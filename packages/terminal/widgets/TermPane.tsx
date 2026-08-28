@@ -221,6 +221,11 @@ export default function TermPane(props: TermPaneProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const sizerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  // A focusable div receives hardware keys, but mobile browsers do not open
+  // their software keyboard for it. Keep a visually inert native input solely
+  // as the mobile IME bridge; terminal output and selection remain in bodyRef.
+  const mobileInputRef = useRef<HTMLInputElement>(null);
+  const composedMobileInputRef = useRef<string | null>(null);
 
   const [, setTick] = useState(0);
   const [searchEpoch, setSearchEpoch] = useState(0);
@@ -283,12 +288,18 @@ export default function TermPane(props: TermPaneProps) {
   }, [emu]);
 
   // ---- measurement + resize ----
-  const measure = useCallback(() => {
+  const measure = useCallback((): CellSize => {
     const body = bodyRef.current;
-    if (!body) return;
+    if (!body) return cellRef.current;
     const probe = document.createElement("span");
     probe.className = "term-row";
     probe.style.position = "absolute";
+    // `.term-row` normally stretches from left to right for virtualized
+    // output. That makes its bounding rect equal the pane width, which was
+    // then divided by 20 and reported a 20px-wide "character" on phones.
+    // The measurement probe must instead shrink to its twenty glyphs.
+    probe.style.right = "auto";
+    probe.style.width = "max-content";
     probe.style.visibility = "hidden";
     probe.textContent = "W".repeat(20);
     body.appendChild(probe);
@@ -296,8 +307,13 @@ export default function TermPane(props: TermPaneProps) {
     body.removeChild(probe);
     if (rect.width > 0 && rect.height > 0) {
       const next = { w: rect.width / 20, h: rect.height };
+      // ResizeObserver's callback uses this value in the same turn. Updating
+      // the ref avoids sending the PTY an old fallback grid for one resize.
+      cellRef.current = next;
       setCell((prev) => (Math.abs(prev.w - next.w) > 0.01 || Math.abs(prev.h - next.h) > 0.01 ? next : prev));
+      return next;
     }
+    return cellRef.current;
   }, []);
 
   useLayoutEffect(() => {
@@ -308,11 +324,11 @@ export default function TermPane(props: TermPaneProps) {
     const ro = new ResizeObserver(() => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
-        measure();
+        const measuredCell = measure();
         const el = bodyRef.current;
         if (!el) return;
         setViewportH(el.clientHeight);
-        const c = cellRef.current;
+        const c = measuredCell;
         const cols = Math.max(2, Math.floor((el.clientWidth - 16) / c.w));
         const rows = Math.max(2, Math.floor((el.clientHeight - 16) / c.h));
         if (cols !== emu.cols() || rows !== emu.rows()) {
@@ -427,7 +443,7 @@ export default function TermPane(props: TermPaneProps) {
     } catch { /* clipboard unavailable */ }
   }, [send, emu, scrollToBottom]);
 
-  const onPaste = (e: ReactClipboardEvent) => {
+  const onPaste = (e: ReactClipboardEvent<HTMLElement>) => {
     e.preventDefault();
     const text = e.clipboardData?.getData("text");
     if (text) {
@@ -436,14 +452,34 @@ export default function TermPane(props: TermPaneProps) {
     }
   };
 
-  const onCompositionEnd = (e: ReactCompositionEvent<HTMLDivElement>) => {
+  const onCompositionEnd = (e: ReactCompositionEvent<HTMLElement>) => {
     if (!running || !e.data) return;
     send(e.data);
+    scrollToBottom();
+    // Browsers may follow compositionend with an input event. The composition
+    // data has already reached the PTY, so suppress that duplicate commit.
+    if (e.currentTarget instanceof HTMLInputElement) {
+      composedMobileInputRef.current = e.data;
+      e.currentTarget.value = "";
+    }
+  };
+
+  const onMobileInput = (e: React.FormEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    if ((e.nativeEvent as InputEvent).isComposing) return;
+    const text = input.value;
+    input.value = "";
+    if (composedMobileInputRef.current !== null) {
+      composedMobileInputRef.current = null;
+      return;
+    }
+    if (!running || !text) return;
+    send(text);
     scrollToBottom();
   };
 
   // ---- keyboard ----
-  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
     if ((e.nativeEvent as { isComposing?: boolean }).isComposing) return;
     if (contextMenu) setContextMenu(null);
     const ctrl = e.ctrlKey;
@@ -612,7 +648,8 @@ export default function TermPane(props: TermPaneProps) {
 
   const onMouseDown = (e: ReactMouseEvent<HTMLDivElement>) => {
     if (contextMenu) setContextMenu(null);
-    bodyRef.current?.focus();
+    const mobile = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
+    (mobile ? mobileInputRef.current : bodyRef.current)?.focus({ preventScroll: true });
     // links: ctrl/cmd+click opens
     const target = e.target as HTMLElement;
     const linkEl = target.closest?.("[data-url],[data-osc-link]") as HTMLElement | null;
@@ -735,6 +772,11 @@ export default function TermPane(props: TermPaneProps) {
     if (emu.modes().focusReporting && running) send("\x1b[O");
   };
 
+  const focusMobileKeyboard = (pointerType: string) => {
+    if (pointerType !== "touch") return;
+    mobileInputRef.current?.focus({ preventScroll: true });
+  };
+
   // ---- render ----
   const cursor = emu.cursor();
   const modes = emu.modes();
@@ -844,6 +886,7 @@ export default function TermPane(props: TermPaneProps) {
         tabIndex={0}
         role="application"
         aria-label={tr("terminalview.terminalValue", { title: label })}
+        onPointerDown={(e) => focusMobileKeyboard(e.pointerType)}
         onKeyDown={onKeyDown}
         onCompositionEnd={onCompositionEnd}
         onPaste={onPaste}
@@ -877,6 +920,24 @@ export default function TermPane(props: TermPaneProps) {
           )}
         </div>
       </div>
+
+      <input
+        ref={mobileInputRef}
+        className="term-mobile-input"
+        aria-label={tr("terminalview.terminalValue", { title: label })}
+        autoCapitalize="off"
+        autoComplete="off"
+        autoCorrect="off"
+        inputMode="text"
+        spellCheck={false}
+        tabIndex={-1}
+        onInput={onMobileInput}
+        onKeyDown={onKeyDown}
+        onPaste={onPaste}
+        onCompositionEnd={onCompositionEnd}
+        onFocus={onFocus}
+        onBlur={onBlur}
+      />
 
       {contextMenu && (
         <div

@@ -687,10 +687,12 @@ export function createSessionService(deps: {
         ?? "legacy";
       const persisted = proj.runtimeBinding;
       if (persisted) {
+        // Protocol describes the adapter, not the backend-session identity.
+        // A managed OpenCode upgrade can move a durable authority from legacy
+        // to V2 without moving its endpoint or invalidating its session IDs.
         const sameIdentity =
           persisted.backendSessionId === proj.backendSessionId
           && persisted.authorityId === endpoint.authorityId
-          && persisted.protocol === protocol
           && persisted.location.directory === endpoint.location.directory
           && (persisted.location.workspace ?? "") === (endpoint.location.workspace ?? "");
         if (!sameIdentity) {
@@ -730,6 +732,7 @@ export function createSessionService(deps: {
         !persisted
         || persisted.generation !== currentBinding.generation
         || persisted.continuity !== currentBinding.continuity
+        || persisted.protocol !== currentBinding.protocol
       ) {
         await applyProjection(proj.id, (current) => ({
           ...current,

@@ -10,6 +10,10 @@ import { parseGithubUrl, type GithubAttachResult } from "@polyth/github/attachme
 import { useEscape } from "../useEscape.ts";
 import { Icon } from "../icons.tsx";
 import { tr } from "../i18n/index.ts";
+import { useShellMode } from "../responsiveShell.ts";
+import { dismissKeyboard } from "../mobileViewport.ts";
+import Sheet from "./mobile/Sheet.tsx";
+import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
 import { Button, Dialog, TextInput } from "./ui/index.ts";
 
 export interface ComposerAddMenuProps {
@@ -36,12 +40,25 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
   const [githubOpen, setGithubOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const asSheet = useShellMode() === "phone";
 
   const closeToTrigger = () => {
     setOpen(false);
     triggerRef.current?.focus();
   };
-  useEscape(open && !githubOpen, closeToTrigger);
+  useEscape(open && !githubOpen && !asSheet, closeToTrigger);
+
+  const toggleOpen = () => {
+    if (open) {
+      closeToTrigger();
+      return;
+    }
+    setOpen(true);
+    // A phone action list is a modal Sheet. Dismiss the keyboard after it is
+    // mounted so the trigger's pointer-up cannot be lost during reflow.
+    if (asSheet) void dismissKeyboard();
+  };
+  const triggerHandlers = useSheetTrigger(asSheet, toggleOpen);
 
   // Opening focuses the first operable row (menu button pattern).
   useEffect(() => {
@@ -88,6 +105,38 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
     next?.focus();
   };
 
+  const menuRows = (
+    <div
+      id="composer-add-menu"
+      ref={menuRef}
+      role="menu"
+      aria-label={tr("composeraddmenu.addContextOrUseAComposerTool")}
+      className={`add-menu ${asSheet ? "add-menu-sheet-list" : props.direction}`}
+      onKeyDown={onMenuKey}
+    >
+      {rows.map((row) => row.kind === "group" ? (
+        <div key={row.id} className="add-menu-group" role="presentation">{row.label}</div>
+      ) : (
+        <button
+          key={row.id}
+          type="button"
+          role="menuitem"
+          className="add-menu-item"
+          aria-disabled={row.disabledReason ? true : undefined}
+          onClick={() => { if (!row.disabledReason && row.action) activate(row.action); }}
+        >
+          <span className="add-menu-main">
+            <span className="add-menu-label">{row.label}</span>
+            {row.description && <span className="add-menu-desc">{row.description}</span>}
+            {row.detail && <span className="add-menu-desc">{row.detail}</span>}
+            {row.disabledReason && <span className="add-menu-reason">{row.disabledReason}</span>}
+          </span>
+          {row.hint && <span className="add-menu-hint" aria-hidden="true">{row.hint}</span>}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <span className="composer-add">
       <button
@@ -95,46 +144,28 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
         type="button"
         className="chip composer-add-trigger"
         aria-label={tr("composeraddmenu.addFilesContextAndTools")}
-        aria-haspopup="menu"
+        aria-haspopup={asSheet ? "dialog" : "menu"}
         aria-expanded={open}
-        {...(open ? { "aria-controls": "composer-add-menu" } : {})}
-        onClick={() => setOpen((v) => !v)}
+        {...(open && !asSheet ? { "aria-controls": "composer-add-menu" } : {})}
+        {...triggerHandlers}
       >
         <span aria-hidden="true" className="composer-add-icon"><Icon.plus /></span>
         <span className="composer-add-label">{tr("common.add")}</span>
       </button>
-      {open && (
+      {open && asSheet && (
+        <Sheet
+          title={tr("composeraddmenu.addFilesContextAndTools")}
+          className="composer-add-sheet"
+          onClose={closeToTrigger}
+          restoreFocusRef={triggerRef}
+        >
+          {menuRows}
+        </Sheet>
+      )}
+      {open && !asSheet && (
         <>
           <div className="menu-backdrop" onClick={closeToTrigger} />
-          <div
-            id="composer-add-menu"
-            ref={menuRef}
-            role="menu"
-            aria-label={tr("composeraddmenu.addContextOrUseAComposerTool")}
-            className={`add-menu ${props.direction}`}
-            onKeyDown={onMenuKey}
-          >
-            {rows.map((row) => row.kind === "group" ? (
-              <div key={row.id} className="add-menu-group" role="presentation">{row.label}</div>
-            ) : (
-              <button
-                key={row.id}
-                type="button"
-                role="menuitem"
-                className="add-menu-item"
-                aria-disabled={row.disabledReason ? true : undefined}
-                onClick={() => { if (!row.disabledReason && row.action) activate(row.action); }}
-              >
-                <span className="add-menu-main">
-                  <span className="add-menu-label">{row.label}</span>
-                  {row.description && <span className="add-menu-desc">{row.description}</span>}
-                  {row.detail && <span className="add-menu-desc">{row.detail}</span>}
-                  {row.disabledReason && <span className="add-menu-reason">{row.disabledReason}</span>}
-                </span>
-                {row.hint && <span className="add-menu-hint" aria-hidden="true">{row.hint}</span>}
-              </button>
-            ))}
-          </div>
+          {menuRows}
         </>
       )}
       {githubOpen && (

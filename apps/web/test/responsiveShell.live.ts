@@ -174,7 +174,7 @@ test("top rail and bottom bar open their current destinations", async () => {
   const notifications = page.locator('.mobile-shortcut[aria-label="Notifications"]');
   await notifications.click();
   await page.waitForSelector('.panel-sheet[aria-label="Notifications"]', { state: "visible" });
-  assert.ok(await page.locator(".panel-sheet .sheet-strip").isVisible(), "notification secondary rail is missing");
+  assert.equal(await page.locator(".panel-sheet .sheet-strip").count(), 0, "panel sheet does not duplicate the main navigation rail");
   await page.click('.panel-sheet[aria-label="Notifications"] button[aria-label="Close panel"]');
   await page.waitForSelector('.panel-sheet[aria-label="Notifications"]', { state: "hidden" });
 

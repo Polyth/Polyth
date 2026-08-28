@@ -140,6 +140,23 @@ test("375px chat keeps a safe-area-aware bottom navigator and docked composer", 
   );
 });
 
+test("active mobile composition immediately obscures project and settings surfaces", async () => {
+  const css = await readWebStyles();
+  const state = 'body:is([data-keyboard="open"], :has(.composer-mobile.composer-input-active))';
+
+  assert.ok(css.includes(state), "keyboard geometry and focused-composer fallback share one visibility state");
+  assert.match(
+    css,
+    /:is\(\.sidebar\.open, \.rail-fullscreen, \.panel-sheet, \.settings-scrim\)\s*\{[\s\S]*?transition:[\s\S]*?opacity var\(--motion-fast\)[\s\S]*?transform var\(--motion-fast\)/,
+    "project and settings surfaces return with the shared motion tokens",
+  );
+  assert.match(
+    css,
+    /body:is\(\[data-keyboard="open"\], :has\(\.composer-mobile\.composer-input-active\)\)\s*:is\(\.sidebar\.open, \.rail-fullscreen, \.panel-sheet, \.settings-scrim\),[\s\S]*?visibility:\s*hidden;[\s\S]*?pointer-events:\s*none;[\s\S]*?opacity:\s*0;/,
+    "the panels become immediately invisible and inert while composing",
+  );
+});
+
 test("phone and coarse-pointer standalone controls share the 44px hit-box floor", async () => {
   const css = await readWebStyles();
   const contract = css;

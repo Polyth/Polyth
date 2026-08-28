@@ -640,24 +640,6 @@ export default function ContextRail() {
               aria-label={tr("contextrail.closePanel")}
             ><Icon.close /></button>
           </div>
-          {compactContext && (
-            <div className="plugin-strip sheet-strip" aria-label={tr("contextrail.workspacePanels")}>
-              {railButtons.map((s) => (
-                <button
-                  key={s.id}
-                  className={`rail-icon strip-btn ${s.active ? "active" : ""}`}
-                  title={s.title}
-                  aria-label={s.title}
-                  aria-pressed={s.active}
-                  {...(s.presentation ? { "data-pane-launcher": s.id } : {})}
-                  onClick={s.activate}
-                >
-                  <s.icon />
-                  <Badge n={s.badge} />
-                </button>
-              ))}
-            </div>
-          )}
           {kept.map((s) => {
             const active = s.id === rail;
             return (

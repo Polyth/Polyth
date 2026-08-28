@@ -331,6 +331,7 @@ test("the composer is adaptive, with one primary action at a time", async () => 
   const composer = await read("../src/components/Composer.tsx");
   assert.ok(composer.includes("composer-collapsed"), "an idle phone composer is compact");
   assert.ok(composer.includes("composer-expanded"), "focus expands it");
+  assert.ok(composer.includes("composer-input-active"), "textarea focus is exposed for keyboard-safe shell CSS");
   assert.ok(composer.includes("composer-has-draft"), "the draft state drives the mic/send morph");
   assert.ok(
     composer.includes("inputFocused || hasDraft || working || shellMode"),
@@ -343,6 +344,23 @@ test("the composer is adaptive, with one primary action at a time", async () => 
   );
   assert.ok(!composer.includes("STARTER_SUGGESTIONS"), "starters come from the starter system, not hardcoded chips");
   assert.ok(composer.includes("mobileSheet"), "the mode selector opens as a sheet on phones");
+
+  const css = await readWebStyles();
+  assert.match(
+    css,
+    /\.composer-mobile\.composer-expanded \.composer-card textarea\s*\{\s*min-height:\s*calc\(var\(--tap\) \* 2\);/s,
+    "an active composer opens into a usable writing area",
+  );
+  assert.match(
+    css,
+    /\.composer-mobile \.composer-card,\s*\.composer-mobile \.composer-card:focus-within\s*\{\s*box-shadow:\s*none;/s,
+    "the mobile input remains shadow-free while focused",
+  );
+  assert.match(
+    css,
+    /\.composer-card textarea:focus-visible \{ outline: none; box-shadow: none; \}/,
+    "the textarea itself cannot reintroduce the global focus shadow",
+  );
 });
 
 test("reasoning effort stays reachable on phones, inside the config rail", async () => {
@@ -356,13 +374,11 @@ test("reasoning effort stays reachable on phones, inside the config rail", async
     "effort follows the model it belongs to",
   );
   assert.ok(config.includes("modelSupportsThinking(selectedModel)"), "it only exists for models that report variants");
-  assert.ok(effortMenu.includes('kind: "radio"'), "effort uses discrete radio entries, not a slider");
+  assert.ok(effortMenu.includes('type="range"'), "effort uses a direct discrete slider");
+  assert.ok(effortMenu.includes('const options = ["", ...new Set(variants)]'), "Auto and each backend variant get a fixed stop");
   assert.ok(config.includes("pickThinking(thinking || undefined)"), "picking saves the effort and updates the composer config");
   assert.ok(effortMenu.includes("thinkingVariantLabel"), "backend variant strings get display labels");
-  assert.ok(
-    composer.includes("onWillOpen={isPhone ? () => void dismissKeyboard() : undefined}"),
-    "§22: phones dismiss the keyboard before the effort sheet raises",
-  );
+  assert.ok(effortMenu.includes("aria-valuetext={label}"), "the selected effort remains available to assistive technology");
 
   // A tap on any rail control blurs the input; collapsing on that blur would
   // unmount the control before its click lands (the tap would be swallowed).
@@ -452,13 +468,23 @@ test("the phone shell restores session navigation below a swipeable shortcut rai
   assert.ok(bottom.includes("workspace.workspacebottomnav.newSession"), "New chat keeps an accessible name");
   assert.ok(bottom.includes("Projects &amp; sessions"), "the title button identifies the projects and sessions drawer");
   assert.ok(bottom.includes("displaySessionTitle"), "the projects and sessions button shows the current session title");
-  assert.match(css, /\.workspace-bottom-nav\s*\{\s*position:\s*fixed;/, "the session bar is fixed to the compact shell bottom");
+  assert.match(css, /\.workspace-bottom-nav\s*\{[^}]*position:\s*relative;[^}]*order:\s*3;/s, "the session bar occupies the compact shell's bottom row without covering content");
   assert.match(css, /\.mobile-shortcut-rail\s*\{[^}]*overflow-x:\s*auto;/s, "extra top icons reveal with horizontal swipe");
   assert.match(css, /\.mobile-shortcut\s*\{[^}]*var\(--tap\)/s, "every shortcut keeps a 44px touch target");
   assert.ok(navigation.includes("useResolvedCapabilities()"), "the rail follows configured capabilities");
   assert.ok(navigation.includes("useRailSurfaceModel()"), "notification and plugin surfaces stay reachable");
   assert.ok(navigation.includes("ui.mobileShortcuts"), "the rail follows the ordered Settings preference");
   assert.doesNotMatch(navigation, /mobile-navigation-grid|header\.application/, "the grouped Application menu is gone");
+  assert.match(
+    css,
+    /body\[data-keyboard="open"\] \.workspace-bottom-nav\s*\{\s*display:\s*none;/,
+    "keyboard entry hides the projects, sessions, and new-session bar",
+  );
+  assert.match(
+    css,
+    /body\[data-keyboard="open"\] \.app\.mode-chat\.view-session > \.session-bottom-nav\s*\{\s*display:\s*none;/,
+    "the real keyboard state overrides session-only display:flex and restores navigation after closing",
+  );
 });
 
 test("haptics are opt-in, bounded, and respect reduced motion", async () => {

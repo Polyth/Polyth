@@ -86,6 +86,7 @@ const runtimeWithSnapshot = (
     binding: RuntimeSessionBinding & { reconciliationOrdinal?: number },
   ) => RuntimeSnapshot,
   sessions: AgentRuntime["sessions"] = async () => [],
+  protocol?: "legacy" | "v2",
 ): AgentRuntime => ({
   capabilities: async () => ({
     streaming: true,
@@ -108,6 +109,7 @@ const runtimeWithSnapshot = (
   }),
   dispose: async () => undefined,
   endpoint: async () => endpoint,
+  ...(protocol ? { protocol: async () => protocol } : {}),
   reconcile: async (binding: RuntimeSessionBinding & { reconciliationOrdinal?: number }) =>
     snapshot(binding),
 } as AgentRuntime);
@@ -314,6 +316,57 @@ test("first wire rebinds a durable owned session to the current generation", asy
     (await store.events(sessionId)).filter((event) => event.type === "user/message").length,
     1,
   );
+  await store.close();
+});
+
+test("first wire upgrades a legacy protocol binding for the same owned endpoint", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-protocol-upgrade-"));
+  const endpoint: RuntimeEndpoint = {
+    ...endpointFor(dir),
+    continuity: "generation-only",
+    control: { kind: "owned", instanceToken: "owned-protocol-upgrade" },
+  };
+  let reconciliations = 0;
+  const runtime = runtimeWithSnapshot(endpoint, (binding) => {
+    reconciliations += 1;
+    assert.equal(binding.backendSessionId, "backend-protocol-upgrade");
+    return {
+      authorityId: binding.authorityId,
+      generation: binding.generation,
+      location: binding.location,
+      backendSessionId: binding.backendSessionId!,
+      reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+      state: { value: "interrupted", watermark: "7", comparison: { domain: "test-status", order: 7 } },
+      completeness: { events: "partial", permissions: "partial", questions: "partial" },
+      permissions: [],
+      questions: [],
+      events: [],
+    };
+  }, undefined, "v2");
+  const { sessions, store, project } = makeHarness(runtime, dir);
+  const sessionId = "session-protocol-upgrade";
+  await store.upsertProjection({
+    id: sessionId,
+    projectId: project.id,
+    backendSessionId: "backend-protocol-upgrade",
+    runtimeBinding: {
+      backendSessionId: "backend-protocol-upgrade",
+      authorityId: endpoint.authorityId,
+      generation: endpoint.generation,
+      continuity: endpoint.continuity,
+      protocol: "legacy",
+      location: endpoint.location,
+    },
+    title: "Protocol upgrade",
+    status: "working",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+
+  await sessions.events(sessionId, 0);
+
+  assert.equal(reconciliations, 1);
+  assert.equal((await store.projection(sessionId))?.runtimeBinding?.protocol, "v2");
   await store.close();
 });
 

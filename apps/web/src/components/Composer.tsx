@@ -1166,7 +1166,7 @@ export default function Composer({
   const hasDraft = text.trim() !== "" || attachments.length > 0;
   const expanded = !phoneLayout || inputFocused || hasDraft || working || shellMode;
   const stateClass = phoneLayout
-    ? ` composer-mobile ${expanded ? "composer-expanded" : "composer-collapsed"}${hasDraft ? " composer-has-draft" : ""}`
+    ? ` composer-mobile ${expanded ? "composer-expanded" : "composer-collapsed"}${inputFocused ? " composer-input-active" : ""}${hasDraft ? " composer-has-draft" : ""}`
     : "";
 
   // Creating a canonical session can cold-start OpenCode. Replace the empty
@@ -1393,7 +1393,6 @@ export default function Composer({
                 pickThinking(thinking || undefined);
                 preserveKeyboard?.();
               }}
-              onWillOpen={isPhone ? () => void dismissKeyboard() : undefined}
             />
           )}
         </div>

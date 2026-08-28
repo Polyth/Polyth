@@ -521,6 +521,11 @@ flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: n
 
 .editor-view.mobile-tree .editor-tree {
 display: block; width: 100%; min-width: 0; flex: 1;
+    /* The compact two-pane fallback above limits the tree to a preview-sized
+       band. Once Files is its own phone screen, that cap otherwise leaves the
+       lower half of the directory unreachable. This is the one scroll owner
+       for the tree, so it must consume the remaining pane height. */
+    min-height: 0; max-height: none;
     border-right: 0; border-bottom: 0;
 }
 

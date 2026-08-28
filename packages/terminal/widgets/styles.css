@@ -82,6 +82,12 @@ display: flex; align-items: center; gap: var(--space-1);
 .term-pane {
 position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--term-bg);
 }
+.term-mobile-input {
+/* Native mobile keyboards only open for editable controls. Keep this bridge
+   measurable and focused without adding a second visible input or caret. */
+position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; padding: 0;
+  border: 0; opacity: 0; pointer-events: none; caret-color: transparent;
+}
 .term-body {
 flex: 1; margin: 0; border: 0; border-radius: 0; background: var(--term-bg);
   font-family: var(--mono); font-size: var(--editor-font-size, 12.5px);
@@ -356,4 +362,9 @@ min-height: var(--tap);
 .term-actions button {
 width: var(--tap); height: var(--tap);
 }
+
+/* A full-cell block cursor is disproportionate at phone text sizes and can
+   obscure the character being entered. Preserve underline cursors, while
+   rendering block/bar cursor modes as a conventional thin insertion bar. */
+.term-cursor:not(.style-underline) { width: 2px !important; }
 }

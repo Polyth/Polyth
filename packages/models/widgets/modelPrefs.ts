@@ -37,7 +37,7 @@ export function toggleModelFavorite(key: string): void {
   commit(toggleFavorite(prefs, key));
 }
 
-/** Favorites reorder — only reachable from an explicit Edit mode (§27). */
+/** Favorites reorder from the desktop drag list or the phone Edit controls. */
 export function reorderModelFavorites(draggedKey: string, targetKey: string): void {
   commit(reorderFavorite(prefs, draggedKey, targetKey));
 }

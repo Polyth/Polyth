@@ -49,6 +49,9 @@ import {
 } from "./modelPickerState.ts";
 
 const MAX_RENDERED_MODELS = 200;
+const MODEL_PICKER_DRAG_TYPE = "application/x-polyth-model-picker";
+type ModelPickerDragKind = "favorite" | "provider";
+type ModelPickerDrag = { kind: ModelPickerDragKind; id: string };
 
 /** The compact technical card behind the per-row details affordance. Shared
  *  verbatim by the desktop popover and the phone sheet. */
@@ -164,8 +167,7 @@ export default function ModelPicker({
   const [editing, setEditing] = useState(false);
   const [detail, setDetail] = useState<ModelDescriptor | null>(null);
   const [active, setActive] = useState(0);
-  const [draggedProvider, setDraggedProvider] = useState<string | null>(null);
-  const [draggedFavorite, setDraggedFavorite] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<ModelPickerDrag | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -285,6 +287,22 @@ export default function ModelPicker({
     ? selectedModel.providerID === model.providerID && selectedModel.modelID === model.modelID
     : false;
 
+  const startDrag = (event: DragEvent, kind: ModelPickerDragKind, id: string) => {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData(MODEL_PICKER_DRAG_TYPE, `${kind}:${id}`);
+    setDragging({ kind, id });
+  };
+  const dragId = (event: DragEvent, kind: ModelPickerDragKind): string | null => {
+    if (dragging?.kind === kind) return dragging.id;
+    const data = event.dataTransfer.getData(MODEL_PICKER_DRAG_TYPE);
+    const prefix = `${kind}:`;
+    return data.startsWith(prefix) ? data.slice(prefix.length) || null : null;
+  };
+  const allowDrop = (event: DragEvent) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  };
+
   // §22: tapping the model while typing dismisses the keyboard FIRST, then
   // opens the sheet — the picker can never end up under the keyboard.
   const toggleOpen = () => {
@@ -368,7 +386,7 @@ export default function ModelPicker({
       <div
         key={key}
         id={`model-option-${key}`}
-        className={`model-picker-row${selected ? " current" : ""}${activeKey === key ? " active" : ""}`}
+        className={`model-picker-row${selected ? " current" : ""}${activeKey === key ? " active" : ""}${dragging?.kind === "favorite" && dragging.id === key ? " dragging" : ""}`}
         role="option"
         aria-selected={selected}
         tabIndex={-1}
@@ -378,14 +396,15 @@ export default function ModelPicker({
           if (index !== undefined) setActive(index);
         }}
         {...(favoriteDrag ? {
-          draggable: !q,
-          onDragStart: () => setDraggedFavorite(key),
-          onDragOver: (event: DragEvent) => event.preventDefault(),
+          draggable: !phone && !q,
+          onDragStart: (event: DragEvent) => startDrag(event, "favorite", key),
+          onDragOver: allowDrop,
           onDrop: (event: DragEvent) => {
-            event.preventDefault();
-            if (draggedFavorite) reorderModelFavorites(draggedFavorite, key);
-            setDraggedFavorite(null);
+            const dragged = dragId(event, "favorite");
+            if (dragged) reorderModelFavorites(dragged, key);
+            setDragging(null);
           },
+          onDragEnd: () => setDragging(null),
         } : {})}
       >
         {favoriteDrag && <span className="model-picker-grip" aria-hidden="true">⠿</span>}
@@ -408,9 +427,9 @@ export default function ModelPicker({
   // ---- mobile sheet rows -----------------------------------------------------
   const moveFavorite = (model: ModelDescriptor, delta: number) => {
     const key = modelKey(model);
-    const index = prefs.favorites.indexOf(key);
-    const target = prefs.favorites[index + delta];
-    if (target) reorderModelFavorites(key, target);
+    const index = favorites.findIndex((favorite) => modelKey(favorite) === key);
+    const target = favorites[index + delta];
+    if (target) reorderModelFavorites(key, modelKey(target));
   };
   const sheetRow = (model: ModelDescriptor, group: "favorites" | "provider") => (
     <SheetRow
@@ -433,14 +452,14 @@ export default function ModelPicker({
             type="button"
             className="sheet-row-tool"
             aria-label={tr("modelpicker.moveValueUp", { name: model.name })}
-            disabled={prefs.favorites.indexOf(modelKey(model)) <= 0}
+            disabled={favorites.findIndex((favorite) => modelKey(favorite) === modelKey(model)) <= 0}
             onClick={() => moveFavorite(model, -1)}
           >↑</button>
           <button
             type="button"
             className="sheet-row-tool"
             aria-label={tr("modelpicker.moveValueDown", { name: model.name })}
-            disabled={prefs.favorites.indexOf(modelKey(model)) >= prefs.favorites.length - 1}
+            disabled={favorites.findIndex((favorite) => modelKey(favorite) === modelKey(model)) >= favorites.length - 1}
             onClick={() => moveFavorite(model, 1)}
           >↓</button>
         </span>
@@ -604,16 +623,17 @@ export default function ModelPicker({
                   const shown = items.filter((model) => flatRowIndex.has(modelKey(model)));
                   return (
                     <section
-                      className="model-provider-section"
+                      className={`model-provider-section${dragging?.kind === "provider" && dragging.id === provider.id ? " dragging" : ""}`}
                       key={provider.id}
                       draggable={!q}
-                      onDragStart={() => setDraggedProvider(provider.id)}
-                      onDragOver={(event) => event.preventDefault()}
+                      onDragStart={(event) => startDrag(event, "provider", provider.id)}
+                      onDragOver={allowDrop}
                       onDrop={(event) => {
-                        event.preventDefault();
-                        if (draggedProvider) reorderModelProviders(providerIds, draggedProvider, provider.id);
-                        setDraggedProvider(null);
+                        const dragged = dragId(event, "provider");
+                        if (dragged) reorderModelProviders(providerIds, dragged, provider.id);
+                        setDragging(null);
                       }}
+                      onDragEnd={() => setDragging(null)}
                     >
                       <button
                         type="button"
