@@ -24,7 +24,7 @@ Polyth is a local web app for project-scoped OpenCode coding-agent sessions: a N
 
 ## Non-negotiable rules
 
-- Erasable TS only (Node >= 22.18 type stripping; earlier 22.x fails): no enums, no namespaces, no parameter properties.
+- Erasable TS only (Node >= 22.14; scripts enable type stripping explicitly): no enums, no namespaces, no parameter properties.
 - Local imports use explicit `.ts`. Cross-package imports use workspace names (`@polyth/contracts`); every package's `exports` is `"." : "./src/index.ts"`.
 - Only `packages/backend-opencode` may talk to the OpenCode process/SDK. Grep gate enforced.
 - Everything model-visible is appended to the session event log BEFORE UI display; pure UI state stays out of the log.

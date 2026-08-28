@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.18.0"
+    "node": ">=22.14.0"
   },
   "workspaces": [
     "packages/*",
@@ -14,13 +14,13 @@
     "check:node": "node scripts/check-node.mjs",
     "preinstall": "node scripts/check-node.mjs",
     "prebuild": "node scripts/check-node.mjs",
-    "build:web": "node apps/web/buildPackages.ts && node apps/web/build.ts",
+    "build:web": "node --experimental-strip-types apps/web/buildPackages.ts && node --experimental-strip-types apps/web/build.ts",
     "build:desktop": "npm run build:web && npm --workspace @polyth/desktop run build",
     "build": "npm run build:web",
     "prestart": "node scripts/check-node.mjs",
-    "start": "node packages/server/src/index.ts",
+    "start": "node --experimental-strip-types packages/server/src/index.ts",
     "predev": "node scripts/check-node.mjs",
-    "dev": "npm run build:web && node packages/server/src/index.ts",
+    "dev": "npm run build:web && node --experimental-strip-types packages/server/src/index.ts",
     "desktop:download-opencode": "npm --workspace @polyth/desktop run download:opencode",
     "desktop:dev": "npm run build:desktop && npm run desktop:download-opencode && npm --workspace @polyth/desktop start",
     "desktop:dist:linux": "npm run build:web && npm run desktop:download-opencode && npm --workspace @polyth/desktop run dist:linux",
@@ -32,7 +32,7 @@
     "mobile:open:ios": "npm --workspace @polyth/mobile run open:ios",
     "mobile:build:android": "npm run build:web && npm --workspace @polyth/mobile run sync && npm --workspace @polyth/mobile run build:android",
     "pretest": "node scripts/check-node.mjs",
-    "test": "node --test packages/*/test/*.test.ts apps/*/test/*.test.ts"
+    "test": "node --experimental-strip-types --test packages/*/test/*.test.ts apps/*/test/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

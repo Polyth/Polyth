@@ -343,8 +343,11 @@ before(async () => {
   await store.upsertProjection(projection(ERROR_PARENT, "Failed workflow parent"));
   await store.close();
 
-  execFileSync(process.execPath, ["apps/web/build.ts"], { cwd: REPO_ROOT, stdio: "pipe" });
-  server = spawn(process.execPath, ["packages/server/src/index.ts"], {
+  execFileSync(process.execPath, ["--experimental-strip-types", "apps/web/build.ts"], {
+    cwd: REPO_ROOT,
+    stdio: "pipe",
+  });
+  server = spawn(process.execPath, ["--experimental-strip-types", "packages/server/src/index.ts"], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,

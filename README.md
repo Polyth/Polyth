@@ -10,7 +10,7 @@ It's built for very different people to work in very different ways — chat-fir
 
 ## Quick start
 
-Prerequisites: Node >= 22.18 (the server runs TypeScript directly via type stripping; earlier 22.x releases fail) and the [opencode](https://opencode.ai) CLI on your PATH (`curl -fsSL https://opencode.ai/install | bash`). The `gh` CLI is optional, for GitHub features.
+Prerequisites: Node >= 22.14 (the repository scripts enable Node's TypeScript type stripping) and the [opencode](https://opencode.ai) CLI on your PATH (`curl -fsSL https://opencode.ai/install | bash`). The `gh` CLI is optional, for GitHub features.
 
 ```bash
 npm install
