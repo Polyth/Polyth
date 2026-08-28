@@ -75,3 +75,18 @@ test("runCommand of a disposed (plugin-removed) command returns false", () => {
   assert.equal(ran, 1);
   assert.equal(runCommand("never.existed"), false);
 });
+
+test("command icon metadata round-trips without changing search behavior", () => {
+  const dispose = registerCommand(cmd({
+    id: "test.icon",
+    label: "Search conversations",
+    icon: "search",
+  }));
+  try {
+    const found = listCommands().find((command) => command.id === "test.icon");
+    assert.equal(found?.icon, "search");
+    assert.deepEqual(filterPalette([found!], "conversations"), [found]);
+  } finally {
+    dispose();
+  }
+});

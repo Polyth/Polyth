@@ -1,4 +1,7 @@
-import { useState, useRef, useEffect, useCallback, useMemo, type ClipboardEvent, type KeyboardEvent } from "react";
+import {
+  useState, useRef, useEffect, useCallback, useMemo, useSyncExternalStore,
+  type ClipboardEvent, type KeyboardEvent,
+} from "react";
 import {
   activateProject,
   clearNewSessionDraft,
@@ -106,6 +109,7 @@ import SessionContextBar, {
 import {
   Button, Menu, SendIcon, StopIcon,
 } from "./ui/index.ts";
+import { getSendFailure, subscribeSendFailures } from "../sendFailure.ts";
 
 // Per-project command/snippet catalog cache: the composer remounts on every
 // session change (including a fresh spawn), and each mount refetched both
@@ -307,6 +311,11 @@ export default function Composer({
   const settings = useStore((s) => s.settings);
   const sessionDefaults = useSessionDefaults();
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
+  const failedSend = useSyncExternalStore(
+    subscribeSendFailures,
+    () => getSendFailure(session?.id ?? null),
+    () => null,
+  );
   const newSessionIntent = useStore((s) => s.newSessionIntent);
   const { contextBar, newSessionTarget } = useComposerLocation(session);
   const model = useActiveModel();
@@ -740,7 +749,19 @@ export default function Composer({
             ...(wire !== undefined ? { agentProfileId: wire } : {}),
           },
         ).then((ok) => {
-          if (!ok) return;
+          if (!ok) {
+            // Admission failures remove attachment pills optimistically below;
+            // put them back, and restore the exact draft only when the user
+            // has not already started a replacement while the request ran.
+            for (const attachment of atts) addAttachment(targetSessionId, attachment);
+            if (sessionIdRef.current === targetSessionId
+              && !(inputRef.current?.getText() ?? "").trim()) {
+              setText(t);
+              inputRef.current?.replaceText(t);
+              saveDraft(targetSessionId, t);
+            }
+            return;
+          }
           // The server recorded the sent configuration in the projection and
           // durable log; drop the local pending record only when it still
           // equals what was sent, then reflect the authoritative state.
@@ -1163,6 +1184,12 @@ export default function Composer({
           in an open session the location is fixed, and picking here silently
           switched project or spawned a new session instead of retargeting. */}
       {!session && <SessionContextBar {...contextBar} />}
+      {failedSend && (
+        <div className="composer-send-failure" role="alert">
+          <span>{tr("composer.sendUnavailableDraftPreserved")}</span>
+          <Button size="sm" onClick={() => send()}>{tr("common.retry")}</Button>
+        </div>
+      )}
       <div
         className="composer-card"
         onDragOver={(e) => { const k = dragKind(e.dataTransfer); if (k) { e.preventDefault(); setDropHint(k); } }}

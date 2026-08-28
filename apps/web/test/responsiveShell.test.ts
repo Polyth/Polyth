@@ -144,11 +144,12 @@ test("modal surfaces share the Dialog focus contract (no copied traps)", async (
     ["Sidebar", sidebar],
     ["ContextRail", rail],
     ["ProjectSetup", projectSetup],
-    ["CommandPalette", palette],
   ] as const) {
     assert.ok(src.includes("useModalSurface"), `${name} consumes useModalSurface`);
     assert.ok(!src.includes("FOCUSABLE"), `${name} must not copy a focus-trap implementation`);
   }
+  assert.ok(palette.includes("ResponsiveOverlay"), "CommandPalette consumes the adaptive modal primitive");
+  assert.ok(!palette.includes("FOCUSABLE"), "CommandPalette must not copy a focus-trap implementation");
   assert.ok(sidebar.includes('id="polyth-session-drawer"'), "drawer id matches the trigger");
   assert.ok(
     rail.includes('id={compact ? "polyth-panel-sheet" : undefined}'),

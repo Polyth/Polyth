@@ -7,6 +7,7 @@ import { exposeSlots } from "./slots.ts";
 import { exposeSurfaces } from "./surfaces.ts";
 import { exposeCapabilities } from "./capabilities.ts";
 import { installShell } from "./shell.ts";
+import { installCommandSlotBridge } from "./commandBridge.ts";
 import { exposeWorkspaceSurfaces } from "./workspace/surfaceRegistry.ts";
 import { applySettingsToDom } from "./settings.ts";
 import { applyUiSettings } from "./uiPrefs.ts";
@@ -15,6 +16,7 @@ import { getState } from "./store.ts";
 import { installBuiltinMiniWidgets } from "./widgets/builtinMiniWidgets.tsx";
 import { installNotificationCentre } from "./components/NotificationCentre.tsx";
 import { installOpenCodeRestartControl } from "./components/OpenCodeRestartControl.tsx";
+import { installReconnectPill } from "./components/ReconnectPill.tsx";
 import { installDesktopIntegration } from "./desktop.tsx";
 import { exposeWidgets } from "./widgets/catalog.ts";
 import { bootPackages } from "./packages/registry.ts";
@@ -37,12 +39,14 @@ installBuiltinMiniWidgets();
 // NTF-01: bell + panel arrive through the slot registry, never via App.tsx.
 installNotificationCentre();
 installOpenCodeRestartControl();
+installReconnectPill();
 // No-op in browsers; Electron's preload exposes the bridge that enables the
 // desktop settings page and custom titlebar controls through existing slots.
 installDesktopIntegration();
 // Palette commands + keyboard shortcuts: one install, synced with the
 // capability registry from then on (UX-PERSONAS: search sees every tool).
 installShell();
+installCommandSlotBridge();
 
 // F16: init() loads REST data and opens /ws — it must not run until the
 // server says this device is authorized (or that no password is set).

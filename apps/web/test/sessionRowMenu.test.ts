@@ -250,7 +250,7 @@ test("pinned chats are first across worktrees and their menu offers Unpin", asyn
   activateProject("p1");
   setSessions("p1", [
     session({ id: "other", title: "Other worktree", branch: "feature/other", worktreePath: "/repo-other" }),
-    session({ id: "pinned", title: "Pinned worktree", branch: "feature/pinned", worktreePath: "/repo-pinned", pinned: { position: 0 } }),
+    session({ id: "pinned", title: "Pinned worktree", status: "working", branch: "feature/pinned", worktreePath: "/repo-pinned", pinned: { position: 0 } }),
   ]);
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -261,8 +261,13 @@ test("pinned chats are first across worktrees and their menu offers Unpin", asyn
     const pinned = container.querySelector<HTMLElement>(".session-pinned");
     assert.ok(org && pinned, "pinned section is rendered");
     assert.equal(org!.firstElementChild, pinned, "pinned chats lead the worktree groups");
-    assert.match(pinned!.textContent ?? "", /feature\/pinned/, "pinned chat retains its worktree label");
+    assert.doesNotMatch(pinned!.textContent ?? "", /feature\/pinned/, "active state outranks the narrow worktree pill");
     assert.ok(pinned!.querySelector(".session-pin-icon"), "pinned chat shows a pin icon");
+    assert.match(
+      pinned!.querySelector<HTMLButtonElement>(".session-btn")?.title ?? "",
+      /feature\/pinned/,
+      "the full branch remains available on hover",
+    );
     assert.equal(
       container.querySelectorAll('.session-worktree-sessions .session-row').length,
       1,

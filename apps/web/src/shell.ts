@@ -1,11 +1,10 @@
-import { HOTKEY_ACTIONS, matchAction, formatCombo, type HotkeyAction } from "@polyth/hotkeys";
+import { matchAction, formatCombo, type HotkeyAction } from "@polyth/hotkeys";
+import { getKeymap } from "@polyth/hotkeys/widgets";
 import { registerCommand } from "./commands.ts";
 import { exportSessionMarkdown, forkSession, abortSession } from "./init.ts";
 import { MOD } from "./format.ts";
-import { getKeymap } from "../../../packages/hotkeys/widgets/hotkeys.ts";
-import { readLastReply, stopSpeaking } from "../../../packages/dictation/widgets/voice.tsx";
 import {
-  focusComposer, getState, openPalette, openSettingsPage, openWorktreeSessionDialog, setOverlay, startNewSession,
+  focusComposer, getState, openPalette, openWorktreeSessionDialog, setOverlay, startNewSession,
   toggleRailPlugin, toggleWorkspacePane,
   type RailPlugin,
 } from "./store.ts";
@@ -156,15 +155,6 @@ export function installShell(): void {
     id: "cmd.export", label: tr("shell.exportSession"), group: tr("shell.session"),
     run: exportSessionMarkdown, when: () => !!getState().activeSessionId,
   });
-  registerCommand({
-    id: "voice.read", label: tr("shell.readLastReplyAloud"), group: tr("shell.voice"),
-    when: () => !!getState().activeSessionId,
-    run: readLastReply,
-  });
-  registerCommand({
-    id: "voice.stop", label: tr("shell.stopReadingAloud"), group: tr("shell.voice"),
-    run: stopSpeaking,
-  });
   // Every registered, available capability is searchable regardless of tier.
   syncCapabilityCommands();
   for (const [id, labelKey] of RAIL) {
@@ -175,18 +165,6 @@ export function installShell(): void {
   }
   // Sidebar Group by (WP13): built-ins; plugins add via registerSidebarGrouping.
   for (const g of listGroupings()) registerGroupingCommand(g);
-  // Searchable shortcut editing: one row per action, hint shows the binding,
-  // matching also works on the key itself ("ctrl+k" finds the palette row).
-  for (const { id, label } of HOTKEY_ACTIONS) {
-    registerCommand({
-      id: `shortcut.${id}`,
-      label: tr("shell.changeShortcutValue", { label: label }),
-      group: tr("shell.shortcuts"),
-      keywords: ["keybinding", "hotkey", "shortcut"],
-      hint: hintOf(id),
-      run: () => openSettingsPage("shortcuts"),
-    });
-  }
 
   window.addEventListener("keydown", onKey);
 }

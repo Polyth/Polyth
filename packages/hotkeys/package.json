@@ -5,7 +5,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./i18n": "./src/i18n/index.ts",
-    "./widgets": "./widgets/index.tsx",
+    "./widgets": "./widgets/hotkeys.ts",
     "./i18n/*": "./src/i18n/*.ts"
   },
   "polyth": {

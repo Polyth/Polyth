@@ -184,7 +184,7 @@ test("header primary rail exposes a permanent Terminal toggle after project acti
 
   const searchSurface = await mounted(createElement(CommandPalette));
   try {
-    assert.equal(searchSurface.container.querySelector(".palette-heading-title")?.textContent, "Search workspace");
+    assert.equal(searchSurface.container.querySelector('[role="dialog"]')?.getAttribute("aria-label"), "Search workspace");
     assert.match(searchSurface.container.textContent ?? "", /Commands, projects, sessions, and files/);
   } finally {
     await searchSurface.unmount();
@@ -202,7 +202,11 @@ test("header primary rail exposes a permanent Terminal toggle after project acti
   window.matchMedia = () => ({ matches: true }) as MediaQueryList;
   const mobileHistorySurface = await mounted(createElement(SessionSearch));
   try {
-    assert.equal(document.activeElement, mobileHistorySurface.container.querySelector(".palette-heading"));
+    assert.equal(
+      document.activeElement,
+      document.querySelector('[data-sheet-focus=""]'),
+      "phone session search initially focuses sheet chrome without summoning the keyboard",
+    );
   } finally {
     window.matchMedia = matchMedia;
     await mobileHistorySurface.unmount();

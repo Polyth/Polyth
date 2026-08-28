@@ -6,9 +6,13 @@ import { api, type SessionSearchResult } from "@polyth/session/web-api";
 import { openSession } from "../init.ts";
 import { ago, deriveSessionTitle } from "../format.ts";
 import { firstUserText } from "../utils.ts";
-import Dialog from "./a11y/Dialog.tsx";
 import { tr } from "../i18n/index.ts";
-import { Button } from "./ui/index.ts";
+import { Button, ResponsiveOverlay } from "./ui/index.ts";
+import { useShellMode } from "../responsiveShell.ts";
+import {
+  matchesSessionSearchFacets,
+  parseSessionSearchQuery,
+} from "../sessionSearchQuery.ts";
 
 export default function SessionSearch() {
   const sessions = useStore((s) => s.sessions);
@@ -20,13 +24,15 @@ export default function SessionSearch() {
   const [loading, setLoading] = useState(false);
   const [searchFailed, setSearchFailed] = useState(false);
   const [retry, setRetry] = useState(0);
+  const [allProjects, setAllProjects] = useState(false);
   const searchSequence = useRef(0);
-  const mobile = typeof window !== "undefined" && window.matchMedia("(max-width: 700px)").matches;
+  const phone = useShellMode() === "phone";
+  const query = useMemo(() => parseSessionSearchQuery(q), [q]);
 
   // Debounced server search: metadata/branch/labels/message text with snippets.
   useEffect(() => {
     const sequence = ++searchSequence.current;
-    const n = q.trim();
+    const n = query.text;
     setRemote([]);
     setSearchFailed(false);
     if (!n) {
@@ -38,7 +44,7 @@ export default function SessionSearch() {
     const controller = new AbortController();
     setLoading(true);
     const t = setTimeout(() => {
-      void api.searchSessions(n, activeProjectId ?? undefined, 30, controller.signal)
+      void api.searchSessions(n, allProjects ? undefined : activeProjectId ?? undefined, 30, controller.signal)
         .then((results) => {
           if (active && searchSequence.current === sequence) setRemote(results);
         })
@@ -56,46 +62,101 @@ export default function SessionSearch() {
       clearTimeout(t);
       controller.abort();
     };
-  }, [q, activeProjectId, retry]);
+  }, [query.text, activeProjectId, allProjects, retry]);
 
   const items = useMemo(() => {
-    const n = q.trim().toLowerCase();
-    const local = sessions.filter((s) => !n || (s.title || "").toLowerCase().includes(n) || s.id.toLowerCase().includes(n));
+    const n = query.text.toLowerCase();
+    const inScope = (projectId: string) => allProjects || !activeProjectId || projectId === activeProjectId;
+    const local = sessions.filter((s) =>
+      inScope(s.projectId)
+      && matchesSessionSearchFacets(s, query)
+      && (!n || (s.title || "").toLowerCase().includes(n) || s.id.toLowerCase().includes(n)));
     const localIds = new Set(local.map((s) => s.id));
     const snippets = new Map(remote.map((r) => [r.sessionId, r.matches] as const));
     const extra = remote
       .filter((r) => !localIds.has(r.sessionId))
       .map((r) => sessions.find((s) => s.id === r.sessionId))
-      .filter((s): s is NonNullable<typeof s> => s !== undefined);
+      .filter((s): s is NonNullable<typeof s> =>
+        s !== undefined && inScope(s.projectId) && matchesSessionSearchFacets(s, query));
     return [...local, ...extra]
       .sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id))
       .map((s) => ({ s, matches: snippets.get(s.id) ?? [] }));
-  }, [sessions, q, remote]);
+  }, [sessions, query, remote, allProjects, activeProjectId]);
 
-  useEffect(() => { setI(0); }, [q]);
+  useEffect(() => { setI(0); }, [q, allProjects]);
 
   const pick = (id: string) => { setOverlay(null); void openSession(id); };
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === "ArrowDown") { e.preventDefault(); setI((n) => (n + 1) % Math.max(items.length, 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setI((n) => (n - 1 + items.length) % Math.max(items.length, 1)); }
     else if (e.key === "Enter" && items[i]) { e.preventDefault(); pick(items[i]!.s.id); }
   };
 
+  const placeholder = tr("sessionsearch.searchTitleBranchLabelsMessages");
+  const footer = <div className="palette-footer"><kbd>↑↓</kbd> {tr("sessionsearch.navigate")}{" "}<kbd>↵</kbd> {tr("sessionsearch.open")}{" "}<kbd>{tr("sessionsearch.esc")}</kbd> {tr("sessionsearch.close")}</div>;
+
   return (
-    <Dialog
+    <ResponsiveOverlay
+      open
       title={tr("sessionsearch.searchSessions")}
       onClose={() => setOverlay(null)}
+      desktop="dialog"
+      dialogSize="md"
       className="palette"
-      backdropClassName="palette-overlay"
-      initialFocus={mobile ? ".palette-heading" : ".palette-input"}
+      initialFocus=".palette-input"
+      sheetSize="tall"
+      {...(phone ? {
+        sheetSearch: {
+          value: q,
+          onChange: setQ,
+          placeholder,
+          ariaLabel: placeholder,
+          role: "combobox" as const,
+          ariaExpanded: items.length > 0,
+          ariaControls: "session-search-listbox",
+          ...(items[i] ? { ariaActiveDescendant: `session-search-opt-${i}` } : {}),
+          onKeyDown: onKey,
+        },
+        sheetAction: {
+          label: tr("sessionsearch.allProjects"),
+          onClick: () => setAllProjects((value) => !value),
+          pressed: allProjects,
+        },
+      } : {})}
+      sheetFooter={footer}
+      dialogFooter={footer}
     >
-      <div className="palette-heading" tabIndex={-1}>
+      <div className="palette-heading">
         <span className="palette-heading-title">{tr("sessionsearch.sessionHistory")}</span>
         <span className="palette-heading-description">
           {tr("sessionsearch.recentSessionsAndConversationContent")}</span>
+        {!phone && (
+          <label className="session-search-scope">
+            <input
+              type="checkbox"
+              checked={allProjects}
+              onChange={(event) => setAllProjects(event.target.checked)}
+            />
+            <span>{tr("sessionsearch.allProjects")}</span>
+          </label>
+        )}
       </div>
-      <input className="palette-input" value={q} placeholder={tr("sessionsearch.searchTitleBranchLabelsMessages")} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} />
-      <div className="palette-list">
+      {!phone && (
+        <input
+          className="palette-input"
+          value={q}
+          role="combobox"
+          aria-expanded={items.length > 0}
+          aria-controls="session-search-listbox"
+          aria-activedescendant={items[i] ? `session-search-opt-${i}` : undefined}
+          aria-autocomplete="list"
+          placeholder={placeholder}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={onKey}
+        />
+      )}
+      <div className="palette-list" id="session-search-listbox" role="listbox">
         {loading && <div className="palette-empty" role="status">{tr("sessionsearch.searchingSessions")}</div>}
         {!loading && searchFailed && (
           <div className="palette-empty" role="status">
@@ -106,7 +167,10 @@ export default function SessionSearch() {
         {items.map(({ s, matches }, n) => (
           <button
             key={s.id}
+            id={`session-search-opt-${n}`}
             className={`palette-item ${n === i ? "active" : ""}`}
+            role="option"
+            aria-selected={n === i}
             ref={n === i ? (el) => el?.scrollIntoView({ block: "nearest" }) : null}
             onClick={() => pick(s.id)}
           >
@@ -121,7 +185,6 @@ export default function SessionSearch() {
           </button>
         ))}
       </div>
-      <div className="palette-footer"><kbd>↑↓</kbd> {tr("sessionsearch.navigate")}{" "}<kbd>↵</kbd> {tr("sessionsearch.open")}{" "}<kbd>{tr("sessionsearch.esc")}</kbd> {tr("sessionsearch.close")}</div>
-    </Dialog>
+    </ResponsiveOverlay>
   );
 }

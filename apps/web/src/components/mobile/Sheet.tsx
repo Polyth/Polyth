@@ -12,6 +12,7 @@
 //     summon the keyboard; focus starts on the sheet itself.
 import {
   useCallback, useEffect, useRef, useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
@@ -27,6 +28,11 @@ export interface SheetSearch {
   placeholder: string;
   /** Accessible name; defaults to the placeholder. */
   ariaLabel?: string;
+  role?: "combobox" | "searchbox";
+  ariaExpanded?: boolean;
+  ariaControls?: string;
+  ariaActiveDescendant?: string;
+  onKeyDown?: (event: ReactKeyboardEvent<HTMLInputElement>) => void;
 }
 
 export interface SheetProps {
@@ -193,11 +199,19 @@ export default function Sheet({
               value={search.value}
               placeholder={search.placeholder}
               aria-label={search.ariaLabel ?? search.placeholder}
+              {...(search.role ? { role: search.role } : {})}
+              {...(search.ariaExpanded !== undefined ? { "aria-expanded": search.ariaExpanded } : {})}
+              {...(search.ariaControls ? { "aria-controls": search.ariaControls } : {})}
+              {...(search.ariaActiveDescendant
+                ? { "aria-activedescendant": search.ariaActiveDescendant }
+                : {})}
+              {...(search.role === "combobox" ? { "aria-autocomplete": "list" as const } : {})}
               enterKeyHint="search"
               autoComplete="off"
               autoCorrect="off"
               spellCheck={false}
               onChange={(event) => search.onChange(event.target.value)}
+              {...(search.onKeyDown ? { onKeyDown: search.onKeyDown } : {})}
             />
             {search.value !== "" && (
               <button

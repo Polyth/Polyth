@@ -21,6 +21,7 @@ import { initPluginBridge } from "./pluginBridge.ts";
 import { reconcilePackage } from "./packages/reconcile.ts";
 import { tr } from "./i18n/index.ts";
 import { desktopBridge } from "./desktopBridge.ts";
+import { clearSendFailure, reportSendFailure } from "./sendFailure.ts";
 
 let sync: SyncClient | null = null;
 let syncStatus: SyncStatus = "disconnected";
@@ -812,9 +813,11 @@ export async function sendMessage(text: string, model?: JsonObject, agent?: stri
       // only an omitted field means "inherit".
       ...(opts?.agentProfileId !== undefined ? { agentProfileId: opts.agentProfileId } : {}),
     });
+    clearSendFailure(id);
     return true;
   } catch (err) {
     console.error("send message failed", err);
+    reportSendFailure(id, err);
     store.setUiError(friendlyError(tr("common.error"), err));
     return false;
   }

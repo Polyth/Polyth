@@ -448,7 +448,7 @@ test("the phone shell restores session navigation below a swipeable shortcut rai
   assert.equal(header.match(/<WorkspaceBottomNav \/>/g)?.length, 2, "phone and tablet shells mount the session bar");
   assert.doesNotMatch(bottom, />Recents</, "the Recents action is icon-only");
   assert.doesNotMatch(bottom, />New chat</, "the New chat action is icon-only");
-  assert.ok(bottom.includes("workspace.workspacebottomnav.sessionHistory"), "Recents keeps an accessible name");
+  assert.ok(bottom.includes("shell.commandPalette"), "Search keeps an accessible name");
   assert.ok(bottom.includes("workspace.workspacebottomnav.newSession"), "New chat keeps an accessible name");
   assert.ok(bottom.includes("Projects &amp; sessions"), "the title button identifies the projects and sessions drawer");
   assert.ok(bottom.includes("displaySessionTitle"), "the projects and sessions button shows the current session title");

@@ -141,11 +141,11 @@ test("mobile app header focuses workspace destinations without escaping a destin
 
     const bottom = container.querySelector<HTMLElement>(".workspace-bottom-nav");
     assert.ok(bottom, "restored bottom session bar is mounted");
-    const recents = bottom!.querySelector<HTMLButtonElement>('[aria-label="Session history"]');
-    assert.ok(recents);
-    assert.equal(recents!.textContent, "", "Recents stays icon-only");
-    await act(async () => { recents!.click(); });
-    assert.equal(getState().overlay, "search", "Recents opens session search");
+    const search = bottom!.querySelector<HTMLButtonElement>('[aria-label="Command palette"]');
+    assert.ok(search);
+    assert.equal(search!.textContent, "", "Search stays icon-only");
+    await act(async () => { search!.click(); });
+    assert.equal(getState().overlay, "palette", "Search opens the unified palette");
     await act(async () => { setOverlay(null); });
 
     const current = bottom!.querySelector<HTMLButtonElement>('[aria-controls="polyth-session-drawer"]');

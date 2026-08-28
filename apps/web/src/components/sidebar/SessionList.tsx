@@ -11,7 +11,7 @@ import {
   getState, setSidebarOpen, setUiError, startNewSession, useStore,
 } from "../../store.ts";
 import { openSession, archiveSession, deleteSession, restoreSession, forkSession, refreshSessions } from "../../init.ts";
-import { sessionRowStatus, type SessionRowStatus } from "../../sessionBadges.ts";
+import { resolveSessionStatus, type SessionRowStatus } from "../../sessionStatus.ts";
 import { deriveSessionTitle, fullSessionTitle } from "../../format.ts";
 import { friendlyError } from "../../settings.ts";
 import { getUiSettings } from "../../uiPrefs.ts";
@@ -61,13 +61,13 @@ function sidebarElapsed(ms: number): string {
 
 function AttentionBadges({ status }: { status: SessionRowStatus }) {
   if (status.kind === "needs-approval") {
-    return <span className="session-status-indicator approval" title={tr("sidebar.sessionlist.approvalRequired")} aria-label={tr("sidebar.sessionlist.approvalRequired")}><span aria-hidden>✓</span></span>;
+    return <span className="session-status-indicator approval" title={status.label} aria-label={status.label}><span aria-hidden>{status.glyph}</span></span>;
   }
   if (status.kind === "needs-reply") {
-    return <span className="session-status-indicator reply" title={tr("sidebar.sessionlist.replyNeeded")} aria-label={tr("sidebar.sessionlist.replyNeeded")}><span className="session-question-icon" aria-hidden><Icon.question /></span></span>;
+    return <span className="session-status-indicator reply" title={status.label} aria-label={status.label}><span className="session-question-icon" aria-hidden><Icon.question /></span></span>;
   }
   if (status.kind === "unread") {
-    return <span className="session-status-indicator unread" title={tr("sidebar.sessionlist.unreadActivity")} aria-label={tr("sidebar.sessionlist.unreadActivity")}><span aria-hidden>●</span></span>;
+    return <span className="session-status-indicator unread" title={status.label} aria-label={status.label}><span aria-hidden>{status.glyph}</span></span>;
   }
   return null;
 }
@@ -112,14 +112,14 @@ function StatusBadge({ status }: { status: SessionRowStatus }) {
       </span>
     );
   }
-  if (status.kind === "reconciling" || status.kind === "unknown") {
+  if (status.kind === "failed" || status.kind === "reconciling" || status.kind === "unknown") {
     return (
       <span
         className={`session-status-indicator ${status.kind}`}
-        title={status.kind}
-        aria-label={status.kind}
+        title={status.label}
+        aria-label={status.label}
       >
-        {status.kind}
+        <span aria-hidden>{status.glyph}</span>
       </span>
     );
   }
@@ -174,7 +174,7 @@ function SessionRow({
   const swipeStartRef = useRef<GesturePoint | null>(null);
   const swipeConsumedRef = useRef(false);
   const now = useNowTick(s.status === "working");
-  const rowStatus = sessionRowStatus(s, now);
+  const rowStatus = resolveSessionStatus(s, now);
 
   const cancelLongPress = () => {
     if (longPressTimerRef.current !== null) clearTimeout(longPressTimerRef.current);
@@ -294,7 +294,10 @@ function SessionRow({
     }
   };
   const displayTitle = deriveSessionTitle(s.title, eventsTitle);
-  const hoverTitle = fullSessionTitle(s.title, eventsTitle);
+  const hoverTitle = [
+    fullSessionTitle(s.title, eventsTitle),
+    pinnedWorktreeLabel,
+  ].filter(Boolean).join(" · ");
   const activityLabel = sessionActivityLabel(s, relativeTime);
   const actionsLabel = tr("sidebar.sessionlist.actionsForValue", { value: s.title || tr("sidebar.sessionlist.session") });
   const checkedLabels = s.labelIds ?? [];
@@ -412,7 +415,7 @@ function SessionRow({
           <span className="session-title">
             {pinnedSection && <span className="session-pin-icon" title="Pinned" aria-label="Pinned"><Icon.pin /></span>}
             <span className="session-title-text">{displayTitle}</span>
-            {pinnedWorktreeLabel && (
+            {pinnedWorktreeLabel && rowStatus.kind === "regular" && (
               <span className="session-worktree-label" title={`Worktree: ${pinnedWorktreeLabel}`}>
                 <Icon.branch />{pinnedWorktreeLabel}
               </span>
@@ -443,7 +446,7 @@ function SessionRow({
       {!renaming && (
         <Menu
           label={actionsLabel}
-          title={displayTitle}
+          title={pinnedWorktreeLabel ? `${displayTitle} · ${pinnedWorktreeLabel}` : displayTitle}
           align="end"
           open={menuOpen}
           onOpenChange={setMenuOpen}

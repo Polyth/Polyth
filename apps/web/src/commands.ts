@@ -3,6 +3,8 @@ export interface PaletteCommand {
   label: string;
   /** Static string or live resolver — hints must track custom bindings (WP13). */
   hint?: string | (() => string);
+  /** Semantic key resolved only through the curated ui/icons.ts map. */
+  icon?: string;
   group?: string;
   /** Extra search terms (category synonyms, old names). */
   keywords?: string[];
@@ -12,11 +14,21 @@ export interface PaletteCommand {
   run: () => void;
 }
 
+/** Executable descriptor accepted from the `commandPalette.commands` slot.
+ * `checked` remains shell-owned; package commands expose only action metadata. */
+export type PaletteCommandDescriptor = Omit<PaletteCommand, "checked">;
+
+export interface CommandPaletteSlotMeta extends Record<string, unknown> {
+  commands: readonly PaletteCommandDescriptor[];
+}
+
 const cmds = new Map<string, PaletteCommand>();
 
 export function registerCommand(cmd: PaletteCommand): () => void {
   cmds.set(cmd.id, cmd);
-  return () => { cmds.delete(cmd.id); };
+  return () => {
+    if (cmds.get(cmd.id) === cmd) cmds.delete(cmd.id);
+  };
 }
 
 export function listCommands(): PaletteCommand[] {

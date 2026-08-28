@@ -37,6 +37,7 @@ import {
 } from "../../starters.ts";
 import { tr } from "../../i18n/index.ts";
 import { Button } from "../ui/index.ts";
+import { resolveSessionStatus } from "../../sessionStatus.ts";
 
 const NOOP_STARTER = (_prompt: string, _id?: string): void => {};
 
@@ -171,19 +172,29 @@ function RecentSessions({ projectId }: { projectId: string | null }) {
     <HeroWidget id="recent"><div className="hero-recent">
       <h3 className="hero-recent-head">{tr("workspace.builtinsurfaces.recent")}</h3>
       <ul>
-        {recent.map((session) => (
-          <li key={session.id}>
-            <button
-              type="button"
-              className="hero-recent-row"
-              onClick={() => void openSession(session.id).catch((error) =>
-                setUiError(friendlyError(tr("common.error"), error)))}
-            >
-              <span className="hero-recent-title">{displaySessionTitle(session.title, session.id)}</span>
-              <span className="hero-recent-time">{ago(session.lastTurnAt ?? session.updatedAt)}</span>
-            </button>
-          </li>
-        ))}
+        {recent.map((session) => {
+          const status = resolveSessionStatus(session);
+          return (
+            <li key={session.id}>
+              <button
+                type="button"
+                className="hero-recent-row"
+                onClick={() => void openSession(session.id).catch((error) =>
+                  setUiError(friendlyError(tr("common.error"), error)))}
+              >
+                <span
+                  className={`hero-recent-status ${status.kind}`}
+                  title={status.label}
+                  aria-label={status.label}
+                >
+                  <span aria-hidden>{status.glyph}</span>
+                </span>
+                <span className="hero-recent-title">{displaySessionTitle(session.title, session.id)}</span>
+                <span className="hero-recent-time">{ago(session.lastTurnAt ?? session.updatedAt)}</span>
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </div></HeroWidget>
   );

@@ -24,7 +24,7 @@ import MobileNavigationRail from "./mobile/MobileNavigationRail.tsx";
 import WorkspaceBottomNav from "./workspace/WorkspaceBottomNav.tsx";
 import { api, type GithubStatusDto } from "@polyth/session/web-api";
 import { tr } from "../i18n/index.ts";
-import { useKeymap } from "../../../../packages/hotkeys/widgets/hotkeys.ts";
+import { useKeymap } from "@polyth/hotkeys/widgets";
 import { listSurfaces } from "../surfaces.ts";
 import { getWorkspaceSurface } from "../workspace/surfaceRegistry.ts";
 

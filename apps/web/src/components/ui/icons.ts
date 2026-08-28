@@ -5,6 +5,34 @@
 //
 // Import icons from here — not from "lucide-react" directly — so the set
 // stays reviewable and swap-outs happen in one place.
+import {
+  Archive,
+  Bell,
+  KeyRound,
+  Pencil,
+  Search,
+  Sparkles,
+  Square,
+  Volume2,
+  type LucideIcon,
+} from "lucide-react";
+
+/** String-keyed command descriptors resolve only through this allowlist. */
+export const COMMAND_ICONS: Readonly<Record<string, LucideIcon>> = {
+  archive: Archive,
+  bell: Bell,
+  edit: Pencil,
+  key: KeyRound,
+  search: Search,
+  sparkle: Sparkles,
+  stop: Square,
+  volume: Volume2,
+};
+
+export function commandIcon(name: string | undefined): LucideIcon | undefined {
+  return name ? COMMAND_ICONS[name] : undefined;
+}
+
 export {
   // dismiss / confirm
   X as CloseIcon,

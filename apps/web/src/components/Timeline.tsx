@@ -6,7 +6,7 @@ import { fmtDuration, fmtTokens } from "../format.ts";
 import { groupWork, mergeThinking, promptIndex, copyText, loadDraft, type WorkGroup } from "../utils.ts";
 import { executionGroupLabel, executionPresentation, reasoningTail } from "../execution.ts";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
-import { forkSession, loadOlderEvents, sendMessage } from "../init.ts";
+import { forkSession, loadOlderEvents } from "../init.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
 import {
   applyEvent, setActiveView, setUiError, startNewSession, useStore,
@@ -1623,17 +1623,23 @@ export default function Timeline({
         {turnBroken && (
           <div className="turn-error" role="alert">
             <span className="turn-error-text">
-              {turn.status === "aborted" ? tr("timeline.turnAborted") : tr("timeline.turnFailed")}
-              {turn.error ? ` — ${turn.error}` : ""}
+              {turn.status === "aborted" ? tr("timeline.turnAborted") : tr("timeline.lastTurnFailed")}
             </span>
-            {lastUser && (
+            {turn.status === "failed" && lastUser && sessionId && (
               <button
                 type="button"
                 className="turn-error-retry"
                 title={tr("timeline.retryTheLastMessage")}
                 aria-label={tr("timeline.retryTheLastMessage")}
-                onClick={() => void sendMessage(lastUser.text)}
-              ><Icon.refresh /></button>
+                onClick={() => {
+                  const draft = {
+                    text: lastUser.raw ?? lastUser.text,
+                    ...(lastUser.attachments?.length ? { attachments: lastUser.attachments } : {}),
+                  };
+                  applyComposerSeed(sessionId, `turn-failed:${turn.turnId}`, draft);
+                  requestComposerReplace(draft.text);
+                }}
+              >{tr("common.retry")}</button>
             )}
           </div>
         )}

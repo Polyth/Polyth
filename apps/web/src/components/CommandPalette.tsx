@@ -1,18 +1,20 @@
 // Unified palette (WP13): commands, projects, sessions, and files in one box.
 // Mod+P opens file-focused mode; `is:archived` reveals archived sessions.
 import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { commandHint, filterPalette, listCommands, type PaletteCommand } from "../commands.ts";
+import { commandHint, filterPalette, listCommands } from "../commands.ts";
 import { api, type FileSearchHitDto, type WorkspaceSearchItemDto } from "@polyth/session/web-api";
 import { activateProject, openEditorFile, setOverlay, setUiError, useStore } from "../store.ts";
 import { openSession } from "../init.ts";
 import { announce } from "./a11y/live.tsx";
-import { useModalSurface } from "./a11y/Dialog.tsx";
 import { tr } from "../i18n/index.ts";
+import { useShellMode } from "../responsiveShell.ts";
+import { commandIcon, Icon, ResponsiveOverlay } from "./ui/index.ts";
+import { orderEntries, type PaletteEntry } from "../paletteOrdering.ts";
 
-type Entry =
-  | { kind: "cmd"; id: string; cmd: PaletteCommand }
-  | { kind: "workspace"; id: string; item: WorkspaceSearchItemDto }
-  | { kind: "file"; id: string; hit: FileSearchHitDto };
+function CommandIcon({ name }: { name: string | undefined }) {
+  const glyph = commandIcon(name);
+  return glyph ? <Icon icon={glyph} size="sm" /> : null;
+}
 
 /** Pull an `is:archived` token out of the raw query. */
 export function parseQuery(raw: string): { text: string; archived: boolean } {
@@ -25,8 +27,9 @@ export default function CommandPalette() {
   const [i, setI] = useState(0);
   const [files, setFiles] = useState<FileSearchHitDto[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceSearchItemDto[]>([]);
-  const panelRef = useRef<HTMLDivElement>(null);
   const seq = useRef(0);
+  const shellMode = useShellMode();
+  const phone = shellMode === "phone";
   const projectId = useStore((s) => s.activeProjectId);
   // File search resolves against the active session's worktree (P0).
   const sessionId = useStore((s) => s.activeSessionId);
@@ -38,12 +41,6 @@ export default function CommandPalette() {
     () => (filesMode ? [] : filterPalette(listCommands(), text)),
     [filesMode, text],
   );
-  useModalSurface({
-    open: true,
-    onClose: () => setOverlay(null),
-    containerRef: panelRef,
-    initialFocus: ".palette-input",
-  });
   useEffect(() => { setI(0); }, [q]);
 
   // Debounced remote searches; stale responses are dropped by sequence.
@@ -70,16 +67,30 @@ export default function CommandPalette() {
     return () => clearTimeout(h);
   }, [text, archived, filesMode, projectId, sessionId]);
 
-  const entries = useMemo<Entry[]>(
-    () => [
-      ...cmds.map((c): Entry => ({ kind: "cmd", id: c.id, cmd: c })),
-      ...workspaces.map((w): Entry => ({ kind: "workspace", id: `${w.kind}:${w.id}`, item: w })),
-      ...files.map((f): Entry => ({ kind: "file", id: `file:${f.path}`, hit: f })),
-    ],
-    [cmds, workspaces, files],
+  const entries = useMemo<PaletteEntry[]>(
+    () => orderEntries([
+      ...cmds.map((c): PaletteEntry => ({ kind: "cmd", id: c.id, cmd: c })),
+      ...workspaces.map((w): PaletteEntry => ({
+        kind: "workspace",
+        id: `${w.kind}:${w.id}`,
+        item: w,
+      })),
+      ...(phone && !filesMode
+        ? [{ kind: "session-search" as const, id: "session-search" as const }]
+        : []),
+      ...files.map((f): PaletteEntry => ({ kind: "file", id: `file:${f.path}`, hit: f })),
+    ], shellMode),
+    [cmds, workspaces, files, filesMode, phone, shellMode],
   );
+  useEffect(() => {
+    setI((current) => Math.min(current, Math.max(entries.length - 1, 0)));
+  }, [entries.length]);
 
-  const run = (entry: Entry) => {
+  const run = (entry: PaletteEntry) => {
+    if (entry.kind === "session-search") {
+      setOverlay("search");
+      return;
+    }
     setOverlay(null);
     if (entry.kind === "cmd") {
       entry.cmd.run();
@@ -106,11 +117,12 @@ export default function CommandPalette() {
     else if (e.key === "Enter" && entries[i]) { e.preventDefault(); run(entries[i]!); }
   };
 
-  const groupOf = (entry: Entry): string => {
+  const groupOf = (entry: PaletteEntry): string => {
     if (entry.kind === "cmd") return entry.cmd.group ?? "";
     if (entry.kind === "workspace") {
       return entry.item.kind === "project" ? tr("commandpalette.projects") : tr("commandpalette.sessions");
     }
+    if (entry.kind === "session-search") return tr("commandpalette.sessions");
     return tr("commandpalette.files");
   };
 
@@ -119,36 +131,66 @@ export default function CommandPalette() {
     return idx < 0 ? "" : p.slice(0, idx);
   };
   const baseOf = (p: string): string => p.slice(p.lastIndexOf("/") + 1);
+  const placeholder = filesMode
+    ? tr("commandpalette.searchFiles")
+    : tr("commandpalette.searchCommandsProjectsSessionsFilesIsArchived");
+  const footer = (
+    <div className="palette-footer" id="palette-close-hint">
+      <kbd>{tr("commandpalette.esc")}</kbd> {tr("commandpalette.close")}
+    </div>
+  );
 
   return (
-    <div className="scrim palette-overlay" onPointerDown={(e) => { if (e.target === e.currentTarget) setOverlay(null); }}>
-      <div
-        ref={panelRef}
-        className="dialog-panel palette"
-        onPointerDown={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={tr("commandpalette.commandPalette")}
-        aria-describedby="palette-close-hint"
-        tabIndex={-1}
-      >
-      <div className="palette-heading">
-        <span className="palette-heading-title">{tr("commandpalette.searchWorkspace")}</span>
+    <ResponsiveOverlay
+      open
+      onClose={() => setOverlay(null)}
+      title={tr("commandpalette.searchWorkspace")}
+      desktop="dialog"
+      dialogSize="md"
+      className="palette"
+      initialFocus=".palette-input"
+      sheetSize="tall"
+      {...(phone
+        ? {
+            sheetSearch: {
+              value: q,
+              onChange: setQ,
+              placeholder,
+              ariaLabel: placeholder,
+              role: "combobox" as const,
+              ariaExpanded: entries.length > 0,
+              ariaControls: "palette-listbox",
+              ...(entries[i]
+                ? { ariaActiveDescendant: `palette-opt-${i}` }
+                : {}),
+              onKeyDown: onKey,
+            },
+          }
+        : {})}
+      sheetFooter={footer}
+      dialogFooter={footer}
+    >
+      {!phone && (
+        <div className="palette-heading">
         <span className="palette-heading-description">
-          {tr("commandpalette.commandsProjectsSessionsAndFiles")}</span>
-      </div>
-      <input
-        className="palette-input"
-        value={q}
-        role="combobox"
-        aria-expanded={entries.length > 0}
-        aria-controls="palette-listbox"
-        aria-activedescendant={entries[i] ? `palette-opt-${i}` : undefined}
-        aria-autocomplete="list"
-        placeholder={filesMode ? tr("commandpalette.searchFiles") : tr("commandpalette.searchCommandsProjectsSessionsFilesIsArchived")}
-        onChange={(e) => setQ(e.target.value)}
-        onKeyDown={onKey}
-      />
+          {tr("commandpalette.commandsProjectsSessionsAndFiles")}
+        </span>
+        </div>
+      )}
+      {!phone && (
+        <input
+          className="palette-input"
+          value={q}
+          role="combobox"
+          aria-expanded={entries.length > 0}
+          aria-controls="palette-listbox"
+          aria-activedescendant={entries[i] ? `palette-opt-${i}` : undefined}
+          aria-autocomplete="list"
+          placeholder={placeholder}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={onKey}
+        />
+      )}
       <div className="palette-list" role="listbox" id="palette-listbox" aria-label={tr("commandpalette.paletteResults")}>
         {entries.length === 0 && <div className="palette-empty">{tr("commandpalette.noMatches")}</div>}
         {entries.map((entry, n) => (
@@ -166,6 +208,7 @@ export default function CommandPalette() {
             >
                 {entry.kind === "cmd" && (
                   <>
+                    <CommandIcon name={entry.cmd.icon} />
                     {entry.cmd.checked && (
                       <span className="palette-check" aria-hidden="true">{entry.cmd.checked() ? "✓" : tr("commandpalette.u00a0")}</span>
                     )}
@@ -190,6 +233,13 @@ export default function CommandPalette() {
                     </span>
                   </>
                 )}
+                {entry.kind === "session-search" && (
+                  <>
+                    <CommandIcon name="search" />
+                    <span className="palette-label">Search inside conversations…</span>
+                    <span className="palette-meta">{tr("shell.searchSessions")}</span>
+                  </>
+                )}
                 {entry.kind === "file" && (
                   <>
                     <span className="palette-col">
@@ -203,8 +253,6 @@ export default function CommandPalette() {
           </Fragment>
         ))}
       </div>
-      <div className="palette-footer" id="palette-close-hint"><kbd>{tr("commandpalette.esc")}</kbd> {tr("commandpalette.close")}</div>
-      </div>
-    </div>
+    </ResponsiveOverlay>
   );
 }

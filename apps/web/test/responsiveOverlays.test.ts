@@ -52,7 +52,10 @@ test("modal primitives lock background scroll and retain touch dismissal", async
   assert.match(settings, /className="settings-mobile-nav-head"/);
   assert.match(settings, /className="settings-mobile-title"/);
   assert.match(settings, /<IconButton icon=\{CloseIcon\} label=\{tr\("common\.close"\)\} onClick=\{closeSettings\} \/>/);
-  assert.match(palette, /className="scrim palette-overlay" onPointerDown=/);
+  assert.match(palette, /<ResponsiveOverlay[\s\S]*desktop="dialog"/);
+  assert.match(palette, /sheetSize="tall"/);
+  assert.match(palette, /initialFocus="\.palette-input"/);
+  assert.doesNotMatch(palette, /className="scrim palette-overlay"/);
   assert.match(projectSetup, /className="project-setup-scrim" onPointerDown=/);
   assert.match(packageTour, /useModalScrollLock\(open\)/);
   assert.match(packageTour, /className="scrim package-tour-scrim"[\s\S]*onPointerDown=/);
