@@ -1,0 +1,14 @@
+{
+  "id": "OC-REAL-021",
+  "verdict": "fail",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy (forced)",
+  "observed": "bad model -> session.error(UnknownError/ProviderModelNotFoundError with stack trace) durable; auth failure -> session.error(APIError 'API key not valid') durable on message, injected key not leaked; unknown session prompt -> HTTP 404; read tool on missing path HANGS: stuck running 120s+ with no error/idle (reproduced twice); turn/stopped(error) never emitted (no revision on real session.error)",
+  "expected": "failure durable, bounded/redacted, not presented as completion",
+  "attribution": "OPENCODE",
+  "evidence": [
+    "artifacts/opencode-real-world/phase-1-legacy/OC-REAL-021/failure-modes.json",
+    "logs/opencode-real-world/phase-1-legacy/OC-REAL-021/sse-badkey.ndjson"
+  ],
+  "notes": "OPENCODE BUG: read tool on a nonexistent path never terminalizes (failure criterion 'stuck active turn'). Also, ProviderModelNotFoundError body leaks an internal bun stack trace (unbounded/unredacted error flood risk). POLYTH: session.error carries no comparable revision so failures are never terminalized locally (root cause shared with OC-REAL-020). Malformed-model-response not exercisable live."
+}

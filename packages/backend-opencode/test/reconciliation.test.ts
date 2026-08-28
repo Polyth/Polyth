@@ -11,11 +11,13 @@ import type {
 } from "@polyth/contracts";
 import { createStore } from "@polyth/session";
 import {
+  claimTerminalStateEvidence,
   createTranslateState,
   isCurrentSnapshot,
   normalizeAndIngestOcObservation,
   normalizeOcObservation,
   snapshotAbsenceIsAuthoritative,
+  splitNormalizedObservation,
   terminalStateEvidenceOf,
   type ObservationBinding,
 } from "../src/events.ts";
@@ -162,6 +164,102 @@ test("pull reconciliation recovers identified pending permission and question", 
   );
 });
 
+test("live and pulled multi-event tool facts share per-event semantic revisions", async () => {
+  const observed: ObservationBinding = {
+    authorityId: endpoint.authorityId,
+    generation: endpoint.generation,
+    location: endpoint.location,
+    backendSessionId: "session-a",
+    reconciliationOrdinal: 21,
+  };
+  const toolEvent = {
+    type: "message.part.updated",
+    properties: {
+      sessionID: "session-a",
+      part: {
+        id: "part-tool-a",
+        callID: "call-tool-a",
+        messageID: "message-assistant-a",
+        sessionID: "session-a",
+        type: "tool",
+        tool: "write",
+        state: {
+          status: "completed",
+          input: { filePath: "marker.txt" },
+          output: "Wrote file successfully.",
+        },
+      },
+    },
+  };
+  const normalized = normalizeOcObservation({
+    data: toolEvent,
+    channel: "sse",
+    observed,
+    current: observed,
+    cursorAfter: "evt-tool-completed",
+  });
+  assert.equal(normalized.kind, "accepted");
+  if (normalized.kind !== "accepted") throw new Error("tool event was not accepted");
+  const live = splitNormalizedObservation(normalized.observation);
+  assert.deepEqual(
+    live.map((entry) => ({
+      revision: entry.identity.revision,
+      type: entry.events[0]?.type,
+      checkpoint: entry.checkpoint?.stateRank,
+      cursor: entry.cursorAfter,
+    })),
+    [
+      { revision: "state:completed#0", type: "tool/call", checkpoint: undefined, cursor: undefined },
+      { revision: "state:completed#1", type: "tool/result", checkpoint: 2, cursor: "evt-tool-completed" },
+    ],
+  );
+
+  const transport: OpenCodeTransport = {
+    async query<T>(request: {
+      method: "GET" | "HEAD";
+      path: string;
+      deadlineMs: number;
+    }): Promise<T> {
+      if (request.path.startsWith("/session/status")) {
+        return { "session-a": { type: "busy" } } as T;
+      }
+      if (request.path.startsWith("/session/session-a/message")) {
+        return [{
+          info: {
+            id: "message-assistant-a",
+            role: "assistant",
+            sessionID: "session-a",
+          },
+          parts: [toolEvent.properties.part],
+        }] as T;
+      }
+      if (request.path.startsWith("/permission") || request.path.startsWith("/question")) {
+        return [] as T;
+      }
+      throw new Error(`unexpected query ${request.path}`);
+    },
+    async mutate() {
+      throw new Error("reconciliation must not mutate");
+    },
+    async stream() {},
+  };
+  const adapter = createLegacyProtocolAdapter({
+    transport,
+    endpoint,
+    promptPaths: ["prompt_async"],
+  });
+  const snapshot = await adapter.reconcile({ ...binding, reconciliationOrdinal: 21 });
+  assert.deepEqual(
+    snapshot.events
+      .filter((entry) => entry.entityKey === "call-tool-a")
+      .map((entry) => ({ revision: entry.revision, type: entry.event.type })),
+    live.map((entry) => ({
+      revision: entry.identity.revision,
+      type: entry.events[0]!.type,
+    })),
+  );
+});
+
 test("legacy terminal status requires a numeric comparable revision", async () => {
   let reportedStatus: Record<string, unknown> = { type: "idle" };
   const transport: OpenCodeTransport = {
@@ -229,13 +327,13 @@ test("legacy terminal status requires a numeric comparable revision", async () =
     },
   });
 
-  assert.equal(
+  assert.deepEqual(
     terminalStateEvidenceOf({
       type: "session.idle",
       properties: { sessionID: "session-a" },
     }),
-    undefined,
-    "an unversioned SSE idle event cannot terminalize a turn",
+    { state: "idle" },
+    "an explicit stream terminal can stop the currently admitted turn without inventing a revision",
   );
   assert.deepEqual(
     terminalStateEvidenceOf({
@@ -251,6 +349,110 @@ test("legacy terminal status requires a numeric comparable revision", async () =
       },
     },
   );
+});
+
+test("OC-REAL-073: each durable assistant completion anchors one revision-less idle", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-legacy-two-turn-"));
+  const store = createStore(join(directory, "sessions.db"));
+  const state = createTranslateState();
+  let observed: ObservationBinding = {
+    authorityId: endpoint.authorityId,
+    generation: endpoint.generation,
+    location: endpoint.location,
+    backendSessionId: "session-a",
+    reconciliationOrdinal: 1,
+  };
+  const completion = (messageId: string, completed: number) => ({
+    type: "message.updated",
+    properties: {
+      sessionID: "session-a",
+      info: {
+        id: messageId,
+        role: "assistant",
+        time: { created: completed - 10, completed },
+      },
+    },
+  });
+  const idle = {
+    type: "session.idle",
+    properties: { sessionID: "session-a" },
+  };
+  const normalizeIdle = () => normalizeOcObservation({
+    data: idle,
+    channel: "sse",
+    observed,
+    current: observed,
+    state,
+  });
+  const ingestIdle = async (
+    normalized: Extract<ReturnType<typeof normalizeOcObservation>, { kind: "accepted" }>,
+  ) => store.ingestObservation({
+    sessionId: "canonical-a",
+    identity: normalized.observation.identity,
+    reconciliationOrdinal: observed.reconciliationOrdinal,
+    events: [{
+      type: "turn/stopped",
+      data: { reason: "completed" },
+      ignorable: true,
+      producerPlugin: "backend-opencode",
+    }],
+  });
+
+  try {
+    observed = await persistObservationBinding(store, "canonical-a", observed);
+
+    const firstCompletion = await normalizeAndIngestOcObservation({
+      store,
+      sessionId: "canonical-a",
+      data: completion("message-assistant-1", 101),
+      channel: "sse",
+      observed,
+      current: observed,
+      state,
+    });
+    assert.equal(firstCompletion.kind, "ingested");
+    if (firstCompletion.kind === "ingested") {
+      assert.equal(firstCompletion.result.kind, "applied");
+    }
+    const firstIdle = normalizeIdle();
+    assert.equal(firstIdle.kind, "accepted");
+    if (firstIdle.kind !== "accepted") assert.fail("first idle was not normalized");
+    assert.deepEqual(claimTerminalStateEvidence(idle, state), { state: "idle" });
+    assert.equal((await ingestIdle(firstIdle)).kind, "applied");
+
+    const duplicateIdle = normalizeIdle();
+    assert.equal(duplicateIdle.kind, "accepted");
+    if (duplicateIdle.kind !== "accepted") assert.fail("duplicate idle was not normalized");
+    assert.equal(claimTerminalStateEvidence(idle, state), undefined);
+    assert.equal((await ingestIdle(duplicateIdle)).kind, "duplicate");
+
+    const secondCompletion = await normalizeAndIngestOcObservation({
+      store,
+      sessionId: "canonical-a",
+      data: completion("message-assistant-2", 202),
+      channel: "sse",
+      observed,
+      current: observed,
+      state,
+    });
+    assert.equal(secondCompletion.kind, "ingested");
+    if (secondCompletion.kind === "ingested") {
+      assert.equal(secondCompletion.result.kind, "applied");
+    }
+    const secondIdle = normalizeIdle();
+    assert.equal(secondIdle.kind, "accepted");
+    if (secondIdle.kind !== "accepted") assert.fail("second idle was not normalized");
+    assert.deepEqual(claimTerminalStateEvidence(idle, state), { state: "idle" });
+    assert.notEqual(
+      secondIdle.observation.identity.revision,
+      firstIdle.observation.identity.revision,
+      "the second turn reused the first turn's unversioned status identity",
+    );
+    assert.equal((await ingestIdle(secondIdle)).kind, "applied");
+  } finally {
+    await store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("SSE and pull claim one semantic fact through SessionStore ingestion", async () => {

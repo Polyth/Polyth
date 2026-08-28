@@ -1,0 +1,29 @@
+{
+  "scenario": "OC-REAL-034",
+  "seed": "phase2-034-delays-0-1-2-5-10-25x2",
+  "gitSha": "3078967a16c7a6e541ffb71376572f6fc33ab18e",
+  "opencode": {
+    "version": "1.18.18",
+    "binary": "/home/ubuntu/.local/bin/opencode",
+    "sha256": "bb71f45b564f9234a97f54d6252a4a41d2f4388ae4b078918f691824cc3b3e54",
+    "shimPid": 34803,
+    "pid": 34815,
+    "proxyUrl": "http://127.0.0.1:44935",
+    "targetUrl": "http://127.0.0.1:33587",
+    "configDir": "/tmp/ocreal-phase2/oc-real-034-mtchjy0t/opencode-config",
+    "dataDir": "/tmp/ocreal-phase2/oc-real-034-mtchjy0t/home/.local/share"
+  },
+  "polyth": {
+    "pid": 34759,
+    "port": 37347,
+    "dataDir": "/tmp/ocreal-phase2/oc-real-034-mtchjy0t/polyth-data"
+  },
+  "project": "/tmp/ocreal-phase2/oc-real-034-mtchjy0t/project",
+  "worktree": "/tmp/ocreal-phase2/oc-real-034-mtchjy0t/project",
+  "node": "v22.22.2",
+  "os": "linux 6.12.94+",
+  "hostname": "cursor",
+  "protocol": "legacy (forced)",
+  "authority": "owned runtime; generation 1 unless restarted",
+  "createdAt": "2026-08-28T05:03:01.958Z"
+}

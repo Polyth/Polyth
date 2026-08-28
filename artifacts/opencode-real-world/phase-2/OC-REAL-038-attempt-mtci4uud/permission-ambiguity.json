@@ -1,0 +1,34 @@
+{
+  "canonicalSessionId": "09fa8f9e-c270-49d6-aa5a-711f537a4ba4",
+  "backendSessionId": "ses_fb931e9f1ffeqfCajzr65cOM5g",
+  "requestId": "per_046ce1e4c001Rc3LAMQubG7ghx",
+  "operationId": "56b2966d-4817-45cf-9513-bbfd2cb17532",
+  "requestedEventId": "b3072464-f906-4fe2-abc4-099f78490dc9",
+  "stalePendingCount": 1,
+  "actualPendingAfterAnswer": [],
+  "answerError": "outcome-unknown",
+  "secondError": "binding-mismatch",
+  "operationStates": {
+    "stale": "unknown",
+    "emptyPartialSnapshot": "unknown",
+    "afterRestart": "unknown"
+  },
+  "responseIntentOperationIds": [
+    "56b2966d-4817-45cf-9513-bbfd2cb17532"
+  ],
+  "durableCard": {
+    "requestedCount": 1,
+    "resolvedCount": 0
+  },
+  "requestConnectionIds": [
+    16
+  ],
+  "requestOperationIds": [
+    "56b2966d-4817-45cf-9513-bbfd2cb17532"
+  ],
+  "websocketMessagesBeforeRestart": 45,
+  "websocketMessagesAfterRestart": 2,
+  "failures": [
+    "stale second answer error=binding-mismatch"
+  ]
+}

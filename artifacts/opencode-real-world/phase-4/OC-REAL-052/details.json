@@ -1,0 +1,61 @@
+{
+  "checks": [
+    {
+      "name": "prompt admitted",
+      "pass": true,
+      "observed": "status=200"
+    },
+    {
+      "name": "PID record matches the live child identity",
+      "pass": true,
+      "observed": "{\"record\":{\"pid\":68103,\"startIdentity\":\"1380398\",\"executable\":\"/home/ubuntu/.opencode/bin/opencode\",\"command\":\"opencode serve --hostname 127.0.0.1 --port 33543\"},\"identity\":{\"startIdentity\":\"1380398\",\"exe\":\"/home/ubuntu/.opencode/bin/opencode\",\"cmdline\":\"opencode serve --hostname 127.0.0.1 --port 33543\"}}"
+    },
+    {
+      "name": "durable prefix survives unchanged",
+      "pass": true,
+      "observed": "prefix chunks=1"
+    },
+    {
+      "name": "no part finalizes twice",
+      "pass": true,
+      "observed": "[[\"prt_047268cc5001PsVrLGWegMZDS2\",1],[\"prt_04726ce88001eAztpUPona2WLl\",1]]"
+    },
+    {
+      "name": "no invented completion",
+      "pass": true,
+      "observed": "[]"
+    },
+    {
+      "name": "projection settles honestly (unknown/reconciling), not completed/idle and not forever-running",
+      "pass": true,
+      "observed": "final status=unknown trace=[{\"ts\":\"2026-08-28T06:55:21.500Z\",\"status\":\"working\"},{\"ts\":\"2026-08-28T06:55:23.502Z\",\"status\":\"reconciling\"},{\"ts\":\"2026-08-28T06:55:43.517Z\",\"status\":\"unknown\"}]"
+    },
+    {
+      "name": "sqlite integrity ok",
+      "pass": true,
+      "observed": "[{\"integrity_check\":\"ok\"}]"
+    }
+  ],
+  "observations": [
+    {
+      "prefixChunkCount": 1,
+      "prefixBytes": 749
+    },
+    {
+      "statusTrace": [
+        {
+          "ts": "2026-08-28T06:55:21.500Z",
+          "status": "working"
+        },
+        {
+          "ts": "2026-08-28T06:55:23.502Z",
+          "status": "reconciling"
+        },
+        {
+          "ts": "2026-08-28T06:55:43.517Z",
+          "status": "unknown"
+        }
+      ]
+    }
+  ]
+}

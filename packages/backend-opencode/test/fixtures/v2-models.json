@@ -1,0 +1,75 @@
+{
+  "location": {
+    "directory": "/workspace"
+  },
+  "data": [
+    {
+      "id": "big-pickle",
+      "providerID": "opencode",
+      "name": "Big Pickle",
+      "capabilities": {
+        "tools": true,
+        "input": ["text"],
+        "output": ["text"]
+      },
+      "variants": [],
+      "cost": [
+        {
+          "input": 0,
+          "output": 0
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 200000,
+        "output": 32000
+      }
+    },
+    {
+      "id": "gemini-3.1-flash-image",
+      "providerID": "google",
+      "name": "Nano Banana 2",
+      "capabilities": {
+        "tools": false,
+        "input": ["text", "image"],
+        "output": ["text", "image"]
+      },
+      "variants": [
+        {
+          "id": "high"
+        }
+      ],
+      "cost": [
+        {
+          "input": 0.5,
+          "output": 60
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 65536,
+        "output": 65536
+      }
+    },
+    {
+      "id": "disabled-model",
+      "providerID": "google",
+      "name": "Disabled Model",
+      "capabilities": {
+        "tools": false,
+        "input": ["text"],
+        "output": ["text"]
+      },
+      "variants": [],
+      "cost": [],
+      "status": "deprecated",
+      "enabled": false,
+      "limit": {
+        "context": 1024,
+        "output": 128
+      }
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "id": "OC-REAL-082",
+  "verdict": "PARTIAL",
+  "attribution": "POLYTH",
+  "summary": "Exact remote child and PID-reuse guard worked; active-session replacement could not prove continuity."
+}

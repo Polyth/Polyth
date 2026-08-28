@@ -1,0 +1,14 @@
+{
+  "behaviorPath": "/tmp/ocreal/OC-REAL-024/run-1-mtcitph9/home/.config/opencode/AGENTS.md",
+  "replies": {
+    "alpha": "PONG-ALPHA",
+    "beta": "PONG-BETA",
+    "activeTail": "\n286\n287\n288\n289\n290\n291\n292\n293\n294\n295\n296\n297\n298\n299\n300",
+    "gamma": "PONG-GAMMA"
+  },
+  "busySeenDuringActiveWrite": true,
+  "activeTurnCompleted": true,
+  "pidStable": true,
+  "finalBehaviorBytes": "# Global behavior\n\nWhen the user sends exactly the word \"ping\", respond with exactly the word PONG-GAMMA and nothing else. Do not use tools.\n",
+  "failures": []
+}

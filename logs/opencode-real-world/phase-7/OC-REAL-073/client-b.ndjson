@@ -1,0 +1,2 @@
+{"t":1787909326596,"client":"client-b","kind":"request","method":"POST","path":"/api/sessions/818202e8-de37-401f-b590-bd05c48bbec5/message","body":{"text":"Reply with exactly the single word BRAVO-REAL and nothing else.","model":{"providerID":"opencode","modelID":"big-pickle"}}}
+{"t":1787909326614,"client":"client-b","kind":"response","method":"POST","path":"/api/sessions/818202e8-de37-401f-b590-bd05c48bbec5/message","status":200,"bytes":64,"body":"{\"queueId\":\"e600903f-d570-4041-8ed9-0348edef4966\",\"queued\":true}"}

@@ -1,0 +1,101 @@
+{
+  "rawProviderCount": 204,
+  "rawModelCount": 7380,
+  "catalogModelCount": 7380,
+  "rawConnected": [
+    "google",
+    "opencode"
+  ],
+  "connectedInCatalog": [
+    "google",
+    "opencode"
+  ],
+  "missingFromCatalog": [],
+  "inventedInCatalog": [],
+  "variantSampleCount": 3278,
+  "variantDrift": [],
+  "googleSample": [
+    {
+      "providerID": "google",
+      "modelID": "gemini-3.1-flash-tts-preview",
+      "name": "Gemini 3.1 Flash TTS Preview",
+      "providerName": "Google",
+      "context": 8192,
+      "cost": {
+        "input": 1,
+        "output": 20
+      },
+      "capabilities": [
+        "input:text",
+        "output:audio"
+      ],
+      "connected": true
+    },
+    {
+      "providerID": "google",
+      "modelID": "gemma-4-26b-a4b-it",
+      "name": "Gemma 4 26B A4B IT",
+      "providerName": "Google",
+      "context": 262144,
+      "cost": {
+        "input": 0,
+        "output": 0
+      },
+      "capabilities": [
+        "attachment",
+        "toolcall",
+        "input:image",
+        "input:text",
+        "output:text"
+      ],
+      "variants": [
+        "low",
+        "high"
+      ],
+      "connected": true
+    },
+    {
+      "providerID": "google",
+      "modelID": "gemini-3-pro-image",
+      "name": "Nano Banana Pro",
+      "providerName": "Google",
+      "context": 131072,
+      "cost": {
+        "input": 2,
+        "output": 120
+      },
+      "capabilities": [
+        "attachment",
+        "input:image",
+        "input:text",
+        "output:image",
+        "output:text"
+      ],
+      "variants": [
+        "low",
+        "high"
+      ],
+      "connected": true
+    },
+    {
+      "providerID": "google",
+      "modelID": "gemini-3-pro-image-preview",
+      "name": "Nano Banana Pro",
+      "providerName": "Google",
+      "context": 131072,
+      "cost": {
+        "input": 2,
+        "output": 120
+      },
+      "capabilities": [
+        "attachment",
+        "input:image",
+        "input:text",
+        "output:image",
+        "output:text"
+      ],
+      "connected": true
+    }
+  ],
+  "failures": []
+}

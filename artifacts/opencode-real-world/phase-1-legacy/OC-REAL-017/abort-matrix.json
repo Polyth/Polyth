@@ -1,0 +1,169 @@
+{
+  "cases": [
+    {
+      "name": "text",
+      "phaseReached": true,
+      "abortPosts": 1,
+      "completedLie": false,
+      "finalAssistant": {
+        "completed": true,
+        "error": {
+          "name": "MessageAbortedError",
+          "data": {
+            "message": "Aborted"
+          }
+        }
+      },
+      "toolStates": [],
+      "statusAfterAbort": {},
+      "reconcileState": {
+        "value": "unknown"
+      }
+    },
+    {
+      "name": "reasoning",
+      "phaseReached": true,
+      "abortPosts": 1,
+      "completedLie": false,
+      "finalAssistant": {
+        "completed": true,
+        "error": {
+          "name": "MessageAbortedError",
+          "data": {
+            "message": "Aborted"
+          }
+        }
+      },
+      "toolStates": [],
+      "statusAfterAbort": {},
+      "reconcileState": {
+        "value": "unknown"
+      }
+    },
+    {
+      "name": "tool-running",
+      "phaseReached": true,
+      "abortPosts": 1,
+      "completedLie": false,
+      "finalAssistant": {
+        "completed": true,
+        "error": {
+          "name": "MessageAbortedError",
+          "data": {
+            "message": "Aborted"
+          }
+        }
+      },
+      "toolStates": [
+        {
+          "tool": "bash",
+          "status": "completed"
+        }
+      ],
+      "statusAfterAbort": {},
+      "reconcileState": {
+        "value": "unknown"
+      }
+    },
+    {
+      "name": "question-open",
+      "phaseReached": true,
+      "abortPosts": 1,
+      "completedLie": false,
+      "finalAssistant": {
+        "completed": true,
+        "error": {
+          "name": "MessageAbortedError",
+          "data": {
+            "message": "Aborted"
+          }
+        }
+      },
+      "toolStates": [
+        {
+          "tool": "question",
+          "status": "error",
+          "error": "Tool execution aborted"
+        }
+      ],
+      "pendingAfterAbort": [
+        {
+          "id": "que_046c68a6e001tEXQqnigVdUNWh",
+          "sessionID": "ses_fb9397771ffeG1yIOVw3hYChIw",
+          "questions": [
+            {
+              "question": "Which color do you prefer?",
+              "header": "Color Preference",
+              "options": [
+                {
+                  "label": "red",
+                  "description": "Choose red"
+                },
+                {
+                  "label": "blue",
+                  "description": "Choose blue"
+                }
+              ]
+            }
+          ],
+          "tool": {
+            "messageID": "msg_046c68964001o97bBnksWzS5xy",
+            "callID": "4d5df25a2"
+          }
+        }
+      ],
+      "statusAfterAbort": {},
+      "reconcileState": {
+        "value": "unknown"
+      }
+    },
+    {
+      "name": "permission-open",
+      "phaseReached": true,
+      "abortPosts": 1,
+      "completedLie": false,
+      "finalAssistant": {
+        "completed": true,
+        "error": {
+          "name": "MessageAbortedError",
+          "data": {
+            "message": "Aborted"
+          }
+        }
+      },
+      "toolStates": [
+        {
+          "tool": "bash",
+          "status": "error",
+          "error": "Tool execution aborted"
+        }
+      ],
+      "pendingAfterAbort": [
+        {
+          "id": "per_046c69322001GFR6PLCNKRhYDP",
+          "sessionID": "ses_fb939714dffegQP3kILK3lidEN",
+          "permission": "bash",
+          "patterns": [
+            "echo PERM-ABORT-MARKER"
+          ],
+          "metadata": {
+            "command": "echo PERM-ABORT-MARKER"
+          },
+          "always": [
+            "echo *"
+          ],
+          "tool": {
+            "messageID": "msg_046c690d3001jySnpFkKURK1Bv",
+            "callID": "6a3ca87ef"
+          }
+        }
+      ],
+      "statusAfterAbort": {},
+      "reconcileState": {
+        "value": "unknown"
+      }
+    }
+  ],
+  "toolRunningSideEffectFile": null,
+  "failures": []
+}

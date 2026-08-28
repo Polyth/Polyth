@@ -1,0 +1,23 @@
+{
+  "phase": "tool",
+  "backendId": "ses_fb8dbdfe5ffeu2TmP7nivwC4rt",
+  "servePid": 67487,
+  "baselineReply": "PROJECT_A_FEATURE",
+  "baselineEventCount": 25,
+  "deletedAt": 1787899956625,
+  "completed": true,
+  "reply": "cat: IDENTITY.txt: No such file or directory",
+  "tools": [
+    {
+      "tool": "bash",
+      "status": "completed",
+      "output": "cat: IDENTITY.txt: No such file or directory\n"
+    }
+  ],
+  "catSucceededAfterDeletion": false,
+  "finalProjection": {
+    "status": "working",
+    "worktreePath": "/tmp/polyth-tests/project-a/worktree-feature",
+    "worktreeState": "ready"
+  }
+}

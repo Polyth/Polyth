@@ -1,0 +1,21 @@
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:46274  data=/tmp/polyth-oc-phase1-v2-current-4/product-auto-data
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:46275  data=/tmp/polyth-oc-phase1-v2-current-4/product-v2-data
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:46276  data=/tmp/polyth-oc-phase1-v2-current-4/product-occupied-data
+{
+  "output": "logs/opencode-real-world/phase-1-v2/current-validation.json",
+  "autoModels": 68,
+  "autoAgents": 4,
+  "autoCreate": "confirmed",
+  "autoPrompt": "confirmed",
+  "autoHistory": {
+    "ok": false,
+    "error": "Expected a value less than or equal to 200, got 1000\n  at [\"limit\"]",
+    "code": "http-400"
+  },
+  "sharedAlive": true,
+  "productAutoModels": 0,
+  "productV2Models": 0
+}

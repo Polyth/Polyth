@@ -1,0 +1,13 @@
+{
+  "id": "P13-G5",
+  "verdict": "pass",
+  "protocol": "legacy (forced)",
+  "observed": "owned child 159614 SIGKILLed mid-turn (status=working); status timeline=[{\"t\":0,\"status\":\"working\"},{\"t\":500,\"status\":\"reconciling\"},{\"t\":15506,\"status\":\"unknown\"}]; settled=unknown; orphan remains=false",
+  "expected": "projection leaves sending/working/waiting in bounded time and settles honestly (reconciling/unknown); no orphaned exact child",
+  "attribution": "NONE",
+  "evidence": [
+    "artifacts/opencode-real-world/phase-13/P13-G5/details.json",
+    "logs/opencode-real-world/phase-13/P13-G5/polyth.ndjson"
+  ],
+  "opencodeVersion": "1.18.18"
+}

@@ -1,0 +1,26 @@
+{
+  "id": "OC-REAL-055",
+  "runId": "run-mtcm23rb",
+  "startedAt": "2026-08-28T07:09:05.297Z",
+  "gitSha": "9e0fb6d24bc0cca7a9881a5516c03208f99e1b12",
+  "opencode": {
+    "version": "1.18.18",
+    "binary": "/home/ubuntu/.local/bin/opencode",
+    "sha256": "bb71f45b564f9234a97f54d6252a4a41d2f4388ae4b078918f691824cc3b3e54"
+  },
+  "node": "v22.22.2",
+  "os": "linux x64",
+  "protocol": "legacy (forced)",
+  "polythPort": 15148,
+  "projectPath": "/tmp/ocreal/phase-4/OC-REAL-055/run-mtcm23rb/project",
+  "polythDataDir": "/tmp/ocreal/phase-4/OC-REAL-055/run-mtcm23rb/polyth-data",
+  "opencodeConfigDir": "/tmp/ocreal/phase-4/OC-REAL-055/run-mtcm23rb/opencode-config",
+  "xdgDataHome": "/tmp/ocreal/phase-4/OC-REAL-055/run-mtcm23rb/xdg-data",
+  "faultSeed": "OC-REAL-055-sigkill-after-side-effect-before-tool-terminal",
+  "projectId": "69dcdb4f-75cc-463e-b002-d11b9a707465",
+  "canonicalSessionId": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+  "providerModel": {
+    "providerID": "google",
+    "modelID": "gemini-3.6-flash"
+  }
+}

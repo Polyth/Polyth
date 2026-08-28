@@ -1,0 +1,24 @@
+{
+  "rawStatuses": {
+    "/global/health": 200,
+    "/api/health": 200,
+    "/agent": 200,
+    "/provider": 200
+  },
+  "healthyReadyMs": 15,
+  "allFail500": {
+    "elapsed": 3001,
+    "error": "Error: OpenCode runtime was not ready within 3000ms (HTTP 500)"
+  },
+  "allStall": {
+    "elapsed": 3000,
+    "error": "Error: OpenCode runtime was not ready within 3000ms (OpenCode request exceeded its 394ms deadline)"
+  },
+  "globalStalledOthersOk": {
+    "readyMs": 505
+  },
+  "recovery": {
+    "recoveredMs": 2013
+  },
+  "failures": []
+}

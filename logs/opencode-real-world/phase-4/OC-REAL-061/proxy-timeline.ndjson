@@ -1,0 +1,5 @@
+{"ts":"2026-08-28T07:46:18.193Z","event":"proxy-listening","proxyPort":33215,"realPort":4096,"wrapperPid":76550,"childPid":76558}
+{"ts":"2026-08-28T07:46:26.297Z","event":"real-child-exit","pid":76558,"code":null,"signal":"SIGKILL"}
+{"ts":"2026-08-28T07:46:49.131Z","event":"proxy-listening","proxyPort":43457,"realPort":4096,"wrapperPid":76614,"childPid":76622}
+{"ts":"2026-08-28T07:47:30.092Z","event":"wrapper-sigterm","forwardedTo":76622}
+{"ts":"2026-08-28T07:47:30.113Z","event":"real-child-exit","pid":76622,"code":null,"signal":"SIGTERM"}

@@ -1,0 +1,56 @@
+{
+  "checks": [
+    {
+      "name": "prompt admitted",
+      "pass": true,
+      "observed": "status=200"
+    },
+    {
+      "name": "durable reasoning survives unchanged as reasoning",
+      "pass": true,
+      "observed": "reasoning chunks=1"
+    },
+    {
+      "name": "reasoning is never rendered as answer text",
+      "pass": true,
+      "observed": "[]"
+    },
+    {
+      "name": "no invented completion",
+      "pass": true,
+      "observed": "[]"
+    },
+    {
+      "name": "no false idle: projection settles honestly (unknown/reconciling)",
+      "pass": true,
+      "observed": "final status=unknown trace=[{\"ts\":\"2026-08-28T07:06:46.563Z\",\"status\":\"working\"},{\"ts\":\"2026-08-28T07:06:48.564Z\",\"status\":\"reconciling\"},{\"ts\":\"2026-08-28T07:07:08.578Z\",\"status\":\"unknown\"}]"
+    },
+    {
+      "name": "sqlite integrity ok",
+      "pass": true,
+      "observed": "[{\"integrity_check\":\"ok\"}]"
+    }
+  ],
+  "observations": [
+    {
+      "reasoningChunkCount": 1,
+      "reasoningBytes": 5656
+    },
+    {
+      "statusTrace": [
+        {
+          "ts": "2026-08-28T07:06:46.563Z",
+          "status": "working"
+        },
+        {
+          "ts": "2026-08-28T07:06:48.564Z",
+          "status": "reconciling"
+        },
+        {
+          "ts": "2026-08-28T07:07:08.578Z",
+          "status": "unknown"
+        }
+      ]
+    }
+  ]
+}

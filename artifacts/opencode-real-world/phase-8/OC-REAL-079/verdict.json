@@ -1,0 +1,6 @@
+{
+  "id": "OC-REAL-079",
+  "verdict": "PARTIAL",
+  "attribution": "POLYTH",
+  "summary": "Pre-mutation tunnel loss did not apply the prompt, but automatic forward/session recovery did not complete."
+}

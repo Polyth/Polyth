@@ -1,0 +1,141 @@
+{
+  "checks": [
+    {
+      "name": "prompt admitted",
+      "pass": true,
+      "observed": "status=200"
+    },
+    {
+      "name": "owned OpenCode wrapper and child survived Polyth crash",
+      "pass": true,
+      "observed": "{\"wrapperAlive\":true,\"childAlive\":true}"
+    },
+    {
+      "name": "owned authority is stable and generation advances across Polyth restart",
+      "pass": true,
+      "observed": "{\"before\":{\"version\":1,\"authorityId\":\"owned:11ec6254-f313-48f6-93fc-fa198e9db174\",\"generation\":1},\"after\":{\"version\":1,\"authorityId\":\"owned:11ec6254-f313-48f6-93fc-fa198e9db174\",\"generation\":2}}"
+    },
+    {
+      "name": "first wire does not fail binding-mismatch",
+      "pass": true,
+      "observed": "status=200 body={\"ok\":true} elapsedMs=30"
+    },
+    {
+      "name": "persisted session remains operable after restart",
+      "pass": true,
+      "observed": "abort status=200"
+    },
+    {
+      "name": "restart does not leave session stuck sending or working",
+      "pass": true,
+      "observed": "final status=unknown"
+    },
+    {
+      "name": "no duplicate prompt",
+      "pass": true,
+      "observed": "prompt POST count=1"
+    },
+    {
+      "name": "no duplicate side effect",
+      "pass": true,
+      "observed": "effect lines=1"
+    },
+    {
+      "name": "user intent remains exactly once",
+      "pass": true,
+      "observed": "user/message count=1"
+    },
+    {
+      "name": "no false completed terminal",
+      "pass": true,
+      "observed": "false completed count=0"
+    },
+    {
+      "name": "old owned generation is gone and successor PID record is identity-complete",
+      "pass": true,
+      "observed": "{\"oldWrapperAlive\":false,\"oldChildAlive\":false,\"before\":{\"pid\":99406,\"startIdentity\":\"1832632\",\"executable\":\"/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node\",\"command\":\"node /tmp/ocreal/phase-4/tools/shim-proxy.mjs serve --hostname 127.0.0.1 --port 36769\"},\"after\":{\"pid\":99531,\"startIdentity\":\"1833680\",\"executable\":\"/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node\",\"command\":\"node /tmp/ocreal/phase-4/tools/shim-proxy.mjs serve --hostname 127.0.0.1 --port 45765\"}}"
+    },
+    {
+      "name": "sqlite integrity ok",
+      "pass": true,
+      "observed": "[{\"integrity_check\":\"ok\"}]"
+    }
+  ],
+  "observations": [
+    {
+      "stateBefore": {
+        "wrapperPid": 99406,
+        "childPid": 99414,
+        "realPort": 4096,
+        "proxyPort": 36769,
+        "startedAt": "2026-08-28T08:10:20.179Z"
+      },
+      "pidRecordBefore": {
+        "version": 1,
+        "ownerPid": 99381,
+        "ownerInstanceToken": "70b53d65-f102-407a-ad79-205cba588d36",
+        "child": {
+          "pid": 99406,
+          "startIdentity": "1832632",
+          "executable": "/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node",
+          "command": "node /tmp/ocreal/phase-4/tools/shim-proxy.mjs serve --hostname 127.0.0.1 --port 36769"
+        }
+      },
+      "leaseStateBefore": {
+        "version": 1,
+        "authorityId": "owned:11ec6254-f313-48f6-93fc-fa198e9db174",
+        "generation": 1
+      }
+    },
+    {
+      "snapshotBeforeWire": {
+        "status": "working"
+      },
+      "modelsTouchStatus": 200,
+      "leaseStateAfter": {
+        "version": 1,
+        "authorityId": "owned:11ec6254-f313-48f6-93fc-fa198e9db174",
+        "generation": 2
+      }
+    },
+    {
+      "firstWire": {
+        "status": 200,
+        "json": {
+          "ok": true
+        }
+      },
+      "wireElapsedMs": 30
+    },
+    {
+      "statusTrace": [
+        {
+          "ts": "2026-08-28T08:10:32.309Z",
+          "status": "unknown"
+        }
+      ]
+    },
+    {
+      "promptPosts": [
+        {
+          "ts": "2026-08-28T08:10:22.715Z",
+          "path": "/session/ses_fb8948028ffeD1YWYlbRlRFG20/prompt_async?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-060-RERUN%2Frun-mtco8x5g%2Fproject",
+          "status": 204
+        }
+      ],
+      "finalStatus": "unknown",
+      "pidRecordAfter": {
+        "version": 1,
+        "ownerPid": 99511,
+        "ownerInstanceToken": "599434e2-21f9-4d5d-afb1-80e1588a6511",
+        "child": {
+          "pid": 99531,
+          "startIdentity": "1833680",
+          "executable": "/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node",
+          "command": "node /tmp/ocreal/phase-4/tools/shim-proxy.mjs serve --hostname 127.0.0.1 --port 45765"
+        }
+      },
+      "turnStops": []
+    }
+  ]
+}

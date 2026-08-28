@@ -7,6 +7,7 @@ import { test } from "node:test";
 import {
   acquireDataDirectoryLease,
   createRuntimeAdmissionBarrier,
+  createRuntimeProtocolForwarder,
 } from "../src/index.ts";
 import { createOpenCodePendingService } from "../src/opencodePending.ts";
 import { settleAllOrThrow } from "../src/settle.ts";
@@ -28,6 +29,25 @@ test("canonical data directory lease fails closed for a second writer", async ()
 
   const afterRelease = await acquireDataDirectoryLease(dataDir);
   await afterRelease.release();
+});
+
+test("stable runtime facade forwards protocol identity across replacements", async () => {
+  let current = {
+    protocol: async () => "v2" as const,
+  } as never;
+  const protocol = createRuntimeProtocolForwarder(() => current);
+
+  assert.equal(await protocol(), "v2");
+  current = {
+    lifecycle: { protocol: async () => "legacy" as const },
+  } as never;
+  assert.equal(await protocol(), "legacy");
+
+  current = {} as never;
+  await assert.rejects(
+    () => protocol(),
+    (error: Error & { code?: string }) => error.code === "unsupported",
+  );
 });
 
 test("busy runtime defers config apply and keeps the restart batch pending", async () => {

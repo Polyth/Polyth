@@ -1,0 +1,4 @@
+{"ts":"2026-08-28T07:09:02.033Z","event":"polyth-started","label":"polyth","pid":69733,"port":15148}
+{"ts":"2026-08-28T07:09:13.806Z","event":"barrier","barrier":"side-effect-before-terminal","childPid":69761}
+{"ts":"2026-08-28T07:09:13.806Z","event":"kill-exact","pid":69761,"signal":"SIGKILL","identity":{"startIdentity":"1464904","exe":"/home/ubuntu/.opencode/bin/opencode","cmdline":"opencode serve --hostname 127.0.0.1 --port 45147"}}
+{"ts":"2026-08-28T07:10:11.896Z","event":"polyth-stopped","pid":69733,"how":"SIGTERM"}

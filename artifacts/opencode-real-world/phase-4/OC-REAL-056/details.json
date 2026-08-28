@@ -1,0 +1,99 @@
+{
+  "checks": [
+    {
+      "name": "prompt admitted",
+      "pass": true,
+      "observed": "status=200"
+    },
+    {
+      "name": "gated tool never ran (answer not misrouted to a replacement)",
+      "pass": true,
+      "observed": "side-056.txt exists=false"
+    },
+    {
+      "name": "post-kill answer settles bounded (no >120s hang)",
+      "pass": true,
+      "observed": "reply status=500 elapsed=38540ms"
+    },
+    {
+      "name": "post-kill answer is not a silent fake success",
+      "pass": true,
+      "observed": "reply status=500"
+    },
+    {
+      "name": "permission request never vanishes from durable history",
+      "pass": true,
+      "observed": "permission/requested count=1"
+    },
+    {
+      "name": "no fabricated tool result",
+      "pass": true,
+      "observed": "[]"
+    },
+    {
+      "name": "no invented completion",
+      "pass": true,
+      "observed": "[]"
+    },
+    {
+      "name": "projection settles honestly (unknown/reconciling)",
+      "pass": true,
+      "observed": "final status=unknown"
+    },
+    {
+      "name": "sqlite integrity ok",
+      "pass": true,
+      "observed": "[{\"integrity_check\":\"ok\"}]"
+    }
+  ],
+  "observations": [
+    {
+      "requestId": "per_047385a3f001PufJomwwYc6wHW",
+      "permissionEvents": [
+        {
+          "seq": 20,
+          "requestId": "per_047385a3f001PufJomwwYc6wHW"
+        }
+      ]
+    },
+    {
+      "snapBeforeStatus": "waiting",
+      "openBefore": []
+    },
+    {
+      "replyAfterKill": {
+        "status": 500,
+        "json": {
+          "error": "outcome-unknown",
+          "message": "An internal server error occurred."
+        }
+      },
+      "replyElapsedMs": 38540
+    },
+    {
+      "statusTrace": [
+        {
+          "ts": "2026-08-28T07:15:10.772Z",
+          "status": "reconciling"
+        },
+        {
+          "ts": "2026-08-28T07:15:30.795Z",
+          "status": "unknown"
+        }
+      ]
+    },
+    {
+      "snapAfterStatus": "unknown",
+      "attentionOpenFinal": [
+        {
+          "session_id": "39b74858-efcb-4ed2-ab7d-2d58193a6e0d",
+          "kind": "permission",
+          "request_id": "per_047385a3f001PufJomwwYc6wHW"
+        }
+      ]
+    },
+    {
+      "closures": []
+    }
+  ]
+}

@@ -1,0 +1,308 @@
+{
+  "integrityCheck": [
+    {
+      "integrity_check": "ok"
+    }
+  ],
+  "walCheckpoint": [
+    {
+      "busy": 0,
+      "log": 50,
+      "checkpointed": 50
+    }
+  ],
+  "events": [
+    {
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "seq": 1,
+      "id": "2aa0902a-5607-47ab-b318-7d828e8b0429",
+      "time": 1787893399082,
+      "type": "session/created",
+      "data": "{\"title\":\"OC-REAL-036 timeout\",\"projectId\":\"phase-2-project\",\"model\":{\"providerID\":\"google\",\"modelID\":\"gemini-2.5-flash-lite\"}}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "seq": 2,
+      "id": "262d2627-a682-4b37-9a77-c4def757d338",
+      "time": 1787893399082,
+      "type": "mutation/prepared",
+      "data": "{\"operationId\":\"0ba7ebd5-458f-492c-9970-28ce7d137d64\",\"ordinal\":1,\"mutationKind\":\"session-create\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "seq": 3,
+      "id": "8e2eb92a-7b86-4df4-a531-34e54acda713",
+      "time": 1787893400797,
+      "type": "mutation/claimed",
+      "data": "{\"operationId\":\"0ba7ebd5-458f-492c-9970-28ce7d137d64\",\"ordinal\":1,\"mutationKind\":\"session-create\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "seq": 4,
+      "id": "9961f442-2b95-4f27-901c-0ffa4099a3b8",
+      "time": 1787893404298,
+      "type": "mutation/confirmed",
+      "data": "{\"operationId\":\"0ba7ebd5-458f-492c-9970-28ce7d137d64\",\"ordinal\":1,\"mutationKind\":\"session-create\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "seq": 5,
+      "id": "a1e537c3-cfd6-4e72-b313-4522abba62f4",
+      "time": 1787893404298,
+      "type": "reconciliation/started",
+      "data": "{\"ordinal\":1}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "seq": 6,
+      "id": "eeacd62b-e89d-4359-9c1c-c665b2cfbb23",
+      "time": 1787893404316,
+      "type": "runtime/status-observed",
+      "data": "{\"state\":\"idle\",\"causalOperationId\":\"0ba7ebd5-458f-492c-9970-28ce7d137d64\",\"authorityId\":\"owned:c69fe9fe-a39d-43ed-a474-de888e7c8436\",\"generation\":1,\"reason\":\"session-created\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "seq": 7,
+      "id": "847be7ec-d79e-4c0f-a75a-3f8645563017",
+      "time": 1787893404316,
+      "type": "reconciliation/completed",
+      "data": "{\"ordinal\":1,\"state\":\"ready\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "seq": 8,
+      "id": "eddf3dfe-db83-4368-aafe-f52ffbd91758",
+      "time": 1787893404521,
+      "type": "behavior/instructions-applied",
+      "data": "{\"revision\":\"c50a52b3fcf0\",\"digest\":\"c50a52b3fcf04fa6b1df7c406be979502fbd9ac2c07cdc8dac3cdb6b5136090a\",\"scope\":\"global\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "seq": 9,
+      "id": "4b0362ca-b2a0-4a57-86fc-e0c43353fac2",
+      "time": 1787893404521,
+      "type": "user/message",
+      "data": "{\"text\":\"Reply with exactly P2-036-TIMEOUT.\"}",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "seq": 10,
+      "id": "7d5fe444-30a5-4d84-a4c1-fbb9c0b7e485",
+      "time": 1787893404521,
+      "type": "mutation/prepared",
+      "data": "{\"operationId\":\"e26c6445-e715-448b-9552-2f5920e07bd1\",\"ordinal\":2,\"mutationKind\":\"turn-submit\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "seq": 11,
+      "id": "e36101d1-e654-40e4-b8a7-d25a2f4513c9",
+      "time": 1787893404521,
+      "type": "mutation/claimed",
+      "data": "{\"operationId\":\"e26c6445-e715-448b-9552-2f5920e07bd1\",\"ordinal\":2,\"mutationKind\":\"turn-submit\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "seq": 12,
+      "id": "92f6eb03-fe4b-4eca-b9e2-367a20705939",
+      "time": 1787893414522,
+      "type": "mutation/uncertainty-recorded",
+      "data": "{\"operationId\":\"e26c6445-e715-448b-9552-2f5920e07bd1\",\"ordinal\":2,\"mutationKind\":\"turn-submit\",\"code\":\"runtime-outcome-unknown\",\"message\":\"OpenCode POST /session/ses_fb93fad7dffeKCYqbbjTj7nKlt/prompt_async?directory=%2Ftmp%2Focreal-phase2%2Foc-real-036-mtchkfo2%2Fproject outcome is unknown: OpenCode request exceeded its 10000ms deadline\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "seq": 13,
+      "id": "225fc224-e619-4a6d-aa65-d7a2064e1b49",
+      "time": 1787893414523,
+      "type": "reconciliation/started",
+      "data": "{\"ordinal\":2}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "seq": 14,
+      "id": "c1645b79-b2d5-416f-a8a0-bc4e87f403ff",
+      "time": 1787893414537,
+      "type": "runtime/status-observed",
+      "data": "{\"state\":\"unknown\",\"authorityId\":\"owned:c69fe9fe-a39d-43ed-a474-de888e7c8436\",\"generation\":1,\"reason\":\"mutation-outcome-unknown\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "seq": 15,
+      "id": "2f7c3825-910f-4f6b-bde7-f4e9bf67a10d",
+      "time": 1787893414537,
+      "type": "reconciliation/blocked",
+      "data": "{\"ordinal\":2,\"state\":\"blocked\",\"reason\":\"operation e26c6445-e715-448b-9552-2f5920e07bd1 remains unknown\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    }
+  ],
+  "projections": [
+    {
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "data": "{\"id\":\"1e37be8c-b592-4bad-b682-c0fd2d0adaba\",\"projectId\":\"phase-2-project\",\"title\":\"OC-REAL-036 timeout\",\"model\":{\"providerID\":\"google\",\"modelID\":\"gemini-2.5-flash-lite\"},\"createdAt\":1787893399082,\"updatedAt\":1787893414537,\"status\":\"unknown\",\"backendSessionId\":\"ses_fb93fad7dffeKCYqbbjTj7nKlt\",\"runtimeBinding\":{\"backendSessionId\":\"ses_fb93fad7dffeKCYqbbjTj7nKlt\",\"authorityId\":\"owned:c69fe9fe-a39d-43ed-a474-de888e7c8436\",\"generation\":1,\"continuity\":\"generation-only\",\"protocol\":\"legacy\",\"location\":{\"directory\":\"/tmp/ocreal-phase2/oc-real-036-mtchkfo2/project\"}}}",
+      "project_id": "phase-2-project"
+    }
+  ],
+  "runtime_operations": [
+    {
+      "operation_id": "0ba7ebd5-458f-492c-9970-28ce7d137d64",
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "ordinal": 1,
+      "mutation_kind": "session-create",
+      "state": "confirmed",
+      "replay_kind": "never",
+      "replay_contract": null,
+      "created_at": 1787893399082,
+      "updated_at": 1787893404298,
+      "code": null,
+      "message": null,
+      "receipt": "ses_fb93fad7dffeKCYqbbjTj7nKlt",
+      "owner_event_seq": 1
+    },
+    {
+      "operation_id": "e26c6445-e715-448b-9552-2f5920e07bd1",
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "ordinal": 2,
+      "mutation_kind": "turn-submit",
+      "state": "unknown",
+      "replay_kind": "never",
+      "replay_contract": null,
+      "created_at": 1787893404521,
+      "updated_at": 1787893414522,
+      "code": "runtime-outcome-unknown",
+      "message": "OpenCode POST /session/ses_fb93fad7dffeKCYqbbjTj7nKlt/prompt_async?directory=%2Ftmp%2Focreal-phase2%2Foc-real-036-mtchkfo2%2Fproject outcome is unknown: OpenCode request exceeded its 10000ms deadline",
+      "receipt": null,
+      "owner_event_seq": 9
+    }
+  ],
+  "session_queue": [],
+  "response_intents": [],
+  "observations": [
+    {
+      "authority_id": "owned:c69fe9fe-a39d-43ed-a474-de888e7c8436",
+      "directory": "/tmp/ocreal-phase2/oc-real-036-mtchkfo2/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb93fad7dffeKCYqbbjTj7nKlt",
+      "artifact_kind": "status",
+      "entity_id": "ses_fb93fad7dffeKCYqbbjTj7nKlt",
+      "revision": "causal:0ba7ebd5-458f-492c-9970-28ce7d137d64",
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[6]",
+      "observed_at": 1787893404316
+    },
+    {
+      "authority_id": "owned:c69fe9fe-a39d-43ed-a474-de888e7c8436",
+      "directory": "/tmp/ocreal-phase2/oc-real-036-mtchkfo2/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb93fad7dffeKCYqbbjTj7nKlt",
+      "artifact_kind": "status",
+      "entity_id": "ses_fb93fad7dffeKCYqbbjTj7nKlt",
+      "revision": "unversioned:unknown",
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 2,
+      "canonical_seqs": "[14]",
+      "observed_at": 1787893414537
+    }
+  ],
+  "observation_checkpoints": [
+    {
+      "authority_id": "owned:c69fe9fe-a39d-43ed-a474-de888e7c8436",
+      "directory": "/tmp/ocreal-phase2/oc-real-036-mtchkfo2/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb93fad7dffeKCYqbbjTj7nKlt",
+      "artifact_kind": "status",
+      "entity_id": "ses_fb93fad7dffeKCYqbbjTj7nKlt",
+      "revision": "causal:0ba7ebd5-458f-492c-9970-28ce7d137d64",
+      "state_rank": null,
+      "value": "{\"state\":\"idle\",\"causalOperationId\":\"0ba7ebd5-458f-492c-9970-28ce7d137d64\"}",
+      "updated_at": 1787893404316
+    }
+  ],
+  "observation_cursors": [],
+  "session_reconciliations": [
+    {
+      "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+      "ordinal": 2,
+      "state": "blocked",
+      "reason": "operation e26c6445-e715-448b-9552-2f5920e07bd1 remains unknown",
+      "updated_at": 1787893414537
+    }
+  ],
+  "deletion_tombstones": [],
+  "attention_open": []
+}

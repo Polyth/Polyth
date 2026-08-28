@@ -1,0 +1,20 @@
+{"ts":"2026-08-28T06:31:04.456Z","event":"polyth-started","label":"polyth","pid":62802,"port":15145}
+{"ts":"2026-08-28T06:32:38.266Z","event":"polyth-stopped","pid":62802,"how":"SIGTERM"}
+{"ts":"2026-08-28T06:33:09.663Z","event":"polyth-started","label":"polyth","pid":64035,"port":15145}
+{"ts":"2026-08-28T06:34:44.086Z","event":"polyth-stopped","pid":64035,"how":"SIGTERM"}
+{"ts":"2026-08-28T06:35:27.076Z","event":"polyth-started","label":"polyth","pid":64249,"port":15145}
+{"ts":"2026-08-28T06:36:46.283Z","event":"polyth-stopped","pid":64249,"how":"SIGTERM"}
+{"ts":"2026-08-28T06:37:17.242Z","event":"polyth-started","label":"polyth","pid":64748,"port":15145}
+{"ts":"2026-08-28T06:38:50.772Z","event":"polyth-stopped","pid":64748,"how":"SIGTERM"}
+{"ts":"2026-08-28T06:39:19.928Z","event":"polyth-started","label":"polyth","pid":65196,"port":15145}
+{"ts":"2026-08-28T06:42:10.380Z","event":"polyth-stopped","pid":65196,"how":"SIGTERM"}
+{"ts":"2026-08-28T06:42:35.107Z","event":"polyth-started","label":"polyth","pid":65839,"port":15145}
+{"ts":"2026-08-28T06:43:26.497Z","event":"polyth-stopped","pid":65839,"how":"SIGTERM"}
+{"ts":"2026-08-28T06:44:13.217Z","event":"polyth-started","label":"polyth","pid":66428,"port":15145}
+{"ts":"2026-08-28T06:46:33.102Z","event":"polyth-stopped","pid":66428,"how":"SIGTERM"}
+{"ts":"2026-08-28T06:49:36.039Z","event":"polyth-started","label":"polyth","pid":66954,"port":15145}
+{"ts":"2026-08-28T06:50:17.633Z","event":"polyth-stopped","pid":66954,"how":"SIGTERM"}
+{"ts":"2026-08-28T06:54:56.981Z","event":"polyth-started","label":"polyth","pid":68078,"port":15145}
+{"ts":"2026-08-28T06:55:21.499Z","event":"barrier","barrier":"mid-text-3-deltas","childPid":68103}
+{"ts":"2026-08-28T06:55:21.499Z","event":"kill-exact","pid":68103,"signal":"SIGKILL","identity":{"startIdentity":"1380398","exe":"/home/ubuntu/.opencode/bin/opencode","cmdline":"opencode serve --hostname 127.0.0.1 --port 33543"}}
+{"ts":"2026-08-28T06:56:02.064Z","event":"polyth-stopped","pid":68078,"how":"SIGTERM"}

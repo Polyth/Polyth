@@ -1,0 +1,16 @@
+{
+  "id": "P13-G6",
+  "startedAt": "2026-08-28T09:40:42.357Z",
+  "gitSha": "e10e6a1a25de60c7df5dc031a6ff10abf135008b",
+  "opencode": {
+    "version": "1.18.18",
+    "binary": "/home/ubuntu/.local/bin/opencode",
+    "sha256": "bb71f45b564f9234a97f54d6252a4a41d2f4388ae4b078918f691824cc3b3e54"
+  },
+  "node": "v22.22.2",
+  "os": "linux x64",
+  "serve": {
+    "pid": 158361,
+    "url": "http://127.0.0.1:37405"
+  }
+}

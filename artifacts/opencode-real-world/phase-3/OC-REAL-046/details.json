@@ -1,0 +1,98 @@
+{
+  "heldBefore": 2,
+  "released": 2,
+  "beforeTools": [
+    {
+      "id": "80d96fec-c616-425b-8cf3-985bd91d6c52",
+      "sessionId": "72503b80-073e-406a-b6a7-d79cb948582f",
+      "seq": 13,
+      "time": 1787909476110,
+      "type": "tool/call",
+      "data": {
+        "callId": "chatcmpl-tool-ad81e9333fbaedff",
+        "tool": "write",
+        "input": {
+          "filePath": "/tmp/ocreal/phase-3/OC-REAL-046/run-mtcr4nk6/project/stale-marker.txt",
+          "content": "STALE_EVENT_OK"
+        },
+        "status": "running"
+      },
+      "v": 1
+    },
+    {
+      "id": "af43dbc0-9357-414e-bc3d-6d1a75dcf55a",
+      "sessionId": "72503b80-073e-406a-b6a7-d79cb948582f",
+      "seq": 14,
+      "time": 1787909476110,
+      "type": "tool/result",
+      "data": {
+        "callId": "chatcmpl-tool-ad81e9333fbaedff",
+        "tool": "write",
+        "output": "Wrote file successfully.",
+        "title": "tmp/ocreal/phase-3/OC-REAL-046/run-mtcr4nk6/project/stale-marker.txt",
+        "metadata": {
+          "diagnostics": {},
+          "filepath": "/tmp/ocreal/phase-3/OC-REAL-046/run-mtcr4nk6/project/stale-marker.txt",
+          "exists": false,
+          "truncated": false
+        },
+        "input": {
+          "filePath": "/tmp/ocreal/phase-3/OC-REAL-046/run-mtcr4nk6/project/stale-marker.txt",
+          "content": "STALE_EVENT_OK"
+        }
+      },
+      "v": 1
+    }
+  ],
+  "afterTools": [
+    {
+      "id": "80d96fec-c616-425b-8cf3-985bd91d6c52",
+      "sessionId": "72503b80-073e-406a-b6a7-d79cb948582f",
+      "seq": 13,
+      "time": 1787909476110,
+      "type": "tool/call",
+      "data": {
+        "callId": "chatcmpl-tool-ad81e9333fbaedff",
+        "tool": "write",
+        "input": {
+          "filePath": "/tmp/ocreal/phase-3/OC-REAL-046/run-mtcr4nk6/project/stale-marker.txt",
+          "content": "STALE_EVENT_OK"
+        },
+        "status": "running"
+      },
+      "v": 1
+    },
+    {
+      "id": "af43dbc0-9357-414e-bc3d-6d1a75dcf55a",
+      "sessionId": "72503b80-073e-406a-b6a7-d79cb948582f",
+      "seq": 14,
+      "time": 1787909476110,
+      "type": "tool/result",
+      "data": {
+        "callId": "chatcmpl-tool-ad81e9333fbaedff",
+        "tool": "write",
+        "output": "Wrote file successfully.",
+        "title": "tmp/ocreal/phase-3/OC-REAL-046/run-mtcr4nk6/project/stale-marker.txt",
+        "metadata": {
+          "diagnostics": {},
+          "filepath": "/tmp/ocreal/phase-3/OC-REAL-046/run-mtcr4nk6/project/stale-marker.txt",
+          "exists": false,
+          "truncated": false
+        },
+        "input": {
+          "filePath": "/tmp/ocreal/phase-3/OC-REAL-046/run-mtcr4nk6/project/stale-marker.txt",
+          "content": "STALE_EVENT_OK"
+        }
+      },
+      "v": 1
+    }
+  ],
+  "appliedAfterRelease": false,
+  "regressed": false,
+  "sequenceByCall": {
+    "chatcmpl-tool-ad81e9333fbaedff": [
+      "tool/call",
+      "tool/result"
+    ]
+  }
+}

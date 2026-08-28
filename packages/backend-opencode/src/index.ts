@@ -41,11 +41,12 @@ import type { OpenCodeBrowserToolConfig } from "./browserTool.ts";
 import {
   asOcEvent,
   backendSessionId,
+  claimTerminalStateEvidence,
   createTranslateState,
   errorMessageOf,
   flushAssistantOnIdle,
   normalizeOcObservation,
-  terminalStateEvidenceOf,
+  splitNormalizedObservation,
   translateOcEvent,
   type TranslateState,
 } from "./events.ts";
@@ -410,7 +411,7 @@ export const createOpenCodeRuntimeFacade = (
       });
       if (normalized.kind !== "accepted") return;
       const events = [...normalized.observation.events];
-      const terminal = terminalStateEvidenceOf(ev);
+      const terminal = claimTerminalStateEvidence(ev, st);
       const err = errorMessageOf(ev);
       if (err && terminal?.state === "failed") {
         const turn = activeTurn.get(canonical);
@@ -429,12 +430,21 @@ export const createOpenCodeRuntimeFacade = (
           });
         }
       }
-      const observation = { ...normalized.observation, events };
-      for (const cb of observationListeners) cb(canonical, observation);
+      if (
+        events.length === normalized.observation.events.length
+        && normalized.observation.events.length > 1
+      ) {
+        for (const observation of splitNormalizedObservation(normalized.observation)) {
+          for (const cb of observationListeners) cb(canonical, observation);
+        }
+      } else {
+        const observation = { ...normalized.observation, events };
+        for (const cb of observationListeners) cb(canonical, observation);
+      }
       return;
     }
     for (const runtimeEv of translateOcEvent(ev, st)) emit(canonical, runtimeEv);
-    const terminal = terminalStateEvidenceOf(ev);
+    const terminal = claimTerminalStateEvidence(ev, st);
     const err = errorMessageOf(ev);
     if (err && terminal?.state === "failed") {
       const turn = activeTurn.get(canonical);

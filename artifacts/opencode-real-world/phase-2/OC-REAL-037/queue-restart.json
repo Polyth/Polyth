@@ -1,0 +1,122 @@
+{
+  "initial": {
+    "polythPid": 47752,
+    "sessionId": "8d19f7f8-5197-44c4-b83d-07163447e496",
+    "backendSessionId": "ses_fb920b56dffeO9Y1napU4uAdy8",
+    "headOperationId": "",
+    "queue": [
+      {
+        "id": "b6aa723a-a077-436e-9ad2-6b46e9f5020f",
+        "sessionId": "8d19f7f8-5197-44c4-b83d-07163447e496",
+        "position": 0,
+        "text": "Reply with exactly QUEUE-HEAD-037.",
+        "delivery": "queue",
+        "createdAt": 1787895433916
+      },
+      {
+        "id": "6a057b7e-8b10-44b4-9a44-c6e888d97a74",
+        "sessionId": "8d19f7f8-5197-44c4-b83d-07163447e496",
+        "position": 1,
+        "text": "Reply with exactly QUEUE-LATER-037.",
+        "delivery": "queue",
+        "createdAt": 1787895433916
+      }
+    ],
+    "projection": {
+      "id": "8d19f7f8-5197-44c4-b83d-07163447e496",
+      "projectId": "phase-2-project",
+      "title": "OC-REAL-037 queue restart",
+      "model": {
+        "providerID": "google",
+        "modelID": "gemini-3.5-flash"
+      },
+      "createdAt": 1787895428714,
+      "updatedAt": 1787895435944,
+      "status": "working",
+      "backendSessionId": "ses_fb920b56dffeO9Y1napU4uAdy8",
+      "runtimeBinding": {
+        "backendSessionId": "ses_fb920b56dffeO9Y1napU4uAdy8",
+        "authorityId": "owned:ff9fd0f3-6cc2-4ca7-9c80-fb369d30f605",
+        "generation": 1,
+        "continuity": "generation-only",
+        "protocol": "legacy",
+        "location": {
+          "directory": "/tmp/ocreal-phase2/oc-real-037-mtcirx5f/project"
+        }
+      },
+      "lastTurnAt": 1787895433916,
+      "tokenTotals": {
+        "input": 0,
+        "output": 0
+      },
+      "costTotal": 0,
+      "runtimeObservationSeq": 20
+    }
+  },
+  "restart": {
+    "polythPid": 48961,
+    "headOperationId": "",
+    "queue": [
+      {
+        "id": "b6aa723a-a077-436e-9ad2-6b46e9f5020f",
+        "sessionId": "8d19f7f8-5197-44c4-b83d-07163447e496",
+        "position": 0,
+        "text": "Reply with exactly QUEUE-HEAD-037.",
+        "delivery": "queue",
+        "createdAt": 1787895433916
+      },
+      {
+        "id": "6a057b7e-8b10-44b4-9a44-c6e888d97a74",
+        "sessionId": "8d19f7f8-5197-44c4-b83d-07163447e496",
+        "position": 1,
+        "text": "Reply with exactly QUEUE-LATER-037.",
+        "delivery": "queue",
+        "createdAt": 1787895433916
+      }
+    ],
+    "projection": {
+      "id": "8d19f7f8-5197-44c4-b83d-07163447e496",
+      "projectId": "phase-2-project",
+      "title": "OC-REAL-037 queue restart",
+      "model": {
+        "providerID": "google",
+        "modelID": "gemini-3.5-flash"
+      },
+      "createdAt": 1787895428714,
+      "updatedAt": 1787895435944,
+      "status": "working",
+      "backendSessionId": "ses_fb920b56dffeO9Y1napU4uAdy8",
+      "runtimeBinding": {
+        "backendSessionId": "ses_fb920b56dffeO9Y1napU4uAdy8",
+        "authorityId": "owned:ff9fd0f3-6cc2-4ca7-9c80-fb369d30f605",
+        "generation": 1,
+        "continuity": "generation-only",
+        "protocol": "legacy",
+        "location": {
+          "directory": "/tmp/ocreal-phase2/oc-real-037-mtcirx5f/project"
+        }
+      },
+      "lastTurnAt": 1787895433916,
+      "tokenTotals": {
+        "input": 0,
+        "output": 0
+      },
+      "costTotal": 0,
+      "runtimeObservationSeq": 20
+    }
+  },
+  "requestConnectionIds": [],
+  "requestOperationIds": [],
+  "laterRequestConnectionIds": [],
+  "headCanonicalEventIds": [],
+  "crash": {
+    "pid": 47752,
+    "signal": "SIGKILL"
+  },
+  "failures": [
+    "real initial prompt was accepted but produced no observable terminal event, so the queued head was never reserved or dispatched",
+    "queue head mutation requests=0",
+    "head operation state=undefined",
+    "head canonical messages=0"
+  ]
+}

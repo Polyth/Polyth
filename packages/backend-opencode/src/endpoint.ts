@@ -261,6 +261,8 @@ interface StartedOwnedInstance {
 
 interface OwnedLeaseOptions {
   authorityId?: string;
+  nextGeneration?: () => Promise<number>;
+  prepareStart?: () => Promise<void>;
   continuity?: "verified" | "generation-only";
   location: RuntimeLocation;
   config: RuntimeConfigAuthority;
@@ -290,12 +292,22 @@ const createOwnedLease = async (
     current = undefined;
     if (previous) await previous.instance.stop();
     const instanceToken = randomUUID();
+    await options.prepareStart?.();
+    const nextGeneration = options.nextGeneration
+      ? await options.nextGeneration()
+      : generation + 1;
+    if (
+      !Number.isSafeInteger(nextGeneration)
+      || nextGeneration <= generation
+    ) {
+      throw unavailable("owned runtime generation did not advance");
+    }
     const instance = await options.start(instanceToken);
     if (disposed) {
       await instance.stop();
       throw unavailable("runtime endpoint lease was disposed during startup");
     }
-    generation += 1;
+    generation = nextGeneration;
     const endpoint: RuntimeEndpoint = {
       authorityId,
       continuity: options.continuity ?? "generation-only",
@@ -333,7 +345,11 @@ const createOwnedLease = async (
     },
     async endpoint() {
       if (disposed) throw unavailable("runtime endpoint lease is disposed");
-      if (!current) return replaceSingleFlight();
+      // A known-dead instance must never be handed out: after a failed
+      // post-disconnect refresh (exit-notification race), endpoint() is the
+      // only acquisition path left, and returning the dead generation would
+      // wedge the runtime on a closed port forever.
+      if (!current || !current.instance.alive()) return replaceSingleFlight();
       return current.endpoint;
     },
     async refresh() {
@@ -384,10 +400,94 @@ export interface OwnedLocalEndpointOptions {
   pickPort?: (hostname: string) => Promise<number>;
   spawn?: typeof spawn;
   pidFile?: string;
+  stateFile?: string;
   readProcessIdentity?: ProcessIdentityReader;
   signalProcess?: ProcessSignaler;
   orphanGraceMs?: number;
 }
+
+interface OwnedRuntimeState {
+  version: 1;
+  authorityId: string;
+  generation: number;
+}
+
+const parseOwnedRuntimeState = (raw: string): OwnedRuntimeState | undefined => {
+  try {
+    const value = JSON.parse(raw) as Partial<OwnedRuntimeState>;
+    if (
+      value.version !== 1
+      || typeof value.authorityId !== "string"
+      || !value.authorityId
+      || !Number.isSafeInteger(value.generation)
+      || value.generation! < 0
+    ) {
+      return undefined;
+    }
+    return value as OwnedRuntimeState;
+  } catch {
+    return undefined;
+  }
+};
+
+const writeOwnedRuntimeState = async (
+  stateFile: string,
+  state: OwnedRuntimeState,
+): Promise<void> => {
+  await mkdir(dirname(stateFile), { recursive: true });
+  const temporary = `${stateFile}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(temporary, JSON.stringify(state), { mode: 0o600 });
+  await rename(temporary, stateFile);
+};
+
+const loadOwnedRuntimeState = async (
+  stateFile: string,
+  configuredAuthorityId?: string,
+): Promise<{
+  authorityId: string;
+  nextGeneration(): Promise<number>;
+}> => {
+  let state: OwnedRuntimeState | undefined;
+  try {
+    state = parseOwnedRuntimeState(await readFile(stateFile, "utf8"));
+    if (!state) {
+      throw unavailable(`owned runtime state is invalid: ${stateFile}`);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+
+  if (state && configuredAuthorityId && state.authorityId !== configuredAuthorityId) {
+    throw unavailable("configured owned runtime authority conflicts with durable state");
+  }
+  if (!state) {
+    state = {
+      version: 1,
+      authorityId: configuredAuthorityId ?? `owned:${randomUUID()}`,
+      generation: 0,
+    };
+    await writeOwnedRuntimeState(stateFile, state);
+  }
+  let currentState: OwnedRuntimeState = state;
+
+  return {
+    authorityId: currentState.authorityId,
+    async nextGeneration() {
+      if (currentState.generation >= Number.MAX_SAFE_INTEGER) {
+        throw unavailable("owned runtime generation is exhausted");
+      }
+      const next: OwnedRuntimeState = {
+        ...currentState,
+        generation: currentState.generation + 1,
+      };
+      // Commit the fence before spawning. A crash may consume a generation,
+      // but can never expose the same generation from two process lifetimes.
+      await writeOwnedRuntimeState(stateFile, next);
+      currentState = next;
+      return next.generation;
+    },
+  };
+};
 
 interface StartedLocalChild {
   child: ChildProcess;
@@ -478,8 +578,10 @@ export const createOwnedLocalEndpointLease = async (
   const cwd = resolve(options.cwd);
   const hostname = options.hostname ?? "127.0.0.1";
   const pidFile = options.pidFile ?? pidFileForDirectory(cwd);
+  const stateFile = options.stateFile ?? `${pidFile}.lease.json`;
   const readIdentity = options.readProcessIdentity ?? readProcessIdentity;
   const signal = options.signalProcess ?? ((pid, processSignal) => process.kill(pid, processSignal));
+  const durableState = await loadOwnedRuntimeState(stateFile, options.authorityId);
   const authentication: RuntimeAuthentication = {
     kind: "basic-env",
     usernameEnv: options.usernameEnv ?? "OPENCODE_SERVER_USERNAME",
@@ -488,7 +590,17 @@ export const createOwnedLocalEndpointLease = async (
   let firstStart = true;
 
   return createOwnedLease({
-    authorityId: options.authorityId,
+    authorityId: durableState.authorityId,
+    nextGeneration: durableState.nextGeneration,
+    async prepareStart() {
+      if (!firstStart) return;
+      firstStart = false;
+      await reapPidFile(pidFile, {
+        readIdentity,
+        signal,
+        graceMs: options.orphanGraceMs ?? 250,
+      });
+    },
     continuity: "generation-only",
     location: { directory: cwd },
     config: options.configTargetId
@@ -496,14 +608,6 @@ export const createOwnedLocalEndpointLease = async (
       : { kind: "read-only" },
     authentication,
     async start(instanceToken) {
-      if (firstStart) {
-        firstStart = false;
-        await reapPidFile(pidFile, {
-          readIdentity,
-          signal,
-          graceMs: options.orphanGraceMs ?? 250,
-        });
-      }
       const attempts = Math.max(1, options.maxBindAttempts ?? 4);
       let lastError: unknown;
       for (let attempt = 0; attempt < attempts; attempt++) {
@@ -560,11 +664,15 @@ export interface OwnedSshEndpointOptions {
     stop(): Promise<void>;
   }>;
   authorityId?: string;
+  /** Durable authority/generation fence for this exact remote runtime. */
+  stateFile?: string;
   authentication?: RuntimeAuthentication;
 }
 
 /** Owned SSH mode controls an exact remote child/forward token but never
- * grants authority over the local OpenCode config. */
+ * grants authority over the local OpenCode config. When stateFile is supplied,
+ * process restarts retain authority while every replacement consumes a new
+ * generation. Forward/remote-child lifecycle remains coupled here. */
 export const createOwnedSshEndpointLease = async (
   options: OwnedSshEndpointOptions,
 ): Promise<OwnedRuntimeEndpointLease> => {
@@ -573,8 +681,12 @@ export const createOwnedSshEndpointLease = async (
     usernameEnv: "OPENCODE_SERVER_USERNAME",
     passwordEnv: "OPENCODE_SERVER_PASSWORD",
   };
+  const durableState = options.stateFile
+    ? await loadOwnedRuntimeState(options.stateFile, options.authorityId)
+    : undefined;
   return createOwnedLease({
-    authorityId: options.authorityId,
+    authorityId: durableState?.authorityId ?? options.authorityId,
+    ...(durableState ? { nextGeneration: durableState.nextGeneration } : {}),
     continuity: "generation-only",
     location: options.location,
     config: { kind: "read-only" },

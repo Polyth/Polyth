@@ -1,0 +1,3 @@
+{"ts":"2026-08-28T06:27:46.764Z","event":"proxy-listening","proxyPort":33307,"realPort":4096,"wrapperPid":61696,"childPid":61704}
+{"ts":"2026-08-28T06:27:49.240Z","event":"fault-kill-real-child","pid":61704,"why":"swallow-kill POST /session?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-050%2Frun-mtckl129%2Fproject"}
+{"ts":"2026-08-28T06:27:49.261Z","event":"real-child-exit","pid":61704,"code":null,"signal":"SIGKILL"}

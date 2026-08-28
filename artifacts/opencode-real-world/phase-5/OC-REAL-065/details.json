@@ -1,0 +1,109 @@
+{
+  "snapshots": [
+    {
+      "step": "initial",
+      "endpoint": {
+        "url": "http://127.0.0.1:36471",
+        "authorityId": "phase5-auth-authority",
+        "continuity": "generation-only",
+        "generation": 1,
+        "control": {
+          "kind": "borrowed",
+          "source": "shared"
+        },
+        "config": {
+          "kind": "read-only"
+        },
+        "headerNames": [
+          "Authorization"
+        ],
+        "headers": {
+          "authorization": "[REDACTED]"
+        }
+      },
+      "correct": {
+        "status": 200,
+        "contentType": "application/json",
+        "body": {
+          "healthy": true
+        }
+      }
+    },
+    {
+      "step": "auth-only",
+      "endpoint": {
+        "url": "http://127.0.0.1:36471",
+        "generation": 2,
+        "headerNames": [
+          "Authorization"
+        ],
+        "headers": {
+          "authorization": "[REDACTED]"
+        }
+      },
+      "correct": {
+        "status": 200,
+        "contentType": "application/json",
+        "body": {
+          "healthy": true
+        }
+      },
+      "stale": {
+        "status": 401,
+        "contentType": "application/json",
+        "body": {
+          "_tag": "UnauthorizedError",
+          "message": "Authentication required"
+        }
+      }
+    },
+    {
+      "step": "url-only",
+      "endpoint": {
+        "url": "http://127.0.0.1:46803",
+        "generation": 3,
+        "headerNames": [
+          "Authorization"
+        ],
+        "headers": {
+          "authorization": "[REDACTED]"
+        }
+      },
+      "correct": {
+        "status": 200,
+        "contentType": "application/json",
+        "body": {
+          "healthy": true
+        }
+      }
+    },
+    {
+      "step": "url-and-auth",
+      "endpoint": {
+        "url": "http://127.0.0.1:39815",
+        "generation": 4,
+        "headerNames": [
+          "Authorization"
+        ],
+        "headers": {
+          "authorization": "[REDACTED]"
+        }
+      },
+      "correct": {
+        "status": 200,
+        "contentType": "application/json",
+        "body": {
+          "healthy": true
+        }
+      },
+      "stale": {
+        "status": 401,
+        "contentType": "application/json",
+        "body": {
+          "_tag": "UnauthorizedError",
+          "message": "Authentication required"
+        }
+      }
+    }
+  ]
+}

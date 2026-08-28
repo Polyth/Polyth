@@ -1,0 +1,6 @@
+{
+  "id": "OC-REAL-080",
+  "verdict": "FAIL",
+  "attribution": "POLYTH",
+  "summary": "Dropping the SSH ControlMaster terminated or stranded the active remote runtime; offline completion was not recovered."
+}

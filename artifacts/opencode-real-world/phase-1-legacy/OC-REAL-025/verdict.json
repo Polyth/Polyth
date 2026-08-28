@@ -1,0 +1,13 @@
+{
+  "id": "OC-REAL-025",
+  "verdict": "partial",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy (config applier + owned restart)",
+  "observed": "unsupported MCP entry + unknown top-level + unowned provider/agent fields survived all managed writes; no-op wrote 0 bytes; read-only/mismatch refusals typed; corrupt file never clobbered; 1 owned safe-idle restart gen 1->2 honored disabled_providers; JSONC comments preserved=false",
+  "expected": "only owned fields change; one safe-idle owned restart; rollback/defer honest",
+  "attribution": "POLYTH",
+  "evidence": [
+    "artifacts/opencode-real-world/phase-1-legacy/OC-REAL-025/config-ownership.json"
+  ],
+  "notes": "Documented limitation confirmed live: the first genuine write re-serializes strict JSON, so user JSONC comments are lost (semantic preservation only — config.ts states this trade-off; needs a JSONC rewriter to fix). Pending-batch retention across injected restart failure is the server config barrier (deterministic-tested), not exercisable at this seam."
+}

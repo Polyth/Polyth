@@ -201,21 +201,31 @@ test("protocol probe cache is isolated by endpoint generation", async () => {
   assert.equal(fake.queries.length, 2, "new generation is negotiated independently");
 });
 
-test("V2 unsupported mutation returns a stable capability rejection without I/O", async () => {
+test("V2 prompt admission uses the native session prompt contract", async () => {
   const fake = transportDouble({
-    mutate: () => {
-      throw new Error("must not mutate");
-    },
+    mutate: () => ({
+      kind: "response",
+      status: 200,
+      headers: {},
+      body: { data: { id: "msg_v2" } },
+    }),
   });
   const adapter = createV2ProtocolAdapter({
     transport: fake.transport,
     endpoint: endpoint(),
   });
   const outcome = await adapter.submit(
-    { session: binding(), text: "do not send" },
+    { session: binding(), text: "send through V2" },
     "operation-v2",
   );
-  assert.equal(outcome.kind, "rejected");
-  if (outcome.kind === "rejected") assert.equal(outcome.code, "capability-unsupported");
-  assert.equal(fake.mutations.length, 0);
+  assert.deepEqual(outcome, {
+    kind: "confirmed",
+    value: { admissionId: "msg_v2" },
+  });
+  assert.equal(fake.mutations.length, 1);
+  assert.match(fake.mutations[0]!.path, /^\/api\/session\/session-a\/prompt\?/);
+  assert.deepEqual(fake.mutations[0]!.body, {
+    prompt: { text: "send through V2" },
+    delivery: "queue",
+  });
 });

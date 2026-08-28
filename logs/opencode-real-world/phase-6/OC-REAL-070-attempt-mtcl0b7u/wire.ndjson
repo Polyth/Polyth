@@ -1,0 +1,4 @@
+{"t":1787899107330,"kind":"request","method":"POST","path":"/api/worktrees","body":{"projectId":"project-a","branch":"race-070","path":"/tmp/polyth-tests/project-a/worktree-race-1"}}
+{"t":1787899107330,"kind":"request","method":"POST","path":"/api/worktrees","body":{"projectId":"project-a","branch":"race-070","path":"/tmp/polyth-tests/project-a/worktree-race-2"}}
+{"t":1787899107360,"kind":"response","method":"POST","path":"/api/worktrees","status":500,"bytes":69,"body":"{\"error\":\"git-failed\",\"message\":\"An internal server error occurred.\"}"}
+{"t":1787899107361,"kind":"response","method":"POST","path":"/api/worktrees","status":200,"bytes":74,"body":"{\"path\":\"/tmp/polyth-tests/project-a/worktree-race-1\",\"branch\":\"race-070\"}"}

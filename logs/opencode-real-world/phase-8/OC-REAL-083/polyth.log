@@ -1,0 +1,36 @@
+(node:138818) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[polyth] Secure Safe behavior refresh skipped Error: applyBehavior refused: config authority is read-only
+    at assertWritable (file:///workspace/packages/backend-opencode/src/config.ts:297:9)
+    at Object.applyBehavior (file:///workspace/packages/backend-opencode/src/config.ts:363:7)
+    at Object.applyBehavior (file:///workspace/packages/server/src/opencodePending.ts:147:37)
+    at refreshSafeBehavior (file:///workspace/packages/server/src/index.ts:998:27)
+    at async boot (file:///workspace/packages/server/src/index.ts:1004:3)
+    at async file:///workspace/scripts/opencode-real-world/phase8-server.ts:9:13 {
+  code: 'config-read-only'
+}
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:28383  data=/tmp/ocreal-phase8/oc-real-083/polyth-data
+{"type":"ready","pid":138818,"port":28383,"dataDir":"/tmp/ocreal-phase8/oc-real-083/polyth-data"}
+[polyth] failed to materialize runtime session 62b991e6-1aba-431f-a91b-16ea07fb691c Error: persisted backend binding does not match the current endpoint
+    at runtimeBinding (file:///workspace/packages/server/src/sessions.ts:698:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async ensureWired (file:///workspace/packages/server/src/sessions.ts:1893:7)
+    at async Object.events (file:///workspace/packages/server/src/sessions.ts:3736:13)
+    at async Server.<anonymous> (file:///workspace/packages/server/src/http.ts:248:31) {
+  code: 'binding-mismatch'
+}
+opencode sse disconnected { error: 'Error: socket hang up' }
+file:///workspace/packages/knowledge/src/index.ts:245
+      db.close();
+         ^
+
+Error: database is not open
+    at Object.close (file:///workspace/packages/knowledge/src/index.ts:245:10)
+    at Object.shutdown (file:///workspace/packages/server/src/index.ts:1447:42)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async shutdown (file:///workspace/scripts/opencode-real-world/phase8-server.ts:13:3) {
+  code: 'ERR_INVALID_STATE'
+}
+
+Node.js v22.22.2

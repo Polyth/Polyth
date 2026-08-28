@@ -1,0 +1,257 @@
+{
+  "note": "union coverage across three real runs; free-tier per-model daily quotas (20/day) forced model splits",
+  "modelsUsed": {
+    "run1": "google/gemini-2.5-flash-lite",
+    "run3": "google/gemini-3.5-flash + gemini-3.1-flash-lite",
+    "run4": "google/gemini-3.1-flash-lite"
+  },
+  "coverage": {
+    "single-choice": {
+      "run": "run1",
+      "name": "single-choice",
+      "questionId": "que_0468e5e8b001Gyb80Zxvp6hkrC",
+      "rawQuestions": [
+        {
+          "question": "Which color do you prefer?",
+          "header": "Color Preference",
+          "options": [
+            {
+              "label": "red",
+              "description": ""
+            },
+            {
+              "label": "blue",
+              "description": ""
+            }
+          ]
+        }
+      ],
+      "snapshotQuestions": [
+        {
+          "question": "Which color do you prefer?",
+          "header": "Color Preference",
+          "options": [
+            {
+              "label": "red",
+              "description": ""
+            },
+            {
+              "label": "blue",
+              "description": ""
+            }
+          ]
+        }
+      ]
+    },
+    "multi-question": {
+      "run": "run1",
+      "name": "multi-question",
+      "questionId": "que_046903e57001noRW1mPvjyYyyD",
+      "rawQuestions": [
+        {
+          "question": "Which fruits do you like?",
+          "header": "Favorite Fruits",
+          "options": [
+            {
+              "label": "apple",
+              "description": ""
+            },
+            {
+              "label": "banana",
+              "description": ""
+            },
+            {
+              "label": "cherry",
+              "description": ""
+            }
+          ],
+          "multiple": true
+        },
+        {
+          "question": "What is your favorite city?",
+          "header": "Favorite City",
+          "options": [],
+          "multiple": false
+        }
+      ],
+      "snapshotQuestions": [
+        {
+          "question": "Which fruits do you like?",
+          "header": "Favorite Fruits",
+          "options": [
+            {
+              "label": "apple",
+              "description": ""
+            },
+            {
+              "label": "banana",
+              "description": ""
+            },
+            {
+              "label": "cherry",
+              "description": ""
+            }
+          ],
+          "multiple": true
+        },
+        {
+          "question": "What is your favorite city?",
+          "header": "Favorite City",
+          "options": [],
+          "multiple": false
+        }
+      ]
+    },
+    "reject-case": {
+      "run": "run3",
+      "name": "reject-case",
+      "questionId": "que_046f377ad001k3onsEEjZfKsX0",
+      "rawQuestions": [
+        {
+          "question": "Would you like to continue?",
+          "header": "Continue?",
+          "options": [
+            {
+              "label": "yes",
+              "description": "Proceed with the task."
+            },
+            {
+              "label": "no",
+              "description": "Stop the current operation."
+            }
+          ]
+        }
+      ],
+      "snapshotQuestions": [
+        {
+          "question": "Would you like to continue?",
+          "header": "Continue?",
+          "options": [
+            {
+              "label": "yes",
+              "description": "Proceed with the task."
+            },
+            {
+              "label": "no",
+              "description": "Stop the current operation."
+            }
+          ]
+        }
+      ]
+    },
+    "race-case": {
+      "run": "run3",
+      "name": "race-case",
+      "questionId": "que_046f381d7001Q9r6JPqQBKNhpy",
+      "rawQuestions": [
+        {
+          "question": "Which animal do you like?",
+          "header": "Animal Preference",
+          "options": [
+            {
+              "label": "cat",
+              "description": "I prefer cats"
+            },
+            {
+              "label": "dog",
+              "description": "I prefer dogs"
+            }
+          ]
+        }
+      ],
+      "snapshotQuestions": [
+        {
+          "question": "Which animal do you like?",
+          "header": "Animal Preference",
+          "options": [
+            {
+              "label": "cat",
+              "description": "I prefer cats"
+            },
+            {
+              "label": "dog",
+              "description": "I prefer dogs"
+            }
+          ]
+        }
+      ]
+    },
+    "multi-choice": {
+      "run": "run4",
+      "name": "multi-choice",
+      "questionId": "que_046f4e78d001xDCPZ3Tqt203DY",
+      "rawQuestions": [
+        {
+          "question": "Which fruits do you like?",
+          "header": "Select Fruits",
+          "options": [
+            {
+              "label": "apple",
+              "description": "Crisp and sweet."
+            },
+            {
+              "label": "banana",
+              "description": "Rich in potassium."
+            },
+            {
+              "label": "cherry",
+              "description": "Small and tangy."
+            }
+          ],
+          "multiple": true
+        }
+      ],
+      "snapshotQuestions": [
+        {
+          "question": "Which fruits do you like?",
+          "header": "Select Fruits",
+          "options": [
+            {
+              "label": "apple",
+              "description": "Crisp and sweet."
+            },
+            {
+              "label": "banana",
+              "description": "Rich in potassium."
+            },
+            {
+              "label": "cherry",
+              "description": "Small and tangy."
+            }
+          ],
+          "multiple": true
+        }
+      ]
+    },
+    "free-text": {
+      "run": "run4",
+      "name": "free-text",
+      "questionId": "que_046f4f700001UFZ1U2TmQnSRJj",
+      "rawQuestions": [
+        {
+          "question": "What is your favorite city, and what makes it special to you?",
+          "header": "Favorite City",
+          "options": [
+            {
+              "label": "Tokyo",
+              "description": "Example for inspiration, but you can enter any city"
+            }
+          ]
+        }
+      ],
+      "snapshotQuestions": [
+        {
+          "question": "What is your favorite city, and what makes it special to you?",
+          "header": "Favorite City",
+          "options": [
+            {
+              "label": "Tokyo",
+              "description": "Example for inspiration, but you can enter any city"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "allSixShapesRaised": true
+}

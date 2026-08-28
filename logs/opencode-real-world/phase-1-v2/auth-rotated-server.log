@@ -1,0 +1,4 @@
+timestamp=2026-08-28T03:21:35.945Z level=INFO run=6fd2b5de message=loading path=/tmp/polyth-oc-phase1-v2/home/.config/opencode/config.json
+timestamp=2026-08-28T03:21:35.955Z level=INFO run=6fd2b5de message=loading path=/tmp/polyth-oc-phase1-v2/home/.config/opencode/opencode.json
+timestamp=2026-08-28T03:21:35.956Z level=INFO run=6fd2b5de message=loading path=/tmp/polyth-oc-phase1-v2/home/.config/opencode/opencode.jsonc
+opencode server listening on http://127.0.0.1:45128

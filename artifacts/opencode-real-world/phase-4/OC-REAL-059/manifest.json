@@ -1,0 +1,29 @@
+{
+  "id": "OC-REAL-059",
+  "runId": "run-mtcmvdls",
+  "startedAt": "2026-08-28T07:31:51.676Z",
+  "gitSha": "414155c17aa4bcbed1b965633ceb1ab7ec1dca65",
+  "opencode": {
+    "version": "1.18.18",
+    "binary": "/home/ubuntu/.local/bin/opencode",
+    "sha256": "bb71f45b564f9234a97f54d6252a4a41d2f4388ae4b078918f691824cc3b3e54"
+  },
+  "node": "v22.22.2",
+  "os": "linux x64",
+  "protocol": "legacy (forced)",
+  "polythPort": 15152,
+  "projectPath": "/tmp/ocreal/phase-4/OC-REAL-059/run-mtcmvdls/project",
+  "polythDataDir": "/tmp/ocreal/phase-4/OC-REAL-059/run-mtcmvdls/polyth-data",
+  "opencodeConfigDir": "/tmp/ocreal/phase-4/OC-REAL-059/run-mtcmvdls/opencode-config",
+  "xdgDataHome": "/tmp/ocreal/phase-4/OC-REAL-059/run-mtcmvdls/xdg-data",
+  "faultSeed": "OC-REAL-059-sse-cut-terminal-kill",
+  "projectId": "9a002d48-ee2c-4492-9fee-632feb7f192e",
+  "canonicalSessionId": "7664bac9-30ef-4e2b-9388-abaa23bfa9d2",
+  "providerModel": {
+    "providerID": "google",
+    "modelID": "gemini-3.6-flash"
+  },
+  "proxy": {
+    "rule": "sse-cut ^/event marker=session.idle killAfter oneshot"
+  }
+}

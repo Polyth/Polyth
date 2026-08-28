@@ -1,0 +1,164 @@
+{
+  "caseA": {
+    "sourceBackendId": "ses_fb92cf9fcffeo9rgcotWmhtg3d",
+    "childBackendId": "ses_fb92cf9e3ffeanHKJdyoWUzkq4",
+    "childHistoryLength": 0,
+    "sessionsBefore": 1,
+    "sessionsAfter": 2
+  },
+  "sourceEntries": [
+    {
+      "id": "msg_046d30654001UkF4eOd1qnqIML",
+      "role": "user",
+      "text": "Reply with exactly the word SAME and nothing else."
+    },
+    {
+      "id": "msg_046d307a6001v75NFm4vUdaVra",
+      "role": "assistant",
+      "text": "SAME"
+    },
+    {
+      "id": "msg_046d3106d001AHQOnj47z2qcd4",
+      "role": "user",
+      "text": "Reply with exactly the word SAME and nothing else."
+    },
+    {
+      "id": "msg_046d31074001pdUP1YTESFcDnP",
+      "role": "assistant",
+      "text": "SAME"
+    }
+  ],
+  "caseB": {
+    "childBackendId": "ses_fb92ce59fffeEYcZ5jjwchxw3k",
+    "error": null,
+    "childHistory": [
+      {
+        "id": "msg_046d31a62001CgQf1MO1dm5aho",
+        "role": "user",
+        "text": "Reply with exactly the word SAME and nothing else."
+      },
+      {
+        "id": "msg_046d31a64001BTBGTDu2ydGPZO",
+        "role": "assistant",
+        "text": "SAME"
+      }
+    ],
+    "wantedPrefix": [
+      {
+        "id": "msg_046d30654001UkF4eOd1qnqIML",
+        "role": "user",
+        "text": "Reply with exactly the word SAME and nothing else."
+      },
+      {
+        "id": "msg_046d307a6001v75NFm4vUdaVra",
+        "role": "assistant",
+        "text": "SAME"
+      }
+    ],
+    "forkPosts": [
+      {
+        "t": 1787893985220,
+        "kind": "request",
+        "connection": 10,
+        "method": "POST",
+        "path": "/session/ses_fb936d8cdffeV0eVskpXoXTnG7/fork?directory=%2Ftmp%2Focreal%2FOC-REAL-018%2Frun-1-mtchwwxe%2Fproject",
+        "bytes": 46,
+        "body": {
+          "messageID": "msg_046c928700017rTcfv6V5mQM4d"
+        },
+        "headerNames": [
+          "host",
+          "connection",
+          "accept",
+          "content-type",
+          "x-polyth-operation-id",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent",
+          "accept-encoding",
+          "content-length"
+        ]
+      },
+      {
+        "t": 1787893985261,
+        "kind": "request",
+        "connection": 13,
+        "method": "POST",
+        "path": "/session/ses_fb936d8cdffeV0eVskpXoXTnG7/fork?directory=%2Ftmp%2Focreal%2FOC-REAL-018%2Frun-1-mtchwwxe%2Fproject",
+        "bytes": 46,
+        "body": {
+          "messageID": "msg_046c92ba5001fUNj9GGTZPbDfA"
+        },
+        "headerNames": [
+          "host",
+          "connection",
+          "accept",
+          "content-type",
+          "x-polyth-operation-id",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent",
+          "accept-encoding",
+          "content-length"
+        ]
+      },
+      {
+        "t": 1787894635101,
+        "kind": "request",
+        "connection": 10,
+        "method": "POST",
+        "path": "/session/ses_fb92cf9ceffefYq9pc4APfCr2f/fork?directory=%2Ftmp%2Focreal%2FOC-REAL-018%2Frun-1-mtcias3y%2Fproject",
+        "bytes": 46,
+        "body": {
+          "messageID": "msg_046d3106d001AHQOnj47z2qcd4"
+        },
+        "headerNames": [
+          "host",
+          "connection",
+          "accept",
+          "content-type",
+          "x-polyth-operation-id",
+          "accept-language",
+          "sec-fetch-mode",
+          "user-agent",
+          "accept-encoding",
+          "content-length"
+        ]
+      }
+    ],
+    "sessionsBefore": 3,
+    "sessionsAfter": 4,
+    "sourceUnchanged": true
+  },
+  "caseC": {
+    "childBackendId": "ses_fb92ce578ffeLypq4b80lhBkOu",
+    "error": null,
+    "childHistory": [
+      {
+        "id": "msg_046d31a89001xsLJ6nOkH4WPMA",
+        "role": "user",
+        "text": "Reply with exactly the word SAME and nothing else."
+      },
+      {
+        "id": "msg_046d31a8b001lvQovlRbokXiDK",
+        "role": "assistant",
+        "text": "SAME"
+      },
+      {
+        "id": "msg_046d31a8e001Kw0HUjzjXm7a0d",
+        "role": "user",
+        "text": "Reply with exactly the word SAME and nothing else."
+      },
+      {
+        "id": "msg_046d31a90001jjJHfwxzMi1Wle",
+        "role": "assistant",
+        "text": "SAME"
+      }
+    ],
+    "sessionsBefore": 4,
+    "sessionsAfter": 5,
+    "sourceUnchanged": true
+  },
+  "mismatchOutcome": "history-mismatch: Error: requested history prefix is not present in the backend session",
+  "failures": []
+}

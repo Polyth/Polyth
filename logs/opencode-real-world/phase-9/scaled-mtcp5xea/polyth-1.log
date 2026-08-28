@@ -1,0 +1,22 @@
+(node:143982) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[polyth] Secure Safe behavior refresh skipped Error: applyBehavior refused: config authority is read-only
+    at assertWritable (file:///workspace/packages/backend-opencode/src/config.ts:297:9)
+    at Object.applyBehavior (file:///workspace/packages/backend-opencode/src/config.ts:363:7)
+    at Object.applyBehavior (file:///workspace/packages/server/src/opencodePending.ts:147:37)
+    at refreshSafeBehavior (file:///workspace/packages/server/src/index.ts:998:27)
+    at async boot (file:///workspace/packages/server/src/index.ts:1004:3) {
+  code: 'config-read-only'
+}
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:15290  data=/tmp/ocreal/phase-9/scaled-mtcp5xea/polyth-data
+[harness] polyth boot complete
+opencode event for unmapped session {
+  backendId: 'ses_fb87cf784ffe1sKzNi78HZLaHW',
+  type: 'session.created'
+}
+opencode sse disconnected { error: 'Error: OpenCode SSE response closed before completion' }
+opencode endpoint refresh failed {
+  error: 'Error: OpenCode protocol negotiation failed; private daemon fallback is disabled'
+}
+[soak] polyth-1 exited code=null signal=SIGKILL

@@ -1,0 +1,19 @@
+{
+  "id": "OC-REAL-076",
+  "headSha": "34770f3a7671ea0ed0215085a24485526447cc3d",
+  "opencodeBin": "/home/ubuntu/.local/bin/opencode",
+  "opencodeVersion": "1.18.18",
+  "nodeVersion": "v22.22.2",
+  "os": "linux 6.12.94+",
+  "host": "cursor",
+  "model": {
+    "providerID": "opencode",
+    "modelID": "big-pickle"
+  },
+  "protocol": "legacy",
+  "projectPath": "/tmp/ocreal-phase7/oc-real-076-mtcpgtnm/project",
+  "polythDataDir": "/tmp/ocreal-phase7/oc-real-076-mtcpgtnm/polyth-data",
+  "startedAt": "2026-08-28T08:44:27.495Z",
+  "scenario": "rapid session switching during in-flight gap-fill, second client stays live",
+  "engine": "H"
+}

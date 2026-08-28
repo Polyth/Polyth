@@ -118,6 +118,26 @@ export interface BootOptions {
   serverPackages?: readonly ServerPackageRegistration[];
 }
 
+/** Keep protocol identity behind the runtime pool's stable facade, including
+ * lifecycle-backed runtimes and generation replacement. */
+export function createRuntimeProtocolForwarder(
+  current: () => AgentRuntime,
+): NonNullable<AgentRuntime["protocol"]> {
+  return async () => {
+    const runtime = current();
+    if (typeof runtime.protocol === "function") return runtime.protocol();
+    const lifecycle = (
+      runtime as AgentRuntime & {
+        lifecycle?: Pick<Required<AgentRuntime>, "protocol">;
+      }
+    ).lifecycle;
+    if (typeof lifecycle?.protocol === "function") return lifecycle.protocol();
+    throw Object.assign(new Error("runtime protocol identity is unavailable"), {
+      code: "unsupported",
+    });
+  };
+}
+
 /** A feature package entry supplied by a bundled host such as Electron. */
 export interface ServerPackageRegistration {
   id: string;
@@ -416,6 +436,7 @@ export async function boot(opts: BootOptions = {}) {
       return createRemoteOpenCodeRuntime({
         host: ssh.host(remoteBinding.connectionId),
         remotePath: cwd,
+        leaseStateFile: join(dataDir, "opencode-ssh", `${projectId}.lease.json`),
         sessionIdMap,
       });
     }
@@ -514,6 +535,7 @@ export async function boot(opts: BootOptions = {}) {
         code: "unsupported",
       });
     };
+    const protocol = createRuntimeProtocolForwarder(() => inner);
     const reconcile = async (
       binding: RuntimeSessionBinding & { reconciliationOrdinal?: number },
       after?: string,
@@ -526,13 +548,7 @@ export async function boot(opts: BootOptions = {}) {
           code: "unsupported",
         });
       }
-      const protocol = await lifecycle.protocol?.();
-      if (!protocol) {
-        throw Object.assign(new Error("runtime protocol identity is unavailable"), {
-          code: "unsupported",
-        });
-      }
-      return lifecycle.reconcile({ ...binding, protocol }, after);
+      return lifecycle.reconcile({ ...binding, protocol: await protocol() }, after);
     };
 
     const respawnOnce = async (): Promise<void> => {
@@ -710,6 +726,7 @@ export async function boot(opts: BootOptions = {}) {
           }
         : {}),
       endpoint,
+      protocol,
       reconcile,
       onObservation(cb) {
         observationListeners.add(cb);

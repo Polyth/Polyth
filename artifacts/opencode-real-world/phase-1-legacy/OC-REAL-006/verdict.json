@@ -1,0 +1,13 @@
+{
+  "id": "OC-REAL-006",
+  "verdict": "pass",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy (forced)",
+  "observed": "externally created sessions listed exactly per directory scope (A:2, B:1); no cross-directory leak",
+  "expected": "counts and IDs match location scope; no silent adoption",
+  "attribution": "NONE",
+  "evidence": [
+    "artifacts/opencode-real-world/phase-1-legacy/OC-REAL-006/listing.json"
+  ],
+  "notes": "Adapter-level catalog; Polyth server-side non-adoption (unadopted catalog) is deterministic-tested; this validates the real location scoping contract."
+}

@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "name": "single-choice",
+      "questionId": "que_0468e5e8b001Gyb80Zxvp6hkrC",
+      "rawQuestions": [
+        {
+          "question": "Which color do you prefer?",
+          "header": "Color Preference",
+          "options": [
+            {
+              "label": "red",
+              "description": ""
+            },
+            {
+              "label": "blue",
+              "description": ""
+            }
+          ]
+        }
+      ],
+      "snapshotQuestions": [
+        {
+          "question": "Which color do you prefer?",
+          "header": "Color Preference",
+          "options": [
+            {
+              "label": "red",
+              "description": ""
+            },
+            {
+              "label": "blue",
+              "description": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "multi-choice"
+    },
+    {
+      "name": "free-text"
+    },
+    {
+      "name": "multi-question",
+      "questionId": "que_046903e57001noRW1mPvjyYyyD",
+      "rawQuestions": [
+        {
+          "question": "Which fruits do you like?",
+          "header": "Favorite Fruits",
+          "options": [
+            {
+              "label": "apple",
+              "description": ""
+            },
+            {
+              "label": "banana",
+              "description": ""
+            },
+            {
+              "label": "cherry",
+              "description": ""
+            }
+          ],
+          "multiple": true
+        },
+        {
+          "question": "What is your favorite city?",
+          "header": "Favorite City",
+          "options": [],
+          "multiple": false
+        }
+      ],
+      "snapshotQuestions": [
+        {
+          "question": "Which fruits do you like?",
+          "header": "Favorite Fruits",
+          "options": [
+            {
+              "label": "apple",
+              "description": ""
+            },
+            {
+              "label": "banana",
+              "description": ""
+            },
+            {
+              "label": "cherry",
+              "description": ""
+            }
+          ],
+          "multiple": true
+        },
+        {
+          "question": "What is your favorite city?",
+          "header": "Favorite City",
+          "options": [],
+          "multiple": false
+        }
+      ]
+    },
+    {
+      "name": "reject-case"
+    },
+    {
+      "name": "race-case"
+    }
+  ],
+  "failures": [
+    "multi-choice: model did not raise a question",
+    "free-text: model did not raise a question",
+    "reject-case: model did not raise a question",
+    "race-case: model did not raise a question"
+  ]
+}

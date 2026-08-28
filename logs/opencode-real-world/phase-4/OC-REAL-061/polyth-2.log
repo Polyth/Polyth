@@ -1,0 +1,23 @@
+(node:76588) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[polyth] Secure Safe behavior refresh skipped Error: applyBehavior refused: config authority is read-only
+    at assertWritable (file:///workspace/packages/backend-opencode/src/config.ts:297:9)
+    at Object.applyBehavior (file:///workspace/packages/backend-opencode/src/config.ts:363:7)
+    at Object.applyBehavior (file:///workspace/packages/server/src/opencodePending.ts:147:37)
+    at refreshSafeBehavior (file:///workspace/packages/server/src/index.ts:998:27)
+    at async boot (file:///workspace/packages/server/src/index.ts:1004:3) {
+  code: 'config-read-only'
+}
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:15154  data=/tmp/ocreal/phase-4/OC-REAL-061/run-mtcne0gx/polyth-data
+[harness] polyth boot complete
+[polyth] failed to materialize runtime session 7a6dd4d4-42db-4d28-87e3-6d4856f3fe44 Error: persisted backend binding does not match the current endpoint
+    at runtimeBinding (file:///workspace/packages/server/src/sessions.ts:698:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async ensureWired (file:///workspace/packages/server/src/sessions.ts:1887:7)
+    at async Object.events (file:///workspace/packages/server/src/sessions.ts:3730:13)
+    at async Server.<anonymous> (file:///workspace/packages/server/src/http.ts:248:31) {
+  code: 'binding-mismatch'
+}
+
+[harness] polyth polyth-2 exited code=0 signal=null

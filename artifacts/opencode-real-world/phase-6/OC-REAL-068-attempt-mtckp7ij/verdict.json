@@ -1,0 +1,39 @@
+{
+  "id": "OC-REAL-068",
+  "verdict": "fail",
+  "engine": "R",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy",
+  "observed": "isolation violations: a-feature: tool read path escaped into /tmp/polyth-tests/project-a | b-feature: tool read path escaped into /tmp/polyth-tests/project-b",
+  "expected": "every request/event/config lookup remains in its cwd; no marker or session crosses location",
+  "attribution": "POLYTH",
+  "crossTreeLeakBlocker": true,
+  "identifiers": {
+    "a-root": {
+      "id": "ba7bc9dd-2821-4f65-a050-7937cee76b70",
+      "backendId": "ses_fb8f06514ffesIU4c3pRExI21F"
+    },
+    "a-feature": {
+      "id": "ee1d9649-0a31-41c8-b989-ffce29f80b69",
+      "backendId": "ses_fb8f05e2fffeYOt1Upcwn5TURg"
+    },
+    "b-root": {
+      "id": "3027819f-7515-4c14-98a2-e140801df13c",
+      "backendId": "ses_fb8f0578bffeM8YgguvZ1Iaqzn"
+    },
+    "b-feature": {
+      "id": "f5a7d509-cac0-41f3-9958-e68fa95d393a",
+      "backendId": "ses_fb8f050d7ffeZDNWAFqkoBJZyc"
+    }
+  },
+  "evidence": [
+    "artifacts/opencode-real-world/phase-6/OC-REAL-068/details.json",
+    "logs/opencode-real-world/phase-6/OC-REAL-068/wire.ndjson",
+    "logs/opencode-real-world/phase-6/OC-REAL-068/polyth.ndjson",
+    "logs/opencode-real-world/phase-6/OC-REAL-068/db-after.json"
+  ],
+  "failures": [
+    "a-feature: tool read path escaped into /tmp/polyth-tests/project-a",
+    "b-feature: tool read path escaped into /tmp/polyth-tests/project-b"
+  ]
+}

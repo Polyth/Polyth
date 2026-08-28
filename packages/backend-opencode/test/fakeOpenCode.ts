@@ -638,7 +638,7 @@ export const createFakeOpenCode = async (
         publish({
           data: {
             type: "session.idle",
-            properties: { sessionID: sessionId, revision: session.revision },
+            properties: { sessionID: sessionId },
           },
         });
       }

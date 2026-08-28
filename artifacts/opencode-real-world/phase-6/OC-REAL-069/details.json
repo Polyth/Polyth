@@ -1,0 +1,90 @@
+{
+  "backendIds": {
+    "rootBackend": "ses_1",
+    "worktreeBackend": "ses_1"
+  },
+  "sharedMap": {
+    "ab2bd6ce-591f-46cf-8b72-0b9cb3da20d3": "ses_1",
+    "043037d5-3d38-48b8-badc-caf5938e015b": "ses_1"
+  },
+  "permissionReplies": {
+    "rootReplies": 1,
+    "worktreeReplies": 0
+  },
+  "permissionRepliesAfterBoth": {
+    "root": 1,
+    "worktree": 1
+  },
+  "upstreamMessages": {
+    "root": [
+      {
+        "id": "msg_1",
+        "body": {
+          "parts": [
+            {
+              "type": "text",
+              "text": "prompt ROOT-TEXT-069"
+            }
+          ]
+        }
+      }
+    ],
+    "worktree": [
+      {
+        "id": "msg_1",
+        "body": {
+          "parts": [
+            {
+              "type": "text",
+              "text": "prompt WORKTREE-TEXT-069"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "equalMessageIds": {
+    "rootMessageIds": [
+      "msg_1"
+    ],
+    "worktreeMessageIds": [
+      "msg_1"
+    ]
+  },
+  "sharedMapBeforeDelete": {
+    "ab2bd6ce-591f-46cf-8b72-0b9cb3da20d3": "ses_1",
+    "043037d5-3d38-48b8-badc-caf5938e015b": "ses_1"
+  },
+  "sharedMapAfterDelete": {},
+  "deleteError": "",
+  "postDeleteSend": {
+    "error": "",
+    "upstreamHasPrompt": true
+  },
+  "worktreeFinalProjection": {
+    "id": "043037d5-3d38-48b8-badc-caf5938e015b",
+    "projectId": "project-a",
+    "title": "069 worktree",
+    "worktreePath": "/tmp/polyth-tests/project-a/worktree-feature",
+    "worktreeId": "/tmp/polyth-tests/project-a/worktree-feature",
+    "worktreeState": "ready",
+    "branch": "feature",
+    "createdAt": 1787899017571,
+    "updatedAt": 1787899019005,
+    "status": "working",
+    "backendSessionId": "ses_1",
+    "runtimeBinding": {
+      "backendSessionId": "ses_1",
+      "authorityId": "phase6:worktree",
+      "generation": 1,
+      "continuity": "verified",
+      "protocol": "legacy",
+      "location": {
+        "directory": "/tmp/polyth-tests/project-a/worktree-feature"
+      }
+    },
+    "runtimeObservationSeq": 20,
+    "lastTurnAt": 1787899019005
+  },
+  "postDeleteSseArrived": true
+}

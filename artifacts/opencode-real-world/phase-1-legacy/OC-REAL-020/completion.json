@@ -1,0 +1,35 @@
+{
+  "upstreamCompleted": true,
+  "idleOnWire": true,
+  "rawSessionIdlePayload": {
+    "id": "evt_046d639d0002D9MDi13ISSHANc",
+    "type": "session.idle",
+    "properties": {
+      "sessionID": "ses_fb929d15dffeUGO6rE2JzfebZe"
+    }
+  },
+  "rawStatusEndpointAfterCompletion": {},
+  "liveTurnStarted": 1,
+  "liveTurnStopped": [],
+  "liveFinalizedTexts": [
+    "DONE-MARKER-020"
+  ],
+  "snapshot1State": {
+    "value": "unknown"
+  },
+  "snapshot1Completeness": {
+    "events": "partial",
+    "permissions": "partial",
+    "questions": "partial"
+  },
+  "markerCountSnapshot1": 1,
+  "snapshot2State": {
+    "value": "unknown"
+  },
+  "markerCountSnapshot2": 1,
+  "fakeContrast": "packages/backend-opencode/test/fakeOpenCode.ts finishTurn emits session.idle with properties.revision; real 1.18.18 emits only {sessionID}",
+  "failures": [
+    "MISSED COMPLETION: upstream idle on the wire but the facade never emitted turn/stopped (real session.idle has no revision field; terminalStateEvidenceOf requires one)",
+    "reconcile after completion reports state=unknown, expected idle (raw /session/status = {})"
+  ]
+}

@@ -1,0 +1,115 @@
+{
+  "note": "union coverage across three real runs (see OC-REAL-015 merged evidence for run manifest)",
+  "coverage": {
+    "single-choice": {
+      "run": "run1",
+      "name": "single-choice",
+      "action": {
+        "answered": {
+          "answers": [
+            [
+              "red"
+            ]
+          ]
+        }
+      },
+      "toolOutcome": {
+        "status": "completed",
+        "output": "User has answered your questions: \"Which color do you prefer?\"=\"red\". You can now continue with the user's answers in mind.",
+        "error": ""
+      }
+    },
+    "multi-question": {
+      "run": "run3",
+      "name": "multi-question",
+      "action": {
+        "answered": {
+          "answers": [
+            [
+              "blue"
+            ],
+            [
+              "small"
+            ]
+          ]
+        }
+      },
+      "toolOutcome": {
+        "status": "completed",
+        "output": "User has answered your questions: \"Which color do you prefer?\"=\"blue\", \"Which size do you prefer?\"=\"small\". You can now continue with the user's answers in mind.",
+        "error": ""
+      }
+    },
+    "reject-case": {
+      "run": "run3",
+      "name": "reject-case",
+      "action": {
+        "rejected": true
+      },
+      "toolOutcome": {
+        "status": "error",
+        "output": "",
+        "error": "The user dismissed this question"
+      }
+    },
+    "race-case": {
+      "run": "run3",
+      "name": "race-case",
+      "action": {
+        "race": {
+          "first": {
+            "kind": "rejected",
+            "code": "http-404",
+            "message": "Question request not found: que_046f381d7001Q9r6JPqQBKNhpy"
+          },
+          "second": {
+            "kind": "confirmed",
+            "value": {}
+          }
+        }
+      },
+      "toolOutcome": {
+        "status": "error",
+        "output": "",
+        "error": "The user dismissed this question"
+      }
+    },
+    "multi-choice": {
+      "run": "run4",
+      "name": "multi-choice",
+      "action": {
+        "answered": {
+          "answers": [
+            [
+              "apple",
+              "cherry"
+            ]
+          ]
+        }
+      },
+      "toolOutcome": {
+        "status": "completed",
+        "output": "User has answered your questions: \"Which fruits do you like?\"=\"apple, cherry\". You can now continue with the user's answers in mind.",
+        "error": ""
+      }
+    },
+    "free-text": {
+      "run": "run4",
+      "name": "free-text",
+      "action": {
+        "answered": {
+          "answers": [
+            [
+              "Lisbon"
+            ]
+          ]
+        }
+      },
+      "toolOutcome": {
+        "status": "completed",
+        "output": "User has answered your questions: \"What is your favorite city, and what makes it special to you?\"=\"Lisbon\". You can now continue with the user's answers in mind.",
+        "error": ""
+      }
+    }
+  }
+}

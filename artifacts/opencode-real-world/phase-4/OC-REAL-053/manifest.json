@@ -1,0 +1,26 @@
+{
+  "id": "OC-REAL-053",
+  "runId": "run-mtclxyh6",
+  "startedAt": "2026-08-28T07:05:52.211Z",
+  "gitSha": "9e0fb6d24bc0cca7a9881a5516c03208f99e1b12",
+  "opencode": {
+    "version": "1.18.18",
+    "binary": "/home/ubuntu/.local/bin/opencode",
+    "sha256": "bb71f45b564f9234a97f54d6252a4a41d2f4388ae4b078918f691824cc3b3e54"
+  },
+  "node": "v22.22.2",
+  "os": "linux x64",
+  "protocol": "legacy (forced)",
+  "polythPort": 15146,
+  "projectPath": "/tmp/ocreal/phase-4/OC-REAL-053/run-mtclxyh6/project",
+  "polythDataDir": "/tmp/ocreal/phase-4/OC-REAL-053/run-mtclxyh6/polyth-data",
+  "opencodeConfigDir": "/tmp/ocreal/phase-4/OC-REAL-053/run-mtclxyh6/opencode-config",
+  "xdgDataHome": "/tmp/ocreal/phase-4/OC-REAL-053/run-mtclxyh6/xdg-data",
+  "faultSeed": "OC-REAL-053-sigkill-mid-reasoning",
+  "projectId": "f4a7db84-46e9-4be4-95f9-33eeb37ab8fe",
+  "canonicalSessionId": "5568227d-84b1-4b49-a977-73bd3a3ac225",
+  "providerModel": {
+    "providerID": "google",
+    "modelID": "gemini-3.6-flash"
+  }
+}

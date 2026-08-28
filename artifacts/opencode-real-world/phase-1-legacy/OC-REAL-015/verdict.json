@@ -1,0 +1,17 @@
+{
+  "id": "OC-REAL-015",
+  "verdict": "pass",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy (forced)",
+  "observed": "all six live question shapes raised across runs 1/3/4 (single-choice, multi-choice, free-text, multi-question, reject, race); each request appeared exactly once on SSE, in GET /question, and in the reconcile snapshot with byte-identical questions payloads (que_ id, questions[].question/header/options[].label/description)",
+  "expected": "prompt/options/multiplicity survive normalization exactly once",
+  "attribution": "NONE",
+  "evidence": [
+    "artifacts/opencode-real-world/phase-1-legacy/OC-REAL-015/question-shapes.json",
+    "artifacts/opencode-real-world/phase-1-legacy/OC-REAL-015/question-shapes-run1.json",
+    "artifacts/opencode-real-world/phase-1-legacy/OC-REAL-015/question-shapes-run3.json",
+    "artifacts/opencode-real-world/phase-1-legacy/OC-REAL-015/question-shapes-run4.json",
+    "logs/opencode-real-world/phase-1-legacy/OC-REAL-015/sse.ndjson"
+  ],
+  "notes": "Free-tier daily quotas (20 req/day/model) forced union coverage across gemini-2.5-flash-lite, gemini-3.5-flash and gemini-3.1-flash-lite runs; the per-case no-question failures in individual runs were provider quota exhaustion (session.status retry -> session.error APIError), not Polyth. Detached-UI durability is server-stack scope."
+}

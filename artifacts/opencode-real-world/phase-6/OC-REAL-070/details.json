@@ -1,0 +1,267 @@
+{
+  "worktreeRace": {
+    "statuses": [
+      200,
+      500
+    ],
+    "bodies": [
+      {
+        "path": "/tmp/polyth-tests/project-a/worktree-race-1",
+        "branch": "race-070"
+      },
+      {
+        "error": "git-failed",
+        "message": "An internal server error occurred."
+      }
+    ],
+    "worktreesAfterRace": [
+      "/tmp/polyth-tests/project-a",
+      "/tmp/polyth-tests/project-a/worktree-feature",
+      "/tmp/polyth-tests/project-a/worktree-race-1"
+    ],
+    "raceWinners": [
+      "/tmp/polyth-tests/project-a/worktree-race-1"
+    ],
+    "dirsOnDisk": [
+      {
+        "path": "/tmp/polyth-tests/project-a/worktree-race-1",
+        "exists": true
+      },
+      {
+        "path": "/tmp/polyth-tests/project-a/worktree-race-2",
+        "exists": false
+      }
+    ]
+  },
+  "jitterAttempts": [
+    {
+      "index": 0,
+      "delayMs": 0,
+      "doomPath": "/tmp/polyth-tests/project-a/worktree-doom-0",
+      "createOutcome": {
+        "kind": "rejected",
+        "code": "ENOENT"
+      },
+      "newServePids": [],
+      "doomServe": null,
+      "boundedRejection": true,
+      "doomProjectionStatuses": [
+        "failed"
+      ]
+    },
+    {
+      "index": 1,
+      "delayMs": 5,
+      "doomPath": "/tmp/polyth-tests/project-a/worktree-doom-1",
+      "createOutcome": {
+        "kind": "created",
+        "sessionId": "91ec664d-4d92-42cb-b78f-aa63137622e7",
+        "projection": {
+          "id": "91ec664d-4d92-42cb-b78f-aa63137622e7",
+          "projectId": "project-a",
+          "title": "OC-REAL-070 doom 1",
+          "worktreePath": "/tmp/polyth-tests/project-a/worktree-doom-1",
+          "worktreeId": "/tmp/polyth-tests/project-a/worktree-doom-1",
+          "worktreeState": "ready",
+          "branch": "doom-070-1",
+          "model": {
+            "providerID": "opencode",
+            "modelID": "big-pickle"
+          },
+          "createdAt": 1787899179169,
+          "updatedAt": 1787899184201,
+          "status": "idle",
+          "backendSessionId": "ses_fb8e77bd1ffeRGzvrSL6ZM56hC",
+          "runtimeBinding": {
+            "backendSessionId": "ses_fb8e77bd1ffeRGzvrSL6ZM56hC",
+            "authorityId": "owned:6208b4d7-b219-4045-baf5-6316662fb82a",
+            "generation": 1,
+            "continuity": "generation-only",
+            "protocol": "legacy",
+            "location": {
+              "directory": "/tmp/polyth-tests/project-a/worktree-doom-1"
+            }
+          }
+        }
+      },
+      "newServePids": [
+        65360
+      ],
+      "doomServe": {
+        "pid": 65360,
+        "cwd": "/tmp/polyth-tests/project-a/worktree-doom-1",
+        "cwdDeleted": true,
+        "cmd": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 40535",
+        "ports": [
+          40535
+        ]
+      },
+      "finalStatus": "idle"
+    },
+    {
+      "index": 2,
+      "delayMs": 15,
+      "doomPath": "/tmp/polyth-tests/project-a/worktree-doom-2",
+      "createOutcome": {
+        "kind": "created",
+        "sessionId": "e7e6ca42-941f-4807-98a5-ea8f459cc5c1",
+        "projection": {
+          "id": "e7e6ca42-941f-4807-98a5-ea8f459cc5c1",
+          "projectId": "project-a",
+          "title": "OC-REAL-070 doom 2",
+          "worktreePath": "/tmp/polyth-tests/project-a/worktree-doom-2",
+          "worktreeId": "/tmp/polyth-tests/project-a/worktree-doom-2",
+          "worktreeState": "ready",
+          "branch": "doom-070-2",
+          "model": {
+            "providerID": "opencode",
+            "modelID": "big-pickle"
+          },
+          "createdAt": 1787899184720,
+          "updatedAt": 1787899186438,
+          "status": "idle",
+          "backendSessionId": "ses_fb8e77310ffeWF7nubvnu37Khf",
+          "runtimeBinding": {
+            "backendSessionId": "ses_fb8e77310ffeWF7nubvnu37Khf",
+            "authorityId": "owned:951f3a38-8a82-4c92-87ee-9d170a3c0a68",
+            "generation": 1,
+            "continuity": "generation-only",
+            "protocol": "legacy",
+            "location": {
+              "directory": "/tmp/polyth-tests/project-a/worktree-doom-2"
+            }
+          }
+        }
+      },
+      "newServePids": [
+        65386
+      ],
+      "doomServe": {
+        "pid": 65386,
+        "cwd": "/tmp/polyth-tests/project-a/worktree-doom-2",
+        "cwdDeleted": true,
+        "cmd": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 39767",
+        "ports": [
+          39767
+        ]
+      },
+      "finalStatus": "idle"
+    },
+    {
+      "index": 3,
+      "delayMs": 30,
+      "doomPath": "/tmp/polyth-tests/project-a/worktree-doom-3",
+      "createOutcome": {
+        "kind": "created",
+        "sessionId": "2d453e0a-680d-414a-8b0a-fbb08c288cb4",
+        "projection": {
+          "id": "2d453e0a-680d-414a-8b0a-fbb08c288cb4",
+          "projectId": "project-a",
+          "title": "OC-REAL-070 doom 3",
+          "worktreePath": "/tmp/polyth-tests/project-a/worktree-doom-3",
+          "worktreeId": "/tmp/polyth-tests/project-a/worktree-doom-3",
+          "worktreeState": "ready",
+          "branch": "doom-070-3",
+          "model": {
+            "providerID": "opencode",
+            "modelID": "big-pickle"
+          },
+          "createdAt": 1787899186976,
+          "updatedAt": 1787899188667,
+          "status": "idle",
+          "backendSessionId": "ses_fb8e76a5dffetKo0CvXAQ8k0Zx",
+          "runtimeBinding": {
+            "backendSessionId": "ses_fb8e76a5dffetKo0CvXAQ8k0Zx",
+            "authorityId": "owned:8e0d3fde-cd67-4a91-a636-140a83e6a769",
+            "generation": 1,
+            "continuity": "generation-only",
+            "protocol": "legacy",
+            "location": {
+              "directory": "/tmp/polyth-tests/project-a/worktree-doom-3"
+            }
+          }
+        }
+      },
+      "newServePids": [
+        65409
+      ],
+      "doomServe": {
+        "pid": 65409,
+        "cwd": "/tmp/polyth-tests/project-a/worktree-doom-3",
+        "cwdDeleted": true,
+        "cmd": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 43929",
+        "ports": [
+          43929
+        ]
+      },
+      "finalStatus": "idle"
+    },
+    {
+      "index": 4,
+      "delayMs": 60,
+      "doomPath": "/tmp/polyth-tests/project-a/worktree-doom-4",
+      "createOutcome": {
+        "kind": "created",
+        "sessionId": "88ca78eb-81fa-42b2-b3dd-d3322b61d911",
+        "projection": {
+          "id": "88ca78eb-81fa-42b2-b3dd-d3322b61d911",
+          "projectId": "project-a",
+          "title": "OC-REAL-070 doom 4",
+          "worktreePath": "/tmp/polyth-tests/project-a/worktree-doom-4",
+          "worktreeId": "/tmp/polyth-tests/project-a/worktree-doom-4",
+          "worktreeState": "ready",
+          "branch": "doom-070-4",
+          "model": {
+            "providerID": "opencode",
+            "modelID": "big-pickle"
+          },
+          "createdAt": 1787899189185,
+          "updatedAt": 1787899190903,
+          "status": "idle",
+          "backendSessionId": "ses_fb8e761a2ffeYZ5KVsCZbAMQ2M",
+          "runtimeBinding": {
+            "backendSessionId": "ses_fb8e761a2ffeYZ5KVsCZbAMQ2M",
+            "authorityId": "owned:2f2ec2a0-3cc2-4dd3-bd3c-3a48ab0ec0f2",
+            "generation": 1,
+            "continuity": "generation-only",
+            "protocol": "legacy",
+            "location": {
+              "directory": "/tmp/polyth-tests/project-a/worktree-doom-4"
+            }
+          }
+        }
+      },
+      "newServePids": [
+        65432
+      ],
+      "doomServe": {
+        "pid": 65432,
+        "cwd": "/tmp/polyth-tests/project-a/worktree-doom-4",
+        "cwdDeleted": true,
+        "cmd": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 36433",
+        "ports": [
+          36433
+        ]
+      },
+      "finalStatus": "idle"
+    }
+  ],
+  "toctou": {
+    "outcome": {
+      "kind": "rejected",
+      "code": "ENOENT"
+    },
+    "spawnAttempts": 1,
+    "orphanServe": null,
+    "projectionStatus": "failed",
+    "worktreesNow": [
+      "/tmp/polyth-tests/project-a",
+      "/tmp/polyth-tests/project-a/worktree-feature"
+    ],
+    "durableOperationStates": [
+      "session/created",
+      "mutation/prepared",
+      "mutation/rejected"
+    ]
+  }
+}

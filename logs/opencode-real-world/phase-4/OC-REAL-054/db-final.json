@@ -1,0 +1,604 @@
+{
+  "dbPath": "/tmp/ocreal/phase-4/OC-REAL-054/run-mtcm0e2m/polyth-data/sessions.db",
+  "sessionId": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+  "capturedAt": "2026-08-28T07:08:46.668Z",
+  "integrityCheck": [
+    {
+      "integrity_check": "ok"
+    }
+  ],
+  "walCheckpoint": [
+    {
+      "__error": "disk I/O error"
+    }
+  ],
+  "journalMode": [
+    {
+      "journal_mode": "wal"
+    }
+  ],
+  "events": [
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 1,
+      "id": "2edc6254-4085-4665-b93a-10cf2270b3b3",
+      "time": 1787900862120,
+      "type": "session/created",
+      "data": "{\"title\":\"s054\",\"projectId\":\"a027ca68-256d-4cb5-9a0d-e151c8a458c6\",\"model\":{\"providerID\":\"google\",\"modelID\":\"gemini-3.6-flash\"}}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 2,
+      "id": "f70c56b1-5e5e-4901-b812-70ab5c863375",
+      "time": 1787900862121,
+      "type": "mutation/prepared",
+      "data": "{\"operationId\":\"4bae5579-d9ae-4c36-8d9b-334354054142\",\"ordinal\":1,\"mutationKind\":\"session-create\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 3,
+      "id": "f49ec533-e24c-4576-af30-ef532e6847ea",
+      "time": 1787900863777,
+      "type": "mutation/claimed",
+      "data": "{\"operationId\":\"4bae5579-d9ae-4c36-8d9b-334354054142\",\"ordinal\":1,\"mutationKind\":\"session-create\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 4,
+      "id": "1499c9ce-9785-409a-b640-22f91f88a6bd",
+      "time": 1787900865328,
+      "type": "mutation/confirmed",
+      "data": "{\"operationId\":\"4bae5579-d9ae-4c36-8d9b-334354054142\",\"ordinal\":1,\"mutationKind\":\"session-create\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 5,
+      "id": "dc9fb0a7-164a-4169-b383-e5998a83d352",
+      "time": 1787900865328,
+      "type": "reconciliation/started",
+      "data": "{\"ordinal\":1}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 6,
+      "id": "28e440b0-8e08-427d-90aa-e35ab1b239e1",
+      "time": 1787900865344,
+      "type": "runtime/status-observed",
+      "data": "{\"state\":\"idle\",\"causalOperationId\":\"4bae5579-d9ae-4c36-8d9b-334354054142\",\"authorityId\":\"owned:ca5ac8d4-6dc2-4a79-a738-87f18aaf9e00\",\"generation\":1,\"reason\":\"session-created\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 7,
+      "id": "34882d18-29e8-4b62-ae0e-6ff813499037",
+      "time": 1787900865345,
+      "type": "reconciliation/completed",
+      "data": "{\"ordinal\":1,\"state\":\"ready\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 8,
+      "id": "da4d5782-406d-4979-8f7b-2dd7edb8b84f",
+      "time": 1787900865473,
+      "type": "behavior/instructions-applied",
+      "data": "{\"revision\":\"e6dae11141c2\",\"digest\":\"e6dae11141c228994f57a3e5ddfb3c4282318142554131a8a431b4704907a594\",\"scope\":\"global\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 9,
+      "id": "3183603f-e34b-42db-af35-3622f7a5d740",
+      "time": 1787900865473,
+      "type": "user/message",
+      "data": "{\"text\":\"Run exactly this bash command and nothing else: echo done > side-054.txt\"}",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 10,
+      "id": "358af081-f606-4d2e-8b60-0762d3322cf0",
+      "time": 1787900865473,
+      "type": "mutation/prepared",
+      "data": "{\"operationId\":\"b2346aaa-c72f-44f5-b3c7-74f8b4ac6dba\",\"ordinal\":2,\"mutationKind\":\"turn-submit\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 11,
+      "id": "6651d60d-d023-4a03-9072-c748c69c4719",
+      "time": 1787900865473,
+      "type": "mutation/claimed",
+      "data": "{\"operationId\":\"b2346aaa-c72f-44f5-b3c7-74f8b4ac6dba\",\"ordinal\":2,\"mutationKind\":\"turn-submit\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 12,
+      "id": "4ce3ed24-254d-4a06-9018-feffd353225a",
+      "time": 1787900865482,
+      "type": "mutation/confirmed",
+      "data": "{\"operationId\":\"b2346aaa-c72f-44f5-b3c7-74f8b4ac6dba\",\"ordinal\":2,\"mutationKind\":\"turn-submit\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 13,
+      "id": "dcd07a4c-f560-438b-9f5e-b1a47986d4de",
+      "time": 1787900865483,
+      "type": "turn/started",
+      "data": "{\"turnId\":\"turn_mtcm0gy2_92wnzy\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 14,
+      "id": "9740bc69-809e-4a9d-ae88-41d09620a0f0",
+      "time": 1787900886097,
+      "type": "assistant/reasoning-chunk",
+      "data": "{\"partId\":\"prt_047327724001g1Zjt40xJsZCBf\",\"text\":\"**Analyzing the Command**\\n\\nI'm currently focused on dissecting the provided bash command, specifically to understand its impact. I've broken down the 'echo' function and the file redirection to 'side-054.txt', as it's critical to ascertain any potential side effects before execution. I'm taking a moment to identify if any safeguards need to be put into place to prevent unexpected results.\\n\\n\\n\"}",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 15,
+      "id": "712e28ff-8db4-47b1-ad8b-5e05822a03e4",
+      "time": 1787900886097,
+      "type": "assistant/message",
+      "data": "{\"partId\":\"prt_047327724001g1Zjt40xJsZCBf\",\"text\":\"\",\"reasoning\":\"**Analyzing the Command**\\n\\nI'm currently focused on dissecting the provided bash command, specifically to understand its impact. I've broken down the 'echo' function and the file redirection to 'side-054.txt', as it's critical to ascertain any potential side effects before execution. I'm taking a moment to identify if any safeguards need to be put into place to prevent unexpected results.\\n\\n\\n\"}",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 16,
+      "id": "9747c67d-0220-4aad-9ce1-d6fd70021c24",
+      "time": 1787900886450,
+      "type": "tool/call",
+      "data": "{\"callId\":\"MwUUGfA4F58lxMM9\",\"tool\":\"bash\",\"input\":{},\"status\":\"pending\"}",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 17,
+      "id": "8ab8afe7-2ce4-424f-88ee-7c39929aaafe",
+      "time": 1787900886450,
+      "type": "tool/started",
+      "data": "{\"callId\":\"MwUUGfA4F58lxMM9\",\"tool\":\"bash\",\"input\":{\"command\":\"echo done > side-054.txt\"}}",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 18,
+      "id": "34dd4a46-1168-4717-8f3d-6283b6d4f3c5",
+      "time": 1787900886450,
+      "type": "assistant/chunk",
+      "data": "{\"partId\":\"prt_047327c4e0010FwMLXdHnoSSZX\",\"text\":\"I will execute `echo done > side-054.txt`, which writes \\\"done\\\" into `side-054.txt` in the current directory.\"}",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 19,
+      "id": "2f58821e-7553-4e15-a027-90b7974ad2ea",
+      "time": 1787900886450,
+      "type": "assistant/message",
+      "data": "{\"partId\":\"prt_047327c4e0010FwMLXdHnoSSZX\",\"text\":\"I will execute `echo done > side-054.txt`, which writes \\\"done\\\" into `side-054.txt` in the current directory.\",\"tokens\":{\"input\":0,\"output\":0,\"reasoning\":0,\"cacheRead\":0,\"cacheWrite\":0},\"cost\":0}",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 20,
+      "id": "491277de-047c-4663-bc77-736d8cec3305",
+      "time": 1787900886478,
+      "type": "permission/requested",
+      "data": "{\"requestId\":\"per_047327dcc0019sWrXLFG0r3t3b\",\"permission\":\"bash\",\"patterns\":[\"echo done > side-054.txt\"],\"metadata\":{\"command\":\"echo done > side-054.txt\"},\"tool\":\"MwUUGfA4F58lxMM9\",\"preview\":{\"title\":\"bash via MwUUGfA4F58lxMM9\",\"lines\":[\"echo done > side-054.txt\",\"command: echo done > side-054.txt\"],\"risk\":\"medium\"},\"allowedScopes\":[\"once\",\"session\",\"project\"]}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 21,
+      "id": "06611af7-4988-4773-8c21-06316e024fa0",
+      "time": 1787900886669,
+      "type": "reconciliation/started",
+      "data": "{\"ordinal\":2}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "seq": 22,
+      "id": "98c31703-1aed-4fbf-ab1b-4536c69d73bd",
+      "time": 1787900906670,
+      "type": "reconciliation/blocked",
+      "data": "{\"ordinal\":2,\"state\":\"unknown\",\"reason\":\"OpenCode protocol negotiation failed; private daemon fallback is disabled\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    }
+  ],
+  "projections": [
+    {
+      "__error": "no such column: id"
+    }
+  ],
+  "runtime_operations": [
+    {
+      "operation_id": "4bae5579-d9ae-4c36-8d9b-334354054142",
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "ordinal": 1,
+      "mutation_kind": "session-create",
+      "state": "confirmed",
+      "replay_kind": "never",
+      "replay_contract": null,
+      "created_at": 1787900862120,
+      "updated_at": 1787900865328,
+      "code": null,
+      "message": null,
+      "receipt": "ses_fb8cdd4d7ffecCh71dmt8E54DH",
+      "owner_event_seq": 1
+    },
+    {
+      "operation_id": "b2346aaa-c72f-44f5-b3c7-74f8b4ac6dba",
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "ordinal": 2,
+      "mutation_kind": "turn-submit",
+      "state": "confirmed",
+      "replay_kind": "never",
+      "replay_contract": null,
+      "created_at": 1787900865473,
+      "updated_at": 1787900865482,
+      "code": null,
+      "message": null,
+      "receipt": null,
+      "owner_event_seq": 9
+    }
+  ],
+  "session_queue": [],
+  "response_intents": [],
+  "observations": [
+    {
+      "authority_id": "owned:ca5ac8d4-6dc2-4a79-a738-87f18aaf9e00",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-054/run-mtcm0e2m/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cdd4d7ffecCh71dmt8E54DH",
+      "artifact_kind": "status",
+      "entity_id": "ses_fb8cdd4d7ffecCh71dmt8E54DH",
+      "revision": "causal:4bae5579-d9ae-4c36-8d9b-334354054142",
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[6]",
+      "observed_at": 1787900865344
+    },
+    {
+      "authority_id": "owned:ca5ac8d4-6dc2-4a79-a738-87f18aaf9e00",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-054/run-mtcm0e2m/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cdd4d7ffecCh71dmt8E54DH",
+      "artifact_kind": "turn",
+      "entity_id": "ses_fb8cdd4d7ffecCh71dmt8E54DH",
+      "revision": "1.18.18",
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900865506
+    },
+    {
+      "authority_id": "owned:ca5ac8d4-6dc2-4a79-a738-87f18aaf9e00",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-054/run-mtcm0e2m/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cdd4d7ffecCh71dmt8E54DH",
+      "artifact_kind": "message",
+      "entity_id": "msg_047322bd5001PALn6FcUwhLH67",
+      "revision": "snapshot",
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900865831
+    },
+    {
+      "authority_id": "owned:ca5ac8d4-6dc2-4a79-a738-87f18aaf9e00",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-054/run-mtcm0e2m/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cdd4d7ffecCh71dmt8E54DH",
+      "artifact_kind": "part",
+      "entity_id": "prt_047322bdb001DlStCNNqDdBQNS",
+      "revision": "snapshot",
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900865831
+    },
+    {
+      "authority_id": "owned:ca5ac8d4-6dc2-4a79-a738-87f18aaf9e00",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-054/run-mtcm0e2m/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cdd4d7ffecCh71dmt8E54DH",
+      "artifact_kind": "status",
+      "entity_id": "ses_fb8cdd4d7ffecCh71dmt8E54DH",
+      "revision": "state:running",
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900865843
+    },
+    {
+      "authority_id": "owned:ca5ac8d4-6dc2-4a79-a738-87f18aaf9e00",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-054/run-mtcm0e2m/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cdd4d7ffecCh71dmt8E54DH",
+      "artifact_kind": "message",
+      "entity_id": "msg_047322d14001jKsR3MQmQHwhUv",
+      "revision": "snapshot",
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900865843
+    },
+    {
+      "authority_id": "owned:ca5ac8d4-6dc2-4a79-a738-87f18aaf9e00",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-054/run-mtcm0e2m/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cdd4d7ffecCh71dmt8E54DH",
+      "artifact_kind": "part",
+      "entity_id": "prt_047327721001CZ4T7tDHaD4h9M",
+      "revision": "snapshot",
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900884776
+    },
+    {
+      "authority_id": "owned:ca5ac8d4-6dc2-4a79-a738-87f18aaf9e00",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-054/run-mtcm0e2m/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cdd4d7ffecCh71dmt8E54DH",
+      "artifact_kind": "part",
+      "entity_id": "prt_047327724001g1Zjt40xJsZCBf",
+      "revision": "snapshot",
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900884776
+    },
+    {
+      "authority_id": "owned:ca5ac8d4-6dc2-4a79-a738-87f18aaf9e00",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-054/run-mtcm0e2m/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cdd4d7ffecCh71dmt8E54DH",
+      "artifact_kind": "part",
+      "entity_id": "prt_047327724001g1Zjt40xJsZCBf",
+      "revision": "complete:1787900886092#0",
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[14]",
+      "observed_at": 1787900886097
+    },
+    {
+      "authority_id": "owned:ca5ac8d4-6dc2-4a79-a738-87f18aaf9e00",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-054/run-mtcm0e2m/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cdd4d7ffecCh71dmt8E54DH",
+      "artifact_kind": "part",
+      "entity_id": "prt_047327724001g1Zjt40xJsZCBf",
+      "revision": "complete:1787900886092#1",
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[15]",
+      "observed_at": 1787900886097
+    },
+    {
+      "authority_id": "owned:ca5ac8d4-6dc2-4a79-a738-87f18aaf9e00",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-054/run-mtcm0e2m/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cdd4d7ffecCh71dmt8E54DH",
+      "artifact_kind": "part",
+      "entity_id": "prt_047327c4e0010FwMLXdHnoSSZX",
+      "revision": "snapshot",
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900886098
+    },
+    {
+      "authority_id": "owned:ca5ac8d4-6dc2-4a79-a738-87f18aaf9e00",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-054/run-mtcm0e2m/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cdd4d7ffecCh71dmt8E54DH",
+      "artifact_kind": "tool",
+      "entity_id": "MwUUGfA4F58lxMM9",
+      "revision": "state:pending",
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[16]",
+      "observed_at": 1787900886450
+    },
+    {
+      "authority_id": "owned:ca5ac8d4-6dc2-4a79-a738-87f18aaf9e00",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-054/run-mtcm0e2m/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cdd4d7ffecCh71dmt8E54DH",
+      "artifact_kind": "tool",
+      "entity_id": "MwUUGfA4F58lxMM9",
+      "revision": "state:running",
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[17]",
+      "observed_at": 1787900886450
+    },
+    {
+      "authority_id": "owned:ca5ac8d4-6dc2-4a79-a738-87f18aaf9e00",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-054/run-mtcm0e2m/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cdd4d7ffecCh71dmt8E54DH",
+      "artifact_kind": "part",
+      "entity_id": "prt_047327c4e0010FwMLXdHnoSSZX",
+      "revision": "complete:1787900886445#0",
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[18]",
+      "observed_at": 1787900886450
+    },
+    {
+      "authority_id": "owned:ca5ac8d4-6dc2-4a79-a738-87f18aaf9e00",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-054/run-mtcm0e2m/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cdd4d7ffecCh71dmt8E54DH",
+      "artifact_kind": "part",
+      "entity_id": "prt_047327c4e0010FwMLXdHnoSSZX",
+      "revision": "complete:1787900886445#1",
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[19]",
+      "observed_at": 1787900886450
+    },
+    {
+      "authority_id": "owned:ca5ac8d4-6dc2-4a79-a738-87f18aaf9e00",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-054/run-mtcm0e2m/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cdd4d7ffecCh71dmt8E54DH",
+      "artifact_kind": "permission",
+      "entity_id": "per_047327dcc0019sWrXLFG0r3t3b",
+      "revision": "pending",
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[20]",
+      "observed_at": 1787900886478
+    }
+  ],
+  "observation_checkpoints": [
+    {
+      "__error": "no such column: session_id"
+    }
+  ],
+  "observation_cursors": [
+    {
+      "__error": "no such column: session_id"
+    }
+  ],
+  "session_reconciliations": [
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "ordinal": 2,
+      "state": "unknown",
+      "reason": "OpenCode protocol negotiation failed; private daemon fallback is disabled",
+      "updated_at": 1787900906670
+    }
+  ],
+  "deletion_tombstones": [
+    {
+      "__error": "no such column: session_id"
+    }
+  ],
+  "attention_open": [
+    {
+      "session_id": "fe949c62-8da6-4168-bfa5-929c44f96c1f",
+      "kind": "permission",
+      "request_id": "per_047327dcc0019sWrXLFG0r3t3b"
+    }
+  ]
+}

@@ -1,0 +1,571 @@
+{
+  "dbPath": "/tmp/ocreal/phase-4/OC-REAL-052/run-mtcljzpp/polyth-data/sessions.db",
+  "sessionId": "68953b24-c875-494d-8617-4a14bbd8626e",
+  "capturedAt": "2026-08-28T06:56:01.551Z",
+  "integrityCheck": [
+    {
+      "integrity_check": "ok"
+    }
+  ],
+  "walCheckpoint": [
+    {
+      "__error": "disk I/O error"
+    }
+  ],
+  "journalMode": [
+    {
+      "journal_mode": "wal"
+    }
+  ],
+  "events": [
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 1,
+      "id": "c65c427e-80b9-441e-ad33-0421b36ba6a3",
+      "time": 1787900097011,
+      "type": "session/created",
+      "data": "{\"title\":\"s052\",\"projectId\":\"85fb96fd-a004-4cdc-b3d9-2d6f522e1f74\",\"model\":{\"providerID\":\"google\",\"modelID\":\"gemini-3.6-flash\"}}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 2,
+      "id": "47c67163-f5e7-4e45-b677-dce1f6a81077",
+      "time": 1787900097011,
+      "type": "mutation/prepared",
+      "data": "{\"operationId\":\"36645e81-efcc-4c92-b336-be408b636658\",\"ordinal\":1,\"mutationKind\":\"session-create\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 3,
+      "id": "4ce83252-5df5-4950-b84f-5f42f07afcd3",
+      "time": 1787900098703,
+      "type": "mutation/claimed",
+      "data": "{\"operationId\":\"36645e81-efcc-4c92-b336-be408b636658\",\"ordinal\":1,\"mutationKind\":\"session-create\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 4,
+      "id": "e7bb95c7-41b2-4e1b-ac62-d4567a0ddba8",
+      "time": 1787900100673,
+      "type": "mutation/confirmed",
+      "data": "{\"operationId\":\"36645e81-efcc-4c92-b336-be408b636658\",\"ordinal\":1,\"mutationKind\":\"session-create\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 5,
+      "id": "7921676d-5638-4eca-bd87-05ec161c968c",
+      "time": 1787900100674,
+      "type": "reconciliation/started",
+      "data": "{\"ordinal\":1}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 6,
+      "id": "799d2f94-a171-4264-9aa1-b7ce47efaf2e",
+      "time": 1787900100688,
+      "type": "runtime/status-observed",
+      "data": "{\"state\":\"idle\",\"causalOperationId\":\"36645e81-efcc-4c92-b336-be408b636658\",\"authorityId\":\"owned:c409bac3-b7c5-4b1d-9e99-523376e3baaa\",\"generation\":1,\"reason\":\"session-created\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 7,
+      "id": "17a9d3c3-2c70-400f-adea-054728a656db",
+      "time": 1787900100689,
+      "type": "reconciliation/completed",
+      "data": "{\"ordinal\":1,\"state\":\"ready\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 8,
+      "id": "3f0f229f-4e73-4003-a2e6-76ca2960e091",
+      "time": 1787900100817,
+      "type": "behavior/instructions-applied",
+      "data": "{\"revision\":\"ac1881c20498\",\"digest\":\"ac1881c204987623bf9d308f5e982a52ba471ba2f3b7e338f79184dd90b5e6c8\",\"scope\":\"global\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 9,
+      "id": "ef700dc7-b4ff-412e-9d78-d8c08627dbca",
+      "time": 1787900100817,
+      "type": "user/message",
+      "data": "{\"text\":\"First, write a 100 word paragraph about lighthouses (plain text). Then run the bash command `sleep 30`. After it finishes, write a 100 word paragraph about storms.\"}",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 10,
+      "id": "8fb53402-faa3-4452-9431-8bde401f6a12",
+      "time": 1787900100817,
+      "type": "mutation/prepared",
+      "data": "{\"operationId\":\"5d483dbf-5e2f-477e-9ab2-02256b0b0ef6\",\"ordinal\":2,\"mutationKind\":\"turn-submit\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 11,
+      "id": "4cb0ef59-f34f-4009-8985-6a9dfa7cbad8",
+      "time": 1787900100818,
+      "type": "mutation/claimed",
+      "data": "{\"operationId\":\"5d483dbf-5e2f-477e-9ab2-02256b0b0ef6\",\"ordinal\":2,\"mutationKind\":\"turn-submit\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 12,
+      "id": "5ba60989-d928-4a25-928f-bee344cea456",
+      "time": 1787900100826,
+      "type": "mutation/confirmed",
+      "data": "{\"operationId\":\"5d483dbf-5e2f-477e-9ab2-02256b0b0ef6\",\"ordinal\":2,\"mutationKind\":\"turn-submit\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 13,
+      "id": "81d4a23b-4623-4b17-949f-4ce78953f68f",
+      "time": 1787900100827,
+      "type": "turn/started",
+      "data": "{\"turnId\":\"turn_mtclk2xm_z8hyh5\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 14,
+      "id": "a7623d59-320d-4de7-bf4d-0178663d8c7e",
+      "time": 1787900120715,
+      "type": "assistant/reasoning-chunk",
+      "data": "{\"partId\":\"prt_047268cc5001PsVrLGWegMZDS2\",\"text\":\"**Initiating the Tasks**\\n\\nI've got the initial tasks lined up: crafting a paragraph about lighthouses, then a sleep command, followed by a storm-related paragraph. I am progressing with the first part. I will initiate the sleep command once the first paragraph is complete. After the sleep, I will begin writing the second paragraph.\\n\\n\\n**Refining the Approach**\\n\\nI'm now prioritizing clarity. The plan is clear, to write the lighthouse paragraph first. I've drafted it to meet the word count. Next, I will run the `sleep 30` command, using `bash`, followed by the storm paragraph. I'm focusing on concisely addressing how I will be running the `sleep 30` command.\\n\\n\\n**Analyzing the Words**\\n\\nI've carefully analyzed the lighthouse paragraph, checking the word count to ensure compliance with the instructions. I have determined that it is fully compliant, and will be using it to complete the task. I can now move to the next stage.\\n\\n\\n**Verifying the Count**\\n\\nI'm now meticulously verifying the word count for the lighthouse paragraph, ensuring it aligns with the specified requirements. I'm carefully double-checking the figures. It appears that the lighthouse paragraph I've drafted is 101 words. I will need to refine it. I will now examine and select words to modify to make the count fit.\\n\\n\\n**Adjusting the Text**\\n\\nI've examined the provided text. After refining the paragraph, the updated version focuses on core lighthouse aspects, reducing the word count to meet the requirement.\\n\\n\\n**Counting the Words**\\n\\nI've counted the words in the provided lighthouse description, which totals 65 tokens. I will need to reduce the text to fit within the constraints. I will work on reducing the count now.\\n\\n\\n**Finalizing the Strategy**\\n\\nI've crafted the lighthouse text to align precisely with the word count. Next, I plan to output the lighthouse paragraph, then execute the `sleep 30` command, followed by the storm text…[2746 bytes]",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 15,
+      "id": "2f6f0a5d-e09a-430c-a574-79b4fbf441ee",
+      "time": 1787900120715,
+      "type": "assistant/message",
+      "data": "{\"partId\":\"prt_047268cc5001PsVrLGWegMZDS2\",\"text\":\"\",\"reasoning\":\"**Initiating the Tasks**\\n\\nI've got the initial tasks lined up: crafting a paragraph about lighthouses, then a sleep command, followed by a storm-related paragraph. I am progressing with the first part. I will initiate the sleep command once the first paragraph is complete. After the sleep, I will begin writing the second paragraph.\\n\\n\\n**Refining the Approach**\\n\\nI'm now prioritizing clarity. The plan is clear, to write the lighthouse paragraph first. I've drafted it to meet the word count. Next, I will run the `sleep 30` command, using `bash`, followed by the storm paragraph. I'm focusing on concisely addressing how I will be running the `sleep 30` command.\\n\\n\\n**Analyzing the Words**\\n\\nI've carefully analyzed the lighthouse paragraph, checking the word count to ensure compliance with the instructions. I have determined that it is fully compliant, and will be using it to complete the task. I can now move to the next stage.\\n\\n\\n**Verifying the Count**\\n\\nI'm now meticulously verifying the word count for the lighthouse paragraph, ensuring it aligns with the specified requirements. I'm carefully double-checking the figures. It appears that the lighthouse paragraph I've drafted is 101 words. I will need to refine it. I will now examine and select words to modify to make the count fit.\\n\\n\\n**Adjusting the Text**\\n\\nI've examined the provided text. After refining the paragraph, the updated version focuses on core lighthouse aspects, reducing the word count to meet the requirement.\\n\\n\\n**Counting the Words**\\n\\nI've counted the words in the provided lighthouse description, which totals 65 tokens. I will need to reduce the text to fit within the constraints. I will work on reducing the count now.\\n\\n\\n**Finalizing the Strategy**\\n\\nI've crafted the lighthouse text to align precisely with the word count. Next, I plan to output the lighthouse paragraph, then execute the `sleep 30` command, followed by…[2761 bytes]",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 16,
+      "id": "5d7a881f-74a9-4d66-8b58-5b5eefdaa7cf",
+      "time": 1787900121370,
+      "type": "tool/call",
+      "data": "{\"callId\":\"YjfguphKmMZNnIAi\",\"tool\":\"bash\",\"input\":{},\"status\":\"pending\"}",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 17,
+      "id": "d3342a88-9a96-4637-9452-0f4d46d42fb8",
+      "time": 1787900121371,
+      "type": "tool/started",
+      "data": "{\"callId\":\"YjfguphKmMZNnIAi\",\"tool\":\"bash\",\"input\":{\"command\":\"sleep 30\"}}",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 18,
+      "id": "81009a19-2137-42e8-8a60-e88b034a1a43",
+      "time": 1787900121387,
+      "type": "assistant/chunk",
+      "data": "{\"partId\":\"prt_04726ce88001eAztpUPona2WLl\",\"text\":\"Lighthouses stand as timeless beacons along rugged coastlines, guiding mariners safely through perilous waters. Emerging from dense fog or pitch-black nights, their sweeping light beams offer reassurance and direction to sailors navigating treacherous rocky shores. Historically crafted from stone or iron, these towering structures withstand relentless ocean waves and fierce coastal winds. Within their lantern rooms, powerful Fresnel lenses focus bright light miles across the dark sea, warning ships of hidden shoals and shallow reefs. Beyond their practical maritime function, lighthouses symbolize hope, vigilance, and sanctuary, enduring as iconic monuments to human ingenuity and perseverance amidst nature's unpredictable, untamed elements.\"}",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 19,
+      "id": "3bf5bc99-ab7c-4f29-a753-fe2e757ff255",
+      "time": 1787900121387,
+      "type": "assistant/message",
+      "data": "{\"partId\":\"prt_04726ce88001eAztpUPona2WLl\",\"text\":\"Lighthouses stand as timeless beacons along rugged coastlines, guiding mariners safely through perilous waters. Emerging from dense fog or pitch-black nights, their sweeping light beams offer reassurance and direction to sailors navigating treacherous rocky shores. Historically crafted from stone or iron, these towering structures withstand relentless ocean waves and fierce coastal winds. Within their lantern rooms, powerful Fresnel lenses focus bright light miles across the dark sea, warning ships of hidden shoals and shallow reefs. Beyond their practical maritime function, lighthouses symbolize hope, vigilance, and sanctuary, enduring as iconic monuments to human ingenuity and perseverance amidst nature's unpredictable, untamed elements.\",\"tokens\":{\"input\":0,\"output\":0,\"reasoning\":0,\"cacheRead\":0,\"cacheWrite\":0},\"cost\":0}",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 20,
+      "id": "3a8d44e7-4655-41e1-9833-a7d0e4c7ed10",
+      "time": 1787900121548,
+      "type": "reconciliation/started",
+      "data": "{\"ordinal\":2}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "seq": 21,
+      "id": "fa21157d-a7b9-4b22-ba1d-26131d649e83",
+      "time": 1787900141549,
+      "type": "reconciliation/blocked",
+      "data": "{\"ordinal\":2,\"state\":\"unknown\",\"reason\":\"OpenCode protocol negotiation failed; private daemon fallback is disabled\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    }
+  ],
+  "projections": [
+    {
+      "__error": "no such column: id"
+    }
+  ],
+  "runtime_operations": [
+    {
+      "operation_id": "36645e81-efcc-4c92-b336-be408b636658",
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "ordinal": 1,
+      "mutation_kind": "session-create",
+      "state": "confirmed",
+      "replay_kind": "never",
+      "replay_contract": null,
+      "created_at": 1787900097011,
+      "updated_at": 1787900100673,
+      "code": null,
+      "message": null,
+      "receipt": "ses_fb8d97fc6ffeAYNeDTiGFfgxBE",
+      "owner_event_seq": 1
+    },
+    {
+      "operation_id": "5d483dbf-5e2f-477e-9ab2-02256b0b0ef6",
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "ordinal": 2,
+      "mutation_kind": "turn-submit",
+      "state": "confirmed",
+      "replay_kind": "never",
+      "replay_contract": null,
+      "created_at": 1787900100817,
+      "updated_at": 1787900100826,
+      "code": null,
+      "message": null,
+      "receipt": null,
+      "owner_event_seq": 9
+    }
+  ],
+  "session_queue": [],
+  "response_intents": [],
+  "observations": [
+    {
+      "authority_id": "owned:c409bac3-b7c5-4b1d-9e99-523376e3baaa",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-052/run-mtcljzpp/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8d97fc6ffeAYNeDTiGFfgxBE",
+      "artifact_kind": "status",
+      "entity_id": "ses_fb8d97fc6ffeAYNeDTiGFfgxBE",
+      "revision": "causal:36645e81-efcc-4c92-b336-be408b636658",
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[6]",
+      "observed_at": 1787900100688
+    },
+    {
+      "authority_id": "owned:c409bac3-b7c5-4b1d-9e99-523376e3baaa",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-052/run-mtcljzpp/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8d97fc6ffeAYNeDTiGFfgxBE",
+      "artifact_kind": "turn",
+      "entity_id": "ses_fb8d97fc6ffeAYNeDTiGFfgxBE",
+      "revision": "1.18.18",
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900100844
+    },
+    {
+      "authority_id": "owned:c409bac3-b7c5-4b1d-9e99-523376e3baaa",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-052/run-mtcljzpp/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8d97fc6ffeAYNeDTiGFfgxBE",
+      "artifact_kind": "message",
+      "entity_id": "msg_0472680df001dKcMDCLg9wEOnn",
+      "revision": "snapshot",
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900101181
+    },
+    {
+      "authority_id": "owned:c409bac3-b7c5-4b1d-9e99-523376e3baaa",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-052/run-mtcljzpp/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8d97fc6ffeAYNeDTiGFfgxBE",
+      "artifact_kind": "part",
+      "entity_id": "prt_0472680e5001HUYBDDXeqHeaQj",
+      "revision": "snapshot",
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900101181
+    },
+    {
+      "authority_id": "owned:c409bac3-b7c5-4b1d-9e99-523376e3baaa",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-052/run-mtcljzpp/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8d97fc6ffeAYNeDTiGFfgxBE",
+      "artifact_kind": "status",
+      "entity_id": "ses_fb8d97fc6ffeAYNeDTiGFfgxBE",
+      "revision": "state:running",
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900101195
+    },
+    {
+      "authority_id": "owned:c409bac3-b7c5-4b1d-9e99-523376e3baaa",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-052/run-mtcljzpp/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8d97fc6ffeAYNeDTiGFfgxBE",
+      "artifact_kind": "message",
+      "entity_id": "msg_047268229001gNSMvsfG0Lzxtr",
+      "revision": "snapshot",
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900101195
+    },
+    {
+      "authority_id": "owned:c409bac3-b7c5-4b1d-9e99-523376e3baaa",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-052/run-mtcljzpp/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8d97fc6ffeAYNeDTiGFfgxBE",
+      "artifact_kind": "part",
+      "entity_id": "prt_047268cc3001ZHhRk6OpEzHHln",
+      "revision": "snapshot",
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900103880
+    },
+    {
+      "authority_id": "owned:c409bac3-b7c5-4b1d-9e99-523376e3baaa",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-052/run-mtcljzpp/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8d97fc6ffeAYNeDTiGFfgxBE",
+      "artifact_kind": "part",
+      "entity_id": "prt_047268cc5001PsVrLGWegMZDS2",
+      "revision": "snapshot",
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900103881
+    },
+    {
+      "authority_id": "owned:c409bac3-b7c5-4b1d-9e99-523376e3baaa",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-052/run-mtcljzpp/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8d97fc6ffeAYNeDTiGFfgxBE",
+      "artifact_kind": "part",
+      "entity_id": "prt_047268cc5001PsVrLGWegMZDS2",
+      "revision": "complete:1787900120708#0",
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[14]",
+      "observed_at": 1787900120715
+    },
+    {
+      "authority_id": "owned:c409bac3-b7c5-4b1d-9e99-523376e3baaa",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-052/run-mtcljzpp/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8d97fc6ffeAYNeDTiGFfgxBE",
+      "artifact_kind": "part",
+      "entity_id": "prt_047268cc5001PsVrLGWegMZDS2",
+      "revision": "complete:1787900120708#1",
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[15]",
+      "observed_at": 1787900120715
+    },
+    {
+      "authority_id": "owned:c409bac3-b7c5-4b1d-9e99-523376e3baaa",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-052/run-mtcljzpp/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8d97fc6ffeAYNeDTiGFfgxBE",
+      "artifact_kind": "part",
+      "entity_id": "prt_04726ce88001eAztpUPona2WLl",
+      "revision": "snapshot",
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900120715
+    },
+    {
+      "authority_id": "owned:c409bac3-b7c5-4b1d-9e99-523376e3baaa",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-052/run-mtcljzpp/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8d97fc6ffeAYNeDTiGFfgxBE",
+      "artifact_kind": "tool",
+      "entity_id": "YjfguphKmMZNnIAi",
+      "revision": "state:pending",
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[16]",
+      "observed_at": 1787900121370
+    },
+    {
+      "authority_id": "owned:c409bac3-b7c5-4b1d-9e99-523376e3baaa",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-052/run-mtcljzpp/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8d97fc6ffeAYNeDTiGFfgxBE",
+      "artifact_kind": "tool",
+      "entity_id": "YjfguphKmMZNnIAi",
+      "revision": "state:running",
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[17]",
+      "observed_at": 1787900121371
+    },
+    {
+      "authority_id": "owned:c409bac3-b7c5-4b1d-9e99-523376e3baaa",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-052/run-mtcljzpp/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8d97fc6ffeAYNeDTiGFfgxBE",
+      "artifact_kind": "part",
+      "entity_id": "prt_04726ce88001eAztpUPona2WLl",
+      "revision": "complete:1787900121380#0",
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[18]",
+      "observed_at": 1787900121387
+    },
+    {
+      "authority_id": "owned:c409bac3-b7c5-4b1d-9e99-523376e3baaa",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-052/run-mtcljzpp/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8d97fc6ffeAYNeDTiGFfgxBE",
+      "artifact_kind": "part",
+      "entity_id": "prt_04726ce88001eAztpUPona2WLl",
+      "revision": "complete:1787900121380#1",
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[19]",
+      "observed_at": 1787900121387
+    }
+  ],
+  "observation_checkpoints": [
+    {
+      "__error": "no such column: session_id"
+    }
+  ],
+  "observation_cursors": [
+    {
+      "__error": "no such column: session_id"
+    }
+  ],
+  "session_reconciliations": [
+    {
+      "session_id": "68953b24-c875-494d-8617-4a14bbd8626e",
+      "ordinal": 2,
+      "state": "unknown",
+      "reason": "OpenCode protocol negotiation failed; private daemon fallback is disabled",
+      "updated_at": 1787900141549
+    }
+  ],
+  "deletion_tombstones": [
+    {
+      "__error": "no such column: session_id"
+    }
+  ],
+  "attention_open": []
+}

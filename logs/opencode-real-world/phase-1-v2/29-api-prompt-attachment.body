@@ -1,0 +1,1 @@
+{"data":{"admittedSeq":4,"id":"msg_phase1v2_002","sessionID":"ses_phase1v2_001","prompt":{"text":"Read the attached marker and reply with its content.","files":[{"uri":"file:///tmp/polyth-oc-phase1-v2/project/marker.txt","mime":"text/plain","name":"marker.txt"}]},"delivery":"queue","timeCreated":1787887099835}}

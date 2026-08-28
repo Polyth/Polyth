@@ -1,0 +1,24 @@
+{
+  "id": "OC-REAL-050",
+  "runId": "run-mtckl129",
+  "startedAt": "2026-08-28T06:27:45.798Z",
+  "gitSha": "9e0fb6d24bc0cca7a9881a5516c03208f99e1b12",
+  "opencode": {
+    "version": "1.18.18",
+    "binary": "/home/ubuntu/.local/bin/opencode",
+    "sha256": "bb71f45b564f9234a97f54d6252a4a41d2f4388ae4b078918f691824cc3b3e54"
+  },
+  "node": "v22.22.2",
+  "os": "linux x64",
+  "protocol": "legacy (forced)",
+  "polythPort": 15143,
+  "projectPath": "/tmp/ocreal/phase-4/OC-REAL-050/run-mtckl129/project",
+  "polythDataDir": "/tmp/ocreal/phase-4/OC-REAL-050/run-mtckl129/polyth-data",
+  "opencodeConfigDir": "/tmp/ocreal/phase-4/OC-REAL-050/run-mtckl129/opencode-config",
+  "xdgDataHome": "/tmp/ocreal/phase-4/OC-REAL-050/run-mtckl129/xdg-data",
+  "faultSeed": "OC-REAL-050-swallow-create-response-kill",
+  "projectId": "83ceb2b7-3f4d-4d1c-a259-a3a674df90ce",
+  "proxy": {
+    "rule": "swallow-kill POST ^/session$ oneshot"
+  }
+}

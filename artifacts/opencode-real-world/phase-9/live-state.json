@@ -1,0 +1,32 @@
+{
+  "note": "Final Polyth and its owned runtime intentionally remain running for follow-up inspection.",
+  "baseUrl": "http://127.0.0.1:15290",
+  "scratch": "/tmp/ocreal/phase-9/scaled-mtcp5xea",
+  "polyth": {
+    "pid": 144847,
+    "state": "S",
+    "parentPid": 143944,
+    "startIdentity": "2023567",
+    "executable": "/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node",
+    "command": "/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node /workspace/artifacts/opencode-real-world/phase-4/tools/boot-polyth.mjs",
+    "cwd": "/workspace"
+  },
+  "wrapper": {
+    "pid": 144867,
+    "state": "S",
+    "parentPid": 144847,
+    "startIdentity": "2023625",
+    "executable": "/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node",
+    "command": "node /workspace/artifacts/opencode-real-world/phase-4/tools/shim-proxy.mjs serve --hostname 127.0.0.1 --port 46117",
+    "cwd": "/tmp/ocreal/phase-9/scaled-mtcp5xea/project"
+  },
+  "child": {
+    "pid": 144875,
+    "state": "S",
+    "parentPid": 144867,
+    "startIdentity": "2023629",
+    "executable": "/home/ubuntu/.opencode/bin/opencode",
+    "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 0",
+    "cwd": "/tmp/ocreal/phase-9/scaled-mtcp5xea/project"
+  }
+}

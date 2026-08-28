@@ -1,0 +1,57 @@
+{
+  "cases": [
+    {
+      "name": "single-choice",
+      "action": {
+        "answered": {
+          "answers": [
+            [
+              "red"
+            ]
+          ]
+        }
+      },
+      "toolOutcome": {
+        "status": "completed",
+        "output": "User has answered your questions: \"Which color do you prefer?\"=\"red\". You can now continue with the user's answers in mind.",
+        "error": ""
+      }
+    },
+    {
+      "name": "multi-choice"
+    },
+    {
+      "name": "free-text"
+    },
+    {
+      "name": "multi-question",
+      "action": {
+        "answered": {
+          "answers": [
+            [
+              "blue"
+            ],
+            [
+              "small"
+            ]
+          ]
+        }
+      },
+      "toolOutcome": {
+        "status": "completed",
+        "output": "User has answered your questions: \"Which fruits do you like?\"=\"blue\", \"What is your favorite city?\"=\"small\". You can now continue with the user's answers in min",
+        "error": ""
+      }
+    },
+    {
+      "name": "reject-case"
+    },
+    {
+      "name": "race-case"
+    }
+  ],
+  "failures": [
+    "multi-choice answers not visible",
+    "free-text answer not visible"
+  ]
+}

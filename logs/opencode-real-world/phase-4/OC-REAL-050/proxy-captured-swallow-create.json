@@ -1,0 +1,15 @@
+{
+  "ts": "2026-08-28T06:27:49.240Z",
+  "rule": "swallow-create",
+  "request": {
+    "method": "POST",
+    "path": "/session?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-050%2Frun-mtckl129%2Fproject",
+    "bodyBytes": 33,
+    "body": "{\"title\":\"s050 ambiguous create\"}"
+  },
+  "response": {
+    "status": 200,
+    "bodyBytes": 403,
+    "body": "{\"id\":\"ses_fb8f2648fffenamCjxHPDB2xWG\",\"slug\":\"happy-planet\",\"projectID\":\"global\",\"directory\":\"/tmp/ocreal/phase-4/OC-REAL-050/run-mtckl129/project\",\"path\":\"tmp/ocreal/phase-4/OC-REAL-050/run-mtckl129/project\",\"cost\":0,\"tokens\":{\"input\":0,\"output\":0,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}},\"title\":\"s050 ambiguous create\",\"version\":\"1.18.18\",\"time\":{\"created\":1787898469233,\"updated\":1787898469233}}"
+  }
+}

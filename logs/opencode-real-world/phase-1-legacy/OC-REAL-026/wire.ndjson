@@ -1,0 +1,4 @@
+{"t":1787887401545,"kind":"request","method":"GET","path":"/global/health"}
+{"t":1787887401548,"kind":"response","method":"GET","path":"/global/health","status":200,"bytes":36,"body":{"healthy":true,"version":"1.18.18"}}
+{"t":1787887401548,"kind":"request","method":"GET","path":"/api/health"}
+{"t":1787887401550,"kind":"response","method":"GET","path":"/api/health","status":200,"bytes":16,"body":{"healthy":true}}

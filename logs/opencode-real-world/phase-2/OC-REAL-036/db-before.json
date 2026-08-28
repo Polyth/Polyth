@@ -1,0 +1,175 @@
+{
+  "integrityCheck": [
+    {
+      "integrity_check": "ok"
+    }
+  ],
+  "walCheckpoint": [
+    {
+      "busy": 0,
+      "log": 116,
+      "checkpointed": 116
+    }
+  ],
+  "events": [
+    {
+      "session_id": "dc78a368-c5ae-4f3a-8fd8-af91578980f3",
+      "seq": 1,
+      "id": "53dd255f-bb3b-43c5-b9dd-14267a566743",
+      "time": 1787894190737,
+      "type": "session/created",
+      "data": "{\"title\":\"OC-REAL-036 timeout\",\"projectId\":\"phase-2-project\",\"model\":{\"providerID\":\"opencode\",\"modelID\":\"big-pickle\"}}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "dc78a368-c5ae-4f3a-8fd8-af91578980f3",
+      "seq": 2,
+      "id": "13973410-b219-4612-af1b-4ea1cc27b506",
+      "time": 1787894190737,
+      "type": "mutation/prepared",
+      "data": "{\"operationId\":\"17e7cfbd-3d2e-4f18-b767-dc0d9d5ed11a\",\"ordinal\":1,\"mutationKind\":\"session-create\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "dc78a368-c5ae-4f3a-8fd8-af91578980f3",
+      "seq": 3,
+      "id": "41e417f6-a58b-4b53-823c-e3af269f05f1",
+      "time": 1787894192501,
+      "type": "mutation/claimed",
+      "data": "{\"operationId\":\"17e7cfbd-3d2e-4f18-b767-dc0d9d5ed11a\",\"ordinal\":1,\"mutationKind\":\"session-create\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "dc78a368-c5ae-4f3a-8fd8-af91578980f3",
+      "seq": 4,
+      "id": "1cd8b532-f8b8-4ec1-b65d-0623ea6cc298",
+      "time": 1787894195959,
+      "type": "mutation/confirmed",
+      "data": "{\"operationId\":\"17e7cfbd-3d2e-4f18-b767-dc0d9d5ed11a\",\"ordinal\":1,\"mutationKind\":\"session-create\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "dc78a368-c5ae-4f3a-8fd8-af91578980f3",
+      "seq": 5,
+      "id": "b64a368c-dd0c-4bc0-b5e1-57d633e87439",
+      "time": 1787894195960,
+      "type": "reconciliation/started",
+      "data": "{\"ordinal\":1}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "dc78a368-c5ae-4f3a-8fd8-af91578980f3",
+      "seq": 6,
+      "id": "4141a2b7-251c-4708-ae61-5caef19d556e",
+      "time": 1787894195981,
+      "type": "runtime/status-observed",
+      "data": "{\"state\":\"idle\",\"causalOperationId\":\"17e7cfbd-3d2e-4f18-b767-dc0d9d5ed11a\",\"authorityId\":\"owned:4a6bdbf1-4279-426a-a4d3-38772f8d2ca8\",\"generation\":1,\"reason\":\"session-created\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "dc78a368-c5ae-4f3a-8fd8-af91578980f3",
+      "seq": 7,
+      "id": "99055efa-9947-4cfe-beff-84ff9e75600f",
+      "time": 1787894195981,
+      "type": "reconciliation/completed",
+      "data": "{\"ordinal\":1,\"state\":\"ready\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    }
+  ],
+  "projections": [
+    {
+      "session_id": "dc78a368-c5ae-4f3a-8fd8-af91578980f3",
+      "data": "{\"id\":\"dc78a368-c5ae-4f3a-8fd8-af91578980f3\",\"projectId\":\"phase-2-project\",\"title\":\"OC-REAL-036 timeout\",\"model\":{\"providerID\":\"opencode\",\"modelID\":\"big-pickle\"},\"createdAt\":1787894190736,\"updatedAt\":1787894195981,\"status\":\"idle\",\"backendSessionId\":\"ses_fb933990fffe2hivurpWZgEUV1\",\"runtimeBinding\":{\"backendSessionId\":\"ses_fb933990fffe2hivurpWZgEUV1\",\"authorityId\":\"owned:4a6bdbf1-4279-426a-a4d3-38772f8d2ca8\",\"generation\":1,\"continuity\":\"generation-only\",\"protocol\":\"legacy\",\"location\":{\"directory\":\"/tmp/ocreal-phase2/oc-real-036-mtci1egf/project\"}}}",
+      "project_id": "phase-2-project"
+    }
+  ],
+  "runtime_operations": [
+    {
+      "operation_id": "17e7cfbd-3d2e-4f18-b767-dc0d9d5ed11a",
+      "session_id": "dc78a368-c5ae-4f3a-8fd8-af91578980f3",
+      "ordinal": 1,
+      "mutation_kind": "session-create",
+      "state": "confirmed",
+      "replay_kind": "never",
+      "replay_contract": null,
+      "created_at": 1787894190736,
+      "updated_at": 1787894195959,
+      "code": null,
+      "message": null,
+      "receipt": "ses_fb933990fffe2hivurpWZgEUV1",
+      "owner_event_seq": 1
+    }
+  ],
+  "session_queue": [],
+  "response_intents": [],
+  "observations": [
+    {
+      "authority_id": "owned:4a6bdbf1-4279-426a-a4d3-38772f8d2ca8",
+      "directory": "/tmp/ocreal-phase2/oc-real-036-mtci1egf/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb933990fffe2hivurpWZgEUV1",
+      "artifact_kind": "status",
+      "entity_id": "ses_fb933990fffe2hivurpWZgEUV1",
+      "revision": "causal:17e7cfbd-3d2e-4f18-b767-dc0d9d5ed11a",
+      "session_id": "dc78a368-c5ae-4f3a-8fd8-af91578980f3",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[6]",
+      "observed_at": 1787894195981
+    }
+  ],
+  "observation_checkpoints": [
+    {
+      "authority_id": "owned:4a6bdbf1-4279-426a-a4d3-38772f8d2ca8",
+      "directory": "/tmp/ocreal-phase2/oc-real-036-mtci1egf/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb933990fffe2hivurpWZgEUV1",
+      "artifact_kind": "status",
+      "entity_id": "ses_fb933990fffe2hivurpWZgEUV1",
+      "revision": "causal:17e7cfbd-3d2e-4f18-b767-dc0d9d5ed11a",
+      "state_rank": null,
+      "value": "{\"state\":\"idle\",\"causalOperationId\":\"17e7cfbd-3d2e-4f18-b767-dc0d9d5ed11a\"}",
+      "updated_at": 1787894195981
+    }
+  ],
+  "observation_cursors": [],
+  "session_reconciliations": [
+    {
+      "session_id": "dc78a368-c5ae-4f3a-8fd8-af91578980f3",
+      "ordinal": 1,
+      "state": "ready",
+      "reason": null,
+      "updated_at": 1787894195981
+    }
+  ],
+  "deletion_tombstones": [],
+  "attention_open": []
+}

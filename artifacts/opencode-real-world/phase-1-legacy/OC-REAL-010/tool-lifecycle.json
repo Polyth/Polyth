@@ -1,0 +1,52 @@
+{
+  "toolLifecycles": {
+    "zKSsqD1Z1d1FsIXm": [
+      "call:pending",
+      "tool/started",
+      "tool/result"
+    ],
+    "eHKKxPXHf3VR4oYx": [
+      "call:pending",
+      "tool/started",
+      "tool/result"
+    ]
+  },
+  "readToolUsed": true,
+  "writeToolUsed": true,
+  "sideEffectContent": "TOOLSIDEEFFECT-67890",
+  "rawToolPartTransitions": [
+    {
+      "tool": "read",
+      "callID": "zKSsqD1Z1d1FsIXm",
+      "status": "pending"
+    },
+    {
+      "tool": "read",
+      "callID": "zKSsqD1Z1d1FsIXm",
+      "status": "running"
+    },
+    {
+      "tool": "read",
+      "callID": "zKSsqD1Z1d1FsIXm",
+      "status": "completed"
+    },
+    {
+      "tool": "write",
+      "callID": "eHKKxPXHf3VR4oYx",
+      "status": "pending"
+    },
+    {
+      "tool": "write",
+      "callID": "eHKKxPXHf3VR4oYx",
+      "status": "running"
+    },
+    {
+      "tool": "write",
+      "callID": "eHKKxPXHf3VR4oYx",
+      "status": "completed"
+    }
+  ],
+  "eventCountReadTurn": 18,
+  "eventCountTotal": 34,
+  "failures": []
+}

@@ -1,0 +1,174 @@
+{
+  "source": "Captured from opencode 1.18.18 GET /api/model and GET /api/provider (sanitized: request.body stripped).",
+  "models": [
+    {
+      "id": "gemini-flash-latest",
+      "providerID": "google",
+      "family": "gemini-flash",
+      "name": "Gemini Flash Latest",
+      "api": {
+        "id": "gemini-flash-latest",
+        "type": "aisdk",
+        "package": "@ai-sdk/google"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "video",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "request": {
+        "headers": {},
+        "body": {}
+      },
+      "variants": [],
+      "time": {
+        "released": 1786579200000
+      },
+      "cost": [
+        {
+          "input": 0.75,
+          "output": 3.75,
+          "cache": {
+            "read": 0.075,
+            "write": 0
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1048576,
+        "output": 65536
+      }
+    },
+    {
+      "id": "x-preview-f-free",
+      "providerID": "opencode",
+      "name": "Ox Alpha Free (Unlimited)",
+      "api": {
+        "id": "x-preview-f-free",
+        "type": "aisdk",
+        "package": "@ai-sdk/openai-compatible",
+        "url": "https://opencode.ai/zen/v1"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "request": {
+        "headers": {},
+        "body": {}
+      },
+      "variants": [],
+      "time": {
+        "released": 1787270400000
+      },
+      "cost": [
+        {
+          "input": 0,
+          "output": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      ],
+      "status": "deprecated",
+      "enabled": true,
+      "limit": {
+        "context": 1000000,
+        "output": 131072
+      }
+    },
+    {
+      "id": "gemini-3.7-flash",
+      "providerID": "google",
+      "family": "gemini-flash",
+      "name": "Gemini 3.7 Flash",
+      "api": {
+        "id": "gemini-3.7-flash",
+        "type": "aisdk",
+        "package": "@ai-sdk/google"
+      },
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text",
+          "image",
+          "video",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "request": {
+        "headers": {},
+        "body": {}
+      },
+      "variants": [],
+      "time": {
+        "released": 1786579200000
+      },
+      "cost": [
+        {
+          "input": 0.75,
+          "output": 3.75,
+          "cache": {
+            "read": 0.075,
+            "write": 0
+          }
+        }
+      ],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1048576,
+        "output": 65536
+      }
+    }
+  ],
+  "providers": [
+    {
+      "id": "google",
+      "name": "Google",
+      "api": {
+        "type": "aisdk",
+        "package": "@ai-sdk/google"
+      },
+      "request": {
+        "headers": {},
+        "body": {}
+      }
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode Zen",
+      "api": {
+        "type": "aisdk",
+        "package": "@ai-sdk/openai-compatible",
+        "url": "https://opencode.ai/zen/v1"
+      },
+      "request": {
+        "headers": {},
+        "body": {}
+      }
+    }
+  ]
+}

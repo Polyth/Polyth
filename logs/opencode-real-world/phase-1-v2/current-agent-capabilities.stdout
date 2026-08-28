@@ -1,0 +1,29 @@
+{
+  "sessionId": "ses_fb941780affeXonzmXga0o19xu",
+  "simpleTerminal": false,
+  "toolTerminal": false,
+  "questionObserved": false,
+  "permissionObserved": false,
+  "stream": {
+    "eventCount": 11,
+    "eventTypes": [
+      "server.connected",
+      "session.next.prompt.admitted",
+      "session.next.prompted",
+      "session.next.prompt.admitted",
+      "session.next.prompted",
+      "session.next.prompt.admitted",
+      "session.next.prompted",
+      "session.next.prompt.admitted",
+      "session.next.prompted",
+      "session.next.prompt.admitted",
+      "session.next.prompted"
+    ],
+    "hasText": false,
+    "hasReasoning": false,
+    "hasTool": false,
+    "hasQuestion": false,
+    "hasPermission": false,
+    "hasInterrupted": false
+  }
+}

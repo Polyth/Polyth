@@ -1,0 +1,16 @@
+{
+  "id": "OC-REAL-016",
+  "verdict": "pass",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy (forced)",
+  "observed": "answers delivered exactly: single-choice red, multi-choice apple+cherry, free-text Lisbon, multi-question positional arrays all reflected verbatim in the real question tool output; reject produced a non-completed tool state; reply-vs-reject race on one request -> exactly one confirmed winner, loser rejected upstream",
+  "expected": "one upstream action, one durable winner, exact answer arrays",
+  "attribution": "NONE",
+  "evidence": [
+    "artifacts/opencode-real-world/phase-1-legacy/OC-REAL-016/question-replies.json",
+    "artifacts/opencode-real-world/phase-1-legacy/OC-REAL-016/question-replies-run1.json",
+    "artifacts/opencode-real-world/phase-1-legacy/OC-REAL-016/question-replies-run3.json",
+    "artifacts/opencode-real-world/phase-1-legacy/OC-REAL-016/question-replies-run4.json"
+  ],
+  "notes": "Web-vs-mobile CAS race is Polyth server-layer; the upstream single-winner contract is pinned here (run3 race case). Per-run gaps were provider daily-quota exhaustion, not Polyth."
+}

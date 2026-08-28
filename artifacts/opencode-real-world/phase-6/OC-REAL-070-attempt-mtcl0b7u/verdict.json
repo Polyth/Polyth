@@ -1,0 +1,24 @@
+{
+  "id": "OC-REAL-070",
+  "verdict": "fail",
+  "engine": "R+H",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy",
+  "observed": "race/TOCTOU violations: attempt 0: unbounded rejection ENOENT | attempt 0: rejected create left a ready projection for /tmp/polyth-tests/project-a/worktree-doom-0 | attempt 1: unbounded rejection ENOENT",
+  "expected": "one valid location or bounded rejection; no runtime for an unverified path; no orphan/duplicate runtime; no wrong branch",
+  "attribution": "POLYTH",
+  "crossTreeLeakBlocker": false,
+  "identifiers": {},
+  "evidence": [
+    "artifacts/opencode-real-world/phase-6/OC-REAL-070/details.json",
+    "logs/opencode-real-world/phase-6/OC-REAL-070/wire.ndjson",
+    "logs/opencode-real-world/phase-6/OC-REAL-070/polyth.ndjson",
+    "logs/opencode-real-world/phase-6/OC-REAL-070/db-after-r.json"
+  ],
+  "failures": [
+    "attempt 0: unbounded rejection ENOENT",
+    "attempt 0: rejected create left a ready projection for /tmp/polyth-tests/project-a/worktree-doom-0",
+    "attempt 1: unbounded rejection ENOENT",
+    "attempt 1: rejected create left a ready projection for /tmp/polyth-tests/project-a/worktree-doom-1"
+  ]
+}

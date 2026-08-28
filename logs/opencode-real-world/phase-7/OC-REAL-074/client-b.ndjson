@@ -1,0 +1,2 @@
+{"t":1787906157826,"client":"client-b","kind":"request","method":"POST","path":"/api/sessions/4ae9614d-94e7-410b-b5c3-91524583ef42/permission/per_04782eced001PcE42X5oVUfMDe","body":{"reply":"reject"}}
+{"t":1787906157841,"client":"client-b","kind":"response","method":"POST","path":"/api/sessions/4ae9614d-94e7-410b-b5c3-91524583ef42/permission/per_04782eced001PcE42X5oVUfMDe","status":200,"bytes":11,"body":"{\"ok\":true}"}

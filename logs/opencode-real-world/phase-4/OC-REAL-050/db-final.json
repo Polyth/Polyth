@@ -1,0 +1,116 @@
+{
+  "dbPath": "/tmp/ocreal/phase-4/OC-REAL-050/run-mtckl129/polyth-data/sessions.db",
+  "sessionId": "fc5257c0-e506-493a-a614-58d10566c8ae",
+  "capturedAt": "2026-08-28T06:28:12.292Z",
+  "integrityCheck": [
+    {
+      "integrity_check": "ok"
+    }
+  ],
+  "walCheckpoint": [
+    {
+      "__error": "disk I/O error"
+    }
+  ],
+  "journalMode": [
+    {
+      "journal_mode": "wal"
+    }
+  ],
+  "events": [
+    {
+      "session_id": "fc5257c0-e506-493a-a614-58d10566c8ae",
+      "seq": 1,
+      "id": "7d0cc2c3-998e-4017-9286-550f9d402820",
+      "time": 1787898465923,
+      "type": "session/created",
+      "data": "{\"title\":\"s050 ambiguous create\",\"projectId\":\"83ceb2b7-3f4d-4d1c-a259-a3a674df90ce\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fc5257c0-e506-493a-a614-58d10566c8ae",
+      "seq": 2,
+      "id": "db668da8-e282-40a7-b27b-92e2f44602c0",
+      "time": 1787898465923,
+      "type": "mutation/prepared",
+      "data": "{\"operationId\":\"60d2c032-d94e-41f3-baca-04c069939db7\",\"ordinal\":1,\"mutationKind\":\"session-create\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fc5257c0-e506-493a-a614-58d10566c8ae",
+      "seq": 3,
+      "id": "ad27459b-19e1-4113-b47b-0bf007e19c9a",
+      "time": 1787898467731,
+      "type": "mutation/claimed",
+      "data": "{\"operationId\":\"60d2c032-d94e-41f3-baca-04c069939db7\",\"ordinal\":1,\"mutationKind\":\"session-create\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "fc5257c0-e506-493a-a614-58d10566c8ae",
+      "seq": 4,
+      "id": "54eefa04-046c-42c9-8e5a-00f9ac4cdc74",
+      "time": 1787898469243,
+      "type": "mutation/uncertainty-recorded",
+      "data": "{\"operationId\":\"60d2c032-d94e-41f3-baca-04c069939db7\",\"ordinal\":1,\"mutationKind\":\"session-create\",\"code\":\"runtime-outcome-unknown\",\"message\":\"OpenCode POST /session?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-050%2Frun-mtckl129%2Fproject outcome is unknown: fetch failed (UND_ERR_SOCKET)\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    }
+  ],
+  "projections": [
+    {
+      "__error": "no such column: id"
+    }
+  ],
+  "runtime_operations": [
+    {
+      "operation_id": "60d2c032-d94e-41f3-baca-04c069939db7",
+      "session_id": "fc5257c0-e506-493a-a614-58d10566c8ae",
+      "ordinal": 1,
+      "mutation_kind": "session-create",
+      "state": "unknown",
+      "replay_kind": "never",
+      "replay_contract": null,
+      "created_at": 1787898465922,
+      "updated_at": 1787898469243,
+      "code": "runtime-outcome-unknown",
+      "message": "OpenCode POST /session?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-050%2Frun-mtckl129%2Fproject outcome is unknown: fetch failed (UND_ERR_SOCKET)",
+      "receipt": null,
+      "owner_event_seq": 1
+    }
+  ],
+  "session_queue": [],
+  "response_intents": [],
+  "observations": [],
+  "observation_checkpoints": [
+    {
+      "__error": "no such column: session_id"
+    }
+  ],
+  "observation_cursors": [
+    {
+      "__error": "no such column: session_id"
+    }
+  ],
+  "session_reconciliations": [],
+  "deletion_tombstones": [
+    {
+      "__error": "no such column: session_id"
+    }
+  ],
+  "attention_open": []
+}

@@ -1,0 +1,139 @@
+(node:62802) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[polyth] Secure Safe behavior refresh skipped Error: applyBehavior refused: config authority is read-only
+    at assertWritable (file:///workspace/packages/backend-opencode/src/config.ts:297:9)
+    at Object.applyBehavior (file:///workspace/packages/backend-opencode/src/config.ts:363:7)
+    at Object.applyBehavior (file:///workspace/packages/server/src/opencodePending.ts:147:37)
+    at refreshSafeBehavior (file:///workspace/packages/server/src/index.ts:998:27)
+    at async boot (file:///workspace/packages/server/src/index.ts:1004:3) {
+  code: 'config-read-only'
+}
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:15145  data=/tmp/ocreal/phase-4/OC-REAL-052/run-mtckpacz/polyth-data
+[harness] polyth boot complete
+
+[harness] polyth polyth exited code=0 signal=null
+(node:64035) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[polyth] Secure Safe behavior refresh skipped Error: applyBehavior refused: config authority is read-only
+    at assertWritable (file:///workspace/packages/backend-opencode/src/config.ts:297:9)
+    at Object.applyBehavior (file:///workspace/packages/backend-opencode/src/config.ts:363:7)
+    at Object.applyBehavior (file:///workspace/packages/server/src/opencodePending.ts:147:37)
+    at refreshSafeBehavior (file:///workspace/packages/server/src/index.ts:998:27)
+    at async boot (file:///workspace/packages/server/src/index.ts:1004:3) {
+  code: 'config-read-only'
+}
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:15145  data=/tmp/ocreal/phase-4/OC-REAL-052/run-mtckryzh/polyth-data
+[harness] polyth boot complete
+
+[harness] polyth polyth exited code=0 signal=null
+(node:64249) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[polyth] Secure Safe behavior refresh skipped Error: applyBehavior refused: config authority is read-only
+    at assertWritable (file:///workspace/packages/backend-opencode/src/config.ts:297:9)
+    at Object.applyBehavior (file:///workspace/packages/backend-opencode/src/config.ts:363:7)
+    at Object.applyBehavior (file:///workspace/packages/server/src/opencodePending.ts:147:37)
+    at refreshSafeBehavior (file:///workspace/packages/server/src/index.ts:998:27)
+    at async boot (file:///workspace/packages/server/src/index.ts:1004:3) {
+  code: 'config-read-only'
+}
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:15145  data=/tmp/ocreal/phase-4/OC-REAL-052/run-mtckuwzt/polyth-data
+[harness] polyth boot complete
+
+[harness] polyth polyth exited code=0 signal=null
+(node:64748) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[polyth] Secure Safe behavior refresh skipped Error: applyBehavior refused: config authority is read-only
+    at assertWritable (file:///workspace/packages/backend-opencode/src/config.ts:297:9)
+    at Object.applyBehavior (file:///workspace/packages/backend-opencode/src/config.ts:363:7)
+    at Object.applyBehavior (file:///workspace/packages/server/src/opencodePending.ts:147:37)
+    at refreshSafeBehavior (file:///workspace/packages/server/src/index.ts:998:27)
+    at async boot (file:///workspace/packages/server/src/index.ts:1004:3) {
+  code: 'config-read-only'
+}
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:15145  data=/tmp/ocreal/phase-4/OC-REAL-052/run-mtckxa0e/polyth-data
+[harness] polyth boot complete
+
+[harness] polyth polyth exited code=0 signal=null
+(node:65196) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[polyth] Secure Safe behavior refresh skipped Error: applyBehavior refused: config authority is read-only
+    at assertWritable (file:///workspace/packages/backend-opencode/src/config.ts:297:9)
+    at Object.applyBehavior (file:///workspace/packages/backend-opencode/src/config.ts:363:7)
+    at Object.applyBehavior (file:///workspace/packages/server/src/opencodePending.ts:147:37)
+    at refreshSafeBehavior (file:///workspace/packages/server/src/index.ts:998:27)
+    at async boot (file:///workspace/packages/server/src/index.ts:1004:3) {
+  code: 'config-read-only'
+}
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:15145  data=/tmp/ocreal/phase-4/OC-REAL-052/run-mtckzwoh/polyth-data
+[harness] polyth boot complete
+
+[harness] polyth polyth exited code=0 signal=null
+(node:65839) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[polyth] Secure Safe behavior refresh skipped Error: applyBehavior refused: config authority is read-only
+    at assertWritable (file:///workspace/packages/backend-opencode/src/config.ts:297:9)
+    at Object.applyBehavior (file:///workspace/packages/backend-opencode/src/config.ts:363:7)
+    at Object.applyBehavior (file:///workspace/packages/server/src/opencodePending.ts:147:37)
+    at refreshSafeBehavior (file:///workspace/packages/server/src/index.ts:998:27)
+    at async boot (file:///workspace/packages/server/src/index.ts:1004:3) {
+  code: 'config-read-only'
+}
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:15145  data=/tmp/ocreal/phase-4/OC-REAL-052/run-mtcl439x/polyth-data
+[harness] polyth boot complete
+
+[harness] polyth polyth exited code=0 signal=null
+(node:66428) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[polyth] Secure Safe behavior refresh skipped Error: applyBehavior refused: config authority is read-only
+    at assertWritable (file:///workspace/packages/backend-opencode/src/config.ts:297:9)
+    at Object.applyBehavior (file:///workspace/packages/backend-opencode/src/config.ts:363:7)
+    at Object.applyBehavior (file:///workspace/packages/server/src/opencodePending.ts:147:37)
+    at refreshSafeBehavior (file:///workspace/packages/server/src/index.ts:998:27)
+    at async boot (file:///workspace/packages/server/src/index.ts:1004:3) {
+  code: 'config-read-only'
+}
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:15145  data=/tmp/ocreal/phase-4/OC-REAL-052/run-mtcl66z9/polyth-data
+[harness] polyth boot complete
+
+[harness] polyth polyth exited code=0 signal=null
+(node:66954) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[polyth] Secure Safe behavior refresh skipped Error: applyBehavior refused: config authority is read-only
+    at assertWritable (file:///workspace/packages/backend-opencode/src/config.ts:297:9)
+    at Object.applyBehavior (file:///workspace/packages/backend-opencode/src/config.ts:363:7)
+    at Object.applyBehavior (file:///workspace/packages/server/src/opencodePending.ts:147:37)
+    at refreshSafeBehavior (file:///workspace/packages/server/src/index.ts:998:27)
+    at async boot (file:///workspace/packages/server/src/index.ts:1004:3) {
+  code: 'config-read-only'
+}
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:15145  data=/tmp/ocreal/phase-4/OC-REAL-052/run-mtcld42n/polyth-data
+[harness] polyth boot complete
+
+[harness] polyth polyth exited code=0 signal=null
+(node:68078) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[polyth] Secure Safe behavior refresh skipped Error: applyBehavior refused: config authority is read-only
+    at assertWritable (file:///workspace/packages/backend-opencode/src/config.ts:297:9)
+    at Object.applyBehavior (file:///workspace/packages/backend-opencode/src/config.ts:363:7)
+    at Object.applyBehavior (file:///workspace/packages/server/src/opencodePending.ts:147:37)
+    at refreshSafeBehavior (file:///workspace/packages/server/src/index.ts:998:27)
+    at async boot (file:///workspace/packages/server/src/index.ts:1004:3) {
+  code: 'config-read-only'
+}
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:15145  data=/tmp/ocreal/phase-4/OC-REAL-052/run-mtcljzpp/polyth-data
+[harness] polyth boot complete
+opencode sse disconnected { error: 'Error: OpenCode SSE response closed before completion' }
+opencode endpoint refresh failed {
+  error: 'Error: OpenCode protocol negotiation failed; private daemon fallback is disabled'
+}
+
+[harness] polyth polyth exited code=0 signal=null

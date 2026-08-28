@@ -1,0 +1,5 @@
+{"t":1787910775192,"kind":"lifecycle","event":{"type":"stream-connected","authorityId":"owned:4dd9b90f-00ac-4213-810f-7c0566589b83","generation":1}}
+{"t":1787910783149,"level":"debug","message":"opencode sse disconnected","data":{"error":"Error: OpenCode SSE response closed before completion"}}
+{"t":1787910783149,"kind":"lifecycle","event":{"type":"stream-disconnected","authorityId":"owned:4dd9b90f-00ac-4213-810f-7c0566589b83","generation":1,"reason":"Error: OpenCode SSE response closed before completion"}}
+{"t":1787910798151,"level":"debug","message":"opencode endpoint refresh failed","data":{"error":"Error: OpenCode protocol negotiation failed; private daemon fallback is disabled"}}
+{"t":1787910800241,"kind":"lifecycle","event":{"type":"stream-connected","authorityId":"owned:4dd9b90f-00ac-4213-810f-7c0566589b83","generation":2}}

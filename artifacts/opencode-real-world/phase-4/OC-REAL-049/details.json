@@ -1,0 +1,104 @@
+{
+  "checks": [
+    {
+      "name": "exactly one probe-window kill fired",
+      "pass": true,
+      "observed": "[{\"ts\":\"2026-08-28T06:25:10.289Z\",\"event\":\"fault-kill-real-child\",\"pid\":61472,\"why\":\"kill-on-request GET /global/health?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-049%2Frun-mtckhobf%2Fproject\"}]"
+    },
+    {
+      "name": "first generation candidate existed (listen line before kill)",
+      "pass": true,
+      "observed": "proxy generations=1"
+    },
+    {
+      "name": "probe failure is bounded and never exposed as ready",
+      "pass": true,
+      "observed": "status=503 elapsed=10858ms body={\"error\":\"unavailable\",\"message\":\"OpenCode protocol negotiation failed; private daemon fallback is disabled\"}"
+    },
+    {
+      "name": "no stream was connected to the failed generation",
+      "pass": true,
+      "observed": "[]"
+    },
+    {
+      "name": "later recovery builds a generation that serves the catalog",
+      "pass": true,
+      "observed": "models=44"
+    },
+    {
+      "name": "later recovery serves session create",
+      "pass": true,
+      "observed": "status=200 body={\"id\":\"fc868a8d-493f-4fe2-b521-47a986d9d3b7\"}"
+    },
+    {
+      "name": "fresh generation uses a fresh child (no dead URL reuse)",
+      "pass": true,
+      "observed": "killed=61472 live=61492 record={\"pid\":61484,\"startIdentity\":\"1202726\",\"executable\":\"/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node\",\"command\":\"node /tmp/ocreal/phase-4/tools/shim-proxy.mjs serve --hostname 127.0.0.1 --port 41239\"}"
+    }
+  ],
+  "observations": [
+    {
+      "create": {
+        "status": 503,
+        "json": {
+          "error": "unavailable",
+          "message": "OpenCode protocol negotiation failed; private daemon fallback is disabled"
+        }
+      },
+      "elapsedMs": 10858
+    },
+    {
+      "proxyStarts": [
+        {
+          "ts": "2026-08-28T06:25:10.280Z",
+          "event": "proxy-listening",
+          "proxyPort": 43761,
+          "realPort": 4096,
+          "wrapperPid": 61464,
+          "childPid": 61472
+        }
+      ],
+      "kills": [
+        {
+          "ts": "2026-08-28T06:25:10.289Z",
+          "event": "fault-kill-real-child",
+          "pid": 61472,
+          "why": "kill-on-request GET /global/health?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-049%2Frun-mtckhobf%2Fproject"
+        }
+      ],
+      "record": {
+        "version": 1,
+        "ownerPid": 61437,
+        "ownerInstanceToken": "8625a95e-c615-4587-9de2-1171c1a1fd9c",
+        "child": {
+          "pid": 61484,
+          "startIdentity": "1202726",
+          "executable": "/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node",
+          "command": "node /tmp/ocreal/phase-4/tools/shim-proxy.mjs serve --hostname 127.0.0.1 --port 41239"
+        }
+      },
+      "state": {
+        "wrapperPid": 61484,
+        "childPid": 61492,
+        "realPort": 4096,
+        "proxyPort": 41239,
+        "startedAt": "2026-08-28T06:25:21.106Z"
+      },
+      "wireHead": [
+        {
+          "ts": "2026-08-28T06:25:10.289Z",
+          "event": "fault",
+          "rule": "kill-during-probe",
+          "method": "GET",
+          "path": "/global/health?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-049%2Frun-mtckhobf%2Fproject"
+        }
+      ],
+      "retryCreate": {
+        "status": 200,
+        "json": {
+          "id": "fc868a8d-493f-4fe2-b521-47a986d9d3b7"
+        }
+      }
+    }
+  ]
+}

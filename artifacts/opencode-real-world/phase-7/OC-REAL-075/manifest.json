@@ -1,0 +1,19 @@
+{
+  "id": "OC-REAL-075",
+  "headSha": "1b327c54ad6dd68c6281009f2281e316dc1dca2e",
+  "opencodeBin": "/home/ubuntu/.local/bin/opencode",
+  "opencodeVersion": "1.18.18",
+  "nodeVersion": "v22.22.2",
+  "os": "linux 6.12.94+",
+  "host": "cursor",
+  "model": {
+    "providerID": "opencode",
+    "modelID": "big-pickle"
+  },
+  "protocol": "legacy",
+  "projectPath": "/tmp/ocreal-phase7/oc-real-075-mtcr2h9u/project",
+  "polythDataDir": "/tmp/ocreal-phase7/oc-real-075-mtcr2h9u/polyth-data",
+  "startedAt": "2026-08-28T09:29:17.493Z",
+  "scenario": "queue edit/reorder/remove during an active turn, second client watching",
+  "engine": "R+H"
+}

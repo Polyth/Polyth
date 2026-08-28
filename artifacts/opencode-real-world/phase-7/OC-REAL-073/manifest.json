@@ -1,0 +1,19 @@
+{
+  "id": "OC-REAL-073",
+  "headSha": "1b327c54ad6dd68c6281009f2281e316dc1dca2e",
+  "opencodeBin": "/home/ubuntu/.local/bin/opencode",
+  "opencodeVersion": "1.18.18",
+  "nodeVersion": "v22.22.2",
+  "os": "linux 6.12.94+",
+  "host": "cursor",
+  "model": {
+    "providerID": "opencode",
+    "modelID": "big-pickle"
+  },
+  "protocol": "legacy",
+  "projectPath": "/tmp/ocreal-phase7/oc-real-073-mtcr1p91/project",
+  "polythDataDir": "/tmp/ocreal-phase7/oc-real-073-mtcr1p91/polyth-data",
+  "startedAt": "2026-08-28T09:28:41.180Z",
+  "scenario": "two same-tick sends from idle",
+  "engine": "R+H"
+}

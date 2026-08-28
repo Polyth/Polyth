@@ -1,0 +1,232 @@
+{
+  "serveProcesses": [
+    {
+      "pid": 62173,
+      "cwd": "/tmp/polyth-tests/project-a",
+      "cwdDeleted": false,
+      "cmd": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 41987",
+      "ports": [
+        41987
+      ]
+    },
+    {
+      "pid": 62196,
+      "cwd": "/tmp/polyth-tests/project-a/worktree-feature",
+      "cwdDeleted": false,
+      "cmd": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 41101",
+      "ports": [
+        41101
+      ]
+    },
+    {
+      "pid": 62213,
+      "cwd": "/tmp/polyth-tests/project-b",
+      "cwdDeleted": false,
+      "cmd": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 37055",
+      "ports": [
+        37055
+      ]
+    },
+    {
+      "pid": 62236,
+      "cwd": "/tmp/polyth-tests/project-b/worktree-feature",
+      "cwdDeleted": false,
+      "cmd": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 35267",
+      "ports": [
+        35267
+      ]
+    }
+  ],
+  "distinctServeCwds": [
+    "/tmp/polyth-tests/project-a",
+    "/tmp/polyth-tests/project-a/worktree-feature",
+    "/tmp/polyth-tests/project-b",
+    "/tmp/polyth-tests/project-b/worktree-feature"
+  ],
+  "catalogChecks": {
+    "a-root": {
+      "directory": "/tmp/polyth-tests/project-a",
+      "ids": [
+        "ses_fb8f06514ffesIU4c3pRExI21F"
+      ]
+    },
+    "a-feature": {
+      "directory": "/tmp/polyth-tests/project-a/worktree-feature",
+      "ids": [
+        "ses_fb8f05e2fffeYOt1Upcwn5TURg"
+      ]
+    },
+    "b-root": {
+      "directory": "/tmp/polyth-tests/project-b",
+      "ids": [
+        "ses_fb8f0578bffeM8YgguvZ1Iaqzn"
+      ]
+    },
+    "b-feature": {
+      "directory": "/tmp/polyth-tests/project-b/worktree-feature",
+      "ids": [
+        "ses_fb8f050d7ffeZDNWAFqkoBJZyc"
+      ]
+    }
+  },
+  "sendResults": [
+    {
+      "key": "a-root",
+      "result": {
+        "turnId": "c3067846-72c5-4fbf-b647-d46eb9dc270a"
+      }
+    },
+    {
+      "key": "a-feature",
+      "result": {
+        "turnId": "be43cd0e-8dd5-410a-841e-84e254f806e3"
+      }
+    },
+    {
+      "key": "b-root",
+      "result": {
+        "turnId": "a365ad44-30f0-49bd-8173-070560eb682b"
+      }
+    },
+    {
+      "key": "b-feature",
+      "result": {
+        "turnId": "3d13cb12-7969-4993-a707-d0e8d8f98dda"
+      }
+    }
+  ],
+  "perLocation": {
+    "a-feature": {
+      "completed": true,
+      "reply": "PROJECT_A_FEATURE",
+      "messageCwds": [
+        "/tmp/polyth-tests/project-a/worktree-feature"
+      ],
+      "tools": [
+        {
+          "tool": "read",
+          "status": "completed",
+          "output": "<path>/tmp/polyth-tests/project-a/worktree-feature/IDENTITY.txt</path>\n<type>file</type>\n<content>\n1: PROJECT_A_FEATURE\n\n(End of file - total 1 lines)\n</content>"
+        }
+      ]
+    },
+    "b-feature": {
+      "completed": true,
+      "reply": "PROJECT_B_FEATURE",
+      "messageCwds": [
+        "/tmp/polyth-tests/project-b/worktree-feature"
+      ],
+      "tools": [
+        {
+          "tool": "read",
+          "status": "completed",
+          "output": "<path>/tmp/polyth-tests/project-b/worktree-feature/IDENTITY.txt</path>\n<type>file</type>\n<content>\n1: PROJECT_B_FEATURE\n\n(End of file - total 1 lines)\n</content>"
+        }
+      ]
+    },
+    "a-root": {
+      "completed": true,
+      "reply": "PROJECT_A_MAIN",
+      "messageCwds": [
+        "/tmp/polyth-tests/project-a"
+      ],
+      "tools": [
+        {
+          "tool": "read",
+          "status": "completed",
+          "output": "<path>/tmp/polyth-tests/project-a/IDENTITY.txt</path>\n<type>file</type>\n<content>\n1: PROJECT_A_MAIN\n\n(End of file - total 1 lines)\n</content>"
+        }
+      ]
+    },
+    "b-root": {
+      "completed": true,
+      "reply": "PROJECT_B_MAIN",
+      "messageCwds": [
+        "/tmp/polyth-tests/project-b"
+      ],
+      "tools": [
+        {
+          "tool": "read",
+          "status": "completed",
+          "output": "<path>/tmp/polyth-tests/project-b/IDENTITY.txt</path>\n<type>file</type>\n<content>\n1: PROJECT_B_MAIN\n\n(End of file - total 1 lines)\n</content>"
+        }
+      ]
+    }
+  },
+  "crossDirectoryCatalogs": {
+    "a-root->asks-for->a-feature": [
+      "ses_fb8f05e2fffeYOt1Upcwn5TURg"
+    ],
+    "a-root->asks-for->b-root": [
+      "ses_fb8f0578bffeM8YgguvZ1Iaqzn"
+    ],
+    "a-root->asks-for->b-feature": [
+      "ses_fb8f050d7ffeZDNWAFqkoBJZyc"
+    ],
+    "a-feature->asks-for->a-root": [
+      "ses_fb8f06514ffesIU4c3pRExI21F"
+    ],
+    "a-feature->asks-for->b-root": [
+      "ses_fb8f0578bffeM8YgguvZ1Iaqzn"
+    ],
+    "a-feature->asks-for->b-feature": [
+      "ses_fb8f050d7ffeZDNWAFqkoBJZyc"
+    ],
+    "b-root->asks-for->a-root": [
+      "ses_fb8f06514ffesIU4c3pRExI21F"
+    ],
+    "b-root->asks-for->a-feature": [
+      "ses_fb8f05e2fffeYOt1Upcwn5TURg"
+    ],
+    "b-root->asks-for->b-feature": [
+      "ses_fb8f050d7ffeZDNWAFqkoBJZyc"
+    ],
+    "b-feature->asks-for->a-root": [
+      "ses_fb8f06514ffesIU4c3pRExI21F"
+    ],
+    "b-feature->asks-for->a-feature": [
+      "ses_fb8f05e2fffeYOt1Upcwn5TURg"
+    ],
+    "b-feature->asks-for->b-root": [
+      "ses_fb8f0578bffeM8YgguvZ1Iaqzn"
+    ]
+  },
+  "finalServeProcesses": [
+    {
+      "pid": 62173,
+      "cwd": "/tmp/polyth-tests/project-a",
+      "cwdDeleted": false,
+      "cmd": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 41987",
+      "ports": [
+        41987
+      ]
+    },
+    {
+      "pid": 62196,
+      "cwd": "/tmp/polyth-tests/project-a/worktree-feature",
+      "cwdDeleted": false,
+      "cmd": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 41101",
+      "ports": [
+        41101
+      ]
+    },
+    {
+      "pid": 62213,
+      "cwd": "/tmp/polyth-tests/project-b",
+      "cwdDeleted": false,
+      "cmd": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 37055",
+      "ports": [
+        37055
+      ]
+    },
+    {
+      "pid": 62236,
+      "cwd": "/tmp/polyth-tests/project-b/worktree-feature",
+      "cwdDeleted": false,
+      "cmd": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 35267",
+      "ports": [
+        35267
+      ]
+    }
+  ]
+}

@@ -1,0 +1,289 @@
+{
+  "capturedAt": "2026-08-28T03:19:41.995Z",
+  "openCode": {
+    "version": "1.18.18",
+    "baseUrl": "http://127.0.0.1:45126"
+  },
+  "runs": [
+    {
+      "requested": "auto",
+      "selected": "v2",
+      "operations": {
+        "capabilities": {
+          "ok": true,
+          "value": {
+            "eventReplay": "none",
+            "pendingSnapshot": "none",
+            "idempotentMutations": {}
+          }
+        },
+        "models": {
+          "ok": true,
+          "value": []
+        },
+        "agents": {
+          "ok": true,
+          "value": []
+        },
+        "sessions": {
+          "ok": true,
+          "value": []
+        },
+        "history": {
+          "ok": false,
+          "error": "OpenCode V2 history is disabled until its beta contract is pinned",
+          "code": "capability-unsupported"
+        },
+        "eventStreamPath": {
+          "ok": true
+        },
+        "create": {
+          "ok": true,
+          "value": {
+            "kind": "rejected",
+            "code": "capability-unsupported",
+            "message": "OpenCode V2 session creation is disabled until its beta contract is pinned"
+          }
+        },
+        "reset": {
+          "ok": true,
+          "value": {
+            "kind": "rejected",
+            "code": "capability-unsupported",
+            "message": "OpenCode V2 session reset is disabled until its beta contract is pinned"
+          }
+        },
+        "fork": {
+          "ok": true,
+          "value": {
+            "kind": "rejected",
+            "code": "capability-unsupported",
+            "message": "OpenCode V2 session branch is disabled until its beta contract is pinned"
+          }
+        },
+        "prompt": {
+          "ok": true,
+          "value": {
+            "kind": "rejected",
+            "code": "capability-unsupported",
+            "message": "OpenCode V2 prompt admission is disabled until its beta contract is pinned"
+          }
+        },
+        "steer": {
+          "ok": true,
+          "value": {
+            "kind": "rejected",
+            "code": "capability-unsupported",
+            "message": "OpenCode V2 turn steering is disabled until its beta contract is pinned"
+          }
+        },
+        "abort": {
+          "ok": true,
+          "value": {
+            "kind": "rejected",
+            "code": "capability-unsupported",
+            "message": "OpenCode V2 turn abort is disabled until its beta contract is pinned"
+          }
+        },
+        "delete": {
+          "ok": true,
+          "value": {
+            "kind": "rejected",
+            "code": "capability-unsupported",
+            "message": "OpenCode V2 session delete is disabled until its beta contract is pinned"
+          }
+        },
+        "permissionReply": {
+          "ok": true,
+          "value": {
+            "kind": "rejected",
+            "code": "capability-unsupported",
+            "message": "OpenCode V2 permission reply is disabled until its beta contract is pinned"
+          }
+        },
+        "questionReply": {
+          "ok": true,
+          "value": {
+            "kind": "rejected",
+            "code": "capability-unsupported",
+            "message": "OpenCode V2 question reply is disabled until its beta contract is pinned"
+          }
+        },
+        "reconcile": {
+          "ok": true,
+          "value": {
+            "authorityId": "real-opencode-v2-1.18.18",
+            "generation": 1,
+            "location": {
+              "directory": "/tmp/polyth-oc-phase1-v2/project"
+            },
+            "backendSessionId": "ses_phase1v2_001",
+            "reconciliationOrdinal": 1,
+            "state": {
+              "value": "unknown"
+            },
+            "completeness": {
+              "events": "unverifiable",
+              "permissions": "unverifiable",
+              "questions": "unverifiable"
+            },
+            "permissions": [],
+            "questions": [],
+            "events": []
+          }
+        }
+      },
+      "networkCallsAfterSelection": 1,
+      "networkCallsAfterOperations": 1,
+      "postSelectionNetworkCalls": [],
+      "trace": [
+        {
+          "kind": "query",
+          "method": "GET",
+          "path": "/doc?directory=%2Ftmp%2Fpolyth-oc-phase1-v2%2Fproject",
+          "status": 200
+        }
+      ]
+    },
+    {
+      "requested": "v2",
+      "selected": "v2",
+      "operations": {
+        "capabilities": {
+          "ok": true,
+          "value": {
+            "eventReplay": "none",
+            "pendingSnapshot": "none",
+            "idempotentMutations": {}
+          }
+        },
+        "models": {
+          "ok": true,
+          "value": []
+        },
+        "agents": {
+          "ok": true,
+          "value": []
+        },
+        "sessions": {
+          "ok": true,
+          "value": []
+        },
+        "history": {
+          "ok": false,
+          "error": "OpenCode V2 history is disabled until its beta contract is pinned",
+          "code": "capability-unsupported"
+        },
+        "eventStreamPath": {
+          "ok": true
+        },
+        "create": {
+          "ok": true,
+          "value": {
+            "kind": "rejected",
+            "code": "capability-unsupported",
+            "message": "OpenCode V2 session creation is disabled until its beta contract is pinned"
+          }
+        },
+        "reset": {
+          "ok": true,
+          "value": {
+            "kind": "rejected",
+            "code": "capability-unsupported",
+            "message": "OpenCode V2 session reset is disabled until its beta contract is pinned"
+          }
+        },
+        "fork": {
+          "ok": true,
+          "value": {
+            "kind": "rejected",
+            "code": "capability-unsupported",
+            "message": "OpenCode V2 session branch is disabled until its beta contract is pinned"
+          }
+        },
+        "prompt": {
+          "ok": true,
+          "value": {
+            "kind": "rejected",
+            "code": "capability-unsupported",
+            "message": "OpenCode V2 prompt admission is disabled until its beta contract is pinned"
+          }
+        },
+        "steer": {
+          "ok": true,
+          "value": {
+            "kind": "rejected",
+            "code": "capability-unsupported",
+            "message": "OpenCode V2 turn steering is disabled until its beta contract is pinned"
+          }
+        },
+        "abort": {
+          "ok": true,
+          "value": {
+            "kind": "rejected",
+            "code": "capability-unsupported",
+            "message": "OpenCode V2 turn abort is disabled until its beta contract is pinned"
+          }
+        },
+        "delete": {
+          "ok": true,
+          "value": {
+            "kind": "rejected",
+            "code": "capability-unsupported",
+            "message": "OpenCode V2 session delete is disabled until its beta contract is pinned"
+          }
+        },
+        "permissionReply": {
+          "ok": true,
+          "value": {
+            "kind": "rejected",
+            "code": "capability-unsupported",
+            "message": "OpenCode V2 permission reply is disabled until its beta contract is pinned"
+          }
+        },
+        "questionReply": {
+          "ok": true,
+          "value": {
+            "kind": "rejected",
+            "code": "capability-unsupported",
+            "message": "OpenCode V2 question reply is disabled until its beta contract is pinned"
+          }
+        },
+        "reconcile": {
+          "ok": true,
+          "value": {
+            "authorityId": "real-opencode-v2-1.18.18",
+            "generation": 1,
+            "location": {
+              "directory": "/tmp/polyth-oc-phase1-v2/project"
+            },
+            "backendSessionId": "ses_phase1v2_001",
+            "reconciliationOrdinal": 1,
+            "state": {
+              "value": "unknown"
+            },
+            "completeness": {
+              "events": "unverifiable",
+              "permissions": "unverifiable",
+              "questions": "unverifiable"
+            },
+            "permissions": [],
+            "questions": [],
+            "events": []
+          }
+        }
+      },
+      "networkCallsAfterSelection": 1,
+      "networkCallsAfterOperations": 1,
+      "postSelectionNetworkCalls": [],
+      "trace": [
+        {
+          "kind": "query",
+          "method": "GET",
+          "path": "/doc?directory=%2Ftmp%2Fpolyth-oc-phase1-v2%2Fproject",
+          "status": 200
+        }
+      ]
+    }
+  ]
+}

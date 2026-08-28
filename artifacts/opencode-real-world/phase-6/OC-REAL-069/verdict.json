@@ -1,0 +1,25 @@
+{
+  "id": "OC-REAL-069",
+  "verdict": "partial",
+  "engine": "H",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy",
+  "observed": "collision damage: deleting the ROOT session removed the WORKTREE session's canonical->backend binding from the shared sessionIdMap",
+  "expected": "authority/location/binding prevent collisions; dedup or routing never crosses sessions",
+  "attribution": "POLYTH",
+  "crossTreeLeakBlocker": false,
+  "identifiers": {
+    "rootSession": "ab2bd6ce-591f-46cf-8b72-0b9cb3da20d3",
+    "worktreeSession": "043037d5-3d38-48b8-badc-caf5938e015b",
+    "rootBackend": "ses_1",
+    "worktreeBackend": "ses_1"
+  },
+  "evidence": [
+    "artifacts/opencode-real-world/phase-6/OC-REAL-069/details.json",
+    "logs/opencode-real-world/phase-6/OC-REAL-069/polyth.ndjson",
+    "logs/opencode-real-world/phase-6/OC-REAL-069/db-after.json"
+  ],
+  "failures": [
+    "deleting the ROOT session removed the WORKTREE session's canonical->backend binding from the shared sessionIdMap"
+  ]
+}

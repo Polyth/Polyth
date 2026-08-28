@@ -1,0 +1,55 @@
+{
+  "marker": "P2-035-PARTIAL",
+  "sendError": "outcome-unknown",
+  "secondError": "conflict",
+  "operation": {
+    "operation_id": "2ef7e931-74b8-4679-a60e-caf201bd959c",
+    "session_id": "ba925613-4780-4888-9b19-f7a56f94a1e1",
+    "ordinal": 2,
+    "mutation_kind": "turn-submit",
+    "state": "unknown",
+    "replay_kind": "never",
+    "replay_contract": null,
+    "created_at": 1787893388482,
+    "updated_at": 1787893398484,
+    "code": "runtime-outcome-unknown",
+    "message": "OpenCode POST /session/ses_fb93fec20ffeifuaihxfEjCThW/message?directory=%2Ftmp%2Focreal-phase2%2Foc-real-035-mtchk3yd%2Fproject outcome is unknown: OpenCode request exceeded its 10000ms deadline",
+    "receipt": null,
+    "owner_event_seq": 9
+  },
+  "requests": [
+    {
+      "sequence": 19,
+      "time": 1787893388484,
+      "kind": "request",
+      "connectionId": 9,
+      "method": "POST",
+      "path": "/session/ses_fb93fec20ffeifuaihxfEjCThW/message?directory=%2Ftmp%2Focreal-phase2%2Foc-real-035-mtchk3yd%2Fproject",
+      "bytes": 137,
+      "body": {
+        "parts": [
+          {
+            "type": "text",
+            "text": "Reply with exactly P2-035-PARTIAL."
+          }
+        ],
+        "model": {
+          "providerID": "google",
+          "modelID": "gemini-2.5-flash-lite"
+        }
+      },
+      "operationId": "2ef7e931-74b8-4679-a60e-caf201bd959c",
+      "ruleId": "035-headers-partial-rst",
+      "action": "partial-body-reset"
+    }
+  ],
+  "canonicalUserEventIds": [
+    "8aefe816-8c3b-4796-a14c-562f424ee3aa"
+  ],
+  "upstreamUserMessageIds": [
+    "msg_046c014ce001GQ1nd0znHQZpIr"
+  ],
+  "failures": [
+    "partial boundary not proven: undefined"
+  ]
+}

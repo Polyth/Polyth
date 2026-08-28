@@ -1,0 +1,14 @@
+{
+  "firstStatus": 200,
+  "staleStatus": 401,
+  "sseUnauthorized": 401,
+  "generation": [
+    1,
+    2
+  ],
+  "staleGenerationMutation": {
+    "ok": false,
+    "error": "session generation is stale and endpoint continuity is unverified",
+    "code": "binding-mismatch"
+  }
+}

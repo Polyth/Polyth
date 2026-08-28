@@ -1,0 +1,24 @@
+{
+  "id": "OC-REAL-076",
+  "verdict": "pass",
+  "engine": "H",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy",
+  "observed": "same-tick subscribe burst across three sessions with >500-event gap-fills in flight: newest subscribe won, A's final s3 view was complete/deduped/session-bound, no old-subscription revival, and the staying client B missed nothing on the live session",
+  "expected": "gap-fill/live events are seq-deduped and session-bound; no cross-session event, dropped live event, duplicate, or old subscription winning",
+  "attribution": "NONE",
+  "multiClientBlocker": false,
+  "identifiers": {
+    "s1": "d26c8ef2-00f5-476c-8d71-ed55abfaa2ce",
+    "s2": "0ce3912b-f739-4797-8a27-7d8a8fd191bc",
+    "s3": "6bd3ae62-5d8c-49a6-8b7e-c045580121f6"
+  },
+  "evidence": [
+    "artifacts/opencode-real-world/phase-7/OC-REAL-076/details.json",
+    "logs/opencode-real-world/phase-7/OC-REAL-076/ws-a.ndjson",
+    "logs/opencode-real-world/phase-7/OC-REAL-076/ws-b.ndjson",
+    "logs/opencode-real-world/phase-7/OC-REAL-076/driver.ndjson",
+    "logs/opencode-real-world/phase-7/OC-REAL-076/db-final.json"
+  ],
+  "failures": []
+}

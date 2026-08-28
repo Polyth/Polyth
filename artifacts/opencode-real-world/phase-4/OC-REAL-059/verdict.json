@@ -1,0 +1,25 @@
+{
+  "id": "OC-REAL-059",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy (forced)",
+  "verdict": "pass",
+  "engine": "R+H",
+  "observed": "terminal-SSE cut+kill: the upstream terminal committed, the session.idle frame was withheld and the exact child SIGKILLed. The output and one ordered terminal (turn/stopped completed, seq after the answer) were durable exactly once, no prompt replay, user intent once, sqlite ok. Post-recovery the projection settled honestly `unknown` (owned local continuity is generation-only, so the recovered generation cannot prove binding continuity — the spec's 'remain unknown if evidence is unversioned' arm). BUG FOUND AND FIXED during this scenario: when the post-disconnect one-shot refresh raced Node's child exit notification, the owned lease kept handing out the dead endpoint from `lease.endpoint()` forever (negotiation failed against a closed port on every retry; no respawn was ever attempted; the runtime stayed wedged until full Polyth restart). Localized fix: `endpoint()` now treats a known-dead instance like a missing one and respawns (`packages/backend-opencode/src/endpoint.ts`); regression test `endpoint() never hands out a dead owned child; it respawns` in `packages/backend-opencode/test/runtimeLifecycle.test.ts`. Re-run after the fix shows a second generation respawning.",
+  "expected": "recover output and ordered terminal once, or remain unknown",
+  "attribution": "NONE",
+  "identifiers": {
+    "canonicalSessionIds": [
+      "7664bac9-30ef-4e2b-9388-abaa23bfa9d2"
+    ],
+    "fixedBug": "owned lease endpoint() handed out a known-dead child endpoint forever after an exit-notification race",
+    "fix": "packages/backend-opencode/src/endpoint.ts (endpoint() aliveness check)",
+    "regressionTest": "packages/backend-opencode/test/runtimeLifecycle.test.ts — endpoint() never hands out a dead owned child; it respawns"
+  },
+  "blockers": [],
+  "evidence": [
+    "artifacts/opencode-real-world/phase-4/OC-REAL-059/details.json",
+    "logs/opencode-real-world/phase-4/OC-REAL-059/proxy-wire.ndjson",
+    "logs/opencode-real-world/phase-4/OC-REAL-059/db-final.json",
+    "logs/opencode-real-world/phase-4/OC-REAL-059/polyth.log"
+  ]
+}

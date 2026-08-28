@@ -1,0 +1,19 @@
+{
+  "variantRequested": "high",
+  "upstreamReasoningLength": 256,
+  "upstreamReasoningSample": "**Calculating Sheep Numbers**\n\nOkay, so I've worked through the sheep problem. The key is understanding that \"all but 9\" implies 9 remain. Starting with 17 and interpreting \"all but 9 run away\" means 9 are left, which resolves the initial problem posed.\n\n\n",
+  "upstreamTextSample": "9",
+  "facadeReasoningChunks": 1,
+  "facadeTextChunks": 1,
+  "facadeFinal": [
+    {
+      "textSample": "",
+      "reasoningLength": 256
+    },
+    {
+      "textSample": "9",
+      "reasoningLength": 0
+    }
+  ],
+  "failures": []
+}

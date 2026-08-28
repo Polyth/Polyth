@@ -397,6 +397,67 @@ test("missed question is pulled after disconnect and answered once", async () =>
   }
 });
 
+test("changed-ID semantic SSE duplicate is consumed without an observation error", async () => {
+  const fake = await createFakeOpenCode();
+  const harness = await reliabilityHarness(fake);
+  const originalError = console.error;
+  const errors: string[] = [];
+  try {
+    const created = await harness.sessions.create({
+      projectId: harness.project.id,
+      title: "Semantic duplicate",
+    });
+    const backendSessionId = (await harness.store.projection(created.id))!.backendSessionId!;
+    await fake.waitForSseConnections();
+    const completeAssistant = {
+      type: "message.updated",
+      properties: {
+        sessionID: backendSessionId,
+        info: {
+          id: "msg_duplicate_complete",
+          sessionID: backendSessionId,
+          role: "assistant",
+          providerID: "test",
+          modelID: "duplicate",
+          cost: 0,
+          tokens: {
+            input: 1,
+            output: 1,
+            reasoning: 0,
+            cache: { read: 0, write: 0 },
+          },
+          time: { created: 1, completed: 2 },
+        },
+      },
+    };
+    fake.emitSse({ id: "transport-first", data: completeAssistant });
+    await harness.waitForEvent((event) =>
+      event.sessionId === created.id && event.type === "usage/recorded");
+
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map((arg) => String(arg)).join(" "));
+    };
+    fake.emitSse({ id: "transport-second", data: completeAssistant });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    assert.deepEqual(
+      errors,
+      [],
+      "a semantic duplicate must be a no-op, not an unconsumed persisted-event error",
+    );
+    assert.equal(
+      (await harness.store.events(created.id))
+        .filter((event) => event.type === "usage/recorded").length,
+      1,
+    );
+  } finally {
+    console.error = originalError;
+    await harness.runtime.dispose();
+    await fake.close();
+    await harness.store.close();
+  }
+});
+
 test("silent connected SSE triggers lifecycle reconciliation under a liveness policy", async () => {
   const fake = await createFakeOpenCode();
   fake.scriptSse({ silent: true });
@@ -1049,8 +1110,13 @@ test("legacy V1 fake supports core create, prompt, event, and reconcile behavior
   }
 });
 
-test("V2 keeps unsupported operations capability-gated without fabricating V1 traffic", async () => {
+test("V2 creates sessions on its native route without fabricating V1 traffic", async () => {
   const fake = await createFakeOpenCode();
+  fake.scriptHttp({
+    method: "POST",
+    path: "/api/session",
+    steps: [httpFaults.success({ data: { id: "ses_v2_created" } })],
+  });
   const directory = mkdtempSync(join(tmpdir(), "polyth-v2-gate-e2e-"));
   const lease = await createBorrowedExternalEndpointLease({
     url: fake.baseUrl,
@@ -1069,15 +1135,17 @@ test("V2 keeps unsupported operations capability-gated without fabricating V1 tr
   });
   const runtime = attachRuntimeLifecycle(facade, lifecycle);
   try {
+    assert.equal(await runtime.protocol?.(), "v2");
     const outcome = await runtime.createSessionOperation!(
       { projectId: "p-v2", sessionId: "canonical-v2", cwd: directory },
       "operation-v2",
     );
     assert.deepEqual(outcome, {
-      kind: "rejected",
-      code: "capability-unsupported",
-      message: "OpenCode V2 session creation is disabled until its beta contract is pinned",
+      kind: "confirmed",
+      value: { backendSessionId: "ses_v2_created" },
+      receipt: "ses_v2_created",
     });
+    assert.equal(fake.requestCount("POST", "/api/session"), 1);
     assert.equal(fake.requestCount("POST", "/session"), 0);
   } finally {
     await runtime.dispose();

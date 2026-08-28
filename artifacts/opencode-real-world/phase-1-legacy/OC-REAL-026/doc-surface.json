@@ -1,0 +1,32 @@
+{
+  "totalPaths": 162,
+  "legacyPromptPaths": [
+    "/session/{sessionID}/message",
+    "/session/{sessionID}/prompt_async",
+    "/api/session/{sessionID}/message"
+  ],
+  "v2PathCount": 51,
+  "v2PathSample": [
+    "/api/health",
+    "/api/location",
+    "/api/agent",
+    "/api/session",
+    "/api/session/active",
+    "/api/session/{sessionID}",
+    "/api/session/{sessionID}/agent",
+    "/api/session/{sessionID}/model",
+    "/api/session/{sessionID}/prompt",
+    "/api/session/{sessionID}/compact",
+    "/api/session/{sessionID}/wait",
+    "/api/session/{sessionID}/revert/stage"
+  ],
+  "health": {
+    "global": {
+      "healthy": true,
+      "version": "1.18.18"
+    },
+    "api": {
+      "healthy": true
+    }
+  }
+}

@@ -10,6 +10,9 @@
 // This module owns everything OpenCode-specific about the remote leg (binary
 // name, serve invocation, listen-line protocol, pidfile reaping); the
 // transport knows nothing about OpenCode, keeping the adapter boundary intact.
+import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type {
   AgentRuntime,
   JsonObject,
@@ -40,6 +43,8 @@ export interface RemoteOpenCodeOptions {
   lifecycleTimeoutMs?: number;
   usernameEnv?: string;
   passwordEnv?: string;
+  /** Local durable authority/generation state for this owned remote runtime. */
+  leaseStateFile?: string;
   /** Remote port candidate picker — injectable for tests. */
   pickPort?: () => number;
 }
@@ -108,6 +113,16 @@ const shortHash = (value: string): string => {
   let h = 0;
   for (let i = 0; i < value.length; i++) h = (h * 31 + value.charCodeAt(i)) | 0;
   return (h >>> 0).toString(36);
+};
+
+const defaultLeaseStateFile = (hostLabel: string, remotePath: string): string => {
+  const key = createHash("sha256")
+    .update(hostLabel)
+    .update("\0")
+    .update(remotePath)
+    .digest("hex")
+    .slice(0, 24);
+  return join(tmpdir(), "polyth-opencode", `ssh-${key}.lease.json`);
 };
 
 const PID_LINE_RE = /POLYTH_REMOTE_PID=(\d+)/;
@@ -291,6 +306,7 @@ export const createRemoteOpenCodeRuntime = async (
   const lease = await createOwnedSshEndpointLease({
     location: { directory: remotePath },
     authentication,
+    stateFile: options.leaseStateFile ?? defaultLeaseStateFile(host.label, remotePath),
     async start(instanceToken) {
       let started: StartedServe | null = null;
       let lastError: unknown;

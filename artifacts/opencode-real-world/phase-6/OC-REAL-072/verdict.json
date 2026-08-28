@@ -1,0 +1,39 @@
+{
+  "id": "OC-REAL-072",
+  "verdict": "fail",
+  "engine": "R+H",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy",
+  "observed": "attachment/fork isolation violations: R post-fork: parent's next turn completed upstream but never terminalized in Polyth (projection stuck working; turn/stopped missing; forked child backend became an unmapped SSE target) | R rotation: worktree endpoint never came back after the exact-PID kill | H rotation: session never re-verified against the generation-2 endpoint (projection stuck unknown)",
+  "expected": "child stays in source worktree and receives only source bytes; no root byte leak, target cwd drift, or old-generation attachment mutation",
+  "attribution": "POLYTH",
+  "crossTreeLeakBlocker": false,
+  "identifiers": {
+    "real": {
+      "worktreeSession": "44f6e39b-941a-410a-ae0d-66ec2302505c",
+      "rootSession": "36d8da2a-9903-4393-8fbd-bc06ee4046ee",
+      "worktreeBackend": "ses_fb8c44c42fferZ0Twk5A20FGNr",
+      "rootBackend": "ses_fb8c44579ffeoOCId1ETN6DBjo",
+      "childSession": "12e7001b-f323-495b-8e8b-59c417fbed76",
+      "childBackend": "ses_fb8c4367effehitxnYWuAhuqlb",
+      "rotationSession": "5b822342-d1df-45d3-878a-ca9a75019934"
+    },
+    "harness": {
+      "worktreeSession": "db669c7d-a0b2-4645-91e7-0687537a6e68",
+      "rootSession": "3fe0eb32-e6ec-4324-8c35-191e4f67436b",
+      "worktreeBackend": "ses_1"
+    }
+  },
+  "evidence": [
+    "artifacts/opencode-real-world/phase-6/OC-REAL-072/real/details.json",
+    "artifacts/opencode-real-world/phase-6/OC-REAL-072/harness/details.json",
+    "logs/opencode-real-world/phase-6/OC-REAL-072/"
+  ],
+  "failures": [
+    "R post-fork: parent's next turn completed upstream but never terminalized in Polyth (projection stuck working; turn/stopped missing; forked child backend became an unmapped SSE target)",
+    "R rotation: worktree endpoint never came back after the exact-PID kill",
+    "H rotation: session never re-verified against the generation-2 endpoint (projection stuck unknown)",
+    "H gen2: send failed after endpoint rotation (conflict)",
+    "[gap] R fork: forking a history that contains a file attachment is always rejected with history-mismatch (OpenCode stores the attachment as synthetic user text parts the canonical history does not carry) — truthful bounded rejection, no child, no leak"
+  ]
+}

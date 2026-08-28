@@ -1,0 +1,73 @@
+{
+  "cases": [
+    {
+      "name": "single-choice",
+      "error": "no question.asked within 120s"
+    },
+    {
+      "name": "multi-choice",
+      "error": "no question.asked within 120s"
+    },
+    {
+      "name": "free-text",
+      "error": "no question.asked within 120s"
+    },
+    {
+      "name": "multi-question",
+      "action": {
+        "answered": {
+          "answers": [
+            [
+              "blue"
+            ],
+            [
+              "small"
+            ]
+          ]
+        }
+      },
+      "toolOutcome": {
+        "status": "completed",
+        "output": "User has answered your questions: \"Which color do you prefer?\"=\"blue\", \"Which size do you prefer?\"=\"small\". You can now continue with the user's answers in mind.",
+        "error": ""
+      }
+    },
+    {
+      "name": "reject-case",
+      "action": {
+        "rejected": true
+      },
+      "toolOutcome": {
+        "status": "error",
+        "output": "",
+        "error": "The user dismissed this question"
+      }
+    },
+    {
+      "name": "race-case",
+      "action": {
+        "race": {
+          "first": {
+            "kind": "rejected",
+            "code": "http-404",
+            "message": "Question request not found: que_046f381d7001Q9r6JPqQBKNhpy"
+          },
+          "second": {
+            "kind": "confirmed",
+            "value": {}
+          }
+        }
+      },
+      "toolOutcome": {
+        "status": "error",
+        "output": "",
+        "error": "The user dismissed this question"
+      }
+    }
+  ],
+  "failures": [
+    "single-choice answer not visible in tool output",
+    "multi-choice answers not visible",
+    "free-text answer not visible"
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "id": "OC-REAL-053",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy (forced)",
+  "verdict": "pass",
+  "engine": "R",
+  "observed": "mid-reasoning SIGKILL kept 1 reasoning chunks truthful, never rendered as answer, honest unknown steady state",
+  "expected": "reasoning state truthful; interrupted/unknown by evidence; never false idle",
+  "attribution": "NONE",
+  "identifiers": {
+    "canonicalSessionIds": [
+      "5568227d-84b1-4b49-a977-73bd3a3ac225"
+    ]
+  },
+  "blockers": [],
+  "evidence": [
+    "artifacts/opencode-real-world/phase-4/OC-REAL-053/details.json",
+    "logs/opencode-real-world/phase-4/OC-REAL-053/fault-timeline.ndjson",
+    "logs/opencode-real-world/phase-4/OC-REAL-053/db-final.json",
+    "logs/opencode-real-world/phase-4/OC-REAL-053/polyth.log"
+  ]
+}

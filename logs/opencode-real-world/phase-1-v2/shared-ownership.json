@@ -1,0 +1,219 @@
+{
+  "capturedAt": "2026-08-28T03:21:07.372Z",
+  "shared": {
+    "url": "http://127.0.0.1:45126",
+    "pid": 4812,
+    "directory": "/tmp/polyth-oc-phase1-v2/project"
+  },
+  "borrowedAttach": {
+    "before": {
+      "endpoint": {
+        "authorityId": "real-shared-opencode-1.18.18",
+        "continuity": "generation-only",
+        "generation": 1,
+        "url": "http://127.0.0.1:45126",
+        "location": {
+          "directory": "/tmp/polyth-oc-phase1-v2/project"
+        },
+        "control": {
+          "kind": "borrowed",
+          "source": "external"
+        },
+        "config": {
+          "kind": "read-only"
+        },
+        "authentication": {
+          "kind": "basic-env",
+          "usernameEnv": "OPENCODE_SERVER_USERNAME",
+          "passwordEnv": "OPENCODE_SERVER_PASSWORD"
+        }
+      },
+      "protocol": "v2",
+      "facadeCapabilities": {
+        "streaming": true,
+        "permissions": true,
+        "questions": true,
+        "compaction": true,
+        "subagents": true,
+        "steering": true
+      },
+      "sharedAlive": true,
+      "health": {
+        "status": 200,
+        "body": {
+          "healthy": true,
+          "version": "1.18.18"
+        }
+      }
+    },
+    "afterDispose": {
+      "sharedAlive": true,
+      "health": {
+        "status": 200,
+        "body": {
+          "healthy": true,
+          "version": "1.18.18"
+        }
+      }
+    }
+  },
+  "reconnectToSurvivingService": {
+    "endpoint": {
+      "authorityId": "real-shared-opencode-1.18.18",
+      "continuity": "generation-only",
+      "generation": 1,
+      "url": "http://127.0.0.1:45126",
+      "location": {
+        "directory": "/tmp/polyth-oc-phase1-v2/project"
+      },
+      "control": {
+        "kind": "borrowed",
+        "source": "external"
+      },
+      "config": {
+        "kind": "read-only"
+      },
+      "authentication": {
+        "kind": "basic-env",
+        "usernameEnv": "OPENCODE_SERVER_USERNAME",
+        "passwordEnv": "OPENCODE_SERVER_PASSWORD"
+      }
+    },
+    "protocol": "v2",
+    "directSession": {
+      "data": {
+        "id": "ses_phase1v2_001",
+        "projectID": "global",
+        "agent": "build",
+        "model": {
+          "id": "orcarouter/free",
+          "providerID": "orcarouter",
+          "variant": "default"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "time": {
+          "created": 1787887046234,
+          "updated": 1787887099812
+        },
+        "title": "New session - 2026-08-28T03:17:26.234Z",
+        "location": {
+          "directory": "/tmp/polyth-oc-phase1-v2/project"
+        },
+        "subpath": "tmp/polyth-oc-phase1-v2/project"
+      }
+    },
+    "adapterSessions": {
+      "ok": true,
+      "value": []
+    },
+    "adapterHistory": {
+      "ok": false,
+      "error": "OpenCode V2 history is disabled until its beta contract is pinned",
+      "code": "capability-unsupported"
+    },
+    "adapterReconcile": {
+      "ok": true,
+      "value": {
+        "authorityId": "real-shared-opencode-1.18.18",
+        "generation": 1,
+        "location": {
+          "directory": "/tmp/polyth-oc-phase1-v2/project"
+        },
+        "backendSessionId": "ses_phase1v2_001",
+        "reconciliationOrdinal": 1,
+        "state": {
+          "value": "unknown"
+        },
+        "completeness": {
+          "events": "unverifiable",
+          "permissions": "unverifiable",
+          "questions": "unverifiable"
+        },
+        "permissions": [],
+        "questions": [],
+        "events": []
+      }
+    }
+  },
+  "normalOwnedRuntimeAtOccupiedSharedPort": {
+    "requestedPort": 45126,
+    "result": {
+      "kind": "failed",
+      "name": "Error",
+      "message": "opencode serve exited 1: Warning: OPENCODE_SERVER_PASSWORD is not set; server is unsecured.\n\u001b[91m\u001b[1mError: \u001b[0mUnexpected error\n\nServeError\n",
+      "code": "unavailable"
+    },
+    "sharedAliveAfterAttempt": true
+  },
+  "normalOwnedRuntimeWithDefaultPort": {
+    "during": {
+      "endpoint": {
+        "authorityId": "owned:99463a2e-eb90-47e6-9043-1f308b0a92d3",
+        "continuity": "generation-only",
+        "generation": 1,
+        "url": "http://127.0.0.1:46551",
+        "location": {
+          "directory": "/tmp/polyth-oc-phase1-v2/project-owned-default"
+        },
+        "control": {
+          "kind": "owned",
+          "instanceToken": "87533dc6-232c-4cdc-bbb5-b6e1596f4d6a"
+        },
+        "config": {
+          "kind": "writable",
+          "targetId": "opencode-config:/tmp/polyth-oc-phase1-v2/owned-config"
+        },
+        "authentication": {
+          "kind": "basic-env",
+          "usernameEnv": "OPENCODE_SERVER_USERNAME",
+          "passwordEnv": "OPENCODE_SERVER_PASSWORD"
+        }
+      },
+      "protocol": "v2",
+      "facadeCapabilities": {
+        "streaming": true,
+        "permissions": true,
+        "questions": true,
+        "compaction": true,
+        "subagents": true,
+        "steering": true
+      },
+      "models": [],
+      "ownedPid": 6957,
+      "ownedPidIdentity": {
+        "startIdentity": "97274",
+        "executable": "/home/ubuntu/.opencode/bin/opencode",
+        "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 46551"
+      },
+      "ownedAlive": true,
+      "sharedAlive": true,
+      "sharedHealth": {
+        "status": 200,
+        "body": {
+          "healthy": true,
+          "version": "1.18.18"
+        }
+      }
+    },
+    "afterDispose": {
+      "ownedAlive": false,
+      "sharedAlive": true,
+      "sharedHealth": {
+        "status": 200,
+        "body": {
+          "healthy": true,
+          "version": "1.18.18"
+        }
+      }
+    }
+  }
+}

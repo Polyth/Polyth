@@ -1,0 +1,10 @@
+{
+  "shimPid": 39296,
+  "opencodePid": 39308,
+  "proxyUrl": "http://127.0.0.1:35319",
+  "targetUrl": "http://127.0.0.1:43391",
+  "cwd": "/tmp/ocreal-phase2/oc-real-037-mtchslws/project",
+  "configDir": "/tmp/ocreal-phase2/oc-real-037-mtchslws/opencode-config",
+  "xdgDataHome": "/tmp/ocreal-phase2/oc-real-037-mtchslws/home/.local/share",
+  "startedAt": 1787893782119
+}

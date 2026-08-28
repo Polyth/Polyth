@@ -1,0 +1,205 @@
+{
+  "checks": [
+    {
+      "name": "real: both admitted turns terminalize (no stall)",
+      "pass": true,
+      "observed": "both turns reached turn/stopped and the session settled idle"
+    },
+    {
+      "name": "real: exactly one admission before the first turn completes",
+      "pass": true,
+      "observed": "turn/started before first turn/stopped: 1; total started=2"
+    },
+    {
+      "name": "real: loser queued exactly once, never lost",
+      "pass": true,
+      "observed": "queue/enqueued=1 turn/started=2 turn/stopped=2 fallback=1"
+    },
+    {
+      "name": "real: both texts entered the durable log exactly once",
+      "pass": true,
+      "observed": "[\"Reply with exactly the single word ALPHA\",\"Reply with exactly the single word BRAVO\"]"
+    },
+    {
+      "name": "real: client A converges to canonical durable order",
+      "pass": true,
+      "observed": "A events=33 dupSeqs=[]"
+    },
+    {
+      "name": "real: client B converges to canonical durable order",
+      "pass": true,
+      "observed": "B events=33 dupSeqs=[]"
+    },
+    {
+      "name": "real: no client-specific order (A == B frame-for-frame on seqs)",
+      "pass": true,
+      "observed": "A seqs=33 B seqs=33"
+    },
+    {
+      "name": "real: upstream saw each prompt exactly once",
+      "pass": true,
+      "observed": "upstream user-message counts: A=1 B=1 total=4"
+    },
+    {
+      "name": "real: queue fully drained",
+      "pass": true,
+      "observed": "[]"
+    },
+    {
+      "name": "harness: both admitted turns terminalize (no stall)",
+      "pass": true,
+      "observed": "both turns reached turn/stopped and the session settled idle"
+    },
+    {
+      "name": "harness: exactly one admission before the first turn completes",
+      "pass": true,
+      "observed": "turn/started before first turn/stopped: 1; total started=2"
+    },
+    {
+      "name": "harness: loser queued exactly once, never lost",
+      "pass": true,
+      "observed": "queue/enqueued=1 turn/started=2 turn/stopped=2 fallback=1"
+    },
+    {
+      "name": "harness: both texts entered the durable log exactly once",
+      "pass": true,
+      "observed": "[\"Reply with exactly the single word ALPHA\",\"Reply with exactly the single word BRAVO\"]"
+    },
+    {
+      "name": "harness: client A converges to canonical durable order",
+      "pass": true,
+      "observed": "A events=33 dupSeqs=[]"
+    },
+    {
+      "name": "harness: client B converges to canonical durable order",
+      "pass": true,
+      "observed": "B events=33 dupSeqs=[]"
+    },
+    {
+      "name": "harness: no client-specific order (A == B frame-for-frame on seqs)",
+      "pass": true,
+      "observed": "A seqs=33 B seqs=33"
+    },
+    {
+      "name": "harness: upstream saw each prompt exactly once",
+      "pass": true,
+      "observed": "upstream user-message counts: A=1 B=1 total=4"
+    },
+    {
+      "name": "harness: queue fully drained",
+      "pass": true,
+      "observed": "[]"
+    },
+    {
+      "name": "sqlite integrity ok",
+      "pass": true,
+      "observed": "[{\"integrity_check\":\"ok\"}]"
+    }
+  ],
+  "real": {
+    "sessionId": "818202e8-de37-401f-b590-bd05c48bbec5",
+    "sendResults": {
+      "a": {
+        "status": 200,
+        "body": {
+          "turnId": "a4f54766-18e6-456a-935b-d65ba9429dab"
+        },
+        "raw": "{\"turnId\":\"a4f54766-18e6-456a-935b-d65ba9429dab\"}"
+      },
+      "b": {
+        "status": 200,
+        "body": {
+          "queueId": "e600903f-d570-4041-8ed9-0348edef4966",
+          "queued": true
+        },
+        "raw": "{\"queueId\":\"e600903f-d570-4041-8ed9-0348edef4966\",\"queued\":true}"
+      }
+    },
+    "admission": {
+      "startedSeqs": [
+        15,
+        27
+      ],
+      "stoppedSeqs": [
+        21,
+        33
+      ],
+      "enqueued": [
+        {
+          "seq": 14,
+          "data": {
+            "queueId": "e600903f-d570-4041-8ed9-0348edef4966",
+            "text": "Reply with exactly the single word BRAVO-REAL and nothing else.",
+            "delivery": "queue"
+          }
+        }
+      ],
+      "fallback": [
+        {
+          "seq": 13,
+          "data": {
+            "queueId": "e600903f-d570-4041-8ed9-0348edef4966",
+            "reason": "turn-active"
+          }
+        }
+      ]
+    },
+    "canonicalFingerprintLength": 33,
+    "upstream": {
+      "backendId": "ses_fb84cb983ffe4uPwdrQOn1FsUe",
+      "countA": 1,
+      "countB": 1,
+      "totalMessages": 4,
+      "servePid": 156224
+    }
+  },
+  "harness": {
+    "sessionId": "877572db-7ed1-42d1-99cc-83469f970fea",
+    "sendResults": {
+      "a": {
+        "turnId": "3d695a99-67c0-4ed8-b887-38d5c3847e1d"
+      },
+      "b": {
+        "queueId": "4e111a26-1c24-46ff-8db0-89f8568e338a",
+        "queued": true
+      }
+    },
+    "admission": {
+      "startedSeqs": [
+        15,
+        27
+      ],
+      "stoppedSeqs": [
+        21,
+        33
+      ],
+      "enqueued": [
+        {
+          "seq": 14,
+          "data": {
+            "queueId": "4e111a26-1c24-46ff-8db0-89f8568e338a",
+            "text": "Reply with exactly the single word BRAVO-HARNESS and nothing else.",
+            "delivery": "queue"
+          }
+        }
+      ],
+      "fallback": [
+        {
+          "seq": 13,
+          "data": {
+            "queueId": "4e111a26-1c24-46ff-8db0-89f8568e338a",
+            "reason": "turn-active"
+          }
+        }
+      ]
+    },
+    "canonicalFingerprintLength": 33,
+    "upstream": {
+      "backendId": "ses_fb84c975dffej5GdkUSuL2uKLB",
+      "countA": 1,
+      "countB": 1,
+      "totalMessages": 4,
+      "servePid": 156224
+    }
+  }
+}

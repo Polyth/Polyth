@@ -1,0 +1,14 @@
+{
+  "id": "OC-REAL-008",
+  "verdict": "pass",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy (forced)",
+  "observed": "one POST to prompt_async (status 204); body carried exact text+model; upstream user message exact once; assistant ran google/gemini-2.5-flash-lite agent=build",
+  "expected": "one prompt, selected model/agent intact, no body drift",
+  "attribution": "NONE",
+  "evidence": [
+    "artifacts/opencode-real-world/phase-1-legacy/OC-REAL-008/prompt-wire.json",
+    "logs/opencode-real-world/phase-1-legacy/OC-REAL-008/wire.ndjson"
+  ],
+  "notes": "Durable-intent-before-POST is server-stack behavior (deterministic-tested); this run pins the real wire contract. LIVE model used."
+}

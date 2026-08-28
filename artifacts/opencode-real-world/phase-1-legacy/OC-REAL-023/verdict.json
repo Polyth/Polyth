@@ -1,0 +1,13 @@
+{
+  "id": "OC-REAL-023",
+  "verdict": "partial",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy (forced)",
+  "observed": "idle-fresh: raw={} -> idle; busy: raw={\"ses_fb9216b70ffeLAlYc5sI4TZ3Xq\":{\"type\":\"busy\"}} -> running; aborted: raw={} -> unknown; permission-pending: raw={\"ses_fb9214e80ffeh5AmQhAScmEW3n\":{\"type\":\"busy\"}} -> running; question-pending: raw={\"ses_fb921478effeDwXdnFBKe2wupk\":{\"type\":\"busy\"}} -> running; failed: raw={} -> unknown",
+  "expected": "busy positive; terminal values require comparable ordered evidence",
+  "attribution": "OPENCODE",
+  "evidence": [
+    "artifacts/opencode-real-world/phase-1-legacy/OC-REAL-023/status-matrix.json"
+  ],
+  "notes": "Real /session/status only lists busy sessions ({} when idle/failed/aborted) and carries no revision anywhere: idle/failed/interrupted can NEVER be normalized from live status. Fresh sessions get causal idle from the create receipt only. Product effect: after the first turn a real legacy session can never be proven idle again (see OC-REAL-020 failure report)."
+}

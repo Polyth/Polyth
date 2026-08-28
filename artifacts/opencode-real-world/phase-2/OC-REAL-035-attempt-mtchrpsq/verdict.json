@@ -1,0 +1,49 @@
+{
+  "id": "OC-REAL-035",
+  "verdict": "fail",
+  "engine": "R+H",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy message path, real dual surface narrowed by read-only transport shim",
+  "observed": "real 2xx JSON response was cut at undefined of undefined body bytes and reset; outcome=unknown; POSTs=1",
+  "expected": "one POST; partial success is unknown, not confirmation/rejection; scheduler remains blocked without duplicate dispatch",
+  "attribution": "POLYTH",
+  "duplicateMutationBlocker": false,
+  "identifiers": {
+    "canonicalSessionIds": [
+      "ba925613-4780-4888-9b19-f7a56f94a1e1"
+    ],
+    "backendSessionIds": [
+      "ses_fb93fec20ffeifuaihxfEjCThW"
+    ],
+    "operationIds": [
+      "2ef7e931-74b8-4679-a60e-caf201bd959c"
+    ],
+    "eventIds": [
+      "6c7d618e-4e64-43ae-9f9b-2142dba1f313",
+      "73b9d602-e7b0-41e4-b934-8bd5b3ad467d",
+      "6b6e59ad-6c5c-456e-a806-37611abbdf0d",
+      "16d74afa-dc8e-44a4-bf1c-79440e836ec9",
+      "57f6be18-9c65-42d8-b958-f1225f7ba93d",
+      "c14212ce-4d4d-411b-a797-cb6aafbf7d99",
+      "d5470938-082e-4a03-9656-959453464f38",
+      "2b7aae7e-78e1-472b-a16a-de1cf0042b23",
+      "8aefe816-8c3b-4796-a14c-562f424ee3aa",
+      "d4185bb9-275c-489b-a3d6-8668fe6a251e",
+      "b9d1b80d-d4fe-4ecd-9ee2-02280f8a55c9",
+      "070b92fb-2c61-4441-8746-1778eece5a3f",
+      "76df26a2-5be4-4161-956a-f92337da6fa3"
+    ]
+  },
+  "evidence": [
+    "artifacts/opencode-real-world/phase-2/OC-REAL-035/manifest.json",
+    "logs/opencode-real-world/phase-2/OC-REAL-035/wire.ndjson",
+    "logs/opencode-real-world/phase-2/OC-REAL-035/opencode.log",
+    "logs/opencode-real-world/phase-2/OC-REAL-035/db-before.json",
+    "logs/opencode-real-world/phase-2/OC-REAL-035/db-after.json",
+    "artifacts/opencode-real-world/phase-2/OC-REAL-035/partial-body.json"
+  ],
+  "failures": [
+    "partial boundary not proven: undefined"
+  ],
+  "notes": "The /doc response is transport-shimmed only to select OpenCode's real synchronous legacy /message endpoint; the mutation, model execution, and response body all come from real OpenCode."
+}

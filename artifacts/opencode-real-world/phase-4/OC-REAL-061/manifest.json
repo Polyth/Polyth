@@ -1,0 +1,26 @@
+{
+  "id": "OC-REAL-061",
+  "runId": "run-mtcne0gx",
+  "startedAt": "2026-08-28T07:46:21.092Z",
+  "gitSha": "414155c17aa4bcbed1b965633ceb1ab7ec1dca65",
+  "opencode": {
+    "version": "1.18.18",
+    "binary": "/home/ubuntu/.local/bin/opencode",
+    "sha256": "bb71f45b564f9234a97f54d6252a4a41d2f4388ae4b078918f691824cc3b3e54"
+  },
+  "node": "v22.22.2",
+  "os": "linux x64",
+  "protocol": "legacy (forced)",
+  "polythPort": 15154,
+  "projectPath": "/tmp/ocreal/phase-4/OC-REAL-061/run-mtcne0gx/project",
+  "polythDataDir": "/tmp/ocreal/phase-4/OC-REAL-061/run-mtcne0gx/polyth-data",
+  "opencodeConfigDir": "/tmp/ocreal/phase-4/OC-REAL-061/run-mtcne0gx/opencode-config",
+  "xdgDataHome": "/tmp/ocreal/phase-4/OC-REAL-061/run-mtcne0gx/xdg-data",
+  "faultSeed": "OC-REAL-061-double-crash-mid-turn-polyth-restarts-first",
+  "projectId": "51d711c8-8351-4811-9569-608968af90d6",
+  "canonicalSessionId": "7a6dd4d4-42db-4d28-87e3-6d4856f3fe44",
+  "providerModel": {
+    "providerID": "google",
+    "modelID": "gemini-3.6-flash"
+  }
+}

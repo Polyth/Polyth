@@ -1,0 +1,49 @@
+{
+  "id": "OC-REAL-040",
+  "verdict": "pass",
+  "engine": "R+H",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy compatibility create (native fork unsupported)",
+  "observed": "active protocol used an unkeyed compatibility create, committed orphan child ses_fb92e599fffe50aT9xt28TSqC9, and lost its response; operation remained unknown and restart blocked a second create",
+  "expected": "never issue a second unkeyed fork; publish no child without the exact returned ID; do not adopt by title/history similarity",
+  "attribution": "NONE",
+  "duplicateMutationBlocker": false,
+  "identifiers": {
+    "canonicalSessionIds": [
+      "cca3ab43-2e90-4d43-ae12-6a107787bbe7",
+      "d426ff1a-f669-4ddb-9250-a9baed93f410"
+    ],
+    "backendSessionIds": [
+      "ses_fb92e5a89ffe6tMHEAaGWtMrj6",
+      "ses_fb92e599fffe50aT9xt28TSqC9"
+    ],
+    "operationIds": [
+      "ddad8cde-99b6-477c-b5d5-1d5aaa426ef1"
+    ],
+    "eventIds": [
+      "b22eca67-10db-4310-b606-7f55b39830eb",
+      "567e90a1-9fd4-4b78-bd6d-f7806b23e90d",
+      "0d3bab6b-aea1-4e1e-9cff-8d8afffa022d",
+      "b950735d-7a04-4ed5-8282-2f8fc8373098",
+      "b1d97a90-86d9-44a8-a98a-56918c99f2cb",
+      "ab691fc6-995f-4c00-a733-3762cb2a04d0",
+      "1897a574-d66d-41ea-b453-82c1ae81605c",
+      "4b66c056-3b69-481c-b9a9-7ce8b5c5b63c",
+      "5d0de4d3-0f77-4a77-ae28-dd9eaec2399d",
+      "4daced69-0f89-46ca-ac5d-737ae8f5200c",
+      "7d037239-bf88-45e9-8d6c-7b3664db6d75",
+      "b8050619-fe98-473b-aaa0-96dcbb5ecbf1",
+      "438bb9fb-1504-4b44-bbda-46ca4216e37f"
+    ]
+  },
+  "evidence": [
+    "artifacts/opencode-real-world/phase-2/OC-REAL-040/manifest.json",
+    "logs/opencode-real-world/phase-2/OC-REAL-040/wire.ndjson",
+    "logs/opencode-real-world/phase-2/OC-REAL-040/opencode.log",
+    "logs/opencode-real-world/phase-2/OC-REAL-040/db-before.json",
+    "logs/opencode-real-world/phase-2/OC-REAL-040/db-after.json",
+    "artifacts/opencode-real-world/phase-2/OC-REAL-040/fork-ambiguity.json"
+  ],
+  "failures": [],
+  "notes": "Legacy does not use OpenCode's native fork endpoint; it falls back to an unkeyed session create. Safety behavior is accepted for that actual wire contract, and stale replay was conservatively blocked with conflict."
+}

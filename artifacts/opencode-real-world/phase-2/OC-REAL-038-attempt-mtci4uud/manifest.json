@@ -1,0 +1,29 @@
+{
+  "scenario": "OC-REAL-038",
+  "seed": "phase2-permission-stale-empty-restart",
+  "gitSha": "a2b84596079806cb6e91c520eb6f54964f646edf",
+  "opencode": {
+    "version": "1.18.18",
+    "binary": "/home/ubuntu/.local/bin/opencode",
+    "sha256": "bb71f45b564f9234a97f54d6252a4a41d2f4388ae4b078918f691824cc3b3e54",
+    "shimPid": 43401,
+    "pid": 43413,
+    "proxyUrl": "http://127.0.0.1:41175",
+    "targetUrl": "http://127.0.0.1:4096",
+    "configDir": "/tmp/ocreal-phase2/oc-real-038-mtci3ref/opencode-config",
+    "dataDir": "/tmp/ocreal-phase2/oc-real-038-mtci3ref/home/.local/share"
+  },
+  "polyth": {
+    "pid": 43339,
+    "port": 32937,
+    "dataDir": "/tmp/ocreal-phase2/oc-real-038-mtci3ref/polyth-data"
+  },
+  "project": "/tmp/ocreal-phase2/oc-real-038-mtci3ref/project",
+  "worktree": "/tmp/ocreal-phase2/oc-real-038-mtci3ref/project",
+  "node": "v22.22.2",
+  "os": "linux 6.12.94+",
+  "hostname": "cursor",
+  "protocol": "legacy (forced)",
+  "authority": "owned runtime; generation 1 unless restarted",
+  "createdAt": "2026-08-28T05:18:26.540Z"
+}

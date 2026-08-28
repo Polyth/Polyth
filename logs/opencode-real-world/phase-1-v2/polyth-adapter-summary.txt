@@ -1,0 +1,34 @@
+auto selected=v2 probeCalls=1 postCalls=0
+capabilities {"eventReplay":"none","pendingSnapshot":"none","idempotentMutations":{}}
+models []
+agents []
+sessions []
+history capability-unsupported:OpenCode V2 history is disabled until its beta contract is pinned
+eventStreamPath undefined
+create {"kind":"rejected","code":"capability-unsupported","message":"OpenCode V2 session creation is disabled until its beta contract is pinned"}
+reset {"kind":"rejected","code":"capability-unsupported","message":"OpenCode V2 session reset is disabled until its beta contract is pinned"}
+fork {"kind":"rejected","code":"capability-unsupported","message":"OpenCode V2 session branch is disabled until its beta contract is pinned"}
+prompt {"kind":"rejected","code":"capability-unsupported","message":"OpenCode V2 prompt admission is disabled until its beta contract is pinned"}
+steer {"kind":"rejected","code":"capability-unsupported","message":"OpenCode V2 turn steering is disabled until its beta contract is pinned"}
+abort {"kind":"rejected","code":"capability-unsupported","message":"OpenCode V2 turn abort is disabled until its beta contract is pinned"}
+delete {"kind":"rejected","code":"capability-unsupported","message":"OpenCode V2 session delete is disabled until its beta contract is pinned"}
+permissionReply {"kind":"rejected","code":"capability-unsupported","message":"OpenCode V2 permission reply is disabled until its beta contract is pinned"}
+questionReply {"kind":"rejected","code":"capability-unsupported","message":"OpenCode V2 question reply is disabled until its beta contract is pinned"}
+reconcile {"authorityId":"real-opencode-v2-1.18.18","generation":1,"location":{"directory":"/tmp/polyth-oc-phase1-v2/project"},"backendSessionId":"ses_phase1v2_001","reconciliationOrdinal":1,"state":{"value":"unknown"},"completeness":{"events":"unverifiable","permissions":"unverifiable","questions":"unverifia
+v2 selected=v2 probeCalls=1 postCalls=0
+capabilities {"eventReplay":"none","pendingSnapshot":"none","idempotentMutations":{}}
+models []
+agents []
+sessions []
+history capability-unsupported:OpenCode V2 history is disabled until its beta contract is pinned
+eventStreamPath undefined
+create {"kind":"rejected","code":"capability-unsupported","message":"OpenCode V2 session creation is disabled until its beta contract is pinned"}
+reset {"kind":"rejected","code":"capability-unsupported","message":"OpenCode V2 session reset is disabled until its beta contract is pinned"}
+fork {"kind":"rejected","code":"capability-unsupported","message":"OpenCode V2 session branch is disabled until its beta contract is pinned"}
+prompt {"kind":"rejected","code":"capability-unsupported","message":"OpenCode V2 prompt admission is disabled until its beta contract is pinned"}
+steer {"kind":"rejected","code":"capability-unsupported","message":"OpenCode V2 turn steering is disabled until its beta contract is pinned"}
+abort {"kind":"rejected","code":"capability-unsupported","message":"OpenCode V2 turn abort is disabled until its beta contract is pinned"}
+delete {"kind":"rejected","code":"capability-unsupported","message":"OpenCode V2 session delete is disabled until its beta contract is pinned"}
+permissionReply {"kind":"rejected","code":"capability-unsupported","message":"OpenCode V2 permission reply is disabled until its beta contract is pinned"}
+questionReply {"kind":"rejected","code":"capability-unsupported","message":"OpenCode V2 question reply is disabled until its beta contract is pinned"}
+reconcile {"authorityId":"real-opencode-v2-1.18.18","generation":1,"location":{"directory":"/tmp/polyth-oc-phase1-v2/project"},"backendSessionId":"ses_phase1v2_001","reconciliationOrdinal":1,"state":{"value":"unknown"},"completeness":{"events":"unverifiable","permissions":"unverifiable","questions":"unverifia

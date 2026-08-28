@@ -1,0 +1,38 @@
+{
+  "before": {
+    "token": "bd2a5101-04ab-4eb4-9ac6-996966fe7fe9",
+    "pid": 127597,
+    "start": "1856633",
+    "executable": "/home/ubuntu/.opencode/bin/opencode",
+    "commandHash": "2158355398:76"
+  },
+  "verifiedKill": {
+    "code": 0,
+    "stdout": "",
+    "stderr": "Your user’s .npmrc file (${HOME}/.npmrc)\nhas a `globalconfig` and/or a `prefix` setting, which are incompatible with nvm.\nRun `nvm use --delete-prefix v22.22.2 --silent` to unset it.\n"
+  },
+  "recovery": "Error: OpenCode protocol negotiation failed; private daemon fallback is disabled",
+  "endpointAfter": {
+    "authorityId": "owned:e8c5f5a4-aed8-4ddd-8271-cab4b1836616",
+    "continuity": "generation-only",
+    "generation": 2,
+    "url": "http://127.0.0.1:41993",
+    "location": {
+      "directory": "/tmp/ocreal-phase8/oc-real-082-mtcoe1vt/project"
+    },
+    "control": {
+      "kind": "owned",
+      "instanceToken": "c578abd4-dda5-4fbe-a91f-a3e9e68b7afc"
+    },
+    "config": {
+      "kind": "read-only"
+    },
+    "authentication": {
+      "kind": "basic-env",
+      "usernameEnv": "OPENCODE_SERVER_USERNAME",
+      "passwordEnv": "OPENCODE_SERVER_PASSWORD"
+    }
+  },
+  "sleeperPid": 129979,
+  "stalePidSurvived": true
+}

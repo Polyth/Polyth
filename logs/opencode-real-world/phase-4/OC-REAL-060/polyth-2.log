@@ -1,0 +1,85 @@
+(node:75547) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[polyth] Secure Safe behavior refresh skipped Error: applyBehavior refused: config authority is read-only
+    at assertWritable (file:///workspace/packages/backend-opencode/src/config.ts:297:9)
+    at Object.applyBehavior (file:///workspace/packages/backend-opencode/src/config.ts:363:7)
+    at Object.applyBehavior (file:///workspace/packages/server/src/opencodePending.ts:147:37)
+    at refreshSafeBehavior (file:///workspace/packages/server/src/index.ts:998:27)
+    at async boot (file:///workspace/packages/server/src/index.ts:1004:3) {
+  code: 'config-read-only'
+}
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:15153  data=/tmp/ocreal/phase-4/OC-REAL-060/run-mtcmy4ym/polyth-data
+[harness] polyth boot complete
+[polyth] failed to materialize runtime session 4b8f8787-10b7-4037-8439-4c08fcae4c48 Error: persisted backend binding does not match the current endpoint
+    at runtimeBinding (file:///workspace/packages/server/src/sessions.ts:698:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async ensureWired (file:///workspace/packages/server/src/sessions.ts:1887:7)
+    at async Object.events (file:///workspace/packages/server/src/sessions.ts:3730:13)
+    at async Server.<anonymous> (file:///workspace/packages/server/src/http.ts:248:31) {
+  code: 'binding-mismatch'
+}
+
+[harness] polyth polyth-2 exited code=0 signal=null
+(node:75715) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[polyth] Secure Safe behavior refresh skipped Error: applyBehavior refused: config authority is read-only
+    at assertWritable (file:///workspace/packages/backend-opencode/src/config.ts:297:9)
+    at Object.applyBehavior (file:///workspace/packages/backend-opencode/src/config.ts:363:7)
+    at Object.applyBehavior (file:///workspace/packages/server/src/opencodePending.ts:147:37)
+    at refreshSafeBehavior (file:///workspace/packages/server/src/index.ts:998:27)
+    at async boot (file:///workspace/packages/server/src/index.ts:1004:3) {
+  code: 'config-read-only'
+}
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:15153  data=/tmp/ocreal/phase-4/OC-REAL-060/run-mtcn0mbw/polyth-data
+[harness] polyth boot complete
+[polyth] failed to materialize runtime session d950400f-1292-44c4-9f93-a9a01a30e6b6 Error: persisted backend binding does not match the current endpoint
+    at runtimeBinding (file:///workspace/packages/server/src/sessions.ts:698:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async ensureWired (file:///workspace/packages/server/src/sessions.ts:1887:7)
+    at async Object.events (file:///workspace/packages/server/src/sessions.ts:3730:13)
+    at async Server.<anonymous> (file:///workspace/packages/server/src/http.ts:248:31) {
+  code: 'binding-mismatch'
+}
+[polyth] failed to materialize runtime session d950400f-1292-44c4-9f93-a9a01a30e6b6 Error: persisted backend binding does not match the current endpoint
+    at runtimeBinding (file:///workspace/packages/server/src/sessions.ts:698:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async ensureWired (file:///workspace/packages/server/src/sessions.ts:1887:7)
+    at async Object.events (file:///workspace/packages/server/src/sessions.ts:3730:13)
+    at async Server.<anonymous> (file:///workspace/packages/server/src/http.ts:248:31) {
+  code: 'binding-mismatch'
+}
+
+[harness] polyth polyth-2 exited code=0 signal=null
+(node:76038) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[polyth] Secure Safe behavior refresh skipped Error: applyBehavior refused: config authority is read-only
+    at assertWritable (file:///workspace/packages/backend-opencode/src/config.ts:297:9)
+    at Object.applyBehavior (file:///workspace/packages/backend-opencode/src/config.ts:363:7)
+    at Object.applyBehavior (file:///workspace/packages/server/src/opencodePending.ts:147:37)
+    at refreshSafeBehavior (file:///workspace/packages/server/src/index.ts:998:27)
+    at async boot (file:///workspace/packages/server/src/index.ts:1004:3) {
+  code: 'config-read-only'
+}
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:15153  data=/tmp/ocreal/phase-4/OC-REAL-060/run-mtcn5qll/polyth-data
+[harness] polyth boot complete
+[polyth] failed to materialize runtime session d1bc55b9-d0ea-4825-98d1-d0f185d9cd4b Error: persisted backend binding does not match the current endpoint
+    at runtimeBinding (file:///workspace/packages/server/src/sessions.ts:698:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async ensureWired (file:///workspace/packages/server/src/sessions.ts:1887:7)
+    at async Object.events (file:///workspace/packages/server/src/sessions.ts:3730:13)
+    at async Server.<anonymous> (file:///workspace/packages/server/src/http.ts:248:31) {
+  code: 'binding-mismatch'
+}
+[polyth] failed to materialize runtime session d1bc55b9-d0ea-4825-98d1-d0f185d9cd4b Error: persisted backend binding does not match the current endpoint
+    at runtimeBinding (file:///workspace/packages/server/src/sessions.ts:698:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async ensureWired (file:///workspace/packages/server/src/sessions.ts:1887:7)
+    at async Object.events (file:///workspace/packages/server/src/sessions.ts:3730:13)
+    at async Server.<anonymous> (file:///workspace/packages/server/src/http.ts:248:31) {
+  code: 'binding-mismatch'
+}
+
+[harness] polyth polyth-2 exited code=0 signal=null

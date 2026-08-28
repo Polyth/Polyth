@@ -1,0 +1,27 @@
+{
+  "id": "OC-REAL-074",
+  "verdict": "pass",
+  "engine": "R+H",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy",
+  "observed": "double answer to one pending permission (real HTTP race + deterministic in-process tick): exactly one CAS winner, one durable resolution matching the winner, gated side effect consistent with the winner, loser got a typed conflict, both clients converged",
+  "expected": "both clients converge; exactly one upstream answer; loser never shown as success",
+  "attribution": "NONE",
+  "multiClientBlocker": false,
+  "identifiers": {
+    "realSessionId": "4ae9614d-94e7-410b-b5c3-91524583ef42",
+    "realRequestId": "per_04782eced001PcE42X5oVUfMDe",
+    "harnessSessionId": "38e9a117-39c8-4d7c-b51d-4c4ac1d62872",
+    "harnessRequestId": "per_04782f86a001vPPHkRZvf8gTkv"
+  },
+  "evidence": [
+    "artifacts/opencode-real-world/phase-7/OC-REAL-074/details.json",
+    "logs/opencode-real-world/phase-7/OC-REAL-074/ws-a-real.ndjson",
+    "logs/opencode-real-world/phase-7/OC-REAL-074/ws-b-real.ndjson",
+    "logs/opencode-real-world/phase-7/OC-REAL-074/client-a.ndjson",
+    "logs/opencode-real-world/phase-7/OC-REAL-074/client-b.ndjson",
+    "logs/opencode-real-world/phase-7/OC-REAL-074/upstream-real.ndjson",
+    "logs/opencode-real-world/phase-7/OC-REAL-074/db-final.json"
+  ],
+  "failures": []
+}

@@ -1,0 +1,18 @@
+{
+  "servePid": 158361,
+  "identityBefore": {
+    "cmdline": "opencode serve --hostname 127.0.0.1 --port 0",
+    "startTick": "2373528"
+  },
+  "identityAfter": {
+    "cmdline": "opencode serve --hostname 127.0.0.1 --port 0",
+    "startTick": "2373528"
+  },
+  "receivedSignal": null,
+  "aliveAfterShutdown": true,
+  "stillListening": 200,
+  "leaseControl": {
+    "kind": "borrowed",
+    "source": "external"
+  }
+}

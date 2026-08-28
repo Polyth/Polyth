@@ -1,0 +1,2 @@
+{"at":"2026-08-28T08:13:07.973Z","type":"runtime-event","sessionId":"phase8-080","event":{"type":"turn/started","turnId":"turn_mtcocjk5_l7r38k"}}
+{"at":"2026-08-28T08:13:09.122Z","type":"ssh-controlmaster-killed","pid":119475,"signal":"SIGKILL"}

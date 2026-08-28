@@ -1,0 +1,22 @@
+{
+  "id": "OC-REAL-052",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy (forced)",
+  "verdict": "pass",
+  "engine": "R",
+  "observed": "mid-text SIGKILL preserved 1 durable deltas once, no invented suffix/completion, honest unknown steady state",
+  "expected": "prefix remains; no invented suffix/completion; recovery uses proven suffix only",
+  "attribution": "NONE",
+  "identifiers": {
+    "canonicalSessionIds": [
+      "68953b24-c875-494d-8617-4a14bbd8626e"
+    ]
+  },
+  "blockers": [],
+  "evidence": [
+    "artifacts/opencode-real-world/phase-4/OC-REAL-052/details.json",
+    "logs/opencode-real-world/phase-4/OC-REAL-052/fault-timeline.ndjson",
+    "logs/opencode-real-world/phase-4/OC-REAL-052/db-final.json",
+    "logs/opencode-real-world/phase-4/OC-REAL-052/polyth.log"
+  ]
+}

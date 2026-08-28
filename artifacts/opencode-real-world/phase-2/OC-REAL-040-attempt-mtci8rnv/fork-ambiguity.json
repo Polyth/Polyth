@@ -1,0 +1,25 @@
+{
+  "sourceCanonicalSessionId": "8674b56c-a823-4cbc-9891-393847f2752a",
+  "sourceBackendSessionId": "ses_fb92f74b6ffel13MwzsKWxzmGq",
+  "intendedChildCanonicalId": "5c5bd1b7-c1a6-4f00-ac17-97c4f15a8979",
+  "forkOperationId": "10a38aa3-da92-46a5-9653-917fe3f0a356",
+  "forkError": "",
+  "secondError": "binding-mismatch",
+  "forkSupported": true,
+  "upstreamChildrenBeforeRestart": [],
+  "upstreamChildrenAfterRestart": [],
+  "canonicalChildrenBeforeRestart": [
+    "5c5bd1b7-c1a6-4f00-ac17-97c4f15a8979"
+  ],
+  "canonicalChildrenAfterRestart": [
+    "5c5bd1b7-c1a6-4f00-ac17-97c4f15a8979"
+  ],
+  "requestConnectionIds": [],
+  "requestOperationIds": [],
+  "failures": [
+    "fork mutation requests=0",
+    "real fork children=0",
+    "canonical children published before/after=1/1",
+    "fork operation states before/after=confirmed/confirmed"
+  ]
+}

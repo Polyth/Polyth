@@ -1,0 +1,99 @@
+{
+  "seedBytes": "{\n  // user comment that a JSONC-faithful writer would keep\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"xUnknownTop\": { \"keep\": [1, 2], \"nested\": { \"deep\": true } },\n  \"theme\": \"dark\",\n  \"mcp\": {\n    // valid for OpenCode (1.18.18 hard-fails startup on schema-invalid mcp\n    // types), unmanaged by Polyth, and carrying unknown extra fields\n    \"unsupported-entry\": { \"type\": \"remote\", \"url\": \"https://example.invalid/mcp\", \"enabled\": false, \"customField\": true, \"notes\": \"user-owned\" },\n  },\n  \"provider\": {\n    \"google\": { \"blacklist\": [\"old-model\"], \"customOpt\": { \"nested\": 1 } },\n  },\n  \"plugin\": [\"some-plugin@1.0.0\"],\n  \"agent\": { \"reviewer\": { \"mode\": \"subagent\", \"temperature\": 0.2 } },\n}\n",
+  "commentsPreservedAfterFirstWrite": false,
+  "mcpBlockAfterApply": {
+    "unsupported-entry": {
+      "type": "remote",
+      "url": "https://example.invalid/mcp",
+      "enabled": false,
+      "customField": true,
+      "notes": "user-owned"
+    },
+    "polyth-managed": {
+      "type": "local",
+      "command": [
+        "echo",
+        "mcp"
+      ],
+      "enabled": true,
+      "environment": {
+        "FLAG": "1"
+      }
+    }
+  },
+  "refusals": {
+    "refusedReadOnly": "config-read-only",
+    "refusedMismatch": "config-target-mismatch"
+  },
+  "corruptOutcome": "SyntaxError: Expected property name or '}' in JSON at position 2 (line 1 column 3)",
+  "restart": {
+    "generation1": 1,
+    "url1": "http://127.0.0.1:33485",
+    "generation2": 2,
+    "url2": "http://127.0.0.1:37621",
+    "restartsExecuted": 1,
+    "connectedBefore": [
+      "google",
+      "opencode"
+    ],
+    "huggingfaceHiddenAfterRestart": true,
+    "oldEndpointDead": true
+  },
+  "finalConfig": {
+    "$schema": "https://opencode.ai/config.json",
+    "xUnknownTop": {
+      "keep": [
+        1,
+        2
+      ],
+      "nested": {
+        "deep": true
+      }
+    },
+    "theme": "dark",
+    "mcp": {
+      "unsupported-entry": {
+        "type": "remote",
+        "url": "https://example.invalid/mcp",
+        "enabled": false,
+        "customField": true,
+        "notes": "user-owned"
+      },
+      "polyth-managed": {
+        "type": "local",
+        "command": [
+          "echo",
+          "mcp"
+        ],
+        "enabled": true,
+        "environment": {
+          "FLAG": "1"
+        }
+      }
+    },
+    "provider": {
+      "google": {
+        "blacklist": [
+          "blocked-model-x"
+        ],
+        "customOpt": {
+          "nested": 1
+        }
+      }
+    },
+    "plugin": [
+      "another-plugin@2.0.0"
+    ],
+    "agent": {
+      "reviewer": {
+        "mode": "subagent",
+        "temperature": 0.2,
+        "prompt": "Review changes carefully."
+      }
+    },
+    "disabled_providers": [
+      "huggingface"
+    ]
+  },
+  "failures": []
+}

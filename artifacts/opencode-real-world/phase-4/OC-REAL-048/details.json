@@ -1,0 +1,81 @@
+{
+  "checks": [
+    {
+      "name": "no PID record before listen",
+      "pass": true,
+      "observed": "pidfile exists=false"
+    },
+    {
+      "name": "startup failure is bounded",
+      "pass": true,
+      "observed": "create settled in 1205ms status=503"
+    },
+    {
+      "name": "no false ready (create failed)",
+      "pass": true,
+      "observed": "status=503 body={\"error\":\"unavailable\",\"message\":\"opencode serve exited null: \"}"
+    },
+    {
+      "name": "exact child is cleaned (no orphan)",
+      "pass": true,
+      "observed": "pid 61211 alive=false"
+    },
+    {
+      "name": "no stale PID record left",
+      "pass": true,
+      "observed": "pidfile exists=false"
+    },
+    {
+      "name": "no leaked runtime child",
+      "pass": true,
+      "observed": "[]"
+    },
+    {
+      "name": "later recovery builds a fresh generation",
+      "pass": true,
+      "observed": "status=200 session=618672e2-fb5a-4c9b-8689-9a54229a0dec"
+    },
+    {
+      "name": "fresh child has a valid identity-complete PID record",
+      "pass": true,
+      "observed": "{\"version\":1,\"ownerPid\":61184,\"ownerInstanceToken\":\"2ab9f6a8-1bb6-40e0-b0b1-0a369184a9fd\",\"child\":{\"pid\":61213,\"startIdentity\":\"1185898\",\"executable\":\"/home/ubuntu/.opencode/bin/opencode\",\"command\":\"/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 34987\"}}"
+    }
+  ],
+  "observations": [
+    {
+      "createResult": {
+        "status": 503,
+        "json": {
+          "error": "unavailable",
+          "message": "opencode serve exited null: "
+        }
+      },
+      "elapsedMs": 1205
+    },
+    {
+      "liveChildren": [
+        {
+          "pid": 61196,
+          "identity": {
+            "startIdentity": "1185697",
+            "exe": "/usr/bin/flock",
+            "cmdline": "flock --exclusive --nonblock /tmp/ocreal/phase-4/OC-REAL-048/run-mtcke9iz/polyth-data/.polyth-writer.lock /home/ubuntu/.nvm/versions/node/v22.22.2/bin/node -e process.stdout.write('locked\\n');process.stdin.resume()"
+          }
+        }
+      ]
+    },
+    {
+      "recoveryPidRecord": {
+        "version": 1,
+        "ownerPid": 61184,
+        "ownerInstanceToken": "2ab9f6a8-1bb6-40e0-b0b1-0a369184a9fd",
+        "child": {
+          "pid": 61213,
+          "startIdentity": "1185898",
+          "executable": "/home/ubuntu/.opencode/bin/opencode",
+          "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 34987"
+        }
+      }
+    }
+  ]
+}

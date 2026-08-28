@@ -1,0 +1,571 @@
+{
+  "dbPath": "/tmp/ocreal/phase-4/OC-REAL-055/run-mtcm23rb/polyth-data/sessions.db",
+  "sessionId": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+  "capturedAt": "2026-08-28T07:10:03.879Z",
+  "integrityCheck": [
+    {
+      "integrity_check": "ok"
+    }
+  ],
+  "walCheckpoint": [
+    {
+      "__error": "disk I/O error"
+    }
+  ],
+  "journalMode": [
+    {
+      "journal_mode": "wal"
+    }
+  ],
+  "events": [
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 1,
+      "id": "329b1bd7-d789-4286-9662-545eeac372e1",
+      "time": 1787900942063,
+      "type": "session/created",
+      "data": "{\"title\":\"s055\",\"projectId\":\"69dcdb4f-75cc-463e-b002-d11b9a707465\",\"model\":{\"providerID\":\"google\",\"modelID\":\"gemini-3.6-flash\"}}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 2,
+      "id": "53b18494-cbfc-4f4a-a984-4b7f45f68536",
+      "time": 1787900942063,
+      "type": "mutation/prepared",
+      "data": "{\"operationId\":\"8daafa7a-b820-46ca-9a9a-33beacdc3582\",\"ordinal\":1,\"mutationKind\":\"session-create\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 3,
+      "id": "0948b91a-b2df-48e8-8165-2c1ec844e98d",
+      "time": 1787900943731,
+      "type": "mutation/claimed",
+      "data": "{\"operationId\":\"8daafa7a-b820-46ca-9a9a-33beacdc3582\",\"ordinal\":1,\"mutationKind\":\"session-create\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 4,
+      "id": "cdff7d85-9cdd-4ee5-ab9c-225569bd0351",
+      "time": 1787900945278,
+      "type": "mutation/confirmed",
+      "data": "{\"operationId\":\"8daafa7a-b820-46ca-9a9a-33beacdc3582\",\"ordinal\":1,\"mutationKind\":\"session-create\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 5,
+      "id": "aa929979-dd96-49ea-9e01-5acf6b029838",
+      "time": 1787900945279,
+      "type": "reconciliation/started",
+      "data": "{\"ordinal\":1}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 6,
+      "id": "3301b217-819a-4433-9b27-f3d4adb100ea",
+      "time": 1787900945294,
+      "type": "runtime/status-observed",
+      "data": "{\"state\":\"idle\",\"causalOperationId\":\"8daafa7a-b820-46ca-9a9a-33beacdc3582\",\"authorityId\":\"owned:ce95982e-842a-4f0d-a403-ae4555220f25\",\"generation\":1,\"reason\":\"session-created\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 7,
+      "id": "0341dc77-0cf0-4c34-8893-ef9c93403a39",
+      "time": 1787900945295,
+      "type": "reconciliation/completed",
+      "data": "{\"ordinal\":1,\"state\":\"ready\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 8,
+      "id": "2eac23f1-6bd5-487e-a3bc-6cc241d0ea72",
+      "time": 1787900945423,
+      "type": "behavior/instructions-applied",
+      "data": "{\"revision\":\"aad7aad3d885\",\"digest\":\"aad7aad3d885a80dba0321e41ca2be29b87b89379bcd55a3af7d535f424e9231\",\"scope\":\"global\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 9,
+      "id": "57f819d5-bfb9-4d6e-b78e-262414c0f0bb",
+      "time": 1787900945423,
+      "type": "user/message",
+      "data": "{\"text\":\"Run exactly this single bash command and nothing else: echo ran >> effect-055.txt && sleep 45\"}",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 10,
+      "id": "72afda47-ed34-463d-9ac0-66461e6b71d8",
+      "time": 1787900945423,
+      "type": "mutation/prepared",
+      "data": "{\"operationId\":\"acfb88cd-8edf-4d0b-9a36-125d828ea110\",\"ordinal\":2,\"mutationKind\":\"turn-submit\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 11,
+      "id": "295a4158-0088-441b-a071-39dfaaff2eec",
+      "time": 1787900945423,
+      "type": "mutation/claimed",
+      "data": "{\"operationId\":\"acfb88cd-8edf-4d0b-9a36-125d828ea110\",\"ordinal\":2,\"mutationKind\":\"turn-submit\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 12,
+      "id": "c33e6199-cb63-4421-8b46-c4d4c3748eec",
+      "time": 1787900945432,
+      "type": "mutation/confirmed",
+      "data": "{\"operationId\":\"acfb88cd-8edf-4d0b-9a36-125d828ea110\",\"ordinal\":2,\"mutationKind\":\"turn-submit\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 13,
+      "id": "6ac3cda0-34ef-41a6-ab7f-fb1709f58fdc",
+      "time": 1787900945433,
+      "type": "turn/started",
+      "data": "{\"turnId\":\"turn_mtcm26mw_c3cwty\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 14,
+      "id": "4b1ac31a-5f59-4b64-8934-8a8e84c40295",
+      "time": 1787900953355,
+      "type": "assistant/reasoning-chunk",
+      "data": "{\"partId\":\"prt_047337d62001S4yO2aj5fdVK5d\",\"text\":\"**Assessing Safety Protocols**\\n\\nI'm now cross-referencing the explicit command with established safety protocols to ensure compliance, particularly concerning file system modifications. I am currently evaluating the direct implications of the provided command \\\"echo ran >> effect-055.txt && sleep 45\\\" to see if I need to run it in a sandbox.\\n\\n\\n\"}",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 15,
+      "id": "1c383f45-a52b-428f-8f61-8c1355d08b66",
+      "time": 1787900953356,
+      "type": "assistant/message",
+      "data": "{\"partId\":\"prt_047337d62001S4yO2aj5fdVK5d\",\"text\":\"\",\"reasoning\":\"**Assessing Safety Protocols**\\n\\nI'm now cross-referencing the explicit command with established safety protocols to ensure compliance, particularly concerning file system modifications. I am currently evaluating the direct implications of the provided command \\\"echo ran >> effect-055.txt && sleep 45\\\" to see if I need to run it in a sandbox.\\n\\n\\n\"}",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 16,
+      "id": "50063ff6-2b70-47a0-9501-6d22e9a4e7fc",
+      "time": 1787900953622,
+      "type": "tool/call",
+      "data": "{\"callId\":\"hcE2j5tVMuOnbEqW\",\"tool\":\"bash\",\"input\":{},\"status\":\"pending\"}",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 17,
+      "id": "5b97a53a-1337-4674-8522-05159945f7b4",
+      "time": 1787900953623,
+      "type": "tool/started",
+      "data": "{\"callId\":\"hcE2j5tVMuOnbEqW\",\"tool\":\"bash\",\"input\":{\"command\":\"echo ran >> effect-055.txt && sleep 45\"}}",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 18,
+      "id": "1174d045-b53b-47e4-b9ba-cb4eb1b5d63c",
+      "time": 1787900953623,
+      "type": "assistant/chunk",
+      "data": "{\"partId\":\"prt_047338308001qrsOfLVjEXPr22\",\"text\":\"I will execute the command to append \\\"ran\\\" to `effect-055.txt` and sleep for 45 seconds.\"}",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 19,
+      "id": "319fb34b-6068-4be7-b497-090b28113f1c",
+      "time": 1787900953623,
+      "type": "assistant/message",
+      "data": "{\"partId\":\"prt_047338308001qrsOfLVjEXPr22\",\"text\":\"I will execute the command to append \\\"ran\\\" to `effect-055.txt` and sleep for 45 seconds.\",\"tokens\":{\"input\":0,\"output\":0,\"reasoning\":0,\"cacheRead\":0,\"cacheWrite\":0},\"cost\":0}",
+      "ignorable": 0,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 20,
+      "id": "754affc7-9b05-4803-8aba-f37452294d26",
+      "time": 1787900953844,
+      "type": "reconciliation/started",
+      "data": "{\"ordinal\":2}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    },
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "seq": 21,
+      "id": "0b8fa202-26b8-4a8f-b4fa-e084af82db5e",
+      "time": 1787900973845,
+      "type": "reconciliation/blocked",
+      "data": "{\"ordinal\":2,\"state\":\"unknown\",\"reason\":\"OpenCode protocol negotiation failed; private daemon fallback is disabled\"}",
+      "ignorable": 1,
+      "surface_op": null,
+      "source_seqs": null,
+      "producer": null,
+      "v": 1
+    }
+  ],
+  "projections": [
+    {
+      "__error": "no such column: id"
+    }
+  ],
+  "runtime_operations": [
+    {
+      "operation_id": "8daafa7a-b820-46ca-9a9a-33beacdc3582",
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "ordinal": 1,
+      "mutation_kind": "session-create",
+      "state": "confirmed",
+      "replay_kind": "never",
+      "replay_contract": null,
+      "created_at": 1787900942062,
+      "updated_at": 1787900945278,
+      "code": null,
+      "message": null,
+      "receipt": "ses_fb8cc9c89ffeLQO4aHFJOVfGSI",
+      "owner_event_seq": 1
+    },
+    {
+      "operation_id": "acfb88cd-8edf-4d0b-9a36-125d828ea110",
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "ordinal": 2,
+      "mutation_kind": "turn-submit",
+      "state": "confirmed",
+      "replay_kind": "never",
+      "replay_contract": null,
+      "created_at": 1787900945423,
+      "updated_at": 1787900945432,
+      "code": null,
+      "message": null,
+      "receipt": null,
+      "owner_event_seq": 9
+    }
+  ],
+  "session_queue": [],
+  "response_intents": [],
+  "observations": [
+    {
+      "authority_id": "owned:ce95982e-842a-4f0d-a403-ae4555220f25",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-055/run-mtcm23rb/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cc9c89ffeLQO4aHFJOVfGSI",
+      "artifact_kind": "status",
+      "entity_id": "ses_fb8cc9c89ffeLQO4aHFJOVfGSI",
+      "revision": "causal:8daafa7a-b820-46ca-9a9a-33beacdc3582",
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[6]",
+      "observed_at": 1787900945294
+    },
+    {
+      "authority_id": "owned:ce95982e-842a-4f0d-a403-ae4555220f25",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-055/run-mtcm23rb/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cc9c89ffeLQO4aHFJOVfGSI",
+      "artifact_kind": "turn",
+      "entity_id": "ses_fb8cc9c89ffeLQO4aHFJOVfGSI",
+      "revision": "1.18.18",
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900945454
+    },
+    {
+      "authority_id": "owned:ce95982e-842a-4f0d-a403-ae4555220f25",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-055/run-mtcm23rb/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cc9c89ffeLQO4aHFJOVfGSI",
+      "artifact_kind": "message",
+      "entity_id": "msg_047336421001bhv7LWCsxW0duZ",
+      "revision": "snapshot",
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900945793
+    },
+    {
+      "authority_id": "owned:ce95982e-842a-4f0d-a403-ae4555220f25",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-055/run-mtcm23rb/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cc9c89ffeLQO4aHFJOVfGSI",
+      "artifact_kind": "part",
+      "entity_id": "prt_047336427001W5QqWviUovs8r7",
+      "revision": "snapshot",
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900945793
+    },
+    {
+      "authority_id": "owned:ce95982e-842a-4f0d-a403-ae4555220f25",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-055/run-mtcm23rb/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cc9c89ffeLQO4aHFJOVfGSI",
+      "artifact_kind": "status",
+      "entity_id": "ses_fb8cc9c89ffeLQO4aHFJOVfGSI",
+      "revision": "state:running",
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900945806
+    },
+    {
+      "authority_id": "owned:ce95982e-842a-4f0d-a403-ae4555220f25",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-055/run-mtcm23rb/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cc9c89ffeLQO4aHFJOVfGSI",
+      "artifact_kind": "message",
+      "entity_id": "msg_04733656d001GUr29IYJCVemw2",
+      "revision": "snapshot",
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900945806
+    },
+    {
+      "authority_id": "owned:ce95982e-842a-4f0d-a403-ae4555220f25",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-055/run-mtcm23rb/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cc9c89ffeLQO4aHFJOVfGSI",
+      "artifact_kind": "part",
+      "entity_id": "prt_047337d5f0016s5BHhWTJLpaJB",
+      "revision": "snapshot",
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900951909
+    },
+    {
+      "authority_id": "owned:ce95982e-842a-4f0d-a403-ae4555220f25",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-055/run-mtcm23rb/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cc9c89ffeLQO4aHFJOVfGSI",
+      "artifact_kind": "part",
+      "entity_id": "prt_047337d62001S4yO2aj5fdVK5d",
+      "revision": "snapshot",
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900951909
+    },
+    {
+      "authority_id": "owned:ce95982e-842a-4f0d-a403-ae4555220f25",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-055/run-mtcm23rb/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cc9c89ffeLQO4aHFJOVfGSI",
+      "artifact_kind": "part",
+      "entity_id": "prt_047337d62001S4yO2aj5fdVK5d",
+      "revision": "complete:1787900953350#0",
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[14]",
+      "observed_at": 1787900953355
+    },
+    {
+      "authority_id": "owned:ce95982e-842a-4f0d-a403-ae4555220f25",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-055/run-mtcm23rb/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cc9c89ffeLQO4aHFJOVfGSI",
+      "artifact_kind": "part",
+      "entity_id": "prt_047337d62001S4yO2aj5fdVK5d",
+      "revision": "complete:1787900953350#1",
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[15]",
+      "observed_at": 1787900953356
+    },
+    {
+      "authority_id": "owned:ce95982e-842a-4f0d-a403-ae4555220f25",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-055/run-mtcm23rb/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cc9c89ffeLQO4aHFJOVfGSI",
+      "artifact_kind": "part",
+      "entity_id": "prt_047338308001qrsOfLVjEXPr22",
+      "revision": "snapshot",
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[]",
+      "observed_at": 1787900953356
+    },
+    {
+      "authority_id": "owned:ce95982e-842a-4f0d-a403-ae4555220f25",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-055/run-mtcm23rb/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cc9c89ffeLQO4aHFJOVfGSI",
+      "artifact_kind": "tool",
+      "entity_id": "hcE2j5tVMuOnbEqW",
+      "revision": "state:pending",
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[16]",
+      "observed_at": 1787900953622
+    },
+    {
+      "authority_id": "owned:ce95982e-842a-4f0d-a403-ae4555220f25",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-055/run-mtcm23rb/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cc9c89ffeLQO4aHFJOVfGSI",
+      "artifact_kind": "tool",
+      "entity_id": "hcE2j5tVMuOnbEqW",
+      "revision": "state:running",
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[17]",
+      "observed_at": 1787900953623
+    },
+    {
+      "authority_id": "owned:ce95982e-842a-4f0d-a403-ae4555220f25",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-055/run-mtcm23rb/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cc9c89ffeLQO4aHFJOVfGSI",
+      "artifact_kind": "part",
+      "entity_id": "prt_047338308001qrsOfLVjEXPr22",
+      "revision": "complete:1787900953617#0",
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[18]",
+      "observed_at": 1787900953623
+    },
+    {
+      "authority_id": "owned:ce95982e-842a-4f0d-a403-ae4555220f25",
+      "directory": "/tmp/ocreal/phase-4/OC-REAL-055/run-mtcm23rb/project",
+      "workspace": "",
+      "backend_session_id": "ses_fb8cc9c89ffeLQO4aHFJOVfGSI",
+      "artifact_kind": "part",
+      "entity_id": "prt_047338308001qrsOfLVjEXPr22",
+      "revision": "complete:1787900953617#1",
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "observed_generation": 1,
+      "reconciliation_ordinal": 1,
+      "canonical_seqs": "[19]",
+      "observed_at": 1787900953623
+    }
+  ],
+  "observation_checkpoints": [
+    {
+      "__error": "no such column: session_id"
+    }
+  ],
+  "observation_cursors": [
+    {
+      "__error": "no such column: session_id"
+    }
+  ],
+  "session_reconciliations": [
+    {
+      "session_id": "3312a9e3-c9f4-4155-af55-85da27f2fbf7",
+      "ordinal": 2,
+      "state": "unknown",
+      "reason": "OpenCode protocol negotiation failed; private daemon fallback is disabled",
+      "updated_at": 1787900973845
+    }
+  ],
+  "deletion_tombstones": [
+    {
+      "__error": "no such column: session_id"
+    }
+  ],
+  "attention_open": []
+}

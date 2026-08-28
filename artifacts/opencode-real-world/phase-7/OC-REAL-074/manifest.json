@@ -1,0 +1,19 @@
+{
+  "id": "OC-REAL-074",
+  "headSha": "1de37879680d4fa75b559088aea11e4ab3d18668",
+  "opencodeBin": "/home/ubuntu/.local/bin/opencode",
+  "opencodeVersion": "1.18.18",
+  "nodeVersion": "v22.22.2",
+  "os": "linux 6.12.94+",
+  "host": "cursor",
+  "model": {
+    "providerID": "opencode",
+    "modelID": "big-pickle"
+  },
+  "protocol": "legacy",
+  "projectPath": "/tmp/ocreal-phase7/oc-real-074-mtcp5leb/project",
+  "polythDataDir": "/tmp/ocreal-phase7/oc-real-074-mtcp5leb/polyth-data",
+  "startedAt": "2026-08-28T08:35:43.562Z",
+  "scenario": "two clients answer one pending permission",
+  "engine": "R+H"
+}

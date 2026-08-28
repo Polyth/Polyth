@@ -1,0 +1,165 @@
+{
+  "runs": [
+    {
+      "name": "short",
+      "outageMs": 500,
+      "sawDeltaBeforeDrop": true,
+      "socketsKilled": 1,
+      "reconnectMs": 16,
+      "promptPosts": 1,
+      "upstreamCompleted": true,
+      "upstreamHasMarker": true,
+      "snapshotState": {
+        "value": "unknown"
+      },
+      "snapshotCompleteness": {
+        "events": "partial",
+        "permissions": "partial",
+        "questions": "partial"
+      },
+      "snapshotAssistantMessages": 2,
+      "markerCountInSnapshot": 1,
+      "liveFinalizedAssistantEvents": 1
+    },
+    {
+      "name": "medium",
+      "outageMs": 5000,
+      "sawDeltaBeforeDrop": true,
+      "socketsKilled": 1,
+      "reconnectMs": 2042,
+      "promptPosts": 1,
+      "upstreamCompleted": true,
+      "upstreamHasMarker": true,
+      "snapshotState": {
+        "value": "unknown"
+      },
+      "snapshotCompleteness": {
+        "events": "partial",
+        "permissions": "partial",
+        "questions": "partial"
+      },
+      "snapshotAssistantMessages": 1,
+      "markerCountInSnapshot": 1,
+      "liveFinalizedAssistantEvents": 0
+    },
+    {
+      "name": "long",
+      "outageMs": 30000,
+      "sawDeltaBeforeDrop": true,
+      "socketsKilled": 1,
+      "reconnectMs": 85,
+      "promptPosts": 1,
+      "upstreamCompleted": true,
+      "upstreamHasMarker": true,
+      "snapshotState": {
+        "value": "unknown"
+      },
+      "snapshotCompleteness": {
+        "events": "partial",
+        "permissions": "partial",
+        "questions": "partial"
+      },
+      "snapshotAssistantMessages": 2,
+      "markerCountInSnapshot": 1,
+      "liveFinalizedAssistantEvents": 1
+    }
+  ],
+  "eventStreamConnections": 11,
+  "lifecycleEvents": [
+    {
+      "t": 1787894646360,
+      "type": "stream-connected"
+    },
+    {
+      "t": 1787894649723,
+      "type": "stream-disconnected",
+      "reason": "Error: OpenCode SSE response closed before completion"
+    },
+    {
+      "t": 1787894650238,
+      "type": "stream-connected"
+    },
+    {
+      "t": 1787894653315,
+      "type": "stream-disconnected",
+      "reason": "Error: OpenCode SSE response closed before completion"
+    },
+    {
+      "t": 1787894654327,
+      "type": "stream-connected"
+    },
+    {
+      "t": 1787894654329,
+      "type": "stream-disconnected",
+      "reason": "Error: opencode GET /event → 503"
+    },
+    {
+      "t": 1787894656342,
+      "type": "stream-connected"
+    },
+    {
+      "t": 1787894656343,
+      "type": "stream-disconnected",
+      "reason": "Error: opencode GET /event → 503"
+    },
+    {
+      "t": 1787894660357,
+      "type": "stream-connected"
+    },
+    {
+      "t": 1787894663152,
+      "type": "stream-disconnected",
+      "reason": "Error: OpenCode SSE response closed before completion"
+    },
+    {
+      "t": 1787894668164,
+      "type": "stream-connected"
+    },
+    {
+      "t": 1787894668166,
+      "type": "stream-disconnected",
+      "reason": "Error: opencode GET /event → 503"
+    },
+    {
+      "t": 1787894673178,
+      "type": "stream-connected"
+    },
+    {
+      "t": 1787894673179,
+      "type": "stream-disconnected",
+      "reason": "Error: opencode GET /event → 503"
+    },
+    {
+      "t": 1787894678192,
+      "type": "stream-connected"
+    },
+    {
+      "t": 1787894678194,
+      "type": "stream-disconnected",
+      "reason": "Error: opencode GET /event → 503"
+    },
+    {
+      "t": 1787894683206,
+      "type": "stream-connected"
+    },
+    {
+      "t": 1787894683208,
+      "type": "stream-disconnected",
+      "reason": "Error: opencode GET /event → 503"
+    },
+    {
+      "t": 1787894688223,
+      "type": "stream-connected"
+    },
+    {
+      "t": 1787894688224,
+      "type": "stream-disconnected",
+      "reason": "Error: opencode GET /event → 503"
+    },
+    {
+      "t": 1787894693237,
+      "type": "stream-connected"
+    }
+  ],
+  "failures": []
+}

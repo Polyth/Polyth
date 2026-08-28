@@ -1,0 +1,15 @@
+{
+  "id": "OC-REAL-026",
+  "verdict": "fail",
+  "opencodeVersion": "1.18.18",
+  "protocol": "auto->v2, forced legacy, forced v2",
+  "observed": "auto selected v2; auto create={\"kind\":\"rejected\",\"code\":\"capability-unsupported\",\"message\":\"OpenCode V2 session creation is disabled until its beta contract is pinned\"}; forced-legacy create=confirmed; forced-v2 create=rejected/capability-unsupported",
+  "expected": "auto must select an operational adapter or fail startup; must not select disabled V2 then reject core work",
+  "attribution": "POLYTH",
+  "evidence": [
+    "artifacts/opencode-real-world/phase-1-legacy/OC-REAL-026/doc-surface.json",
+    "artifacts/opencode-real-world/phase-1-legacy/OC-REAL-026/protocol-matrix.json",
+    "logs/opencode-real-world/phase-1-legacy/OC-REAL-026/opencode.log"
+  ],
+  "notes": "Known baseline defect: dual-surface /doc makes protocol:auto choose the disabled V2 adapter (protocol.ts hasV2ProtocolDocument precedence). Forced legacy is a diagnostic, not a waiver."
+}

@@ -1,0 +1,9 @@
+{"ts":"2026-08-28T06:25:10.289Z","event":"fault","rule":"kill-during-probe","method":"GET","path":"/global/health?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-049%2Frun-mtckhobf%2Fproject"}
+{"ts":"2026-08-28T06:25:21.130Z","event":"proxied","method":"GET","path":"/global/health?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-049%2Frun-mtckhobf%2Fproject","status":200,"reqBytes":0,"resBytes":36,"cut":false}
+{"ts":"2026-08-28T06:25:21.918Z","event":"proxied","method":"GET","path":"/doc?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-049%2Frun-mtckhobf%2Fproject","status":200,"reqBytes":0,"resBytes":37752,"cut":false}
+{"ts":"2026-08-28T06:25:24.121Z","event":"proxied","method":"GET","path":"/provider?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-049%2Frun-mtckhobf%2Fproject","status":200,"reqBytes":0,"resBytes":344122,"cut":false}
+{"ts":"2026-08-28T06:25:24.267Z","event":"proxied","method":"POST","path":"/session?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-049%2Frun-mtckhobf%2Fproject","status":200,"reqBytes":25,"resBytes":395,"cut":false}
+{"ts":"2026-08-28T06:25:24.271Z","event":"proxied","method":"GET","path":"/session/status?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-049%2Frun-mtckhobf%2Fproject","status":200,"reqBytes":0,"resBytes":2,"cut":false}
+{"ts":"2026-08-28T06:25:24.276Z","event":"proxied","method":"GET","path":"/session/ses_fb8f49adcffeQmuChcXgw4R6nT/message?limit=1000&directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-049%2Frun-mtckhobf%2Fproject","status":200,"reqBytes":0,"resBytes":2,"cut":false}
+{"ts":"2026-08-28T06:25:24.277Z","event":"proxied","method":"GET","path":"/permission?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-049%2Frun-mtckhobf%2Fproject","status":200,"reqBytes":0,"resBytes":2,"cut":false}
+{"ts":"2026-08-28T06:25:24.278Z","event":"proxied","method":"GET","path":"/question?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-049%2Frun-mtckhobf%2Fproject","status":200,"reqBytes":0,"resBytes":2,"cut":false}

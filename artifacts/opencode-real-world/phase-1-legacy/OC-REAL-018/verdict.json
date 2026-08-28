@@ -1,0 +1,14 @@
+{
+  "id": "OC-REAL-018",
+  "verdict": "pass",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy (forced)",
+  "observed": "empty fork -> fresh session (0 msgs); mid fork with repeated equal text used positional messageID boundary; full fork exact; bogus prefix -> history-mismatch: Error: requested history prefix is not present in the backend session",
+  "expected": "child history and cwd exact; source mapping never changes on failed verification",
+  "attribution": "NONE",
+  "evidence": [
+    "artifacts/opencode-real-world/phase-1-legacy/OC-REAL-018/fork-boundaries.json",
+    "logs/opencode-real-world/phase-1-legacy/OC-REAL-018/wire.ndjson"
+  ],
+  "notes": "Cross-location fork isolation is covered by worktree rows; this pins the real /fork boundary contract and read-back verification."
+}

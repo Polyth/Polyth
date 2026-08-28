@@ -1,0 +1,34 @@
+{
+  "version": 3,
+  "rules": [
+    {
+      "id": "permission-sse-blackhole",
+      "method": "GET",
+      "pathPattern": "^/event(?:\\?|$)",
+      "action": {
+        "kind": "blackhole"
+      }
+    },
+    {
+      "id": "permission-pending-empty",
+      "method": "GET",
+      "pathPattern": "^/permission(?:\\?|$)",
+      "action": {
+        "kind": "synthetic",
+        "status": 200,
+        "body": []
+      }
+    },
+    {
+      "id": "permission-answer-drop",
+      "method": "POST",
+      "pathPattern": "/session/[^/]+/permissions/per_046cee361001XTyA7835nInVVi(?:\\?|$)",
+      "bodyIncludes": "\"response\":\"reject\"",
+      "maxUses": 1,
+      "action": {
+        "kind": "drop-before-headers",
+        "delayMs": 2
+      }
+    }
+  ]
+}

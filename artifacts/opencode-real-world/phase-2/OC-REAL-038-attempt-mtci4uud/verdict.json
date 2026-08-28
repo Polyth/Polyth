@@ -1,0 +1,74 @@
+{
+  "id": "OC-REAL-038",
+  "verdict": "fail",
+  "engine": "R+H",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy (forced)",
+  "observed": "real permission answer applied upstream and ack was lost; stale then empty partial pending snapshots and full Polyth/OpenCode restart retained one unknown operation/intent/open card; answer POSTs=1",
+  "expected": "one answer mutation; intent/payload and card remain durable until exact or causally complete proof; stale client cannot answer again",
+  "attribution": "POLYTH",
+  "duplicateMutationBlocker": false,
+  "identifiers": {
+    "canonicalSessionIds": [
+      "09fa8f9e-c270-49d6-aa5a-711f537a4ba4"
+    ],
+    "backendSessionIds": [
+      "ses_fb931e9f1ffeqfCajzr65cOM5g"
+    ],
+    "operationIds": [
+      "56b2966d-4817-45cf-9513-bbfd2cb17532"
+    ],
+    "eventIds": [
+      "32b3bde3-9709-4284-97dd-cf4dca4f9c67",
+      "7d0d04f9-14b8-4da3-ba20-f9c71f845f39",
+      "868b801a-d08c-42f8-b9cd-76a718bd559a",
+      "9985afba-2f8c-4495-90e7-7ad35524f683",
+      "f18fb009-db28-45e7-85e7-2b8a736e5152",
+      "b4607f83-c444-41d1-87bb-dff6ef1d7c49",
+      "0f242e29-67fc-40fd-8677-ea49912a4d3b",
+      "c90d26cd-b1c9-42dc-8e01-29ba8f177f89",
+      "e90f94fe-c475-4f90-ba07-599b852a431e",
+      "dafa326a-486b-4dc3-850d-6d1e2664601c",
+      "fc53a421-b67f-41ea-84f7-4e70dbac743d",
+      "47c3b383-4e2b-41a4-83b8-dd651f7bdbad",
+      "82d081e2-1d50-43bf-9196-d3eab85b0b47",
+      "185fcda8-e644-48d7-bc71-8637b1cc9ac2",
+      "ebd2ef97-2a61-4641-bda5-b861cfffee2f",
+      "b3072464-f906-4fe2-abc4-099f78490dc9",
+      "76ea21df-1b30-4e36-86e1-0fec8c7facfd",
+      "ef9af96c-52f7-4462-a218-fcc62c54b062",
+      "027b8b33-4b77-4bfc-82a1-efc7dc97fdd5",
+      "8d2bb647-c4c8-4c2a-bcbe-dc5031e4da06",
+      "c117cc3f-a5d1-411e-88c3-73696efb2e09",
+      "13173559-c475-4e5f-852f-c20d202afce8",
+      "515bfa37-4f58-4135-83b8-e946a0458de0",
+      "2572feea-eb5e-4d22-a013-89404fa5ed98",
+      "da729bc7-652d-4976-8bf5-efaa27427bbc",
+      "a7911c6a-8e86-4962-875f-7d57990bf377",
+      "eedd7860-a0c2-4666-842a-bab21ab1addc",
+      "47048ac1-dbdf-4315-89ec-5470c9477a8a",
+      "c1706045-3084-4f83-a83e-8e66ac7c122d",
+      "e831caae-ad2d-4a0b-bcf8-c87b8d747a7a",
+      "070582de-c242-48ab-b2a7-8a3230009f99",
+      "8d349466-2b86-4177-b62e-3d8a87b3e158",
+      "c42129ff-9206-4620-8146-2cc1a9bc24c1",
+      "31dc2bb9-95ee-4c3d-8b8b-80b26146df52",
+      "50a20bd9-f59f-4f32-a766-f81c8c0ca42e"
+    ]
+  },
+  "evidence": [
+    "artifacts/opencode-real-world/phase-2/OC-REAL-038/manifest.json",
+    "logs/opencode-real-world/phase-2/OC-REAL-038/wire.ndjson",
+    "logs/opencode-real-world/phase-2/OC-REAL-038/opencode.log",
+    "logs/opencode-real-world/phase-2/OC-REAL-038/db-before.json",
+    "logs/opencode-real-world/phase-2/OC-REAL-038/db-after.json",
+    "artifacts/opencode-real-world/phase-2/OC-REAL-038/permission-ambiguity.json",
+    "logs/opencode-real-world/phase-2/OC-REAL-038/upstream-sse.ndjson",
+    "logs/opencode-real-world/phase-2/OC-REAL-038/websocket-before-restart.ndjson",
+    "logs/opencode-real-world/phase-2/OC-REAL-038/websocket-after-restart.ndjson"
+  ],
+  "failures": [
+    "stale second answer error=binding-mismatch"
+  ],
+  "notes": "Legacy pending-list completeness is partial. Both an intentionally stale list and a later empty list are therefore non-causal and must not settle the answer."
+}

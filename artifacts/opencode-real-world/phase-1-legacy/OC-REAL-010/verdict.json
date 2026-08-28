@@ -1,0 +1,14 @@
+{
+  "id": "OC-REAL-010",
+  "verdict": "pass",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy (forced)",
+  "observed": "live gemini-2.5-flash: read tool + write tool ran; lifecycles {\"zKSsqD1Z1d1FsIXm\":[\"call:pending\",\"tool/started\",\"tool/result\"],\"eHKKxPXHf3VR4oYx\":[\"call:pending\",\"tool/started\",\"tool/result\"]}; side effect file exact once; each call exactly one terminal result",
+  "expected": "ordered lifecycle ranks; side effect and canonical result once",
+  "attribution": "NONE",
+  "evidence": [
+    "artifacts/opencode-real-world/phase-1-legacy/OC-REAL-010/tool-lifecycle.json",
+    "logs/opencode-real-world/phase-1-legacy/OC-REAL-010/sse.ndjson"
+  ],
+  "notes": "Tool permissions auto-allowed via project opencode.json; permission flow is exercised in OC-REAL-013/014."
+}

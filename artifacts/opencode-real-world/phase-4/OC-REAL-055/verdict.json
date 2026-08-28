@@ -1,0 +1,22 @@
+{
+  "id": "OC-REAL-055",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy (forced)",
+  "verdict": "pass",
+  "engine": "R",
+  "observed": "side-effect-then-kill left exactly one side effect, one prompt, no fabricated result, honest steady state",
+  "expected": "no repeated tool/prompt; no claimed unobserved result; no hidden uncertainty",
+  "attribution": "NONE",
+  "identifiers": {
+    "canonicalSessionIds": [
+      "3312a9e3-c9f4-4155-af55-85da27f2fbf7"
+    ]
+  },
+  "blockers": [],
+  "evidence": [
+    "artifacts/opencode-real-world/phase-4/OC-REAL-055/details.json",
+    "logs/opencode-real-world/phase-4/OC-REAL-055/fault-timeline.ndjson",
+    "logs/opencode-real-world/phase-4/OC-REAL-055/db-final.json",
+    "logs/opencode-real-world/phase-4/OC-REAL-055/polyth.log"
+  ]
+}

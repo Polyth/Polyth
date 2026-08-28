@@ -1,0 +1,58 @@
+{
+  "before": {
+    "authorityId": "owned:3c2f9708-ac73-4779-956c-4f5415db33e3",
+    "continuity": "generation-only",
+    "generation": 1,
+    "url": "http://127.0.0.1:36791",
+    "location": {
+      "directory": "/tmp/ocreal-phase8/oc-real-079-mtcobn76/project"
+    },
+    "control": {
+      "kind": "owned",
+      "instanceToken": "ff2dded5-7780-46ff-a160-e658f49ee025"
+    },
+    "config": {
+      "kind": "read-only"
+    },
+    "authentication": {
+      "kind": "basic-env",
+      "usernameEnv": "OPENCODE_SERVER_USERNAME",
+      "passwordEnv": "OPENCODE_SERVER_PASSWORD"
+    }
+  },
+  "outcome": {
+    "kind": "threw",
+    "error": "Error: OpenCode protocol negotiation failed; private daemon fallback is disabled"
+  },
+  "status": {
+    "id": "b687d727-f87d-4470-be68-ef35bab830d6",
+    "state": "connected",
+    "checkedAt": 1787904783117,
+    "latencyMs": 136
+  },
+  "after": {
+    "authorityId": "owned:3c2f9708-ac73-4779-956c-4f5415db33e3",
+    "continuity": "generation-only",
+    "generation": 2,
+    "url": "http://127.0.0.1:33545",
+    "location": {
+      "directory": "/tmp/ocreal-phase8/oc-real-079-mtcobn76/project"
+    },
+    "control": {
+      "kind": "owned",
+      "instanceToken": "d008a2bc-1012-407d-b96b-fe651cd11592"
+    },
+    "config": {
+      "kind": "read-only"
+    },
+    "authentication": {
+      "kind": "basic-env",
+      "usernameEnv": "OPENCODE_SERVER_USERNAME",
+      "passwordEnv": "OPENCODE_SERVER_PASSWORD"
+    }
+  },
+  "history": [],
+  "rawHistory": "[]",
+  "noMutation": true,
+  "backgroundErrors": []
+}

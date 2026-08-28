@@ -1,0 +1,4 @@
+{"ts":"2026-08-28T06:26:39.617Z","event":"polyth-started","label":"polyth","pid":61561,"port":15143}
+{"ts":"2026-08-28T06:27:14.497Z","event":"polyth-stopped","pid":61561,"how":"SIGTERM"}
+{"ts":"2026-08-28T06:27:45.770Z","event":"polyth-started","label":"polyth","pid":61669,"port":15143}
+{"ts":"2026-08-28T06:28:20.308Z","event":"polyth-stopped","pid":61669,"how":"SIGTERM"}

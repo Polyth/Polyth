@@ -1,0 +1,24 @@
+{
+  "phase": "permission",
+  "backendId": "ses_fb8db7bdaffeN8v8vcf1a4twgO",
+  "servePid": 67742,
+  "baselineReply": "PROJECT_A_FEATURE",
+  "baselineEventCount": 25,
+  "requestId": "per_04724ada90011TbmxKazNwN08G",
+  "deletedAt": 1787899981424,
+  "completed": true,
+  "reply": "NotFound: FileSystem.access (/tmp/polyth-tests/project-a/worktree-feature)",
+  "tools": [
+    {
+      "tool": "bash",
+      "status": "error",
+      "output": "",
+      "error": "NotFound: FileSystem.access (/tmp/polyth-tests/project-a/worktree-feature)"
+    }
+  ],
+  "finalProjection": {
+    "status": "working",
+    "worktreePath": "/tmp/polyth-tests/project-a/worktree-feature",
+    "worktreeState": "ready"
+  }
+}

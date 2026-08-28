@@ -1,0 +1,39 @@
+{
+  "beforeBorrowedShutdown": {
+    "pid": 86741,
+    "identity": {
+      "pid": 86741,
+      "startIdentity": "1786221",
+      "executable": "/home/ubuntu/.opencode/bin/opencode",
+      "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 38607"
+    },
+    "external": {
+      "status": 200,
+      "ended": false,
+      "byteCount": 17224,
+      "eventCount": 72
+    }
+  },
+  "afterBorrowedShutdown": {
+    "alive": true,
+    "identity": {
+      "pid": 86741,
+      "startIdentity": "1786221",
+      "executable": "/home/ubuntu/.opencode/bin/opencode",
+      "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 38607"
+    },
+    "health": {
+      "status": 200,
+      "contentType": "application/json",
+      "body": {
+        "healthy": true
+      }
+    },
+    "external": {
+      "status": 200,
+      "ended": false,
+      "byteCount": 17224,
+      "eventCount": 72
+    }
+  }
+}

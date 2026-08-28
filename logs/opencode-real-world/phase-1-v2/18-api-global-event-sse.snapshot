@@ -1,0 +1,20 @@
+data: {"id":"evt_0465f77d8001NFLd76JSwpeu6S","type":"server.connected","data":{}}
+
+: heartbeat
+
+data: {"id":"evt_0465fa11b0017DzM5UV92Aef6z","type":"session.next.prompt.admitted","durable":{"aggregateID":"ses_phase1v2_001","seq":1,"version":1},"location":{"directory":"/tmp/polyth-oc-phase1-v2/project"},"data":{"timestamp":1787887067419,"sessionID":"ses_phase1v2_001","messageID":"msg_phase1v2_001","prompt":{"text":"Reply with exactly V2_WIRE_OK and nothing else."},"delivery":"queue"}}
+
+data: {"id":"evt_0465fa12e001GbVDaYnpNiZo8M","type":"session.next.prompted","durable":{"aggregateID":"ses_phase1v2_001","seq":2,"version":1},"location":{"directory":"/tmp/polyth-oc-phase1-v2/project"},"data":{"timestamp":1787887067419,"sessionID":"ses_phase1v2_001","messageID":"msg_phase1v2_001","prompt":{"text":"Reply with exactly V2_WIRE_OK and nothing else."},"delivery":"queue"}}
+
+: heartbeat
+
+: heartbeat
+
+data: {"id":"evt_046601fa4002qF50b7PYhPqLTB","type":"session.next.agent.switched","durable":{"aggregateID":"ses_phase1v2_001","seq":3,"version":1},"location":{"directory":"/tmp/polyth-oc-phase1-v2/project"},"data":{"timestamp":1787887099812,"sessionID":"ses_phase1v2_001","messageID":"msg_046601fa4001wcpqlQH28g3ZDD","agent":"build"}}
+
+data: {"id":"evt_046601fbb001o304Vf4Maetvxv","type":"session.next.prompt.admitted","durable":{"aggregateID":"ses_phase1v2_001","seq":4,"version":1},"location":{"directory":"/tmp/polyth-oc-phase1-v2/project"},"data":{"timestamp":1787887099835,"sessionID":"ses_phase1v2_001","messageID":"msg_phase1v2_002","prompt":{"text":"Read the attached marker and reply with its content.","files":[{"uri":"file:///tmp/polyth-oc-phase1-v2/project/marker.txt","mime":"text/plain","name":"marker.txt"}]},"delivery":"queue"}}
+
+data: {"id":"evt_046601fc2001QVgJGsugx0NxHI","type":"session.next.prompted","durable":{"aggregateID":"ses_phase1v2_001","seq":5,"version":1},"location":{"directory":"/tmp/polyth-oc-phase1-v2/project"},"data":{"timestamp":1787887099835,"sessionID":"ses_phase1v2_001","messageID":"msg_phase1v2_002","prompt":{"text":"Read the attached marker and reply with its content.","files":[{"uri":"file:///tmp/polyth-oc-phase1-v2/project/marker.txt","mime":"text/plain","name":"marker.txt"}]},"delivery":"queue"}}
+
+: heartbeat
+

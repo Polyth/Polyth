@@ -1,0 +1,14 @@
+{
+  "integrity": [
+    {
+      "integrity_check": "ok"
+    }
+  ],
+  "wal": [
+    {
+      "busy": 0,
+      "log": 158,
+      "checkpointed": 158
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{"ts":"2026-08-28T07:10:24.314Z","event":"polyth-started","label":"polyth","pid":69867,"port":15149}
+{"ts":"2026-08-28T07:10:32.875Z","event":"barrier","barrier":"permission-pending","childPid":69892,"requestId":"per_04734b99c001AT0ha6boDm1aR6"}
+{"ts":"2026-08-28T07:10:32.875Z","event":"kill-exact","pid":69892,"signal":"SIGKILL","identity":{"startIdentity":"1473132","exe":"/home/ubuntu/.opencode/bin/opencode","cmdline":"opencode serve --hostname 127.0.0.1 --port 46291"}}
+{"ts":"2026-08-28T07:11:34.451Z","event":"polyth-stopped","pid":69867,"how":"SIGTERM"}
+{"ts":"2026-08-28T07:11:58.143Z","event":"polyth-started","label":"polyth","pid":70187,"port":15149}
+{"ts":"2026-08-28T07:12:41.965Z","event":"barrier","barrier":"permission-pending","childPid":70213,"requestId":"per_04736b189001sDj6H8HEfjBVez"}
+{"ts":"2026-08-28T07:12:41.965Z","event":"kill-exact","pid":70213,"signal":"SIGKILL","identity":{"startIdentity":"1482515","exe":"/home/ubuntu/.opencode/bin/opencode","cmdline":"opencode serve --hostname 127.0.0.1 --port 43857"}}
+{"ts":"2026-08-28T07:13:21.477Z","event":"polyth-stopped","pid":70187,"how":"SIGTERM"}
+{"ts":"2026-08-28T07:13:54.226Z","event":"polyth-started","label":"polyth","pid":70462,"port":15149}
+{"ts":"2026-08-28T07:14:30.730Z","event":"barrier","barrier":"permission-pending","childPid":70487,"requestId":"per_047385a3f001PufJomwwYc6wHW"}
+{"ts":"2026-08-28T07:14:30.730Z","event":"kill-exact","pid":70487,"signal":"SIGKILL","identity":{"startIdentity":"1494123","exe":"/home/ubuntu/.opencode/bin/opencode","cmdline":"opencode serve --hostname 127.0.0.1 --port 43711"}}
+{"ts":"2026-08-28T07:15:52.787Z","event":"polyth-stopped","pid":70462,"how":"SIGTERM"}

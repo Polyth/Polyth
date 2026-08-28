@@ -1,0 +1,19 @@
+{
+  "id": "OC-REAL-077",
+  "headSha": "3f3c1c0c0f8c50437437a8f387bbf0fff24c97be",
+  "opencodeBin": "/home/ubuntu/.local/bin/opencode",
+  "opencodeVersion": "1.18.18",
+  "nodeVersion": "v22.22.2",
+  "os": "linux 6.12.94+",
+  "host": "cursor",
+  "model": {
+    "providerID": "opencode",
+    "modelID": "big-pickle"
+  },
+  "protocol": "legacy",
+  "projectPath": "/tmp/ocreal-phase7/oc-real-077-mtcq0n4y/project",
+  "polythDataDir": "/tmp/ocreal-phase7/oc-real-077-mtcq0n4y/polyth-data",
+  "startedAt": "2026-08-28T08:59:52.164Z",
+  "scenario": "all UIs disconnect during turn/tool and during pending permission; new UI reconnects",
+  "engine": "R"
+}

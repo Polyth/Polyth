@@ -1,0 +1,150 @@
+{
+  "checks": [
+    {
+      "name": "real: prompt admitted",
+      "pass": true,
+      "observed": "status=200 {\"turnId\":\"bea6868d-c6b9-4773-8b64-1bc76e763588\"}"
+    },
+    {
+      "name": "real: one open request visible to both clients",
+      "pass": true,
+      "observed": "requestId=per_04782eced001PcE42X5oVUfMDe"
+    },
+    {
+      "name": "real: the contested request was asked once and resolved exactly once (no duplicate reply)",
+      "pass": true,
+      "observed": "requested=1 resolved=1 retriesAnswered=0"
+    },
+    {
+      "name": "real: exactly one CAS winner (one success, one typed loser)",
+      "pass": true,
+      "observed": "a=http-409 b=ok durableWinner=reject"
+    },
+    {
+      "name": "real: durable resolution matches the winning client's choice (no last-writer overwrite)",
+      "pass": true,
+      "observed": "durable=reject winnerChoice=reject"
+    },
+    {
+      "name": "real: gated side effect never executed (winner=reject)",
+      "pass": true,
+      "observed": "marker=null"
+    },
+    {
+      "name": "real: exactly one durable response intent for the request",
+      "pass": true,
+      "observed": "intents=1"
+    },
+    {
+      "name": "real: both clients converge to one canonical order",
+      "pass": true,
+      "observed": "A=26 B=26 rest=26"
+    },
+    {
+      "name": "real: upstream executed the gated bash tool exactly once iff the winner allowed it (one upstream answer)",
+      "pass": true,
+      "observed": "bash tool parts=1 completed=0 states=[\"error\"] winner=reject"
+    },
+    {
+      "name": "harness: prompt admitted",
+      "pass": true,
+      "observed": "status=200 {\"turnId\":\"9ebc37e2-f971-47ad-ba34-de0993a740c2\"}"
+    },
+    {
+      "name": "harness: one open request visible to both clients",
+      "pass": true,
+      "observed": "requestId=per_04782f86a001vPPHkRZvf8gTkv"
+    },
+    {
+      "name": "harness: the contested request was asked once and resolved exactly once (no duplicate reply)",
+      "pass": true,
+      "observed": "requested=1 resolved=1 retriesAnswered=0"
+    },
+    {
+      "name": "harness: exactly one CAS winner (one success, one typed loser)",
+      "pass": true,
+      "observed": "a=ok b=conflict durableWinner=once"
+    },
+    {
+      "name": "harness: durable resolution matches the winning client's choice (no last-writer overwrite)",
+      "pass": true,
+      "observed": "durable=once winnerChoice=once"
+    },
+    {
+      "name": "harness: gated side effect executed exactly once (winner=once)",
+      "pass": true,
+      "observed": "marker=\"WINNER\""
+    },
+    {
+      "name": "harness: exactly one durable response intent for the request",
+      "pass": true,
+      "observed": "intents=1"
+    },
+    {
+      "name": "harness: both clients converge to one canonical order",
+      "pass": true,
+      "observed": "A=27 B=27 rest=27"
+    },
+    {
+      "name": "harness: upstream executed the gated bash tool exactly once iff the winner allowed it (one upstream answer)",
+      "pass": true,
+      "observed": "bash tool parts=1 completed=1 states=[\"completed\"] winner=once"
+    },
+    {
+      "name": "sqlite integrity ok",
+      "pass": true,
+      "observed": "[{\"integrity_check\":\"ok\"}]"
+    }
+  ],
+  "real": {
+    "sessionId": "4ae9614d-94e7-410b-b5c3-91524583ef42",
+    "requestId": "per_04782eced001PcE42X5oVUfMDe",
+    "winnerReply": "reject",
+    "settled": {
+      "a": {
+        "rejected": "http-409"
+      },
+      "b": {
+        "status": "fulfilled",
+        "value": {
+          "ok": true
+        }
+      }
+    },
+    "markerContent": null,
+    "intentRows": 1,
+    "retriesAnswered": [],
+    "upstream": {
+      "backendId": "ses_fb87d33adffeQOOQ2OHOterBj2",
+      "servePid": 143590,
+      "bashToolParts": 1,
+      "states": [
+        "error"
+      ]
+    }
+  },
+  "harness": {
+    "sessionId": "38e9a117-39c8-4d7c-b51d-4c4ac1d62872",
+    "requestId": "per_04782f86a001vPPHkRZvf8gTkv",
+    "winnerReply": "once",
+    "settled": {
+      "a": {
+        "status": "fulfilled"
+      },
+      "b": {
+        "rejected": "conflict"
+      }
+    },
+    "markerContent": "WINNER",
+    "intentRows": 1,
+    "retriesAnswered": [],
+    "upstream": {
+      "backendId": "ses_fb87d0af8ffeGqgL7K4x1A4lvg",
+      "servePid": 143590,
+      "bashToolParts": 1,
+      "states": [
+        "completed"
+      ]
+    }
+  }
+}

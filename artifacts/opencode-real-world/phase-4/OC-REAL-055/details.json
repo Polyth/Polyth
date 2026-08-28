@@ -1,0 +1,67 @@
+{
+  "checks": [
+    {
+      "name": "prompt admitted",
+      "pass": true,
+      "observed": "status=200"
+    },
+    {
+      "name": "no duplicate side effect (tool was not repeated)",
+      "pass": true,
+      "observed": "lines at kill=1 final=1"
+    },
+    {
+      "name": "prompt was not repeated",
+      "pass": true,
+      "observed": "user/message count=1"
+    },
+    {
+      "name": "no fabricated tool result",
+      "pass": true,
+      "observed": "[]"
+    },
+    {
+      "name": "no invented completion",
+      "pass": true,
+      "observed": "[]"
+    },
+    {
+      "name": "uncertainty is not hidden (unknown/reconciling, not idle/completed)",
+      "pass": true,
+      "observed": "final status=unknown"
+    },
+    {
+      "name": "sqlite integrity ok",
+      "pass": true,
+      "observed": "[{\"integrity_check\":\"ok\"}]"
+    }
+  ],
+  "observations": [
+    {
+      "linesAtKill": [
+        "ran"
+      ]
+    },
+    {
+      "statusTrace": [
+        {
+          "ts": "2026-08-28T07:09:13.808Z",
+          "status": "working"
+        },
+        {
+          "ts": "2026-08-28T07:09:15.811Z",
+          "status": "reconciling"
+        },
+        {
+          "ts": "2026-08-28T07:09:35.834Z",
+          "status": "unknown"
+        }
+      ]
+    },
+    {
+      "linesFinal": [
+        "ran"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "sourceCanonicalSessionId": "cca3ab43-2e90-4d43-ae12-6a107787bbe7",
+  "sourceBackendSessionId": "ses_fb92e5a89ffe6tMHEAaGWtMrj6",
+  "intendedChildCanonicalId": "d426ff1a-f669-4ddb-9250-a9baed93f410",
+  "forkOperationId": "ddad8cde-99b6-477c-b5d5-1d5aaa426ef1",
+  "forkError": "outcome-unknown",
+  "secondError": "conflict",
+  "forkSupported": false,
+  "upstreamChildrenBeforeRestart": [
+    {
+      "id": "ses_fb92e599fffe50aT9xt28TSqC9",
+      "title": "OC-REAL-040 fork source (fork)"
+    }
+  ],
+  "upstreamChildrenAfterRestart": [
+    {
+      "id": "ses_fb92e599fffe50aT9xt28TSqC9",
+      "title": "OC-REAL-040 fork source (fork)"
+    }
+  ],
+  "canonicalChildrenBeforeRestart": [],
+  "canonicalChildrenAfterRestart": [],
+  "requestConnectionIds": [
+    9
+  ],
+  "requestOperationIds": [
+    "ddad8cde-99b6-477c-b5d5-1d5aaa426ef1"
+  ],
+  "failures": []
+}

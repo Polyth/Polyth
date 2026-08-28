@@ -1,0 +1,81 @@
+{
+  "checks": [
+    {
+      "name": "prompt admitted",
+      "pass": true,
+      "observed": "status=200"
+    },
+    {
+      "name": "final answer exists exactly once",
+      "pass": true,
+      "observed": "assistant/message with marker=1"
+    },
+    {
+      "name": "no duplicated answer bytes in the chunk stream",
+      "pass": true,
+      "observed": "marker occurrences in chunks=1"
+    },
+    {
+      "name": "at most one ordered terminal",
+      "pass": true,
+      "observed": "[{\"seq\":17,\"data\":{\"turnId\":\"turn_mtcmvgxy_0o70vd\",\"reason\":\"completed\"}}]"
+    },
+    {
+      "name": "terminal recovered once with evidence OR remains honestly unknown (never false active/guessed idle)",
+      "pass": true,
+      "observed": "stops=1 finalStatus=unknown"
+    },
+    {
+      "name": "terminal is ordered after the recovered output",
+      "pass": true,
+      "observed": "stopSeq=17 lastAnswerSeq=15"
+    },
+    {
+      "name": "no prompt replay across recovery",
+      "pass": true,
+      "observed": "prompt POST count=1"
+    },
+    {
+      "name": "user intent exactly once",
+      "pass": true,
+      "observed": "user/message count=1"
+    },
+    {
+      "name": "sqlite integrity ok",
+      "pass": true,
+      "observed": "[{\"integrity_check\":\"ok\"}]"
+    }
+  ],
+  "observations": [
+    {
+      "cutAt": "2026-08-28T07:31:54.657Z"
+    },
+    {
+      "statusTrace": [
+        {
+          "ts": "2026-08-28T07:31:54.822Z",
+          "status": "reconciling"
+        },
+        {
+          "ts": "2026-08-28T07:32:14.845Z",
+          "status": "unknown"
+        }
+      ]
+    },
+    {
+      "recoveryModelsStatus": 200
+    },
+    {
+      "statusTraceAfterTouch": [
+        {
+          "ts": "2026-08-28T07:31:54.822Z",
+          "status": "reconciling"
+        },
+        {
+          "ts": "2026-08-28T07:32:14.845Z",
+          "status": "unknown"
+        }
+      ]
+    }
+  ]
+}

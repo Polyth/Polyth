@@ -24,6 +24,7 @@ import {
   comparableStatusRevision,
   createTranslateState,
   normalizeOcObservation,
+  splitNormalizedObservation,
   type ObservationBinding,
 } from "./events.ts";
 
@@ -445,6 +446,50 @@ const sameHistory = (left: HistoryEntry[], right: HistoryEntry[]): boolean =>
 
 const confirmedEmpty = (): Record<string, never> => ({});
 
+const completedHistoryTerminalState = (
+  value: unknown,
+): RuntimeSnapshot["state"] | undefined => {
+  const messages = asArray(unwrap(value));
+  const latest = [...messages].reverse().map(asRecord).find((message) => {
+    const role = asRecord(message?.info)?.role;
+    return role === "user" || role === "assistant";
+  });
+  const info = asRecord(latest?.info);
+  const completed = asRecord(info?.time)?.completed;
+  if (
+    info?.role !== "assistant"
+    || typeof completed !== "number"
+    || !Number.isSafeInteger(completed)
+    || completed < 0
+  ) {
+    return undefined;
+  }
+  return {
+    value: "idle",
+    watermark: String(completed),
+    comparison: {
+      domain: "legacy-history:assistant-completed",
+      order: completed,
+    },
+  };
+};
+
+const statusAllowsHistoryTerminal = (
+  value: unknown,
+  backendSessionId: string,
+): boolean => {
+  const map = asRecord(unwrap(value));
+  if (!map) return false;
+  const status = map[backendSessionId];
+  if (status === undefined) return true;
+  const kind = typeof status === "string"
+    ? status
+    : typeof asRecord(status)?.type === "string"
+      ? String(asRecord(status)?.type)
+      : "";
+  return kind === "idle";
+};
+
 const statusFor = (
   value: unknown,
   backendSessionId: string,
@@ -554,15 +599,12 @@ const addNormalized = (
     state,
   });
   if (normalized.kind !== "accepted") return;
-  const { observation } = normalized;
-  for (let index = 0; index < observation.events.length; index++) {
-    const event = observation.events[index];
+  for (const observation of splitNormalizedObservation(normalized.observation)) {
+    const event = observation.events[0];
     if (!event) continue;
     target.push({
       entityKey: observation.entityKey,
-      revision: observation.events.length === 1
-        ? observation.identity.revision
-        : `${observation.identity.revision}#${index}`,
+      revision: observation.identity.revision,
       event,
     });
   }
@@ -1138,6 +1180,17 @@ export const createLegacyProtocolAdapter = (
       let snapshotState = status.ok
         ? statusFor(status.value, backendSessionId)
         : { value: "unknown" as const };
+      if (
+        snapshotState.value === "unknown"
+        && status.ok
+        && messages.ok
+        && statusAllowsHistoryTerminal(status.value, backendSessionId)
+      ) {
+        // `/session/status` omits idle sessions in real 1.18.18. Absence by
+        // itself remains unknown; a durable latest assistant completion gives
+        // the missing comparable terminal watermark.
+        snapshotState = completedHistoryTerminalState(messages.value) ?? snapshotState;
+      }
       const createOperationId = freshSessionEvidence.get(backendSessionId);
       if (snapshotState.value === "unknown" && createOperationId) {
         snapshotState = {

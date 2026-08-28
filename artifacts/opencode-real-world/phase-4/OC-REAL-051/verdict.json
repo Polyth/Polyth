@@ -1,0 +1,21 @@
+{
+  "id": "OC-REAL-051",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy (forced)",
+  "verdict": "pass",
+  "engine": "R+H",
+  "observed": "accepted-then-killed prompt kept one durable unknown operation, one user intent, no replay, blocked resend, honest projection",
+  "expected": "no replay; reconcile or remain unknown; no false not-applied",
+  "attribution": "NONE",
+  "identifiers": {
+    "canonicalSessionIds": [
+      "bbba470f-b9dc-458f-a8cb-6ea0c015e28f"
+    ]
+  },
+  "blockers": [],
+  "evidence": [
+    "artifacts/opencode-real-world/phase-4/OC-REAL-051/details.json",
+    "logs/opencode-real-world/phase-4/OC-REAL-051/proxy-wire.ndjson",
+    "logs/opencode-real-world/phase-4/OC-REAL-051/db-final.json"
+  ]
+}

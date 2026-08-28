@@ -1,0 +1,81 @@
+{
+  "checks": [
+    {
+      "name": "s2/s3 gap-fill payloads span multiple batched frames",
+      "pass": true,
+      "observed": "s2=627 s3=627"
+    },
+    {
+      "name": "live turn admitted on s1",
+      "pass": true,
+      "observed": "status=200"
+    },
+    {
+      "name": "post-burst probe admitted on s1",
+      "pass": true,
+      "observed": "status=200"
+    },
+    {
+      "name": "B (staying client) lost nothing and duplicated nothing across gap-fill+live",
+      "pass": true,
+      "observed": "B=35 rest=35 dup=[]"
+    },
+    {
+      "name": "B received zero cross-session events",
+      "pass": true,
+      "observed": "foreign=0 []"
+    },
+    {
+      "name": "A's final segment is the complete seq-deduped s3 view (newest subscribe wins, session-bound)",
+      "pass": true,
+      "observed": "segment=627 rest=627 dup=[]"
+    },
+    {
+      "name": "A received no s1 live events after converging on s3 (old subscription never revived)",
+      "pass": true,
+      "observed": "leaked=0 []"
+    },
+    {
+      "name": "A only ever saw sessions it subscribed to",
+      "pass": true,
+      "observed": "[\"d26c8ef2-00f5-476c-8d71-ed55abfaa2ce\",\"0ce3912b-f739-4797-8a27-7d8a8fd191bc\",\"6bd3ae62-5d8c-49a6-8b7e-c045580121f6\"]"
+    },
+    {
+      "name": "sqlite integrity ok",
+      "pass": true,
+      "observed": "[{\"integrity_check\":\"ok\"}]"
+    }
+  ],
+  "s1": "d26c8ef2-00f5-476c-8d71-ed55abfaa2ce",
+  "s2": "0ce3912b-f739-4797-8a27-7d8a8fd191bc",
+  "s3": "6bd3ae62-5d8c-49a6-8b7e-c045580121f6",
+  "burst": {
+    "at": 1787906672967,
+    "order": [
+      "s2",
+      "s3",
+      "s2",
+      "(15ms)",
+      "s3-final"
+    ]
+  },
+  "probeStalled": "Error: B: probe turn stopped on B not reached in 90000ms",
+  "frameSummary": {
+    "aFrames": [
+      "gap:7:d26c8ef2",
+      "live:1:d26c8ef2",
+      "live:1:d26c8ef2",
+      "live:1:d26c8ef2",
+      "live:1:d26c8ef2",
+      "live:1:d26c8ef2",
+      "live:1:d26c8ef2",
+      "gap:500:0ce3912b",
+      "gap:127:0ce3912b",
+      "gap:500:0ce3912b",
+      "gap:127:0ce3912b",
+      "gap:500:6bd3ae62",
+      "gap:127:6bd3ae62"
+    ],
+    "finalSegmentLength": 627
+  }
+}

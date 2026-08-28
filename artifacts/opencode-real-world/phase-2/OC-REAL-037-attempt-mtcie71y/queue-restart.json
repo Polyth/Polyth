@@ -1,0 +1,122 @@
+{
+  "initial": {
+    "polythPid": 43014,
+    "sessionId": "eca34eb3-1ff1-41f5-914b-13bbc09f7eae",
+    "backendSessionId": "ses_fb9334f6dffeHbndu59PqaUjsc",
+    "headOperationId": "",
+    "queue": [
+      {
+        "id": "237c7d07-38b0-4392-9395-755d64c05d99",
+        "sessionId": "eca34eb3-1ff1-41f5-914b-13bbc09f7eae",
+        "position": 0,
+        "text": "Reply with exactly QUEUE-HEAD-037.",
+        "delivery": "queue",
+        "createdAt": 1787894214847
+      },
+      {
+        "id": "632a565d-7be2-4a62-9e75-aaa5053d8d7e",
+        "sessionId": "eca34eb3-1ff1-41f5-914b-13bbc09f7eae",
+        "position": 1,
+        "text": "Reply with exactly QUEUE-LATER-037.",
+        "delivery": "queue",
+        "createdAt": 1787894214847
+      }
+    ],
+    "projection": {
+      "id": "eca34eb3-1ff1-41f5-914b-13bbc09f7eae",
+      "projectId": "phase-2-project",
+      "title": "OC-REAL-037 queue restart",
+      "model": {
+        "providerID": "opencode",
+        "modelID": "big-pickle"
+      },
+      "createdAt": 1787894209574,
+      "updatedAt": 1787894216338,
+      "status": "working",
+      "backendSessionId": "ses_fb9334f6dffeHbndu59PqaUjsc",
+      "runtimeBinding": {
+        "backendSessionId": "ses_fb9334f6dffeHbndu59PqaUjsc",
+        "authorityId": "owned:595957f0-6d2c-45a7-93a1-0998da6fec8b",
+        "generation": 1,
+        "continuity": "generation-only",
+        "protocol": "legacy",
+        "location": {
+          "directory": "/tmp/ocreal-phase2/oc-real-037-mtci1sfx/project"
+        }
+      },
+      "lastTurnAt": 1787894214847,
+      "tokenTotals": {
+        "input": 8225,
+        "output": 26
+      },
+      "costTotal": 0,
+      "runtimeObservationSeq": 24
+    }
+  },
+  "restart": {
+    "polythPid": 43143,
+    "headOperationId": "",
+    "queue": [
+      {
+        "id": "237c7d07-38b0-4392-9395-755d64c05d99",
+        "sessionId": "eca34eb3-1ff1-41f5-914b-13bbc09f7eae",
+        "position": 0,
+        "text": "Reply with exactly QUEUE-HEAD-037.",
+        "delivery": "queue",
+        "createdAt": 1787894214847
+      },
+      {
+        "id": "632a565d-7be2-4a62-9e75-aaa5053d8d7e",
+        "sessionId": "eca34eb3-1ff1-41f5-914b-13bbc09f7eae",
+        "position": 1,
+        "text": "Reply with exactly QUEUE-LATER-037.",
+        "delivery": "queue",
+        "createdAt": 1787894214847
+      }
+    ],
+    "projection": {
+      "id": "eca34eb3-1ff1-41f5-914b-13bbc09f7eae",
+      "projectId": "phase-2-project",
+      "title": "OC-REAL-037 queue restart",
+      "model": {
+        "providerID": "opencode",
+        "modelID": "big-pickle"
+      },
+      "createdAt": 1787894209574,
+      "updatedAt": 1787894216338,
+      "status": "working",
+      "backendSessionId": "ses_fb9334f6dffeHbndu59PqaUjsc",
+      "runtimeBinding": {
+        "backendSessionId": "ses_fb9334f6dffeHbndu59PqaUjsc",
+        "authorityId": "owned:595957f0-6d2c-45a7-93a1-0998da6fec8b",
+        "generation": 1,
+        "continuity": "generation-only",
+        "protocol": "legacy",
+        "location": {
+          "directory": "/tmp/ocreal-phase2/oc-real-037-mtci1sfx/project"
+        }
+      },
+      "lastTurnAt": 1787894214847,
+      "tokenTotals": {
+        "input": 8225,
+        "output": 26
+      },
+      "costTotal": 0,
+      "runtimeObservationSeq": 24
+    }
+  },
+  "requestConnectionIds": [],
+  "requestOperationIds": [],
+  "laterRequestConnectionIds": [],
+  "headCanonicalEventIds": [],
+  "crash": {
+    "pid": 43014,
+    "signal": "SIGKILL"
+  },
+  "failures": [
+    "real initial turn completed upstream but Polyth emitted no terminal event, so the queued head was never reserved or dispatched",
+    "queue head mutation requests=0",
+    "head operation state=undefined",
+    "head canonical messages=0"
+  ]
+}

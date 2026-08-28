@@ -1,0 +1,21 @@
+{
+  "checkedAt": "2026-08-28T04:27:23.129Z",
+  "protocol": "v2",
+  "endpoint": "/api/model",
+  "upstreamStatus": 200,
+  "upstreamModelCount": 68,
+  "polythRuntimeModelCount": 68,
+  "firstModel": {
+    "providerID": "opencode",
+    "modelID": "x-preview-f-free",
+    "name": "Ox Alpha Free (Unlimited)",
+    "providerName": "OpenCode Zen",
+    "connected": true
+  },
+  "polythRuntimeAgentCount": 4,
+  "ensureSession": {
+    "canonicalSessionId": "blocker-0-sol-1787891243108",
+    "backendSessionId": "ses_fb960a798ffeeonX1OnYPtX6zX",
+    "succeeded": true
+  }
+}

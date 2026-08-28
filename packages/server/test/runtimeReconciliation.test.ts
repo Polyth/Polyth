@@ -247,6 +247,76 @@ test("first materialization reconciles an idle persisted session before admissio
   await store.close();
 });
 
+test("first wire rebinds a durable owned session to the current generation", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-owned-restart-"));
+  const endpoint: RuntimeEndpoint = {
+    ...endpointFor(dir),
+    continuity: "generation-only",
+    generation: 2,
+    control: { kind: "owned", instanceToken: "owned-generation-2" },
+  };
+  let reconciliations = 0;
+  const runtime = runtimeWithSnapshot(endpoint, (binding) => {
+    reconciliations += 1;
+    assert.equal(binding.authorityId, endpoint.authorityId);
+    assert.equal(binding.generation, endpoint.generation);
+    assert.equal(binding.backendSessionId, "backend-owned-restart");
+    return {
+      authorityId: binding.authorityId,
+      generation: binding.generation,
+      location: binding.location,
+      backendSessionId: binding.backendSessionId!,
+      reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+      state: {
+        value: "interrupted",
+        watermark: "2",
+        comparison: { domain: "test-status", order: 2 },
+      },
+      completeness: {
+        events: "partial",
+        permissions: "partial",
+        questions: "partial",
+      },
+      permissions: [],
+      questions: [],
+      events: [],
+    };
+  });
+  const { sessions, store, project } = makeHarness(runtime, dir);
+  const sessionId = "session-owned-restart";
+  await store.upsertProjection({
+    id: sessionId,
+    projectId: project.id,
+    backendSessionId: "backend-owned-restart",
+    runtimeBinding: {
+      backendSessionId: "backend-owned-restart",
+      authorityId: endpoint.authorityId,
+      generation: 1,
+      continuity: "generation-only",
+      protocol: "legacy",
+      location: endpoint.location,
+    },
+    title: "Owned restart",
+    status: "working",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  await store.append(sessionId, "user/message", { text: "run once" });
+
+  await sessions.events(sessionId, 0);
+
+  const recovered = await store.projection(sessionId);
+  assert.equal(reconciliations, 1);
+  assert.equal(recovered?.runtimeBinding?.authorityId, endpoint.authorityId);
+  assert.equal(recovered?.runtimeBinding?.generation, endpoint.generation);
+  assert.equal(recovered?.status, "failed");
+  assert.equal(
+    (await store.events(sessionId)).filter((event) => event.type === "user/message").length,
+    1,
+  );
+  await store.close();
+});
+
 test("idle snapshot without a comparable watermark remains unknown and blocks admission", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-unversioned-idle-"));
   const endpoint = endpointFor(dir);

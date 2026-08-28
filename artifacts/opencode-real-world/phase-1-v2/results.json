@@ -1,0 +1,154 @@
+{
+  "phase": "Phase 1 V2 / shared service revalidation",
+  "capturedAt": "2026-08-28T05:05:29Z",
+  "gitStart": "bf80e1b5ba2376030cd6f6eef126591953e54018",
+  "supersedes": {
+    "gitStart": "95a0422a",
+    "reason": "The earlier result exercised a V2 stub. Current V2 models, sessions, mutations, SSE, and reconciliation code was re-executed against real OpenCode."
+  },
+  "environment": {
+    "node": {
+      "path": "/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node",
+      "version": "v22.22.2"
+    },
+    "openCode": {
+      "path": "/home/ubuntu/.local/bin/opencode",
+      "version": "1.18.18",
+      "sha256": "bb71f45b564f9234a97f54d6252a4a41d2f4388ae4b078918f691824cc3b3e54"
+    },
+    "referenceService": {
+      "url": "http://127.0.0.1:46303",
+      "pid": 32127,
+      "directory": "/tmp/polyth-oc-phase1-v2-current-4/project",
+      "isolatedRoot": "/tmp/polyth-oc-phase1-v2-current-4"
+    },
+    "productPorts": [
+      46274,
+      46275,
+      46276
+    ],
+    "authRotationPorts": [
+      46311,
+      46312
+    ]
+  },
+  "counts": {
+    "pass": 1,
+    "fail": 3,
+    "blocked": 4,
+    "total": 8
+  },
+  "scenarios": [
+    {
+      "id": "OC-REAL-026",
+      "status": "fail",
+      "summary": "The stale stub failure is superseded: stable auto V2 returned 68 models, 4 agents, and confirmed create/prompt. However, a fresh forced-V2 first catalog query and fresh normal-product auto/V2 catalog queries returned empty before later stable reprobes returned 68. Product-created sessions persisted protocol=legacy through the pool facade, reconciled to unknown, and rejected prompt with HTTP 409. Forced legacy returned 7382 models and confirmed create.",
+      "supersededFinding": "V2 models/create were permanently stubbed as unsupported.",
+      "remainingFailures": [
+        "Fresh-service V2 catalog readiness is racy and can return an authoritative-looking empty array.",
+        "The normal server runtime-pool facade does not forward protocol(), so V2 bindings are persisted as legacy.",
+        "V2 history/reconcile use limit=1000 where the live message endpoint enforces a maximum of 200."
+      ],
+      "evidence": [
+        "logs/opencode-real-world/phase-1-v2/current-validation.json",
+        "logs/opencode-real-world/phase-1-v2/current-stable-model-reprobe.log",
+        "logs/opencode-real-world/phase-1-v2/current-validation.stdout"
+      ]
+    },
+    {
+      "id": "OC-REAL-027",
+      "status": "pass",
+      "qualifier": "negative capability",
+      "summary": "OpenCode 1.18.18 still exposes --mdns advertisement and attach <url>, but no authoritative service descriptor carrying URL, headers, authority, instance, or continuity and no serve --service mode. SDK server declarations expose createOpencodeServer({url, close}), not Service.discover/ensure/stop. No official discovery was fabricated.",
+      "evidence": [
+        "logs/opencode-real-world/phase-1-v2/current-opencode-help.txt",
+        "logs/opencode-real-world/phase-1-v2/current-opencode-serve-help.txt",
+        "logs/opencode-real-world/phase-1-v2/current-opencode-attach-help.txt",
+        "/home/ubuntu/.opencode/node_modules/@opencode-ai/sdk/dist/v2/server.d.ts"
+      ]
+    },
+    {
+      "id": "OC-REAL-028",
+      "status": "blocked",
+      "summary": "With the closest supported injected descriptor seam, real Basic auth succeeded on REST and SSE, missing/wrong/stale credentials returned 401, and header values remained redacted. Official discovery-driven credential rotation remains unavailable.",
+      "limitation": "Both descriptors were injected into Polyth's library seam; this is not OpenCode service-discovery acceptance evidence.",
+      "evidence": [
+        "logs/opencode-real-world/phase-1-v2/current-auth-rotation.json"
+      ]
+    },
+    {
+      "id": "OC-REAL-029",
+      "status": "blocked",
+      "summary": "The injected seam atomically replaced real URL/auth and generation 1 with generation 2. Continuity was deliberately generation-only because these were different real processes; an old binding failed with stable binding-mismatch before mutation. Official descriptor continuity and delayed active-callback testing remain unavailable.",
+      "evidence": [
+        "logs/opencode-real-world/phase-1-v2/current-auth-rotation.json"
+      ]
+    },
+    {
+      "id": "OC-REAL-030",
+      "status": "fail",
+      "summary": "Library-level borrowed attach operates without spawning. Normal boot still has no borrowed/shared selection: it creates an owned child. When configured with the live shared port, session startup returned 503 generic ServeError instead of attaching; the shared PID remained alive.",
+      "evidence": [
+        "logs/opencode-real-world/phase-1-v2/current-validation.json",
+        "packages/server/src/index.ts"
+      ]
+    },
+    {
+      "id": "OC-REAL-031",
+      "status": "blocked",
+      "summary": "Borrowed facade/lifecycle disposal closed only Polyth resources: shared PID 32127 stayed healthy and the independent SSE client remained connected. Normal product boot cannot enter borrowed mode, so product-level shutdown acceptance remains blocked.",
+      "evidence": [
+        "logs/opencode-real-world/phase-1-v2/current-validation.json",
+        "logs/opencode-real-world/phase-1-v2/current-shared-process.txt",
+        "logs/opencode-real-world/phase-1-v2/current-shared-health.json"
+      ]
+    },
+    {
+      "id": "OC-REAL-032",
+      "status": "blocked",
+      "summary": "A new borrowed lifecycle reconnected to the surviving process and listed the existing sessions, superseding the stale empty-session finding. Hydration and reconciliation both failed HTTP 400 because Polyth requested message limit=1000 instead of the live maximum 200; direct limit=200 history succeeded. There is still no authoritative continuity source and no product attach path.",
+      "evidence": [
+        "logs/opencode-real-world/phase-1-v2/current-validation.json"
+      ]
+    },
+    {
+      "id": "OC-REAL-033",
+      "status": "fail",
+      "summary": "Native V2 model/agent/session discovery, create/reset, prompt/steer, interrupt, global/session SSE, replay, attachments, and missing permission/question replies reached real /api routes. Fork/delete returned explicit capability-unsupported with no fake success. History and reconcile are broken by limit=1000; facade capabilities still advertise compaction/subagents/attention despite unavailable execution, and fresh catalog calls can return false empty data.",
+      "evidence": [
+        "logs/opencode-real-world/phase-1-v2/current-validation.json",
+        "logs/opencode-real-world/phase-1-v2/current-agent-capabilities.json"
+      ]
+    }
+  ],
+  "capabilities": {
+    "startupHealth": "pass: real owned and borrowed services reached health; exact owned children stopped on Polyth shutdown; shared PID survived",
+    "modelsProviders": "partial: stable V2=68 models across google/opencode and 4 agents; fresh first calls returned [] in forced V2 and both normal-product runs",
+    "sessions": "partial: create/list/reset pass; history/hydration/reconcile fail HTTP 400 due limit=1000 > 200",
+    "prompt": "adapter pass: prompt admissions confirmed and emitted durable V2 events; normal product fail: session remained unknown and HTTP prompt returned 409",
+    "streamingReconnect": "partial: global stream observed 16 events; session replay returned 15 events and after=2 returned 13; no normal text stream completed",
+    "toolsThinkingCompleted": "not demonstrated: five real Google prompt admissions emitted only admitted/prompted events over 243 seconds; no text, reasoning, tool, or completed event",
+    "failed": "observed: selected opencode model produced session.next.step.failed and native completed assistant error",
+    "interrupted": "not demonstrated: interrupt returned 204/confirmed, but no active executor emitted interrupted evidence",
+    "attachments": "partial: in-root file URI was durably admitted; traversal was silently dropped while the prompt still confirmed instead of rejecting pre-I/O",
+    "permissionQuestion": "partial: native missing-request replies returned explicit 404; no live request was generated because the V2 headless executor did not run",
+    "forkDelete": "pass as negative capability: stable capability-unsupported outcomes, no wire fallback",
+    "status": "partial: native active status returned data {}; Polyth could not derive terminal state because reconciliation failed",
+    "config": "unsupported gap: no /api/config operation; unregistered path fell through to 200 text/html SPA while legacy /config returned JSON",
+    "waitCompact": "explicit upstream 503 ServiceUnavailableError for session.wait and session.compact"
+  },
+  "remainingProductGaps": [
+    "Normal boot cannot select a borrowed/shared service.",
+    "The server runtime-pool facade omits protocol(), persisting V2 bindings as legacy.",
+    "V2 message pagination requests limit=1000 although OpenCode 1.18.18 enforces limit<=200, breaking history, hydrate, and reconcile.",
+    "Fresh V2 model/provider discovery is not readiness-stabilized and can return a transient empty catalog as authoritative.",
+    "Facade capability flags overclaim compaction, subagents, permissions, and questions.",
+    "Traversal attachments are silently omitted rather than rejected.",
+    "V2 config absence is not represented by a typed adapter capability; the raw unregistered route is misleading 200 HTML.",
+    "No official service discovery/auth/continuity contract exists in 1.18.18."
+  ],
+  "secrets": {
+    "stored": false,
+    "authenticationArtifacts": "Authorization values are [REDACTED]; only header names and response status/body are retained."
+  }
+}

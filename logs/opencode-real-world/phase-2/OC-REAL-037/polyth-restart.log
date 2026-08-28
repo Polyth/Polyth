@@ -1,0 +1,24 @@
+(node:48961) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[polyth] Secure Safe behavior refresh skipped Error: applyBehavior refused: config authority is read-only
+    at assertWritable (file:///workspace/packages/backend-opencode/src/config.ts:297:9)
+    at Object.applyBehavior (file:///workspace/packages/backend-opencode/src/config.ts:363:7)
+    at Object.applyBehavior (file:///workspace/packages/server/src/opencodePending.ts:147:37)
+    at refreshSafeBehavior (file:///workspace/packages/server/src/index.ts:982:27)
+    at async boot (file:///workspace/packages/server/src/index.ts:988:3)
+    at async openRuntime (file:///workspace/scripts/opencode-real-world/phase2.ts:283:15)
+    at async worker037 (file:///workspace/scripts/opencode-real-world/phase2.ts:1039:15)
+    at async file:///workspace/scripts/opencode-real-world/phase2.ts:1803:3 {
+  code: 'config-read-only'
+}
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:0  data=/tmp/ocreal-phase2/oc-real-037-mtcirx5f/polyth-data
+[polyth] failed to materialize runtime session 8d19f7f8-5197-44c4-b83d-07163447e496 Error: persisted backend binding does not match the current endpoint
+    at runtimeBinding (file:///workspace/packages/server/src/sessions.ts:698:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async ensureWired (file:///workspace/packages/server/src/sessions.ts:1881:7)
+    at async Object.events (file:///workspace/packages/server/src/sessions.ts:3724:13)
+    at async worker037 (file:///workspace/scripts/opencode-real-world/phase2.ts:1080:7)
+    at async file:///workspace/scripts/opencode-real-world/phase2.ts:1803:3 {
+  code: 'binding-mismatch'
+}

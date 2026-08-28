@@ -701,6 +701,7 @@ export function createSessionService(deps: {
         }
         if (
           persisted.generation !== endpoint.generation
+          && endpoint.control.kind !== "owned"
           && (persisted.continuity !== "verified" || endpoint.continuity !== "verified")
         ) {
           throw Object.assign(
@@ -708,6 +709,11 @@ export function createSessionService(deps: {
             { code: "binding-mismatch" },
           );
         }
+        // A durable owned authority identifies one logical runtime across
+        // Polyth process lifetimes. Rebind its exact backend session ID to the
+        // current generation before ensure/reconcile; generation-only
+        // continuity still makes terminal evidence conservative, while the
+        // runtime lifecycle continues to fence old callbacks and bindings.
       }
       const currentBinding = {
         backendSessionId: proj.backendSessionId,
@@ -1731,6 +1737,12 @@ export function createSessionService(deps: {
           }
         : {}),
     });
+    if (ingested.kind === "duplicate") {
+      // The original semantic observation already drove projection effects.
+      // Its returned durable events are references to that first application,
+      // not a new canonical batch to consume or broadcast again.
+      return;
+    }
 
     let persistedIndex = 0;
     for (let index = 0; index < observation.events.length; index += 1) {

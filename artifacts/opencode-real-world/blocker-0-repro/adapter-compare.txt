@@ -1,0 +1,4 @@
+auto-negotiated protocol: v2
+v2 adapter models(): 0 models
+legacy adapter models(): 7382 models
+  sample: hpc-ai/deepseek/deepseek-v4-flash, hpc-ai/deepseek/deepseek-v4-pro, hpc-ai/moonshotai/kimi-k2.7-code

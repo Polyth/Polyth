@@ -1,0 +1,100 @@
+{
+  "abortCase": {
+    "busySeenOnWire": true,
+    "abortPosts": 1,
+    "stateAfterAbort": {
+      "value": "unknown"
+    },
+    "durableError": {
+      "name": "MessageAbortedError",
+      "data": {
+        "message": "Aborted"
+      }
+    },
+    "lastRawStatusEvents": [
+      {
+        "id": "evt_046de96bb001pld8hHm3Iu3Lx8",
+        "type": "session.status",
+        "properties": {
+          "sessionID": "ses_fb9216b70ffeLAlYc5sI4TZ3Xq",
+          "status": {
+            "type": "busy"
+          }
+        }
+      },
+      {
+        "id": "evt_046de97060016x0fdGw3B7ClmM",
+        "type": "session.status",
+        "properties": {
+          "sessionID": "ses_fb9216b70ffeLAlYc5sI4TZ3Xq",
+          "status": {
+            "type": "idle"
+          }
+        }
+      },
+      {
+        "id": "evt_046de97060021r4MxcNRBWiTmN",
+        "type": "session.idle",
+        "properties": {
+          "sessionID": "ses_fb9216b70ffeLAlYc5sI4TZ3Xq"
+        }
+      }
+    ]
+  },
+  "killedBashCase": {
+    "toolParts": [
+      {
+        "id": "prt_046dea965001OowC5QNxs8GkLl",
+        "sessionID": "ses_fb92164cfffe6C0aBLIH1D0TrI",
+        "messageID": "msg_046de9c12001eeJIw7zcA5UccC",
+        "type": "tool",
+        "callID": "Xt5oH1YPuvS7kVva",
+        "tool": "bash",
+        "state": {
+          "status": "completed",
+          "input": {
+            "command": "sleep 20 && echo DONE > /tmp/ocreal/OC-REAL-022/run-1-mtciqzku/project/bash-side-effect.txt"
+          },
+          "output": "(no output)\n\n<shell_metadata>\nUser aborted the command\n</shell_metadata>",
+          "title": "sleep 20 && echo DONE > /tmp/ocreal/OC-REAL-022/run-1-mtciqzku/project/bash-side-effect.txt",
+          "metadata": {
+            "output": "(no output)\n\n<shell_metadata>\nUser aborted the command\n</shell_metadata>",
+            "exit": null,
+            "truncated": false
+          },
+          "time": {
+            "start": 1787895392659,
+            "end": 1787895393670
+          }
+        },
+        "metadata": {
+          "google": {
+            "thoughtSignature": "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"
+          }
+        }
+      }
+    ],
+    "sideEffectFile": null
+  },
+  "sigkillCase": {
+    "killedPid": 47328,
+    "busyBeforeKill": true,
+    "reconcileAfterKill": {
+      "kind": "snapshot",
+      "state": {
+        "value": "unknown"
+      },
+      "completeness": {
+        "events": "partial",
+        "permissions": "partial",
+        "questions": "partial"
+      },
+      "events": 0
+    },
+    "streamDisconnectsAfterKill": 0
+  },
+  "comparableRevisionBranch": "not exercisable live: no 1.18.18 legacy payload carries revision/version/seq/updatedAt, so the 'comparable interruption terminalizes' branch cannot run against the real server",
+  "failures": [
+    "OPENCODE: bash tool killed mid-run reports terminal status=completed although its side effect never happened (hidden interrupted tool)"
+  ]
+}

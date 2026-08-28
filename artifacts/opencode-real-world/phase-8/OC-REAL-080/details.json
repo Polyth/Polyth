@@ -1,0 +1,45 @@
+{
+  "outcome": {
+    "kind": "confirmed",
+    "value": {
+      "admissionId": "msg_0476e05f8001wKqPkjhJRDWsH0"
+    }
+  },
+  "backendId": "ses_fb891fa22ffe2wNx27xBp8wiHF",
+  "killedMasterPid": 119475,
+  "remoteBefore": {
+    "token": "6de849ad-747d-4c54-8aae-32be8fc079be",
+    "pid": 120196,
+    "start": "1849201",
+    "executable": "/home/ubuntu/.opencode/bin/opencode",
+    "commandHash": "786516300:76"
+  },
+  "remoteSurvived": true,
+  "rawBeforeRuntimeRecovery": "[]",
+  "recoveredHistory": "Error: OpenCode protocol negotiation failed; private daemon fallback is disabled",
+  "endpointAfter": {
+    "authorityId": "owned:587a2707-7c4d-47ce-bb9b-5272c41501b9",
+    "continuity": "generation-only",
+    "generation": 2,
+    "url": "http://127.0.0.1:41913",
+    "location": {
+      "directory": "/tmp/ocreal-phase8/oc-real-080-mtcocgin/project"
+    },
+    "control": {
+      "kind": "owned",
+      "instanceToken": "f2b676d7-1cd1-42e5-9977-7ec970a69a9e"
+    },
+    "config": {
+      "kind": "read-only"
+    },
+    "authentication": {
+      "kind": "basic-env",
+      "usernameEnv": "OPENCODE_SERVER_USERNAME",
+      "passwordEnv": "OPENCODE_SERVER_PASSWORD"
+    }
+  },
+  "eventCount": 1,
+  "userCount": 0,
+  "completedOffline": false,
+  "boundaryNote": "Tunnel was dropped after confirmed prompt response; no response-hold proxy was inserted into SSH."
+}

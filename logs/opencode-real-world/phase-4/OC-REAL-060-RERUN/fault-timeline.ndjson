@@ -1,0 +1,10 @@
+{"ts":"2026-08-28T08:08:31.612Z","event":"polyth-started","label":"polyth","pid":94301,"port":15260}
+{"ts":"2026-08-28T08:08:41.373Z","event":"kill-exact","pid":94301,"signal":"SIGKILL","identity":{"startIdentity":"1821825","exe":"/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node","cmdline":"/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node /tmp/ocreal/phase-4/tools/boot-polyth.mjs"}}
+{"ts":"2026-08-28T08:08:43.191Z","event":"polyth-started","label":"polyth-2","pid":94430,"port":15260}
+{"ts":"2026-08-28T08:09:15.989Z","event":"rerun-verdict","scenario":"060","pass":false,"failedChecks":["first wire does not fail binding-mismatch","persisted session remains operable after restart","restart does not leave session stuck sending or working"]}
+{"ts":"2026-08-28T08:09:16.033Z","event":"polyth-stopped","pid":94430,"how":"SIGTERM"}
+{"ts":"2026-08-28T08:10:19.318Z","event":"polyth-started","label":"polyth","pid":99381,"port":15260}
+{"ts":"2026-08-28T08:10:27.746Z","event":"kill-exact","pid":99381,"signal":"SIGKILL","identity":{"startIdentity":"1832593","exe":"/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node","cmdline":"/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node /tmp/ocreal/phase-4/tools/boot-polyth.mjs"}}
+{"ts":"2026-08-28T08:10:29.568Z","event":"polyth-started","label":"polyth-2","pid":99511,"port":15260}
+{"ts":"2026-08-28T08:10:32.343Z","event":"rerun-verdict","scenario":"060","pass":true,"failedChecks":[]}
+{"ts":"2026-08-28T08:10:32.394Z","event":"polyth-stopped","pid":99511,"how":"SIGTERM"}

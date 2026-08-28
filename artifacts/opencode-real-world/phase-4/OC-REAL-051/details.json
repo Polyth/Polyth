@@ -1,0 +1,93 @@
+{
+  "checks": [
+    {
+      "name": "send settles as an error, not fake success",
+      "pass": true,
+      "observed": "status=500 body={\"error\":\"outcome-unknown\",\"message\":\"An internal server error occurred.\"}"
+    },
+    {
+      "name": "upstream accepted exactly one prompt before the kill",
+      "pass": true,
+      "observed": "status=204 path=/session/ses_fb8f0f03effeRtEILwfpIGzCBx/prompt_async?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-051%2Frun-mtckn2qq%2Fproject"
+    },
+    {
+      "name": "turn-submit operation is durably unknown",
+      "pass": true,
+      "observed": "{\"state\":\"unknown\",\"code\":\"runtime-outcome-unknown\"}"
+    },
+    {
+      "name": "user intent survives exactly once",
+      "pass": true,
+      "observed": "user/message count=1"
+    },
+    {
+      "name": "ambiguous admission is not presented as a started turn",
+      "pass": true,
+      "observed": "turn/started count=0"
+    },
+    {
+      "name": "second send is blocked (no silent resend)",
+      "pass": true,
+      "observed": "status=409 body={\"error\":\"conflict\",\"message\":\"cannot send while the session is reconciling\"}"
+    },
+    {
+      "name": "no prompt replay was sent upstream",
+      "pass": true,
+      "observed": "prompt POST count=1"
+    },
+    {
+      "name": "operation stays unknown or settles only by exact evidence (never false not-applied)",
+      "pass": true,
+      "observed": "state=unknown"
+    },
+    {
+      "name": "user intent still exactly once after recovery",
+      "pass": true,
+      "observed": "user/message count=1"
+    },
+    {
+      "name": "projection is honest (unknown/reconciling, not idle/completed)",
+      "pass": true,
+      "observed": "status=reconciling"
+    },
+    {
+      "name": "sqlite integrity ok",
+      "pass": true,
+      "observed": "[{\"integrity_check\":\"ok\"}]"
+    }
+  ],
+  "observations": [
+    {
+      "send": {
+        "status": 500,
+        "json": {
+          "error": "outcome-unknown",
+          "message": "An internal server error occurred."
+        }
+      }
+    },
+    {
+      "captured": {
+        "status": 204,
+        "path": "/session/ses_fb8f0f03effeRtEILwfpIGzCBx/prompt_async?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-051%2Frun-mtckn2qq%2Fproject",
+        "resBytes": 0
+      }
+    },
+    {
+      "resend": {
+        "status": 409,
+        "json": {
+          "error": "conflict",
+          "message": "cannot send while the session is reconciling"
+        }
+      }
+    },
+    {
+      "submitOpFinal": {
+        "state": "unknown",
+        "code": "runtime-outcome-unknown"
+      },
+      "snapshotStatus": "reconciling"
+    }
+  ]
+}

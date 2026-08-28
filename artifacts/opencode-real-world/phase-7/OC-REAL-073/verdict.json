@@ -1,0 +1,25 @@
+{
+  "id": "OC-REAL-073",
+  "verdict": "pass",
+  "engine": "R+H",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy",
+  "observed": "same-tick double send from idle (real HTTP race + deterministic in-process tick): one admission, loser queued once, both WS clients converged to one canonical order, upstream saw each prompt exactly once",
+  "expected": "one admitted, one queued; both clients converge to identical durable order; no double admission, no lost loser",
+  "attribution": "NONE",
+  "multiClientBlocker": false,
+  "identifiers": {
+    "realSessionId": "818202e8-de37-401f-b590-bd05c48bbec5",
+    "harnessSessionId": "877572db-7ed1-42d1-99cc-83469f970fea"
+  },
+  "evidence": [
+    "artifacts/opencode-real-world/phase-7/OC-REAL-073/details.json",
+    "logs/opencode-real-world/phase-7/OC-REAL-073/ws-a-real.ndjson",
+    "logs/opencode-real-world/phase-7/OC-REAL-073/ws-b-real.ndjson",
+    "logs/opencode-real-world/phase-7/OC-REAL-073/client-a.ndjson",
+    "logs/opencode-real-world/phase-7/OC-REAL-073/client-b.ndjson",
+    "logs/opencode-real-world/phase-7/OC-REAL-073/upstream-real.ndjson",
+    "logs/opencode-real-world/phase-7/OC-REAL-073/db-final.json"
+  ],
+  "failures": []
+}

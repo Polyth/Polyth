@@ -1,0 +1,26 @@
+{
+  "id": "OC-REAL-077",
+  "verdict": "pass",
+  "engine": "R",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy",
+  "observed": "zero-UI windows mid-tool and mid-pending-permission: backend kept working (upstream-only observation), side effects ran exactly once, the pending request survived and was answerable by a brand-new UI, rehydration matched durable truth with no duplicate prompt and no stale sending state",
+  "expected": "backend remains active; durable state catches up; no work depends on UI presence",
+  "attribution": "NONE",
+  "multiClientBlocker": false,
+  "identifiers": {
+    "turnSessionId": "4c0449f8-0c30-4bc6-b8f2-784ef2a2e92c",
+    "pendingSessionId": "f3eb5575-eb4d-444d-83d4-1fc8bc0308e3",
+    "pendingRequestId": "per_0479957ac001iqUgflLAMc3meX"
+  },
+  "evidence": [
+    "artifacts/opencode-real-world/phase-7/OC-REAL-077/details.json",
+    "logs/opencode-real-world/phase-7/OC-REAL-077/ws-c-turn.ndjson",
+    "logs/opencode-real-world/phase-7/OC-REAL-077/ws-c-pending.ndjson",
+    "logs/opencode-real-world/phase-7/OC-REAL-077/upstream-turn-window.ndjson",
+    "logs/opencode-real-world/phase-7/OC-REAL-077/upstream-turn-final.ndjson",
+    "logs/opencode-real-world/phase-7/OC-REAL-077/admin.ndjson",
+    "logs/opencode-real-world/phase-7/OC-REAL-077/db-final.json"
+  ],
+  "failures": []
+}

@@ -1,0 +1,161 @@
+{
+  "id": "OC-REAL-084-SCALED",
+  "runId": "scaled-mtcp5xea",
+  "startedAt": "2026-08-28T08:35:58.933Z",
+  "headSha": "34770f3a7671ea0ed0215085a24485526447cc3d",
+  "opencode": {
+    "version": "1.18.18",
+    "binary": "/home/ubuntu/.local/bin/opencode",
+    "sha256": "bb71f45b564f9234a97f54d6252a4a41d2f4388ae4b078918f691824cc3b3e54"
+  },
+  "node": "v22.22.2",
+  "os": "linux 6.12.94+ cursor",
+  "protocol": "legacy (forced)",
+  "model": {
+    "providerID": "opencode",
+    "modelID": "big-pickle"
+  },
+  "port": 15290,
+  "soakTargetMs": 600000,
+  "sessionTarget": 24,
+  "scratch": "/tmp/ocreal/phase-9/scaled-mtcp5xea",
+  "dataDir": "/tmp/ocreal/phase-9/scaled-mtcp5xea/polyth-data",
+  "projectPath": "/tmp/ocreal/phase-9/scaled-mtcp5xea/project",
+  "foreignProcessBaseline": [
+    {
+      "pid": 122399,
+      "state": "S",
+      "parentPid": 1,
+      "startIdentity": "1852639",
+      "executable": "/home/ubuntu/.opencode/bin/opencode",
+      "command": "/home/ubuntu/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 57515",
+      "cwd": "/tmp/ocreal-phase8/oc-real-080-mtcocgin/project"
+    },
+    {
+      "pid": 126119,
+      "state": "S",
+      "parentPid": 1,
+      "startIdentity": "1856356",
+      "executable": "/home/ubuntu/.opencode/bin/opencode",
+      "command": "/home/ubuntu/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 63547",
+      "cwd": "/tmp/ocreal-phase8/oc-real-081-mtcod991/project"
+    },
+    {
+      "pid": 131029,
+      "state": "S",
+      "parentPid": 1,
+      "startIdentity": "1860273",
+      "executable": "/home/ubuntu/.opencode/bin/opencode",
+      "command": "/home/ubuntu/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 36344",
+      "cwd": "/tmp/ocreal-phase8/oc-real-082-mtcoe1vt/project"
+    },
+    {
+      "pid": 143585,
+      "state": "S",
+      "parentPid": 143327,
+      "startIdentity": "1985045",
+      "executable": "/home/ubuntu/.opencode/bin/opencode",
+      "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 44527",
+      "cwd": "/tmp/ocreal-phase7/oc-real-073-mtcp5lb1/project"
+    },
+    {
+      "pid": 143590,
+      "state": "S",
+      "parentPid": 143512,
+      "startIdentity": "1985055",
+      "executable": "/home/ubuntu/.opencode/bin/opencode",
+      "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 35977",
+      "cwd": "/tmp/ocreal-phase7/oc-real-074-mtcp5leb/project"
+    },
+    {
+      "pid": 18057,
+      "state": "S",
+      "parentPid": 17902,
+      "startIdentity": "437720",
+      "executable": "/home/ubuntu/.opencode/bin/opencode",
+      "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 14711",
+      "cwd": "/workspace"
+    },
+    {
+      "pid": 18653,
+      "state": "S",
+      "parentPid": 18482,
+      "startIdentity": "443691",
+      "executable": "/home/ubuntu/.opencode/bin/opencode",
+      "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 14721 --print-logs",
+      "cwd": "/workspace"
+    },
+    {
+      "pid": 24013,
+      "state": "S",
+      "parentPid": 23849,
+      "startIdentity": "520196",
+      "executable": "/home/ubuntu/.opencode/bin/opencode",
+      "command": "opencode serve --hostname 127.0.0.1 --port 33435",
+      "cwd": "/workspace"
+    },
+    {
+      "pid": 3077,
+      "state": "S",
+      "parentPid": 2810,
+      "startIdentity": "21744",
+      "executable": "/home/ubuntu/.opencode/bin/opencode",
+      "command": "/home/ubuntu/.local/bin/opencode serve --pure --hostname 127.0.0.1 --port 44991 --print-logs --log-level DEBUG",
+      "cwd": "/tmp/polyth-real-opencode-audit"
+    },
+    {
+      "pid": 32127,
+      "state": "S",
+      "parentPid": 31956,
+      "startIdentity": "687873",
+      "executable": "/home/ubuntu/.opencode/bin/opencode",
+      "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 46303",
+      "cwd": "/tmp/polyth-oc-phase1-v2-current-4/project"
+    },
+    {
+      "pid": 33390,
+      "state": "S",
+      "parentPid": 33068,
+      "startIdentity": "692926",
+      "executable": "/home/ubuntu/.opencode/bin/opencode",
+      "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 46311",
+      "cwd": "/tmp/polyth-oc-phase1-v2-auth-a/project"
+    },
+    {
+      "pid": 33405,
+      "state": "S",
+      "parentPid": 33085,
+      "startIdentity": "692927",
+      "executable": "/home/ubuntu/.opencode/bin/opencode",
+      "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 46312",
+      "cwd": "/tmp/polyth-oc-phase1-v2-auth-b/project"
+    },
+    {
+      "pid": 4812,
+      "state": "S",
+      "parentPid": 2809,
+      "startIdentity": "69841",
+      "executable": "/home/ubuntu/.opencode/bin/opencode",
+      "command": "/home/ubuntu/.local/bin/opencode serve --pure --print-logs --log-level DEBUG --hostname 127.0.0.1 --port 45126",
+      "cwd": "/tmp/polyth-oc-phase1-v2/project"
+    },
+    {
+      "pid": 7004,
+      "state": "S",
+      "parentPid": 2809,
+      "startIdentity": "98355",
+      "executable": "/home/ubuntu/.opencode/bin/opencode",
+      "command": "/home/ubuntu/.local/bin/opencode serve --pure --print-logs --log-level INFO --hostname 127.0.0.1 --port 45127",
+      "cwd": "/tmp/polyth-oc-phase1-v2/project"
+    },
+    {
+      "pid": 7266,
+      "state": "S",
+      "parentPid": 2809,
+      "startIdentity": "100216",
+      "executable": "/home/ubuntu/.opencode/bin/opencode",
+      "command": "/home/ubuntu/.local/bin/opencode serve --pure --print-logs --log-level INFO --hostname 127.0.0.1 --port 45128",
+      "cwd": "/tmp/polyth-oc-phase1-v2/project"
+    }
+  ]
+}

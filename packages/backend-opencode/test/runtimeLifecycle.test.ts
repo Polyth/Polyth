@@ -412,6 +412,56 @@ test("PID reuse is rejected without signalling the unrelated process", async () 
   }
 });
 
+// Phase-4 regression (OC-REAL-059): when the owned child dies but the
+// one-shot post-disconnect refresh raced ahead of Node's exit notification,
+// every later acquisition goes through lease.endpoint(). Handing out the dead
+// generation there wedges the runtime permanently (negotiation fails against a
+// closed port forever); the lease must respawn once the instance is known-dead.
+test("endpoint() never hands out a dead owned child; it respawns", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-endpoint-dead-"));
+  const ports = [43001, 43002];
+  const children: FakeChild[] = [];
+  const spawn = ((_bin: string, args: readonly string[]) => {
+    const port = Number(args.at(-1));
+    const child = createFakeChild(
+      3000 + children.length,
+      `opencode server listening on http://127.0.0.1:${port}\n`,
+    );
+    children.push(child);
+    return child;
+  }) as unknown as typeof nodeSpawn;
+  try {
+    const lease = await createOwnedLocalEndpointLease({
+      cwd: directory,
+      pidFile: join(directory, "runtime.pid.json"),
+      pickPort: async () => ports.shift() ?? 0,
+      spawn,
+      readProcessIdentity: async (pid) => ({
+        startIdentity: `start-${pid}`,
+        executable: "/usr/bin/opencode",
+        command: `opencode-${pid}`,
+      }),
+      gracefulStopMs: 20,
+    });
+    const first = await lease.endpoint();
+    assert.equal(first.url, "http://127.0.0.1:43001");
+    assert.equal(children.length, 1);
+
+    // The child dies out-of-band (SIGKILL); no refresh() is ever called —
+    // exactly the wedged path where only endpoint() runs afterwards.
+    children[0]!.kill("SIGKILL");
+    await new Promise((resolveTick) => setImmediate(resolveTick));
+
+    const second = await lease.endpoint();
+    assert.equal(second.url, "http://127.0.0.1:43002");
+    assert.notEqual(second.generation, first.generation);
+    assert.equal(children.length, 2);
+    await lease.dispose();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("three local bind collisions select fresh ports and leak no children", async () => {
   const directory = await mkdtemp(join(tmpdir(), "polyth-endpoint-bind-"));
   const ports = [42001, 42002, 42003, 42004];

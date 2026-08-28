@@ -1,0 +1,15 @@
+{
+  "ts": "2026-08-28T06:29:24.709Z",
+  "rule": "swallow-prompt",
+  "request": {
+    "method": "POST",
+    "path": "/session/ses_fb8f0f03effeRtEILwfpIGzCBx/prompt_async?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-051%2Frun-mtckn2qq%2Fproject",
+    "bodyBytes": 161,
+    "body": "{\"parts\":[{\"type\":\"text\",\"text\":\"Reply with exactly OC_REAL_051_MARKER and nothing else.\"}],\"model\":{\"providerID\":\"google\",\"modelID\":\"gemini-flash-lite-latest\"}}"
+  },
+  "response": {
+    "status": 204,
+    "bodyBytes": 0,
+    "body": ""
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "id": "OC-REAL-009",
+  "verdict": "pass",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy (forced)",
+  "observed": "live stream: 3 raw text deltas, 3 facade chunks; delta-concat == final == upstream; UTF-8 target (emoji/CJK/combining) exact; 3 full-value updates monotonic=true; exactly 1 finalized assistant message; turn/stopped emitted=false although idle evidence was on the wire (real idle carries no comparable revision -> see OC-REAL-020/023)",
+  "expected": "text is monotonic and exact once; finalization after ingestion",
+  "attribution": "NONE",
+  "evidence": [
+    "artifacts/opencode-real-world/phase-1-legacy/OC-REAL-009/stream-comparison.json",
+    "logs/opencode-real-world/phase-1-legacy/OC-REAL-009/sse.ndjson"
+  ],
+  "notes": "LIVE google/gemini-2.5-flash-lite. Packet-level UTF-8 split handled by decoder; UI-before-log is server-stack scope. Missing turn terminalization on real idle payloads is attributed under OC-REAL-020/023."
+}

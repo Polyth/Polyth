@@ -1,0 +1,51 @@
+{
+  "id": "OC-REAL-035",
+  "verdict": "pass",
+  "engine": "R+H",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy message path, real dual surface narrowed by read-only transport shim",
+  "observed": "real 2xx JSON response was cut at 31 of 1615 body bytes and reset; outcome=unknown; POSTs=1",
+  "expected": "one POST; partial success is unknown, not confirmation/rejection; scheduler remains blocked without duplicate dispatch",
+  "attribution": "NONE",
+  "duplicateMutationBlocker": false,
+  "identifiers": {
+    "canonicalSessionIds": [
+      "d902832a-8f76-42c5-8a62-73eb73d24a71"
+    ],
+    "backendSessionIds": [
+      "ses_fb933b684ffeNJ7qhFZxDa1UUb"
+    ],
+    "operationIds": [
+      "50191d02-a331-484c-bcb5-a62076820f78"
+    ],
+    "eventIds": [
+      "27c15eee-4b50-46f6-a069-0a087f56f1b9",
+      "1d6992a6-db9d-4979-a470-b6c3dd0a5e24",
+      "f5799cf5-bc98-4632-9c28-ceca5a70cc18",
+      "31f6c624-afe8-447c-a7ff-7f927b2f530e",
+      "63adc2c5-3aa1-4676-b3b5-6fe513f77c70",
+      "d11562ac-15a0-4d8a-9cd1-dfadb34f275c",
+      "7eefbf00-f391-41e5-82c0-9a4cb1ee1663",
+      "9858a6ec-86e3-43b8-9c62-e3abdd1b55fd",
+      "8aee5ba9-8ccd-4fb8-879b-435c7a1b0ef6",
+      "a0bd2463-d56a-4a22-b6a7-485b26f567ee",
+      "8d1ba326-7a0b-47ed-a952-e10ce4564727",
+      "a7e01601-2a4d-4b59-a411-91edd776c138",
+      "3c2a2ab8-e072-4e53-9aaf-ad544cb957b1",
+      "cccf9fe6-eb0d-46bd-9d80-551775d24368",
+      "792eb323-371f-4457-8168-bd22375f05af",
+      "807798e9-aabd-4e02-8e84-e739370fa8c8",
+      "9a2cf171-183b-400e-9cd5-f4c676d8fd80"
+    ]
+  },
+  "evidence": [
+    "artifacts/opencode-real-world/phase-2/OC-REAL-035/manifest.json",
+    "logs/opencode-real-world/phase-2/OC-REAL-035/wire.ndjson",
+    "logs/opencode-real-world/phase-2/OC-REAL-035/opencode.log",
+    "logs/opencode-real-world/phase-2/OC-REAL-035/db-before.json",
+    "logs/opencode-real-world/phase-2/OC-REAL-035/db-after.json",
+    "artifacts/opencode-real-world/phase-2/OC-REAL-035/partial-body.json"
+  ],
+  "failures": [],
+  "notes": "The /doc response is transport-shimmed only to select OpenCode's real synchronous legacy /message endpoint; the mutation, model execution, and response body all come from real OpenCode."
+}

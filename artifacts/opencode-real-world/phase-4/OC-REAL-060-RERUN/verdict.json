@@ -1,0 +1,22 @@
+{
+  "id": "OC-REAL-060-RERUN",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy (forced)",
+  "verdict": "pass",
+  "engine": "R",
+  "observed": "durable authority owned:11ec6254-f313-48f6-93fc-fa198e9db174 advanced generation 1->2; first wire 200; one prompt/intent/side effect; final unknown",
+  "expected": "stable authority; advancing generation; usable first wire; no duplicate prompt; no stuck active projection",
+  "attribution": "NONE",
+  "identifiers": {
+    "canonicalSessionIds": [
+      "10a407d5-2ef6-4be8-b208-95ae6c36814e"
+    ]
+  },
+  "blockers": [],
+  "evidence": [
+    "artifacts/opencode-real-world/phase-4/OC-REAL-060-RERUN/details.json",
+    "logs/opencode-real-world/phase-4/OC-REAL-060-RERUN/proxy-wire.ndjson",
+    "logs/opencode-real-world/phase-4/OC-REAL-060-RERUN/fault-timeline.ndjson",
+    "logs/opencode-real-world/phase-4/OC-REAL-060-RERUN/db-final.json"
+  ]
+}

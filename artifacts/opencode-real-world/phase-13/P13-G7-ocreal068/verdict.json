@@ -1,0 +1,36 @@
+{
+  "id": "OC-REAL-068",
+  "verdict": "pass",
+  "engine": "R",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy",
+  "observed": "four concurrent sessions (2 roots + 2 worktrees) each answered with exactly its own IDENTITY marker; upstream cwd, tool paths, directory catalogs, and durable logs never crossed locations",
+  "expected": "every request/event/config lookup remains in its cwd; no marker or session crosses location",
+  "attribution": "NONE",
+  "crossTreeLeakBlocker": false,
+  "identifiers": {
+    "a-root": {
+      "id": "cfa19637-1f96-4f04-bc5e-169067312d4e",
+      "backendId": "ses_fb83117d3ffenW4b7UEZsjQ1WG"
+    },
+    "a-feature": {
+      "id": "97482f2f-5a8e-4dbc-8896-505daea72755",
+      "backendId": "ses_fb83110fdffeUJfRfQZgFSxOzZ"
+    },
+    "b-root": {
+      "id": "85e40a2a-b5f5-4381-851e-6245bf181522",
+      "backendId": "ses_fb8310a20ffeDLfDRKCG76C7vM"
+    },
+    "b-feature": {
+      "id": "e620ea74-ead7-46ef-8beb-f82772ec019d",
+      "backendId": "ses_fb8310335ffe5bdOs8RS9kXgv4"
+    }
+  },
+  "evidence": [
+    "artifacts/opencode-real-world/phase-6/OC-REAL-068/details.json",
+    "logs/opencode-real-world/phase-6/OC-REAL-068/wire.ndjson",
+    "logs/opencode-real-world/phase-6/OC-REAL-068/polyth.ndjson",
+    "logs/opencode-real-world/phase-6/OC-REAL-068/db-after.json"
+  ],
+  "failures": []
+}

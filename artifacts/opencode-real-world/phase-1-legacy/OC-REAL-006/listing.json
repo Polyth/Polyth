@@ -1,0 +1,24 @@
+{
+  "created": {
+    "a1": "ses_fb98ea276ffemIN6ibS7z8mEbF",
+    "a2": "ses_fb98ea262ffelkzFYAom46KORC",
+    "b1": "ses_fb98ea236ffeZc8TzYO6dxdNmR"
+  },
+  "listA": [
+    {
+      "id": "ses_fb98ea262ffelkzFYAom46KORC",
+      "title": "external A2"
+    },
+    {
+      "id": "ses_fb98ea276ffemIN6ibS7z8mEbF",
+      "title": "external A1"
+    }
+  ],
+  "listB": [
+    {
+      "id": "ses_fb98ea236ffeZc8TzYO6dxdNmR",
+      "title": "external B1"
+    }
+  ],
+  "failures": []
+}

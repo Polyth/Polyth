@@ -16,7 +16,175 @@ export interface OcEvent {
   id?: string;
   type?: string;
   properties?: Record<string, unknown>;
+  durable?: Record<string, unknown>;
 }
+
+const asRecord = (v: unknown): Record<string, unknown> | undefined =>
+  v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+
+const serialized = (value: unknown): string => {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
+
+/** V2's native stream uses `{ type, data }`. Most compatibility events need
+ * only the field rename; native session.next events are projected onto the
+ * established event vocabulary so the protocol-neutral reducer can consume
+ * either stream without a UI or session-store branch. */
+const normalizeV2Event = (
+  type: string,
+  data: Record<string, unknown>,
+): { type: string; properties: Record<string, unknown> } => {
+  const sessionID = data.sessionID;
+  const messageID = data.assistantMessageID;
+  const timestamp = data.timestamp;
+  if (type === "session.next.prompted" || type === "session.next.prompt.admitted") {
+    return {
+      type: "message.updated",
+      properties: {
+        sessionID,
+        info: {
+          id: data.messageID,
+          role: "user",
+          sessionID,
+          time: { created: timestamp },
+        },
+      },
+    };
+  }
+  if (type === "session.next.step.started" || type === "session.next.step.ended") {
+    const model = asRecord(data.model);
+    return {
+      type: "message.updated",
+      properties: {
+        sessionID,
+        info: {
+          id: messageID,
+          role: "assistant",
+          sessionID,
+          ...(typeof data.agent === "string" ? { agent: data.agent } : {}),
+          ...(typeof model?.providerID === "string" ? { providerID: model.providerID } : {}),
+          ...(typeof model?.id === "string" ? { modelID: model.id } : {}),
+          ...(typeof data.cost === "number" ? { cost: data.cost } : {}),
+          ...(asRecord(data.tokens) ? { tokens: data.tokens } : {}),
+          time: type === "session.next.step.ended"
+            ? { created: timestamp, completed: timestamp }
+            : { created: timestamp },
+        },
+      },
+    };
+  }
+  if (type === "session.next.step.failed") {
+    return {
+      type: "session.error",
+      properties: { sessionID, error: data.error },
+    };
+  }
+  const textKind = type.includes(".reasoning.") ? "reasoning" : "text";
+  const partID = textKind === "reasoning" ? data.reasoningID : data.textID;
+  if (
+    type === "session.next.text.started"
+    || type === "session.next.reasoning.started"
+  ) {
+    return {
+      type: "message.part.updated",
+      properties: {
+        sessionID,
+        part: {
+          id: partID,
+          type: textKind,
+          text: "",
+          messageID,
+          sessionID,
+          time: { start: timestamp },
+        },
+      },
+    };
+  }
+  if (
+    type === "session.next.text.delta"
+    || type === "session.next.reasoning.delta"
+  ) {
+    return {
+      type: "message.part.delta",
+      properties: {
+        sessionID,
+        messageID,
+        partID,
+        field: textKind,
+        delta: data.delta,
+      },
+    };
+  }
+  if (
+    type === "session.next.text.ended"
+    || type === "session.next.reasoning.ended"
+  ) {
+    return {
+      type: "message.part.updated",
+      properties: {
+        sessionID,
+        part: {
+          id: partID,
+          type: textKind,
+          text: data.text,
+          messageID,
+          sessionID,
+          time: { start: timestamp, end: timestamp },
+        },
+      },
+    };
+  }
+  if (type === "session.next.tool.called") {
+    return {
+      type: "message.part.updated",
+      properties: {
+        sessionID,
+        part: {
+          id: data.callID,
+          type: "tool",
+          callID: data.callID,
+          tool: data.tool,
+          messageID,
+          sessionID,
+          state: { status: "running", input: asRecord(data.input) ?? {} },
+        },
+      },
+    };
+  }
+  if (type === "session.next.tool.success" || type === "session.next.tool.failed") {
+    const failed = type === "session.next.tool.failed";
+    return {
+      type: "message.part.updated",
+      properties: {
+        sessionID,
+        part: {
+          id: data.callID,
+          type: "tool",
+          callID: data.callID,
+          tool: "tool",
+          messageID,
+          sessionID,
+          state: failed
+            ? { status: "error", input: {}, error: serialized(data.error) }
+            : { status: "completed", input: {}, output: serialized(data.result) },
+        },
+      },
+    };
+  }
+  return {
+    type: type === "permission.v2.asked"
+      ? "permission.asked"
+      : type === "question.v2.asked"
+        ? "question.asked"
+        : type,
+    properties: data,
+  };
+};
 
 export const asOcEvent = (data: unknown): OcEvent | undefined => {
   if (!data || typeof data !== "object") return undefined;
@@ -25,12 +193,18 @@ export const asOcEvent = (data: unknown): OcEvent | undefined => {
   const src = nested && typeof nested === "object" ? (nested as Record<string, unknown>) : rec;
   const type = typeof src.type === "string" ? src.type : undefined;
   if (!type) return undefined;
-  const properties =
-    src.properties && typeof src.properties === "object"
-      ? (src.properties as Record<string, unknown>)
-      : {};
+  const nativeData = asRecord(src.data);
+  const normalized = nativeData
+    ? normalizeV2Event(type, nativeData)
+    : { type, properties: asRecord(src.properties) ?? {} };
   const id = typeof src.id === "string" ? src.id : undefined;
-  return { id, type, properties };
+  const durable = asRecord(src.durable);
+  return {
+    id,
+    type: normalized.type,
+    properties: normalized.properties,
+    ...(durable ? { durable } : {}),
+  };
 };
 
 export const backendSessionId = (ev: OcEvent): string | undefined => {
@@ -50,9 +224,6 @@ export const backendSessionId = (ev: OcEvent): string | undefined => {
   }
   return undefined;
 };
-
-const asRecord = (v: unknown): Record<string, unknown> | undefined =>
-  v && typeof v === "object" ? (v as Record<string, unknown>) : undefined;
 
 const asJsonObject = (v: unknown): JsonObject => {
   if (!v || typeof v !== "object" || Array.isArray(v)) return {};
@@ -93,6 +264,12 @@ export interface TranslateState {
   emittedAssistant: Set<string>;
   emittedUsage: Set<string>;
   compactionParts: Set<string>;
+  /** Exact upstream message completion which can anchor a revision-less
+   * legacy idle to one durable turn, without fabricating a status revision. */
+  latestAssistantCompletion?: { messageId: string; revision: string };
+  /** Prevent a repeated idle for the same completion from stopping a later
+   * admitted turn before that turn has produced its own durable completion. */
+  terminalizedAssistantCompletion?: string;
   lastTokens?: TokenUsage;
   lastCost?: number;
   // WP8: revisioned full snapshots of tasks and delegated agents. Revisions
@@ -209,6 +386,16 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
       if (tok) state.lastTokens = tok;
       if (typeof info.cost === "number") state.lastCost = info.cost;
       const completed = asRecord(info?.time)?.completed;
+      if (typeof completed === "number" && typeof info.id === "string" && info.id) {
+        state.latestAssistantCompletion = {
+          messageId: info.id,
+          revision: explicitRevision(
+            ev as unknown as Record<string, unknown>,
+            p,
+            info,
+          ) ?? `completed:${completed}`,
+        };
+      }
       if (typeof completed === "number" && tok && typeof info.id === "string" && !state.emittedUsage.has(info.id)) {
         state.emittedUsage.add(info.id);
         out.push({
@@ -423,6 +610,8 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
     const permission =
       typeof nested.permission === "string"
         ? nested.permission
+        : typeof nested.action === "string"
+          ? nested.action
         : typeof nested.type === "string"
           ? nested.type
           : "unknown";
@@ -437,14 +626,16 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
       type: "permission/requested",
       requestId,
       permission,
-      patterns: patternsOf(nested),
+      patterns: Array.isArray(nested.resources)
+        ? nested.resources.filter((item): item is string => typeof item === "string")
+        : patternsOf(nested),
       metadata: nested.metadata ? asJsonObject(nested.metadata) : undefined,
       tool,
     });
     return out;
   }
 
-  if (type === "question.asked" || type === "question.v2.asked") {
+  if (type === "question.asked") {
     const requestId = typeof p.id === "string" ? p.id : "";
     const questions = Array.isArray(p.questions) ? (p.questions as JsonObject[]) : [];
     out.push({ type: "question/asked", requestId, questions });
@@ -481,7 +672,7 @@ export const flushAssistantOnIdle = (state: TranslateState): RuntimeEvent[] => {
 
 export const terminalStateEvidenceOf = (
   ev: OcEvent,
-): (ComparableRuntimeRevision & {
+): (Partial<ComparableRuntimeRevision> & {
   state: "idle" | "failed" | "interrupted";
 }) | undefined => {
   const properties = ev.properties ?? {};
@@ -500,7 +691,37 @@ export const terminalStateEvidenceOf = (
     asRecord(properties.status),
     asRecord(properties.error),
   );
-  return comparable ? { state: status, ...comparable } : undefined;
+  if (comparable) return { state: status, ...comparable };
+  // Real legacy streams provide explicit terminal signals without revisions.
+  // They are transport-order evidence for the facade's currently admitted
+  // turn, not a fabricated monotonic watermark. Snapshot absence remains
+  // non-authoritative and is handled independently by protocol reconciliation.
+  return { state: status };
+};
+
+const assistantCompletionKey = (
+  state: TranslateState,
+): string | undefined => {
+  const completion = state.latestAssistantCompletion;
+  return completion
+    ? `${completion.messageId}\0${completion.revision}`
+    : undefined;
+};
+
+/** Claim transport-order terminal evidence for the current translation
+ * stream. A revision-less idle may be used once per exact durable assistant
+ * completion; a duplicate idle cannot stop a later turn. */
+export const claimTerminalStateEvidence = (
+  ev: OcEvent,
+  state: TranslateState,
+): ReturnType<typeof terminalStateEvidenceOf> => {
+  const evidence = terminalStateEvidenceOf(ev);
+  if (!evidence || evidence.state !== "idle" || evidence.comparison) return evidence;
+  const completion = assistantCompletionKey(state);
+  if (!completion) return evidence;
+  if (state.terminalizedAssistantCompletion === completion) return undefined;
+  state.terminalizedAssistantCompletion = completion;
+  return evidence;
 };
 
 export const errorMessageOf = (ev: OcEvent): string | undefined => {
@@ -550,6 +771,36 @@ export interface NormalizedOcObservation {
     message: string;
   };
 }
+
+/** Multi-event translations use stable per-event revisions so live SSE and
+ * pull reconstruction can claim the same canonical facts independently. The
+ * checkpoint/cursor belongs to the final member, after the whole batch. */
+export const splitNormalizedObservation = (
+  observation: NormalizedOcObservation,
+): NormalizedOcObservation[] => {
+  if (observation.events.length <= 1) return [observation];
+  const {
+    events,
+    checkpoint,
+    cursorAfter,
+    uncertainty,
+    ...shared
+  } = observation;
+  return events.map((event, index) => {
+    const final = index === events.length - 1;
+    return {
+      ...shared,
+      identity: {
+        ...observation.identity,
+        revision: `${observation.identity.revision}#${index}`,
+      },
+      events: [event],
+      ...(final && checkpoint ? { checkpoint } : {}),
+      ...(final && cursorAfter ? { cursorAfter } : {}),
+      ...(final && uncertainty ? { uncertainty } : {}),
+    };
+  });
+};
 
 export type OcObservationNormalization =
   | { kind: "accepted"; observation: NormalizedOcObservation }
@@ -682,7 +933,10 @@ const statusValue = (value: unknown): string => {
     : "unknown";
 };
 
-const semanticIdentityOf = (ev: OcEvent): SemanticIdentity | undefined => {
+const semanticIdentityOf = (
+  ev: OcEvent,
+  state?: TranslateState,
+): SemanticIdentity | undefined => {
   const properties = ev.properties ?? {};
   const info = asRecord(properties.info);
   const part = asRecord(properties.part);
@@ -776,7 +1030,7 @@ const semanticIdentityOf = (ev: OcEvent): SemanticIdentity | undefined => {
     };
   }
 
-  if (ev.type === "question.asked" || ev.type === "question.v2.asked") {
+  if (ev.type === "question.asked") {
     const requestId =
       typeof properties.id === "string" ? properties.id
         : typeof properties.requestID === "string" ? properties.requestID
@@ -811,12 +1065,18 @@ const semanticIdentityOf = (ev: OcEvent): SemanticIdentity | undefined => {
     );
     const terminal =
       status === "idle" || status === "failed" || status === "interrupted";
+    const assistantCompletion = status === "idle" && !comparable && !directRevision
+      ? state?.latestAssistantCompletion
+      : undefined;
     return {
       artifactKind: "status",
       entityId: sessionId,
       revision: comparable
         ? `${comparable.comparison.domain}:${comparable.comparison.order}`
-        : directRevision ?? `state:${status}`,
+        : directRevision
+          ?? (assistantCompletion
+            ? `assistant-completed:${assistantCompletion.messageId}:${assistantCompletion.revision}`
+            : `state:${status}`),
       ...(!terminal || comparable
         ? {
             checkpoint: {
@@ -916,7 +1176,8 @@ export const normalizeOcObservation = (
       message: "observation belongs to a different backend session",
     };
   }
-  const semantic = semanticIdentityOf(ev);
+  const state = input.state ?? createTranslateState();
+  const semantic = semanticIdentityOf(ev, state);
   if (!semantic) {
     return {
       kind: "suppressed",
@@ -925,7 +1186,6 @@ export const normalizeOcObservation = (
     };
   }
 
-  const state = input.state ?? createTranslateState();
   const prepared = prepareStateFromCheckpoint(state, ev, input.checkpoint);
   const divergent = prepared?.kind === "suppressed";
   const terminalChanged = terminalPayloadChanged(semantic, input.checkpoint);
@@ -1068,7 +1328,8 @@ export const normalizeAndIngestOcObservation = async (
 ): Promise<OcObservationIngestion> => {
   if (!isCurrentObservation(input.observed, input.current)) return { kind: "stale" };
   const ev = asOcEvent(input.data);
-  const semantic = ev ? semanticIdentityOf(ev) : undefined;
+  const state = input.state ?? createTranslateState();
+  const semantic = ev ? semanticIdentityOf(ev, state) : undefined;
   const checkpoint = semantic
     ? await input.store.observationCheckpoint({
         authorityId: input.observed.authorityId,
@@ -1078,7 +1339,7 @@ export const normalizeAndIngestOcObservation = async (
         entityId: semantic.entityId,
       })
     : undefined;
-  const normalized = normalizeOcObservation({ ...input, checkpoint });
+  const normalized = normalizeOcObservation({ ...input, state, checkpoint });
   if (normalized.kind !== "accepted") return normalized;
   const result = await ingestNormalizedObservation({
     store: input.store,

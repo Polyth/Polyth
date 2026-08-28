@@ -1,0 +1,106 @@
+{
+  "toolError": {
+    "upstreamToolStates": [
+      {
+        "tool": "read",
+        "status": "running",
+        "error": ""
+      }
+    ],
+    "facadeToolErrorEvents": [],
+    "turnCompletedUpstream": false,
+    "upstreamHangRepro": "probe_readhang.ts: read tool on /nonexistent/missing-probe.txt stayed status=running for 120s+, no error event, no session.idle; reproduced twice (90s in scenario run, 120s in isolated probe)"
+  },
+  "modelError": {
+    "promptAccepted": true,
+    "sessionErrorOnWire": true,
+    "rawSessionError": {
+      "id": "evt_046d92153001dNbxWwUqZypvPx",
+      "type": "session.error",
+      "properties": {
+        "sessionID": "ses_fb926df8bffeyaGTDi4ODw7NSD",
+        "error": {
+          "name": "UnknownError",
+          "data": {
+            "message": "ProviderModelNotFoundError: Model not found: google/no-such-model-xyz-021.\n    at <anonymous> (/$bunfs/root/chunk-n6qzp1at.js:439:90316)\n    at SessionPrompt.getModel (/$bunfs/root/chunk-zebeatt9.js:1096:11490)\n    at SessionPrompt.getModel (definition) (/$bunfs/root/chunk-zebeatt9.js:1096:908)\n    at SessionPrompt.run (/$bunfs/root/chunk-zebeatt9.js:1096:15306)\n    at SessionPrompt.run (definition) (/$bunfs/root/chunk-zebeatt9.js:1096:10498)\n    at SessionRunState.ensureRunning (/$bunfs/root/chunk-zebeatt9.js:1096:15275)\n    at SessionRunState.ensureRunning (definition) (/$bunfs/root/chunk-zebeatt9.js:2:8179)\n    at SessionPrompt.loop (/$bunfs/root/chunk-zebeatt9.js:1096:10220)\n    at SessionPrompt.loop (definition) (/$bunfs/root/chunk-zebeatt9.js:1096:15211)\n    at SessionPrompt.prompt (/$bunfs/root/chunk-gzs24a6h.js:4:13492)\n    at SessionPrompt.prompt (definition) (/$bunfs/root/chunk-zebeatt9.js:1096:9838)"
+          }
+        }
+      }
+    },
+    "durableMessageError": null
+  },
+  "authError": {
+    "sessionErrorOnWire": true,
+    "rawSessionError": {
+      "id": "evt_046d92475001hULWS9aj3IQ8Xk",
+      "type": "session.error",
+      "properties": {
+        "sessionID": "ses_fb926dea4ffe7qZXKAq1NyZqdg",
+        "error": {
+          "name": "APIError",
+          "data": {
+            "message": "API key not valid. Please pass a valid API key.",
+            "statusCode": 400,
+            "isRetryable": false,
+            "responseHeaders": {
+              "alt-svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+              "content-length": "581",
+              "content-type": "text/event-stream",
+              "date": "Fri, 28 Aug 2026 05:30:30 GMT",
+              "server": "scaffolding on HTTPServer2",
+              "server-timing": "gfet4t7; dur=33",
+              "vary": "Origin, X-Origin, Referer",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "SAMEORIGIN",
+              "x-xss-protection": "0"
+            },
+            "responseBody": "{\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"API key not valid. Please pass a valid API key.\",\n    \"status\": \"INVALID_ARGUMENT\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.ErrorInfo\",\n        \"reason\": \"API_KEY_INVALID\",\n        \"domain\": \"googleapis.com\",\n        \"metadata\": {\n          \"service\": \"generativelanguage.googleapis.com\"\n        }\n      },\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.LocalizedMessage\",\n        \"locale\": \"en-US\",\n        \"message\": \"API key not valid. Please pass a valid API key.\"\n      }\n    ]\n  }\n}\n",
+            "metadata": {
+              "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:streamGenerateContent?alt=sse"
+            }
+          }
+        }
+      }
+    },
+    "durableMessageError": {
+      "name": "APIError",
+      "data": {
+        "message": "API key not valid. Please pass a valid API key.",
+        "statusCode": 400,
+        "isRetryable": false,
+        "responseHeaders": {
+          "alt-svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+          "content-length": "581",
+          "content-type": "text/event-stream",
+          "date": "Fri, 28 Aug 2026 05:30:30 GMT",
+          "server": "scaffolding on HTTPServer2",
+          "server-timing": "gfet4t7; dur=33",
+          "vary": "Origin, X-Origin, Referer",
+          "x-content-type-options": "nosniff",
+          "x-frame-options": "SAMEORIGIN",
+          "x-xss-protection": "0"
+        },
+        "responseBody": "{\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"API key not valid. Please pass a valid API key.\",\n    \"status\": \"INVALID_ARGUMENT\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.ErrorInfo\",\n        \"reason\": \"API_KEY_INVALID\",\n        \"domain\": \"googleapis.com\",\n        \"metadata\": {\n          \"service\": \"generativelanguage.googleapis.com\"\n        }\n      },\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.LocalizedMessage\",\n        \"locale\": \"en-US\",\n        \"message\": \"API key not valid. Please pass a valid API key.\"\n      }\n    ]\n  }\n}\n",
+        "metadata": {
+          "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:streamGenerateContent?alt=sse"
+        }
+      }
+    },
+    "rawStatusAfterFailure": {},
+    "injectedKeyLeakedInError": false
+  },
+  "unknownSession": {
+    "status": 404,
+    "body": {
+      "name": "NotFoundError",
+      "data": {
+        "message": "Session not found: ses_does_not_exist_021"
+      }
+    }
+  },
+  "turnStoppedEvents": [],
+  "malformedModelResponse": "not exercisable live: the fault proxy sits Polyth<->OpenCode; provider wire is real. Covered deterministically in transportFaults.test.ts (body faults).",
+  "failures": [
+    "tool error case: OPENCODE BUG - read tool on nonexistent absolute path never terminalizes (stuck running, session stuck busy)"
+  ]
+}

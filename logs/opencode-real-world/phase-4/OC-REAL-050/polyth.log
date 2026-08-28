@@ -1,0 +1,66 @@
+(node:61561) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[polyth] Secure Safe behavior refresh skipped Error: applyBehavior refused: config authority is read-only
+    at assertWritable (file:///workspace/packages/backend-opencode/src/config.ts:297:9)
+    at Object.applyBehavior (file:///workspace/packages/backend-opencode/src/config.ts:363:7)
+    at Object.applyBehavior (file:///workspace/packages/server/src/opencodePending.ts:147:37)
+    at refreshSafeBehavior (file:///workspace/packages/server/src/index.ts:998:27)
+    at async boot (file:///workspace/packages/server/src/index.ts:1004:3) {
+  code: 'config-read-only'
+}
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:15143  data=/tmp/ocreal/phase-4/OC-REAL-050/run-mtckjm0s/polyth-data
+[harness] polyth boot complete
+opencode sse disconnected { error: 'Error: OpenCode SSE response closed before completion' }
+[polyth] failed to materialize runtime session 9a8e93fc-1e3a-490a-8fec-acc34c50a815 Error: OpenCode protocol negotiation failed; private daemon fallback is disabled
+    at unavailable (file:///workspace/packages/backend-opencode/src/runtime.ts:26:17)
+    at build (file:///workspace/packages/backend-opencode/src/runtime.ts:266:13)
+    at async install (file:///workspace/packages/backend-opencode/src/runtime.ts:286:18) {
+  code: 'unavailable',
+  [cause]: Error: OpenCode runtime was not ready within 20000ms (OpenCode request exceeded its 92ms deadline)
+      at unavailable (file:///workspace/packages/backend-opencode/src/runtime.ts:26:17)
+      at waitForRuntimeReady (file:///workspace/packages/backend-opencode/src/runtime.ts:826:9)
+      at async Object.createProtocol (file:///workspace/packages/backend-opencode/src/index.ts:220:7)
+      at async build (file:///workspace/packages/backend-opencode/src/runtime.ts:264:18)
+      at async install (file:///workspace/packages/backend-opencode/src/runtime.ts:286:18) {
+    code: 'unavailable'
+  }
+}
+opencode endpoint refresh failed {
+  error: 'Error: OpenCode protocol negotiation failed; private daemon fallback is disabled'
+}
+
+[harness] polyth polyth exited code=null signal=SIGKILL
+(node:61669) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[polyth] Secure Safe behavior refresh skipped Error: applyBehavior refused: config authority is read-only
+    at assertWritable (file:///workspace/packages/backend-opencode/src/config.ts:297:9)
+    at Object.applyBehavior (file:///workspace/packages/backend-opencode/src/config.ts:363:7)
+    at Object.applyBehavior (file:///workspace/packages/server/src/opencodePending.ts:147:37)
+    at refreshSafeBehavior (file:///workspace/packages/server/src/index.ts:998:27)
+    at async boot (file:///workspace/packages/server/src/index.ts:1004:3) {
+  code: 'config-read-only'
+}
+[polyth] discovered server packages: browser, commands, dictation, example-feature, files, fusion, git, github, goals, home-assistant, hotkeys, knowledge, models, multirun, permissions, plugins, schedule, secure-safe, ssh, task-trackers, terminal, usage, walkthrough, workflow
+[polyth] server on http://127.0.0.1:15143  data=/tmp/ocreal/phase-4/OC-REAL-050/run-mtckl129/polyth-data
+[harness] polyth boot complete
+opencode sse disconnected { error: 'Error: OpenCode SSE response closed before completion' }
+[polyth] failed to materialize runtime session fc5257c0-e506-493a-a614-58d10566c8ae Error: OpenCode protocol negotiation failed; private daemon fallback is disabled
+    at unavailable (file:///workspace/packages/backend-opencode/src/runtime.ts:26:17)
+    at build (file:///workspace/packages/backend-opencode/src/runtime.ts:266:13)
+    at async install (file:///workspace/packages/backend-opencode/src/runtime.ts:286:18) {
+  code: 'unavailable',
+  [cause]: Error: OpenCode runtime was not ready within 20000ms (OpenCode request exceeded its 84ms deadline)
+      at unavailable (file:///workspace/packages/backend-opencode/src/runtime.ts:26:17)
+      at waitForRuntimeReady (file:///workspace/packages/backend-opencode/src/runtime.ts:826:9)
+      at async Object.createProtocol (file:///workspace/packages/backend-opencode/src/index.ts:220:7)
+      at async build (file:///workspace/packages/backend-opencode/src/runtime.ts:264:18)
+      at async install (file:///workspace/packages/backend-opencode/src/runtime.ts:286:18) {
+    code: 'unavailable'
+  }
+}
+opencode endpoint refresh failed {
+  error: 'Error: OpenCode protocol negotiation failed; private daemon fallback is disabled'
+}
+
+[harness] polyth polyth exited code=null signal=SIGKILL

@@ -1,0 +1,106 @@
+{
+  "onceRan": true,
+  "permissionRepliedSeen": true,
+  "askedAgainAfterOnce": true,
+  "askedAfterAlways": false,
+  "rejectObserved": {},
+  "raceResult": {},
+  "replyWire": [
+    {
+      "t": 1787889491054,
+      "kind": "request",
+      "connection": 10,
+      "method": "POST",
+      "path": "/session/ses_fb97b72efffeCzpVQIGo0OZCr4/permissions/per_046849872001qoVqRp1KuPZVkw?directory=%2Ftmp%2Focreal%2FOC-REAL-013%2Frun-1-mtcf8jwv%2Fproject",
+      "bytes": 19,
+      "body": {
+        "response": "once"
+      },
+      "headerNames": [
+        "host",
+        "connection",
+        "accept",
+        "content-type",
+        "x-polyth-operation-id",
+        "accept-language",
+        "sec-fetch-mode",
+        "user-agent",
+        "accept-encoding",
+        "content-length"
+      ]
+    },
+    {
+      "t": 1787889494106,
+      "kind": "request",
+      "connection": 12,
+      "method": "POST",
+      "path": "/session/ses_fb97b72efffeCzpVQIGo0OZCr4/permissions/per_046849872001qoVqRp1KuPZVkw?directory=%2Ftmp%2Focreal%2FOC-REAL-013%2Frun-1-mtcf8jwv%2Fproject",
+      "bytes": 21,
+      "body": {
+        "response": "always"
+      },
+      "headerNames": [
+        "host",
+        "connection",
+        "accept",
+        "content-type",
+        "x-polyth-operation-id",
+        "accept-language",
+        "sec-fetch-mode",
+        "user-agent",
+        "accept-encoding",
+        "content-length"
+      ]
+    },
+    {
+      "t": 1787889558338,
+      "kind": "request",
+      "connection": 10,
+      "method": "POST",
+      "path": "/session/ses_fb97a6a01ffelz1c3HJtfxPieT/permissions/per_046859f43001I55Qpdl9JW762D?directory=%2Ftmp%2Focreal%2FOC-REAL-013%2Frun-1-mtcfa08e%2Fproject",
+      "bytes": 19,
+      "body": {
+        "response": "once"
+      },
+      "headerNames": [
+        "host",
+        "connection",
+        "accept",
+        "content-type",
+        "x-polyth-operation-id",
+        "accept-language",
+        "sec-fetch-mode",
+        "user-agent",
+        "accept-encoding",
+        "content-length"
+      ]
+    },
+    {
+      "t": 1787889561006,
+      "kind": "request",
+      "connection": 12,
+      "method": "POST",
+      "path": "/session/ses_fb97a6a01ffelz1c3HJtfxPieT/permissions/per_04685ada9001qKQtBFVburWvKq?directory=%2Ftmp%2Focreal%2FOC-REAL-013%2Frun-1-mtcfa08e%2Fproject",
+      "bytes": 21,
+      "body": {
+        "response": "always"
+      },
+      "headerNames": [
+        "host",
+        "connection",
+        "accept",
+        "content-type",
+        "x-polyth-operation-id",
+        "accept-language",
+        "sec-fetch-mode",
+        "user-agent",
+        "accept-encoding",
+        "content-length"
+      ]
+    }
+  ],
+  "failures": [
+    "no fresh permission for the reject case (always-scope may cover new sessions)",
+    "no permission for race case"
+  ]
+}

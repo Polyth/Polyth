@@ -1,0 +1,17 @@
+{
+  "id": "OC-REAL-070",
+  "headSha": "9e0fb6d24bc0cca7a9881a5516c03208f99e1b12",
+  "opencodeBin": "/home/ubuntu/.local/bin/opencode",
+  "opencodeVersion": "1.18.18",
+  "nodeVersion": "v22.22.2",
+  "os": "linux 6.12.94+",
+  "host": "cursor",
+  "fixtureRoot": "/tmp/polyth-tests",
+  "model": {
+    "providerID": "opencode",
+    "modelID": "big-pickle"
+  },
+  "protocol": "legacy",
+  "startedAt": "2026-08-28T06:38:27.183Z",
+  "engine": "R+H"
+}

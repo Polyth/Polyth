@@ -1,0 +1,16 @@
+{
+  "id": "OC-REAL-062",
+  "capturedAt": "2026-08-28T08:04:26.080Z",
+  "gitSha": "1d833613ddf861f28dd6a48a9efa3977ae7345e6",
+  "openCode": {
+    "version": "1.18.18",
+    "binary": "/home/ubuntu/.local/bin/opencode",
+    "sha256": "bb71f45b564f9234a97f54d6252a4a41d2f4388ae4b078918f691824cc3b3e54"
+  },
+  "node": "v22.22.2",
+  "os": "linux x64",
+  "protocol": "v2 (forced)",
+  "isolatedRoot": "/tmp/ocreal/phase-5/run-mtcnyz9q",
+  "exactPidOnly": true,
+  "port14500Used": false
+}

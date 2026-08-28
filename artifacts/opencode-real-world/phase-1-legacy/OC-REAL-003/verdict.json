@@ -1,0 +1,13 @@
+{
+  "id": "OC-REAL-003",
+  "verdict": "pass",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy (forced)",
+  "observed": "raw 7380 models / 204 providers, connected=[\"google\",\"opencode\"]; catalog 7380 models; 3278 variant models compared",
+  "expected": "IDs, names, connection state, modalities and variants survive normalization exactly",
+  "attribution": "NONE",
+  "evidence": [
+    "artifacts/opencode-real-world/phase-1-legacy/OC-REAL-003/catalog-comparison.json",
+    "logs/opencode-real-world/phase-1-legacy/OC-REAL-003/wire.ndjson"
+  ]
+}

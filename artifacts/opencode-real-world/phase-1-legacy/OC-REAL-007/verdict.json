@@ -1,0 +1,13 @@
+{
+  "id": "OC-REAL-007",
+  "verdict": "partial",
+  "opencodeVersion": "1.18.18",
+  "protocol": "legacy (forced)",
+  "observed": "existing external session hydrated once (1 user + 1 assistant, marker intact); second hydrate byte-identical; reconcile pull stable across ordinals; snapshot completeness=partial and state=unknown",
+  "expected": "existing history appears once, baseline durable, second hydrate idempotent",
+  "attribution": "NONE",
+  "evidence": [
+    "artifacts/opencode-real-world/phase-1-legacy/OC-REAL-007/hydration.json"
+  ],
+  "notes": "partial: adapter hydration/reconcile idempotency proven against real history incl. live model output; the durable import-baseline (D evidence, session package) requires the full server stack and is covered by deterministic tests, not this real run. Tool/terminal record variants not seeded (tool run covered in OC-REAL-010)."
+}

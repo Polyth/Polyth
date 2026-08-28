@@ -1,0 +1,1423 @@
+{
+  "capturedAt": "2026-08-28T08:04:29.509Z",
+  "isolatedRoot": "/tmp/ocreal/phase-5/run-mtcnyz9q",
+  "scenarios": [
+    {
+      "id": "OC-REAL-062",
+      "verdict": "fail (polyth)",
+      "summary": "The current borrowed seam joined the pre-existing real V2 service and read its session/history without spawn/stop/config authority. Normal Polyth boot still attempted an owned child on the occupied port and returned 503 instead of joining.",
+      "limitation": "Normal Polyth composition still cannot select a borrowed/shared endpoint; OpenCode 1.18.18 exposes no authoritative discovery descriptor.",
+      "details": {
+        "shared": {
+          "pid": 86741,
+          "identity": {
+            "pid": 86741,
+            "startIdentity": "1786221",
+            "executable": "/home/ubuntu/.opencode/bin/opencode",
+            "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 38607"
+          },
+          "url": "http://127.0.0.1:38607"
+        },
+        "externalCreate": {
+          "data": {
+            "data": {
+              "id": "ses_phase5_active_000000000001",
+              "projectID": "02a6d6fb7cc28053c3aa6fbd1e18b045937617c0",
+              "agent": "build",
+              "model": {
+                "id": "big-pickle",
+                "providerID": "opencode",
+                "variant": "default"
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787904171222,
+                "updated": 1787904171222
+              },
+              "title": "New session - 2026-08-28T08:02:51.222Z",
+              "location": {
+                "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a"
+              }
+            }
+          },
+          "status": 200
+        },
+        "externalAdmission": {
+          "data": {
+            "data": {
+              "admittedSeq": 1,
+              "id": "msg_phase5_external_000000000001",
+              "sessionID": "ses_phase5_active_000000000001",
+              "prompt": {
+                "text": "Use the bash tool to run: sleep 20; printf PHASE5_EXTERNAL_PREEXISTING"
+              },
+              "delivery": "queue",
+              "timeCreated": 1787904171634
+            }
+          },
+          "status": 200
+        },
+        "activeStatus": {
+          "data": {
+            "data": {
+              "ses_phase5_active_000000000001": {
+                "type": "running"
+              }
+            }
+          },
+          "status": 200
+        },
+        "activePermissions": {
+          "data": {
+            "location": {
+              "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a",
+              "project": {
+                "id": "02a6d6fb7cc28053c3aa6fbd1e18b045937617c0",
+                "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a"
+              }
+            },
+            "data": []
+          },
+          "status": 200
+        },
+        "borrowedEndpoint": {
+          "authorityId": "phase5-shared-authority",
+          "continuity": "generation-only",
+          "generation": 1,
+          "url": "http://127.0.0.1:38607",
+          "location": {
+            "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a"
+          },
+          "control": {
+            "kind": "borrowed",
+            "source": "shared"
+          },
+          "config": {
+            "kind": "read-only"
+          },
+          "authentication": {
+            "kind": "endpoint-headers"
+          }
+        },
+        "joinedSessions": {
+          "ok": true,
+          "value": [
+            {
+              "id": "ses_phase5_active_000000000001",
+              "title": "New session - 2026-08-28T08:02:51.222Z",
+              "createdAt": 1787904171222,
+              "updatedAt": 1787904171222
+            }
+          ]
+        },
+        "joinedHistory": {
+          "ok": true,
+          "value": [
+            {
+              "role": "user",
+              "text": "Use the bash tool to run: sleep 20; printf PHASE5_EXTERNAL_PREEXISTING"
+            },
+            {
+              "role": "assistant",
+              "text": "",
+              "reasoning": "The user wants me to run a bash command."
+            }
+          ]
+        },
+        "normalProductOccupiedPort": {
+          "project": {
+            "status": 200,
+            "contentType": "application/json",
+            "body": {
+              "id": "880d6d91-d447-4ce9-b979-e63f314c1706",
+              "path": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a",
+              "name": "Phase 5 occupied",
+              "createdAt": 1787904174250
+            }
+          },
+          "create": {
+            "status": 503,
+            "contentType": "application/json",
+            "body": {
+              "error": "unavailable",
+              "message": "opencode serve exited 1: Warning: OPENCODE_SERVER_PASSWORD is not set; server is unsecured.\n\u001b[91m\u001b[1mError: \u001b[0mUnexpected error\n\nServeError\n"
+            }
+          },
+          "sqliteIntegrity": [
+            {
+              "integrity_check": "ok"
+            }
+          ],
+          "sharedAlive": true
+        }
+      }
+    },
+    {
+      "id": "OC-REAL-063",
+      "verdict": "blocked",
+      "summary": "Borrowed facade/lifecycle shutdown detached while the shared PID retained the same /proc identity, health stayed 200, and the external SSE client remained connected. Product-level acceptance is blocked because normal boot cannot borrow.",
+      "limitation": "Normal Polyth composition still cannot select a borrowed/shared endpoint; OpenCode 1.18.18 exposes no authoritative discovery descriptor.",
+      "details": {
+        "beforeBorrowedShutdown": {
+          "pid": 86741,
+          "identity": {
+            "pid": 86741,
+            "startIdentity": "1786221",
+            "executable": "/home/ubuntu/.opencode/bin/opencode",
+            "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 38607"
+          },
+          "external": {
+            "status": 200,
+            "ended": false,
+            "byteCount": 17224,
+            "eventCount": 72
+          }
+        },
+        "afterBorrowedShutdown": {
+          "alive": true,
+          "identity": {
+            "pid": 86741,
+            "startIdentity": "1786221",
+            "executable": "/home/ubuntu/.opencode/bin/opencode",
+            "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 38607"
+          },
+          "health": {
+            "status": 200,
+            "contentType": "application/json",
+            "body": {
+              "healthy": true
+            }
+          },
+          "external": {
+            "status": 200,
+            "ended": false,
+            "byteCount": 17224,
+            "eventCount": 72
+          }
+        }
+      }
+    },
+    {
+      "id": "OC-REAL-064",
+      "verdict": "fail (polyth)",
+      "summary": "A live borrowed lease advanced generation and rejected its stale binding after service replacement, but a fresh Polyth-side lease reset generation to 1 and accepted the same generation-only stale binding without explicit continuity proof.",
+      "limitation": "Normal Polyth composition still cannot select a borrowed/shared endpoint; OpenCode 1.18.18 exposes no authoritative discovery descriptor.",
+      "details": {
+        "oldEndpoint": {
+          "authorityId": "phase5-shared-authority",
+          "continuity": "generation-only",
+          "generation": 1,
+          "url": "http://127.0.0.1:38607",
+          "location": {
+            "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a"
+          },
+          "control": {
+            "kind": "borrowed",
+            "source": "shared"
+          },
+          "config": {
+            "kind": "read-only"
+          },
+          "authentication": {
+            "kind": "endpoint-headers"
+          }
+        },
+        "replacementEndpoint": {
+          "authorityId": "phase5-shared-authority",
+          "continuity": "generation-only",
+          "generation": 2,
+          "url": "http://127.0.0.1:40805",
+          "location": {
+            "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a"
+          },
+          "control": {
+            "kind": "borrowed",
+            "source": "shared"
+          },
+          "config": {
+            "kind": "read-only"
+          },
+          "authentication": {
+            "kind": "endpoint-headers"
+          }
+        },
+        "replacementSessions": {
+          "ok": true,
+          "value": [
+            {
+              "id": "ses_phase5_active_000000000001",
+              "title": "New session - 2026-08-28T08:02:51.222Z",
+              "createdAt": 1787904171222,
+              "updatedAt": 1787904171222
+            }
+          ]
+        },
+        "replacementHistory": {
+          "ok": true,
+          "value": [
+            {
+              "role": "user",
+              "text": "Use the bash tool to run: sleep 20; printf PHASE5_EXTERNAL_PREEXISTING"
+            },
+            {
+              "role": "assistant",
+              "text": "",
+              "reasoning": "The user wants me to run a bash command."
+            }
+          ]
+        },
+        "staleBinding": {
+          "ok": false,
+          "error": "session generation is stale and endpoint continuity is unverified",
+          "code": "binding-mismatch"
+        },
+        "rediscoveredEndpoint": {
+          "authorityId": "phase5-shared-authority",
+          "continuity": "generation-only",
+          "generation": 1,
+          "url": "http://127.0.0.1:40805",
+          "location": {
+            "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a"
+          },
+          "control": {
+            "kind": "borrowed",
+            "source": "shared"
+          },
+          "config": {
+            "kind": "read-only"
+          },
+          "authentication": {
+            "kind": "endpoint-headers"
+          }
+        },
+        "rediscoveredSessions": {
+          "ok": true,
+          "value": [
+            {
+              "id": "ses_phase5_active_000000000001",
+              "title": "New session - 2026-08-28T08:02:51.222Z",
+              "createdAt": 1787904171222,
+              "updatedAt": 1787904171222
+            }
+          ]
+        },
+        "restartedStaleBinding": {
+          "ok": true,
+          "value": {
+            "authorityId": "phase5-shared-authority",
+            "generation": 1,
+            "location": {
+              "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a"
+            },
+            "backendSessionId": "ses_phase5_active_000000000001",
+            "reconciliationOrdinal": 1,
+            "state": {
+              "value": "unknown"
+            },
+            "completeness": {
+              "events": "partial",
+              "permissions": "partial",
+              "questions": "partial"
+            },
+            "permissions": [],
+            "questions": [],
+            "events": [
+              {
+                "entityKey": "reasoning-0",
+                "revision": "snapshot",
+                "event": {
+                  "type": "assistant/reasoning-chunk",
+                  "partId": "reasoning-0",
+                  "text": "The user wants me to run a bash command."
+                }
+              },
+              {
+                "entityKey": "call_5c9076c8675b4381a0fccadb",
+                "revision": "state:running",
+                "event": {
+                  "type": "tool/call",
+                  "callId": "call_5c9076c8675b4381a0fccadb",
+                  "tool": "bash",
+                  "input": {
+                    "command": "sleep 20; printf PHASE5_EXTERNAL_PREEXISTING",
+                    "timeout": 600000
+                  },
+                  "status": "running"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "OC-REAL-065",
+      "verdict": "blocked",
+      "summary": "Injected descriptor refresh covered auth-only, URL-only, and combined URL/auth replacement. Every fingerprint change advanced generation, valid credentials returned 200, and stale credentials returned 401 without recording secret values. In-flight official-discovery acceptance remains unavailable.",
+      "limitation": "Normal Polyth composition still cannot select a borrowed/shared endpoint; OpenCode 1.18.18 exposes no authoritative discovery descriptor.",
+      "details": {
+        "snapshots": [
+          {
+            "step": "initial",
+            "endpoint": {
+              "url": "http://127.0.0.1:36471",
+              "authorityId": "phase5-auth-authority",
+              "continuity": "generation-only",
+              "generation": 1,
+              "control": {
+                "kind": "borrowed",
+                "source": "shared"
+              },
+              "config": {
+                "kind": "read-only"
+              },
+              "headerNames": [
+                "Authorization"
+              ],
+              "headers": {
+                "authorization": "[REDACTED]"
+              }
+            },
+            "correct": {
+              "status": 200,
+              "contentType": "application/json",
+              "body": {
+                "healthy": true
+              }
+            }
+          },
+          {
+            "step": "auth-only",
+            "endpoint": {
+              "url": "http://127.0.0.1:36471",
+              "generation": 2,
+              "headerNames": [
+                "Authorization"
+              ],
+              "headers": {
+                "authorization": "[REDACTED]"
+              }
+            },
+            "correct": {
+              "status": 200,
+              "contentType": "application/json",
+              "body": {
+                "healthy": true
+              }
+            },
+            "stale": {
+              "status": 401,
+              "contentType": "application/json",
+              "body": {
+                "_tag": "UnauthorizedError",
+                "message": "Authentication required"
+              }
+            }
+          },
+          {
+            "step": "url-only",
+            "endpoint": {
+              "url": "http://127.0.0.1:46803",
+              "generation": 3,
+              "headerNames": [
+                "Authorization"
+              ],
+              "headers": {
+                "authorization": "[REDACTED]"
+              }
+            },
+            "correct": {
+              "status": 200,
+              "contentType": "application/json",
+              "body": {
+                "healthy": true
+              }
+            }
+          },
+          {
+            "step": "url-and-auth",
+            "endpoint": {
+              "url": "http://127.0.0.1:39815",
+              "generation": 4,
+              "headerNames": [
+                "Authorization"
+              ],
+              "headers": {
+                "authorization": "[REDACTED]"
+              }
+            },
+            "correct": {
+              "status": 200,
+              "contentType": "application/json",
+              "body": {
+                "healthy": true
+              }
+            },
+            "stale": {
+              "status": 401,
+              "contentType": "application/json",
+              "body": {
+                "_tag": "UnauthorizedError",
+                "message": "Authentication required"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "OC-REAL-066",
+      "verdict": "fail (opencode)",
+      "summary": "Ordinary project-root/worktree catalogs stayed directory-isolated, but a client-supplied session ID collision in project B returned project A's session with HTTP 200. Real workspace discovery returned no identities, and normal product shared attach remains unavailable.",
+      "limitation": "Normal Polyth composition still cannot select a borrowed/shared endpoint; OpenCode 1.18.18 exposes no authoritative discovery descriptor.",
+      "details": {
+        "projects": {
+          "project-a": {
+            "root": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a",
+            "worktree": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a-worktree"
+          },
+          "project-b": {
+            "root": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-b",
+            "worktree": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-b-worktree"
+          }
+        },
+        "locations": {
+          "a-root": {
+            "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a",
+            "created": {
+              "data": {
+                "data": {
+                  "id": "ses_phase5_a_root_000000000001",
+                  "projectID": "02a6d6fb7cc28053c3aa6fbd1e18b045937617c0",
+                  "cost": 0,
+                  "tokens": {
+                    "input": 0,
+                    "output": 0,
+                    "reasoning": 0,
+                    "cache": {
+                      "read": 0,
+                      "write": 0
+                    }
+                  },
+                  "time": {
+                    "created": 1787904261230,
+                    "updated": 1787904261230
+                  },
+                  "title": "New session - 2026-08-28T08:04:21.230Z",
+                  "location": {
+                    "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a"
+                  }
+                }
+              },
+              "status": 200
+            },
+            "sessionId": "ses_phase5_a_root_000000000001",
+            "catalog": {
+              "ids": [
+                "ses_phase5_collision_000000000001",
+                "ses_phase5_a_root_000000000001",
+                "ses_phase5_active_000000000001"
+              ],
+              "containsOwn": true,
+              "foreignIds": []
+            },
+            "polyth": {
+              "sessions": {
+                "ok": true,
+                "value": [
+                  {
+                    "id": "ses_phase5_collision_000000000001",
+                    "title": "New session - 2026-08-28T08:04:22.083Z",
+                    "createdAt": 1787904262083,
+                    "updatedAt": 1787904262083
+                  },
+                  {
+                    "id": "ses_phase5_a_root_000000000001",
+                    "title": "New session - 2026-08-28T08:04:21.230Z",
+                    "createdAt": 1787904261230,
+                    "updatedAt": 1787904261230
+                  },
+                  {
+                    "id": "ses_phase5_active_000000000001",
+                    "title": "New session - 2026-08-28T08:02:51.222Z",
+                    "createdAt": 1787904171222,
+                    "updatedAt": 1787904171222
+                  }
+                ]
+              },
+              "history": {
+                "ok": true,
+                "value": []
+              }
+            },
+            "officialDurableHistory": {
+              "error": {
+                "_tag": "InvalidRequestError",
+                "message": "Expected a value less than or equal to 100, got 200\n  at [\"limit\"]",
+                "kind": "Query"
+              },
+              "status": 400
+            }
+          },
+          "a-worktree": {
+            "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a-worktree",
+            "created": {
+              "data": {
+                "data": {
+                  "id": "ses_phase5_a_worktree_000000000001",
+                  "projectID": "02a6d6fb7cc28053c3aa6fbd1e18b045937617c0",
+                  "cost": 0,
+                  "tokens": {
+                    "input": 0,
+                    "output": 0,
+                    "reasoning": 0,
+                    "cache": {
+                      "read": 0,
+                      "write": 0
+                    }
+                  },
+                  "time": {
+                    "created": 1787904261275,
+                    "updated": 1787904261275
+                  },
+                  "title": "New session - 2026-08-28T08:04:21.275Z",
+                  "location": {
+                    "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a-worktree"
+                  }
+                }
+              },
+              "status": 200
+            },
+            "sessionId": "ses_phase5_a_worktree_000000000001",
+            "catalog": {
+              "ids": [
+                "ses_phase5_a_worktree_000000000001"
+              ],
+              "containsOwn": true,
+              "foreignIds": []
+            },
+            "polyth": {
+              "sessions": {
+                "ok": true,
+                "value": [
+                  {
+                    "id": "ses_phase5_a_worktree_000000000001",
+                    "title": "New session - 2026-08-28T08:04:21.275Z",
+                    "createdAt": 1787904261275,
+                    "updatedAt": 1787904261275
+                  }
+                ]
+              },
+              "history": {
+                "ok": true,
+                "value": []
+              }
+            },
+            "officialDurableHistory": {
+              "error": {
+                "_tag": "InvalidRequestError",
+                "message": "Expected a value less than or equal to 100, got 200\n  at [\"limit\"]",
+                "kind": "Query"
+              },
+              "status": 400
+            }
+          },
+          "b-root": {
+            "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-b",
+            "created": {
+              "data": {
+                "data": {
+                  "id": "ses_phase5_b_root_000000000001",
+                  "projectID": "c526ae24dc25c90b9e13c279dec0f1ad66cbedda",
+                  "cost": 0,
+                  "tokens": {
+                    "input": 0,
+                    "output": 0,
+                    "reasoning": 0,
+                    "cache": {
+                      "read": 0,
+                      "write": 0
+                    }
+                  },
+                  "time": {
+                    "created": 1787904261578,
+                    "updated": 1787904261578
+                  },
+                  "title": "New session - 2026-08-28T08:04:21.578Z",
+                  "location": {
+                    "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-b"
+                  }
+                }
+              },
+              "status": 200
+            },
+            "sessionId": "ses_phase5_b_root_000000000001",
+            "catalog": {
+              "ids": [
+                "ses_phase5_b_root_000000000001"
+              ],
+              "containsOwn": true,
+              "foreignIds": []
+            },
+            "polyth": {
+              "sessions": {
+                "ok": true,
+                "value": [
+                  {
+                    "id": "ses_phase5_b_root_000000000001",
+                    "title": "New session - 2026-08-28T08:04:21.578Z",
+                    "createdAt": 1787904261578,
+                    "updatedAt": 1787904261578
+                  }
+                ]
+              },
+              "history": {
+                "ok": true,
+                "value": []
+              }
+            },
+            "officialDurableHistory": {
+              "error": {
+                "_tag": "InvalidRequestError",
+                "message": "Expected a value less than or equal to 100, got 200\n  at [\"limit\"]",
+                "kind": "Query"
+              },
+              "status": 400
+            }
+          },
+          "b-worktree": {
+            "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-b-worktree",
+            "created": {
+              "data": {
+                "data": {
+                  "id": "ses_phase5_b_worktree_000000000001",
+                  "projectID": "c526ae24dc25c90b9e13c279dec0f1ad66cbedda",
+                  "cost": 0,
+                  "tokens": {
+                    "input": 0,
+                    "output": 0,
+                    "reasoning": 0,
+                    "cache": {
+                      "read": 0,
+                      "write": 0
+                    }
+                  },
+                  "time": {
+                    "created": 1787904261833,
+                    "updated": 1787904261833
+                  },
+                  "title": "New session - 2026-08-28T08:04:21.833Z",
+                  "location": {
+                    "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-b-worktree"
+                  }
+                }
+              },
+              "status": 200
+            },
+            "sessionId": "ses_phase5_b_worktree_000000000001",
+            "catalog": {
+              "ids": [
+                "ses_phase5_b_worktree_000000000001"
+              ],
+              "containsOwn": true,
+              "foreignIds": []
+            },
+            "polyth": {
+              "sessions": {
+                "ok": true,
+                "value": [
+                  {
+                    "id": "ses_phase5_b_worktree_000000000001",
+                    "title": "New session - 2026-08-28T08:04:21.833Z",
+                    "createdAt": 1787904261833,
+                    "updatedAt": 1787904261833
+                  }
+                ]
+              },
+              "history": {
+                "ok": true,
+                "value": []
+              }
+            },
+            "officialDurableHistory": {
+              "error": {
+                "_tag": "InvalidRequestError",
+                "message": "Expected a value less than or equal to 100, got 200\n  at [\"limit\"]",
+                "kind": "Query"
+              },
+              "status": 400
+            }
+          }
+        },
+        "collision": {
+          "id": "ses_phase5_collision_000000000001",
+          "projectA": {
+            "data": {
+              "data": {
+                "id": "ses_phase5_collision_000000000001",
+                "projectID": "02a6d6fb7cc28053c3aa6fbd1e18b045937617c0",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787904262083,
+                  "updated": 1787904262083
+                },
+                "title": "New session - 2026-08-28T08:04:22.083Z",
+                "location": {
+                  "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a"
+                }
+              }
+            },
+            "status": 200
+          },
+          "projectB": {
+            "data": {
+              "data": {
+                "id": "ses_phase5_collision_000000000001",
+                "projectID": "02a6d6fb7cc28053c3aa6fbd1e18b045937617c0",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787904262083,
+                  "updated": 1787904262083
+                },
+                "title": "New session - 2026-08-28T08:04:22.083Z",
+                "location": {
+                  "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a"
+                }
+              }
+            },
+            "status": 200
+          },
+          "getFromA": {
+            "data": {
+              "data": {
+                "id": "ses_phase5_collision_000000000001",
+                "projectID": "02a6d6fb7cc28053c3aa6fbd1e18b045937617c0",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787904262083,
+                  "updated": 1787904262083
+                },
+                "title": "New session - 2026-08-28T08:04:22.083Z",
+                "location": {
+                  "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a"
+                }
+              }
+            },
+            "status": 200
+          },
+          "getFromB": {
+            "data": {
+              "data": {
+                "id": "ses_phase5_collision_000000000001",
+                "projectID": "02a6d6fb7cc28053c3aa6fbd1e18b045937617c0",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787904262083,
+                  "updated": 1787904262083
+                },
+                "title": "New session - 2026-08-28T08:04:22.083Z",
+                "location": {
+                  "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a"
+                }
+              }
+            },
+            "status": 200
+          }
+        },
+        "workspaceProbe": {
+          "ok": true,
+          "value": {
+            "data": [],
+            "status": 200
+          }
+        }
+      }
+    },
+    {
+      "id": "OC-REAL-067",
+      "verdict": "fail (polyth)",
+      "summary": "Two official V2 SDK clients and one Polyth borrowed facade durably admitted distinct queue markers, but Polyth history/reconcile exposed only the promoted first message and hid later external/Polyth admissions that official durable history retained. No permission request materialized.",
+      "limitation": "Normal Polyth composition still cannot select a borrowed/shared endpoint; OpenCode 1.18.18 exposes no authoritative discovery descriptor.",
+      "details": {
+        "sharedCreate": {
+          "data": {
+            "data": {
+              "id": "ses_phase5_three_clients_000000001",
+              "projectID": "02a6d6fb7cc28053c3aa6fbd1e18b045937617c0",
+              "agent": "build",
+              "model": {
+                "id": "big-pickle",
+                "providerID": "opencode",
+                "variant": "default"
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787904262482,
+                "updated": 1787904262482
+              },
+              "title": "New session - 2026-08-28T08:04:22.482Z",
+              "location": {
+                "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a"
+              }
+            }
+          },
+          "status": 200
+        },
+        "clientOnePrompt": {
+          "data": {
+            "data": {
+              "admittedSeq": 1,
+              "id": "msg_phase5_client_one_000000001",
+              "sessionID": "ses_phase5_three_clients_000000001",
+              "prompt": {
+                "text": "PHASE5_CLIENT_ONE_QUEUE"
+              },
+              "delivery": "queue",
+              "timeCreated": 1787904262487
+            }
+          },
+          "status": 200
+        },
+        "clientTwoPrompt": {
+          "data": {
+            "data": {
+              "admittedSeq": 2,
+              "id": "msg_phase5_client_two_000000001",
+              "sessionID": "ses_phase5_three_clients_000000001",
+              "prompt": {
+                "text": "PHASE5_CLIENT_TWO_QUEUE"
+              },
+              "delivery": "queue",
+              "timeCreated": 1787904262496
+            }
+          },
+          "status": 200
+        },
+        "polythPrompt": {
+          "kind": "confirmed",
+          "value": {
+            "admissionId": "msg_04766017f001nH5rL9b7viN3SA"
+          }
+        },
+        "permissionAttempt": {
+          "data": {
+            "data": {
+              "admittedSeq": 4,
+              "id": "msg_phase5_permission_attempt_000001",
+              "sessionID": "ses_phase5_three_clients_000000001",
+              "prompt": {
+                "text": "Use the bash tool to run: sleep 15; printf PHASE5_PERMISSION_ATTEMPT"
+              },
+              "delivery": "queue",
+              "timeCreated": 1787904262542
+            }
+          },
+          "status": 200
+        },
+        "permissionViews": {
+          "clientOne": {
+            "data": {
+              "location": {
+                "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a",
+                "project": {
+                  "id": "02a6d6fb7cc28053c3aa6fbd1e18b045937617c0",
+                  "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a"
+                }
+              },
+              "data": []
+            },
+            "status": 200
+          },
+          "clientTwo": {
+            "data": {
+              "location": {
+                "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a",
+                "project": {
+                  "id": "02a6d6fb7cc28053c3aa6fbd1e18b045937617c0",
+                  "directory": "/tmp/ocreal/phase-5/run-mtcnyz9q/project-a"
+                }
+              },
+              "data": []
+            },
+            "status": 200
+          }
+        },
+        "clientTwoAbort": {
+          "data": null,
+          "status": 204
+        },
+        "histories": {
+          "durableClientOne": {
+            "error": {
+              "_tag": "InvalidRequestError",
+              "message": "Expected a value less than or equal to 100, got 200\n  at [\"limit\"]",
+              "kind": "Query"
+            },
+            "status": 400
+          },
+          "durableClientTwo": {
+            "error": {
+              "_tag": "InvalidRequestError",
+              "message": "Expected a value less than or equal to 100, got 200\n  at [\"limit\"]",
+              "kind": "Query"
+            },
+            "status": 400
+          },
+          "clientOne": {
+            "data": {
+              "data": [
+                {
+                  "id": "msg_phase5_client_one_000000001",
+                  "time": {
+                    "created": 1787904262487
+                  },
+                  "text": "PHASE5_CLIENT_ONE_QUEUE",
+                  "type": "user"
+                },
+                {
+                  "id": "msg_04766057c001XFenp98sA7OQ7c",
+                  "time": {
+                    "created": 1787904263548,
+                    "completed": 1787904265559
+                  },
+                  "type": "assistant",
+                  "agent": "build",
+                  "model": {
+                    "id": "big-pickle",
+                    "providerID": "opencode",
+                    "variant": "default"
+                  },
+                  "content": [
+                    {
+                      "type": "reasoning",
+                      "id": "reasoning-0",
+                      "text": "The user's request \"PHASE5_CLIENT_ONE_QUEUE\" appears to be a specific task identifier. Let me start by understanding the current state of the workspace - looking at the project structure and any instructions or task files.",
+                      "time": {
+                        "created": 1787904263551,
+                        "completed": 1787904264557
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "id": "text-0",
+                      "text": "Let me start by understanding the project structure and what this task entails."
+                    },
+                    {
+                      "type": "tool",
+                      "id": "call_f34556b4dcf048069d1ff5fb",
+                      "name": "read",
+                      "provider": {
+                        "executed": false
+                      },
+                      "state": {
+                        "status": "error",
+                        "input": {},
+                        "content": [],
+                        "structured": {},
+                        "error": {
+                          "type": "unknown",
+                          "message": "Tool execution interrupted"
+                        }
+                      },
+                      "time": {
+                        "created": 1787904264877,
+                        "completed": 1787904265556
+                      }
+                    }
+                  ],
+                  "snapshot": {
+                    "start": "9e568559500d767bd5e362b3b8816172492d8329"
+                  },
+                  "finish": "error",
+                  "error": {
+                    "type": "unknown",
+                    "message": "Provider turn interrupted"
+                  }
+                }
+              ],
+              "cursor": {
+                "previous": "eyJpZCI6Im1zZ19waGFzZTVfY2xpZW50X29uZV8wMDAwMDAwMDEiLCJvcmRlciI6ImFzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+                "next": "eyJpZCI6Im1zZ18wNDc2NjA1N2MwMDFYRmVucDk4c0E3T1E3YyIsIm9yZGVyIjoiYXNjIiwiZGlyZWN0aW9uIjoibmV4dCJ9"
+              }
+            },
+            "status": 200
+          },
+          "clientTwo": {
+            "data": {
+              "data": [
+                {
+                  "id": "msg_phase5_client_one_000000001",
+                  "time": {
+                    "created": 1787904262487
+                  },
+                  "text": "PHASE5_CLIENT_ONE_QUEUE",
+                  "type": "user"
+                },
+                {
+                  "id": "msg_04766057c001XFenp98sA7OQ7c",
+                  "time": {
+                    "created": 1787904263548,
+                    "completed": 1787904265559
+                  },
+                  "type": "assistant",
+                  "agent": "build",
+                  "model": {
+                    "id": "big-pickle",
+                    "providerID": "opencode",
+                    "variant": "default"
+                  },
+                  "content": [
+                    {
+                      "type": "reasoning",
+                      "id": "reasoning-0",
+                      "text": "The user's request \"PHASE5_CLIENT_ONE_QUEUE\" appears to be a specific task identifier. Let me start by understanding the current state of the workspace - looking at the project structure and any instructions or task files.",
+                      "time": {
+                        "created": 1787904263551,
+                        "completed": 1787904264557
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "id": "text-0",
+                      "text": "Let me start by understanding the project structure and what this task entails."
+                    },
+                    {
+                      "type": "tool",
+                      "id": "call_f34556b4dcf048069d1ff5fb",
+                      "name": "read",
+                      "provider": {
+                        "executed": false
+                      },
+                      "state": {
+                        "status": "error",
+                        "input": {},
+                        "content": [],
+                        "structured": {},
+                        "error": {
+                          "type": "unknown",
+                          "message": "Tool execution interrupted"
+                        }
+                      },
+                      "time": {
+                        "created": 1787904264877,
+                        "completed": 1787904265556
+                      }
+                    }
+                  ],
+                  "snapshot": {
+                    "start": "9e568559500d767bd5e362b3b8816172492d8329"
+                  },
+                  "finish": "error",
+                  "error": {
+                    "type": "unknown",
+                    "message": "Provider turn interrupted"
+                  }
+                }
+              ],
+              "cursor": {
+                "previous": "eyJpZCI6Im1zZ19waGFzZTVfY2xpZW50X29uZV8wMDAwMDAwMDEiLCJvcmRlciI6ImFzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+                "next": "eyJpZCI6Im1zZ18wNDc2NjA1N2MwMDFYRmVucDk4c0E3T1E3YyIsIm9yZGVyIjoiYXNjIiwiZGlyZWN0aW9uIjoibmV4dCJ9"
+              }
+            },
+            "status": 200
+          },
+          "polyth": {
+            "ok": true,
+            "value": [
+              {
+                "role": "user",
+                "text": "PHASE5_CLIENT_ONE_QUEUE"
+              },
+              {
+                "role": "assistant",
+                "text": "Let me start by understanding the project structure and what this task entails.",
+                "reasoning": "The user's request \"PHASE5_CLIENT_ONE_QUEUE\" appears to be a specific task identifier. Let me start by understanding the current state of the workspace - looking at the project structure and any instructions or task files."
+              }
+            ]
+          }
+        },
+        "markerCounts": {
+          "clientOne": {
+            "officialOne": 1,
+            "officialTwo": 0,
+            "polyth": 0
+          },
+          "clientTwo": {
+            "officialOne": 1,
+            "officialTwo": 0,
+            "polyth": 0
+          }
+        }
+      }
+    }
+  ],
+  "blocker5": {
+    "triggered": false,
+    "reason": "No Polyth-owned path signalled or stopped a borrowed process. Every service signal in the timeline is an exact-PID harness action after /proc identity verification."
+  },
+  "processTimeline": [
+    {
+      "at": "2026-08-28T08:02:51.175Z",
+      "event": "service-started",
+      "label": "shared-primary-1",
+      "pid": 86741,
+      "port": 38607,
+      "identity": {
+        "pid": 86741,
+        "startIdentity": "1786221",
+        "executable": "/home/ubuntu/.opencode/bin/opencode",
+        "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 38607"
+      }
+    },
+    {
+      "at": "2026-08-28T08:02:51.183Z",
+      "event": "external-stream-connected",
+      "label": "external-client-062",
+      "path": "/api/event",
+      "status": 200
+    },
+    {
+      "at": "2026-08-28T08:02:54.947Z",
+      "event": "borrowed-disposed",
+      "label": "joiner-062"
+    },
+    {
+      "at": "2026-08-28T08:02:55.462Z",
+      "event": "exact-pid-signal",
+      "label": "shared-primary-1",
+      "pid": 86741,
+      "signal": "SIGTERM",
+      "identity": {
+        "pid": 86741,
+        "startIdentity": "1786221",
+        "executable": "/home/ubuntu/.opencode/bin/opencode",
+        "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 38607"
+      }
+    },
+    {
+      "at": "2026-08-28T08:02:55.490Z",
+      "event": "service-exited",
+      "label": "shared-primary-1",
+      "pid": 86741,
+      "code": null,
+      "signal": "SIGTERM"
+    },
+    {
+      "at": "2026-08-28T08:03:11.308Z",
+      "event": "service-started",
+      "label": "shared-primary-2",
+      "pid": 88227,
+      "port": 40805,
+      "identity": {
+        "pid": 88227,
+        "startIdentity": "1788246",
+        "executable": "/home/ubuntu/.opencode/bin/opencode",
+        "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 40805"
+      }
+    },
+    {
+      "at": "2026-08-28T08:03:17.862Z",
+      "event": "borrowed-disposed",
+      "label": "rotation-064"
+    },
+    {
+      "at": "2026-08-28T08:03:17.889Z",
+      "event": "borrowed-disposed",
+      "label": "restart-rediscovery-064"
+    },
+    {
+      "at": "2026-08-28T08:03:33.703Z",
+      "event": "service-started",
+      "label": "auth-url-1",
+      "pid": 88539,
+      "port": 36471,
+      "identity": {
+        "pid": 88539,
+        "startIdentity": "1790486",
+        "executable": "/home/ubuntu/.opencode/bin/opencode",
+        "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 36471"
+      }
+    },
+    {
+      "at": "2026-08-28T08:03:33.706Z",
+      "event": "exact-pid-signal",
+      "label": "auth-url-1",
+      "pid": 88539,
+      "signal": "SIGTERM",
+      "identity": {
+        "pid": 88539,
+        "startIdentity": "1790486",
+        "executable": "/home/ubuntu/.opencode/bin/opencode",
+        "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 36471"
+      }
+    },
+    {
+      "at": "2026-08-28T08:03:33.723Z",
+      "event": "service-exited",
+      "label": "auth-url-1",
+      "pid": 88539,
+      "code": null,
+      "signal": "SIGTERM"
+    },
+    {
+      "at": "2026-08-28T08:03:49.538Z",
+      "event": "service-started",
+      "label": "auth-url-1-rotated",
+      "pid": 88558,
+      "port": 36471,
+      "identity": {
+        "pid": 88558,
+        "startIdentity": "1792069",
+        "executable": "/home/ubuntu/.opencode/bin/opencode",
+        "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 36471"
+      }
+    },
+    {
+      "at": "2026-08-28T08:03:49.542Z",
+      "event": "exact-pid-signal",
+      "label": "auth-url-1-rotated",
+      "pid": 88558,
+      "signal": "SIGTERM",
+      "identity": {
+        "pid": 88558,
+        "startIdentity": "1792069",
+        "executable": "/home/ubuntu/.opencode/bin/opencode",
+        "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 36471"
+      }
+    },
+    {
+      "at": "2026-08-28T08:03:49.558Z",
+      "event": "service-exited",
+      "label": "auth-url-1-rotated",
+      "pid": 88558,
+      "code": null,
+      "signal": "SIGTERM"
+    },
+    {
+      "at": "2026-08-28T08:04:05.371Z",
+      "event": "service-started",
+      "label": "auth-url-2",
+      "pid": 88606,
+      "port": 46803,
+      "identity": {
+        "pid": 88606,
+        "startIdentity": "1793653",
+        "executable": "/home/ubuntu/.opencode/bin/opencode",
+        "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 46803"
+      }
+    },
+    {
+      "at": "2026-08-28T08:04:05.373Z",
+      "event": "exact-pid-signal",
+      "label": "auth-url-2",
+      "pid": 88606,
+      "signal": "SIGTERM",
+      "identity": {
+        "pid": 88606,
+        "startIdentity": "1793653",
+        "executable": "/home/ubuntu/.opencode/bin/opencode",
+        "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 46803"
+      }
+    },
+    {
+      "at": "2026-08-28T08:04:05.391Z",
+      "event": "service-exited",
+      "label": "auth-url-2",
+      "pid": 88606,
+      "code": null,
+      "signal": "SIGTERM"
+    },
+    {
+      "at": "2026-08-28T08:04:21.207Z",
+      "event": "service-started",
+      "label": "auth-url-3",
+      "pid": 88629,
+      "port": 39815,
+      "identity": {
+        "pid": 88629,
+        "startIdentity": "1795236",
+        "executable": "/home/ubuntu/.opencode/bin/opencode",
+        "command": "/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 39815"
+      }
+    },
+    {
+      "at": "2026-08-28T08:04:22.122Z",
+      "event": "borrowed-disposed",
+      "label": "isolation-a-root"
+    },
+    {
+      "at": "2026-08-28T08:04:22.151Z",
+      "event": "borrowed-disposed",
+      "label": "isolation-a-worktree"
+    },
+    {
+      "at": "2026-08-28T08:04:22.169Z",
+      "event": "borrowed-disposed",
+      "label": "isolation-b-root"
+    },
+    {
+      "at": "2026-08-28T08:04:22.188Z",
+      "event": "borrowed-disposed",
+      "label": "isolation-b-worktree"
+    },
+    {
+      "at": "2026-08-28T08:04:26.079Z",
+      "event": "borrowed-disposed",
+      "label": "three-clients-067"
+    }
+  ]
+}

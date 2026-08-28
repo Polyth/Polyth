@@ -1,0 +1,30 @@
+{
+  "marker": "P2-036-TIMEOUT",
+  "elapsedMs": 10004,
+  "sendError": "outcome-unknown",
+  "operationAfterLateRelease": {
+    "operation_id": "e26c6445-e715-448b-9552-2f5920e07bd1",
+    "session_id": "1e37be8c-b592-4bad-b682-c0fd2d0adaba",
+    "ordinal": 2,
+    "mutation_kind": "turn-submit",
+    "state": "unknown",
+    "replay_kind": "never",
+    "replay_contract": null,
+    "created_at": 1787893404521,
+    "updated_at": 1787893414522,
+    "code": "runtime-outcome-unknown",
+    "message": "OpenCode POST /session/ses_fb93fad7dffeKCYqbbjTj7nKlt/prompt_async?directory=%2Ftmp%2Focreal-phase2%2Foc-real-036-mtchkfo2%2Fproject outcome is unknown: OpenCode request exceeded its 10000ms deadline",
+    "receipt": null,
+    "owner_event_seq": 9
+  },
+  "requestConnectionIds": [
+    9
+  ],
+  "canonicalUserEventIds": [
+    "4b0362ca-b2a0-4a57-86fc-e0c43353fac2"
+  ],
+  "upstreamUserMessageIds": [
+    "msg_046c05375001hLk0hia4Ta5QMs"
+  ],
+  "failures": []
+}

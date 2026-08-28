@@ -1,0 +1,15 @@
+{
+  "ts": "2026-08-28T07:20:09.848Z",
+  "rule": "swallow-abort",
+  "request": {
+    "method": "POST",
+    "path": "/session/ses_fb8c28b30ffeWNbnkNVJYk1G8J/abort?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-058%2Frun-mtcmg8tc%2Fproject",
+    "bodyBytes": 0,
+    "body": ""
+  },
+  "response": {
+    "status": 200,
+    "bodyBytes": 4,
+    "body": "true"
+  }
+}

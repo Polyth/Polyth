@@ -1,0 +1,117 @@
+{
+  "checks": [
+    {
+      "name": "prompt admitted",
+      "pass": true,
+      "observed": "status=200"
+    },
+    {
+      "name": "WAL database is valid after double crash",
+      "pass": true,
+      "observed": "[{\"integrity_check\":\"ok\"}]"
+    },
+    {
+      "name": "no false terminal",
+      "pass": true,
+      "observed": "[]"
+    },
+    {
+      "name": "executing became honest unknown/reconciling",
+      "pass": true,
+      "observed": "final status=reconciling"
+    },
+    {
+      "name": "user intent survives exactly once (no loss, no duplicate)",
+      "pass": true,
+      "observed": "user/message count=1"
+    },
+    {
+      "name": "no duplicate mutation (prompt sent exactly once across both lives)",
+      "pass": true,
+      "observed": "prompt POST count=1"
+    },
+    {
+      "name": "no duplicate tool side effect",
+      "pass": true,
+      "observed": "effect lines=1"
+    },
+    {
+      "name": "stale PID record handled by exact identity (fresh verified record or clean reap)",
+      "pass": true,
+      "observed": "{\"before\":{\"pid\":76550,\"startIdentity\":\"1688427\",\"executable\":\"/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node\",\"command\":\"node /tmp/ocreal/phase-4/tools/shim-proxy.mjs serve --hostname 127.0.0.1 --port 33215\"},\"after\":{\"pid\":76614,\"startIdentity\":\"1691523\",\"executable\":\"/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node\",\"command\":\"node /tmp/ocreal/phase-4/tools/shim-proxy.mjs serve --hostname 127.0.0.1 --port 43457\"}}"
+    }
+  ],
+  "observations": [
+    {
+      "recordBefore": {
+        "version": 1,
+        "ownerPid": 76525,
+        "ownerInstanceToken": "a3f9b528-2907-4852-8500-eb56ff2cf33c",
+        "child": {
+          "pid": 76550,
+          "startIdentity": "1688427",
+          "executable": "/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node",
+          "command": "node /tmp/ocreal/phase-4/tools/shim-proxy.mjs serve --hostname 127.0.0.1 --port 33215"
+        }
+      },
+      "proxyState": {
+        "wrapperPid": 76550,
+        "childPid": 76558,
+        "realPort": 4096,
+        "proxyPort": 33215,
+        "startedAt": "2026-08-28T07:46:18.189Z"
+      }
+    },
+    {
+      "stalePidFileExists": true,
+      "staleRecord": {
+        "version": 1,
+        "ownerPid": 76525,
+        "ownerInstanceToken": "a3f9b528-2907-4852-8500-eb56ff2cf33c",
+        "child": {
+          "pid": 76550,
+          "startIdentity": "1688427",
+          "executable": "/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node",
+          "command": "node /tmp/ocreal/phase-4/tools/shim-proxy.mjs serve --hostname 127.0.0.1 --port 33215"
+        }
+      }
+    },
+    {
+      "firstWire": {
+        "status": 500,
+        "json": {
+          "error": "binding-mismatch",
+          "message": "An internal server error occurred."
+        }
+      }
+    },
+    {
+      "statusTrace": [
+        {
+          "ts": "2026-08-28T07:46:28.235Z",
+          "status": "reconciling"
+        }
+      ]
+    },
+    {
+      "recordAfter": {
+        "version": 1,
+        "ownerPid": 76588,
+        "ownerInstanceToken": "7ada155a-78fb-4d4f-bd93-1a68e1520bb2",
+        "child": {
+          "pid": 76614,
+          "startIdentity": "1691523",
+          "executable": "/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node",
+          "command": "node /tmp/ocreal/phase-4/tools/shim-proxy.mjs serve --hostname 127.0.0.1 --port 43457"
+        }
+      },
+      "stateAfter": {
+        "wrapperPid": 76614,
+        "childPid": 76622,
+        "realPort": 4096,
+        "proxyPort": 43457,
+        "startedAt": "2026-08-28T07:46:49.127Z"
+      }
+    }
+  ]
+}
