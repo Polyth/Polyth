@@ -22,7 +22,12 @@ import {
 } from "../../widgets/widgetLayout.ts";
 import { supportedWidgetSlots } from "../../widgets/widgetLibrary.ts";
 import "../../widgets/builtinWidgets.tsx";
-import { PageHead } from "./parts.tsx";
+import {
+  PageHead,
+  WidgetPlacementChip,
+  WidgetPlacementPicker,
+  WidgetSectionCard,
+} from "./parts.tsx";
 import {
   MOBILE_SHORTCUT_IDS, RESPONSE_ACTION_IDS, setUiSettings, useUiSettings,
   type MobileShortcutId, type RailIconSize, type ResponseActionId,
@@ -77,27 +82,6 @@ const MINI_PLACES: Array<{
     slots: ["session.header.actions", "app.header.actions"],
   },
 ];
-
-function MiniWidgetPicker({
-  widgets,
-  onPick,
-}: {
-  widgets: WidgetDef[];
-  onPick: (widget: WidgetDef) => void;
-}) {
-  return (
-    <div className="widget-place-picker" role="menu">
-      {widgets.length === 0
-        ? <p>{tr("settings.widgetspage.noMoreButtonsAreAvailableForThis")}</p>
-        : widgets.map((widget) => (
-            <button type="button" role="menuitem" key={widget.id} onClick={() => onPick(widget)}>
-              <strong>{widget.title}</strong>
-              <small>{widget.description}</small>
-            </button>
-          ))}
-    </div>
-  );
-}
 
 const INTERFACE_SURFACES: Array<{
   id: InterfaceSurfaceId;
@@ -202,7 +186,7 @@ function OrderedToggleList<T extends string>({
         return (
           <div
             key={id}
-            className={`widget-order-chip${visible ? "" : " hidden"}${dragged === id ? " dragging" : ""}${dragOver === id ? " drag-over" : ""}`}
+            className={`widget-placement-item widget-order-chip${visible ? "" : " hidden"}${dragged === id ? " dragging" : ""}${dragOver === id ? " drag-over" : ""}`}
             data-widget-order-id={id}
             draggable={visible}
             onDragStart={(event) => {
@@ -224,7 +208,7 @@ function OrderedToggleList<T extends string>({
           >
             <button
               type="button"
-              className="widget-drag-handle"
+              className="widget-placement-drag widget-drag-handle"
               aria-label={`Reorder ${labels[id]}. Long press and drag, or use arrow keys.`}
               disabled={!visible}
               onKeyDown={(event) => {
@@ -272,7 +256,7 @@ function OrderedToggleList<T extends string>({
                 ? [...selected, id]
                 : selected.filter((candidate) => candidate !== id))}
             />
-            <span className="widget-order-label">{labels[id]}</span>
+            <span className="widget-placement-item-label widget-order-label">{labels[id]}</span>
             {visible && (
               <span className="widget-order-controls">
                 <button
@@ -462,29 +446,32 @@ export default function WidgetsPage() {
       </section>
 
       <div className="widget-place-grid widget-inline-config">
-        <section className="widget-place-card" data-widget-surface="top-rail" data-settings-item="widgets.mobileShortcuts">
-          <header>
-            <div>
-              <h3>Mobile shortcut rail</h3>
-              <p>Choose and order the icons in the swipeable top rail on phones and tablets.</p>
-            </div>
-          </header>
+        <WidgetSectionCard
+          title="Mobile shortcut rail"
+          description="Choose and order the icons in the swipeable top rail on phones and tablets."
+          surface="top-rail"
+          itemId="widgets.mobileShortcuts"
+        >
           <OrderedToggleList
             all={mobileShortcutOptions}
             selected={ui.mobileShortcuts}
             labels={mobileShortcutLabels}
             onChange={(mobileShortcuts) => setUiSettings({ mobileShortcuts })}
           />
-        </section>
-        <section className="widget-place-card" data-widget-surface="response-footer" data-settings-item="widgets.responseActions">
-          <header><div><h3>{tr("settings.widgetspage.responseActions")}</h3><p>{tr("settings.widgetspage.chooseAndOrderActionsShownAfterA")}</p></div></header>
+        </WidgetSectionCard>
+        <WidgetSectionCard
+          title={tr("settings.widgetspage.responseActions")}
+          description={tr("settings.widgetspage.chooseAndOrderActionsShownAfterA")}
+          surface="response-footer"
+          itemId="widgets.responseActions"
+        >
           <OrderedToggleList
             all={RESPONSE_ACTION_IDS}
             selected={ui.responseActions}
             labels={RESPONSE_ACTION_LABELS}
             onChange={(responseActions) => setUiSettings({ responseActions })}
           />
-        </section>
+        </WidgetSectionCard>
       </div>
 
       <div className="widget-place-grid">
@@ -492,17 +479,13 @@ export default function WidgetsPage() {
           const placed = availableCapabilities.filter((capability) => capability.tier === place.id);
           const candidates = availableCapabilities.filter((capability) => capability.tier !== place.id);
           return (
-            <section
-              className="widget-place-card"
-              data-widget-surface={place.id === "more" ? "right-rail" : "top-rail"}
-              data-settings-item={index === 0 ? "widgets.capabilities" : undefined}
+            <WidgetSectionCard
+              title={place.title}
+              description={place.description}
+              surface={place.id === "more" ? "right-rail" : "top-rail"}
+              itemId={index === 0 ? "widgets.capabilities" : undefined}
               key={place.id}
-            >
-              <header>
-                <div>
-                  <h3>{place.title}</h3>
-                  <p>{place.description}</p>
-                </div>
+              action={(
                 <button
                   type="button"
                   className="widget-place-add"
@@ -510,7 +493,8 @@ export default function WidgetsPage() {
                   aria-expanded={openPlace === place.id}
                   onClick={() => setOpenPlace(openPlace === place.id ? null : place.id)}
                 >＋</button>
-              </header>
+              )}
+            >
               <div className="widget-rail-controls">
                 {place.id === "primary" && (
                   <label className="widget-rail-control">
@@ -550,9 +534,7 @@ export default function WidgetsPage() {
               <div className="widget-place-chips">
                 {placed.length === 0 && <span className="widget-place-empty">{tr("settings.widgetspage.noButtonsPlaced")}</span>}
                 {placed.map((capability) => (
-                  <button
-                    type="button"
-                    className="widget-place-chip"
+                  <WidgetPlacementChip
                     key={capability.descriptor.id}
                     draggable
                     onDragStart={(event) => event.dataTransfer.setData("text/polyth-capability", capability.descriptor.id)}
@@ -568,31 +550,27 @@ export default function WidgetsPage() {
                     aria-label={tr("settings.widgetspage.valueToolValueDragToReorder", { title: place.title, label: capability.descriptor.label })}
                     onClick={() => moveCapabilityToOtherRail(capability.descriptor.id, place.id)}
                   >
-                    {capability.descriptor.label}<span aria-hidden="true">↔</span>
-                  </button>
+                    <span className="widget-placement-drag" aria-hidden="true">⋮⋮</span>
+                    <span className="widget-placement-item-label">{capability.descriptor.label}</span>
+                    <span className="widget-placement-item-action" aria-hidden="true">↔</span>
+                  </WidgetPlacementChip>
                 ))}
               </div>
               {openPlace === place.id && (
-                <div className="widget-place-picker" role="menu">
-                  {candidates.length === 0
-                    ? <p>{tr("settings.widgetspage.allAvailableToolsAreAlreadyHere")}</p>
-                    : candidates.map((capability) => (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          key={capability.descriptor.id}
-                          onClick={() => {
-                            placeCapability(capability.descriptor.id, place.id);
-                            setOpenPlace(null);
-                          }}
-                        >
-                          <strong>{capability.descriptor.label}</strong>
-                          <small>{capability.descriptor.plainDescription}</small>
-                        </button>
-                      ))}
-                </div>
+                <WidgetPlacementPicker
+                  items={candidates.map((capability) => ({
+                    id: capability.descriptor.id,
+                    label: capability.descriptor.label,
+                    description: capability.descriptor.plainDescription,
+                  }))}
+                  empty={tr("settings.widgetspage.allAvailableToolsAreAlreadyHere")}
+                  onPick={(capability) => {
+                    placeCapability(capability.id, place.id);
+                    setOpenPlace(null);
+                  }}
+                />
               )}
-            </section>
+            </WidgetSectionCard>
           );
         })}
 
@@ -600,17 +578,13 @@ export default function WidgetsPage() {
           const placed = miniWidgetsFor(place.slots);
           const candidates = miniWidgetCandidates(place.slots);
           return (
-            <section
-              className="widget-place-card"
-              data-widget-surface={place.id}
-              data-settings-item={index === 0 ? "widgets.actions" : undefined}
+            <WidgetSectionCard
+              title={place.title}
+              description={place.description}
+              surface={place.id}
+              itemId={index === 0 ? "widgets.actions" : undefined}
               key={place.id}
-            >
-              <header>
-                <div>
-                  <h3>{place.title}</h3>
-                  <p>{place.description}</p>
-                </div>
+              action={(
                 <button
                   type="button"
                   className="widget-place-add"
@@ -618,13 +592,12 @@ export default function WidgetsPage() {
                   aria-expanded={openPlace === place.id}
                   onClick={() => setOpenPlace(openPlace === place.id ? null : place.id)}
                 >＋</button>
-              </header>
+              )}
+            >
               <div className="widget-place-chips">
                 {placed.length === 0 && <span className="widget-place-empty">{tr("settings.widgetspage.noButtonsPlaced")}</span>}
                 {placed.map((widget) => (
-                  <button
-                    type="button"
-                    className="widget-place-chip"
+                  <WidgetPlacementChip
                     key={widget.id}
                     draggable
                     onDragStart={(event) => event.dataTransfer.setData("text/polyth-widget", widget.id)}
@@ -649,17 +622,29 @@ export default function WidgetsPage() {
                       if (!widget.requiredVisible) mutate({ type: "visibility", id: widget.id, visible: false });
                     }}
                   >
-                    {widget.title}<span aria-hidden="true">{widget.requiredVisible ? "Required" : "×"}</span>
-                  </button>
+                    <span className="widget-placement-drag" aria-hidden="true">⋮⋮</span>
+                    <span className="widget-placement-item-label">{widget.title}</span>
+                    <span className="widget-placement-item-action" aria-hidden="true">
+                      {widget.requiredVisible ? "Required" : "×"}
+                    </span>
+                  </WidgetPlacementChip>
                 ))}
               </div>
               {openPlace === place.id && (
-                <MiniWidgetPicker
-                  widgets={candidates}
-                  onPick={(widget) => placeMiniWidget(widget, place.slots)}
+                <WidgetPlacementPicker
+                  items={candidates.map((widget) => ({
+                    id: widget.id,
+                    label: widget.title,
+                    description: widget.description,
+                  }))}
+                  empty={tr("settings.widgetspage.noMoreButtonsAreAvailableForThis")}
+                  onPick={(widget) => {
+                    const candidate = candidates.find((item) => item.id === widget.id);
+                    if (candidate) placeMiniWidget(candidate, place.slots);
+                  }}
                 />
               )}
-            </section>
+            </WidgetSectionCard>
           );
         })}
       </div>
