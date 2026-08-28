@@ -1055,7 +1055,10 @@ export default function Composer({
       detail: `${tr("composer.letPolythUseYourCurrentWorkspaceDefault")}. ${agentChangeEffect}`,
       group: "",
     },
-    ...chatAgents.map((a) => ({
+    ...chatAgents
+      // The default row already resolves to this agent; showing it twice is a dupe.
+      .filter((a) => agentBadgeLabel(a.name) !== defaultAgentLabel)
+      .map((a) => ({
       id: a.name,
       label: agentBadgeLabel(a.name),
       detail: a.description ? `${a.description} — ${agentChangeEffect}` : agentChangeEffect,
@@ -1378,6 +1381,7 @@ export default function Composer({
               direction="up"
               items={agentItems}
               value={agentValue}
+              searchable={false}
               onPick={pickAgent}
               placeholder={activeAgentLabel}
               ariaLabel={tr("composer.selectAgentModeCurrentValue", { value: activeAgentLabel })}

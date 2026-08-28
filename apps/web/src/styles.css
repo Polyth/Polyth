@@ -1198,10 +1198,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .bubble del { color: var(--muted); text-decoration: line-through; }
 .caret { display: inline-block; width: 8px; height: 14px; margin-left: 2px; background: var(--accent); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
 
-.reasoning { border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--panel); margin-bottom: 8px; max-width: 100%; }
-.reasoning summary { cursor: pointer; padding: 6px 10px; color: var(--purple); font-size: 12px; }
-.reasoning-body { padding: 0 10px 8px; color: var(--muted); white-space: pre-wrap; max-height: 300px; overflow-y: auto; }
-
 /* tool cards */
 .tool-card { border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--panel); max-width: 100%; }
 .tool-card.error { border-color: color-mix(in srgb, var(--red) 50%, transparent); }
@@ -3149,7 +3145,6 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   background: var(--panel); border: 1px solid var(--border-soft);
   border-radius: var(--radius); padding: 4px 10px;
 }
-.reasoning-actions { margin-top: 8px; }
 .rewound-confirm {
   display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
   padding: 8px 10px; font-size: 12px;
@@ -4396,31 +4391,9 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .msg.user > .bubble:hover ~ .msg-meta .msg-time,
 .msg.user > .msg-meta:hover .msg-time,
 .msg.user .msg-meta:focus-within .msg-time { opacity: 1; }
-.reasoning {
-  width: 100%; margin: 0 0 8px; border: 0; border-radius: 0;
-  background: transparent;
-}
-.reasoning:not([open]) { width: fit-content; max-width: 100%; }
-.reasoning:not([open]) summary { max-width: 100%; }
-.reasoning-preview {
-  flex: 1; min-width: 0; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap;
-}
-.reasoning[open] { width: 100%; }
 .tool-card {
   width: 100%; border-color: var(--border-soft); border-radius: calc(10px * var(--corner-radius-scale));
   background: color-mix(in srgb, var(--panel) 24%, transparent);
-}
-.reasoning summary {
-  width: fit-content; padding: 3px 0; color: var(--muted);
-  font-size: 11px; border-radius: calc(6px * var(--corner-radius-scale));
-}
-.reasoning summary:hover { color: var(--text-dim); background: transparent; }
-.reasoning-brain { display: inline-grid; place-items: center; font-size: 13px; line-height: 1; }
-.reasoning-body {
-  margin-top: 3px; padding: 3px 0 3px 10px;
-  border-inline-start: 2px solid var(--border-soft);
-  font-size: 12px; line-height: 1.65;
 }
 .tool-head { min-height: 32px; padding: 5px 9px; }
 .tool-body { padding: 0 9px 9px; }
@@ -5393,7 +5366,6 @@ grid-template-columns: 1fr !important;
 .copy-btn svg,
 .msg-actions svg,
 .msg-actions-item svg,
-.reasoning-actions svg,
 .timeline-dialog-row .small-btn svg { width: 15px; height: 15px; }
 .msg-actions .small-btn,
 .msg-actions-item,
@@ -10367,60 +10339,60 @@ html[data-font] body :is(
 .reasoning:not([open]) { width: 100%; }
 .reasoning summary {
   width: 100%;
-  min-height: 40px;
-  display: flex;
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 16px;
   align-items: center;
   gap: 8px;
-  padding: 5px 8px;
+  padding: 6px 9px;
   border-radius: calc(8px * var(--corner-radius-scale));
   color: var(--text-dim);
   cursor: pointer;
   list-style: none;
+  text-align: left;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 .reasoning summary::-webkit-details-marker { display: none; }
 .reasoning summary:hover { background: color-mix(in srgb, var(--text) 3%, transparent); }
-.reasoning-label,
-.reasoning-heading strong {
-  flex: none;
-  color: var(--muted);
-  font-size: calc(14px * var(--ui-font-scale, 1));
-  font-weight: 550;
-  font-variant-numeric: tabular-nums;
-}
-.reasoning-label.running { color: var(--text-dim); }
+.reasoning summary:active { background: color-mix(in srgb, var(--text) 4%, transparent); }
 .reasoning-mark {
-  width: 16px;
-  height: 16px;
-  flex: none;
+  width: 18px;
+  height: 18px;
   display: grid;
   place-items: center;
   color: var(--muted);
 }
+.reasoning-mark svg { width: 17px; height: 17px; }
+.reasoning-mark.running svg { animation: reasoning-pulse 1.2s ease-in-out infinite; }
+@keyframes reasoning-pulse { 50% { opacity: 0.45; } }
+/* Collapsed preview: one line that dissolves toward its end instead of a
+   hard ellipsis cut. Type matches .execution-main .tool-preview. */
 .reasoning-preview {
   min-width: 0;
-  flex: 1;
   overflow: hidden;
-  color: var(--faint);
-  font-size: calc(13px * var(--ui-font-scale, 1));
-  font-weight: 400;
-  text-overflow: ellipsis;
+  color: var(--muted);
+  font: 400 calc(13.25px * var(--ui-font-scale, 1))/18px var(--ui-font-family);
   white-space: nowrap;
+  -webkit-mask-image: linear-gradient(to right, #000 55%, transparent 97%);
+  mask-image: linear-gradient(to right, #000 55%, transparent 97%);
 }
-.reasoning-chevron { width: 16px; height: 16px; flex: none; margin-left: auto; display: grid; place-items: center; color: var(--faint); }
-.reasoning-chevron svg { width: 14px; height: 14px; }
+.reasoning-chevron { width: 16px; height: 16px; display: grid; place-items: center; color: var(--faint); }
+.reasoning-chevron svg { width: 14px; height: 14px; stroke-width: 1.75; }
 /* Expanded thinking: the real reasoning as secondary prose in a height-capped
-   well — long thinking scrolls internally and never breaks the page. */
-.reasoning-content { padding: 0 8px 4px; }
+   well — long thinking scrolls internally and never breaks the page. The
+   35px indent matches .execution-details.tool-body (icon + gap + padding). */
+.reasoning-content { padding: 2px 9px 10px 35px; }
 .reasoning-body {
   max-height: min(42vh, 380px);
   overflow: auto;
   overscroll-behavior: contain;
   margin: 0;
-  padding: 2px 10px 2px 14px;
+  padding: 2px 10px 2px 12px;
   border-inline-start: 2px solid var(--border-soft);
   color: var(--muted);
-  font-size: calc(13.5px * var(--ui-font-scale, 1));
-  line-height: 1.6;
+  font-size: calc(13.25px * var(--ui-font-scale, 1));
+  line-height: 1.55;
   overflow-wrap: anywhere;
   white-space: normal; /* legacy .reasoning-body rules set pre-wrap */
 }
@@ -10444,8 +10416,15 @@ html[data-font] body :is(
   color: var(--faint);
 }
 .reasoning-foot .copy-btn:hover { color: var(--text); background: transparent; }
-.reasoning-flat { padding: 6px 8px; }
-.reasoning-heading { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+.reasoning-flat { padding: 0; }
+.reasoning-heading {
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+}
 
 .execution-group { width: 100%; }
 .execution-group-toggle {
@@ -10589,7 +10568,7 @@ html[data-font] body :is(
   .execution-input dl > div { grid-template-columns: 84px minmax(0, 1fr); }
   .execution-group-copy { display: grid; gap: 1px; }
   .execution-group-copy strong, .execution-group-copy small { display: block; }
-  .reasoning summary { min-height: 44px; padding-inline: 6px; }
+  .reasoning summary { min-height: 48px; padding-inline: 8px; }
   .reasoning-body { max-height: min(50vh, 360px); }
   .task-list-title { display: grid; gap: 0; }
   .execution-viewer {
@@ -10610,6 +10589,7 @@ html[data-font] body :is(
   .execution-highlight { animation: none; }
   .execution-expand-shell,
   .execution-group-expand-shell { transition: none; }
+  .reasoning-mark.running svg { animation: none; }
   .execution-status .spinner,
   .reasoning-mark .spinner,
   .execution-group-mark .spinner { animation-duration: 1.8s; }

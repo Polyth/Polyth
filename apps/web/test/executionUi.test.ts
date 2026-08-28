@@ -11,6 +11,7 @@ import {
   middleTruncatePath,
   normalizedMcpResult,
   normalizedInputEntries,
+  reasoningHead,
   reasoningTail,
 } from "../src/execution.ts";
 import type { ToolMsg } from "../src/reduce.ts";
@@ -163,6 +164,13 @@ test("groups get semantic labels and streaming thinking previews the newest thou
   const long = reasoningTail(`start\n${"reasoning ".repeat(40)}end`);
   assert.ok(long.length <= 111, `tail stays bounded, got ${long.length}`);
   assert.ok(long.endsWith("…"));
+  // The settled preview is the first non-empty line, same stripping.
+  assert.equal(
+    reasoningHead("\n\n## Plan\n\n- Found the event reducer.\n"),
+    "Plan",
+  );
+  assert.equal(reasoningHead(""), "");
+  assert.equal(reasoningHead("  \n\n"), "");
 });
 
 test("execution code surfaces override the global prose font preference", async () => {

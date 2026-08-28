@@ -24,14 +24,6 @@ max-height: 180px; overflow-y: auto; background: var(--elevated); border: 1px so
 .plugin-log-line {
 white-space: pre-wrap; word-break: break-all;
 }
-@media (min-width: 1101px) {
-.plugin-strip {
-width: 112px;
-    min-width: 112px;
-    align-items: stretch;
-    padding-inline: 6px;
-}
-}
 .plugin-library {
 position: relative; margin: 12px 0 20px;
 }
@@ -164,24 +156,6 @@ grid-template-columns: 1fr !important;
 }
 .plugin-strip {
 width: 52px; min-width: 52px; gap: 4px;
-}
-@media (min-width: 1101px) {
-.rail-icon-col.plugin-strip {
-box-sizing: border-box;
-    width: 112px;
-    min-width: 112px;
-    align-items: stretch;
-    padding-inline: 6px;
-    overflow-x: hidden;
-}
-
-.rail-icon-col.plugin-strip .strip-btn {
-box-sizing: border-box;
-    width: 100%;
-    min-width: 0;
-    grid-template-columns: 20px minmax(0, 1fr);
-    overflow: hidden;
-}
 }
 .settings-pane-body .plugin-log {
 overflow-wrap: anywhere;

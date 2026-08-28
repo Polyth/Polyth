@@ -44,6 +44,8 @@ export interface PickerProps {
     secondaryLabel?: string;
     secondaryRun?: () => void;
   };
+  /** Set false to hide the filter input (short lists that don't need it). */
+  searchable?: boolean;
   /** Extra class on the root (responsive layout hooks, e.g. picker-profile). */
   className?: string;
   /** Accessible trigger name; keeps the full label when text is condensed. */
@@ -71,6 +73,7 @@ export default function Picker({
   ariaLabel,
   triggerIcon,
   mobileSheet,
+  searchable = true,
 }: PickerProps) {
   const multi = values !== undefined;
   const asSheet = useShellMode() === "phone" && mobileSheet === true;
@@ -216,6 +219,7 @@ export default function Picker({
         <>
           <div className="menu-backdrop" onClick={close} />
           <div ref={popoverRef} className={`picker-pop ${direction}`}>
+            {searchable && (
             <input
               autoFocus
               value={q}
@@ -229,6 +233,7 @@ export default function Picker({
               aria-controls={listId}
               aria-activedescendant={shown[active] ? `${pickerId}-option-${active}` : undefined}
             />
+            )}
             <div
               id={listId}
               className="picker-list"

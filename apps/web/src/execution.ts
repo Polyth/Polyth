@@ -445,3 +445,13 @@ export function reasoningTail(reasoning: string): string {
     .find((candidate) => candidate !== "");
   return line === undefined ? "" : endTruncate(line, 110);
 }
+
+/** First meaningful reasoning line for the collapsed preview once thinking
+ *  finished (same stripping as reasoningTail, opposite end). */
+export function reasoningHead(reasoning: string): string {
+  const line = reasoning
+    .split(/\r?\n/)
+    .map((candidate) => candidate.replace(/^[\s#>*+-]+/, "").replace(/[*_`]+/g, "").trim())
+    .find((candidate) => candidate !== "");
+  return line === undefined ? "" : endTruncate(line, 110);
+}

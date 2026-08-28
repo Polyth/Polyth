@@ -4,7 +4,7 @@ import type { SessionEvent } from "@polyth/contracts";
 import { renderMarkdown } from "../markdown.tsx";
 import { fmtDuration, fmtTokens } from "../format.ts";
 import { groupWork, mergeThinking, promptIndex, copyText, loadDraft, type WorkGroup } from "../utils.ts";
-import { executionGroupLabel, executionPresentation, reasoningTail } from "../execution.ts";
+import { executionGroupLabel, executionPresentation, reasoningHead } from "../execution.ts";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { forkSession, loadOlderEvents } from "../init.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
@@ -89,25 +89,32 @@ import { Button } from "./ui/index.ts";
 type Announce = (text: string) => void;
 
 // Merged thinking block (P2-W2): progressive disclosure over the REAL
-// reasoning stream. Collapsed it is one quiet line — "Thinking · 18s" once
-// finished, a live tail of the newest thought while streaming. Expanded it
-// renders the reasoning as secondary-styled markdown inside a height-capped,
-// self-following scroll well, so long thinking never breaks the page.
+// reasoning stream. The block stays expanded while the stream forms, then
+// folds to a single line — the brain mark plus the first thought, faded out
+// toward the line end. Expanded it renders the reasoning as secondary-styled
+// markdown inside a height-capped, self-following scroll well, so long
+// thinking never breaks the page.
 // UX-MSG-ACTIONS: the disclosure is a native, keyboard-operable control with
 // a purpose-and-target name and truthful expanded state; expanding/collapsing
 // appends no event.
 function Thinking({ m }: { m: AssistantMsg }) {
   const prefs = useUiSettings();
-  const [open, setOpen] = useState(prefs.thinkingDefaultExpanded);
+  const active = !m.finalized;
+  const [open, setOpen] = useState(active || prefs.thinkingDefaultExpanded);
+  const userToggled = useRef(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const reasoningAtBottom = useRef(true);
-  const active = !m.finalized;
-  const span = m.reasoningStartedAt !== undefined && m.reasoningEndedAt !== undefined
-    ? Math.max(0, m.reasoningEndedAt - m.reasoningStartedAt)
-    : null;
-  const duration = !active && span !== null && span >= 500 ? fmtDuration(span) : null;
-  const label = duration ? `${tr("timeline.thinking")} · ${duration}` : tr("timeline.thinking");
-  const tail = active ? reasoningTail(m.reasoning) : "";
+  const head = reasoningHead(m.reasoning);
+  // Expanded while forming; auto-folds when the stream settles unless the
+  // reader pinned it by hand.
+  useEffect(() => {
+    if (active) {
+      userToggled.current = false;
+      setOpen(true);
+    } else if (!userToggled.current) {
+      setOpen(prefs.thinkingDefaultExpanded);
+    }
+  }, [active, prefs.thinkingDefaultExpanded]);
   // Streaming follow mirrors the conversation reader contract: follow while
   // the well is at its tail, but preserve an intentional scroll-up position.
   useEffect(() => {
@@ -115,6 +122,11 @@ function Thinking({ m }: { m: AssistantMsg }) {
     const el = bodyRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [open, active, m.reasoning]);
+  const mark = (
+    <span className={active ? "reasoning-mark running" : "reasoning-mark"} aria-hidden="true">
+      <Icon.brain />
+    </span>
+  );
   const body = (
     <div className="reasoning-content">
       <div
@@ -138,10 +150,7 @@ function Thinking({ m }: { m: AssistantMsg }) {
   if (!prefs.collapsibleThinkingBlocks) {
     return (
       <div className="reasoning reasoning-flat">
-        <div className="reasoning-heading">
-          {active && <span className="reasoning-mark running" aria-hidden="true"><span className="spinner" /></span>}
-          <strong>{label}</strong>
-        </div>
+        <div className="reasoning-heading">{mark}</div>
         {body}
       </div>
     );
@@ -153,15 +162,15 @@ function Thinking({ m }: { m: AssistantMsg }) {
         aria-expanded={open}
         onClick={(e) => {
           e.preventDefault();
+          userToggled.current = true;
           setOpen((value) => {
             if (!value) reasoningAtBottom.current = true;
             return !value;
           });
         }}
       >
-        {active && <span className="reasoning-mark running" aria-hidden="true"><span className="spinner" /></span>}
-        <strong className={active ? "reasoning-label running" : "reasoning-label"}>{label}</strong>
-        {!open && tail !== "" && <span className="reasoning-preview">{tail}</span>}
+        {mark}
+        {!open && head !== "" && <span className="reasoning-preview">{head}</span>}
         <span className="reasoning-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
       </summary>
       {open && body}
