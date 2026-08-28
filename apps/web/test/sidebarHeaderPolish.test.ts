@@ -41,6 +41,9 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
   assert.match(sessions, /tr\("sidebar\.sessionlist\.deleteWorktreeAndItsSessions"\)/);
   assert.match(sessions, /Promise\.all\(sessionsForRemoval\.map\(\(session\) => deleteSession\(session\.id\)\)\)/);
   assert.match(sessions, /api\.removeWorktree\(projectId, removeTarget\.path, deleteBranch\)/);
+  assert.match(sessions, /group\.sessions\.length === 0 && <div className="empty session-list-empty">\{tr\("sidebar\.sessionlist\.noMatchingSessions"\)\}/);
+  assert.doesNotMatch(sessions, /session-worktree-empty|sidebar\.sessionlist\.noSessions/);
+  assert.doesNotMatch(styles, /\.session-worktree-empty/);
   assert.match(styles, /\.session-worktree-toggle\s*\{[\s\S]*?width: auto;/);
   assert.match(styles, /\.session-worktree-actions\s*\{[\s\S]*?flex: none;/);
   assert.match(styles, /\.session-worktree-head:hover \.session-worktree-actions,[\s\S]*?opacity: 1;/);
@@ -68,8 +71,9 @@ test("header and composer controls are configurable and purpose-specific", async
   assert.doesNotMatch(header, /visibleIds|rest\.length > 0/);
   assert.doesNotMatch(composer, /Modalities:/);
   // P2-W3A: the Add menu owns Upload on every layout; the composer wires it
-  // to the shared hidden file input.
-  assert.match(composer, /onUpload=\{\(\) => fileInputRef\.current\?\.click\(\)\}/);
+  // through the platform-aware picker callback.
+  assert.match(composer, /onUpload=\{openAttachmentPicker\}/);
+  assert.match(composer, /pickNativeFiles\(\)\.then/);
   assert.doesNotMatch(widgets, /Session header stats|Response hover actions|Technical menu/);
   assert.match(widgets, /tr\("settings\.widgetspage\.responseActions"\)/);
   assert.match(widgets, /tr\("settings\.widgetspage\.whereButtonsAppear"\)/);

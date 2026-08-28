@@ -54,6 +54,12 @@ test("merge conflict agent settings default safely and accept supported targets"
   assert.equal(product.normalizeSettings({ conflictAgentTarget: "other" }).conflictAgentTarget, "new-session");
 });
 
+test("archived sessions are collapsed by default", () => {
+  assert.equal(product.DEFAULT_SETTINGS.showArchived, false);
+  assert.equal(product.normalizeSettings({}).showArchived, false);
+  assert.equal(product.normalizeSettings({ showArchived: true }).showArchived, true);
+});
+
 test("send shortcuts default safely, preserve legacy behavior, and match only their configured key", () => {
   const defaults = product.normalizeSettings({});
   assert.equal(defaults.desktopSendShortcut, "enter");

@@ -443,6 +443,43 @@ test("translates chunks, tools, permission, question; turn started/stopped once"
   }
 });
 
+test("confirmed abort accepts bare idle without assistant completion", async () => {
+  const fake = await startFake();
+  const runtime = await createTestRuntime(fake.baseUrl);
+  const events: RuntimeEvent[] = [];
+  runtime.onEvent((_sessionId, event) => events.push(event));
+  try {
+    await runtime.ensureSession({
+      sessionId: "abort-before-completion",
+      projectId: "p",
+      cwd: "/tmp",
+      title: "t",
+    });
+    await waitUntil(() => fake.sseClients.length >= 1);
+    await runtime.startTurn({ sessionId: "abort-before-completion", text: "stop me" });
+    await runtime.abort("abort-before-completion");
+    fake.replay({
+      type: "session.idle",
+      properties: { sessionID: "ses_fake_1" },
+    });
+
+    await waitUntil(() => events.some((event) => event.type === "turn/stopped"));
+    const stopped = events.filter((event) => event.type === "turn/stopped");
+    assert.equal(fake.aborts, 1);
+    assert.deepEqual(stopped, [{ type: "turn/stopped", reason: "aborted" }]);
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(
+      events.filter((event) => event.type === "turn/stopped").length,
+      1,
+      "the delayed completion/idle cannot stop the aborted turn twice",
+    );
+  } finally {
+    await runtime.dispose();
+    fake.server.close();
+  }
+});
+
 test("SSE reconnect dedups by event id", async () => {
   const fake = await startFake();
   const runtime = await createTestRuntime(fake.baseUrl);

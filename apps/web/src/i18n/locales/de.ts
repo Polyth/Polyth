@@ -470,6 +470,7 @@ export const de: AppMessages = {
   "mobile.starterpicker.reviewMyChanges": "Meine Änderungen überprüfen",
   "mobile.starterpicker.saveStarter": "Speicherstarter",
   "mobile.starterpicker.searchStartersCommandsSkills": "Suchbegriffe, Befehle, Fähigkeiten",
+  "mobile.starterpicker.shareAcrossProjects": "Projektübergreifend teilen",
   "mobile.starterpicker.showValueInSuggestions": "{label} in Vorschlägen anzeigen",
   "mobile.starterpicker.starterIcon": "Starter-Symbol",
   "mobile.starterpicker.starters": "Vorspeisen",

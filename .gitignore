@@ -11,3 +11,9 @@ apps/desktop/resources/opencode/*/provenance.json
 *.db-wal
 *.db-shm
 data/
+artifacts/
+logs/
+*.runtime.json
+*.wire.ndjson
+*.sse.ndjson
+*.websocket.ndjson

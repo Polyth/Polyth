@@ -1,6 +1,0 @@
-{"ts":"2026-08-28T06:25:10.280Z","event":"proxy-listening","proxyPort":43761,"realPort":4096,"wrapperPid":61464,"childPid":61472}
-{"ts":"2026-08-28T06:25:10.289Z","event":"fault-kill-real-child","pid":61472,"why":"kill-on-request GET /global/health?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-049%2Frun-mtckhobf%2Fproject"}
-{"ts":"2026-08-28T06:25:10.301Z","event":"real-child-exit","pid":61472,"code":null,"signal":"SIGKILL"}
-{"ts":"2026-08-28T06:25:21.111Z","event":"proxy-listening","proxyPort":41239,"realPort":4096,"wrapperPid":61484,"childPid":61492}
-{"ts":"2026-08-28T06:25:24.289Z","event":"wrapper-sigterm","forwardedTo":61492}
-{"ts":"2026-08-28T06:25:24.322Z","event":"real-child-exit","pid":61492,"code":null,"signal":"SIGTERM"}

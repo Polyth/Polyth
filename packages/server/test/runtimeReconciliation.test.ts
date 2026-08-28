@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import type {
   AgentRuntime,
+  PersistedRuntimeBinding,
   Project,
   ProjectService,
   RuntimeEndpoint,
@@ -80,12 +81,25 @@ const endpointFor = (directory: string): RuntimeEndpoint => ({
   authentication: { kind: "none" },
 });
 
+const persistedBindingFor = (
+  endpoint: RuntimeEndpoint,
+  backendSessionId: string,
+): PersistedRuntimeBinding => ({
+  backendSessionId,
+  authorityId: endpoint.authorityId,
+  generation: endpoint.generation,
+  continuity: endpoint.continuity,
+  protocol: "legacy",
+  location: endpoint.location,
+});
+
 const runtimeWithSnapshot = (
   endpoint: RuntimeEndpoint,
   snapshot: (
     binding: RuntimeSessionBinding & { reconciliationOrdinal?: number },
   ) => RuntimeSnapshot,
   sessions: AgentRuntime["sessions"] = async () => [],
+  protocol?: "legacy" | "v2",
 ): AgentRuntime => ({
   capabilities: async () => ({
     streaming: true,
@@ -108,6 +122,7 @@ const runtimeWithSnapshot = (
   }),
   dispose: async () => undefined,
   endpoint: async () => endpoint,
+  ...(protocol ? { protocol: async () => protocol } : {}),
   reconcile: async (binding: RuntimeSessionBinding & { reconciliationOrdinal?: number }) =>
     snapshot(binding),
 } as AgentRuntime);
@@ -143,6 +158,7 @@ test("materialization reconciles missed permission and question state before adm
     id: "session-1",
     projectId: project.id,
     backendSessionId: "backend-1",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-1"),
     title: "Recovered",
     status: "working",
     createdAt: 1,
@@ -193,6 +209,7 @@ test("interrupted backend evidence clears a stale running projection", async () 
     id: "session-dead",
     projectId: project.id,
     backendSessionId: "backend-dead",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-dead"),
     title: "Interrupted",
     status: "working",
     createdAt: 1,
@@ -233,6 +250,7 @@ test("first materialization reconciles an idle persisted session before admissio
     id: "session-idle-before-wire",
     projectId: project.id,
     backendSessionId: "backend-idle-before-wire",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-idle-before-wire"),
     title: "Persisted idle",
     status: "idle",
     createdAt: 1,
@@ -247,11 +265,42 @@ test("first materialization reconciles an idle persisted session before admissio
   await store.close();
 });
 
-test("first wire rebinds a durable owned session to the current generation", async () => {
+test("a backend session without durable runtime identity cannot attach", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-unbound-"));
+  const endpoint = endpointFor(dir);
+  let attachments = 0;
+  const runtime = runtimeWithSnapshot(endpoint, () => {
+    assert.fail("an unbound backend session reached reconciliation");
+  });
+  runtime.ensureSession = async () => {
+    attachments += 1;
+    return "backend-unbound";
+  };
+  const { sessions, store, project } = makeHarness(runtime, dir);
+  await store.upsertProjection({
+    id: "session-unbound",
+    projectId: project.id,
+    backendSessionId: "backend-unbound",
+    title: "Unbound",
+    status: "idle",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+
+  await assert.rejects(
+    sessions.send("session-unbound", { text: "must not attach" }),
+    (error: Error & { code?: string }) => error.code === "binding-mismatch",
+  );
+  assert.equal(attachments, 0);
+  assert.equal((await store.projection("session-unbound"))?.runtimeBinding, undefined);
+  await store.close();
+});
+
+test("first wire rebinds a verified durable session to the current generation", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-owned-restart-"));
   const endpoint: RuntimeEndpoint = {
     ...endpointFor(dir),
-    continuity: "generation-only",
+    continuity: "verified",
     generation: 2,
     control: { kind: "owned", instanceToken: "owned-generation-2" },
   };
@@ -292,7 +341,7 @@ test("first wire rebinds a durable owned session to the current generation", asy
       backendSessionId: "backend-owned-restart",
       authorityId: endpoint.authorityId,
       generation: 1,
-      continuity: "generation-only",
+      continuity: "verified",
       protocol: "legacy",
       location: endpoint.location,
     },
@@ -375,6 +424,57 @@ test("first wire migrates a stale V2 binding to the selected legacy protocol", a
   await store.close();
 });
 
+test("first wire upgrades a legacy protocol binding for the same owned endpoint", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-protocol-upgrade-"));
+  const endpoint: RuntimeEndpoint = {
+    ...endpointFor(dir),
+    continuity: "generation-only",
+    control: { kind: "owned", instanceToken: "owned-protocol-upgrade" },
+  };
+  let reconciliations = 0;
+  const runtime = runtimeWithSnapshot(endpoint, (binding) => {
+    reconciliations += 1;
+    assert.equal(binding.backendSessionId, "backend-protocol-upgrade");
+    return {
+      authorityId: binding.authorityId,
+      generation: binding.generation,
+      location: binding.location,
+      backendSessionId: binding.backendSessionId!,
+      reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+      state: { value: "interrupted", watermark: "7", comparison: { domain: "test-status", order: 7 } },
+      completeness: { events: "partial", permissions: "partial", questions: "partial" },
+      permissions: [],
+      questions: [],
+      events: [],
+    };
+  }, undefined, "v2");
+  const { sessions, store, project } = makeHarness(runtime, dir);
+  const sessionId = "session-protocol-upgrade";
+  await store.upsertProjection({
+    id: sessionId,
+    projectId: project.id,
+    backendSessionId: "backend-protocol-upgrade",
+    runtimeBinding: {
+      backendSessionId: "backend-protocol-upgrade",
+      authorityId: endpoint.authorityId,
+      generation: endpoint.generation,
+      continuity: endpoint.continuity,
+      protocol: "legacy",
+      location: endpoint.location,
+    },
+    title: "Protocol upgrade",
+    status: "working",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+
+  await sessions.events(sessionId, 0);
+
+  assert.equal(reconciliations, 1);
+  assert.equal((await store.projection(sessionId))?.runtimeBinding?.protocol, "v2");
+  await store.close();
+});
+
 test("idle snapshot without a comparable watermark remains unknown and blocks admission", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-unversioned-idle-"));
   const endpoint = endpointFor(dir);
@@ -403,6 +503,7 @@ test("idle snapshot without a comparable watermark remains unknown and blocks ad
     id: "session-unversioned-idle",
     projectId: project.id,
     backendSessionId: "backend-unversioned-idle",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-unversioned-idle"),
     title: "Unversioned idle",
     status: "idle",
     createdAt: 1,
@@ -461,6 +562,7 @@ test("equal status evidence is idempotent but a stale terminal revision cannot r
     id: sessionId,
     projectId: project.id,
     backendSessionId,
+    runtimeBinding: persistedBindingFor(endpoint, backendSessionId),
     title: "Stale terminal",
     status: "working",
     createdAt: 1,
@@ -565,6 +667,7 @@ test("a fork receipt cannot prove child idle after any child mutation", async ()
     id: childSessionId,
     projectId: project.id,
     backendSessionId,
+    runtimeBinding: persistedBindingFor(endpoint, backendSessionId),
     title: "Fork child",
     status: "reconciling",
     createdAt: 1,
@@ -646,6 +749,7 @@ test("fork and import first-wire reconciliation does not duplicate copied histor
     id: "session-source",
     projectId: project.id,
     backendSessionId: "backend-source",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-source"),
     title: "Source",
     status: "idle",
     createdAt: 1,
@@ -711,6 +815,7 @@ test("whole snapshot ingestion rolls back every artifact and cursor on an inject
     id: "session-cursor-atomicity",
     projectId: project.id,
     backendSessionId: "backend-cursor-atomicity",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-cursor-atomicity"),
     title: "Cursor atomicity",
     status: "working",
     createdAt: 1,
@@ -782,6 +887,7 @@ test("runtime observation uncertainty survives the AgentRuntime ingestion seam",
     id: "session-uncertain",
     projectId: project.id,
     backendSessionId: "backend-uncertain",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-uncertain"),
     title: "Uncertain",
     status: "idle",
     createdAt: 1,
@@ -857,6 +963,7 @@ test("backend listing never offers an active deletion tombstone for re-adoption"
     id: "deleted-session",
     projectId: project.id,
     backendSessionId: "backend-deleted",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-deleted"),
     title: "Deleted",
     status: "idle",
     createdAt: 1,

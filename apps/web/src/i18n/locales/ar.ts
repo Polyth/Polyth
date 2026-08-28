@@ -470,6 +470,7 @@ export const ar: AppMessages = {
   "mobile.starterpicker.reviewMyChanges": "راجع التغييرات التي أجريتها",
   "mobile.starterpicker.saveStarter": "حفظ البداية",
   "mobile.starterpicker.searchStartersCommandsSkills": "ابحث عن البدايات والأوامر والمهارات",
+  "mobile.starterpicker.shareAcrossProjects": "المشاركة عبر المشاريع",
   "mobile.starterpicker.showValueInSuggestions": "اعرض {label} في الاقتراحات",
   "mobile.starterpicker.starterIcon": "أيقونة البداية",
   "mobile.starterpicker.starters": "المبتدئون",

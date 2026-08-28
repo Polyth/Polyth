@@ -1,68 +1,64 @@
+import { useState } from "react";
 import { thinkingVariantLabel } from "@polyth/models/model-presentation";
 import { tr } from "../i18n/index.ts";
-import { Icon } from "../icons.tsx";
-import { AssistIcon, Menu, type MenuEntry } from "./ui/index.ts";
-import UiIcon from "./ui/Icon.tsx";
 
 export interface EffortMenuProps {
   variants: readonly string[];
   value?: string;
   onPick: (thinking: string | undefined) => void;
-  /** Phones dismiss the software keyboard before the sheet raises. */
-  onWillOpen?: () => void;
 }
 
-/** Discrete reasoning effort: an anchored radio menu or phone sheet. */
+/**
+ * Discrete reasoning effort with one native range stop per backend variant.
+ * This restores direct, at-a-glance control while keeping "Auto" as a real
+ * reset choice instead of pretending the model default is another variant.
+ */
 export default function EffortMenu({
   variants,
   value,
   onPick,
-  onWillOpen,
 }: EffortMenuProps) {
-  const label = value ? thinkingVariantLabel(value) : tr("composer.auto");
-  const entries: MenuEntry[] = [
-    {
-      id: "auto",
-      label: tr("composer.auto"),
-      detail: tr("composer.modelDefaultReasoningEffort"),
-      kind: "radio",
-      checked: !value,
-      onSelect: () => onPick(undefined),
-    },
-    ...variants.map((variant): MenuEntry => ({
-      id: variant,
-      label: thinkingVariantLabel(variant),
-      kind: "radio",
-      checked: value === variant,
-      onSelect: () => onPick(variant),
-    })),
-  ];
+  const [adjusting, setAdjusting] = useState(false);
+  const options = ["", ...new Set(variants)];
+  const selected = Math.max(0, options.indexOf(value ?? ""));
+  const selectedOption = options[selected] ?? "";
+  const label = selectedOption ? thinkingVariantLabel(selectedOption) : tr("composer.auto");
 
   return (
-    <Menu
-      label={tr("composer.thinkingEffortValue", { value: label })}
-      title={tr("composer.thinking")}
-      entries={entries}
-      className="composer-effort-menu"
+    <label
+      className="composer-effort-control"
+      title={tr("composer.thinkingEffortValue", { value: label })}
     >
-      {(trigger) => (
-        <button
-          type="button"
-          className="config-chip composer-effort-chip"
-          title={tr("composer.thinkingEffortValue", { value: label })}
-          {...trigger}
-          onClick={() => {
-            trigger.onClick();
-            onWillOpen?.();
-          }}
-        >
-          <span className="config-chip-icon" aria-hidden="true">
-            <UiIcon icon={AssistIcon} size="sm" />
+      <span className="composer-effort-label">
+        <span>{tr("composer.thinking")}</span>
+        <output>{label}</output>
+      </span>
+      <span className="composer-effort-track">
+        <input
+          type="range"
+          min={0}
+          max={options.length - 1}
+          step={1}
+          value={selected}
+          aria-label={tr("composer.thinkingEffortValue", { value: label })}
+          aria-valuetext={label}
+          onChange={(event) => onPick(options[Number(event.target.value)] || undefined)}
+          onPointerDown={() => setAdjusting(true)}
+          onPointerUp={() => setAdjusting(false)}
+          onPointerCancel={() => setAdjusting(false)}
+          onBlur={() => setAdjusting(false)}
+        />
+        <span className="composer-effort-stops" aria-hidden="true">
+          {options.map((option, index) => (
+            <i key={option || "auto"} className={index <= selected ? "active" : ""} />
+          ))}
+        </span>
+        {adjusting && (
+          <span className="composer-effort-tooltip" role="tooltip">
+            {tr("composer.thinkingValue", { value: label })}
           </span>
-          <span className="config-chip-text">{label}</span>
-          <span className="config-chip-caret" aria-hidden="true"><Icon.chevronDown /></span>
-        </button>
-      )}
-    </Menu>
+        )}
+      </span>
+    </label>
   );
 }

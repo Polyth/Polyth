@@ -148,11 +148,10 @@ function measure(): void {
     next.covering = measuredCovering || nativeKeyboardInset >= KEYBOARD_MIN_INSET;
     publish(next);
   };
-  // Reading visualViewport synchronously after its own resize event races the
-  // browser's scroll of the layout viewport; one frame later both values are
-  // consistent, so the frame shift and the new band never disagree.
-  if (typeof requestAnimationFrame === "function") requestAnimationFrame(publishNow);
-  else publishNow();
+  // Keyboard resize and visual-viewport scroll fire as separate events on
+  // Safari. Publishing each immediately keeps the dock at the visible edge
+  // instead of rendering one frame at the top before the offset arrives.
+  publishNow();
 }
 
 /**

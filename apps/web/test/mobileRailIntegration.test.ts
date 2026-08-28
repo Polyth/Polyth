@@ -137,7 +137,7 @@ test("mobile app header focuses workspace destinations without escaping a destin
       await new Promise((resolve) => setTimeout(resolve, 10));
     });
     assert.equal(getState().railPlugin, "slot:notification-centre");
-    assert.ok(container.querySelector(".panel-sheet .sheet-strip"), "notifications reuse the compact horizontal panel rail");
+    assert.equal(container.querySelector(".panel-sheet .sheet-strip"), null, "panel sheet does not duplicate the main navigation rail");
 
     const bottom = container.querySelector<HTMLElement>(".workspace-bottom-nav");
     assert.ok(bottom, "restored bottom session bar is mounted");

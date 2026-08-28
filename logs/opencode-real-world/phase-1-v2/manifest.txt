@@ -1,8 +1,0 @@
-2026-08-28T03:16:21Z
-95a0422a1554dc63271c62aec8218ca2a5df7b30
-## feat/opencode-real-world-validation-17e1
-?? logs/opencode-real-world/phase-1-v2/
-Linux cursor 6.12.94+ #1 SMP PREEMPT_DYNAMIC Wed Aug 26 20:41:45 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
-v22.22.2
-1.18.18
-bb71f45b564f9234a97f54d6252a4a41d2f4388ae4b078918f691824cc3b3e54  /home/ubuntu/.local/bin/opencode

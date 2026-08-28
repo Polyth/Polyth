@@ -1,6 +1,0 @@
-{
-  "id": "OC-REAL-078",
-  "verdict": "FAIL",
-  "attribution": "POLYTH",
-  "summary": "Real SSH core runtime worked, but an occupied remote port was not classified for retry."
-}

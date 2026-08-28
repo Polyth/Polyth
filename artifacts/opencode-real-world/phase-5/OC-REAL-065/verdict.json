@@ -1,7 +1,0 @@
-{
-  "id": "OC-REAL-065",
-  "verdict": "blocked",
-  "summary": "Injected descriptor refresh covered auth-only, URL-only, and combined URL/auth replacement. Every fingerprint change advanced generation, valid credentials returned 200, and stale credentials returned 401 without recording secret values. In-flight official-discovery acceptance remains unavailable.",
-  "limitation": "Normal Polyth composition still cannot select a borrowed/shared endpoint; OpenCode 1.18.18 exposes no authoritative discovery descriptor.",
-  "blocker5": false
-}

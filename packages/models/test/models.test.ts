@@ -8,6 +8,7 @@ import {
   parseModelPrefs,
   planFavoriteMigration,
   recordRecent,
+  reorderFavorite,
   reorderProvider,
   serializeModelPrefs,
   setProviderExpanded,
@@ -64,6 +65,14 @@ test("toggleFavorite adds then removes; isFavorite reflects it", () => {
   assert.equal(isFavorite(p, key), true);
   p = toggleFavorite(p, key);
   assert.equal(isFavorite(p, key), false);
+});
+
+test("favorite reorder moves a saved favorite ahead of its drop target", () => {
+  const prefs = { ...defaultModelPrefs(), favorites: ["p/first", "p/second", "p/third"] };
+  assert.deepEqual(reorderFavorite(prefs, "p/third", "p/first").favorites, [
+    "p/third", "p/first", "p/second",
+  ]);
+  assert.equal(reorderFavorite(prefs, "p/missing", "p/first"), prefs);
 });
 
 test("sortModels floats favorites first, then provider/name order", () => {

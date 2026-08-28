@@ -849,7 +849,7 @@ export default function SessionList({
             {!isCollapsed && (
               <div className="session-worktree-sessions">
                 {group.sessions.map((session) => row(session))}
-                {group.sessions.length === 0 && <div className="empty session-worktree-empty">{tr("sidebar.sessionlist.noSessions")}</div>}
+                {group.sessions.length === 0 && <div className="empty session-list-empty">{tr("sidebar.sessionlist.noMatchingSessions")}</div>}
               </div>
             )}
           </div>

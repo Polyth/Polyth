@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -29,6 +29,31 @@ test("canonical data directory lease fails closed for a second writer", async ()
 
   const afterRelease = await acquireDataDirectoryLease(dataDir);
   await afterRelease.release();
+});
+
+test("data directory lease runs an Electron executable in Node mode", async () => {
+  const parent = mkdtempSync(join(tmpdir(), "polyth-electron-lease-"));
+  const executable = join(parent, "electron");
+  const originalExecPath = process.execPath;
+  const quotedNode = originalExecPath.replaceAll("'", "'\\''");
+  writeFileSync(
+    executable,
+    `#!/bin/sh
+if [ "$ELECTRON_RUN_AS_NODE" != "1" ]; then
+  exit 17
+fi
+exec '${quotedNode}' "$@"
+`,
+    { mode: 0o755 },
+  );
+
+  process.execPath = executable;
+  try {
+    const lease = await acquireDataDirectoryLease(join(parent, "data"));
+    await lease.release();
+  } finally {
+    process.execPath = originalExecPath;
+  }
 });
 
 test("stable runtime facade forwards protocol identity across replacements", async () => {

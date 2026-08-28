@@ -1,8 +1,0 @@
-{
-  "opencodeUrl": "http://127.0.0.1:46303",
-  "autoSelectedProtocol": "v2",
-  "v2ModelCount": 68,
-  "legacyModelCount": 7382,
-  "sampleV2Model": "opencode/x-preview-f-free",
-  "sampleLegacyModel": "hpc-ai/deepseek/deepseek-v4-flash"
-}

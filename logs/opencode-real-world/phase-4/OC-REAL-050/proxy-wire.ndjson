@@ -1,4 +1,0 @@
-{"ts":"2026-08-28T06:27:46.784Z","event":"proxied","method":"GET","path":"/global/health?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-050%2Frun-mtckl129%2Fproject","status":200,"reqBytes":0,"resBytes":36,"cut":false}
-{"ts":"2026-08-28T06:27:47.720Z","event":"proxied","method":"GET","path":"/doc?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-050%2Frun-mtckl129%2Fproject","status":200,"reqBytes":0,"resBytes":37752,"cut":false}
-{"ts":"2026-08-28T06:27:49.240Z","event":"fault-swallowed-response","rule":"swallow-create","method":"POST","path":"/session?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-050%2Frun-mtckl129%2Fproject","status":200,"resBytes":403}
-{"ts":"2026-08-28T06:27:49.264Z","event":"upstream-error","method":"GET","path":"/global/health?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-050%2Frun-mtckl129%2Fproject","error":"connect ECONNREFUSED 127.0.0.1:4096"}

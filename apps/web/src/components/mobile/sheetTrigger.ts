@@ -23,6 +23,10 @@ export function useSheetTrigger(enabled: boolean, activate: () => void): SheetTr
     onPointerDown: (event) => {
       // Primary button / first touch only; never a secondary or extra pointer.
       if (!enabled || event.button > 0 || !event.isPrimary) return;
+      // The sheet mounts during pointer-down, before the browser's default
+      // focus step. Focus the trigger first so the modal contract records the
+      // actual opener and can recover from the gesture's later focus echo.
+      event.currentTarget.focus({ preventScroll: true });
       activatedAt.current = Date.now();
       activate();
     },

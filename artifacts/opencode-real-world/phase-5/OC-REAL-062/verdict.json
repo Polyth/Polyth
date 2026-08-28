@@ -1,7 +1,0 @@
-{
-  "id": "OC-REAL-062",
-  "verdict": "fail (polyth)",
-  "summary": "The current borrowed seam joined the pre-existing real V2 service and read its session/history without spawn/stop/config authority. Normal Polyth boot still attempted an owned child on the occupied port and returned 503 instead of joining.",
-  "limitation": "Normal Polyth composition still cannot select a borrowed/shared endpoint; OpenCode 1.18.18 exposes no authoritative discovery descriptor.",
-  "blocker5": false
-}

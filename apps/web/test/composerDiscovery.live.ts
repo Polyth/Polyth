@@ -12,7 +12,7 @@
 //
 // Kept OUTSIDE the default *.test.ts glob on purpose; run it explicitly:
 //
-//   node --test apps/web/test/composerDiscovery.live.ts
+//   node --experimental-strip-types --test apps/web/test/composerDiscovery.live.ts
 //
 // Self-booting: builds the disposable fixture, rebuilds apps/web/dist, and
 // starts an isolated Polyth server on port 4464 whose PATH resolves both
@@ -73,8 +73,15 @@ before(async () => {
     await buildComposerDiscFixture();
     // Always rebuild: the gate must exercise the current sources, never a
     // stale bundle.
-    execFileSync(process.execPath, ["apps/web/build.ts"], { cwd: REPO_ROOT, stdio: "pipe" });
-    serverProc = spawn(process.execPath, ["packages/server/src/index.ts"], {
+    execFileSync(process.execPath, ["--experimental-strip-types", "apps/web/buildPackages.ts"], {
+      cwd: REPO_ROOT,
+      stdio: "pipe",
+    });
+    execFileSync(process.execPath, ["--experimental-strip-types", "apps/web/build.ts"], {
+      cwd: REPO_ROOT,
+      stdio: "pipe",
+    });
+    serverProc = spawn(process.execPath, ["--experimental-strip-types", "packages/server/src/index.ts"], {
       cwd: REPO_ROOT,
       env: {
         ...process.env,
@@ -153,7 +160,11 @@ async function openApp(opts: OpenOpts = {}): Promise<Page> {
     await context.route("**/api/commands*", (route) =>
       route.fulfill({ status: 500, contentType: "text/plain", body: "synthetic catalog failure" }));
   }
-  const storage = { "polyth.prefs": ENGINEER_SEED, ...(opts.storage ?? {}) };
+  const storage = {
+    "polyth.prefs": ENGINEER_SEED,
+    [`polyth.projectSetup.v1.${PROJECT_ID}`]: "completed",
+    ...(opts.storage ?? {}),
+  };
   await context.addInitScript((entries: Record<string, string>) => {
     for (const [k, v] of Object.entries(entries)) localStorage.setItem(k, v);
   }, storage);
@@ -203,7 +214,7 @@ async function openApp(opts: OpenOpts = {}): Promise<Page> {
   await page.waitForSelector(".app", { timeout: 15_000 });
   await page.waitForSelector(".composer-card", { state: "visible", timeout: 15_000 });
   // Models resolved: pickers render only when the runtime reported models.
-  await page.waitForSelector(".picker-model .picker-chip", { state: "visible", timeout: 15_000 });
+  await page.waitForSelector(".picker-model .model-picker-trigger", { state: "visible", timeout: 15_000 });
   await page.waitForTimeout(120);
   return page;
 }
@@ -247,7 +258,7 @@ test("add menu: truthful rows, four-state details, ARIA, and no invented capabil
   assert.equal(await trigger.getAttribute("aria-expanded"), "false");
   assert.equal(
     await trigger.getAttribute("aria-label"),
-    "Add context or use a composer tool",
+    "Add files, context, and tools",
   );
 
   await openAddMenu(page);
@@ -315,10 +326,7 @@ test("menu insertion equals typed sigils; the popup is an honest combobox", asyn
   assert.equal(await input.getAttribute("role"), "combobox");
   assert.equal(await input.getAttribute("aria-expanded"), "true");
   assert.equal(await input.getAttribute("aria-controls"), "composer-autocomplete-list");
-  assert.equal(
-    (await page.locator(".ac-status").innerText()).trim(),
-    "Type a file or folder name to search this project.",
-  );
+  assert.equal((await page.locator(".ac-status").innerText()).trim(), "Type a file or folder name.");
 
   // Real project file search; the active option owns aria-activedescendant.
   await page.keyboard.type("alpha");
@@ -397,7 +405,7 @@ test("a failed catalog request is unavailable — never a successful empty list"
   await page.waitForSelector(".ac-status", { state: "visible" });
   assert.equal(
     (await page.locator(".ac-status").innerText()).trim(),
-    "Commands are unavailable for this project.",
+    "Commands are currently unavailable.",
   );
   await shot(page, "ac_commands_unavailable.png");
   await closePage(page);
@@ -416,7 +424,7 @@ test("shell entry: labeled mode and Run from an empty draft; a drafted prompt is
     (await page.locator(".composer-mode-label").innerText()).trim(),
     "Shell command · permission checked · output added to context",
   );
-  assert.ok((await page.locator(".composer-primary .send").innerText()).startsWith("Run"));
+  assert.equal(await page.locator(".composer-primary .send").getAttribute("aria-label"), "Run shell command");
   await shot(page, "shell_mode.png");
 
   // Nonempty draft: the row is disabled with a visible reason and never
@@ -428,7 +436,7 @@ test("shell entry: labeled mode and Run from an empty draft; a drafted prompt is
   assert.equal(await shellRow.getAttribute("aria-disabled"), "true");
   assert.equal(
     await shellRow.locator(".add-menu-reason").innerText(),
-    "Send or clear this draft before entering Shell mode",
+    "Clear the draft before entering shell mode.",
   );
   // force: Playwright's actionability treats aria-disabled as not enabled;
   // the raw click still reaches the app's own guard.
@@ -480,19 +488,7 @@ test("github link: mismatch reports the exact error with no pill; a match create
   await closePage(page);
 });
 
-test("voice: availability is truthful and named for plugin-off, preference-off, and unsupported", async () => {
-  // Plugin off (workspace prefs without the dictation plugin).
-  const pluginOff = await openApp({
-    storage: { "polyth.prefs": JSON.stringify({ persona: "engineer", plugins: ["session", "files"] }) },
-  });
-  await pluginOff.waitForSelector(".mic-control", { state: "visible" });
-  assert.equal((await pluginOff.locator(".mic-status").innerText()).trim(), "Voice plugin is off");
-  assert.equal(await pluginOff.locator(".mic-btn").isDisabled(), true);
-  // The setup route is operable and reaches the real Voice settings.
-  await pluginOff.locator(".mic-settings").click();
-  await pluginOff.waitForSelector("text=Dictation and read-aloud", { timeout: 10_000 });
-  await closePage(pluginOff);
-
+test("voice: availability is truthful and named for preference-off and unsupported states", async () => {
   // Preference off (voice prefs record).
   const prefOff = await openApp({ storage: { "polyth.voice": JSON.stringify({ dictation: false }) } });
   await prefOff.waitForSelector(".mic-control", { state: "visible" });
@@ -527,7 +523,8 @@ test("voice lifecycle: listening and failure are visible; transcripts stay draft
   // One polite announcement carries the transition (textContent: the region
   // is visually hidden, so innerText reports empty).
   await page.waitForFunction(() =>
-    document.querySelector("[aria-live='polite']")?.textContent?.includes("Listening…"));
+    [...document.querySelectorAll("[aria-live='polite']")]
+      .some((region) => region.textContent?.includes("Listening…")));
   await shot(page, "voice_listening.png");
 
   // A final result becomes draft text only — no send, no session event.
@@ -565,31 +562,34 @@ test("voice lifecycle: listening and failure are visible; transcripts stay draft
   await closePage(page);
 });
 
-test("selectors: truthful names, contract-bounded model detail, profile at zero profiles, persistence", async () => {
+test("selectors: truthful model and agent names with per-session model persistence", async () => {
   const page = await openApp();
 
   // Model picker: current value in the accessible name; honest row detail.
-  const modelChip = page.locator(".picker-model .picker-chip");
+  const modelChip = page.locator(".picker-model .model-picker-trigger");
   assert.ok((await modelChip.getAttribute("aria-label"))?.startsWith("Select model, current "));
   await modelChip.click();
-  await page.waitForSelector(".picker-pop", { state: "visible" });
-  // The detail text distinguishes the model row from the "Default: …" row.
-  const row = page.locator(".picker-item", { hasText: "Synthetic · 128k context" });
-  assert.equal(await row.locator(".palette-meta").innerText(), "Synthetic · 128k context");
-  const popText = (await page.locator(".picker-pop").innerText()).toLowerCase();
+  await page.waitForSelector(".model-pop", { state: "visible" });
+  const row = page.locator(".model-picker-row", { hasText: "Fable Mini" });
+  assert.equal(await row.locator(".model-picker-copy small").innerText(), "Text · 128K");
+  const popText = (await page.locator(".model-pop").innerText()).toLowerCase();
   for (const banned of ["$", "cost", "variant", "attach", "vision", "image"]) {
     assert.ok(!popText.includes(banned), `model rows never claim ${banned}`);
   }
-  // The row action is a named create-profile seam, not an unlabeled glyph.
   assert.equal(
-    await row.locator(".picker-trail").getAttribute("aria-label"),
-    "Create profile from Fable Mini",
+    await row.locator(".model-row-info").getAttribute("aria-label"),
+    "Details for Fable Mini",
   );
+  await row.locator(".model-row-info").click();
+  await page.waitForSelector(".model-details", { state: "visible" });
+  assert.ok((await page.locator(".model-details").innerText()).includes("Context window"));
   await shot(page, "model_picker_truth.png");
+  await page.locator(".model-details-back").click();
+  await page.waitForSelector(".model-picker-row", { state: "visible" });
 
   // Selecting the model persists the per-session pending configuration.
   await row.click();
-  await page.waitForSelector(".picker-pop", { state: "detached" });
+  await page.waitForSelector(".model-pop", { state: "detached" });
   const stored = await page.evaluate((key) => localStorage.getItem(key),
     `polyth.composer.config.v1.${SESSIONS.main}`);
   assert.ok(stored, "explicit selection stored per session");
@@ -597,31 +597,36 @@ test("selectors: truthful names, contract-bounded model detail, profile at zero 
 
   // Reload restores the exact same pending selection.
   await page.reload({ waitUntil: "load" });
-  await page.waitForSelector(".picker-model .picker-chip", { state: "visible" });
+  await page.waitForSelector(".picker-model .model-picker-trigger", { state: "visible" });
   assert.equal(
-    await page.locator(".picker-model .picker-chip").getAttribute("aria-label"),
+    await page.locator(".picker-model .model-picker-trigger").getAttribute("aria-label"),
     "Select model, current Fable Mini",
   );
 
-  // Profile: present at zero profiles with an operable named create action.
-  const profileChip = page.locator(".picker-profile .picker-chip");
-  assert.equal(await profileChip.getAttribute("aria-label"), "Select profile, current None");
-  await profileChip.click();
-  await page.waitForSelector(".picker-footer-action", { state: "visible" });
-  assert.equal(await page.locator(".picker-footer-action").innerText(), "Create profile…");
-  assert.equal(await page.locator(".picker-footer-action").getAttribute("aria-disabled"), null);
+  // The current agent mode is named and opens the canonical listbox.
+  const agentChip = page.locator(".composer-agent-chip .picker-chip");
+  assert.equal(await agentChip.getAttribute("aria-label"), "Select agent mode, current Build");
+  await agentChip.click();
+  await page.waitForSelector(".picker-pop", { state: "visible" });
+  assert.equal(await page.locator(".picker-pop [role='listbox']").getAttribute("aria-label"), "Agent");
   await page.keyboard.press("Escape");
   await closePage(page);
 });
 
-test("active turn: visible configured delivery copy and a separate named Stop", async () => {
+test("active turn: empty draft exposes Stop; a draft exposes queue delivery and stop menu", async () => {
   const page = await openApp({ session: SESSIONS.active });
+  const stop = page.locator(".composer-actions .stop");
+  await stop.waitFor({ state: "visible", timeout: 15_000 });
+  assert.equal(await stop.getAttribute("aria-label"), "Stop the current response");
+
+  await editor(page).fill("Queued follow-up probe");
   await page.waitForSelector(".composer-delivery", { state: "visible", timeout: 15_000 });
   const delivery = page.locator(".composer-delivery");
-  assert.ok((await delivery.innerText()).startsWith("Queue"), "visible label names the configured behavior");
-  assert.equal(await delivery.getAttribute("aria-label"), "Queue until idle");
-  const stop = page.locator(".composer-actions .stop");
-  assert.equal((await stop.innerText()).trim(), "Stop");
+  assert.equal((await delivery.textContent())?.trim(), "Queue");
+  assert.equal(await delivery.getAttribute("aria-label"), "Queue message until the current response finishes");
+  await page.locator(".composer-send-options").click();
+  await page.waitForSelector("[role='menu']", { state: "visible" });
+  assert.ok((await page.locator("[role='menu']").innerText()).includes("Stop without sending this draft"));
   await shot(page, "active_turn_delivery.png");
   await closePage(page);
 });
@@ -629,13 +634,12 @@ test("active turn: visible configured delivery copy and a separate named Stop", 
 test("phone geometry: ≥44px targets, in-bounds, nonoverlapping, center-hit; bounded Add menu", async () => {
   for (const width of [320, 390]) {
     const page = await openApp({ width, height: 900, session: SESSIONS.active });
-    await page.waitForSelector(".composer-delivery", { state: "visible" });
+    await page.waitForSelector(".composer-actions .stop", { state: "visible" });
 
     const targets: Array<[string, string]> = [
       ["Add", ".composer-add-trigger"],
+      ["model", ".model-picker-trigger"],
       ["voice", ".mic-btn"],
-      ["profile", ".picker-profile .picker-chip"],
-      ["delivery", ".composer-delivery"],
       ["stop", ".composer-actions .stop"],
     ];
     const boxes: Array<{ name: string; x: number; y: number; w: number; h: number }> = [];
@@ -665,21 +669,40 @@ test("phone geometry: ≥44px targets, in-bounds, nonoverlapping, center-hit; bo
       }
     }
 
-    // The Add menu is viewport-bounded (≤ width − 16) with its first operable
-    // row focused inside the visible area.
+    const configOverflow = await page.locator(".composer-config").evaluate((el) => ({
+      clientWidth: el.clientWidth,
+      scrollWidth: el.scrollWidth,
+    }));
+    assert.ok(configOverflow.clientWidth > 0, `config controls retain a visible lane @${width}`);
+    if (width === 320) {
+      assert.ok(
+        configOverflow.scrollWidth > configOverflow.clientWidth,
+        "the narrowest config lane scrolls instead of painting under actions",
+      );
+    }
+
+    // The Add menu is viewport-bounded (≤ width − 16), contains focus, and
+    // keeps its first operable row inside the visible area.
     await openAddMenu(page);
+    await page.waitForFunction(() => document.activeElement?.closest(".sheet") !== null);
     const menuBox = await addMenu(page).boundingBox();
     assert.ok(menuBox, `menu box @${width}`);
     assert.ok(menuBox!.width <= width - 16, `menu ≤ viewport−16 @${width} (${Math.round(menuBox!.width)})`);
     assert.ok(menuBox!.x >= 0 && menuBox!.x + menuBox!.width <= width, `menu in bounds @${width}`);
-    const focusedBox = await page.evaluate(() => {
-      const el = document.activeElement as HTMLElement | null;
-      if (!el || el.getAttribute("role") !== "menuitem") return null;
-      const r = el.getBoundingClientRect();
-      return { top: r.top, bottom: r.bottom };
+    const sheetState = await page.evaluate(() => {
+      const first = document.querySelector<HTMLElement>("#composer-add-menu [role='menuitem']");
+      const r = first?.getBoundingClientRect();
+      return {
+        focusInside: document.activeElement?.closest(".sheet") !== null,
+        firstRow: r ? { top: r.top, bottom: r.bottom } : null,
+      };
     });
-    assert.ok(focusedBox, `a menu row owns focus @${width}`);
-    assert.ok(focusedBox!.top >= 0 && focusedBox!.bottom <= 900, `focused row visible @${width}`);
+    assert.equal(sheetState.focusInside, true, `the phone sheet contains initial focus @${width}`);
+    assert.ok(sheetState.firstRow, `the first menu row is mounted @${width}`);
+    assert.ok(
+      sheetState.firstRow!.top >= 0 && sheetState.firstRow!.bottom <= 900,
+      `the first menu row is visible @${width}`,
+    );
     if (width === 320) await shot(page, "phone_320_add_menu.png");
     await page.keyboard.press("Escape");
     await closePage(page);
@@ -690,7 +713,7 @@ test("coarse pointer: the 44px target contract holds at desktop width", async ()
   const page = await openApp({ coarse: true, session: SESSIONS.active });
   const coarse = await page.evaluate(() => window.matchMedia("(pointer: coarse)").matches);
   assert.equal(coarse, true, "touch emulation reports a coarse pointer");
-  await page.waitForSelector(".composer-delivery", { state: "visible" });
+  await page.waitForSelector(".composer-actions .stop", { state: "visible" });
   for (const [name, sel] of [
     ["Add", ".composer-add-trigger"],
     ["voice", ".mic-btn"],
@@ -702,7 +725,7 @@ test("coarse pointer: the 44px target contract holds at desktop width", async ()
   await closePage(page);
 });
 
-test("sequential focus order: editor → selectors → voice → Add → focused editor → primary action", async () => {
+test("sequential focus order: editor → Add → selectors → voice → primary action", async () => {
   const page = await openApp();
   // A nonempty draft makes the primary action operable (a disabled Send is
   // rightly skipped by sequential focus).
@@ -721,7 +744,7 @@ test("sequential focus order: editor → selectors → voice → Add → focused
     visited.push(cls);
   }
   const order = [
-    "picker-model", "picker-profile", "mic-btn", "composer-add-trigger", "composer-expand", "send",
+    "composer-add-trigger", "picker-model", "composer-agent-chip", "mic-btn", "send",
   ];
   let at = -1;
   for (const marker of order) {

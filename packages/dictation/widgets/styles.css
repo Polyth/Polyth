@@ -60,6 +60,13 @@ width: var(--control-h);
   padding: 0;
   border-radius: var(--radius-control);
 }
+@media (pointer: coarse) {
+.composer .composer-mobile-extensions .mic-btn {
+width: var(--tap);
+  min-width: var(--tap);
+  height: var(--tap);
+}
+}
 .mic-icon > svg {
 width: 20px; height: 20px;
 }

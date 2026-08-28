@@ -703,11 +703,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   text-align: center;
 }
 .session-worktree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-worktree-empty {
-  min-height: var(--nav-row-session);
-  padding: 10px 0 10px var(--nav-indent-session);
-  font-size: var(--nav-meta-size);
-}
 .session-worktree-actions {
   position: relative;
   z-index: 1;
@@ -1419,7 +1414,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   font-size: 14.5px; line-height: 1.6; letter-spacing: -0.005em; color: var(--text);
 }
 .composer-card textarea::placeholder { color: var(--faint); }
-.composer-card textarea:focus-visible { outline: none; }
+.composer-card textarea:focus-visible { outline: none; box-shadow: none; }
 /* P2-W3A composer rail: one quiet row under the editor. Semantic groups —
    Add · config chips (model/agent/effort) · extension slots · primary send.
    Send/Stop is the only filled control; config stays quiet text chips. */
@@ -1469,7 +1464,116 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .composer-agent-chip .chip-k { display: none; }
 .composer-agent-chip .picker-chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .composer-agent-chip .picker-caret { color: var(--faint); font-size: 10px; }
-.composer-effort-chip { max-width: 130px; }
+.composer-effort-control {
+  --composer-effort-width: 112px;
+  min-width: 0;
+  display: inline-grid;
+  grid-template-columns: auto minmax(72px, var(--composer-effort-width));
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.composer-effort-label {
+  min-width: 0;
+  display: inline-flex;
+  flex-direction: column;
+  font-size: var(--font-meta);
+  font-weight: 650;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+.composer-effort-label output {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 550;
+  text-overflow: ellipsis;
+}
+.composer-effort-track {
+  position: relative;
+  display: grid;
+  align-items: center;
+  min-width: 0;
+  height: var(--control-h-sm);
+}
+.composer-effort-track::before {
+  position: absolute;
+  inset-inline: var(--space-2);
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border-soft);
+  content: "";
+}
+.composer-effort-track input {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: var(--control-h-sm);
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.composer-effort-track input::-webkit-slider-runnable-track { height: 4px; background: transparent; }
+.composer-effort-track input::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 3px solid var(--elevated);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.composer-effort-track input::-moz-range-track { height: 4px; background: transparent; }
+.composer-effort-track input::-moz-range-thumb {
+  width: 8px;
+  height: 8px;
+  border: 3px solid var(--elevated);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.composer-effort-stops {
+  position: absolute;
+  inset-inline: var(--space-2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.composer-effort-stops i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border);
+}
+.composer-effort-stops i.active { background: var(--accent); }
+.composer-effort-control:focus-within .composer-effort-track::before {
+  background: color-mix(in srgb, var(--accent) 45%, var(--border-soft));
+}
+.composer-effort-tooltip {
+  position: absolute;
+  z-index: var(--z-tooltip);
+  bottom: calc(100% + var(--space-1));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--overlay-bg);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
 @container composer-widget (max-width: 480px) {
   .composer-widget .composer-config {
     flex: 1 1 auto;
@@ -2333,8 +2437,6 @@ html[data-density="compact"] .sidebar .side-search,
 body[data-density="compact"] .sidebar .side-search { margin-top: 10px; margin-bottom: 4px; }
 html[data-density="compact"] .sidebar .side-label,
 body[data-density="compact"] .sidebar .side-label { padding-top: 8px; padding-bottom: 4px; }
-html[data-density="compact"] .sidebar .session-worktree-empty,
-body[data-density="compact"] .sidebar .session-worktree-empty { padding-block: 6px; }
 html[data-density="balanced"] .sidebar,
 body[data-density="balanced"] .sidebar {
   --nav-row-project: 42px;
@@ -2402,7 +2504,7 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
 .workspace-bottom-nav { display: none; }
 @media (max-width: 820px), (max-height: 480px) and (pointer: coarse) {
 .workspace-bottom-nav {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 41;
+    position: relative; order: 3; flex: none; z-index: 41;
     display: flex; align-items: stretch;
     height: calc(52px + var(--safe-bottom));
     padding: 0 max(2px, var(--safe-right)) var(--safe-bottom) max(2px, var(--safe-left));
@@ -3571,8 +3673,7 @@ color: var(--text-dim);
   .header .overflow-trigger { width: 44px; height: 44px; }
   .auto-accept-chip { min-height: 44px; }
 
-  /* Registered panel sheet: overlays the workspace above the status bar;
-     the strip lives inside it and reserves zero inline width. */
+  /* Registered panel sheet: overlays the workspace above the status bar. */
   .panel-sheet {
     position: fixed; top: 0; right: 0; bottom: 0; z-index: 120;
     width: min(380px, 100vw);
@@ -3583,10 +3684,6 @@ color: var(--text-dim);
   .panel-sheet-backdrop { position: fixed; inset: 0; z-index: 119; background: var(--scrim); }
   .sheet-head { flex: none; }
   .sheet-close { width: 44px; height: 44px; font-size: 17px; }
-  .sheet-strip .rail-icon, .sheet-strip .strip-btn { width: 44px; height: 44px; }
-  .sheet-strip .strip-sep { width: 1px; height: 24px; margin: 0 4px; border-top: none; border-left: 1px solid var(--border-soft); }
-  .sheet-strip .strip-spacer { flex: 1; min-height: 0; }
-  .sheet-strip .strip-picker { right: 8px; top: calc(100% + 4px); bottom: auto; }
   .panel-sheet .rail-body { flex: 1; min-height: 0; overflow-y: auto; }
 
   .timeline { padding-inline: 16px; }
@@ -3686,6 +3783,18 @@ color: var(--text-dim);
 }
 .add-menu.up { bottom: calc(100% + 6px); }
 .add-menu.down { top: calc(100% + 6px); }
+.add-menu.add-menu-sheet-list {
+  position: static;
+  width: auto;
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  animation: none;
+}
 .add-menu-group {
   padding: 7px 10px 3px; font-size: 10px; font-weight: 650;
   letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted);
@@ -4348,6 +4457,13 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .composer-simple .composer-add-label { display: none; }
 .composer-simple .composer-add-trigger, .composer-simple .composer-actions > .icon-btn {
   width: 34px; min-width: 34px; height: 34px; padding: 0; justify-content: center; border-color: transparent; background: transparent;
+}
+@media (pointer: coarse) {
+  .composer-simple .composer-add-trigger {
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+  }
 }
 .composer-focus-light .composer-actions > .icon-btn:hover,
 .composer-focus-light .composer-add-trigger:hover { color: var(--text); background: var(--bg); }
@@ -5992,10 +6108,12 @@ font-style: normal; opacity: .65;
 .workspace-bottom-nav { display: none; }
 @media (max-width: 820px), (max-height: 480px) and (pointer: coarse) {
   .workspace-bottom-nav {
-    position: fixed;
-    right: 0;
-    bottom: 0;
-    left: 0;
+    /* This is a flex row of the app shell, not an overlay. Keeping it in
+       normal flow reserves its full height for the workspace and prevents it
+       from covering the composer, widgets, or session content. */
+    position: relative;
+    order: 3;
+    flex: none;
     z-index: 82;
     height: calc(60px + var(--safe-bottom));
     display: grid;
@@ -6059,11 +6177,14 @@ font-style: normal; opacity: .65;
     height: 14px;
     color: var(--muted);
   }
-  .app:has(> .workspace-bottom-nav) .workspace { padding-bottom: calc(72px + var(--safe-bottom)); }
+  .app:has(> .workspace-bottom-nav) .workspace { padding-bottom: 0; }
   .app:has(> .workspace-bottom-nav) :is(.rail-fullscreen, .panel-sheet) {
-    bottom: calc(72px + var(--safe-bottom));
+    bottom: calc(60px + var(--safe-bottom));
   }
-  body[data-keyboard="open"] .workspace-bottom-nav { display: none; }
+  body[data-keyboard="open"] .workspace-bottom-nav {
+    visibility: hidden;
+    pointer-events: none;
+  }
   body[data-keyboard="open"] .workspace { padding-bottom: 0; }
   body[data-keyboard="open"] :is(.rail-fullscreen, .panel-sheet) { bottom: 0; }
 }
@@ -6090,7 +6211,7 @@ font-style: normal; opacity: .65;
   .app.mode-chat.view-session .statusbar { display: none; }
   .app.mode-chat.view-session .statusbar:has(.sb-workflow) { display: flex; }
   .app.mode-chat.view-session:has(> .workspace-bottom-nav) .workspace {
-    padding-bottom: calc(72px + var(--safe-bottom));
+    padding-bottom: 0;
   }
 
   .stage { background: color-mix(in srgb, var(--bg) 94%, var(--elevated)); }
@@ -6739,6 +6860,7 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
 .sheet-empty { margin: 0; padding: var(--space-5) var(--space-4); color: var(--muted); font-size: var(--font-label); text-align: center; }
 
 /* Starter authoring form */
+.starter-sharing { padding: var(--space-2) var(--space-3); }
 .starter-form { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-2) var(--space-3) var(--space-4); }
 .starter-field { display: flex; flex-direction: column; gap: var(--space-2); }
 .starter-field > span { color: var(--muted); font-size: var(--font-meta); font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
@@ -7007,16 +7129,6 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
 .context-trigger-caret svg { width: 15px; height: 15px; }
 .context-sep { display: none; }
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-/* §29/§31/§45: pin the shell's bottom to the browser's visual viewport.
-     `interactive-widget=resizes-content` asks supporting browsers to resize
-     the layout viewport too. Safari can instead pan the visual viewport down;
-     --visual-bottom includes that offset, keeping the composer at the visible
-     lower edge rather than ending an offset-height above the keyboard. */
-  .app,
-  .app.mode-chat.view-session {
-    height: var(--visual-bottom, 100dvh);
-    min-height: 0;
-  }
   .app.mode-chat.view-session .mobile-chat-header {
     position: sticky;
     top: 0;
@@ -7068,7 +7180,11 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   body[data-keyboard="open"] .hero-recent { display: none; }
   body[data-keyboard="open"] .stage-new .hero h2 { font-size: 21px; line-height: 1.25; }
   .hero-widget-settings { display: none; }
-  .hero-dock:has(.add-menu) { position: relative; z-index: 130; }
+  /* The attachment menu is a popover, not content in the widget column. */
+  .stage-new .hero-dock:has(.add-menu) {
+    position: relative;
+    z-index: var(--z-popover);
+  }
 
   /* ---- header: two actions, ≥44px targets (§19/§21/§37) ---- */
   .mobile-chat-header .header-drawer-btn {
@@ -7149,7 +7265,11 @@ display: none;
   /* Expanded (§11/§42): the editor on top, one rail below — Add · config
      chips (model/agent/effort) · extensions · Send. Chips shrink and truncate
      before anything overflows; Send never leaves the row. */
-  .composer-mobile.composer-expanded .composer-card { flex-direction: column; padding: 0; }
+  .composer-mobile.composer-expanded .composer-card {
+    flex-direction: column;
+    padding: 0;
+  }
+  .composer-mobile.composer-expanded .composer-card textarea { min-height: calc(var(--tap) * 2); }
   .composer-mobile.composer-expanded .composer-rail {
     min-height: 52px;
     display: flex;
@@ -7183,7 +7303,11 @@ display: none;
     font-size: 12px;
   }
   .composer-mobile .composer-agent-chip .picker-chip { max-width: 30vw; }
-  .composer-mobile .composer-effort-chip { max-width: 26vw; }
+  .composer-mobile .composer-effort-control {
+    --composer-effort-width: 92px;
+    min-height: var(--tap);
+  }
+  .composer-mobile .composer-effort-label { font-size: var(--font-meta); }
   .composer-mobile .composer-card textarea {
     min-height: 26px;
     /* §20: grows with the text, then scrolls internally. */
@@ -7203,7 +7327,19 @@ display: none;
   }
   .composer-mobile .composer-add { display: inline-flex; }
   .composer-mobile .composer-primary { margin-left: auto; }
-  .composer-mobile .composer-mobile-extensions { display: inline-flex; align-items: center; padding: 0; }
+  .composer-mobile .composer-mobile-extensions {
+    display: inline-flex;
+    align-items: center;
+    width: var(--tap);
+    max-width: var(--tap);
+    flex: 0 0 var(--tap);
+    padding: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+  .composer-mobile .composer-mobile-extensions::-webkit-scrollbar { display: none; }
 .composer-mobile .composer-mobile-extensions .placed-mini-widget {
 display: contents;
 }
@@ -7281,22 +7417,9 @@ width: var(--tap);
   .composer-chat.composer-mobile {
     /* The surrounding dock/nav owns the safe area. Keeping it here too put
        both resting and expanded composers needlessly high. */
-    padding: var(--space-1) var(--screen-gutter);
+    padding: var(--space-1) var(--screen-gutter) 0;
   }
 
-  /* The shell follows visualViewport directly, so it stays glued to the
-     keyboard. This only smooths the card's own collapsed → expanded growth. */
-  @media (prefers-reduced-motion: no-preference) {
-    @supports (interpolate-size: allow-keywords) {
-    .composer-mobile .composer-card {
-      height: 56px;
-      interpolate-size: allow-keywords;
-      transition: height var(--motion-surface) var(--motion-ease),
-        border-color 160ms ease, box-shadow 160ms ease;
-    }
-    .composer-mobile.composer-expanded .composer-card { height: auto; }
-    }
-  }
 }
 
 
@@ -7568,7 +7691,7 @@ html[data-modal-surface="open"] body {
     min-height: var(--tap);
     touch-action: manipulation;
   }
-  :is(.settings-shell, .dialog-panel, .panel-sheet, .sidebar) button {
+  :is(.settings-shell, .dialog-panel, .panel-sheet, .sidebar) button:not(.widget-drag-handle) {
     touch-action: manipulation;
   }
 }
@@ -8263,7 +8386,7 @@ min-height: 0;
 font-size: var(--font-label);
 }
 
-@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+@media (max-width: 820px), (max-height: 480px) and (pointer: coarse) {
 body[data-keyboard="open"] .app.mode-chat.view-session .mobile-chat-header,
   body[data-band="short"][data-keyboard="open"] .app.mode-chat.view-session .mobile-chat-header {
     display: none;
@@ -8272,9 +8395,17 @@ body[data-keyboard="open"] .app.mode-chat.view-session .mobile-chat-header,
 }
 
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-.app.mode-chat.view-session > .session-bottom-nav { display: flex; }
+  .app.mode-chat.view-session > .session-bottom-nav { display: grid; }
+  /* This deliberately beats the session-only display:grid above. Keyboard
+     visibility must follow the viewport seam, not textarea focus: iOS keeps
+     a textarea focused after its keyboard is dismissed. */
+  body[data-keyboard="open"] .app.mode-chat.view-session > .session-bottom-nav {
+    display: grid;
+    visibility: hidden;
+    pointer-events: none;
+  }
   .app.mode-chat.view-session .workspace {
-    padding-bottom: calc(68px + var(--safe-bottom));
+    padding-bottom: 0;
   }
   .app.mode-chat.view-session .composer-chat.composer-mobile {
     position: sticky;
@@ -8293,12 +8424,19 @@ body[data-keyboard="open"] .app.mode-chat.view-session .mobile-chat-header,
     padding-block: 0 var(--space-1);
   }
   body[data-keyboard="open"] .app.mode-chat.view-session > .session-bottom-nav {
-    display: none;
+    display: grid;
+    visibility: hidden;
+    pointer-events: none;
   }
   body[data-keyboard="open"] .app.mode-chat.view-session .workspace {
     padding-bottom: 0;
   }
   body[data-keyboard="open"] .app.mode-chat.view-session .composer-chat.composer-mobile {
+    position: fixed;
+    right: 0;
+    bottom: max(var(--keyboard-inset), var(--safe-bottom));
+    left: 0;
+    z-index: var(--z-shell);
     padding-bottom: max(var(--space-1), var(--safe-bottom));
   }
 }
@@ -8501,7 +8639,7 @@ color: var(--muted);
     z-index: 30;
   }
   .app:has(> .workspace-bottom-nav) :is(.rail-fullscreen, .panel-sheet) {
-    bottom: calc(72px + var(--safe-bottom));
+    bottom: calc(60px + var(--safe-bottom));
   }
   .panel-sheet-backdrop { z-index: 29; }
   .rail-head { min-height: 60px; }
@@ -8919,7 +9057,7 @@ max-width: 100%;
 overflow-wrap: anywhere;
 }
 @container feature-panel (max-width: 700px) {
-:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle) {
+:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle):not(.widget-drag-handle) {
 min-width: var(--tap);
     min-height: var(--tap);
     touch-action: manipulation;
@@ -9235,7 +9373,7 @@ border-bottom: 0;
 }
 }
 @container feature-panel (max-width: 700px) {
-:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle) {
+:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle):not(.widget-drag-handle) {
 min-width: var(--tap);
     min-height: var(--tap);
     touch-action: manipulation;
@@ -9331,7 +9469,7 @@ flex: 1 1 auto; min-width: var(--tap); padding-inline: 4px; white-space: nowrap;
 }
 }
 @container feature-panel (max-width: 700px) {
-:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle) {
+:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle):not(.widget-drag-handle) {
 min-width: var(--tap);
     min-height: var(--tap);
     touch-action: manipulation;
@@ -9463,7 +9601,7 @@ transform: translateX(22px);
 }
 }
 @container feature-panel (max-width: 700px) {
-:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle) {
+:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle):not(.widget-drag-handle) {
 min-width: var(--tap);
     min-height: var(--tap);
     touch-action: manipulation;
@@ -9541,7 +9679,7 @@ color: var(--amber); border-color: var(--amber);
 color: var(--red); border-color: var(--red);
 }
 @container feature-panel (max-width: 700px) {
-:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle) {
+:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle):not(.widget-drag-handle) {
 min-width: var(--tap);
     min-height: var(--tap);
     touch-action: manipulation;
@@ -9690,6 +9828,8 @@ color: var(--text);
 }
 .composer-card:focus-within { border-color: transparent; box-shadow: var(--shadow-lg); }
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  .composer-mobile .composer-card,
+  .composer-mobile .composer-card:focus-within { box-shadow: none; }
   .composer-mobile .agent-type-badge { min-height: var(--tap); padding-inline: 12px; font-size: 12px; }
 }
 @media (max-width: 820px), (max-height: 480px) and (pointer: coarse) {
@@ -9706,6 +9846,52 @@ color: var(--text);
     box-shadow: 0 5px 14px -7px color-mix(in srgb, var(--composer-green) 80%, transparent);
   }
   .composer-mobile .send-plane { color: var(--accent-ink); }
+}
+
+/* Mobile composition owns the visible band. Project/navigation, contextual,
+   and Settings surfaces must never compete with the focused editor or end up
+   behind the software keyboard. `data-keyboard` is the primary visual-
+   viewport signal; :has is the immediate fallback for WebViews that report
+   the viewport resize late (or not at all). Visibility changes immediately so
+   no part of a panel remains visible during keyboard animation. Its opacity
+   and transform are retained for the gentle return once writing ends. */
+@media (max-width: 820px), (max-height: 480px) and (pointer: coarse) {
+  :is(.sidebar.open, .rail-fullscreen, .panel-sheet, .settings-scrim) {
+    transition:
+      opacity var(--motion-fast) var(--motion-ease),
+      transform var(--motion-fast) var(--motion-ease),
+      visibility 0s linear;
+  }
+
+  body:not(:has(.term-mobile-input:focus)):is(
+    [data-keyboard="open"],
+    :has(.composer-mobile.composer-input-active)
+  )
+    :is(.sidebar.open, .rail-fullscreen, .panel-sheet, .settings-scrim),
+  body:not(:has(.term-mobile-input:focus)):is(
+    [data-keyboard="open"],
+    :has(.composer-mobile.composer-input-active)
+  )
+    :is(.sidebar-backdrop, .panel-sheet-backdrop) {
+    visibility: hidden;
+    pointer-events: none;
+    opacity: 0;
+  }
+
+  body:not(:has(.term-mobile-input:focus)):is(
+    [data-keyboard="open"],
+    :has(.composer-mobile.composer-input-active)
+  ) .sidebar.open {
+    transform: translateX(-102%);
+  }
+
+  body:not(:has(.term-mobile-input:focus)):is(
+    [data-keyboard="open"],
+    :has(.composer-mobile.composer-input-active)
+  )
+    :is(.rail-fullscreen, .panel-sheet, .settings-scrim) {
+    transform: translateY(var(--space-2));
+  }
 }
 
 /* Agent execution language -------------------------------------------------

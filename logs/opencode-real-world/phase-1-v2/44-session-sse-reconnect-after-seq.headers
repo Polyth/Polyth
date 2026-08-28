@@ -1,6 +1,0 @@
-HTTP/1.1 200 OK
-Content-Type: text/event-stream
-Vary: Origin
-Date: Fri, 28 Aug 2026 03:18:56 GMT
-Transfer-Encoding: chunked
-

@@ -206,6 +206,20 @@ transform: rotate(-90deg);
 .model-provider-grip {
 color: var(--faint); font-size: 12px; cursor: grab;
 }
+.model-provider-section[draggable],
+.model-picker-row[draggable] {
+cursor: grab;
+}
+.model-provider-section.dragging,
+.model-picker-row.dragging {
+opacity: .56;
+}
+.model-provider-section[draggable]:active,
+.model-picker-row[draggable]:active,
+.model-provider-grip:active,
+.model-picker-grip:active {
+cursor: grabbing;
+}
 .model-provider-logo {
 width: 18px; height: 18px;
 }

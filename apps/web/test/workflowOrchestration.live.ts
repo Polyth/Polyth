@@ -343,8 +343,15 @@ before(async () => {
   await store.upsertProjection(projection(ERROR_PARENT, "Failed workflow parent"));
   await store.close();
 
-  execFileSync(process.execPath, ["apps/web/build.ts"], { cwd: REPO_ROOT, stdio: "pipe" });
-  server = spawn(process.execPath, ["packages/server/src/index.ts"], {
+  execFileSync(process.execPath, ["--experimental-strip-types", "apps/web/buildPackages.ts"], {
+    cwd: REPO_ROOT,
+    stdio: "pipe",
+  });
+  execFileSync(process.execPath, ["--experimental-strip-types", "apps/web/build.ts"], {
+    cwd: REPO_ROOT,
+    stdio: "pipe",
+  });
+  server = spawn(process.execPath, ["--experimental-strip-types", "packages/server/src/index.ts"], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
@@ -855,7 +862,11 @@ test("complete workflow journey remains synchronized, accessible, and responsive
     await phone.screenshot({ path: join(ARTIFACTS, `workflow_mobile_launcher_${width}.png`), fullPage: false });
     await phone.keyboard.press("Escape");
     await phone.locator(".workflow-launch-dialog").waitFor({ state: "detached" });
-    await phone.getByRole("button", { name: "View workflow", exact: true }).click();
+    const viewWorkflow = phone.getByRole("button", { name: "View workflow", exact: true });
+    // The expanded phone composer is intentionally docked over the timeline.
+    // Reveal the timeline action in its scrollport before driving a real click.
+    await viewWorkflow.evaluate((element) => element.scrollIntoView({ block: "center" }));
+    await viewWorkflow.click();
     await phone.waitForSelector(".workflow-page", { state: "visible" });
     await assertNoOverflow(phone, `workflow view@${width}`);
     await assertTouchTargets(

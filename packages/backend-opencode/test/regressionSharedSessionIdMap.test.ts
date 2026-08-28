@@ -1,15 +1,4 @@
-// Regression test for OC-REAL-069 (phase 6 — directory/worktree isolation).
-// See artifacts/opencode-real-world/phase-6/OC-REAL-069/details.json.
-//
-// Production wiring shares ONE sessionIdMap across every runtime facade in
-// the pool (packages/server/src/index.ts). Two `opencode serve` endpoints —
-// the project root's and a worktree's — assign backend session ids from
-// independent id spaces, so EQUAL backend ids across endpoints are legal.
-// `removeMapping` (packages/backend-opencode/src/index.ts) deletes every
-// forward entry whose backend id matches, so deleting the root session also
-// removes the worktree session's canonical->backend binding (and its
-// reconciliation ordinal) even though that session lives on a different
-// endpoint and was never deleted.
+// Backend session IDs are endpoint-local and may collide across worktrees.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AgentRuntime, RuntimeEndpoint, RuntimeEndpointLease } from "@polyth/contracts";

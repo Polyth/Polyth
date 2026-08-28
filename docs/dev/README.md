@@ -186,6 +186,12 @@ npm start            # http://127.0.0.1:4400, spawns `opencode serve` per projec
 npm test             # node --test across all packages
 ```
 
+`http://127.0.0.1:4400` is the canonical active instance for this repo. Only one
+server may own a data directory at a time — a second instance (e.g. started from
+a worktree) fails the `data-directory-locked` check and must not shadow the
+active port (an instance bound to `:4401` has no projects and cannot create
+sessions; kill it and use `:4400`).
+
 Env: `PORT` (4400), `POLYTH_DATA_DIR` (./data), `POLYTH_SMALL_MODEL`
 ("provider/model" for auditors, commit messages, recaps), `POLYTH_FAKE_QUOTAS=1`,
 `POLYTH_FAKE_BROWSER=1`, `POLYTH_CHROMIUM_PATH`, `POLYTH_TUNNEL_URL`,

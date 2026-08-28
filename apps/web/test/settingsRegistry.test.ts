@@ -55,7 +55,7 @@ test("Widgets & Layout exposes place-first workspace and composer controls", asy
   assert.doesNotMatch(shell, /Change workspace preset|cmd\.customize/);
   assert.doesNotMatch(settings, /Choose a setup/);
   assert.match(settings, /tr\("settingsview\.widgetsLayout"\)/);
-  assert.match(widgets, /<PageHead title=\{tr\("settings\.widgetspage\.widgetsLayout"\)\}/);
+  assert.match(widgets, /<PageHead\s+title=\{tr\("settings\.widgetspage\.widgetsLayout"\)\}/);
   assert.match(packages, /<PageHead title=\{tr\("settings\.packagespage\.packages"\)\}/);
   assert.match(widgets, /data-settings-item=\{index === 0 \? "widgets\.capabilities"/);
   assert.match(widgets, /data-settings-item=\{index === 0 \? "widgets\.actions"/);

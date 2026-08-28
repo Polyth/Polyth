@@ -102,6 +102,21 @@ test("CSS carries the same literal width/height contracts", async () => {
   );
 });
 
+test("long-press reorder handles keep native scrolling disabled", async () => {
+  const css = await read("../src/styles.css");
+  assert.match(css, /\.widget-drag-handle\s*\{\s*touch-action:\s*none/);
+  assert.doesNotMatch(
+    css,
+    /:is\(\.settings-shell,[^)]+\) button\s*\{[^}]*touch-action:\s*manipulation/,
+    "coarse-pointer button defaults must not override the reorder handle",
+  );
+  assert.doesNotMatch(
+    css,
+    /:is\(\.view-page,[^)]+\) button:not\(\.switch\):not\(\.package-toggle\)\s*\{[^}]*touch-action:\s*manipulation/,
+    "container button defaults must not override the reorder handle",
+  );
+});
+
 test("compact sidebar is a drawer, never display:none with no way back", async () => {
   const css = await read("../src/styles.css");
   assert.ok(!/\.sidebar\s*\{\s*display:\s*none/.test(css), "the old unrecoverable .sidebar{display:none} must stay dead");
@@ -241,8 +256,10 @@ test("Focus uses compact mobile composer controls without editor chrome", async 
   // second standalone upload chip anywhere.
   assert.ok(composer.includes("<ComposerAddMenu"), "the Add menu is the single plus control");
   assert.ok(
-    composer.includes("onUpload={openAttachmentPicker}"),
-    "the Add menu drives the platform-aware shared file picker",
+    composer.includes("onUpload={openAttachmentPicker}")
+      && composer.includes("pickNativeFiles().then")
+      && composer.includes("fileInputRef.current?.click()"),
+    "the Add menu drives native or browser file picking through one callback",
   );
   assert.ok(!composer.includes('label={tr("composer.addFiles")}'), "no separate upload chip remains");
   assert.ok(!composer.includes("<Icon.focus />"), "Focus removes the focused-editor header action");

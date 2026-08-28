@@ -20,10 +20,14 @@ import type {
 } from "@polyth/contracts";
 import {
   createTranslateState,
-  normalizeOcObservation,
-  splitNormalizedObservation,
   type ObservationBinding,
 } from "./events.ts";
+import { appendPulledEvents } from "./reconciliationEvents.ts";
+import {
+  pulledV2MessageEvents,
+  v2PermissionOf,
+  v2QuestionOf,
+} from "./v2Reconciliation.ts";
 
 export interface CreateV2ProtocolAdapterOptions {
   transport: OpenCodeTransport;
@@ -78,9 +82,6 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined;
-
-const asJsonObject = (value: unknown): JsonObject =>
-  asRecord(value) as JsonObject | undefined ?? {};
 
 export const hasV2ProtocolDocument = (document: unknown): boolean => {
   const body = asRecord(document);
@@ -499,170 +500,6 @@ const sessionCreateBody = (location: RuntimeLocation): JsonObject => ({
   },
 });
 
-const addNormalized = (
-  target: RuntimeSnapshot["events"],
-  data: unknown,
-  binding: ObservationBinding,
-  state: ReturnType<typeof createTranslateState>,
-): void => {
-  const normalized = normalizeOcObservation({
-    data,
-    channel: "pull",
-    observed: binding,
-    current: binding,
-    state,
-  });
-  if (normalized.kind !== "accepted") return;
-  for (const observation of splitNormalizedObservation(normalized.observation)) {
-    const event = observation.events[0];
-    if (!event) continue;
-    target.push({
-      entityKey: observation.entityKey,
-      revision: observation.identity.revision,
-      event,
-    });
-  }
-};
-
-const toolOutput = (state: Record<string, unknown>): string | undefined => {
-  if (typeof state.result === "string") return state.result;
-  if (state.result !== undefined) {
-    try {
-      return JSON.stringify(state.result);
-    } catch {
-      return undefined;
-    }
-  }
-  return undefined;
-};
-
-const pulledMessageEvents = (value: unknown, backendSessionId: string): unknown[] => {
-  const message = asRecord(value);
-  if (!message || typeof message.id !== "string") return [];
-  const time = asRecord(message.time);
-  if (message.type === "user") {
-    return [{
-      type: "message.updated",
-      properties: {
-        sessionID: backendSessionId,
-        info: {
-          id: message.id,
-          role: "user",
-          sessionID: backendSessionId,
-          time: time ?? {},
-        },
-      },
-    }];
-  }
-  if (message.type !== "assistant") return [];
-  const model = asRecord(message.model);
-  const events: unknown[] = [{
-    type: "message.updated",
-    properties: {
-      sessionID: backendSessionId,
-      info: {
-        id: message.id,
-        role: "assistant",
-        sessionID: backendSessionId,
-        time: time ?? {},
-        ...(typeof model?.providerID === "string" ? { providerID: model.providerID } : {}),
-        ...(typeof model?.id === "string" ? { modelID: model.id } : {}),
-        ...(typeof message.cost === "number" ? { cost: message.cost } : {}),
-        ...(asRecord(message.tokens) ? { tokens: message.tokens } : {}),
-      },
-    },
-  }];
-  for (const contentValue of Array.isArray(message.content) ? message.content : []) {
-    const content = asRecord(contentValue);
-    if (!content || typeof content.id !== "string") continue;
-    if (content.type === "text" || content.type === "reasoning") {
-      events.push({
-        type: "message.part.updated",
-        properties: {
-          sessionID: backendSessionId,
-          part: {
-            id: content.id,
-            type: content.type,
-            text: typeof content.text === "string" ? content.text : "",
-            messageID: message.id,
-            sessionID: backendSessionId,
-            time: {
-              ...(typeof time?.created === "number" ? { start: time.created } : {}),
-              ...(typeof time?.completed === "number" ? { end: time.completed } : {}),
-            },
-          },
-        },
-      });
-      continue;
-    }
-    if (content.type !== "tool") continue;
-    const state = asRecord(content.state) ?? {};
-    const status = typeof state.status === "string" ? state.status : "pending";
-    const output = toolOutput(state);
-    events.push({
-      type: "message.part.updated",
-      properties: {
-        sessionID: backendSessionId,
-        part: {
-          id: content.id,
-          type: "tool",
-          callID: content.id,
-          tool: typeof content.name === "string" ? content.name : "tool",
-          messageID: message.id,
-          sessionID: backendSessionId,
-          state: {
-            status,
-            input: asJsonObject(state.input),
-            ...(output ? { output } : {}),
-            ...(status === "error"
-              ? { error: mutationMessage(state.error, "tool failed") }
-              : {}),
-          },
-        },
-      },
-    });
-  }
-  return events;
-};
-
-const permissionOf = (
-  value: unknown,
-  backendSessionId: string,
-): RuntimeSnapshot["permissions"][number] | undefined => {
-  const request = asRecord(value);
-  if (!request || request.sessionID !== backendSessionId || typeof request.id !== "string") {
-    return undefined;
-  }
-  return {
-    requestId: request.id,
-    permission: typeof request.action === "string" ? request.action : "unknown",
-    patterns: Array.isArray(request.resources)
-      ? request.resources.filter((item): item is string => typeof item === "string")
-      : [],
-    revision: "pending",
-  };
-};
-
-const questionOf = (
-  value: unknown,
-  backendSessionId: string,
-): RuntimeSnapshot["questions"][number] | undefined => {
-  const request = asRecord(value);
-  if (!request || request.sessionID !== backendSessionId || typeof request.id !== "string") {
-    return undefined;
-  }
-  return {
-    requestId: request.id,
-    questions: Array.isArray(request.questions)
-      ? request.questions
-          .map(asRecord)
-          .filter((item): item is Record<string, unknown> => item !== undefined)
-          .map((item) => item as JsonObject)
-      : [],
-    revision: "pending",
-  };
-};
-
 export const createV2ProtocolAdapter = (
   options: CreateV2ProtocolAdapterOptions,
 ): ProtocolAdapter => {
@@ -980,15 +817,15 @@ export const createV2ProtocolAdapter = (
       const events: RuntimeSnapshot["events"] = [];
       const state = createTranslateState();
       for (const row of messageRows) {
-        for (const event of pulledMessageEvents(row, backendSessionId)) {
-          addNormalized(events, event, observed, state);
+        for (const event of pulledV2MessageEvents(row, backendSessionId)) {
+          appendPulledEvents(events, event, observed, state);
         }
       }
       const permissions = permissionRows
-        .map((value) => permissionOf(value, backendSessionId))
+        .map((value) => v2PermissionOf(value, backendSessionId))
         .filter((value): value is RuntimeSnapshot["permissions"][number] => value !== undefined);
       const questions = questionRows
-        .map((value) => questionOf(value, backendSessionId))
+        .map((value) => v2QuestionOf(value, backendSessionId))
         .filter((value): value is RuntimeSnapshot["questions"][number] => value !== undefined);
 
       const activeSession = asRecord(active[backendSessionId]);

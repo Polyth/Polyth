@@ -1,5 +1,0 @@
-before session=oc-shared-external-client pane_pid=8752 command=timeout dead=0
-attached protocol=v2 control={"kind":"borrowed","source":"external"}
-borrowed lifecycle disposed
-after session=oc-shared-external-client pane_pid=8752 command=timeout dead=0
-{"healthy":true,"version":"1.18.18"}

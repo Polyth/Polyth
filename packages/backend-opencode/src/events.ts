@@ -264,12 +264,15 @@ export interface TranslateState {
   emittedAssistant: Set<string>;
   emittedUsage: Set<string>;
   compactionParts: Set<string>;
-  /** Exact upstream message completion which can anchor a revision-less
-   * legacy idle to one durable turn, without fabricating a status revision. */
-  latestAssistantCompletion?: { messageId: string; revision: string };
-  /** Prevent a repeated idle for the same completion from stopping a later
-   * admitted turn before that turn has produced its own durable completion. */
-  terminalizedAssistantCompletion?: string;
+  admittedTurnId?: string;
+  abortingTurnId?: string;
+  latestAssistantCompletion?: {
+    messageId: string;
+    revision: string;
+    order: number;
+    turnId?: string;
+  };
+  terminalizedTurnId?: string;
   lastTokens?: TokenUsage;
   lastCost?: number;
   // WP8: revisioned full snapshots of tasks and delegated agents. Revisions
@@ -295,6 +298,32 @@ export const createTranslateState = (): TranslateState => ({
   subagentRevision: 0,
   subagents: new Map(),
 });
+
+export const admitTranslateTurn = (
+  state: TranslateState,
+  turnId: string,
+): void => {
+  state.admittedTurnId = turnId;
+  state.abortingTurnId = undefined;
+  state.latestAssistantCompletion = undefined;
+};
+
+export const markTranslateTurnAborting = (
+  state: TranslateState,
+  turnId: string,
+): void => {
+  if (state.admittedTurnId === turnId) state.abortingTurnId = turnId;
+};
+
+export const finishTranslateTurn = (
+  state: TranslateState,
+  turnId: string,
+): void => {
+  if (state.admittedTurnId !== turnId) return;
+  state.admittedTurnId = undefined;
+  state.abortingTurnId = undefined;
+  state.latestAssistantCompletion = undefined;
+};
 
 /** First classification wins: later updates can never migrate already
  *  displayed reasoning into answer text (or vice versa). */
@@ -394,6 +423,8 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
             p,
             info,
           ) ?? `completed:${completed}`,
+          order: completed,
+          ...(state.admittedTurnId ? { turnId: state.admittedTurnId } : {}),
         };
       }
       if (typeof completed === "number" && tok && typeof info.id === "string" && !state.emittedUsage.has(info.id)) {
@@ -699,28 +730,22 @@ export const terminalStateEvidenceOf = (
   return { state: status };
 };
 
-const assistantCompletionKey = (
-  state: TranslateState,
-): string | undefined => {
-  const completion = state.latestAssistantCompletion;
-  return completion
-    ? `${completion.messageId}\0${completion.revision}`
-    : undefined;
-};
-
-/** Claim transport-order terminal evidence for the current translation
- * stream. A revision-less idle may be used once per exact durable assistant
- * completion; a duplicate idle cannot stop a later turn. */
 export const claimTerminalStateEvidence = (
   ev: OcEvent,
   state: TranslateState,
 ): ReturnType<typeof terminalStateEvidenceOf> => {
   const evidence = terminalStateEvidenceOf(ev);
-  if (!evidence || evidence.state !== "idle" || evidence.comparison) return evidence;
-  const completion = assistantCompletionKey(state);
-  if (!completion) return evidence;
-  if (state.terminalizedAssistantCompletion === completion) return undefined;
-  state.terminalizedAssistantCompletion = completion;
+  if (!evidence || evidence.comparison) return evidence;
+  const turnId = state.admittedTurnId;
+  if (!turnId || state.terminalizedTurnId === turnId) return undefined;
+  if (
+    evidence.state === "idle"
+    && state.abortingTurnId !== turnId
+    && state.latestAssistantCompletion?.turnId !== turnId
+  ) {
+    return undefined;
+  }
+  state.terminalizedTurnId = turnId;
   return evidence;
 };
 
@@ -1065,25 +1090,41 @@ const semanticIdentityOf = (
     );
     const terminal =
       status === "idle" || status === "failed" || status === "interrupted";
-    const assistantCompletion = status === "idle" && !comparable && !directRevision
-      ? state?.latestAssistantCompletion
+    const candidateCompletion = state?.latestAssistantCompletion;
+    const assistantCompletion =
+      status === "idle"
+      && !comparable
+      && !directRevision
+      && state?.admittedTurnId
+      && candidateCompletion?.turnId === state.admittedTurnId
+        ? candidateCompletion
+        : undefined;
+    const assistantComparison = assistantCompletion
+      ? {
+          watermark: String(assistantCompletion.order),
+          comparison: {
+            domain: "legacy-history:assistant-completed",
+            order: assistantCompletion.order,
+          },
+        }
       : undefined;
+    const terminalComparison = comparable ?? assistantComparison;
     return {
       artifactKind: "status",
       entityId: sessionId,
       revision: comparable
         ? `${comparable.comparison.domain}:${comparable.comparison.order}`
         : directRevision
-          ?? (assistantCompletion
-            ? `assistant-completed:${assistantCompletion.messageId}:${assistantCompletion.revision}`
+          ?? (assistantComparison
+            ? `${assistantComparison.comparison.domain}:${assistantComparison.comparison.order}`
             : `state:${status}`),
-      ...(!terminal || comparable
+      ...(!terminal || terminalComparison
         ? {
             checkpoint: {
               state: status,
-              ...(comparable ? {
-                watermark: comparable.watermark,
-                comparison: comparable.comparison,
+              ...(terminalComparison ? {
+                watermark: terminalComparison.watermark,
+                comparison: terminalComparison.comparison,
               } : {}),
             },
           }

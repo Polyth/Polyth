@@ -470,6 +470,7 @@ export const pt: AppMessages = {
   "mobile.starterpicker.reviewMyChanges": "Analise as minhas alterações.",
   "mobile.starterpicker.saveStarter": "Guardar inicial",
   "mobile.starterpicker.searchStartersCommandsSkills": "Iniciar pesquisas, comandos, habilidades",
+  "mobile.starterpicker.shareAcrossProjects": "Partilhar entre projetos",
   "mobile.starterpicker.showValueInSuggestions": "Visualizar {label} nas sugestões",
   "mobile.starterpicker.starterIcon": "Ícone inicial",
   "mobile.starterpicker.starters": "Iniciantes",

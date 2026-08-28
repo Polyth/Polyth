@@ -1,4 +1,4 @@
-const required = [22, 18, 0];
+const required = [22, 14, 0];
 const current = process.versions.node.split(".").map(Number);
 const supported =
   current[0] > required[0]
@@ -7,7 +7,7 @@ const supported =
 
 if (!supported) {
   console.error(
-    `Polyth requires Node.js >=22.18.0 (current: ${process.versions.node}). `
+    `Polyth requires Node.js >=22.14.0 (current: ${process.versions.node}). `
     + "Install a supported release or run `nvm use` before installing, building, testing, or starting.",
   );
   process.exit(1);

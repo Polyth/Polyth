@@ -23,10 +23,9 @@ import type {
 import {
   comparableStatusRevision,
   createTranslateState,
-  normalizeOcObservation,
-  splitNormalizedObservation,
   type ObservationBinding,
 } from "./events.ts";
+import { appendPulledEvents } from "./reconciliationEvents.ts";
 
 export type LegacyPromptPath = "prompt_async" | "message";
 
@@ -585,31 +584,6 @@ const questionOf = (
   };
 };
 
-const addNormalized = (
-  target: RuntimeSnapshot["events"],
-  data: unknown,
-  binding: ObservationBinding,
-  state: ReturnType<typeof createTranslateState>,
-): void => {
-  const normalized = normalizeOcObservation({
-    data,
-    channel: "pull",
-    observed: binding,
-    current: binding,
-    state,
-  });
-  if (normalized.kind !== "accepted") return;
-  for (const observation of splitNormalizedObservation(normalized.observation)) {
-    const event = observation.events[0];
-    if (!event) continue;
-    target.push({
-      entityKey: observation.entityKey,
-      revision: observation.identity.revision,
-      event,
-    });
-  }
-};
-
 export const createLegacyProtocolAdapter = (
   options: CreateLegacyProtocolAdapterOptions,
 ): ProtocolAdapter => {
@@ -1143,7 +1117,7 @@ export const createLegacyProtocolAdapter = (
             backendSessionId,
           });
         }
-        addNormalized(
+        appendPulledEvents(
           events,
           {
             type: "message.updated",
@@ -1153,7 +1127,7 @@ export const createLegacyProtocolAdapter = (
           state,
         );
         for (const part of Array.isArray(row.parts) ? row.parts : []) {
-          addNormalized(
+          appendPulledEvents(
             events,
             {
               type: "message.part.updated",

@@ -7,6 +7,7 @@
 // runtime pool, HTTP/WS gateway) plus the few genuinely cross-cutting seams
 // (session service wiring, track workflow, browser-tool bridge).
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -231,7 +232,13 @@ export async function acquireDataDirectoryLease(dataDir: string): Promise<DataDi
       "-e",
       "process.stdout.write('locked\\n');process.stdin.resume()",
     ],
-    { stdio: ["pipe", "pipe", "pipe"] },
+    {
+      stdio: ["pipe", "pipe", "pipe"],
+      // Electron exposes its own binary as process.execPath. Running that
+      // binary with -e starts another desktop instance unless Node mode is
+      // explicit, causing the nested server to contend for this same lease.
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+    },
   );
 
   await new Promise<void>((resolveLock, rejectLock) => {
@@ -435,6 +442,7 @@ export async function boot(opts: BootOptions = {}) {
       }
       return createRemoteOpenCodeRuntime({
         host: ssh.host(remoteBinding.connectionId),
+        connectionIdentity: remoteBinding.connectionId,
         remotePath: cwd,
         leaseStateFile: join(dataDir, "opencode-ssh", `${projectId}.lease.json`),
         sessionIdMap,
@@ -442,12 +450,18 @@ export async function boot(opts: BootOptions = {}) {
     }
     const browserTool = browserToolBridge?.register({ projectId, cwd });
     try {
+      const localStateKey = createHash("sha256")
+        .update(resolve(cwd))
+        .digest("hex")
+        .slice(0, 24);
       const runtime = await createOpenCodeRuntime({
         cwd, sessionIdMap,
         ...(opts.opencode?.port ? { port: opts.opencode.port } : {}),
         ...(opts.opencode?.bin ? { bin: opts.opencode.bin } : {}),
         ...(opts.opencode?.hostname ? { hostname: opts.opencode.hostname } : {}),
         ...(opts.opencode?.dataDir ? { dataDir: opts.opencode.dataDir } : {}),
+        stateFile: opts.opencode?.stateFile
+          ?? join(dataDir, "opencode-local", `${localStateKey}.lease.json`),
         ...(opts.opencode?.protocol ? { protocol: opts.opencode.protocol } : {}),
         ...(opts.opencode?.startupDeadlineMs
           ? { startupDeadlineMs: opts.opencode.startupDeadlineMs }

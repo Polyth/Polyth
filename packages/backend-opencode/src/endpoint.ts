@@ -24,6 +24,11 @@ import {
   prepareBrowserToolEnvironment,
   type OpenCodeBrowserToolConfig,
 } from "./browserTool.ts";
+import {
+  createDurableOwnedRuntimeState,
+  ownedRuntimeIdentityKey,
+  type OwnedRuntimeIncarnation,
+} from "./ownedRuntimeState.ts";
 
 export const LISTEN_RE = /opencode server listening on https?:\/\/[^\s:]+:(\d+)/i;
 const BIND_COLLISION_RE = /EADDRINUSE|address already in use/i;
@@ -261,7 +266,7 @@ interface StartedOwnedInstance {
 
 interface OwnedLeaseOptions {
   authorityId?: string;
-  nextGeneration?: () => Promise<number>;
+  nextIncarnation?: () => Promise<OwnedRuntimeIncarnation>;
   prepareStart?: () => Promise<void>;
   continuity?: "verified" | "generation-only";
   location: RuntimeLocation;
@@ -273,7 +278,7 @@ interface OwnedLeaseOptions {
 const createOwnedLease = async (
   options: OwnedLeaseOptions,
 ): Promise<OwnedRuntimeEndpointLease> => {
-  const authorityId = options.authorityId ?? `owned:${randomUUID()}`;
+  const defaultAuthorityId = options.authorityId ?? `owned:${randomUUID()}`;
   let current:
     | {
         endpoint: RuntimeEndpoint;
@@ -293,23 +298,28 @@ const createOwnedLease = async (
     if (previous) await previous.instance.stop();
     const instanceToken = randomUUID();
     await options.prepareStart?.();
-    const nextGeneration = options.nextGeneration
-      ? await options.nextGeneration()
-      : generation + 1;
+    const incarnation = options.nextIncarnation
+      ? await options.nextIncarnation()
+      : { authorityId: defaultAuthorityId, generation: generation + 1 };
     if (
-      !Number.isSafeInteger(nextGeneration)
-      || nextGeneration <= generation
+      !incarnation.authorityId
+      || !Number.isSafeInteger(incarnation.generation)
+      || incarnation.generation <= 0
+      || (
+        previous?.endpoint.authorityId === incarnation.authorityId
+        && incarnation.generation <= generation
+      )
     ) {
-      throw unavailable("owned runtime generation did not advance");
+      throw unavailable("owned runtime incarnation did not advance");
     }
     const instance = await options.start(instanceToken);
     if (disposed) {
       await instance.stop();
       throw unavailable("runtime endpoint lease was disposed during startup");
     }
-    generation = nextGeneration;
+    generation = incarnation.generation;
     const endpoint: RuntimeEndpoint = {
-      authorityId,
+      authorityId: incarnation.authorityId,
       continuity: options.continuity ?? "generation-only",
       generation,
       url: instance.url,
@@ -406,89 +416,6 @@ export interface OwnedLocalEndpointOptions {
   orphanGraceMs?: number;
 }
 
-interface OwnedRuntimeState {
-  version: 1;
-  authorityId: string;
-  generation: number;
-}
-
-const parseOwnedRuntimeState = (raw: string): OwnedRuntimeState | undefined => {
-  try {
-    const value = JSON.parse(raw) as Partial<OwnedRuntimeState>;
-    if (
-      value.version !== 1
-      || typeof value.authorityId !== "string"
-      || !value.authorityId
-      || !Number.isSafeInteger(value.generation)
-      || value.generation! < 0
-    ) {
-      return undefined;
-    }
-    return value as OwnedRuntimeState;
-  } catch {
-    return undefined;
-  }
-};
-
-const writeOwnedRuntimeState = async (
-  stateFile: string,
-  state: OwnedRuntimeState,
-): Promise<void> => {
-  await mkdir(dirname(stateFile), { recursive: true });
-  const temporary = `${stateFile}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(temporary, JSON.stringify(state), { mode: 0o600 });
-  await rename(temporary, stateFile);
-};
-
-const loadOwnedRuntimeState = async (
-  stateFile: string,
-  configuredAuthorityId?: string,
-): Promise<{
-  authorityId: string;
-  nextGeneration(): Promise<number>;
-}> => {
-  let state: OwnedRuntimeState | undefined;
-  try {
-    state = parseOwnedRuntimeState(await readFile(stateFile, "utf8"));
-    if (!state) {
-      throw unavailable(`owned runtime state is invalid: ${stateFile}`);
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-
-  if (state && configuredAuthorityId && state.authorityId !== configuredAuthorityId) {
-    throw unavailable("configured owned runtime authority conflicts with durable state");
-  }
-  if (!state) {
-    state = {
-      version: 1,
-      authorityId: configuredAuthorityId ?? `owned:${randomUUID()}`,
-      generation: 0,
-    };
-    await writeOwnedRuntimeState(stateFile, state);
-  }
-  let currentState: OwnedRuntimeState = state;
-
-  return {
-    authorityId: currentState.authorityId,
-    async nextGeneration() {
-      if (currentState.generation >= Number.MAX_SAFE_INTEGER) {
-        throw unavailable("owned runtime generation is exhausted");
-      }
-      const next: OwnedRuntimeState = {
-        ...currentState,
-        generation: currentState.generation + 1,
-      };
-      // Commit the fence before spawning. A crash may consume a generation,
-      // but can never expose the same generation from two process lifetimes.
-      await writeOwnedRuntimeState(stateFile, next);
-      currentState = next;
-      return next.generation;
-    },
-  };
-};
-
 interface StartedLocalChild {
   child: ChildProcess;
   port: number;
@@ -578,10 +505,21 @@ export const createOwnedLocalEndpointLease = async (
   const cwd = resolve(options.cwd);
   const hostname = options.hostname ?? "127.0.0.1";
   const pidFile = options.pidFile ?? pidFileForDirectory(cwd);
-  const stateFile = options.stateFile ?? `${pidFile}.lease.json`;
+  const legacyStateFile = `${pidFile}.lease.json`;
+  const stateFile = options.stateFile ?? legacyStateFile;
   const readIdentity = options.readProcessIdentity ?? readProcessIdentity;
   const signal = options.signalProcess ?? ((pid, processSignal) => process.kill(pid, processSignal));
-  const durableState = await loadOwnedRuntimeState(stateFile, options.authorityId);
+  const durableState = createDurableOwnedRuntimeState(
+    stateFile,
+    ownedRuntimeIdentityKey({
+      kind: "owned-local",
+      directory: cwd,
+      binary: options.bin ?? "opencode",
+      configDirectory: options.dataDir ? resolve(options.dataDir) : "default",
+    }),
+    options.authorityId,
+    resolve(stateFile) === resolve(legacyStateFile) ? [] : [legacyStateFile],
+  );
   const authentication: RuntimeAuthentication = {
     kind: "basic-env",
     usernameEnv: options.usernameEnv ?? "OPENCODE_SERVER_USERNAME",
@@ -590,8 +528,7 @@ export const createOwnedLocalEndpointLease = async (
   let firstStart = true;
 
   return createOwnedLease({
-    authorityId: durableState.authorityId,
-    nextGeneration: durableState.nextGeneration,
+    nextIncarnation: durableState.nextIncarnation,
     async prepareStart() {
       if (!firstStart) return;
       firstStart = false;
@@ -601,7 +538,7 @@ export const createOwnedLocalEndpointLease = async (
         graceMs: options.orphanGraceMs ?? 250,
       });
     },
-    continuity: "generation-only",
+    continuity: "verified",
     location: { directory: cwd },
     config: options.configTargetId
       ? { kind: "writable", targetId: options.configTargetId }
@@ -666,6 +603,8 @@ export interface OwnedSshEndpointOptions {
   authorityId?: string;
   /** Durable authority/generation fence for this exact remote runtime. */
   stateFile?: string;
+  /** Stable connection/host and runtime binding identity. Required with stateFile. */
+  runtimeIdentity?: string;
   authentication?: RuntimeAuthentication;
 }
 
@@ -681,13 +620,27 @@ export const createOwnedSshEndpointLease = async (
     usernameEnv: "OPENCODE_SERVER_USERNAME",
     passwordEnv: "OPENCODE_SERVER_PASSWORD",
   };
-  const durableState = options.stateFile
-    ? await loadOwnedRuntimeState(options.stateFile, options.authorityId)
+  if (options.stateFile && !options.runtimeIdentity) {
+    throw unavailable("durable SSH runtime state requires a runtime identity");
+  }
+  const durableState = options.stateFile && options.runtimeIdentity
+    ? createDurableOwnedRuntimeState(
+        options.stateFile,
+        ownedRuntimeIdentityKey({
+          kind: "owned-ssh",
+          runtime: options.runtimeIdentity,
+          location: options.location,
+        }),
+        options.authorityId,
+      )
     : undefined;
   return createOwnedLease({
-    authorityId: durableState?.authorityId ?? options.authorityId,
-    ...(durableState ? { nextGeneration: durableState.nextGeneration } : {}),
-    continuity: "generation-only",
+    ...(durableState
+      ? { nextIncarnation: durableState.nextIncarnation }
+      : options.authorityId
+        ? { authorityId: options.authorityId }
+        : {}),
+    continuity: durableState ? "verified" : "generation-only",
     location: options.location,
     config: { kind: "read-only" },
     authentication,

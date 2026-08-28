@@ -470,6 +470,7 @@ export const uk: AppMessages = {
   "mobile.starterpicker.reviewMyChanges": "Переглянути мої зміни",
   "mobile.starterpicker.saveStarter": "Зберегти стартер",
   "mobile.starterpicker.searchStartersCommandsSkills": "Пошук стартерів, команд, навичок",
+  "mobile.starterpicker.shareAcrossProjects": "Ділитися між проєктами",
   "mobile.starterpicker.showValueInSuggestions": "Показувати {label} у пропозиціях",
   "mobile.starterpicker.starterIcon": "Піктограма стартера",
   "mobile.starterpicker.starters": "Стартові гравці",

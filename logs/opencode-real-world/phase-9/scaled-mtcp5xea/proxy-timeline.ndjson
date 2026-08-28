@@ -1,6 +1,0 @@
-{"ts":"2026-08-28T08:36:00.779Z","event":"proxy-listening","proxyPort":46867,"realPort":4096,"wrapperPid":144006,"childPid":144014}
-{"ts":"2026-08-28T08:39:05.620Z","event":"real-child-exit","pid":144014,"code":null,"signal":"SIGKILL"}
-{"ts":"2026-08-28T08:39:26.972Z","event":"proxy-listening","proxyPort":35327,"realPort":4096,"wrapperPid":144643,"childPid":144651}
-{"ts":"2026-08-28T08:42:09.025Z","event":"wrapper-sigterm","forwardedTo":144651}
-{"ts":"2026-08-28T08:42:09.044Z","event":"real-child-exit","pid":144651,"code":null,"signal":"SIGTERM"}
-{"ts":"2026-08-28T08:42:10.142Z","event":"proxy-listening","proxyPort":46117,"realPort":4096,"wrapperPid":144867,"childPid":144875}

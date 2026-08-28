@@ -8,7 +8,7 @@
   "desktopName": "polyth.desktop",
   "main": "dist/main.js",
   "scripts": {
-    "build": "node build.ts",
+    "build": "node --experimental-strip-types build.ts",
     "download:opencode": "node download-opencode.mjs",
     "start": "electron .",
     "dist": "npm run build && electron-builder --publish never",

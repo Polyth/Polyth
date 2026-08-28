@@ -1,6 +1,0 @@
-{
-  "id": "OC-REAL-083",
-  "verdict": "FAIL",
-  "attribution": "POLYTH",
-  "summary": "Polyth/SSH restart did not preserve and reconcile the active remote turn."
-}

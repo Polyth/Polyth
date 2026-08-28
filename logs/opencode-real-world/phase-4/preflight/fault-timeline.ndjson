@@ -1,3 +1,0 @@
-{"ts":"2026-08-28T06:20:25.677Z","event":"polyth-started","label":"polyth","pid":60915,"port":15140}
-{"ts":"2026-08-28T06:20:33.671Z","event":"polyth-stopped","pid":60915,"how":"SIGTERM"}
-{"ts":"2026-08-28T06:20:33.671Z","event":"preflight-done"}

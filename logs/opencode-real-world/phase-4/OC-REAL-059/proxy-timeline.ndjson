@@ -1,7 +1,0 @@
-{"ts":"2026-08-28T07:31:48.709Z","event":"proxy-listening","proxyPort":36797,"realPort":4096,"wrapperPid":75310,"childPid":75318}
-{"ts":"2026-08-28T07:31:54.657Z","event":"sse-cut","rule":"cut-terminal","path":"/event?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-059%2Frun-mtcmvdls%2Fproject"}
-{"ts":"2026-08-28T07:31:54.657Z","event":"fault-kill-real-child","pid":75318,"why":"sse-cut cut-terminal /event?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-059%2Frun-mtcmvdls%2Fproject"}
-{"ts":"2026-08-28T07:31:54.708Z","event":"real-child-exit","pid":75318,"code":null,"signal":"SIGKILL"}
-{"ts":"2026-08-28T07:32:16.056Z","event":"proxy-listening","proxyPort":41601,"realPort":4096,"wrapperPid":75350,"childPid":75358}
-{"ts":"2026-08-28T07:33:15.725Z","event":"wrapper-sigterm","forwardedTo":75358}
-{"ts":"2026-08-28T07:33:15.747Z","event":"real-child-exit","pid":75358,"code":null,"signal":"SIGTERM"}

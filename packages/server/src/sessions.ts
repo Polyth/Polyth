@@ -90,6 +90,32 @@ export interface RestartSafetySessionService extends SessionService {
   ): Promise<RuntimeRestartSafety>;
 }
 
+export const canRebindPersistedSession = (
+  persisted: PersistedRuntimeBinding,
+  requested: {
+    backendSessionId: string;
+    endpoint: RuntimeEndpoint;
+    protocol: "legacy" | "v2";
+  },
+): boolean => {
+  const { endpoint } = requested;
+  if (
+    persisted.backendSessionId !== requested.backendSessionId
+    || persisted.authorityId !== endpoint.authorityId
+    || persisted.location.directory !== endpoint.location.directory
+    || (persisted.location.workspace ?? "") !== (endpoint.location.workspace ?? "")
+  ) {
+    return false;
+  }
+  // Protocol identifies the adapter used to reach the durable authority, not
+  // the backend session itself. A managed adapter upgrade may retain identity.
+  return persisted.generation === endpoint.generation
+    || (
+      persisted.continuity === "verified"
+      && endpoint.continuity === "verified"
+    );
+};
+
 type RuntimeDurability = Pick<
   DurableSessionStore,
   | "prepareOperation"
@@ -686,40 +712,23 @@ export function createSessionService(deps: {
         ?? proj.runtimeBinding?.protocol
         ?? "legacy";
       const persisted = proj.runtimeBinding;
-      if (persisted) {
-        const supportedProtocolMigration =
-          persisted.protocol === "v2" && protocol === "legacy";
-        const sameIdentity =
-          persisted.backendSessionId === proj.backendSessionId
-          && persisted.authorityId === endpoint.authorityId
-          && (persisted.protocol === protocol || supportedProtocolMigration)
-          && persisted.location.directory === endpoint.location.directory
-          && (persisted.location.workspace ?? "") === (endpoint.location.workspace ?? "");
-        if (!sameIdentity) {
-          throw Object.assign(
-            new Error("persisted backend binding does not match the current endpoint"),
-            { code: "binding-mismatch" },
-          );
-        }
-        // Mixed OpenCode documents previously selected V2 even when the
-        // underlying session store exposed the supported legacy contract.
-        // Preserve the exact backend identity while migrating that stale
-        // protocol label; all other protocol changes remain binding failures.
-        if (
-          persisted.generation !== endpoint.generation
-          && endpoint.control.kind !== "owned"
-          && (persisted.continuity !== "verified" || endpoint.continuity !== "verified")
-        ) {
-          throw Object.assign(
-            new Error("backend session binding cannot cross an unverified endpoint generation"),
-            { code: "binding-mismatch" },
-          );
-        }
-        // A durable owned authority identifies one logical runtime across
-        // Polyth process lifetimes. Rebind its exact backend session ID to the
-        // current generation before ensure/reconcile; generation-only
-        // continuity still makes terminal evidence conservative, while the
-        // runtime lifecycle continues to fence old callbacks and bindings.
+      if (!persisted) {
+        throw Object.assign(
+          new Error("persisted backend binding has no durable runtime identity"),
+          { code: "binding-mismatch" },
+        );
+      }
+      if (
+        !canRebindPersistedSession(persisted, {
+          backendSessionId: proj.backendSessionId,
+          endpoint,
+          protocol,
+        })
+      ) {
+        throw Object.assign(
+          new Error("persisted backend binding does not match a verified runtime"),
+          { code: "binding-mismatch" },
+        );
       }
       const currentBinding = {
         backendSessionId: proj.backendSessionId,
@@ -728,13 +737,12 @@ export function createSessionService(deps: {
         continuity: endpoint.continuity,
         protocol,
         location: endpoint.location,
-        ...(persisted?.historyBaseline
+        ...(persisted.historyBaseline
           ? { historyBaseline: persisted.historyBaseline }
           : {}),
       };
       if (
-        !persisted
-        || persisted.generation !== currentBinding.generation
+        persisted.generation !== currentBinding.generation
         || persisted.continuity !== currentBinding.continuity
         || persisted.protocol !== currentBinding.protocol
       ) {
@@ -2680,17 +2688,9 @@ export function createSessionService(deps: {
       seen.add(remote.id);
       total += 1;
       if (adopted.has(remote.id)) continue;
-      const binding = await runtimeBinding(runtime, {
-        id: `candidate:${remote.id}`,
-        projectId,
-        title: remote.title,
-        status: "idle",
-        backendSessionId: remote.id,
-        createdAt: remote.createdAt,
-        updatedAt: remote.updatedAt,
-      }, project.path);
-      if (binding && await durable.hasDeletionTombstone({
-        canonicalSessionId: binding.canonicalSessionId,
+      const binding = await newRuntimeBinding(runtime, remote.id, project.path, undefined);
+      if (await durable.hasDeletionTombstone({
+        canonicalSessionId: `candidate:${remote.id}`,
         authorityId: binding.authorityId,
         generation: binding.generation,
         location: binding.location,

@@ -1,5 +1,0 @@
-{"ts":"2026-08-28T06:22:30.153Z","event":"polyth-started","label":"polyth","pid":61184,"port":15141}
-{"ts":"2026-08-28T06:22:30.506Z","event":"barrier","barrier":"spawned-before-listen","childPid":61211,"identity":{"startIdentity":"1185728","exe":"/usr/bin/bash","cmdline":"bash /tmp/ocreal/phase-4/tools/shim-delay.sh serve --hostname 127.0.0.1 --port 46779"}}
-{"ts":"2026-08-28T06:22:31.507Z","event":"kill-exact","pid":61211,"signal":"SIGKILL","identity":{"startIdentity":"1185728","exe":"/usr/bin/bash","cmdline":"bash /tmp/ocreal/phase-4/tools/shim-delay.sh serve --hostname 127.0.0.1 --port 46779"}}
-{"ts":"2026-08-28T06:22:32.010Z","event":"recovery-enabled"}
-{"ts":"2026-08-28T06:22:36.685Z","event":"polyth-stopped","pid":61184,"how":"SIGTERM"}

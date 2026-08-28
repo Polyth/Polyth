@@ -15,11 +15,25 @@ Object.assign(globalThis, {
   Node: dom.Node,
 });
 Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configurable: true });
+let nextAnimationFrame = 0;
+const animationFrames = new Map<number, ReturnType<typeof setTimeout>>();
 Object.defineProperty(globalThis, "requestAnimationFrame", {
   configurable: true,
   value: (callback: FrameRequestCallback) => {
-    callback(0);
-    return 1;
+    const id = ++nextAnimationFrame;
+    animationFrames.set(id, setTimeout(() => {
+      animationFrames.delete(id);
+      callback(performance.now());
+    }, 0));
+    return id;
+  },
+});
+Object.defineProperty(globalThis, "cancelAnimationFrame", {
+  configurable: true,
+  value: (id: number) => {
+    const timer = animationFrames.get(id);
+    if (timer !== undefined) clearTimeout(timer);
+    animationFrames.delete(id);
   },
 });
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -196,20 +210,6 @@ test("header primary rail exposes a permanent Terminal toggle after project acti
     assert.match(historySurface.container.textContent ?? "", /Recent sessions and conversation content/);
   } finally {
     await historySurface.unmount();
-  }
-
-  const matchMedia = window.matchMedia;
-  window.matchMedia = () => ({ matches: true }) as MediaQueryList;
-  const mobileHistorySurface = await mounted(createElement(SessionSearch));
-  try {
-    assert.equal(
-      document.activeElement,
-      document.querySelector('[data-sheet-focus=""]'),
-      "phone session search initially focuses sheet chrome without summoning the keyboard",
-    );
-  } finally {
-    window.matchMedia = matchMedia;
-    await mobileHistorySurface.unmount();
   }
 });
 

@@ -1,7 +1,0 @@
-{
-  "id": "OC-REAL-064",
-  "verdict": "fail (polyth)",
-  "summary": "A live borrowed lease advanced generation and rejected its stale binding after service replacement, but a fresh Polyth-side lease reset generation to 1 and accepted the same generation-only stale binding without explicit continuity proof.",
-  "limitation": "Normal Polyth composition still cannot select a borrowed/shared endpoint; OpenCode 1.18.18 exposes no authoritative discovery descriptor.",
-  "blocker5": false
-}

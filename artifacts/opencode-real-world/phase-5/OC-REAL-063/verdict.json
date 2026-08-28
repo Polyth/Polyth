@@ -1,7 +1,0 @@
-{
-  "id": "OC-REAL-063",
-  "verdict": "blocked",
-  "summary": "Borrowed facade/lifecycle shutdown detached while the shared PID retained the same /proc identity, health stayed 200, and the external SSE client remained connected. Product-level acceptance is blocked because normal boot cannot borrow.",
-  "limitation": "Normal Polyth composition still cannot select a borrowed/shared endpoint; OpenCode 1.18.18 exposes no authoritative discovery descriptor.",
-  "blocker5": false
-}
