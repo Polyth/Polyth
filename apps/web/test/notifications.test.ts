@@ -54,6 +54,35 @@ test("kind filter: disabled kinds emit nothing", () => {
   assert.deepEqual(diffNotifications(prev, next, { kinds: kinds("completed") }), []);
 });
 
+test("background workflow completion emits one session-routed notification", () => {
+  const before = snap({
+    id: "a",
+    backgroundWork: { fusion: 1, startedAt: 100 },
+  });
+  const after = snap({
+    id: "a",
+    backgroundWork: {
+      lastResult: {
+        id: "fusion-1",
+        kind: "fusion",
+        status: "completed",
+        at: 200,
+      },
+    },
+  });
+  const specs = diffNotifications(asMap([before]), [after], {
+    kinds: kinds("completed"),
+  });
+
+  assert.equal(specs.length, 1);
+  assert.equal(specs[0]!.key, "a:background:fusion:fusion-1:completed");
+  assert.equal(specs[0]!.sessionId, "a");
+  assert.equal(specs[0]!.body, "Session a — Fusion finished");
+  assert.deepEqual(diffNotifications(asMap([after]), [after], {
+    kinds: kinds("completed"),
+  }), []);
+});
+
 test("first sight primes silently — replay produces no notifications", () => {
   const specs = diffNotifications(new Map(), [snap({ id: "a", status: "idle" })], {
     kinds: kinds("completed", "failed", "question", "permission"),

@@ -6,6 +6,7 @@ export type HotkeyAction =
   | "palette"
   | "searchFiles"
   | "searchSessions"
+  | "notificationCentre"
   | "settings"
   | "newSession"
   | "focusComposer"
@@ -19,6 +20,7 @@ export const HOTKEY_ACTIONS: ReadonlyArray<{ id: HotkeyAction; label: string; pl
   { id: "palette", label: "Command palette", pluginName: "Core" },
   { id: "searchFiles", label: "Search files", pluginName: "Files" },
   { id: "searchSessions", label: "Search sessions", pluginName: "Sessions" },
+  { id: "notificationCentre", label: "Notification centre", pluginName: "Core" },
   { id: "settings", label: "Settings", pluginName: "Core" },
   { id: "newSession", label: "New session", pluginName: "Sessions" },
   { id: "focusComposer", label: "Focus composer", pluginName: "Composer" },
@@ -31,6 +33,7 @@ export const DEFAULT_KEYMAP: Record<HotkeyAction, string> = {
   palette: "mod+k",
   searchFiles: "mod+p",
   searchSessions: "mod+shift+f",
+  notificationCentre: "mod+shift+n",
   settings: "mod+,",
   newSession: "mod+n",
   focusComposer: "mod+i",

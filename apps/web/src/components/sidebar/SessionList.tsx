@@ -10,17 +10,25 @@ import { api, type Worktree } from "@polyth/session/web-api";
 import {
   getState, setSidebarOpen, setUiError, startNewSession, useStore,
 } from "../../store.ts";
-import { openSession, archiveSession, deleteSession, restoreSession, forkSession, refreshSessions } from "../../init.ts";
+import { openSession, deleteSession, restoreSession, forkSession, refreshSessions } from "../../init.ts";
 import { resolveSessionStatus, type SessionRowStatus } from "../../sessionStatus.ts";
 import { deriveSessionTitle, fullSessionTitle } from "../../format.ts";
 import { friendlyError } from "../../settings.ts";
-import { getUiSettings } from "../../uiPrefs.ts";
 import { confirmAlert } from "../../alerts.ts";
+import {
+  archiveSessionWithPolicy,
+  needsDestructiveConfirm,
+  renameSessionTitle,
+  toggleSessionPin,
+} from "../../sessionActions.ts";
 import { copyText, firstUserTextCached } from "../../utils.ts";
 import { announce } from "../a11y/live.tsx";
 import { worktreeLabel } from "../../worktreeSessions.ts";
 import SlotHost from "../slots/SlotHost.ts";
-import { Button, Checkbox, Dialog, Menu, type MenuEntry } from "../ui/index.ts";
+import {
+  Button, Checkbox, Dialog, EmptyState, Menu, ResponsiveOverlay, TextInput,
+  type MenuEntry,
+} from "../ui/index.ts";
 import {
   reorderPinnedSessions,
   sortPinnedSessions,
@@ -31,6 +39,7 @@ import { errorFeedback, successFeedback, tapFeedback } from "../../haptics.ts";
 import { horizontalDistance, SESSION_SWIPE_REVEAL, type GesturePoint } from "../../mobileGestures.ts";
 
 const INITIAL_VISIBLE_SESSIONS = 6;
+const INLINE_LABEL_LIMIT = 6;
 
 export function sessionActivityLabel(
   s: Pick<SessionProjection, "updatedAt" | "status" | "attention">,
@@ -146,20 +155,14 @@ interface RowProps {
   pinnedWorktreeLabel?: string;
 }
 
-/** Destructive actions confirm first while the agent is running or a
- *  question/permission is waiting; otherwise act immediately. */
-function needsDestructiveConfirm(s: SessionProjection): boolean {
-  return s.status === "working" || s.status === "waiting"
-    || s.status === "reconciling" || s.status === "unknown"
-    || (s.attention?.questions ?? 0) > 0 || (s.attention?.permissions ?? 0) > 0;
-}
-
 function SessionRow({
   s, activeSessionId, labels, eventsTitle, opening, relativeTime, selectMode, selected,
   onToggleSelect, onChanged, onOpen, onTogglePin, pinnedSection, onPinDragStart, onPinDrop,
   contextLabel, pinnedWorktreeLabel,
 }: RowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [labelPickerOpen, setLabelPickerOpen] = useState(false);
+  const [labelQuery, setLabelQuery] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(s.title);
   const [swipeRevealed, setSwipeRevealed] = useState(false);
@@ -230,10 +233,9 @@ function SessionRow({
 
   const quickArchive = async () => {
     const label = s.title || tr("sidebar.sessionlist.session");
-    if (needsDestructiveConfirm(s) && !await confirmAlert(tr("sidebar.sessionlist.archiveValueTheAgentIsStillRunning", { label: label }), { title: tr("sidebar.sessionlist.archiveActiveSession"), confirmLabel: tr("common.archive") })) return;
-    if (!needsDestructiveConfirm(s) && getUiSettings().confirmSessionArchive && !await confirmAlert(tr("sidebar.sessionlist.archiveValue", { label: label }), { title: tr("sidebar.sessionlist.archiveSession"), confirmLabel: tr("common.archive") })) return;
-    void archiveSession(s.id)
-      .then(() => {
+    void archiveSessionWithPolicy(s)
+      .then((archived) => {
+        if (!archived) return;
         successFeedback();
         setSwipeRevealed(false);
         announce(tr("sidebar.sessionlist.archivedValue", { label: label }));
@@ -267,8 +269,9 @@ function SessionRow({
     setRenaming(false);
     if (!t || t === s.title) return;
     try {
-      await api.renameSession(s.id, t);
-      announce(tr("sidebar.sessionlist.sessionRenamedToValue", { t: t }));
+      const renamed = await renameSessionTitle(s.id, s.title, t);
+      if (!renamed) return;
+      announce(tr("sidebar.sessionlist.sessionRenamedToValue", { t: renamed }));
       onChanged();
     } catch (e) {
       setUiError(friendlyError(tr("common.error"), e));
@@ -301,6 +304,27 @@ function SessionRow({
   const activityLabel = sessionActivityLabel(s, relativeTime);
   const actionsLabel = tr("sidebar.sessionlist.actionsForValue", { value: s.title || tr("sidebar.sessionlist.session") });
   const checkedLabels = s.labelIds ?? [];
+  const normalizedLabelQuery = labelQuery.trim().toLocaleLowerCase(getLocale());
+  const visibleLabels = normalizedLabelQuery === ""
+    ? labels
+    : labels.filter((label) => label.name.toLocaleLowerCase(getLocale()).includes(normalizedLabelQuery));
+  const labelEntries: MenuEntry[] = labels.length > INLINE_LABEL_LIMIT
+    ? [{
+        id: "labels",
+        label: tr("sidebar.sessionlist.labelsMenu"),
+        onSelect: () => {
+          setLabelQuery("");
+          setLabelPickerOpen(true);
+        },
+      }]
+    : labels.map((l): MenuEntry => ({
+        id: `label-${l.id}`,
+        label: l.name,
+        kind: "checkbox",
+        checked: checkedLabels.includes(l.id),
+        swatch: l.color,
+        onSelect: () => void toggleLabel(l.id),
+      }));
   const menuEntries: MenuEntry[] = [
     { id: "rename", label: tr("common.rename"), onSelect: () => { setTitle(s.title); setRenaming(true); } },
     {
@@ -324,14 +348,7 @@ function SessionRow({
       : { id: "archive", label: tr("common.archive"), onSelect: () => void quickArchive() },
     { id: "delete", label: tr("common.delete"), danger: true, onSelect: () => void quickDelete() },
     ...(labels.length > 0 ? [{ heading: tr("sidebar.sessionlist.labels") }] : []),
-    ...labels.map((l): MenuEntry => ({
-      id: `label-${l.id}`,
-      label: l.name,
-      kind: "checkbox",
-      checked: checkedLabels.includes(l.id),
-      swatch: l.color,
-      onSelect: () => void toggleLabel(l.id),
-    })),
+    ...labelEntries,
   ];
   const openRowMenu = () => {
     menuReturnRef.current = sessionBtnRef.current;
@@ -473,6 +490,55 @@ function SessionRow({
           )}
         </Menu>
       )}
+      <ResponsiveOverlay
+        open={labelPickerOpen}
+        title={tr("sidebar.sessionlist.labels")}
+        desktop="dialog"
+        dialogSize="sm"
+        sheetSize="tall"
+        className="session-label-picker"
+        restoreFocusRef={sessionBtnRef}
+        sheetSearch={{
+          value: labelQuery,
+          onChange: setLabelQuery,
+          placeholder: tr("sidebar.sessionlist.searchLabels"),
+          ariaLabel: tr("sidebar.sessionlist.searchLabels"),
+          role: "searchbox",
+        }}
+        onClose={() => setLabelPickerOpen(false)}
+      >
+        <TextInput
+          className="session-label-search"
+          type="search"
+          value={labelQuery}
+          placeholder={tr("sidebar.sessionlist.searchLabels")}
+          aria-label={tr("sidebar.sessionlist.searchLabels")}
+          onChange={(event) => setLabelQuery(event.target.value)}
+        />
+        {visibleLabels.length > 0 ? (
+          <div className="session-label-options">
+            {visibleLabels.map((label) => (
+              <Checkbox
+                key={label.id}
+                className="session-label-option"
+                checked={checkedLabels.includes(label.id)}
+                onChange={() => void toggleLabel(label.id)}
+                label={(
+                  <span className="session-label-option-copy">
+                    <span className="session-label-swatch" style={{ background: label.color }} aria-hidden="true" />
+                    <span>{label.name}</span>
+                  </span>
+                )}
+              />
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            variant="compact"
+            title={tr("sidebar.sessionlist.noLabelsMatch")}
+          />
+        )}
+      </ResponsiveOverlay>
       {!renaming && (swipeX !== null || swipeRevealed) && (
         <span className="session-quick">
           {s.status !== "archived" && (
@@ -641,8 +707,7 @@ export default function SessionList({
 
   const togglePin = async (session: SessionProjection) => {
     try {
-      const position = pinned.reduce((max, item) => Math.max(max, item.pinned?.position ?? -1), -1) + 1;
-      await api.organizeSession(session.id, { pinned: session.pinned ? null : { position } });
+      await toggleSessionPin(session, pinned);
       onChanged();
     } catch (error) {
       setUiError(friendlyError(tr("common.error"), error));

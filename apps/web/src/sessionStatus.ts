@@ -32,10 +32,20 @@ export function resolveSessionStatus(
   if (questions > 0 || session.status === "waiting") {
     return { kind: "needs-reply", glyph: "?", label: "Reply needed" };
   }
-  if (session.status === "working") {
+  const backgroundRuns =
+    (session.backgroundWork?.multirun ?? 0)
+    + (session.backgroundWork?.fusion ?? 0);
+  if (session.status === "working" || backgroundRuns > 0) {
     return {
       kind: "working",
-      elapsedMs: Math.max(0, now - (session.lastTurnAt ?? session.updatedAt)),
+      elapsedMs: Math.max(
+        0,
+        now - (
+          backgroundRuns > 0
+            ? session.backgroundWork?.startedAt ?? session.lastTurnAt ?? session.updatedAt
+            : session.lastTurnAt ?? session.updatedAt
+        ),
+      ),
       glyph: "◌",
       label: "Working",
     };

@@ -202,11 +202,17 @@ export type MultirunRunStatus = "pending" | "running" | "completed" | "failed";
 export interface MultirunRunDto {
   id: string; model?: ModelRef; agent?: string; status: MultirunRunStatus;
   output: string; tokens?: TokenUsage; cost?: number; error?: string;
+  /** Wall-clock lifecycle supplied by the runner when available. */
+  startedAt?: number; finishedAt?: number;
 }
 export interface MultirunDto { id: string; prompt: string; runs: MultirunRunDto[]; pickedRunId?: string }
 
 export interface MultirunStartedData { multirunId: string; prompt: string; runs: Array<{ runId: string; model?: ModelRef; agent?: string }> }
-export interface MultirunRunProgressData { multirunId: string; runId: string; status: MultirunRunStatus; output: string; tokens?: TokenUsage; cost?: number; error?: string }
+export interface MultirunRunProgressData {
+  multirunId: string; runId: string; status: MultirunRunStatus; output: string;
+  tokens?: TokenUsage; cost?: number; error?: string;
+  startedAt?: number; finishedAt?: number;
+}
 export interface MultirunCompletedData { multirunId: string }
 export interface MultirunPickedData { multirunId: string; runId: string }
 
@@ -306,11 +312,19 @@ export interface WorkflowRunCompletedData {
 }
 
 export interface FusionWeightDto { model: string; weight: number }
+export interface FusionSourceDto { model: string; answer: string }
 export type FusionStatus = "running" | "completed" | "failed";
-export interface FusionDto { id: string; answer: string; weights: FusionWeightDto[]; disagreements: string[]; status: FusionStatus; error?: string }
+export interface FusionDto {
+  id: string; answer: string; weights: FusionWeightDto[]; disagreements: string[];
+  sources: FusionSourceDto[]; status: FusionStatus; error?: string;
+}
 
 export interface FusionStartedData { fusionId: string; prompt: string; models: string[] }
-export interface FusionCompletedData { fusionId: string; status: FusionStatus; answer: string; weights: FusionWeightDto[]; disagreements: string[]; error?: string }
+export interface FusionCompletedData {
+  fusionId: string; status: FusionStatus; answer: string;
+  weights: FusionWeightDto[]; disagreements: string[];
+  sources: FusionSourceDto[]; error?: string;
+}
 
 export type WalkthroughStepStatus = "pending" | "approved" | "rejected";
 export interface WalkthroughStepDto { file: string; explanation: string; diff: string; status: WalkthroughStepStatus }
@@ -413,6 +427,21 @@ export interface SessionAttention {
   goalStatus?: string;
 }
 
+export type BackgroundWorkKind = "multirun" | "fusion";
+export interface BackgroundWorkState {
+  multirun?: number;
+  fusion?: number;
+  /** Earliest still-active background workflow. */
+  startedAt?: number;
+  /** Latest terminal workflow, used for replay-deduped completion notices. */
+  lastResult?: {
+    id: string;
+    kind: BackgroundWorkKind;
+    status: "completed" | "failed";
+    at: number;
+  };
+}
+
 export type WorktreeState = "ready" | "bootstrapping" | "busy" | "missing";
 
 /** F9 idle assist: recap + one suggested follow-up, keyed to the log tail.
@@ -450,6 +479,8 @@ export interface SessionProjection {
   agentProfileId?: string;
   /** Organization metadata, never written to the session event log. */
   pinned?: { position: number };
+  /** Durable navigation/notification state for workflows that outlive a view. */
+  backgroundWork?: BackgroundWorkState;
   /** Small-model idle assist (F9); stale once the log grows past atSeq. */
   assist?: SessionAssist;
   /** F18: effective auto-accept policy (own setting or nearest parent's) —

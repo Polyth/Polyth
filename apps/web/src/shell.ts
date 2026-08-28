@@ -125,8 +125,27 @@ export function installShell(): void {
     run: () => openPalette("files"),
   });
   registerCommand({ id: "cmd.search", label: tr("shell.searchSessions"), hint: hintOf("searchSessions"), group: tr("shell.shell"), run: () => setOverlay("search") });
+  registerCommand({
+    id: "rail.notifications",
+    label: tr("notificationcentre.notifications"),
+    hint: hintOf("notificationCentre"),
+    group: tr("shell.panels"),
+    keywords: ["notification centre", "inbox", "bell", "unread"],
+    run: () => toggleRailPlugin("slot:notification-centre"),
+  });
   registerCommand({ id: "cmd.settings", label: tr("common.settings"), hint: hintOf("settings"), group: tr("shell.shell"), run: () => setOverlay("settings") });
   registerCommand({ id: "cmd.focusComposer", label: tr("shell.focusComposer"), hint: hintOf("focusComposer"), group: tr("shell.shell"), run: focusComposer });
+  registerCommand({
+    id: "cmd.starterPicker",
+    label: tr("mobile.starterpicker.addAStarter"),
+    group: tr("shell.session"),
+    keywords: ["starter", "prompt", "quick action"],
+    when: () => {
+      const state = getState();
+      return state.activeProjectId !== null && state.activeView === "session";
+    },
+    run: () => setOverlay("starter-picker"),
+  });
   registerCommand({
     id: "cmd.new", label: tr("shell.newSession"), hint: hintOf("newSession"), group: tr("shell.session"),
     when: () => !!getState().activeProjectId,
@@ -175,6 +194,7 @@ const ACTIONS: Record<HotkeyAction, () => void> = {
   palette: () => openPalette("all"),
   searchFiles: () => openPalette("files"),
   searchSessions: () => setOverlay("search"),
+  notificationCentre: () => toggleRailPlugin("slot:notification-centre"),
   settings: () => setOverlay("settings"),
   newSession: () => {
     const id = getState().activeProjectId;

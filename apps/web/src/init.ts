@@ -112,6 +112,15 @@ function fetchBranch(projectId: string, sessionId: string | null): void {
 // The address bar always reflects the active project/session so links can be
 // shared and agents can deep-link (/p/:projectId/s/:sessionId or ?session=).
 let urlSyncStarted = false;
+interface PolythHistoryState {
+  polyth: true;
+  depth: number;
+}
+
+const historyDepth = (): number => {
+  const value = history.state as Partial<PolythHistoryState> | null;
+  return value?.polyth === true && typeof value.depth === "number" ? Math.max(0, value.depth) : 0;
+};
 
 /** Align the address bar with the store. Boot uses replaceState (no junk
  *  history entry); user-driven switches push so Back works. Skips when the
@@ -120,8 +129,37 @@ function syncUrl(replace: boolean): void {
   const s = store.getState();
   const target = formatAppUrl(s.activeProjectId, s.activeSessionId);
   if (location.pathname === target && !location.search.includes("session=")) return;
-  if (replace) history.replaceState(null, "", target);
-  else history.pushState(null, "", target);
+  if (replace) history.replaceState({ polyth: true, depth: historyDepth() } satisfies PolythHistoryState, "", target);
+  else history.pushState({ polyth: true, depth: historyDepth() + 1 } satisfies PolythHistoryState, "", target);
+}
+
+/** Navigate only within Polyth. At a deep-linked session with no in-app
+ * history, fall back to its project hero instead of leaving the WebView. */
+export function navigateBackInApp(): boolean {
+  if (historyDepth() > 0) {
+    history.back();
+    return true;
+  }
+  const current = store.getState();
+  if (current.activeView !== "session") {
+    store.setActiveView("session");
+    return true;
+  }
+  if (current.activeSessionId && current.activeProjectId) {
+    const target = formatAppUrl(current.activeProjectId, null);
+    history.replaceState({ polyth: true, depth: 0 } satisfies PolythHistoryState, "", target);
+    store.activateSession(null);
+    return true;
+  }
+  return false;
+}
+
+/** Apply a validated native deep link through the same popstate route used by
+ * browser history. The native shell parses schemes; this layer owns app state. */
+export function openNativeAppPath(path: string): void {
+  if (!path.startsWith("/")) return;
+  history.pushState({ polyth: true, depth: historyDepth() + 1 } satisfies PolythHistoryState, "", path);
+  window.dispatchEvent(new PopStateEvent("popstate", { state: history.state }));
 }
 
 function startUrlSync(): void {

@@ -51,6 +51,25 @@ test("human attention outranks activity, failure, and unread state", () => {
   });
 });
 
+test("active multirun and fusion work resolve as working outside their view", () => {
+  const background = resolveSessionStatus(session({
+    status: "idle",
+    backgroundWork: { multirun: 1, fusion: 1, startedAt: NOW - 45_000 },
+  }), NOW);
+  assert.deepEqual(background, {
+    kind: "working",
+    elapsedMs: 45_000,
+    glyph: "◌",
+    label: "Working",
+  });
+
+  assert.equal(resolveSessionStatus(session({
+    status: "waiting",
+    attention: { questions: 1, permissions: 0, unread: 0 },
+    backgroundWork: { fusion: 1, startedAt: NOW - 10_000 },
+  }), NOW).kind, "needs-reply");
+});
+
 test("resolver covers the shared continuity taxonomy", () => {
   const fixtures: Array<[Partial<SessionProjection>, string, string]> = [
     [{ status: "waiting" }, "needs-reply", "Reply needed"],

@@ -1,5 +1,6 @@
 import type { ModelRef, RouteHandler } from "@polyth/contracts";
 import {
+  publishBackgroundWork,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
@@ -60,8 +61,20 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   // M3: runs resolve the parent session's project/runtime lazily, so they
   // work for any session without composition-root wiring.
   const multirun = createMultirunService({
-    append: (sessionId, type, data) =>
-      host.events.append(sessionId, type, data, { ignorable: true }),
+    append: async (sessionId, type, data) => {
+      const event = await host.events.append(sessionId, type, data, { ignorable: true });
+      const id = typeof data.multirunId === "string" ? data.multirunId : "";
+      if (id && type === "multirun/started") {
+        await publishBackgroundWork(host, sessionId, "multirun", { phase: "started", id });
+      } else if (id && type === "multirun/completed") {
+        await publishBackgroundWork(host, sessionId, "multirun", {
+          phase: "completed",
+          id,
+          status: "completed",
+        });
+      }
+      return event;
+    },
     runOne: createMultirunRunOne(
       (sessionId) => host.resolveSessionRuntime(sessionId),
       { store: host.store },

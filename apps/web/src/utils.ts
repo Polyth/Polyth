@@ -3,6 +3,8 @@ import type { SlashCommand, SnippetDef } from "@polyth/session/web-api";
 import type { JsonObject, SessionEvent } from "@polyth/contracts";
 import type { RenderMessage, TaskActivityMsg, ToolMsg, UserMsg } from "./reduce.ts";
 import { tr } from "./i18n/index.ts";
+import { isNativeMobile } from "@polyth/mobile/runtime";
+import { writeNativeClipboard } from "@polyth/mobile/native";
 
 /** Text of the first user message in a session's event log, if any. */
 export function firstUserText(events: readonly SessionEvent[] | undefined): string | undefined {
@@ -339,6 +341,7 @@ export function copyText(
   text: string,
   clip?: { writeText(t: string): Promise<void> },
 ): Promise<boolean> {
+  if (!clip && isNativeMobile()) return writeNativeClipboard(text);
   const clipboard = clip ?? (
     typeof navigator !== "undefined"
       && globalThis.isSecureContext === true

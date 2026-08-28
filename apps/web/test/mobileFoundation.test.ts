@@ -72,7 +72,10 @@ test("safe-area utilities cover every viewport edge", async () => {
     ["--safe-bottom", "bottom"],
     ["--safe-left", "left"],
   ] as const) {
-    assert.match(css, new RegExp(`${token}: env\\(safe-area-inset-${inset}, 0px\\)`));
+    assert.match(
+      css,
+      new RegExp(`${token}: var\\(--safe-area-inset-${inset}, env\\(safe-area-inset-${inset}, 0px\\)\\)`),
+    );
   }
   assert.match(css, /\.safe-area-inset\s*\{[^}]*padding-top:\s*var\(--safe-top\)[^}]*padding-right:\s*var\(--safe-right\)[^}]*padding-bottom:\s*var\(--safe-bottom\)[^}]*padding-left:\s*var\(--safe-left\)/s);
   assert.match(css, /\.safe-area-inset-x\s*\{[^}]*var\(--safe-right\)[^}]*var\(--safe-left\)/s);
@@ -97,7 +100,7 @@ test("latest-message control remains a full coarse-pointer target", async () => 
   );
 });
 
-test("compact shell keeps drawer and bottom navigation reachable", async () => {
+test("compact shell keeps drawer navigation while phone owns the bottom bar", async () => {
   const [header, sidebar, bottomNav, css] = await Promise.all([
     read("../src/components/Header.tsx"),
     read("../src/components/Sidebar.tsx"),
@@ -106,6 +109,7 @@ test("compact shell keeps drawer and bottom navigation reachable", async () => {
   ]);
 
   assert.match(header, /aria-controls="polyth-session-drawer"/);
+  assert.equal(header.match(/<WorkspaceBottomNav \/>/g)?.length, 1);
   assert.match(sidebar, /className=\{`sidebar \$\{drawerOpen \? "open" : ""\}/);
   assert.match(sidebar, /useModalSurface\(\{/);
   assert.match(bottomNav, /className="workspace-bottom-nav/);

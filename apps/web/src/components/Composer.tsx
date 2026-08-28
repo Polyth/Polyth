@@ -110,6 +110,8 @@ import {
   Button, Menu, SendIcon, StopIcon,
 } from "./ui/index.ts";
 import { getSendFailure, subscribeSendFailures } from "../sendFailure.ts";
+import { isNativeMobile } from "@polyth/mobile/runtime";
+import { pickNativeFiles } from "@polyth/mobile/native";
 
 // Per-project command/snippet catalog cache: the composer remounts on every
 // session change (including a fresh spawn), and each mount refetched both
@@ -487,6 +489,17 @@ export default function Composer({
       });
     }
   }, []);
+  const openAttachmentPicker = useCallback(() => {
+    if (!isNativeMobile()) {
+      fileInputRef.current?.click();
+      return;
+    }
+    void pickNativeFiles().then((result) => {
+      if (result.status === "picked") attachFiles(result.files);
+      else if (result.status === "denied" || result.status === "failed") setUiError(result.message);
+      // Native cancellation is a normal no-op and keeps the draft untouched.
+    });
+  }, [attachFiles]);
 
   // Paste: image/file clipboards become pills; a lone GitHub PR/issue URL
   // becomes a pill when the project's remote matches, else stays plain text.
@@ -1031,19 +1044,20 @@ export default function Composer({
   const defaultAgentLabel = agentBadgeLabel(
     agentPickerDefaultLabel(session?.agent, chatAgents).replace(/^Default:\s*/, ""),
   );
+  const agentChangeEffect = "Applies to the next message in this session. No new session is created; current work and history stay here.";
   // Agent rows carry the backend-reported purpose so choosing between modes
   // is informed, not a guess from a one-word name.
   const agentItems: PickerItem[] = [
     {
       id: "",
       label: defaultAgentLabel,
-      detail: tr("composer.letPolythUseYourCurrentWorkspaceDefault"),
+      detail: `${tr("composer.letPolythUseYourCurrentWorkspaceDefault")}. ${agentChangeEffect}`,
       group: "",
     },
     ...chatAgents.map((a) => ({
       id: a.name,
       label: agentBadgeLabel(a.name),
-      ...(a.description ? { detail: a.description } : {}),
+      detail: a.description ? `${a.description} — ${agentChangeEffect}` : agentChangeEffect,
       group: "",
     })),
   ];
@@ -1336,7 +1350,7 @@ export default function Composer({
           commands={commandCatalog}
           snippets={snippetCatalog}
           direction="up"
-          onUpload={() => fileInputRef.current?.click()}
+          onUpload={openAttachmentPicker}
           onInsertMention={menuMention}
           onInsertCommand={menuCommand}
           onInsertSnippet={menuSnippet}

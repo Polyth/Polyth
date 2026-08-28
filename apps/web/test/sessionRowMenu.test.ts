@@ -11,7 +11,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
 import { Window } from "happy-dom";
-import type { SessionProjection } from "@polyth/contracts";
+import type { SessionProjection, WorkspaceLabel } from "@polyth/contracts";
+import { readFile } from "node:fs/promises";
 
 const dom = new Window();
 Object.assign(globalThis, {
@@ -54,15 +55,23 @@ Object.defineProperty(dom.navigator, "clipboard", {
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // Deterministic API seam: record calls, answer [] / {} like an empty server.
-const fetchCalls: Array<{ url: string; method: string }> = [];
-(globalThis as { fetch?: unknown }).fetch = async (url: string, init?: { method?: string }) => {
-  fetchCalls.push({ url: String(url), method: init?.method ?? "GET" });
+const fetchCalls: Array<{ url: string; method: string; body?: string }> = [];
+let labelFixtures: WorkspaceLabel[] = [];
+let sessionListFixtures: SessionProjection[] | null = null;
+(globalThis as { fetch?: unknown }).fetch = async (url: string, init?: { method?: string; body?: string }) => {
+  const request = { url: String(url), method: init?.method ?? "GET", ...(init?.body ? { body: init.body } : {}) };
+  fetchCalls.push(request);
+  const payload = request.method === "GET" && request.url === "/api/labels"
+    ? labelFixtures
+    : request.method === "GET" && request.url.startsWith("/api/sessions?") && sessionListFixtures !== null
+      ? sessionListFixtures
+      : [];
   return {
     ok: true,
     status: 200,
     statusText: "OK",
-    json: async () => [],
-    text: async () => "[]",
+    json: async () => payload,
+    text: async () => JSON.stringify(payload),
   };
 };
 
@@ -82,9 +91,17 @@ const session = (over: Partial<SessionProjection>): SessionProjection => ({
   createdAt: Date.now() - 60_000, updatedAt: Date.now() - 30_000,
   ...over,
 });
+const label = (id: string, name: string): WorkspaceLabel => ({
+  id,
+  name,
+  color: `label-color-${id}`,
+  position: Number(id.replace(/\D/g, "")) || 0,
+  revision: 1,
+});
 
 const MouseEventCtor = (dom as unknown as { MouseEvent: typeof MouseEvent }).MouseEvent;
 const KeyboardEventCtor = (dom as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent;
+const EventCtor = (dom as unknown as { Event: typeof Event }).Event;
 
 /** The row menu renders through a ui/Menu portal on document.body. */
 const openMenu = () => document.querySelector<HTMLElement>('[role="menu"]');
@@ -391,4 +408,126 @@ test("quick actions are swipe-only; keyboard reaches the same menu via Shift+F10
   } finally {
     await unmount();
   }
+});
+
+test("six or fewer labels stay as inline menu checkboxes", async () => {
+  labelFixtures = Array.from({ length: 6 }, (_, index) =>
+    label(`label-${index + 1}`, `Label ${index + 1}`));
+  const { container, unmount } = await mountList();
+  try {
+    const row = rowOf(container, "Idle session");
+    await act(async () => {
+      row.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
+    });
+
+    assert.equal(
+      document.querySelectorAll('[role="menuitemcheckbox"]').length,
+      6,
+      "short label lists render inline checkboxes",
+    );
+    assert.equal(
+      menuItems().some((item) => item.textContent?.trim() === "Labels…"),
+      false,
+      "short label lists do not add a nested picker",
+    );
+  } finally {
+    labelFixtures = [];
+    await unmount();
+  }
+});
+
+test("more than six labels open a searchable apply-immediately picker", async () => {
+  const labels = [
+    label("label-1", "Alpha"),
+    label("label-2", "Beta"),
+    label("label-3", "Build"),
+    label("label-4", "Docs"),
+    label("label-5", "Feature"),
+    label("label-6", "Fix"),
+    label("label-7", "Gamma"),
+  ];
+  labelFixtures = labels;
+  const { container, unmount } = await mountList();
+  try {
+    const row = rowOf(container, "Idle session");
+    await act(async () => {
+      row.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
+    });
+    assert.equal(document.querySelectorAll('[role="menuitemcheckbox"]').length, 0);
+    const openLabels = menuItems().find((item) => item.textContent?.trim() === "Labels…");
+    assert.ok(openLabels, "long label lists expose one picker row");
+
+    await act(async () => { openLabels!.click(); });
+    const picker = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Labels"]');
+    assert.ok(picker, "Labels row opens the responsive picker");
+    assert.equal(picker!.querySelectorAll(".session-label-option").length, 7);
+
+    const search = picker!.querySelector<HTMLInputElement>('[aria-label="Search labels"]');
+    assert.ok(search, "picker has a searchable text input");
+    await act(async () => {
+      const setValue = Object.getOwnPropertyDescriptor(
+        (dom as unknown as { HTMLInputElement: typeof HTMLInputElement }).HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setValue!.call(search, "gamma");
+      search!.dispatchEvent(new EventCtor("input", { bubbles: true }));
+    });
+    const filtered = picker!.querySelectorAll<HTMLElement>(".session-label-option");
+    assert.equal(filtered.length, 1, "search filters labels");
+    assert.match(filtered[0]?.textContent ?? "", /Gamma/);
+
+    sessionListFixtures = [
+      session({ id: "s-idle", title: "Idle session" }),
+      session({ id: "s-run", title: "Running session", status: "working", lastTurnAt: Date.now() - 10_000 }),
+    ];
+    fetchCalls.length = 0;
+    const gammaCheckbox = filtered[0]!.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    assert.ok(gammaCheckbox);
+    await act(async () => {
+      gammaCheckbox!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const organize = fetchCalls.find((call) =>
+      call.method === "PATCH" && call.url === "/api/sessions/s-idle/organize");
+    assert.ok(organize, "toggle calls organizeSession for the selected row");
+    assert.deepEqual(JSON.parse(organize!.body ?? "{}"), { labelIds: ["label-7"] });
+    assert.ok(
+      document.querySelector('[role="dialog"][aria-label="Labels"]'),
+      "the picker stays open after applying a label",
+    );
+  } finally {
+    labelFixtures = [];
+    sessionListFixtures = null;
+    await unmount();
+  }
+});
+
+test("palette session verbs reuse sidebar handlers and never expose delete", async () => {
+  const [palette, list, actions] = await Promise.all([
+    readFile(new URL("../src/components/CommandPalette.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/sidebar/SessionList.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/sessionActions.ts", import.meta.url), "utf8"),
+  ]);
+  for (const handler of [
+    "archiveSessionWithPolicy",
+    "renameSessionTitle",
+    "toggleSessionPin",
+  ]) {
+    assert.ok(palette.includes(handler), `palette calls shared ${handler}`);
+    assert.ok(list.includes(handler), `sidebar calls shared ${handler}`);
+    assert.ok(actions.includes(`function ${handler}`), `${handler} has one implementation`);
+  }
+  assert.match(
+    palette,
+    /SESSION_PALETTE_VERBS:[\s\S]*\[\s*"archive",\s*"pin",\s*"rename",?\s*\]/,
+  );
+  assert.match(palette, /e\.key === "Tab" \|\| e\.key === "ArrowRight"/);
+  assert.match(palette, /e\.key === "Enter"[\s\S]*runSessionVerb/);
+  assert.doesNotMatch(
+    palette.slice(
+      palette.indexOf("const SESSION_PALETTE_VERBS"),
+      palette.indexOf("function CommandIcon"),
+    ),
+    /delete/i,
+  );
 });

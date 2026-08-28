@@ -7,7 +7,7 @@ plan; nothing here is aspirational — every item is in the tree today.
 
 One-minute map for a new agent; everything after this section is the deep reference.
 
-- **One app, one server.** `apps/web` (React 19 SPA, esbuild) talks REST `/api/*` + WS `/ws` to `packages/server` (node:http composition root). The server wires every feature service and lazily spawns `opencode serve` per project through `packages/backend-opencode` — the only package allowed to touch the OpenCode process/API.
+- **One UI, one server.** `apps/web` (React 19 SPA, esbuild) talks REST `/api/*` + WS `/ws` to `packages/server` (node:http composition root). Electron embeds it with a local server; Capacitor embeds the same build as a client of an existing server. The server wires every feature service and lazily spawns `opencode serve` per project through `packages/backend-opencode` — the only package allowed to touch the OpenCode process/API.
 - **Truth lives in the event log.** `packages/session` stores append-only events in SQLite (WAL). Anything model-visible is appended before the UI sees it; `deriveMessages` rebuilds model history from the log (skipping `ignorable` events).
 - **Contracts first.** `packages/contracts` is the normative surface — mostly types (DTOs, `SessionEvent`, `UiSlot`) plus a few runtime exports (`cap`, `CAP`, `UI_SLOTS`, `isUiSlot`, `MODEL_VISIBLE_TYPES`). `packages/kernel` provides plugin scopes, capabilities, and slot contributions. Built-in feature services are wired directly at the composition root (`packages/server/src/index.ts`), not dynamically loaded; the kernel and the installed-plugin registry are the plugin seams.
 - **Extending the server:** add a feature package exposing a `RouteHandler` and register it at the composition root — never edit `packages/server/src/http.ts`.
@@ -19,6 +19,8 @@ One-minute map for a new agent; everything after this section is the deep refere
 
 ```
 apps/web (React 19, esbuild bundle, no framework server)
+   ├─ apps/desktop (Electron: starts a loopback server + bundled OpenCode)
+   ├─ apps/mobile (Capacitor: connects to an existing Polyth server)
    │  REST /api/*        WS /ws (sessions, browser frames, dictation audio)
    │                     WS /ws/terminal/:id (JSON terminal frames)
 packages/server (node:http composition root)
@@ -58,8 +60,11 @@ packages/session (node:sqlite WAL: events + projections + queue/org/profiles)
 | `plugins` | Installed-plugin registry (install/enable/disable from dir sources, trust classes, contribution manifests). |
 | `server` | Composition root + everything HTTP/WS: see below. |
 
-`apps/web` is the only app: React 19, bundled by `apps/web/build.ts` (esbuild), served
-statically by the server with SPA fallback.
+`apps/web` is the only UI implementation: React 19, bundled by
+`apps/web/build.ts` (esbuild), served statically by the server with SPA
+fallback. `apps/desktop` and `apps/mobile` are platform shells around that
+canonical output; mobile never starts Node or OpenCode. See
+`docs/mobile/architecture.md`.
 
 ## Server internals (`packages/server/src`)
 
@@ -313,6 +318,16 @@ ignored by the web reducer (never crash).
   frames replace the local buffer so reattach never duplicates),
   `SettingsModal`/`SettingsView` + `settings/registry.ts`
   (item-level search), `Onboarding` (personas), `SessionSearch`.
+
+Phase 3 Wave 2 keeps command ownership at the extension seam:
+`commandBridge.ts` adapts `commandPalette.commands` slot descriptors into the
+shared command registry, while `CommandPalette` uses `ResponsiveOverlay` for
+its dialog/sheet presentation. Session continuity surfaces share the pure
+`sessionStatus.ts` taxonomy. Recoverable failures stay in place: a delayed
+reconnect pill lives in the header contribution, failed sends retain the draft
+with an inline retry, and a failed-turn tail can seed (but never send) the last
+user text.
+
 - Theming (F15): `theme.ts` — JSON token schema (surface/line/ink/brand/signal/
   syntax roles) resolved to CSS custom properties at one apply point
   (`applyTheme`); 6 bundled presets, `theme: "system"` follows

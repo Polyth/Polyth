@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { JsonObject, SessionEvent } from "@polyth/contracts";
 import { buildModel, contextGauge } from "../src/reduce.ts";
+import { readFile } from "node:fs/promises";
 
 test("context gauge uses the latest input sample and honest unknown metadata", () => {
   assert.deepEqual(contextGauge({ contextUsage: { inputTokens: 12_000 } }), {
@@ -25,6 +26,18 @@ test("context gauge clamps overflow and applies warning thresholds", () => {
   assert.equal(contextGauge({ contextUsage: { inputTokens: 85 } }, 100).level, "red");
   const overflow = contextGauge({ contextUsage: { inputTokens: 250 } }, 100);
   assert.equal(overflow.known && overflow.percent, 100);
+});
+
+test("wide header stays quiet until context usage reaches sixty percent", async () => {
+  const header = await readFile(
+    new URL("../src/components/Header.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    header,
+    /showContextRing = mode === "wide" && gauge\.known && gauge\.percent >= 60/,
+  );
+  assert.match(header, /\{showContextRing && <ContextRing gauge=\{gauge\} \/>\}/);
 });
 
 test("usage replay tracks the latest turn input separately from lifetime totals", () => {

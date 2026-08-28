@@ -16,6 +16,7 @@ export interface FusionState {
   answer: string;
   weights: FusionWeightDto[];
   disagreements: string[];
+  sources: ModelAnswer[];
   error?: string;
   createdAt: number;
 }
@@ -99,6 +100,7 @@ export function snapshot(state: FusionState): FusionDto {
     answer: state.answer,
     weights: state.weights.map((w) => ({ ...w })),
     disagreements: [...state.disagreements],
+    sources: state.sources.map((source) => ({ model: source.model, answer: source.text })),
     status: state.status,
     ...(state.error ? { error: state.error } : {}),
   };
@@ -115,6 +117,10 @@ export function createFusionService(deps: FusionDeps): FusionService {
       answer: state.answer,
       weights: state.weights as unknown as JsonObject[],
       disagreements: state.disagreements,
+      sources: state.sources.map((source) => ({
+        model: source.model,
+        answer: source.text,
+      })) as unknown as JsonObject[],
       ...(state.error ? { error: state.error } : {}),
     } as unknown as JsonObject);
   };
@@ -127,6 +133,7 @@ export function createFusionService(deps: FusionDeps): FusionService {
           text: await deps.runModel({ sessionId: state.sessionId, fusionId: state.id, model, prompt: state.prompt }),
         })),
       );
+      state.sources = answers;
       const raw = await deps.synthesize({ sessionId: state.sessionId, fusionId: state.id, prompt: state.prompt, answers });
       const parsed = parseSynthesis(raw, state.models);
       state.answer = parsed.answer;
@@ -148,7 +155,7 @@ export function createFusionService(deps: FusionDeps): FusionService {
       const id = randomUUID();
       const state: FusionState = {
         id, sessionId, prompt: text, models: [...input.models],
-        status: "running", answer: "", weights: [], disagreements: [], createdAt: now(),
+        status: "running", answer: "", weights: [], disagreements: [], sources: [], createdAt: now(),
       };
       fusions.set(id, state);
       await deps.append(sessionId, "fusion/started", { fusionId: id, prompt: text, models: state.models });

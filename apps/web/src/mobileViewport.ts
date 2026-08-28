@@ -93,6 +93,7 @@ const TEXT_ENTRY = "input, textarea, [contenteditable=\"true\"]";
 
 let metrics: ViewportMetrics = INITIAL;
 let started = false;
+let nativeKeyboardInset = 0;
 const listeners = new Set<() => void>();
 
 export function getViewportMetrics(): ViewportMetrics {
@@ -134,12 +135,17 @@ function measure(): void {
       visual.height ?? layoutHeight,
       visual.offsetTop ?? 0,
     );
-    next.covering = keyboardOpenFrom(
+    const measuredCovering = keyboardOpenFrom(
       layoutHeight,
       visual.height ?? layoutHeight,
       visual.offsetTop ?? 0,
       document.activeElement?.matches?.(TEXT_ENTRY) ?? false,
     );
+    // Capacitor's native-resize mode can make innerHeight equal the already
+    // reduced WebView height, hiding the covered amount from visualViewport.
+    // Its keyboard plugin supplies that missing inset; web remains geometry-only.
+    next.keyboardInset = Math.max(next.keyboardInset, nativeKeyboardInset);
+    next.covering = measuredCovering || nativeKeyboardInset >= KEYBOARD_MIN_INSET;
     publish(next);
   };
   // Reading visualViewport synchronously after its own resize event races the
@@ -166,6 +172,14 @@ export function startMobileViewport(): void {
   const visual = window.visualViewport;
   visual?.addEventListener("resize", onChange);
   visual?.addEventListener("scroll", onChange);
+}
+
+/** Native shell seam: map Capacitor's keyboard height onto the same CSS
+ * contract used by mobile browsers. Passing zero returns ownership to
+ * visualViewport measurement. */
+export function setNativeKeyboardInset(height: number): void {
+  nativeKeyboardInset = Number.isFinite(height) ? Math.max(0, Math.round(height)) : 0;
+  measure();
 }
 
 export function useViewportMetrics(): ViewportMetrics {

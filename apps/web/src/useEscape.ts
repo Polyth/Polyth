@@ -9,12 +9,20 @@ interface EscapeLayer {
 const layers: EscapeLayer[] = [];
 let listening = false;
 
+/** Close the current escape-stack layer without synthesizing a keyboard
+ * event. Native Android Back uses this before shell navigation. */
+export function dismissTopEscapeLayer(): boolean {
+  const top = layers.at(-1);
+  if (!top) return false;
+  top.close();
+  return true;
+}
+
 const onKeyDown = (event: KeyboardEvent) => {
   if (event.key !== "Escape") return;
-  const top = layers.at(-1);
-  if (!top) return;
+  if (!dismissTopEscapeLayer()) return;
+  event.preventDefault();
   event.stopPropagation();
-  top.close();
 };
 
 function syncListener(): void {

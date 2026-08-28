@@ -5,18 +5,28 @@ import { readWebStyles } from "./webStyles.ts";
 
 const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
 
-test("compact navigation separates swipeable workspace shortcuts from session actions", async () => {
-  const [shortcuts, sessions] = await Promise.all([
+test("compact navigation uses the drawer while phone keeps session actions", async () => {
+  const [header, shortcuts, sessions, prefs, shell] = await Promise.all([
+    read("../src/components/Header.tsx"),
     read("../src/components/mobile/MobileNavigationRail.tsx"),
     read("../src/components/workspace/WorkspaceBottomNav.tsx"),
+    read("../src/uiPrefs.ts"),
+    read("../src/shell.ts"),
   ]);
 
+  assert.equal(header.match(/<WorkspaceBottomNav \/>/g)?.length, 1);
+  assert.match(header, /if \(mode === "phone"\)[\s\S]*<WorkspaceBottomNav \/>/);
+  assert.doesNotMatch(header.slice(header.indexOf('return (\n    <>', header.indexOf('if (mode === "phone")') + 1)), /<WorkspaceBottomNav \/>/);
   assert.match(shortcuts, /ui\.mobileShortcuts\.flatMap/);
   assert.match(shortcuts, /className="mobile-shortcut-track"/);
   assert.match(shortcuts, /capability\.descriptor\.open/);
   assert.doesNotMatch(shortcuts, /<Sheet/);
-  assert.match(sessions, /workspace\.workspacebottomnav\.sessionHistory/);
+  assert.match(sessions, /workspace\.workspacebottomnav\.openSessionsCurrentValue/);
   assert.match(sessions, /workspace\.workspacebottomnav\.newSession/);
+  assert.match(prefs, /mobileShortcuts:\s*\[[\s\S]*"notification-centre"/);
+  assert.match(shell, /hint:\s*hintOf\("notificationCentre"\)/);
+  assert.match(shell, /notificationCentre:\s*\(\) => toggleRailPlugin\("slot:notification-centre"\)/);
+  assert.equal(shell.match(/window\.addEventListener\("keydown", onKey\)/g)?.length, 1);
 });
 
 test("horizontal tabs and chips retain a visible scroll affordance", async () => {

@@ -53,6 +53,11 @@ export {
   type ServerServiceRegistry,
   type SessionRuntimeBinding,
 } from "./serverPackage.ts";
+export {
+  publishBackgroundWork,
+  transitionBackgroundWork,
+  type BackgroundWorkTransition,
+} from "./backgroundWork.ts";
 export { buildUiBundle };
 
 const execFileAsync = promisify(execFile);

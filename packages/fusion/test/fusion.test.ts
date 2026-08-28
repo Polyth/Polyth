@@ -62,7 +62,16 @@ test("start emits fusion/started then fusion/completed with the synthesized answ
   assert.equal(state.status, "completed");
   assert.equal(state.answer, "combined");
   assert.deepEqual(state.disagreements, ["x disagrees"]);
+  assert.deepEqual(state.sources, [
+    { model: "a", text: "reply from a" },
+    { model: "b", text: "reply from b" },
+  ]);
   assert.deepEqual(types(h), ["fusion/started", "fusion/completed"]);
+  const completed = h.events.find((event) => event.type === "fusion/completed");
+  assert.deepEqual(completed?.data.sources, [
+    { model: "a", answer: "reply from a" },
+    { model: "b", answer: "reply from b" },
+  ]);
 });
 
 test("start rejects empty prompt or no models", async () => {
@@ -94,4 +103,8 @@ test("snapshot maps to the wire DTO shape", async () => {
   assert.equal(dto.answer, "combined");
   assert.ok(Array.isArray(dto.weights));
   assert.ok(Array.isArray(dto.disagreements));
+  assert.deepEqual(dto.sources, [
+    { model: "a", answer: "reply from a" },
+    { model: "b", answer: "reply from b" },
+  ]);
 });

@@ -2,7 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { api } from "@polyth/session/web-api";
 import { consumeAuthPrefetch } from "./authPrefetch.ts";
-import { init } from "./init.ts";
+import { init, navigateBackInApp, openNativeAppPath, reconnectSync } from "./init.ts";
 import { exposeSlots } from "./slots.ts";
 import { exposeSurfaces } from "./surfaces.ts";
 import { exposeCapabilities } from "./capabilities.ts";
@@ -11,8 +11,14 @@ import { installCommandSlotBridge } from "./commandBridge.ts";
 import { exposeWorkspaceSurfaces } from "./workspace/surfaceRegistry.ts";
 import { applySettingsToDom } from "./settings.ts";
 import { applyUiSettings } from "./uiPrefs.ts";
-import { startMobileViewport } from "./mobileViewport.ts";
-import { getState } from "./store.ts";
+import { setNativeKeyboardInset, startMobileViewport } from "./mobileViewport.ts";
+import {
+  closeWorkspacePane,
+  getState,
+  setOverlay,
+  setRailPlugin,
+  setSidebarOpen,
+} from "./store.ts";
 import { installBuiltinMiniWidgets } from "./widgets/builtinMiniWidgets.tsx";
 import { installNotificationCentre } from "./components/NotificationCentre.tsx";
 import { installOpenCodeRestartControl } from "./components/OpenCodeRestartControl.tsx";
@@ -23,7 +29,10 @@ import { bootPackages } from "./packages/registry.ts";
 import { getLocaleSnapshot, subscribeLocale } from "./i18n/index.ts";
 import App from "./App.tsx";
 import LockScreen from "./components/LockScreen.tsx";
-import "./styles.css";
+import { dismissTopEscapeLayer } from "./useEscape.ts";
+import { isWorkspaceSurface, listSurfaces } from "./surfaces.ts";
+import { installNativeMobileIntegration } from "@polyth/mobile/native";
+import { handleNativeBack } from "./nativeMobile.ts";
 
 applySettingsToDom(getState().settings);
 applyUiSettings();
@@ -43,6 +52,34 @@ installReconnectPill();
 // No-op in browsers; Electron's preload exposes the bridge that enables the
 // desktop settings page and custom titlebar controls through existing slots.
 installDesktopIntegration();
+installNativeMobileIntegration({
+  handleBack: () => {
+    const current = getState();
+    const activeRail = current.railPlugin === null
+      ? undefined
+      : listSurfaces().find((surface) => surface.id === current.railPlugin);
+    const workspacePaneOpen = activeRail !== undefined && isWorkspaceSurface(activeRail);
+    return handleNativeBack(
+      {
+        overlayOpen: current.overlay !== null,
+        drawerOpen: current.sidebarOpen,
+        workspacePaneOpen,
+        railOpen: current.railPlugin !== null && !workspacePaneOpen,
+      },
+      {
+        dismissEscapeLayer: dismissTopEscapeLayer,
+        closeOverlay: () => setOverlay(null),
+        closeDrawer: () => setSidebarOpen(false),
+        closeWorkspacePane,
+        closeRail: () => setRailPlugin(null),
+        navigateBack: navigateBackInApp,
+      },
+    );
+  },
+  openDeepLink: openNativeAppPath,
+  reconnect: reconnectSync,
+  setKeyboardInset: setNativeKeyboardInset,
+});
 // Palette commands + keyboard shortcuts: one install, synced with the
 // capability registry from then on (UX-PERSONAS: search sees every tool).
 installShell();

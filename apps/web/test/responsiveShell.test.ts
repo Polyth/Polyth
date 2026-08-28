@@ -119,6 +119,11 @@ test("header owns the drawer trigger and registry-backed compact navigation rail
   assert.ok(header.includes('aria-controls="polyth-session-drawer"'), "drawer trigger targets the drawer");
   assert.ok(header.includes('tr("header.openProjectsAndSessions")'), "drawer trigger accessible name");
   assert.ok(header.includes("<MobileNavigationRail />"), "compact headers expose the shared top rail");
+  assert.equal(
+    header.match(/<WorkspaceBottomNav \/>/g)?.length,
+    1,
+    "the bottom session bar is mounted only by the phone branch; compact desktop uses the drawer",
+  );
   assert.ok(navigation.includes("const resolved = useResolvedCapabilities()"), "mobile rail consumes the shared capability model");
   assert.ok(navigation.includes("VIEW_OF_CAPABILITY[id]"), "mobile rail maps capability descriptors to views");
   assert.ok(navigation.includes("PANE_OF_CAPABILITY[id]"), "mobile rail keeps pane tools such as Browser reachable");

@@ -68,6 +68,8 @@ test("each run reaches completed and multirun/completed fires once all settle", 
     assert.equal(r.status, "completed");
     assert.equal(r.output, "final answer");
     assert.equal(r.cost, 0.01);
+    assert.equal(r.startedAt, 1000);
+    assert.equal(r.finishedAt, 1000);
   }
   assert.equal(types(h).filter((t) => t === "multirun/completed").length, 1);
   assert.ok(types(h).includes("multirun/run-progress"));

@@ -83,6 +83,16 @@ test("shell card copy combines the command and its result", () => {
   assert.equal(shellCardCopyText({ argv: ["npm", "test"] }), '{\n  "argv": [\n    "npm",\n    "test"\n  ]\n}');
 });
 
+test("expanded reasoning follows only while its own reader stays at the tail", () => {
+  const timeline = read("../src/components/Timeline.tsx");
+  assert.match(timeline, /const reasoningAtBottom = useRef\(true\)/);
+  assert.match(timeline, /!open \|\| !active \|\| !reasoningAtBottom\.current/);
+  assert.match(
+    timeline,
+    /reasoningAtBottom\.current =\s*el\.scrollHeight - el\.scrollTop - el\.clientHeight < 16/,
+  );
+});
+
 test("model metadata reports deduplicated input and output modalities", () => {
   assert.equal(modelModalities({
     providerID: "test",
@@ -104,6 +114,7 @@ test("all mobile chat composers expose project and worktree targets", () => {
   const header = read("../src/components/Header.tsx");
   const bottomNavigation = read("../src/components/workspace/WorkspaceBottomNav.tsx");
   const mobileNavigation = read("../src/components/mobile/MobileNavigationRail.tsx");
+  const widgetsSettings = read("../src/components/settings/WidgetsPage.tsx");
   const css = readWebStylesSync();
 
   // UX-MOBILE-01 §5: the compact context bar belongs to the shared composer,
@@ -131,8 +142,9 @@ test("all mobile chat composers expose project and worktree targets", () => {
   assert.match(css, /\.composer-mobile\.composer-has-draft \.composer-workflow\s*\{\s*display:\s*inline-flex;/);
   assert.match(bottomNavigation, /displaySessionTitle\(session\?\.title \?\? "", session\?\.id\)/);
   assert.match(header, /<MobileNavigationRail \/>/);
-  assert.match(header, /<WorkspaceBottomNav \/>/);
+  assert.equal(header.match(/<WorkspaceBottomNav \/>/g)?.length, 1, "bottom navigation is phone-only");
   assert.match(mobileNavigation, /ui\.mobileShortcuts/);
+  assert.match(widgetsSettings, /settings\.widgetspage\.canvasAvailableTabletDesktop/);
   assert.match(css, /\.polyth-gradient\s*\{[^}]*linear-gradient/s);
 });
 

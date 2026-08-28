@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import Timeline from "../Timeline.tsx";
 import Composer from "../Composer.tsx";
 import QuestionCards from "../QuestionCards.tsx";
-import { setUiError, useActiveModel, useStore } from "../../store.ts";
+import { focusComposer, setOverlay, setUiError, useActiveModel, useStore } from "../../store.ts";
 import { openSession, restoreSession } from "../../init.ts";
 import { friendlyError } from "../../settings.ts";
 import { composerBlockedByArchive, sessionSurfaceKind } from "../../sessionSurface.ts";
@@ -31,9 +31,11 @@ import { ago, displaySessionTitle } from "../../format.ts";
 import {
   noteStarterUsed,
   starterContextFrom,
+  starterSessionContext,
   useStarterPrefs,
   visibleStarters,
   type Starter,
+  type StarterContext,
 } from "../../starters.ts";
 import { tr } from "../../i18n/index.ts";
 import { Button } from "../ui/index.ts";
@@ -46,7 +48,7 @@ const NOOP_STARTER = (_prompt: string, _id?: string): void => {};
 // interaction zone (project/branch context + composer) pinned above the
 // keyboard. Project and branch never split the page between the headline and
 // the composer any more.
-function SessionHero() {
+function SessionHero({ starterContext }: { starterContext: StarterContext }) {
   const projects = useStore((s) => s.projectRegistry.projects);
   const projectId = useStore((s) => s.activeProjectId);
   const project = projects.find((candidate) => candidate.id === projectId) ?? null;
@@ -56,20 +58,14 @@ function SessionHero() {
   // real workspace state — a dirty worktree offers review/commit work, a clean
   // one offers exploration and planning.
   const shell = useShellMode();
-  const gitStatus = useGitStatus(projectId, false);
   const starterPrefs = useStarterPrefs();
-  const [starterPickerOpen, setStarterPickerOpen] = useState(false);
   const [heroWidgetsOpen, setHeroWidgetsOpen] = useState(false);
   // §22: pointer-down activation, like every other sheet trigger.
   const starterPickerTrigger = useSheetTrigger(shell === "phone", () => {
-    setStarterPickerOpen(true);
+    setOverlay("starter-picker");
     void dismissKeyboard();
   });
   const heroWidgetsTrigger = useSheetTrigger(shell === "phone", () => setHeroWidgetsOpen(true));
-  const starterContext = useMemo(
-    () => starterContextFrom(gitStatus, { hasHistory: false, lastTurnFinished: false }),
-    [gitStatus],
-  );
   const chips = useMemo(
     () => visibleStarters(starterPrefs, starterContext, shell === "phone" ? 2 : 3),
     [starterPrefs, starterContext, shell],
@@ -109,13 +105,6 @@ function SessionHero() {
           <Composer />
         </div>
       </div>
-      {starterPickerOpen && (
-        <StarterPicker
-          context={starterContext}
-          onPick={(starter) => runStarter(starter.prompt)}
-          onClose={() => setStarterPickerOpen(false)}
-        />
-      )}
       {heroWidgetsOpen && <HeroWidgetSettings onClose={() => setHeroWidgetsOpen(false)} />}
     </div>
   );
@@ -244,7 +233,13 @@ function SessionSurface() {
   const sessionId = useStore((s) => s.activeSessionId);
   const openingSessionId = useStore((s) => s.openingSessionId);
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
+  const starterPickerOpen = useStore((s) => s.overlay === "starter-picker");
   const model = useActiveModel();
+  const gitStatus = useGitStatus(projectId, false);
+  const starterContext = useMemo(
+    () => starterContextFrom(gitStatus, starterSessionContext(model)),
+    [gitStatus, model],
+  );
   const [latestRevealAnchor, setLatestRevealAnchor] = useState<HTMLDivElement | null>(null);
 
   if (workspaceMode !== "chat") return <WidgetCanvas />;
@@ -254,8 +249,18 @@ function SessionSurface() {
   // Archived sessions remain visible but replace the composer with the
   // atomic restore action.
   const kind = sessionSurfaceKind(sessionId, openingSessionId, model, session);
-  if (kind === "loading") return <SessionLoading />;
-  if (kind === "hero") return <SessionHero />;
+  const picker = starterPickerOpen ? (
+    <StarterPicker
+      context={starterContext}
+      onPick={(starter) => requestComposerInsert(starter.prompt)}
+      onClose={() => {
+        setOverlay(null);
+        focusComposer();
+      }}
+    />
+  ) : null;
+  if (kind === "loading") return <><SessionLoading />{picker}</>;
+  if (kind === "hero") return <><SessionHero starterContext={starterContext} />{picker}</>;
 
   const pendingPermissions = model.permissions.filter((p) => p.status === "pending");
   const pendingQuestions = model.questions.filter((q) => q.status === "pending");
@@ -273,6 +278,7 @@ function SessionSurface() {
     && pendingPermissions.length === 0;
 
   return (
+    <>
     <div className="focus-conversation">
       <div className="timeline-wrap">
         <Timeline model={model} latestRevealTarget={latestRevealAnchor} />
@@ -294,6 +300,8 @@ function SessionSurface() {
       <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
       {archived && sessionId ? <ArchivedComposerGuard sessionId={sessionId} /> : <Composer />}
     </div>
+    {picker}
+    </>
   );
 }
 

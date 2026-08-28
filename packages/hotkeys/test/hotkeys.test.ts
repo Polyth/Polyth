@@ -25,6 +25,7 @@ test("defaults match the current shell bindings", () => {
   assert.equal(DEFAULT_KEYMAP.palette, "mod+k");
   assert.equal(DEFAULT_KEYMAP.searchFiles, "mod+p");
   assert.equal(DEFAULT_KEYMAP.searchSessions, "mod+shift+f");
+  assert.equal(DEFAULT_KEYMAP.notificationCentre, "mod+shift+n");
   assert.equal(DEFAULT_KEYMAP.settings, "mod+,");
   assert.equal(DEFAULT_KEYMAP.newSession, "mod+n");
   assert.equal(DEFAULT_KEYMAP.viewTerminal, "mod+`");
@@ -49,8 +50,10 @@ test("matchAction resolves events against custom maps", () => {
   const map = parseKeymap(JSON.stringify({ palette: "mod+shift+p", viewGit: "bogus", nonsense: "mod+z" }));
   assert.equal(map.palette, "mod+shift+p");
   assert.equal(map.viewGit, DEFAULT_KEYMAP.viewGit); // bad combo dropped
+  assert.equal(map.notificationCentre, "mod+shift+n");
   assert.equal(matchAction(map, ev("p", { ctrl: true, shift: true })), "palette");
   assert.equal(matchAction(map, ev("p", { ctrl: true })), "searchFiles");
+  assert.equal(matchAction(map, ev("n", { ctrl: true, shift: true })), "notificationCentre");
   assert.equal(matchAction(map, ev("x", { ctrl: true })), null);
 });
 
@@ -62,10 +65,16 @@ test("serializeKeymap only stores overrides and round-trips", () => {
 });
 
 test("findConflicts flags duplicate combos", () => {
-  const map = { ...DEFAULT_KEYMAP, newSession: DEFAULT_KEYMAP.palette };
+  const map = {
+    ...DEFAULT_KEYMAP,
+    newSession: DEFAULT_KEYMAP.palette,
+    notificationCentre: DEFAULT_KEYMAP.searchSessions,
+  };
   const conflicts = findConflicts(map);
   assert.ok(conflicts.includes("palette"));
   assert.ok(conflicts.includes("newSession"));
+  assert.ok(conflicts.includes("searchSessions"));
+  assert.ok(conflicts.includes("notificationCentre"));
   assert.deepEqual(findConflicts(DEFAULT_KEYMAP), []);
 });
 

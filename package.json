@@ -26,6 +26,11 @@
     "desktop:dist:linux": "npm run build:web && npm run desktop:download-opencode && npm --workspace @polyth/desktop run dist:linux",
     "desktop:dist:mac": "npm run build:web && npm run desktop:download-opencode && npm --workspace @polyth/desktop run dist:mac",
     "desktop:dist:win": "npm run build:web && npm run desktop:download-opencode && npm --workspace @polyth/desktop run dist:win",
+    "build:mobile": "npm run build:web && npm --workspace @polyth/mobile run sync",
+    "mobile:sync": "npm run build:web && npm --workspace @polyth/mobile run sync",
+    "mobile:open:android": "npm --workspace @polyth/mobile run open:android",
+    "mobile:open:ios": "npm --workspace @polyth/mobile run open:ios",
+    "mobile:build:android": "npm run build:web && npm --workspace @polyth/mobile run sync && npm --workspace @polyth/mobile run build:android",
     "pretest": "node scripts/check-node.mjs",
     "test": "node --test packages/*/test/*.test.ts apps/*/test/*.test.ts"
   },

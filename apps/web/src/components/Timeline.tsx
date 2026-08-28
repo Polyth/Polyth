@@ -100,6 +100,7 @@ function Thinking({ m }: { m: AssistantMsg }) {
   const prefs = useUiSettings();
   const [open, setOpen] = useState(prefs.thinkingDefaultExpanded);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const reasoningAtBottom = useRef(true);
   const active = !m.finalized;
   const span = m.reasoningStartedAt !== undefined && m.reasoningEndedAt !== undefined
     ? Math.max(0, m.reasoningEndedAt - m.reasoningStartedAt)
@@ -107,16 +108,26 @@ function Thinking({ m }: { m: AssistantMsg }) {
   const duration = !active && span !== null && span >= 500 ? fmtDuration(span) : null;
   const label = duration ? `${tr("timeline.thinking")} · ${duration}` : tr("timeline.thinking");
   const tail = active ? reasoningTail(m.reasoning) : "";
-  // Streaming follow: while thinking is still running and the well is open,
-  // keep the capped body pinned to the newest line (presentation only).
+  // Streaming follow mirrors the conversation reader contract: follow while
+  // the well is at its tail, but preserve an intentional scroll-up position.
   useEffect(() => {
-    if (!open || !active) return;
+    if (!open || !active || !reasoningAtBottom.current) return;
     const el = bodyRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [open, active, m.reasoning]);
   const body = (
     <div className="reasoning-content">
-      <div className="reasoning-body" ref={bodyRef} dir="auto" tabIndex={0}>
+      <div
+        className="reasoning-body"
+        ref={bodyRef}
+        dir="auto"
+        tabIndex={0}
+        onScroll={(event) => {
+          const el = event.currentTarget;
+          reasoningAtBottom.current =
+            el.scrollHeight - el.scrollTop - el.clientHeight < 16;
+        }}
+      >
         {renderMarkdown(m.reasoning, `${m.id}-reasoning`)}
       </div>
       <div className="reasoning-foot">
@@ -140,7 +151,13 @@ function Thinking({ m }: { m: AssistantMsg }) {
       <summary
         aria-label={reasoningToggleName(open)}
         aria-expanded={open}
-        onClick={(e) => { e.preventDefault(); setOpen((v) => !v); }}
+        onClick={(e) => {
+          e.preventDefault();
+          setOpen((value) => {
+            if (!value) reasoningAtBottom.current = true;
+            return !value;
+          });
+        }}
       >
         {active && <span className="reasoning-mark running" aria-hidden="true"><span className="spinner" /></span>}
         <strong className={active ? "reasoning-label running" : "reasoning-label"}>{label}</strong>

@@ -1,6 +1,5 @@
-// The compact shell's permanent session navigation. Workspace destinations
-// live in the swipeable top shortcut rail; this bar stays focused on the three
-// high-frequency conversation actions the mobile shell must never hide.
+// The phone shell's permanent session navigation. Workspace destinations live
+// in the swipeable top shortcut rail; compact desktop uses the drawer instead.
 import {
   openPalette, setRailPlugin, setSidebarOpen, startNewSession, useStore,
 } from "../../store.ts";

@@ -412,7 +412,10 @@ export default function WidgetsPage() {
 
   return (
     <>
-      <PageHead title={tr("settings.widgetspage.widgetsLayout")} />
+      <PageHead
+        title={tr("settings.widgetspage.widgetsLayout")}
+        blurb={tr("settings.widgetspage.canvasAvailableTabletDesktop")}
+      />
 
       <div className="widget-placement-toolbar">
         <label className="widget-project-scope">

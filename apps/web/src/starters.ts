@@ -211,6 +211,18 @@ export function starterContextFrom(
   };
 }
 
+/** Session-history inputs for `starterContextFrom`. Kept pure so every picker
+ * entry point ranks the canonical catalog from the same replay-derived truth. */
+export function starterSessionContext(session: {
+  messages: readonly unknown[];
+  turn: { status: "working" | "stopped" | "aborted" | "failed" } | null;
+}): { hasHistory: boolean; lastTurnFinished: boolean } {
+  return {
+    hasHistory: session.messages.length > 0,
+    lastTurnFinished: session.turn?.status === "stopped",
+  };
+}
+
 // ---- preferences ------------------------------------------------------------
 
 export interface CustomStarter {

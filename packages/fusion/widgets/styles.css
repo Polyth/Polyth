@@ -1,107 +1,256 @@
 /* Package-owned fusion web styles. */
-.fusion-model-picks {
-display: flex; flex-wrap: wrap; gap: 6px;
+.fusion-view {
+  container: fusion-view / inline-size;
 }
-.fusion-model-picks > .model-filter-input {
-flex-basis: 100%;
+
+.fusion-view .fusion-setup,
+.fusion-view .fusion-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.fusion-view .fusion-setup {
+  padding: var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-surface);
+  background: var(--panel);
+}
+
+.fusion-view .fusion-setup h2,
+.fusion-view .fusion-result h2 {
+  margin: 0;
+  font-size: var(--font-heading);
+}
+
+.fusion-view .fusion-setup p {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+}
+
+.fusion-view .fusion-model-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.fusion-view .fusion-model-picks > .model-filter-input {
   width: 100%;
+  flex-basis: 100%;
   font-family: var(--mono);
 }
-.model-chip .ui-btn-label {
-display: inline-flex; align-items: center; gap: 6px;
+
+.fusion-view .fusion-model-chip .ui-btn-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
 }
-.model-chip.on {
-color: var(--text); background: var(--accent-wash);
+
+.fusion-view .fusion-model-chip.is-selected {
+  color: var(--text);
+  background: var(--accent-wash);
 }
-.model-chip-provider-logo {
-width: 18px; height: 18px;
+
+.fusion-view .fusion-provider-logo {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  flex: none;
 }
-.fusion-layout {
-display: grid; grid-template-columns: 260px 1fr 260px; gap: 16px; min-height: 0; align-items: start;
+
+.fusion-view .fusion-launch,
+.fusion-view .fusion-result-head,
+.fusion-view .fusion-result-status,
+.fusion-view .fusion-answer-actions,
+.fusion-view .fusion-source header,
+.fusion-view .fusion-source header > span,
+.fusion-view .fusion-working {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
 }
-.weight-card {
-border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--panel);
-  padding: 10px 12px; margin-bottom: 10px;
+
+.fusion-view .fusion-launch,
+.fusion-view .fusion-result-head,
+.fusion-view .fusion-source header {
+  justify-content: space-between;
 }
-.weight-card-row {
-display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 6px;
+
+.fusion-view .fusion-launch > span,
+.fusion-view .fusion-cost-note,
+.fusion-view .fusion-answer-actions,
+.fusion-view .fusion-working span,
+.fusion-view .fusion-eyebrow,
+.fusion-view .fusion-prompt > span {
+  color: var(--muted);
+  font-size: var(--font-meta);
 }
-.weight-name {
-display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+
+.fusion-view .fusion-cost-note {
+  margin: calc(-1 * var(--space-2)) 0 0;
 }
-.weight-track {
-height: 5px; background: var(--elevated); border-radius: calc(3px * var(--corner-radius-scale)); overflow: hidden;
+
+.fusion-view .fusion-result-status {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
-.weight-fill {
-height: 100%; border-radius: calc(3px * var(--corner-radius-scale));
+
+.fusion-view .fusion-eyebrow,
+.fusion-view .fusion-prompt > span {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
-.weight-pct {
-font-family: var(--mono); font-size: 11px; color: var(--muted);
+
+.fusion-view .fusion-prompt {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--elevated);
 }
-.fusion-answer {
-display: flex; flex-direction: column; gap: 10px; min-width: 0;
+
+.fusion-view .fusion-prompt p {
+  margin: var(--space-1) 0 0;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
 }
-.fusion-answer-card {
-border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--panel); padding: 18px 20px; min-height: 120px;
-  font-size: 14px; line-height: 1.7;
+
+.fusion-view .fusion-working {
+  align-items: flex-start;
+  padding: var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--accent-wash);
 }
-.attr-bar {
-display: flex; height: 10px; border-radius: calc(5px * var(--corner-radius-scale)); overflow: hidden; background: var(--elevated);
+
+.fusion-view .fusion-working > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
 }
-.attr-seg {
-min-width: 2px;
+
+.fusion-view .fusion-answer-card {
+  min-width: 0;
+  min-height: calc(var(--control-h-lg) * 2);
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
+  background: var(--panel);
+  color: var(--text-dim);
+  line-height: 1.7;
 }
-.disagree-card {
-border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--panel);
-  padding: 10px 12px; font-size: 12.5px; color: var(--text-dim); margin-bottom: 10px;
-}
-.run-error {
-color: var(--red); font-size: 12px;
-}
-@container feature-panel (max-width: 1100px) {
-.fusion-layout {
-grid-template-columns: 1fr;
-}
-}
-.fusion-layout .empty-state {
-min-height: 0;
-  padding: 16px;
-}
-.fusion-layout .empty-state-title {
-font-size: var(--font-label);
-}
-.fusion-answer-card {
-min-width: 0;
-}
-.weight-name {
-overflow-wrap: anywhere;
-}
-.fusion-answer-card :is(pre, table) {
-display: block;
+
+.fusion-view .fusion-answer-card :is(pre, table),
+.fusion-view .fusion-source :is(pre, table) {
+  display: block;
   max-width: 100%;
   overflow-x: auto;
 }
-@container feature-panel (max-width: 700px) {
-.fusion-layout {
-grid-template-columns: minmax(0, 1fr);
+
+.fusion-view .fusion-answer-actions {
+  flex-wrap: wrap;
 }
 
-.fusion-model-picks {
-max-height: min(36dvh, 300px);
+.fusion-view .fusion-error {
+  padding: var(--space-3) var(--space-4);
+  color: var(--red);
+  font-size: var(--font-meta);
+  border-radius: var(--radius-card);
+  background: var(--red-wash);
+}
+
+.fusion-view .fusion-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border-top: 1px solid var(--surface-divider);
+  padding-top: var(--space-3);
+}
+
+.fusion-view .fusion-evidence details {
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.fusion-view .fusion-evidence summary {
+  min-height: max(var(--control-h), var(--hit-min));
+  padding: var(--space-2) 0;
+  color: var(--text-dim);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fusion-view .fusion-source-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  padding: var(--space-2) 0 var(--space-4);
+}
+
+.fusion-view .fusion-source {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--panel);
+}
+
+.fusion-view .fusion-source header {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.fusion-view .fusion-source header > span {
+  min-width: 0;
+}
+
+.fusion-view .fusion-source header strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fusion-view .fusion-source > div {
+  max-height: min(42dvh, 24rem);
+  padding: var(--space-3);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  color: var(--text-dim);
+}
+
+.fusion-view .fusion-disagreement-list,
+.fusion-view .fusion-agreement {
+  margin: 0 0 var(--space-4);
+  color: var(--text-dim);
+}
+
+.fusion-view .fusion-disagreement-list {
+  padding-inline-start: var(--space-5);
+}
+
+@container fusion-view (max-width: 44rem) {
+  .fusion-view .fusion-result-head,
+  .fusion-view .fusion-launch {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .fusion-view .fusion-result-status {
+    justify-content: flex-start;
+  }
+
+  .fusion-view .fusion-model-picks {
+    max-height: min(36dvh, 19rem);
+    padding: var(--space-1);
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: 2px;
-}
+    scrollbar-gutter: stable;
+  }
 
-.fusion-answer-card {
-padding: 14px; overflow: hidden;
-}
+  .fusion-view .fusion-answer-card {
+    padding: var(--space-4);
+    overflow: hidden;
+  }
 
-.weight-card-row {
-align-items: flex-start; gap: 8px;
-}
-
-.weight-name {
-white-space: normal;
-}
+  .fusion-view .fusion-source-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

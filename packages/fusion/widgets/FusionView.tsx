@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import type { FusionDto } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
-import { useActiveModel, useStore } from "../../../apps/web/src/store.ts";
-import { modelBadge } from "../../../apps/web/src/format.ts";
+import { showSessionChat, useActiveModel, useStore } from "../../../apps/web/src/store.ts";
 import { renderMarkdown } from "../../../apps/web/src/markdown.tsx";
 import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
 import { modelDisplayName, modelSupportsTextWorkflow } from "../../../apps/web/src/composer/discovery.ts";
 import ProviderLogo from "../../models/widgets/ProviderLogo.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
-import { Button, Textarea, TextInput } from "../../../apps/web/src/components/ui/index.ts";
+import { Badge, Button, Spinner, Textarea, TextInput } from "../../../apps/web/src/components/ui/index.ts";
+import { requestComposerInsert } from "../../../apps/web/src/composerInsert.ts";
 
 const providerIdFromModel = (model: string): string => {
   const slash = model.lastIndexOf("/");
@@ -28,6 +28,7 @@ export default function FusionView() {
   const [modelFilter, setModelFilter] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [ignoreLog, setIgnoreLog] = useState(false);
 
   const q = modelFilter.toLowerCase();
   const filteredModels = q ? textModels.filter((m) => (m.modelID + m.name + m.providerID).toLowerCase().includes(q)) : textModels;
@@ -38,7 +39,7 @@ export default function FusionView() {
     ...visibleModels,
   ];
 
-  const shown = live ?? fromLog;
+  const shown = live ?? (ignoreLog ? null : fromLog);
   const running = shown?.status === "running";
 
   useEffect(() => {
@@ -62,6 +63,7 @@ export default function FusionView() {
 
   useEffect(() => {
     setLive(null);
+    setIgnoreLog(false);
   }, [sessionId]);
 
   const toggle = (key: string) => {
@@ -75,6 +77,7 @@ export default function FusionView() {
     try {
       const { fusionId } = await api.startFusion(sessionId, text.trim(), picked);
       const snap = await api.getFusion(fusionId).catch(() => null);
+      setIgnoreLog(false);
       if (snap) setLive(snap);
     } catch (e) {
       setError(String(e));
@@ -88,137 +91,159 @@ export default function FusionView() {
 
   const weights = shown?.weights ?? [];
   const total = weights.reduce((a, w) => a + w.weight, 0) || 1;
+  const weightFor = (model: string): number =>
+    Math.round(((weights.find((weight) => weight.model === model)?.weight ?? 0) / total) * 100);
+  const continueSynthesis = () => {
+    if (!shown?.answer) return;
+    requestComposerInsert(`Continue from this synthesis:\n\n${shown.answer}`);
+    showSessionChat();
+  };
+  const startAnother = () => {
+    setLive(null);
+    setIgnoreLog(true);
+    setError("");
+  };
 
   return (
-    <div className="view-page">
+    <div className="view-page fusion-view">
       <div>
         <h1 className="view-title">{tr("fusionview.modelFusion")}</h1>
-        <p className="view-sub">{tr("fusionview.synthesizeSeveralModelOutputsIntoOneWeighted")}</p>
+        <p className="view-sub">Gather independent source answers, then synthesize one response with traceable provenance.</p>
       </div>
-      <div className="view-toolbar">
-        <Textarea
-          rows={2}
-          value={text}
-          placeholder={tr("fusionview.promptToFuseAcrossModels")}
-          onChange={(e) => setText(e.target.value)}
-        />
-        <div className="fusion-model-picks">
-          <TextInput
-            uiSize="sm"
-            className="model-filter-input"
-            placeholder={tr("fusionview.filterModels")}
-            value={modelFilter}
-            onChange={(e) => setModelFilter(e.target.value)}
+      {!shown && (
+        <section className="fusion-setup" aria-labelledby="fusion-setup-title">
+          <div>
+            <h2 id="fusion-setup-title">Choose synthesis sources</h2>
+            <p>Each model answers independently. A separate synthesis pass combines the strongest supported points.</p>
+          </div>
+          <Textarea
+            rows={3}
+            value={text}
+            placeholder={tr("fusionview.promptToFuseAcrossModels")}
+            onChange={(e) => setText(e.target.value)}
           />
-          {shownChips.map((m) => {
-            const key = `${m.providerID}/${m.modelID}`;
-            const on = picked.includes(key);
-            return (
-              <Button
-                size="sm"
-                variant="ghost"
-                key={key}
-                className={`model-chip ${on ? "on" : ""}`}
-                aria-pressed={on}
-                onClick={() => toggle(key)}
-              >
-                <ProviderLogo
-                  providerID={m.providerID}
-                  providerName={m.providerName}
-                  className="model-chip-provider-logo"
-                />
-                {modelDisplayName(m, textModels)}
-              </Button>
-            );
-          })}
-          {filteredModels.length > MAX_CHIPS && (
-            <span className="muted">{filteredModels.length - MAX_CHIPS} {tr("fusionview.moreRefineFilter")}</span>
-          )}
-        </div>
-        <div className="view-toolbar-row">
-          <Button variant="primary" busy={busy || running} onClick={() => void start()} disabled={!text.trim() || picked.length === 0}>
-            {busy || running ? tr("fusionview.fusing") : tr("fusionview.fuse")}
-          </Button>
-        </div>
-        {error && <div className="form-error">{error}</div>}
-      </div>
-
-      {shown && (
-        <div className="fusion-layout">
-          <section className="fusion-contributors">
-            <div className="stat-label">{tr("fusionview.contributors")}</div>
-            {weights.map((w) => {
-              const badge = modelBadge(w.model);
+          <div className="fusion-model-picks">
+            <TextInput
+              uiSize="sm"
+              className="model-filter-input"
+              placeholder={tr("fusionview.filterModels")}
+              value={modelFilter}
+              onChange={(e) => setModelFilter(e.target.value)}
+            />
+            {shownChips.map((m) => {
+              const key = `${m.providerID}/${m.modelID}`;
+              const on = picked.includes(key);
               return (
-                <div key={w.model} className="weight-card">
-                  <div className="weight-card-row">
-                    <span className="weight-name">
-                      <ProviderLogo
-                        providerID={providerIdFromModel(w.model)}
-                        className="model-chip-provider-logo"
-                      />
-                      {w.model}
-                    </span>
-                    <span className="weight-pct">{Math.round((w.weight / total) * 100)}%</span>
-                  </div>
-                  <div className="weight-track">
-                    <div className="weight-fill" style={{ width: `${(w.weight / total) * 100}%`, background: badge.color }} />
-                  </div>
-                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  key={key}
+                  className={`fusion-model-chip ${on ? "is-selected" : ""}`}
+                  aria-pressed={on}
+                  onClick={() => toggle(key)}
+                >
+                  <ProviderLogo
+                    providerID={m.providerID}
+                    providerName={m.providerName}
+                    className="fusion-provider-logo"
+                  />
+                  {modelDisplayName(m, textModels)}
+                </Button>
               );
             })}
-            {weights.length === 0 && (
-              <EmptyState
-                title={tr("fusionview.waitingForWeights")}
-                description={tr("fusionview.contributors")}
-              />
+            {filteredModels.length > MAX_CHIPS && (
+              <span className="muted">{filteredModels.length - MAX_CHIPS} {tr("fusionview.moreRefineFilter")}</span>
             )}
-          </section>
-
-          <section className="fusion-answer">
-            <div className="stat-label">{tr("fusionview.fusedAnswer")}</div>
-            {(promptFromLog || text) && (
-              <div className="prompt-echo">
-                <span className="prompt-echo-label">{tr("fusionview.prompt")}</span>
-                <span>{promptFromLog || text}</span>
-              </div>
-            )}
-            <div className="fusion-answer-card">
-              {shown.error ? <div className="run-error">{shown.error}</div> : shown.answer ? renderMarkdown(shown.answer, shown.id) : <span className="muted">{tr("fusionview.synthesizing")}</span>}
-            </div>
-            <div className="stat-label">{tr("fusionview.attribution")}</div>
-            <div className="attr-bar">
-              {weights.map((w) => {
-                const badge = modelBadge(w.model);
-                return (
-                  <div
-                    key={w.model}
-                    className="attr-seg"
-                    title={`${badge.label} ${Math.round((w.weight / total) * 100)}%`}
-                    style={{ flex: w.weight, background: badge.color }}
-                  />
-                );
-              })}
-            </div>
-          </section>
-
-          <section className="fusion-disagreements">
-            <div className="stat-label">{tr("fusionview.disagreements")}</div>
-            {shown.disagreements.length === 0 ? (
-              <EmptyState
-                title={tr("fusionview.noDisagreementsRecorded")}
-                description={tr("fusionview.disagreements")}
-              />
-            ) : (
-              shown.disagreements.map((d, i) => (
-                <div key={i} className="disagree-card">{d}</div>
-              ))
-            )}
-          </section>
-        </div>
+          </div>
+          <div className="fusion-launch">
+            <span>{picked.length || "No"} sources · parallel collection · one synthesis</span>
+            <Button variant="primary" busy={busy} onClick={() => void start()} disabled={!text.trim() || picked.length === 0}>
+              {busy ? tr("fusionview.fusing") : tr("fusionview.fuse")}
+            </Button>
+          </div>
+          <p className="fusion-cost-note">The current fusion runner does not report utility-run cost, so no estimate is shown.</p>
+          {error && <div className="form-error">{error}</div>}
+        </section>
       )}
-      {!shown && (
-        <EmptyState title={tr("fusionview.nothingFusedYet")} description={tr("fusionview.selectModelsAndFuseAPromptInto")} />
+
+      {shown && (
+        <section className="fusion-result" aria-labelledby="fusion-result-title">
+          <header className="fusion-result-head">
+            <div>
+              <span className="fusion-eyebrow">Synthesis</span>
+              <h2 id="fusion-result-title">{running ? "Building one answer" : shown.status === "failed" ? "Synthesis failed" : "Synthesis ready"}</h2>
+            </div>
+            <div className="fusion-result-status">
+              <Badge tone={running ? "accent" : shown.status === "failed" ? "danger" : "success"} dot>
+                {running ? "Working" : shown.status === "failed" ? "Failed" : "Completed"}
+              </Badge>
+              {!running && <Button size="sm" variant="ghost" onClick={startAnother}>New synthesis</Button>}
+            </div>
+          </header>
+          {(promptFromLog || text) && (
+            <div className="fusion-prompt">
+              <span>{tr("fusionview.prompt")}</span>
+              <p>{promptFromLog || text}</p>
+            </div>
+          )}
+          {running ? (
+            <div className="fusion-working" role="status">
+              <Spinner label="Collecting source answers and synthesizing" />
+              <div>
+                <strong>Collecting and synthesizing</strong>
+                <span>{weights.length} sources are answering independently.</span>
+              </div>
+            </div>
+          ) : shown.error ? (
+            <div className="fusion-error">{shown.error}</div>
+          ) : (
+            <>
+              <div className="fusion-answer-card">
+                {shown.answer ? renderMarkdown(shown.answer, shown.id) : <span className="muted">No synthesis returned.</span>}
+              </div>
+              <div className="fusion-answer-actions">
+                <Button size="sm" variant="primary" disabled={!shown.answer} onClick={continueSynthesis}>Continue in chat</Button>
+                <span>{shown.sources.length} source answers · provenance available below</span>
+              </div>
+            </>
+          )}
+
+          {!running && shown.status === "completed" && (
+            <div className="fusion-evidence">
+              <details>
+                <summary>Sources and provenance ({shown.sources.length})</summary>
+                <div className="fusion-source-list">
+                  {shown.sources.map((source) => (
+                    <article key={source.model} className="fusion-source">
+                      <header>
+                        <span>
+                          <ProviderLogo providerID={providerIdFromModel(source.model)} className="fusion-provider-logo" />
+                          <strong>{source.model}</strong>
+                        </span>
+                        <Badge tone="neutral">{weightFor(source.model)}% attributed</Badge>
+                      </header>
+                      <div>{renderMarkdown(source.answer, `${shown.id}-${source.model}`)}</div>
+                    </article>
+                  ))}
+                </div>
+              </details>
+              <details>
+                <summary>Disagreements ({shown.disagreements.length})</summary>
+                {shown.disagreements.length > 0 ? (
+                  <ul className="fusion-disagreement-list">
+                    {shown.disagreements.map((disagreement, index) => <li key={index}>{disagreement}</li>)}
+                  </ul>
+                ) : (
+                  <p className="fusion-agreement">The sources agreed on the material points captured by the synthesis.</p>
+                )}
+              </details>
+            </div>
+          )}
+          {error && <div className="form-error">{error}</div>}
+        </section>
+      )}
+      {!shown && picked.length === 0 && !busy && (
+        <EmptyState title={tr("fusionview.nothingFusedYet")} description="Select source models to create one traceable synthesis." />
       )}
     </div>
   );

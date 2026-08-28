@@ -4,7 +4,7 @@
 // new session event is needed. Secrets are redacted and previews bounded
 // before anything reaches a native notification.
 
-import type { NotificationKind } from "@polyth/contracts";
+import type { BackgroundWorkState, NotificationKind } from "@polyth/contracts";
 import { tr } from "./i18n/index.ts";
 
 /** Native and centre delivery share one normative kind contract. */
@@ -17,6 +17,7 @@ export interface SessionSnapshot {
   status: string;
   parentId?: string;
   attention?: { questions: number; permissions: number };
+  backgroundWork?: BackgroundWorkState;
 }
 
 export interface NotificationSpec {
@@ -93,6 +94,24 @@ export function diffNotifications(
   for (const s of next) {
     const before = prev.get(s.id);
     if (!before) continue; // first sight: prime, never notify on replay
+
+    // -- background workflow finished ----------------------------------------
+    const result = s.backgroundWork?.lastResult;
+    if (
+      result
+      && result.id !== before.backgroundWork?.lastResult?.id
+      && opts.kinds.has(result.status === "failed" ? "failed" : "completed")
+    ) {
+      const workflow = result.kind === "multirun" ? "Multi-run" : "Fusion";
+      const status = result.status === "failed" ? `${workflow} failed` : `${workflow} finished`;
+      specs.push({
+        key: `${s.id}:background:${result.kind}:${result.id}:${result.status}`,
+        kind: result.status === "failed" ? "failed" : "completed",
+        sessionId: s.id,
+        title: s.title || tr("notifications.session"),
+        body: renderTemplate(template, varsFor(s, status)),
+      });
+    }
 
     // -- turn finished/failed -------------------------------------------------
     if (before.status === "working" && DONE.has(s.status) && s.status !== before.status) {

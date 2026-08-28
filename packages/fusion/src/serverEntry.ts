@@ -1,5 +1,6 @@
 import type { ModelRef, RouteHandler } from "@polyth/contracts";
 import {
+  publishBackgroundWork,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
@@ -43,8 +44,20 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   // M3: fusion resolves the parent session's project/runtime lazily, the same
   // way multirun does, so it works for any session.
   const fusion = createFusionService({
-    append: (sessionId, type, data) =>
-      host.events.append(sessionId, type, data, { ignorable: true }),
+    append: async (sessionId, type, data) => {
+      const event = await host.events.append(sessionId, type, data, { ignorable: true });
+      const id = typeof data.fusionId === "string" ? data.fusionId : "";
+      if (id && type === "fusion/started") {
+        await publishBackgroundWork(host, sessionId, "fusion", { phase: "started", id });
+      } else if (id && type === "fusion/completed") {
+        await publishBackgroundWork(host, sessionId, "fusion", {
+          phase: "completed",
+          id,
+          status: data.status === "failed" ? "failed" : "completed",
+        });
+      }
+      return event;
+    },
     runModel: async ({ sessionId, model, prompt }) => {
       const { rt, cwd } = await host.resolveSessionRuntime(sessionId);
       return host.oneShot(rt, {

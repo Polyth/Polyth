@@ -69,6 +69,8 @@ export function createMultirunService(deps: MultirunDeps): MultirunService {
       tokens: run.tokens as unknown as JsonObject | undefined,
       cost: run.cost,
       error: run.error,
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
     } as unknown as JsonObject);
   };
 
@@ -76,6 +78,7 @@ export function createMultirunService(deps: MultirunDeps): MultirunService {
 
   const executeRun = async (state: MultirunState, run: MultirunRunDto): Promise<void> => {
     run.status = "running";
+    run.startedAt = now();
     await emitProgress(state, run);
     try {
       await deps.runOne(
@@ -90,6 +93,7 @@ export function createMultirunService(deps: MultirunDeps): MultirunService {
       run.status = "failed";
       run.error = String(err instanceof Error ? err.message : err).slice(0, 300);
     }
+    run.finishedAt = now();
     await emitProgress(state, run);
     // Every run's own finalization checks the shared state, so two runs
     // settling in the same microtask window must not double-fire; the

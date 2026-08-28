@@ -3,7 +3,7 @@
 // ≥48px rows, pin/hide controls, an explicit Edit mode for reordering
 // favorites (§27), and a form for user-authored starters.
 import { useMemo, useState } from "react";
-import Sheet, { SheetRow, SheetSection } from "./Sheet.tsx";
+import { SheetRow, SheetSection } from "./Sheet.tsx";
 import { Icon } from "../../icons.tsx";
 import {
   deleteCustomStarter,
@@ -21,7 +21,8 @@ import {
   type StarterIconId,
 } from "../../starters.ts";
 import { tr } from "../../i18n/index.ts";
-import { Button } from "../ui/index.ts";
+import { Button, ResponsiveOverlay } from "../ui/index.ts";
+import { useShellMode } from "../../responsiveShell.ts";
 
 const ICONS: Record<StarterIconId, () => React.ReactElement> = {
   target: Icon.target,
@@ -70,6 +71,7 @@ export interface StarterPickerProps {
 
 export default function StarterPicker({ context, commands, skills, onPick, onClose }: StarterPickerProps) {
   const prefs = useStarterPrefs();
+  const phone = useShellMode() === "phone";
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<FormState | null>(null);
@@ -179,9 +181,12 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
   if (form) {
     const valid = form.label.trim() !== "" && form.prompt.trim() !== "";
     return (
-      <Sheet
+      <ResponsiveOverlay
+        open
         title={form.id ? tr("mobile.starterpicker.editStarter") : tr("mobile.starterpicker.newStarter")}
-        size="tall"
+        desktop="dialog"
+        dialogSize="md"
+        sheetSize="tall"
         className="starter-sheet"
         onClose={() => setForm(null)}
       >
@@ -238,37 +243,65 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
             >{tr("mobile.starterpicker.saveStarter")}</Button>
           </div>
         </div>
-      </Sheet>
+      </ResponsiveOverlay>
     );
   }
 
+  const search = {
+    value: query,
+    onChange: setQuery,
+    placeholder: tr("mobile.starterpicker.searchStartersCommandsSkills"),
+    ariaLabel: tr("mobile.starterpicker.searchStartersCommandsSkills"),
+  };
+  const editAction = {
+    label: editing ? tr("common.done") : tr("common.edit"),
+    pressed: editing,
+    onClick: () => setEditing((value) => !value),
+  };
+  const createAction = (
+    <button
+      type="button"
+      className="sheet-foot-action"
+      onClick={() => setForm({ label: "", prompt: "", icon: "bookmark" })}
+    >
+      <Icon.plus /><span>{tr("mobile.starterpicker.createAStarter")}</span>
+    </button>
+  );
+
   return (
-    <Sheet
+    <ResponsiveOverlay
+      open
       title={tr("mobile.starterpicker.addAStarter")}
-      size="tall"
+      desktop="dialog"
+      dialogSize="lg"
+      sheetSize="tall"
       className="starter-sheet"
       onClose={onClose}
-      search={{
-        value: query,
-        onChange: setQuery,
-        placeholder: tr("mobile.starterpicker.searchStartersCommandsSkills"),
-        ariaLabel: "Search starters",
-      }}
-      action={{
-        label: editing ? tr("common.done") : tr("common.edit"),
-        pressed: editing,
-        onClick: () => setEditing((value) => !value),
-      }}
-      footer={
-        <button
-          type="button"
-          className="sheet-foot-action"
-          onClick={() => setForm({ label: "", prompt: "", icon: "bookmark" })}
-        >
-          <Icon.plus /><span>{tr("mobile.starterpicker.createAStarter")}</span>
-        </button>
-      }
+      sheetSearch={search}
+      sheetAction={editAction}
+      sheetFooter={createAction}
+      dialogFooter={createAction}
     >
+      {!phone && (
+        <div className="sheet-search">
+          <Icon.search />
+          <input
+            type="search"
+            value={query}
+            placeholder={search.placeholder}
+            aria-label={search.ariaLabel}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-pressed={editing}
+            onClick={editAction.onClick}
+          >
+            {editAction.label}
+          </Button>
+        </div>
+      )}
       <div role="listbox" aria-label={tr("mobile.starterpicker.starters")}>
         {results
           ? results.length > 0
@@ -280,6 +313,6 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
             </SheetSection>
           ))}
       </div>
-    </Sheet>
+    </ResponsiveOverlay>
   );
 }

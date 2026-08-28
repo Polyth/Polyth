@@ -117,10 +117,13 @@
   --visual-bottom: 100dvh;
   --keyboard-inset: 0px;
   --visual-offset: 0px;
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-right: env(safe-area-inset-right, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --safe-left: env(safe-area-inset-left, 0px);
+  /* Capacitor's native safe-area bridge publishes --safe-area-inset-* on
+     Android WebViews where env() can incorrectly remain zero. Browsers and
+     iOS continue through the standards-based fallback. */
+  --safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --safe-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+  --safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --safe-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
 
   /* Deprecated semantic aliases. Do not use in new CSS. */
   --surface-0: var(--bg);

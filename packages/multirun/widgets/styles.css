@@ -1,98 +1,288 @@
 /* Package-owned multirun web styles. */
-.multirun-grid {
-display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px;
+.multirun-view {
+  container: multirun-view / inline-size;
 }
-.multirun-controls {
-display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-items: stretch;
-  gap: 8px;
-}
-.multirun-controls > .ui-picker,
-.multirun-controls > .ui-btn {
-width: 100%;
+
+.multirun-view .multirun-setup,
+.multirun-view .multirun-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
   min-width: 0;
-  max-width: 100%;
 }
-.multirun-controls > .ui-picker:nth-child(4) {
-grid-column: span 2;
+
+.multirun-view .multirun-setup {
+  padding: var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-surface);
+  background: var(--panel);
 }
-.multirun-prompt {
-min-height: 68px;
+
+.multirun-view .multirun-setup h2,
+.multirun-view .multirun-results h2 {
+  margin: 0;
+  font-size: var(--font-heading);
+}
+
+.multirun-view .multirun-setup p,
+.multirun-view .multirun-results p {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+}
+
+.multirun-view .multirun-prompt {
+  min-height: calc(var(--control-h-lg) + var(--space-5));
   flex: none;
   line-height: 1.4;
 }
-.view-toolbar > .model-filter-input {
-height: var(--tap);
-  min-height: var(--tap);
+
+.multirun-view .model-filter-input {
+  width: 100%;
   flex: none;
-  flex-basis: auto;
   font-family: var(--mono);
 }
-.run-card {
-display: flex; flex-direction: column;
-  border: 1px solid var(--border-soft); border-radius: var(--radius-lg); background: var(--panel);
+
+.multirun-view .multirun-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.multirun-view .multirun-controls > .ui-picker {
+  width: 100%;
+  min-width: 0;
+}
+
+.multirun-view .multirun-controls > .ui-picker:nth-child(4) {
+  grid-column: 1 / -1;
+}
+
+.multirun-view .multirun-launch,
+.multirun-view .multirun-results-head,
+.multirun-view .multirun-summary-states,
+.multirun-view .multirun-detail-head,
+.multirun-view .multirun-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.multirun-view .multirun-launch,
+.multirun-view .multirun-results-head,
+.multirun-view .multirun-detail-head {
+  justify-content: space-between;
+}
+
+.multirun-view .multirun-launch > span,
+.multirun-view .multirun-cost-note,
+.multirun-view .multirun-detail-meta,
+.multirun-view .multirun-overview-status small,
+.multirun-view .multirun-total-cost {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.multirun-view .multirun-cost-note {
+  margin: calc(-1 * var(--space-2)) 0 0;
+}
+
+.multirun-view .multirun-results-head > div {
+  min-width: 0;
+}
+
+.multirun-view .multirun-prompt-echo {
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 65ch;
 }
-.run-card.picked {
-border-color: var(--accent);
+
+.multirun-view .multirun-summary {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) auto;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--elevated);
 }
-.run-card-head {
-padding: 12px 14px; border-bottom: 1px solid var(--border-soft);
-  display: flex; flex-direction: column; gap: 4px;
+
+.multirun-view .multirun-summary-states {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
-.run-card-title {
-display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 13px;
+
+.multirun-view .multirun-tabs {
+  overflow-x: auto;
+  scrollbar-gutter: stable;
 }
-.run-model-name {
-overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+
+.multirun-view .multirun-tab-label,
+.multirun-view .multirun-run-identity,
+.multirun-view .multirun-run-identity > span,
+.multirun-view .multirun-overview-status {
+  display: flex;
 }
-.run-card-agent {
-color: var(--muted); font-size: 11px;
+
+.multirun-view .multirun-tab-label,
+.multirun-view .multirun-run-identity > span,
+.multirun-view .multirun-overview-status {
+  flex-direction: column;
 }
-.run-card-body {
-padding: 12px 14px; flex: 1; min-height: 90px; max-height: 320px; overflow: auto; font-size: 12.5px; color: var(--text-dim);
+
+.multirun-view .multirun-tab-label {
+  align-items: flex-start;
+  gap: var(--space-1);
 }
-.run-card-meta {
-display: flex; gap: 12px; padding: 8px 14px; border-top: 1px solid var(--border-soft);
-  font-family: var(--mono); font-size: 11px; color: var(--muted);
+
+.multirun-view .multirun-tab-label small,
+.multirun-view .multirun-run-identity small {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 400;
 }
-.run-error {
-color: var(--red); font-size: 12px;
+
+.multirun-view .multirun-run-identity {
+  align-items: center;
+  min-width: 0;
+  gap: var(--space-2);
+  text-align: start;
 }
-.pick-btn {
-margin: 10px 14px;
+
+.multirun-view .multirun-run-identity strong,
+.multirun-view .multirun-run-identity small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-@container feature-panel (max-width: 1100px) {
-.multirun-grid {
-grid-template-columns: 1fr;
+
+.multirun-view .multirun-provider-logo {
+  width: var(--icon-xl);
+  height: var(--icon-xl);
+  flex: none;
 }
+
+.multirun-view .multirun-tab-panel {
+  min-width: 0;
 }
-.run-provider-logo {
-width: 22px; height: 22px;
+
+.multirun-view .multirun-detail {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-surface);
+  background: var(--panel);
 }
-.run-card {
-min-width: 0;
+
+.multirun-view .multirun-detail.is-picked {
+  border-color: var(--accent-line);
 }
-.run-card-body :is(pre, table) {
-display: block;
+
+.multirun-view .multirun-detail-head {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.multirun-view .multirun-detail-meta {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  font-family: var(--mono);
+  background: var(--surface-overlay);
+}
+
+.multirun-view .multirun-output {
+  min-height: calc(var(--control-h-lg) * 2);
+  max-height: min(52dvh, 32rem);
+  padding: var(--space-4);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  color: var(--text-dim);
+}
+
+.multirun-view .multirun-output :is(pre, table) {
+  display: block;
   max-width: 100%;
   overflow-x: auto;
 }
-@container feature-panel (max-width: 700px) {
-.multirun-controls {
-grid-template-columns: minmax(0, 1fr);
+
+.multirun-view .multirun-error {
+  color: var(--red);
+  font-size: var(--font-meta);
 }
 
-.multirun-controls > .ui-picker:nth-child(4) {
-grid-column: auto;
+.multirun-view .multirun-detail-actions {
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border-soft);
 }
 
-.multirun-grid {
-grid-template-columns: minmax(0, 1fr);
+.multirun-view .multirun-overview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
-.run-card-body {
-max-height: min(48dvh, 360px);
+.multirun-view .multirun-overview-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: max(var(--control-h-lg), var(--hit-min));
+  padding: var(--space-3);
+  color: var(--text);
+  text-align: start;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-card);
+  background: var(--panel);
+  cursor: pointer;
 }
+
+.multirun-view .multirun-overview-row:hover {
+  background: var(--raised);
+}
+
+.multirun-view .multirun-overview-status {
+  align-items: flex-end;
+  gap: var(--space-1);
+  flex: none;
+}
+
+.multirun-view .multirun-phone-detail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.multirun-view .multirun-phone-detail .multirun-detail {
+  width: 100%;
+}
+
+.multirun-view .multirun-pending {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+@container multirun-view (max-width: 44rem) {
+  .multirun-view .multirun-controls,
+  .multirun-view .multirun-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .multirun-view .multirun-controls > .ui-picker:nth-child(4) {
+    grid-column: auto;
+  }
+
+  .multirun-view .multirun-launch,
+  .multirun-view .multirun-results-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .multirun-view .multirun-summary-states {
+    justify-content: flex-start;
+  }
 }

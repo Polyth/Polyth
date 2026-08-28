@@ -943,6 +943,10 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         if (cost !== undefined) run.cost = cost;
         const error = str(d, "error");
         if (error !== undefined) run.error = error;
+        const startedAt = num(d, "startedAt");
+        if (startedAt !== undefined) run.startedAt = startedAt;
+        const finishedAt = num(d, "finishedAt");
+        if (finishedAt !== undefined) run.finishedAt = finishedAt;
       }
       break;
     }
@@ -1009,6 +1013,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         answer: "",
         weights: models.map((m) => ({ model: m, weight: 0 })),
         disagreements: [],
+        sources: [],
         status: "running",
       };
       break;
@@ -1022,11 +1027,19 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         })
         .filter((w) => w.model);
       const status = str(d, "status");
+      const sourcesRaw = Array.isArray(d.sources) ? d.sources : [];
+      const sources = sourcesRaw
+        .map((raw) => {
+          const source = (raw && typeof raw === "object" ? raw : {}) as JsonObject;
+          return { model: str(source, "model") ?? "", answer: str(source, "answer") ?? "" };
+        })
+        .filter((source) => source.model);
       model.fusion = {
         id: str(d, "fusionId") ?? model.fusion?.id ?? "",
         answer: str(d, "answer") ?? "",
         weights,
         disagreements: strArr(d, "disagreements"),
+        sources,
         status: status === "failed" || status === "running" || status === "completed" ? status : "completed",
         ...(str(d, "error") ? { error: str(d, "error") } : {}),
       };

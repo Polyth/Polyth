@@ -445,7 +445,7 @@ test("the phone shell restores session navigation below a swipeable shortcut rai
   const css = await readWebStyles();
 
   assert.ok(header.includes("<MobileNavigationRail />"), "the phone header is the shortcut rail");
-  assert.equal(header.match(/<WorkspaceBottomNav \/>/g)?.length, 2, "phone and tablet shells mount the session bar");
+  assert.equal(header.match(/<WorkspaceBottomNav \/>/g)?.length, 1, "only the phone shell mounts the session bar");
   assert.doesNotMatch(bottom, />Recents</, "the Recents action is icon-only");
   assert.doesNotMatch(bottom, />New chat</, "the New chat action is icon-only");
   assert.ok(bottom.includes("shell.commandPalette"), "Search keeps an accessible name");

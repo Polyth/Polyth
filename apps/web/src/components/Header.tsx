@@ -307,6 +307,7 @@ function UserMenu({ githubUser }: { githubUser: GithubStatusDto["user"] }) {
 export default function Header() {
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const project = useStore((s) => s.projectRegistry.projects.find((p) => p.id === s.activeProjectId) ?? null);
+  const models = useStore((s) => s.models);
   const model = useActiveModel();
   const view = useStore((s) => s.activeView);
   const workspaceMode = useWorkspaceMode();
@@ -315,6 +316,14 @@ export default function Header() {
   const mode = useShellMode();
   const compact = mode !== "wide";
   const chatSurface = workspaceMode === "chat" && view === "session";
+  const activeModel = model.contextUsage?.model ?? model.turn?.model ?? session?.model;
+  const activeModelDescriptor = activeModel
+    ? models.find((candidate) =>
+        candidate.providerID === activeModel.providerID
+        && candidate.modelID === activeModel.modelID)
+    : undefined;
+  const gauge = contextGauge(model, activeModelDescriptor?.context);
+  const showContextRing = mode === "wide" && gauge.known && gauge.percent >= 60;
   useResizeFocusHandoff(mode);
   const switchWorkspaceMode = (next: "chat" | "widgets" | "edit") => {
     closeWorkspacePane();
@@ -388,6 +397,7 @@ export default function Header() {
         <span className="header-spacer" />
         {(!compact || !chatSurface) && (
           <div className="header-actions" aria-label={tr("header.application")}>
+            {showContextRing && <ContextRing gauge={gauge} />}
             {workspaceMode === "chat" && session && (
               <SlotHost
                 slot="session.header.actions"
@@ -404,7 +414,6 @@ export default function Header() {
         {(!compact || !chatSurface) && <UserMenu githubUser={githubUser} />}
         <SlotHost slot="app.window.controls" />
       </header>
-      {compact && <WorkspaceBottomNav />}
     </>
   );
 }

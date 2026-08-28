@@ -43,7 +43,15 @@ export type AppView = "session" | "goals" | "multirun" | "workflow" | "fusion" |
 export type LegacyPaneViewId = "files" | "git" | "terminal" | "preview";
 const LEGACY_PANE_VIEWS: readonly string[] = ["files", "git", "terminal", "preview"];
 const PRIMARY_VIEWS: readonly string[] = ["session", "goals", "multirun", "workflow", "fusion", "walkthrough", "schedule", "github"];
-export type Overlay = "onboarding" | "project-picker" | "palette" | "search" | "settings" | "worktree-session" | null;
+export type Overlay =
+  | "onboarding"
+  | "project-picker"
+  | "palette"
+  | "search"
+  | "settings"
+  | "starter-picker"
+  | "worktree-session"
+  | null;
 /** Right-rail surface id (F17): a registry id such as "files" or a
  *  plugin-contributed "slot:…" id — no longer a closed union. */
 export type RailPlugin = string;

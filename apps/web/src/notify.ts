@@ -10,8 +10,17 @@ import {
   type NotifyKind,
   type SessionSnapshot,
 } from "./notifications.ts";
+import { isNativeMobile } from "@polyth/mobile/runtime";
+import {
+  requestNativeNotificationPermission,
+  showNativeLocalNotification,
+} from "@polyth/mobile/native";
 
 export function requestNotifyPermission(): void {
+  if (isNativeMobile()) {
+    void requestNativeNotificationPermission().catch(() => undefined);
+    return;
+  }
   if (typeof Notification !== "undefined" && Notification.permission === "default") {
     void Notification.requestPermission();
   }
@@ -36,6 +45,17 @@ function beep(): void {
 }
 
 function showNative(spec: NotificationSpec): void {
+  if (isNativeMobile()) {
+    let id = 17;
+    for (const character of spec.key) id = (id * 31 + character.charCodeAt(0)) & 0x7fffffff;
+    void showNativeLocalNotification({
+      id: Math.max(1, id),
+      title: `Polyth — ${spec.title}`,
+      body: spec.body,
+      extra: { sessionId: spec.sessionId },
+    }).catch(() => undefined);
+    return;
+  }
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
   const n = new Notification(`Polyth — ${spec.title}`, {
     body: spec.body,
@@ -64,6 +84,7 @@ export function installNotify(): void {
       status: p.status,
       ...(p.parentId ? { parentId: p.parentId } : {}),
       ...(p.attention ? { attention: { questions: p.attention.questions, permissions: p.attention.permissions } } : {}),
+      ...(p.backgroundWork ? { backgroundWork: p.backgroundWork } : {}),
     }));
     const specs = diffNotifications(prev, snapshots, {
       kinds: new Set<NotifyKind>(ui.notifyKinds),
