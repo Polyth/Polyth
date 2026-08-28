@@ -59,6 +59,11 @@ test("desktop rail width and header geometry include the separate icon strip", a
     /\.rail-head\s*\{[^}]*min-height:\s*60px/s,
     "the panel head aligns with the desktop application header",
   );
+  assert.doesNotMatch(
+    css,
+    /body\[data-density="compact"\] \.rail-head/,
+    "desktop density preferences must not break shell header alignment",
+  );
 });
 
 // UX-PANE-MODEL: registered panes and capabilities without a panel body use

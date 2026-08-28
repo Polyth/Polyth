@@ -2661,7 +2661,6 @@ position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
 
 /* ---------- local UI settings (body data attributes) ---------- */
 body[data-density="compact"] .header { min-height: 44px; padding-block: 4px; }
-body[data-density="compact"] .rail-head { min-height: 44px; }
 body[data-density="compact"] .timeline { gap: 8px; padding-top: 16px; }
 body[data-density="compact"] .bubble { padding: 8px 11px; }
 body[data-density="compact"] .composer { padding-block: 8px; }
