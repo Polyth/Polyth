@@ -241,8 +241,8 @@ test("Focus uses compact mobile composer controls without editor chrome", async 
   // second standalone upload chip anywhere.
   assert.ok(composer.includes("<ComposerAddMenu"), "the Add menu is the single plus control");
   assert.ok(
-    composer.includes("onUpload={() => fileInputRef.current?.click()}"),
-    "the Add menu drives the shared file input",
+    composer.includes("onUpload={openAttachmentPicker}"),
+    "the Add menu drives the platform-aware shared file picker",
   );
   assert.ok(!composer.includes('label={tr("composer.addFiles")}'), "no separate upload chip remains");
   assert.ok(!composer.includes("<Icon.focus />"), "Focus removes the focused-editor header action");
