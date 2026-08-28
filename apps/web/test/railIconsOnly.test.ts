@@ -37,6 +37,30 @@ test("ContextRail omits the bottom add and More button group", async () => {
   assert.ok(!src.includes("moreToolsPicker"), "the old bottom button group is gone");
 });
 
+test("desktop rail width and header geometry include the separate icon strip", async () => {
+  const css = await stylesSource();
+  assert.match(
+    css,
+    /\.rail\s*\{[^}]*width:\s*var\(--rail-w,\s*300px\)[^}]*flex:\s*0 1 var\(--rail-w,\s*300px\)/s,
+    "the panel leaves room for the icon strip inside the 344px rail host",
+  );
+  assert.match(
+    css,
+    /\.plugin-strip\s*\{[^}]*width:\s*var\(--tap\)[^}]*min-width:\s*var\(--tap\)/s,
+    "the icon strip consumes the shared 44px tap dimension",
+  );
+  assert.match(
+    css,
+    /\.rail-icon-col\s*\{[^}]*margin-top:\s*0/s,
+    "the desktop strip reaches the header boundary without a top gap",
+  );
+  assert.match(
+    css,
+    /\.rail-head\s*\{[^}]*min-height:\s*60px/s,
+    "the panel head aligns with the desktop application header",
+  );
+});
+
 // UX-PANE-MODEL: registered panes and capabilities without a panel body use
 // the same strip launcher contract.
 test("ContextRail has no JUMPS rows — every placed capability gets a launcher", async () => {

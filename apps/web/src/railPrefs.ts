@@ -10,7 +10,7 @@ export interface RailPrefs {
 
 export const RAIL_PREFS_KEY = "polyth.railPrefs";
 
-export const RAIL_WIDTH_DEFAULT = 344;
+export const RAIL_WIDTH_DEFAULT = 300;
 export const RAIL_WIDTH_MIN = 240;
 export const RAIL_WIDTH_MAX = 640;
 

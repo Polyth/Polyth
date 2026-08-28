@@ -1660,8 +1660,8 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
   /* The preferred width yields when the chat column hits its minimum
      (cramped wide viewports with an open rail), instead of pushing header
      controls over the rail. 200px keeps panel content usable. */
-  width: var(--rail-w, 344px); min-width: min(var(--rail-w, 344px), 200px);
-  flex: 0 1 var(--rail-w, 344px);
+  width: var(--rail-w, 300px); min-width: min(var(--rail-w, 300px), 200px);
+  flex: 0 1 var(--rail-w, 300px);
   background: var(--panel); border-left: 1px solid var(--border-soft);
   display: flex; flex-direction: column;
   position: relative;
@@ -1673,14 +1673,14 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
 }
 .rail-resize:hover { background: var(--accent-line); }
 .rail.closed { width: 48px; min-width: 48px; align-items: center; padding-top: 6px; }
-.rail-icon-col { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.rail-icon-col { display: flex; flex-direction: column; gap: var(--space-1); margin-top: 0; }
 .rail-icon {
   display: grid; place-items: center; width: 32px; height: 32px; padding: 0;
   border: none; border-radius: var(--radius-sm); color: var(--muted); background: transparent;
 }
 .rail-icon:hover { color: var(--text); background: var(--elevated); border-color: transparent; }
 .rail-icon.active { color: var(--accent); background: var(--accent-wash); }
-.rail-head { display: flex; align-items: center; min-height: 56px; padding: 0 8px; border-bottom: 1px solid var(--border-soft); }
+.rail-head { display: flex; align-items: center; min-height: 60px; padding: 0 8px; border-bottom: 1px solid var(--border-soft); }
 .rail-tabs { display: flex; flex: 1; gap: 2px; }
 .rail-tabs .tab {
   flex: 1; background: transparent; border: none; border-radius: var(--radius-sm);
@@ -8174,7 +8174,7 @@ opacity: 1;
 .strip-btn { width: 40px; height: 40px; }
 /* Keep desktop rail actions compact; coarse-pointer layouts expand them below. */
 .sidebar-resize { right: -6px; width: 12px; }
-.plugin-strip { width: 44px; min-width: 44px; gap: 3px; }
+.plugin-strip { width: var(--tap); min-width: var(--tap); }
 .strip-btn { width: 32px; height: 32px; }
 .prompt-nav { width: 44px; }
 .prompt-nav-tick { width: 44px; height: 24px; }
