@@ -33,7 +33,7 @@ import {
 } from "./ui/index.ts";
 
 const folderIcon = (
-  <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+  <svg className="ui-icon ui-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M3 6.5h7l2 2h9v10H3z" />
   </svg>
 );

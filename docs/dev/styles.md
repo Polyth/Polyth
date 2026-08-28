@@ -94,6 +94,7 @@ Read this guide before editing UI or CSS.
 | `--space-6` | 32px spacing step. |
 | `--gutter` | Standard desktop content gutter; aliases `--space-5`. |
 | `--screen-gutter` | Compact/phone screen gutter; aliases `--space-4`. |
+| `--chat-measure` | Shared reading measure for the chat timeline, composer, and inline conversation widgets. |
 | `--tap` | Minimum 44px interactive hit dimension. |
 | `--control-h-sm` | Compact 32px control visual. |
 | `--control-h` | Standard 40px control visual. |

@@ -191,7 +191,7 @@ export default function Sheet({
         </div>
         {search && (
           <div className="sheet-search">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+            <svg className="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
               <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" />
             </svg>
             <input
@@ -220,7 +220,7 @@ export default function Sheet({
                 aria-label={tr("mobile.sheet.clearSearch")}
                 onClick={() => search.onChange("")}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <svg className="ui-icon ui-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                   <path d="m6 6 12 12M18 6 6 18" />
                 </svg>
               </button>
@@ -286,7 +286,7 @@ export function SheetRow({ title, meta, icon, selected, onClick, trailing, ariaL
         </span>
         {selected && (
           <span className="sheet-row-check" aria-hidden="true">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg className="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="m5 12 4 4L19 6" />
             </svg>
           </span>

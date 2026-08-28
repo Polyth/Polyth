@@ -294,7 +294,7 @@ export default function MultiRunView() {
           />
           <TextInput
             uiSize="sm"
-            className="model-filter-input"
+            className="multirun-model-filter"
             placeholder={tr("multirunview.filterModels")}
             value={modelFilter}
             onChange={(e) => setModelFilter(e.target.value)}

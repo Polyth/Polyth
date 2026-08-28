@@ -36,7 +36,7 @@
   line-height: 1.4;
 }
 
-.multirun-view .model-filter-input {
+.multirun-view .multirun-model-filter {
   width: 100%;
   flex: none;
   font-family: var(--mono);

@@ -212,7 +212,7 @@ export default function WidgetLibraryOverlay({
           <button type="button" className="widget-library-clear" disabled={!hasFilters} onClick={resetFilters}>{tr("settings.widgetlibraryoverlay.clearFilters")}</button>
         </div>
 
-        <div className="widget-library-tabs" role="tablist" aria-label={tr("settings.widgetlibraryoverlay.widgetCollections")}>
+        <div className="widget-library-tabs ui-scroll-tabs" role="tablist" aria-label={tr("settings.widgetlibraryoverlay.widgetCollections")}>
           {([
             ["recommended", tr("projectsetup.recommended")],
             ["plugin", tr("settings.widgetlibraryoverlay.byPlugin")],

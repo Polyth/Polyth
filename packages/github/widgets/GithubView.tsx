@@ -270,7 +270,7 @@ export default function GithubView() {
               <TextInput value={query} placeholder={tr("githubview.searchValue", { value: tab === "issues" ? tr("githubview.issuesLabel") : tr("githubview.pullRequestsLabel") })} aria-label={tr("githubview.searchValue", { value: tab === "issues" ? tr("githubview.issuesLabel") : tr("githubview.pullRequestsLabel") })} onChange={(event) => setQuery(event.target.value)} />
               {query && <IconButton className="source-search-clear" icon={CloseIcon} label={tr("githubview.clearSearch")} onClick={() => setQuery("")} />}
             </div>
-            <div className="gh-filter-chips" aria-label={tr("githubview.filterList")}>
+            <div className="gh-filter-chips ui-scroll-tabs" aria-label={tr("githubview.filterList")}>
               {filters.map((item) => <Button size="sm" variant="ghost" key={item.id} className={filter === item.id ? "active" : ""} aria-pressed={filter === item.id} onClick={() => setFilter(item.id)}>{item.label}</Button>)}
             </div>
           </div>

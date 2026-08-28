@@ -69,7 +69,7 @@ function ServerEndpointForm({ server, onSaved }: { server: VoiceSettingsDto; onS
 
       {msg && <div className={saveFailed ? "form-error" : "knowledge-notice"}>{msg}</div>}
       <div className="mcp-form-row">
-        <span className="muted" style={{ fontSize: "calc(11.5px * var(--ui-font-scale, 1))" }}>
+        <span className="muted voice-form-note">
           {tr("settings.voicepage.keysAreReadFromTheServerS")}</span>
         <span className="header-spacer" />
         <Button size="sm" variant="primary" busy={busy} onClick={() => void save()}>{tr("settings.voicepage.saveServerSettings")}</Button>

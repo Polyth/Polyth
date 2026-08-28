@@ -4,7 +4,7 @@ display: inline-flex; align-items: center; gap: 6px; min-width: 0;
 }
 .mic-btn {
 display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0;
-  border: 0; border-radius: calc(8px * var(--corner-radius-scale));
+  border: 0; border-radius: var(--radius-control);
   background: transparent; color: var(--muted);
 }
 .mic-btn:hover {
@@ -20,7 +20,7 @@ color: var(--red); border-color: transparent; background: var(--red-wash); anima
 display: grid; place-items: center;
 }
 .mic-status {
-font-size: 11.5px; color: var(--muted); min-width: 0;
+font-size: var(--font-meta); color: var(--muted); min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px;
 }
 .mic-failed .mic-status {
@@ -33,12 +33,12 @@ color: var(--text-dim);
 }
 @media (pointer: coarse) {
 .mic-btn {
-min-height: 44px; min-width: 44px;
+min-height: var(--tap); min-width: var(--tap);
 }
 }
 @media (max-width: 640px) {
 .mic-btn {
-min-height: 44px;
+min-height: var(--tap);
 }
 
 .mic-status {
@@ -53,7 +53,7 @@ min-height: 32px; min-width: 0;
 body[data-dictate="false"] .mic-btn {
 display: none !important;
 }
-.composer .composer-mobile-extensions .mic-btn {
+.composer-mobile-extensions .mic-btn {
 width: var(--control-h);
   min-width: var(--control-h);
   height: var(--control-h);
@@ -61,14 +61,14 @@ width: var(--control-h);
   border-radius: var(--radius-control);
 }
 @media (pointer: coarse) {
-.composer .composer-mobile-extensions .mic-btn {
+.composer-mobile-extensions .mic-btn {
 width: var(--tap);
   min-width: var(--tap);
   height: var(--tap);
 }
 }
 .mic-icon > svg {
-width: 20px; height: 20px;
+width: var(--icon-lg); height: var(--icon-lg);
 }
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
 .composer-mobile .composer-mobile-extensions .mic-control {
@@ -108,16 +108,17 @@ display: none;
 .mic-icon > svg {
 transform: none;
 }
+/* Only the package-owned mic button; composer-owned controls get their tap
+   floor from core styles. */
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-.composer-actions :is(
-    .composer-add-files,
-    .composer-add-trigger,
-    .mic-btn,
-    .icon-btn
-  ) {
+.composer-actions .mic-btn {
 width: var(--tap);
     min-width: var(--tap);
     height: var(--tap);
     min-height: var(--tap);
 }
+}
+/* Settings form footnote keeps the shared meta role. */
+.voice-form-note {
+font-size: var(--font-meta);
 }

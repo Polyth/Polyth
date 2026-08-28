@@ -43,7 +43,7 @@ export function NotificationBell({ centre = notificationCentre }: { centre?: Not
       aria-expanded={open}
       onClick={() => toggleRailPlugin(NOTIFICATION_SURFACE_ID)}
     >
-      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" {...STROKE}>
+      <svg className="ui-icon ui-icon--sm" viewBox="0 0 16 16" aria-hidden="true" {...STROKE}>
         <path d="M8 2a4 4 0 0 0-4 4v2.6L2.8 11.2h10.4L12 8.6V6a4 4 0 0 0-4-4z" />
         <path d="M6.6 13.2a1.5 1.5 0 0 0 2.8 0" />
       </svg>

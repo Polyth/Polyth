@@ -1185,7 +1185,7 @@ export default function Composer({
       >
         <div className="composer-card">
           <div className="session-loading" role="status">
-            <span className="spinner" aria-hidden="true" />
+            <span className="ui-spinner ui-spinner--sm" aria-hidden="true" />
             <span>{tr("workspace.builtinsurfaces.loadingSession")}</span>
           </div>
         </div>

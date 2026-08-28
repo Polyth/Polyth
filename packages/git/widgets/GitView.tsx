@@ -530,7 +530,7 @@ export default function GitView() {
       )}
 
       <Tabs
-        className="source-tabs"
+        className="source-tabs ui-scroll-tabs"
         size="sm"
         label={tr("gitview.sourceControlViews")}
         value={tab}
@@ -734,7 +734,7 @@ export default function GitView() {
               <TextInput uiSize="sm" value={graphQuery} placeholder={tr("gitview.searchCommitsAuthorsOrRefs")} aria-label={tr("gitview.searchCommitLog")} onChange={(event) => setGraphQuery(event.target.value)} />
               {graphQuery && <IconButton icon={CloseIcon} size="sm" variant="ghost" className="source-search-clear" label={tr("gitview.clearSearch")} onClick={() => setGraphQuery("")} />}
             </div>
-            <div className="git-ref-chips" aria-label={tr("gitview.filterByBranch")}>
+            <div className="git-ref-chips ui-scroll-tabs" aria-label={tr("gitview.filterByBranch")}>
               <Button size="sm" variant="ghost" className={!graphRef ? "active" : ""} aria-pressed={!graphRef} onClick={() => setGraphRef("")}>{tr("gitview.allBranches")}</Button>
               {branchChips.map((ref) => <Button size="sm" variant="ghost" key={ref} className={graphRef === ref ? "active" : ""} aria-pressed={graphRef === ref} onClick={() => setGraphRef(ref)}>{ref}</Button>)}
             </div>

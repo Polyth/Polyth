@@ -48,7 +48,7 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
   assert.match(styles, /\.session-worktree-actions\s*\{[\s\S]*?flex: none;/);
   assert.match(styles, /\.session-worktree-head:hover \.session-worktree-actions,[\s\S]*?opacity: 1;/);
   assert.doesNotMatch(styles, /\.project-tree-sessions::before/);
-  assert.match(styles, /\.session-btn::before\s*\{[\s\S]*?border-radius:\s*calc\(8px \* var\(--corner-radius-scale\)\)/);
+  assert.match(styles, /\.session-btn::before\s*\{[\s\S]*?border-radius:\s*var\(--radius-control\)/);
   assert.match(styles, /\.sidebar-drawer-header\s*\{[\s\S]*?var\(--safe-top\)/,
     "the compact drawer has a safe-area-aware identity bar");
   assert.match(styles, /\.sidebar \.project-new-session,\s*\.sidebar \.project-menu-btn\s*\{\s*width:\s*var\(--tap\);\s*height:\s*var\(--tap\);/,

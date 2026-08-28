@@ -137,7 +137,7 @@ export function useRailSurfaceModel(): RailSurfaceModel {
 }
 
 const PANEL_ICON = (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+  <svg className="ui-icon ui-icon--sm" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <rect x="1.8" y="2.8" width="12.4" height="10.4" rx="2" />
     <path d="M9.8 2.8v10.4" />
   </svg>

@@ -65,7 +65,7 @@ export default function WalkthroughView() {
         />
         <span className="header-spacer" />
         {mode === "session" && steps.length > 0 && (
-          <span className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))", marginRight: 8, whiteSpace: "nowrap" }}>
+          <span className="muted wt-progress">
             {tr("walkthroughview.step")}{" "}{index + 1}/{steps.length} · {approved} ✓ · {rejected} ✕
           </span>
         )}
@@ -100,7 +100,7 @@ export default function WalkthroughView() {
           <div className="wt-card">
             <div className="wt-file" title={step.file}>
               {step.file}
-              <span className="ctx-badge" style={{ marginLeft: 8 }}>{step.status}</span>
+              <span className="ctx-badge wt-status-badge">{step.status}</span>
             </div>
             <pre className="wt-diff">
               {parseDiffLines(step.diff).map((line, i) => (

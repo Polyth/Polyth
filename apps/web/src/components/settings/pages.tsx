@@ -951,7 +951,7 @@ export function AgentsPage() {
         </div>
       )}
       {editingRole && <RoleEditor role={editingRole} onClose={() => setEditingRole(null)} />}
-      <div className="stat-label" style={{ display: "flex", alignItems: "center", gap: 8 }} data-settings-item="agents.profiles">
+      <div className="stat-label stat-label-row" data-settings-item="agents.profiles">
         <span>{tr("settings.pages.agentProfiles")}{profiles.length})</span>
         <span className="header-spacer" />
         <Button size="sm" onClick={() => setCreating(true)}>{tr("settings.pages.profile")}</Button>

@@ -193,7 +193,7 @@ const PaneHost = forwardRef<PaneHostHandle, PaneHostProps>(function PaneHost(
   return (
     <section className="editor-pane">
       {pane.tabs.length > 0 && (
-        <div className="pane-tabs" role="tablist" aria-label={tr("workspace.panehost.openResources")}>
+        <div className="pane-tabs ui-scroll-tabs" role="tablist" aria-label={tr("workspace.panehost.openResources")}>
           {pane.tabs.map((t, index) => (
             <div
               key={t.id}

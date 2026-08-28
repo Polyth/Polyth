@@ -463,7 +463,7 @@ function SessionRow({
           <span className="session-status-zone">
             {opening ? (
               <span className="session-opening-indicator" title={tr("common.loading")} aria-label={tr("common.loading")}>
-                <span className="spinner" aria-hidden="true" />
+                <span className="ui-spinner ui-spinner--sm" aria-hidden="true" />
               </span>
             ) : (
               <>

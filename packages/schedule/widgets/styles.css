@@ -3,7 +3,7 @@
 display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 0;
 }
 .sched-form {
-display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--hair-strong); border-radius: var(--radius-lg); background: var(--elevated); padding: 14px 16px; box-shadow: var(--inset-hi);
+display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--elevated); padding: 14px 16px; box-shadow: var(--inset-hi);
 }
 .sched-form .ui-textarea {
 width: 100%; resize: vertical;
@@ -13,7 +13,7 @@ display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-s
 }
 .sched-card {
 display: flex; gap: 12px; align-items: flex-start; justify-content: space-between;
-  border: 1px solid var(--hair-strong); border-radius: var(--radius-lg); background: var(--elevated); padding: 14px 16px; box-shadow: var(--inset-hi);
+  border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--elevated); padding: 14px 16px; box-shadow: var(--inset-hi);
 }
 .sched-card.paused {
 opacity: 0.6;
@@ -25,24 +25,24 @@ min-width: 0; display: flex; flex-direction: column; gap: 4px;
 font-size: 13.5px; line-height: 1.5; overflow-wrap: anywhere;
 }
 .sched-meta {
-display: flex; flex-wrap: wrap; gap: 6px; color: var(--muted); font-size: 11.5px;
+display: flex; flex-wrap: wrap; gap: 6px; color: var(--muted); font-size: var(--font-meta);
 }
 .sched-actions {
 display: flex; gap: 6px; flex-shrink: 0;
 }
 .sched-preview {
-border: 1px solid var(--hair-strong); border-radius: var(--radius-sm); padding: 9px 11px;
+border: 1px solid var(--hair-strong); border-radius: var(--radius-control); padding: 9px 11px;
   background: var(--sunken); display: flex; flex-direction: column; gap: 3px; font-size: 12px;
 }
 .sched-preview-desc {
 color: var(--text);
 }
 .sched-preview-runs {
-color: var(--muted); font-family: var(--mono); font-size: 11.5px;
+color: var(--muted); font-family: var(--mono); font-size: var(--font-meta);
 }
 .sched-loop-badge {
 display: inline-block; margin-right: 6px; padding: 1px 6px; border-radius: 999px;
-  font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+  font-size: var(--font-meta); text-transform: uppercase; letter-spacing: 0.05em;
   color: var(--accent); border: 1px solid var(--accent);
 }
 .sched-runs {
@@ -67,7 +67,7 @@ background: var(--amber);
 background: var(--muted);
 }
 .sched-run-error {
-color: var(--red); font-size: 11.5px;
+color: var(--red); font-size: var(--font-meta);
 }
 .sched-every-value {
 width: min(100%, 96px);
@@ -132,4 +132,11 @@ flex-basis: 100%; padding-left: 16px;
 .sched-actions {
 grid-template-columns: minmax(0, 1fr);
 }
+}
+
+/* Rule moved from core styles.css: schedule run errors. */
+.run-error { color: var(--red); font-size: var(--font-meta); }
+
+.sched-stat-label {
+  margin: 0;
 }

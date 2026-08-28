@@ -307,7 +307,7 @@ export default function ScheduleView() {
       </div>
 
       <div className="view-toolbar-row">
-        <span className="stat-label" style={{ margin: 0 }}>{tr("scheduleview.tasks")}</span>
+        <span className="stat-label sched-stat-label">{tr("scheduleview.tasks")}</span>
         <span className="header-spacer" />
         <Button size="sm" title={tr("scheduleview.rescanAgentsLoopsForMarkdownManagedTasks")} onClick={rescan}>{tr("scheduleview.rescanLoops")}</Button>
       </div>

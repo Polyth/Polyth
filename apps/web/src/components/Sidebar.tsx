@@ -485,7 +485,7 @@ export default function Sidebar() {
               role="status"
               aria-live="polite"
             >
-              <span className="spinner" aria-hidden="true" />
+              <span className="ui-spinner ui-spinner--sm" aria-hidden="true" />
               <span>{pullRefreshing ? tr("common.loading") : tr("common.refresh")}</span>
             </div>
           )}

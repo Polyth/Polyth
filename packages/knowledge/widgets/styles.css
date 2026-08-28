@@ -2,9 +2,6 @@
 .knowledge-notice {
 color: var(--green); font-size: 12px;
 }
-.pr-conflict-agent-area > .knowledge-notice {
-grid-column: 1 / -1; margin: 0;
-}
 .knowledge-panel,
 .knowledge-editor {
 display: flex; flex-direction: column; gap: 8px;
@@ -16,14 +13,14 @@ flex: 1;
 align-self: flex-start;
 }
 .knowledge-card {
-border: 1px solid var(--hair-strong); border-radius: var(--radius-lg); padding: 10px 11px;
+border: 1px solid var(--hair-strong); border-radius: var(--radius-card); padding: 10px 11px;
   background: var(--elevated); box-shadow: var(--inset-hi); display: flex; flex-direction: column; gap: 5px;
 }
 .knowledge-card-head {
 display: flex; align-items: center; gap: 6px;
 }
 .knowledge-kind {
-padding: 1px 6px; border-radius: 999px; font-size: 10px; text-transform: uppercase;
+padding: 1px 6px; border-radius: 999px; font-size: var(--font-meta); text-transform: uppercase;
   letter-spacing: 0.05em; border: 1px solid var(--border); color: var(--muted); flex: none;
 }
 .knowledge-kind.kind-plan {
@@ -39,7 +36,7 @@ font-weight: 600; font-size: 12.5px;
 color: var(--muted); font-size: 12px; white-space: pre-wrap;
 }
 .knowledge-meta {
-display: flex; gap: 5px; color: var(--muted); font-size: 11px; flex-wrap: wrap;
+display: flex; gap: 5px; color: var(--muted); font-size: var(--font-meta); flex-wrap: wrap;
 }
 .knowledge-actions {
 display: flex; gap: 6px;
@@ -58,8 +55,8 @@ display: flex;
   gap: 10px;
   padding: 12px;
   border: 1px solid var(--border-soft);
-  border-radius: calc(10px * var(--corner-radius-scale));
-  background: var(--surface-raised);
+  border-radius: var(--radius-card);
+  background: var(--elevated);
 }
 .track-create-form label {
 display: flex;
@@ -73,7 +70,7 @@ padding: 2px 6px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--font-meta);
   font-weight: 700;
   letter-spacing: .04em;
   text-transform: uppercase;
@@ -90,7 +87,7 @@ color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, var(--bo
 .track-progress,
 .track-docs {
 color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-meta);
 }
 .track-progress {
 display: flex; gap: 5px;
@@ -113,9 +110,9 @@ display: inline-grid;
   height: 20px;
   flex: 0 0 20px;
   border-radius: 50%;
-  background: var(--surface);
+  background: var(--panel);
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-meta);
 }
 .track-step-completed .track-step-marker {
 color: var(--green);
@@ -141,7 +138,7 @@ overflow-wrap: anywhere; color: var(--muted);
 max-height: 160px;
   overflow: auto;
   white-space: pre-wrap;
-  font-size: 10px;
+  font-size: var(--font-meta);
 }
 .knowledge-card {
 min-width: 0;
@@ -206,4 +203,13 @@ width: 100%;
 .track-create-form :is(.ui-text-input, .ui-textarea) {
 width: 100%;
 }
+}
+
+/* Rules moved from core styles.css: knowledge tracks panel. */
+.tracks-panel { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3); }
+.tracks-intro { margin-top: 3px; font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+
+/* Inline notes share the meta type role. */
+.knowledge-meta-note {
+  font-size: var(--font-meta);
 }

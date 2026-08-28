@@ -32,38 +32,38 @@ const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeL
 
 const ICONS: Record<AppView, React.ReactNode> = {
   session: (
-    <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
+    <svg className="ui-icon ui-icon--sm" viewBox="0 0 16 16" {...STROKE}>
       <path d="M2.5 3.5h11v7h-6l-2.8 2.6v-2.6h-2.2z" />
     </svg>
   ),
   goals: (
-    <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
+    <svg className="ui-icon ui-icon--sm" viewBox="0 0 16 16" {...STROKE}>
       <circle cx="8" cy="8" r="6" /><circle cx="8" cy="8" r="3" /><circle cx="8" cy="8" r="0.5" />
     </svg>
   ),
   multirun: (
-    <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
+    <svg className="ui-icon ui-icon--sm" viewBox="0 0 16 16" {...STROKE}>
       <rect x="2" y="3" width="3.2" height="10" rx="1" /><rect x="6.4" y="3" width="3.2" height="10" rx="1" /><rect x="10.8" y="3" width="3.2" height="10" rx="1" />
     </svg>
   ),
   workflow: <Icon.workflow />,
   fusion: (
-    <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
+    <svg className="ui-icon ui-icon--sm" viewBox="0 0 16 16" {...STROKE}>
       <circle cx="6" cy="8" r="4.2" /><circle cx="10" cy="8" r="4.2" />
     </svg>
   ),
   walkthrough: (
-    <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
+    <svg className="ui-icon ui-icon--sm" viewBox="0 0 16 16" {...STROKE}>
       <path d="M3 4h2M3 8h2M3 12h2M8 4h5M8 8h5M8 12h5" />
     </svg>
   ),
   schedule: (
-    <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
+    <svg className="ui-icon ui-icon--sm" viewBox="0 0 16 16" {...STROKE}>
       <circle cx="8" cy="8" r="5.5" /><path d="M8 5v3.2l2.2 1.3" />
     </svg>
   ),
   github: (
-    <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
+    <svg className="ui-icon ui-icon--sm" viewBox="0 0 16 16" {...STROKE}>
       <circle cx="5" cy="4.5" r="1.7" /><circle cx="5" cy="11.5" r="1.7" /><circle cx="11" cy="11.5" r="1.7" />
       <path d="M5 6.2v3.6M11 9.8V7.5a2 2 0 0 0-2-2H8.2" />
     </svg>

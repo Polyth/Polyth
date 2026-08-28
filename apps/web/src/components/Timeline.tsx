@@ -860,7 +860,7 @@ export function WorkedGroup({ g, subagents }: { g: WorkGroup; subagents: Subagen
         })}
       >
         <span className={`execution-group-mark ${running ? "running" : failed ? "error" : "done"}`} aria-hidden="true">
-          {running ? <span className="spinner" /> : failed ? "×" : "✓"}
+          {running ? <span className="ui-spinner ui-spinner--sm" /> : failed ? "×" : "✓"}
         </span>
         <span className="execution-group-copy">
           <strong>{running ? `Working · ${label}` : label}</strong>

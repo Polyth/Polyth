@@ -9,7 +9,7 @@ padding: 28px max(28px, calc((100% - 880px) / 2));
 display: flex; align-items: flex-start;
 }
 .goal-card {
-border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel);
+border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--panel);
   padding: 18px 20px; display: flex; flex-direction: column; gap: 16px;
 }
 .goal-card-row {
@@ -19,7 +19,7 @@ display: flex; align-items: center; gap: 10px;
 font-size: 16px; letter-spacing: -0.01em; line-height: 1.45;
 }
 .goal-budget-row {
-display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 5px;
+display: flex; justify-content: space-between; font-size: var(--font-meta); color: var(--muted); margin-bottom: 5px;
 }
 .goal-budget-track {
 height: 6px; border-radius: calc(3px * var(--corner-radius-scale)); background: var(--border-soft); overflow: hidden;
@@ -31,10 +31,10 @@ height: 100%; background: var(--accent);
 display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
 }
 .goal-stat-cell {
-border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--elevated);
+border: 1px solid var(--border-soft); border-radius: var(--radius-control); padding: 10px 12px; background: var(--elevated);
 }
 .goal-stat-k {
-font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: 0.03em;
+font-size: var(--font-meta); color: var(--muted); font-weight: 600; letter-spacing: 0.03em;
 }
 .goal-stat-v {
 font-size: 15px; margin-top: 4px; text-transform: capitalize;
@@ -47,13 +47,13 @@ display: flex; flex-direction: column; gap: 6px;
 }
 .audit-row {
 display: flex; gap: 12px; align-items: baseline;
-  border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--panel); padding: 10px 12px;
+  border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: var(--panel); padding: 10px 12px;
 }
 .audit-time {
-font-size: 11px; color: var(--muted); width: 52px; flex-shrink: 0;
+font-size: var(--font-meta); color: var(--muted); width: 52px; flex-shrink: 0;
 }
 .audit-verdict {
-font-size: 11px; font-weight: 700; text-transform: capitalize; width: 70px; flex-shrink: 0;
+font-size: var(--font-meta); font-weight: 700; text-transform: capitalize; width: 70px; flex-shrink: 0;
 }
 .audit-note {
 color: var(--text-dim); font-size: 13px;
@@ -68,10 +68,10 @@ border-bottom: 1px solid var(--border);
 display: flex; align-items: center; gap: 8px;
 }
 .goal-label {
-font-size: 11px; font-weight: 650; letter-spacing: 0.03em; color: var(--muted);
+font-size: var(--font-meta); font-weight: 650; letter-spacing: 0.03em; color: var(--muted);
 }
 .goal-pill {
-font-size: 10px; padding: 1px 7px; border-radius: calc(8px * var(--corner-radius-scale)); font-weight: 650; text-transform: capitalize;
+font-size: var(--font-meta); padding: 1px 7px; border-radius: var(--radius-control); font-weight: 650; text-transform: capitalize;
 }
 .goal-pill-active {
 background: var(--green-wash); color: var(--green-on-wash);
@@ -92,7 +92,7 @@ background: var(--surface-overlay-strong); color: var(--muted);
 flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .goal-stats {
-display: flex; gap: 10px; font-size: 11px; color: var(--muted);
+display: flex; gap: 10px; font-size: var(--font-meta); color: var(--muted);
 }
 .goal-stat {
 font-family: var(--mono);
@@ -135,7 +135,7 @@ display: flex; align-items: center; gap: 8px; width: 100%;
 background: transparent; border-color: transparent;
 }
 .goal-progress {
-font-family: var(--mono); font-size: 11px; color: var(--muted);
+font-family: var(--mono); font-size: var(--font-meta); color: var(--muted);
 }
 .goal-chevron {
 color: var(--muted);
@@ -163,7 +163,7 @@ gap: 6px; padding-bottom: 8px;
 width: min(580px, calc(100vw - 28px));
   overflow: hidden;
   border-color: color-mix(in srgb, var(--purple) 32%, var(--border));
-  border-radius: calc(20px * var(--corner-radius-scale));
+  border-radius: var(--radius-sheet);
   background:
     radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--purple) 13%, transparent), transparent 35%),
     var(--elevated);
@@ -191,7 +191,7 @@ width: 42px;
   display: grid;
   place-items: center;
   border: 1px solid color-mix(in srgb, var(--purple) 38%, var(--border-soft));
-  border-radius: calc(13px * var(--corner-radius-scale));
+  border-radius: var(--radius-surface);
   color: var(--purple);
   background: color-mix(in srgb, var(--purple) 12%, transparent);
   font-size: 23px;
@@ -209,13 +209,13 @@ gap: 7px; color: var(--text-dim);
 display: flex; align-items: baseline; gap: 6px;
 }
 .goal-dialog .goal-attach-label small {
-color: var(--muted); font-size: 9px; font-weight: 500;
+color: var(--muted); font-size: var(--font-meta); font-weight: 500;
 }
 .goal-dialog .goal-attach textarea {
 min-height: 112px;
   padding: 12px;
   border-color: var(--border-soft);
-  border-radius: calc(13px * var(--corner-radius-scale));
+  border-radius: var(--radius-surface);
   background: var(--chat-surface);
   line-height: 1.5;
 }
@@ -223,10 +223,10 @@ min-height: 112px;
 display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
 }
 .goal-dialog .goal-attach-row input {
-width: 100%; min-height: 42px; border-radius: calc(11px * var(--corner-radius-scale));
+width: 100%; min-height: 42px; border-radius: var(--radius-card);
 }
 .goal-dialog-error {
-padding: 9px 11px; border-radius: calc(9px * var(--corner-radius-scale)); background: var(--red-wash);
+padding: 9px 11px; border-radius: var(--radius-control); background: var(--red-wash);
 }
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
 .goal-dialog-intro {
@@ -328,4 +328,16 @@ width: 100%;
 .goal-stat-grid {
 grid-template-columns: minmax(0, 1fr);
 }
+}
+
+/* Verdict coloring is data-driven through data-verdict, not inline styles. */
+.goal-stat-v[data-verdict],
+.audit-verdict {
+  color: var(--muted);
+}
+:is(.goal-stat-v, .audit-verdict)[data-verdict="keep"] { color: var(--green); }
+:is(.goal-stat-v, .audit-verdict)[data-verdict="done"] { color: var(--blue); }
+:is(.goal-stat-v, .audit-verdict)[data-verdict="stuck"] { color: var(--red); }
+.goal-audit-empty {
+  font-size: var(--font-label);
 }

@@ -309,7 +309,7 @@ export function ManagedPluginsSection() {
           </header>
           <Tabs
             size="sm"
-            className="plugin-detail-tabs"
+            className="plugin-detail-tabs ui-scroll-tabs"
             label={tr("settings.pages.pluginContributionsCount", { name: selectedPlugin.name, count: selectedPlugin.contributions.length })}
             value={detailTab}
             tabs={(["overview", "widgets", "commands", "tools", "settings", "permissions", "contributions"] as const).map((tab) => ({

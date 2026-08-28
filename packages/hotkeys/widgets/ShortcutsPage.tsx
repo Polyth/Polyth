@@ -37,7 +37,7 @@ export default function ShortcutsPage() {
             <div className="set-row-label">{label}</div>
             <div className="set-row-hint">{tr("settings.shortcutspage.providedBy")}{" "}{pluginName} {tr("settings.shortcutspage.plugin")}</div>
             {conflicts.has(id) && (
-              <div className="set-row-hint set-conflict" role="alert">
+              <div className="set-row-hint hotkey-conflict" role="alert">
                 {tr("settings.shortcutspage.conflictsWith")}{" "}{conflictLabels.join(", ")}
               </div>
             )}

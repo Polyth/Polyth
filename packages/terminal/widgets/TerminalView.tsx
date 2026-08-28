@@ -325,7 +325,7 @@ export default function TerminalView() {
   return (
     <div className="term-view">
       <div className="term-tabs">
-        <div className="term-tab-list" role="tablist" aria-label={tr("terminalview.terminalTabName")}>
+        <div className="term-tab-list ui-scroll-tabs" role="tablist" aria-label={tr("terminalview.terminalTabName")}>
           {tabs.map((t) => (
             <span key={t.id} className={`term-tab-group ${t.id === tab?.id ? "active" : ""}`}>
               {renaming === t.id ? (

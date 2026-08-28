@@ -80,7 +80,7 @@ export function QuotaWindowRow({
       </div>
       {pace && <div className="quota-pace">{paceText(pace, w)}</div>}
       {w.resetsAt !== undefined && (
-        <div className="muted" style={{ fontSize: "calc(11px * var(--ui-font-scale, 1))" }}>{tr("usage.quotaui.resets")}{" "}{new Date(w.resetsAt).toLocaleString(getLocale())}</div>
+        <div className="muted quota-meta">{tr("usage.quotaui.resets")}{" "}{new Date(w.resetsAt).toLocaleString(getLocale())}</div>
       )}
     </div>
   );
@@ -149,7 +149,7 @@ export function QuotaCard({
         {snap.stale && <span className="tag" title={snap.error?.message}>{tr("usage.quotaui.stale")}</span>}
         <span className="header-spacer" />
         {snap.fetchedAt > 0 && (
-          <span className="muted" style={{ fontSize: "calc(11px * var(--ui-font-scale, 1))" }}>{new Date(snap.fetchedAt).toLocaleTimeString(getLocale())}</span>
+          <span className="muted quota-meta">{new Date(snap.fetchedAt).toLocaleTimeString(getLocale())}</span>
         )}
         <Button size="sm" iconStart={RefreshIcon} onClick={() => onRefresh(snap.providerId)}>{tr("common.refresh")}</Button>
       </div>
@@ -179,7 +179,7 @@ export function QuotaCard({
         );
       })}
       {snap.windows.length === 0 && (
-        <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }}>{tr("usage.quotaui.noQuotaDataYet")}</div>
+        <div className="muted quota-meta">{tr("usage.quotaui.noQuotaDataYet")}</div>
       )}
     </div>
   );

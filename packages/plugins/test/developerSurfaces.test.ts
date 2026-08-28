@@ -18,10 +18,10 @@ test("developer surfaces keep narrow layouts and monospace overflow contained", 
   assert.match(editor, /mobileStage/);
   assert.match(editor, /className="editor-mobile-tabs"/);
   assert.match(editor, /mobile-\$\{mobileStage\}/);
-  assert.match(terminal, /className="term-tab-list" role="tablist"/);
+  assert.match(terminal, /className="term-tab-list ui-scroll-tabs" role="tablist"/);
   assert.match(terminal, /role="tab"/);
 
-  assert.match(refinement, /\.term-tab-list\s*\{[^}]*overflow-x:\s*auto/s);
+  assert.match(refinement, /\.ui-scroll-tabs\s*\{[^}]*overflow-x:\s*auto/s);
   assert.match(refinement, /\.term-body\s*\{[^}]*overflow-x:\s*auto/s);
   assert.match(refinement, /\.editor-body,[\s\S]*?max-width:\s*100%/);
   assert.match(refinement, /\.split-diff\s*\{[^}]*max-width:\s*100%/);

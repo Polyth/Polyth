@@ -64,6 +64,9 @@
   --space-6: 32px;
   --gutter: var(--space-5);
   --screen-gutter: var(--space-4);
+  /* One reading measure shared by the chat timeline, composer, and inline
+     conversation widgets. */
+  --chat-measure: 768px;
   --tap: 44px;
   --control-h-sm: 32px;
   --control-h: 40px;

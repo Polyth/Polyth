@@ -53,7 +53,7 @@ function ContextView() {
     <div>
       <div className="stat-row">
         <span className="k">{tr("railsurfaces.status")}</span>
-        <span className="status-line" style={{ padding: 0 }}>
+        <span className="status-line rail-status-line">
           <span className={`dot ${session.status}`} />
           <span>{session.status}</span>
         </span>

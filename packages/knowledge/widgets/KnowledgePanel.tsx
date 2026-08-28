@@ -102,7 +102,7 @@ export default function KnowledgePanel() {
         <TextInput placeholder={tr("knowledgepanel.title")} value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} />
         <Textarea rows={10} placeholder={tr("knowledgepanel.bodyMarkdownWelcome")} value={editor.body} onChange={(e) => setEditor({ ...editor, body: e.target.value })} />
         <TextInput placeholder={tr("knowledgepanel.tagsCommaSeparated")} value={editor.tags} onChange={(e) => setEditor({ ...editor, tags: e.target.value })} />
-        {editor.id !== null && <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }}>{tr("knowledgepanel.editingRevision")}{" "}{editor.revision}{tr("knowledgepanel.savingBumpsIt")}</div>}
+        {editor.id !== null && <div className="muted knowledge-meta-note">{tr("knowledgepanel.editingRevision")}{" "}{editor.revision}{tr("knowledgepanel.savingBumpsIt")}</div>}
         {error && <div className="form-error">{error}</div>}
       </div>
     );
@@ -169,7 +169,7 @@ export default function KnowledgePanel() {
           </div>
         </div>
       ))}
-      {total > items.length && <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }}>{total - items.length} {tr("knowledgepanel.moreNotShownRefineYourSearch")}</div>}
+      {total > items.length && <div className="muted knowledge-meta-note">{total - items.length} {tr("knowledgepanel.moreNotShownRefineYourSearch")}</div>}
     </div>
   );
 }

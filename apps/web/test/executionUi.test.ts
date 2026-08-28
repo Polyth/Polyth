@@ -178,7 +178,7 @@ test("execution code surfaces override the global prose font preference", async 
   const override = css.match(/html\[data-font\] body :is\([\s\S]*?execution-viewer > pre[\s\S]*?\)\s*\{\s*font-family:\s*var\(--mono\);\s*\}/);
   assert.ok(override, "commands, output, diffs, and the full viewer retain the monospace font");
   assert.match(css, /\.execution-group-items\s*\{[\s\S]*?width:\s*100%;[\s\S]*?justify-self:\s*stretch;/);
-  assert.match(css, /grid-template-rows 170ms[\s\S]*?opacity 160ms/);
+  assert.match(css, /grid-template-rows var\(--motion-normal\)[\s\S]*?opacity var\(--motion-normal\)/);
 });
 
 const dom = new Window({ url: "http://localhost/" });
@@ -275,9 +275,9 @@ test("execution row renders collapsed value first, expands inline, and opens lev
     await act(async () => disclosure.click());
     assert.ok(container.querySelector(".execution-details"), "details remain mounted for the exit transition");
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 190));
+      await new Promise((resolve) => setTimeout(resolve, 200));
     });
-    assert.equal(container.querySelector(".execution-details"), null, "details unmount after the 170ms collapse");
+    assert.equal(container.querySelector(".execution-details"), null, "details unmount after the motion-normal collapse");
   } finally {
     await act(async () => root.unmount());
     timeline.remove();
@@ -325,7 +325,7 @@ test("pending and running execution states stay visually and accessibly distinct
       message: tool({ status: "running", output: undefined, finishTime: undefined }),
     })));
     assert.match(container.querySelector(".execution-status")?.getAttribute("aria-label") ?? "", /^Running in /);
-    assert.ok(container.querySelector(".execution-status-icon .spinner"), "running status uses an animated spinner");
+    assert.ok(container.querySelector(".execution-status-icon .ui-spinner"), "running status uses an animated spinner");
   } finally {
     await act(async () => root.unmount());
     container.remove();

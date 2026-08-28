@@ -124,8 +124,8 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   );
   const usageMobileEnd = styles.indexOf("@media (prefers-reduced-motion: reduce)", usageMobileStart);
   const usageMobileStyles = styles.slice(usageMobileStart, usageMobileEnd);
-  assert.match(usageMobileStyles, /\.usage-eyebrow\s*\{\s*font-size:\s*9\.5px;\s*letter-spacing:\s*\.075em;\s*line-height:\s*1\.35;/);
+  assert.match(usageMobileStyles, /\.usage-eyebrow\s*\{\s*font-size:\s*var\(--font-meta\);\s*letter-spacing:\s*\.075em;\s*line-height:\s*1\.35;/);
   assert.match(usageMobileStyles, /\.usage-spend-legend \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;[\s\S]*?max-width: none;/);
-  assert.match(styles, /\.usage-view-tabs \.ui-tab\s*\{\s*flex:\s*1;\s*min-height:\s*var\(--tap\);/);
+  assert.match(styles, /\.usage-view-tabs \.ui-tab\s*\{\s*flex:\s*1;\s*\}/);
   assert.match(styles, /\.usage-layout-compact \.usage-cohort-chart\s*\{\s*height:\s*174px;/);
 });

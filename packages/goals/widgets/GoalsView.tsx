@@ -16,12 +16,6 @@ function fmtK(n: number): string {
   return formatNumber(n);
 }
 
-const VERDICT_COLOR: Record<string, string> = {
-  keep: "var(--green)",
-  done: "var(--blue)",
-  stuck: "var(--red)",
-};
-
 const NO_EVENTS: never[] = [];
 
 export default function GoalsView() {
@@ -106,7 +100,7 @@ export default function GoalsView() {
               </div>
               <div className="goal-stat-cell">
                 <div className="goal-stat-k">{tr("goalsview.lastVerdict")}</div>
-                <div className="goal-stat-v" style={{ color: goal.lastVerdict ? VERDICT_COLOR[goal.lastVerdict] : undefined }}>
+                <div className="goal-stat-v" data-verdict={goal.lastVerdict ?? undefined}>
                   {goal.lastVerdict ?? "—"}
                 </div>
               </div>
@@ -127,11 +121,11 @@ export default function GoalsView() {
           <div>
             <div className="stat-label">{tr("goalsview.auditTrail")}</div>
             <div className="audit-list">
-              {audits.length === 0 && <div className="muted" style={{ fontSize: "calc(13px * var(--ui-font-scale, 1))" }}>{tr("goalsview.noAuditsYetTheAuditorRunsAfter")}</div>}
+              {audits.length === 0 && <div className="muted goal-audit-empty">{tr("goalsview.noAuditsYetTheAuditorRunsAfter")}</div>}
               {audits.map((a) => (
                 <div key={a.id} className="audit-row">
                   <span className="audit-time mono">{a.time}</span>
-                  <span className="audit-verdict" style={{ color: VERDICT_COLOR[a.verdict] ?? "var(--muted)" }}>{a.verdict}</span>
+                  <span className="audit-verdict" data-verdict={a.verdict}>{a.verdict}</span>
                   <span className="audit-note">{a.note}</span>
                 </div>
               ))}

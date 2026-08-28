@@ -154,7 +154,7 @@ export default function ModelsPage() {
         ]} onChange={setScope} />
       </div>
 
-      <div className="provider-chips" role="group" aria-label={tr("settings.modelspage.filterByProvider")}>
+      <div className="provider-chips ui-scroll-tabs" role="group" aria-label={tr("settings.modelspage.filterByProvider")}>
         <button
           className={`chip provider-chip ${providerFilter === null ? "on" : ""}`}
           aria-pressed={providerFilter === null}
@@ -275,7 +275,7 @@ export default function ModelsPage() {
                       </div>
                     );
                   })}
-                  {p.models.length === 0 && <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))", padding: "4px 8px" }}>{tr("settings.modelspage.noMatchesInThisProvider")}</div>}
+                  {p.models.length === 0 && <div className="muted set-provider-no-matches">{tr("settings.modelspage.noMatchesInThisProvider")}</div>}
                 </div>
               )}
             </div>

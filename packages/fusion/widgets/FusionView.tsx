@@ -125,7 +125,7 @@ export default function FusionView() {
           <div className="fusion-model-picks">
             <TextInput
               uiSize="sm"
-              className="model-filter-input"
+              className="fusion-model-filter"
               placeholder={tr("fusionview.filterModels")}
               value={modelFilter}
               onChange={(e) => setModelFilter(e.target.value)}

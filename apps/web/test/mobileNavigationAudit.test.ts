@@ -35,7 +35,7 @@ test("horizontal tabs and chips retain a visible scroll affordance", async () =>
   assert.match(css, /--scroll-affordance:\s*18px/);
   assert.match(
     css,
-    /\.pane-tabs,[\s\S]*?\.provider-chips,[\s\S]*?\.git-ref-chips,[\s\S]*?\.gh-filter-chips[\s\S]*?mask-image:\s*linear-gradient/,
+    /\.ui-scroll-tabs\s*\{[\s\S]*?mask-image:\s*linear-gradient/,
   );
 });
 

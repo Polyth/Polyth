@@ -7,7 +7,7 @@ position: relative; width: 44px; min-width: 44px; min-height: 0;
   background: var(--panel); border-left: 1px solid var(--border-soft);
 }
 .plugin-trust {
-margin-left: 6px; font-size: 10px;
+margin-left: 6px; font-size: var(--font-meta);
 }
 .plugin-trust.trust-privileged,
 .plugin-trust.trust-credentialed {
@@ -19,7 +19,7 @@ color: var(--amber); border-color: var(--amber);
 }
 .plugin-log {
 max-height: 180px; overflow-y: auto; background: var(--elevated); border: 1px solid var(--border);
-  border-radius: calc(8px * var(--corner-radius-scale)); padding: 8px 10px; font-size: 11.5px; margin: 6px 0;
+  border-radius: var(--radius-control); padding: 8px 10px; font-size: var(--font-meta); margin: 6px 0;
 }
 .plugin-log-line {
 white-space: pre-wrap; word-break: break-all;
@@ -37,7 +37,7 @@ display: flex; flex-direction: column;
 font-size: 13px;
 }
 .plugin-library-head span {
-color: var(--muted); font-size: 10px;
+color: var(--muted); font-size: var(--font-meta);
 }
 .plugin-library-head > span {
 margin-left: auto;
@@ -47,7 +47,7 @@ display: grid;
 }
 .plugin-card {
 min-width: 0; min-height: 210px; overflow: hidden; display: flex; flex-direction: column;
-  border: 1px solid var(--border-soft); border-radius: calc(14px * var(--corner-radius-scale)); background: var(--elevated);
+  border: 1px solid var(--border-soft); border-radius: var(--radius-surface); background: var(--elevated);
   transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease, opacity .15s ease;
 }
 .plugin-card:hover {
@@ -64,7 +64,7 @@ width: 100%; min-height: 180px; flex: 1; display: flex; flex-direction: column; 
   gap: 8px; padding: 16px; border: 0; background: transparent; text-align: center;
 }
 .plugin-card-icon {
-display: grid; place-items: center; flex: none; width: 58px; height: 58px; border-radius: calc(14px * var(--corner-radius-scale));
+display: grid; place-items: center; flex: none; width: 58px; height: 58px; border-radius: var(--radius-surface);
   background: linear-gradient(145deg, color-mix(in srgb, var(--accent-wash) 72%, var(--elevated)), var(--accent-wash));
   color: var(--accent); font-size: 22px; font-weight: 800; box-shadow: 0 8px 18px -12px var(--accent);
 }
@@ -75,23 +75,23 @@ min-width: 0; width: 100%; display: flex; flex-direction: column; align-items: c
 max-width: 100%; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap;
 }
 .plugin-card-copy small {
-max-width: 100%; overflow: hidden; color: var(--muted); font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap;
+max-width: 100%; overflow: hidden; color: var(--muted); font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap;
 }
 .plugin-card-main > p {
 display: -webkit-box; min-height: 38px; margin: 0; overflow: hidden; color: var(--muted);
-  font-size: 9.5px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  font-size: var(--font-meta); line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
 }
 .plugin-card-counts {
 display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 10px; color: var(--faint);
 }
 .plugin-card-counts b {
-font-size: 8px; font-weight: 550;
+font-size: var(--font-meta); font-weight: 550;
 }
 .plugin-card-actions {
 display: flex; flex-wrap: wrap; gap: 5px; margin-top: auto; padding: 9px 10px; border-top: 1px solid var(--border-soft); background: var(--bg);
 }
 .plugin-card-actions button {
-height: 27px; padding: 0 7px; font-size: 8.5px;
+height: 27px; padding: 0 7px; font-size: var(--font-meta);
 }
 .plugin-card-actions .danger-btn {
 margin-left: auto; border-color: transparent;
@@ -105,7 +105,7 @@ grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   gap: 10px;
 }
 .plugin-detail {
-margin-top: 12px; overflow: hidden; border: 1px solid var(--border-soft); border-radius: calc(12px * var(--corner-radius-scale)); background: var(--elevated);
+margin-top: 12px; overflow: hidden; border: 1px solid var(--border-soft); border-radius: var(--radius-surface); background: var(--elevated);
 }
 .plugin-detail > header {
 min-height: 58px; display: flex; align-items: center; gap: 9px; padding: 9px 12px;
@@ -117,7 +117,7 @@ display: flex; flex-direction: column;
 font-size: 12px;
 }
 .plugin-detail > header small {
-color: var(--muted); font-size: 8.5px;
+color: var(--muted); font-size: var(--font-meta);
 }
 .plugin-detail > header > button {
 margin-left: auto; width: 28px; height: 28px; padding: 0; border: 0;
@@ -126,13 +126,13 @@ margin-left: auto; width: 28px; height: 28px; padding: 0; border: 0;
 display: flex; gap: 5px; overflow-x: auto; padding: 0 10px; border-bottom: 1px solid var(--border-soft);
 }
 .plugin-detail-tabs button {
-flex: none; border: 0; border-radius: 0; padding: 7px 4px; border-bottom: 2px solid transparent; color: var(--muted); font-size: 8.5px;
+flex: none; border: 0; border-radius: 0; padding: 7px 4px; border-bottom: 2px solid transparent; color: var(--muted); font-size: var(--font-meta);
 }
 .plugin-detail-tabs button.active {
 border-bottom-color: var(--accent); color: var(--text);
 }
 .plugin-detail-body {
-min-height: 70px; padding: 11px 13px; color: var(--muted); font-size: 9.5px;
+min-height: 70px; padding: 11px 13px; color: var(--muted); font-size: var(--font-meta);
 }
 .plugin-detail-body p {
 margin: 0;
@@ -141,13 +141,13 @@ margin: 0;
 display: grid; gap: 5px; margin: 0; padding-left: 17px;
 }
 .plugin-toast {
-position: sticky; bottom: 10px; display: flex; align-items: center; gap: 9px; margin-top: 10px; padding: 9px 11px; border: 1px solid var(--accent-line); border-radius: calc(9px * var(--corner-radius-scale)); background: color-mix(in srgb, var(--accent-wash) 60%, var(--elevated)); color: var(--text); font-size: 9.5px; box-shadow: var(--shadow-lg);
+position: sticky; bottom: 10px; display: flex; align-items: center; gap: 9px; margin-top: 10px; padding: 9px 11px; border: 1px solid var(--accent-line); border-radius: var(--radius-control); background: color-mix(in srgb, var(--accent-wash) 60%, var(--elevated)); color: var(--text); font-size: var(--font-meta); box-shadow: var(--shadow-lg);
 }
 .plugin-toast span {
 flex: 1;
 }
 .plugin-toast button {
-border: 0; color: var(--accent); background: transparent; font-size: 8.5px;
+border: 0; color: var(--accent); background: transparent; font-size: var(--font-meta);
 }
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
 .settings-pane-body .plugin-card-grid {

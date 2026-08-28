@@ -35,7 +35,8 @@ function ExecutionIcon({ kind }: { kind: ExecutionKind }) {
 }
 
 type DisplayStatus = "pending" | "running" | "done" | "error" | "cancelled";
-export const EXECUTION_COLLAPSE_MS = 170;
+/** Matches the --motion-normal token so unmount waits for the CSS collapse. */
+export const EXECUTION_COLLAPSE_MS = 180;
 
 export function useCollapsePresence(open: boolean): boolean {
   const [present, setPresent] = useState(open);
@@ -78,7 +79,7 @@ function StatusMark({ message, childStatus }: { message: ToolMsg; childStatus?: 
     <span className={`execution-status ${status}`} aria-label={`${label} in ${elapsed}`}>
       <span className="execution-duration">{elapsed}</span>
       <span className="execution-status-icon" aria-hidden="true">
-        {status === "pending" ? "○" : status === "running" ? <span className="spinner" /> : status === "done" ? "✓" : status === "error" ? "×" : "—"}
+        {status === "pending" ? "○" : status === "running" ? <span className="ui-spinner ui-spinner--sm" /> : status === "done" ? "✓" : status === "error" ? "×" : "—"}
       </span>
     </span>
   );

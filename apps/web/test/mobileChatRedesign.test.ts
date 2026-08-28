@@ -493,7 +493,7 @@ test("touch targets and design tokens are centralized", async () => {
   );
   assert.match(
     dictationCss,
-    /@media \(pointer: coarse\) \{\s*\.composer \.composer-mobile-extensions \.mic-btn \{[^}]*min-width:\s*var\(--tap\);/s,
+    /@media \(pointer: coarse\) \{\s*\.composer-mobile-extensions \.mic-btn \{[^}]*min-width:\s*var\(--tap\);/s,
     "the compact Dictate control remains a full touch target on coarse pointers",
   );
 });

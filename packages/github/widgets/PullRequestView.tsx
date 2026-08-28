@@ -435,7 +435,7 @@ export default function PullRequestView({ number, onClose }: { number: number; o
       {detail && (
         <>
           <Tabs
-            className="pr-tabbar"
+            className="pr-tabbar ui-scroll-tabs"
             label={tr("pullrequestview.pullRequestSections")}
             value={tab}
             tabs={([
