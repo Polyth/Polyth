@@ -490,6 +490,9 @@ export interface SessionProjection {
   /** Durable identity of the endpoint generation that owns backendSessionId.
    * A generation-only binding may not be silently carried to a replacement. */
   runtimeBinding?: PersistedRuntimeBinding;
+  /** Presentation-only endpoint control for epoch-pending chrome.
+   * Not an identity field and not stored on PersistedRuntimeBinding. */
+  runtimeControl?: "owned" | "borrowed";
   /** Highest canonical event sequence whose runtime-derived projection effects
    * were applied. Makes post-ingestion projection repair idempotent. */
   runtimeObservationSeq?: number;
@@ -523,6 +526,52 @@ export interface AutoAcceptDto {
   effective: boolean;
 }
 
+/** Persisted binding snapshot for session debug. Identity hashes only — no
+ * prompts, tokens, or provider credentials. */
+export interface SessionDebugRuntimeBindingDto {
+  authorityId: string;
+  generation: number;
+  epoch: number;
+  continuity: "verified" | "generation-only";
+  protocol: "legacy" | "v2";
+  location: RuntimeLocation;
+  historyBaseline?: "empty" | "copied" | "import";
+}
+
+/** Attached-endpoint snapshot for session debug. Never includes URL,
+ * authentication values, or instance tokens. */
+export interface SessionDebugEndpointDto {
+  authorityId: string;
+  generation: number;
+  control: { kind: "owned" | "borrowed"; source?: "shared" | "external" };
+}
+
+export interface SessionDebugEpochReplacedDto {
+  reason: string;
+  old: RuntimeEpochIdentity;
+  new: RuntimeEpochIdentity;
+  seq: number;
+}
+
+/** Computed recovery-plan stats. Never includes recoveryContext text. */
+export interface SessionDebugRecoveryPlanDto {
+  epoch: number;
+  markerSeq: number;
+  omittedMessages: number;
+  omittedPins: number;
+  omittedKnowledge: number;
+  omittedSummaries: number;
+  sectionsCapped: string[];
+  sectionChars: {
+    intent: number;
+    durable: number;
+    summaries: number;
+    dialogue: number;
+  };
+  goalRestored: boolean;
+  restored: boolean;
+}
+
 /** Durable + live diagnostics exposed to authenticated agent clients. Secret
  * values are never present: pending requests contain opaque ids only. */
 export interface SessionDebugDto {
@@ -545,6 +594,15 @@ export interface SessionDebugDto {
     secrets: string[];
   };
   recentErrors: Array<{ seq: number; time: number; type: string; message: string }>;
+  runtimeBinding?: SessionDebugRuntimeBindingDto;
+  endpoint?: SessionDebugEndpointDto;
+  counts: {
+    fencedOperations: number;
+    unknownOperations: number;
+    heldForReview: number;
+  };
+  lastEpochReplaced?: SessionDebugEpochReplacedDto;
+  recoveryPlan?: SessionDebugRecoveryPlanDto;
 }
 
 export interface SessionService {
@@ -605,6 +663,8 @@ export interface SessionService {
   autoAcceptGet?(sessionId: string): Promise<AutoAcceptDto>;
   /** F18: set the policy; enabling reconciles already-pending requests. */
   autoAcceptSet?(sessionId: string, setting: AutoAcceptSetting): Promise<AutoAcceptDto>;
+  /** User-confirmed borrowed/external runtime replacement. Never auto-epochs. */
+  confirmBorrowedRuntimeEpoch?(sessionId: string): Promise<SessionProjection>;
 }
 
 export interface SessionOrganizePatch {
@@ -1055,7 +1115,8 @@ export interface PreparedSessionCreateResult {
 
 /** Atomic durable half of an epoch replacement. The reset operation must
  * already be protocol-confirmed with the replacement backend session receipt.
- * Only the dedicated transition may move prior unknown operations to fenced. */
+ * Pre-reset prepared operations are rejected and executing operations become
+ * unknown. Only an owned fence may then move those unknowns to fenced. */
 export interface RuntimeEpochTransitionInput {
   sessionId: string;
   expectedBinding: PersistedRuntimeBinding;

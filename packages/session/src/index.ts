@@ -54,6 +54,13 @@ import type {
   SnapshotIngestionResult,
   WorkspaceLabel,
 } from "@polyth/contracts";
+import {
+  activeObjectiveFromEvents,
+  attachedKnowledge,
+  buildRuntimeEpochRecoveryContext,
+  compactionSummariesFromEvents,
+  dialogueFromMessages,
+} from "./recovery.ts";
 
 export { sessionRetentionSummary } from "./retention.ts";
 export type { SessionRetentionSummary } from "./retention.ts";
@@ -139,6 +146,35 @@ export function compactionRecoveryText(input: {
 export const recoveredUserText = (text: string, recoveryContext?: string): string =>
   recoveryContext ? `${recoveryContext}\n\n${text}` : text;
 
+export {
+  EPOCH_RECOVERY_BUDGET_SHARE,
+  EPOCH_RECOVERY_MAX_CHARS,
+  EPOCH_RECOVERY_MAX_MESSAGES,
+  EPOCH_RECOVERY_NOTE_LINES,
+  activeObjectiveFromEvents,
+  attachedKnowledge,
+  buildRuntimeEpochRecoveryContext,
+  compactionSummariesFromEvents,
+  dialogueFromMessages,
+  escapeRecoveryText,
+  formatRecoveryDialogueLine,
+} from "./recovery.ts";
+export type {
+  RuntimeEpochRecoveryAttachment,
+  RuntimeEpochRecoveryBuild,
+  RuntimeEpochRecoveryDialogueLine,
+  RuntimeEpochRecoveryInput,
+  RuntimeEpochRecoveryKnowledge,
+  RuntimeEpochRecoveryPin,
+  RuntimeEpochRecoverySectionChars,
+} from "./recovery.ts";
+export {
+  sessionDebugObservability,
+  snapshotDebugEndpoint,
+  snapshotDebugRuntimeBinding,
+} from "./sessionDebug.ts";
+export type { SessionDebugObservabilityInput } from "./sessionDebug.ts";
+
 export interface Store extends SessionPersistence {
   exportJsonl(sessionId: string): Promise<string>;
   // -- durable runtime operations --
@@ -151,8 +187,9 @@ export interface Store extends SessionPersistence {
    * the replay contract captured at preparation. */
   replayUnknownOperation(operationId: string, contract: string): Promise<OperationClaimResult>;
   settleOperation(operationId: string, settlement: OperationSettlement): Promise<DurableOperation>;
-  /** Append the epoch marker, swap the binding, and optionally fence the
-   * destroyed authority's prior unknowns in one SQLite transaction. */
+  /** Append the epoch marker, swap the binding, interrupt pre-reset prepared
+   *  and executing operations, and optionally fence the destroyed authority's
+   *  prior unknowns in one SQLite transaction. */
   transitionRuntimeEpoch(input: RuntimeEpochTransitionInput): Promise<RuntimeEpochTransitionResult>;
   /** Startup runs this automatically; the explicit API is useful before
    * handing an already-open database to a recovered scheduler. */
@@ -1346,48 +1383,79 @@ export function createStore(dbPath: string): Store {
             epoch: replacement.epoch,
           },
           reason,
+          resetOperationId: input.resetOperationId,
         },
         { ignorable: true },
       );
 
       const fencedOperations: DurableOperation[] = [];
       const heldQueueItems: QueueItemDto[] = [];
-      if (input.fence) {
-        // A prepared operation has not crossed the durable claim boundary, so
-        // the runtime could not have observed it. Retire it truthfully before
-        // replacing the destroyed authority; leaving it prepared would block
-        // epoch recovery forever or make a later generic claim resend it.
-        const neverAdmitted = prep(
-          `SELECT * FROM runtime_operations
-           WHERE session_id = ? AND state = 'prepared' AND ordinal < ?
-           ORDER BY ordinal`,
-        ).all(input.sessionId, reset.ordinal) as unknown as OperationRow[];
-        for (const pending of neverAdmitted) {
-          const changed = prep(
-            `UPDATE runtime_operations
-             SET state = 'rejected', updated_at = ?, code = ?, message = ?, receipt = NULL
-             WHERE operation_id = ? AND state = 'prepared'`,
-          ).run(
-            Date.now(),
-            "runtime-epoch-replaced-before-execution",
-            "operation was never admitted before the runtime was replaced",
-            pending.operation_id,
-          );
-          if (Number(changed.changes) !== 1) {
-            throw Object.assign(new Error("prepared operation changed during epoch replacement"), {
-              code: "conflict",
-            });
-          }
-          const rejected = rowToOperation(operationRow(pending.operation_id)!);
-          appendMutationState(rejected, "mutation/rejected", {
-            code: "runtime-epoch-replaced-before-execution",
-            ...(rejected.message ? { message: rejected.message } : {}),
+      // Prepared work never crossed the claim boundary, so the runtime could
+      // not have observed it. Retire it on every epoch — owned or borrowed —
+      // otherwise it blocks recovery or a later generic claim resends it.
+      const neverAdmitted = prep(
+        `SELECT * FROM runtime_operations
+         WHERE session_id = ? AND state = 'prepared' AND ordinal < ?
+         ORDER BY ordinal`,
+      ).all(input.sessionId, reset.ordinal) as unknown as OperationRow[];
+      for (const pending of neverAdmitted) {
+        const changed = prep(
+          `UPDATE runtime_operations
+           SET state = 'rejected', updated_at = ?, code = ?, message = ?, receipt = NULL
+           WHERE operation_id = ? AND state = 'prepared'`,
+        ).run(
+          Date.now(),
+          "runtime-epoch-replaced-before-execution",
+          "operation was never admitted before the runtime was replaced",
+          pending.operation_id,
+        );
+        if (Number(changed.changes) !== 1) {
+          throw Object.assign(new Error("prepared operation changed during epoch replacement"), {
+            code: "conflict",
           });
-          if (rejected.mutationKind === "turn-submit") {
-            const held = holdEpochTurnForReview(rejected);
-            if (held) heldQueueItems.push(held);
-          }
         }
+        const rejected = rowToOperation(operationRow(pending.operation_id)!);
+        appendMutationState(rejected, "mutation/rejected", {
+          code: "runtime-epoch-replaced-before-execution",
+          ...(rejected.message ? { message: rejected.message } : {}),
+        });
+        if (input.fence && rejected.mutationKind === "turn-submit") {
+          const held = holdEpochTurnForReview(rejected);
+          if (held) heldQueueItems.push(held);
+        }
+      }
+      // An in-flight claim is the same honesty class as a process crash:
+      // the outcome is not durably recorded. Convert executing → unknown
+      // before optional owned fencing so a late confirm cannot land on the
+      // replacement binding.
+      const interrupted = prep(
+        `SELECT * FROM runtime_operations
+         WHERE session_id = ? AND state = 'executing' AND ordinal < ?
+         ORDER BY ordinal`,
+      ).all(input.sessionId, reset.ordinal) as unknown as OperationRow[];
+      for (const executing of interrupted) {
+        const changed = prep(
+          `UPDATE runtime_operations
+           SET state = 'unknown', updated_at = ?, code = ?, message = ?, receipt = NULL
+           WHERE operation_id = ? AND state = 'executing'`,
+        ).run(
+          Date.now(),
+          "runtime-epoch-replaced",
+          "execution was interrupted before its outcome was durably recorded; the runtime was replaced",
+          executing.operation_id,
+        );
+        if (Number(changed.changes) !== 1) {
+          throw Object.assign(new Error("executing operation changed during epoch replacement"), {
+            code: "conflict",
+          });
+        }
+        const recovered = rowToOperation(operationRow(executing.operation_id)!);
+        appendMutationState(recovered, "mutation/uncertainty-recorded", {
+          code: "runtime-epoch-replaced",
+          ...(recovered.message ? { message: recovered.message } : {}),
+        });
+      }
+      if (input.fence) {
         const unknowns = prep(
           `SELECT * FROM runtime_operations
            WHERE session_id = ? AND state = 'unknown' AND ordinal < ?
@@ -3477,4 +3545,187 @@ export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
   }
 
   return out;
+}
+
+export interface RuntimeEpochRecoveryPlan {
+  epoch: number;
+  markerSeq: number;
+  recoveryContext: string;
+  goalRestored: boolean;
+  pinnedSourceSeqs: number[];
+  omittedMessages: number;
+  omittedPins: number;
+  omittedKnowledge: number;
+  omittedSummaries: number;
+  sectionsCapped: string[];
+  sectionChars: {
+    intent: number;
+    durable: number;
+    summaries: number;
+    dialogue: number;
+  };
+}
+
+export interface PlanRuntimeEpochRecoveryInput {
+  events: readonly SessionEvent[];
+  operations: readonly DurableOperation[];
+  heldQueueIds?: ReadonlySet<string>;
+  includeWorkflow?: boolean;
+  /** Diagnostics may recompute stats after a confirmed restore. */
+  includeRestored?: boolean;
+  workflow?: {
+    objective?: string;
+    pinned?: readonly PinnedMessageContext[];
+    behavior?: string;
+    agent?: string;
+  };
+}
+
+const UNSAFE_TURN_STATES = new Set(["prepared", "executing", "unknown", "fenced"]);
+
+/** Confirmed, rewind-effective events that may feed epoch recovery. */
+export function selectConfirmedEpochRecoveryEvents(input: {
+  events: readonly SessionEvent[];
+  operations: readonly DurableOperation[];
+  heldQueueIds?: ReadonlySet<string>;
+  markerSeq: number;
+}): SessionEvent[] {
+  const heldQueueIds = input.heldQueueIds ?? new Set<string>();
+  const epochMarkers = input.events.filter((event) => event.type === "runtime/epoch-replaced");
+  const markerSeqs = epochMarkers.map((event) => event.seq);
+  const endingMarkerSeq = (eventSeq: number): number | undefined =>
+    markerSeqs.find((markerSeq) => markerSeq > eventSeq);
+  const unsafeCutByMarker = new Map<number, number>();
+  const markUnsafe = (eventSeq: number): void => {
+    const endingMarker = endingMarkerSeq(eventSeq);
+    if (endingMarker === undefined) return;
+    unsafeCutByMarker.set(
+      endingMarker,
+      Math.min(unsafeCutByMarker.get(endingMarker) ?? eventSeq, eventSeq),
+    );
+  };
+  const operationByOwnerSeq = new Map(
+    input.operations
+      .filter((operation) => operation.ownerEventSeq !== undefined)
+      .map((operation) => [operation.ownerEventSeq!, operation]),
+  );
+  const orphanUnsafe = input.operations.some((operation) =>
+    operation.mutationKind === "turn-submit"
+    && UNSAFE_TURN_STATES.has(operation.state)
+    && operation.ownerEventSeq === undefined);
+  for (const ownerEventSeq of input.operations
+    .filter((operation) =>
+      operation.mutationKind === "turn-submit"
+      && UNSAFE_TURN_STATES.has(operation.state)
+      && operation.ownerEventSeq !== undefined)
+    .map((operation) => operation.ownerEventSeq!)) {
+    markUnsafe(ownerEventSeq);
+  }
+  for (const event of input.events) {
+    if (
+      event.type === "user/message"
+      && heldQueueIds.has(String((event.data as { queueId?: unknown }).queueId ?? ""))
+    ) {
+      markUnsafe(event.seq);
+    }
+    if (
+      orphanUnsafe
+      && event.type === "user/message"
+      && event.seq < input.markerSeq
+      && !operationByOwnerSeq.has(event.seq)
+    ) {
+      markUnsafe(event.seq);
+    }
+  }
+  const effective = effectiveHistory(input.events.filter((event) => event.seq < input.markerSeq)).events;
+  return effective
+    .filter((event) => {
+      const endingMarker = endingMarkerSeq(event.seq);
+      const unsafeCut = endingMarker === undefined
+        ? undefined
+        : unsafeCutByMarker.get(endingMarker);
+      return unsafeCut === undefined || event.seq < unsafeCut;
+    })
+    .filter((event) => {
+      const owner = operationByOwnerSeq.get(event.seq);
+      return !owner || owner.state === "confirmed";
+    })
+    .filter((event) => event.type !== "question/asked" && event.type !== "question/answered")
+    .map((event) => {
+      if (event.type !== "user/message") return event;
+      const {
+        recoveryContext: _recoveryContext,
+        compactionRecovery: _compactionRecovery,
+        runtimeEpochRecovery: _runtimeEpochRecovery,
+        ...data
+      } = event.data as Record<string, unknown>;
+      return { ...event, data: data as JsonObject };
+    });
+}
+
+export function planRuntimeEpochRecovery(
+  input: PlanRuntimeEpochRecoveryInput,
+): RuntimeEpochRecoveryPlan | null {
+  const epochMarkers = input.events.filter((event) => event.type === "runtime/epoch-replaced");
+  const marker = epochMarkers.at(-1);
+  if (!marker) return null;
+  const epoch = Number((marker.data as { new?: { epoch?: unknown } }).new?.epoch);
+  if (!Number.isSafeInteger(epoch) || epoch <= 0) return null;
+
+  const operationByOwnerSeq = new Map(
+    input.operations
+      .filter((operation) => operation.ownerEventSeq !== undefined)
+      .map((operation) => [operation.ownerEventSeq!, operation]),
+  );
+  const alreadyRestored = input.events.some((event) => {
+    if (event.type !== "user/message") return false;
+    const metadata = (event.data as {
+      runtimeEpochRecovery?: { markerSeq?: unknown; epoch?: unknown };
+    }).runtimeEpochRecovery;
+    if (Number(metadata?.markerSeq) !== marker.seq || Number(metadata?.epoch) !== epoch) {
+      return false;
+    }
+    return operationByOwnerSeq.get(event.seq)?.state === "confirmed";
+  });
+  if (alreadyRestored && !input.includeRestored) return null;
+
+  const includeWorkflow = input.includeWorkflow !== false;
+  const safeEvents = selectConfirmedEpochRecoveryEvents({
+    events: input.events,
+    operations: input.operations,
+    heldQueueIds: input.heldQueueIds,
+    markerSeq: marker.seq,
+  });
+  const safeSeqs = new Set(safeEvents.map((event) => event.seq));
+  const objective = includeWorkflow
+    ? (input.workflow?.objective?.trim() || activeObjectiveFromEvents(safeEvents) || undefined)
+    : undefined;
+  const pinned = includeWorkflow
+    ? (input.workflow?.pinned ?? activePinnedMessages(safeEvents))
+      .filter((pin) => safeSeqs.has(pin.sourceEventSeq))
+    : [];
+  const built = buildRuntimeEpochRecoveryContext({
+    epoch,
+    markerSeq: marker.seq,
+    dialogue: dialogueFromMessages(deriveMessages(safeEvents)),
+    ...(objective ? { objective } : {}),
+    pinned,
+    ...(input.workflow?.behavior ? { behavior: input.workflow.behavior } : {}),
+    ...(input.workflow?.agent ? { agent: input.workflow.agent } : {}),
+    knowledge: attachedKnowledge(safeEvents),
+    summaries: compactionSummariesFromEvents(safeEvents),
+  });
+  return {
+    epoch,
+    markerSeq: marker.seq,
+    recoveryContext: built.recoveryContext,
+    goalRestored: built.goalRestored,
+    pinnedSourceSeqs: built.pinnedSourceSeqs,
+    omittedMessages: built.omittedMessages,
+    omittedPins: built.omittedPins,
+    omittedKnowledge: built.omittedKnowledge,
+    omittedSummaries: built.omittedSummaries,
+    sectionsCapped: built.sectionsCapped,
+    sectionChars: built.sectionChars,
+  };
 }

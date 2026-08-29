@@ -9,6 +9,7 @@ import type {
   ObservationCursorKey,
   ObservationEntityKey,
   ObservationIdentity,
+  PersistedRuntimeBinding,
   SessionProjection,
   SnapshotIngestionInput,
 } from "@polyth/contracts";
@@ -589,6 +590,269 @@ test("reconciliation ordinals reject superseded completion", async () => {
     );
     assert.equal(current.kind, "accepted");
     assert.equal(current.reconciliation.state, "unknown");
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const epochBinding = (
+  backendSessionId: string,
+  authorityId: string,
+): PersistedRuntimeBinding => ({
+  backendSessionId,
+  authorityId,
+  generation: 4,
+  epoch: 0,
+  continuity: "verified",
+  protocol: "legacy",
+  location: { directory: "/project" },
+});
+
+const epochProjection = (
+  sessionId: string,
+  binding: PersistedRuntimeBinding,
+): SessionProjection => ({
+  id: sessionId,
+  projectId: "project-a",
+  title: "Epoch pending ops",
+  status: "epoch-pending",
+  backendSessionId: binding.backendSessionId,
+  runtimeBinding: binding,
+  createdAt: 1,
+  updatedAt: 1,
+});
+
+test("owned epoch fences executing operations so a late confirm cannot land", async () => {
+  const { dir, path } = fresh("polyth-epoch-executing-owned-");
+  const store = createStore(path);
+  try {
+    const sessionId = "session-a";
+    const oldBinding = epochBinding("backend-old", "owned:destroyed");
+    await store.upsertProjection(epochProjection(sessionId, oldBinding));
+    const turn = await store.prepareOperation({
+      sessionId,
+      mutationKind: "turn-submit",
+      intentEvent: { type: "user/message", data: { text: "in flight" } },
+    });
+    assert.equal((await store.claimOperation(turn.operation.operationId)).kind, "claimed");
+    const prepared = await store.prepareOperation({
+      sessionId,
+      mutationKind: "permission-reply",
+      intentEvent: {
+        type: "permission/response-intended",
+        data: { requestId: "permission-1", reply: "once" },
+        ignorable: true,
+      },
+    });
+    const reset = await store.prepareOperation({
+      sessionId,
+      mutationKind: "session-reset",
+      intentEvent: {
+        type: "session/reset-intended",
+        data: { reason: "runtime-epoch" },
+        ignorable: true,
+      },
+    });
+    assert.equal((await store.claimOperation(reset.operation.operationId)).kind, "claimed");
+    await store.settleOperation(reset.operation.operationId, {
+      kind: "confirmed",
+      receipt: "backend-new",
+    });
+
+    const replacement = {
+      ...oldBinding,
+      backendSessionId: "backend-new",
+      authorityId: "owned:new",
+      generation: 1,
+      epoch: 1,
+      historyBaseline: "empty" as const,
+    };
+    const result = await store.transitionRuntimeEpoch({
+      sessionId,
+      expectedBinding: oldBinding,
+      replacementBinding: replacement,
+      resetOperationId: reset.operation.operationId,
+      reason: "owned runtime authority changed",
+      fence: { authorityId: oldBinding.authorityId, generation: oldBinding.generation },
+    });
+
+    assert.equal((await store.operation(turn.operation.operationId))?.state, "fenced");
+    assert.equal((await store.operation(prepared.operation.operationId))?.state, "rejected");
+    assert.equal(result.fencedOperations.length, 1);
+    assert.equal(result.fencedOperations[0]?.operationId, turn.operation.operationId);
+    assert.equal(result.heldQueueItems.length, 1);
+    assert.equal(result.heldQueueItems[0]?.text, "in flight");
+    await assert.rejects(
+      () => store.settleOperation(turn.operation.operationId, {
+        kind: "confirmed",
+        receipt: "late-receipt",
+      }),
+      (error: Error & { code?: string }) => error.code === "invalid-transition",
+    );
+    assert.equal(
+      (await store.claimOperation(turn.operation.operationId)).kind,
+      "not-claimed",
+    );
+    assert.equal(
+      (await store.replayUnknownOperation(turn.operation.operationId, "never")).kind,
+      "not-claimed",
+    );
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("borrowed epoch interrupts executing operations without fencing them", async () => {
+  const { dir, path } = fresh("polyth-epoch-executing-borrowed-");
+  const store = createStore(path);
+  try {
+    const sessionId = "session-b";
+    const oldBinding = epochBinding("backend-old", "external:old");
+    await store.upsertProjection(epochProjection(sessionId, oldBinding));
+    const turn = await store.prepareOperation({
+      sessionId,
+      mutationKind: "turn-submit",
+      intentEvent: { type: "user/message", data: { text: "borrowed in flight" } },
+    });
+    assert.equal((await store.claimOperation(turn.operation.operationId)).kind, "claimed");
+    const prepared = await store.prepareOperation({
+      sessionId,
+      mutationKind: "turn-abort",
+      intentEvent: {
+        type: "turn/abort-intended",
+        data: { reason: "user-requested" },
+        ignorable: true,
+      },
+    });
+    const reset = await store.prepareOperation({
+      sessionId,
+      mutationKind: "session-reset",
+      intentEvent: {
+        type: "session/reset-intended",
+        data: { reason: "runtime-epoch" },
+        ignorable: true,
+      },
+    });
+    assert.equal((await store.claimOperation(reset.operation.operationId)).kind, "claimed");
+    await store.settleOperation(reset.operation.operationId, {
+      kind: "confirmed",
+      receipt: "backend-new",
+    });
+
+    const result = await store.transitionRuntimeEpoch({
+      sessionId,
+      expectedBinding: oldBinding,
+      replacementBinding: {
+        ...oldBinding,
+        backendSessionId: "backend-new",
+        authorityId: "external:new",
+        generation: 2,
+        epoch: 1,
+        historyBaseline: "empty",
+      },
+      resetOperationId: reset.operation.operationId,
+      reason: "user confirmed replacement of an external runtime",
+    });
+
+    assert.deepEqual(result.fencedOperations, []);
+    assert.deepEqual(result.heldQueueItems, []);
+    assert.equal((await store.operation(turn.operation.operationId))?.state, "unknown");
+    assert.equal((await store.operation(prepared.operation.operationId))?.state, "rejected");
+    const confirmed = await store.settleOperation(turn.operation.operationId, {
+      kind: "confirmed",
+      receipt: "borrowed-protocol-evidence",
+    });
+    assert.equal(confirmed.state, "confirmed");
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("fenced and rejected operations refuse every settlement and claim path", async () => {
+  const { dir, path } = fresh("polyth-epoch-terminal-ops-");
+  const store = createStore(path);
+  try {
+    const sessionId = "session-c";
+    const oldBinding = epochBinding("backend-old", "owned:destroyed");
+    await store.upsertProjection(epochProjection(sessionId, oldBinding));
+    const turn = await store.prepareOperation({
+      sessionId,
+      mutationKind: "turn-submit",
+      replay: { kind: "same-operation-id", contract: "turn-submit-v1" },
+      intentEvent: { type: "user/message", data: { text: "fenced later" } },
+    });
+    await store.claimOperation(turn.operation.operationId);
+    await store.settleOperation(turn.operation.operationId, {
+      kind: "unknown",
+      message: "lost",
+    });
+    const reset = await store.prepareOperation({
+      sessionId,
+      mutationKind: "session-reset",
+      intentEvent: {
+        type: "session/reset-intended",
+        data: { reason: "runtime-epoch" },
+        ignorable: true,
+      },
+    });
+    await store.claimOperation(reset.operation.operationId);
+    await store.settleOperation(reset.operation.operationId, {
+      kind: "confirmed",
+      receipt: "backend-new",
+    });
+    await store.transitionRuntimeEpoch({
+      sessionId,
+      expectedBinding: oldBinding,
+      replacementBinding: {
+        ...oldBinding,
+        backendSessionId: "backend-new",
+        authorityId: "owned:new",
+        generation: 1,
+        epoch: 1,
+        historyBaseline: "empty",
+      },
+      resetOperationId: reset.operation.operationId,
+      reason: "owned runtime authority changed",
+      fence: { authorityId: oldBinding.authorityId, generation: oldBinding.generation },
+    });
+    assert.equal((await store.operation(turn.operation.operationId))?.state, "fenced");
+    await assert.rejects(
+      () => store.settleOperation(turn.operation.operationId, {
+        kind: "confirmed",
+        receipt: "late",
+      }),
+      (error: Error & { code?: string }) => error.code === "invalid-transition",
+    );
+    await assert.rejects(
+      () => store.settleOperation(turn.operation.operationId, {
+        kind: "rejected",
+        code: "nope",
+        message: "late reject",
+      }),
+      (error: Error & { code?: string }) => error.code === "invalid-transition",
+    );
+    await assert.rejects(
+      () => store.settleOperation(turn.operation.operationId, {
+        kind: "unknown",
+        message: "late unknown",
+      }),
+      (error: Error & { code?: string }) => error.code === "invalid-transition",
+    );
+    await assert.rejects(
+      () => store.settleOperation(turn.operation.operationId, {
+        kind: "not-applied",
+        message: "late non-application",
+      }),
+      (error: Error & { code?: string }) => error.code === "invalid-transition",
+    );
+    assert.equal((await store.claimOperation(turn.operation.operationId)).kind, "not-claimed");
+    assert.equal(
+      (await store.replayUnknownOperation(turn.operation.operationId, "turn-submit-v1")).kind,
+      "not-claimed",
+    );
   } finally {
     await store.close();
     rmSync(dir, { recursive: true, force: true });

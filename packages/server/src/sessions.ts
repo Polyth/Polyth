@@ -11,8 +11,8 @@ import type {
   RuntimeEndpoint, RuntimeLifecycleNotification, RuntimeMutationKind, RuntimeObservation,
   RuntimeSessionBinding, RuntimeSnapshot,
   SecretRequestData, SecretResolvedData, SecureSafeKind, SecureSafeService,
-  RuntimeSession, SendResult, SessionDebugDto, SessionEvent, SessionFolderDto, SessionForkedData, SessionOrganizePatch, SessionProjection, SessionRef,
-  SessionService, SessionPersistence, UserTurnInput, ModelMessage,
+  RuntimeSession, SendResult, SessionDebugDto, SessionDebugEndpointDto, SessionEvent, SessionFolderDto, SessionForkedData, SessionOrganizePatch, SessionProjection, SessionRef,
+  SessionService, SessionPersistence, UserTurnInput,
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
 import type { AutoAcceptStore, PermissionService } from "@polyth/permissions";
@@ -21,7 +21,10 @@ import {
   activeRewind,
   deriveMessages,
   effectiveHistory,
+  planRuntimeEpochRecovery,
   recoveredUserText,
+  sessionDebugObservability,
+  snapshotDebugEndpoint,
   type Store as DurableSessionStore,
 } from "@polyth/session";
 import { buildPermissionPreview, PERMISSION_ALLOWED_SCOPES } from "./permissionPreview.ts";
@@ -124,6 +127,8 @@ export interface RuntimeEpochSessionService extends RestartSafetySessionService 
     runtime: AgentRuntime,
     options: RuntimeEpochTransitionOptions,
   ): Promise<RuntimeEpochTransitionResult>;
+  /** User-confirmed borrowed/external replacement. Never fences unknowns. */
+  confirmBorrowedRuntimeEpoch(sessionId: string): Promise<SessionProjection>;
 }
 
 export const canRebindPersistedSession = (
@@ -222,6 +227,8 @@ export interface TurnHooks {
   ): Promise<{
     objective?: string;
     pinned: Array<{ sourceEventSeq: number; role: "user" | "assistant"; text: string }>;
+    behavior?: string;
+    agent?: string;
   }>;
 }
 
@@ -316,6 +323,12 @@ export function createSessionService(deps: {
   }
   const hooks = deps.hooks ?? {};
   const sessionRuntime = new Map<string, AgentRuntime>(); // sessionId -> runtime
+  // Last redacted endpoint seen during normal attach/bind. debug() reads this
+  // instead of calling endpoint(), which can restart a dead owned instance.
+  const attachedEndpoint = new WeakMap<AgentRuntime, SessionDebugEndpointDto>();
+  const rememberEndpoint = (runtime: AgentRuntime, endpoint: RuntimeEndpoint): void => {
+    attachedEndpoint.set(runtime, snapshotDebugEndpoint(endpoint));
+  };
   // One onEvent subscription per runtime (not per session): events dispatch
   // through sessionRuntime, so wiring N sessions to a runtime costs a single
   // listener that unwire() disposes once the last session leaves it.
@@ -746,6 +759,7 @@ export function createSessionService(deps: {
         ...(historyBaseline ? { historyBaseline } : {}),
       };
     }
+    rememberEndpoint(runtime, endpoint);
     return {
       backendSessionId,
       authorityId: endpoint.authorityId,
@@ -766,6 +780,7 @@ export function createSessionService(deps: {
     if (!proj.backendSessionId) return undefined;
     const endpoint = await (rt as ReliabilityRuntime).endpoint?.();
     if (endpoint) {
+      rememberEndpoint(rt, endpoint);
       const protocol = await (rt as ReliabilityRuntime).protocol?.()
         ?? proj.runtimeBinding?.protocol
         ?? "legacy";
@@ -1204,7 +1219,7 @@ export function createSessionService(deps: {
       return false;
     }
     const endpoint = await (runtime as ReliabilityRuntime).endpoint?.().catch(() => undefined);
-    if (!endpoint || endpoint.control.kind !== "owned") return false;
+    if (!endpoint) return false;
     const reason = "persisted runtime authority requires a deliberate epoch transition";
     const ordinal = reconciliationOrdinal
       ?? (await broadcastTail(
@@ -1220,7 +1235,10 @@ export function createSessionService(deps: {
         reason,
       ));
     }
-    await updateProjection(sessionId, { status: "epoch-pending" });
+    await updateProjection(sessionId, {
+      status: "epoch-pending",
+      runtimeControl: endpoint.control.kind === "owned" ? "owned" : "borrowed",
+    });
     return true;
   };
 
@@ -2524,172 +2542,37 @@ export function createSessionService(deps: {
     return { queueId: item.id, queued: true };
   };
 
-  interface RuntimeEpochRecoveryPlan {
-    epoch: number;
-    markerSeq: number;
-    recoveryContext: string;
-    goalRestored: boolean;
-    pinnedSourceSeqs: number[];
-  }
-
-  const EPOCH_RECOVERY_MAX_MESSAGES = 40;
-  const EPOCH_RECOVERY_MAX_CHARS = 16_000;
-
-  const messageText = (message: ModelMessage): string =>
-    message.parts
-      .filter((part): part is { type: "text"; text: string } => part.type === "text")
-      .map((part) => part.text.trim())
-      .filter(Boolean)
-      .join("\n");
-
   const runtimeEpochRecoveryPlan = async (
     sessionId: string,
     events: readonly SessionEvent[],
     includeWorkflow: boolean,
-  ): Promise<RuntimeEpochRecoveryPlan | null> => {
-    const epochMarkers = events.filter((event) => event.type === "runtime/epoch-replaced");
-    const marker = epochMarkers.at(-1);
-    if (!marker) return null;
-    const epoch = Number((marker.data as { new?: { epoch?: unknown } }).new?.epoch);
-    if (!Number.isSafeInteger(epoch) || epoch <= 0) return null;
-
+    includeRestored = false,
+  ) => {
     const operations = await durable.operations(sessionId);
-    const operationByOwnerSeq = new Map(
-      operations
-        .filter((operation) => operation.ownerEventSeq !== undefined)
-        .map((operation) => [operation.ownerEventSeq!, operation]),
-    );
-    const alreadyRestored = events.some((event) => {
-      if (event.type !== "user/message") return false;
-      const metadata = (event.data as {
-        runtimeEpochRecovery?: { markerSeq?: unknown; epoch?: unknown };
-      }).runtimeEpochRecovery;
-      if (
-        Number(metadata?.markerSeq) !== marker.seq
-        || Number(metadata?.epoch) !== epoch
-      ) {
-        return false;
-      }
-      return operationByOwnerSeq.get(event.seq)?.state === "confirmed";
-    });
-    if (alreadyRestored) return null;
-
     const heldQueueIds = new Set(
       (await deps.queue?.queueList(sessionId) ?? [])
         .filter((item) => item.heldForReview)
         .map((item) => item.id),
     );
-    const markerSeqs = epochMarkers.map((event) => event.seq);
-    const endingMarkerSeq = (eventSeq: number): number | undefined =>
-      markerSeqs.find((markerSeq) => markerSeq > eventSeq);
-    const unsafeCutByMarker = new Map<number, number>();
-    const markUnsafe = (eventSeq: number): void => {
-      const endingMarker = endingMarkerSeq(eventSeq);
-      if (endingMarker === undefined) return;
-      unsafeCutByMarker.set(
-        endingMarker,
-        Math.min(unsafeCutByMarker.get(endingMarker) ?? eventSeq, eventSeq),
-      );
-    };
-    for (const ownerEventSeq of operations
-      .filter((operation) =>
-        operation.mutationKind === "turn-submit"
-        && (
-          operation.state === "prepared"
-          || operation.state === "executing"
-          || operation.state === "unknown"
-          || operation.state === "fenced"
-        )
-        && operation.ownerEventSeq !== undefined)
-      .map((operation) => operation.ownerEventSeq!)) {
-      markUnsafe(ownerEventSeq);
-    }
-    for (const event of events) {
-      if (
-        event.type === "user/message"
-        && heldQueueIds.has(String((event.data as { queueId?: unknown }).queueId ?? ""))
-      ) {
-        markUnsafe(event.seq);
-      }
-    }
-    const effective = effectiveHistory(events.filter((event) => event.seq < marker.seq)).events;
-    const safeEvents = effective
-      // Each epoch is an independent history segment. Once a turn outcome is
-      // uncertain, discard that segment's remaining model-visible tail, but
-      // resume at its replacement marker so later confirmed epochs survive a
-      // second runtime loss.
-      .filter((event) => {
-        const endingMarker = endingMarkerSeq(event.seq);
-        const unsafeCut = endingMarker === undefined
-          ? undefined
-          : unsafeCutByMarker.get(endingMarker);
-        return unsafeCut === undefined || event.seq < unsafeCut;
-      })
-      .filter((event) => {
-        const owner = operationByOwnerSeq.get(event.seq);
-        return !owner || owner.state === "confirmed";
-      })
-      // Runtime requests and their replies are epoch-scoped. They expire
-      // separately and are never reconstructed as conversational turns.
-      .filter((event) => event.type !== "question/asked" && event.type !== "question/answered")
-      .map((event) => {
-        if (event.type !== "user/message") return event;
-        const {
-          recoveryContext: _recoveryContext,
-          compactionRecovery: _compactionRecovery,
-          runtimeEpochRecovery: _runtimeEpochRecovery,
-          ...data
-        } = event.data as Record<string, unknown>;
-        return { ...event, data: data as JsonObject };
-      });
-    const messages = deriveMessages(safeEvents);
-    // Match the existing assist transcript precedent: at most forty text-only
-    // user/assistant messages and 16k characters. Tool traffic and model
-    // reasoning are intentionally omitted; no summarizer invents history.
-    const transcript = messages
-      .filter((message) => message.role !== "tool")
-      .slice(-EPOCH_RECOVERY_MAX_MESSAGES)
-      .map((message) => {
-        const text = messageText(message);
-        return text ? `${message.role === "user" ? "User" : "Assistant"}: ${text}` : "";
-      })
-      .filter(Boolean)
-      .join("\n\n");
     const workflow = includeWorkflow
       ? await hooks.runtimeEpochContext?.(sessionId, events)
       : undefined;
-    const workflowLines: string[] = [];
-    const objective = workflow?.objective?.trim();
-    if (objective) workflowLines.push("Active objective:", objective);
-    if (workflow?.pinned.length) {
-      workflowLines.push("User-pinned context:");
-      for (const pin of workflow.pinned) {
-        workflowLines.push(`[${pin.role} message, source event ${pin.sourceEventSeq}]`, pin.text);
-      }
-    }
-    const prefix = [
-      `<polyth-runtime-epoch-recovery epoch="${epoch}" marker-seq="${marker.seq}">`,
-      "The runtime was replaced. Continue only from the confirmed canonical history below.",
-      "An uncertain prior request was not re-sent and must not be assumed applied.",
-    ].join("\n");
-    const suffix = "</polyth-runtime-epoch-recovery>";
-    const workflowText = workflowLines.join("\n\n");
-    const fixedLength = prefix.length + suffix.length + 4;
-    const workflowBudget = Math.max(0, EPOCH_RECOVERY_MAX_CHARS - fixedLength);
-    const boundedWorkflow = workflowText.slice(0, workflowBudget);
-    const transcriptBudget = Math.max(
-      0,
-      EPOCH_RECOVERY_MAX_CHARS - fixedLength - boundedWorkflow.length - 2,
-    );
-    const boundedTranscript = transcriptBudget > 0 ? transcript.slice(-transcriptBudget) : "";
-    const body = [boundedWorkflow, boundedTranscript].filter(Boolean).join("\n\n");
-    return {
-      epoch,
-      markerSeq: marker.seq,
-      recoveryContext: `${prefix}${body ? `\n\n${body}` : ""}\n${suffix}`,
-      goalRestored: Boolean(objective),
-      pinnedSourceSeqs: workflow?.pinned.map((pin) => pin.sourceEventSeq) ?? [],
-    };
+    const proj = await store.projection(sessionId);
+    return planRuntimeEpochRecovery({
+      events,
+      operations,
+      heldQueueIds,
+      includeWorkflow,
+      includeRestored,
+      workflow: {
+        ...(workflow?.objective ? { objective: workflow.objective } : {}),
+        ...(workflow?.pinned ? { pinned: workflow.pinned } : {}),
+        ...(workflow?.behavior ? { behavior: workflow.behavior } : {}),
+        ...(workflow?.agent ?? proj?.agent
+          ? { agent: workflow?.agent ?? proj?.agent }
+          : {}),
+      },
+    });
   };
 
   /** Dispatch the next queued message iff the session is idle. Never enters an
@@ -2968,12 +2851,13 @@ export function createSessionService(deps: {
       const barrier = reconciliation?.state === "reconciling"
         || reconciliation?.state === "blocked"
         || reconciliation?.state === "unknown";
-      const unresolved = await blockingOperation(
-        sessionId,
-        reserved?.operation.operationId,
-      );
+      const unresolved = await sendAdmissionBlocking(sessionId);
+      const reservedId = reserved?.operation.operationId;
+      const blocking = unresolved && unresolved.operationId !== reservedId
+        ? unresolved
+        : undefined;
       const requestsWaiting = openRequestTotal(await logFacts(sessionId)) > 0;
-      if (active || unsafeStatus || barrier || unresolved || requestsWaiting) {
+      if (active || unsafeStatus || barrier || blocking || requestsWaiting) {
         if (!deps.queue || reserved) {
           throw Object.assign(new Error("turn admission changed while the request was waiting"), {
             code: "conflict",
@@ -2986,7 +2870,7 @@ export function createSessionService(deps: {
           ? "turn-active"
           : barrier
             ? "reconciliation-active"
-            : unresolved
+            : blocking
               ? "mutation-active"
               : requestsWaiting
                 ? "request-waiting"
@@ -3144,6 +3028,133 @@ export function createSessionService(deps: {
         return result;
   };
 
+  const prepareFreshEpochResetUnderLock = async (
+    sessionId: string,
+    projection: SessionProjection,
+    runtime: AgentRuntime,
+    endpoint: RuntimeEndpoint,
+    cwd: string,
+  ): Promise<DurableOperation> => {
+    const oldBinding = projection.runtimeBinding;
+    if (!oldBinding) {
+      throw Object.assign(
+        new Error("runtime epoch recovery requires a complete persisted binding"),
+        { code: "binding-mismatch" },
+      );
+    }
+    const events = await store.events(sessionId);
+    const eventBySeq = new Map(events.map((event) => [event.seq, event]));
+    const resetCandidates = (await durable.operations(sessionId))
+      .filter((operation) => {
+        if (
+          operation.mutationKind !== "session-reset"
+          || operation.state === "fenced"
+          || operation.state === "rejected"
+          || operation.state === "not-applied"
+          || operation.receipt === oldBinding.backendSessionId
+        ) {
+          return false;
+        }
+        const owner = operation.ownerEventSeq === undefined
+          ? undefined
+          : eventBySeq.get(operation.ownerEventSeq);
+        const data = owner?.data as {
+          reason?: unknown;
+          targetAuthorityId?: unknown;
+          targetGeneration?: unknown;
+          targetContinuity?: unknown;
+        } | undefined;
+        return owner?.type === "session/reset-intended"
+          && data?.reason === "runtime-epoch-rehydration"
+          && data.targetAuthorityId === endpoint.authorityId
+          && (
+            Number(data.targetGeneration) === endpoint.generation
+            || (
+              data.targetContinuity === "verified"
+              && endpoint.continuity === "verified"
+            )
+          );
+      })
+      .sort((left, right) => right.ordinal - left.ordinal);
+    let reset = resetCandidates[0];
+    if (reset?.state === "executing" || reset?.state === "unknown") {
+      throw Object.assign(
+        new Error("fresh backend session creation outcome remains unknown"),
+        { code: "outcome-unknown", operationId: reset.operationId },
+      );
+    }
+    if (!reset) {
+      const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
+        sessionId,
+        mutationKind: "session-reset",
+        intentEvent: {
+          type: "session/reset-intended",
+          data: {
+            reason: "runtime-epoch-rehydration",
+            oldAuthorityId: oldBinding.authorityId,
+            oldGeneration: oldBinding.generation,
+            oldEpoch: oldBinding.epoch ?? 0,
+            targetAuthorityId: endpoint.authorityId,
+            targetGeneration: endpoint.generation,
+            targetContinuity: endpoint.continuity,
+          },
+          ignorable: true,
+        },
+      }));
+      reset = prepared.operation;
+    }
+    if (reset.state === "prepared") {
+      const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(
+        reset,
+        (operationId) => {
+          const request = {
+            projectId: projection.projectId,
+            title: projection.title,
+            sessionId,
+            cwd,
+            ...(projection.model ? { model: projection.model } : {}),
+            ...(projection.agent ? { agent: projection.agent } : {}),
+          };
+          return runtime.resetSessionOperation
+            ? runtime.resetSessionOperation(request, operationId)
+            : runtime.resetSession
+              ? runtime.resetSession(request)
+              : Promise.resolve({
+                  kind: "rejected" as const,
+                  code: "capability-unsupported",
+                  message: "runtime cannot create a fresh backend session",
+                });
+        },
+        (backendSessionId) => ({ backendSessionId }),
+      );
+      if (outcome.kind !== "confirmed") throw outcomeError(outcome);
+      reset = (await durable.operation(reset.operationId))!;
+    }
+    return reset;
+  };
+
+  const establishFreshRuntimeEpochUnderLock = async (
+    sessionId: string,
+    projection: SessionProjection,
+    runtime: AgentRuntime,
+  ): Promise<SessionProjection> => {
+    unwire(sessionId);
+    await ensureWired(sessionId, projection);
+    const ready = await store.projection(sessionId);
+    const reconciliation = await durable.reconciliation(sessionId);
+    if (
+      !ready
+      || ready.status !== "idle"
+      || reconciliation?.state !== "ready"
+    ) {
+      throw Object.assign(
+        new Error("fresh runtime epoch could not establish an idle reconciled session"),
+        { code: ready?.status === "unknown" ? "outcome-unknown" : "conflict" },
+      );
+    }
+    return ready;
+  };
+
   const recoverFreshRuntimeEpochUnderLock = async (
     sessionId: string,
   ): Promise<{ projection: SessionProjection; runtime: AgentRuntime }> => {
@@ -3191,93 +3202,13 @@ export function createSessionService(deps: {
         );
       }
       const oldBinding = projection.runtimeBinding;
-      const eventBySeq = new Map(events.map((event) => [event.seq, event]));
-      const resetCandidates = (await durable.operations(sessionId))
-        .filter((operation) => {
-          if (
-            operation.mutationKind !== "session-reset"
-            || operation.state === "fenced"
-            || operation.state === "rejected"
-            || operation.state === "not-applied"
-            || operation.receipt === oldBinding.backendSessionId
-          ) {
-            return false;
-          }
-          const owner = operation.ownerEventSeq === undefined
-            ? undefined
-            : eventBySeq.get(operation.ownerEventSeq);
-          const data = owner?.data as {
-            reason?: unknown;
-            targetAuthorityId?: unknown;
-            targetGeneration?: unknown;
-            targetContinuity?: unknown;
-          } | undefined;
-          return owner?.type === "session/reset-intended"
-            && data?.reason === "runtime-epoch-rehydration"
-            && data.targetAuthorityId === endpoint.authorityId
-            && (
-              Number(data.targetGeneration) === endpoint.generation
-              || (
-                data.targetContinuity === "verified"
-                && endpoint.continuity === "verified"
-              )
-            );
-        })
-        .sort((left, right) => right.ordinal - left.ordinal);
-      let reset = resetCandidates[0];
-      if (reset?.state === "executing" || reset?.state === "unknown") {
-        throw Object.assign(
-          new Error("fresh backend session creation outcome remains unknown"),
-          { code: "outcome-unknown", operationId: reset.operationId },
-        );
-      }
-      if (!reset) {
-        const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
-          sessionId,
-          mutationKind: "session-reset",
-          intentEvent: {
-            type: "session/reset-intended",
-            data: {
-              reason: "runtime-epoch-rehydration",
-              oldAuthorityId: oldBinding.authorityId,
-              oldGeneration: oldBinding.generation,
-              oldEpoch: oldBinding.epoch ?? 0,
-              targetAuthorityId: endpoint.authorityId,
-              targetGeneration: endpoint.generation,
-              targetContinuity: endpoint.continuity,
-            },
-            ignorable: true,
-          },
-        }));
-        reset = prepared.operation;
-      }
-      if (reset.state === "prepared") {
-        const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(
-          reset,
-          (operationId) => {
-            const request = {
-              projectId: projection!.projectId,
-              title: projection!.title,
-              sessionId,
-              cwd,
-              ...(projection!.model ? { model: projection!.model } : {}),
-              ...(projection!.agent ? { agent: projection!.agent } : {}),
-            };
-            return runtime.resetSessionOperation
-              ? runtime.resetSessionOperation(request, operationId)
-              : runtime.resetSession
-                ? runtime.resetSession(request)
-                : Promise.resolve({
-                    kind: "rejected" as const,
-                    code: "capability-unsupported",
-                    message: "runtime cannot create a fresh backend session",
-                  });
-          },
-          (backendSessionId) => ({ backendSessionId }),
-        );
-        if (outcome.kind !== "confirmed") throw outcomeError(outcome);
-        reset = (await durable.operation(reset.operationId))!;
-      }
+      const reset = await prepareFreshEpochResetUnderLock(
+        sessionId,
+        projection,
+        runtime,
+        endpoint,
+        cwd,
+      );
       await transitionRuntimeEpochUnderLock(sessionId, runtime, {
         resetOperationId: reset.operationId,
         reason: "owned runtime authority changed; restoring confirmed canonical history",
@@ -3290,12 +3221,105 @@ export function createSessionService(deps: {
       projection = (await store.projection(sessionId))!;
     }
 
-    // A committed transition intentionally unwires the old generation. Force
-    // materialization and reconciliation of the fresh backend before admission.
+    const ready = await establishFreshRuntimeEpochUnderLock(sessionId, projection, runtime);
+    return { projection: ready, runtime };
+  };
+
+  const confirmBorrowedRuntimeEpochUnderLock = async (
+    sessionId: string,
+  ): Promise<SessionProjection> => {
+    const projection = await store.projection(sessionId);
+    if (!projection) {
+      throw Object.assign(new Error("session not found"), { code: "not-found" });
+    }
+    if (projection.status === "archived") {
+      throw Object.assign(new Error("unavailable while the session is archived"), { code: "conflict" });
+    }
+    if (turnActive(sessionId)) {
+      throw Object.assign(new Error("borrowed runtime epoch cannot replace an active turn"), {
+        code: "conflict",
+      });
+    }
+    if (!projection.runtimeBinding || !projection.backendSessionId) {
+      throw Object.assign(
+        new Error("runtime epoch confirmation requires a complete persisted binding"),
+        { code: "binding-mismatch" },
+      );
+    }
+    const project = await projects.get(projection.projectId);
+    const cwd = projection.worktreePath ?? project?.path ?? process.cwd();
+    const runtime = await runtimes.forProject(projection.projectId, cwd);
+    const endpoint = await (runtime as ReliabilityRuntime).endpoint?.();
+    if (!endpoint) {
+      throw Object.assign(new Error("runtime epoch confirmation requires endpoint identity"), {
+        code: "unsupported",
+      });
+    }
+    if (endpoint.control.kind === "owned") {
+      throw Object.assign(
+        new Error("owned runtime epoch requires proof of the destroyed binding"),
+        { code: "epoch-proof-required" },
+      );
+    }
+    if (
+      projection.status !== "epoch-pending"
+      || projection.runtimeControl !== "borrowed"
+    ) {
+      throw Object.assign(
+        new Error("borrowed runtime epoch confirmation is only allowed for a pending borrowed identity break"),
+        { code: "confirmation-not-required" },
+      );
+    }
+    const protocol = await (runtime as ReliabilityRuntime).protocol?.()
+      ?? projection.runtimeBinding.protocol;
+    if (canRebindPersistedSession(projection.runtimeBinding, {
+      backendSessionId: projection.backendSessionId,
+      endpoint,
+      protocol,
+    })) {
+      throw Object.assign(
+        new Error("borrowed runtime epoch confirmation requires a failed rebind"),
+        { code: "confirmation-not-required" },
+      );
+    }
+    const reset = await prepareFreshEpochResetUnderLock(
+      sessionId,
+      projection,
+      runtime,
+      endpoint,
+      cwd,
+    );
+    await transitionRuntimeEpochUnderLock(sessionId, runtime, {
+      resetOperationId: reset.operationId,
+      reason: "user confirmed replacement of an external runtime",
+      authorityDisposition: { kind: "borrowed-runtime-confirmed" },
+    });
+    const next = (await store.projection(sessionId))!;
     unwire(sessionId);
-    await ensureWired(sessionId, projection);
-    const ready = await store.projection(sessionId);
-    const reconciliation = await durable.reconciliation(sessionId);
+    await ensureWired(sessionId, next);
+    let ready = await store.projection(sessionId);
+    let reconciliation = await durable.reconciliation(sessionId);
+    const resetOrdinal = (await durable.operation(reset.operationId))?.ordinal;
+    const unresolved = await blockingOperation(sessionId);
+    if (
+      unresolved?.state === "unknown"
+      && resetOrdinal !== undefined
+      && unresolved.ordinal < resetOrdinal
+    ) {
+      const current = await durable.reconciliation(sessionId);
+      if (current && current.state !== "ready") {
+        await broadcastTail(sessionId, () => durable.settleReconciliation(
+          sessionId,
+          current.ordinal,
+          "ready",
+        ));
+      }
+      if (ready?.status !== "idle") {
+        await updateProjection(sessionId, { status: "idle" });
+      }
+      ready = await store.projection(sessionId);
+      reconciliation = await durable.reconciliation(sessionId);
+    }
     if (
       !ready
       || ready.status !== "idle"
@@ -3306,13 +3330,54 @@ export function createSessionService(deps: {
         { code: ready?.status === "unknown" ? "outcome-unknown" : "conflict" },
       );
     }
-    return { projection: ready, runtime };
+    return ready;
+  };
+
+  const latestConfirmedEpochResetOrdinal = async (
+    sessionId: string,
+  ): Promise<number | undefined> => {
+    const events = await store.events(sessionId);
+    const resetIds = events
+      .filter((event) => event.type === "runtime/epoch-replaced")
+      .map((event) => (event.data as { resetOperationId?: unknown }).resetOperationId)
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
+    if (resetIds.length === 0) return undefined;
+    const named = new Set(resetIds);
+    const reset = (await durable.operations(sessionId))
+      .filter((operation) =>
+        operation.mutationKind === "session-reset"
+        && operation.state === "confirmed"
+        && named.has(operation.operationId))
+      .sort((left, right) => right.ordinal - left.ordinal)[0];
+    return reset?.ordinal;
+  };
+
+  const sendAdmissionBlocking = async (
+    sessionId: string,
+  ): Promise<DurableOperation | undefined> => {
+    const resetOrdinal = await latestConfirmedEpochResetOrdinal(sessionId);
+    return (await durable.operations(sessionId)).find((operation) => {
+      if (!isRuntimeOperationBlocking(operation)) return false;
+      if (
+        operation.state === "unknown"
+        && resetOrdinal !== undefined
+        && operation.ordinal < resetOrdinal
+      ) {
+        return false;
+      }
+      return true;
+    });
   };
 
   const service: RuntimeEpochSessionService = {
     async transitionRuntimeEpoch(sessionId, runtime, options) {
       return withSessionLock(sessionId, () =>
         transitionRuntimeEpochUnderLock(sessionId, runtime, options));
+    },
+
+    async confirmBorrowedRuntimeEpoch(sessionId) {
+      return withSessionLock(sessionId, () =>
+        confirmBorrowedRuntimeEpochUnderLock(sessionId));
     },
 
     async reconcileForRuntimeRestart(sessionId, runtime, expected) {
@@ -3569,7 +3634,7 @@ export function createSessionService(deps: {
             { code: "conflict" },
           );
         }
-        const existingOperation = await blockingOperation(sessionId);
+        const existingOperation = await sendAdmissionBlocking(sessionId);
         if (existingOperation) {
           throw Object.assign(
             new Error(`cannot send while operation ${existingOperation.operationId} is ${existingOperation.state}`),
@@ -3605,7 +3670,7 @@ export function createSessionService(deps: {
           { code: "conflict" },
         );
       }
-      const readyOperation = await blockingOperation(sessionId);
+      const readyOperation = await sendAdmissionBlocking(sessionId);
       if (readyOperation) {
         throw Object.assign(
           new Error(`cannot send while operation ${readyOperation.operationId} is ${readyOperation.state}`),
@@ -4512,26 +4577,50 @@ export function createSessionService(deps: {
       if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
       const facts = await logFacts(sessionId);
       const turnId = lastTurnId.get(sessionId);
+      const events = await store.events(sessionId);
+      const operations = await durable.operations(sessionId);
+      const queue = deps.queue ? await deps.queue.queueList(sessionId) : [];
+      const heldForReview = queue.filter((item) => item.heldForReview).length;
+      const attached = sessionRuntime.get(sessionId);
+      const endpoint = attached ? attachedEndpoint.get(attached) : undefined;
+      const plan = await runtimeEpochRecoveryPlan(sessionId, events, true, true);
+      const restored = events.some((event) => {
+        if (event.type !== "user/message") return false;
+        const metadata = (event.data as {
+          runtimeEpochRecovery?: { markerSeq?: unknown; epoch?: unknown };
+        }).runtimeEpochRecovery;
+        return Number(metadata?.markerSeq) === plan?.markerSeq
+          && Number(metadata?.epoch) === plan?.epoch;
+      });
+      const observability = sessionDebugObservability({
+        events,
+        operations,
+        heldForReview,
+        ...(projection.runtimeBinding ? { binding: projection.runtimeBinding } : {}),
+        ...(endpoint ? { endpoint } : {}),
+        ...(plan ? { recoveryPlan: plan, recoveryRestored: restored } : {}),
+      });
       return {
         status: projection.status,
         eventCount: facts.eventCount,
         latestSeq: facts.lastEvent?.seq ?? 0,
         ...(facts.lastEvent ? { lastEvent: { ...facts.lastEvent } } : {}),
         runtime: {
-          attached: sessionRuntime.has(sessionId),
+          attached: Boolean(attached),
           activeTurn: turnActive(sessionId),
           admissionPending: admitting.has(sessionId),
           ...(turnId ? { turnId } : {}),
           ...(projection.backendSessionId ? { backendSessionId: projection.backendSessionId } : {}),
           ...(projection.worktreePath ? { worktreePath: projection.worktreePath } : {}),
         },
-        queue: deps.queue ? await deps.queue.queueList(sessionId) : [],
+        queue,
         pending: {
           permissions: [...facts.openPermissions.keys()],
           questions: [...facts.openQuestions.keys()],
           secrets: [...facts.openSecrets.keys()],
         },
         recentErrors: [...facts.recentErrors],
+        ...observability,
       };
     },
 

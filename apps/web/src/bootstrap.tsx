@@ -23,6 +23,7 @@ import { installBuiltinMiniWidgets } from "./widgets/builtinMiniWidgets.tsx";
 import { installNotificationCentre } from "./components/NotificationCentre.tsx";
 import { installOpenCodeRestartControl } from "./components/OpenCodeRestartControl.tsx";
 import { installReconnectPill } from "./components/ReconnectPill.tsx";
+import { installRuntimeEpochBanner } from "./components/RuntimeEpochBanner.tsx";
 import { installDesktopIntegration } from "./desktop.tsx";
 import { exposeWidgets } from "./widgets/catalog.ts";
 import { bootPackages } from "./packages/registry.ts";
@@ -49,6 +50,7 @@ installBuiltinMiniWidgets();
 installNotificationCentre();
 installOpenCodeRestartControl();
 installReconnectPill();
+installRuntimeEpochBanner();
 // No-op in browsers; Electron's preload exposes the bridge that enables the
 // desktop settings page and custom titlebar controls through existing slots.
 installDesktopIntegration();

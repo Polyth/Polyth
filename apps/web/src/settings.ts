@@ -205,6 +205,7 @@ export function formatModelRef(ref: { providerID: string; modelID: string }): st
 // ---- error display ----------------------------------------------------------
 
 const RECONNECT_RE = /\b503\b|unavailable|reconnect|fetch failed|econnrefused|socket hang up|network error/i;
+const EPOCH_IDENTITY_RE = /epoch-pending|confirmation-required|binding-mismatch|epoch-proof-required/i;
 const MAX_ERR_LEN = 160;
 
 function truncate(s: string): string {
@@ -236,6 +237,13 @@ function shortMessage(raw: string): string {
 // (503, fetch failed, refused) collapse into one calm reconnect message.
 export function friendlyError(action: string, err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err);
+  const code = typeof (err as { code?: unknown }).code === "string"
+    ? (err as { code: string }).code
+    : "";
+  if (EPOCH_IDENTITY_RE.test(raw) || EPOCH_IDENTITY_RE.test(code)) {
+    const short = shortMessage(raw);
+    return short ? `${action}: ${short}` : action;
+  }
   if (RECONNECT_RE.test(raw)) return tr("settings.openCodeReconnecting");
   const short = shortMessage(raw);
   return short ? `${action}: ${short}` : action;

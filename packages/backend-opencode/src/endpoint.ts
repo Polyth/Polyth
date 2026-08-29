@@ -667,9 +667,58 @@ export const createOwnedLocalEndpointLease = async (
   });
 };
 
+export interface OwnedSshStorageIdentity {
+  connection: string;
+  host: string;
+  remotePath: string;
+  runtimeDir: string;
+  engine: "opencode";
+  version: string;
+  binaryDigest: string;
+  protocolGeneration: number;
+  storageId: string;
+}
+
+export type OwnedSshRuntimeIdentity =
+  | string
+  | OwnedSshStorageIdentity
+  | (() => string | OwnedSshStorageIdentity);
+
+/** Connection identity stays in the outer SSH envelope. Storage/engine fields
+ * are the shared owned-runtime semantic block; they never include credentials
+ * or conversation content. */
+export const ownedSshRuntimeIdentityKey = (identity: OwnedSshStorageIdentity): string =>
+  ownedRuntimeIdentityKey({
+    kind: "owned-ssh",
+    connection: identity.connection,
+    host: identity.host,
+    remotePath: identity.remotePath,
+    runtimeDir: identity.runtimeDir,
+    engine: identity.engine,
+    version: identity.version,
+    binaryDigest: identity.binaryDigest,
+    protocolGeneration: identity.protocolGeneration,
+    storageId: identity.storageId,
+  });
+
+const resolveSshRuntimeIdentity = (
+  identity: string | OwnedSshStorageIdentity,
+  location: RuntimeLocation,
+): string =>
+  typeof identity === "string"
+    ? ownedRuntimeIdentityKey({
+        kind: "owned-ssh",
+        runtime: identity,
+        location,
+      })
+    : ownedSshRuntimeIdentityKey(identity);
+
 export interface OwnedSshEndpointOptions {
   location: RuntimeLocation;
-  start(instanceToken: string): Promise<{
+  start(
+    instanceToken: string,
+    incarnation: OwnedRuntimeIncarnation,
+  ): Promise<{
     url: string;
     instanceIdentity: string;
     alive?(): boolean;
@@ -679,7 +728,8 @@ export interface OwnedSshEndpointOptions {
   /** Durable authority/generation fence for this exact remote runtime. */
   stateFile?: string;
   /** Stable connection/host and runtime binding identity. Required with stateFile. */
-  runtimeIdentity?: string;
+  runtimeIdentity?: OwnedSshRuntimeIdentity;
+  prepareStart?: () => Promise<void>;
   authentication?: RuntimeAuthentication;
 }
 
@@ -698,29 +748,32 @@ export const createOwnedSshEndpointLease = async (
   if (options.stateFile && !options.runtimeIdentity) {
     throw unavailable("durable SSH runtime state requires a runtime identity");
   }
-  const durableState = options.stateFile && options.runtimeIdentity
-    ? createDurableOwnedRuntimeState(
-        options.stateFile,
-        ownedRuntimeIdentityKey({
-          kind: "owned-ssh",
-          runtime: options.runtimeIdentity,
-          location: options.location,
-        }),
-        options.authorityId,
-      )
-    : undefined;
+  const durable = options.stateFile && options.runtimeIdentity
+    ? {
+        nextIncarnation: async () => {
+          const resolved = typeof options.runtimeIdentity === "function"
+            ? options.runtimeIdentity()
+            : options.runtimeIdentity;
+          if (!resolved) throw unavailable("durable SSH runtime state requires a runtime identity");
+          return createDurableOwnedRuntimeState(
+            options.stateFile!,
+            resolveSshRuntimeIdentity(resolved, options.location),
+            options.authorityId,
+          ).nextIncarnation();
+        },
+      }
+    : options.authorityId
+      ? { authorityId: options.authorityId }
+      : {};
   return createOwnedLease({
-    ...(durableState
-      ? { nextIncarnation: durableState.nextIncarnation }
-      : options.authorityId
-        ? { authorityId: options.authorityId }
-        : {}),
-    continuity: durableState ? "verified" : "generation-only",
+    ...durable,
+    ...(options.prepareStart ? { prepareStart: options.prepareStart } : {}),
+    continuity: options.stateFile && options.runtimeIdentity ? "verified" : "generation-only",
     location: options.location,
     config: { kind: "read-only" },
     authentication,
-    async start(instanceToken) {
-      const started = await options.start(instanceToken);
+    async start(instanceToken, incarnation) {
+      const started = await options.start(instanceToken, incarnation);
       return {
         ...started,
         authentication,

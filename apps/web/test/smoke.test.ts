@@ -136,6 +136,23 @@ test("assistant chunks stream into one message and finalize on assistant/message
   assert.ok(Math.abs(stopped.totals.cost - 0.001) < 1e-9);
 });
 
+test("uncertainty and fenced turn-submit mark the nearest unmarked user message", () => {
+  let model = buildModel([
+    ev("user/message", { text: "first" }),
+    ev("user/message", { text: "second" }),
+  ]);
+  model = reduceEvent(model, ev("mutation/uncertainty-recorded", { mutationKind: "turn-submit" }));
+  const second = model.messages[1] as { kind: string; text: string; uncertain?: boolean };
+  const first = model.messages[0] as { kind: string; uncertain?: boolean };
+  assert.equal(second.kind, "user");
+  assert.equal(second.uncertain, true);
+  assert.equal(first.uncertain, undefined);
+  model = reduceEvent(model, ev("mutation/fenced", { mutationKind: "permission-reply" }));
+  assert.equal((model.messages[0] as { uncertain?: boolean }).uncertain, undefined);
+  model = reduceEvent(model, ev("mutation/fenced", { mutationKind: "turn-submit" }));
+  assert.equal((model.messages[0] as { uncertain?: boolean }).uncertain, true);
+});
+
 test("tool call → result fills the card; call → error marks it failed", () => {
   const m = buildModel([
     ev("tool/call", { callId: "c1", tool: "read_file", input: { path: "a.ts" } }),

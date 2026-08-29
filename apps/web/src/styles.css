@@ -923,6 +923,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .session-status-indicator.reply { color: var(--session-blue, var(--accent)); }
 .session-status-indicator.approval,
 .session-status-indicator.reconciling { color: var(--amber); }
+.session-status-indicator.epoch-pending { color: var(--amber); }
 .session-status-indicator.failed { color: var(--red); }
 .session-status-indicator.unknown { color: var(--muted); }
 .session-question-icon {
@@ -4219,6 +4220,80 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
   font-size: var(--nav-meta-size);
 }
 .composer-send-failure .ui-btn { flex: none; }
+.runtime-recovery {
+  container: runtime-recovery / inline-size;
+  width: min(var(--chat-measure), calc(100% - (2 * var(--gutter))));
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--amber) 32%, transparent);
+  border-radius: var(--radius-control);
+  background: var(--amber-wash);
+  color: var(--text-dim);
+}
+.runtime-recovery-title,
+.runtime-recovery-body {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-label);
+}
+.runtime-recovery-detail,
+.runtime-recovery-note {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.runtime-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+@container runtime-recovery (max-width: 420px) {
+  .runtime-recovery-actions { flex-direction: column; align-items: stretch; }
+}
+.runtime-recovery-caption {
+  margin-top: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.runtime-recovery-details {
+  width: 100%;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.runtime-recovery-details > summary {
+  cursor: pointer;
+  color: var(--text-dim);
+}
+.runtime-recovery-facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: var(--space-2) 0 0;
+}
+.runtime-recovery-fact {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+}
+.runtime-recovery-fact dt {
+  color: var(--faint);
+}
+.runtime-recovery-fact dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.queue-chip.held { cursor: default; }
+.queue-held {
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+}
 
 /* Focus is a conversation, not a dashboard. */
 .focus-conversation { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--elevated); }
@@ -5717,7 +5792,8 @@ min-height: var(--tap);
 .session-nav-status.working,
 .session-nav-status.needs-reply { color: var(--accent); }
 .session-nav-status.needs-approval,
-.session-nav-status.reconciling { color: var(--amber); }
+.session-nav-status.reconciling,
+.session-nav-status.epoch-pending { color: var(--amber); }
 .session-nav-status.failed { color: var(--red); }
 .session-nav-status.unread { color: var(--text-dim); }
 .session-nav-current svg { width: 13px; height: 13px; color: var(--muted); }

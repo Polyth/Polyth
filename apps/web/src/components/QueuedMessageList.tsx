@@ -89,10 +89,13 @@ export default function QueuedMessageList({
       {visibleItems.map((item) => (
         <div
           key={item.id}
-          className={`queue-chip${draggedId === item.id ? " dragging" : ""}${dropTargetId === item.id ? " drag-over" : ""}`}
+          className={`queue-chip${draggedId === item.id ? " dragging" : ""}${dropTargetId === item.id ? " drag-over" : ""}${item.heldForReview ? " held" : ""}`}
           role="listitem"
-          draggable
-          onDragStart={(event) => startDrag(item.id, event)}
+          draggable={!item.heldForReview}
+          onDragStart={(event) => {
+            if (item.heldForReview) return;
+            startDrag(item.id, event);
+          }}
           onDragEnd={() => { setDraggedId(null); setDropTargetId(null); }}
           onDragOver={(event) => {
             if (!draggedId || draggedId === item.id) return;
@@ -107,6 +110,9 @@ export default function QueuedMessageList({
           <span className="queue-pos">#{item.position + 1}</span>
           <span className="queue-text" title={item.text}>{item.text}</span>
           <span className="muted queue-delivery">{item.delivery === "steer" ? tr("queuedmessagelist.steer") : tr("queuedmessagelist.queued")}</span>
+          {item.heldForReview && (
+            <span className="queue-held">{tr("queuedmessagelist.heldForReview")}</span>
+          )}
           <button aria-label={tr("queuedmessagelist.editQueuedMessageValue", { value: item.position + 1 })} onClick={() => onEdit?.(item)}>✎</button>
           <button aria-label={tr("queuedmessagelist.removeQueuedMessageValue", { value: item.position + 1 })} onClick={() => void remove(item.id)}>✕</button>
         </div>

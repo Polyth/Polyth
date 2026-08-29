@@ -16,10 +16,11 @@ import type {
   SessionService,
   UserTurnInput,
 } from "@polyth/contracts";
-import { deriveMessages } from "@polyth/session";
+import { deriveMessages, planRuntimeEpochRecovery, sessionDebugObservability } from "@polyth/session";
 
 const SESSION_STATUSES = new Set([
   "idle", "working", "waiting", "finished", "failed", "archived",
+  "epoch-pending",
 ]);
 const DELIVERY_MODES = new Set(["normal", "steer", "queue", "interrupt"]);
 
@@ -195,6 +196,20 @@ const fallbackDebug = async (
   events: SessionEvent[],
 ): Promise<SessionDebugDto> => {
   const last = events.at(-1);
+  const queue = await sessions.queueList?.(projection.id) ?? [];
+  const plan = planRuntimeEpochRecovery({
+    events,
+    operations: [],
+    includeRestored: true,
+  });
+  const restored = events.some((event) => {
+    if (event.type !== "user/message") return false;
+    const metadata = (event.data as {
+      runtimeEpochRecovery?: { markerSeq?: unknown; epoch?: unknown };
+    }).runtimeEpochRecovery;
+    return Number(metadata?.markerSeq) === plan?.markerSeq
+      && Number(metadata?.epoch) === plan?.epoch;
+  });
   return {
     status: projection.status,
     eventCount: events.length,
@@ -207,9 +222,15 @@ const fallbackDebug = async (
       ...(projection.backendSessionId ? { backendSessionId: projection.backendSessionId } : {}),
       ...(projection.worktreePath ? { worktreePath: projection.worktreePath } : {}),
     },
-    queue: await sessions.queueList?.(projection.id) ?? [],
+    queue,
     pending: pendingRequests(events),
     recentErrors: recentErrors(events),
+    ...sessionDebugObservability({
+      events,
+      heldForReview: queue.filter((item) => item.heldForReview).length,
+      ...(projection.runtimeBinding ? { binding: projection.runtimeBinding } : {}),
+      ...(plan ? { recoveryPlan: plan, recoveryRestored: restored } : {}),
+    }),
   };
 };
 
@@ -528,6 +549,16 @@ export function agentSessionRoutes(deps: AgentSessionRouteDeps): RouteHandler {
           : sessions.restore(sessionId));
         json(200, { session: await sessions.snapshot(sessionId), links: sessionLinks(sessionId) });
       }
+      return true;
+    }
+
+    if (suffix === "/runtime-epoch" && method === "POST") {
+      if (!sessions.confirmBorrowedRuntimeEpoch) {
+        return unsupported("runtime epoch confirmation is unavailable");
+      }
+      const input = await body();
+      if (input.confirm !== true) return invalid("confirm must be true");
+      json(200, await sessions.confirmBorrowedRuntimeEpoch(sessionId));
       return true;
     }
 

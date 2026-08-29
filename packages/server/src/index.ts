@@ -88,6 +88,7 @@ import { createRouteRegistry } from "./routeRegistry.ts";
 import { createPackageLifecycle } from "./packageLifecycle.ts";
 import { createDeferredConfigApplier, createOpenCodePendingService } from "./opencodePending.ts";
 import { agentSessionRoutes, type AgentGoalService } from "./routes/agentSessions.ts";
+import { runtimeEpochRoutes } from "./routes/runtimeEpoch.ts";
 import { settleAllOrThrow } from "./settle.ts";
 import {
   createRuntimeIdleController,
@@ -492,7 +493,9 @@ export async function boot(opts: BootOptions = {}) {
       return createRemoteOpenCodeRuntime({
         host: ssh.host(remoteBinding.connectionId),
         connectionIdentity: remoteBinding.connectionId,
+        projectId,
         remotePath: cwd,
+        remoteStateKey,
         ...(opts.opencode?.runtimeDir
           ? { runtimeDir: posix.join(opts.opencode.runtimeDir, remoteStateKey) }
           : {}),
@@ -1581,6 +1584,7 @@ export async function boot(opts: BootOptions = {}) {
       version: "0.1.0",
     }),
     queueRoutes(sessions),
+    runtimeEpochRoutes(sessions),
     pushRoutes(push),
     notificationRoutes(notifications),
     browseRoutes(),

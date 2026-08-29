@@ -16,6 +16,7 @@ export interface SessionActionTarget {
 export function needsDestructiveConfirm(session: SessionActionTarget): boolean {
   return session.status === "working" || session.status === "waiting"
     || session.status === "reconciling" || session.status === "unknown"
+    || session.status === "epoch-pending"
     || (session.attention?.questions ?? 0) > 0
     || (session.attention?.permissions ?? 0) > 0;
 }

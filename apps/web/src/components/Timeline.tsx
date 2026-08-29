@@ -910,6 +910,9 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, preliminary, o
               {tr("timeline.expandedFrom")}{" "}<code>{m.raw.split("\n")[0] ?? m.raw}</code>
             </div>
           )}
+          {m.uncertain && (
+            <div className="runtime-recovery-caption">{tr("runtimeRecovery.uncertainTurn")}</div>
+          )}
         </div>
         {announce && (
           <MessageMeta m={m} announce={announce} onRevert={onRevert} onFork={onFork} revert={revert} fork={fork} />
@@ -945,7 +948,8 @@ function sameMessage(a: RenderMessage, b: RenderMessage): boolean {
   if (a.undone !== b.undone || a.rewindMarkerSeq !== b.rewindMarkerSeq) return false;
   if (a === b) return true; // same object → the rev prop covers mutations
   if (a.kind === "user" && b.kind === "user") {
-    return a.text === b.text && a.raw === b.raw && a.attachments === b.attachments;
+    return a.text === b.text && a.raw === b.raw && a.attachments === b.attachments
+      && a.uncertain === b.uncertain;
   }
   if (a.kind === "assistant" && b.kind === "assistant") {
     return a.text === b.text && a.reasoning === b.reasoning && a.finalized === b.finalized

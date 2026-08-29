@@ -5,6 +5,7 @@ export type SessionStatusKind =
   | "needs-reply"
   | "working"
   | "failed"
+  | "epoch-pending"
   | "reconciling"
   | "unknown"
   | "unread"
@@ -52,6 +53,9 @@ export function resolveSessionStatus(
   }
   if (session.status === "failed") {
     return { kind: "failed", glyph: "!", label: "Failed" };
+  }
+  if (session.status === "epoch-pending") {
+    return { kind: "epoch-pending", glyph: "⚠", label: "Runtime changed" };
   }
   if (session.status === "reconciling") {
     return { kind: "reconciling", glyph: "↻", label: "Reconnecting" };

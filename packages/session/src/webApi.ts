@@ -38,6 +38,7 @@ import type {
   SecureSafeCreateInput,
   SecureSafeEntryDto,
   SendResult,
+  SessionDebugDto,
   SessionEvent,
   SessionFolderDto,
   SessionProjection,
@@ -558,6 +559,8 @@ export const api = {
   createSession: (input: { projectId: string; title?: string; model?: ModelRef; agent?: string; worktreePath?: string }) =>
     jfetch<SessionRef>("/api/sessions", json("POST", input)),
   getSession: (id: string) => jfetch<SessionProjection>(`/api/sessions/${id}`),
+  sessionDebug: (id: string) =>
+    jfetch<{ debug: SessionDebugDto }>(`/api/agent/sessions/${encodeURIComponent(id)}/debug`),
   /** `page` (beforeSeq/limit) keyset-pages the NEWEST events in the window —
    *  the deep-log hydration path fetches a recent window first and backfills
    *  older history in chunks (beforeSeq = oldest loaded seq). */
@@ -571,6 +574,8 @@ export const api = {
   sendMessage: (id: string, body: { text: string; autoTitle?: boolean; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; delivery?: string; dismissPending?: boolean; agentProfileId?: string | null }) =>
     jfetch<SendResult>(`/api/sessions/${id}/message`, json("POST", body)),
   abort: (id: string) => jfetch<void>(`/api/sessions/${id}/abort`, { method: "POST" }),
+  confirmBorrowedRuntimeEpoch: (id: string) =>
+    jfetch<SessionProjection>(`/api/sessions/${id}/runtime-epoch`, json("POST", { confirm: true })),
   renameSession: (id: string, title: string) =>
     jfetch<{ ok: true }>(`/api/sessions/${id}/rename`, json("POST", { title })),
 

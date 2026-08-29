@@ -687,6 +687,7 @@ export default function Composer({
     deliveryOverride?: "steer" | "queue" | "interrupt",
   ) => {
     if (creatingSession) return;
+    if (session?.status === "epoch-pending" && session.runtimeControl === "borrowed") return;
     const t = (override ?? inputRef.current?.getText() ?? text).trim();
     const target = sessionIdRef.current;
     if (queueEdit) {
@@ -831,7 +832,7 @@ export default function Composer({
     acTokenRef.current = null;
   }, [
     text, attachments, cfg, profileMissing, noModels, working, activeProjectId, queueEdit, queueEditSaving,
-    session?.model, preferredModel,
+    session?.model, session?.status, session?.runtimeControl, preferredModel,
     sessionDefaults.defaultThinking, chatModels, creatingSession, newSessionTarget,
     newSessionAutoApprove, newSessionGoal, newSessionIntent,
   ]);
@@ -1162,8 +1163,11 @@ export default function Composer({
   const thinkingVariants = selectedModel?.variants ?? [];
 
   const followUp = getUiSettings().followUpBehavior;
+  const borrowedEpochPending = session?.status === "epoch-pending"
+    && session.runtimeControl === "borrowed";
   const sendDisabled = creatingSession
     || queueEditSaving
+    || borrowedEpochPending
     || (queueEdit ? !text.trim() : (!text.trim() && attachments.length === 0))
     || (!queueEdit && !shellMode && (noModels || profileMissing));
   const phoneLayout = isPhone;

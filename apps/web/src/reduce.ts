@@ -29,6 +29,8 @@ export interface UserMsg {
   undone?: boolean;
   rewindMarkerSeq?: number;
   time: number;
+  /** Prior-epoch turn-submit whose outcome stayed unknown or was fenced. */
+  uncertain?: boolean;
   /** Mutation counter: reduceEvent updates messages IN PLACE, so identity
    *  checks can't see changes. Every in-place mutation bumps `rev`; row
    *  memoization captures it as a scalar prop at render time. */
@@ -400,6 +402,19 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         headRefName: str(d, "headRefName") ?? "",
         time: ev.time,
       });
+      break;
+    }
+    case "mutation/uncertainty-recorded":
+    case "mutation/fenced": {
+      if (str(d, "mutationKind") !== "turn-submit") break;
+      for (let i = model.messages.length - 1; i >= 0; i -= 1) {
+        const msg = model.messages[i];
+        if (msg?.kind === "user" && !msg.uncertain) {
+          msg.uncertain = true;
+          touch(msg);
+          break;
+        }
+      }
       break;
     }
     case "user/message": {

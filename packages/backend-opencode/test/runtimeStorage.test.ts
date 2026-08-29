@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -9,9 +9,22 @@ import {
   OPEN_CODE_RUNTIME_STALE_TTL_MS,
   OPENCODE_UPDATE_DISABLE_ENV,
   POLYTH_OPENCODE_BIN_ENV,
+  prepareOpenCodeRuntime,
   resolveOpenCodeBinary,
   sweepOpenCodeRuntimes,
 } from "../src/runtimeStorage.ts";
+
+const TEST_ENGINE = {
+  engine: "opencode" as const,
+  version: "1.18.18",
+  binaryDigest: "a".repeat(64),
+  protocolGeneration: 1,
+};
+
+const TEST_BINARY = {
+  executablePath: "/test-opencode-binaries/opencode",
+  binarySource: "path" as const,
+};
 
 const metadata = (
   projectId: string,
@@ -199,4 +212,57 @@ test("override resolution failures name the env and attempted binary", async (t)
     );
   }
   assert.equal(OPENCODE_UPDATE_DISABLE_ENV, "OPENCODE_DISABLE_AUTOUPDATE");
+});
+
+test("prepare refuses a symlink runtimeDir and does not write through it", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-runtime-dir-symlink-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const victim = join(directory, "victim");
+  const alias = join(directory, "alias");
+  await mkdir(victim, { recursive: true, mode: 0o700 });
+  await writeFile(join(victim, "opencode.db"), "victim-db", { mode: 0o600 });
+  await symlink(victim, alias);
+
+  await assert.rejects(
+    () => prepareOpenCodeRuntime({
+      runtimeDir: alias,
+      projectId: "attacker",
+      cwd: join(directory, "cwd"),
+      engineIdentity: TEST_ENGINE,
+      binary: TEST_BINARY,
+    }),
+    (error: Error & { code?: string }) => {
+      assert.equal(error.code, "unavailable");
+      assert.match(error.message, /symlink/);
+      return true;
+    },
+  );
+  assert.equal(await readFile(join(victim, "opencode.db"), "utf8"), "victim-db");
+  await assert.rejects(() => stat(join(victim, "runtime.json")));
+});
+
+test("prepare treats a symlink runtime.json as invalid metadata and mints a new storageId", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-runtime-json-symlink-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const runtimeDir = join(directory, "runtime");
+  const cwd = join(directory, "cwd");
+  await mkdir(runtimeDir, { recursive: true, mode: 0o700 });
+  await mkdir(cwd, { recursive: true });
+  const stolen = metadata("project-a", cwd, Date.now());
+  const foreign = join(directory, "stolen-runtime.json");
+  await writeFile(foreign, JSON.stringify(stolen));
+  await writeFile(join(runtimeDir, "opencode.db"), "current-db", { mode: 0o600 });
+  await symlink(foreign, join(runtimeDir, "runtime.json"));
+
+  const prepared = await prepareOpenCodeRuntime({
+    runtimeDir,
+    projectId: "project-a",
+    cwd,
+    engineIdentity: TEST_ENGINE,
+    binary: TEST_BINARY,
+  });
+  assert.notEqual(prepared.storageId, stolen.storageId);
+  await prepared.recordOpen({ authorityId: "owned:new", generation: 1 });
+  assert.equal((await lstat(join(runtimeDir, "runtime.json"))).isSymbolicLink(), false);
+  assert.equal(JSON.parse(await readFile(foreign, "utf8")).storageId, stolen.storageId);
 });

@@ -10,7 +10,7 @@
 // This module owns everything OpenCode-specific about the remote leg (binary
 // name, serve invocation, listen-line protocol, pidfile reaping); the
 // transport knows nothing about OpenCode, keeping the adapter boundary intact.
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import type {
@@ -29,6 +29,22 @@ import {
   createOwnedSshEndpointLease,
   LISTEN_RE,
 } from "./endpoint.ts";
+import type { PreparedRemoteOpenCodeRuntime } from "./remoteStorage.ts";
+import {
+  acquireRemoteRuntimeLock,
+  prepareRemoteOpenCodeRuntime,
+  probeRemoteProcessIdentity,
+  releaseRemoteRuntimeLock,
+  remoteServePidFileExpr,
+  REMOTE_LOCK_DIR,
+  REMOTE_LOCK_HANDOFF,
+  REMOTE_LOCK_STARTING,
+  REMOTE_OWNER_FILE,
+  REMOTE_PROCESS_IDENTITY_FUNS,
+  resolveRemoteRuntimeDir,
+  shq,
+  stopRemoteLockGuardian,
+} from "./remoteStorage.ts";
 import { OPENCODE_UPDATE_DISABLE_ENV } from "./runtimeStorage.ts";
 
 export interface RemoteOpenCodeOptions {
@@ -37,13 +53,19 @@ export interface RemoteOpenCodeOptions {
   connectionIdentity?: string;
   /** Workspace path on the remote machine (becomes the serve cwd). */
   remotePath: string;
-  /** Absolute runtime directory on the remote host. Owned remotes fail closed
-   * when omitted so they can never open the remote user's global OpenCode DB. */
+  /** Absolute runtime directory on the remote host. When omitted, the remote
+   * XDG data path `${XDG_DATA_HOME:-$HOME/.local/share}/polyth/runtimes/opencode/<remoteStateKey>`
+   * is expanded on the remote host. Never the user's OpenCode global dir. */
   runtimeDir?: string;
+  /** Path segment under the remote XDG polyth runtime root when runtimeDir is omitted. */
+  remoteStateKey?: string;
+  /** Project identity recorded in remote runtime.json (not folded into storageId). */
+  projectId?: string;
   /** Remote opencode binary (default "opencode" on the remote PATH). */
   bin?: string;
   sessionIdMap?: Map<string, string>;
   log?: (level: "debug" | "info" | "warn" | "error", msg: string, data?: JsonObject) => void;
+  onRuntimeDiagnostic?: (message: string) => void;
   listenTimeoutMs?: number;
   readyTimeoutMs?: number;
   lifecycleTimeoutMs?: number;
@@ -99,10 +121,6 @@ const withDeadline = <T>(
     );
   });
 
-/** POSIX single-quote escaping (tiny local copy: no dependency on the
- *  transport package — the dependency direction is ssh → contracts ← here). */
-const shq = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
-
 const checkBin = (bin: string): string => {
   if (!/^[A-Za-z0-9_.~/-]+$/.test(bin)) throw invalid(`invalid remote binary name: ${bin}`);
   return bin;
@@ -115,20 +133,18 @@ const checkRemotePath = (path: string): string => {
   return p;
 };
 
-const checkRemoteRuntimeDir = (path: string | undefined): string => {
-  if (!path) {
-    throw unavailable(
-      "owned remote OpenCode runtimeDir is required; refusing to fall back to the remote global OpenCode DB",
-    );
-  }
+const checkRemoteRuntimeDir = (path: string): string => {
   const checked = checkRemotePath(path);
   if (!checked.startsWith("/")) throw invalid("remote runtimeDir must be an absolute path");
   return posix.normalize(checked);
 };
 
-const remoteProcessKey = (runtimeDir: string, remotePath: string): string =>
+const defaultRemoteStateKey = (
+  connectionIdentity: string,
+  remotePath: string,
+): string =>
   createHash("sha256")
-    .update(runtimeDir)
+    .update(connectionIdentity)
     .update("\0")
     .update(remotePath)
     .digest("hex")
@@ -218,35 +234,44 @@ const startServe = async (
     runtimeDir: string;
     port: number;
     instanceToken: string;
+    lockToken: string;
   },
 ): Promise<StartedServe> => {
   // The PID record is a process-ownership boundary. Key it by the isolated
   // runtime directory as well as the worktree: two configured projects may
   // legitimately address the same remote path but must never reap each other.
-  const hash = remoteProcessKey(opts.runtimeDir, opts.remotePath);
   const dbPath = posix.join(opts.runtimeDir, "opencode.db");
   // A private PID record carries the exact lease token plus process start,
   // executable, and command identities. A stale/reused PID fails this complete
   // match and is never signalled.
-  const pidFileExpr = `"\${XDG_CACHE_HOME:-$HOME/.cache}/polyth/serve-${hash}.pid"`;
+  const pidFileExpr = remoteServePidFileExpr(opts.runtimeDir, opts.remotePath);
+  const ownerFileExpr = `"$RUNTIME_DIR/${REMOTE_OWNER_FILE}"`;
+  const lockFileExpr = `"$RUNTIME_DIR/${REMOTE_LOCK_DIR}"`;
   const command = [
     REMOTE_PATH,
     "umask 077",
     `RUNTIME_DIR=${shq(opts.runtimeDir)}`,
+    'if [ -L "$RUNTIME_DIR" ]; then '
+      + 'echo "POLYTH_OPENCODE_RUNTIME_DIR_FAILED=$RUNTIME_DIR" >&2; exit 78; fi',
     'if ! mkdir -p "$RUNTIME_DIR" || ! chmod 700 "$RUNTIME_DIR"; then '
       + 'echo "POLYTH_OPENCODE_RUNTIME_DIR_FAILED=$RUNTIME_DIR" >&2; exit 78; fi',
     `export OPENCODE_DB=${shq(dbPath)}`,
     `export ${OPENCODE_UPDATE_DISABLE_ENV}=true`,
     `PF=${pidFileExpr}`,
+    `OWNER=${ownerFileExpr}`,
+    `LOCK=${lockFileExpr}`,
     'mkdir -p "$(dirname "$PF")"',
-    'oc_start() { sed "s/.*) //" "/proc/$1/stat" 2>/dev/null | cut -d" " -f20; }',
-    'oc_exe() { readlink "/proc/$1/exe" 2>/dev/null; }',
-    'oc_cmd() { tr "\\000" " " < "/proc/$1/cmdline" 2>/dev/null | cksum | awk \'{print $1 ":" $2}\'; }',
+    REMOTE_PROCESS_IDENTITY_FUNS,
     'TAB=$(printf "\\t")',
+    'if [ -L "$OWNER" ]; then echo "POLYTH_RUNTIME_OWNED_SYMLINK=$OWNER" >&2; exit 78; fi',
+    'if [ -f "$OWNER" ] && IFS="$TAB" read -r OWN_TOKEN OWN_PID OWN_START OWN_EXE OWN_CMD < "$OWNER"; then '
+      + 'if [ -n "$OWN_TOKEN" ] && [ "$(oc_start "$OWN_PID")" = "$OWN_START" ] '
+      + '&& [ "$(oc_exe "$OWN_PID")" = "$OWN_EXE" ] && [ "$(oc_cmd "$OWN_PID")" = "$OWN_CMD" ]; '
+      + 'then echo "POLYTH_RUNTIME_OWNED=$OWN_PID" >&2; exit 78; fi; fi',
     'if [ -f "$PF" ] && IFS="$TAB" read -r OLD_TOKEN OLD_PID OLD_START OLD_EXE OLD_CMD < "$PF"; then '
       + 'if [ -n "$OLD_TOKEN" ] && [ "$(oc_start "$OLD_PID")" = "$OLD_START" ] '
       + '&& [ "$(oc_exe "$OLD_PID")" = "$OLD_EXE" ] && [ "$(oc_cmd "$OLD_PID")" = "$OLD_CMD" ]; '
-      + 'then kill "$OLD_PID" 2>/dev/null || true; fi; fi',
+      + 'then echo "POLYTH_RUNTIME_OWNED=$OLD_PID" >&2; exit 78; fi; fi',
     `cd ${shq(opts.remotePath)}`,
     `${opts.bin} serve --hostname 127.0.0.1 --port ${opts.port} & OC_PID=$!`,
     'trap \'kill "$OC_PID" 2>/dev/null || true\' TERM INT HUP',
@@ -256,9 +281,13 @@ const startServe = async (
     'OC_START=$(oc_start "$OC_PID")',
     'OC_EXE=$(oc_exe "$OC_PID")',
     `printf '%s\\t%s\\t%s\\t%s\\t%s\\n' ${shq(opts.instanceToken)} "$OC_PID" "$OC_START" "$OC_EXE" "$OC_CMD" > "$PF"`,
+    `printf '%s\\t%s\\t%s\\t%s\\t%s\\n' ${shq(opts.instanceToken)} "$OC_PID" "$OC_START" "$OC_EXE" "$OC_CMD" > "$OWNER"`,
+    `if [ "$(cut -f1 "$LOCK/${REMOTE_LOCK_STARTING}" 2>/dev/null)" = ${shq(opts.lockToken)} ]; then `
+      + `printf '%s\\n' ${shq(opts.lockToken)} > "$LOCK/${REMOTE_LOCK_HANDOFF}"; fi`,
     'echo "POLYTH_REMOTE_PID=$OC_PID"',
     'wait "$OC_PID"; CODE=$?',
     `if [ "$(cut -f1 "$PF" 2>/dev/null)" = ${shq(opts.instanceToken)} ]; then rm -f "$PF"; fi`,
+    `if [ "$(cut -f1 "$OWNER" 2>/dev/null)" = ${shq(opts.instanceToken)} ]; then rm -f "$OWNER"; fi`,
     'exit "$CODE"',
   ].join("; ");
 
@@ -333,17 +362,23 @@ export const createRemoteOpenCodeRuntime = async (
 ): Promise<AgentRuntime> => {
   const { host } = options;
   const remotePath = checkRemotePath(options.remotePath);
-  // The server cannot safely invent a remote filesystem policy. The caller
-  // must supply an explicit remote runtimeDir or owned startup fails closed.
-  const runtimeDir = checkRemoteRuntimeDir(options.runtimeDir);
   const bin = checkBin(options.bin ?? "opencode");
   const listenTimeoutMs = options.listenTimeoutMs ?? 30_000;
   const readyTimeoutMs = options.readyTimeoutMs ?? 20_000;
   const lifecycleTimeoutMs = options.lifecycleTimeoutMs ?? 10_000;
   const pickPort = options.pickPort ?? (() => 20_000 + Math.floor(Math.random() * 45_000));
+  const connection = options.connectionIdentity ?? host.label;
+  const remoteStateKey = options.remoteStateKey ?? defaultRemoteStateKey(connection, remotePath);
+  const projectId = options.projectId?.trim() || connection;
+  const runtimeDir = options.runtimeDir
+    ? checkRemoteRuntimeDir(options.runtimeDir)
+    : await resolveRemoteRuntimeDir({ host, remoteStateKey });
 
   const probe = await probeRemoteOpenCode(host, bin, runtimeDir);
   if (!probe.ok) throw unavailable(probe.message ?? `opencode is unavailable on ${host.label}`);
+  if (!probe.version) {
+    throw unavailable(`could not read the OpenCode version on ${host.label}`);
+  }
 
   const dirCheck = await host.exec(`test -d ${shq(remotePath)}`, { timeoutMs: 20_000 });
   if (dirCheck.code !== 0) {
@@ -358,19 +393,62 @@ export const createRemoteOpenCodeRuntime = async (
     usernameEnv: options.usernameEnv ?? "OPENCODE_SERVER_USERNAME",
     passwordEnv: options.passwordEnv ?? "OPENCODE_SERVER_PASSWORD",
   };
+  await probeRemoteProcessIdentity(host);
+  const lockToken = randomUUID();
+  const lock = await acquireRemoteRuntimeLock(host, runtimeDir, lockToken, remotePath, {
+    timeoutMs: lifecycleTimeoutMs,
+  });
+  let lockHeld = true;
+  const releaseLock = async (): Promise<void> => {
+    if (!lockHeld) return;
+    lockHeld = false;
+    await stopRemoteLockGuardian(host, lock);
+    await releaseRemoteRuntimeLock(host, runtimeDir, lockToken);
+  };
+  let prepared: PreparedRemoteOpenCodeRuntime | undefined;
+  try {
   const lease = await createOwnedSshEndpointLease({
     location: { directory: remotePath },
     authentication,
     stateFile: options.leaseStateFile
-      ?? defaultLeaseStateFile(options.connectionIdentity ?? host.label, remotePath),
-    runtimeIdentity: JSON.stringify({
-      connection: options.connectionIdentity ?? host.label,
-      host: host.label,
-      remotePath,
-      runtimeDir,
-      binary: bin,
-    }),
-    async start(instanceToken) {
+      ?? defaultLeaseStateFile(connection, remotePath),
+    async prepareStart() {
+      prepared = await prepareRemoteOpenCodeRuntime({
+        host,
+        runtimeDir,
+        projectId,
+        cwd: remotePath,
+        bin,
+        version: probe.version!,
+        binarySource: options.bin ? "configured" : "path",
+      });
+      if (prepared.diagnostic) {
+        const emit = options.onRuntimeDiagnostic
+          ?? (options.log
+            ? (message: string) => { options.log!("warn", message); }
+            : (message: string) => { console.warn(`[polyth] ${message}`); });
+        emit(prepared.diagnostic);
+      }
+    },
+    runtimeIdentity: () => {
+      const runtime = prepared;
+      if (!runtime) throw unavailable("isolated remote OpenCode runtime was not prepared");
+      return {
+        connection,
+        host: host.label,
+        remotePath,
+        runtimeDir: runtime.runtimeDir,
+        engine: runtime.engineIdentity.engine,
+        version: runtime.engineIdentity.version,
+        binaryDigest: runtime.engineIdentity.binaryDigest,
+        protocolGeneration: runtime.engineIdentity.protocolGeneration,
+        storageId: runtime.storageId,
+      };
+    },
+    async start(instanceToken, incarnation) {
+      const runtime = prepared;
+      if (!runtime) throw unavailable("isolated remote OpenCode runtime was not prepared");
+      await runtime.recordOpen(incarnation);
       let started: StartedServe | null = null;
       let lastError: unknown;
       // Three collisions still get three fresh retries and a fourth candidate.
@@ -380,12 +458,13 @@ export const createRemoteOpenCodeRuntime = async (
           started = await startServe({
             host,
             remotePath,
-            runtimeDir,
+            runtimeDir: runtime.runtimeDir,
             bin,
             listenTimeoutMs,
             lifecycleTimeoutMs,
             port,
             instanceToken,
+            lockToken,
           });
         } catch (error) {
           lastError = error;
@@ -396,13 +475,13 @@ export const createRemoteOpenCodeRuntime = async (
         throw lastError ?? unavailable(`could not start opencode serve on ${host.label}`);
       }
       const serve = started;
+      const ownerPath = posix.join(runtime.runtimeDir, REMOTE_OWNER_FILE);
 
       const cleanupRemote = async (): Promise<void> => {
         const command = [
           `PF=${serve.pidFileExpr}`,
-          'oc_start() { sed "s/.*) //" "/proc/$1/stat" 2>/dev/null | cut -d" " -f20; }',
-          'oc_exe() { readlink "/proc/$1/exe" 2>/dev/null; }',
-          'oc_cmd() { tr "\\000" " " < "/proc/$1/cmdline" 2>/dev/null | cksum | awk \'{print $1 ":" $2}\'; }',
+          `OWNER=${shq(ownerPath)}`,
+          REMOTE_PROCESS_IDENTITY_FUNS,
           'TAB=$(printf "\\t")',
           'if [ -f "$PF" ] && IFS="$TAB" read -r TOKEN PID START EXE CMD < "$PF"; then '
             + `if [ "$TOKEN" = ${shq(serve.instanceToken)} ] `
@@ -411,6 +490,7 @@ export const createRemoteOpenCodeRuntime = async (
             + '&& [ "$(oc_cmd "$PID")" = "$CMD" ]; '
             + 'then kill "$PID" 2>/dev/null || true; fi; '
             + `if [ "$TOKEN" = ${shq(serve.instanceToken)} ]; then rm -f "$PF"; fi; fi`,
+          `if [ "$(cut -f1 "$OWNER" 2>/dev/null)" = ${shq(serve.instanceToken)} ]; then rm -f "$OWNER"; fi`,
         ].join("; ");
         await host.exec(command, { timeoutMs: lifecycleTimeoutMs }).catch(() => {});
         await withDeadline(
@@ -485,6 +565,11 @@ export const createRemoteOpenCodeRuntime = async (
     disposed = true;
     await innerDispose();
     await lifecycle.dispose();
+    await releaseLock();
   };
   return attachRuntimeLifecycle(runtime, lifecycle) as ManagedOpenCodeRuntime;
+  } catch (error) {
+    await releaseLock();
+    throw error;
+  }
 };

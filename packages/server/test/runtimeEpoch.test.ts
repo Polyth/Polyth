@@ -237,6 +237,7 @@ test("owned epoch transition atomically records the break and fences prior unkno
         epoch: 1,
       },
       reason: "isolated runtime DB was quarantined after an engine digest change",
+      resetOperationId,
     });
     assert.equal(result.projection.runtimeBinding?.epoch, 1);
     assert.equal(result.projection.backendSessionId, "backend-new");
@@ -313,6 +314,63 @@ test("owned epoch transition atomically records the break and fences prior unkno
   }
 });
 
+test("owned epoch fences an executing turn and refuses a late confirm", async () => {
+  const endpoint: RuntimeEndpoint = {
+    authorityId: "owned:new-authority",
+    continuity: "verified",
+    generation: 1,
+    url: "http://runtime.invalid",
+    location: { directory: "/project" },
+    control: { kind: "owned", instanceToken: "new-instance" },
+    config: { kind: "read-only" },
+    authentication: { kind: "none" },
+  };
+  const runtime = runtimeFor(endpoint);
+  const { dir, store, project, sessions } = harness(runtime, "polyth-epoch-executing-");
+  const sessionId = "session-executing";
+  try {
+    await store.upsertProjection(projectionFor(
+      project,
+      endpoint,
+      sessionId,
+      "backend-old",
+      "owned:destroyed-authority",
+    ));
+    const inFlight = await store.prepareOperation({
+      sessionId,
+      mutationKind: "turn-submit",
+      intentEvent: { type: "user/message", data: { text: "still executing" } },
+    });
+    assert.equal((await store.claimOperation(inFlight.operation.operationId)).kind, "claimed");
+    const resetOperationId = await confirmReset(store, sessionId, "backend-new");
+
+    const result = await sessions.transitionRuntimeEpoch(sessionId, runtime, {
+      resetOperationId,
+      reason: "owned runtime authority changed during an in-flight turn",
+      authorityDisposition: {
+        kind: "owned-authority-destroyed",
+        authorityId: "owned:destroyed-authority",
+        generation: 4,
+      },
+    });
+
+    assert.equal(result.fencedOperations.length, 1);
+    assert.equal(result.fencedOperations[0]?.operationId, inFlight.operation.operationId);
+    assert.equal((await store.operation(inFlight.operation.operationId))?.state, "fenced");
+    assert.equal(result.heldQueueItems[0]?.text, "still executing");
+    await assert.rejects(
+      () => store.settleOperation(inFlight.operation.operationId, {
+        kind: "confirmed",
+        receipt: "late-backend-ack",
+      }),
+      (error: Error & { code?: string }) => error.code === "invalid-transition",
+    );
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("borrowed epoch requires confirmation and never auto-fences unknowns", async () => {
   const endpoint: RuntimeEndpoint = {
     authorityId: "external:shared",
@@ -380,6 +438,54 @@ test("borrowed epoch requires confirmation and never auto-fences unknowns", asyn
   }
 });
 
+test("borrowed binding mismatch becomes epoch-pending without auto-replacement", async () => {
+  const endpoint: RuntimeEndpoint = {
+    authorityId: "external:replacement",
+    continuity: "generation-only",
+    generation: 8,
+    url: "http://runtime.invalid",
+    location: { directory: "/external/project" },
+    control: { kind: "borrowed", source: "external" },
+    config: { kind: "read-only" },
+    authentication: { kind: "none" },
+  };
+  let ensureCalls = 0;
+  const runtime = runtimeFor(endpoint, () => { ensureCalls += 1; });
+  const { dir, store, project, sessions } = harness(runtime, "polyth-epoch-borrowed-pending-");
+  const sessionId = "session-borrowed-mismatch";
+  try {
+    const projection = projectionFor(
+      project,
+      endpoint,
+      sessionId,
+      "backend-old",
+      "external:destroyed",
+    );
+    projection.status = "idle";
+    projection.runtimeBinding = {
+      ...projection.runtimeBinding!,
+      continuity: "generation-only",
+    };
+    await store.upsertProjection(projection);
+
+    await sessions.events(sessionId, 0);
+
+    assert.equal(ensureCalls, 0);
+    const pending = await store.projection(sessionId);
+    assert.equal(pending?.status, "epoch-pending");
+    assert.equal(pending?.runtimeControl, "borrowed");
+    assert.equal((await store.reconciliation(sessionId))?.state, "blocked");
+    assert.equal(
+      (await store.events(sessionId)).some((event) => event.type === "runtime/epoch-replaced"),
+      false,
+      "borrowed mismatch marks pending but never auto-completes the durable epoch",
+    );
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("owned binding mismatch becomes epoch-pending without auto-replacement", async () => {
   const endpoint: RuntimeEndpoint = {
     authorityId: "owned:replacement",
@@ -411,7 +517,9 @@ test("owned binding mismatch becomes epoch-pending without auto-replacement", as
     await sessions.events(sessionId, 0);
 
     assert.equal(ensureCalls, 0);
-    assert.equal((await store.projection(sessionId))?.status, "epoch-pending");
+    const pending = await store.projection(sessionId);
+    assert.equal(pending?.status, "epoch-pending");
+    assert.equal(pending?.runtimeControl, "owned");
     assert.equal((await store.reconciliation(sessionId))?.state, "blocked");
     assert.equal(
       (await store.events(sessionId)).some((event) => event.type === "runtime/epoch-replaced"),
@@ -585,6 +693,14 @@ test("fresh epoch recovery is isolated to the project whose runtime authority ch
 
   try {
     await sessions.send("session-a", { text: "recover only A" });
+    const recoveredA = (await store.events("session-a"))
+      .filter((event) => event.type === "user/message")
+      .at(-1)!;
+    assert.equal((recoveredA.data as { text?: string }).text, "recover only A");
+    assert.match(
+      (recoveredA.data as { recoveryContext?: string }).recoveryContext ?? "",
+      /The execution runtime was replaced/,
+    );
     await sessions.send("session-b", { text: "B stays continuous" });
     assert.equal(resetCounts.get(projectA.id), 1);
     assert.equal(resetCounts.get(projectB.id) ?? 0, 0);
@@ -602,6 +718,441 @@ test("fresh epoch recovery is isolated to the project whose runtime authority ch
       false,
     );
     assert.deepEqual(submitted.get(projectB.id), ["B stays continuous"]);
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const borrowedConfirmRuntime = (
+  endpoint: RuntimeEndpoint,
+  submitted: string[],
+): AgentRuntime => {
+  let resetOperationId: string | undefined;
+  return {
+    capabilities: async () => ({
+      streaming: true,
+      permissions: true,
+      questions: true,
+      compaction: false,
+      subagents: false,
+    }),
+    models: async () => [],
+    agents: async () => [],
+    ensureSession: async (input) => input.backendSessionId ?? "backend-borrowed-new",
+    resetSessionOperation: async (_input, operationId) => {
+      resetOperationId = operationId;
+      return {
+        kind: "confirmed",
+        value: { backendSessionId: "backend-borrowed-new" },
+        receipt: "backend-borrowed-new",
+      };
+    },
+    sessions: async () => [],
+    history: async () => [],
+    startTurnOperation: async (request) => {
+      submitted.push(request.text);
+      return { kind: "confirmed", value: {} };
+    },
+    startTurn: async () => undefined,
+    abort: async () => undefined,
+    replyPermission: async () => undefined,
+    replyQuestion: async () => undefined,
+    endpoint: async () => endpoint,
+    protocol: async () => "legacy",
+    reconcile: async (
+      binding: RuntimeSessionBinding & { reconciliationOrdinal?: number },
+    ): Promise<RuntimeSnapshot> => ({
+      authorityId: binding.authorityId,
+      generation: binding.generation,
+      location: binding.location,
+      backendSessionId: binding.backendSessionId!,
+      reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+      state: resetOperationId
+        ? { value: "idle", causalOperationId: resetOperationId }
+        : {
+            value: "idle",
+            comparison: { domain: "borrowed-stable", order: 1 },
+          },
+      completeness: {
+        events: "partial",
+        permissions: "partial",
+        questions: "partial",
+      },
+      permissions: [],
+      questions: [],
+      events: [],
+    }),
+    onEvent: () => ({ dispose: () => undefined }),
+    dispose: async () => undefined,
+  };
+};
+
+test("borrowed confirm starts a fresh epoch without fencing unknowns", async () => {
+  const endpoint: RuntimeEndpoint = {
+    authorityId: "external:replacement",
+    continuity: "generation-only",
+    generation: 3,
+    url: "http://runtime.invalid",
+    location: { directory: "/external/project" },
+    control: { kind: "borrowed", source: "external" },
+    config: { kind: "read-only" },
+    authentication: { kind: "none" },
+  };
+  const submitted: string[] = [];
+  const runtime = borrowedConfirmRuntime(endpoint, submitted);
+  const { dir, store, project, sessions } = harness(runtime, "polyth-epoch-borrowed-confirm-");
+  const sessionId = "session-borrowed-confirm";
+  try {
+    const projection = projectionFor(
+      project,
+      endpoint,
+      sessionId,
+      "backend-old",
+      "external:destroyed",
+    );
+    projection.status = "epoch-pending";
+    projection.runtimeControl = "borrowed";
+    projection.runtimeBinding = {
+      ...projection.runtimeBinding!,
+      continuity: "generation-only",
+    };
+    await store.upsertProjection(projection);
+    const uncertain = await store.prepareOperation({
+      sessionId,
+      mutationKind: "turn-submit",
+      intentEvent: { type: "user/message", data: { text: "uncertain prompt" } },
+    });
+    await store.claimOperation(uncertain.operation.operationId);
+    await store.settleOperation(uncertain.operation.operationId, {
+      kind: "unknown",
+      message: "submission outcome was lost",
+    });
+
+    const ready = await sessions.confirmBorrowedRuntimeEpoch(sessionId);
+    assert.equal(ready.status, "idle");
+    assert.equal(ready.runtimeBinding?.epoch, 1);
+    assert.equal(ready.backendSessionId, "backend-borrowed-new");
+    assert.equal((await store.reconciliation(sessionId))?.state, "ready");
+    assert.equal((await store.operation(uncertain.operation.operationId))?.state, "unknown");
+    assert.equal(
+      (await store.events(sessionId)).some((event) => event.type === "mutation/fenced"),
+      false,
+    );
+    assert.equal(isRuntimeOperationBlocking((await store.operation(uncertain.operation.operationId))!), true);
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("new send after borrowed confirm proceeds with a lingering prior-epoch unknown", async () => {
+  const endpoint: RuntimeEndpoint = {
+    authorityId: "external:replacement",
+    continuity: "generation-only",
+    generation: 3,
+    url: "http://runtime.invalid",
+    location: { directory: "/external/project" },
+    control: { kind: "borrowed", source: "external" },
+    config: { kind: "read-only" },
+    authentication: { kind: "none" },
+  };
+  const submitted: string[] = [];
+  const runtime = borrowedConfirmRuntime(endpoint, submitted);
+  const { dir, store, project, sessions } = harness(runtime, "polyth-epoch-borrowed-send-");
+  const sessionId = "session-borrowed-send";
+  try {
+    const projection = projectionFor(
+      project,
+      endpoint,
+      sessionId,
+      "backend-old",
+      "external:destroyed",
+    );
+    projection.status = "epoch-pending";
+    projection.runtimeControl = "borrowed";
+    projection.runtimeBinding = {
+      ...projection.runtimeBinding!,
+      continuity: "generation-only",
+    };
+    await store.upsertProjection(projection);
+    const uncertain = await store.prepareOperation({
+      sessionId,
+      mutationKind: "turn-submit",
+      intentEvent: { type: "user/message", data: { text: "uncertain prompt" } },
+    });
+    await store.claimOperation(uncertain.operation.operationId);
+    await store.settleOperation(uncertain.operation.operationId, {
+      kind: "unknown",
+      message: "submission outcome was lost",
+    });
+
+    await sessions.confirmBorrowedRuntimeEpoch(sessionId);
+    await sessions.send(sessionId, { text: "fresh prompt after confirm" });
+    assert.equal(submitted.length, 1);
+    assert.match(submitted[0] ?? "", /fresh prompt after confirm/);
+    assert.equal((await store.operation(uncertain.operation.operationId))?.state, "unknown");
+    const sent = (await store.events(sessionId))
+      .filter((event) => event.type === "user/message")
+      .at(-1)!;
+    assert.equal((sent.data as { text?: string }).text, "fresh prompt after confirm");
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("borrowed epoch-pending send refuses to auto-recover", async () => {
+  const endpoint: RuntimeEndpoint = {
+    authorityId: "external:replacement",
+    continuity: "generation-only",
+    generation: 3,
+    url: "http://runtime.invalid",
+    location: { directory: "/external/project" },
+    control: { kind: "borrowed", source: "external" },
+    config: { kind: "read-only" },
+    authentication: { kind: "none" },
+  };
+  const runtime = borrowedConfirmRuntime(endpoint, []);
+  const { dir, store, project, sessions } = harness(runtime, "polyth-epoch-borrowed-refuse-send-");
+  const sessionId = "session-borrowed-refuse-send";
+  try {
+    const projection = projectionFor(
+      project,
+      endpoint,
+      sessionId,
+      "backend-old",
+      "external:destroyed",
+    );
+    projection.status = "epoch-pending";
+    projection.runtimeControl = "borrowed";
+    projection.runtimeBinding = {
+      ...projection.runtimeBinding!,
+      continuity: "generation-only",
+    };
+    await store.upsertProjection(projection);
+
+    await assert.rejects(
+      () => sessions.send(sessionId, { text: "should stay blocked" }),
+      (error: Error & { code?: string }) =>
+        error.code === "confirmation-required" || error.code === "epoch-pending",
+    );
+    assert.equal((await store.projection(sessionId))?.status, "epoch-pending");
+    assert.equal(
+      (await store.events(sessionId)).some((event) => event.type === "runtime/epoch-replaced"),
+      false,
+    );
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("owned sessions refuse borrowed epoch confirmation", async () => {
+  const endpoint: RuntimeEndpoint = {
+    authorityId: "owned:replacement",
+    continuity: "verified",
+    generation: 1,
+    url: "http://runtime.invalid",
+    location: { directory: "/project" },
+    control: { kind: "owned", instanceToken: "replacement-instance" },
+    config: { kind: "read-only" },
+    authentication: { kind: "none" },
+  };
+  const runtime = runtimeFor(endpoint);
+  const { dir, store, project, sessions } = harness(runtime, "polyth-epoch-owned-refuse-");
+  const sessionId = "session-owned-refuse";
+  try {
+    const projection = projectionFor(
+      project,
+      endpoint,
+      sessionId,
+      "backend-old",
+      "owned:destroyed",
+    );
+    projection.status = "epoch-pending";
+    projection.runtimeControl = "owned";
+    await store.upsertProjection(projection);
+
+    await assert.rejects(
+      () => sessions.confirmBorrowedRuntimeEpoch(sessionId),
+      (error: Error & { code?: string }) => error.code === "epoch-proof-required",
+    );
+    assert.equal((await store.projection(sessionId))?.status, "epoch-pending");
+    assert.equal(
+      (await store.events(sessionId)).some((event) => event.type === "runtime/epoch-replaced"),
+      false,
+    );
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("healthy borrowed confirm refuses to manufacture an identity break", async () => {
+  const endpoint: RuntimeEndpoint = {
+    authorityId: "external:healthy",
+    continuity: "verified",
+    generation: 4,
+    url: "http://runtime.invalid",
+    location: { directory: "/external/project" },
+    control: { kind: "borrowed", source: "external" },
+    config: { kind: "read-only" },
+    authentication: { kind: "none" },
+  };
+  const runtime = borrowedConfirmRuntime(endpoint, []);
+  const { dir, store, project, sessions } = harness(runtime, "polyth-epoch-borrowed-healthy-");
+  const sessionId = "session-borrowed-healthy";
+  try {
+    const projection = projectionFor(project, endpoint, sessionId, "backend-healthy");
+    projection.status = "idle";
+    projection.runtimeControl = "borrowed";
+    await store.upsertProjection(projection);
+
+    await assert.rejects(
+      () => sessions.confirmBorrowedRuntimeEpoch(sessionId),
+      (error: Error & { code?: string }) =>
+        error.code === "confirmation-not-required" || error.code === "conflict",
+    );
+    const after = await store.projection(sessionId);
+    assert.equal(after?.status, "idle");
+    assert.equal(after?.backendSessionId, "backend-healthy");
+    assert.equal(after?.runtimeBinding?.epoch ?? 0, 0);
+    assert.equal(after?.runtimeBinding?.backendSessionId, "backend-healthy");
+    assert.equal(
+      (await store.events(sessionId)).some((event) => event.type === "runtime/epoch-replaced"),
+      false,
+    );
+    assert.equal(
+      (await store.operations(sessionId)).some((operation) => operation.mutationKind === "session-reset"),
+      false,
+    );
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("unrelated session-reset without epoch-replaced does not lift a prior unknown", async () => {
+  const endpoint: RuntimeEndpoint = {
+    authorityId: "external:healthy",
+    continuity: "verified",
+    generation: 4,
+    url: "http://runtime.invalid",
+    location: { directory: "/external/project" },
+    control: { kind: "borrowed", source: "external" },
+    config: { kind: "read-only" },
+    authentication: { kind: "none" },
+  };
+  const submitted: string[] = [];
+  const runtime = borrowedConfirmRuntime(endpoint, submitted);
+  const { dir, store, project, sessions } = harness(runtime, "polyth-epoch-unrelated-reset-");
+  const sessionId = "session-unrelated-reset";
+  try {
+    const projection = projectionFor(project, endpoint, sessionId, "backend-healthy");
+    projection.status = "idle";
+    projection.runtimeControl = "borrowed";
+    await store.upsertProjection(projection);
+    const uncertain = await store.prepareOperation({
+      sessionId,
+      mutationKind: "turn-submit",
+      intentEvent: { type: "user/message", data: { text: "uncertain prompt" } },
+    });
+    await store.claimOperation(uncertain.operation.operationId);
+    await store.settleOperation(uncertain.operation.operationId, {
+      kind: "unknown",
+      message: "submission outcome was lost",
+    });
+    await confirmReset(store, sessionId, "backend-unrelated");
+
+    await assert.rejects(
+      () => sessions.send(sessionId, { text: "should stay blocked" }),
+      (error: Error & { code?: string }) => error.code === "conflict",
+    );
+    assert.equal(submitted.length, 0);
+    assert.equal((await store.operation(uncertain.operation.operationId))?.state, "unknown");
+    assert.equal(
+      (await store.events(sessionId)).some((event) => event.type === "runtime/epoch-replaced"),
+      false,
+    );
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("later unrelated session-reset does not become the epoch send barrier", async () => {
+  const endpoint: RuntimeEndpoint = {
+    authorityId: "external:replacement",
+    continuity: "generation-only",
+    generation: 3,
+    url: "http://runtime.invalid",
+    location: { directory: "/external/project" },
+    control: { kind: "borrowed", source: "external" },
+    config: { kind: "read-only" },
+    authentication: { kind: "none" },
+  };
+  const submitted: string[] = [];
+  const runtime = borrowedConfirmRuntime(endpoint, submitted);
+  const { dir, store, project, sessions } = harness(runtime, "polyth-epoch-later-reset-");
+  const sessionId = "session-later-reset";
+  try {
+    const projection = projectionFor(
+      project,
+      endpoint,
+      sessionId,
+      "backend-old",
+      "external:destroyed",
+    );
+    projection.status = "epoch-pending";
+    projection.runtimeControl = "borrowed";
+    projection.runtimeBinding = {
+      ...projection.runtimeBinding!,
+      continuity: "generation-only",
+    };
+    await store.upsertProjection(projection);
+    const prior = await store.prepareOperation({
+      sessionId,
+      mutationKind: "turn-submit",
+      intentEvent: { type: "user/message", data: { text: "prior unknown" } },
+    });
+    await store.claimOperation(prior.operation.operationId);
+    await store.settleOperation(prior.operation.operationId, {
+      kind: "unknown",
+      message: "submission outcome was lost",
+    });
+
+    await sessions.confirmBorrowedRuntimeEpoch(sessionId);
+    const post = await store.prepareOperation({
+      sessionId,
+      mutationKind: "turn-submit",
+      intentEvent: { type: "user/message", data: { text: "post-epoch unknown" } },
+    });
+    await store.claimOperation(post.operation.operationId);
+    await store.settleOperation(post.operation.operationId, {
+      kind: "unknown",
+      message: "new turn outcome was lost",
+    });
+    await confirmReset(store, sessionId, "backend-unrelated-later");
+
+    await assert.rejects(
+      () => sessions.send(sessionId, { text: "post-epoch unknown must still block" }),
+      (error: Error & { code?: string }) => error.code === "conflict",
+    );
+    assert.equal(submitted.length, 0);
+    assert.equal((await store.operation(prior.operation.operationId))?.state, "unknown");
+    assert.equal((await store.operation(post.operation.operationId))?.state, "unknown");
+    const marker = (await store.events(sessionId))
+      .findLast((event) => event.type === "runtime/epoch-replaced");
+    assert.ok(marker);
+    assert.equal(
+      typeof (marker.data as { resetOperationId?: unknown }).resetOperationId,
+      "string",
+    );
+    assert.notEqual(
+      (marker.data as { resetOperationId?: string }).resetOperationId,
+      post.operation.operationId,
+    );
   } finally {
     await store.close();
     rmSync(dir, { recursive: true, force: true });

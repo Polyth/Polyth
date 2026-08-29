@@ -253,7 +253,14 @@ export const inspectOpenCodeEngine = async (
   };
 };
 
-const runtimeMetadata = (raw: string): OpenCodeRuntimeMetadata | undefined => {
+export const OPENCODE_BINARY_DIGEST_RE = /^[a-f0-9]{64}$/;
+export const OPENCODE_STORAGE_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Shared `runtime.json` contract for owned local and owned SSH storage. */
+export const parseOpenCodeRuntimeMetadata = (
+  raw: string,
+): OpenCodeRuntimeMetadata | undefined => {
   try {
     const value = JSON.parse(raw) as Partial<OpenCodeRuntimeMetadata>;
     const location = value.runtimeLocation;
@@ -262,11 +269,11 @@ const runtimeMetadata = (raw: string): OpenCodeRuntimeMetadata | undefined => {
       || typeof value.version !== "string"
       || !value.version
       || typeof value.binaryDigest !== "string"
-      || !/^[a-f0-9]{64}$/.test(value.binaryDigest)
+      || !OPENCODE_BINARY_DIGEST_RE.test(value.binaryDigest)
       || !Number.isSafeInteger(value.protocolGeneration)
       || (value.protocolGeneration ?? 0) <= 0
       || typeof value.storageId !== "string"
-      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.storageId)
+      || !OPENCODE_STORAGE_ID_RE.test(value.storageId)
       || (
         value.binarySource !== undefined
         && !["bundled", "override", "configured", "path"].includes(value.binarySource)
@@ -299,14 +306,14 @@ const runtimeMetadata = (raw: string): OpenCodeRuntimeMetadata | undefined => {
   }
 };
 
-const sameEngine = (
-  metadata: OpenCodeRuntimeMetadata,
-  identity: OpenCodeEngineIdentity,
+export const openCodeEnginesMatch = (
+  left: OpenCodeEngineIdentity,
+  right: OpenCodeEngineIdentity,
 ): boolean =>
-  metadata.engine === identity.engine
-  && metadata.version === identity.version
-  && metadata.binaryDigest === identity.binaryDigest
-  && metadata.protocolGeneration === identity.protocolGeneration;
+  left.engine === right.engine
+  && left.version === right.version
+  && left.binaryDigest === right.binaryDigest
+  && left.protocolGeneration === right.protocolGeneration;
 
 const databaseNames = new Set(["opencode.db", "opencode.db-wal", "opencode.db-shm"]);
 
@@ -377,17 +384,46 @@ export const prepareOpenCodeRuntime = async (options: {
   const metadataFile = join(runtimeDir, "runtime.json");
   const now = options.now ?? Date.now();
   try {
+    const existing = await lstat(runtimeDir);
+    if (existing.isSymbolicLink()) {
+      throw unavailable(
+        `owned OpenCode runtime directory is a symlink: ${runtimeDir}; refusing to follow it`,
+      );
+    }
+  } catch (error) {
+    if ((error as { code?: unknown }).code === "unavailable") throw error;
+    if (!isMissing(error)) {
+      throw unavailable(`could not inspect isolated OpenCode runtime directory ${runtimeDir}`, error);
+    }
+  }
+  try {
     await mkdir(runtimeDir, { recursive: true, mode: 0o700 });
+  } catch (error) {
+    throw unavailable(`could not create isolated OpenCode runtime directory ${runtimeDir}`, error);
+  }
+  try {
+    const created = await lstat(runtimeDir);
+    if (created.isSymbolicLink()) {
+      throw unavailable(
+        `owned OpenCode runtime directory is a symlink: ${runtimeDir}; refusing to follow it`,
+      );
+    }
     await chmod(runtimeDir, 0o700);
   } catch (error) {
+    if ((error as { code?: unknown }).code === "unavailable") throw error;
     throw unavailable(`could not create isolated OpenCode runtime directory ${runtimeDir}`, error);
   }
 
   let previous: OpenCodeRuntimeMetadata | undefined;
   let metadataExists = false;
   try {
-    previous = runtimeMetadata(await readFile(metadataFile, "utf8"));
+    const metadataInfo = await lstat(metadataFile);
     metadataExists = true;
+    if (metadataInfo.isSymbolicLink() || !metadataInfo.isFile()) {
+      previous = undefined;
+    } else {
+      previous = parseOpenCodeRuntimeMetadata(await readFile(metadataFile, "utf8"));
+    }
   } catch (error) {
     if (!isMissing(error)) {
       throw unavailable(`could not read OpenCode runtime metadata ${metadataFile}`, error);
@@ -404,10 +440,10 @@ export const prepareOpenCodeRuntime = async (options: {
     throw unavailable(`could not inspect isolated OpenCode DB in ${runtimeDir}`, error);
   }
   const engineCompatible = previous && sameLocation
-    && sameEngine(previous, options.engineIdentity);
+    && openCodeEnginesMatch(previous, options.engineIdentity);
   const compatible = engineCompatible && databaseIsRegular;
   const diagnostic = previous && sameLocation
-    ? !sameEngine(previous, options.engineIdentity)
+    ? !openCodeEnginesMatch(previous, options.engineIdentity)
       ? `OpenCode engine identity changed for ${runtimeDir}; the previous writable runtime DB was quarantined without being opened. `
         + `Previous engine: version ${previous.version}, digest ${previous.binaryDigest}. `
         + `Selected engine: version ${options.engineIdentity.version}, digest ${options.engineIdentity.binaryDigest}. `
@@ -523,7 +559,7 @@ export const sweepOpenCodeRuntimes = async (
     if (runtimeStat.isSymbolicLink()) continue;
     let metadata: OpenCodeRuntimeMetadata | undefined;
     try {
-      metadata = runtimeMetadata(await readFile(join(runtimeDir, "runtime.json"), "utf8"));
+      metadata = parseOpenCodeRuntimeMetadata(await readFile(join(runtimeDir, "runtime.json"), "utf8"));
     } catch (error) {
       if (!isMissing(error)) continue;
     }

@@ -12,6 +12,12 @@ function publish(): void {
 
 export function isUnavailableSendError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
+  const code = typeof (error as { code?: unknown }).code === "string"
+    ? (error as { code: string }).code
+    : "";
+  if (/epoch-pending|confirmation-required|binding-mismatch|epoch-proof-required/i.test(`${code} ${message}`)) {
+    return false;
+  }
   return /\b503\b|\bunavailable\b/i.test(message);
 }
 

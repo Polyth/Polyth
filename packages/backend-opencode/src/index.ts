@@ -115,12 +115,28 @@ export {
 } from "./remote.ts";
 export type { RemoteOpenCodeOptions, RemoteOpenCodeProbe } from "./remote.ts";
 export {
+  acquireRemoteRuntimeLock,
+  DEFAULT_REMOTE_RUNTIME_ROOT_EXPR,
+  prepareRemoteOpenCodeRuntime,
+  probeRemoteProcessIdentity,
+  releaseRemoteRuntimeLock,
+  remoteProcessKey,
+  REMOTE_LOCK_DIR,
+  REMOTE_LOCK_HANDOFF,
+  REMOTE_LOCK_STARTING,
+  REMOTE_STORAGE_MARKERS,
+  resolveRemoteRuntimeDir,
+  stopRemoteLockGuardian,
+} from "./remoteStorage.ts";
+export type { RemoteRuntimeLockHandle } from "./remoteStorage.ts";
+export {
   createBorrowedExternalEndpointLease,
   createBorrowedServiceEndpointLease,
   createOwnedLocalEndpointLease,
   createOwnedSshEndpointLease,
   isOwnedEndpointLease,
   LISTEN_RE,
+  ownedSshRuntimeIdentityKey,
   pickFreePort,
   pidFileForDirectory,
   readProcessIdentity,
@@ -131,6 +147,7 @@ export type {
   BorrowedServiceEndpointOptions,
   OwnedLocalEndpointOptions,
   OwnedSshEndpointOptions,
+  OwnedSshStorageIdentity,
   ProcessIdentity,
   ProcessIdentityReader,
   ProcessSignaler,
@@ -146,6 +163,8 @@ export {
   OPENCODE_UPDATE_DISABLE_ENV,
   OPENCODE_PROTOCOL_GENERATION,
   POLYTH_OPENCODE_BIN_ENV,
+  parseOpenCodeRuntimeMetadata,
+  openCodeEnginesMatch,
   prepareOpenCodeRuntime,
   resolveOpenCodeBinary,
   sweepOpenCodeRuntimes,

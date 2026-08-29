@@ -29,7 +29,7 @@ let items: QueueItemDto[] = [
     attachments: [{ id: "a1", name: "one.txt", mime: "text/plain", size: 3, path: "one.txt" }],
   },
   { id: "q2", sessionId: "s1", position: 1, text: "second", delivery: "queue", createdAt: 20 },
-  { id: "q3", sessionId: "s1", position: 2, text: "third", delivery: "queue", createdAt: 30 },
+  { id: "q3", sessionId: "s1", position: 2, text: "third", delivery: "queue", createdAt: 30, heldForReview: true },
 ];
 const mutations: Array<{ path: string; body: Record<string, unknown> }> = [];
 
@@ -134,6 +134,11 @@ test("queued messages hand editing to the composer and drag-reorder through the 
       [...container.querySelectorAll(".queue-text")].map((element) => element.textContent),
       ["second", "third", "first"],
     );
+    const held = [...container.querySelectorAll<HTMLElement>(".queue-chip")]
+      .find((chip) => chip.textContent?.includes("third"));
+    assert.ok(held);
+    assert.equal(held.getAttribute("draggable"), "false");
+    assert.match(held.textContent ?? "", /Held for review/);
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();

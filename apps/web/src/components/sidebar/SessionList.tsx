@@ -123,7 +123,7 @@ function StatusBadge({ status }: { status: SessionRowStatus }) {
       </span>
     );
   }
-  if (status.kind === "failed" || status.kind === "reconciling" || status.kind === "unknown") {
+  if (status.kind === "failed" || status.kind === "reconciling" || status.kind === "unknown" || status.kind === "epoch-pending") {
     return (
       <span
         className={`session-status-indicator ${status.kind}`}
@@ -676,6 +676,7 @@ export default function SessionList({
       || session.status === "waiting"
       || session.status === "reconciling"
       || session.status === "unknown"
+      || session.status === "epoch-pending"
       || (session.attention?.questions ?? 0) > 0
       || (session.attention?.permissions ?? 0) > 0;
   };
