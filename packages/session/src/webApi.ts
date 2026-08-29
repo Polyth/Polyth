@@ -301,6 +301,13 @@ export interface CommandListResult {
   commands: SlashCommand[];
   snippets: SnippetDef[];
 }
+export type SkillScope = "project-opencode" | "user-opencode" | "project-claude" | "user-claude" | "project-agents" | "user-agents";
+export interface AgentSkillDef {
+  name: string;
+  description: string;
+  instructions: string;
+  scope: SkillScope;
+}
 
 /** Strict list outcome (UX-COMPOSER-DISC): a request failure is never
  *  presented as a successful empty list. */
@@ -868,6 +875,8 @@ export const api = {
     jfetch<SnippetDef[]>(`/api/snippets?projectId=${encodeURIComponent(projectId)}`).catch(
       (): SnippetDef[] => [],
     ),
+  listSkills: (projectId: string) =>
+    jfetch<AgentSkillDef[]>(`/api/skills?projectId=${encodeURIComponent(projectId)}`).catch((): AgentSkillDef[] => []),
 
   // ---- session goal (§12) ---------------------------------------------------
   goalAttach: (sessionId: string, objective: string, budgetTokens?: number, maxContinuations?: number) =>
@@ -1156,6 +1165,10 @@ export const api = {
     jfetch<{ ok: true }>(`/api/snippets`, json("POST", { projectId, scope, ...snippet })),
   deleteSnippet: (projectId: string, scope: "user" | "project", alias: string) =>
     jfetch<{ ok: boolean }>(`/api/snippets`, json("DELETE", { projectId, scope, alias })),
+  saveSkill: (projectId: string, scope: SkillScope, skill: { name: string; description: string; instructions: string }) =>
+    jfetch<{ ok: true }>(`/api/skills`, json("POST", { projectId, scope, ...skill })),
+  deleteSkill: (projectId: string, scope: SkillScope, name: string) =>
+    jfetch<{ ok: boolean }>(`/api/skills`, json("DELETE", { projectId, scope, name })),
 
   // ---- shared internal browser ------------------------------------------------
   browserCapability: () =>

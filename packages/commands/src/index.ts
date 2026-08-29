@@ -1,6 +1,6 @@
 // Slash commands + snippets, polyth-style discovery and expansion.
 import { exec } from "node:child_process";
-import { mkdir, readdir, readFile, realpath, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, realpath, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -28,6 +28,15 @@ export interface Snippet {
 export interface CommandList {
   commands: SlashCommand[];
   snippets: Snippet[];
+}
+
+export type SkillScope = "project-opencode" | "user-opencode" | "project-claude" | "user-claude" | "project-agents" | "user-agents";
+
+export interface AgentSkill {
+  name: string;
+  description: string;
+  instructions: string;
+  scope: SkillScope;
 }
 
 export interface ExpandContext {
@@ -59,6 +68,9 @@ export interface CommandService {
   removeCommand(root: string, scope: WriteScope, name: string): Promise<boolean>;
   saveSnippet(root: string, scope: WriteScope, snippet: { alias: string; text: string }): Promise<void>;
   removeSnippet(root: string, scope: WriteScope, alias: string): Promise<boolean>;
+  listSkills(root: string): Promise<AgentSkill[]>;
+  saveSkill(root: string, scope: SkillScope, skill: { name: string; description: string; instructions: string }): Promise<void>;
+  removeSkill(root: string, scope: SkillScope, name: string): Promise<boolean>;
 }
 
 export interface CommandServiceOptions {
@@ -97,11 +109,22 @@ const BUILTINS: SlashCommand[] = [
 ];
 
 const NAME_RE = /^[A-Za-z0-9_-]+$/;
+const SKILL_NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const SKILL_SCOPES: SkillScope[] = [
+  "project-opencode", "user-opencode", "project-claude", "user-claude", "project-agents", "user-agents",
+];
 
 export function createCommandService(opts: CommandServiceOptions = {}): CommandService {
   const homeOf = (): string => opts.home ?? process.env.HOME ?? "";
   const dirFor = (root: string, scope: WriteScope, kind: "commands" | "snippets"): string =>
     scope === "user" ? path.join(homeOf(), ".config", "polyth", kind) : path.join(root, ".polyth", kind);
+  const skillDirFor = (root: string, scope: SkillScope): string => {
+    const user = scope.startsWith("user-");
+    const family = scope.slice(scope.indexOf("-") + 1);
+    const base = user ? homeOf() : root;
+    if (family === "opencode") return user ? path.join(base, ".config", "opencode", "skills") : path.join(base, ".opencode", "skills");
+    return path.join(base, `.${family}`, "skills");
+  };
   const assertName = (name: string): void => {
     if (!NAME_RE.test(name)) {
       throw Object.assign(new Error("name must be letters, digits, - or _"), { code: "invalid-input" });
@@ -217,6 +240,40 @@ export function createCommandService(opts: CommandServiceOptions = {}): CommandS
         return false;
       }
     },
+
+    async listSkills(root) {
+      const skills = await Promise.all(SKILL_SCOPES.map(async (scope) =>
+        loadSkills(skillDirFor(root, scope), scope)));
+      return skills.flat().sort((a, b) => a.name.localeCompare(b.name) || a.scope.localeCompare(b.scope));
+    },
+
+    async saveSkill(root, scope, skill) {
+      if (!SKILL_SCOPES.includes(scope)) throw Object.assign(new Error("unknown skill location"), { code: "invalid-input" });
+      if (!SKILL_NAME_RE.test(skill.name)) {
+        throw Object.assign(new Error("name must be lowercase letters, digits, and single hyphens"), { code: "invalid-input" });
+      }
+      if (!skill.description.trim() || skill.description.trim().length > 1024) {
+        throw Object.assign(new Error("description is required and must be at most 1024 characters"), { code: "invalid-input" });
+      }
+      if (!skill.instructions.trim()) throw Object.assign(new Error("instructions are required"), { code: "invalid-input" });
+      const dir = path.join(skillDirFor(root, scope), skill.name);
+      await mkdir(dir, { recursive: true });
+      const description = skill.description.trim().replaceAll("\n", " ").replaceAll('"', '\\"');
+      await writeFile(path.join(dir, "SKILL.md"), `---\nname: ${skill.name}\ndescription: "${description}"\n---\n\n${skill.instructions.trim()}\n`);
+    },
+
+    async removeSkill(root, scope, name) {
+      if (!SKILL_SCOPES.includes(scope) || !SKILL_NAME_RE.test(name)) {
+        throw Object.assign(new Error("invalid skill location or name"), { code: "invalid-input" });
+      }
+      try {
+        await rm(path.join(skillDirFor(root, scope), name), { recursive: true, force: false });
+        return true;
+      } catch (error) {
+        if ((error as { code?: string }).code === "ENOENT") return false;
+        throw error;
+      }
+    },
   };
 }
 
@@ -268,6 +325,52 @@ async function loadSnippets(dir: string, scope: CommandScope): Promise<Snippet[]
     out.push({ alias: file.replace(/\.[^.]+$/, ""), text, scope });
   }
   return out;
+}
+
+async function loadSkills(dir: string, scope: SkillScope): Promise<AgentSkill[]> {
+  let entries: string[] = [];
+  try {
+    entries = (await readdir(dir, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory() && SKILL_NAME_RE.test(entry.name))
+      .map((entry) => entry.name);
+  } catch {
+    return [];
+  }
+  const skills: AgentSkill[] = [];
+  for (const name of entries) {
+    try {
+      const parsed = parseSkill(await readFile(path.join(dir, name, "SKILL.md"), "utf8"));
+      if (parsed.name === name && parsed.description) skills.push({ ...parsed, scope });
+    } catch {
+      // A partial or malformed skill must not hide the rest of the catalog.
+    }
+  }
+  return skills;
+}
+
+function parseSkill(raw: string): { name: string; description: string; instructions: string } {
+  const source = raw.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+  if (!source.startsWith("---\n")) throw new Error("missing frontmatter");
+  const close = source.indexOf("\n---", 3);
+  if (close === -1) throw new Error("missing frontmatter end");
+  const meta = source.slice(4, close);
+  const field = (key: string): string => {
+    const lines = meta.split("\n");
+    const index = lines.findIndex((line) => new RegExp(`^${key}\\s*:`).test(line));
+    if (index === -1) return "";
+    const value = lines[index]!.replace(new RegExp(`^${key}\\s*:\\s*`), "").trim();
+    if (value !== ">" && value !== "|") return value.replace(/^['"]|['"]$/g, "");
+    const nested: string[] = [];
+    for (const line of lines.slice(index + 1)) {
+      if (!/^\s/.test(line)) break;
+      nested.push(line.trim());
+    }
+    return value === ">" ? nested.join(" ") : nested.join("\n");
+  };
+  const name = field("name");
+  const description = field("description");
+  if (!SKILL_NAME_RE.test(name) || !description || description.length > 1024) throw new Error("invalid frontmatter");
+  return { name, description, instructions: source.slice(close + 4).replace(/^\n+/, "").trim() };
 }
 
 export function parseFrontmatter(raw: string): {

@@ -103,6 +103,7 @@ const SETTINGS_ICON_BY_PAGE: Record<string, keyof typeof Icon> = {
   agents: "session",
   mcp: "plug",
   commands: "term",
+  skills: "puzzle",
   integrations: "link",
   plugins: "puzzle",
   "secure-safe": "shield",
