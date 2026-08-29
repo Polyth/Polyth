@@ -459,6 +459,7 @@ test("confirmed abort accepts bare idle without assistant completion", async () 
     await runtime.startTurn({ sessionId: "abort-before-completion", text: "stop me" });
     await runtime.abort("abort-before-completion");
     fake.replay({
+      id: "evt_abort_idle",
       type: "session.idle",
       properties: { sessionID: "ses_fake_1" },
     });
@@ -943,7 +944,12 @@ test("session compaction and compaction parts translate to canonical runtime eve
 
 test("real opencode provider list", { skip: process.env.POLYTH_REAL_OPENCODE !== "1" }, async () => {
   const { createOpenCodeRuntime } = await import("../src/index.ts");
-  const runtime = await createOpenCodeRuntime({ cwd: "/tmp/oc-probe", port: 4579 });
+  const runtime = await createOpenCodeRuntime({
+    projectId: "real-opencode-probe",
+    cwd: "/tmp/oc-probe",
+    runtimeDir: "/tmp/polyth-real-opencode-probe",
+    port: 4579,
+  });
   try {
     const models = await runtime.models();
     assert.ok(Array.isArray(models));

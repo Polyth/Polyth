@@ -71,6 +71,7 @@ test("release workflow builds all platforms and uploads updater metadata", async
 });
 
 test("pinned OpenCode lock covers packaged CPU and operating-system targets", async () => {
+  const mainSource = await readFile(join(desktopDir, "src", "main.ts"), "utf8");
   const lock = JSON.parse(await readFile(join(desktopDir, "opencode.json"), "utf8")) as {
     version: string;
     targets: Record<string, { archive: string; sha256: string }>;
@@ -86,4 +87,9 @@ test("pinned OpenCode lock covers packaged CPU and operating-system targets", as
   ]) {
     assert.match(lock.targets[target]?.sha256 ?? "", /^[a-f0-9]{64}$/);
   }
+  assert.match(
+    mainSource,
+    /opencode:\s*\{\s*bin:\s*binary,\s*binarySource:\s*"bundled"\s*\}/,
+    "desktop must label its absolute resources executable as bundled",
+  );
 });

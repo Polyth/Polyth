@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import type { ChildProcess, spawn as nodeSpawn } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import { test } from "node:test";
 
 import {
@@ -10,6 +13,8 @@ import {
   createBorrowedExternalEndpointLease,
   attachRuntimeLifecycle,
   createConfigApplier,
+  createOwnedLocalEndpointLease,
+  type OpenCodeEngineIdentity,
 } from "@polyth/backend-opencode";
 import type {
   AgentRuntime,
@@ -69,6 +74,90 @@ const waitForEvent = (
   });
 };
 
+const waitForCondition = async (
+  condition: () => boolean | Promise<boolean>,
+): Promise<void> => {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (await condition()) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("expected condition was not reached");
+};
+
+const TEST_ENGINE: OpenCodeEngineIdentity = {
+  engine: "opencode",
+  version: "1.18.18",
+  binaryDigest: "a".repeat(64),
+  protocolGeneration: 1,
+};
+
+let nextOwnedPid = 12_000;
+
+const createOwnedFakeLease = async (
+  fake: Awaited<ReturnType<typeof createFakeOpenCode>>,
+  directory: string,
+) => {
+  const port = Number(new URL(fake.baseUrl).port);
+  return createOwnedLocalEndpointLease({
+    projectId: `project:${directory}`,
+    cwd: directory,
+    runtimeDir: join(directory, "runtimes", "opencode", "project"),
+    stateFile: join(directory, "opencode-local", "project.lease.json"),
+    pidFile: join(directory, "opencode-local", "project.pid.json"),
+    resolveBinary: async () => ({
+      executablePath: join(directory, "fake-opencode"),
+      binarySource: "configured",
+    }),
+    inspectEngine: async () => TEST_ENGINE,
+    pickPort: async () => port,
+    spawn: ((_bin: string, args: readonly string[], spawnOptions: { env?: NodeJS.ProcessEnv }) => {
+      const isolatedDb = spawnOptions.env?.OPENCODE_DB;
+      assert.ok(isolatedDb);
+      writeFileSync(isolatedDb, `opaque fake database ${nextOwnedPid}`, { mode: 0o600 });
+      const child = new EventEmitter() as ChildProcess;
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      let signalCode: NodeJS.Signals | null = null;
+      Object.assign(child, {
+        pid: nextOwnedPid++,
+        stdout,
+        stderr,
+        stdin: null,
+        stdio: [null, stdout, stderr, null, null],
+        connected: false,
+        spawnargs: [],
+        spawnfile: "opencode",
+        kill(signal: NodeJS.Signals = "SIGTERM") {
+          signalCode = signal;
+          queueMicrotask(() => child.emit("exit", null, signal));
+          return true;
+        },
+        ref() {},
+        unref() {},
+        disconnect() {},
+        send() { return false; },
+      });
+      Object.defineProperties(child, {
+        killed: { get: () => signalCode !== null },
+        exitCode: { get: () => null },
+        signalCode: { get: () => signalCode },
+      });
+      setImmediate(() => {
+        stderr.write(
+          `opencode server listening on http://127.0.0.1:${Number(args.at(-1))}\n`,
+        );
+      });
+      return child;
+    }) as unknown as typeof nodeSpawn,
+    readProcessIdentity: async (pid) => ({
+      startIdentity: `start-${pid}`,
+      executable: "/usr/bin/opencode",
+      command: `opencode-${pid}`,
+    }),
+    gracefulStopMs: 20,
+  });
+};
+
 const reliabilityHarness = async (
   fake: Awaited<ReturnType<typeof createFakeOpenCode>>,
   options: {
@@ -76,21 +165,26 @@ const reliabilityHarness = async (
     store?: SessionPersistence;
     generation?: number;
     sseStallMs?: number;
+    authorityId?: string;
+    control?: RuntimeEndpoint["control"];
+    lease?: RuntimeEndpointLease;
   } = {},
 ) => {
   const directory = options.directory ?? mkdtempSync(join(tmpdir(), "polyth-reliability-e2e-"));
   const store = options.store ?? createStore(join(directory, "sessions.db"));
-  const endpoint: RuntimeEndpoint = {
-    authorityId: `fake:${directory}`,
-    continuity: "verified",
-    generation: options.generation ?? 1,
-    url: fake.baseUrl,
-    location: { directory },
-    control: { kind: "borrowed", source: "external" },
-    config: { kind: "read-only" },
-    authentication: { kind: "none" },
-  };
-  const lease = {
+  const endpoint: RuntimeEndpoint = options.lease
+    ? await options.lease.endpoint()
+    : {
+        authorityId: options.authorityId ?? `fake:${directory}`,
+        continuity: "verified",
+        generation: options.generation ?? 1,
+        url: fake.baseUrl,
+        location: { directory },
+        control: options.control ?? { kind: "borrowed", source: "external" },
+        config: { kind: "read-only" },
+        authentication: { kind: "none" },
+      };
+  const lease = options.lease ?? {
     control: endpoint.control,
     async endpoint() { return endpoint; },
     async refresh() { return endpoint; },
@@ -235,6 +329,173 @@ test("accepted prompt with a lost response is durably unknown and sent once", as
     await harness.runtime.dispose();
     await fake.close();
     await harness.store.close();
+  }
+});
+
+test("fresh owned runtime rehydrates confirmed history without replaying an uncertain prompt", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "polyth-fresh-epoch-e2e-"));
+  const oldFake = await createFakeOpenCode();
+  const firstLease = await createOwnedFakeLease(oldFake, directory);
+  const first = await reliabilityHarness(oldFake, {
+    directory,
+    lease: firstLease,
+  });
+  let newFake: Awaited<ReturnType<typeof createFakeOpenCode>> | undefined;
+  let second: Awaited<ReturnType<typeof reliabilityHarness>> | undefined;
+  try {
+    const created = await first.sessions.create({
+      projectId: first.project.id,
+      title: "Fresh epoch recovery",
+    });
+    const oldBackendSessionId = (await first.store.projection(created.id))!.backendSessionId!;
+    await first.sessions.send(created.id, { text: "confirmed canonical fact" });
+    oldFake.lifecycle.finishTurn(oldBackendSessionId);
+    await first.waitForEvent((event) =>
+      event.sessionId === created.id && event.type === "turn/stopped");
+
+    const uncertainPath = `/session/${oldBackendSessionId}/prompt_async`;
+    oldFake.scriptHttp({
+      method: "POST",
+      path: uncertainPath,
+      steps: [httpFaults.acceptThenClose({ accepted: true })],
+    });
+    await assert.rejects(
+      () => first.sessions.send(created.id, { text: "uncertain request must stay held" }),
+      (error: Error & { code?: string }) => error.code === "outcome-unknown",
+    );
+    const uncertain = (await (first.store as ReturnType<typeof createStore>)
+      .operations(created.id))
+      .find((operation) => operation.mutationKind === "turn-submit"
+        && operation.state === "unknown")!;
+
+    // A fresh fake endpoint models deletion/quarantine of the old runtime DB:
+    // it retains no backend sessions, messages, or in-memory facade mappings.
+    await first.runtime.dispose();
+    rmSync(join(directory, "runtimes"), { recursive: true, force: true });
+    newFake = await createFakeOpenCode();
+    newFake.lifecycle.createSession({ title: "unrelated fresh-runtime session" });
+    const secondLease = await createOwnedFakeLease(newFake, directory);
+    second = await reliabilityHarness(newFake, {
+      directory,
+      store: first.store,
+      lease: secondLease,
+    });
+    assert.notEqual(second.endpoint.authorityId, first.endpoint.authorityId);
+    assert.equal(second.endpoint.generation, 1);
+
+    await second.sessions.send(created.id, { text: "continue on the clean runtime" });
+
+    const projection = (await first.store.projection(created.id))!;
+    assert.equal(projection.runtimeBinding?.epoch, 1);
+    assert.equal(projection.runtimeBinding?.authorityId, second.endpoint.authorityId);
+    assert.notEqual(projection.backendSessionId, oldBackendSessionId);
+    assert.equal(
+      (await (first.store as ReturnType<typeof createStore>)
+        .operation(uncertain.operationId))?.state,
+      "fenced",
+    );
+    assert.deepEqual(
+      (await (first.store as ReturnType<typeof createStore>).queueList(created.id))
+        .map((item) => ({ text: item.text, heldForReview: item.heldForReview })),
+      [{ text: "uncertain request must stay held", heldForReview: true }],
+    );
+    const freshSession = newFake.lifecycle.session(projection.backendSessionId!);
+    assert.equal(freshSession?.messages.length, 1);
+    const sentText = (freshSession?.messages[0]?.body as {
+      parts?: Array<{ text?: string }>;
+    }).parts?.[0]?.text ?? "";
+    assert.match(sentText, /confirmed canonical fact/);
+    assert.match(sentText, /continue on the clean runtime/);
+    assert.doesNotMatch(sentText, /uncertain request must stay held/);
+    const events = await first.store.events(created.id);
+    assert.equal(events.filter((event) => event.type === "runtime/epoch-replaced").length, 1);
+    assert.equal(events.some((event) =>
+      event.type === "mutation/rejected"
+      && (event.data as { operationId?: string }).operationId === uncertain.operationId), false);
+  } finally {
+    await first.runtime.dispose();
+    if (second) await second.runtime.dispose();
+    await first.store.close();
+    await oldFake.close();
+    if (newFake) await newFake.close();
+  }
+});
+
+test("DB loss after prompt preparation holds the never-admitted turn without replaying it", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "polyth-pre-admission-crash-"));
+  const oldFake = await createFakeOpenCode();
+  const firstLease = await createOwnedFakeLease(oldFake, directory);
+  const first = await reliabilityHarness(oldFake, {
+    directory,
+    lease: firstLease,
+  });
+  let newFake: Awaited<ReturnType<typeof createFakeOpenCode>> | undefined;
+  let second: Awaited<ReturnType<typeof reliabilityHarness>> | undefined;
+  try {
+    const created = await first.sessions.create({
+      projectId: first.project.id,
+      title: "Pre-admission crash",
+    });
+    const oldBackendSessionId = (await first.store.projection(created.id))!.backendSessionId!;
+    const prepared = await (first.store as ReturnType<typeof createStore>).prepareOperation({
+      sessionId: created.id,
+      mutationKind: "turn-submit",
+      intentEvent: {
+        type: "user/message",
+        data: { text: "prepared but never admitted" },
+      },
+    });
+    assert.equal(prepared.operation.state, "prepared");
+    assert.equal(
+      oldFake.requestCount("POST", `/session/${oldBackendSessionId}/prompt_async`),
+      0,
+    );
+
+    await first.runtime.dispose();
+    rmSync(
+      join(directory, "runtimes", "opencode", "project", "opencode.db"),
+      { force: true },
+    );
+    newFake = await createFakeOpenCode();
+    newFake.lifecycle.createSession({ title: "unrelated fresh-runtime session" });
+    const secondLease = await createOwnedFakeLease(newFake, directory);
+    second = await reliabilityHarness(newFake, {
+      directory,
+      store: first.store,
+      lease: secondLease,
+    });
+    assert.notEqual(second.endpoint.authorityId, first.endpoint.authorityId);
+
+    await second.sessions.send(created.id, { text: "new epoch prompt" });
+
+    const rejected = await (first.store as ReturnType<typeof createStore>)
+      .operation(prepared.operation.operationId);
+    assert.equal(rejected?.state, "rejected");
+    assert.equal(rejected?.code, "runtime-epoch-replaced-before-execution");
+    assert.deepEqual(
+      (await (first.store as ReturnType<typeof createStore>).queueList(created.id))
+        .map((item) => ({ text: item.text, heldForReview: item.heldForReview })),
+      [{ text: "prepared but never admitted", heldForReview: true }],
+    );
+    const projection = (await first.store.projection(created.id))!;
+    assert.equal(projection.runtimeBinding?.epoch, 1);
+    const freshSession = newFake.lifecycle.session(projection.backendSessionId!);
+    assert.equal(freshSession?.messages.length, 1);
+    const sentText = (freshSession?.messages[0]?.body as {
+      parts?: Array<{ text?: string }>;
+    }).parts?.[0]?.text ?? "";
+    assert.match(sentText, /new epoch prompt/);
+    assert.doesNotMatch(sentText, /prepared but never admitted/);
+    assert.equal(
+      newFake.requestCount("POST", `/session/${projection.backendSessionId}/prompt_async`),
+      1,
+    );
+  } finally {
+    await first.runtime.dispose();
+    if (second) await second.runtime.dispose();
+    await first.store.close();
+    await oldFake.close();
+    if (newFake) await newFake.close();
   }
 });
 
@@ -590,6 +851,18 @@ test("backend hard death leaves an incomplete tool turn truthful across endpoint
     await second.sessions.events(created.id, 0);
     await restartedUnknown;
     assert.equal(restarted.requestCount("POST", `/session/${backendSessionId}/prompt_async`), 0);
+    const canonical = await first.store.events(created.id);
+    assert.equal(
+      canonical.filter((event) => event.type === "assistant/message").length,
+      0,
+      "stream loss must not invent an assistant completion",
+    );
+    assert.equal(
+      canonical.filter((event) =>
+        event.type === "turn/stopped"
+        && (event.data as { reason?: string }).reason === "completed").length,
+      0,
+    );
   } finally {
     await first.runtime.dispose();
     if (second) await second.runtime.dispose();
@@ -892,6 +1165,108 @@ test("fresh session-service consumer sees running pending state from durable tru
     await harness.runtime.dispose();
     await fake.close();
     await harness.store.close();
+  }
+});
+
+test("two owned projects prompt concurrently and one restarts without touching the other", async () => {
+  const base = mkdtempSync(join(tmpdir(), "polyth-two-project-restart-"));
+  const directoryA = join(base, "project-a");
+  const directoryB = join(base, "project-b");
+  mkdirSync(directoryA);
+  mkdirSync(directoryB);
+  const store = createStore(join(base, "sessions.db"));
+  const fakeA = await createFakeOpenCode();
+  const fakeB = await createFakeOpenCode();
+  const leaseA = await createOwnedFakeLease(fakeA, directoryA);
+  const leaseB = await createOwnedFakeLease(fakeB, directoryB);
+  const firstA = await reliabilityHarness(fakeA, {
+    directory: directoryA,
+    store,
+    lease: leaseA,
+  });
+  const harnessB = await reliabilityHarness(fakeB, {
+    directory: directoryB,
+    store,
+    lease: leaseB,
+  });
+  let restartedA: Awaited<ReturnType<typeof reliabilityHarness>> | undefined;
+  try {
+    const [sessionA, sessionB] = await Promise.all([
+      firstA.sessions.create({ projectId: firstA.project.id, title: "Project A" }),
+      harnessB.sessions.create({ projectId: harnessB.project.id, title: "Project B" }),
+    ]);
+    const backendA = (await store.projection(sessionA.id))!.backendSessionId!;
+    const backendB = (await store.projection(sessionB.id))!.backendSessionId!;
+
+    await Promise.all([
+      firstA.sessions.send(sessionA.id, { text: "project A first" }),
+      harnessB.sessions.send(sessionB.id, { text: "project B first" }),
+    ]);
+    fakeA.lifecycle.finishTurn(backendA);
+    fakeB.lifecycle.finishTurn(backendB);
+    await Promise.all([
+      firstA.waitForEvent((event) =>
+        event.sessionId === sessionA.id && event.type === "turn/stopped"),
+      harnessB.waitForEvent((event) =>
+        event.sessionId === sessionB.id && event.type === "turn/stopped"),
+      waitForCondition(async () => (await store.projection(sessionA.id))?.status === "idle"),
+      waitForCondition(async () => (await store.projection(sessionB.id))?.status === "idle"),
+    ]);
+
+    const bindingBBefore = structuredClone((await store.projection(sessionB.id))!.runtimeBinding);
+    const endpointABefore = firstA.endpoint;
+    await firstA.runtime.dispose();
+    const restartedLeaseA = await createOwnedFakeLease(fakeA, directoryA);
+    restartedA = await reliabilityHarness(fakeA, {
+      directory: directoryA,
+      store,
+      lease: restartedLeaseA,
+    });
+    assert.equal(restartedA.endpoint.authorityId, endpointABefore.authorityId);
+    assert.equal(restartedA.endpoint.generation, endpointABefore.generation + 1);
+    await restartedA.sessions.events(sessionA.id, 0);
+    const projectionAAfterRestart = (await store.projection(sessionA.id))!;
+    const reconciliationAAfterRestart = await store.reconciliation(sessionA.id);
+    assert.equal(
+      projectionAAfterRestart.status,
+      "idle",
+      JSON.stringify({
+        projection: projectionAAfterRestart,
+        reconciliation: reconciliationAAfterRestart,
+      }),
+    );
+
+    assert.deepEqual(
+      (await store.projection(sessionB.id))!.runtimeBinding,
+      bindingBBefore,
+      "restarting project A must not change project B's runtime binding",
+    );
+    await Promise.all([
+      restartedA.sessions.send(sessionA.id, { text: "project A after restart" }),
+      harnessB.sessions.send(sessionB.id, { text: "project B while A restarts" }),
+    ]);
+
+    assert.equal(fakeA.lifecycle.session(backendA)?.messages.length, 2);
+    assert.equal(fakeB.lifecycle.session(backendB)?.messages.length, 2);
+    assert.equal(
+      (await store.events(sessionA.id)).filter((event) => event.type === "user/message").length,
+      2,
+    );
+    assert.equal(
+      (await store.events(sessionB.id)).filter((event) => event.type === "user/message").length,
+      2,
+    );
+    assert.notEqual(
+      join(directoryA, "runtimes", "opencode", "project", "opencode.db"),
+      join(directoryB, "runtimes", "opencode", "project", "opencode.db"),
+    );
+  } finally {
+    await firstA.runtime.dispose();
+    await restartedA?.runtime.dispose();
+    await harnessB.runtime.dispose();
+    await store.close();
+    await fakeA.close();
+    await fakeB.close();
   }
 });
 

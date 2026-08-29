@@ -28,6 +28,7 @@ import type {
   ObservationCursorKey,
   OperationClaimResult,
   OperationSettlement,
+  PersistedRuntimeBinding,
   PrepareDeletionTombstoneInput,
   PreparedDeletionTombstoneResult,
   PrepareOperationInput,
@@ -42,6 +43,8 @@ import type {
   ResponseIntentChoice,
   ResponseIntentInput,
   ResponseIntentSettlement,
+  RuntimeEpochTransitionInput,
+  RuntimeEpochTransitionResult,
   RuntimeMutationKind,
   SessionEvent,
   SessionFolderDto,
@@ -148,6 +151,9 @@ export interface Store extends SessionPersistence {
    * the replay contract captured at preparation. */
   replayUnknownOperation(operationId: string, contract: string): Promise<OperationClaimResult>;
   settleOperation(operationId: string, settlement: OperationSettlement): Promise<DurableOperation>;
+  /** Append the epoch marker, swap the binding, and optionally fence the
+   * destroyed authority's prior unknowns in one SQLite transaction. */
+  transitionRuntimeEpoch(input: RuntimeEpochTransitionInput): Promise<RuntimeEpochTransitionResult>;
   /** Startup runs this automatically; the explicit API is useful before
    * handing an already-open database to a recovered scheduler. */
   recoverExecutingOperations(sessionId?: string): Promise<DurableOperation[]>;
@@ -661,6 +667,41 @@ export function createStore(dbPath: string): Store {
          )`,
       );
     },
+    // v8: runtime epochs. Fenced is a terminal unknown-outcome disposition,
+    // and queue admissions fenced by an epoch become durable held drafts.
+    () => {
+      db.exec(`
+        CREATE TABLE runtime_operations_v8 (
+          operation_id    TEXT PRIMARY KEY,
+          session_id      TEXT NOT NULL,
+          ordinal         INTEGER NOT NULL,
+          mutation_kind   TEXT NOT NULL,
+          state           TEXT NOT NULL CHECK (
+            state IN ('prepared','executing','confirmed','rejected','unknown','not-applied','fenced')
+          ),
+          replay_kind     TEXT NOT NULL CHECK (replay_kind IN ('never','same-operation-id')),
+          replay_contract TEXT,
+          created_at      INTEGER NOT NULL,
+          updated_at      INTEGER NOT NULL,
+          code            TEXT,
+          message         TEXT,
+          receipt         TEXT,
+          owner_event_seq INTEGER,
+          UNIQUE (session_id, ordinal)
+        );
+        INSERT INTO runtime_operations_v8
+          SELECT * FROM runtime_operations;
+        DROP TABLE runtime_operations;
+        ALTER TABLE runtime_operations_v8 RENAME TO runtime_operations;
+        CREATE INDEX idx_runtime_operations_session
+          ON runtime_operations (session_id, ordinal);
+        CREATE INDEX idx_runtime_operations_state
+          ON runtime_operations (state);
+        ALTER TABLE session_queue
+          ADD COLUMN held_for_review INTEGER NOT NULL DEFAULT 0
+          CHECK (held_for_review IN (0, 1));
+      `);
+    },
   ];
   {
     const current = getVersion();
@@ -695,8 +736,10 @@ export function createStore(dbPath: string): Store {
   const ATTENTION_OPS: Record<string, { kind: "permission" | "question"; op: "open" | "close" }> = {
     "permission/requested": { kind: "permission", op: "open" },
     "permission/resolved": { kind: "permission", op: "close" },
+    "permission/expired": { kind: "permission", op: "close" },
     "question/asked": { kind: "question", op: "open" },
     "question/answered": { kind: "question", op: "close" },
+    "question/expired": { kind: "question", op: "close" },
   };
 
   function applyAttention(sessionId: string, type: string, data: JsonObject): void {
@@ -713,7 +756,7 @@ export function createStore(dbPath: string): Store {
     }
   }
 
-  /** Raw-row variant: parses data only for the four attention event types. */
+  /** Raw-row variant: parses data only for attention event types. */
   function applyAttentionRaw(sessionId: string, type: string, dataRaw: string): void {
     if (!ATTENTION_OPS[type]) return;
     try {
@@ -883,7 +926,8 @@ export function createStore(dbPath: string): Store {
       | "mutation/confirmed"
       | "mutation/rejected"
       | "mutation/uncertainty-recorded"
-      | "mutation/nonapplication-confirmed",
+      | "mutation/nonapplication-confirmed"
+      | "mutation/fenced",
     extra: { code?: string; message?: string } = {},
   ): SessionEvent | undefined {
     const tombstoned = prep(
@@ -1108,6 +1152,288 @@ export function createStore(dbPath: string): Store {
         }
       }
       return transitionOperation(operationId, settlement).operation;
+    });
+  }
+
+  const bindingEpoch = (binding: PersistedRuntimeBinding): number => binding.epoch ?? 0;
+
+  const priorEpochEvents = (sessionId: string): SessionEvent[] =>
+    (prep("SELECT * FROM events WHERE session_id = ? ORDER BY seq")
+      .all(sessionId) as unknown as Row[]).map(rowToEvent);
+
+  const appendEpochRequestExpirations = (
+    sessionId: string,
+    epoch: number,
+    events: readonly SessionEvent[],
+  ): SessionEvent[] => {
+    const open = new Map<string, { requestId: string; type: "permission/expired" | "question/expired" | "secret/expired" }>();
+    for (const event of events) {
+      const requestId = (event.data as { requestId?: unknown }).requestId;
+      if (typeof requestId !== "string" || !requestId) continue;
+      if (event.type === "permission/requested") {
+        open.set(`permission:${requestId}`, { requestId, type: "permission/expired" });
+      } else if (event.type === "question/asked") {
+        open.set(`question:${requestId}`, { requestId, type: "question/expired" });
+      } else if (event.type === "secret/requested") {
+        open.set(`secret:${requestId}`, { requestId, type: "secret/expired" });
+      } else if (event.type === "permission/resolved" || event.type === "permission/expired") {
+        open.delete(`permission:${requestId}`);
+      } else if (event.type === "question/answered" || event.type === "question/expired") {
+        open.delete(`question:${requestId}`);
+      } else if (event.type === "secret/resolved" || event.type === "secret/expired") {
+        open.delete(`secret:${requestId}`);
+      }
+    }
+    return [...open.values()].map(({ requestId, type }) =>
+      appendInTransaction(sessionId, type, {
+        requestId,
+        epoch,
+        reason: "runtime-epoch-replaced",
+      }, { ignorable: true }));
+  };
+
+  const nextSnapshotRevision = (
+    events: readonly SessionEvent[],
+    type: "task/snapshot" | "subagent/snapshot",
+  ): number => {
+    let revision = 0;
+    for (const event of events) {
+      if (event.type !== type) continue;
+      const value = Number((event.data as { revision?: unknown }).revision);
+      if (Number.isSafeInteger(value) && value >= 0) revision = Math.max(revision, value);
+    }
+    if (revision >= Number.MAX_SAFE_INTEGER) {
+      throw Object.assign(new Error(`${type} revision is exhausted`), { code: "integrity-error" });
+    }
+    return revision + 1;
+  };
+
+  const appendEpochStateSnapshots = (
+    sessionId: string,
+    events: readonly SessionEvent[],
+  ): SessionEvent[] => {
+    const appended: SessionEvent[] = [];
+    const task = events.findLast((event) => event.type === "task/snapshot");
+    if (task) {
+      const data = task.data as { listId?: unknown; items?: unknown };
+      appended.push(appendInTransaction(sessionId, "task/snapshot", {
+        listId: typeof data.listId === "string" ? data.listId : "todo",
+        revision: nextSnapshotRevision(events, "task/snapshot"),
+        items: Array.isArray(data.items) ? data.items as JsonObject[] : [],
+      }));
+    }
+    const subagents = events.findLast((event) => event.type === "subagent/snapshot");
+    if (subagents) {
+      const rawAgents = (subagents.data as { agents?: unknown }).agents;
+      const terminal = new Set(["done", "completed", "failed", "cancelled", "canceled"]);
+      const agents = Array.isArray(rawAgents)
+        ? rawAgents.map((raw) => {
+            const agent = raw && typeof raw === "object" && !Array.isArray(raw)
+              ? raw as Record<string, unknown>
+              : {};
+            const status = typeof agent.status === "string" ? agent.status : "";
+            return {
+              sessionId: typeof agent.sessionId === "string" ? agent.sessionId : "",
+              label: typeof agent.label === "string" ? agent.label : "",
+              status: terminal.has(status.toLowerCase()) ? status : "unknown",
+              ...(typeof agent.currentTask === "string" ? { currentTask: agent.currentTask } : {}),
+            };
+          })
+        : [];
+      appended.push(appendInTransaction(sessionId, "subagent/snapshot", {
+        revision: nextSnapshotRevision(events, "subagent/snapshot"),
+        agents,
+      }));
+    }
+    return appended;
+  };
+
+  const samePersistedBinding = (
+    left: PersistedRuntimeBinding,
+    right: PersistedRuntimeBinding,
+  ): boolean =>
+    left.backendSessionId === right.backendSessionId
+    && left.authorityId === right.authorityId
+    && left.generation === right.generation
+    && bindingEpoch(left) === bindingEpoch(right)
+    && left.continuity === right.continuity
+    && left.protocol === right.protocol
+    && left.location.directory === right.location.directory
+    && (left.location.workspace ?? "") === (right.location.workspace ?? "");
+
+  async function transitionRuntimeEpoch(
+    input: RuntimeEpochTransitionInput,
+  ): Promise<RuntimeEpochTransitionResult> {
+    return transaction(() => {
+      const reason = input.reason.trim();
+      if (!reason) {
+        throw Object.assign(new Error("runtime epoch transition requires a reason"), {
+          code: "invalid-input",
+        });
+      }
+      const projectionRow = prep("SELECT data FROM projections WHERE session_id = ?")
+        .get(input.sessionId) as { data: string } | undefined;
+      if (!projectionRow) {
+        throw Object.assign(new Error("session projection not found"), { code: "not-found" });
+      }
+      const projection = JSON.parse(projectionRow.data) as SessionProjection;
+      const currentBinding = projection.runtimeBinding;
+      if (
+        !currentBinding
+        || projection.backendSessionId !== currentBinding.backendSessionId
+        || !samePersistedBinding(currentBinding, input.expectedBinding)
+      ) {
+        throw Object.assign(
+          new Error("runtime epoch transition raced a binding change"),
+          { code: "binding-mismatch" },
+        );
+      }
+      const oldEpoch = bindingEpoch(currentBinding);
+      const replacement = input.replacementBinding;
+      const priorEvents = priorEpochEvents(input.sessionId);
+      if (
+        !Number.isSafeInteger(replacement.epoch)
+        || replacement.epoch !== oldEpoch + 1
+        || replacement.epoch <= 0
+        || !replacement.backendSessionId
+        || replacement.backendSessionId === currentBinding.backendSessionId
+        || !replacement.authorityId
+      ) {
+        throw Object.assign(
+          new Error("replacement binding must name a fresh backend session at the next epoch"),
+          { code: "invalid-input" },
+        );
+      }
+      const reset = operationRow(input.resetOperationId);
+      if (
+        !reset
+        || reset.session_id !== input.sessionId
+        || reset.mutation_kind !== "session-reset"
+        || reset.state !== "confirmed"
+        || reset.receipt !== replacement.backendSessionId
+      ) {
+        throw Object.assign(
+          new Error("runtime epoch transition requires a confirmed session-reset receipt"),
+          { code: "epoch-reset-unconfirmed" },
+        );
+      }
+      if (
+        input.fence
+        && (
+          input.fence.authorityId !== currentBinding.authorityId
+          || input.fence.generation !== currentBinding.generation
+          || replacement.authorityId === currentBinding.authorityId
+        )
+      ) {
+        throw Object.assign(
+          new Error("runtime epoch fence does not name the destroyed binding"),
+          { code: "epoch-proof-mismatch" },
+        );
+      }
+
+      const marker = appendInTransaction(
+        input.sessionId,
+        "runtime/epoch-replaced",
+        {
+          old: {
+            authorityId: currentBinding.authorityId,
+            generation: currentBinding.generation,
+            epoch: oldEpoch,
+          },
+          new: {
+            authorityId: replacement.authorityId,
+            generation: replacement.generation,
+            epoch: replacement.epoch,
+          },
+          reason,
+        },
+        { ignorable: true },
+      );
+
+      const fencedOperations: DurableOperation[] = [];
+      const heldQueueItems: QueueItemDto[] = [];
+      if (input.fence) {
+        // A prepared operation has not crossed the durable claim boundary, so
+        // the runtime could not have observed it. Retire it truthfully before
+        // replacing the destroyed authority; leaving it prepared would block
+        // epoch recovery forever or make a later generic claim resend it.
+        const neverAdmitted = prep(
+          `SELECT * FROM runtime_operations
+           WHERE session_id = ? AND state = 'prepared' AND ordinal < ?
+           ORDER BY ordinal`,
+        ).all(input.sessionId, reset.ordinal) as unknown as OperationRow[];
+        for (const pending of neverAdmitted) {
+          const changed = prep(
+            `UPDATE runtime_operations
+             SET state = 'rejected', updated_at = ?, code = ?, message = ?, receipt = NULL
+             WHERE operation_id = ? AND state = 'prepared'`,
+          ).run(
+            Date.now(),
+            "runtime-epoch-replaced-before-execution",
+            "operation was never admitted before the runtime was replaced",
+            pending.operation_id,
+          );
+          if (Number(changed.changes) !== 1) {
+            throw Object.assign(new Error("prepared operation changed during epoch replacement"), {
+              code: "conflict",
+            });
+          }
+          const rejected = rowToOperation(operationRow(pending.operation_id)!);
+          appendMutationState(rejected, "mutation/rejected", {
+            code: "runtime-epoch-replaced-before-execution",
+            ...(rejected.message ? { message: rejected.message } : {}),
+          });
+          if (rejected.mutationKind === "turn-submit") {
+            const held = holdEpochTurnForReview(rejected);
+            if (held) heldQueueItems.push(held);
+          }
+        }
+        const unknowns = prep(
+          `SELECT * FROM runtime_operations
+           WHERE session_id = ? AND state = 'unknown' AND ordinal < ?
+           ORDER BY ordinal`,
+        ).all(input.sessionId, reset.ordinal) as unknown as OperationRow[];
+        for (const unknown of unknowns) {
+          const changed = prep(
+            `UPDATE runtime_operations
+             SET state = 'fenced', updated_at = ?, code = ?, message = ?, receipt = NULL
+             WHERE operation_id = ? AND state = 'unknown'`,
+          ).run(
+            Date.now(),
+            "runtime-epoch-replaced",
+            "outcome unknown — runtime was replaced; the request was not re-sent",
+            unknown.operation_id,
+          );
+          if (Number(changed.changes) !== 1) {
+            throw Object.assign(new Error("unknown operation changed during epoch fencing"), {
+              code: "conflict",
+            });
+          }
+          const fenced = rowToOperation(operationRow(unknown.operation_id)!);
+          fencedOperations.push(fenced);
+          appendMutationState(fenced, "mutation/fenced", {
+            code: "runtime-epoch-replaced",
+            ...(fenced.message ? { message: fenced.message } : {}),
+          });
+          if (fenced.mutationKind === "turn-submit") {
+            const held = holdEpochTurnForReview(fenced);
+            if (held) heldQueueItems.push(held);
+          }
+        }
+      }
+      appendEpochRequestExpirations(input.sessionId, oldEpoch, priorEvents);
+      appendEpochStateSnapshots(input.sessionId, priorEvents);
+
+      const nextProjection: SessionProjection = {
+        ...projection,
+        backendSessionId: replacement.backendSessionId,
+        runtimeBinding: replacement,
+        status: "epoch-pending",
+        updatedAt: Date.now(),
+      };
+      prep("UPDATE projections SET data = ? WHERE session_id = ?")
+        .run(JSON.stringify(nextProjection), input.sessionId);
+      return { marker, projection: nextProjection, fencedOperations, heldQueueItems };
     });
   }
 
@@ -1376,6 +1702,7 @@ export function createStore(dbPath: string): Store {
     created_at: number;
     attachments: string | null;
     reservation_operation_id: string | null;
+    held_for_review: number;
   }
 
   const parseAttachments = (raw: string | null): AttachmentRef[] | undefined => {
@@ -1398,6 +1725,7 @@ export function createStore(dbPath: string): Store {
       delivery: (["normal", "steer", "queue", "interrupt"].includes(r.delivery) ? r.delivery : "queue") as DeliveryMode,
       createdAt: Number(r.created_at),
       ...(attachments ? { attachments } : {}),
+      ...(r.held_for_review === 1 ? { heldForReview: true } : {}),
     };
   };
 
@@ -1432,7 +1760,7 @@ export function createStore(dbPath: string): Store {
 
   function queueEdit(sessionId: string, queueId: string, text: string): Promise<QueueItemDto | undefined> {
     const result = prep(
-      `UPDATE session_queue SET text = ?
+      `UPDATE session_queue SET text = ?, held_for_review = 0
        WHERE session_id = ? AND queue_id = ? AND reservation_operation_id IS NULL`,
     )
       .run(text, sessionId, queueId);
@@ -1485,7 +1813,7 @@ export function createStore(dbPath: string): Store {
     try {
       const row = prep("SELECT * FROM session_queue WHERE session_id = ? ORDER BY position LIMIT 1")
         .get(sessionId) as QueueRow | undefined;
-      if (row && row.reservation_operation_id === null) {
+      if (row && row.reservation_operation_id === null && row.held_for_review === 0) {
         prep("DELETE FROM session_queue WHERE queue_id = ?").run(row.queue_id);
         item = rowToQueueItem(row);
       }
@@ -1515,12 +1843,80 @@ export function createStore(dbPath: string): Store {
     return Promise.resolve(queueReservationInDatabase(operationId));
   }
 
+  function holdEpochTurnForReview(
+    operation: DurableOperation,
+  ): QueueItemDto | undefined {
+    const row = prep(
+      "SELECT * FROM session_queue WHERE reservation_operation_id = ?",
+    ).get(operation.operationId) as unknown as QueueRow | undefined;
+    if (row) {
+      const changed = prep(
+        `UPDATE session_queue
+         SET reservation_operation_id = NULL, held_for_review = 1
+         WHERE queue_id = ? AND reservation_operation_id = ?`,
+      ).run(row.queue_id, operation.operationId);
+      if (Number(changed.changes) !== 1) {
+        throw Object.assign(new Error("queue reservation changed during epoch replacement"), {
+          code: "conflict",
+        });
+      }
+      const held = prep("SELECT * FROM session_queue WHERE queue_id = ?")
+        .get(row.queue_id) as unknown as QueueRow;
+      return rowToQueueItem(held);
+    }
+    if (operation.ownerEventSeq === undefined) return undefined;
+    const ownerRow = prep(
+      "SELECT * FROM events WHERE session_id = ? AND seq = ?",
+    ).get(operation.sessionId, operation.ownerEventSeq) as unknown as Row | undefined;
+    if (!ownerRow) return undefined;
+    const owner = rowToEvent(ownerRow);
+    if (owner.type !== "user/message") return undefined;
+    const data = owner.data as {
+      text?: unknown;
+      raw?: unknown;
+      delivery?: unknown;
+      attachments?: unknown;
+    };
+    const text = typeof data.raw === "string"
+      ? data.raw
+      : typeof data.text === "string" ? data.text : "";
+    if (!text) return undefined;
+    const next = prep(
+      "SELECT COALESCE(MIN(position), 0) - 1 AS position FROM session_queue WHERE session_id = ?",
+    ).get(operation.sessionId) as { position: number };
+    const queueId = randomUUID();
+    prep(
+      `INSERT INTO session_queue (
+        queue_id, session_id, position, text, delivery, created_at,
+        attachments, reservation_operation_id, held_for_review
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 1)`,
+    ).run(
+      queueId,
+      operation.sessionId,
+      Number(next.position),
+      text,
+      ["normal", "steer", "queue", "interrupt"].includes(String(data.delivery))
+        ? String(data.delivery)
+        : "queue",
+      Date.now(),
+      Array.isArray(data.attachments) && data.attachments.length > 0
+        ? JSON.stringify(data.attachments)
+        : null,
+    );
+    const held = prep("SELECT * FROM session_queue WHERE queue_id = ?")
+      .get(queueId) as unknown as QueueRow;
+    return rowToQueueItem(held);
+  }
+
   async function reserveQueueHead(input: QueueReservationInput): Promise<QueueReservationResult> {
     return transaction(() => {
       const row = prep(
         "SELECT * FROM session_queue WHERE session_id = ? ORDER BY position LIMIT 1",
       ).get(input.sessionId) as unknown as QueueRow | undefined;
       if (!row) return { kind: "empty" };
+      if (row.held_for_review === 1) {
+        return { kind: "held", queueItem: rowToQueueItem(row) };
+      }
       if (row.reservation_operation_id !== null) {
         const reservation = queueReservationInDatabase(row.reservation_operation_id);
         if (!reservation) {
@@ -1537,7 +1933,8 @@ export function createStore(dbPath: string): Store {
       );
       const changed = prep(
         `UPDATE session_queue SET reservation_operation_id = ?
-         WHERE queue_id = ? AND session_id = ? AND reservation_operation_id IS NULL`,
+         WHERE queue_id = ? AND session_id = ?
+           AND reservation_operation_id IS NULL AND held_for_review = 0`,
       ).run(operation.operationId, row.queue_id, input.sessionId);
       if (Number(changed.changes) !== 1) {
         throw Object.assign(new Error("queue head was reserved concurrently"), {
@@ -2773,6 +3170,7 @@ export function createStore(dbPath: string): Store {
     claimOperation,
     replayUnknownOperation,
     settleOperation,
+    transitionRuntimeEpoch,
     recoverExecutingOperations,
     enqueue,
     queueList,

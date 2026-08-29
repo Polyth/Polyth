@@ -8,7 +8,10 @@ import type {
   AgentRuntime,
   Project,
   ProjectService,
+  RuntimeEndpoint,
   RuntimeEvent,
+  RuntimeSnapshot,
+  RuntimeSessionBinding,
   SessionService,
 } from "@polyth/contracts";
 import type { PermissionService } from "@polyth/permissions";
@@ -178,4 +181,360 @@ test("context route delegates pin and unpin by source event sequence", async () 
   assert.equal((response as { type: string }).type, "context/pinned");
   assert.equal(await route({ ...base, path: "/api/sessions/s1/context/pins/3", method: "DELETE" }), true);
   assert.deepEqual(calls, ["pin:3", "unpin:3"]);
+});
+
+test("first turn in a fresh runtime epoch restores active goal and pins", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-epoch-context-"));
+  const store = createStore(join(dir, "sessions.db"));
+  const listeners = new Set<Emit>();
+  const turns: string[] = [];
+  let backendSessionId = "backend-old";
+  let comparisonOrder = 0;
+  let endpoint: RuntimeEndpoint = {
+    authorityId: "owned:old",
+    continuity: "verified",
+    generation: 4,
+    url: "http://runtime.invalid",
+    location: { directory: dir },
+    control: { kind: "owned", instanceToken: "old-instance" },
+    config: { kind: "read-only" },
+    authentication: { kind: "none" },
+  };
+  const runtime: AgentRuntime = {
+    capabilities: async () => ({
+      streaming: true, permissions: true, questions: true, compaction: true, subagents: false,
+    }),
+    models: async () => [],
+    agents: async () => [],
+    ensureSession: async (input) => input.backendSessionId ?? backendSessionId,
+    sessions: async () => [],
+    history: async () => [],
+    startTurn: async (request) => {
+      turns.push(request.text);
+      for (const listener of listeners) {
+        listener(request.sessionId, { type: "turn/started", turnId: `turn-${turns.length}` });
+      }
+    },
+    abort: async () => undefined,
+    replyPermission: async () => undefined,
+    replyQuestion: async () => undefined,
+    endpoint: async () => endpoint,
+    protocol: async () => "legacy",
+    reconcile: async (
+      binding: RuntimeSessionBinding & { reconciliationOrdinal?: number },
+    ): Promise<RuntimeSnapshot> => ({
+      authorityId: binding.authorityId,
+      generation: binding.generation,
+      location: binding.location,
+      backendSessionId: binding.backendSessionId!,
+      reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+      state: {
+        value: "idle",
+        comparison: { domain: "epoch-context", order: ++comparisonOrder },
+      },
+      completeness: {
+        events: "partial",
+        permissions: "partial",
+        questions: "partial",
+      },
+      permissions: [],
+      questions: [],
+      events: [],
+    }),
+    onEvent(listener) {
+      listeners.add(listener);
+      return { dispose: () => listeners.delete(listener) };
+    },
+    dispose: async () => undefined,
+  };
+  const project: Project = { id: "p-epoch", name: "Epoch", path: dir, createdAt: 1 };
+  const sessions = createSessionService({
+    store,
+    projects: {
+      list: async () => [project],
+      get: async (id) => id === project.id ? project : undefined,
+      add: async () => project,
+      create: async () => project,
+      remove: async () => undefined,
+    },
+    permissions: {
+      evaluate: () => "allow",
+      addRule: () => undefined,
+      rules: () => [],
+    } as unknown as PermissionService,
+    broadcast: { event: () => undefined, projection: () => undefined },
+    runtimes: { forProject: async () => runtime },
+    hooks: {
+      runtimeEpochContext: async (_sessionId, events) => ({
+        objective: "Preserve the durable objective",
+        pinned: activePinnedMessages(events),
+      }),
+    },
+  });
+
+  try {
+    const created = await sessions.create({ projectId: project.id, title: "Epoch context" });
+    await sessions.send(created.id, { text: "Remember this confirmed fact" });
+    for (const listener of listeners) {
+      listener(created.id, { type: "turn/stopped", reason: "completed" });
+    }
+    await flush();
+    const source = (await store.events(created.id)).find((event) =>
+      event.type === "user/message")!;
+    await sessions.pinContext!(created.id, source.seq);
+    await store.append(created.id, "goal/attached", {
+      objective: "Preserve the durable objective",
+      status: "active",
+    });
+
+    endpoint = {
+      ...endpoint,
+      authorityId: "owned:new",
+      generation: 1,
+      control: { kind: "owned", instanceToken: "new-instance" },
+    };
+    backendSessionId = "backend-new";
+    const reset = await store.prepareOperation({
+      sessionId: created.id,
+      mutationKind: "session-reset",
+      intentEvent: {
+        type: "session/reset-intended",
+        data: { reason: "runtime-epoch-rehydration" },
+        ignorable: true,
+      },
+    });
+    await store.claimOperation(reset.operation.operationId);
+    await store.settleOperation(reset.operation.operationId, {
+      kind: "confirmed",
+      receipt: backendSessionId,
+    });
+    await sessions.transitionRuntimeEpoch(created.id, runtime, {
+      resetOperationId: reset.operation.operationId,
+      reason: "runtime storage was replaced",
+      authorityDisposition: {
+        kind: "owned-authority-destroyed",
+        authorityId: "owned:old",
+        generation: 4,
+      },
+    });
+
+    await sessions.send(created.id, { text: "Continue after replacement" });
+    assert.match(turns[1]!, /Preserve the durable objective/);
+    assert.match(turns[1]!, /Remember this confirmed fact/);
+    assert.match(turns[1]!, /\n\nContinue after replacement$/);
+    const events = await store.events(created.id);
+    const recovered = events.filter((event) => event.type === "user/message").at(-1)!;
+    assert.equal((recovered.data as { text?: string }).text, "Continue after replacement");
+    assert.equal(
+      (recovered.data as { runtimeEpochRecovery?: { epoch?: number } })
+        .runtimeEpochRecovery?.epoch,
+      1,
+    );
+    assert.equal(events.filter((event) =>
+      event.type === "goal/context-restored"
+      && (event.data as { epoch?: number }).epoch === 1).length, 1);
+    assert.equal(events.filter((event) =>
+      event.type === "context/restored"
+      && (event.data as { epoch?: number }).epoch === 1).length, 1);
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a second runtime epoch never rehydrates an older fenced turn tail", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-repeated-epoch-context-"));
+  const store = createStore(join(dir, "sessions.db"));
+  const listeners = new Set<Emit>();
+  const turns: string[] = [];
+  let comparisonOrder = 0;
+  let endpoint: RuntimeEndpoint = {
+    authorityId: "owned:epoch-zero",
+    continuity: "verified",
+    generation: 1,
+    url: "http://runtime.invalid/zero",
+    location: { directory: dir },
+    control: { kind: "owned", instanceToken: "epoch-zero" },
+    config: { kind: "read-only" },
+    authentication: { kind: "none" },
+  };
+  const emit = (sessionId: string, event: RuntimeEvent): void => {
+    for (const listener of listeners) listener(sessionId, event);
+  };
+  const runtime: AgentRuntime = {
+    capabilities: async () => ({
+      streaming: true, permissions: true, questions: true, compaction: true, subagents: false,
+    }),
+    models: async () => [],
+    agents: async () => [],
+    createSessionOperation: async () => ({
+      kind: "confirmed",
+      value: { backendSessionId: "backend-zero" },
+    }),
+    ensureSession: async (input) => input.backendSessionId ?? "backend-zero",
+    sessions: async () => [],
+    history: async () => [],
+    startTurn: async (request) => {
+      turns.push(request.text);
+      emit(request.sessionId, { type: "turn/started", turnId: `turn-${turns.length}` });
+    },
+    startTurnOperation: async (request) => {
+      turns.push(request.text);
+      emit(request.sessionId, { type: "turn/started", turnId: `turn-${turns.length}` });
+      return { kind: "confirmed", value: {} };
+    },
+    abort: async () => undefined,
+    replyPermission: async () => undefined,
+    replyQuestion: async () => undefined,
+    endpoint: async () => endpoint,
+    protocol: async () => "legacy",
+    reconcile: async (
+      binding: RuntimeSessionBinding & { reconciliationOrdinal?: number },
+    ): Promise<RuntimeSnapshot> => ({
+      authorityId: binding.authorityId,
+      generation: binding.generation,
+      location: binding.location,
+      backendSessionId: binding.backendSessionId!,
+      reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+      state: {
+        value: "idle",
+        comparison: { domain: "repeated-epoch", order: ++comparisonOrder },
+      },
+      completeness: {
+        events: "partial",
+        permissions: "partial",
+        questions: "partial",
+      },
+      permissions: [],
+      questions: [],
+      events: [],
+    }),
+    onEvent(listener) {
+      listeners.add(listener);
+      return { dispose: () => listeners.delete(listener) };
+    },
+    dispose: async () => undefined,
+  };
+  const project: Project = {
+    id: "p-repeated-epoch",
+    name: "Repeated epoch",
+    path: dir,
+    createdAt: 1,
+  };
+  const sessions = createSessionService({
+    store,
+    projects: {
+      list: async () => [project],
+      get: async (id) => id === project.id ? project : undefined,
+      add: async () => project,
+      create: async () => project,
+      remove: async () => undefined,
+    },
+    permissions: {
+      evaluate: () => "allow",
+      addRule: () => undefined,
+      rules: () => [],
+    } as unknown as PermissionService,
+    broadcast: { event: () => undefined, projection: () => undefined },
+    runtimes: { forProject: async () => runtime },
+  });
+  const replaceEpoch = async (
+    sessionId: string,
+    oldAuthorityId: string,
+    oldGeneration: number,
+    newAuthorityId: string,
+    backendSessionId: string,
+  ): Promise<void> => {
+    endpoint = {
+      ...endpoint,
+      authorityId: newAuthorityId,
+      generation: 1,
+      url: `http://runtime.invalid/${newAuthorityId}`,
+      control: { kind: "owned", instanceToken: newAuthorityId },
+    };
+    const reset = await store.prepareOperation({
+      sessionId,
+      mutationKind: "session-reset",
+      intentEvent: {
+        type: "session/reset-intended",
+        data: { reason: "runtime-epoch-rehydration" },
+        ignorable: true,
+      },
+    });
+    await store.claimOperation(reset.operation.operationId);
+    await store.settleOperation(reset.operation.operationId, {
+      kind: "confirmed",
+      receipt: backendSessionId,
+    });
+    await sessions.transitionRuntimeEpoch(sessionId, runtime, {
+      resetOperationId: reset.operation.operationId,
+      reason: "test repeated runtime replacement",
+      authorityDisposition: {
+        kind: "owned-authority-destroyed",
+        authorityId: oldAuthorityId,
+        generation: oldGeneration,
+      },
+    });
+  };
+
+  try {
+    const created = await sessions.create({
+      projectId: project.id,
+      title: "Repeated epoch context",
+    });
+    await sessions.send(created.id, { text: "confirmed before uncertainty" });
+    emit(created.id, { type: "turn/stopped", reason: "completed" });
+    await flush();
+
+    const uncertain = await store.prepareOperation({
+      sessionId: created.id,
+      mutationKind: "turn-submit",
+      intentEvent: {
+        type: "user/message",
+        data: { text: "uncertain request" },
+      },
+    });
+    await store.claimOperation(uncertain.operation.operationId);
+    await store.settleOperation(uncertain.operation.operationId, {
+      kind: "unknown",
+      message: "runtime disappeared after admission",
+    });
+    await store.append(created.id, "assistant/message", {
+      partId: "untrusted-partial",
+      text: "UNTRUSTED PARTIAL FROM FENCED TURN",
+    });
+
+    await replaceEpoch(
+      created.id,
+      "owned:epoch-zero",
+      1,
+      "owned:epoch-one",
+      "backend-one",
+    );
+    await sessions.send(created.id, { text: "safe after first replacement" });
+    assert.doesNotMatch(turns[1]!, /UNTRUSTED PARTIAL/);
+    emit(created.id, { type: "turn/stopped", reason: "completed" });
+    await flush();
+
+    await replaceEpoch(
+      created.id,
+      "owned:epoch-one",
+      1,
+      "owned:epoch-two",
+      "backend-two",
+    );
+    await sessions.send(created.id, { text: "safe after second replacement" });
+    assert.match(turns[2]!, /confirmed before uncertainty/);
+    assert.match(turns[2]!, /safe after first replacement/);
+    assert.doesNotMatch(
+      turns[2]!,
+      /UNTRUSTED PARTIAL/,
+      "a fenced prior-epoch tail must not reappear after a later runtime loss",
+    );
+    emit(created.id, { type: "turn/stopped", reason: "completed" });
+    await flush();
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

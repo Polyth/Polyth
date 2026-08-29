@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import type { ChildProcess, spawn as nodeSpawn } from "node:child_process";
@@ -18,6 +19,17 @@ import {
   type OwnedLocalEndpointOptions,
 } from "../src/endpoint.ts";
 import { createRuntimeLifecycle } from "../src/runtime.ts";
+import type { OpenCodeEngineIdentity } from "../src/runtimeStorage.ts";
+
+const engineIdentity = (
+  digest = "a".repeat(64),
+  version = "1.18.18",
+): OpenCodeEngineIdentity => ({
+  engine: "opencode",
+  version,
+  binaryDigest: digest,
+  protocolGeneration: 1,
+});
 
 const createFakeChild = (pid: number, port: number): ChildProcess => {
   const emitter = new EventEmitter() as ChildProcess;
@@ -58,17 +70,39 @@ const createLeaseBooter = (
   directory: string,
   options: Pick<
     OwnedLocalEndpointOptions,
-    "authorityId" | "bin" | "dataDir" | "pidFile" | "stateFile"
+    | "authorityId"
+    | "bin"
+    | "configDir"
+    | "dataDir"
+    | "inspectEngine"
+    | "onRuntimeDiagnostic"
+    | "pidFile"
+    | "projectId"
+    | "resolveBinary"
+    | "runtimeDir"
+    | "stateFile"
   > = {},
 ) => {
   let nextPid = 5000;
   return async (port: number) =>
     createOwnedLocalEndpointLease({
+      projectId: "project-a",
       cwd: directory,
+      runtimeDir: join(directory, "isolated-runtime"),
+      resolveBinary: async ({ bin, binarySource }) => ({
+        executablePath: resolve("/test-opencode-binaries", bin ?? "opencode"),
+        binarySource: binarySource ?? (bin ? "configured" : "path"),
+      }),
+      inspectEngine: async (bin) =>
+        engineIdentity(bin.includes("v2") ? "b".repeat(64) : "a".repeat(64)),
       pidFile: join(directory, "runtime.pid.json"),
       pickPort: async () => port,
-      spawn: ((_bin: string, args: readonly string[]) =>
-        createFakeChild(nextPid++, Number(args.at(-1)))) as unknown as typeof nodeSpawn,
+      spawn: ((_bin: string, args: readonly string[], spawnOptions: { env?: NodeJS.ProcessEnv }) => {
+        const isolatedDb = spawnOptions.env?.OPENCODE_DB;
+        assert.ok(isolatedDb);
+        writeFileSync(isolatedDb, `opaque database ${nextPid}`, { mode: 0o600 });
+        return createFakeChild(nextPid++, Number(args.at(-1)));
+      }) as unknown as typeof nodeSpawn,
       readProcessIdentity: async (pid) => ({
         startIdentity: `start-${pid}`,
         executable: "/usr/bin/opencode",
@@ -150,12 +184,19 @@ test("owned authority is stable and generation advances across Polyth restarts",
   try {
     const firstBoot = await bootLease(44001);
     const persisted = await firstBoot.endpoint();
+    const firstMetadata = JSON.parse(
+      await readFile(join(directory, "isolated-runtime", "runtime.json"), "utf8"),
+    ) as { storageId: string };
     await firstBoot.dispose();
 
     const secondBoot = await bootLease(44002);
     const restarted = await secondBoot.endpoint();
+    const secondMetadata = JSON.parse(
+      await readFile(join(directory, "isolated-runtime", "runtime.json"), "utf8"),
+    ) as { storageId: string };
     await secondBoot.dispose();
 
+    assert.equal(secondMetadata.storageId, firstMetadata.storageId);
     assert.equal(restarted.authorityId, persisted.authorityId);
     assert.equal(
       restarted.generation,
@@ -193,46 +234,21 @@ test("local authority survives deletion of temporary PID state", async () => {
   }
 });
 
-test("configured authority remains valid across identity rotation and two restarts", async () => {
+test("configured local authority is rejected because engine rotation must mint authority", async () => {
   const directory = await mkdtemp(join(tmpdir(), "polyth-configured-authority-"));
   const stateFile = join(directory, "local-runtime.lease.json");
   const authorityId = "owned:configured-local";
   try {
-    const originalLease = await createLeaseBooter(directory, {
-      authorityId,
-      bin: "opencode-v1",
-      stateFile,
-    })(44021);
-    const original = await originalLease.endpoint();
-    await originalLease.dispose();
-
-    const rotatedLease = await createLeaseBooter(directory, {
-      authorityId,
-      bin: "opencode-v2",
-      stateFile,
-    })(44022);
-    const rotated = await rotatedLease.endpoint();
-    await rotatedLease.dispose();
-
-    const restartedLease = await createLeaseBooter(directory, {
-      authorityId,
-      bin: "opencode-v2",
-      stateFile,
-    })(44023);
-    const restarted = await restartedLease.endpoint();
-    await restartedLease.dispose();
-
-    assert.equal(original.authorityId, authorityId);
-    assert.equal(rotated.authorityId, authorityId);
-    assert.equal(restarted.authorityId, authorityId);
-    assert.equal(rotated.generation, original.generation + 1);
-    assert.equal(restarted.generation, rotated.generation + 1);
+    await assert.rejects(
+      () => createLeaseBooter(directory, { authorityId, stateFile })(44021),
+      /configured authorityId is incompatible with isolated OpenCode engine rotation/,
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });
 
-test("local binary and config-directory identity changes rotate generated authority", async () => {
+test("local binary digest changes rotate authority while config-directory changes do not", async () => {
   const directory = await mkdtemp(join(tmpdir(), "polyth-local-identity-"));
   const stateFile = join(directory, "local-runtime.lease.json");
   try {
@@ -261,21 +277,92 @@ test("local binary and config-directory identity changes rotate generated author
     await configLease.dispose();
 
     assert.notEqual(binaryChanged.authorityId, original.authorityId);
-    assert.notEqual(configChanged.authorityId, binaryChanged.authorityId);
+    assert.equal(configChanged.authorityId, binaryChanged.authorityId);
     assert.equal(binaryChanged.generation, 1);
-    assert.equal(configChanged.generation, 1);
+    assert.equal(configChanged.generation, 2);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });
 
-test("v1 local state migrates from the temporary PID path without losing authority", async () => {
+test("in-place binary digest change quarantines DB, mints authority, and rejects old binding", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-local-digest-"));
+  const runtimeDir = join(directory, "isolated-runtime");
+  const stateFile = join(directory, "local-runtime.lease.json");
+  let digest = "a".repeat(64);
+  const diagnostics: string[] = [];
+  const boot = createLeaseBooter(directory, {
+    runtimeDir,
+    stateFile,
+    bin: "same-opencode-path",
+    inspectEngine: async () => engineIdentity(digest),
+    onRuntimeDiagnostic: (message) => diagnostics.push(message),
+  });
+  try {
+    const lease = await boot(44051);
+    let protocolCalls = 0;
+    const runtime = await createRuntimeLifecycle({
+      lease,
+      createTransport: noOpTransport,
+      createProtocol: (_transport, endpoint) =>
+        protocolFor(endpoint, () => { protocolCalls += 1; }),
+    });
+    const original = await runtime.endpoint();
+    await writeFile(join(runtimeDir, "opencode.db"), "old opaque db", { mode: 0o600 });
+
+    digest = "b".repeat(64);
+    if (runtime.control.kind !== "owned" || !("restart" in runtime)) {
+      assert.fail("owned local lifecycle must expose restart");
+    }
+    const rotated = await runtime.restart("manual");
+    assert.notEqual(rotated.authorityId, original.authorityId);
+    assert.equal(rotated.generation, 1);
+    const quarantineNames = await readdir(join(runtimeDir, "quarantine"));
+    assert.equal(quarantineNames.length, 1);
+    assert.equal(
+      await readFile(join(runtimeDir, "quarantine", quarantineNames[0]!, "opencode.db"), "utf8"),
+      "old opaque db",
+    );
+    const metadata = JSON.parse(
+      await readFile(join(runtimeDir, "runtime.json"), "utf8"),
+    ) as { binaryDigest: string; runtimeAuthority: string };
+    assert.equal(metadata.binaryDigest, digest);
+    assert.equal(metadata.runtimeAuthority, rotated.authorityId);
+    assert.equal(diagnostics.length, 1);
+    assert.match(diagnostics[0]!, /previous writable runtime DB was quarantined without being opened/i);
+    assert.ok(diagnostics[0]!.includes(`version 1.18.18, digest ${"a".repeat(64)}`));
+    assert.ok(diagnostics[0]!.includes(`version 1.18.18, digest ${"b".repeat(64)}`));
+    assert.match(diagnostics[0]!, /new runtime epoch/);
+    assert.match(diagnostics[0]!, /POLYTH_OPENCODE_BIN/);
+
+    await assert.rejects(
+      () => runtime.ensureSession({
+        canonicalSessionId: "canonical-before-digest-change",
+        backendSessionId: "backend-before-digest-change",
+        authorityId: original.authorityId,
+        generation: original.generation,
+        continuity: original.continuity,
+        location: original.location,
+        protocol: "legacy",
+      }, "operation-old-authority"),
+      (error: Error & { code?: string }) => error.code === "binding-mismatch",
+    );
+    assert.equal(protocolCalls, 0);
+    await runtime.dispose();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("legacy temporary local authority is not reused for an isolated DB", async () => {
   const directory = await mkdtemp(join(tmpdir(), "polyth-v1-authority-"));
   const pidFile = join(directory, "tmp", "runtime.pid.json");
   const stateFile = join(directory, "data", "local-runtime.lease.json");
-  const legacyStateFile = `${pidFile}.lease.json`;
-  await mkdir(join(directory, "tmp"), { recursive: true });
-  await writeFile(legacyStateFile, JSON.stringify({
+  await Promise.all([
+    mkdir(join(directory, "tmp"), { recursive: true }),
+    mkdir(join(directory, "data"), { recursive: true }),
+  ]);
+  await writeFile(stateFile, JSON.stringify({
     version: 1,
     authorityId: "owned:from-v1",
     generation: 7,
@@ -290,10 +377,10 @@ test("v1 local state migrates from the temporary PID path without losing authori
     const restarted = await restartedLease.endpoint();
     await restartedLease.dispose();
 
-    assert.equal(migrated.authorityId, "owned:from-v1");
-    assert.equal(migrated.generation, 8);
+    assert.notEqual(migrated.authorityId, "owned:from-v1");
+    assert.equal(migrated.generation, 1);
     assert.equal(restarted.authorityId, migrated.authorityId);
-    assert.equal(restarted.generation, 9);
+    assert.equal(restarted.generation, 2);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

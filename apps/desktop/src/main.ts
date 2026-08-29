@@ -672,7 +672,7 @@ const startServer = async (): Promise<void> => {
     webDist,
     webPackagesDir: webPackagesPath(),
     serverPackages: desktopServerPackages,
-    opencode: { bin: binary },
+    opencode: { bin: binary, binarySource: "bundled" },
   });
   log(`Polyth server started at ${baseUrl}`);
   log(`Bundled OpenCode ${__POLYTH_OPENCODE_VERSION__}: ${binary}`);

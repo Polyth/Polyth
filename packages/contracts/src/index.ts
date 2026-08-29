@@ -55,6 +55,7 @@ export const CANONICAL_MUTATION_EVENT_TYPES = [
   "mutation/rejected",
   "mutation/uncertainty-recorded",
   "mutation/nonapplication-confirmed",
+  "mutation/fenced",
 ] as const;
 export type CanonicalMutationEventType = (typeof CANONICAL_MUTATION_EVENT_TYPES)[number];
 
@@ -71,6 +72,12 @@ export interface CompactionRecoveryMetadata {
   goalRestored?: boolean;
   pinnedSourceSeqs?: number[];
 }
+export interface RuntimeEpochRecoveryMetadata {
+  epoch: number;
+  markerSeq: number;
+  goalRestored?: boolean;
+  pinnedSourceSeqs?: number[];
+}
 export interface UserMessageData {
   text: string;
   attachments?: AttachmentRef[];
@@ -80,6 +87,8 @@ export interface UserMessageData {
   recoveryContext?: string;
   /** Durable dedup key proving this compaction was handled by this turn. */
   compactionRecovery?: CompactionRecoveryMetadata;
+  /** Durable proof that a confirmed turn restored one fresh runtime epoch. */
+  runtimeEpochRecovery?: RuntimeEpochRecoveryMetadata;
 }
 export interface GithubConflictResolutionStartedData {
   prNumber: number;
@@ -126,6 +135,21 @@ export interface SecretResolvedData {
   requestId: string;
   action: "saved" | "dismissed";
   handle?: string;
+}
+export interface RuntimeEpochIdentity {
+  authorityId: string;
+  generation: number;
+  epoch: number;
+}
+export interface RuntimeEpochReplacedData {
+  old: RuntimeEpochIdentity;
+  new: RuntimeEpochIdentity;
+  reason: string;
+}
+export interface RuntimeRequestExpiredData {
+  requestId: string;
+  epoch: number;
+  reason: "runtime-epoch-replaced";
 }
 export interface TurnStartedData { turnId: string; model?: ModelRef; agent?: string }
 export interface TurnStoppedData { turnId: string; reason: "completed" | "aborted" | "error"; error?: string }
@@ -414,6 +438,7 @@ export type SessionStatus =
   | "working"
   | "waiting"
   | "reconciling"
+  | "epoch-pending"
   | "unknown"
   | "finished"
   | "failed"
@@ -778,6 +803,8 @@ export interface PersistedRuntimeBinding {
   backendSessionId: string;
   authorityId: string;
   generation: number;
+  /** Deliberate backend-identity break counter. Missing on legacy rows means epoch 0. */
+  epoch?: number;
   continuity: "verified" | "generation-only";
   protocol: "legacy" | "v2";
   location: RuntimeLocation;
@@ -969,7 +996,8 @@ export type DurableOperationState =
   | "confirmed"
   | "rejected"
   | "unknown"
-  | "not-applied";
+  | "not-applied"
+  | "fenced";
 export type OperationState = DurableOperationState;
 export type RuntimeOperationState = DurableOperationState;
 
@@ -1025,6 +1053,28 @@ export interface PreparedSessionCreateResult {
   projection: SessionProjection;
 }
 
+/** Atomic durable half of an epoch replacement. The reset operation must
+ * already be protocol-confirmed with the replacement backend session receipt.
+ * Only the dedicated transition may move prior unknown operations to fenced. */
+export interface RuntimeEpochTransitionInput {
+  sessionId: string;
+  expectedBinding: PersistedRuntimeBinding;
+  replacementBinding: PersistedRuntimeBinding;
+  resetOperationId: string;
+  reason: string;
+  fence?: {
+    authorityId: string;
+    generation: number;
+  };
+}
+
+export interface RuntimeEpochTransitionResult {
+  marker: SessionEvent;
+  projection: SessionProjection;
+  fencedOperations: DurableOperation[];
+  heldQueueItems: QueueItemDto[];
+}
+
 export type OperationClaimResult =
   | { kind: "claimed"; operation: DurableOperation; event?: SessionEvent }
   | { kind: "not-claimed"; operation?: DurableOperation };
@@ -1050,7 +1100,8 @@ export interface QueueReservationInput {
 export type QueueReservationResult =
   | { kind: "empty" }
   | { kind: "reserved"; reservation: QueueReservation }
-  | { kind: "blocked"; reservation: QueueReservation };
+  | { kind: "blocked"; reservation: QueueReservation }
+  | { kind: "held"; queueItem: QueueItemDto };
 
 export type ObservationArtifactKind =
   | "message"
@@ -1959,6 +2010,8 @@ export interface QueueItemDto {
   createdAt: number;
   /** Preserved across queueing so deferred sends keep their attachments. */
   attachments?: AttachmentRef[];
+  /** A fenced prior-epoch admission is a draft for explicit review, never dispatchable. */
+  heldForReview?: boolean;
 }
 
 export interface QueueEnqueuedData { queueId: string; text: string; delivery: string }

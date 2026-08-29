@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import type { ChildProcess, spawn as nodeSpawn } from "node:child_process";
@@ -23,17 +24,44 @@ import {
   createBorrowedServiceEndpointLease,
   createOwnedLocalEndpointLease,
   createOwnedSshEndpointLease,
+  type OwnedLocalEndpointOptions,
   type ProcessIdentity,
 } from "../src/endpoint.ts";
 import {
   createRuntimeLifecycle,
   waitForRuntimeReady,
 } from "../src/runtime.ts";
+import {
+  OPENCODE_UPDATE_DISABLE_ENV,
+  POLYTH_OPENCODE_BIN_ENV,
+  type OpenCodeEngineIdentity,
+} from "../src/runtimeStorage.ts";
 import { createFakeOpenCode } from "./fakeOpenCode.ts";
 
 interface FakeChild extends ChildProcess {
   observedSignals: NodeJS.Signals[];
 }
+
+const TEST_ENGINE: OpenCodeEngineIdentity = {
+  engine: "opencode",
+  version: "1.18.18",
+  binaryDigest: "a".repeat(64),
+  protocolGeneration: 1,
+};
+
+const resolveTestBinary: NonNullable<OwnedLocalEndpointOptions["resolveBinary"]> = async (
+  options,
+) => ({
+  executablePath: resolve("/test-opencode-binaries", options.bin ?? "opencode"),
+  binarySource: options.binarySource ?? (options.bin ? "configured" : "path"),
+});
+
+const isolatedLocalOptions = (directory: string, projectId = "project-a") => ({
+  projectId,
+  runtimeDir: join(directory, "isolated-runtime"),
+  resolveBinary: resolveTestBinary,
+  inspectEngine: async () => TEST_ENGINE,
+});
 
 const createFakeChild = (
   pid: number,
@@ -81,6 +109,184 @@ const createFakeChild = (
   });
   return emitter;
 };
+
+test("owned local runtimes require and export exact isolated writable DB paths", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-db-isolation-"));
+  const worktreeA = join(directory, "worktree-a");
+  const worktreeB = join(directory, "worktree-b");
+  const runtimeA = join(directory, "runtimes", "runtime-a");
+  const runtimeB = join(directory, "runtimes", "runtime-b");
+  await Promise.all([
+    mkdir(worktreeA, { recursive: true }),
+    mkdir(worktreeB, { recursive: true }),
+  ]);
+  const environments: NodeJS.ProcessEnv[] = [];
+  let nextPid = 7000;
+  const fakeSpawn = ((
+    _bin: string,
+    args: readonly string[],
+    spawnOptions: { env?: NodeJS.ProcessEnv },
+  ) => {
+    const env = spawnOptions.env ?? {};
+    environments.push(env);
+    assert.ok(env.OPENCODE_DB, "owned spawn must always receive OPENCODE_DB");
+    writeFileSync(env.OPENCODE_DB, "opaque OpenCode database bytes", { mode: 0o666 });
+    return createFakeChild(
+      nextPid++,
+      `opencode server listening on http://127.0.0.1:${Number(args.at(-1))}\n`,
+    );
+  }) as unknown as typeof nodeSpawn;
+  const leases: Array<Awaited<ReturnType<typeof createOwnedLocalEndpointLease>>> = [];
+  const previousGlobalDb = process.env.OPENCODE_DB;
+  const globalDb = join(directory, "forbidden-global.db");
+  const newerGlobalBytes = "newer OpenCode schema that Polyth must never open";
+  await writeFile(globalDb, newerGlobalBytes, { mode: 0o600 });
+  process.env.OPENCODE_DB = globalDb;
+  try {
+    for (const [projectId, cwd, runtimeDir, port] of [
+      ["project-a", worktreeA, runtimeA, 43101],
+      ["project-b", worktreeB, runtimeB, 43102],
+    ] as const) {
+      const lease = await createOwnedLocalEndpointLease({
+        projectId,
+        cwd,
+        runtimeDir,
+        configDir: join(directory, "config"),
+        resolveBinary: resolveTestBinary,
+        inspectEngine: async () => TEST_ENGINE,
+        spawn: fakeSpawn,
+        pickPort: async () => port,
+        pidFile: join(directory, `${projectId}.pid.json`),
+        stateFile: join(directory, `${projectId}.lease.json`),
+        readProcessIdentity: async (pid) => ({
+          startIdentity: `start-${pid}`,
+          executable: "/usr/bin/opencode",
+          command: `opencode-${pid}`,
+        }),
+        gracefulStopMs: 20,
+      });
+      leases.push(lease);
+      const endpoint = await lease.endpoint();
+      const metadataRaw = await readFile(join(runtimeDir, "runtime.json"), "utf8");
+      const metadata = JSON.parse(metadataRaw) as Record<string, unknown>;
+      assert.equal(metadata.runtimeAuthority, endpoint.authorityId);
+      assert.deepEqual(metadata.runtimeLocation, { projectId, cwd });
+      assert.equal(metadata.engine, "opencode");
+      assert.equal(metadata.version, TEST_ENGINE.version);
+      assert.equal(metadata.binaryDigest, TEST_ENGINE.binaryDigest);
+      assert.equal(metadata.protocolGeneration, TEST_ENGINE.protocolGeneration);
+      assert.equal(metadata.binarySource, "path");
+      assert.equal(metadata.binaryPath, resolve("/test-opencode-binaries/opencode"));
+      assert.match(
+        String(metadata.storageId),
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      );
+      assert.equal(/session|message/i.test(metadataRaw), false);
+      assert.equal((await stat(runtimeDir)).mode & 0o777, 0o700);
+      assert.equal((await stat(join(runtimeDir, "runtime.json"))).mode & 0o777, 0o600);
+      assert.equal((await stat(join(runtimeDir, "opencode.db"))).mode & 0o777, 0o600);
+      await writeFile(join(runtimeDir, "opencode.db"), "writable", { flag: "a" });
+    }
+
+    assert.deepEqual(
+      environments.map((env) => env.OPENCODE_DB),
+      [join(runtimeA, "opencode.db"), join(runtimeB, "opencode.db")],
+    );
+    assert.equal(new Set(environments.map((env) => env.OPENCODE_DB)).size, 2);
+    assert.ok(environments.every((env) =>
+      env.OPENCODE_CONFIG_DIR === join(directory, "config")));
+    assert.ok(environments.every((env) =>
+      env[OPENCODE_UPDATE_DISABLE_ENV] === "true"));
+    assert.equal(
+      await readFile(globalDb, "utf8"),
+      newerGlobalBytes,
+      "an ambient global DB modified by another OpenCode version must remain untouched",
+    );
+  } finally {
+    if (previousGlobalDb === undefined) delete process.env.OPENCODE_DB;
+    else process.env.OPENCODE_DB = previousGlobalDb;
+    await Promise.all(leases.map((lease) => lease.dispose()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("default local process records separate projects sharing one worktree", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-local-process-isolation-"));
+  const leases: Array<Awaited<ReturnType<typeof createOwnedLocalEndpointLease>>> = [];
+  let nextPid = 7050;
+  const fakeSpawn = ((
+    _bin: string,
+    args: readonly string[],
+    spawnOptions: { env?: NodeJS.ProcessEnv },
+  ) => {
+    const isolatedDb = spawnOptions.env?.OPENCODE_DB;
+    assert.ok(isolatedDb);
+    writeFileSync(isolatedDb, `opaque database ${nextPid}`, { mode: 0o600 });
+    return createFakeChild(
+      nextPid++,
+      `opencode server listening on http://127.0.0.1:${Number(args.at(-1))}\n`,
+    );
+  }) as unknown as typeof nodeSpawn;
+  const boot = async (projectId: string, port: number) => {
+    const lease = await createOwnedLocalEndpointLease({
+      projectId,
+      cwd: directory,
+      runtimeDir: join(directory, "runtimes", projectId),
+      stateFile: join(directory, "state", `${projectId}.lease.json`),
+      resolveBinary: resolveTestBinary,
+      inspectEngine: async () => TEST_ENGINE,
+      spawn: fakeSpawn,
+      pickPort: async () => port,
+      readProcessIdentity: async (pid) => ({
+        startIdentity: `start-${pid}`,
+        executable: "/usr/bin/opencode",
+        command: `opencode-${pid}`,
+      }),
+      gracefulStopMs: 20,
+    });
+    leases.push(lease);
+    return lease.endpoint();
+  };
+
+  try {
+    const first = await boot("project-a", 43111);
+    const second = await boot("project-b", 43112);
+    assert.notEqual(first.authorityId, second.authorityId);
+  } finally {
+    await Promise.all(leases.map((lease) => lease.dispose()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("owned local startup fails before spawn when isolation cannot be established", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-db-fail-closed-"));
+  const runtimeFile = join(directory, "not-a-directory");
+  await writeFile(runtimeFile, "occupied");
+  let spawned = false;
+  const base = {
+    projectId: "project-a",
+    cwd: directory,
+    inspectEngine: async () => TEST_ENGINE,
+    resolveBinary: resolveTestBinary,
+    spawn: (() => {
+      spawned = true;
+      return createFakeChild(7100, "");
+    }) as unknown as typeof nodeSpawn,
+  };
+  try {
+    await assert.rejects(
+      () => createOwnedLocalEndpointLease(base),
+      /runtimeDir is required.*global OpenCode DB/,
+    );
+    await assert.rejects(
+      () => createOwnedLocalEndpointLease({ ...base, runtimeDir: runtimeFile }),
+      /could not create isolated OpenCode runtime directory/,
+    );
+    assert.equal(spawned, false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("borrowed ensured and external leases never expose process/config mutation", async () => {
   const calls = { discover: 0, ensure: 0, start: 0, stop: 0, config: 0 };
@@ -380,6 +586,7 @@ test("PID reuse is rejected without signalling the unrelated process", async () 
   const spawn = (() => child) as unknown as typeof nodeSpawn;
   try {
     const lease = await createOwnedLocalEndpointLease({
+      ...isolatedLocalOptions(directory),
       cwd: directory,
       pidFile,
       pickPort: async () => 41001,
@@ -421,8 +628,11 @@ test("endpoint() never hands out a dead owned child; it respawns", async () => {
   const directory = await mkdtemp(join(tmpdir(), "polyth-endpoint-dead-"));
   const ports = [43001, 43002];
   const children: FakeChild[] = [];
-  const spawn = ((_bin: string, args: readonly string[]) => {
+  const spawn = ((_bin: string, args: readonly string[], spawnOptions: { env?: NodeJS.ProcessEnv }) => {
     const port = Number(args.at(-1));
+    const isolatedDb = spawnOptions.env?.OPENCODE_DB;
+    assert.ok(isolatedDb);
+    writeFileSync(isolatedDb, `opaque database ${port}`, { mode: 0o600 });
     const child = createFakeChild(
       3000 + children.length,
       `opencode server listening on http://127.0.0.1:${port}\n`,
@@ -432,6 +642,7 @@ test("endpoint() never hands out a dead owned child; it respawns", async () => {
   }) as unknown as typeof nodeSpawn;
   try {
     const lease = await createOwnedLocalEndpointLease({
+      ...isolatedLocalOptions(directory),
       cwd: directory,
       pidFile: join(directory, "runtime.pid.json"),
       pickPort: async () => ports.shift() ?? 0,
@@ -480,6 +691,7 @@ test("three local bind collisions select fresh ports and leak no children", asyn
   }) as unknown as typeof nodeSpawn;
   try {
     const lease = await createOwnedLocalEndpointLease({
+      ...isolatedLocalOptions(directory),
       cwd: directory,
       pidFile: join(directory, "runtime.pid.json"),
       pickPort: async () => ports.shift() ?? 0,
@@ -587,6 +799,171 @@ const protocolFor = (
       events: [],
     };
   },
+});
+
+test("deleting owned runtime storage mints a new authority for the same engine", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-runtime-storage-loss-"));
+  const runtimeDir = join(directory, "runtimes", "opencode", "project-a");
+  const stateFile = join(directory, "opencode-local", "project-a.lease.json");
+  let nextPid = 8000;
+  const boot = (port: number) => createOwnedLocalEndpointLease({
+    projectId: "project-a",
+    cwd: directory,
+    runtimeDir,
+    stateFile,
+    pidFile: join(directory, "runtime.pid.json"),
+    inspectEngine: async () => TEST_ENGINE,
+    resolveBinary: resolveTestBinary,
+    pickPort: async () => port,
+    spawn: ((_bin: string, args: readonly string[], spawnOptions: { env?: NodeJS.ProcessEnv }) => {
+      const isolatedDb = spawnOptions.env?.OPENCODE_DB;
+      assert.ok(isolatedDb);
+      writeFileSync(isolatedDb, `opaque database ${nextPid}`, { mode: 0o600 });
+      return createFakeChild(
+        nextPid++,
+        `opencode server listening on http://127.0.0.1:${Number(args.at(-1))}\n`,
+      );
+    }) as unknown as typeof nodeSpawn,
+    readProcessIdentity: async (pid) => ({
+      startIdentity: `start-${pid}`,
+      executable: "/usr/bin/opencode",
+      command: `opencode-${pid}`,
+    }),
+    gracefulStopMs: 20,
+  });
+  let firstLease: Awaited<ReturnType<typeof boot>> | undefined;
+  let secondLease: Awaited<ReturnType<typeof boot>> | undefined;
+  let thirdLease: Awaited<ReturnType<typeof boot>> | undefined;
+  try {
+    firstLease = await boot(43201);
+    const original = await firstLease.endpoint();
+    const originalMetadata = JSON.parse(
+      await readFile(join(runtimeDir, "runtime.json"), "utf8"),
+    ) as { storageId: string };
+    await firstLease.dispose();
+    firstLease = undefined;
+
+    const metadataBeforeLoss = await readFile(join(runtimeDir, "runtime.json"), "utf8");
+    await rm(join(runtimeDir, "opencode.db"), { force: true });
+    secondLease = await boot(43202);
+    const replacement = await secondLease.endpoint();
+    const replacementMetadata = JSON.parse(
+      await readFile(join(runtimeDir, "runtime.json"), "utf8"),
+    ) as { storageId: string };
+
+    assert.ok(metadataBeforeLoss, "runtime metadata deliberately survives the DB deletion");
+    assert.notEqual(replacementMetadata.storageId, originalMetadata.storageId);
+    assert.notEqual(replacement.authorityId, original.authorityId);
+    assert.equal(replacement.generation, 1);
+
+    await secondLease.dispose();
+    secondLease = undefined;
+    const unrelatedDb = join(directory, "unrelated-global.db");
+    await writeFile(unrelatedDb, "unrelated newer database", { mode: 0o600 });
+    await rm(join(runtimeDir, "opencode.db"), { force: true });
+    await symlink(unrelatedDb, join(runtimeDir, "opencode.db"));
+    thirdLease = await boot(43203);
+    const afterUnsafePath = await thirdLease.endpoint();
+    assert.notEqual(afterUnsafePath.authorityId, replacement.authorityId);
+    assert.equal(afterUnsafePath.generation, 1);
+    assert.equal(
+      await readFile(unrelatedDb, "utf8"),
+      "unrelated newer database",
+      "an owned worker must not follow a tampered DB symlink",
+    );
+
+    const lifecycle = await createRuntimeLifecycle({
+      lease: thirdLease,
+      createTransport: () => noOpTransport(),
+      createProtocol: (_transport, endpoint) =>
+        protocolFor(endpoint, { submit: 0 }),
+    });
+    thirdLease = undefined;
+    try {
+      await assert.rejects(
+        () => lifecycle.ensureSession({
+          canonicalSessionId: "canonical-before-storage-loss",
+          backendSessionId: "backend-before-storage-loss",
+          authorityId: original.authorityId,
+          generation: original.generation,
+          continuity: original.continuity,
+          location: original.location,
+          protocol: "legacy",
+        }, "operation-before-storage-loss"),
+        (error: Error & { code?: string }) => error.code === "binding-mismatch",
+      );
+    } finally {
+      await lifecycle.dispose();
+    }
+  } finally {
+    await firstLease?.dispose();
+    await secondLease?.dispose();
+    await thirdLease?.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("developer override is spawned and recorded instead of the PATH binary", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-opencode-override-"));
+  const pathDirectory = join(directory, "path-bin");
+  const pathBinary = join(pathDirectory, "opencode");
+  const overrideBinary = join(directory, "override-opencode");
+  await mkdir(pathDirectory);
+  await Promise.all([
+    writeFile(pathBinary, "#!/bin/sh\nexit 0\n"),
+    writeFile(overrideBinary, "#!/bin/sh\nexit 0\n"),
+  ]);
+  await Promise.all([chmod(pathBinary, 0o700), chmod(overrideBinary, 0o700)]);
+  const previousPath = process.env.PATH;
+  const previousOverride = process.env[POLYTH_OPENCODE_BIN_ENV];
+  process.env.PATH = pathDirectory;
+  process.env[POLYTH_OPENCODE_BIN_ENV] = overrideBinary;
+  let spawnedBinary = "";
+  let inspectedBinary = "";
+  let lease: Awaited<ReturnType<typeof createOwnedLocalEndpointLease>> | undefined;
+  try {
+    lease = await createOwnedLocalEndpointLease({
+      projectId: "project-override",
+      cwd: directory,
+      runtimeDir: join(directory, "runtime"),
+      stateFile: join(directory, "runtime.lease.json"),
+      pidFile: join(directory, "runtime.pid.json"),
+      inspectEngine: async (binary) => {
+        inspectedBinary = binary;
+        return TEST_ENGINE;
+      },
+      pickPort: async () => 43211,
+      spawn: ((binary: string, args: readonly string[]) => {
+        spawnedBinary = binary;
+        return createFakeChild(
+          8111,
+          `opencode server listening on http://127.0.0.1:${Number(args.at(-1))}\n`,
+        );
+      }) as unknown as typeof nodeSpawn,
+      readProcessIdentity: async (pid) => ({
+        startIdentity: `start-${pid}`,
+        executable: overrideBinary,
+        command: `${overrideBinary} serve`,
+      }),
+      gracefulStopMs: 20,
+    });
+    const selected = resolve(overrideBinary);
+    assert.equal(inspectedBinary, selected);
+    assert.equal(spawnedBinary, selected);
+    const recorded = JSON.parse(
+      await readFile(join(directory, "runtime", "runtime.json"), "utf8"),
+    ) as Record<string, unknown>;
+    assert.equal(recorded.binarySource, "override");
+    assert.equal(recorded.binaryPath, selected);
+    assert.equal(recorded.binaryOverrideEnv, POLYTH_OPENCODE_BIN_ENV);
+  } finally {
+    await lease?.dispose();
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    if (previousOverride === undefined) delete process.env[POLYTH_OPENCODE_BIN_ENV];
+    else process.env[POLYTH_OPENCODE_BIN_ENV] = previousOverride;
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("runtime discards late old-generation callbacks before translation", async () => {

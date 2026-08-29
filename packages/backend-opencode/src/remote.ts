@@ -12,7 +12,7 @@
 // transport knows nothing about OpenCode, keeping the adapter boundary intact.
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import type {
   AgentRuntime,
   JsonObject,
@@ -29,6 +29,7 @@ import {
   createOwnedSshEndpointLease,
   LISTEN_RE,
 } from "./endpoint.ts";
+import { OPENCODE_UPDATE_DISABLE_ENV } from "./runtimeStorage.ts";
 
 export interface RemoteOpenCodeOptions {
   host: RemoteHost;
@@ -36,6 +37,9 @@ export interface RemoteOpenCodeOptions {
   connectionIdentity?: string;
   /** Workspace path on the remote machine (becomes the serve cwd). */
   remotePath: string;
+  /** Absolute runtime directory on the remote host. Owned remotes fail closed
+   * when omitted so they can never open the remote user's global OpenCode DB. */
+  runtimeDir?: string;
   /** Remote opencode binary (default "opencode" on the remote PATH). */
   bin?: string;
   sessionIdMap?: Map<string, string>;
@@ -111,11 +115,24 @@ const checkRemotePath = (path: string): string => {
   return p;
 };
 
-const shortHash = (value: string): string => {
-  let h = 0;
-  for (let i = 0; i < value.length; i++) h = (h * 31 + value.charCodeAt(i)) | 0;
-  return (h >>> 0).toString(36);
+const checkRemoteRuntimeDir = (path: string | undefined): string => {
+  if (!path) {
+    throw unavailable(
+      "owned remote OpenCode runtimeDir is required; refusing to fall back to the remote global OpenCode DB",
+    );
+  }
+  const checked = checkRemotePath(path);
+  if (!checked.startsWith("/")) throw invalid("remote runtimeDir must be an absolute path");
+  return posix.normalize(checked);
 };
+
+const remoteProcessKey = (runtimeDir: string, remotePath: string): string =>
+  createHash("sha256")
+    .update(runtimeDir)
+    .update("\0")
+    .update(remotePath)
+    .digest("hex")
+    .slice(0, 24);
 
 const defaultLeaseStateFile = (hostLabel: string, remotePath: string): string => {
   const key = createHash("sha256")
@@ -137,14 +154,20 @@ const IN_USE_RE = /EADDRINUSE|address already in use/i;
  *  instead of trusting the login PATH. */
 const REMOTE_PATH = 'PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"';
 
-/** Cheap capability probe: is the agent binary installed on the remote? */
+/** Probe the remote binary and, when a runtime directory is supplied, prove
+ * that it honors the isolated OpenCode DB path before owned startup. */
 export const probeRemoteOpenCode = async (
   host: RemoteHost,
   bin = "opencode",
+  runtimeDir?: string,
 ): Promise<RemoteOpenCodeProbe> => {
   const safeBin = checkBin(bin);
+  const expectedDb = runtimeDir ? posix.join(runtimeDir, "probe.db") : undefined;
   const result = await host.exec(
-    `${REMOTE_PATH}; command -v ${safeBin} >/dev/null 2>&1 && ${safeBin} --version 2>/dev/null || echo POLYTH_OC_MISSING`,
+    `${REMOTE_PATH}; export ${OPENCODE_UPDATE_DISABLE_ENV}=true; `
+      + `command -v ${safeBin} >/dev/null 2>&1 && `
+      + `${expectedDb ? `OPENCODE_DB=${shq(expectedDb)} ` : ""}`
+      + `${safeBin} --version 2>/dev/null || echo POLYTH_OC_MISSING`,
     { timeoutMs: 20_000 },
   );
   const out = result.stdout.trim();
@@ -158,6 +181,22 @@ export const probeRemoteOpenCode = async (
     };
   }
   const version = out.split("\n").pop()?.trim();
+  if (expectedDb) {
+    const dbResult = await host.exec(
+      `${REMOTE_PATH}; export ${OPENCODE_UPDATE_DISABLE_ENV}=true; `
+        + `OPENCODE_DB=${shq(expectedDb)} ${safeBin} db path 2>/dev/null`,
+      { timeoutMs: 20_000 },
+    );
+    const actualDb = dbResult.stdout.trim().split(/\r?\n/).at(-1)?.trim();
+    if (dbResult.code !== 0 || actualDb !== expectedDb) {
+      return {
+        ok: false,
+        message: `OpenCode ${version || "unknown"} on ${host.label} does not honor OPENCODE_DB; `
+          + `expected ${expectedDb}, got ${actualDb || `exit ${dbResult.code}`}. `
+          + "Polyth refuses to start an owned remote runtime because its global OpenCode DB would not be isolated.",
+      };
+    }
+  }
   return { ok: true, ...(version ? { version } : {}) };
 };
 
@@ -176,17 +215,28 @@ const startServe = async (
     bin: string;
     listenTimeoutMs: number;
     lifecycleTimeoutMs: number;
+    runtimeDir: string;
     port: number;
     instanceToken: string;
   },
 ): Promise<StartedServe> => {
-  const hash = shortHash(opts.remotePath);
+  // The PID record is a process-ownership boundary. Key it by the isolated
+  // runtime directory as well as the worktree: two configured projects may
+  // legitimately address the same remote path but must never reap each other.
+  const hash = remoteProcessKey(opts.runtimeDir, opts.remotePath);
+  const dbPath = posix.join(opts.runtimeDir, "opencode.db");
   // A private PID record carries the exact lease token plus process start,
   // executable, and command identities. A stale/reused PID fails this complete
   // match and is never signalled.
   const pidFileExpr = `"\${XDG_CACHE_HOME:-$HOME/.cache}/polyth/serve-${hash}.pid"`;
   const command = [
     REMOTE_PATH,
+    "umask 077",
+    `RUNTIME_DIR=${shq(opts.runtimeDir)}`,
+    'if ! mkdir -p "$RUNTIME_DIR" || ! chmod 700 "$RUNTIME_DIR"; then '
+      + 'echo "POLYTH_OPENCODE_RUNTIME_DIR_FAILED=$RUNTIME_DIR" >&2; exit 78; fi',
+    `export OPENCODE_DB=${shq(dbPath)}`,
+    `export ${OPENCODE_UPDATE_DISABLE_ENV}=true`,
     `PF=${pidFileExpr}`,
     'mkdir -p "$(dirname "$PF")"',
     'oc_start() { sed "s/.*) //" "/proc/$1/stat" 2>/dev/null | cut -d" " -f20; }',
@@ -283,13 +333,16 @@ export const createRemoteOpenCodeRuntime = async (
 ): Promise<AgentRuntime> => {
   const { host } = options;
   const remotePath = checkRemotePath(options.remotePath);
+  // The server cannot safely invent a remote filesystem policy. The caller
+  // must supply an explicit remote runtimeDir or owned startup fails closed.
+  const runtimeDir = checkRemoteRuntimeDir(options.runtimeDir);
   const bin = checkBin(options.bin ?? "opencode");
   const listenTimeoutMs = options.listenTimeoutMs ?? 30_000;
   const readyTimeoutMs = options.readyTimeoutMs ?? 20_000;
   const lifecycleTimeoutMs = options.lifecycleTimeoutMs ?? 10_000;
   const pickPort = options.pickPort ?? (() => 20_000 + Math.floor(Math.random() * 45_000));
 
-  const probe = await probeRemoteOpenCode(host, bin);
+  const probe = await probeRemoteOpenCode(host, bin, runtimeDir);
   if (!probe.ok) throw unavailable(probe.message ?? `opencode is unavailable on ${host.label}`);
 
   const dirCheck = await host.exec(`test -d ${shq(remotePath)}`, { timeoutMs: 20_000 });
@@ -314,6 +367,7 @@ export const createRemoteOpenCodeRuntime = async (
       connection: options.connectionIdentity ?? host.label,
       host: host.label,
       remotePath,
+      runtimeDir,
       binary: bin,
     }),
     async start(instanceToken) {
@@ -326,6 +380,7 @@ export const createRemoteOpenCodeRuntime = async (
           started = await startServe({
             host,
             remotePath,
+            runtimeDir,
             bin,
             listenTimeoutMs,
             lifecycleTimeoutMs,

@@ -11,6 +11,10 @@ const execSuccess = async (command: string) => {
   if (command.includes("command -v")) {
     return { code: 0, stdout: "1.18.18\n", stderr: "" };
   }
+  if (command.includes(" db path")) {
+    const expected = command.match(/OPENCODE_DB='([^']+)'/)?.[1] ?? "";
+    return { code: 0, stdout: `${expected}\n`, stderr: "" };
+  }
   return { code: 0, stdout: "", stderr: "" };
 };
 
@@ -55,6 +59,7 @@ test("remote process startup has a finite orchestration deadline", async () => {
     () => createRemoteOpenCodeRuntime({
       host,
       remotePath: "/srv/project",
+      runtimeDir: "/var/lib/polyth/runtimes/project",
       lifecycleTimeoutMs: 25,
       listenTimeoutMs: 1_000,
     }),
@@ -92,6 +97,7 @@ test("timed-out remote forward is disposed if it resolves late", async () => {
     () => createRemoteOpenCodeRuntime({
       host,
       remotePath: "/srv/project",
+      runtimeDir: "/var/lib/polyth/runtimes/project",
       lifecycleTimeoutMs: 20,
       listenTimeoutMs: 1_000,
       pickPort: () => 48001,

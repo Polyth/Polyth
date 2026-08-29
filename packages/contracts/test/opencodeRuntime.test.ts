@@ -25,6 +25,7 @@ test("canonical hardening vocabulary is protocol-neutral and ignorable", () => {
     "mutation/rejected",
     "mutation/uncertainty-recorded",
     "mutation/nonapplication-confirmed",
+    "mutation/fenced",
   ]);
   assert.deepEqual([...CANONICAL_RECONCILIATION_EVENT_TYPES], [
     "reconciliation/started",

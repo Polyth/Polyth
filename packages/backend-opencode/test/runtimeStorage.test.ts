@@ -1,0 +1,202 @@
+import assert from "node:assert/strict";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { test } from "node:test";
+import {
+  inspectOpenCodeEngine,
+  OPEN_CODE_QUARANTINE_TTL_MS,
+  OPEN_CODE_RUNTIME_STALE_TTL_MS,
+  OPENCODE_UPDATE_DISABLE_ENV,
+  POLYTH_OPENCODE_BIN_ENV,
+  resolveOpenCodeBinary,
+  sweepOpenCodeRuntimes,
+} from "../src/runtimeStorage.ts";
+
+const metadata = (
+  projectId: string,
+  cwd: string,
+  lastOpenedAt: number,
+) => ({
+  engine: "opencode",
+  version: "1.18.18",
+  binaryDigest: "a".repeat(64),
+  protocolGeneration: 1,
+  storageId: "11111111-1111-4111-8111-111111111111",
+  runtimeAuthority: `owned:${projectId}`,
+  runtimeLocation: { projectId, cwd },
+  createdAt: new Date(lastOpenedAt).toISOString(),
+  lastOpenedAt: new Date(lastOpenedAt).toISOString(),
+});
+
+test("runtime GC removes only stale missing worktrees and expires quarantine independently", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-runtime-gc-"));
+  t.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(directory, { recursive: true, force: true });
+  });
+  const root = join(directory, "runtimes", "opencode");
+  const liveCwd = join(directory, "live-worktree");
+  const liveRuntime = join(root, "live");
+  const missingRuntime = join(root, "missing");
+  const now = Date.UTC(2026, 7, 28);
+  const staleOpenedAt = now - OPEN_CODE_RUNTIME_STALE_TTL_MS - 1;
+  await mkdir(liveCwd, { recursive: true });
+  await Promise.all([
+    mkdir(join(liveRuntime, "quarantine", `${now - OPEN_CODE_QUARANTINE_TTL_MS - 1}-old`), {
+      recursive: true,
+    }),
+    mkdir(join(liveRuntime, "quarantine", `${now - OPEN_CODE_QUARANTINE_TTL_MS + 1}-recent`), {
+      recursive: true,
+    }),
+    mkdir(missingRuntime, { recursive: true }),
+  ]);
+  await Promise.all([
+    writeFile(
+      join(liveRuntime, "runtime.json"),
+      JSON.stringify(metadata("live", liveCwd, staleOpenedAt)),
+    ),
+    writeFile(
+      join(missingRuntime, "runtime.json"),
+      JSON.stringify(metadata("missing", join(directory, "gone"), staleOpenedAt)),
+    ),
+  ]);
+
+  assert.deepEqual(await sweepOpenCodeRuntimes(root, { now }), {
+    runtimesRemoved: 1,
+    quarantinesRemoved: 1,
+  });
+  assert.equal(JSON.parse(await readFile(join(liveRuntime, "runtime.json"), "utf8")).engine, "opencode");
+  assert.equal((await stat(root)).mode & 0o777, 0o700);
+  await assert.rejects(
+    () => stat(missingRuntime),
+    (error: NodeJS.ErrnoException) => error.code === "ENOENT",
+  );
+  await assert.rejects(
+    () => stat(join(liveRuntime, "quarantine", `${now - OPEN_CODE_QUARANTINE_TTL_MS - 1}-old`)),
+    (error: NodeJS.ErrnoException) => error.code === "ENOENT",
+  );
+  assert.ok(await stat(join(liveRuntime, "quarantine", `${now - OPEN_CODE_QUARANTINE_TTL_MS + 1}-recent`)));
+});
+
+test("engine version and DB-path probes both use the isolated probe DB", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-engine-probe-env-"));
+  t.after(async () => {
+    await rm(directory, { recursive: true, force: true });
+  });
+  const executable = join(directory, "opencode-test");
+  const capture = join(directory, "probe-env.txt");
+  await writeFile(executable, `#!/bin/sh
+printf '%s\\t%s\\t%s\\n' "$1" "$OPENCODE_DB" "$OPENCODE_DISABLE_AUTOUPDATE" >> "$POLYTH_PROBE_CAPTURE"
+if [ "$1" = "--version" ]; then
+  printf '1.18.18\\n'
+elif [ "$1" = "db" ] && [ "$2" = "path" ]; then
+  printf '%s\\n' "$OPENCODE_DB"
+else
+  exit 2
+fi
+`);
+  await chmod(executable, 0o700);
+
+  const previousCapture = process.env.POLYTH_PROBE_CAPTURE;
+  process.env.POLYTH_PROBE_CAPTURE = capture;
+  try {
+    const identity = await inspectOpenCodeEngine(executable);
+    assert.equal(identity.version, "1.18.18");
+  } finally {
+    if (previousCapture === undefined) delete process.env.POLYTH_PROBE_CAPTURE;
+    else process.env.POLYTH_PROBE_CAPTURE = previousCapture;
+  }
+
+  const invocations = (await readFile(capture, "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => line.split("\t"));
+  assert.deepEqual(invocations.map(([argument]) => argument), ["--version", "db"]);
+  assert.ok(invocations[0]![1], "the version probe must receive OPENCODE_DB");
+  assert.equal(invocations[1]![1], invocations[0]![1]);
+  assert.match(invocations[0]![1]!, /polyth-opencode-db-probe-.+\/probe\.db$/);
+  assert.deepEqual(invocations.map((fields) => fields[2]), ["true", "true"]);
+});
+
+test("binary resolution prefers desktop absolute paths, then override, configured, and PATH", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-binary-resolution-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const pathDirectory = join(directory, "path-bin");
+  await mkdir(pathDirectory);
+  const pathBinary = join(pathDirectory, "opencode");
+  const overrideBinary = join(directory, "override-opencode");
+  const bundledBinary = join(directory, "bundled-opencode");
+  for (const binary of [pathBinary, overrideBinary, bundledBinary]) {
+    await writeFile(binary, "#!/bin/sh\nexit 0\n");
+    await chmod(binary, 0o700);
+  }
+  const env = {
+    PATH: pathDirectory,
+    [POLYTH_OPENCODE_BIN_ENV]: overrideBinary,
+  };
+
+  assert.deepEqual(
+    await resolveOpenCodeBinary({
+      bin: bundledBinary,
+      binarySource: "bundled",
+      env,
+    }),
+    {
+      executablePath: resolve(bundledBinary),
+      binarySource: "bundled",
+    },
+  );
+  assert.deepEqual(
+    await resolveOpenCodeBinary({ env }),
+    {
+      executablePath: resolve(overrideBinary),
+      binarySource: "override",
+      binaryOverrideEnv: POLYTH_OPENCODE_BIN_ENV,
+    },
+  );
+  assert.deepEqual(
+    await resolveOpenCodeBinary({
+      bin: "opencode",
+      env: { PATH: pathDirectory },
+    }),
+    {
+      executablePath: resolve(pathBinary),
+      binarySource: "configured",
+    },
+  );
+  assert.deepEqual(
+    await resolveOpenCodeBinary({ env: { PATH: pathDirectory } }),
+    {
+      executablePath: resolve(pathBinary),
+      binarySource: "path",
+    },
+  );
+});
+
+test("override resolution failures name the env and attempted binary", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-binary-missing-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const missing = join(directory, "missing-opencode");
+  const nonExecutable = join(directory, "non-executable-opencode");
+  await writeFile(nonExecutable, "#!/bin/sh\nexit 0\n");
+  await chmod(nonExecutable, 0o600);
+
+  for (const attempted of [missing, nonExecutable]) {
+    await assert.rejects(
+      () => resolveOpenCodeBinary({
+        env: {
+          PATH: "",
+          [POLYTH_OPENCODE_BIN_ENV]: attempted,
+        },
+      }),
+      (error: Error & { code?: string }) => {
+        assert.equal(error.code, "unavailable");
+        assert.match(error.message, new RegExp(POLYTH_OPENCODE_BIN_ENV));
+        assert.ok(error.message.includes(attempted));
+        return true;
+      },
+    );
+  }
+  assert.equal(OPENCODE_UPDATE_DISABLE_ENV, "OPENCODE_DISABLE_AUTOUPDATE");
+});

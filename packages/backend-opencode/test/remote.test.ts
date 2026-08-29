@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { test } from "node:test";
 import type { RemoteHost, RemoteProcessHandle } from "@polyth/contracts";
-import { createRemoteOpenCodeRuntime, probeRemoteOpenCode } from "../src/index.ts";
+import {
+  createRemoteOpenCodeRuntime,
+  OPENCODE_UPDATE_DISABLE_ENV,
+  probeRemoteOpenCode,
+} from "../src/index.ts";
 
 const providerBody = {
   all: [
@@ -46,6 +50,7 @@ interface FakeHostScript {
   version?: string;
   missingBinary?: boolean;
   missingDir?: boolean;
+  reportedDbPath?: string;
   /** Ports that fail with EADDRINUSE before one succeeds. */
   busyPorts?: number[];
   stubPort: number;
@@ -65,6 +70,14 @@ const createFakeHost = (script: FakeHostScript) => {
         return script.missingBinary
           ? { code: 0, stdout: "POLYTH_OC_MISSING\n", stderr: "" }
           : { code: 0, stdout: `${script.version ?? "1.18.18"}\n`, stderr: "" };
+      }
+      if (command.includes(" db path")) {
+        const expected = command.match(/OPENCODE_DB='([^']+)'/)?.[1] ?? "";
+        return {
+          code: 0,
+          stdout: `${script.reportedDbPath ?? expected}\n`,
+          stderr: "",
+        };
       }
       if (command.startsWith("test -d")) {
         return { code: script.missingDir ? 1 : 0, stdout: "", stderr: "" };
@@ -118,6 +131,7 @@ test("remote runtime boots serve on the host, attaches through the forward, and 
   const runtime = await createRemoteOpenCodeRuntime({
     host: fake.host,
     remotePath: "/home/dev/app",
+    runtimeDir: "/var/lib/polyth/runtimes/app",
     pickPort: () => ports.shift() ?? 0,
     readyTimeoutMs: 5_000,
     listenTimeoutMs: 5_000,
@@ -127,10 +141,39 @@ test("remote runtime boots serve on the host, attaches through the forward, and 
     assert.equal(fake.startCommands.length, 1);
     const cmd = fake.startCommands[0]!;
     assert.ok(cmd.includes("cd '/home/dev/app'; opencode serve --hostname 127.0.0.1 --port 37001"), cmd);
+    assert.ok(
+      cmd.includes("export OPENCODE_DB='/var/lib/polyth/runtimes/app/opencode.db'"),
+      "remote owned runtime must export its exact isolated DB path",
+    );
+    assert.ok(
+      cmd.includes(`export ${OPENCODE_UPDATE_DISABLE_ENV}=true`),
+      "remote owned runtime must disable OpenCode self-update",
+    );
+    assert.ok(cmd.includes("umask 077"));
     assert.ok(cmd.includes('oc_start "$OLD_PID"'), "must verify the recorded child start identity");
     assert.ok(cmd.includes('oc_exe "$OLD_PID"'), "must verify the recorded executable");
     assert.ok(cmd.includes('oc_cmd "$OLD_PID"'), "must verify the recorded command");
     assert.match(cmd, /printf .*POLYTH_REMOTE_PID/s, "must record an exact instance token");
+    const dbProbe = fake.execCalls.find((call) => call.includes(" db path"));
+    assert.ok(
+      dbProbe?.includes(
+        "OPENCODE_DB='/var/lib/polyth/runtimes/app/probe.db' opencode db path",
+      ),
+      `missing isolated DB capability probe: ${dbProbe}`,
+    );
+    const versionProbe = fake.execCalls.find((call) => call.includes("--version"));
+    assert.ok(
+      versionProbe?.includes(
+        "OPENCODE_DB='/var/lib/polyth/runtimes/app/probe.db' opencode --version",
+      ),
+      `remote version probe could touch the global DB: ${versionProbe}`,
+    );
+    assert.ok(
+      fake.execCalls
+        .filter((call) => call.includes("command -v") || call.includes(" db path"))
+        .every((call) => call.includes(`export ${OPENCODE_UPDATE_DISABLE_ENV}=true`)),
+      "all remote engine probes must disable OpenCode self-update",
+    );
     // the forward targets the actual listen port
     assert.deepEqual(fake.forwards.map((f) => f.remotePort), [37001]);
     // the adapter talks through the forwarded local port
@@ -159,6 +202,7 @@ test("remote invocations extend PATH with the standard opencode install location
   const runtime = await createRemoteOpenCodeRuntime({
     host: fake.host,
     remotePath: "/home/dev/app",
+    runtimeDir: "/var/lib/polyth/runtimes/app",
     pickPort: () => 37002,
     readyTimeoutMs: 5_000,
     listenTimeoutMs: 5_000,
@@ -177,6 +221,41 @@ test("remote invocations extend PATH with the standard opencode install location
   }
 });
 
+test("remote process ownership records separate projects sharing one worktree", async () => {
+  const stub = await startStubServe();
+  const fake = createFakeHost({ stubPort: stub.port });
+  const ports = [37011, 37012];
+  const first = await createRemoteOpenCodeRuntime({
+    host: fake.host,
+    remotePath: "/srv/shared-worktree",
+    runtimeDir: "/var/lib/polyth/runtimes/project-a",
+    pickPort: () => ports.shift() ?? 0,
+    readyTimeoutMs: 5_000,
+    listenTimeoutMs: 5_000,
+  });
+  const second = await createRemoteOpenCodeRuntime({
+    host: fake.host,
+    remotePath: "/srv/shared-worktree",
+    runtimeDir: "/var/lib/polyth/runtimes/project-b",
+    pickPort: () => ports.shift() ?? 0,
+    readyTimeoutMs: 5_000,
+    listenTimeoutMs: 5_000,
+  });
+  try {
+    const pidFiles = fake.startCommands.map((command) =>
+      command.match(/polyth\/serve-[a-f0-9]{24}\.pid/)?.[0]);
+    assert.equal(pidFiles.every(Boolean), true, String(pidFiles));
+    assert.equal(
+      new Set(pidFiles).size,
+      2,
+      "a second project on the same host/path must not reap the first project's worker",
+    );
+  } finally {
+    await Promise.all([first.dispose(), second.dispose()]);
+    stub.server.close();
+  }
+});
+
 test("remote port collisions retry with a fresh candidate", async () => {
   const stub = await startStubServe();
   const fake = createFakeHost({ stubPort: stub.port, busyPorts: [40001, 40002] });
@@ -184,6 +263,7 @@ test("remote port collisions retry with a fresh candidate", async () => {
   const runtime = await createRemoteOpenCodeRuntime({
     host: fake.host,
     remotePath: "/srv/app",
+    runtimeDir: "/var/lib/polyth/runtimes/app",
     pickPort: () => ports.shift() ?? 0,
     readyTimeoutMs: 5_000,
     listenTimeoutMs: 5_000,
@@ -200,7 +280,11 @@ test("remote port collisions retry with a fresh candidate", async () => {
 test("missing remote binary fails before anything starts, with install guidance", async () => {
   const fake = createFakeHost({ stubPort: 1, missingBinary: true });
   await assert.rejects(
-    () => createRemoteOpenCodeRuntime({ host: fake.host, remotePath: "/srv/app" }),
+    () => createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/srv/app",
+      runtimeDir: "/var/lib/polyth/runtimes/app",
+    }),
     (err: Error & { code?: string }) =>
       err.code === "unavailable"
       && err.message.includes("dev@fake.example")
@@ -213,10 +297,45 @@ test("missing remote binary fails before anything starts, with install guidance"
 test("missing remote workspace path fails with not-found before serve starts", async () => {
   const fake = createFakeHost({ stubPort: 1, missingDir: true });
   await assert.rejects(
-    () => createRemoteOpenCodeRuntime({ host: fake.host, remotePath: "/srv/gone" }),
+    () => createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/srv/gone",
+      runtimeDir: "/var/lib/polyth/runtimes/app",
+    }),
     (err: Error & { code?: string }) => err.code === "not-found" && err.message.includes("/srv/gone"),
   );
   assert.equal(fake.startCommands.length, 0);
+});
+
+test("owned remote runtime fails closed without an explicit remote runtime directory", async () => {
+  const fake = createFakeHost({ stubPort: 1 });
+  await assert.rejects(
+    () => createRemoteOpenCodeRuntime({ host: fake.host, remotePath: "/srv/app" }),
+    /runtimeDir is required.*global OpenCode DB/,
+  );
+  assert.equal(fake.execCalls.length, 0);
+  assert.equal(fake.startCommands.length, 0);
+});
+
+test("owned remote runtime refuses a binary that ignores OPENCODE_DB", async () => {
+  const fake = createFakeHost({
+    stubPort: 1,
+    reportedDbPath: "/home/dev/.local/share/opencode/opencode.db",
+  });
+  await assert.rejects(
+    () => createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/srv/app",
+      runtimeDir: "/var/lib/polyth/runtimes/app",
+    }),
+    (error: Error & { code?: string }) =>
+      error.code === "unavailable"
+      && error.message.includes("does not honor OPENCODE_DB")
+      && error.message.includes("/var/lib/polyth/runtimes/app/probe.db"),
+  );
+  assert.equal(fake.execCalls.filter((call) => call.includes(" db path")).length, 1);
+  assert.equal(fake.startCommands.length, 0);
+  assert.equal(fake.forwards.length, 0);
 });
 
 test("probeRemoteOpenCode reports the installed version honestly", async () => {

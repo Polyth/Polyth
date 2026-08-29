@@ -73,11 +73,16 @@ import {
 } from "./protocol.ts";
 
 export interface OpenCodeAdapterOptions {
+  projectId?: string;
   cwd: string;
   port?: number;
   hostname?: string;
   bin?: string;
+  binarySource?: "bundled" | "configured";
+  configDir?: string;
+  /** @deprecated Use configDir. */
   dataDir?: string;
+  runtimeDir?: string;
   stateFile?: string;
   browserTool?: OpenCodeBrowserToolConfig;
   protocol?: ProtocolSelection;
@@ -134,6 +139,24 @@ export {
   createRuntimeLifecycle,
   waitForRuntimeReady,
 } from "./runtime.ts";
+export {
+  inspectOpenCodeEngine,
+  OPEN_CODE_QUARANTINE_TTL_MS,
+  OPEN_CODE_RUNTIME_STALE_TTL_MS,
+  OPENCODE_UPDATE_DISABLE_ENV,
+  OPENCODE_PROTOCOL_GENERATION,
+  POLYTH_OPENCODE_BIN_ENV,
+  prepareOpenCodeRuntime,
+  resolveOpenCodeBinary,
+  sweepOpenCodeRuntimes,
+} from "./runtimeStorage.ts";
+export type {
+  OpenCodeBinarySource,
+  OpenCodeEngineIdentity,
+  OpenCodeRuntimeMetadata,
+  PreparedOpenCodeRuntime,
+  ResolvedOpenCodeBinary,
+} from "./runtimeStorage.ts";
 export type {
   BaseRuntimeLifecycle,
   BorrowedRuntimeLifecycle,
@@ -835,15 +858,20 @@ export const createOpenCodeRuntime = async (
   opts: OpenCodeAdapterOptions & Omit<OpenCodeRuntimeExtras, "lifecycle">,
 ): Promise<AgentRuntime> => {
   const lease = await createOwnedLocalEndpointLease({
+    projectId: opts.projectId,
     cwd: opts.cwd,
     port: opts.port,
     hostname: opts.hostname,
     bin: opts.bin,
-    dataDir: opts.dataDir,
+    binarySource: opts.binarySource,
+    configDir: opts.configDir ?? opts.dataDir,
+    runtimeDir: opts.runtimeDir,
     stateFile: opts.stateFile,
     browserTool: opts.browserTool,
     configTargetId: opts.configTargetId
-      ?? (opts.dataDir ? `opencode-config:${resolve(opts.dataDir)}` : undefined),
+      ?? (opts.configDir ?? opts.dataDir
+        ? `opencode-config:${resolve((opts.configDir ?? opts.dataDir)!)}`
+        : undefined),
   });
   let lifecycle: RuntimeLifecycle;
   try {

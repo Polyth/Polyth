@@ -481,3 +481,112 @@ test("complete pending data alone cannot prove an unknown response was not appli
   assert.equal((await store.projection(created.id))?.status, "unknown");
   await store.close();
 });
+
+test("epoch-fenced operations stay uncertain and cannot be claimed, replayed, or rejected", async () => {
+  const runtime = {
+    capabilities: async () => ({
+      streaming: true,
+      permissions: true,
+      questions: true,
+      compaction: false,
+      subagents: false,
+    }),
+    models: async () => [],
+    agents: async () => [],
+    ensureSession: async () => "unused",
+    sessions: async () => [],
+    history: async () => [],
+    startTurn: async () => undefined,
+    abort: async () => undefined,
+    replyPermission: async () => undefined,
+    replyQuestion: async () => undefined,
+    onEvent: () => ({ dispose: () => undefined }),
+    dispose: async () => undefined,
+  } as AgentRuntime;
+  const { store, project } = harness(runtime);
+  const sessionId = "fenced-operation";
+  const oldBinding = {
+    backendSessionId: "backend-old",
+    authorityId: "owned:destroyed",
+    generation: 4,
+    epoch: 0,
+    continuity: "verified" as const,
+    protocol: "legacy" as const,
+    location: { directory: project.path },
+  };
+  await store.upsertProjection({
+    id: sessionId,
+    projectId: project.id,
+    title: "Fenced",
+    status: "epoch-pending",
+    backendSessionId: oldBinding.backendSessionId,
+    runtimeBinding: oldBinding,
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  const uncertain = await store.prepareOperation({
+    sessionId,
+    mutationKind: "turn-submit",
+    replay: { kind: "same-operation-id", contract: "turn-submit-v1" },
+    intentEvent: { type: "user/message", data: { text: "do not replay" } },
+  });
+  await store.claimOperation(uncertain.operation.operationId);
+  await store.settleOperation(uncertain.operation.operationId, {
+    kind: "unknown",
+    message: "admission outcome was lost",
+  });
+  const reset = await store.prepareOperation({
+    sessionId,
+    mutationKind: "session-reset",
+    intentEvent: {
+      type: "session/reset-intended",
+      data: { reason: "runtime-epoch-rehydration" },
+      ignorable: true,
+    },
+  });
+  await store.claimOperation(reset.operation.operationId);
+  await store.settleOperation(reset.operation.operationId, {
+    kind: "confirmed",
+    receipt: "backend-new",
+  });
+  await store.transitionRuntimeEpoch({
+    sessionId,
+    expectedBinding: oldBinding,
+    replacementBinding: {
+      ...oldBinding,
+      backendSessionId: "backend-new",
+      authorityId: "owned:replacement",
+      generation: 1,
+      epoch: 1,
+      historyBaseline: "empty",
+    },
+    resetOperationId: reset.operation.operationId,
+    reason: "destroyed runtime authority was quarantined",
+    fence: { authorityId: oldBinding.authorityId, generation: oldBinding.generation },
+  });
+
+  assert.equal((await store.operation(uncertain.operation.operationId))?.state, "fenced");
+  assert.equal((await store.claimOperation(uncertain.operation.operationId)).kind, "not-claimed");
+  assert.equal(
+    (await store.replayUnknownOperation(
+      uncertain.operation.operationId,
+      "turn-submit-v1",
+    )).kind,
+    "not-claimed",
+  );
+  await assert.rejects(
+    () => store.settleOperation(uncertain.operation.operationId, {
+      kind: "rejected",
+      code: "runtime-replaced",
+      message: "must remain uncertain",
+    }),
+    (error: Error & { code?: string }) => error.code === "invalid-transition",
+  );
+  assert.equal(
+    (await store.events(sessionId)).some((event) =>
+      event.type === "mutation/rejected"
+      && (event.data as { operationId?: string }).operationId === uncertain.operation.operationId),
+    false,
+  );
+  await store.close();
+});

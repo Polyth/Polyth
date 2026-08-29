@@ -9,7 +9,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, realpathSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createContext, loadPlugin } from "@polyth/kernel";
 import {
@@ -40,6 +40,7 @@ import {
   createOpenCodeRuntime,
   createRemoteOpenCodeRuntime,
   probeRemoteOpenCode,
+  sweepOpenCodeRuntimes,
   type OpenCodeAdapterOptions,
 } from "@polyth/backend-opencode";
 import {
@@ -88,6 +89,10 @@ import { createPackageLifecycle } from "./packageLifecycle.ts";
 import { createDeferredConfigApplier, createOpenCodePendingService } from "./opencodePending.ts";
 import { agentSessionRoutes, type AgentGoalService } from "./routes/agentSessions.ts";
 import { settleAllOrThrow } from "./settle.ts";
+import {
+  createRuntimeIdleController,
+  type RuntimeIdleController,
+} from "./runtimeIdle.ts";
 
 /** POLYTH_SMALL_MODEL="provider/model-id" — cheap model for auditors/commit messages. */
 const smallModel = (): { providerID: string; modelID: string } | undefined => {
@@ -147,6 +152,30 @@ export interface ServerPackageRegistration {
 }
 
 export { isPackageEnabled } from "./packages.ts";
+
+export function openCodeRuntimeId(projectId: string, cwd: string): string {
+  return createHash("sha256")
+    .update(projectId)
+    .update("\0")
+    .update(resolve(cwd))
+    .digest("hex")
+    .slice(0, 24);
+}
+
+export function openCodeRemoteRuntimeId(
+  connectionIdentity: string,
+  projectId: string,
+  cwd: string,
+): string {
+  return createHash("sha256")
+    .update(connectionIdentity)
+    .update("\0")
+    .update(projectId)
+    .update("\0")
+    .update(posix.normalize(cwd))
+    .digest("hex")
+    .slice(0, 24);
+}
 
 export interface DataDirectoryLease {
   canonicalDataDir: string;
@@ -326,6 +355,8 @@ export async function boot(opts: BootOptions = {}) {
   const writerLease = await acquireDataDirectoryLease(requestedDataDir);
   const dataDir = writerLease.canonicalDataDir;
   try {
+  const openCodeRuntimesDir = join(dataDir, "runtimes", "opencode");
+  await sweepOpenCodeRuntimes(openCodeRuntimesDir);
   const packagesDir = opts.packagesDir ?? resolve(__dirname, "../..");
   const bundledServerPackages = opts.serverPackages;
   const discoveredPackageManifests = bundledServerPackages
@@ -385,6 +416,7 @@ export async function boot(opts: BootOptions = {}) {
 
   // --- per-project opencode runtime pool (lazy spawn, one serve process per project)
   const runtimesByProject = new Map<string, Promise<AgentRuntime>>();
+  const runtimeEvictions = new Map<string, Promise<void>>();
   const runtimeRestarters = new Map<string, {
     runtime: AgentRuntime;
     restart(): Promise<void>;
@@ -393,9 +425,21 @@ export async function boot(opts: BootOptions = {}) {
     ): Promise<T>;
   }>();
   const runtimeRestartListeners = new Set<(runtime: AgentRuntime) => Promise<void>>();
+  const runtimeEvictionListeners = new Set<
+    (runtime: AgentRuntime) => void | Promise<void>
+  >();
+  let canEvictRuntime = async (
+    _runtime: AgentRuntime,
+    _inspectionRuntime: AgentRuntime,
+    _expected: { authorityId: string; generation: number },
+    _liveStreamSessionIds: readonly string[],
+  ): Promise<{ safe: true } | { safe: false; reason: string }> => ({
+    safe: false,
+    reason: "runtime eviction safety is not initialized",
+  });
   let runtimeCreationFenceDepth = 0;
   const sessionIdMap = new Map<string, string>(); // canonical -> backend
-  const configDir = opts.opencode?.dataDir;
+  const configDir = opts.opencode?.configDir ?? opts.opencode?.dataDir;
   const configIdentityProbe = createConfigApplier({
     ...(configDir ? { configDir } : {}),
   });
@@ -440,26 +484,35 @@ export async function boot(opts: BootOptions = {}) {
       if (!ssh) {
         throw Object.assign(new Error("SSH support unavailable: the ssh package did not load"), { code: "unavailable" });
       }
+      const remoteStateKey = openCodeRemoteRuntimeId(
+        remoteBinding.connectionId,
+        projectId,
+        cwd,
+      );
       return createRemoteOpenCodeRuntime({
         host: ssh.host(remoteBinding.connectionId),
         connectionIdentity: remoteBinding.connectionId,
         remotePath: cwd,
-        leaseStateFile: join(dataDir, "opencode-ssh", `${projectId}.lease.json`),
+        ...(opts.opencode?.runtimeDir
+          ? { runtimeDir: posix.join(opts.opencode.runtimeDir, remoteStateKey) }
+          : {}),
+        leaseStateFile: join(dataDir, "opencode-ssh", `${remoteStateKey}.lease.json`),
         sessionIdMap,
       });
     }
     const browserTool = browserToolBridge?.register({ projectId, cwd });
     try {
-      const localStateKey = createHash("sha256")
-        .update(resolve(cwd))
-        .digest("hex")
-        .slice(0, 24);
+      const localStateKey = openCodeRuntimeId(projectId, cwd);
       const runtime = await createOpenCodeRuntime({
-        cwd, sessionIdMap,
+        projectId, cwd, sessionIdMap,
         ...(opts.opencode?.port ? { port: opts.opencode.port } : {}),
         ...(opts.opencode?.bin ? { bin: opts.opencode.bin } : {}),
+        ...(opts.opencode?.binarySource
+          ? { binarySource: opts.opencode.binarySource }
+          : {}),
         ...(opts.opencode?.hostname ? { hostname: opts.opencode.hostname } : {}),
-        ...(opts.opencode?.dataDir ? { dataDir: opts.opencode.dataDir } : {}),
+        ...(configDir ? { configDir } : {}),
+        runtimeDir: join(openCodeRuntimesDir, localStateKey),
         stateFile: opts.opencode?.stateFile
           ?? join(dataDir, "opencode-local", `${localStateKey}.lease.json`),
         ...(opts.opencode?.protocol ? { protocol: opts.opencode.protocol } : {}),
@@ -501,6 +554,8 @@ export async function boot(opts: BootOptions = {}) {
     configRestartable: boolean,
   ): AgentRuntime => {
     let inner = first;
+    let idleController: RuntimeIdleController | undefined;
+    const liveStreamSessionIds = new Set<string>();
     const listeners = new Set<(sessionId: string, ev: RuntimeEvent) => void>();
     const observationListeners = new Set<
       Parameters<NonNullable<AgentRuntime["onObservation"]>>[0]
@@ -508,13 +563,23 @@ export async function boot(opts: BootOptions = {}) {
     const lifecycleListeners = new Set<
       Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]
     >();
-    const fanout = (sessionId: string, ev: RuntimeEvent) => { for (const cb of listeners) cb(sessionId, ev); };
+    const observeRuntimeEvent = (sessionId: string, ev: RuntimeEvent): void => {
+      if (ev.type === "turn/started") liveStreamSessionIds.add(sessionId);
+      else if (ev.type === "turn/stopped") liveStreamSessionIds.delete(sessionId);
+      idleController?.touch();
+    };
+    const fanout = (sessionId: string, ev: RuntimeEvent) => {
+      observeRuntimeEvent(sessionId, ev);
+      for (const cb of listeners) cb(sessionId, ev);
+    };
     const fanoutObservation: Parameters<NonNullable<AgentRuntime["onObservation"]>>[0] =
       (sessionId, observation) => {
+        for (const event of observation.events) observeRuntimeEvent(sessionId, event);
         for (const cb of observationListeners) cb(sessionId, observation);
       };
     const fanoutLifecycle: Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0] =
       (notification) => {
+        idleController?.touch();
         for (const cb of lifecycleListeners) cb(notification);
       };
     const subscribeInner = (): Disposable[] => [
@@ -569,6 +634,7 @@ export async function boot(opts: BootOptions = {}) {
       for (const subscription of innerSubs) subscription.dispose();
       await inner.dispose().catch(() => {});
       inner = await spawnRuntime(projectId, cwd);
+      liveStreamSessionIds.clear();
       innerSubs = subscribeInner();
       runtimesByProject.set(key, Promise.resolve(facade));
       await settleAllOrThrow(
@@ -628,106 +694,157 @@ export async function boot(opts: BootOptions = {}) {
       return restarting;
     };
 
+    const useRuntime = <T,>(action: () => Promise<T>): Promise<T> =>
+      idleController ? idleController.use(action) : action();
+    let disposal: Promise<void> | undefined;
+    const disposeInner = (): Promise<void> => {
+      if (disposal) return disposal;
+      disposal = (async () => {
+        for (const subscription of innerSubs) subscription.dispose();
+        innerSubs = [];
+        liveStreamSessionIds.clear();
+        await inner.dispose();
+      })();
+      return disposal;
+    };
+
     const facade: AgentRuntime = {
-      capabilities: () => inner.capabilities(),
-      models: () => inner.models(),
-      agents: () => inner.agents(),
-      sessions: () => inner.sessions(),
-      history: (sessionId) => inner.history(sessionId),
-      ensureSession: (canonical) => inner.ensureSession(canonical),
+      capabilities: () => useRuntime(() => inner.capabilities()),
+      models: () => useRuntime(() => inner.models()),
+      agents: () => useRuntime(() => inner.agents()),
+      sessions: () => useRuntime(() => inner.sessions()),
+      history: (sessionId) => useRuntime(() => inner.history(sessionId)),
+      ensureSession: (canonical) => useRuntime(() => inner.ensureSession(canonical)),
       createSessionOperation: (canonical, operationId) =>
-        inner.createSessionOperation
+        useRuntime(() => inner.createSessionOperation
           ? inner.createSessionOperation(canonical, operationId)
           : Promise.resolve({
               kind: "unknown",
               operationId,
               message: "runtime lacks operation-aware session creation",
-            }),
+            })),
       async resetSession(canonical) {
-        if (!inner.resetSession) throw Object.assign(new Error("runtime cannot reset session history"), { code: "unsupported" });
-        return inner.resetSession(canonical);
+        return useRuntime(async () => {
+          if (!inner.resetSession) throw Object.assign(new Error("runtime cannot reset session history"), { code: "unsupported" });
+          const backendSessionId = await inner.resetSession(canonical);
+          liveStreamSessionIds.delete(canonical.sessionId);
+          return backendSessionId;
+        });
       },
       resetSessionOperation: (canonical, operationId) =>
-        inner.resetSessionOperation
+        useRuntime(async () => {
+          const outcome = inner.resetSessionOperation
           ? inner.resetSessionOperation(canonical, operationId)
           : Promise.resolve({
-              kind: "rejected",
+              kind: "rejected" as const,
               code: "capability-unsupported",
               message: "runtime lacks operation-aware session reset",
-            }),
+            });
+          const result = await outcome;
+          if (result.kind === "confirmed") liveStreamSessionIds.delete(canonical.sessionId);
+          return result;
+        }),
       // UX-MSG-ACTIONS: exact-history branching passes through the facade so
       // the session service never learns backend/OpenCode details.
       async branchSession(request) {
-        if (!inner.branchSession) throw Object.assign(new Error("runtime cannot branch exact history"), { code: "unsupported" });
-        return inner.branchSession(request);
+        return useRuntime(async () => {
+          if (!inner.branchSession) throw Object.assign(new Error("runtime cannot branch exact history"), { code: "unsupported" });
+          const backendSessionId = await inner.branchSession(request);
+          liveStreamSessionIds.delete(request.target.sessionId);
+          return backendSessionId;
+        });
       },
       branchSessionOperation: (request, operationId) =>
-        inner.branchSessionOperation
+        useRuntime(async () => {
+          const outcome = inner.branchSessionOperation
           ? inner.branchSessionOperation(request, operationId)
           : Promise.resolve({
-              kind: "rejected",
+              kind: "rejected" as const,
               code: "capability-unsupported",
               message: "runtime lacks operation-aware session branching",
-            }),
+            });
+          const result = await outcome;
+          if (result.kind === "confirmed") liveStreamSessionIds.delete(request.target.sessionId);
+          return result;
+        }),
       async discardSession(sessionId) {
-        await inner.discardSession?.(sessionId);
+        await useRuntime(async () => {
+          await inner.discardSession?.(sessionId);
+          liveStreamSessionIds.delete(sessionId);
+        });
       },
       discardSessionOperation: (sessionId, operationId) =>
-        inner.discardSessionOperation
+        useRuntime(async () => {
+          const outcome = inner.discardSessionOperation
           ? inner.discardSessionOperation(sessionId, operationId)
           : Promise.resolve({
-              kind: "unknown",
+              kind: "unknown" as const,
               operationId,
               message: "runtime lacks operation-aware session deletion",
-            }),
-      startTurn: (req) => inner.startTurn(req),
+            });
+          const result = await outcome;
+          if (result.kind === "confirmed") liveStreamSessionIds.delete(sessionId);
+          return result;
+        }),
+      startTurn: (req) => useRuntime(async () => {
+        await inner.startTurn(req);
+        liveStreamSessionIds.add(req.sessionId);
+      }),
       startTurnOperation: (req, operationId) =>
-        inner.startTurnOperation
+        useRuntime(async () => {
+          const outcome = inner.startTurnOperation
           ? inner.startTurnOperation(req, operationId)
           : Promise.resolve({
-              kind: "unknown",
+              kind: "unknown" as const,
               operationId,
               message: "runtime lacks operation-aware turn submission",
-            }),
-      steer: (sessionId, text) => inner.steer?.(sessionId, text) ?? Promise.resolve(false),
+            });
+          const result = await outcome;
+          if (result.kind === "confirmed") liveStreamSessionIds.add(req.sessionId);
+          return result;
+        }),
+      steer: (sessionId, text) =>
+        useRuntime(() => inner.steer?.(sessionId, text) ?? Promise.resolve(false)),
       steerOperation: (sessionId, text, operationId) =>
-        inner.steerOperation
+        useRuntime(() => inner.steerOperation
           ? inner.steerOperation(sessionId, text, operationId)
           : Promise.resolve({
               kind: "unknown",
               operationId,
               message: "runtime lacks operation-aware steering",
-            }),
-      abort: (sessionId) => inner.abort(sessionId),
+            })),
+      abort: (sessionId) => useRuntime(() => inner.abort(sessionId)),
       abortOperation: (sessionId, operationId) =>
-        inner.abortOperation
+        useRuntime(() => inner.abortOperation
           ? inner.abortOperation(sessionId, operationId)
           : Promise.resolve({
               kind: "unknown",
               operationId,
               message: "runtime lacks operation-aware abort",
-            }),
-      replyPermission: (sessionId, requestId, reply) => inner.replyPermission(sessionId, requestId, reply),
+            })),
+      replyPermission: (sessionId, requestId, reply) =>
+        useRuntime(() => inner.replyPermission(sessionId, requestId, reply)),
       replyPermissionOperation: (sessionId, requestId, reply, operationId) =>
-        inner.replyPermissionOperation
+        useRuntime(() => inner.replyPermissionOperation
           ? inner.replyPermissionOperation(sessionId, requestId, reply, operationId)
           : Promise.resolve({
               kind: "unknown",
               operationId,
               message: "runtime lacks operation-aware permission reply",
-            }),
-      replyQuestion: (sessionId, requestId, answers) => inner.replyQuestion(sessionId, requestId, answers),
+            })),
+      replyQuestion: (sessionId, requestId, answers) =>
+        useRuntime(() => inner.replyQuestion(sessionId, requestId, answers)),
       replyQuestionOperation: (sessionId, requestId, answers, operationId) =>
-        inner.replyQuestionOperation
+        useRuntime(() => inner.replyQuestionOperation
           ? inner.replyQuestionOperation(sessionId, requestId, answers, operationId)
           : Promise.resolve({
               kind: "unknown",
               operationId,
               message: "runtime lacks operation-aware question reply",
-            }),
+            })),
       ...(inner.replySecret
         ? { replySecret: (sessionId: string, requestId: string, result: Parameters<NonNullable<AgentRuntime["replySecret"]>>[2]) =>
-            inner.replySecret!(sessionId, requestId, result) }
+            useRuntime(() => inner.replySecret!(sessionId, requestId, result)) }
         : {}),
       ...(inner.replySecretOperation
         ? {
@@ -736,12 +853,13 @@ export async function boot(opts: BootOptions = {}) {
               requestId: string,
               result: Parameters<NonNullable<AgentRuntime["replySecretOperation"]>>[2],
               operationId: string,
-            ) => inner.replySecretOperation!(sessionId, requestId, result, operationId),
+            ) => useRuntime(() =>
+              inner.replySecretOperation!(sessionId, requestId, result, operationId)),
           }
         : {}),
-      endpoint,
-      protocol,
-      reconcile,
+      endpoint: () => useRuntime(endpoint),
+      protocol: () => useRuntime(protocol),
+      reconcile: (binding, after) => useRuntime(() => reconcile(binding, after)),
       onObservation(cb) {
         observationListeners.add(cb);
         return { dispose: () => { observationListeners.delete(cb); } };
@@ -754,13 +872,43 @@ export async function boot(opts: BootOptions = {}) {
         listeners.add(cb);
         return { dispose: () => { listeners.delete(cb); } };
       },
-      dispose: () => {
+      dispose: async () => {
+        idleController?.stop();
         runtimesByProject.delete(key);
         runtimeRestarters.delete(key);
-        for (const subscription of innerSubs) subscription.dispose();
-        return inner.dispose();
+        await disposeInner();
       },
     };
+    idleController = createRuntimeIdleController({
+      withAdmissionBarrier: (action) => admissionBarrier.run(action),
+      canEvict: async () => {
+        const expected = await endpoint();
+        return (await canEvictRuntime(
+          facade,
+          inner,
+          {
+            authorityId: expected.authorityId,
+            generation: expected.generation,
+          },
+          [...liveStreamSessionIds],
+        )).safe;
+      },
+      evict: async () => {
+        let eviction!: Promise<void>;
+        eviction = (async () => {
+          await disposeInner();
+          runtimesByProject.delete(key);
+          runtimeRestarters.delete(key);
+          await settleAllOrThrow(
+            [...runtimeEvictionListeners].map(async (listener) => listener(facade)),
+          );
+        })().finally(() => {
+          if (runtimeEvictions.get(key) === eviction) runtimeEvictions.delete(key);
+        });
+        runtimeEvictions.set(key, eviction);
+        await eviction;
+      },
+    });
     if (configRestartable) {
       runtimeRestarters.set(key, {
         runtime: facade,
@@ -890,6 +1038,7 @@ export async function boot(opts: BootOptions = {}) {
     async forProject(projectId, cwd) {
       const dir = await cwdFor(projectId, cwd);
       const key = `${projectId}::${dir}`;
+      await runtimeEvictions.get(key);
       let p = runtimesByProject.get(key);
       if (!p) {
         if (runtimeCreationFenceDepth > 0) {
@@ -930,6 +1079,10 @@ export async function boot(opts: BootOptions = {}) {
     onRestart(listener) {
       runtimeRestartListeners.add(listener);
       return { dispose: () => { runtimeRestartListeners.delete(listener); } };
+    },
+    onEvict(listener) {
+      runtimeEvictionListeners.add(listener);
+      return { dispose: () => { runtimeEvictionListeners.delete(listener); } };
     },
   };
   const runtimeCatalog = createRuntimeCatalog({ projects, runtimes });
@@ -1237,6 +1390,14 @@ export async function boot(opts: BootOptions = {}) {
           pinnedSourceSeqs: pinned.map((item) => item.sourceEventSeq),
         };
       },
+      runtimeEpochContext: async (sessionId, events) => {
+        const goal = await ensureGoalState(sessionId);
+        const objective = goal?.status === "active" ? goal.objective : undefined;
+        return {
+          ...(objective ? { objective } : {}),
+          pinned: activePinnedMessages(events),
+        };
+      },
       onTurnCompleted: (sessionId, text) => {
         void (async () => {
           const goals = goalService();
@@ -1256,6 +1417,13 @@ export async function boot(opts: BootOptions = {}) {
   sessionsImpl = sessions;
   reconcileRuntimeForConfigRestart = (sessionId, runtime, expected) =>
     sessions.reconcileForRuntimeRestart(sessionId, runtime, expected);
+  canEvictRuntime = (runtime, inspectionRuntime, expected, liveStreamSessionIds) =>
+    sessions.canEvictRuntime(
+      runtime,
+      inspectionRuntime,
+      expected,
+      liveStreamSessionIds,
+    );
   root.provide(CAP.sessions, sessions);
 
   // --- F9 idle assist: after N quiet seconds past turn/stopped, a small-model

@@ -156,17 +156,20 @@ const nextDurableIncarnation = async (
       }
       current = persisted;
     } else if (persisted?.version === 1) {
-      if (
-        configuredAuthorityId
-        && persisted.authorityId !== configuredAuthorityId
-      ) {
-        throw unavailable("configured owned runtime authority conflicts with durable state");
+      // V1 never recorded the runtime identity. Reusing its authority would
+      // let a newly isolated DB satisfy verified-continuity rebinds for the
+      // old, potentially shared DB. The absence of identity proof requires a
+      // cold authority, not a format-only migration.
+      if (configuredAuthorityId) {
+        throw unavailable(
+          "configured owned runtime authority cannot be verified against legacy state",
+        );
       }
       current = {
         version: 2,
         identityKey,
-        authorityId: persisted.authorityId,
-        generation: persisted.generation,
+        authorityId: `owned:${randomUUID()}`,
+        generation: 0,
       };
     } else {
       const authorityId = configuredAuthorityId ?? `owned:${randomUUID()}`;

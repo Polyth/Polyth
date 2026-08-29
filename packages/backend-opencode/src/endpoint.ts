@@ -29,6 +29,16 @@ import {
   ownedRuntimeIdentityKey,
   type OwnedRuntimeIncarnation,
 } from "./ownedRuntimeState.ts";
+import {
+  inspectOpenCodeEngine,
+  OPENCODE_UPDATE_DISABLE_ENV,
+  prepareOpenCodeRuntime,
+  resolveOpenCodeBinary,
+  type OpenCodeBinarySource,
+  type OpenCodeEngineIdentity,
+  type PreparedOpenCodeRuntime,
+  type ResolvedOpenCodeBinary,
+} from "./runtimeStorage.ts";
 
 export const LISTEN_RE = /opencode server listening on https?:\/\/[^\s:]+:(\d+)/i;
 const BIND_COLLISION_RE = /EADDRINUSE|address already in use/i;
@@ -139,8 +149,10 @@ const processIdentityMatches = (
   && actual.executable === expected.executable
   && actual.command === expected.command;
 
-export const pidFileForDirectory = (cwd: string): string => {
-  const key = createHash("sha256").update(resolve(cwd)).digest("hex").slice(0, 24);
+export const pidFileForDirectory = (cwd: string, projectId?: string): string => {
+  const digest = createHash("sha256");
+  if (projectId) digest.update(projectId).update("\0");
+  const key = digest.update(resolve(cwd)).digest("hex").slice(0, 24);
   return join(tmpdir(), "polyth-opencode", `${key}.pid.json`);
 };
 
@@ -272,7 +284,10 @@ interface OwnedLeaseOptions {
   location: RuntimeLocation;
   config: RuntimeConfigAuthority;
   authentication: RuntimeAuthentication;
-  start(instanceToken: string): Promise<StartedOwnedInstance>;
+  start(
+    instanceToken: string,
+    incarnation: OwnedRuntimeIncarnation,
+  ): Promise<StartedOwnedInstance>;
 }
 
 const createOwnedLease = async (
@@ -312,7 +327,7 @@ const createOwnedLease = async (
     ) {
       throw unavailable("owned runtime incarnation did not advance");
     }
-    const instance = await options.start(instanceToken);
+    const instance = await options.start(instanceToken, incarnation);
     if (disposed) {
       await instance.stop();
       throw unavailable("runtime endpoint lease was disposed during startup");
@@ -394,11 +409,16 @@ const createOwnedLease = async (
 };
 
 export interface OwnedLocalEndpointOptions {
+  projectId?: string;
   cwd: string;
   port?: number;
   hostname?: string;
   bin?: string;
+  binarySource?: Extract<OpenCodeBinarySource, "bundled" | "configured">;
+  configDir?: string;
+  /** @deprecated Use configDir. */
   dataDir?: string;
+  runtimeDir?: string;
   browserTool?: OpenCodeBrowserToolConfig;
   configTargetId?: string;
   authorityId?: string;
@@ -414,6 +434,14 @@ export interface OwnedLocalEndpointOptions {
   readProcessIdentity?: ProcessIdentityReader;
   signalProcess?: ProcessSignaler;
   orphanGraceMs?: number;
+  onRuntimeDiagnostic?: (message: string) => void;
+  /** Test seam for an already-resolved executable. Production callers omit it. */
+  resolveBinary?: (options: {
+    bin?: string;
+    binarySource?: Extract<OpenCodeBinarySource, "bundled" | "configured">;
+  }) => Promise<ResolvedOpenCodeBinary>;
+  /** Test seam for a pre-verified binary identity. Production callers omit it. */
+  inspectEngine?: (bin: string) => Promise<OpenCodeEngineIdentity>;
 }
 
 interface StartedLocalChild {
@@ -429,9 +457,13 @@ const startLocalChildOnce = async (
   port: number,
   pidFile: string,
   readIdentity: ProcessIdentityReader,
+  runtime: PreparedOpenCodeRuntime,
 ): Promise<StartedLocalChild> => {
   let env = { ...process.env };
-  if (options.dataDir) env.OPENCODE_CONFIG_DIR = options.dataDir;
+  const configDir = options.configDir ?? options.dataDir;
+  if (configDir) env.OPENCODE_CONFIG_DIR = configDir;
+  env.OPENCODE_DB = runtime.dbPath;
+  env[OPENCODE_UPDATE_DISABLE_ENV] = "true";
   if (options.browserTool) {
     env = await prepareBrowserToolEnvironment(options.browserTool, env);
   }
@@ -440,7 +472,7 @@ const startLocalChildOnce = async (
   env.POLYTH_OPENCODE_INSTANCE_TOKEN = instanceToken;
   const spawnProcess = options.spawn ?? spawn;
   const child = spawnProcess(
-    options.bin ?? "opencode",
+    runtime.binary.executablePath,
     ["serve", "--hostname", hostname, "--port", String(port)],
     {
       cwd: resolve(options.cwd),
@@ -489,6 +521,7 @@ const startLocalChildOnce = async (
     });
     child.stdout?.resume();
     child.stderr?.resume();
+    await runtime.secureDatabaseFiles();
     await writePidRecord(pidFile, instanceToken, child, readIdentity);
     return { child, port: actualPort, hostname };
   } catch (error) {
@@ -503,40 +536,78 @@ export const createOwnedLocalEndpointLease = async (
   options: OwnedLocalEndpointOptions,
 ): Promise<OwnedRuntimeEndpointLease> => {
   const cwd = resolve(options.cwd);
+  if (!options.runtimeDir) {
+    throw unavailable(
+      "owned OpenCode runtimeDir is required; refusing to fall back to the global OpenCode DB",
+    );
+  }
+  if (!options.projectId) {
+    throw unavailable("owned OpenCode projectId is required for isolated runtime identity");
+  }
+  if (options.authorityId) {
+    throw unavailable(
+      "configured authorityId is incompatible with isolated OpenCode engine rotation",
+    );
+  }
   const hostname = options.hostname ?? "127.0.0.1";
-  const pidFile = options.pidFile ?? pidFileForDirectory(cwd);
+  const pidFile = options.pidFile ?? pidFileForDirectory(cwd, options.projectId);
   const legacyStateFile = `${pidFile}.lease.json`;
   const stateFile = options.stateFile ?? legacyStateFile;
   const readIdentity = options.readProcessIdentity ?? readProcessIdentity;
   const signal = options.signalProcess ?? ((pid, processSignal) => process.kill(pid, processSignal));
-  const durableState = createDurableOwnedRuntimeState(
-    stateFile,
-    ownedRuntimeIdentityKey({
-      kind: "owned-local",
-      directory: cwd,
-      binary: options.bin ?? "opencode",
-      configDirectory: options.dataDir ? resolve(options.dataDir) : "default",
-    }),
-    options.authorityId,
-    resolve(stateFile) === resolve(legacyStateFile) ? [] : [legacyStateFile],
-  );
   const authentication: RuntimeAuthentication = {
     kind: "basic-env",
     usernameEnv: options.usernameEnv ?? "OPENCODE_SERVER_USERNAME",
     passwordEnv: options.passwordEnv ?? "OPENCODE_SERVER_PASSWORD",
   };
   let firstStart = true;
+  let preparedRuntime: PreparedOpenCodeRuntime | undefined;
 
   return createOwnedLease({
-    nextIncarnation: durableState.nextIncarnation,
+    async nextIncarnation() {
+      const runtime = preparedRuntime;
+      if (!runtime) throw unavailable("isolated OpenCode runtime was not prepared");
+      return createDurableOwnedRuntimeState(
+        stateFile,
+        ownedRuntimeIdentityKey({
+          kind: "owned-local",
+          directory: cwd,
+          projectId: options.projectId,
+          engine: runtime.engineIdentity.engine,
+          version: runtime.engineIdentity.version,
+          binaryDigest: runtime.engineIdentity.binaryDigest,
+          protocolGeneration: runtime.engineIdentity.protocolGeneration,
+          storageId: runtime.storageId,
+        }),
+      ).nextIncarnation();
+    },
     async prepareStart() {
+      const binary = await (options.resolveBinary ?? resolveOpenCodeBinary)({
+        bin: options.bin,
+        binarySource: options.binarySource,
+      });
+      preparedRuntime = await prepareOpenCodeRuntime({
+        runtimeDir: options.runtimeDir!,
+        projectId: options.projectId!,
+        cwd,
+        engineIdentity: await (options.inspectEngine ?? inspectOpenCodeEngine)(
+          binary.executablePath,
+        ),
+        binary,
+      });
+      if (preparedRuntime.diagnostic) {
+        (options.onRuntimeDiagnostic
+          ?? ((message: string) => console.warn(`[polyth] ${message}`)))(
+          preparedRuntime.diagnostic,
+        );
+      }
       if (!firstStart) return;
-      firstStart = false;
       await reapPidFile(pidFile, {
         readIdentity,
         signal,
         graceMs: options.orphanGraceMs ?? 250,
       });
+      firstStart = false;
     },
     continuity: "verified",
     location: { directory: cwd },
@@ -544,7 +615,10 @@ export const createOwnedLocalEndpointLease = async (
       ? { kind: "writable", targetId: options.configTargetId }
       : { kind: "read-only" },
     authentication,
-    async start(instanceToken) {
+    async start(instanceToken, incarnation) {
+      const runtime = preparedRuntime;
+      if (!runtime) throw unavailable("isolated OpenCode runtime was not prepared");
+      await runtime.recordOpen(incarnation);
       const attempts = Math.max(1, options.maxBindAttempts ?? 4);
       let lastError: unknown;
       for (let attempt = 0; attempt < attempts; attempt++) {
@@ -559,6 +633,7 @@ export const createOwnedLocalEndpointLease = async (
             port,
             pidFile,
             readIdentity,
+            runtime,
           );
           let stopped = false;
           activeLocalInstanceTokens.add(instanceToken);

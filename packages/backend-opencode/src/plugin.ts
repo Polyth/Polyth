@@ -6,10 +6,14 @@ import {
 import type { ProtocolSelection } from "./protocol.ts";
 
 export interface BackendOpenCodePluginConfig {
+  projectId?: string;
   cwd?: string;
   port?: number;
   hostname?: string;
   bin?: string;
+  configDir?: string;
+  runtimeDir?: string;
+  /** @deprecated Use configDir. */
   dataDir?: string;
   sessionIdMap?: Map<string, string>;
   protocol?: ProtocolSelection;
@@ -28,11 +32,17 @@ const plugin: Plugin<BackendOpenCodePluginConfig> = {
   async setup(ctx: PluginContext, config: BackendOpenCodePluginConfig) {
     const cwd = typeof config.cwd === "string" ? config.cwd : process.cwd();
     const opts: OpenCodeAdapterOptions & { sessionIdMap?: Map<string, string> } = {
+      projectId: typeof config.projectId === "string" ? config.projectId : undefined,
       cwd,
       port: typeof config.port === "number" ? config.port : undefined,
       hostname: typeof config.hostname === "string" ? config.hostname : undefined,
       bin: typeof config.bin === "string" ? config.bin : undefined,
-      dataDir: typeof config.dataDir === "string" ? config.dataDir : undefined,
+      configDir: typeof config.configDir === "string"
+        ? config.configDir
+        : typeof config.dataDir === "string"
+          ? config.dataDir
+          : undefined,
+      runtimeDir: typeof config.runtimeDir === "string" ? config.runtimeDir : undefined,
       sessionIdMap: config.sessionIdMap,
       protocol: config.protocol,
       configTargetId: typeof config.configTargetId === "string" ? config.configTargetId : undefined,

@@ -610,7 +610,10 @@ export const createFakeOpenCode = async (
           id: `evt_busy_${message.id}`,
           data: {
             type: "session.status",
-            properties: { sessionID: sessionId, status: { type: "busy" } },
+            properties: {
+              sessionID: sessionId,
+              status: { type: "busy", revision: session.revision },
+            },
           },
         });
       }
@@ -624,7 +627,10 @@ export const createFakeOpenCode = async (
         publish({
           data: {
             type: "session.status",
-            properties: { sessionID: sessionId, status: { type: "busy" } },
+            properties: {
+              sessionID: sessionId,
+              status: { type: "busy", revision: session.revision },
+            },
           },
         });
       }
@@ -659,7 +665,7 @@ export const createFakeOpenCode = async (
         publish({
           data: {
             type: "session.idle",
-            properties: { sessionID: sessionId },
+            properties: { sessionID: sessionId, revision: session.revision },
           },
         });
       }

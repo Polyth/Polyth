@@ -35,6 +35,13 @@ const canRebind = (
   protocol: "legacy",
 });
 
+// Lock the continuity verifier to authority/backend/location/generation
+// semantics. Epoch replacement is a separate durable API and must never be
+// smuggled into or used to relax this predicate.
+test("rebind verifier remains epoch-unaware", () => {
+  assert.doesNotMatch(canRebindPersistedSession.toString(), /\.epoch\b/);
+});
+
 test("verified durable authority can rebind the same backend session across generations", () => {
   assert.equal(canRebind(persisted), true);
 });
@@ -70,4 +77,18 @@ test("persisted backend session cannot move to another runtime identity", () => 
 
 test("protocol upgrades retain durable backend-session identity", () => {
   assert.equal(canRebind({ ...persisted, protocol: "v2" }), true);
+});
+
+test("a replacement epoch cannot rebind through the old durable binding", () => {
+  const replacementEndpoint: RuntimeEndpoint = {
+    ...endpoint,
+    authorityId: "owned:runtime-b",
+    generation: 1,
+    control: { kind: "owned", instanceToken: "replacement-instance" },
+  };
+  assert.equal(canRebindPersistedSession(persisted, {
+    backendSessionId: "backend-epoch-1",
+    endpoint: replacementEndpoint,
+    protocol: "legacy",
+  }), false);
 });
