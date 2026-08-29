@@ -5,7 +5,7 @@
 // keeps the active tick visible when there are more prompts than ticks.
 
 export const RAIL_MAX_TICKS = 30;
-export const RAIL_TICK_PITCH = 12;
+export const RAIL_TICK_PITCH = 6;
 export const RAIL_BASE_WIDTH = 10;
 export const RAIL_ACTIVE_WIDTH = 14;
 export const RAIL_CURSOR_WIDTH = 20;

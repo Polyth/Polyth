@@ -3109,7 +3109,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 }
 .prompt-nav-tape {
   display: flex; flex-direction: column; align-items: flex-end;
-  width: 100%; padding: 4px 0;
+  width: 100%;
 }
 /* Gradient masks hint that the 30-tick window clipped earlier/later prompts. */
 .prompt-nav-tape[data-clip-above] {
@@ -3124,12 +3124,12 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   -webkit-mask-image: linear-gradient(to bottom, transparent, #000 28px, #000 calc(100% - 28px), transparent);
   mask-image: linear-gradient(to bottom, transparent, #000 28px, #000 calc(100% - 28px), transparent);
 }
-/* Each tick is a real button: a 28px-wide hit zone at the 12px pitch; the
+/* Each tick is a real button: a 28px-wide hit zone at the 6px pitch; the
    visual bar is a 2px line whose width the component drives (active tick and
    cursor proximity wave). */
 .prompt-nav-tick {
   display: flex; align-items: center; justify-content: flex-end;
-  width: 28px; height: 12px; padding: 0 6px 0 0; border: 0; background: none;
+  width: 28px; height: 6px; padding: 0 6px 0 0; border: 0; background: none;
   cursor: pointer; border-radius: calc(4px * var(--corner-radius-scale));
 }
 .prompt-nav-tick-bar {

@@ -5,6 +5,7 @@ import {
   RAIL_BASE_WIDTH,
   RAIL_CURSOR_WIDTH,
   RAIL_MAX_TICKS,
+  RAIL_TICK_PITCH,
   activePromptIndex,
   cursorTickIndex,
   railWindow,
@@ -53,10 +54,10 @@ test("tickWidth proximity wave falls off with distance and floors at base", () =
 
 test("cursorTickIndex maps tape offsets to visible ticks", () => {
   assert.equal(cursorTickIndex(0, 10), 0);
-  assert.equal(cursorTickIndex(11, 10), 0);
-  assert.equal(cursorTickIndex(12, 10), 1);
-  assert.equal(cursorTickIndex(119, 10), 9);
-  assert.equal(cursorTickIndex(120, 10), -1, "below the last tick");
+  assert.equal(cursorTickIndex(RAIL_TICK_PITCH - 1, 10), 0);
+  assert.equal(cursorTickIndex(RAIL_TICK_PITCH, 10), 1);
+  assert.equal(cursorTickIndex(RAIL_TICK_PITCH * 10 - 1, 10), 9);
+  assert.equal(cursorTickIndex(RAIL_TICK_PITCH * 10, 10), -1, "below the last tick");
   assert.equal(cursorTickIndex(-1, 10), -1, "above the tape");
   assert.equal(cursorTickIndex(5, 0), -1, "no ticks");
 });
