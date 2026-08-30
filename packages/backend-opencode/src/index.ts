@@ -47,6 +47,7 @@ import {
   errorMessageOf,
   finishTranslateTurn,
   flushAssistantOnIdle,
+  markTranslateTurnAborting,
   normalizeOcObservation,
   splitNormalizedObservation,
   translateOcEvent,
@@ -373,7 +374,7 @@ export const createOpenCodeRuntimeFacade = (
   const observationListeners = new Set<(sessionId: string, observation: RuntimeObservation) => void>();
   const lifecycleListeners = new Set<Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]>();
   const translate = new Map<string, TranslateState>();
-  const activeTurn = new Map<string, { turnId: string }>();
+  const activeTurn = new Map<string, { turnId: string; aborting: boolean }>();
   const suppressedAfterAbort = new Set<string>();
   const reconciliationOrdinals = new Map<string, number>();
   const seenEventIds = new Set<string>();
@@ -407,7 +408,7 @@ export const createOpenCodeRuntimeFacade = (
     suppressedAfterAbort.delete(sessionId);
     if (activeTurn.has(sessionId)) return;
     const turnId = `turn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-    activeTurn.set(sessionId, { turnId });
+    activeTurn.set(sessionId, { turnId, aborting: false });
     admitTranslateTurn(stateFor(sessionId), turnId);
     emit(sessionId, { type: "turn/started", turnId });
   };
@@ -428,7 +429,7 @@ export const createOpenCodeRuntimeFacade = (
         ...assistant,
         {
           type: "turn/stopped",
-          reason: "completed",
+          reason: turn.aborting ? "aborted" : "completed",
         },
       ];
     }
@@ -442,12 +443,25 @@ export const createOpenCodeRuntimeFacade = (
     }];
   };
 
-  const finishAbortedTurn = (sessionId: string, turn: { turnId: string } | undefined): void => {
+  const finishAbortedTurn = (
+    sessionId: string,
+    turn: { turnId: string; aborting: boolean } | undefined,
+  ): void => {
     if (!turn) return;
     activeTurn.delete(sessionId);
     finishTranslateTurn(stateFor(sessionId), turn.turnId);
     suppressedAfterAbort.add(sessionId);
     emit(sessionId, { type: "turn/stopped", reason: "aborted" });
+  };
+
+  const clearAbortRequest = (
+    sessionId: string,
+    turn: { turnId: string; aborting: boolean } | undefined,
+  ): void => {
+    if (!turn || activeTurn.get(sessionId) !== turn) return;
+    turn.aborting = false;
+    const state = stateFor(sessionId);
+    if (state.abortingTurnId === turn.turnId) state.abortingTurnId = undefined;
   };
 
   const handlePayload = (
@@ -808,16 +822,28 @@ export const createOpenCodeRuntimeFacade = (
     },
     async abort(sessionId: string) {
       const turn = activeTurn.get(sessionId);
+      if (turn) {
+        turn.aborting = true;
+        markTranslateTurnAborting(stateFor(sessionId), turn.turnId);
+      }
       const binding = await lifecycleBinding(sessionId);
       const outcome = await lifecycle.abort(binding, randomUUID());
+      if (outcome.kind === "rejected") clearAbortRequest(sessionId, turn);
       outcomeValue(outcome);
       finishAbortedTurn(sessionId, turn);
     },
     async abortOperation(sessionId, operationId) {
+      const turn = activeTurn.get(sessionId);
+      if (turn) {
+        turn.aborting = true;
+        markTranslateTurnAborting(stateFor(sessionId), turn.turnId);
+      }
       const binding = await lifecycleBinding(sessionId);
       const outcome = await lifecycle.abort(binding, operationId);
       if (outcome.kind === "confirmed") {
-        finishAbortedTurn(sessionId, activeTurn.get(sessionId));
+        finishAbortedTurn(sessionId, turn);
+      } else if (outcome.kind === "rejected") {
+        clearAbortRequest(sessionId, turn);
       }
       return outcome;
     },

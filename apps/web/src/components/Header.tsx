@@ -22,6 +22,7 @@ import {
 import { useUiSettings } from "../uiPrefs.ts";
 import MobileNavigationRail from "./mobile/MobileNavigationRail.tsx";
 import MobileSessionHeader from "./mobile/MobileSessionHeader.tsx";
+import MobileViewHeader from "./mobile/MobileViewHeader.tsx";
 import { api, type GithubStatusDto } from "@polyth/session/web-api";
 import { tr } from "../i18n/index.ts";
 import { useKeymap } from "@polyth/hotkeys/widgets";
@@ -352,7 +353,7 @@ export default function Header() {
   // choice here (rather than inside each view) prevents a surface switch from
   // bringing back the legacy compact bar.
   if (mode === "phone") {
-    return <MobileSessionHeader />;
+    return chatSurface ? <MobileSessionHeader /> : <MobileViewHeader />;
   }
 
   return (

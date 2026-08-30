@@ -403,7 +403,13 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
   if (type === "session.updated") {
     const info = asRecord(p.info);
     const title = typeof info?.title === "string" ? info.title.trim() : "";
-    if (title) out.push({ type: "session/title-generated", title });
+    // OpenCode emits a burst of placeholder "New session - <iso>" updates
+    // before the semantic title lands. Those are not user-meaningful names
+    // and Polyth surfaces treat them as placeholders, so translate only
+    // non-placeholder titles.
+    if (title && !/^new session - \d{4}-\d{2}-\d{2}t/i.test(title)) {
+      out.push({ type: "session/title-generated", title });
+    }
     return out;
   }
 

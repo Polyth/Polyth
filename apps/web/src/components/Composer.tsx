@@ -431,17 +431,31 @@ export default function Composer({
     saveComposerConfig(sessionIdRef.current, next);
   }, []);
 
+  // Save the live composer text to the local draft store and the server, on
+  // focus loss / session switch / unmount — never while typing (a server
+  // broadcast echoing the debounced autosave would reset the live input to
+  // the older value). While editing a queued message the unrelated draft is
+  // preserved untouched.
+  const flushComposerDraft = useCallback(() => {
+    const id = sessionIdRef.current;
+    if (id === null) return;
+    const editing = queueEditRef.current;
+    saveDraft(id, editing?.sessionId === id
+      ? editing.draftBefore
+      : inputRef.current?.getText() ?? committedTextRef.current);
+    flushDraftToServer(id);
+  }, []);
+
   // Session switch: restore the draft through the command handle (never a
   // controlled replay), and never while the user is mid-composition. The
   // pending execution configuration is per-session and reloads with it.
+  // Deliberately NOT reactive to session.draft: live cross-client draft
+  // updates apply below, only when the composer is empty.
   useEffect(() => {
     const outgoing = sessionIdRef.current;
     if (outgoing !== null && outgoing !== (session?.id ?? null)) {
+      flushComposerDraft();
       const editing = queueEditRef.current;
-      saveDraft(outgoing, editing?.sessionId === outgoing
-        ? editing.draftBefore
-        : inputRef.current?.getText() ?? committedTextRef.current);
-      flushDraftToServer(outgoing);
       if (editing?.sessionId === outgoing) void api.queueEditCancel(outgoing, editing.id).catch(() => {});
     }
     sessionIdRef.current = session?.id ?? null;
@@ -466,7 +480,7 @@ export default function Composer({
     setQueueEdit(null);
     setQueueEditStarting(false);
     setQueueEditSaving(false);
-  }, [session?.id, session?.draft, newSessionIntent]);
+  }, [session?.id, newSessionIntent, flushComposerDraft]);
 
   // Disengage after an outside click has reached its target. Collapsing on
   // pointer-down can move a timeline control before pointer-up and swallow the
@@ -488,40 +502,28 @@ export default function Composer({
   // Pane and session transitions must not depend on the debounce. Flush the
   // canonical draft synchronously on pagehide and unmount.
   useEffect(() => {
-    const flush = () => {
-      const id = sessionIdRef.current;
-      const editing = queueEditRef.current;
-      if (id !== null) {
-        const t = editing?.sessionId === id
-          ? editing.draftBefore
-          : inputRef.current?.getText() ?? committedTextRef.current;
-        saveDraft(id, t);
-        flushDraftToServer(id);
-      }
-    };
-    window.addEventListener("pagehide", flush);
+    window.addEventListener("pagehide", flushComposerDraft);
     return () => {
-      window.removeEventListener("pagehide", flush);
-      flush();
+      window.removeEventListener("pagehide", flushComposerDraft);
+      flushComposerDraft();
       const editing = queueEditRef.current;
       if (editing) void api.queueEditCancel(editing.sessionId, editing.id).catch(() => {});
     };
-  }, []);
+  }, [flushComposerDraft]);
 
-  // Debounced draft persistence of committed text (local + server sync).
+  // Debounced LOCAL persistence while typing (refresh-safe). Server sync is
+  // deferred to focus loss / send / session switch: a broadcast arriving
+  // mid-typing would reset the live input to the older server value.
   useEffect(() => {
     const id = session?.id;
     if (!id || queueEdit?.sessionId === id) return;
-    const t = setTimeout(() => {
-      saveDraft(id, text);
-      syncDraftToServer(id, text);
-    }, 250);
+    const t = setTimeout(() => saveDraft(id, text), 250);
     return () => clearTimeout(t);
   }, [session?.id, text, queueEdit]);
 
   // Apply server-side draft updates from other clients when the composer is
   // empty (user hasn't started typing). Active local edits always win — the
-  // debounced sync ensures the server catches up eventually.
+  // focus-loss flush ensures the server catches up.
   const lastServerDraftRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     const serverDraft = session?.draft;
@@ -1441,7 +1443,10 @@ export default function Composer({
           onTextChange={onTextChange}
           onKeyIntercept={onKeyIntercept}
           onPaste={onPaste}
-          onFocusChange={(focused) => { if (focused) setInputFocused(true); }}
+          onFocusChange={(focused) => {
+            if (focused) setInputFocused(true);
+            else flushComposerDraft(); // save on focus loss, never mid-typing
+          }}
         />
         {acView && (
           <div className="ac-popup">
@@ -1530,31 +1535,13 @@ export default function Composer({
           onAttachGoal={toggleGoal}
           attachGithub={attachGithub}
         />
-        <div className="composer-config">
-          {!phoneLayout && executionControls}
-          {chatAgents.length > 0 ? (
-            <Picker
-              className="composer-agent-chip"
-              label={tr("composer.agent")}
-              mobileSheet
-              direction="up"
-              items={agentItems}
-              value={agentValue}
-              searchable={false}
-              onPick={pickAgent}
-              placeholder={activeAgentLabel}
-              ariaLabel={tr("composer.selectAgentModeCurrentValue", { value: activeAgentLabel })}
-              triggerIcon={<span className="agent-status-dot" />}
-            />
-          ) : (
-            <span className="agent-type-badge">{activeAgentLabel}</span>
-          )}
-        </div>
+        {/* Extensions (icon actions) lead the rail; the config cluster
+            (model · effort · agent) is right-anchored beside Send. */}
+        <span className="composer-extensions composer-mobile-extensions">
+          <SlotHost slot="composer.leading" context={slotContext} />
+          <SlotHost slot="composer.trailing" context={slotContext} />
+        </span>
         <div className="composer-actions">
-          <span className="composer-extensions composer-mobile-extensions">
-            <SlotHost slot="composer.leading" context={slotContext} />
-            <SlotHost slot="composer.trailing" context={slotContext} />
-          </span>
           {(canGenerateNextAction || suggestionBusy) && (
             <Tooltip content={tr("composer.generateNextAction")}>
               <IconButton
@@ -1567,6 +1554,25 @@ export default function Composer({
               />
             </Tooltip>
           )}
+          <div className="composer-config">
+            {!phoneLayout && executionControls}
+            {chatAgents.length > 0 ? (
+              <Picker
+                className="composer-agent-chip"
+                label={tr("composer.agent")}
+                mobileSheet
+                direction="up"
+                items={agentItems}
+                value={agentValue}
+                searchable={false}
+                onPick={pickAgent}
+                placeholder={activeAgentLabel}
+                ariaLabel={tr("composer.selectAgentModeCurrentValue", { value: activeAgentLabel })}
+              />
+            ) : (
+              <span className="agent-type-badge">{activeAgentLabel}</span>
+            )}
+          </div>
           <span className="composer-primary">
             {canStop ? (
               (working && (queueEdit || (followUp === "queue" && !sendDisabled))) ? (

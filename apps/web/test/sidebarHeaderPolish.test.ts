@@ -18,11 +18,13 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
   assert.doesNotMatch(sidebar, /className="side-foot"/);
   assert.match(sidebar, /className="sidebar-service-bar"/);
   assert.match(sidebar, /className="sidebar-drawer-header"/);
-  assert.match(sidebar, /className="sidebar-drawer-identity"/);
-  assert.match(sidebar, /project\?\.name \|\| project\?\.path \|\| tr\("header\.polyth"\)/);
+  // Compact drawer replaced the decorative identity block with a working
+  // toolbar: search toggle, sort, filter, and close.
+  assert.match(sidebar, /className="sidebar-drawer-tools"/);
   assert.match(sidebar, /className="drawer-close"/);
-  // Sort and filter merged into one service-bar menu; the dedicated
-  // list-controls row is gone (P2-W1).
+  assert.match(sidebar, /className="sidebar-search sidebar-search-inline"/);
+  assert.match(sidebar, /className=\{`sidebar-drawer-tool/);
+  assert.doesNotMatch(sidebar, /className="sidebar-drawer-identity"/);
   assert.doesNotMatch(sidebar, /className="sidebar-list-controls"/);
   assert.match(sidebar, /tr\("sidebar\.listOptions"\)/);
   assert.match(sidebar, /kind: "radio",\s*checked: sort === "recent"/);

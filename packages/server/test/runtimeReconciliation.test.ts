@@ -643,6 +643,51 @@ test("a stopped turn can send again when reconciliation status is unknown", asyn
   await store.close();
 });
 
+test("send recovers an orphaned turn when runtime status is unknown", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-orphaned-turn-"));
+  const endpoint = endpointFor(dir);
+  let aborts = 0;
+  let submissions = 0;
+  const runtime = runtimeWithSnapshot(endpoint, (binding) => ({
+    authorityId: binding.authorityId,
+    generation: binding.generation,
+    location: binding.location,
+    backendSessionId: binding.backendSessionId!,
+    reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+    state: { value: "unknown" },
+    completeness: { events: "partial", permissions: "partial", questions: "partial" },
+    permissions: [],
+    questions: [],
+    events: [],
+  }));
+  runtime.abort = async () => { aborts += 1; };
+  runtime.startTurn = async () => { submissions += 1; };
+  const { sessions, store, project } = makeHarness(runtime, dir);
+  const sessionId = "session-orphaned-turn";
+  await store.upsertProjection({
+    id: sessionId,
+    projectId: project.id,
+    backendSessionId: "backend-orphaned-turn",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-orphaned-turn"),
+    title: "Orphaned turn",
+    status: "unknown",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  await store.append(sessionId, "turn/started", { turnId: "orphaned-1" });
+
+  await sessions.send(sessionId, { text: "continue after restart" });
+
+  assert.deepEqual(
+    (await store.events(sessionId)).filter((event) => event.type.startsWith("turn/")).map((event) => event.type),
+    ["turn/started", "turn/abort-requested", "turn/stopped"],
+  );
+  assert.equal(aborts, 1);
+  assert.equal(submissions, 1);
+  assert.equal((await store.events(sessionId)).some((event) => event.type === "turn/stopped"), true);
+  await store.close();
+});
+
 test("equal status evidence is idempotent but a stale terminal revision cannot reopen admission", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-stale-terminal-"));
   const endpoint = endpointFor(dir);

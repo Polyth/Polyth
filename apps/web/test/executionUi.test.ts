@@ -179,6 +179,7 @@ test("execution code surfaces override the global prose font preference", async 
   assert.ok(override, "commands, output, diffs, and the full viewer retain the monospace font");
   assert.match(css, /\.execution-group-items\s*\{[\s\S]*?width:\s*100%;[\s\S]*?justify-self:\s*stretch;/);
   assert.match(css, /grid-template-rows var\(--motion-normal\)[\s\S]*?opacity var\(--motion-normal\)/);
+  assert.match(css, /\.reasoning-preview\s*\{[\s\S]*?-webkit-mask-image:\s*linear-gradient\(to right, #000 90%, transparent 100%\);[\s\S]*?mask-image:\s*linear-gradient\(to right, #000 90%, transparent 100%\);/);
 });
 
 const dom = new Window({ url: "http://localhost/" });

@@ -369,9 +369,10 @@ export function createSessionService(deps: {
   const turnReply = new Map<string, Map<string, string>>();
   const replyText = (sessionId: string): string =>
     [...(turnReply.get(sessionId)?.values() ?? [])].filter((t) => t.trim()).join("\n\n");
-  // The web preference arrives with the first prompt. Keep that intent until
-  // OpenCode publishes the semantic title it generated from the prompt.
-  const autoTitleRequested = new Set<string>();
+      // The web preference arrives with the first prompt. Keep that intent
+      // until OpenCode publishes the semantic title it generated from the
+      // prompt — or until a new explicit rename supersedes it.
+      const autoTitleRequested = new Set<string>();
   const titleRefreshInFlight = new Set<string>();
 
   const broadcastTail = async <T>(
@@ -1387,7 +1388,7 @@ export function createSessionService(deps: {
           });
         }
         const currentProjection = await store.projection(sessionId);
-        const authoritativeState = await authoritativeSnapshotState(
+        let authoritativeState = await authoritativeSnapshotState(
           sessionId,
           snapshot,
           binding,
@@ -1532,6 +1533,42 @@ export function createSessionService(deps: {
         for (const result of snapshotIngestion.observations) {
           if (result.kind !== "applied") continue;
           for (const event of result.events) broadcast.event(event);
+        }
+        // A Polyth restart loses the in-memory active-turn map. If the
+        // reattached runtime cannot supply a comparable status watermark, do
+        // not leave a durable `turn/started` stranded forever. Abort the
+        // orphaned backend turn with a durable operation; a confirmed abort is
+        // the same authoritative boundary used by the explicit Stop action.
+        if (
+          (reason === "session-reattached" || reason === "send-after-restart")
+          && authoritativeState.value === "unknown"
+          && !turnActive(sessionId)
+        ) {
+          const open = openTurnFromEvents(await store.events(sessionId));
+          if (open) {
+            const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
+              sessionId,
+              mutationKind: "turn-abort",
+              intentEvent: {
+                type: "turn/abort-requested",
+                data: { reason: "restart-recovery" },
+                ignorable: true,
+              },
+            }));
+            const outcome = await runPreparedOperation<Record<string, never>, void>(
+              prepared.operation,
+              (operationId) => rt.abortOperation
+                ? rt.abortOperation(sessionId, operationId)
+                : rt.abort(sessionId),
+              () => ({}),
+              undefined,
+              ABORT_AWAIT_MS,
+            );
+            if (outcome.kind === "confirmed") {
+              await stopLocally(sessionId);
+              authoritativeState = { value: "idle", causalOperationId: prepared.operation.operationId };
+            }
+          }
         }
         if (
           authoritativeState.value === "idle"
@@ -1709,7 +1746,13 @@ export function createSessionService(deps: {
       }
       try {
         const title = (await runtime.sessions()).find((session) => session.id === current.backendSessionId)?.title;
-        if (title && !isPlaceholderTitle(title, current.backendSessionId)) {
+        // Timestamp titles are OpenCode's failed auto-title. Treating them as
+        // real titles leaves the backend placeholder as the visible name;
+        // skipping keeps the request pending for the next interval while a
+        // retry (or a later turn) may still produce a semantic title.
+        if (title
+          && !isPlaceholderTitle(title, current.backendSessionId)
+          && !/^new session - \d{4}-\d{2}-\d{2}t/i.test(title)) {
           await onRuntimeEvent(sessionId, { type: "session/title-generated", title });
           titleRefreshInFlight.delete(sessionId);
           return;
@@ -1772,6 +1815,9 @@ export function createSessionService(deps: {
         }
         break;
       case "session/title-generated": {
+        // The first user prompt already makes the session legible in every
+        // surface that reads the log; a semantic title that fails to materialize
+        // is a naming bug only when OpenCode can do better than the raw prompt.
         if (!autoTitleRequested.has(sessionId)) break;
         const current = await store.projection(sessionId);
         if (!current || !isPlaceholderTitle(current.title, sessionId)) {
@@ -1780,6 +1826,11 @@ export function createSessionService(deps: {
         }
         const title = ev.title.trim().slice(0, 200);
         if (!title || isPlaceholderTitle(title, sessionId)) break;
+        // "New session - <iso>" is OpenCode's failure mode (timestamp title
+        // replaces the auto-title that never ran, e.g. a bad small model).
+        // Persisting it as the visible title defeats the prompt-derived
+        // fallback, so keep those names in backend territory only.
+        if (/^new session - \d{4}-\d{2}-\d{2}t/i.test(title)) break;
         await persist(
           sessionId,
           "session/metadata-changed",
@@ -3017,7 +3068,7 @@ export function createSessionService(deps: {
     withSessionLock(sessionId, async () => {
       const current = (await store.projection(sessionId)) ?? proj;
       const active = turnActive(sessionId);
-      const stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
+      let stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
       const unsafeStatus = current.status === "reconciling"
         || (current.status === "unknown" && !stoppedTurnRecorded);
       const reconciliation = await durable.reconciliation(sessionId);
@@ -3769,7 +3820,7 @@ export function createSessionService(deps: {
     async send(sessionId, input: UserTurnInput): Promise<SendResult> {
       let proj = await store.projection(sessionId);
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
-      const stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
+      let stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
       // Attachments are verified before any state changes (rewind reset,
       // queueing, admission) so a bad ref can never dirty the durable log.
       if (input.attachments !== undefined) {
@@ -3813,6 +3864,7 @@ export function createSessionService(deps: {
       ) {
         await reconcileUnderLock(sessionId, proj, candidateRuntime, "send-after-restart");
         proj = (await store.projection(sessionId)) ?? proj;
+        stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
       }
       if (
         proj.status === "reconciling"
@@ -3856,6 +3908,7 @@ export function createSessionService(deps: {
         }
       }
       proj = (await store.projection(sessionId)) ?? proj;
+      stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
       if (
         proj.status === "reconciling"
         || proj.status === "epoch-pending"
@@ -4645,6 +4698,9 @@ export function createSessionService(deps: {
         if (!t || t.length > 200) throw Object.assign(new Error("title required (≤200 chars)"), { code: "invalid-input" });
         const proj = await store.projection(sessionId);
         if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        // A manual rename settles the naming intent: a later (or delayed)
+        // OpenCode title event must not overwrite the user's explicit choice.
+        autoTitleRequested.delete(sessionId);
         await appendAndBroadcast(sessionId, "session/metadata-changed", { title: t }, { ignorable: true });
         await updateProjection(sessionId, { title: t });
       });

@@ -984,7 +984,7 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
         const savebar = document.querySelector<HTMLElement>(".workflow-mobile-savebar")!.getBoundingClientRect();
         const scrollport = document.querySelector<HTMLElement>(".workflow-layout")!.getBoundingClientRect();
         const status = document.querySelector<HTMLElement>(".statusbar")?.getBoundingClientRect();
-        const nav = document.querySelector<HTMLElement>(".workspace-bottom-nav")?.getBoundingClientRect();
+        const nav = document.querySelector<HTMLElement>(".mobile-session-floats")?.getBoundingClientRect();
         const savebarPosition = getComputedStyle(document.querySelector<HTMLElement>(".workflow-mobile-savebar")!).position;
         return {
           toolbarHeight: toolbar.height,

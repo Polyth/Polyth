@@ -136,21 +136,14 @@ test("390px and 1280px shells render the current navigation contracts", async ()
     assert.ok(documentOverflow <= 1, `${width}px document overflows by ${documentOverflow}px`);
 
     if (width === 390) {
-      await page.waitForSelector(".mobile-shortcut-rail", { state: "visible" });
-      await page.waitForSelector(".workspace-bottom-nav", { state: "visible" });
-      assert.equal(await page.locator(".header-actions").count(), 0, "phone shell restored the removed Application menu");
-      assert.match(
-        await page.locator(".session-nav-current").getAttribute("aria-label") ?? "",
-        /Loaded synthetic timeline/,
-      );
-      const top = await boxesOf(page, ".mobile-shortcut");
-      const bottom = await boxesOf(page, ".workspace-bottom-nav > button");
-      assertTouchTargets(top, "390px top shortcut rail");
-      assertTouchTargets(bottom, "390px bottom session bar");
-      geometry.mobile = { top, bottom, documentOverflow };
+      await page.waitForSelector(".mobile-session-floats", { state: "visible" });
+      assert.equal(await page.locator(".header-actions").count(), 0, "phone shell hides the desktop Application menu");
+      const floats = await boxesOf(page, ".mobile-session-floats > *");
+      assertTouchTargets(floats, "390px floating three-segment bar");
+      geometry.mobile = { floats, documentOverflow };
     } else {
       await page.waitForSelector(".view-switcher", { state: "visible" });
-      assert.equal(await page.locator(".workspace-bottom-nav:visible").count(), 0, "desktop shows the mobile bottom bar");
+      assert.equal(await page.locator(".mobile-session-floats").count(), 0, "desktop does not render the phone floating bar");
       assert.equal(await page.locator(".mobile-shortcut-rail").count(), 0, "desktop renders the phone shortcut rail");
       geometry.desktop = {
         topRail: await boxesOf(page, ".view-switcher .view-icon"),

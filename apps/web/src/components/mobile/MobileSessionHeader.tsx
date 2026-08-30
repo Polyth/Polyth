@@ -81,7 +81,7 @@ function SessionSwitcher({ onClose }: { onClose: () => void }) {
   );
 }
 
-function Tools({ onClose }: { onClose: () => void }) {
+export function Tools({ onClose }: { onClose: () => void }) {
   const capabilities = useResolvedCapabilities().filter((capability) => capability.descriptor.available());
   const groups = [
     ["Workspace", capabilities.filter((capability) => ["files", "git", "terminal", "browser"].includes(capability.descriptor.id))],

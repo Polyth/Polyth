@@ -669,8 +669,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   place-items: center;
   flex: none;
   border: 0;
-  border-radius: var(--radius-control);
-  background: var(--session-blue-soft, var(--accent-wash));
+  background: none;
   color: var(--session-blue, var(--accent));
   font: 650 var(--nav-project-size)/1 var(--ui-font-family);
 }
@@ -1230,6 +1229,12 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   padding-inline: max(var(--gutter), calc((100% - var(--chat-measure)) / 2));
   display: flex; flex-direction: column; gap: var(--space-4);
 }
+/* A column-flex SCROLLER must never compress its rows: rows with
+   overflow:hidden (tool cards) have min-height:auto collapsing to 0, so the
+   default flex-shrink:1 squeezes them to zero height while they still occupy
+   the flex gap around them — the invisible 0-height ghosts behind the
+   "inconsistent paddings" between timeline rows. Rows are content-sized. */
+.timeline > * { flex-shrink: 0; }
 
 /* Session-open transition: compositor-only (opacity + transform, no layout or
    paint properties) so a switch stays smooth even while a large log hydrates.
@@ -1238,6 +1243,24 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   .timeline.session-entering { animation: session-enter var(--motion-normal) ease-out; }
   @keyframes session-enter {
     from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
+/* Rows ease in on mount instead of popping: appended messages, tool cards,
+   task states, the working indicator, and items joining a work group.
+   Row keys stay stable while a row streams, so this plays once per new row —
+   in-place updates never restart it. Compositor-only (opacity + transform). */
+@media (prefers-reduced-motion: no-preference) {
+  .timeline > .msg,
+  .timeline > .tool-card,
+  .timeline > .task-activity,
+  .execution-group-items > .execution-row,
+  .execution-group-items > .task-activity {
+    animation: msg-in var(--motion-surface) var(--motion-ease);
+  }
+  @keyframes msg-in {
+    from { opacity: 0; transform: translateY(8px); }
     to { opacity: 1; transform: none; }
   }
 }
@@ -8594,6 +8617,28 @@ color: var(--muted);
     white-space: nowrap;
   }
   .mobile-session-selector > svg { flex: none; width: var(--icon-sm); height: var(--icon-sm); color: var(--muted); }
+  .mobile-view-title {
+    min-width: 0;
+    min-height: var(--tap);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 var(--space-3);
+    border-radius: var(--radius-control);
+    background: color-mix(in srgb, var(--elevated) 94%, transparent);
+    border: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
+    box-shadow: var(--shadow-sm);
+    backdrop-filter: blur(10px);
+    color: var(--text);
+    font-size: var(--font-label);
+    font-weight: 600;
+  }
+  .mobile-view-title > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .mobile-session-status { width: var(--space-2); height: var(--space-2); flex: none; border-radius: 50%; background: var(--green); }
   .mobile-session-status.needs-approval, .mobile-session-status.reconciling { background: var(--amber); }
   .mobile-session-status.failed { background: var(--red); }
@@ -9760,8 +9805,9 @@ html[data-font] body :is(
 .reasoning {
   width: 100%;
   max-width: 100%;
-  margin: 0 0 var(--space-1);
+  margin: 0;
 }
+.msg > .reasoning + .bubble { margin-top: var(--space-1); }
 .reasoning:not([open]) { width: 100%; }
 .reasoning summary {
   width: 100%;
@@ -9813,8 +9859,8 @@ html[data-font] body :is(
   color: var(--muted);
   font: 400 calc(13.25px * var(--ui-font-scale, 1))/18px var(--ui-font-family);
   white-space: nowrap;
-  -webkit-mask-image: linear-gradient(to right, #000 55%, transparent 97%);
-  mask-image: linear-gradient(to right, #000 55%, transparent 97%);
+  -webkit-mask-image: linear-gradient(to right, #000 90%, transparent 100%);
+  mask-image: linear-gradient(to right, #000 90%, transparent 100%);
 }
 .reasoning-chevron { width: 16px; height: 16px; display: grid; place-items: center; color: var(--faint); }
 .reasoning-chevron svg { width: 14px; height: 14px; stroke-width: 1.75; }

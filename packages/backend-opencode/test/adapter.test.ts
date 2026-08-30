@@ -936,6 +936,14 @@ test("session.updated exposes OpenCode's generated title and ignores malformed u
     }, state),
     [],
   );
+  // OpenCode's placeholder burst is not a user-meaningful title.
+  assert.deepEqual(
+    translateOcEvent({
+      type: "session.updated",
+      properties: { info: { id: "ses_1", title: "New session - 2026-08-26T05:00:55.897Z" } },
+    }, state),
+    [],
+  );
 });
 
 test("title snapshots without upstream revisions remain independently ingestible", () => {

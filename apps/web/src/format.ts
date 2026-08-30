@@ -40,7 +40,7 @@ export const MOD = modKey(typeof navigator === "undefined" ? "" : navigator.plat
 /** Full title used by hover/focus affordances before visual truncation. */
 export function fullSessionTitle(title: string, firstUserText?: string): string {
   const t = title.trim();
-  const isPlaceholder = t === "" || /^new session$/i.test(t) || /^\(untitled/.test(t);
+  const isPlaceholder = isPlaceholderTitle(t);
   if (!isPlaceholder || !firstUserText) return t || "(untitled)";
   const line = firstUserText.split("\n").find((l) => l.trim())?.trim() ?? "";
   return line || t || "(untitled)";
@@ -50,7 +50,7 @@ export function fullSessionTitle(title: string, firstUserText?: string): string 
 export function deriveSessionTitle(title: string, firstUserText?: string): string {
   const full = fullSessionTitle(title, firstUserText);
   const t = title.trim();
-  const isPlaceholder = t === "" || /^new session$/i.test(t) || /^\(untitled/.test(t);
+  const isPlaceholder = isPlaceholderTitle(t);
   return isPlaceholder && full.length > 48 ? `${full.slice(0, 47)}…` : full;
 }
 
@@ -84,6 +84,7 @@ const PLACEHOLDER_TITLES = new Set([
 export function isPlaceholderTitle(title: string, sessionId?: string): boolean {
   const t = title.trim();
   if (PLACEHOLDER_TITLES.has(t.toLowerCase())) return true;
+  if (/^new session - \d{4}-\d{2}-\d{2}t/i.test(t)) return true;
   if (sessionId !== undefined && t === sessionId) return true;
   if (t.startsWith("ses_")) return true;
   if (/^[0-9a-f-]{8,}$/i.test(t)) return true;

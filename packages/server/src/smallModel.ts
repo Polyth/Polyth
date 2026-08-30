@@ -33,9 +33,6 @@ const FALLBACK_CONTEXT_TOKENS = 32_000;
 const PROMPT_OVERHEAD_TOKENS = 256;
 const CHARS_PER_TOKEN = 3.6;
 
-const unsupported = (error: unknown): boolean =>
-  !!error && typeof error === "object" && (error as { code?: unknown }).code === "unsupported";
-
 const promptForFallback = (options: SmallModelCompleteOptions): string =>
   options.systemPrompt ? `${options.systemPrompt}\n\n${options.prompt}` : options.prompt;
 
@@ -77,8 +74,10 @@ export function createSmallModelService(store: RuntimeMutationStore): SmallModel
             ...(options.signal ? { signal: options.signal } : {}),
             ...(options.responseSchema ? { responseSchema: options.responseSchema } : {}),
           });
-        } catch (error) {
-          if (!unsupported(error)) throw error;
+        } catch {
+          // Fall through to oneShot for all direct-provider failures —
+          // transient errors (expired tokens, rate limits, network) degrade
+          // to the session-based fallback instead of surfacing as 500.
         }
       }
       if (options.signal?.aborted) throw options.signal.reason ?? new DOMException("aborted", "AbortError");

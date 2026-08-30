@@ -89,6 +89,54 @@ import { Button, Notice } from "./ui/index.ts";
  *  text gets an invisible nudge (same trick as a11y/live.tsx). */
 type Announce = (text: string) => void;
 
+/** True when streamed text must not be smoothed: accessibility settings and
+ *  the desktop low-resource mode both get the raw target directly. */
+function smoothTextOff(): boolean {
+  if (document.body.dataset.desktopLowResource === "true") return true;
+  if (document.documentElement.dataset.reduceAnimations === "true") return true;
+  return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/** Super-fast typewriter: the rendered text chases the streamed target at a
+ *  rate set once per chunk arrival (backlog ÷ ~18 frames), so any backlog
+ *  catches up in a fixed ~300ms and new arrivals re-rate — the visible text
+ *  lags the stream by a bounded ~300ms and reads as one continuous fast
+ *  type-out instead of blocks popping in. Shrinking targets (rewind) and
+ *  motion-off snap immediately.
+ *  ponytail: re-parses one message's markdown per reveal frame; per-block
+ *  memo caching in markdown/render.tsx is the upgrade if profiling complains. */
+function useSmoothText(target: string): string {
+  const [shown, setShown] = useState(target);
+  const shownRef = useRef(target);
+  const rateRef = useRef(0);
+  const raf = useRef(0);
+  useEffect(() => {
+    cancelAnimationFrame(raf.current);
+    if (target.length < shownRef.current.length || smoothTextOff()) {
+      shownRef.current = target;
+      rateRef.current = 0;
+      setShown(target);
+      return;
+    }
+    if (shownRef.current.length >= target.length) return;
+    // Fixed-time catch-up from THIS arrival's backlog; the floor keeps short
+    // drips visibly typing instead of teleporting.
+    rateRef.current = Math.max(4, Math.ceil((target.length - shownRef.current.length) / 18));
+    const step = () => {
+      const behind = target.length - shownRef.current.length;
+      if (behind <= 0) return;
+      const take = Math.min(behind, rateRef.current);
+      shownRef.current = target.slice(0, target.length - behind + take);
+      setShown(shownRef.current);
+      if (shownRef.current.length < target.length) raf.current = requestAnimationFrame(step);
+    };
+    raf.current = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf.current);
+  }, [target]);
+  // Render guard: never show more text than the target holds.
+  return target.length < shown.length ? target : shown;
+}
+
 // Merged thinking block (P2-W2): progressive disclosure over the REAL
 // reasoning stream. The block stays expanded while the stream forms, then
 // folds to a single line — the brain mark plus the first thought, faded out
@@ -106,6 +154,7 @@ function Thinking({ m }: { m: AssistantMsg }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const reasoningAtBottom = useRef(true);
   const head = reasoningHead(m.reasoning);
+  const reasoning = useSmoothText(m.reasoning);
   // Expanded while forming; auto-folds when the stream settles unless the
   // reader pinned it by hand.
   useEffect(() => {
@@ -118,11 +167,12 @@ function Thinking({ m }: { m: AssistantMsg }) {
   }, [active, prefs.thinkingDefaultExpanded]);
   // Streaming follow mirrors the conversation reader contract: follow while
   // the well is at its tail, but preserve an intentional scroll-up position.
+  // Deps track the SMOOTHED text so the well follows the per-frame reveal.
   useEffect(() => {
     if (!open || !active || !reasoningAtBottom.current) return;
     const el = bodyRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [open, active, m.reasoning]);
+  }, [open, active, reasoning]);
   const mark = (
     <span className={active ? "reasoning-mark running" : "reasoning-mark"} aria-hidden="true">
       <Icon.brain />
@@ -141,7 +191,7 @@ function Thinking({ m }: { m: AssistantMsg }) {
             el.scrollHeight - el.scrollTop - el.clientHeight < 16;
         }}
       >
-        {renderMarkdown(m.reasoning, `${m.id}-reasoning`)}
+        {renderMarkdown(reasoning, `${m.id}-reasoning`)}
       </div>
       <div className="reasoning-foot">
         <CopyButton text={m.reasoning} label={COPY_REASONING_NAME} />
@@ -745,6 +795,7 @@ function AssistantView({
   preliminary?: boolean;
 }) {
   const hasAnswer = m.text !== "" || !m.finalized;
+  const answer = useSmoothText(m.text);
   const galleryAvailable = /!\[[^\]]*]\([^)]+\)/.test(m.text);
   const openGallery = () => {
     const message = Array.from(document.querySelectorAll<HTMLElement>(tr("timeline.msgAssistant")))
@@ -758,7 +809,7 @@ function AssistantView({
     <div className={`msg assistant${preliminary ? " assistant-preliminary" : ""}`} data-message-seq={m.eventSeq} {...(articleProps ?? {})}>
       {m.reasoning !== "" && <Thinking m={m} />}
       {hasAnswer && (
-        <div className="bubble" dir="auto">{renderMarkdown(m.text || "", m.id)}{!m.finalized && <span className="caret" />}</div>
+        <div className="bubble" dir="auto">{renderMarkdown(answer || "", m.id)}{!m.finalized && <span className="caret" />}</div>
       )}
       {plan && plan.items.length > 0 && <TaskList plan={plan} />}
       {m.finalized && m.text !== "" && announce && galleryAvailable && (
@@ -1213,6 +1264,13 @@ export default function Timeline({
   const anchor = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
   const pendingJump = useRef<string | null>(null);
   const pendingJumpFocus = useRef(false);
+  // Smooth tail-follow state (refs, not state: rAF bookkeeping must never
+  // re-render). instantFollow marks the first follow after open/switch so it
+  // lands in one step instead of gliding through the restored history.
+  const chaseRaf = useRef(0);
+  const chasing = useRef(false);
+  const selfScroll = useRef(false);
+  const instantFollow = useRef(true);
   // Latest-reveal state (§2.4): true while the reader holds a position away
   // from the tail, mounting the reserved Jump to latest region.
   const [showJump, setShowJump] = useState(false);
@@ -1230,6 +1288,7 @@ export default function Timeline({
     }
     setAnchorSession(sessionId);
     setLimit(initialLimit);
+    instantFollow.current = true; // next tail follow lands instantly, no glide
     const stored = sessionId !== null ? loadTimelineAnchor(sessionId) : null;
     restoreRef.current = stored !== null && !stored.atBottom ? stored : null;
     atBottom.current = stored?.atBottom ?? true;
@@ -1273,24 +1332,63 @@ export default function Timeline({
 
   // Tail follow (§2.4): at/near the tail the timeline follows growth; a reader
   // who scrolled up keeps the chosen position and sees the reveal control.
+  // The follow EASES instead of teleporting (exponential rAF chase, re-targeted
+  // per commit), so appended rows visibly push older messages up. Programmatic
+  // writes mark themselves via selfScroll; any other scroll event — wheel,
+  // drag, keyboard — hands control back to the reader immediately.
+  const chaseTail = useCallback(() => {
+    cancelAnimationFrame(chaseRaf.current);
+    chasing.current = true;
+    const step = () => {
+      const el = ref.current;
+      if (!el || !atBottom.current) { chasing.current = false; return; }
+      const gap = el.scrollHeight - el.clientHeight - el.scrollTop;
+      selfScroll.current = true;
+      if (Math.abs(gap) < 1) {
+        el.scrollTop = el.scrollHeight - el.clientHeight;
+        chasing.current = false;
+        return;
+      }
+      el.scrollTop += gap * 0.3;
+      chaseRaf.current = requestAnimationFrame(step);
+    };
+    chaseRaf.current = requestAnimationFrame(step);
+  }, []);
+  useEffect(() => () => cancelAnimationFrame(chaseRaf.current), []);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    const first = instantFollow.current;
+    instantFollow.current = false;
     if (atBottom.current) {
-      el.scrollTop = el.scrollHeight;
       setShowJump(false);
+      if (first) {
+        // Session open/switch: land at the tail in one step, never glide.
+        cancelAnimationFrame(chaseRaf.current);
+        chasing.current = false;
+        selfScroll.current = true;
+        el.scrollTop = el.scrollHeight;
+      } else {
+        chaseTail();
+      }
     } else {
       setShowJump(el.scrollHeight - el.scrollTop - el.clientHeight >= 80);
     }
-  }, [model.version]);
+  }, [model.version, chaseTail]);
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onScroll = () => {
     const el = ref.current;
     if (!el) return;
-    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    atBottom.current = near;
-    setShowJump(!near);
+    if (selfScroll.current) {
+      selfScroll.current = false; // the follow's own write, not reader intent
+    } else {
+      chasing.current = false;
+      cancelAnimationFrame(chaseRaf.current);
+      const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      atBottom.current = near;
+      setShowJump(!near);
+    }
     // Scroll-up lazy loading: nearing the top with every cached row already
     // rendered pulls the next page of older history from the server.
     if (el.scrollTop < 160 && canLoadOlder && start === 0 && !olderBusy) void loadOlder();

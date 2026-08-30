@@ -1100,6 +1100,12 @@ export const createLegacyProtocolAdapter = (
       const events: RuntimeSnapshot["events"] = [];
       const acceptedOperations: NonNullable<RuntimeSnapshot["acceptedOperations"]> = [];
       const state = createTranslateState();
+      // Pulled reconciliation replays the full backend history. A `session.updated`
+      // row carries the current session title, but OpenCode's placeholder burst
+      // ("New session - <iso>") would be replayed as a title event against the
+      // semantic snapshot below — skip title-only updates in the replay stream.
+      const isTitleOnly = (info: Record<string, unknown> | undefined): boolean =>
+        Boolean(info) && Object.keys(info!).length <= 2 && typeof info!.title === "string";
       for (const rowValue of messages.ok ? asArray(messages.value) : []) {
         const row = asRecord(rowValue);
         if (!row) continue;
@@ -1117,15 +1123,17 @@ export const createLegacyProtocolAdapter = (
             backendSessionId,
           });
         }
-        appendPulledEvents(
-          events,
-          {
-            type: "message.updated",
-            properties: { sessionID: backendSessionId, info: info ?? {} },
-          },
-          observed,
-          state,
-        );
+        if (!isTitleOnly(info)) {
+          appendPulledEvents(
+            events,
+            {
+              type: "message.updated",
+              properties: { sessionID: backendSessionId, info: info ?? {} },
+            },
+            observed,
+            state,
+          );
+        }
         for (const part of Array.isArray(row.parts) ? row.parts : []) {
           appendPulledEvents(
             events,
