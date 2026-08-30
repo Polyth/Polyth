@@ -47,7 +47,6 @@ import {
   errorMessageOf,
   finishTranslateTurn,
   flushAssistantOnIdle,
-  markTranslateTurnAborting,
   normalizeOcObservation,
   splitNormalizedObservation,
   translateOcEvent,
@@ -375,6 +374,7 @@ export const createOpenCodeRuntimeFacade = (
   const lifecycleListeners = new Set<Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]>();
   const translate = new Map<string, TranslateState>();
   const activeTurn = new Map<string, { turnId: string; aborting: boolean }>();
+  const suppressedAfterAbort = new Set<string>();
   const reconciliationOrdinals = new Map<string, number>();
   const seenEventIds = new Set<string>();
   const log = extras.log ?? ((level, msg, data) => {
@@ -404,6 +404,7 @@ export const createOpenCodeRuntimeFacade = (
   };
 
   const admitTurn = (sessionId: string): void => {
+    suppressedAfterAbort.delete(sessionId);
     if (activeTurn.has(sessionId)) return;
     const turnId = `turn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     activeTurn.set(sessionId, { turnId, aborting: false });
@@ -441,6 +442,18 @@ export const createOpenCodeRuntimeFacade = (
     }];
   };
 
+  const finishAbortedTurn = (
+    sessionId: string,
+    turn: { turnId: string; aborting: boolean } | undefined,
+  ): void => {
+    if (!turn) return;
+    turn.aborting = true;
+    activeTurn.delete(sessionId);
+    finishTranslateTurn(stateFor(sessionId), turn.turnId);
+    suppressedAfterAbort.add(sessionId);
+    emit(sessionId, { type: "turn/stopped", reason: "aborted" });
+  };
+
   const handlePayload = (
     id: string | undefined,
     data: unknown,
@@ -468,6 +481,7 @@ export const createOpenCodeRuntimeFacade = (
       return;
     }
     const st = stateFor(canonical);
+    if (suppressedAfterAbort.has(canonical)) return;
     const observationEndpoint = streamEndpoint;
     if (observationEndpoint && observationListeners.size > 0) {
       const reconciliationOrdinal = reconciliationOrdinals.get(canonical);
@@ -801,20 +815,13 @@ export const createOpenCodeRuntimeFacade = (
       const binding = await lifecycleBinding(sessionId);
       const outcome = await lifecycle.abort(binding, randomUUID());
       outcomeValue(outcome);
-      if (turn) {
-        turn.aborting = true;
-        markTranslateTurnAborting(stateFor(sessionId), turn.turnId);
-      }
+      finishAbortedTurn(sessionId, turn);
     },
     async abortOperation(sessionId, operationId) {
       const binding = await lifecycleBinding(sessionId);
       const outcome = await lifecycle.abort(binding, operationId);
       if (outcome.kind === "confirmed") {
-        const turn = activeTurn.get(sessionId);
-        if (turn) {
-          turn.aborting = true;
-          markTranslateTurnAborting(stateFor(sessionId), turn.turnId);
-        }
+        finishAbortedTurn(sessionId, activeTurn.get(sessionId));
       }
       return outcome;
     },

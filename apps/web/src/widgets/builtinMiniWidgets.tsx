@@ -3,7 +3,12 @@ import { defineWidgetPlugin, registerWidgetPlugin } from "./catalog.ts";
 import { tr } from "../i18n/index.ts";
 import { ClockIcon, IconButton, SearchIcon, SettingsIcon } from "../components/ui/index.ts";
 
-const SHELL_ACTION_SLOTS = ["app.header.actions", "session.header.actions", "app.nav"] as const;
+const SHELL_ACTION_SLOTS = [
+  "app.header.actions", "session.header.actions", "app.nav",
+  // Widget-areas (WA4): the search / settings controls can also live in the
+  // sidebar toolbar or footer, or the app-header leading cluster.
+  "app.header.leading", "sidebar.toolbar", "sidebar.footer",
+] as const;
 const SHELL_ACTIONS_PLUGIN = defineWidgetPlugin({
   id: "shell-actions",
   name: tr("widgets.builtinminiwidgets.applicationShell"),

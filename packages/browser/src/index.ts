@@ -274,7 +274,16 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
       sessions.set(id, s);
       dto.status = "ready";
       if (input.url) {
-        await service.navigate(id, input.url, "user");
+        try {
+          await service.navigate(id, input.url, "user");
+        } catch (error) {
+          const failure = error as Error & { code?: string };
+          if (failure.code !== "approval-required") throw error;
+          // Session created but the initial URL needs approval — return the
+          // session so the client can show its approval dialog.
+          await enqueue(s, () => captureFrame(s));
+          return { ...s.dto };
+        }
       } else {
         await enqueue(s, () => captureFrame(s));
       }

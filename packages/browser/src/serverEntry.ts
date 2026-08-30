@@ -121,15 +121,26 @@ export function browserRoutes(deps: {
           });
           return true;
         }
-        json(200, await browser.create({
+        const target = String(input.url ?? "");
+        const session = await browser.create({
           projectId: String(input.projectId ?? ""),
           ...(input.sessionId ? { sessionId: String(input.sessionId) } : {}),
-          ...(input.url ? { url: String(input.url) } : {}),
+          ...(target ? { url: target } : {}),
           ...(viewport && typeof viewport.width === "number" && typeof viewport.height === "number"
             ? { viewport: { width: viewport.width, height: viewport.height } }
             : {}),
           ...(colorScheme ? { colorScheme } : {}),
-        }));
+        });
+        // If a URL was requested but the session stayed at about:blank, the
+        // initial navigation needed approval — surface it to the client.
+        if (target && session.url === "about:blank") {
+          json(200, {
+            session,
+            approval: { origin: originOf(target) ?? target, message: `external origin ${originOf(target) ?? target} needs a per-origin approval` },
+          });
+        } else {
+          json(200, session);
+        }
         return true;
       }
 

@@ -2938,6 +2938,66 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .gallery-nav.prev { left: 10px; }
 .gallery-nav.next { right: 10px; }
 
+/* Finder-like Quick Look for composer and timeline attachments. The scrim and
+   scale entrance make the preview feel like a surface lifted from the pill,
+   while the content remains native to the browser. */
+@keyframes attachment-preview-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes attachment-preview-in { from { opacity: 0; transform: scale(.94) translateY(10px); } to { opacity: 1; transform: none; } }
+.dialog-backdrop:has(.attachment-preview-dialog) { animation: attachment-preview-backdrop-in var(--motion-surface) var(--motion-ease); }
+.attachment-preview-dialog {
+  width: min(980px, calc(100vw - var(--space-6)));
+  height: min(780px, calc(100vh - var(--space-6)));
+  max-height: calc(var(--visual-vh, 100dvh) - var(--space-6));
+  background: var(--sunken);
+  animation: attachment-preview-in var(--motion-surface) var(--motion-ease);
+}
+.attachment-preview-dialog .ui-dialog-body { display: flex; padding: 0; overflow: hidden; }
+.attachment-preview-content { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+.attachment-preview-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  min-height: 48px; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--hair);
+  background: var(--elevated); color: var(--muted); font-size: var(--font-meta);
+}
+.attachment-preview-details { display: flex; min-width: 0; align-items: center; gap: var(--space-2); }
+.attachment-preview-details > span { white-space: nowrap; }
+.attachment-preview-path { max-width: min(48vw, 520px); overflow: hidden; text-overflow: ellipsis; }
+.attachment-preview-navigation { display: flex; flex: none; align-items: center; gap: var(--space-2); }
+.attachment-preview-nav {
+  width: var(--control-h-sm); height: var(--control-h-sm); padding: 0; border: 1px solid var(--hair-strong);
+  color: var(--text); font-size: 22px; line-height: 1;
+}
+.attachment-preview-stage {
+  display: flex; flex: 1; min-height: 0; align-items: center; justify-content: center;
+  overflow: auto; padding: var(--space-5); background: var(--sunken); outline: none;
+}
+.attachment-preview-media { display: block; max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--radius-control); box-shadow: var(--shadow-md); }
+.attachment-preview-pdf { width: 100%; height: 100%; min-height: 0; border: 0; border-radius: var(--radius-control); background: var(--panel); }
+.attachment-preview-audio { width: min(460px, 100%); }
+.attachment-preview-text {
+  width: 100%; height: 100%; margin: 0; padding: var(--space-4); overflow: auto;
+  border: 1px solid var(--border-soft); border-radius: var(--radius-card); background: var(--panel);
+  color: var(--text-dim); font: var(--font-code) / 1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.attachment-preview-state { color: var(--muted); text-align: center; }
+.attachment-preview-state a { display: block; margin-top: var(--space-3); color: var(--accent); overflow-wrap: anywhere; }
+.attachment-preview-link-url { display: block; max-width: min(680px, 100%); margin-bottom: var(--space-3); color: var(--text-dim); overflow-wrap: anywhere; }
+.attachment-preview-download { max-width: 420px; }
+.attachment-open {
+  display: inline-flex; min-width: 0; align-items: center; gap: 6px; padding: 0; border: 0;
+  color: inherit; background: transparent; text-align: left; cursor: zoom-in;
+}
+.attachment-open:hover { background: transparent; }
+.attachment-open:focus-visible { border-radius: var(--radius-control); outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.attachment-pill:has(.attachment-open) { padding-block: 2px; }
+.attachment-pill .attachment-open .att-name { text-decoration: none; }
+.attachment-pill .attachment-open:hover .att-name { text-decoration: underline; }
+@media (max-width: 640px) {
+  .attachment-preview-toolbar { align-items: flex-start; }
+  .attachment-preview-details { flex-wrap: wrap; }
+  .attachment-preview-path { max-width: 100%; flex-basis: 100%; }
+  .attachment-preview-stage { padding: var(--space-3); }
+}
+
 /* message actions + prompt navigator (UX-MSG-ACTIONS / UX-TIMELINE-LAYOUT-01) */
 .msg { position: relative; }
 /* The footer is a separate normal-flow row beneath its body. Actions reveal

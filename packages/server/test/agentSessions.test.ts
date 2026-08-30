@@ -472,5 +472,10 @@ test("cancel reattaches a persisted working session after a server restart", asy
 
   assert.deepEqual(runtime.ensured, ["persisted-working"]);
   assert.deepEqual(runtime.aborted, ["persisted-working"]);
+  assert.equal((await store.projection("persisted-working"))?.status, "idle");
+  assert.equal(
+    (await store.events("persisted-working")).filter((event) => event.type === "turn/stopped").length,
+    1,
+  );
   await store.close();
 });

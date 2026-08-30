@@ -1437,7 +1437,7 @@ export type RuntimeEvent =
   | ({ type: "secret/requested" } & SecretRequestData)
   | { type: "session/compacted"; backendEventId?: string }
   | { type: "compaction/part-recorded"; partId: string; messageId?: string; auto?: boolean }
-  | { type: "turn/stopped"; reason: "completed" | "aborted" | "error"; error?: string }
+  | { type: "turn/stopped"; turnId?: string; reason: "completed" | "aborted" | "error"; error?: string }
   | { type: "usage/recorded"; model: ModelRef; tokens: TokenUsage; cost?: number }
   // Full revisioned snapshots (WP8): replay-deterministic task/subagent state.
   | { type: "task/snapshot"; listId: string; revision: number; items: Array<{ id: string; text: string; status: TaskItemStatus }> }

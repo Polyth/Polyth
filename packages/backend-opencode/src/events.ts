@@ -272,6 +272,12 @@ export interface TranslateState {
     order: number;
     turnId?: string;
   };
+  /** Legacy idle can arrive before the final assistant message. Keep it until
+   * that completion makes the terminal turn unambiguous. */
+  pendingTerminal?: {
+    turnId: string;
+    evidence: TerminalStateEvidence;
+  };
   terminalizedTurnId?: string;
   lastTokens?: TokenUsage;
   lastCost?: number;
@@ -305,6 +311,7 @@ export const admitTranslateTurn = (
 ): void => {
   state.admittedTurnId = turnId;
   state.abortingTurnId = undefined;
+  state.pendingTerminal = undefined;
   state.latestAssistantCompletion = undefined;
 };
 
@@ -322,6 +329,7 @@ export const finishTranslateTurn = (
   if (state.admittedTurnId !== turnId) return;
   state.admittedTurnId = undefined;
   state.abortingTurnId = undefined;
+  state.pendingTerminal = undefined;
   state.latestAssistantCompletion = undefined;
 };
 
@@ -701,11 +709,13 @@ export const flushAssistantOnIdle = (state: TranslateState): RuntimeEvent[] => {
   return out;
 };
 
+export type TerminalStateEvidence = Partial<ComparableRuntimeRevision> & {
+  state: "idle" | "failed" | "interrupted";
+};
+
 export const terminalStateEvidenceOf = (
   ev: OcEvent,
-): (Partial<ComparableRuntimeRevision> & {
-  state: "idle" | "failed" | "interrupted";
-}) | undefined => {
+): TerminalStateEvidence | undefined => {
   const properties = ev.properties ?? {};
   const status = ev.type === "session.idle"
     ? "idle"
@@ -735,14 +745,31 @@ export const claimTerminalStateEvidence = (
   state: TranslateState,
 ): ReturnType<typeof terminalStateEvidenceOf> => {
   const evidence = terminalStateEvidenceOf(ev);
-  if (!evidence || evidence.comparison) return evidence;
   const turnId = state.admittedTurnId;
+  if (!evidence) {
+    const pending = state.pendingTerminal;
+    if (!pending || !turnId || pending.turnId !== turnId || state.terminalizedTurnId === turnId) {
+      return undefined;
+    }
+    if (
+      pending.evidence.state === "idle"
+      && state.abortingTurnId !== turnId
+      && state.latestAssistantCompletion?.turnId !== turnId
+    ) {
+      return undefined;
+    }
+    state.pendingTerminal = undefined;
+    state.terminalizedTurnId = turnId;
+    return pending.evidence;
+  }
+  if (evidence.comparison) return evidence;
   if (!turnId || state.terminalizedTurnId === turnId) return undefined;
   if (
     evidence.state === "idle"
     && state.abortingTurnId !== turnId
     && state.latestAssistantCompletion?.turnId !== turnId
   ) {
+    state.pendingTerminal = { turnId, evidence };
     return undefined;
   }
   state.terminalizedTurnId = turnId;

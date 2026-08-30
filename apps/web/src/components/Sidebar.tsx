@@ -615,6 +615,12 @@ export default function Sidebar() {
               )}
             </Menu>
           </div>
+          {/* Widget-areas (WA4): optional search/filter controls belong beside
+              the built-in sidebar controls rather than in a second toolbar. */}
+          <SlotHost
+            slot="sidebar.toolbar"
+            context={{ projectId: project?.id, query, attentionOnly, compact }}
+          />
           <div className="sidebar-popover-anchor">
             <button
               ref={connectionTriggerRef}

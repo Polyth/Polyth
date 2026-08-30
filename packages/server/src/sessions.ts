@@ -723,6 +723,54 @@ export function createSessionService(deps: {
   const openRequestTotal = (facts: LogFacts): number =>
     facts.openPermissions.size + facts.openQuestions.size + facts.openSecrets.size;
 
+  const openTurnFromEvents = (
+    events: readonly SessionEvent[],
+  ): { turnId: string; abortRequested: boolean } | undefined => {
+    let open: { turnId: string; abortRequested: boolean } | undefined;
+    for (const event of events) {
+      if (event.type === "turn/started") {
+        const turnId = (event.data as { turnId?: unknown }).turnId;
+        open = typeof turnId === "string" && turnId
+          ? { turnId, abortRequested: false }
+          : undefined;
+      } else if (event.type === "turn/abort-requested" && open) {
+        open.abortRequested = true;
+      } else if (event.type === "turn/stopped") {
+        open = undefined;
+      }
+    }
+    return open;
+  };
+
+  const terminalizeReconciledTurn = async (
+    sessionId: string,
+    state: "idle" | "failed" | "interrupted",
+  ): Promise<void> => {
+    const open = openTurnFromEvents(await store.events(sessionId));
+    if (!open) return;
+    await onRuntimeEvent(sessionId, {
+      type: "turn/stopped",
+      turnId: open.turnId,
+      reason: state === "interrupted"
+        ? "aborted"
+        : state === "failed"
+          ? "error"
+          : open.abortRequested ? "aborted" : "completed",
+    });
+  };
+
+  const stopLocally = async (sessionId: string): Promise<void> => {
+    const projection = await store.projection(sessionId);
+    if (!projection || projection.status === "archived") return;
+    const open = openTurnFromEvents(await store.events(sessionId));
+    if (!open && projection.status === "idle") return;
+    await onRuntimeEvent(sessionId, {
+      type: "turn/stopped",
+      ...(open ? { turnId: open.turnId } : {}),
+      reason: "aborted",
+    });
+  };
+
   // Projection patches operate on the latest committed row (one store
   // transaction when the store supports it) and broadcast the exact committed
   // projection — a callback can no longer read, await, and then overwrite
@@ -1472,6 +1520,13 @@ export function createSessionService(deps: {
           if (result.kind !== "applied") continue;
           for (const event of result.events) broadcast.event(event);
         }
+        if (
+          authoritativeState.value === "idle"
+          || authoritativeState.value === "failed"
+          || authoritativeState.value === "interrupted"
+        ) {
+          await terminalizeReconciledTurn(sessionId, authoritativeState.value);
+        }
         if (historyBaseline) {
           await applyProjection(sessionId, (current) => {
             if (!current.runtimeBinding) return current;
@@ -1671,6 +1726,17 @@ export function createSessionService(deps: {
     const sideEffects = options.sideEffects ?? true;
     const runtimeEventSeq = options.runtimeEventSeq;
     // invariant: model-visible content hits the log before any UI sees it
+    // A runtime may report the same terminal state after Stop already supplied
+    // the durable fallback. Observation replay must still apply projection
+    // effects for its already-ingested event batch.
+    const observationReplay = options.persist !== undefined && sideEffects;
+    if (
+      ev.type === "turn/stopped"
+      && !observationReplay
+      && (await store.events(sessionId)).findLast((event) => event.type === "turn/stopped")
+    ) {
+      return;
+    }
     switch (ev.type) {
       case "turn/started":
         await persist(sessionId, "turn/started", { turnId: ev.turnId }, { ignorable: true });
@@ -1719,7 +1785,9 @@ export function createSessionService(deps: {
       }
       case "turn/stopped":
         await persist(sessionId, "turn/stopped", {
-          turnId: lastTurnId.get(sessionId) ?? ev.type, reason: ev.reason, ...(ev.error ? { error: ev.error } : {}),
+          turnId: ev.turnId ?? lastTurnId.get(sessionId) ?? ev.type,
+          reason: ev.reason,
+          ...(ev.error ? { error: ev.error } : {}),
         }, { ignorable: true });
         if (sideEffects) {
           const applied = await applyRuntimeProjection(
@@ -4149,7 +4217,12 @@ export function createSessionService(deps: {
           undefined,
           ABORT_AWAIT_MS,
         );
-        if (outcome.kind === "unknown") {
+        if (outcome.kind === "confirmed") {
+          // OpenCode acknowledges abort before it necessarily publishes the
+          // matching idle event. Close the canonical turn now; a late runtime
+          // terminal event is ignored by the durable turn guard.
+          await stopLocally(sessionId);
+        } else if (outcome.kind === "unknown") {
           await updateProjection(sessionId, { status: "unknown" });
           scheduleReconciliation(sessionId, projection, runtime, "abort-outcome-unknown");
         } else if (outcome.kind === "rejected") {

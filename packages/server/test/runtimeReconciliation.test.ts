@@ -263,6 +263,48 @@ test("interrupted backend evidence clears a stale running projection", async () 
   await store.close();
 });
 
+test("idle reconciliation closes a turn whose terminal event was missed", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-missed-stop-"));
+  const endpoint = endpointFor(dir);
+  const runtime = runtimeWithSnapshot(endpoint, (binding) => ({
+    authorityId: binding.authorityId,
+    generation: binding.generation,
+    location: binding.location,
+    backendSessionId: binding.backendSessionId!,
+    reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+    state: {
+      value: "idle",
+      watermark: "2",
+      comparison: { domain: "test-status", order: 2 },
+    },
+    completeness: { events: "partial", permissions: "partial", questions: "partial" },
+    permissions: [],
+    questions: [],
+    events: [],
+  }));
+  const { sessions, store, project } = makeHarness(runtime, dir);
+  const sessionId = "session-missed-stop";
+  await store.upsertProjection({
+    id: sessionId,
+    projectId: project.id,
+    backendSessionId: "backend-missed-stop",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-missed-stop"),
+    title: "Missed stop",
+    status: "working",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  await store.append(sessionId, "turn/started", { turnId: "turn-missed" }, { ignorable: true });
+
+  await sessions.events(sessionId, 0);
+
+  assert.equal((await store.projection(sessionId))?.status, "idle");
+  const stops = (await store.events(sessionId)).filter((event) => event.type === "turn/stopped");
+  assert.equal(stops.length, 1);
+  assert.deepEqual(stops[0]?.data, { turnId: "turn-missed", reason: "completed" });
+  await store.close();
+});
+
 test("first materialization reconciles an idle persisted session before admission", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-idle-first-wire-"));
   const endpoint = endpointFor(dir);

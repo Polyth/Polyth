@@ -4,6 +4,16 @@ import { defineWebPackage, type WidgetRenderContext } from "@polyth/web-sdk";
 import { api } from "@polyth/session/web-api";
 import PermissionBanner from "./PermissionBanner.tsx";
 import { IconButton, ShieldIcon } from "../../../apps/web/src/components/ui/index.ts";
+import { useActiveModel } from "../../../apps/web/src/store.ts";
+
+/** Widget-areas (WA4): the pending-approval banner as a placeable widget, so
+ * it can sit in the composer area (or anywhere) instead of only inline in the
+ * timeline. Renders nothing when no approval is pending. */
+function PendingPermissionsWidget() {
+  const model = useActiveModel();
+  const pending = model.permissions.filter((request) => request.status === "pending");
+  return createElement(PermissionBanner, { permissions: pending });
+}
 
 function AutoApproveAction({ context }: { context: WidgetRenderContext }) {
   const sessionId = typeof context.sessionId === "string" ? context.sessionId : null;
@@ -64,6 +74,17 @@ export default defineWebPackage((host) => () => {
         defaultVisible: true,
         order: 40,
         render: renderAutoApprove,
+      }, {
+        id: "permissions.composer",
+        title: "Pending approvals",
+        description: "Show approval requests for the current session, wherever you place it.",
+        kind: "widget",
+        defaultSlot: "session.composer.before",
+        supportedSlots: ["session.composer.before", "composer.leading", "session.footer", "workspace.main", "workspace.right", "workspace.bottom"],
+        defaultVisible: false,
+        recommended: true,
+        order: 15,
+        render: () => createElement(PendingPermissionsWidget),
       }],
     }),
   ];

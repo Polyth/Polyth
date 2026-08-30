@@ -10,6 +10,8 @@ import {
   flattenModels,
 } from "../src/index.ts";
 import {
+  admitTranslateTurn,
+  claimTerminalStateEvidence,
   createTranslateState,
   flushAssistantOnIdle,
   normalizeOcObservation,
@@ -480,6 +482,31 @@ test("confirmed abort accepts bare idle without assistant completion", async () 
     await runtime.dispose();
     fake.server.close();
   }
+});
+
+test("idle before assistant completion still closes the admitted turn", () => {
+  const state = createTranslateState();
+  admitTranslateTurn(state, "turn-1");
+
+  assert.equal(
+    claimTerminalStateEvidence({
+      type: "session.idle",
+      properties: { sessionID: "ses-1" },
+    }, state),
+    undefined,
+  );
+
+  translateOcEvent({
+    type: "message.updated",
+    properties: {
+      sessionID: "ses-1",
+      info: { id: "msg-1", role: "assistant", time: { completed: 2 } },
+    },
+  }, state);
+  assert.deepEqual(
+    claimTerminalStateEvidence({ type: "message.updated", properties: {} }, state),
+    { state: "idle" },
+  );
 });
 
 test("SSE reconnect dedups by event id", async () => {

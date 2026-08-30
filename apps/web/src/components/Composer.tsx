@@ -338,18 +338,23 @@ export default function Composer({
   const { contextBar, newSessionTarget } = useComposerLocation(session);
   const model = useActiveModel();
   const working = model.turn?.status === "working";
+  const canStop = working || (
+    session?.status !== undefined
+    && session.status !== "idle"
+    && session.status !== "archived"
+  );
   const abortPendingRef = useRef(false);
   const [abortPending, setAbortPending] = useState(false);
   useEffect(() => {
-    if (!working) {
+    if (!canStop) {
       abortPendingRef.current = false;
       setAbortPending(false);
     }
-  }, [working]);
+  }, [canStop]);
   const stopActiveTurn = useCallback(async () => {
     // One stop intent per active turn. If the stream settles while the request
     // is in flight, the idle Send state wins and the late response is ignored.
-    if (!working || abortPendingRef.current) return;
+    if (!canStop || abortPendingRef.current) return;
     abortPendingRef.current = true;
     setAbortPending(true);
     try {
@@ -358,7 +363,7 @@ export default function Composer({
       abortPendingRef.current = false;
       setAbortPending(false);
     }
-  }, [working]);
+  }, [canStop]);
   const noModels = chatModels.length === 0;
   const [showModelWarning, setShowModelWarning] = useState(false);
   useEffect(() => {
@@ -1298,6 +1303,8 @@ export default function Composer({
           in an open session the location is fixed, and picking here silently
           switched project or spawned a new session instead of retargeting. */}
       {!session && <SessionContextBar {...contextBar} />}
+      {/* Widget-areas (WA4): the project/branch meta row is a widget area. */}
+      <SlotHost slot="composer.meta" context={slotContext} />
       {failedSend && (
         <Notice
           tone="warning"
@@ -1306,6 +1313,8 @@ export default function Composer({
           actions={<Button size="sm" onClick={() => send()}>{tr("common.retry")}</Button>}
         >{tr("composer.sendUnavailableDraftPreserved")}</Notice>
       )}
+      {/* Widget-areas (WA4): the uncommitted-changes bar area, above the box. */}
+      <SlotHost slot="composer.pending" context={slotContext} />
       <div
         className="composer-card"
         onDragOver={(e) => { const k = dragKind(e.dataTransfer); if (k) { e.preventDefault(); setDropHint(k); } }}
@@ -1505,8 +1514,8 @@ export default function Composer({
             </Tooltip>
           )}
           <span className="composer-primary">
-            {working ? (
-              (queueEdit || (followUp === "queue" && !sendDisabled)) ? (
+            {canStop ? (
+              (working && (queueEdit || (followUp === "queue" && !sendDisabled))) ? (
                 <div className="composer-send-split">
                     <button
                       className="send composer-delivery composer-queue"
