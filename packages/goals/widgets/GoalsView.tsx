@@ -49,15 +49,9 @@ export default function GoalsView() {
 
   return (
     <div className="view-page goals-page">
-      <div className="goals-head">
-        <div>
-          <h1 className="view-title">{tr("goalsview.sessionGoals")}</h1>
-          <p className="view-sub">{tr("goalsview.attachAnObjectiveAndLetTheAuditor")}</p>
-        </div>
-        <span className="header-spacer" />
-        {!goal && !form && <Button size="sm" onClick={() => setForm(true)}>{tr("goalsview.attachGoal")}</Button>}
-      </div>
-
+      {/* Title, description and the single close control now come from the
+          shared ModuleView frame (WorkspaceHost). The empty state below still
+          offers "Attach goal"; a redundant header button was removed. */}
       {form && <GoalAttachForm onDone={() => setForm(false)} />}
       {!goal && !form && (
         <EmptyState

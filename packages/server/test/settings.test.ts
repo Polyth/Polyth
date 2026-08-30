@@ -6,9 +6,45 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { behaviorRevision, createBehaviorService } from "../src/behavior.ts";
+import { createClientSettings } from "../src/clientSettings.ts";
 import { createMcpConfigService, mcpEntriesFromBackendConfig } from "../src/mcp.ts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "polyth-set-"));
+
+test("client settings: opaque blob round-trips with a monotonic revision", () => {
+  const file = join(tmp(), "client-settings.json");
+  const svc = createClientSettings({ file });
+
+  const empty = svc.get();
+  assert.equal(empty.revision, 0);
+  assert.deepEqual(empty.settings, {});
+
+  const one = svc.put({ product: { density: "compact" }, ui: { fontSize: "l" } });
+  assert.equal(one.revision, 1);
+  assert.deepEqual(one.settings, { product: { density: "compact" }, ui: { fontSize: "l" } });
+
+  const two = svc.put({ product: { density: "balanced" } });
+  assert.equal(two.revision, 2);
+  assert.equal(svc.get().revision, 2);
+
+  // A fresh service instance recovers the last accepted state from disk.
+  const reopened = createClientSettings({ file });
+  assert.equal(reopened.get().revision, 2);
+  assert.deepEqual(reopened.get().settings, { product: { density: "balanced" } });
+});
+
+test("client settings: non-objects and oversized payloads are rejected", () => {
+  const svc = createClientSettings({ file: join(tmp(), "client-settings.json") });
+  for (const bad of [null, "string", 42, ["a"], true]) {
+    assert.throws(() => svc.put(bad), (e: Error & { code?: string }) => e.code === "invalid-input");
+  }
+  assert.throws(
+    () => svc.put({ blob: "x".repeat(256 * 1024 + 1) }),
+    (e: Error & { code?: string }) => e.code === "invalid-input",
+  );
+  // A rejected write never bumps the revision.
+  assert.equal(svc.get().revision, 0);
+});
 
 test("behavior: get/put round-trip with revision, conflict on stale write", async () => {
   const svc = createBehaviorService({ file: join(tmp(), "behavior.md") });

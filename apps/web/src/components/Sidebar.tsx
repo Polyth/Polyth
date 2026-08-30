@@ -1,7 +1,7 @@
 import {
   useEffect, useMemo, useRef, useState, useSyncExternalStore,
   type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent,
-  type TouchEvent as ReactTouchEvent,
+  type PointerEvent as ReactPointerEvent, type TouchEvent as ReactTouchEvent,
 } from "react";
 import {
   getState, useStore, activateProject, openWorkspacePane, openWorktreeSessionDialog, setOverlay,
@@ -20,10 +20,16 @@ import { useModalSurface } from "./a11y/Dialog.tsx";
 import SlotHost from "./slots/SlotHost.ts";
 import { useSidebarExpanded } from "../sidebarPresentation.ts";
 import { useShiftArmed } from "../useShiftArmed.ts";
-import { useSidebarViewMode } from "../sidebarPrefs.ts";
+import {
+  applyManualProjectOrder, reorderManualProjects,
+  setProjectOrder, setProjectSortMode,
+  useProjectOrder, useProjectSortMode, useSidebarViewMode,
+  type ProjectSortMode,
+} from "../sidebarPrefs.ts";
 import EmptyState from "./EmptyState.tsx";
 import {
-  Button, CloseIcon, ComposeIcon, FilterIcon, IconButton, Menu, Popover, SidebarIcon,
+  Button, CloseIcon, ComposeIcon, DragHandleIcon, FilterIcon, IconButton, Menu, Popover,
+  SearchIcon, SidebarIcon, SortIcon,
   type MenuEntry,
 } from "./ui/index.ts";
 import {
@@ -80,7 +86,12 @@ export default function Sidebar() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState<ReadonlySet<string>>(new Set());
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<"recent" | "name">("recent");
+  // Compact drawer: the search field is behind a toolbar button and only
+  // mounts once the user asks for it. Desktop keeps the always-on field.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const sort = useProjectSortMode();
+  const setSort = (mode: ProjectSortMode) => setProjectSortMode(mode);
+  const projectOrder = useProjectOrder();
   const [connectionOpen, setConnectionOpen] = useState(false);
   const shiftHeld = useShiftArmed();
   const [appearanceProjectId, setAppearanceProjectId] = useState<string | null>(null);
@@ -138,6 +149,7 @@ export default function Sidebar() {
         session.projectId === candidate.id
         && `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLowerCase().includes(needle));
     });
+    if (sort === "manual") return applyManualProjectOrder(filtered, projectOrder);
     return filtered.sort((a, b) => {
       if (sort === "name") return (a.name || a.path).localeCompare(b.name || b.path);
       const latest = (projectId: string) => sessions.reduce(
@@ -146,7 +158,7 @@ export default function Sidebar() {
       );
       return latest(b.id) - latest(a.id) || (a.name || a.path).localeCompare(b.name || b.path);
     });
-  }, [attentionOnly, projects, query, sessions, sort]);
+  }, [attentionOnly, projectOrder, projects, query, sessions, sort]);
   // UX-A390: below 821px the sidebar is a modal drawer. It never opens by
   // itself when the viewport shrinks — wide visibility is not a persisted
   // drawer-open preference.
@@ -286,6 +298,133 @@ export default function Sidebar() {
     }
   };
 
+  // Manual project order: drag a card (touch or mouse) or use the handle's
+  // arrow keys. The persisted list keeps every known project so filtered-out
+  // ones hold their slot; only the visible order is what the user rearranges.
+  const manualReorder = sort === "manual" && query.trim() === "";
+  const [draggedProject, setDraggedProject] = useState<string | null>(null);
+  const [dragOverProject, setDragOverProject] = useState<string | null>(null);
+  const pointerReorder = useRef<{ id: string; pointerId: number; active: boolean; target: string } | null>(null);
+  const reorderLongPress = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (reorderLongPress.current !== null) clearTimeout(reorderLongPress.current);
+  }, []);
+  const fullProjectOrder = () => applyManualProjectOrder(projects, projectOrder).map((p) => p.id);
+  const commitReorder = (draggedId: string, targetId: string) => {
+    if (!draggedId || draggedId === targetId) return;
+    setProjectOrder(reorderManualProjects(fullProjectOrder(), draggedId, targetId));
+    tapFeedback();
+    announce(tr("sidebar.projectsReordered"));
+  };
+  const moveProjectBy = (id: string, delta: -1 | 1) => {
+    const ids = fullProjectOrder();
+    const index = ids.indexOf(id);
+    const target = index + delta;
+    if (index < 0 || target < 0 || target >= ids.length) return;
+    [ids[index], ids[target]] = [ids[target]!, ids[index]!];
+    setProjectOrder(ids);
+    announce(tr("sidebar.projectsReordered"));
+  };
+  const clearPointerReorder = () => {
+    if (reorderLongPress.current !== null) clearTimeout(reorderLongPress.current);
+    reorderLongPress.current = null;
+    pointerReorder.current = null;
+    setDraggedProject(null);
+    setDragOverProject(null);
+  };
+  const finishPointerReorder = (event: ReactPointerEvent<HTMLButtonElement>, cancelled = false) => {
+    const current = pointerReorder.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    if (current.active) {
+      event.preventDefault();
+      if (!cancelled) commitReorder(current.id, current.target);
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    clearPointerReorder();
+  };
+  const reorderHandle = (p: { id: string; name: string; path: string }) => (
+    <button
+      type="button"
+      className="project-drag-handle"
+      aria-label={tr("sidebar.reorderValue", { value: p.name || p.path })}
+      title={tr("sidebar.reorderValue", { value: p.name || p.path })}
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+          event.preventDefault();
+          moveProjectBy(p.id, -1);
+        } else if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+          event.preventDefault();
+          moveProjectBy(p.id, 1);
+        }
+      }}
+      onPointerDown={(event) => {
+        if (!event.isPrimary) return;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        pointerReorder.current = { id: p.id, pointerId: event.pointerId, active: false, target: p.id };
+        reorderLongPress.current = setTimeout(() => {
+          if (pointerReorder.current?.pointerId !== event.pointerId) return;
+          pointerReorder.current.active = true;
+          setDraggedProject(p.id);
+          setDragOverProject(p.id);
+          tapFeedback();
+        }, 300);
+      }}
+      onPointerMove={(event) => {
+        const current = pointerReorder.current;
+        if (!current || current.pointerId !== event.pointerId || !current.active) return;
+        event.preventDefault();
+        const target = document.elementFromPoint(event.clientX, event.clientY)
+          ?.closest<HTMLElement>("[data-project-id]")?.dataset.projectId;
+        if (target && target !== current.target) {
+          current.target = target;
+          setDragOverProject(target);
+        }
+      }}
+      onPointerUp={(event) => finishPointerReorder(event)}
+      onPointerCancel={(event) => finishPointerReorder(event, true)}
+    >
+      <DragHandleIcon />
+    </button>
+  );
+
+  const sortEntries: MenuEntry[] = [
+    { heading: tr("sidebar.sortSessions") },
+    {
+      id: "recent",
+      label: tr("sidebar.recentActivity"),
+      kind: "radio",
+      checked: sort === "recent",
+      onSelect: () => setSort("recent"),
+    },
+    {
+      id: "name",
+      label: tr("sidebar.projectName"),
+      kind: "radio",
+      checked: sort === "name",
+      onSelect: () => setSort("name"),
+    },
+    {
+      id: "manual",
+      label: tr("sidebar.manualOrder"),
+      kind: "radio",
+      checked: sort === "manual",
+      onSelect: () => setSort("manual"),
+    },
+  ];
+  const filterEntries: MenuEntry[] = [
+    { heading: tr("sidebar.filterSessions") },
+    {
+      id: "attention",
+      label: tr("sidebar.needsAttention"),
+      kind: "checkbox",
+      checked: attentionOnly,
+      onSelect: () => setAttentionOnly((value) => !value),
+    },
+  ];
+
   // Mouse-drag resize: transient width during the drag, one persisted write
   // on release (drag state stays local; the pref module owns durability).
   const startResize = (event: ReactMouseEvent) => {
@@ -344,13 +483,76 @@ export default function Sidebar() {
         {!collapsed && (<>
         {compact && (
           <div className="sidebar-drawer-header">
-            <div className="sidebar-drawer-identity">
-              <span className="sidebar-drawer-mark" aria-hidden="true">{tr("header.p")}</span>
-              <span className="sidebar-drawer-copy">
-                <strong>{tr("sidebar.projectsAndSessions")}</strong>
-                <small title={project?.path}>{project?.name || project?.path || tr("header.polyth")}</small>
-              </span>
-            </div>
+            {searchOpen ? (
+              <div className="sidebar-search sidebar-search-inline">
+                <Icon.search />
+                <input
+                  type="search"
+                  autoFocus
+                  value={query}
+                  placeholder={tr("sidebar.searchSessions")}
+                  aria-label={tr("sidebar.searchProjectsWorktreesAndSessions")}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") { setQuery(""); setSearchOpen(false); }
+                  }}
+                />
+                <button
+                  className="sidebar-search-clear"
+                  aria-label={tr("sidebar.clearSessionSearch")}
+                  title={tr("sidebar.clearSearch")}
+                  onClick={() => { setQuery(""); setSearchOpen(false); }}
+                >{tr("sidebar.message")}</button>
+              </div>
+            ) : (
+              <div className="sidebar-drawer-tools" role="toolbar" aria-label={tr("sidebar.listOptions")}>
+                <IconButton
+                  icon={SearchIcon}
+                  label={tr("sidebar.searchProjectsWorktreesAndSessions")}
+                  className={`sidebar-drawer-tool${query ? " active" : ""}`}
+                  onClick={() => setSearchOpen(true)}
+                />
+                {project && (
+                  <IconButton
+                    icon={ComposeIcon}
+                    label={tr("sidebar.newChatInValue", { value: project.name || project.path })}
+                    className="sidebar-drawer-tool sidebar-drawer-tool-compose"
+                    onClick={() => { startNewSession(project.id); closeDrawer(); }}
+                  />
+                )}
+                <Menu
+                  label={tr("sidebar.sortSessions")}
+                  title={tr("sidebar.sortSessions")}
+                  align="start"
+                  entries={sortEntries}
+                >
+                  {(trigger) => (
+                    <IconButton
+                      icon={SortIcon}
+                      label={tr("sidebar.sortSessions")}
+                      className={`sidebar-drawer-tool${sort !== "recent" ? " active" : ""}`}
+                      {...trigger}
+                    />
+                  )}
+                </Menu>
+                <Menu
+                  label={tr("sidebar.filterSessions")}
+                  title={tr("sidebar.filterSessions")}
+                  align="start"
+                  entries={filterEntries}
+                >
+                  {(trigger) => (
+                    <IconButton
+                      icon={FilterIcon}
+                      label={tr("sidebar.filterSessions")}
+                      className={`sidebar-drawer-tool${attentionOnly ? " active" : ""}`}
+                      {...trigger}
+                    />
+                  )}
+                </Menu>
+                <span className="header-spacer" />
+              </div>
+            )}
             <IconButton
               icon={CloseIcon}
               label={tr("sidebar.closeProjectsAndSessions")}
@@ -393,36 +595,15 @@ export default function Sidebar() {
           <div className="sidebar-filter">
             <Menu
               label={tr("sidebar.sortSessionsCurrentlyValue", {
-                value: sort === "recent" ? tr("sidebar.recentActivity") : tr("sidebar.projectName"),
+                value: sort === "name"
+                  ? tr("sidebar.projectName")
+                  : sort === "manual"
+                    ? tr("sidebar.manualOrder")
+                    : tr("sidebar.recentActivity"),
               })}
               title={tr("sidebar.listOptions")}
               align="end"
-              entries={[
-                { heading: tr("sidebar.sortSessions") },
-                {
-                  id: "recent",
-                  label: tr("sidebar.recentActivity"),
-                  kind: "radio",
-                  checked: sort === "recent",
-                  onSelect: () => setSort("recent"),
-                },
-                {
-                  id: "name",
-                  label: tr("sidebar.projectName"),
-                  kind: "radio",
-                  checked: sort === "name",
-                  onSelect: () => setSort("name"),
-                },
-                "separator",
-                { heading: tr("sidebar.filterSessions") },
-                {
-                  id: "attention",
-                  label: tr("sidebar.needsAttention"),
-                  kind: "checkbox",
-                  checked: attentionOnly,
-                  onSelect: () => setAttentionOnly((value) => !value),
-                },
-              ]}
+              entries={[...sortEntries, "separator", ...filterEntries]}
             >
               {(trigger) => (
                 <IconButton
@@ -655,10 +836,20 @@ export default function Sidebar() {
                 </span>
               </div>
             );
-            if (effectiveViewMode !== "tree") return <div key={p.id} className="project-entry">{card}</div>;
+            const reorderClass = `${manualReorder ? " reorderable" : ""}${draggedProject === p.id ? " dragging" : ""}${dragOverProject === p.id ? " drag-over" : ""}`;
+            const cardRow = manualReorder
+              ? <div className="project-reorder-row">{reorderHandle(p)}{card}</div>
+              : card;
+            if (effectiveViewMode !== "tree") {
+              return (
+                <div key={p.id} data-project-id={p.id} className={`project-entry${reorderClass}`}>
+                  {cardRow}
+                </div>
+              );
+            }
             return (
-              <div key={p.id} className="project-tree-node">
-                {card}
+              <div key={p.id} data-project-id={p.id} className={`project-tree-node${reorderClass}`}>
+                {cardRow}
                 {expandedTrees.has(p.id) && (
                   <div className="project-tree-sessions">
                     <SessionList

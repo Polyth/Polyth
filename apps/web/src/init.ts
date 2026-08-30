@@ -1,6 +1,7 @@
 // Bootstrapping + user actions: REST load, WS wiring, session lifecycle.
 import { api } from "@polyth/session/web-api";
 import { SyncClient, type SyncStatus } from "./sync.ts";
+import { applyRemoteClientSettings, initSettingsSync } from "./settingsSync.ts";
 import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown } from "./format.ts";
 import { friendlyError } from "./settings.ts";
 import { formatAppUrl, parseAppUrl } from "./router.ts";
@@ -216,6 +217,9 @@ export function init(): void {
     hydrateRuntimeCatalog();
   }
   startSync();
+  // Shared client preferences: pull the server copy, then mirror local edits
+  // and apply changes made on other devices.
+  initSettingsSync();
   // F18: notification clicks from the service worker land here when a tab
   // already exists (postMessage instead of a second window).
   installPushDeepLinks(openSession);
@@ -353,8 +357,11 @@ async function restoreSelectionAfterReady(): Promise<void> {
 // also re-checks immediately, so recovery follows the backend, not a timer.
 const MODEL_RETRY_BASE_MS = 2_000;
 const MODEL_RETRY_MAX_MS = 30_000;
+const MODEL_REQUEST_TIMEOUT_MS = 8_000;
 let modelRetryTimer: ReturnType<typeof setTimeout> | undefined;
 let modelRetryDelay = MODEL_RETRY_BASE_MS;
+let modelFetchAbort: AbortController | undefined;
+let modelRetryRequested = false;
 
 function scheduleModelRetry(): void {
   if (modelRetryTimer !== undefined) return;
@@ -369,12 +376,19 @@ function scheduleModelRetry(): void {
 /** Backend churn healed: an empty published catalog re-checks right away. */
 export function recheckRuntimeCatalog(): void {
   if (!runtimeCatalogHydrated) return;
-  if (modelsFetchInFlight || store.getState().models.length > 0) return;
+  if (store.getState().models.length > 0) return;
   if (modelRetryTimer !== undefined) {
     clearTimeout(modelRetryTimer);
     modelRetryTimer = undefined;
   }
   modelRetryDelay = MODEL_RETRY_BASE_MS;
+  // A runtime that died during startup can leave its HTTP request pending. Do
+  // not make recovery wait for the browser's much longer fetch timeout.
+  if (modelsFetchInFlight) {
+    modelRetryRequested = true;
+    modelFetchAbort?.abort();
+    return;
+  }
   void refreshModels();
   void refreshAgents();
 }
@@ -384,8 +398,11 @@ let modelsFetchInFlight = false;
 async function refreshModels(): Promise<void> {
   if (modelsFetchInFlight) return;
   modelsFetchInFlight = true;
+  const controller = new AbortController();
+  modelFetchAbort = controller;
+  const timeout = setTimeout(() => controller.abort(), MODEL_REQUEST_TIMEOUT_MS);
   try {
-    const models = await api.listModels();
+    const models = await api.listModels(controller.signal);
     store.setModels(models);
     if (models.length > 0) {
       if (modelRetryTimer !== undefined) clearTimeout(modelRetryTimer);
@@ -396,10 +413,17 @@ async function refreshModels(): Promise<void> {
     scheduleModelRetry();
   } catch (err) {
     // Project onboarding continues; the composer catalog owns its own state.
-    console.error("list models failed", err);
+    if (!controller.signal.aborted) console.error("list models failed", err);
     scheduleModelRetry();
   } finally {
+    clearTimeout(timeout);
+    if (modelFetchAbort === controller) modelFetchAbort = undefined;
     modelsFetchInFlight = false;
+    if (modelRetryRequested) {
+      modelRetryRequested = false;
+      void refreshModels();
+      void refreshAgents();
+    }
   }
 }
 
@@ -453,12 +477,20 @@ function startSync(): void {
       notificationCentre.append(msg.notification);
     } else if (msg.type === "package/changed") {
       reconcilePackage(msg.package);
+    } else if (msg.type === "client-settings/changed") {
+      // A settings change from another device — apply it live (theme, density,
+      // interface scale, …). Echoes of this device's own change are dropped by
+      // revision inside settingsSync.
+      applyRemoteClientSettings(msg.settings);
     }
   });
   // Gap-fill on every successful (re)connect; merge-by-id makes the race with
   // the initial bootstrap fetch safe. No polling.
   sync.onOpen(() => {
     void notificationCentre.catchUp();
+    // Re-pull shared settings: a broadcast may have been missed while the
+    // socket was down.
+    initSettingsSync();
     // A reconnect after backend churn is the moment an empty model catalog
     // becomes fetchable again — heal it now instead of waiting out a backoff.
     recheckRuntimeCatalog();
@@ -868,6 +900,7 @@ export async function abortSession(): Promise<void> {
     await api.abort(id);
   } catch (err) {
     console.error("abort failed", err);
+    store.setUiError(friendlyError(tr("composer.stopTheCurrentResponse"), err));
   }
 }
 

@@ -362,6 +362,18 @@ test("the composer is adaptive, with one primary action at a time", async () => 
   );
   assert.ok(!composer.includes("STARTER_SUGGESTIONS"), "starters come from the starter system, not hardcoded chips");
   assert.ok(composer.includes("mobileSheet"), "the mode selector opens as a sheet on phones");
+  assert.ok(
+    composer.includes('onClick={() => send()}'),
+    "the primary active-run action retains the configured queue behavior",
+  );
+  assert.ok(
+    composer.includes('onSelect: () => send(undefined, "interrupt")'),
+    "Send now remains an explicit interrupt action in the active-run menu",
+  );
+  assert.ok(
+    composer.includes('api.queueSendNow(target, editing.id, t)'),
+    "Send now applies an edited queued message immediately",
+  );
 
   const css = await readWebStyles();
   assert.match(
@@ -381,20 +393,28 @@ test("the composer is adaptive, with one primary action at a time", async () => 
   );
 });
 
-test("reasoning effort stays reachable on phones, inside the config rail", async () => {
+test("model and reasoning effort lead the phone composer; effort stays a draggable slider", async () => {
   const composer = await read("../src/components/Composer.tsx");
   const effortMenu = await read("../src/components/EffortMenu.tsx");
-  const rail = composer.slice(composer.indexOf('<div className="composer-config">'));
-  const config = rail.slice(0, rail.indexOf('<div className="composer-actions">'));
-  assert.ok(config.includes("<EffortMenu"), "P2-W3A: the effort control lives beside model and agent");
+
+  // The phone header row renders above the editor; the desktop rail keeps
+  // the same controls under the text. One shared element, two placements.
+  assert.ok(composer.includes('className="composer-config-top"'), "phones get a config header above the editor");
+  assert.ok(composer.includes("{phoneLayout && executionControls"), "the header row is phone-only");
+  assert.ok(composer.includes("{!phoneLayout && executionControls}"), "the desktop rail keeps the same controls");
+  const controls = composer.slice(composer.indexOf("const executionControls = "));
+  const controlsBlock = controls.slice(0, controls.indexOf("const followUp"));
+  assert.ok(controlsBlock.includes("<EffortMenu"), "the header carries the effort control beside the model");
   assert.ok(
-    config.indexOf("<ModelPicker") < config.indexOf("<EffortMenu"),
+    controlsBlock.indexOf("<ModelPicker") < controlsBlock.indexOf("<EffortMenu"),
     "effort follows the model it belongs to",
   );
-  assert.ok(config.includes("modelSupportsThinking(selectedModel)"), "it only exists for models that report variants");
-  assert.ok(effortMenu.includes('type="range"'), "effort uses a direct discrete slider");
+  assert.ok(controlsBlock.includes("modelSupportsThinking(selectedModel)"), "it only exists for models that report variants");
+  assert.ok(controlsBlock.includes("onCommit={preserveKeyboard}"), "the keyboard reopens once the drag ends");
+  assert.ok(controlsBlock.includes("pickThinking(thinking || undefined)"), "picking saves the effort and updates the composer config");
+  assert.ok(effortMenu.includes('type="range"'), "effort uses a direct discrete slider on every layout");
+  assert.ok(!effortMenu.includes("<select"), "the phone select variant is gone — dragging works on touch");
   assert.ok(effortMenu.includes('const options = ["", ...new Set(variants)]'), "Auto and each backend variant get a fixed stop");
-  assert.ok(config.includes("pickThinking(thinking || undefined)"), "picking saves the effort and updates the composer config");
   assert.ok(effortMenu.includes("thinkingVariantLabel"), "backend variant strings get display labels");
   assert.ok(effortMenu.includes("aria-valuetext={label}"), "the selected effort remains available to assistive technology");
 
@@ -413,6 +433,11 @@ test("reasoning effort stays reachable on phones, inside the config rail", async
 
   const css = await readWebStyles();
   const section = css.slice(css.indexOf("UX-MOBILE-01 — mobile-first new chat"));
+  assert.match(
+    section,
+    /\.composer-mobile \.composer-config-top \{\s*display:\s*flex;/,
+    "the phone header row lays the controls out above the editor",
+  );
   const at = section.search(/\.composer-mobile \.composer-config \.config-chip,\s*\n\s*\.composer-mobile \.composer-config \.picker-chip/);
   assert.ok(at > 0, "every config chip shares the same touch box");
   assert.match(section.slice(at, section.indexOf("}", at)), /var\(--tap\)/);
@@ -495,13 +520,15 @@ test("touch targets and design tokens are centralized", async () => {
   );
 });
 
-test("the active phone chat exposes only floating power-on-demand controls", async () => {
+test("phone views expose only floating power-on-demand controls", async () => {
   const header = await read("../src/components/Header.tsx");
   const mobileHeader = await read("../src/components/mobile/MobileSessionHeader.tsx");
   const navigation = await read("../src/components/mobile/MobileNavigationRail.tsx");
   const css = await readWebStyles();
 
-  assert.ok(header.includes("<MobileSessionHeader />"), "active phone chat mounts the floating shell");
+  assert.match(header, /if \(mode === "phone"\) \{\s*return <MobileSessionHeader \/>;\s*\}/s, "every phone view mounts the floating shell");
+  const phoneBranch = header.slice(header.indexOf('if (mode === "phone")'), header.indexOf("\n\n  return (", header.indexOf('if (mode === "phone")')));
+  assert.doesNotMatch(phoneBranch, /MobileNavigationRail/, "the phone branch cannot bring back the legacy rail");
   assert.doesNotMatch(header, /WorkspaceBottomNav/, "active phone chat has no bottom navigation");
   assert.match(mobileHeader, /label="Open navigation"/);
   assert.match(mobileHeader, /label="Open tools"/);
@@ -510,8 +537,8 @@ test("the active phone chat exposes only floating power-on-demand controls", asy
   assert.match(mobileHeader, /<Tools/);
   assert.doesNotMatch(mobileHeader, /Icon\.plus/);
   assert.match(css, /\.mobile-session-floats\s*\{[^}]*position:\s*fixed/s);
-  assert.match(css, /\.mobile-session-switcher\.sheet, \.mobile-tools-sheet\.sheet\s*\{[^}]*width:\s*calc\(100vw/s);
-  assert.match(css, /\.mobile-shortcut-rail\s*\{[^}]*overflow-x:\s*auto;/s, "extra top icons reveal with horizontal swipe");
+  assert.match(css, /\.mobile-session-switcher\.sheet, \.mobile-tools-sheet\.sheet, \.mobile-task-overview\.sheet\s*\{[^}]*width:\s*calc\(100vw/s);
+  assert.match(css, /\.app-shell\s*\{[^}]*padding-top:\s*calc\(var\(--safe-top\) \+ var\(--tap\) \+ var\(--space-6\)\)/s, "non-chat phone views clear the floating shell");
   assert.ok(navigation.includes("useResolvedCapabilities()"), "the rail follows configured capabilities");
   assert.ok(navigation.includes("useRailSurfaceModel()"), "notification and plugin surfaces stay reachable");
   assert.ok(navigation.includes("ui.mobileShortcuts"), "the rail follows the ordered Settings preference");

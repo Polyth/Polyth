@@ -98,6 +98,8 @@ export interface SurfacePresentation {
 export interface SurfaceDefinition {
   id: string;
   title: string;
+  /** One-line purpose shown under the title in the shared module header. */
+  description?: string;
   shortLabel?: string;
   icon?: () => ReactNode;
   capabilityId?: string;
@@ -118,6 +120,8 @@ export interface WorkspaceSurfaceContext {
 export interface WorkspaceSurfaceDefinition {
   id: string;
   title: string;
+  /** One-line purpose shown under the title in the shared module header. */
+  description?: string;
   order: number;
   plugin?: string;
   requires?: WorkspaceSurfaceRequirement;

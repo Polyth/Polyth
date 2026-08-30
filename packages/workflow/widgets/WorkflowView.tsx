@@ -521,23 +521,9 @@ export default function WorkflowView() {
 
   return (
     <div className="view-page workflow-page" aria-busy={loading || isBusy}>
-      <header className="workflow-page-header">
-        <span className="workflow-page-icon" aria-hidden><Icon.workflow /></span>
-        <div className="workflow-page-title">
-          <h1 className="view-title">{tr("workflowview.workflows")}</h1>
-          <p className="view-sub">{tr("capabilities.coordinateAgentRolesInDependencyBasedPipelines")}</p>
-        </div>
-        <button
-          type="button"
-          className="small-btn workflow-button workflow-back-chat"
-          disabled={isBusy}
-          onClick={() => void returnToChat()}
-          aria-label={tr("workflowview.backToChat")}
-        >
-          <Icon.back /><span>{tr("workflowview.backToChat")}</span>
-        </button>
-      </header>
-
+      {/* Title, description and the single close control come from the shared
+          ModuleView frame (WorkspaceHost). No per-view header or "Back to
+          chat" button, and no bottom save/status bar. */}
       {error && (
         <div className="form-error workflow-error" role="alert">
           <span>{error}</span>
@@ -657,9 +643,6 @@ export default function WorkflowView() {
                     {nameError && <small id="workflow-name-error" className="workflow-field-error">{nameError}</small>}
                   </label>
                   <div className="workflow-editor-actions">
-                    <span className={`workflow-save-state${dirty ? " dirty" : ""}`} role="status">
-                      {dirty ? tr("workflowview.unsaved") : tr("workflowview.saved")}
-                    </span>
                     <button type="button" className="small-btn workflow-button" disabled={isBusy} onClick={addNode}>
                       <Icon.plus />{tr("workflowview.addNode")}
                     </button>
@@ -1222,27 +1205,6 @@ export default function WorkflowView() {
           )}
         </main>
       </div>
-      {draft && (
-        <div className="workflow-mobile-savebar" aria-label={tr("workflowview.saveWorkflow")}>
-          <span className={`workflow-save-state${dirty ? " dirty" : ""}`} role="status">
-            {dirty ? tr("workflowview.unsaved") : tr("workflowview.saved")}
-          </span>
-          <button
-            type="button"
-            className="primary-btn workflow-button"
-            disabled={isBusy || !canSave || !dirty}
-            aria-busy={busy === "save"}
-            onClick={save}
-          >
-            <WorkflowButtonContent
-              busy={busy === "save"}
-              idleLabel={tr("common.save")}
-              busyLabel={tr("common.saving")}
-              idleIcon={<Icon.check />}
-            />
-          </button>
-        </div>
-      )}
     </div>
   );
 }

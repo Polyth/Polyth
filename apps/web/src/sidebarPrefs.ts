@@ -131,6 +131,117 @@ export function useSidebarViewMode(): SidebarViewMode {
   );
 }
 
+// ---- sidebar project ordering (mobile/desktop toolbar) -----------------------
+// The compact drawer replaced its decorative title with a search/sort/filter
+// toolbar. "manual" order lets the user drag projects into an arbitrary order
+// that persists per browser, on phone and desktop alike.
+
+const readKey = (key: string): string | null => {
+  try { return localStorage.getItem(key); } catch { return null; }
+};
+const writeKey = (key: string, value: string): void => {
+  try { localStorage.setItem(key, value); } catch { /* private mode */ }
+};
+
+export const PROJECT_SORT_KEY = "polyth.sidebar.projectSort";
+export const PROJECT_ORDER_KEY = "polyth.sidebar.projectOrder";
+export type ProjectSortMode = "recent" | "name" | "manual";
+
+export function parseProjectSortMode(raw: string | null): ProjectSortMode {
+  return raw === "name" || raw === "manual" ? raw : "recent";
+}
+
+let storedProjectSort: ProjectSortMode = parseProjectSortMode(readKey(PROJECT_SORT_KEY));
+const projectSortListeners = new Set<() => void>();
+
+export function getProjectSortMode(): ProjectSortMode {
+  return storedProjectSort;
+}
+
+export function setProjectSortMode(mode: ProjectSortMode): void {
+  storedProjectSort = parseProjectSortMode(mode);
+  writeKey(PROJECT_SORT_KEY, storedProjectSort);
+  for (const l of [...projectSortListeners]) l();
+}
+
+export function useProjectSortMode(): ProjectSortMode {
+  return useSyncExternalStore(
+    (cb) => {
+      projectSortListeners.add(cb);
+      return () => { projectSortListeners.delete(cb); };
+    },
+    getProjectSortMode,
+    () => "recent" as ProjectSortMode,
+  );
+}
+
+function parseProjectOrder(raw: string | null): string[] {
+  try {
+    const value = JSON.parse(raw ?? "[]") as unknown;
+    return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+let storedProjectOrder: string[] = parseProjectOrder(readKey(PROJECT_ORDER_KEY));
+const projectOrderListeners = new Set<() => void>();
+
+export function getProjectOrder(): string[] {
+  return storedProjectOrder;
+}
+
+export function setProjectOrder(ids: readonly string[]): void {
+  storedProjectOrder = [...ids];
+  writeKey(PROJECT_ORDER_KEY, JSON.stringify(storedProjectOrder));
+  for (const l of [...projectOrderListeners]) l();
+}
+
+export function useProjectOrder(): string[] {
+  return useSyncExternalStore(
+    (cb) => {
+      projectOrderListeners.add(cb);
+      return () => { projectOrderListeners.delete(cb); };
+    },
+    getProjectOrder,
+    () => storedProjectOrder,
+  );
+}
+
+/** Pure: order `projects` by the stored manual order, appending any project
+ *  the stored order does not mention (a freshly added one) in its incoming
+ *  position so it lands predictably at the end. Stable for equal ranks. */
+export function applyManualProjectOrder<T extends { id: string }>(
+  projects: readonly T[],
+  order: readonly string[],
+): T[] {
+  const rank = new Map(order.map((id, index) => [id, index] as const));
+  return projects
+    .map((project, index) => ({ project, index }))
+    .sort((a, b) => {
+      const ra = rank.get(a.project.id) ?? Number.MAX_SAFE_INTEGER;
+      const rb = rank.get(b.project.id) ?? Number.MAX_SAFE_INTEGER;
+      return ra - rb || a.index - b.index;
+    })
+    .map((entry) => entry.project);
+}
+
+/** Pure: move `draggedId` into `targetId`'s slot within `ordered`, returning
+ *  the full id list to persist. A no-op when either id is missing or equal. */
+export function reorderManualProjects(
+  ordered: readonly string[],
+  draggedId: string,
+  targetId: string,
+): string[] {
+  const from = ordered.indexOf(draggedId);
+  const to = ordered.indexOf(targetId);
+  if (from < 0 || to < 0 || from === to) return [...ordered];
+  const next = [...ordered];
+  const [dragged] = next.splice(from, 1);
+  next.splice(to, 0, dragged!);
+  return next;
+}
+
 export interface SessionGroup {
   key: string;
   label: string;

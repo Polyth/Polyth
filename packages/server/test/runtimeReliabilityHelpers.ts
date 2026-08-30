@@ -76,6 +76,23 @@ export const admitUnknownTurn = async (
   return { operationId: prepared.operation.operationId };
 };
 
+/** A turn that was mid-flight (prepared + claimed, never settled) when the
+ *  Polyth process died. Reopening the store converts it to
+ *  `unknown` / `process-restarted` exactly like a real restart. */
+export const admitRestartStrandedTurn = async (
+  store: ReturnType<typeof createStore>,
+  sessionId: string,
+  text: string,
+): Promise<{ operationId: string }> => {
+  const prepared = await store.prepareOperation({
+    sessionId,
+    mutationKind: "turn-submit",
+    intentEvent: { type: "user/message", data: { text } },
+  });
+  await store.claimOperation(prepared.operation.operationId);
+  return { operationId: prepared.operation.operationId };
+};
+
 export const prepareUnclaimedTurn = async (
   store: ReturnType<typeof createStore>,
   sessionId: string,

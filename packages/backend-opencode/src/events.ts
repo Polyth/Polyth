@@ -1135,10 +1135,14 @@ const semanticIdentityOf = (
   if (ev.type === "session.updated" || ev.type === "session.compacted") {
     const sessionId = backendSessionId(ev);
     if (!sessionId) return undefined;
+    const title = typeof info?.title === "string" ? info.title.trim() : "";
     return {
       artifactKind: "turn",
       entityId: sessionId,
-      revision: directRevision ?? (ev.type === "session.compacted" ? "compacted" : "snapshot"),
+      // Session snapshots often omit a revision. The title is a distinct,
+      // durable update, so it must not be deduplicated against the initial
+      // placeholder snapshot that precedes it.
+      revision: directRevision ?? (ev.type === "session.compacted" ? "compacted" : `title:${title}`),
       checkpoint: { type: ev.type },
     };
   }

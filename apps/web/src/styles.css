@@ -555,6 +555,32 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 }
 .project-tree-node { margin-bottom: 2px; }
 .project-tree-node .project-card-shell { margin-bottom: 0; }
+/* Manual order: a drag handle sits before the card; the row is the drop unit. */
+.project-reorder-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.project-reorder-row .project-card-shell { flex: 1; min-width: 0; }
+.project-drag-handle {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  min-width: 28px;
+  height: var(--nav-row-project);
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  cursor: grab;
+  touch-action: none;
+}
+.project-drag-handle:hover { color: var(--text); background: var(--elevated); }
+.project-drag-handle svg { width: 15px; height: 15px; }
+:is(.project-entry, .project-tree-node).dragging { opacity: 0.5; }
+:is(.project-entry, .project-tree-node).drag-over { box-shadow: inset 0 2px 0 var(--accent); }
 .project-tree-sessions {
   position: relative;
   margin: 0;
@@ -1379,6 +1405,35 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   border-color: var(--accent-line);
   box-shadow: var(--shadow-lg), 0 0 0 3px var(--focus-wash), var(--inset-hi);
 }
+.composer-note {
+  margin: var(--space-3) var(--space-3) 0;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.composer-runtime-unavailable {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--amber) 32%, transparent);
+  border-radius: var(--radius-control);
+  background: var(--amber-wash);
+}
+.composer-runtime-unavailable > span { flex: 1; min-width: 0; }
+.composer-runtime-unavailable .ui-btn { flex: none; }
+@media (max-width: 640px) {
+  .composer-runtime-unavailable {
+    margin: var(--space-2) var(--space-2) 0;
+    padding: var(--space-1) var(--space-2);
+  }
+  .composer-runtime-unavailable > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
 .composer-input { position: relative; }
 .composer-mode-label {
   color: var(--accent); font-size: var(--font-meta); font-weight: 600; padding: 6px 10px 0;
@@ -2058,7 +2113,7 @@ border-color: var(--accent); color: var(--accent); background: var(--accent-wash
 
 /* ---------- per-project canvas setup ---------- */
 .project-setup-scrim {
-  position: fixed; inset: 0; z-index: 60; display: grid; place-items: center;
+  position: fixed; inset: 0; z-index: var(--z-overlay); display: grid; place-items: center;
   padding: 12px; background: color-mix(in srgb, var(--bg) 62%, transparent);
   backdrop-filter: blur(2px); overflow: hidden;
 }
@@ -3411,48 +3466,44 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
     display: block; position: fixed; inset: 0; z-index: calc(var(--z-overlay) - 1);
     background: var(--scrim); backdrop-filter: blur(4px);
   }
+  /* The compact drawer trades a decorative title for a working toolbar:
+     search toggle, sort, filter, and the close affordance. */
   .sidebar-drawer-header {
-    min-height: calc(60px + var(--safe-top));
+    min-height: calc(52px + var(--safe-top));
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 4px;
     flex: none;
-    padding: var(--safe-top) 8px 0 max(12px, var(--safe-left));
+    padding: var(--safe-top) max(8px, var(--safe-right)) 0 max(8px, var(--safe-left));
     border-bottom: 1px solid var(--border-soft);
     background: color-mix(in srgb, var(--panel) 94%, var(--elevated));
   }
-  .sidebar-drawer-identity {
+  .sidebar-drawer-tools {
     min-width: 0;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 2px;
     flex: 1;
   }
-  .sidebar-drawer-mark {
-    width: 30px;
-    height: 30px;
-    display: grid;
-    place-items: center;
+  .sidebar-drawer-tool {
+    width: var(--tap);
+    height: var(--tap);
+    min-width: var(--tap);
     flex: none;
-    border-radius: var(--radius-control);
-    background: linear-gradient(145deg, var(--accent-hi), var(--accent));
-    color: var(--accent-ink);
-    font: 800 18px/1 Georgia, serif;
+    color: var(--text-dim);
   }
-  .sidebar-drawer-copy {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
+  .sidebar-drawer-tool:hover,
+  .sidebar-drawer-tool[aria-expanded="true"] { background: var(--elevated); color: var(--text); }
+  .sidebar-drawer-tool.active { color: var(--accent); background: var(--accent-wash); }
+  .sidebar-drawer-tool-compose { color: var(--accent); }
+  .sidebar-search.sidebar-search-inline {
+    flex: 1;
+    height: var(--tap);
+    margin: 4px 0;
   }
-  .sidebar-drawer-copy strong,
-  .sidebar-drawer-copy small {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .sidebar-drawer-copy strong { color: var(--text); font-size: 13px; line-height: 1.25; }
-  .sidebar-drawer-copy small { color: var(--muted); font-size: var(--font-meta); line-height: 1.25; }
+  /* One control surface per width: the drawer toolbar owns search/sort/filter
+     on every compact layout, so the desktop service bar stands down here. */
+  .sidebar .sidebar-service-bar { display: none; }
   .sidebar-drawer-header .drawer-close {
     width: var(--tap);
     height: var(--tap);
@@ -3465,10 +3516,26 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
     --nav-row-project: 34px; --nav-row-branch: 30px; --nav-row-session: 28px;
   }
   :is(html, body)[data-density="balanced"] .sidebar {
-    --nav-row-project: 36px; --nav-row-branch: 32px; --nav-row-session: 30px;
+    /* Balanced on a phone was almost comfortable — pull the rhythm in so it
+       reads as a genuine middle step and more sessions fit above the fold. */
+    --nav-row-project: 33px; --nav-row-branch: 29px; --nav-row-session: 27px;
+  }
+  :is(html, body)[data-density="balanced"] .sidebar .side-scroll {
+    padding-block: var(--space-2) var(--space-1);
+  }
+  :is(html, body)[data-density="balanced"] .sidebar .side-label {
+    padding-top: var(--space-2); padding-bottom: var(--space-1);
   }
   :is(html, body)[data-density="comfortable"] .sidebar {
     --nav-row-project: 38px; --nav-row-branch: 34px; --nav-row-session: 32px;
+  }
+  /* The drawer nav tracks the Interface scale, but at the default medium step
+     the 14px body role is a hair small on a phone. Nudge each role up one
+     notch; the small and large steps already carry the right weight. */
+  :is(html, body)[data-interface-size="medium"] .sidebar {
+    --nav-project-size: calc(var(--ui-font-size, 14px) * 1.286);
+    --nav-branch-size: calc(var(--ui-font-size, 14px) * 1.143);
+    --nav-session-size: calc(var(--ui-font-size, 14px) * 1.071);
   }
   .sidebar .sidebar-service-bar {
     min-height: 54px;
@@ -4552,6 +4619,9 @@ html[dir="rtl"] input[type="number"] {
 .action-dot { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--accent-wash); color: var(--accent); font-size: 9px; }
 .action-dot.done { background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); }
 .action-dot.failed { background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red); }
+@container feature-panel (max-width: 480px) {
+.widget-agent-actions > div { padding: 5.6px 3px; }
+}
 .widget-quick-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px; }
 .widget-quick-actions button { min-height: 82px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; padding: 10px; border-color: var(--border-soft); background: var(--bg); }
 .widget-quick-actions button > span { color: var(--accent); font-size: 18px; }
@@ -5959,16 +6029,10 @@ font-style: normal; opacity: .65;
   padding: 0 8px;
 }
 .mobile-shortcut {
-  width: var(--tap);
-  min-width: var(--tap);
-  height: var(--tap);
-  min-height: var(--tap);
-  flex: 0 0 var(--tap);
-  border: 0;
-  background: transparent;
+  flex: 0 0 var(--control-h);
   scroll-snap-align: center;
 }
-.mobile-shortcut svg { width: 18px; height: 18px; }
+.mobile-shortcut svg { width: var(--icon-lg); height: var(--icon-lg); }
 .mobile-shortcut.active { color: var(--accent); background: var(--accent-wash); }
 
 /* Phone boundary only — the shell contract (responsiveShell.ts) is 820/480;
@@ -7057,23 +7121,32 @@ display: none;
     font-size: 12px;
   }
   .composer-mobile .composer-agent-chip .picker-chip { max-width: 20vw; }
-  .composer-mobile .composer-effort-control {
-    --composer-effort-width: 84px;
+  /* Model + reasoning effort lead the phone composer above the editor, where
+     the effort track has room to drag. The chip keeps its touch box; the
+     effort control keeps the desktop anatomy — label, live value, track —
+     stretched across the remaining header width. */
+  .composer-mobile .composer-config-top {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+    padding: var(--space-2) var(--space-2) 0;
+  }
+  .composer-mobile.composer-collapsed .composer-config-top { display: none; }
+  .composer-mobile .composer-config-top .config-chip,
+  .composer-mobile .composer-config-top .picker-chip {
+    flex: none;
     min-height: var(--tap);
-    /* Label is hidden on phones; collapse to one track so the range's
-       intrinsic min-width cannot inflate the control past the rail. */
-    grid-template-columns: minmax(72px, var(--composer-effort-width));
+    max-width: 42vw;
+    font-size: 12px;
   }
-  /* The range remains a first-class phone control; its desktop label would
-     otherwise push it out of the one-line rail behind the agent picker. */
-  .composer-mobile .composer-effort-label { display: none; }
-  .composer-mobile .composer-effort-track input { min-width: 0; }
-  .composer-mobile .composer-effort-select { display: inline-flex; min-width: 0; }
-  .composer-mobile .composer-effort-select select {
-    width: 100%; min-width: 0; height: var(--tap); padding: 0 var(--space-2);
-    border: 0; border-radius: var(--radius-control); background: transparent; color: var(--text-dim);
-    font: inherit; font-size: 12px; font-weight: 550;
+  .composer-mobile .composer-config-top .composer-effort-control {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: var(--tap);
+    grid-template-columns: auto minmax(64px, 1fr);
   }
+  .composer-mobile .composer-config-top .composer-effort-track input { min-width: 0; }
   .composer-mobile .composer-card textarea {
     min-height: 26px;
     /* §20: grows with the text, then scrolls internally. */
@@ -8385,23 +8458,28 @@ color: var(--muted);
   }
 }
 
-/* Phone chat has no header bar. These three controls float over the timeline
-   and leave the desktop/tablet shell completely untouched. */
+/* Phone uses one three-segment shell bar for every workspace surface. The
+   bar floats so the chat timeline can keep its own scroll root; the sibling
+   clearance rules below keep non-chat surfaces from sitting underneath it. */
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  /* The reactive shell hook starts from its server-safe snapshot. Hide the
+     legacy header during that one render so a breakpoint transition cannot
+     flash the old bar before the unified phone bar mounts. */
+  .app > .header { display: none; }
   .mobile-session-floats {
     position: fixed;
-    top: max(var(--space-3), var(--safe-top));
+    top: var(--safe-top);
     right: max(var(--screen-gutter), var(--safe-right));
     left: max(var(--screen-gutter), var(--safe-left));
     z-index: var(--z-shell);
     display: grid;
-    grid-template-columns: var(--tap) minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--space-2);
     pointer-events: none;
   }
   .mobile-session-floats button { pointer-events: auto; }
-  .mobile-float-button,
+  .mobile-float-navigation,
   .mobile-float-actions,
   .mobile-session-selector {
     min-height: var(--tap);
@@ -8410,22 +8488,17 @@ color: var(--muted);
     box-shadow: var(--shadow-sm);
     backdrop-filter: blur(10px);
   }
-  .mobile-float-button {
-    width: var(--tap);
-    display: grid;
-    place-items: center;
-    padding: 0;
-    border-radius: var(--radius-sheet);
-    color: var(--text-dim);
-  }
-  .mobile-float-button svg, .mobile-float-actions svg { width: var(--icon-lg); height: var(--icon-lg); }
+  .mobile-float-navigation, .mobile-float-actions { display: inline-grid; grid-auto-flow: column; border-radius: var(--radius-control); overflow: hidden; }
+  .mobile-float-navigation button, .mobile-float-actions button { width: var(--tap); display: grid; place-items: center; padding: 0; border: 0; border-left: 1px solid var(--hair); background: transparent; color: var(--text-dim); }
+  .mobile-float-navigation button:first-child, .mobile-float-actions button:first-child { border-left: 0; }
+  .mobile-float-navigation svg, .mobile-float-actions svg { width: var(--icon-lg); height: var(--icon-lg); }
   .mobile-session-selector {
     min-width: 0;
     display: flex;
     align-items: center;
     gap: var(--space-2);
     padding: 0 var(--space-3);
-    border-radius: var(--radius-sheet);
+    border-radius: var(--radius-control);
     color: var(--text);
     font-size: var(--font-label);
     font-weight: 600;
@@ -8441,12 +8514,13 @@ color: var(--muted);
   .mobile-session-status.needs-approval, .mobile-session-status.reconciling { background: var(--amber); }
   .mobile-session-status.failed { background: var(--red); }
   .mobile-session-status.unread { background: var(--blue); }
-  .mobile-float-actions { display: inline-grid; grid-auto-flow: column; border-radius: var(--radius-sheet); overflow: hidden; }
-  .mobile-float-actions button { width: var(--tap); display: grid; place-items: center; padding: 0; border: 0; border-left: 1px solid var(--hair); background: transparent; color: var(--text-dim); }
-  .mobile-float-actions button:first-child { border-left: 0; }
   .mobile-float-actions button:disabled { color: var(--faint); }
-  .app.mode-chat.view-session .timeline { padding-top: calc(var(--tap) + var(--space-6)); }
-  .mobile-session-switcher.sheet, .mobile-tools-sheet.sheet {
+  .app-shell { padding-top: calc(var(--safe-top) + var(--tap) + var(--space-6)); }
+  .app.mode-chat.view-session .app-shell { padding-top: 0; }
+  .app.mode-chat.view-session .stage:not(.stage-new) { padding-top: calc(var(--safe-top) + var(--tap) + var(--space-6)); }
+  .app.mode-chat.view-session .stage-new .hero-body { padding-top: calc(var(--safe-top) + var(--tap) + var(--space-5)); }
+  .app.mode-chat.view-session .timeline { padding-top: calc(var(--safe-top) + var(--tap) + var(--space-6)); }
+  .mobile-session-switcher.sheet, .mobile-tools-sheet.sheet, .mobile-task-overview.sheet {
     width: calc(100vw - max(var(--space-1), var(--safe-right)));
     max-width: none;
     height: calc(var(--visual-vh, 100dvh) - var(--safe-top) - var(--keyboard-inset, 0px));
@@ -8456,13 +8530,27 @@ color: var(--muted);
     border-radius: 0 var(--radius-sheet) var(--radius-sheet) 0;
   }
   .mobile-tools-sheet.sheet { margin-right: 0; margin-left: auto; border-radius: var(--radius-sheet) 0 0 var(--radius-sheet); animation-name: mobile-tools-in; }
-  .mobile-session-switcher .sheet-grabber, .mobile-tools-sheet .sheet-grabber { display: none; }
-  .mobile-session-switcher .sheet-head, .mobile-tools-sheet .sheet-head { padding-top: max(var(--space-5), var(--safe-top)); }
+  .mobile-session-switcher .sheet-grabber, .mobile-tools-sheet .sheet-grabber, .mobile-task-overview .sheet-grabber { display: none; }
+  .mobile-session-switcher .sheet-head, .mobile-tools-sheet .sheet-head, .mobile-task-overview .sheet-head { padding-top: max(var(--space-5), var(--safe-top)); }
   .mobile-surface-chevron { display: inline-flex; color: var(--muted); }
   .mobile-surface-chevron svg { width: var(--icon-sm); height: var(--icon-sm); }
   .mobile-surface-footer { width: 100%; min-height: var(--tap); display: flex; align-items: center; justify-content: center; gap: var(--space-2); border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: transparent; color: var(--text-dim); font-size: var(--font-label); }
   .mobile-surface-footer svg { width: var(--icon-sm); height: var(--icon-sm); }
   .focus-working { width: max-content; max-width: calc(100% - (var(--screen-gutter) * 2)); min-height: var(--control-h-sm); margin: var(--space-2) auto; padding: 0 var(--space-3); border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: color-mix(in srgb, var(--elevated) 92%, transparent); box-shadow: var(--shadow-sm); }
+  .mobile-task-status { width: var(--space-2); height: var(--space-2); flex: none; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 var(--space-1) var(--green-wash); }
+  .mobile-task-hero { display: grid; gap: var(--space-2); margin: 0 var(--space-4) var(--space-5); padding: var(--space-5); border: 1px solid var(--accent-line); border-radius: var(--radius-card); background: linear-gradient(135deg, var(--accent-wash), var(--elevated)); box-shadow: var(--inset-hi); }
+  .mobile-task-eyebrow { color: var(--text-dim); font-size: var(--font-meta); font-weight: 700; text-transform: uppercase; }
+  .mobile-task-hero strong { color: var(--text); font-size: var(--font-heading); line-height: var(--font-title-lh); }
+  .mobile-task-hero p { margin: 0; color: var(--text-dim); font-size: var(--font-body); line-height: var(--font-meta-lh); }
+  .mobile-task-list { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+  .mobile-task-list li { display: grid; grid-template-columns: var(--space-5) minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); min-height: var(--tap); padding: var(--space-2) var(--space-3); color: var(--text-dim); }
+  .mobile-task-list li > span:first-child { color: var(--muted); font-weight: 700; text-align: center; }
+  .mobile-task-list li.active { border-radius: var(--radius-control); background: var(--accent-wash); color: var(--text); }
+  .mobile-task-list li.active > span:first-child { color: var(--accent); }
+  .mobile-task-list li.done { color: var(--muted); text-decoration: line-through; }
+  .mobile-task-list li.done > span:first-child { color: var(--green); }
+  .mobile-task-list li.failed > span:first-child { color: var(--red); }
+  .mobile-task-list small { color: var(--accent); font-size: var(--font-meta); font-weight: 700; }
   body[data-keyboard="open"] .mobile-session-floats { pointer-events: none; }
   @keyframes mobile-tools-in { from { opacity: .7; transform: translateX(18px); } to { opacity: 1; transform: none; } }
 }
@@ -8790,6 +8878,121 @@ transition: none;
   display: flex; flex-direction: column; gap: var(--space-3);
   padding: var(--space-4) var(--gutter);
 }
+
+/* ============================================================================
+   Polyth module-view shell — components/ui/ModuleView.ts
+   ONE frame for every feature module. Main-area workspace surfaces
+   (WorkspaceHost) render inside `.module-view--main`; the right rail keeps its
+   own `.rail`/`.rail-fullscreen`/`.panel-sheet` chrome on desktop but adopts
+   the identical header + phone overlay treatment below. Feature packages no
+   longer draw their own page header, "Back to chat" link, or bottom status.
+   ========================================================================== */
+.module-view {
+  flex: 1; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column;
+  background: var(--bg);
+}
+.rail > .module-view { background: var(--panel); }
+.rail > .module-view > .module-view-body { min-height: 0; }
+.module-view-head,
+.rail-fullscreen .rail-head,
+.panel-sheet .rail-head {
+  flex: none; display: flex; align-items: flex-start; gap: var(--space-3);
+  padding: var(--space-4) var(--gutter) var(--space-3);
+  border-bottom: 1px solid var(--border-soft);
+}
+.module-view-icon {
+  flex: none; display: grid; place-items: center;
+  width: 32px; height: 32px; border-radius: var(--radius-control);
+  background: var(--elevated); color: var(--accent);
+}
+.module-view-icon svg { width: 18px; height: 18px; }
+.module-view-heading,
+.rail-heading { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.module-view-title,
+.rail-fullscreen .rail-title,
+.panel-sheet .rail-title {
+  margin: 0; font-size: var(--font-heading); line-height: 1.2;
+  letter-spacing: -0.02em; overflow-wrap: anywhere; font-weight: 700;
+}
+.module-view-desc,
+.rail-desc {
+  margin: 0; color: var(--muted); overflow-wrap: anywhere;
+  font-size: var(--font-meta); line-height: var(--font-meta-lh);
+}
+/* Desktop rail keeps a single-line title; the description only shows in the
+   full-width (layer / phone) presentations wired in ContextRail. */
+.rail:not(.rail-fullscreen) .rail-desc { display: none; }
+.module-view-title:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.module-view-actions { flex: none; display: flex; align-items: center; gap: var(--space-2); }
+.module-view-close {
+  flex: none; display: inline-grid; place-items: center;
+  width: var(--control-h-sm); height: var(--control-h-sm);
+  border: 1px solid var(--border-soft); border-radius: var(--radius-control);
+  background: var(--panel); color: var(--muted);
+  transition:
+    color var(--motion-fast) var(--motion-ease),
+    background var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease);
+}
+.module-view-close:hover { color: var(--text); background: var(--elevated); border-color: var(--border); }
+.module-view-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.module-view-body > .view-page { flex: 1; }
+
+/* Slide-in overlay: on phone every module (main view + any stacked rail panel)
+   is a fixed, opaque layer that enters right-to-left, fully covers the
+   session, and stacks by open order so several open modules overlap and are
+   dismissed together by the single close button. */
+@keyframes module-slide-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+html[dir="rtl"] .module-view--main,
+html[dir="rtl"] .rail-fullscreen,
+html[dir="rtl"] .panel-sheet { animation-name: module-slide-in-rtl; }
+@keyframes module-slide-in-rtl {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  .module-view--main {
+    position: fixed;
+    inset: calc(60px + var(--safe-top)) 0 0 0;
+    z-index: 70;
+    background: var(--bg);
+    animation: module-slide-in var(--motion-normal) var(--motion-ease);
+  }
+  /* Rail panels (workspace panes + contextual sheets) sit above the main
+     module view; both share the identical opaque, edge-to-edge cover. */
+  .rail-fullscreen,
+  .panel-sheet {
+    position: fixed;
+    inset: calc(60px + var(--safe-top)) 0 0 0;
+    width: auto; min-width: 0; max-width: none;
+    z-index: calc(72 + var(--module-depth, 0));
+    background: var(--bg); border-left: none; box-shadow: none;
+    animation: module-slide-in var(--motion-normal) var(--motion-ease);
+  }
+  /* No dim backdrop and no secondary "Back to chat" affordance: the overlay
+     covers everything and the one top-right close returns to the session. */
+  .panel-sheet-backdrop { display: none; }
+  .pane-back { display: none; }
+  .rail-fullscreen .rail-head .rail-toggle:not(:last-child),
+  .panel-sheet .rail-head .rail-toggle:not(:last-child) { display: none; }
+  .rail-fullscreen .rail-head > .rail-toggle,
+  .panel-sheet .rail-head > .rail-toggle {
+    align-self: center;
+    border: 1px solid var(--border-soft); border-radius: var(--radius-control);
+    background: var(--panel);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .module-view--main,
+  .rail-fullscreen,
+  .panel-sheet { animation: none; }
+}
 .view-toolbar { display: flex; flex-direction: column; gap: var(--space-2); }
 .view-toolbar textarea { width: 100%; resize: none; }
 .view-toolbar-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
@@ -9066,19 +9269,27 @@ color: var(--text);
   box-shadow: none;
   animation: execution-row-in var(--motion-normal) ease-out both;
 }
+.reasoning,
+.task-list,
+.tool-card.execution-row {
+  border: 0;
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--panel) 24%, transparent);
+}
+.tool-card.execution-row { overflow: hidden; }
 .tool-card.execution-row.current {
   background: color-mix(in srgb, var(--text) 3.5%, transparent);
 }
 .tool-card.execution-row.error { border-color: color-mix(in srgb, var(--red) 18%, var(--border-soft)); }
 .execution-summary.tool-disclosure {
   width: 100%;
-  min-height: 44px;
-  max-height: 56px;
+  min-height: 32px;
+  max-height: 44px;
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) 72px 16px;
   align-items: center;
-  gap: 8px;
-  padding: 6px 9px;
+  gap: 6px;
+  padding: 2px 6px;
   border-radius: var(--radius-control);
   cursor: pointer;
   text-align: left;
@@ -9185,8 +9396,8 @@ color: var(--text);
 .execution-group-collapse-content { min-height: 0; overflow: hidden; }
 .execution-details.tool-body {
   display: grid;
-  gap: 12px;
-  padding: 4px 9px 14px 35px;
+  gap: 8px;
+  padding: 0 6px 6px 28px;
 }
 .execution-detail-section { min-width: 0; }
 .execution-detail-heading {
@@ -9465,19 +9676,17 @@ html[data-font] body :is(
 .reasoning {
   width: 100%;
   max-width: 100%;
-  margin: 0 0 7px;
-  border: 0;
-  background: transparent;
+  margin: 0 0 var(--space-1);
 }
 .reasoning:not([open]) { width: 100%; }
 .reasoning summary {
   width: 100%;
-  min-height: 44px;
+  min-height: 32px;
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) 16px;
   align-items: center;
-  gap: 8px;
-  padding: 6px 9px;
+  gap: 6px;
+  padding: 2px 6px;
   border-radius: var(--radius-control);
   color: var(--text-dim);
   cursor: pointer;
@@ -9499,6 +9708,19 @@ html[data-font] body :is(
 .reasoning-mark svg { width: 17px; height: 17px; }
 .reasoning-mark.running svg { animation: reasoning-pulse 1.2s ease-in-out infinite; }
 @keyframes reasoning-pulse { 50% { opacity: 0.45; } }
+.reasoning-main {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.reasoning-main strong {
+  flex: none;
+  color: var(--text);
+  font-size: calc(14px * var(--ui-font-scale, 1));
+  font-weight: 600;
+  line-height: 18px;
+}
 /* Collapsed preview: one line that dissolves toward its end instead of a
    hard ellipsis cut. Type matches .execution-main .tool-preview. */
 .reasoning-preview {
@@ -9515,13 +9737,13 @@ html[data-font] body :is(
 /* Expanded thinking: the real reasoning as secondary prose in a height-capped
    well — long thinking scrolls internally and never breaks the page. The
    35px indent matches .execution-details.tool-body (icon + gap + padding). */
-.reasoning-content { padding: 2px 9px 10px 35px; }
+.reasoning-content { padding: 0 6px 4px 28px; }
 .reasoning-body {
   max-height: min(42vh, 380px);
   overflow: auto;
   overscroll-behavior: contain;
   margin: 0;
-  padding: 2px 10px 2px 12px;
+  padding: 2px 8px 2px 10px;
   border-inline-start: 2px solid var(--border-soft);
   color: var(--muted);
   font-size: calc(13.25px * var(--ui-font-scale, 1));
@@ -9539,7 +9761,7 @@ html[data-font] body :is(
 }
 .reasoning-body p { margin: 0.45em 0; }
 .reasoning-body pre { max-width: 100%; font-size: calc(12.5px * var(--ui-font-scale, 1)); }
-.reasoning-foot { display: flex; min-height: 28px; align-items: center; padding-inline-start: 14px; }
+.reasoning-foot { display: flex; min-height: 24px; align-items: center; padding-inline-start: 10px; }
 .reasoning-foot .copy-btn {
   width: auto;
   min-height: 28px;
@@ -9551,23 +9773,23 @@ html[data-font] body :is(
 .reasoning-foot .copy-btn:hover { color: var(--text); background: transparent; }
 .reasoning-flat { padding: 0; }
 .reasoning-heading {
-  min-height: 44px;
+  min-height: 32px;
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
-  padding: 6px 9px;
+  gap: 6px;
+  padding: 2px 6px;
 }
 
 .execution-group { width: 100%; }
 .execution-group-toggle {
   width: 100%;
-  min-height: 44px;
+  min-height: 32px;
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) 16px;
   align-items: center;
-  gap: 8px;
-  padding: 5px 8px;
+  gap: 6px;
+  padding: 2px 6px;
   border: 0;
   background: transparent;
   color: var(--text-dim);
@@ -9588,13 +9810,13 @@ html[data-font] body :is(
   min-width: 0;
   display: grid;
   justify-self: stretch;
-  padding-left: 20px;
+  padding-left: 16px;
 }
 .execution-group-items::before {
   position: absolute;
   top: 0;
-  bottom: 8px;
-  left: 9px;
+  bottom: 6px;
+  left: 7px;
   width: 1px;
   background: var(--border-soft);
   content: "";
@@ -9604,45 +9826,42 @@ html[data-font] body :is(
 .task-list {
   width: 100%;
   max-width: 100%;
-  margin: 10px 0 0;
+  margin: var(--space-1) 0 0;
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-card);
-  background: transparent;
 }
 .task-list-summary {
   width: 100%;
-  min-height: 44px;
+  min-height: 32px;
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr) 16px;
   align-items: center;
-  gap: 8px;
-  padding: 5px 9px;
+  gap: 6px;
+  padding: 2px 6px;
   border: 0;
   background: transparent;
   color: var(--text-dim);
   text-align: left;
 }
-.task-list-mark { width: 20px; height: 20px; display: grid; place-items: center; color: var(--muted); }
+.task-list-mark { width: 18px; height: 18px; display: grid; place-items: center; color: var(--muted); }
 .task-list-mark svg { width: 16px; height: 16px; }
 .task-list-mark.done { color: color-mix(in srgb, var(--green) 72%, var(--text)); }
 .task-list-mark.failed { color: color-mix(in srgb, var(--red) 78%, var(--text)); }
 .task-list-title { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
-.task-list-title strong { flex: none; font-size: 13px; }
-.task-list-title small { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.task-list-title strong { flex: none; color: var(--text); font-size: calc(14px * var(--ui-font-scale, 1)); font-weight: 600; line-height: 18px; }
+.task-list-title small { overflow: hidden; color: var(--muted); font: 400 calc(13.25px * var(--ui-font-scale, 1))/18px var(--ui-font-family); text-overflow: ellipsis; white-space: nowrap; }
 .task-list-chevron { color: var(--faint); }
 .task-list-chevron svg { width: 14px; height: 14px; }
-.task-list ul { display: grid; gap: 0; margin: 0; padding: 0 8px 8px; }
+.task-list ul { display: grid; gap: 0; margin: 0; padding: 0 6px 4px; }
 .task-list li { display: block; }
 .task-list li > button {
   width: 100%;
-  min-height: 44px;
+  min-height: 28px;
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
-  padding: 4px 7px;
+  gap: 5px;
+  padding: 2px 5px;
   border: 0;
   background: transparent;
   color: var(--text-dim);
@@ -9683,10 +9902,10 @@ html[data-font] body :is(
 @media (max-width: 620px) {
   .msg.assistant > .bubble { font-size: calc(16px * var(--ui-font-scale, 1)); line-height: 1.64; }
   .execution-summary.tool-disclosure {
-    min-height: 48px;
+    min-height: 36px;
     grid-template-columns: 18px minmax(0, 1fr) 67px 14px;
-    gap: 7px;
-    padding-inline: 8px;
+    gap: 5px;
+    padding-inline: 6px;
   }
   .execution-main { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 7px; }
   .execution-main .tool-name { font-size: calc(13.5px * var(--ui-font-scale, 1)); }
@@ -9696,13 +9915,14 @@ html[data-font] body :is(
     font-size: calc(12.5px * var(--ui-font-scale, 1));
   }
   .execution-status { width: 67px; gap: 4px; font-size: calc(11.5px * var(--ui-font-scale, 1)); }
-  .execution-details.tool-body { padding: 3px 7px 13px 26px; }
+  .execution-details.tool-body { padding: 0 5px 5px 22px; }
   .execution-command, .execution-output { font-size: calc(12.5px * var(--ui-font-scale, 1)); }
   .execution-input dl > div { grid-template-columns: 84px minmax(0, 1fr); }
   .execution-group-copy { display: grid; gap: 1px; }
   .execution-group-copy strong, .execution-group-copy small { display: block; }
-  .reasoning summary { min-height: 48px; padding-inline: 8px; }
+  .reasoning summary { min-height: 36px; padding-inline: 6px; }
   .reasoning-body { max-height: min(50vh, 360px); }
+  .task-list-summary { min-height: 36px; }
   .task-list-title { display: grid; gap: 0; }
   .execution-viewer {
     width: 100vw;

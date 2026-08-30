@@ -37,6 +37,12 @@ const probeRoutes: RouteHandler = async ({ path, body, json }) => {
       { code: "unavailable" },
     );
   }
+  if (path === "/api/probe/epoch") {
+    throw Object.assign(
+      new Error("runtime epoch requires proof of the destroyed binding"),
+      { code: "epoch-proof-required" },
+    );
+  }
   return false;
 };
 
@@ -133,6 +139,20 @@ test("unavailable dependencies are honest 503s that keep their actionable messag
     assert.deepEqual(await response.json(), {
       error: "unavailable",
       message: "opencode is not installed on dev@remote — install it there first",
+    });
+  } finally {
+    app.server.close();
+  }
+});
+
+test("runtime recovery conflicts remain actionable instead of becoming internal errors", async () => {
+  const app = await start();
+  try {
+    const response = await fetch(`${app.base}/api/probe/epoch`);
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), {
+      error: "epoch-proof-required",
+      message: "runtime epoch requires proof of the destroyed binding",
     });
   } finally {
     app.server.close();

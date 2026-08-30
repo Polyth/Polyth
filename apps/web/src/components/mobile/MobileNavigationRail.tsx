@@ -70,10 +70,9 @@ function focusDestinationHeading(attempt = 0): void {
   });
 }
 
-/** Phone-first shortcut rail. Settings owns the selected/order list; this
- * component resolves those durable ids against the live capability and
- * surface registries. Overflow is intentionally horizontal so a thumb swipe
- * reveals every configured shortcut without turning navigation into a modal. */
+/** Compact-shell shortcut rail for tablet widths. Phone widths use the
+ * three-segment MobileSessionHeader instead; Settings still owns the selected
+ * and ordered ids used here. */
 export default function MobileNavigationRail() {
   const resolved = useResolvedCapabilities();
   const { rail, surfaces } = useRailSurfaceModel();
@@ -139,7 +138,7 @@ export default function MobileNavigationRail() {
         {items.map((item) => (
           <button
             key={item.id}
-            className={`rail-icon mobile-shortcut${item.active ? " active" : ""}${item.id === "settings" ? " mobile-shortcut-settings" : ""}`}
+            className={`ui-icon-btn ui-icon-btn--ghost ui-icon-btn--lg mobile-shortcut${item.active ? " active" : ""}${item.id === "settings" ? " mobile-shortcut-settings" : ""}`}
             title={item.label}
             aria-label={item.label}
             aria-current={item.active ? "page" : undefined}

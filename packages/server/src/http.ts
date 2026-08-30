@@ -29,6 +29,15 @@ const HASHED_ASSET = /-[A-Z0-9]{8,}(?:\.[^./]+){1,2}$/;
 // Text payloads above a kilobyte compress well; everything else (png, woff2)
 // is already compressed on disk.
 const COMPRESSIBLE = /^(?:text\/|application\/(?:json|javascript))/;
+const RECOVERY_CONFLICT_CODES = new Set([
+  "binding-mismatch",
+  "confirmation-required",
+  "epoch-pending",
+  "epoch-proof-required",
+  "epoch-reset-unconfirmed",
+  "outcome-unknown",
+  "stale-evidence",
+]);
 
 /** Gzip cache keyed by path+mtime so a rebuilt dist never serves stale bytes. */
 const gzipCache = new Map<string, { mtimeMs: number; gz: Buffer }>();
@@ -450,7 +459,7 @@ export function createHttpServer(deps: HttpDeps): Server {
         : e.code === "invalid-json" || e.code === "invalid-path" || e.code === "invalid-input" ? 400
         // history-mismatch keeps its own code in the body so the client can
         // explain a failed exact-history branch, but shares 409 semantics.
-        : e.code === "conflict" || e.code === "history-mismatch" ? 409
+        : e.code === "conflict" || e.code === "history-mismatch" || RECOVERY_CONFLICT_CODES.has(e.code ?? "") ? 409
         : e.code === "payload-too-large" ? 413
         // Dependency failures (unreachable SSH host, missing remote runtime,
         // dead backend) are honest 503s with their actionable message — a

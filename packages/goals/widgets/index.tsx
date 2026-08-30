@@ -37,7 +37,7 @@ export default defineWebPackage((host) => () => {
     TargetIcon: host.ui.icons.target ?? (() => null),
   });
   const off = [
-    host.workspaceSurfaces.register({ id: "goals", title: "Goals", order: 20, plugin: "goals", requires: "project", component: () => createElement(GoalsView) }),
+    host.workspaceSurfaces.register({ id: "goals", title: "Session goals", description: "Attach an objective and let the auditor drive continuations to completion.", order: 20, plugin: "goals", requires: "project", component: () => createElement(GoalsView) }),
     host.capabilities.register({ id: "goals", label: "Goals & progress", plainDescription: "Track goals and work progress.", keywords: ["goals", "progress", "status"], standardTier: "primary", standardRank: 3, open: () => host.navigation.setActiveView("goals"), available: () => true }),
     host.widgets.registerPlugin({
       id: "goals",

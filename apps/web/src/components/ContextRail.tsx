@@ -18,8 +18,9 @@ import {
 } from "react";
 import { formatCombo } from "@polyth/hotkeys";
 import SlotHost, { useSlotVersion } from "./slots/SlotHost.ts";
+import ModuleView from "./ui/ModuleView.ts";
 import {
-  closeWorkspacePane, collapseWorkspacePane, expandWorkspacePane, setPaneFullscreen,
+  closeAllModules, closeWorkspacePane, collapseWorkspacePane, expandWorkspacePane, setPaneFullscreen,
   getState, setRailPlugin, setSidebarOpen, toggleRailPlugin, useActiveModel, useStore,
 } from "../store.ts";
 import { useGitStatus } from "../../../../packages/git/widgets/gitStatusStore.ts";
@@ -296,7 +297,6 @@ export default function ContextRail() {
   const railbarRef = useRef<HTMLElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
   const separatorRef = useRef<HTMLDivElement>(null);
-  const backRef = useRef<HTMLButtonElement>(null);
   const geometryKey = `${projectId ?? ""}:${open?.id ?? ""}:${presentation ? "workspace" : "context"}:${compact ? "compact" : "wide"}:${paneExpanded ? "expanded" : "normal"}`;
   const [geometry, setGeometry] = useState<{ key: string; width: number }>({ key: "", width: 0 });
   const workspaceWidth = geometry.key === geometryKey ? geometry.width : 0;
@@ -480,21 +480,13 @@ export default function ContextRail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [guardInputs, workspaceWidth, dockWidth, mode, isWorkspacePane, measured]);
 
-  // Publish presentation truth so App can make hidden Chat inert.
+  // Publish presentation truth so App can make hidden Chat inert. On phone a
+  // contextual sheet also fully covers the session, so it counts too.
+  const railCoversWorkspace = layered || (compact && open !== null && !isWorkspacePane);
   useEffect(() => {
-    setPaneFullscreen(layered);
+    setPaneFullscreen(railCoversWorkspace);
     return () => setPaneFullscreen(false);
-  }, [layered]);
-
-  // Entering the layer moves focus only when the focused element would become
-  // hidden (it was inside Chat); Back to Chat is the first focusable action.
-  useEffect(() => {
-    if (!layered) return;
-    const focused = document.activeElement;
-    const chat = chatElOf();
-    if (focused && chat && chat.contains(focused)) backRef.current?.focus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layered]);
+  }, [railCoversWorkspace]);
 
   // ---- resize: pointer + keyboard on a real separator ---------------------------
   const commitWidth = (w: number) => {
@@ -600,7 +592,7 @@ export default function ContextRail() {
     : { display: "none" };
 
   // Compact contextual surfaces use the A390 modal sheet. Canonical workspace
-  // surfaces retain the pane model's full-screen layer and bottom navigation.
+  // surfaces retain the pane model's full-screen layer and launcher strip.
   const compactContext = compact && open !== null && !isWorkspacePane;
   useModalSurface({
     enabled: compact && !isWorkspacePane,
@@ -646,36 +638,31 @@ export default function ContextRail() {
               aria-valuenow={dockWidth}
             />
           )}
-          <div className={`rail-head${compactContext ? " sheet-head" : ""}`}>
-            {layered && (
-              <button
-                ref={backRef}
-                className="rail-toggle pane-back"
-                onClick={() => closeWorkspacePane()}
-              >
-                {tr("contextrail.backToChat")}</button>
-            )}
-            <span className="rail-title" tabIndex={-1}>{open?.title ?? ""}</span>
-            <span className="header-spacer" />
-            {!isWorkspacePane && (
-              <div className="rail-tabs"><SlotHost slot="contextRail.tabs" context={{ tab: rail, onSelect: toggleRailPlugin }} /></div>
-            )}
-            {isWorkspacePane && !layered && (
-              <button className="rail-toggle" onClick={expandWorkspacePane} title={tr("contextrail.expand")} aria-label={tr("contextrail.expandValue", { value: open?.title ?? tr("contextrail.panel") })}>⤢</button>
-            )}
-            {isWorkspacePane && layered && paneExpanded && !compact && (
-              <button className="rail-toggle" onClick={collapseWorkspacePane} title={tr("contextrail.collapse")} aria-label={tr("contextrail.collapseValue", { value: open?.title ?? tr("contextrail.panel") })}>⤡</button>
-            )}
-            {isWorkspacePane && layered && !paneExpanded && !compact && measured && admits && (
-              <button className="rail-toggle" onClick={dockNow}>{tr("contextrail.dockBesideChat")}</button>
-            )}
-            <button
-              className="rail-toggle"
-              onClick={() => (isWorkspacePane ? closeWorkspacePane() : setRailPlugin(null))}
-              title={tr("contextrail.closePanel")}
-              aria-label={tr("contextrail.closePanel")}
-            ><Icon.close /></button>
-          </div>
+          <ModuleView
+            id={open?.id ?? "panel"}
+            title={open?.title ?? ""}
+            {...(open?.description ? { description: open.description } : {})}
+            variant="rail"
+            onClose={() => {
+              if (compact) closeAllModules();
+              else if (isWorkspacePane) closeWorkspacePane();
+              else setRailPlugin(null);
+            }}
+            actions={<>
+              {!isWorkspacePane && (
+                <div className="rail-tabs"><SlotHost slot="contextRail.tabs" context={{ tab: rail, onSelect: toggleRailPlugin }} /></div>
+              )}
+              {isWorkspacePane && !layered && (
+                <button className="rail-toggle" onClick={expandWorkspacePane} title={tr("contextrail.expand")} aria-label={tr("contextrail.expandValue", { value: open?.title ?? tr("contextrail.panel") })}>⤢</button>
+              )}
+              {isWorkspacePane && layered && paneExpanded && !compact && (
+                <button className="rail-toggle" onClick={collapseWorkspacePane} title={tr("contextrail.collapse")} aria-label={tr("contextrail.collapseValue", { value: open?.title ?? tr("contextrail.panel") })}>⤡</button>
+              )}
+              {isWorkspacePane && layered && !paneExpanded && !compact && measured && admits && (
+                <button className="rail-toggle" onClick={dockNow}>{tr("contextrail.dockBesideChat")}</button>
+              )}
+            </>}
+          >
           {kept.map((s) => {
             const active = s.id === rail;
             return (
@@ -693,6 +680,7 @@ export default function ContextRail() {
               </div>
             );
           })}
+          </ModuleView>
         </div>
         )}
         {!compact && (

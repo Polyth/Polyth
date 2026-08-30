@@ -192,10 +192,8 @@ export default function GithubView() {
   return (
     <div className="view-page github-page">
       <header className="github-head">
-        <div>
-          <h1 className="view-title">{tr("githubview.github")}</h1>
-          <p className="view-sub">{tr("githubview.issuesAndPullRequestsFor")}</p>
-        </div>
+        {/* Title + description + close come from the shared ModuleView frame. */}
+        <span className="header-spacer" />
         <Button size="sm" iconStart={RefreshIcon} busy={loading} onClick={() => setReloadKey((key) => key + 1)}>{tr("common.refresh")}</Button>
       </header>
 

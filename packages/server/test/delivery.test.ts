@@ -414,6 +414,24 @@ test("reserving a queued message keeps it from dispatching until its composer ed
   await store.close();
 });
 
+test("sending an edited queue item now interrupts the active turn", async () => {
+  const fake = fakeRuntime();
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.send(id, { text: "turn" });
+  await flush();
+  const queued = await sessions.send(id, { text: "queued", delivery: "queue" });
+  await sessions.queueEditStart!(id, queued.queueId!);
+
+  await sessions.queueSendNow!(id, queued.queueId!, "edited and urgent");
+  await flush();
+
+  assert.equal(fake.aborted, 1);
+  assert.deepEqual(fake.startedTexts, ["turn", "edited and urgent"]);
+  assert.deepEqual(await sessions.queueList!(id), []);
+  await store.close();
+});
+
 test("rewind rejects running turns, supports redo, and branches backend before replacement", async () => {
   const fake = fakeRuntime();
   const { sessions, store } = makeService(fake);

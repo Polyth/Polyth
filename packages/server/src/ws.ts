@@ -4,6 +4,7 @@ import type { Server } from "node:http";
 import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
 import type {
+  ClientSettingsDto,
   InstalledPluginDto,
   NotificationRecord,
   PackageDescriptorDto,
@@ -300,6 +301,11 @@ export function attachWs(
     },
     packageChanged(pkg: PackageDescriptorDto) {
       for (const [ws] of clients) send(ws, { type: "package/changed", package: pkg });
+    },
+    clientSettingsChanged(settings: ClientSettingsDto) {
+      // Every socket hears it, including the author's — the client drops the
+      // echo by revision. Never buffered, never part of gap-fill.
+      for (const [ws] of clients) send(ws, { type: "client-settings/changed", settings });
     },
   };
 }

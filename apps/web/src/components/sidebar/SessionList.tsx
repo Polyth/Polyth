@@ -12,7 +12,7 @@ import {
 } from "../../store.ts";
 import { openSession, deleteSession, restoreSession, forkSession, refreshSessions } from "../../init.ts";
 import { resolveSessionStatus, type SessionRowStatus } from "../../sessionStatus.ts";
-import { deriveSessionTitle, fullSessionTitle } from "../../format.ts";
+import { fullSessionTitle } from "../../format.ts";
 import { friendlyError } from "../../settings.ts";
 import { confirmAlert } from "../../alerts.ts";
 import {
@@ -317,7 +317,7 @@ function SessionRow({
       setUiError(tr("questioncards.copyFailedClipboardUnavailable"));
     }
   };
-  const displayTitle = deriveSessionTitle(s.title, eventsTitle);
+  const displayTitle = fullSessionTitle(s.title, eventsTitle);
   const hoverTitle = [
     fullSessionTitle(s.title, eventsTitle),
     pinnedWorktreeLabel,

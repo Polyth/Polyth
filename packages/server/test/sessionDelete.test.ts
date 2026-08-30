@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createStore } from "@polyth/session";
-import type { AgentRuntime, Project, ProjectService, RuntimeEvent } from "@polyth/contracts";
+import type { AgentRuntime, Project, ProjectService, RuntimeEndpoint, RuntimeEvent } from "@polyth/contracts";
 import { createSessionService, type Broadcaster } from "../src/sessions.ts";
 import type { PermissionService } from "@polyth/permissions";
 
@@ -113,4 +113,36 @@ test("delete of an unknown session is a typed not-found", async () => {
     assert.equal(err.code, "not-found");
     return true;
   });
+});
+
+test("delete removes a session whose persisted runtime identity changed without deleting from the replacement", async () => {
+  const fake = fakeRuntime();
+  let discarded = 0;
+  const previousEndpoint: RuntimeEndpoint = {
+    authorityId: "owned:previous", continuity: "verified", generation: 1,
+    url: "http://previous.invalid", location: { directory: "/project" },
+    control: { kind: "owned", instanceToken: "previous" },
+    config: { kind: "read-only" }, authentication: { kind: "none" },
+  };
+  const replacementEndpoint = { ...previousEndpoint, authorityId: "owned:replacement" };
+  fake.rt.endpoint = async () => replacementEndpoint;
+  fake.rt.discardSessionOperation = async () => {
+    discarded += 1;
+    return { kind: "confirmed", value: {} };
+  };
+  const { sessions, store } = makeService(fake);
+  await store.upsertProjection({
+    id: "identity-changed", projectId: "p1", backendSessionId: "backend-old",
+    runtimeBinding: {
+      backendSessionId: "backend-old", authorityId: previousEndpoint.authorityId,
+      generation: previousEndpoint.generation, continuity: "verified", protocol: "legacy",
+      location: previousEndpoint.location,
+    },
+    title: "Old", status: "idle", createdAt: 1, updatedAt: 1,
+  });
+
+  await sessions.delete!("identity-changed");
+
+  assert.equal(await store.projection("identity-changed"), undefined);
+  assert.equal(discarded, 0);
 });

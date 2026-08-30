@@ -184,7 +184,7 @@ const DEFAULT_SIZE_BY_ID: Record<string, WidgetSize> = {
   "files.explorer": { w: 6, h: 7 },
   "files.project-map": { w: 5, h: 4 },
   "git.recent": { w: 6, h: 6 },
-  "terminal.shell": { w: 12, h: 5 },
+  "terminal.shell": { w: 12, h: 7 },
   "knowledge.notes": { w: 6, h: 5 },
   "session.work-status": { w: 6, h: 4 },
   "session.activity": { w: 6, h: 4 },
@@ -1142,6 +1142,10 @@ export function ensureWidgets(definitions: readonly WidgetLayoutDefinition[]): v
     const metadata = placementFor(definition, current.visible);
     const next = {
       ...current,
+      // A definition can load after a persisted layout has been hydrated.
+      // Apply its hard limits here as well as while parsing so a widget never
+      // remains too small for its mandatory controls after an update.
+      size: constrainedSize(current.size, definition),
       visible: definition.requiredVisible === true ? true : current.visible,
       requiredVisible: metadata.requiredVisible,
       definitionId: definition.id,

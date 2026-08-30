@@ -326,10 +326,19 @@ function metadataValue(metadata: JsonObject | undefined, keys: readonly string[]
   return undefined;
 }
 
-export function ExecutionRow({ message, subagent }: { message: ToolMsg; subagent?: Subagent }) {
+export function ExecutionRow({
+  message,
+  subagent,
+  activeTurn = false,
+}: {
+  message: ToolMsg;
+  subagent?: Subagent;
+  /** Preserve the announced call and input while the turn is still running. */
+  activeTurn?: boolean;
+}) {
   const status = displayStatus(message, subagent?.status);
   const done = status === "done" || status === "error" || status === "cancelled";
-  const [open, setOpen] = useState(!done);
+  const [open, setOpen] = useState(activeTurn || !done);
   const detailsPresent = useCollapsePresence(open);
   const rowRef = useRef<HTMLDivElement>(null);
   const pointerScrollAnchor = useRef<(TimelineScrollAnchor & { capturedAt: number }) | null>(null);
@@ -358,7 +367,10 @@ export function ExecutionRow({ message, subagent }: { message: ToolMsg; subagent
   const elapsed = fmtMs(Math.max(0, (message.finishTime ?? Date.now()) - message.time));
   const webUrl = typeof message.input.url === "string" ? message.input.url : undefined;
 
-  useEffect(() => setOpen(!done), [done]);
+  useEffect(() => {
+    if (!done) setOpen(true);
+    else if (!activeTurn) setOpen(false);
+  }, [activeTurn, done]);
 
   const openFile = () => {
     if (presentation.path) openEditorFile(presentation.path);

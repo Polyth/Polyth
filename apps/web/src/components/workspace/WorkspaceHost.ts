@@ -11,10 +11,11 @@
 // import this file to test gating, fallback, empty states, and failure
 // isolation through a real React root.
 import { createElement, useSyncExternalStore, type ReactNode } from "react";
-import { setOverlay, useStore } from "../../store.ts";
+import { closeAllModules, setOverlay, useStore } from "../../store.ts";
 import { refreshProjects } from "../../init.ts";
 import type { ProjectRegistryState } from "../../projectRegistry.ts";
 import ViewErrorBoundary from "../ViewErrorBoundary.ts";
+import ModuleView from "../ui/ModuleView.ts";
 import { buttonClassName } from "../ui/buttonClassName.ts";
 import {
   listWorkspaceSurfaces,
@@ -161,9 +162,27 @@ export default function WorkspaceHost(): ReactNode {
   // EXT-SEAMS-S2-V1: every surface receives the canonical ids as props — the
   // specified identity contract, so contributions never reach into internal
   // stores or invent their own workspace authority just to learn "where am I".
-  return createElement(
+  const body = createElement(
     ViewErrorBoundary,
     { inline: true, resetKey: surfaceResetKey(surface, projectId, sessionId) },
     createElement(surface.component, { projectId, sessionId }),
+  );
+
+  // The session surface IS the workspace — it never gets the module frame.
+  // Every other surface renders inside the shared ModuleView: one header, one
+  // description line, one top-right close (closeAllModules), and — on phone —
+  // the slide-in overlay that fully covers the session. Feature packages no
+  // longer draw their own page header or "Back to chat" control.
+  if (surface.id === "session") return body;
+  return createElement(
+    ModuleView,
+    {
+      id: surface.id,
+      title: surface.title,
+      ...(surface.description ? { description: surface.description } : {}),
+      variant: "main" as const,
+      onClose: closeAllModules,
+    },
+    body,
   );
 }

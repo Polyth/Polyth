@@ -151,6 +151,18 @@ export interface RuntimeRequestExpiredData {
   epoch: number;
   reason: "runtime-epoch-replaced";
 }
+/** Ignorable marker written when reconciliation reattaches to the SAME owned
+ *  backend session after a Polyth restart interrupted an in-flight turn. The
+ *  named `turn-submit` / `turn-steer` operations stay `unknown` (never
+ *  auto-resolved), but no longer gate send admission — the warm backend is
+ *  proven alive, so a new turn may continue on it. Any reserved queue draft
+ *  for those turns is held for review, never re-sent. */
+export interface RuntimeRestartRecoveredData {
+  authorityId: string;
+  generation: number;
+  reconciliationOrdinal: number;
+  recoveredOperationIds: string[];
+}
 export interface TurnStartedData { turnId: string; model?: ModelRef; agent?: string }
 export interface TurnStoppedData { turnId: string; reason: "completed" | "aborted" | "error"; error?: string }
 export interface TokenUsage { input: number; output: number; reasoning?: number; cacheRead?: number; cacheWrite?: number }
@@ -648,6 +660,7 @@ export interface SessionService {
   /** Temporarily holds the queue head while it is edited in the composer. */
   queueEditStart?(sessionId: string, queueId: string): Promise<QueueItemDto>;
   queueEdit?(sessionId: string, queueId: string, text: string): Promise<QueueItemDto>;
+  queueSendNow?(sessionId: string, queueId: string, text: string): Promise<SendResult>;
   queueEditCancel?(sessionId: string, queueId: string): Promise<void>;
   queueReorder?(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
   queueRemove?(sessionId: string, queueId: string): Promise<void>;
@@ -1133,6 +1146,26 @@ export interface RuntimeEpochTransitionResult {
   marker: SessionEvent;
   projection: SessionProjection;
   fencedOperations: DurableOperation[];
+  heldQueueItems: QueueItemDto[];
+}
+
+/** Warm-restart recovery for a session whose in-flight turn was interrupted
+ *  by a Polyth restart (`executing` → `unknown` at boot) but whose owned
+ *  backend session is still alive and has been re-verified by reconciliation.
+ *  Writes an ignorable `runtime/restart-recovered` marker naming the stranded
+ *  `turn-submit` / `turn-steer` operations and holds any reserved queue draft
+ *  for review. The operations stay `unknown` (never auto-resolved); the marker
+ *  only lifts them out of the send-admission barrier. No binding change. */
+export interface RuntimeRestartRecoveryInput {
+  sessionId: string;
+  authorityId: string;
+  generation: number;
+  reconciliationOrdinal: number;
+}
+
+export interface RuntimeRestartRecoveryResult {
+  marker: SessionEvent;
+  recoveredOperationIds: string[];
   heldQueueItems: QueueItemDto[];
 }
 
@@ -2151,6 +2184,17 @@ export interface SystemInfoDto {
   tunnelUrl: string | null;
   dataDirLabel: string;
   capabilities: string[];
+}
+
+/** Server-persisted client preferences (Appearance, chat, notifications, …).
+ *  The server treats `settings` as an opaque JSON object — the web client owns
+ *  its schema (product settings + UI preferences). `revision` increments on
+ *  every accepted write so clients can drop echoes of their own change and
+ *  ignore stale WS broadcasts. */
+export interface ClientSettingsDto {
+  revision: number;
+  updatedAt: number;
+  settings: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------- folders & labels (WP5/WP18)

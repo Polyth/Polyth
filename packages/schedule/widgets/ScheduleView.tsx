@@ -226,11 +226,7 @@ export default function ScheduleView() {
 
   return (
     <div className="view-page">
-      <div>
-        <h2 className="view-title">{tr("scheduleview.schedule")}</h2>
-        <p className="view-sub">{tr("scheduleview.sendAPromptOnceOnAnInterval")}{" "}<code>.agents/loops</code> {tr("scheduleview.appearHereTooRunsWhileThePolyth")}</p>
-      </div>
-
+      {/* Header + close come from the shared ModuleView frame. */}
       <div className="sched-form">
         <Textarea rows={2} value={prompt} placeholder={tr("scheduleview.promptToSendEGSummarizeOvernight")} onChange={(e) => setPrompt(e.target.value)} />
         <div className="view-toolbar-row">

@@ -75,6 +75,7 @@ import { notificationRoutes } from "./routes/notifications.ts";
 import { registerDiscoveredPackages, registerServerPackage } from "./packageDiscovery.ts";
 import { queueRoutes } from "./routes/queue.ts";
 import { createBehaviorService } from "./behavior.ts";
+import { createClientSettings } from "./clientSettings.ts";
 import { createMcpConfigService, mcpEntriesFromBackendConfig } from "./mcp.ts";
 import { createSecureSafeService, secureSafeBehaviorSection } from "./secureSafe.ts";
 import { createModelVisibilityService } from "./modelVisibility.ts";
@@ -377,6 +378,7 @@ export async function boot(opts: BootOptions = {}) {
     notification: (n) => live?.notification?.(n),
     pluginChanged: (plugin) => live?.pluginChanged?.(plugin),
     packageChanged: (pkg) => live?.packageChanged?.(pkg),
+    clientSettingsChanged: (settings) => live?.clientSettingsChanged?.(settings),
   };
   const packageRegistry = createPackageRegistry({
     file: `${dataDir}/packages.json`,
@@ -1089,6 +1091,10 @@ export async function boot(opts: BootOptions = {}) {
     },
   };
   const runtimeCatalog = createRuntimeCatalog({ projects, runtimes });
+  // Start provider discovery while the rest of the server finishes wiring.
+  // The first browser request shares this single-flight rather than becoming
+  // the action that starts OpenCode after every server restart.
+  void runtimeCatalog.models().catch(() => {});
 
   const parseModel = (raw?: string) => {
     if (!raw || !raw.includes("/")) return undefined;
@@ -1526,8 +1532,11 @@ export async function boot(opts: BootOptions = {}) {
       },
     });
   };
+  const clientSettings = createClientSettings({ file: `${dataDir}/client-settings.json` });
   const settingsRoute = settingsRoutes({
     behavior, mcp,
+    clientSettings,
+    broadcastClientSettings: (state) => broadcast.clientSettingsChanged?.(state),
     saveRole: async (name, role) => {
       await configApplier.applyAgent(name, role);
       const current = (await runtimeCatalog.agents()).find((agent) => agent.name === name);
@@ -1572,6 +1581,28 @@ export async function boot(opts: BootOptions = {}) {
         }
         return parseNoteReply(await assistComplete(sessionId, buildNotePrompt(transcript)));
       },
+      ...(smallModel() ? {
+        taskBrief: async (sessionId: string) => {
+          const messages = deriveMessages(await store.events(sessionId));
+          const latest = [...messages].reverse().find((message) => message.role === "user");
+          const prompt = latest?.parts
+            .filter((part): part is { type: "text"; text: string } => part.type === "text")
+            .map((part) => part.text).join("\n").trim();
+          if (!prompt) throw Object.assign(new Error("nothing to summarize — the session has no user prompt"), { code: "invalid-input" });
+          const proj = await store.projection(sessionId);
+          const project = proj ? await projects.get(proj.projectId) : null;
+          const runtime = await runtimes.forProject(proj?.projectId ?? "__default__");
+          const brief = await oneShot(runtime, {
+            cwd: project?.path ?? process.cwd(),
+            model: smallModel()!,
+            prompt: [
+              "Summarize this user task in at most 20 words. Return only the summary, no label or punctuation flourish.",
+              "<prompt>", prompt.slice(0, 12_000), "</prompt>",
+            ].join("\n"),
+          }, store);
+          return brief.trim().split(/\s+/).slice(0, 20).join(" ");
+        },
+      } : {}),
     }),
     sessionRetentionRoutes(sessions),
     controlRoutes(sessions),

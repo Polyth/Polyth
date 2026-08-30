@@ -135,6 +135,15 @@ export function normalizeSettings(raw: unknown): PolythSettings {
   };
 }
 
+/** Coarse bucket for the discrete Interface scale segment (12–18px). CSS keys
+ *  off `html[data-interface-size]` when a rule must target one step — e.g. the
+ *  compact-shell nav that reads a touch small at the default (medium) size. */
+export function interfaceSizeBucket(px: number): "small" | "medium" | "large" {
+  if (px <= 13) return "small";
+  if (px >= 16) return "large";
+  return "medium";
+}
+
 export function matchesSendShortcut(shortcut: PolythSettings["desktopSendShortcut"] | PolythSettings["mobileSendShortcut"], shiftKey: boolean): boolean {
   return shortcut === (shiftKey ? "shift-enter" : "enter");
 }
@@ -181,6 +190,7 @@ export function applySettingsToDom(s: PolythSettings): void {
   const html = document.documentElement;
   applyThemeSetting(s.theme, s.appearanceMode);
   html.dataset.density = s.density;
+  html.dataset.interfaceSize = interfaceSizeBucket(s.fontSize);
   html.dataset.font = s.fontFamily;
   const font = interfaceFont(s.fontFamily);
   html.dataset.fontKind = font.mono ? "mono" : "prose";

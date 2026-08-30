@@ -142,7 +142,13 @@ test("fresh mobile chat exposes project targets and attachments use the platform
   );
   assert.match(css, /\.composer-mobile\.composer-collapsed:not\(\.composer-has-draft\) \.composer-workflow\s*\{\s*display:\s*none;/);
   assert.match(css, /\.composer-mobile\.composer-has-draft \.composer-workflow\s*\{\s*display:\s*inline-flex;/);
-  assert.match(mobileHeader, /displaySessionTitle\(session\.title, session\.id\)/);
+  assert.match(mobileHeader, /displaySessionTitle\(session\.title, session\.id, firstUserTextCached\(events\[session\.id\]\)\)/);
+  assert.match(mobileHeader, /const activeTask = model\.tasks\?\.items\.find\(\(task\) => task\.status === "active"\)/);
+  assert.match(mobileHeader, /label="Recent sessions"/);
+  assert.match(mobileHeader, /api\.taskBrief\(sessionId\)/);
+  assert.match(mobileHeader, /<SheetSection title="Task list" count=\{tasks\.length\}>/);
+  assert.match(css, /\.mobile-float-navigation, \.mobile-float-actions \{ display: inline-grid; grid-auto-flow: column;/);
+  assert.match(css, /\.mobile-task-hero\s*\{[^}]*var\(--accent-wash\)/s);
   assert.match(header, /<MobileSessionHeader \/>/);
   assert.doesNotMatch(header, /WorkspaceBottomNav/);
   assert.match(mobileNavigation, /ui\.mobileShortcuts/);

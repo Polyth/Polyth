@@ -1045,22 +1045,10 @@ min-height: 20px; display: flex; align-items: flex-end; justify-content: center;
     color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh);
 }
 
-.workflow-editor-actions > .workflow-save-state,
+/* The Save action stays in the editor toolbar on every width now that the
+   sticky bottom save/status bar is gone (shared ModuleView, no bottom chrome). */
 .workflow-editor-actions > .primary-btn {
-display: none;
-}
-
-.workflow-mobile-savebar {
-position: sticky; bottom: 0; z-index: 3;
-    min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
-    padding: 7px 8px 7px 14px; border: 1px solid var(--hair-strong); border-radius: var(--radius-card);
-    background: color-mix(in srgb, var(--elevated) 94%, transparent);
-    box-shadow: var(--inset-hi), 0 -10px 24px -20px color-mix(in srgb, var(--text) 55%, transparent);
-    backdrop-filter: blur(12px);
-}
-
-.workflow-mobile-savebar .workflow-button {
-min-width: 112px; min-height: var(--tap);
+min-height: var(--tap);
 }
 
 .workflow-node-grid,

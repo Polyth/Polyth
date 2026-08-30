@@ -18,6 +18,8 @@ import {
   abortSession,
   createSession,
   rememberProjectModelSelection,
+  reconnectSync,
+  recheckRuntimeCatalog,
 } from "../init.ts";
 import {
   api,
@@ -133,6 +135,7 @@ async function loadComposerCatalog(projectId: string): Promise<ComposerCatalogRe
 }
 
 const PROFILE_MISSING_NOTE = tr("composer.profileUnavailableChooseAnother");
+const MODEL_WARNING_DELAY_MS = 8_000;
 
 type NewSessionTarget =
   | { kind: "main" }
@@ -344,6 +347,15 @@ export default function Composer({
     }
   }, [working]);
   const noModels = chatModels.length === 0;
+  const [showModelWarning, setShowModelWarning] = useState(false);
+  useEffect(() => {
+    if (!noModels) {
+      setShowModelWarning(false);
+      return;
+    }
+    const timer = setTimeout(() => setShowModelWarning(true), MODEL_WARNING_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [noModels]);
   const widgetMode = variant === "widget";
   const shellLayout = useShellMode();
 
@@ -682,6 +694,11 @@ export default function Composer({
     return true;
   }, []);
 
+  const retryModelConnection = useCallback(() => {
+    recheckRuntimeCatalog();
+    reconnectSync();
+  }, []);
+
   const send = useCallback((
     override?: string,
     deliveryOverride?: "steer" | "queue" | "interrupt",
@@ -694,7 +711,10 @@ export default function Composer({
       if (!target || target !== queueEdit.sessionId || !t || queueEditSaving) return;
       const editing = queueEdit;
       setQueueEditSaving(true);
-      void api.queueEdit(target, editing.id, t)
+      const save = deliveryOverride === "interrupt"
+        ? api.queueSendNow(target, editing.id, t)
+        : api.queueEdit(target, editing.id, t);
+      void save
         .then(() => {
           // The server updates the existing queue row, so it retains its
           // position and delivery metadata instead of becoming a new message.
@@ -1161,6 +1181,30 @@ export default function Composer({
     consumeWorkflowDraft,
   };
   const thinkingVariants = selectedModel?.variants ?? [];
+  // UX-MOBILE: phones render model + reasoning effort in a header row above
+  // the editor (where the effort track has room to drag); the desktop rail
+  // keeps the same controls under the text. One element, one owner — only
+  // the placement differs.
+  const executionControls = !noModels && (
+    <>
+      <ModelPicker
+        models={chatModels}
+        value={cfg.model}
+        recommended={recommendedModel}
+        direction="up"
+        usage={model.contextUsage?.inputTokens}
+        onPick={pickComposerModel}
+      />
+      {modelSupportsThinking(selectedModel) && (
+        <EffortMenu
+          variants={thinkingVariants}
+          value={selectedThinking}
+          onPick={(thinking) => pickThinking(thinking || undefined)}
+          onCommit={preserveKeyboard}
+        />
+      )}
+    </>
+  );
 
   const followUp = getUiSettings().followUpBehavior;
   const borrowedEpochPending = session?.status === "epoch-pending"
@@ -1228,9 +1272,11 @@ export default function Composer({
       {dropHint && (
         <div className="drop-hint">{dropHint === "path" ? tr("composer.attachToChat") : tr("composer.dropToAttach")}</div>
       )}
-      {noModels && (
-        <div className="composer-note" role="status">
-          {tr("composer.noModelsAvailableCheckThatTheBackend")}</div>
+      {showModelWarning && (
+        <div className="composer-note composer-runtime-unavailable" role="status">
+          <span>{tr("composer.noModelsAvailableCheckThatTheBackend")}</span>
+          <Button size="sm" onClick={retryModelConnection}>{tr("sidebar.reconnect")}</Button>
+        </div>
       )}
       {profileMissing && (
         <div className="composer-note composer-profile-missing" role="alert">
@@ -1252,6 +1298,11 @@ export default function Composer({
       )}
       {attachments.length > 0 && !noModels && (
         <div className="composer-attach-note">{ATTACHMENT_COMPAT_NOTE}</div>
+      )}
+      {phoneLayout && executionControls && (
+        <div className="composer-config-top">
+          {executionControls}
+        </div>
       )}
       <div className="composer-input">
         {shellMode && <div className="composer-mode-label">{tr("composer.shellCommandPermissionCheckedOutputAddedTo")}</div>}
@@ -1367,26 +1418,7 @@ export default function Composer({
           attachGithub={attachGithub}
         />
         <div className="composer-config">
-          {!noModels && (
-            <ModelPicker
-              models={chatModels}
-              value={cfg.model}
-              recommended={recommendedModel}
-              direction="up"
-              usage={model.contextUsage?.inputTokens}
-              onPick={pickComposerModel}
-            />
-          )}
-          {modelSupportsThinking(selectedModel) && (
-            <EffortMenu
-              variants={thinkingVariants}
-              value={selectedThinking}
-              onPick={(thinking) => {
-                pickThinking(thinking || undefined);
-                preserveKeyboard?.();
-              }}
-            />
-          )}
+          {!phoneLayout && executionControls}
           {chatAgents.length > 0 ? (
             <Picker
               className="composer-agent-chip"
@@ -1414,14 +1446,14 @@ export default function Composer({
             {working ? (
               (queueEdit || (followUp === "queue" && !sendDisabled)) ? (
                 <div className="composer-send-split">
-                  <button
-                    className="send composer-delivery composer-queue"
-                    onClick={() => send()}
-                    aria-label={queueEdit ? tr("composer.saveQueuedMessageInIts") : tr("composer.queueMessageUntilTheCurrentResponseFinishes")}
-                    title={queueEdit ? tr("composer.saveQueuedMessageInIts") : tr("composer.queueMessageUntilTheCurrentResponseFinishes")}
-                    disabled={queueEdit ? queueEditSaving || !text.trim() : false}
-                  >
-                    <Icon.sendClock /><span className="composer-action-label">{queueEdit ? tr("common.save") : tr("composer.queue")}</span>
+                    <button
+                      className="send composer-delivery composer-queue"
+                      onClick={() => send()}
+                      aria-label={queueEdit ? tr("composer.saveQueuedMessageInIts") : tr("composer.queueMessageUntilTheCurrentResponseFinishes")}
+                      title={queueEdit ? tr("composer.saveQueuedMessageInIts") : tr("composer.queueMessageUntilTheCurrentResponseFinishes")}
+                      disabled={queueEdit ? queueEditSaving || !text.trim() : false}
+                    >
+                      <Icon.sendClock /><span className="composer-action-label">{queueEdit ? tr("common.save") : tr("composer.queue")}</span>
                   </button>
                   <Menu
                     label={tr("composer.moreActiveRunActions")}
@@ -1429,10 +1461,10 @@ export default function Composer({
                     entries={[
                       {
                         id: "send-now",
-                        label: queueEdit ? tr("composer.saveQueuedMessage") : tr("composer.sendNow"),
+                        label: tr("composer.sendNow"),
                         icon: SendIcon,
-                        detail: queueEdit ? tr("composer.keepItInItsCurrent") : tr("composer.stopTheCurrentResponseAndSend"),
-                        onSelect: () => send(undefined, queueEdit ? undefined : "interrupt"),
+                        detail: tr("composer.stopTheCurrentResponseAndSend"),
+                        onSelect: () => send(undefined, "interrupt"),
                       },
                       {
                         id: "stop",

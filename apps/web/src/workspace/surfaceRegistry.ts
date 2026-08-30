@@ -26,6 +26,8 @@ export interface WorkspaceSurfaceContext {
 export interface WorkspaceSurface {
   id: string;
   title: string;
+  /** One-line purpose shown under the title in the shared module header. */
+  description?: string;
   /** Deterministic position for fallback selection: `order` then `id`. */
   order: number;
   /** Legacy capability association. Presets place surfaces but never gate

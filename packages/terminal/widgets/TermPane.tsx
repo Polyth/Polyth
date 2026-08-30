@@ -25,6 +25,7 @@ import {
   ChevronDownIcon,
   ChevronUpIcon,
   CloseIcon,
+  CopyIcon,
   IconButton,
   TextInput,
 } from "../../../apps/web/src/components/ui/index.ts";
@@ -434,6 +435,21 @@ export default function TermPane(props: TermPaneProps) {
     return copyText(text);
   }, [selection, emu]);
 
+  // Touch selection is inconsistent across mobile browsers, especially while
+  // a terminal is keeping the software keyboard open. The mobile Copy action
+  // still copies an explicit selection when there is one, and otherwise gives
+  // users a reliable way to copy the complete visible terminal buffer.
+  const copyTerminalText = useCallback(async (): Promise<boolean> => {
+    if (await copySelection()) return true;
+    const lastRow = emu.bufferLength() - 1;
+    if (lastRow < 0) return false;
+    const text = emu.getText(
+      { row: 0, col: 0 },
+      { row: lastRow, col: emu.cols() },
+    );
+    return text ? copyText(text) : false;
+  }, [copySelection, emu]);
+
   const pasteFromClipboard = useCallback(() => {
     try {
       void navigator.clipboard.readText().then((text) => {
@@ -777,6 +793,21 @@ export default function TermPane(props: TermPaneProps) {
     mobileInputRef.current?.focus({ preventScroll: true });
   };
 
+  const sendMobileKey = (key: "ArrowUp" | "ArrowDown") => {
+    if (!running) return;
+    const bytes = keyEventToBytes({
+      key,
+      ctrlKey: false,
+      altKey: false,
+      metaKey: false,
+      shiftKey: false,
+    }, { appCursorKeys: emu.modes().appCursorKeys });
+    if (!bytes) return;
+    send(bytes);
+    scrollToBottom();
+    mobileInputRef.current?.focus({ preventScroll: true });
+  };
+
   // ---- render ----
   const cursor = emu.cursor();
   const modes = emu.modes();
@@ -938,6 +969,43 @@ export default function TermPane(props: TermPaneProps) {
         onFocus={onFocus}
         onBlur={onBlur}
       />
+
+      <div className="term-mobile-controls" role="toolbar" aria-label={tr("terminalview.terminalValue", { title: label })}>
+        <IconButton
+          icon={CopyIcon}
+          size="sm"
+          variant="ghost"
+          label={tr("terminalview.copy")}
+          title={tr("terminalview.copy")}
+          onClick={() => { void copyTerminalText(); }}
+        />
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            pasteFromClipboard();
+            mobileInputRef.current?.focus({ preventScroll: true });
+          }}
+        >{tr("terminalview.paste")}</Button>
+        <IconButton
+          icon={ChevronUpIcon}
+          size="sm"
+          variant="ghost"
+          label={tr("terminalview.previousMatch")}
+          title={tr("terminalview.previousMatch")}
+          disabled={!running}
+          onClick={() => sendMobileKey("ArrowUp")}
+        />
+        <IconButton
+          icon={ChevronDownIcon}
+          size="sm"
+          variant="ghost"
+          label={tr("terminalview.nextMatch")}
+          title={tr("terminalview.nextMatch")}
+          disabled={!running}
+          onClick={() => sendMobileKey("ArrowDown")}
+        />
+      </div>
 
       {contextMenu && (
         <div

@@ -5,26 +5,25 @@ import { readWebStyles } from "./webStyles.ts";
 
 const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
 
-test("phone chat uses floating session controls while other compact views retain the capability rail", async () => {
-  const [header, mobileHeader, shortcuts, prefs, shell] = await Promise.all([
+test("every phone view uses the same three-segment shell bar", async () => {
+  const [header, mobileHeader, prefs, shell, css] = await Promise.all([
     read("../src/components/Header.tsx"),
     read("../src/components/mobile/MobileSessionHeader.tsx"),
-    read("../src/components/mobile/MobileNavigationRail.tsx"),
     read("../src/uiPrefs.ts"),
     read("../src/shell.ts"),
+    readWebStyles(),
   ]);
 
-  assert.match(header, /chatSurface\s*\? <MobileSessionHeader \/>/);
+  assert.match(header, /if \(mode === "phone"\) \{\s*return <MobileSessionHeader \/>;\s*\}/s);
+  assert.doesNotMatch(header, /chatSurface\s*\?\s*<MobileSessionHeader/);
   assert.doesNotMatch(header, /WorkspaceBottomNav/);
   assert.match(mobileHeader, /label="Open navigation"/);
   assert.match(mobileHeader, /label="New session"/);
   assert.match(mobileHeader, /label="Open tools"/);
   assert.match(mobileHeader, /title="Select a session"/);
   assert.match(mobileHeader, /title="Tools"/);
-  assert.match(shortcuts, /ui\.mobileShortcuts\.flatMap/);
-  assert.match(shortcuts, /className="mobile-shortcut-track"/);
-  assert.match(shortcuts, /capability\.descriptor\.open/);
   assert.doesNotMatch(mobileHeader, /Icon\.plus/);
+  assert.match(css, /\.app-shell\s*\{[^}]*padding-top:\s*calc\(var\(--safe-top\) \+ var\(--tap\) \+ var\(--space-6\)\)/s);
   assert.match(prefs, /mobileShortcuts:\s*\[[\s\S]*"notification-centre"/);
   assert.match(shell, /hint:\s*hintOf\("notificationCentre"\)/);
   assert.match(shell, /notificationCentre:\s*\(\) => toggleRailPlugin\("slot:notification-centre"\)/);

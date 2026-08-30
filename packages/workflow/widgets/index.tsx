@@ -151,7 +151,8 @@ export default defineWebPackage((host) => () => {
   const off = [
     host.workspaceSurfaces.register({
       id: "workflow",
-      title: "Workflows",
+      title: tr("workflowview.workflows"),
+      description: tr("capabilities.coordinateAgentRolesInDependencyBasedPipelines"),
       order: 22,
       plugin: "workflow",
       requires: "project",

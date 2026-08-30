@@ -275,10 +275,7 @@ export default function MultiRunView() {
 
   return (
     <div className="view-page multirun-view">
-      <div>
-        <h1 className="view-title">{tr("widgets.builtinwidgets.multiRun")}</h1>
-        <p className="view-sub">Ask several models in parallel, compare their responses, then choose what to continue.</p>
-      </div>
+      {/* Header + close come from the shared ModuleView frame. */}
       {!shown && (
         <section className="multirun-setup" aria-labelledby="multirun-setup-title">
           <div>

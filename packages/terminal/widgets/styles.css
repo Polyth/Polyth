@@ -88,6 +88,9 @@ position: relative; flex: 1; min-height: 0; display: flex; flex-direction: colum
 position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; padding: 0;
   border: 0; opacity: 0; pointer-events: none; caret-color: transparent;
 }
+.term-mobile-controls {
+display: none;
+}
 .term-body {
 flex: 1; margin: 0; border: 0; border-radius: 0; background: var(--term-bg);
   font-family: var(--mono); font-size: var(--editor-font-size, 12.5px);
@@ -363,6 +366,23 @@ width: var(--tap); height: var(--tap);
    obscure the character being entered. Preserve underline cursors, while
    rendering block/bar cursor modes as a conventional thin insertion bar. */
 .term-cursor:not(.style-underline) { width: 2px !important; }
+
+/* Software keyboards do not expose terminal shortcuts consistently. Keep
+   copy/paste and shell-history navigation in the reachable terminal chrome. */
+.term-mobile-controls {
+flex: none; display: grid; grid-template-columns: var(--tap) minmax(0, 1fr) var(--tap) var(--tap);
+  gap: var(--space-1); align-items: center; padding: var(--space-1) var(--space-2)
+  max(var(--space-1), env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--border-soft); background: var(--panel);
+}
+.term-mobile-controls > button {
+width: 100%; min-width: var(--tap); min-height: var(--tap); padding-inline: var(--space-2);
+}
+.term-view {
+/* Give the output area room for terminal tabs, the mobile controls, and a
+   useful number of rows. The canvas itself remains the scroll container. */
+min-block-size: min(26rem, calc(var(--visual-vh, 100dvh) - 8rem));
+}
 }
 
 /* Keyframes moved from core: terminal-only status animations. */

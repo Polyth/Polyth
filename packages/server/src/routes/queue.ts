@@ -3,7 +3,15 @@ import type { RouteHandler } from "../http.ts";
 
 /** Keeps a queue item from dispatching while its text is open in the composer. */
 export function queueRoutes(sessions: SessionService): RouteHandler {
-  return async ({ path, method, json }) => {
+  return async ({ path, method, body, json }) => {
+    const sendNow = path.match(/^\/api\/sessions\/([^/]+)\/queue\/([^/]+)\/edit\/send-now$/);
+    if (sendNow && method === "POST") {
+      if (!sessions.queueSendNow) throw Object.assign(new Error("queue editing unavailable"), { code: "unsupported" });
+      const input = await body();
+      if (typeof input.text !== "string") throw Object.assign(new Error("text must be a string"), { code: "invalid-input" });
+      json(200, await sessions.queueSendNow(sendNow[1]!, sendNow[2]!, input.text));
+      return true;
+    }
     const match = path.match(/^\/api\/sessions\/([^/]+)\/queue\/([^/]+)\/edit$/);
     if (!match) return false;
     const sessionId = match[1]!;

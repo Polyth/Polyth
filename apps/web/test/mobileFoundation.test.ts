@@ -100,7 +100,7 @@ test("latest-message control remains a full coarse-pointer target", async () => 
   );
 });
 
-test("compact shell keeps drawer navigation while phone chat owns floating controls", async () => {
+test("compact shell keeps drawer navigation while every phone view owns floating controls", async () => {
   const [header, mobileHeader, sidebar, css] = await Promise.all([
     read("../src/components/Header.tsx"),
     read("../src/components/mobile/MobileSessionHeader.tsx"),
@@ -124,7 +124,7 @@ test("375px chat keeps a safe-area-aware floating shell and docked composer", as
 
   assert.match(
     contract,
-    /\.mobile-session-floats\s*\{[^}]*top:\s*max\(var\(--space-3\), var\(--safe-top\)\)/s,
+    /\.mobile-session-floats\s*\{[^}]*top:\s*var\(--safe-top\)/s,
   );
   assert.match(
     contract,

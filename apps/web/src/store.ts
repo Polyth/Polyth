@@ -375,6 +375,15 @@ export function setActiveView(view: AppView | LegacyPaneViewId): void {
     set({ activeView: "session" });
     return;
   }
+  // A primary module replaces an open rail/pane. Leaving a fullscreen Files,
+  // Git, Terminal, or contextual panel mounted above the newly selected main
+  // module made the next navigation frame expose only Chat underneath (the
+  // visible "flash back to chat" bug on phone). There is one visible module
+  // surface at a time; the shared ModuleView owns its consistent frame.
+  if (view !== "session" && state.railPlugin !== null) {
+    if (paneSurfaceOf(state.railPlugin) !== null) closeWorkspacePane({ restoreFocus: false });
+    else setRailPlugin(null);
+  }
   saveActiveView(view as AppView);
   set({ activeView: view as AppView });
 }
@@ -639,6 +648,19 @@ export function startNewSession(
  *  and the primary view returns to "session". */
 export function showSessionChat(): void {
   closeWorkspacePane();
+  set({ overlay: null });
+  setActiveView("session");
+  setWorkspaceMode("chat");
+}
+
+/** UX-MODULE-STACK §4: the single module close affordance. One call dismisses
+ *  every open module — the main-area workspace view AND any right-rail panel
+ *  or workspace pane — and returns to the session. Every module's shared
+ *  ModuleView close button routes here, so on phone the stacked overlays all
+ *  disappear together instead of peeling back one "Back to chat" at a time. */
+export function closeAllModules(): void {
+  closeWorkspacePane();
+  setRailPlugin(null);
   set({ overlay: null });
   setActiveView("session");
   setWorkspaceMode("chat");

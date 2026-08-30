@@ -12,6 +12,7 @@ import {
 import {
   createTranslateState,
   flushAssistantOnIdle,
+  normalizeOcObservation,
   translateOcEvent,
 } from "../src/events.ts";
 
@@ -908,6 +909,25 @@ test("session.updated exposes OpenCode's generated title and ignores malformed u
     }, state),
     [],
   );
+});
+
+test("title snapshots without upstream revisions remain independently ingestible", () => {
+  const observed = {
+    authorityId: "authority-a", generation: 1, location: { directory: "/project" },
+    backendSessionId: "ses_1", reconciliationOrdinal: 1,
+  };
+  const normalize = (title: string) => normalizeOcObservation({
+    data: { type: "session.updated", properties: { info: { id: "ses_1", title } } },
+    channel: "sse", observed, current: observed,
+  });
+
+  const placeholder = normalize("New session");
+  const generated = normalize("Stabilize reconnect behavior");
+  assert.equal(placeholder.kind, "accepted");
+  assert.equal(generated.kind, "accepted");
+  if (placeholder.kind !== "accepted" || generated.kind !== "accepted") return;
+  assert.notEqual(placeholder.observation.identity.revision, generated.observation.identity.revision);
+  assert.deepEqual(generated.observation.events, [{ type: "session/title-generated", title: "Stabilize reconnect behavior" }]);
 });
 
 test("session compaction and compaction parts translate to canonical runtime events", () => {

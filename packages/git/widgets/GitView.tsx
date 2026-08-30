@@ -472,7 +472,7 @@ export default function GitView() {
     <div className="view-page git-page">
       <header className="source-control-head">
         <div className="source-control-title">
-          <h1 className="view-title">{tr("gitview.sourceControl")}</h1>
+          {/* Title + close come from the shared ContextRail / ModuleView header. */}
           <span className="source-branch"><Icon.branch /> <span className="mono">{status?.branch || tr("gitview.detachedHead")}</span></span>
           {status && (status.ahead > 0 || status.behind > 0) && (
             <span className="git-ahead-behind">

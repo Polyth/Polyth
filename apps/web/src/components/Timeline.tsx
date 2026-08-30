@@ -170,7 +170,10 @@ function Thinking({ m }: { m: AssistantMsg }) {
         }}
       >
         {mark}
-        {!open && head !== "" && <span className="reasoning-preview">{head}</span>}
+        <span className="reasoning-main">
+          <strong>Thinking</strong>
+          {!open && head !== "" && <span className="reasoning-preview">{head}</span>}
+        </span>
         <span className="reasoning-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
       </summary>
       {open && body}
@@ -830,10 +833,20 @@ function childForTool(tool: ToolMsg, subagents: SubagentState | null): SubagentS
     agent.label === description || agent.currentTask === tool.input.prompt);
 }
 
-export function WorkedGroup({ g, subagents }: { g: WorkGroup; subagents: SubagentState | null }) {
+export function WorkedGroup({
+  g,
+  subagents,
+  activeTurn = false,
+}: {
+  g: WorkGroup;
+  subagents: SubagentState | null;
+  /** Keep the current turn's actions visible, including a call/result pair
+   * that reaches the browser in the same render. */
+  activeTurn?: boolean;
+}) {
   const failed = g.tools.some((t) => t.status === "error") || g.tasks.some((task) => task.action === "failed");
   const running = g.tools.some((t) => t.status === "pending" || t.status === "running") || g.tasks.some((task) => task.action === "started");
-  const [open, setOpen] = useState(running || failed);
+  const [open, setOpen] = useState(activeTurn || running || failed);
   const itemsPresent = useCollapsePresence(open);
   const previousRunning = useRef(running);
   const userExpanded = useRef(false);
@@ -843,9 +856,10 @@ export function WorkedGroup({ g, subagents }: { g: WorkGroup; subagents: Subagen
       setOpen(true);
     }
     if (previousRunning.current && !running && !failed && !userExpanded.current) setOpen(false);
+    if (!activeTurn && !running && !failed && !userExpanded.current) setOpen(false);
     if (failed) setOpen(true);
     previousRunning.current = running;
-  }, [failed, running]);
+  }, [activeTurn, failed, running]);
   const label = executionGroupLabel(g.tools);
   const files = new Set(g.tools.flatMap((tool) => tool.changedFiles ?? [])).size;
   const actionCount = g.tools.length + g.tasks.length;
@@ -885,13 +899,14 @@ export function WorkedGroup({ g, subagents }: { g: WorkGroup; subagents: Subagen
   );
 }
 
-function MessageView({ m, announce, plan, regeneratePrompt, turn, preliminary, onRevert, onFork, revert, fork }: {
+function MessageView({ m, announce, plan, regeneratePrompt, turn, preliminary, activeTurn, onRevert, onFork, revert, fork }: {
   m: RenderMessage;
   announce?: Announce;
   plan?: NonNullable<RenderModel["tasks"]>;
   regeneratePrompt?: string;
   turn?: RenderModel["turn"];
   preliminary?: boolean;
+  activeTurn?: boolean;
   onRevert?: (message: UserMsg) => void;
   onFork?: (message: UserMsg) => void;
   revert?: ActionAvailability;
@@ -925,7 +940,7 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, preliminary, o
   }
   if (m.kind === "github-conflict") return <GithubConflictCard message={m} />;
   if (m.kind === "task") return <TaskActivityRow activity={m} />;
-  return <ExecutionRow message={m} />;
+  return <ExecutionRow message={m} activeTurn={activeTurn} />;
 }
 
 // ---- memoized rows -----------------------------------------------------------
@@ -977,6 +992,7 @@ const MessageRow = memo(function MessageRow(props: Parameters<typeof MessageView
   // model.turn mutates in place: any row holding it must always re-render
   && prev.turn === undefined && next.turn === undefined
   && prev.preliminary === next.preliminary
+  && prev.activeTurn === next.activeTurn
   && prev.regeneratePrompt === next.regeneratePrompt
   && prev.announce === next.announce
   && prev.onRevert === next.onRevert
@@ -999,9 +1015,19 @@ function sameGroup(a: WorkGroup, b: WorkGroup): boolean {
   return true;
 }
 
-const WorkRow = memo(function WorkRow({ g, subagents }: { rev: number; g: WorkGroup; subagents: SubagentState | null }) {
-  return <WorkedGroup g={g} subagents={subagents} />;
-}, (prev, next) => prev.rev === next.rev && sameGroup(prev.g, next.g) && prev.subagents === next.subagents);
+const WorkRow = memo(function WorkRow({
+  g,
+  subagents,
+  activeTurn,
+}: {
+  rev: number;
+  g: WorkGroup;
+  subagents: SubagentState | null;
+  activeTurn: boolean;
+}) {
+  return <WorkedGroup g={g} subagents={subagents} activeTurn={activeTurn} />;
+}, (prev, next) => prev.rev === next.rev && sameGroup(prev.g, next.g)
+  && prev.subagents === next.subagents && prev.activeTurn === next.activeTurn);
 
 // Right-edge prompt rail (WP4, restyled after polyth PromptNavigatorRail):
 // a thin vertical tape of ticks in a 28px gutter hugging the right edge of the
@@ -1327,6 +1353,10 @@ export default function Timeline({
   const undoneMessages = useMemo(() => model.messages.filter((message) => message.undone), [model]);
   const rows = useMemo(() => groupWork(mergeThinking(visibleMessages)), [visibleMessages]);
   const undoneRows = useMemo(() => groupWork(mergeThinking(undoneMessages)), [undoneMessages]);
+  const hasRunningAction = rows.some((row) => row.kind === "work" && (
+    row.tools.some((tool) => tool.status === "pending" || tool.status === "running")
+    || row.tasks.some((task) => task.action === "started")
+  ));
   const prompts = useMemo(() => promptIndex(visibleMessages), [visibleMessages]);
   const showNav = prefs.promptNavigator === "on" || (prefs.promptNavigator === "auto" && prompts.length >= 3);
   // Regenerate resends the user prompt that produced each answer. One forward
@@ -1591,7 +1621,7 @@ export default function Timeline({
         )}
         {shownRows.map((r) => (
           r.kind === "work"
-            ? <WorkRow key={r.id} rev={workRev(r)} g={r} subagents={model.subagents} />
+            ? <WorkRow key={r.id} rev={workRev(r)} g={r} subagents={model.subagents} activeTurn={turn?.status === "working"} />
             : (
               <MessageRow
                 key={r.id}
@@ -1602,6 +1632,7 @@ export default function Timeline({
                 turn={r.kind === "assistant" && r.id === latestAssistantId && turn?.status !== "working" ? turn : undefined}
                 preliminary={r.kind === "assistant" && turn?.status === "working"
                   && (turn.startedAt === undefined || r.time >= turn.startedAt)}
+                activeTurn={r.kind === "tool" && turn?.status === "working"}
                 announce={announce}
                 onRevert={revert}
                 onFork={fork}
@@ -1610,6 +1641,14 @@ export default function Timeline({
               />
             )
         ))}
+        {turn?.status === "working" && !hasRunningAction && (
+          <div className="msg assistant execution-group current" role="status" aria-live="polite">
+            <div className="execution-group-toggle">
+              <span className="execution-group-mark running" aria-hidden="true"><span className="ui-spinner ui-spinner--sm" /></span>
+              <span className="execution-group-copy"><strong>{tr("timeline.working")}</strong></span>
+            </div>
+          </div>
+        )}
         {model.workflowRun && <WorkflowTimelineCard run={model.workflowRun} />}
         {/* The dock confirmation sits OUTSIDE the collapsible tail: it must be
             visible even while the reverted items stay folded away. */}
@@ -1644,7 +1683,7 @@ export default function Timeline({
             <div className="rewound-tail-body">
               {undoneRows.map((row) => (
                 row.kind === "work"
-                  ? <WorkRow key={row.id} rev={workRev(row)} g={row} subagents={model.subagents} />
+                  ? <WorkRow key={row.id} rev={workRev(row)} g={row} subagents={model.subagents} activeTurn={false} />
                   : <MessageRow key={row.id} rev={row.rev ?? 0} m={row} announce={announce} />
               ))}
             </div>

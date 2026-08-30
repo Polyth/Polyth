@@ -317,6 +317,12 @@ export function useUiSettings(): UiSettings {
   );
 }
 
+/** Non-React subscription to UI-preference changes (settings server sync). */
+export function subscribeUiSettings(cb: () => void): () => void {
+  listeners.add(cb);
+  return () => { listeners.delete(cb); };
+}
+
 /** Preview-capable editor families (mirrors liveFile.previewKindForPath). */
 export type PreviewableKind = "markdown" | "html" | "json";
 const PREVIEWABLE_KINDS: PreviewableKind[] = ["markdown", "html", "json"];

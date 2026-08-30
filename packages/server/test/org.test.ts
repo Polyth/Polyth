@@ -12,18 +12,29 @@ import { createSessionService, type Broadcaster } from "../src/sessions.ts";
 import { createProjectService } from "../src/projects.ts";
 import type { PermissionService } from "@polyth/permissions";
 
-function fakeRuntime(generatedTitle?: string): AgentRuntime {
+function fakeRuntime(generatedTitle?: string, polledTitle?: string, polledTitleAfter = 0): AgentRuntime {
   const listeners = new Set<(sessionId: string, ev: RuntimeEvent) => void>();
+  let sessionId = "";
+  let sessionReads = 0;
   return {
     capabilities: async () => ({ streaming: true, permissions: true, questions: true, compaction: false, subagents: false }),
     models: async () => [],
     agents: async () => [],
     ensureSession: async (c) => `be_${c.sessionId}`,
-    sessions: async () => [],
+    sessions: async () => {
+      sessionReads += 1;
+      return polledTitle && sessionReads > polledTitleAfter ? [{
+        id: `be_${sessionId}`, title: polledTitle, createdAt: 0, updatedAt: 0,
+      }] : [];
+    },
     history: async () => [],
     startTurn: async (req) => {
+      sessionId = req.sessionId;
       for (const listener of listeners) {
         listener(req.sessionId, { type: "turn/started", turnId: "t1" });
+        if (generatedTitle || polledTitle) {
+          listener(req.sessionId, { type: "turn/stopped", reason: "completed" });
+        }
         if (generatedTitle) {
           listener(req.sessionId, {
             type: "session/title-generated",
@@ -45,6 +56,8 @@ function makeService(opts: {
   worktrees?: { list(root: string): Promise<Array<{ path: string; branch: string | null }>> };
   onRuntimeCwd?: (cwd: string | undefined) => void;
   generatedTitle?: string;
+  polledTitle?: string;
+  polledTitleAfter?: number;
 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-orgsvc-"));
   const store = createStore(join(dir, "s.db"));
@@ -64,7 +77,7 @@ function makeService(opts: {
     runtimes: {
       forProject: async (_projectId, cwd) => {
         opts.onRuntimeCwd?.(cwd);
-        return fakeRuntime(opts.generatedTitle);
+        return fakeRuntime(opts.generatedTitle, opts.polledTitle, opts.polledTitleAfter);
       },
     },
   });
@@ -78,7 +91,7 @@ async function waitForTitle(
 ): Promise<void> {
   const started = Date.now();
   while ((await sessions.snapshot(sessionId)).title !== title) {
-    if (Date.now() - started > 1_000) throw new Error(`timed out waiting for title: ${title}`);
+    if (Date.now() - started > 2_000) throw new Error(`timed out waiting for title: ${title}`);
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
@@ -117,6 +130,24 @@ test("auto title persists OpenCode's generated title after its source prompt", a
   assert.equal(events.filter((event) => event.type === "session/metadata-changed").length, 1);
   assert.deepEqual(events[titleIndex]!.data, { title: generatedTitle, source: "opencode" });
   assert.equal(events[titleIndex]!.producerPlugin, "backend-opencode");
+});
+
+test("auto title falls back to OpenCode's session list when its title event is absent", async () => {
+  const generatedTitle = "Stabilize intermittent login test";
+  const { sessions } = makeService({ polledTitle: generatedTitle });
+  const { id } = await sessions.create({ projectId: "p1" });
+
+  await sessions.send(id, { text: "Fix the intermittent login test", autoTitle: true });
+  await waitForTitle(sessions, id, generatedTitle);
+});
+
+test("auto title retries the session list while OpenCode writes its title", async () => {
+  const generatedTitle = "Stabilize intermittent login test";
+  const { sessions } = makeService({ polledTitle: generatedTitle, polledTitleAfter: 1 });
+  const { id } = await sessions.create({ projectId: "p1" });
+
+  await sessions.send(id, { text: "Fix the intermittent login test", autoTitle: true });
+  await waitForTitle(sessions, id, generatedTitle);
 });
 
 test("auto title preserves an explicit title and respects the client preference", async () => {

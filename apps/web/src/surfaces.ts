@@ -44,6 +44,8 @@ export interface RailSurfaceComponentProps {
 export interface RailSurface {
   id: string;
   title: string;
+  /** One-line purpose shown under the title in the shared module header. */
+  description?: string;
   /** Short strip label; falls back to title. */
   shortLabel?: string;
   icon?: () => JSX.Element;

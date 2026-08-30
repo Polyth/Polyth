@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type {
-  AgentProfile, AgentRuntime, AttachmentRef, AutoAcceptSetting, CanonicalEventInput, ChildSnapshotResult, CreateSessionInput, DeliveryMode,
+  AgentProfile, AgentRuntime, AttachmentRef, AutoAcceptSetting, CanonicalEventInput, ChildSnapshotResult, ClientSettingsDto, CreateSessionInput, DeliveryMode,
   Disposable, DurableOperation, ForkDraft, ForkResult, JsonObject, MutationOutcome, NotificationRecord,
   PersistedRuntimeBinding,
   InstalledPluginDto, PackageDescriptorDto, QueueItemDto, RuntimeEvent,
@@ -40,6 +40,8 @@ export interface Broadcaster {
   notification?(record: NotificationRecord): void;
   pluginChanged?(plugin: InstalledPluginDto): void;
   packageChanged?(pkg: PackageDescriptorDto): void;
+  /** Server-persisted client preferences changed on another device. */
+  clientSettingsChanged?(settings: ClientSettingsDto): void;
 }
 
 /** Durable FIFO delivery queue (implemented by @polyth/session's Store). */
@@ -172,6 +174,7 @@ type RuntimeDurability = Pick<
   | "claimOperation"
   | "settleOperation"
   | "transitionRuntimeEpoch"
+  | "recoverRestartInterruptedTurns"
   | "chooseResponseIntent"
   | "responseIntent"
   | "settleResponseIntent"
@@ -301,6 +304,7 @@ export function createSessionService(deps: {
     "claimOperation",
     "settleOperation",
     "transitionRuntimeEpoch",
+    "recoverRestartInterruptedTurns",
     "chooseResponseIntent",
     "responseIntent",
     "settleResponseIntent",
@@ -368,6 +372,7 @@ export function createSessionService(deps: {
   // The web preference arrives with the first prompt. Keep that intent until
   // OpenCode publishes the semantic title it generated from the prompt.
   const autoTitleRequested = new Set<string>();
+  const titleRefreshInFlight = new Set<string>();
 
   const broadcastTail = async <T>(
     sessionId: string,
@@ -400,9 +405,13 @@ export function createSessionService(deps: {
   };
 
   const RUNTIME_AWAIT_MS = 30_000;
+  // Stop is a recovery control, not a background submission: fail it promptly
+  // so reconciliation can take over instead of leaving the control disabled.
+  const ABORT_AWAIT_MS = 8_000;
   const boundedRuntimeAwait = async <T,>(
     promise: Promise<T>,
     operationId: string,
+    timeoutMs = RUNTIME_AWAIT_MS,
   ): Promise<T> => {
     let timer: NodeJS.Timeout | undefined;
     try {
@@ -411,10 +420,10 @@ export function createSessionService(deps: {
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => {
             reject(Object.assign(
-              new Error(`runtime operation ${operationId} exceeded ${RUNTIME_AWAIT_MS}ms`),
+              new Error(`runtime operation ${operationId} exceeded ${timeoutMs}ms`),
               { code: "runtime-timeout" },
             ));
-          }, RUNTIME_AWAIT_MS);
+          }, timeoutMs);
         }),
       ]);
     } finally {
@@ -470,6 +479,7 @@ export function createSessionService(deps: {
     confirmed: (value: R) => T,
     settle: (outcome: MutationOutcome<T>) => Promise<void> = (outcome) =>
       settleOperation(operation, outcome),
+    timeoutMs = RUNTIME_AWAIT_MS,
   ): Promise<MutationOutcome<T>> => {
     await claimOperation(operation);
     let outcome: MutationOutcome<T>;
@@ -477,6 +487,7 @@ export function createSessionService(deps: {
       const value = await boundedRuntimeAwait(
         call(operation.operationId),
         operation.operationId,
+        timeoutMs,
       );
       outcome = isMutationOutcome<T>(value)
         ? value
@@ -514,6 +525,25 @@ export function createSessionService(deps: {
     (await durable.operations(sessionId)).find((operation) =>
       operation.operationId !== exceptOperationId
       && isRuntimeOperationBlocking(operation));
+
+  /** Operations named by any `runtime/restart-recovered` marker — turns that
+   *  were in flight when Polyth restarted and whose owned backend session was
+   *  later re-verified alive. They stay `unknown` (never auto-resolved) but no
+   *  longer gate send admission, mirroring prior-epoch unknowns after a
+   *  confirmed session-reset. Fork / rewind / assertMutable still 409 on them. */
+  const restartRecoveredOperationIds = async (
+    sessionId: string,
+  ): Promise<Set<string>> => {
+    const ids = new Set<string>();
+    for (const event of await store.events(sessionId)) {
+      if (event.type !== "runtime/restart-recovered") continue;
+      const recovered = (event.data as { recoveredOperationIds?: unknown }).recoveredOperationIds;
+      if (Array.isArray(recovered)) {
+        for (const id of recovered) if (typeof id === "string") ids.add(id);
+      }
+    }
+    return ids;
+  };
 
   const isPlaceholderTitle = (title: string, sessionId: string): boolean => {
     const value = title.trim().toLowerCase();
@@ -1464,7 +1494,26 @@ export function createSessionService(deps: {
         facts = await logFacts(sessionId);
         await settleProvenOperationNonapplications(sessionId, snapshot, facts);
         facts = await logFacts(sessionId);
-        const unresolved = await blockingOperation(sessionId, ignoredOperationId);
+        // Warm-restart recovery: the rebind above only succeeds against the
+        // SAME verified owned backend session. When it is demonstrably alive
+        // (definite running/idle evidence), lift any turn stranded `unknown` by
+        // a Polyth restart out of the admission barrier so the session is
+        // usable again on that same backend — the operation stays `unknown`.
+        if (authoritativeState.value === "running" || authoritativeState.value === "idle") {
+          const recovered = await broadcastTail(sessionId, () =>
+            durable.recoverRestartInterruptedTurns({
+              sessionId,
+              authorityId: binding.authorityId,
+              generation: binding.generation,
+              reconciliationOrdinal: started.ordinal,
+            }));
+          if (recovered) facts = await logFacts(sessionId);
+        }
+        const recoveredRestartIds = await restartRecoveredOperationIds(sessionId);
+        const unresolved = (await durable.operations(sessionId)).find((operation) =>
+          operation.operationId !== ignoredOperationId
+          && isRuntimeOperationBlocking(operation)
+          && !(operation.state === "unknown" && recoveredRestartIds.has(operation.operationId)));
         const nextStatus = unresolved
           ? "unknown"
           : authoritativeState.value === "running"
@@ -1573,6 +1622,42 @@ export function createSessionService(deps: {
     return resolveAutoAccept(sessionId, (x) => deps.autoAccept!.get(x), (x) => parents.get(x));
   };
 
+  // SSE is preferred, but some OpenCode providers only expose the generated
+  // title through /session. At most four reads over 11 seconds per turn avoid
+  // a background poll while covering its delayed title write.
+  function refreshGeneratedTitle(sessionId: string, runtime: AgentRuntime): void {
+    if (titleRefreshInFlight.has(sessionId)) return;
+    titleRefreshInFlight.add(sessionId);
+    const delays = [0, 1_000, 3_000, 7_000] as const;
+    const attempt = async (index: number): Promise<void> => {
+      if (!autoTitleRequested.has(sessionId)) {
+        titleRefreshInFlight.delete(sessionId);
+        return;
+      }
+      const current = await store.projection(sessionId);
+      if (!current?.backendSessionId) {
+        titleRefreshInFlight.delete(sessionId);
+        return;
+      }
+      try {
+        const title = (await runtime.sessions()).find((session) => session.id === current.backendSessionId)?.title;
+        if (title && !isPlaceholderTitle(title, current.backendSessionId)) {
+          await onRuntimeEvent(sessionId, { type: "session/title-generated", title });
+          titleRefreshInFlight.delete(sessionId);
+          return;
+        }
+      } catch {
+        // Retry on the next bounded interval; SSE can still settle the title.
+      }
+      if (index === delays.length - 1) {
+        titleRefreshInFlight.delete(sessionId);
+        return;
+      }
+      setTimeout(() => { void attempt(index + 1); }, delays[index + 1]);
+    };
+    void attempt(0);
+  }
+
   const onRuntimeEvent = async (
     sessionId: string,
     ev: RuntimeEvent,
@@ -1649,7 +1734,13 @@ export function createSessionService(deps: {
           if (applied) {
             lastTurnId.delete(sessionId);
             admitting.delete(sessionId);
-            autoTitleRequested.delete(sessionId);
+            // OpenCode can publish its generated session title after the
+            // terminal status event. Keep this one-shot request alive until a
+            // title update (or a later send) settles it.
+            const titleRuntime = sessionRuntime.get(sessionId);
+            if (titleRuntime && autoTitleRequested.has(sessionId)) {
+              refreshGeneratedTitle(sessionId, titleRuntime);
+            }
             deps.notify?.turnStopped(sessionId, ev.reason);
             if (ev.reason === "completed") hooks.onTurnCompleted?.(sessionId, replyText(sessionId));
             // FIFO dispatch of queued follow-ups; never into an error state (a
@@ -3356,6 +3447,7 @@ export function createSessionService(deps: {
     sessionId: string,
   ): Promise<DurableOperation | undefined> => {
     const resetOrdinal = await latestConfirmedEpochResetOrdinal(sessionId);
+    const recoveredRestartIds = await restartRecoveredOperationIds(sessionId);
     return (await durable.operations(sessionId)).find((operation) => {
       if (!isRuntimeOperationBlocking(operation)) return false;
       if (
@@ -3363,6 +3455,12 @@ export function createSessionService(deps: {
         && resetOrdinal !== undefined
         && operation.ordinal < resetOrdinal
       ) {
+        return false;
+      }
+      // A turn stranded `unknown` by a Polyth restart, once its owned backend
+      // session was re-verified alive by reconciliation, no longer blocks a
+      // new send (it stays `unknown` for fork/rewind/audit).
+      if (operation.state === "unknown" && recoveredRestartIds.has(operation.operationId)) {
         return false;
       }
       return true;
@@ -3599,6 +3697,7 @@ export function createSessionService(deps: {
       }
       const initialBlockingOperation = await blockingOperation(sessionId);
       let recoverEpoch = proj.status === "epoch-pending";
+      let candidateRuntime: AgentRuntime | undefined;
       if (
         proj.runtimeBinding
         && (
@@ -3608,10 +3707,29 @@ export function createSessionService(deps: {
       ) {
         const project = await projects.get(proj.projectId);
         const cwd = proj.worktreePath ?? project?.path ?? process.cwd();
-        const candidate = await runtimes.forProject(proj.projectId, cwd);
-        const endpoint = await (candidate as ReliabilityRuntime).endpoint?.().catch(() => undefined);
+        candidateRuntime = await runtimes.forProject(proj.projectId, cwd);
+        const endpoint = await (candidateRuntime as ReliabilityRuntime).endpoint?.().catch(() => undefined);
         recoverEpoch = endpoint?.control.kind === "owned"
           && endpoint.authorityId !== proj.runtimeBinding.authorityId;
+      }
+      // Warm restart: an in-flight turn interrupted by a Polyth restart leaves
+      // its operation `unknown` and forces the session status to `unknown` at
+      // boot, even though the SAME owned backend session is still alive. The
+      // runtime identity has not changed, so this is a rebind — not an epoch.
+      // Reconcile in place: it re-verifies the backend and, when alive, records
+      // a `runtime/restart-recovered` marker that lifts the crash-orphaned turn
+      // out of the send-admission barrier so this send continues on the same
+      // backend session with its full context. If the backend cannot be
+      // verified the status stays `unknown` and the conflict below still fires.
+      if (
+        proj.status === "unknown"
+        && !recoverEpoch
+        && proj.runtimeBinding
+        && candidateRuntime
+        && typeof (candidateRuntime as ReliabilityRuntime).reconcile === "function"
+      ) {
+        await reconcileUnderLock(sessionId, proj, candidateRuntime, "send-after-restart");
+        proj = (await store.projection(sessionId)) ?? proj;
       }
       if (proj.status === "reconciling" || (proj.status === "unknown" && !recoverEpoch)) {
         throw Object.assign(new Error(`cannot send while the session is ${proj.status}`), {
@@ -3871,6 +3989,8 @@ export function createSessionService(deps: {
               ? rt.abortOperation(sessionId, operationId)
               : rt.abort(sessionId),
             () => ({}),
+            undefined,
+            ABORT_AWAIT_MS,
           );
           if (outcome.kind === "unknown") {
             await updateProjection(sessionId, { status: "unknown" });
@@ -3926,6 +4046,22 @@ export function createSessionService(deps: {
       releaseQueueEditHold(sessionId, queueId);
       void dispatchQueue(sessionId);
       return item;
+    },
+    async queueSendNow(sessionId, queueId, text) {
+      if (!deps.queue) throw Object.assign(new Error("delivery queue unavailable"), { code: "unsupported" });
+      const nextText = text.trim();
+      if (!nextText) throw Object.assign(new Error("queued message text is required"), { code: "invalid-input" });
+      const item = (await deps.queue.queueList(sessionId)).find((candidate) => candidate.id === queueId);
+      if (!item) throw Object.assign(new Error("queue item not found"), { code: "not-found" });
+      await deps.queue.queueRemove(sessionId, queueId);
+      await appendAndBroadcast(sessionId, "queue/removed", { queueId }, { ignorable: true });
+      releaseQueueEditHold(sessionId, queueId);
+      return service.send(sessionId, {
+        text: nextText,
+        ...(item.attachments?.length ? { attachments: item.attachments } : {}),
+        delivery: "interrupt",
+        dismissPending: true,
+      });
     },
     async queueEditCancel(sessionId, queueId) {
       releaseQueueEditHold(sessionId, queueId);
@@ -4010,6 +4146,8 @@ export function createSessionService(deps: {
             ? runtime.abortOperation(sessionId, operationId)
             : runtime.abort(sessionId),
           () => ({}),
+          undefined,
+          ABORT_AWAIT_MS,
         );
         if (outcome.kind === "unknown") {
           await updateProjection(sessionId, { status: "unknown" });
@@ -4322,38 +4460,61 @@ export function createSessionService(deps: {
             () => ({}),
           );
         }
-        const binding = rt
-          ? await runtimeBinding(rt, proj, cwd)
+        let binding: RuntimeSessionBinding | undefined;
+        let upstreamDeletionAllowed = true;
+        if (rt) {
+          try {
+            binding = await runtimeBinding(rt, proj, cwd);
+          } catch (error) {
+            if ((error as { code?: string }).code !== "binding-mismatch") throw error;
+            // The runtime may now identify a different backend. Delete this
+            // canonical record, but never send its old backend ID there.
+            upstreamDeletionAllowed = false;
+          }
+        }
+        const deletionBinding = binding ?? (proj.runtimeBinding && proj.backendSessionId
+          ? {
+              canonicalSessionId: sessionId,
+              backendSessionId: proj.backendSessionId,
+              authorityId: proj.runtimeBinding.authorityId,
+              generation: proj.runtimeBinding.generation,
+              location: proj.runtimeBinding.location,
+            }
           : proj.backendSessionId
             ? {
                 canonicalSessionId: sessionId,
                 backendSessionId: proj.backendSessionId,
                 authorityId: `legacy:${proj.projectId}:${cwd}`,
                 generation: 0,
-                continuity: "generation-only" as const,
                 location: { directory: cwd },
               }
-            : undefined;
+            : undefined);
         const deletion = await durable.prepareSessionDeletion({
           binding: {
             canonicalSessionId: sessionId,
-            authorityId: binding?.authorityId ?? `legacy:${proj.projectId}:${cwd}`,
-            generation: binding?.generation ?? 0,
-            location: binding?.location ?? { directory: cwd },
+            authorityId: deletionBinding?.authorityId ?? `legacy:${proj.projectId}:${cwd}`,
+            generation: deletionBinding?.generation ?? 0,
+            location: deletionBinding?.location ?? { directory: cwd },
             // An unknown create has no protocol-proven backend id. Retaining
             // the canonical id still prevents canonical resurrection; Agent F
             // must supply operation lookup to bind an unknown backend child.
-            backendSessionId: binding?.backendSessionId ?? `unknown:${sessionId}`,
+            backendSessionId: deletionBinding?.backendSessionId ?? `unknown:${sessionId}`,
           },
         });
         factsCache.delete(sessionId);
         await claimOperation(deletion.operation);
         let outcome: MutationOutcome<Record<string, never>>;
-        if ((!rt?.discardSession && !rt?.discardSessionOperation) || !proj.backendSessionId) {
+        if (
+          !upstreamDeletionAllowed
+          || (!rt?.discardSession && !rt?.discardSessionOperation)
+          || !proj.backendSessionId
+        ) {
           outcome = {
             kind: "unknown",
             operationId: deletion.operation.operationId,
-            message: "runtime cannot prove upstream session deletion",
+            message: upstreamDeletionAllowed
+              ? "runtime cannot prove upstream session deletion"
+              : "runtime identity changed; upstream session deletion was not attempted",
           };
         } else {
           try {

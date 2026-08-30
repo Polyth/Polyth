@@ -106,10 +106,7 @@ export default function FusionView() {
 
   return (
     <div className="view-page fusion-view">
-      <div>
-        <h1 className="view-title">{tr("fusionview.modelFusion")}</h1>
-        <p className="view-sub">Gather independent source answers, then synthesize one response with traceable provenance.</p>
-      </div>
+      {/* Header + close come from the shared ModuleView frame. */}
       {!shown && (
         <section className="fusion-setup" aria-labelledby="fusion-setup-title">
           <div>

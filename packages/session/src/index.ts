@@ -46,6 +46,8 @@ import type {
   RuntimeEpochTransitionInput,
   RuntimeEpochTransitionResult,
   RuntimeMutationKind,
+  RuntimeRestartRecoveryInput,
+  RuntimeRestartRecoveryResult,
   SessionEvent,
   SessionFolderDto,
   SessionPersistence,
@@ -194,6 +196,15 @@ export interface Store extends SessionPersistence {
   /** Startup runs this automatically; the explicit API is useful before
    * handing an already-open database to a recovered scheduler. */
   recoverExecutingOperations(sessionId?: string): Promise<DurableOperation[]>;
+  /** Warm-restart recovery: after reconciliation re-verifies the SAME owned
+   *  backend session, lift restart-stranded (`code = 'process-restarted'`)
+   *  `turn-submit` / `turn-steer` unknowns out of the send-admission barrier
+   *  by writing an ignorable `runtime/restart-recovered` marker, and hold any
+   *  reserved queue draft for review. The operations stay `unknown`. Returns
+   *  `undefined` when there is nothing to recover. */
+  recoverRestartInterruptedTurns(
+    input: RuntimeRestartRecoveryInput,
+  ): Promise<RuntimeRestartRecoveryResult | undefined>;
   // -- durable delivery queue (WP3) --
   enqueue(sessionId: string, text: string, delivery: DeliveryMode, attachments?: AttachmentRef[]): Promise<QueueItemDto>;
   queueList(sessionId: string): Promise<QueueItemDto[]>;
@@ -1538,6 +1549,69 @@ export function createStore(dbPath: string): Store {
     return transaction(() => recoverExecutingInTransaction(sessionId));
   }
 
+  function recoverRestartInterruptedTurns(
+    input: RuntimeRestartRecoveryInput,
+  ): Promise<RuntimeRestartRecoveryResult | undefined> {
+    return Promise.resolve(transaction(() => {
+      const projectionRow = prep("SELECT data FROM projections WHERE session_id = ?")
+        .get(input.sessionId) as { data: string } | undefined;
+      if (!projectionRow) {
+        throw Object.assign(new Error("session projection not found"), { code: "not-found" });
+      }
+      // Idempotency: a marker may already name some stranded turns from an
+      // earlier reconciliation pass. Only newly discovered ones are recovered.
+      const alreadyRecovered = new Set<string>();
+      for (const row of prep(
+        "SELECT data FROM events WHERE session_id = ? AND type = 'runtime/restart-recovered'",
+      ).all(input.sessionId) as Array<{ data: string }>) {
+        try {
+          const ids = (JSON.parse(row.data) as { recoveredOperationIds?: unknown })
+            .recoveredOperationIds;
+          if (Array.isArray(ids)) {
+            for (const id of ids) if (typeof id === "string") alreadyRecovered.add(id);
+          }
+        } catch { /* a malformed marker never blocks recovery */ }
+      }
+      // Only turns interrupted by a Polyth restart (`process-restarted`, set by
+      // recoverExecutingInTransaction) qualify. A runtime-outcome-unknown from
+      // normal operation stays blocking — the live runtime can still prove it.
+      const stranded = (prep(
+        `SELECT * FROM runtime_operations
+         WHERE session_id = ?
+           AND state = 'unknown'
+           AND code = 'process-restarted'
+           AND mutation_kind IN ('turn-submit', 'turn-steer')
+         ORDER BY ordinal`,
+      ).all(input.sessionId) as unknown as OperationRow[])
+        .filter((row) => !alreadyRecovered.has(row.operation_id));
+      if (stranded.length === 0) return undefined;
+
+      const recoveredOperationIds = stranded.map((row) => row.operation_id);
+      const marker = appendInTransaction(
+        input.sessionId,
+        "runtime/restart-recovered",
+        {
+          authorityId: input.authorityId,
+          generation: input.generation,
+          reconciliationOrdinal: input.reconciliationOrdinal,
+          recoveredOperationIds,
+        },
+        { ignorable: true },
+      );
+      // The operation stays `unknown` — never auto-resolved without protocol
+      // proof. A reserved queue draft is held for review, never re-dispatched.
+      const heldQueueItems: QueueItemDto[] = [];
+      for (const row of stranded) {
+        const held = holdEpochTurnForReview(
+          rowToOperation(operationRow(row.operation_id)!),
+          { synthesizeDraft: false },
+        );
+        if (held) heldQueueItems.push(held);
+      }
+      return { marker, recoveredOperationIds, heldQueueItems };
+    }));
+  }
+
   // ------------------------------------------------------------- append
 
   function append(
@@ -1913,6 +1987,7 @@ export function createStore(dbPath: string): Store {
 
   function holdEpochTurnForReview(
     operation: DurableOperation,
+    { synthesizeDraft = true }: { synthesizeDraft?: boolean } = {},
   ): QueueItemDto | undefined {
     const row = prep(
       "SELECT * FROM session_queue WHERE reservation_operation_id = ?",
@@ -1932,6 +2007,10 @@ export function createStore(dbPath: string): Store {
         .get(row.queue_id) as unknown as QueueRow;
       return rowToQueueItem(held);
     }
+    // A warm restart keeps the backend session (and its copy of the prompt),
+    // so the timeline bubble + uncertainty caption is the surface — no
+    // synthetic draft. An epoch discards that history, so it synthesizes one.
+    if (!synthesizeDraft) return undefined;
     if (operation.ownerEventSeq === undefined) return undefined;
     const ownerRow = prep(
       "SELECT * FROM events WHERE session_id = ? AND seq = ?",
@@ -3240,6 +3319,7 @@ export function createStore(dbPath: string): Store {
     settleOperation,
     transitionRuntimeEpoch,
     recoverExecutingOperations,
+    recoverRestartInterruptedTurns,
     enqueue,
     queueList,
     queueEdit,

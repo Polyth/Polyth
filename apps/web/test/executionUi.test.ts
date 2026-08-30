@@ -332,6 +332,22 @@ test("pending and running execution states stay visually and accessibly distinct
   }
 });
 
+test("a completed call remains open during its active turn", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(createElement(ExecutionRow, { message: tool(), activeTurn: true })));
+    assert.equal(container.querySelector(".execution-summary")?.getAttribute("aria-expanded"), "true");
+    assert.match(container.querySelector(".execution-details")?.textContent ?? "", /git diff/);
+    await act(async () => root.render(createElement(ExecutionRow, { message: tool(), activeTurn: false })));
+    assert.equal(container.querySelector(".execution-summary")?.getAttribute("aria-expanded"), "false");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
 test("working groups collapse on success unless the user explicitly expanded them", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -364,6 +380,24 @@ test("working groups collapse on success unless the user explicitly expanded the
       subagents: null,
     })));
     assert.equal(toggle.getAttribute("aria-expanded"), "true");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("a completed action batch stays open while its turn is active", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const message = tool();
+  const group = { kind: "work" as const, id: "work-batch", items: [message], tools: [message], tasks: [], ms: 420 };
+  try {
+    await act(async () => root.render(createElement(WorkedGroup, { g: group, subagents: null, activeTurn: true })));
+    const toggle = container.querySelector<HTMLButtonElement>(".execution-group-toggle")!;
+    assert.equal(toggle.getAttribute("aria-expanded"), "true", "the call/result batch is inspectable immediately");
+    await act(async () => root.render(createElement(WorkedGroup, { g: group, subagents: null, activeTurn: false })));
+    assert.equal(toggle.getAttribute("aria-expanded"), "false", "settled history returns to its compact form after the turn");
   } finally {
     await act(async () => root.unmount());
     container.remove();

@@ -1,41 +1,36 @@
 import { useState } from "react";
 import { thinkingVariantLabel } from "@polyth/models/model-presentation";
 import { tr } from "../i18n/index.ts";
-import { useShellMode } from "../responsiveShell.ts";
 
 export interface EffortMenuProps {
   variants: readonly string[];
   value?: string;
   onPick: (thinking: string | undefined) => void;
+  /** Fired once when the tap/drag ends — phones re-open the keyboard here. */
+  onCommit?: () => void;
 }
 
 /**
  * Discrete reasoning effort with one native range stop per backend variant.
- * This restores direct, at-a-glance control while keeping "Auto" as a real
+ * One draggable track serves every layout; on touch the drag selects the
+ * nearest stop while the tooltip names the live value. "Auto" stays a real
  * reset choice instead of pretending the model default is another variant.
  */
 export default function EffortMenu({
   variants,
   value,
   onPick,
+  onCommit,
 }: EffortMenuProps) {
   const [adjusting, setAdjusting] = useState(false);
   const options = ["", ...new Set(variants)];
   const selected = Math.max(0, options.indexOf(value ?? ""));
   const selectedOption = options[selected] ?? "";
   const label = selectedOption ? thinkingVariantLabel(selectedOption) : tr("composer.auto");
-  const phone = useShellMode() === "phone";
-
-  if (phone) {
-    return (
-      <label className="composer-effort-control composer-effort-select" title={tr("composer.thinkingEffortValue", { value: label })}>
-        <select value={selectedOption} aria-label={tr("composer.thinkingEffortValue", { value: label })}
-          onChange={(event) => onPick(event.target.value || undefined)}>
-          {options.map((option) => <option key={option || "auto"} value={option}>{option ? thinkingVariantLabel(option) : tr("composer.auto")}</option>)}
-        </select>
-      </label>
-    );
-  }
+  const endAdjust = () => {
+    setAdjusting(false);
+    onCommit?.();
+  };
 
   return (
     <label
@@ -57,8 +52,8 @@ export default function EffortMenu({
           aria-valuetext={label}
           onChange={(event) => onPick(options[Number(event.target.value)] || undefined)}
           onPointerDown={() => setAdjusting(true)}
-          onPointerUp={() => setAdjusting(false)}
-          onPointerCancel={() => setAdjusting(false)}
+          onPointerUp={endAdjust}
+          onPointerCancel={endAdjust}
           onBlur={() => setAdjusting(false)}
         />
         <span className="composer-effort-stops" aria-hidden="true">

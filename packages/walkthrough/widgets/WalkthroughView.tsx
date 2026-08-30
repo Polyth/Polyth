@@ -48,10 +48,7 @@ export default function WalkthroughView() {
   return (
     <div className="view-page walkthrough-page">
       <div className="wt-header">
-        <div>
-          <h1 className="view-title">{tr("walkthroughview.guidedChangesWalkthrough")}</h1>
-          <p className="view-sub">{tr("walkthroughview.reviewEachFileEditInOrderApprove")}</p>
-        </div>
+        {/* Title + description + close come from the shared ModuleView frame. */}
         <Tabs
           className="wt-mode-tabs"
           size="sm"

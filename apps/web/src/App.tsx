@@ -18,6 +18,7 @@ import "./builtinCapabilities.ts";
 import Header from "./components/Header.tsx";
 import AlertDialog from "./components/AlertDialog.tsx";
 import { useWorkspaceMode } from "./widgets/workspaceMode.ts";
+import { useShellMode } from "./responsiveShell.ts";
 import { tr } from "./i18n/index.ts";
 
 function ErrorBanner() {
@@ -45,6 +46,7 @@ export default function App() {
   const paneFullscreen = useStore((s) => s.paneFullscreen);
   const activeView = useStore((s) => s.activeView);
   const workspaceMode = useWorkspaceMode();
+  const shellMode = useShellMode();
 
   useEffect(() => {
     const openSettings = () => setOverlay("settings");
@@ -88,7 +90,7 @@ export default function App() {
           <ViewErrorBoundary resetKey={viewResetKey}>
             <Main />
           </ViewErrorBoundary>
-          <StatusBar />
+          {shellMode !== "phone" && <StatusBar />}
         </div>
         <ContextRail />
       </div>

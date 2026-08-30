@@ -11,6 +11,8 @@ export function assistRoutes(deps: {
   latestSeq(sessionId: string): Promise<number>;
   /** Small-model chat→note distillation; absent = honest 503. */
   distill?: (sessionId: string) => Promise<{ title: string; body: string }>;
+  /** Small-model summary of the latest user prompt for mobile task chrome. */
+  taskBrief?: (sessionId: string) => Promise<string>;
 }): RouteHandler {
   return async (rc) => {
     const { path, method, json } = rc;
@@ -51,6 +53,23 @@ export function assistRoutes(deps: {
       try {
         // returns a draft only — saving goes through the normal /api/knowledge flow
         json(200, await deps.distill(sessionId));
+      } catch (e) {
+        json(502, { error: "upstream", message: e instanceof Error ? e.message : String(e) });
+      }
+      return true;
+    }
+
+    m = path.match(/^\/api\/sessions\/([^/]+)\/task-brief$/);
+    if (m && method === "POST") {
+      const sessionId = decodeURIComponent(m[1]!);
+      const proj = await deps.projection(sessionId);
+      if (!proj) { json(404, { error: "not-found", message: "unknown session" }); return true; }
+      if (!deps.taskBrief) {
+        json(503, { error: "unavailable", message: "no small model configured for task brief" });
+        return true;
+      }
+      try {
+        json(200, { brief: await deps.taskBrief(sessionId) });
       } catch (e) {
         json(502, { error: "upstream", message: e instanceof Error ? e.message : String(e) });
       }

@@ -6,6 +6,7 @@ import type {
   AutoAcceptDto,
   AutoAcceptSetting,
   BulkSessionResult,
+  ClientSettingsDto,
   DictationSessionDto,
   ForkResult,
   FusionDto,
@@ -439,6 +440,7 @@ export interface VoiceSettingsDto {
 // ---- idle assist (F9) ----------------------------------------------------------
 export interface AssistSettingsDto { enabled: boolean; idleSeconds: number }
 export interface AssistDto { recap: string; suggestion: string; atSeq: number; generatedAt: number }
+export interface TaskBriefDto { brief: string }
 
 // ---- PR detail + checks (WP11) ----------------------------------------------
 export interface PrDetailDto {
@@ -574,6 +576,7 @@ export const api = {
   sendMessage: (id: string, body: { text: string; autoTitle?: boolean; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; delivery?: string; dismissPending?: boolean; agentProfileId?: string | null }) =>
     jfetch<SendResult>(`/api/sessions/${id}/message`, json("POST", body)),
   abort: (id: string) => jfetch<void>(`/api/sessions/${id}/abort`, { method: "POST" }),
+  taskBrief: (id: string) => jfetch<TaskBriefDto>(`/api/sessions/${encodeURIComponent(id)}/task-brief`, json("POST", {})),
   confirmBorrowedRuntimeEpoch: (id: string) =>
     jfetch<SessionProjection>(`/api/sessions/${id}/runtime-epoch`, json("POST", { confirm: true })),
   renameSession: (id: string, title: string) =>
@@ -586,6 +589,8 @@ export const api = {
     jfetch<QueueItemDto>(`/api/sessions/${id}/queue/${encodeURIComponent(queueId)}/edit`, { method: "POST" }),
   queueEdit: (id: string, queueId: string, text: string) =>
     jfetch<QueueItemDto>(`/api/sessions/${id}/queue/${encodeURIComponent(queueId)}`, json("PATCH", { text })),
+  queueSendNow: (id: string, queueId: string, text: string) =>
+    jfetch<SendResult>(`/api/sessions/${id}/queue/${encodeURIComponent(queueId)}/edit/send-now`, json("POST", { text })),
   queueEditCancel: (id: string, queueId: string) =>
     jfetch<{ ok: true }>(`/api/sessions/${id}/queue/${encodeURIComponent(queueId)}/edit`, { method: "DELETE" }),
   queueReorder: (id: string, ids: string[]) =>
@@ -692,7 +697,7 @@ export const api = {
   deleteSecureSafe: (id: string) =>
     jfetch<{ ok: boolean }>(`/api/secure-safe/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
-  listModels: () => jfetch<ModelDescriptor[]>("/api/models"),
+  listModels: (signal?: AbortSignal) => jfetch<ModelDescriptor[]>("/api/models", { signal }),
   listAgents: () => jfetch<AgentDescriptor[]>("/api/agents"),
 
   // ---- provider/model visibility (Providers & Models settings) --------------
@@ -1300,6 +1305,13 @@ export const api = {
     ),
   sshCreateProject: (input: { connectionId: string; path: string; name?: string; createDirectory?: boolean }) =>
     jfetch<Project>("/api/ssh/projects", json("POST", input)),
+
+  // ---- shared client preferences (Appearance, chat, notifications, …) ----------
+  /** Server copy of this workspace's client settings; `revision` 0 means the
+   *  server has never been written and the local record should seed it. */
+  clientSettings: () => jfetch<ClientSettingsDto>(`/api/settings/client`),
+  clientSettingsSave: (settings: Record<string, unknown>) =>
+    jfetch<ClientSettingsDto>(`/api/settings/client`, json("PUT", { settings })),
 
   // ---- idle assist (F9): recap + suggestion, chat→note --------------------------
   assistSettings: () => jfetch<AssistSettingsDto>(`/api/settings/assist`),

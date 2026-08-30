@@ -63,13 +63,14 @@ test("message actions use one lightweight copy control and local hover zones", (
   assert.match(timeline, /tr\("timeline\.startNewMultiRunFromThisAnswer"\)/);
 });
 
-test("thinking and execution rows stay unboxed in the conversation", () => {
+test("thinking, tasks, and every execution share the compact activity-card treatment", () => {
   const timeline = read("../src/components/Timeline.tsx");
   const execution = read("../src/components/ExecutionRow.tsx");
   const css = read("../src/styles.css");
 
   assert.match(timeline, /<details className="reasoning" open=\{open\}>/);
+  assert.match(timeline, /<strong>Thinking<\/strong>/);
   assert.match(execution, /<div className=\{`tool-card execution-row/);
-  assert.match(css, /\.reasoning\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;/s);
-  assert.match(css, /\.tool-card\.execution-row\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;/s);
+  assert.match(css, /\.reasoning,\s*\.task-list,\s*\.tool-card\.execution-row\s*\{[^}]*border:\s*0;/s);
+  assert.match(css, /\.task-list\s*\{[^}]*margin:\s*var\(--space-1\) 0 0;/s);
 });

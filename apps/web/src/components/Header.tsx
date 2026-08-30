@@ -345,16 +345,11 @@ export default function Header() {
     return () => { stale = true; };
   }, [project?.id]);
 
-  // The mock's phone header replaces the compact header only at phone widths;
-  // tablets (481–820px) keep the compact header with metrics and overflow.
+  // Phone widths use one shell header for every workspace surface. Keeping the
+  // choice here (rather than inside each view) prevents a surface switch from
+  // bringing back the legacy compact bar.
   if (mode === "phone") {
-    return (
-      <>
-        {chatSurface
-          ? <MobileSessionHeader />
-          : <header className="header header-compact"><MobileNavigationRail /><SlotHost slot="app.window.controls" /></header>}
-      </>
-    );
+    return <MobileSessionHeader />;
   }
 
   return (

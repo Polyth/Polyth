@@ -1,9 +1,10 @@
 // WP9 routes: global behavior instructions, system info, MCP configuration,
 // and the managed plugin registry. Secret values never leave this boundary —
 // requests may carry them in, responses only ever name their keys.
-import type { AgentDescriptor, McpTransport, ModelRef, SystemInfoDto } from "@polyth/contracts";
+import type { AgentDescriptor, ClientSettingsDto, McpTransport, ModelRef, SystemInfoDto } from "@polyth/contracts";
 import type { RouteHandler } from "../http.ts";
 import type { BehaviorService } from "../behavior.ts";
+import type { ClientSettingsService } from "../clientSettings.ts";
 import type { McpConfigService } from "../mcp.ts";
 
 export interface SettingsRouteDeps {
@@ -11,6 +12,10 @@ export interface SettingsRouteDeps {
   mcp: McpConfigService;
   systemInfo(local: boolean): SystemInfoDto;
   saveRole?(name: string, role: { prompt?: string; model?: ModelRef; mode: AgentDescriptor["mode"] }): Promise<AgentDescriptor>;
+  /** Server-persisted client preferences shared across every device. */
+  clientSettings?: ClientSettingsService;
+  /** Fan a just-accepted client-settings write out to the other devices. */
+  broadcastClientSettings?(state: ClientSettingsDto): void;
 }
 
 const parseTransport = (raw: unknown): McpTransport => {
@@ -55,6 +60,21 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
       const b = await rc.body();
       rc.json(200, await deps.behavior.put(String(b.text ?? ""), String(b.expectedRevision ?? "")));
       return true;
+    }
+
+    // ---- shared client preferences -----------------------------------------
+    if (path === "/api/settings/client" && deps.clientSettings) {
+      if (method === "GET") {
+        rc.json(200, deps.clientSettings.get());
+        return true;
+      }
+      if (method === "PUT") {
+        const b = await rc.body();
+        const next = deps.clientSettings.put((b as { settings?: unknown }).settings);
+        deps.broadcastClientSettings?.(next);
+        rc.json(200, next);
+        return true;
+      }
     }
 
     // ---- system info ------------------------------------------------------------

@@ -13,6 +13,7 @@ import { TEST_REMOTE_DIGEST_B } from "../../backend-opencode/test/fakeRemoteRunt
 import { runtimeFailureActions } from "../../backend-opencode/test/runtimeFailureActions.ts";
 import { createFakeOpenCode } from "../../backend-opencode/test/fakeOpenCode.ts";
 import {
+  admitRestartStrandedTurn,
   admitUnknownTurn,
   assertCanRebindUnchanged,
   createEpochRuntime,
@@ -525,6 +526,82 @@ test("race: concurrent owned sends after authority loss commit one epoch", async
     }
   } finally {
     await fixture.dispose();
+  }
+});
+
+test("matrix: owned restart mid-turn recovers on the same backend session", async () => {
+  const endpoint: RuntimeEndpoint = {
+    authorityId: "owned:warm",
+    continuity: "verified",
+    generation: 4,
+    url: "http://runtime.invalid",
+    location: { directory: "/project" },
+    control: { kind: "owned", instanceToken: "warm" },
+    config: { kind: "read-only" },
+    authentication: { kind: "none" },
+  };
+  const submitted: string[] = [];
+  const first = createSessionReliabilityHarness({
+    runtime: createEpochRuntime(endpoint, submitted, "backend-warm"),
+    prefix: "polyth-matrix-warm-restart-",
+  });
+  const sessionId = "session-warm-restart";
+  try {
+    await persistBoundSession(first.store, first.project, endpoint, sessionId, "backend-warm");
+    await first.store.append(sessionId, "user/message", { text: "before restart" });
+    await first.store.append(sessionId, "assistant/message", { text: "partial" });
+    const stranded = await admitRestartStrandedTurn(first.store, sessionId, "interrupted by restart");
+
+    // Restart: reopening the store converts the in-flight claim to
+    // unknown / process-restarted, and boot forces the session status to
+    // `unknown` (mirrors packages/server/src/index.ts).
+    const store = await reopenStore(first.directory, first.store);
+    const strandedAfter = await store.operation(stranded.operationId);
+    assert.equal(strandedAfter?.state, "unknown");
+    assert.equal(strandedAfter?.code, "process-restarted");
+    const booted = (await store.projection(sessionId))!;
+    await store.upsertProjection({ ...booted, status: "unknown", updatedAt: Date.now() });
+
+    const second = createSessionReliabilityHarness({
+      runtime: createEpochRuntime({ ...endpoint, generation: 5 }, submitted, "backend-warm"),
+      directory: first.directory,
+      store,
+    });
+
+    await second.sessions.send(sessionId, { text: "after restart" });
+
+    const projection = await store.projection(sessionId);
+    assert.equal(projection?.runtimeBinding?.authorityId, "owned:warm");
+    assert.equal(projection?.runtimeBinding?.epoch ?? 0, 0, "warm restart is a rebind, not an epoch");
+    assert.equal(projection?.backendSessionId, "backend-warm", "same backend session");
+    assert.notEqual(projection?.status, "unknown");
+
+    const events = await store.events(sessionId);
+    assert.equal(
+      events.some((event) => event.type === "runtime/epoch-replaced"),
+      false,
+      "no epoch replacement for a warm restart",
+    );
+    assert.equal(
+      events.some((event) => event.type === "runtime/restart-recovered"),
+      true,
+      "a restart-recovery marker lifts the stranded turn out of the barrier",
+    );
+    // The stranded turn stays unknown — never auto-resolved without proof.
+    assert.equal((await store.operation(stranded.operationId))?.state, "unknown");
+    // The new turn continued on the warm backend.
+    assert.equal(submitted.includes("after restart"), true);
+
+    // A subsequent normal send needs no further recovery.
+    await second.sessions.send(sessionId, { text: "and again" });
+    assert.equal(
+      (await store.events(sessionId))
+        .filter((event) => event.type === "runtime/restart-recovered").length,
+      1,
+    );
+    await store.close();
+  } finally {
+    try { rmSync(first.directory, { recursive: true, force: true }); } catch { /* already gone */ }
   }
 });
 

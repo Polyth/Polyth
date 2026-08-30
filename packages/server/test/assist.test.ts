@@ -162,6 +162,7 @@ function routeHarness(opts: {
   projections?: Record<string, SessionProjection>;
   latestSeq?: number;
   distill?: (sessionId: string) => Promise<{ title: string; body: string }>;
+  taskBrief?: (sessionId: string) => Promise<string>;
 }) {
   const settings = createAssistSettings({ file: join(tmp(), "assist.json") });
   const routes = assistRoutes({
@@ -169,6 +170,7 @@ function routeHarness(opts: {
     projection: async (id) => opts.projections?.[id],
     latestSeq: async () => opts.latestSeq ?? 0,
     ...(opts.distill ? { distill: opts.distill } : {}),
+    ...(opts.taskBrief ? { taskBrief: opts.taskBrief } : {}),
   });
   const call = async (method: string, path: string, body: Record<string, unknown> = {}) => {
     let status = 0;
@@ -246,4 +248,15 @@ test("POST assist/note: 404 unknown, 503 unwired, draft when wired, 502 on failu
   const soft = await failing.call("POST", "/api/sessions/s1/assist/note");
   assert.equal(soft.status, 502);
   assert.match(String((soft.payload as { message: string }).message), /model offline/);
+});
+
+test("POST task-brief is guarded and returns the small-model summary", async () => {
+  const unknown = routeHarness({ taskBrief: async () => "brief" });
+  assert.equal((await unknown.call("POST", "/api/sessions/nope/task-brief")).status, 404);
+
+  const unwired = routeHarness({ projections: { s1: proj("s1") } });
+  assert.equal((await unwired.call("POST", "/api/sessions/s1/task-brief")).status, 503);
+
+  const wired = routeHarness({ projections: { s1: proj("s1") }, taskBrief: async () => "Ship mobile task overview" });
+  assert.deepEqual((await wired.call("POST", "/api/sessions/s1/task-brief")).payload, { brief: "Ship mobile task overview" });
 });
