@@ -8,12 +8,17 @@ const runtime = {} as AgentRuntime;
 
 test("commit generator caches unchanged selected diff and coalesces concurrent requests", async () => {
   let calls = 0;
+  let seenTimeoutMs: number | undefined;
   const generate = createCommitMessageGenerator({
     diff: async (_root, opts) => ({ diff: opts?.staged ? DIFF : "unstaged ignored" }),
     runtime: async () => runtime,
     model: { providerID: "openai", modelID: "small" },
     inputBudget: async () => 2_000,
-    complete: async () => { calls += 1; return { text: "Update the implementation" }; },
+    complete: async (_rt, options) => {
+      calls += 1;
+      seenTimeoutMs = options.timeoutMs;
+      return { text: "Update the implementation" };
+    },
   });
   const [first, second] = await Promise.all([generate("/repo"), generate("/repo")]);
   assert.equal(first, "Update the implementation");
@@ -21,6 +26,11 @@ test("commit generator caches unchanged selected diff and coalesces concurrent r
   assert.equal(calls, 1);
   await generate("/repo");
   assert.equal(calls, 1);
+  assert.equal(
+    seenTimeoutMs,
+    90_000,
+    "a free/subscription-auth small model needs headroom well past the old 30s cap",
+  );
 });
 
 test("commit generator preserves staged-first semantics and changes cache key with diff", async () => {

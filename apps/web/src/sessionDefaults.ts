@@ -116,6 +116,13 @@ export function setSessionDefaults(patch: Partial<SessionDefaults>): void {
   for (const listener of [...listeners]) listener();
 }
 
+/** Subscribe to any change in the local session-defaults record. Returns an
+ *  unsubscribe fn. Used by settings sync to mirror the record to the server. */
+export function subscribeSessionDefaults(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
 export function useSessionDefaults(): SessionDefaults {
   return useSyncExternalStore(
     (listener) => {

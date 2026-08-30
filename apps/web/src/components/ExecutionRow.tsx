@@ -38,6 +38,48 @@ type DisplayStatus = "pending" | "running" | "done" | "error" | "cancelled";
 /** Matches the --motion-normal token so unmount waits for the CSS collapse. */
 export const EXECUTION_COLLAPSE_MS = 180;
 
+/** True when streamed text must not be animated: accessibility settings and
+ *  the desktop low-resource mode both get the raw target directly. */
+function motionSmoothOff(): boolean {
+  if (document.body.dataset.desktopLowResource === "true") return true;
+  if (document.documentElement.dataset.reduceAnimations === "true") return true;
+  return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/** Print-out effect for execution output: types the newest target text out
+ *  from the current shown position (empty on first arrival), re-rated to a
+ *  fixed ~300ms catch-up so live streaming reads as one continuous type-out
+ *  while one-shot results print in. Shrinking targets (rewind) and reduced
+ *  motion snap immediately. */
+function usePrintText(target: string): string {
+  const [shown, setShown] = useState("");
+  const shownRef = useRef("");
+  const raf = useRef(0);
+  useEffect(() => {
+    cancelAnimationFrame(raf.current);
+    const targetLen = target.length;
+    const shownLen = shownRef.current.length;
+    if (targetLen < shownLen || motionSmoothOff()) {
+      shownRef.current = target;
+      setShown(target);
+      return;
+    }
+    if (shownLen >= targetLen) return;
+    const rate = Math.max(4, Math.ceil((targetLen - shownLen) / 18));
+    const step = () => {
+      const behind = targetLen - shownRef.current.length;
+      if (behind <= 0) return;
+      const take = Math.min(behind, rate);
+      shownRef.current = target.slice(0, shownRef.current.length + take);
+      setShown(shownRef.current);
+      if (shownRef.current.length < targetLen) raf.current = requestAnimationFrame(step);
+    };
+    raf.current = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf.current);
+  }, [target]);
+  return target.length < shown.length ? target : shown;
+}
+
 export function useCollapsePresence(open: boolean): boolean {
   const [present, setPresent] = useState(open);
   useEffect(() => {
@@ -132,9 +174,10 @@ function OutputPreview({ text, error = false, onOpenFull }: {
   onOpenFull: () => void;
 }) {
   const [showAll, setShowAll] = useState(false);
+  const printed = usePrintText(text);
   const lines = outputLineCount(text);
   const long = lines > 12 || text.length > 1600;
-  const shown = showAll ? text : text.split(/\r?\n/).slice(0, 12).join("\n");
+  const shown = showAll ? printed : printed.split(/\r?\n/).slice(0, 12).join("\n");
   return (
     <section className={`execution-detail-section execution-result${error ? " error" : ""}`}>
       <DetailHeading label={error ? "Error" : "Output"} copy={text} />

@@ -1555,12 +1555,17 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .composer-widget { container: composer-widget / inline-size; }
 .composer-config {
   display: flex; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 0;
+  /* Children (model/agent chips) must truncate inside, never paint over the
+     Send button when the rail is docked narrow. */
+  overflow: hidden;
 }
 .composer-extensions { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; }
 .composer-config:empty, .composer-extensions:empty { display: none; }
-/* The action group never collapses below its buttons: config chips shrink
-   and truncate first, Send never leaves the row. */
-.composer-actions { display: flex; align-items: center; gap: var(--space-1); margin-left: auto; flex: none; }
+/* The action group can collapse to its buttons: config chips shrink and
+   truncate first, Send never leaves the row. Allowing the group itself to
+   shrink (instead of flex: none) keeps it from overflowing left over the
+   leading extension icons when Chat is docked beside a workspace pane. */
+.composer-actions { display: flex; align-items: center; gap: var(--space-1); margin-left: auto; flex: 0 1 auto; min-width: 0; overflow: hidden; }
 .composer-primary { display: inline-flex; align-items: center; gap: 7px; flex: none; }
 
 /* Quiet config chip primitive shared by the model trigger (packages/models),

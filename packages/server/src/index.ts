@@ -1300,6 +1300,24 @@ export async function boot(opts: BootOptions = {}) {
   };
 
   const smallModels = createSmallModelService(store);
+
+  // Server-persisted, cross-device client preferences. Created here (ahead of
+  // the settings route) so small-model generation can honour the model the user
+  // picked in Settings → Sessions → Small Model, not just POLYTH_SMALL_MODEL.
+  const clientSettings = createClientSettings({ file: `${dataDir}/client-settings.json` });
+  const resolveSmallModel = (): { providerID: string; modelID: string } | undefined => {
+    const raw = (clientSettings.get().settings as {
+      sessionDefaults?: { smallModel?: { providerID?: unknown; modelID?: unknown } };
+    }).sessionDefaults?.smallModel;
+    if (
+      raw && typeof raw.providerID === "string" && raw.providerID
+      && typeof raw.modelID === "string" && raw.modelID
+    ) {
+      return { providerID: raw.providerID, modelID: raw.modelID };
+    }
+    return smallModel();
+  };
+
   const packageHost: Omit<ServerPackageHost, "pluginId"> = {
     storageDir: dataDir,
     routes: routeRegistry,
@@ -1320,7 +1338,7 @@ export async function boot(opts: BootOptions = {}) {
     oneShot: (runtime, options) => oneShot(runtime, options, store),
     smallModelComplete: (runtime, options) => smallModels.complete(runtime, options),
     smallModelInputBudget: (runtime, model, maxOutputTokens) => smallModels.inputBudget(runtime, model, maxOutputTokens),
-    smallModel,
+    smallModel: resolveSmallModel,
     resolveSessionRuntime,
     loadPlugin: (plugin) => loadPlugin(root, plugin, {}),
     onHttpServer,
@@ -1466,14 +1484,26 @@ export async function boot(opts: BootOptions = {}) {
     }
     return lines.join("\n\n").slice(-16_000);
   };
-  const assistComplete = async (sessionId: string, prompt: string): Promise<string> => {
+  const assistComplete = async (
+    sessionId: string,
+    prompt: string,
+    maxOutputTokens = 1_024,
+  ): Promise<string> => {
     const proj = await store.projection(sessionId);
     const project = proj ? await projects.get(proj.projectId) : null;
     const rt = await runtimes.forProject(proj?.projectId ?? "__default__");
-    return oneShot(rt, {
-      cwd: project?.path ?? process.cwd(), prompt,
-      ...(smallModel() ? { model: smallModel()! } : proj?.model ? { model: proj.model } : {}),
-    }, store);
+    // Prefer the configured small model, then the session's own (known-good,
+    // plugin-provided) model, then the runtime default. Direct provider
+    // transport is tried first with a session-transport fallback.
+    const model = resolveSmallModel() ?? proj?.model ?? undefined;
+    const { text } = await smallModels.complete(rt, {
+      cwd: project?.path ?? process.cwd(),
+      prompt,
+      ...(model ? { model } : {}),
+      maxOutputTokens,
+      timeoutMs: 90_000,
+    });
+    return text;
   };
   const manualSuggestion = createManualSuggestionService({
     latestSeq: (sessionId) => store.latestSeq(sessionId),
@@ -1552,7 +1582,6 @@ export async function boot(opts: BootOptions = {}) {
       },
     });
   };
-  const clientSettings = createClientSettings({ file: `${dataDir}/client-settings.json` });
   const settingsRoute = settingsRoutes({
     behavior, mcp,
     clientSettings,
@@ -1602,28 +1631,29 @@ export async function boot(opts: BootOptions = {}) {
         }
         return parseNoteReply(await assistComplete(sessionId, buildNotePrompt(transcript)));
       },
-      ...(smallModel() ? {
-        taskBrief: async (sessionId: string) => {
-          const messages = deriveMessages(await store.events(sessionId));
-          const latest = [...messages].reverse().find((message) => message.role === "user");
-          const prompt = latest?.parts
-            .filter((part): part is { type: "text"; text: string } => part.type === "text")
-            .map((part) => part.text).join("\n").trim();
-          if (!prompt) throw Object.assign(new Error("nothing to summarize — the session has no user prompt"), { code: "invalid-input" });
-          const proj = await store.projection(sessionId);
-          const project = proj ? await projects.get(proj.projectId) : null;
-          const runtime = await runtimes.forProject(proj?.projectId ?? "__default__");
-          const brief = await oneShot(runtime, {
-            cwd: project?.path ?? process.cwd(),
-            model: smallModel()!,
-            prompt: [
-              "Summarize this user task in at most 20 words. Return only the summary, no label or punctuation flourish.",
-              "<prompt>", prompt.slice(0, 12_000), "</prompt>",
-            ].join("\n"),
-          }, store);
-          return brief.trim().split(/\s+/).slice(0, 20).join(" ");
-        },
-      } : {}),
+      taskBrief: async (sessionId: string) => {
+        const messages = deriveMessages(await store.events(sessionId));
+        const latest = [...messages].reverse().find((message) => message.role === "user");
+        const prompt = latest?.parts
+          .filter((part): part is { type: "text"; text: string } => part.type === "text")
+          .map((part) => part.text).join("\n").trim();
+        if (!prompt) throw Object.assign(new Error("nothing to summarize — the session has no user prompt"), { code: "invalid-input" });
+        const proj = await store.projection(sessionId);
+        const project = proj ? await projects.get(proj.projectId) : null;
+        const runtime = await runtimes.forProject(proj?.projectId ?? "__default__");
+        const model = resolveSmallModel() ?? proj?.model ?? undefined;
+        const { text: brief } = await smallModels.complete(runtime, {
+          cwd: project?.path ?? process.cwd(),
+          ...(model ? { model } : {}),
+          maxOutputTokens: 128,
+          timeoutMs: 90_000,
+          prompt: [
+            "Summarize this user task in at most 20 words. Return only the summary, no label or punctuation flourish.",
+            "<prompt>", prompt.slice(0, 12_000), "</prompt>",
+          ].join("\n"),
+        });
+        return brief.trim().split(/\s+/).slice(0, 20).join(" ");
+      },
     }),
     sessionRetentionRoutes(sessions),
     controlRoutes(sessions),

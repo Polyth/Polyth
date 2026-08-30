@@ -349,7 +349,7 @@ test("a completed call remains open during its active turn", async () => {
   }
 });
 
-test("working groups collapse on success unless the user explicitly expanded them", async () => {
+test("working groups stay folded even while running until the reader toggles", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -365,40 +365,35 @@ test("working groups collapse on success unless the user explicitly expanded the
   try {
     await act(async () => root.render(createElement(WorkedGroup, { g: group(running), subagents: null })));
     const toggle = container.querySelector<HTMLButtonElement>(".execution-group-toggle")!;
-    assert.equal(toggle.getAttribute("aria-expanded"), "true");
-    await act(async () => root.render(createElement(WorkedGroup, {
-      g: group(tool()),
-      subagents: null,
-    })));
-    assert.equal(toggle.getAttribute("aria-expanded"), "false");
+    assert.equal(toggle.getAttribute("aria-expanded"), "false", "a running batch is folded too");
 
-    await act(async () => root.render(createElement(WorkedGroup, { g: group(running), subagents: null })));
-    await act(async () => toggle.click());
     await act(async () => toggle.click());
     assert.equal(toggle.getAttribute("aria-expanded"), "true");
     await act(async () => root.render(createElement(WorkedGroup, {
       g: group(tool()),
       subagents: null,
     })));
-    assert.equal(toggle.getAttribute("aria-expanded"), "true");
+    assert.equal(toggle.getAttribute("aria-expanded"), "true", "a hand toggle is preserved across settle");
+    await act(async () => toggle.click());
+    assert.equal(toggle.getAttribute("aria-expanded"), "false");
   } finally {
     await act(async () => root.unmount());
     container.remove();
   }
 });
 
-test("a completed action batch stays open while its turn is active", async () => {
+test("an action batch stays closed by default and opens on hand toggle", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   const message = tool();
   const group = { kind: "work" as const, id: "work-batch", items: [message], tools: [message], tasks: [], ms: 420 };
   try {
-    await act(async () => root.render(createElement(WorkedGroup, { g: group, subagents: null, activeTurn: true })));
+    await act(async () => root.render(createElement(WorkedGroup, { g: group, subagents: null })));
     const toggle = container.querySelector<HTMLButtonElement>(".execution-group-toggle")!;
-    assert.equal(toggle.getAttribute("aria-expanded"), "true", "the call/result batch is inspectable immediately");
-    await act(async () => root.render(createElement(WorkedGroup, { g: group, subagents: null, activeTurn: false })));
-    assert.equal(toggle.getAttribute("aria-expanded"), "false", "settled history returns to its compact form after the turn");
+    assert.equal(toggle.getAttribute("aria-expanded"), "false", "the batch is folded by default");
+    await act(async () => toggle.click());
+    assert.equal(toggle.getAttribute("aria-expanded"), "true", "hand toggle opens it");
   } finally {
     await act(async () => root.unmount());
     container.remove();

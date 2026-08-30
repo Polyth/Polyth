@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import type { AgentRuntime } from "@polyth/contracts";
+import type { AgentRuntime, RuntimeEvent } from "@polyth/contracts";
 import { createStore } from "@polyth/session";
 import { oneShot } from "../src/oneshot.ts";
 

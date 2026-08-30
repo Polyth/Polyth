@@ -246,7 +246,7 @@ color: var(--faint); font-size: 14px; cursor: grab;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--font-label) - 1px); font-weight: 580; line-height: 1.15;
 }
 .model-picker-copy small {
-  overflow: hidden; color: var(--muted); font-size: calc(var(--font-meta) - 1px); line-height: 1.1; text-overflow: ellipsis; white-space: nowrap;
+  overflow: hidden; color: var(--muted); font-size: calc(var(--font-meta) - 2px); line-height: 1.1; text-overflow: ellipsis; white-space: nowrap;
 }
 .model-row-offline {
 margin-inline-start: 6px; color: var(--amber); font-size: var(--font-meta); font-style: normal; font-weight: 520;

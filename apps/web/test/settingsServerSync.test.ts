@@ -100,4 +100,9 @@ test("client settings round-trip through the server and apply on inbound frames"
   assert.match(settingsSync, /if \(dto\.revision <= localRevision\) return;/);
   assert.match(settingsSync, /updateSettings\(normalizeSettings\(incoming\.product\)\)/);
   assert.match(settingsSync, /setUiSettings\(parseUiSettings\(JSON\.stringify\(incoming\.ui\)\)\)/);
+
+  // Session defaults ride along so server-side small-model generation (commit
+  // messages, next-action, task brief) honours the model the user picked.
+  assert.match(settingsSync, /sessionDefaults:\s*getSessionDefaults\(\)/);
+  assert.match(settingsSync, /setSessionDefaults\(parseSessionDefaults\(JSON\.stringify\(incoming\.sessionDefaults\)\)\)/);
 });

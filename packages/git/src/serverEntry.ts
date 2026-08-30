@@ -12,6 +12,11 @@ import { createGitService, pathsUnder, type GitService } from "./index.ts";
 const COMMIT_PROMPT_VERSION = 2;
 const COMMIT_OUTPUT_TOKENS = 120;
 const COMMIT_CACHE_TTL_MS = 60_000;
+// Commit-message generation runs on the session transport (create throwaway
+// session → reconcile → turn), and a free/rate-limited or subscription-auth
+// model (e.g. Haiku over OAuth) legitimately needs far longer than the old 30s
+// cap, which surfaced as a spurious "timed out". Match the oneShot default.
+const COMMIT_TIMEOUT_MS = 90_000;
 
 const digest = (text: string): string => createHash("sha256").update(text).digest("hex");
 
@@ -69,7 +74,7 @@ export function createCommitMessageGenerator(deps: CommitMessageGeneratorDeps): 
         cwd: root,
         model: deps.model,
         maxOutputTokens: COMMIT_OUTPUT_TOKENS,
-        timeoutMs: 30_000,
+        timeoutMs: COMMIT_TIMEOUT_MS,
         prompt: buildCommitMessagePrompt(diff, budget),
       });
       const text = result.text.replace(/^```[a-z]*\n?|```$/g, "").trim();

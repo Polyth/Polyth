@@ -888,30 +888,15 @@ function childForTool(tool: ToolMsg, subagents: SubagentState | null): SubagentS
 export function WorkedGroup({
   g,
   subagents,
-  activeTurn = false,
 }: {
   g: WorkGroup;
   subagents: SubagentState | null;
-  /** Keep the current turn's actions visible, including a call/result pair
-   * that reaches the browser in the same render. */
-  activeTurn?: boolean;
 }) {
   const failed = g.tools.some((t) => t.status === "error") || g.tasks.some((task) => task.action === "failed");
   const running = g.tools.some((t) => t.status === "pending" || t.status === "running") || g.tasks.some((task) => task.action === "started");
-  const [open, setOpen] = useState(activeTurn || running || failed);
+  // Closed by default; the reader opens it by hand. No auto-open/auto-close.
+  const [open, setOpen] = useState(false);
   const itemsPresent = useCollapsePresence(open);
-  const previousRunning = useRef(running);
-  const userExpanded = useRef(false);
-  useEffect(() => {
-    if (!previousRunning.current && running) {
-      userExpanded.current = false;
-      setOpen(true);
-    }
-    if (previousRunning.current && !running && !failed && !userExpanded.current) setOpen(false);
-    if (!activeTurn && !running && !failed && !userExpanded.current) setOpen(false);
-    if (failed) setOpen(true);
-    previousRunning.current = running;
-  }, [activeTurn, failed, running]);
   const label = executionGroupLabel(g.tools);
   const files = new Set(g.tools.flatMap((tool) => tool.changedFiles ?? [])).size;
   const actionCount = g.tools.length + g.tasks.length;
@@ -920,10 +905,7 @@ export function WorkedGroup({
       <button
         className="execution-group-toggle"
         aria-expanded={open}
-        onClick={() => setOpen((value) => {
-          userExpanded.current = !value;
-          return !value;
-        })}
+        onClick={() => setOpen((value) => !value)}
       >
         <span className={`execution-group-mark ${running ? "running" : failed ? "error" : "done"}`} aria-hidden="true">
           {running ? <span className="ui-spinner ui-spinner--sm" /> : failed ? "×" : "✓"}
@@ -1070,16 +1052,14 @@ function sameGroup(a: WorkGroup, b: WorkGroup): boolean {
 const WorkRow = memo(function WorkRow({
   g,
   subagents,
-  activeTurn,
 }: {
   rev: number;
   g: WorkGroup;
   subagents: SubagentState | null;
-  activeTurn: boolean;
 }) {
-  return <WorkedGroup g={g} subagents={subagents} activeTurn={activeTurn} />;
+  return <WorkedGroup g={g} subagents={subagents} />;
 }, (prev, next) => prev.rev === next.rev && sameGroup(prev.g, next.g)
-  && prev.subagents === next.subagents && prev.activeTurn === next.activeTurn);
+  && prev.subagents === next.subagents);
 
 // Right-edge prompt rail (WP4, restyled after polyth PromptNavigatorRail):
 // a thin vertical tape of ticks in a 28px gutter hugging the right edge of the
@@ -1738,7 +1718,7 @@ export default function Timeline({
         )}
         {shownRows.map((r) => (
           r.kind === "work"
-            ? <WorkRow key={r.id} rev={workRev(r)} g={r} subagents={model.subagents} activeTurn={turn?.status === "working"} />
+            ? <WorkRow key={r.id} rev={workRev(r)} g={r} subagents={model.subagents} />
             : (
               <MessageRow
                 key={r.id}
@@ -1800,7 +1780,7 @@ export default function Timeline({
             <div className="rewound-tail-body">
               {undoneRows.map((row) => (
                 row.kind === "work"
-                  ? <WorkRow key={row.id} rev={workRev(row)} g={row} subagents={model.subagents} activeTurn={false} />
+                  ? <WorkRow key={row.id} rev={workRev(row)} g={row} subagents={model.subagents} />
                   : <MessageRow key={row.id} rev={row.rev ?? 0} m={row} announce={announce} />
               ))}
             </div>

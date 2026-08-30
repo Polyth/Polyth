@@ -13,6 +13,12 @@ import type { ClientSettingsDto } from "@polyth/contracts";
 import { normalizeSettings } from "./settings.ts";
 import { getState, subscribeStore, updateSettings } from "./store.ts";
 import { getUiSettings, parseUiSettings, setUiSettings, subscribeUiSettings } from "./uiPrefs.ts";
+import {
+  getSessionDefaults,
+  parseSessionDefaults,
+  setSessionDefaults,
+  subscribeSessionDefaults,
+} from "./sessionDefaults.ts";
 
 const PUSH_DEBOUNCE_MS = 500;
 
@@ -25,10 +31,14 @@ let started = false;
 interface SettingsBlob {
   product: ReturnType<typeof normalizeSettings>;
   ui: ReturnType<typeof getUiSettings>;
+  // Session defaults travel with the shared blob so server-side small-model
+  // generation (commit messages, next-action, task brief) uses the model the
+  // user picked in Settings, and so the picks follow them across devices.
+  sessionDefaults: ReturnType<typeof getSessionDefaults>;
 }
 
 function currentBlob(): SettingsBlob {
-  return { product: getState().settings, ui: getUiSettings() };
+  return { product: getState().settings, ui: getUiSettings(), sessionDefaults: getSessionDefaults() };
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -38,11 +48,14 @@ function isObject(value: unknown): value is Record<string, unknown> {
 /** Apply a server snapshot locally without bouncing it straight back. */
 function applyRemote(dto: ClientSettingsDto): void {
   if (dto.revision <= localRevision) return;
-  const incoming = dto.settings as { product?: unknown; ui?: unknown };
+  const incoming = dto.settings as { product?: unknown; ui?: unknown; sessionDefaults?: unknown };
   applying = true;
   try {
     if (isObject(incoming.product)) updateSettings(normalizeSettings(incoming.product));
     if (isObject(incoming.ui)) setUiSettings(parseUiSettings(JSON.stringify(incoming.ui)));
+    if (isObject(incoming.sessionDefaults)) {
+      setSessionDefaults(parseSessionDefaults(JSON.stringify(incoming.sessionDefaults)));
+    }
   } finally {
     applying = false;
   }
@@ -84,6 +97,7 @@ export function initSettingsSync(): void {
     lastSyncedJson = JSON.stringify(currentBlob());
     subscribeStore(schedulePush);
     subscribeUiSettings(schedulePush);
+    subscribeSessionDefaults(schedulePush);
   }
   void api.clientSettings()
     .then((dto) => {

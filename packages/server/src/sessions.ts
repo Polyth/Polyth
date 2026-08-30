@@ -1854,12 +1854,20 @@ export function createSessionService(deps: {
           ...(ev.error ? { error: ev.error } : {}),
         }, { ignorable: true });
         if (sideEffects) {
+          // An interrupt abort stops the turn as reason "error" ("Aborted").
+          // Treating that as a failure would wedge the session: status
+          // "failed" blocks queue dispatch and the queued interrupt message
+          // never runs. When the interrupt is still queued at the head, the
+          // stop is the abort completing — return to idle and dispatch it.
+          const interruptQueued = deps.queue
+            ? (await deps.queue.queueList(sessionId))[0]?.delivery === "interrupt"
+            : false;
           const applied = await applyRuntimeProjection(
             sessionId,
             runtimeEventSeq,
             (current) => ({
               ...current,
-              status: ev.reason === "error" ? "failed" : "idle",
+              status: ev.reason === "error" && !interruptQueued ? "failed" : "idle",
               updatedAt: Date.now(),
             }),
           );
@@ -1877,7 +1885,9 @@ export function createSessionService(deps: {
             if (ev.reason === "completed") hooks.onTurnCompleted?.(sessionId, replyText(sessionId));
             // FIFO dispatch of queued follow-ups; never into an error state (a
             // failing session would silently burn the whole queue otherwise).
-            if (ev.reason !== "error") void dispatchQueue(sessionId);
+            // An interrupt that caused the stop is exactly the "cut in" the
+            // user asked for, so it dispatches even over an error stop.
+            if (ev.reason !== "error" || interruptQueued) void dispatchQueue(sessionId);
           }
         }
         break;
@@ -3992,8 +4002,23 @@ export function createSessionService(deps: {
             throw outcomeError(outcome);
           }
           const backendSessionId = outcome.value.backendSessionId;
-          await updateProjection(sessionId, { backendSessionId, status: "idle" });
-          current = { ...current, backendSessionId, status: "idle" };
+          // The rewind branch replaces the backend session; the durable
+          // runtime binding must follow, or the observation fence rejects
+          // every event from the new session as stale-evidence forever.
+          const rewoundBinding = current.runtimeBinding
+            ? { ...current.runtimeBinding, backendSessionId }
+            : undefined;
+          await updateProjection(sessionId, {
+            backendSessionId,
+            status: "idle",
+            ...(rewoundBinding ? { runtimeBinding: rewoundBinding } : {}),
+          });
+          current = {
+            ...current,
+            backendSessionId,
+            status: "idle",
+            ...(rewoundBinding ? { runtimeBinding: rewoundBinding } : {}),
+          };
           await appendAndBroadcast(sessionId, "session/rewind-cleared", {
             rewindSeq: rewind.markerSeq,
             replaced: true,
@@ -4149,6 +4174,16 @@ export function createSessionService(deps: {
         // editable but do not prevent an explicit new request from continuing
         // on the fresh runtime.
         if (pendingQueue.some((item) => !item.heldForReview)) {
+          // A failed/unknown session can never dispatch its queue; silently
+          // enqueueing would strand this message, and the steer button (which
+          // removes the old item after a "successful" send) would spin an
+          // endless re-queue loop. Surface the state instead.
+          if (proj.status !== "idle" && proj.status !== "waiting" && proj.status !== "reconciling") {
+            throw Object.assign(
+              new Error(`session is ${proj.status}; queued messages cannot dispatch until it is idle`),
+              { code: "session-not-idle" },
+            );
+          }
           const res = await enqueueMessage(sessionId, input.text, delivery === "steer" ? "steer" : "queue", undefined, input.attachments);
           void dispatchQueue(sessionId);
           return res;
