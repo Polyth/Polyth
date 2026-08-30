@@ -726,6 +726,10 @@ export interface EventPage {
   beforeSeq?: number;
   /** Maximum number of events; the newest ones in the window are returned. */
   limit?: number;
+  /** Browser intent. `true` is a cache-only prefetch that must not attach or
+   *  wake a runtime; `false` is an interactive open/reconcile. Omitted keeps
+   *  persistence and non-browser callers' existing read behavior. */
+  prefetch?: boolean;
 }
 
 export interface SessionPersistence {

@@ -20,9 +20,9 @@ import {
   setSidebarOpen,
 } from "./store.ts";
 import { installBuiltinMiniWidgets } from "./widgets/builtinMiniWidgets.tsx";
+import { installSystemWidgets } from "./widgets/systemWidgets.tsx";
 import { installNotificationCentre } from "./components/NotificationCentre.tsx";
 import { installOpenCodeRestartControl } from "./components/OpenCodeRestartControl.tsx";
-import { installReconnectPill } from "./components/ReconnectPill.tsx";
 import { installRuntimeEpochBanner } from "./components/RuntimeEpochBanner.tsx";
 import { installDesktopIntegration } from "./desktop.tsx";
 import { exposeWidgets } from "./widgets/catalog.ts";
@@ -46,10 +46,10 @@ exposeCapabilities();
 exposeWorkspaceSurfaces();
 exposeWidgets();
 installBuiltinMiniWidgets();
+installSystemWidgets();
 // NTF-01: bell + panel arrive through the slot registry, never via App.tsx.
 installNotificationCentre();
 installOpenCodeRestartControl();
-installReconnectPill();
 installRuntimeEpochBanner();
 // No-op in browsers; Electron's preload exposes the bridge that enables the
 // desktop settings page and custom titlebar controls through existing slots.

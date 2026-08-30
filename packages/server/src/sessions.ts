@@ -4676,7 +4676,10 @@ export function createSessionService(deps: {
       return p;
     },
     async events(sessionId, afterSeq, page) {
-      if (afterSeq === 0 && !sessionRuntime.has(sessionId)) {
+      const interactiveRead = afterSeq === 0
+        ? page?.prefetch !== true
+        : page?.prefetch === false;
+      if (interactiveRead && !sessionRuntime.has(sessionId)) {
         const projection = await store.projection(sessionId);
         if (projection && (projection.backendSessionId || projection.status === "unknown")) {
           try {
@@ -4688,16 +4691,18 @@ export function createSessionService(deps: {
       }
       // Restart recovery: opening an idle session with persisted queued
       // messages resumes FIFO dispatch (never into an active stream).
-      if (afterSeq === 0 && deps.queue && !turnActive(sessionId)) {
+      if (interactiveRead && deps.queue && !turnActive(sessionId)) {
         void deps.queue.queueList(sessionId).then((q) => {
           if (q.length > 0) return dispatchQueue(sessionId);
           return undefined;
         }).catch(() => {});
       }
-      // Lazy history import: one-time, bounded, only for sessions adopted
-      // from OpenCode. Importing all histories eagerly at sync time is what
-      // OOM'd the server, so history arrives the first time a session opens.
-      if (afterSeq === 0) {
+      // Lazy history import is only for sessions adopted from OpenCode.
+      // OpenCode's current history API is unpaged; faking a partial import
+      // would break durable chronological sequencing, so that first import
+      // remains deferred here until the backend offers a real page boundary.
+      // Passive pointer prefetches never enter this path.
+      if (interactiveRead) {
         const proj = await store.projection(sessionId);
         if (proj?.backendSessionId) {
           // Indexed existence checks; scanning the whole log to answer two

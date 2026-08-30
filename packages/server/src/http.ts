@@ -246,12 +246,16 @@ export function createHttpServer(deps: HttpDeps): Server {
         // beforeSeq pages older history backward without offset scans.
         const beforeSeqRaw = url.searchParams.get("beforeSeq");
         const limitRaw = url.searchParams.get("limit");
+        const prefetchRaw = url.searchParams.get("prefetch");
         const beforeSeq = beforeSeqRaw === null ? undefined : Number(beforeSeqRaw);
         const limit = limitRaw === null ? undefined : Number(limitRaw);
-        const page = (Number.isSafeInteger(beforeSeq) && beforeSeq! > 0) || (Number.isSafeInteger(limit) && limit! > 0)
+        const page = (Number.isSafeInteger(beforeSeq) && beforeSeq! > 0)
+          || (Number.isSafeInteger(limit) && limit! > 0)
+          || prefetchRaw === "0" || prefetchRaw === "1"
           ? {
               ...(Number.isSafeInteger(beforeSeq) && beforeSeq! > 0 ? { beforeSeq: beforeSeq! } : {}),
               ...(Number.isSafeInteger(limit) && limit! > 0 ? { limit: limit! } : {}),
+              ...(prefetchRaw === "0" || prefetchRaw === "1" ? { prefetch: prefetchRaw === "1" } : {}),
             }
           : undefined;
         return json(res, 200, await sessions.events(m[1]!, afterSeq, page));

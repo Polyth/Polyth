@@ -4113,27 +4113,28 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
   border: 0; border-radius: var(--radius-card); color: var(--muted); font-size: var(--font-meta);
 }
 .header-actions { display: flex; align-items: center; gap: 2px; }
-.reconnect-pill {
-  display: inline-flex;
+.system-status-widget {
+  display: flex;
   align-items: center;
   gap: var(--space-2);
   min-height: var(--control-h-sm);
-  padding-inline: var(--space-3);
-  border: 1px solid color-mix(in srgb, var(--amber) 32%, transparent);
-  border-radius: var(--radius-control);
-  background: var(--amber-wash);
+  padding: var(--space-2) var(--space-3);
   color: var(--text-dim);
-  font-size: var(--nav-meta-size);
-  white-space: nowrap;
+  font-size: var(--font-meta);
 }
-.reconnect-pill-dot {
+.system-status-widget-dot {
   width: var(--space-2);
   height: var(--space-2);
+  flex: none;
   border-radius: 50%;
-  background: var(--amber);
+  background: var(--green);
 }
-.reconnect-pill button {
+.system-status-widget.connecting .system-status-widget-dot { background: var(--amber); }
+.system-status-widget.disconnected .system-status-widget-dot { background: var(--red); }
+.system-status-widget-label { min-width: 0; }
+.system-status-widget button {
   min-height: auto;
+  margin-left: auto;
   padding: 0;
   border: 0;
   background: transparent;
@@ -4141,7 +4142,7 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
   font: inherit;
   font-weight: 650;
 }
-.reconnect-pill button:hover { color: var(--accent-hi); }
+.system-status-widget button:hover { color: var(--accent-hi); }
 /* Header actions are compact controls regardless of viewport width. Their
    accessible names remain on the button; labels belong in tooltips and menus. */
 .header-actions .header-action { width: 34px; padding: 0; }

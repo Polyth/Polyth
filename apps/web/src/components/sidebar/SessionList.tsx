@@ -10,7 +10,8 @@ import { api, type Worktree } from "@polyth/session/web-api";
 import {
   getState, setSidebarOpen, setUiError, startNewSession, useStore,
 } from "../../store.ts";
-import { openSession, deleteSession, restoreSession, forkSession, refreshSessions } from "../../init.ts";
+import { openSession, prefetchSessionTail, deleteSession, restoreSession, forkSession, refreshSessions } from "../../init.ts";
+import { markSessionPerformance } from "../../sessionPerformance.ts";
 import { resolveSessionStatus, type SessionRowStatus } from "../../sessionStatus.ts";
 import { fullSessionTitle } from "../../format.ts";
 import { friendlyError } from "../../settings.ts";
@@ -424,6 +425,10 @@ function SessionRow({
           aria-busy={opening || undefined}
           aria-label={tr("sidebar.sessionlist.openValue", { displayTitle: displayTitle })}
           title={hoverTitle}
+          onPointerEnter={() => prefetchSessionTail(s.id)}
+          onPointerDown={(event) => {
+            if (event.pointerType === "touch") prefetchSessionTail(s.id);
+          }}
           onClick={(event) => {
             if (longPressOpenedRef.current || swipeConsumedRef.current) {
               event.preventDefault();
@@ -436,6 +441,7 @@ function SessionRow({
               setSwipeRevealed(false);
               return;
             }
+            markSessionPerformance("session_click", s.id);
             onOpen(s.id);
           }}
           onDoubleClick={() => { setTitle(s.title); setRenaming(true); }}

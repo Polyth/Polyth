@@ -64,6 +64,8 @@ let sessionListFixtures: SessionProjection[] | null = null;
   fetchCalls.push(request);
   const payload = request.method === "GET" && request.url === "/api/labels"
     ? labelFixtures
+    : request.method === "GET" && request.url === "/api/sessions/s-idle"
+      ? { id: "s-idle", projectId: "p1", title: "Idle session", status: "idle", createdAt: 1, updatedAt: 1 }
     : request.method === "GET" && request.url.startsWith("/api/sessions?") && sessionListFixtures !== null
       ? sessionListFixtures
       : [];
@@ -406,6 +408,31 @@ test("quick actions absent at rest; keyboard reaches the same menu via Shift+F10
     });
     assert.equal(openMenu(), null);
     assert.equal(document.activeElement, open, "focus returns to the row button");
+  } finally {
+    await unmount();
+  }
+});
+
+test("pointer intent wires the bounded session-tail prefetch once", async () => {
+  const { container, unmount } = await mountList();
+  try {
+    const open = rowOf(container, "Idle session").querySelector<HTMLButtonElement>(".session-btn")!;
+    const before = fetchCalls.length;
+    await act(async () => {
+      open.dispatchEvent(new (dom as unknown as { PointerEvent: typeof PointerEvent }).PointerEvent(
+        "pointerover",
+        { bubbles: true, pointerType: "mouse" },
+      ));
+      open.dispatchEvent(new (dom as unknown as { PointerEvent: typeof PointerEvent }).PointerEvent(
+        "pointerover",
+        { bubbles: true, pointerType: "mouse" },
+      ));
+      await Promise.resolve();
+    });
+    assert.deepEqual(
+      fetchCalls.slice(before).filter((call) => call.url.includes("/api/sessions/s-idle/events")),
+      [{ url: "/api/sessions/s-idle/events?afterSeq=0&limit=40&prefetch=1", method: "GET" }],
+    );
   } finally {
     await unmount();
   }

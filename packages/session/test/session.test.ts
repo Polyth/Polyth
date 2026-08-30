@@ -81,6 +81,25 @@ test("events(afterSeq) returns ordered, JSON-parsed events", async () => {
   }
 });
 
+test("event tail and backward keyset pages are ascending without overlap or gaps", async () => {
+  const dir = freshDir();
+  const store = createStore(join(dir, "t.db"));
+  try {
+    for (let i = 1; i <= 8; i++) await store.append("s1", "user/message", { n: i });
+    const tail = await store.events("s1", 0, { limit: 3 });
+    const middle = await store.events("s1", 0, { beforeSeq: tail[0]!.seq, limit: 3 });
+    const oldest = await store.events("s1", 0, { beforeSeq: middle[0]!.seq, limit: 3 });
+
+    assert.deepEqual(tail.map((event) => event.seq), [6, 7, 8]);
+    assert.deepEqual(middle.map((event) => event.seq), [3, 4, 5]);
+    assert.deepEqual(oldest.map((event) => event.seq), [1, 2]);
+    assert.deepEqual([...oldest, ...middle, ...tail].map((event) => event.seq), [1, 2, 3, 4, 5, 6, 7, 8]);
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("copyTo forks at a seq, re-sequencing into dst", async () => {
   const dir = freshDir();
   const store = createStore(join(dir, "t.db"));

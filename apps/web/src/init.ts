@@ -23,6 +23,7 @@ import { reconcilePackage } from "./packages/reconcile.ts";
 import { tr } from "./i18n/index.ts";
 import { desktopBridge } from "./desktopBridge.ts";
 import { clearSendFailure, reportSendFailure } from "./sendFailure.ts";
+import { markSessionPerformance } from "./sessionPerformance.ts";
 
 let sync: SyncClient | null = null;
 let syncStatus: SyncStatus = "disconnected";
@@ -132,6 +133,7 @@ function syncUrl(replace: boolean): void {
   if (location.pathname === target && !location.search.includes("session=")) return;
   if (replace) history.replaceState({ polyth: true, depth: historyDepth() } satisfies PolythHistoryState, "", target);
   else history.pushState({ polyth: true, depth: historyDepth() + 1 } satisfies PolythHistoryState, "", target);
+  if (s.activeSessionId) markSessionPerformance("route_committed", s.activeSessionId);
 }
 
 /** Navigate only within Polyth. At a deep-linked session with no in-app
@@ -511,11 +513,76 @@ function startSync(): void {
 // stay correct: active rewind markers are recent by construction (they sit at
 // the log tail), and the auto-backfill below extends the window past the
 // rewind TARGET so undone-range marking is complete.
-const INITIAL_EVENT_WINDOW = 500;
+const INITIAL_EVENT_WINDOW = 40;
 const BACKFILL_CHUNK = 2000;
 /** Background backfill stops here; scroll-up keeps loading beyond on demand. */
 const AUTO_BACKFILL_TARGET = 4000;
 const backfillInFlight = new Set<string>();
+const tailRequests = new Map<string, { passive: boolean; promise: Promise<SessionEvent[]> }>();
+const prefetchedSessions = new Set<string>();
+
+function requestSessionTail(sessionId: string, passive: boolean): Promise<SessionEvent[]> {
+  const existing = tailRequests.get(sessionId);
+  if (existing) return existing.promise;
+  markSessionPerformance("request_started", sessionId);
+  const request = api.getEvents(sessionId, 0, { limit: INITIAL_EVENT_WINDOW, prefetch: passive })
+    .then((events) => {
+      markSessionPerformance("response_received", sessionId);
+      const active = store.getState().activeSessionId;
+      if (active) store.touchSessionCache(active);
+      store.touchSessionCache(sessionId);
+      store.applyEvents(events);
+      store.ensureEventCache(sessionId);
+      hydratedSessions.add(sessionId);
+      markSessionPerformance("messages_ingested", sessionId);
+      return events;
+    })
+    .finally(() => {
+      if (tailRequests.get(sessionId)?.promise === request) tailRequests.delete(sessionId);
+    });
+  tailRequests.set(sessionId, { passive, promise: request });
+  return request;
+}
+
+/** Pointer intent warms only the canonical SQLite tail. It never activates,
+ *  routes, reports an error, or touches the runtime/import path. */
+export function prefetchSessionTail(sessionId: string): void {
+  const s = store.getState();
+  if (hydratedSessions.has(sessionId) && s.events[sessionId] !== undefined) return;
+  prefetchedSessions.add(sessionId);
+  void requestSessionTail(sessionId, true).catch(() => {
+    prefetchedSessions.delete(sessionId); // a later pointer intent may retry
+  });
+}
+
+async function reconcileSession(sessionId: string, afterSeq: number, generation: number): Promise<void> {
+  const cachedBase = store.getState().events[sessionId] ?? [];
+  const projectionAtRequest = store.getState().sessions.find((session) => session.id === sessionId);
+  markSessionPerformance("request_started", sessionId);
+  const [session, events] = await Promise.all([
+    api.getSession(sessionId),
+    // This suffix stays unbounded: a limit could skip middle events when a
+    // prefetched/cached tail fell behind before activation.
+    api.getEvents(sessionId, afterSeq, { prefetch: false }),
+  ]);
+  markSessionPerformance("response_received", sessionId);
+  if (generation !== openSessionGeneration) return;
+  const active = store.getState().activeSessionId;
+  if (active) store.touchSessionCache(active);
+  store.touchSessionCache(sessionId);
+  const currentProjection = store.getState().sessions.find((candidate) => candidate.id === sessionId);
+  if (currentProjection === undefined || currentProjection === projectionAtRequest) {
+    store.upsertSession(session);
+  }
+  // The LRU may have evicted this session while REST was in flight. Restore
+  // the immutable cached base before its unbounded suffix so no gap appears.
+  store.applyEvents(cachedBase);
+  store.applyEvents(events);
+  store.ensureEventCache(sessionId);
+  hydratedSessions.add(sessionId);
+  prefetchedSessions.delete(sessionId);
+  markSessionPerformance("messages_ingested", sessionId);
+}
 
 /** Fetch one chunk of history older than the cached window. Returns true when
  *  events were added, false at log start / while another fetch is in flight. */
@@ -606,18 +673,25 @@ export async function openSession(
       || now.activeSessionId !== baseline.activeSessionId;
   };
   try {
+    if (useCachedView) {
+      await reconcileSession(sessionId, afterSeq, generation);
+      if (generation === openSessionGeneration) {
+        maybeSeedFromReplay(sessionId);
+        scheduleAutoBackfill(sessionId, generation);
+      }
+      return;
+    }
     // Metadata and history are independent reads. Starting both together saves
     // one full round trip on high-latency links and old-session deep links.
     // First opens fetch only the newest window; older history backfills below.
-    const [session, events] = await Promise.all([
-      api.getSession(sessionId),
-      useCachedView
-        ? api.getEvents(sessionId, afterSeq)
-        : api.getEvents(sessionId, 0, { limit: INITIAL_EVENT_WINDOW }),
+    const tailWasPrefetched = prefetchedSessions.has(sessionId)
+      || tailRequests.get(sessionId)?.passive === true;
+    const [session] = await Promise.all([
+      cachedSession ?? api.getSession(sessionId),
+      requestSessionTail(sessionId, false),
     ]);
     if (generation !== openSessionGeneration) return;
     store.upsertSession(session);
-    store.applyEvents(events); // one store update for the whole window/suffix
     store.ensureEventCache(sessionId); // empty logs still count as cached
     hydratedSessions.add(sessionId);
     maybeSeedFromReplay(sessionId);
@@ -627,6 +701,7 @@ export async function openSession(
       if (opts.showChat !== false) store.showSessionChat();
       scheduleAutoBackfill(sessionId, generation);
     }
+    if (tailWasPrefetched) await reconcileSession(sessionId, store.lastSeq(sessionId), generation);
   } finally {
     // A newer concurrent open owns the claim and active-session transition.
     if (

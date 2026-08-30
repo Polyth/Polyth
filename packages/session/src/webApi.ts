@@ -566,10 +566,11 @@ export const api = {
   /** `page` (beforeSeq/limit) keyset-pages the NEWEST events in the window —
    *  the deep-log hydration path fetches a recent window first and backfills
    *  older history in chunks (beforeSeq = oldest loaded seq). */
-  getEvents: (id: string, afterSeq = 0, page?: { beforeSeq?: number; limit?: number }) =>
+  getEvents: (id: string, afterSeq = 0, page?: { beforeSeq?: number; limit?: number; prefetch?: boolean }) =>
     jfetch<SessionEvent[]>(`/api/sessions/${id}/events?afterSeq=${afterSeq}`
       + (page?.beforeSeq !== undefined ? `&beforeSeq=${page.beforeSeq}` : "")
-      + (page?.limit !== undefined ? `&limit=${page.limit}` : "")),
+      + (page?.limit !== undefined ? `&limit=${page.limit}` : "")
+      + (page?.prefetch !== undefined ? `&prefetch=${page.prefetch ? "1" : "0"}` : "")),
 
   // agentProfileId: string selects a profile, null explicitly clears the
   // session's stored profile, omitted inherits it (UX-COMPOSER-DISC).

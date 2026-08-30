@@ -127,6 +127,47 @@ const runtimeWithSnapshot = (
     snapshot(binding),
 } as AgentRuntime);
 
+test("passive event-tail prefetch does not materialize a runtime", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-prefetch-"));
+  const endpoint = endpointFor(dir);
+  let materializations = 0;
+  const runtime = runtimeWithSnapshot(endpoint, (binding) => ({
+    authorityId: binding.authorityId,
+    generation: binding.generation,
+    location: binding.location,
+    backendSessionId: binding.backendSessionId!,
+    reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+    state: { value: "idle", watermark: "prefetch" },
+    completeness: { events: "complete", permissions: "complete", questions: "complete" },
+    events: [],
+  }));
+  runtime.ensureSession = async (input) => {
+    materializations += 1;
+    return input.backendSessionId ?? `backend-${input.sessionId}`;
+  };
+  const { sessions, store, project } = makeHarness(runtime, dir);
+  await store.upsertProjection({
+    id: "session-prefetch",
+    projectId: project.id,
+    backendSessionId: "backend-prefetch",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-prefetch"),
+    title: "Prefetch",
+    status: "idle",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  await store.append("session-prefetch", "user/message", { text: "cached" });
+
+  assert.deepEqual(
+    (await sessions.events("session-prefetch", 0, { limit: 40, prefetch: true })).map((event) => event.seq),
+    [1],
+  );
+  assert.equal(materializations, 0);
+  await sessions.events("session-prefetch", 1, { prefetch: false });
+  assert.equal(materializations, 1, "interactive reconcile still wires the runtime");
+  await store.close();
+});
+
 test("materialization reconciles missed permission and question state before admission", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-pending-"));
   const endpoint = endpointFor(dir);

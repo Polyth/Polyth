@@ -29,6 +29,7 @@ let blockedSession: string | null = null;
 let blockedSessionGate: Promise<void> | null = null;
 let releaseBlockedSession: (() => void) | null = null;
 let requestedPaths: string[] = [];
+const eventFixtures = new Map<string, unknown[]>();
 (globalThis as { fetch?: unknown }).fetch = async (url: string, init?: RequestInit) => {
   const u = new URL(String(url), "http://localhost:3000");
   requestedPaths.push(`${u.pathname}${u.search}`);
@@ -41,8 +42,8 @@ let requestedPaths: string[] = [];
     ? { id: m[1], projectId: "p1", title: "T", status: "idle", createdAt: 1, updatedAt: 1 }
     : u.pathname === "/api/sessions" && init?.method === "POST"
       ? { id: "precache" }
-    : /^\/api\/sessions\/[^/]+\/events$/.test(u.pathname)
-      ? []
+    : /^\/api\/sessions\/([^/]+)\/events$/.test(u.pathname)
+      ? eventFixtures.get(/^\/api\/sessions\/([^/]+)\/events$/.exec(u.pathname)![1]!) ?? []
       : [];
   return {
     ok: true,
@@ -54,7 +55,7 @@ let requestedPaths: string[] = [];
 };
 
 const store = await import("../src/store.ts");
-const { createSession, openSession } = await import("../src/init.ts");
+const { createSession, openSession, prefetchSessionTail } = await import("../src/init.ts");
 const { registerSurface } = await import("../src/surfaces.ts");
 const { getWorkspacePanePrefs } = await import("../src/workspace/panePrefs.ts");
 const { getWorkspaceMode, setWorkspaceMode } = await import("../src/widgets/workspaceMode.ts");
@@ -147,7 +148,7 @@ test("session metadata and history start in parallel on a cold open", async () =
   // older history backfills in the background after first paint.
   assert.deepEqual(requestedPaths, [
     "/api/sessions/parallel",
-    "/api/sessions/parallel/events?afterSeq=0&limit=500",
+    "/api/sessions/parallel/events?afterSeq=0&limit=40&prefetch=0",
   ]);
 
   unblockFetches();
@@ -166,7 +167,7 @@ test("a hydrated session renders from cache while its suffix revalidates", async
   assert.equal(store.getState().activeView, "session", "cached chat is immediately usable");
   assert.deepEqual(requestedPaths, [
     "/api/sessions/parallel",
-    "/api/sessions/parallel/events?afterSeq=0",
+    "/api/sessions/parallel/events?afterSeq=0&prefetch=0",
   ]);
 
   unblockFetches();
@@ -189,11 +190,83 @@ test("first-message session creation opens the chat instantly while revalidating
   assert.deepEqual(requestedPaths.slice(0, 3), [
     "/api/sessions",
     "/api/sessions/precache",
-    "/api/sessions/precache/events?afterSeq=0",
+    "/api/sessions/precache/events?afterSeq=0&prefetch=0",
   ]);
 
   unblockSession();
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
+});
+
+test("tail prefetch dedupes and click paints its cache before reconcile resolves", async () => {
+  const sessionId = "prefetched";
+  const projection = { id: sessionId, projectId: "p1", title: "Prefetched", status: "idle", createdAt: 1, updatedAt: 1 } as const;
+  const tailEvent = {
+    id: "prefetched-1", sessionId, seq: 1, time: 1, type: "user/message", data: { text: "ready" }, v: 1,
+  } as const;
+  store.upsertSession(projection);
+  eventFixtures.set(sessionId, [tailEvent]);
+  requestedPaths = [];
+  blockSession(sessionId);
+
+  prefetchSessionTail(sessionId);
+  prefetchSessionTail(sessionId);
+  await Promise.resolve();
+  assert.deepEqual(requestedPaths, [
+    `/api/sessions/${sessionId}/events?afterSeq=0&limit=40&prefetch=1`,
+  ], "repeated pointer intent shares one bounded request");
+
+  const opening = openSession(sessionId);
+  await Promise.resolve();
+  assert.equal(requestedPaths.length, 1, "click shares the in-flight tail instead of overlapping it");
+
+  blockFetches();
+  unblockSession();
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  assert.equal(store.getState().activeSessionId, sessionId, "cached tail activates before reconcile");
+  assert.deepEqual(store.getState().events[sessionId]?.map((event) => event.seq), [1]);
+  assert.deepEqual(requestedPaths.slice(1), [
+    `/api/sessions/${sessionId}`,
+    `/api/sessions/${sessionId}/events?afterSeq=1&prefetch=0`,
+  ]);
+
+  unblockFetches();
+  await opening;
+  eventFixtures.delete(sessionId);
+});
+
+test("a completed prefetch activates synchronously before SWR resolves", async () => {
+  const sessionId = "prefetched-ready";
+  store.upsertSession({ id: sessionId, projectId: "p1", title: "Ready", status: "idle", createdAt: 1, updatedAt: 1 });
+  eventFixtures.set(sessionId, [{
+    id: "prefetched-ready-1", sessionId, seq: 1, time: 1,
+    type: "user/message", data: { text: "cached" }, v: 1,
+  }]);
+  prefetchSessionTail(sessionId);
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  store.activateSession(null);
+  requestedPaths = [];
+  blockFetches();
+
+  const opening = openSession(sessionId);
+  assert.equal(store.getState().activeSessionId, sessionId, "completed prefetch paints cache synchronously");
+  assert.deepEqual(requestedPaths, [
+    `/api/sessions/${sessionId}`,
+    `/api/sessions/${sessionId}/events?afterSeq=1&prefetch=0`,
+  ]);
+
+  unblockFetches();
+  await opening;
+  eventFixtures.delete(sessionId);
+});
+
+test("a streamed event applies as a delta without a REST history request", () => {
+  requestedPaths = [];
+  store.applyEvent({
+    id: "prefetched-2", sessionId: "prefetched", seq: 2, time: 2,
+    type: "assistant/message", data: { text: "delta" }, v: 1,
+  });
+  assert.deepEqual(store.getState().events.prefetched?.map((event) => event.seq), [1, 2]);
+  assert.deepEqual(requestedPaths, []);
 });
 
 test("a slower earlier open cannot replace a newer selected session", async () => {
@@ -207,6 +280,25 @@ test("a slower earlier open cannot replace a newer selected session", async () =
   unblockSession();
   await slow;
   assert.equal(store.getState().activeSessionId, "newer");
+});
+
+test("a cached reconcile cannot overwrite a newer streamed projection", async () => {
+  await openSession("stale-reconcile");
+  blockSession("stale-reconcile");
+  const stale = openSession("stale-reconcile");
+  await Promise.resolve();
+
+  store.upsertSession({
+    id: "stale-reconcile", projectId: "p1", title: "newer projection",
+    status: "working", createdAt: 1, updatedAt: 2,
+  });
+  unblockSession();
+  await stale;
+
+  assert.equal(
+    store.getState().sessions.find((session) => session.id === "stale-reconcile")?.title,
+    "newer projection",
+  );
 });
 
 // Regression (QA P0): a first open claims the loading row; when a CACHED open

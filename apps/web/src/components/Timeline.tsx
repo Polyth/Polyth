@@ -7,6 +7,7 @@ import { groupWork, mergeThinking, promptIndex, copyText, loadDraft, type WorkGr
 import { executionGroupLabel, executionPresentation, reasoningHead } from "../execution.ts";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { forkSession, loadOlderEvents } from "../init.ts";
+import { markSessionPerformance } from "../sessionPerformance.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
 import {
   applyEvent, setActiveView, setUiError, startNewSession, useStore,
@@ -1234,6 +1235,24 @@ export default function Timeline({
     atBottom.current = stored?.atBottom ?? true;
     setShowJump(stored !== null && !stored.atBottom);
   }
+
+  useLayoutEffect(() => {
+    if (sessionId === null) return;
+    markSessionPerformance("cached_tail_rendered", sessionId);
+  }, [sessionId]);
+
+  const hasMessages = model.messages.length > 0;
+  useEffect(() => {
+    if (sessionId === null || !hasMessages || typeof requestAnimationFrame !== "function") return;
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => markSessionPerformance("first_message_painted", sessionId));
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      if (second) cancelAnimationFrame(second);
+    };
+  }, [sessionId, hasMessages]);
 
   // Session-open animation: replayed per switch by re-adding the class on the
   // next frame. The keyframes are opacity/transform only and sit behind a

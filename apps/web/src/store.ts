@@ -589,7 +589,7 @@ export function clearEditorLocation(): void {
 const MAX_CACHED_SESSIONS = 12;
 const sessionTouchOrder: string[] = [];
 
-function touchSessionCache(id: string): void {
+export function touchSessionCache(id: string): void {
   const at = sessionTouchOrder.indexOf(id);
   if (at >= 0) sessionTouchOrder.splice(at, 1);
   sessionTouchOrder.push(id);
