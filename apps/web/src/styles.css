@@ -1225,6 +1225,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
    clearance between the last surface and the composer boundary. */
 .timeline {
   flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto;
+  scroll-behavior: auto; /* chaseTail rAF loop needs instant scrollTop; html's smooth breaks it */
   padding-block: var(--gutter) 40px;
   padding-inline: max(var(--gutter), calc((100% - var(--chat-measure)) / 2));
   display: flex; flex-direction: column; gap: var(--space-4);
