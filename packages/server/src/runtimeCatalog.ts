@@ -29,7 +29,11 @@ export function createRuntimeCatalog(deps: {
       (runtime) => runtime.models(),
       (model) => `${model.providerID}/${model.modelID}`,
     ).then((items) => {
-      models = items;
+      // A cold-boot fan-out can settle with an empty catalog (runtimes still
+      // spawning/verifying). Never cache that: the next call re-aggregates and
+      // eventually caches a real catalog instead of showing "no models" until
+      // the next server restart.
+      if (items.length > 0) models = items;
       return items;
     }).finally(() => { modelsPending = undefined; });
     return modelsPending;
@@ -42,7 +46,7 @@ export function createRuntimeCatalog(deps: {
       (runtime) => runtime.agents(),
       (agent) => agent.name,
     ).then((items) => {
-      agents = items;
+      if (items.length > 0) agents = items;
       return items;
     }).finally(() => { agentsPending = undefined; });
     return agentsPending;

@@ -57,8 +57,8 @@ test("Widgets & Layout exposes place-first workspace and composer controls", asy
   assert.match(settings, /tr\("settingsview\.widgetsLayout"\)/);
   assert.match(widgets, /<PageHead\s+title=\{tr\("settings\.widgetspage\.widgetsLayout"\)\}/);
   assert.match(packages, /<PageHead title=\{tr\("settings\.packagespage\.packages"\)\}/);
-  assert.match(widgets, /data-settings-item=\{index === 0 \? "widgets\.capabilities"/);
-  assert.match(widgets, /data-settings-item=\{index === 0 \? "widgets\.actions"/);
+  assert.match(widgets, /itemId=\{index === 0 \? "widgets\.capabilities"/);
+  assert.match(widgets, /itemId=\{index === 0 \? "widgets\.actions"/);
   assert.match(widgets, /tr\("settings\.widgetspage\.whereButtonsAppear"\)/);
   assert.match(widgets, /tr\("settings\.widgetspage\.topRail"\)/);
   assert.match(widgets, /tr\("settings\.widgetspage\.rightRail"\)/);

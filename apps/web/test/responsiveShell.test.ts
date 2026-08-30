@@ -127,18 +127,17 @@ test("compact sidebar is a drawer, never display:none with no way back", async (
   assert.ok(css.includes("min(380px, 100vw)"), "sheet width contract");
 });
 
-test("header owns the drawer trigger and registry-backed compact navigation rail", async () => {
+test("header keeps compact navigation and gives active phone chat a separate floating shell", async () => {
   const header = await read("../src/components/Header.tsx");
+  const mobileHeader = await read("../src/components/mobile/MobileSessionHeader.tsx");
   const navigation = await read("../src/components/mobile/MobileNavigationRail.tsx");
   const actions = await read("../../../packages/permissions/widgets/index.tsx");
   assert.ok(header.includes('aria-controls="polyth-session-drawer"'), "drawer trigger targets the drawer");
   assert.ok(header.includes('tr("header.openProjectsAndSessions")'), "drawer trigger accessible name");
   assert.ok(header.includes("<MobileNavigationRail />"), "compact headers expose the shared top rail");
-  assert.equal(
-    header.match(/<WorkspaceBottomNav \/>/g)?.length,
-    1,
-    "the bottom session bar is mounted only by the phone branch; compact desktop uses the drawer",
-  );
+  assert.ok(header.includes("<MobileSessionHeader />"), "active phone chat uses floating navigation");
+  assert.ok(!header.includes("WorkspaceBottomNav"), "the obsolete bottom session bar is gone");
+  assert.ok(mobileHeader.includes("mobile-session-floats"), "the floating shell is explicit");
   assert.ok(navigation.includes("const resolved = useResolvedCapabilities()"), "mobile rail consumes the shared capability model");
   assert.ok(navigation.includes("VIEW_OF_CAPABILITY[id]"), "mobile rail maps capability descriptors to views");
   assert.ok(navigation.includes("PANE_OF_CAPABILITY[id]"), "mobile rail keeps pane tools such as Browser reachable");

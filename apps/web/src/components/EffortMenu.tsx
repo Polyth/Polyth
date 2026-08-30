@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { thinkingVariantLabel } from "@polyth/models/model-presentation";
 import { tr } from "../i18n/index.ts";
+import { useShellMode } from "../responsiveShell.ts";
 
 export interface EffortMenuProps {
   variants: readonly string[];
@@ -23,6 +24,18 @@ export default function EffortMenu({
   const selected = Math.max(0, options.indexOf(value ?? ""));
   const selectedOption = options[selected] ?? "";
   const label = selectedOption ? thinkingVariantLabel(selectedOption) : tr("composer.auto");
+  const phone = useShellMode() === "phone";
+
+  if (phone) {
+    return (
+      <label className="composer-effort-control composer-effort-select" title={tr("composer.thinkingEffortValue", { value: label })}>
+        <select value={selectedOption} aria-label={tr("composer.thinkingEffortValue", { value: label })}
+          onChange={(event) => onPick(event.target.value || undefined)}>
+          {options.map((option) => <option key={option || "auto"} value={option}>{option ? thinkingVariantLabel(option) : tr("composer.auto")}</option>)}
+        </select>
+      </label>
+    );
+  }
 
   return (
     <label

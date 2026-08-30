@@ -1377,6 +1377,16 @@ export default function Composer({
               onPick={pickComposerModel}
             />
           )}
+          {modelSupportsThinking(selectedModel) && (
+            <EffortMenu
+              variants={thinkingVariants}
+              value={selectedThinking}
+              onPick={(thinking) => {
+                pickThinking(thinking || undefined);
+                preserveKeyboard?.();
+              }}
+            />
+          )}
           {chatAgents.length > 0 ? (
             <Picker
               className="composer-agent-chip"
@@ -1393,16 +1403,6 @@ export default function Composer({
             />
           ) : (
             <span className="agent-type-badge">{activeAgentLabel}</span>
-          )}
-          {modelSupportsThinking(selectedModel) && (
-            <EffortMenu
-              variants={thinkingVariants}
-              value={selectedThinking}
-              onPick={(thinking) => {
-                pickThinking(thinking || undefined);
-                preserveKeyboard?.();
-              }}
-            />
           )}
         </div>
         <div className="composer-actions">

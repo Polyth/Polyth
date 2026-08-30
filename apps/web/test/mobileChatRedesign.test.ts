@@ -430,11 +430,8 @@ test("phone CSS keeps the layout inside the visible viewport", async () => {
     /\.app\.mode-chat\.view-session \{[^}]*min-height:\s*100dvh/,
     "the phone shell fills the dynamic viewport while keyboard-open composition owns its inset",
   );
-  assert.match(
-    css,
-    /body\[data-keyboard="open"\] \.app\.mode-chat\.view-session \.composer-chat\.composer-mobile\s*\{[^}]*bottom:\s*max\(var\(--keyboard-inset\), var\(--safe-bottom\)\)/s,
-    "the composer follows the keyboard instead of resizing the whole shell",
-  );
+  assert.doesNotMatch(css, /body\[data-keyboard="open"\][\s\S]{0,180}\.composer-chat\.composer-mobile\s*\{[^}]*position:\s*fixed/s,
+    "the composer keeps the visualViewport flow contract instead of switching positioning modes");
   assert.match(phone, /overflow-x: hidden/, "§33: no horizontal scrolling");
   assert.match(phone, /input, textarea, select \{ font-size: max\(16px, 1em\); \}/, "§32: no Safari auto-zoom");
   assert.match(phone, /touch-action: manipulation/, "§28: no accidental double-tap zoom on controls");
@@ -457,7 +454,7 @@ test("phone CSS keeps the layout inside the visible viewport", async () => {
     /composer-mobile\.composer-has-draft \.composer-workflow\s*\{\s*display:\s*inline-flex;/,
     "a draft keeps Run workflow visible during narrow-layout transitions",
   );
-  assert.match(phone, /max-height: 42dvh/, "§20: the input stops growing and scrolls");
+  assert.match(phone, /max-height: 18dvh/, "§20: the expanded phone input stays compact and scrolls");
   assert.match(section, /margin-bottom: var\(--keyboard-inset, 0px\)/, "§21: sheets sit above the keyboard");
   assert.match(section, /max-height: calc\(var\(--visual-vh, 100dvh\)/, "§29: sheets are sized by the visible band");
   assert.match(section, /html\[data-sheet="open"\], html\[data-sheet="open"\] body \{ overflow: hidden; \}/);
@@ -498,37 +495,27 @@ test("touch targets and design tokens are centralized", async () => {
   );
 });
 
-test("the phone shell restores session navigation below a swipeable shortcut rail", async () => {
+test("the active phone chat exposes only floating power-on-demand controls", async () => {
   const header = await read("../src/components/Header.tsx");
-  const bottom = await read("../src/components/workspace/WorkspaceBottomNav.tsx");
+  const mobileHeader = await read("../src/components/mobile/MobileSessionHeader.tsx");
   const navigation = await read("../src/components/mobile/MobileNavigationRail.tsx");
   const css = await readWebStyles();
 
-  assert.ok(header.includes("<MobileNavigationRail />"), "the phone header is the shortcut rail");
-  assert.equal(header.match(/<WorkspaceBottomNav \/>/g)?.length, 1, "only the phone shell mounts the session bar");
-  assert.doesNotMatch(bottom, />Recents</, "the Recents action is icon-only");
-  assert.doesNotMatch(bottom, />New chat</, "the New chat action is icon-only");
-  assert.ok(bottom.includes("shell.commandPalette"), "Search keeps an accessible name");
-  assert.ok(bottom.includes("workspace.workspacebottomnav.newSession"), "New chat keeps an accessible name");
-  assert.ok(bottom.includes("Projects &amp; sessions"), "the title button identifies the projects and sessions drawer");
-  assert.ok(bottom.includes("displaySessionTitle"), "the projects and sessions button shows the current session title");
-  assert.match(css, /\.workspace-bottom-nav\s*\{[^}]*position:\s*relative;[^}]*order:\s*3;/s, "the session bar occupies the compact shell's bottom row without covering content");
+  assert.ok(header.includes("<MobileSessionHeader />"), "active phone chat mounts the floating shell");
+  assert.doesNotMatch(header, /WorkspaceBottomNav/, "active phone chat has no bottom navigation");
+  assert.match(mobileHeader, /label="Open navigation"/);
+  assert.match(mobileHeader, /label="Open tools"/);
+  assert.match(mobileHeader, /label="New session"/);
+  assert.match(mobileHeader, /<SessionSwitcher/);
+  assert.match(mobileHeader, /<Tools/);
+  assert.doesNotMatch(mobileHeader, /Icon\.plus/);
+  assert.match(css, /\.mobile-session-floats\s*\{[^}]*position:\s*fixed/s);
+  assert.match(css, /\.mobile-session-switcher\.sheet, \.mobile-tools-sheet\.sheet\s*\{[^}]*width:\s*calc\(100vw/s);
   assert.match(css, /\.mobile-shortcut-rail\s*\{[^}]*overflow-x:\s*auto;/s, "extra top icons reveal with horizontal swipe");
-  assert.match(css, /\.mobile-shortcut\s*\{[^}]*var\(--tap\)/s, "every shortcut keeps a 44px touch target");
   assert.ok(navigation.includes("useResolvedCapabilities()"), "the rail follows configured capabilities");
   assert.ok(navigation.includes("useRailSurfaceModel()"), "notification and plugin surfaces stay reachable");
   assert.ok(navigation.includes("ui.mobileShortcuts"), "the rail follows the ordered Settings preference");
   assert.doesNotMatch(navigation, /mobile-navigation-grid|header\.application/, "the grouped Application menu is gone");
-  assert.match(
-    css,
-    /body\[data-keyboard="open"\] \.workspace-bottom-nav\s*\{\s*visibility:\s*hidden;/,
-    "keyboard entry hides the projects, sessions, and new-session bar without resizing the shell",
-  );
-  assert.match(
-    css,
-    /body\[data-keyboard="open"\] \.app\.mode-chat\.view-session > \.session-bottom-nav\s*\{\s*display:\s*grid;\s*visibility:\s*hidden;/,
-    "the keyboard hides navigation without changing the shell's layout height",
-  );
 });
 
 test("haptics are opt-in, bounded, and respect reduced motion", async () => {

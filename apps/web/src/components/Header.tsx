@@ -21,7 +21,7 @@ import {
 } from "./ui/index.ts";
 import { useUiSettings } from "../uiPrefs.ts";
 import MobileNavigationRail from "./mobile/MobileNavigationRail.tsx";
-import WorkspaceBottomNav from "./workspace/WorkspaceBottomNav.tsx";
+import MobileSessionHeader from "./mobile/MobileSessionHeader.tsx";
 import { api, type GithubStatusDto } from "@polyth/session/web-api";
 import { tr } from "../i18n/index.ts";
 import { useKeymap } from "@polyth/hotkeys/widgets";
@@ -350,11 +350,9 @@ export default function Header() {
   if (mode === "phone") {
     return (
       <>
-        <header className="header header-compact header-chat mobile-chat-header">
-          <MobileNavigationRail />
-          <SlotHost slot="app.window.controls" />
-        </header>
-        <WorkspaceBottomNav />
+        {chatSurface
+          ? <MobileSessionHeader />
+          : <header className="header header-compact"><MobileNavigationRail /><SlotHost slot="app.window.controls" /></header>}
       </>
     );
   }

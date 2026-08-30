@@ -100,30 +100,31 @@ test("latest-message control remains a full coarse-pointer target", async () => 
   );
 });
 
-test("compact shell keeps drawer navigation while phone owns the bottom bar", async () => {
-  const [header, sidebar, bottomNav, css] = await Promise.all([
+test("compact shell keeps drawer navigation while phone chat owns floating controls", async () => {
+  const [header, mobileHeader, sidebar, css] = await Promise.all([
     read("../src/components/Header.tsx"),
+    read("../src/components/mobile/MobileSessionHeader.tsx"),
     read("../src/components/Sidebar.tsx"),
-    read("../src/components/workspace/WorkspaceBottomNav.tsx"),
     readWebStyles(),
   ]);
 
   assert.match(header, /aria-controls="polyth-session-drawer"/);
-  assert.equal(header.match(/<WorkspaceBottomNav \/>/g)?.length, 1);
+  assert.match(header, /<MobileSessionHeader \/>/);
+  assert.doesNotMatch(header, /WorkspaceBottomNav/);
   assert.match(sidebar, /className=\{`sidebar \$\{drawerOpen \? "open" : ""\}/);
   assert.match(sidebar, /useModalSurface\(\{/);
-  assert.match(bottomNav, /className="workspace-bottom-nav/);
-  assert.match(css, /@media \(max-width: 820px\)[\s\S]*?\.workspace-bottom-nav\s*\{[^}]*position:\s*relative/s);
+  assert.match(mobileHeader, /className="mobile-session-floats"/);
+  assert.match(css, /\.mobile-session-floats\s*\{[^}]*position:\s*fixed/s);
   assert.match(css, /\.sidebar\.open\s*\{\s*transform:\s*none;\s*visibility:\s*visible/);
 });
 
-test("375px chat keeps a safe-area-aware bottom navigator and docked composer", async () => {
+test("375px chat keeps a safe-area-aware floating shell and docked composer", async () => {
   const css = await readWebStyles();
   const contract = css;
 
   assert.match(
     contract,
-    /@media \(max-width: 480px\), \(max-height: 480px\) and \(pointer: coarse\)[\s\S]*?\.app\.mode-chat\.view-session > \.session-bottom-nav\s*\{\s*display:\s*grid/,
+    /\.mobile-session-floats\s*\{[^}]*top:\s*max\(var\(--space-3\), var\(--safe-top\)\)/s,
   );
   assert.match(
     contract,
@@ -133,11 +134,7 @@ test("375px chat keeps a safe-area-aware bottom navigator and docked composer", 
     contract,
     /\.app\.mode-chat\.view-session \.composer-chat\.composer-mobile\s*\{[^}]*position:\s*sticky[^}]*bottom:\s*0/s,
   );
-  assert.match(
-    contract,
-    /body\[data-keyboard="open"\] \.app\.mode-chat\.view-session > \.session-bottom-nav\s*\{[^}]*visibility:\s*hidden/s,
-    "the keyboard yields the navigation row's space to the composer",
-  );
+  assert.doesNotMatch(contract, /session-bottom-nav/, "the obsolete bottom navigation is removed");
 });
 
 test("active mobile composition immediately obscures project and settings surfaces", async () => {

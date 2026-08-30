@@ -112,7 +112,7 @@ test("fresh mobile chat exposes project targets and attachments use the platform
   ].join("\n");
   const workflowLauncher = read("../../../packages/workflow/widgets/WorkflowLauncher.tsx");
   const header = read("../src/components/Header.tsx");
-  const bottomNavigation = read("../src/components/workspace/WorkspaceBottomNav.tsx");
+  const mobileHeader = read("../src/components/mobile/MobileSessionHeader.tsx");
   const mobileNavigation = read("../src/components/mobile/MobileNavigationRail.tsx");
   const widgetsSettings = read("../src/components/settings/WidgetsPage.tsx");
   const css = readWebStylesSync();
@@ -142,9 +142,9 @@ test("fresh mobile chat exposes project targets and attachments use the platform
   );
   assert.match(css, /\.composer-mobile\.composer-collapsed:not\(\.composer-has-draft\) \.composer-workflow\s*\{\s*display:\s*none;/);
   assert.match(css, /\.composer-mobile\.composer-has-draft \.composer-workflow\s*\{\s*display:\s*inline-flex;/);
-  assert.match(bottomNavigation, /displaySessionTitle\(session\?\.title \?\? "", session\?\.id\)/);
-  assert.match(header, /<MobileNavigationRail \/>/);
-  assert.equal(header.match(/<WorkspaceBottomNav \/>/g)?.length, 1, "bottom navigation is phone-only");
+  assert.match(mobileHeader, /displaySessionTitle\(session\.title, session\.id\)/);
+  assert.match(header, /<MobileSessionHeader \/>/);
+  assert.doesNotMatch(header, /WorkspaceBottomNav/);
   assert.match(mobileNavigation, /ui\.mobileShortcuts/);
   assert.match(widgetsSettings, /settings\.widgetspage\.canvasAvailableTabletDesktop/);
   assert.match(css, /\.polyth-gradient\s*\{[^}]*linear-gradient/s);

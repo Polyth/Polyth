@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import Timeline from "../Timeline.tsx";
 import Composer from "../Composer.tsx";
 import QuestionCards from "../QuestionCards.tsx";
-import { focusComposer, setOverlay, setUiError, useActiveModel, useStore } from "../../store.ts";
+import { focusComposer, setOverlay, setRailPlugin, setUiError, useActiveModel, useStore } from "../../store.ts";
 import { openSession, restoreSession } from "../../init.ts";
 import { friendlyError } from "../../settings.ts";
 import { composerBlockedByArchive, sessionSurfaceKind } from "../../sessionSurface.ts";
@@ -327,7 +327,7 @@ function WorkingIndicator() {
   }, [activityLabels.length, workingIndicator]);
   const activityLabel = activityLabels[activityStep] ?? tr("workspace.builtinsurfaces.working");
   return (
-    <div className={`focus-working focus-working--${workingIndicator}`} role="status">
+    <button className={`focus-working focus-working--${workingIndicator}`} type="button" onClick={() => setRailPlugin("context")}>
       {workingIndicator === "pulse" && <span className="focus-working-spinner" aria-hidden="true" />}
       {workingIndicator === "cursor" && <span className="focus-working-cursor" aria-hidden="true" />}
       {workingIndicator === "cat" && (
@@ -339,7 +339,7 @@ function WorkingIndicator() {
       )}
       {workingIndicator === "activity" && <span className="focus-working-activity" aria-hidden="true"><i /><i /><i /></span>}
       <span>{workingIndicator === "activity" ? activityLabel : tr("workspace.builtinsurfaces.working")}</span>
-    </div>
+    </button>
   );
 }
 

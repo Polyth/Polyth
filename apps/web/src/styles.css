@@ -1841,7 +1841,7 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
 }
 .pane-back { white-space: nowrap; color: var(--text); font-size: 12.5px; }
 @media (prefers-reduced-motion: reduce) {
-.rail, .rail-fullscreen, .workspace-bottom-nav { transition: none; animation: none; }
+.rail, .rail-fullscreen { transition: none; animation: none; }
   .rail, .rail-fullscreen { transition: none; animation: none; }
 }
 
@@ -2523,32 +2523,6 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
 }
 
 
-/* ---- UX-PANE-MODEL: compact bottom navigation ------------------------------ */
-/* One bounded row with no more than four direct destinations plus More above
-   the safe area at max-width:820px. Navigation stays visible under the
-   full-screen workspace layer and is never clipped by it. */
-.workspace-bottom-nav { display: none; }
-@media (max-width: 820px), (max-height: 480px) and (pointer: coarse) {
-.workspace-bottom-nav {
-    position: relative; order: 3; flex: none; z-index: 41;
-    display: flex; align-items: stretch;
-    height: calc(52px + var(--safe-bottom));
-    padding: 0 max(2px, var(--safe-right)) var(--safe-bottom) max(2px, var(--safe-left));
-    background: var(--panel); border-top: 1px solid var(--border);
-  }
-  .wbn-item {
-    flex: 1 1 0; min-width: 44px; min-height: 44px;
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-    background: none; border: 0; border-radius: 0; color: var(--muted); padding: 4px 2px;
-  }
-  .wbn-item.current { color: var(--accent); }
-  .wbn-label {
-    width: 100%; min-width: 0; overflow: hidden;
-    font-size: var(--font-meta); line-height: 1; text-overflow: ellipsis; white-space: nowrap;
-  }
-  /* Chat content (composer + statusbar) scrolls/lands above the fixed row. */
-  .workspace { padding-bottom: calc(52px + var(--safe-bottom)); }
-}
 /* ---------- searchable picker (replaces native selects) ---------- */
 .picker {
   position: relative; display: inline-flex; min-width: 0;
@@ -4353,7 +4327,7 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .message-plan-card li.done span, .message-plan-card li.active span { color: var(--accent); }
 .focus-working {
   width: min(var(--chat-measure), calc(100% - 48px)); margin: 0 auto 8px; display: flex; align-items: center; gap: 7px;
-  color: var(--faint); font-size: var(--font-meta);
+  padding: 0; border: 0; background: transparent; color: var(--faint); font-size: var(--font-meta);
 }
 .focus-working-spinner {
   width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
@@ -5738,28 +5712,6 @@ min-height: var(--tap);
   background: var(--accent-hi);
 }
 
-/* Compact session bar ----------------------------------------------------- */
-.session-bottom-nav {
-  align-items: center;
-  gap: 8px;
-  height: calc(68px + var(--safe-bottom));
-  padding: 8px max(12px, var(--safe-right)) max(8px, var(--safe-bottom)) max(12px, var(--safe-left));
-  border: 0;
-  background: color-mix(in srgb, var(--chat-bg) 88%, transparent);
-  backdrop-filter: blur(14px);
-}
-.session-bottom-nav .session-nav-round {
-  width: 44px;
-  height: 44px;
-  display: grid;
-  place-items: center;
-  flex: none;
-  padding: 0;
-  border: 1px solid var(--chat-border);
-  border-radius: 50%;
-  background: var(--chat-surface);
-  color: var(--text-dim);
-}
 .session-nav-current {
   min-width: 0;
   height: 44px;
@@ -5984,9 +5936,6 @@ font-style: normal; opacity: .65;
 .msg.assistant .msg-actions > .placed-mini-widget { display: contents; }
 .msg-bookmark-action[aria-pressed="true"] { color: var(--accent); background: var(--accent-wash); }
 
-.mobile-chat-header { position: relative; }
-.mobile-session-title { display: none; }
-
 .mobile-shortcut-rail {
   min-width: 0;
   width: 100%;
@@ -6023,117 +5972,13 @@ font-style: normal; opacity: .65;
 .mobile-shortcut svg { width: 18px; height: 18px; }
 .mobile-shortcut.active { color: var(--accent); background: var(--accent-wash); }
 
-/* The restored compact session bar remains the primary phone navigation.
-   Workspace shortcuts stay above in the horizontal rail. */
-.workspace-bottom-nav { display: none; }
-@media (max-width: 820px), (max-height: 480px) and (pointer: coarse) {
-  .workspace-bottom-nav {
-    /* This is a flex row of the app shell, not an overlay. Keeping it in
-       normal flow reserves its full height for the workspace and prevents it
-       from covering the composer, widgets, or session content. */
-    position: relative;
-    order: 3;
-    flex: none;
-    z-index: 82;
-    height: calc(60px + var(--safe-bottom));
-    display: grid;
-    grid-template-columns: var(--tap) minmax(0, 1fr) var(--tap);
-    align-items: center;
-    gap: 8px;
-    padding: 8px max(10px, var(--safe-right)) max(8px, var(--safe-bottom)) max(10px, var(--safe-left));
-    border: 0;
-    background: transparent;
-    box-shadow: none;
-  }
-  .session-nav-action,
-  .session-nav-current {
-    min-width: 0;
-    height: var(--tap);
-    min-height: var(--tap);
-    border: 1px solid var(--chat-border);
-    background: var(--elevated);
-    color: var(--text-dim);
-  }
-  .session-nav-action {
-    display: grid;
-    place-items: center;
-    padding: 0;
-    border-radius: var(--radius-control);
-  }
-  .session-nav-action svg { width: 19px; height: 19px; }
-  .session-nav-current {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 16px;
-    grid-template-rows: 15px 18px;
-    align-content: center;
-    gap: 0 5px;
-    padding: 4px 12px;
-    border-radius: var(--radius-control);
-    text-align: left;
-  }
-  .session-nav-current-kicker {
-    grid-column: 1;
-    overflow: hidden;
-    color: var(--muted);
-    font-size: 9px;
-    font-weight: 560;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .session-nav-current strong {
-    grid-column: 1;
-    overflow: hidden;
-    color: var(--text);
-    font-size: var(--font-meta);
-    font-weight: 680;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .session-nav-current svg {
-    grid-column: 2;
-    grid-row: 1 / 3;
-    align-self: center;
-    width: 14px;
-    height: 14px;
-    color: var(--muted);
-  }
-  .app:has(> .workspace-bottom-nav) .workspace { padding-bottom: 0; }
-  .app:has(> .workspace-bottom-nav) :is(.rail-fullscreen, .panel-sheet) {
-    bottom: calc(60px + var(--safe-bottom));
-  }
-  body[data-keyboard="open"] .workspace-bottom-nav {
-    visibility: hidden;
-    pointer-events: none;
-  }
-  body[data-keyboard="open"] .workspace { padding-bottom: 0; }
-  body[data-keyboard="open"] :is(.rail-fullscreen, .panel-sheet) { bottom: 0; }
-}
-
 /* Phone boundary only — the shell contract (responsiveShell.ts) is 820/480;
    tablets keep the compact header and statusbar. */
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
   html, body, #root { min-height: 100%; min-height: 100dvh; }
   .app.mode-chat.view-session { min-height: 100dvh; background: var(--bg); }
-  .mobile-chat-header {
-    display: flex;
-    align-items: center;
-    height: calc(60px + var(--safe-top));
-    min-height: calc(60px + var(--safe-top));
-    padding: var(--safe-top) max(9px, var(--safe-right)) 0 max(9px, var(--safe-left));
-    gap: 6px;
-    border-bottom-color: var(--border-soft);
-    background: color-mix(in srgb, var(--bg) 90%, var(--elevated));
-    box-shadow: 0 1px 0 var(--border-soft);
-  }
-  .mobile-chat-header .mobile-shortcut-rail { flex: 1; min-width: 0; }
-  .mobile-chat-header svg { width: 18px; height: 18px; }
-
   .app.mode-chat.view-session .statusbar { display: none; }
   .app.mode-chat.view-session .statusbar:has(.sb-workflow) { display: flex; }
-  .app.mode-chat.view-session:has(> .workspace-bottom-nav) .workspace {
-    padding-bottom: 0;
-  }
-
   .stage { background: color-mix(in srgb, var(--bg) 94%, var(--elevated)); }
   .stage::before { opacity: .35; }
 
@@ -7049,13 +6894,6 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
 .context-trigger-caret svg { width: 15px; height: 15px; }
 .context-sep { display: none; }
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-  .app.mode-chat.view-session .mobile-chat-header {
-    position: sticky;
-    top: 0;
-    z-index: 40;
-  }
-
-
   /* §33/§34: no child may widen the viewport. */
   html, body { max-width: 100%; overflow-x: hidden; }
   .app, .workspace, .main, .stage, .hero, .hero-body, .hero-dock,
@@ -7082,6 +6920,9 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   .file-ref::after { display: none; }
 
   .stage-new { --dock-bg: color-mix(in srgb, var(--bg) 94%, var(--elevated)); }
+  /* Project/worktree selection stays in navigation on phone. Keeping a second
+     permanent row above the composer made a fresh chat look like a form. */
+  .composer-mobile > .session-context-bar { display: none; }
   .hero-body { padding: var(--space-5) var(--screen-gutter) var(--space-4); }
   .stage-new .hero h2 { font-size: clamp(26px, 7.6vw, 32px); line-height: 1.18; }
   /* Last-resort guard: on a very short band (small phone + tall keyboard)
@@ -7106,12 +6947,6 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
     z-index: var(--z-popover);
   }
 
-  /* ---- header: two actions, ≥44px targets (§19/§21/§37) ---- */
-  .mobile-chat-header .header-drawer-btn {
-    width: var(--tap);
-    height: var(--tap);
-    min-width: var(--tap);
-  }
   /* §37/§55: the session drawer opened from this screen is a touch surface
      too — its controls get real hit areas, whatever the glyph size. */
   .sidebar .icon-btn,
@@ -7219,19 +7054,31 @@ display: none;
   .composer-mobile .composer-config .picker-chip {
     flex: none;
     min-height: var(--tap);
-    max-width: 38vw;
+    max-width: 28vw;
     font-size: 12px;
   }
-  .composer-mobile .composer-agent-chip .picker-chip { max-width: 30vw; }
+  .composer-mobile .composer-agent-chip .picker-chip { max-width: 20vw; }
   .composer-mobile .composer-effort-control {
-    --composer-effort-width: 92px;
+    --composer-effort-width: 84px;
     min-height: var(--tap);
+    /* Label is hidden on phones; collapse to one track so the range's
+       intrinsic min-width cannot inflate the control past the rail. */
+    grid-template-columns: minmax(72px, var(--composer-effort-width));
   }
-  .composer-mobile .composer-effort-label { font-size: var(--font-meta); }
+  /* The range remains a first-class phone control; its desktop label would
+     otherwise push it out of the one-line rail behind the agent picker. */
+  .composer-mobile .composer-effort-label { display: none; }
+  .composer-mobile .composer-effort-track input { min-width: 0; }
+  .composer-mobile .composer-effort-select { display: inline-flex; min-width: 0; }
+  .composer-mobile .composer-effort-select select {
+    width: 100%; min-width: 0; height: var(--tap); padding: 0 var(--space-2);
+    border: 0; border-radius: var(--radius-control); background: transparent; color: var(--text-dim);
+    font: inherit; font-size: 12px; font-weight: 550;
+  }
   .composer-mobile .composer-card textarea {
     min-height: 26px;
     /* §20: grows with the text, then scrolls internally. */
-    max-height: 42dvh;
+    max-height: 18dvh;
     padding: var(--space-2) var(--space-3) 0;
     font-size: var(--font-input);
     line-height: 1.45;
@@ -7250,6 +7097,8 @@ display: none;
   .composer-mobile .composer-mobile-extensions {
     display: inline-flex;
     align-items: center;
+    flex-direction: row;
+    flex-wrap: nowrap;
     width: var(--tap);
     max-width: var(--tap);
     flex: 0 0 var(--tap);
@@ -8306,23 +8155,10 @@ font-size: var(--font-label);
 }
 
 @media (max-width: 820px), (max-height: 480px) and (pointer: coarse) {
-body[data-keyboard="open"] .app.mode-chat.view-session .mobile-chat-header,
-  body[data-band="short"][data-keyboard="open"] .app.mode-chat.view-session .mobile-chat-header {
-    display: none;
-  }
   body[data-keyboard="open"] .app.mode-chat.view-session .workspace { padding-bottom: 0; }
 }
 
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-  .app.mode-chat.view-session > .session-bottom-nav { display: grid; }
-  /* This deliberately beats the session-only display:grid above. Keyboard
-     visibility must follow the viewport seam, not textarea focus: iOS keeps
-     a textarea focused after its keyboard is dismissed. */
-  body[data-keyboard="open"] .app.mode-chat.view-session > .session-bottom-nav {
-    display: grid;
-    visibility: hidden;
-    pointer-events: none;
-  }
   .app.mode-chat.view-session .workspace {
     padding-bottom: 0;
   }
@@ -8341,22 +8177,6 @@ body[data-keyboard="open"] .app.mode-chat.view-session .mobile-chat-header,
   }
   body[data-band="short"] .composer-chat.composer-mobile {
     padding-block: 0 var(--space-1);
-  }
-  body[data-keyboard="open"] .app.mode-chat.view-session > .session-bottom-nav {
-    display: grid;
-    visibility: hidden;
-    pointer-events: none;
-  }
-  body[data-keyboard="open"] .app.mode-chat.view-session .workspace {
-    padding-bottom: 0;
-  }
-  body[data-keyboard="open"] .app.mode-chat.view-session .composer-chat.composer-mobile {
-    position: fixed;
-    right: 0;
-    bottom: max(var(--keyboard-inset), var(--safe-bottom));
-    left: 0;
-    z-index: var(--z-shell);
-    padding-bottom: max(var(--space-1), var(--safe-bottom));
   }
 }
 
@@ -8550,19 +8370,102 @@ color: var(--muted);
 /* The project/session destination is a true full-screen mobile picker with
      search and recent sorting, not a narrow desktop sidebar. */
   .sidebar {
-    width: 100vw;
+    width: calc(100vw - max(var(--space-1), var(--safe-right)));
     max-width: none;
     border-right: 0;
-    box-shadow: none;
+    box-shadow: var(--shadow-lg);
   }
   .sidebar-drawer-header { padding-right: max(var(--space-2), var(--safe-right)); }
   .sidebar .side-scroll { padding-bottom: max(var(--space-4), var(--safe-bottom)); }
+  .sidebar .sidebar-service-bar { display: none; }
 
   /* Attachment and composer tools use explicit 44×44 boxes and 8px rhythm;
      late legacy width declarations can no longer visually compress them. */
   .composer-actions {
     gap: var(--space-2);
   }
+}
+
+/* Phone chat has no header bar. These three controls float over the timeline
+   and leave the desktop/tablet shell completely untouched. */
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  .mobile-session-floats {
+    position: fixed;
+    top: max(var(--space-3), var(--safe-top));
+    right: max(var(--screen-gutter), var(--safe-right));
+    left: max(var(--screen-gutter), var(--safe-left));
+    z-index: var(--z-shell);
+    display: grid;
+    grid-template-columns: var(--tap) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-2);
+    pointer-events: none;
+  }
+  .mobile-session-floats button { pointer-events: auto; }
+  .mobile-float-button,
+  .mobile-float-actions,
+  .mobile-session-selector {
+    min-height: var(--tap);
+    background: color-mix(in srgb, var(--elevated) 94%, transparent);
+    border: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
+    box-shadow: var(--shadow-sm);
+    backdrop-filter: blur(10px);
+  }
+  .mobile-float-button {
+    width: var(--tap);
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border-radius: var(--radius-sheet);
+    color: var(--text-dim);
+  }
+  .mobile-float-button svg, .mobile-float-actions svg { width: var(--icon-lg); height: var(--icon-lg); }
+  .mobile-session-selector {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0 var(--space-3);
+    border-radius: var(--radius-sheet);
+    color: var(--text);
+    font-size: var(--font-label);
+    font-weight: 600;
+  }
+  .mobile-session-selector > span:not(.mobile-session-status) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mobile-session-selector > svg { flex: none; width: var(--icon-sm); height: var(--icon-sm); color: var(--muted); }
+  .mobile-session-status { width: var(--space-2); height: var(--space-2); flex: none; border-radius: 50%; background: var(--green); }
+  .mobile-session-status.needs-approval, .mobile-session-status.reconciling { background: var(--amber); }
+  .mobile-session-status.failed { background: var(--red); }
+  .mobile-session-status.unread { background: var(--blue); }
+  .mobile-float-actions { display: inline-grid; grid-auto-flow: column; border-radius: var(--radius-sheet); overflow: hidden; }
+  .mobile-float-actions button { width: var(--tap); display: grid; place-items: center; padding: 0; border: 0; border-left: 1px solid var(--hair); background: transparent; color: var(--text-dim); }
+  .mobile-float-actions button:first-child { border-left: 0; }
+  .mobile-float-actions button:disabled { color: var(--faint); }
+  .app.mode-chat.view-session .timeline { padding-top: calc(var(--tap) + var(--space-6)); }
+  .mobile-session-switcher.sheet, .mobile-tools-sheet.sheet {
+    width: calc(100vw - max(var(--space-1), var(--safe-right)));
+    max-width: none;
+    height: calc(var(--visual-vh, 100dvh) - var(--safe-top) - var(--keyboard-inset, 0px));
+    max-height: none;
+    margin-right: auto;
+    margin-bottom: var(--keyboard-inset, 0px);
+    border-radius: 0 var(--radius-sheet) var(--radius-sheet) 0;
+  }
+  .mobile-tools-sheet.sheet { margin-right: 0; margin-left: auto; border-radius: var(--radius-sheet) 0 0 var(--radius-sheet); animation-name: mobile-tools-in; }
+  .mobile-session-switcher .sheet-grabber, .mobile-tools-sheet .sheet-grabber { display: none; }
+  .mobile-session-switcher .sheet-head, .mobile-tools-sheet .sheet-head { padding-top: max(var(--space-5), var(--safe-top)); }
+  .mobile-surface-chevron { display: inline-flex; color: var(--muted); }
+  .mobile-surface-chevron svg { width: var(--icon-sm); height: var(--icon-sm); }
+  .mobile-surface-footer { width: 100%; min-height: var(--tap); display: flex; align-items: center; justify-content: center; gap: var(--space-2); border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: transparent; color: var(--text-dim); font-size: var(--font-label); }
+  .mobile-surface-footer svg { width: var(--icon-sm); height: var(--icon-sm); }
+  .focus-working { width: max-content; max-width: calc(100% - (var(--screen-gutter) * 2)); min-height: var(--control-h-sm); margin: var(--space-2) auto; padding: 0 var(--space-3); border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: color-mix(in srgb, var(--elevated) 92%, transparent); box-shadow: var(--shadow-sm); }
+  body[data-keyboard="open"] .mobile-session-floats { pointer-events: none; }
+  @keyframes mobile-tools-in { from { opacity: .7; transform: translateX(18px); } to { opacity: 1; transform: none; } }
 }
 
 /* ---------- mobile shell audit fixes ------------------------------------ */
@@ -8594,9 +8497,6 @@ color: var(--muted);
     top: calc(60px + var(--safe-top));
     bottom: 0;
     z-index: 30;
-  }
-  .app:has(> .workspace-bottom-nav) :is(.rail-fullscreen, .panel-sheet) {
-    bottom: calc(60px + var(--safe-bottom));
   }
   .panel-sheet-backdrop { z-index: 29; }
   .rail-head { min-height: 60px; }
@@ -9092,12 +8992,6 @@ color: var(--text);
   .composer-mobile .agent-type-badge { min-height: var(--tap); padding-inline: 12px; font-size: 12px; }
 }
 @media (max-width: 820px), (max-height: 480px) and (pointer: coarse) {
-  /* Only the keyboard moves session navigation out of the visible viewport. */
-  body[data-keyboard="open"] .workspace-bottom-nav {
-    transform: translateY(calc(100% + var(--safe-bottom)));
-    visibility: hidden;
-    pointer-events: none;
-  }
   body[data-keyboard="open"] .app.mode-chat.view-session .workspace { padding-bottom: 0; }
   .composer-mobile .composer-rail .send {
     background: var(--composer-green);
