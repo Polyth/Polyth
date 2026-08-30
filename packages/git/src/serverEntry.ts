@@ -278,7 +278,15 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         },
         model: host.smallModel(),
         inputBudget: (runtime, model, maxOutputTokens) => host.smallModelInputBudget(runtime, model, maxOutputTokens),
-        complete: (runtime, options) => host.smallModelComplete(runtime, options),
+        // Keep commit-message generation on the proven session transport. The
+        // direct provider transport is optional and can turn provider hiccups
+        // into a hard 500 before the fallback runtime is able to recover.
+        complete: (runtime, options) => host.oneShot(runtime, {
+          cwd: options.cwd,
+          prompt: options.prompt,
+          ...(options.model ? { model: options.model } : {}),
+          ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+        }).then((text) => ({ text })),
       });
       routes ??= gitRoutes({
         projects: host.projects,
