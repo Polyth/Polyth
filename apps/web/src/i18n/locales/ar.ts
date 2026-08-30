@@ -1010,6 +1010,7 @@ export const ar: AppMessages = {
   "queuedmessagelist.queuedMessageRemoved": "تمت إزالة الرسائل الموجودة في قائمة الانتظار",
   "queuedmessagelist.queuedMessageUpdated": "تم تحديث الرسالة الموجودة في قائمة الانتظار",
   "queuedmessagelist.removeQueuedMessageValue": "إزالة الرسالة الموجودة في قائمة الانتظار {value}",
+  "queuedmessagelist.reorderQueuedMessageValue": "إعادة ترتيب الرسالة الموجودة في قائمة الانتظار {value}",
   "queuedmessagelist.saveQueuedMessageValue": "حفظ الرسالة الموجودة في قائمة الانتظار {value}",
   "queuedmessagelist.steer": "التوجيه",
   "queuedmessagelist.valueQueuedMessages": "{length} رسالة في قائمة الانتظار",

@@ -1010,6 +1010,7 @@ export const fr: AppMessages = {
   "queuedmessagelist.queuedMessageRemoved": "Message en file d'attente supprimé",
   "queuedmessagelist.queuedMessageUpdated": "Message en file d'attente mis à jour",
   "queuedmessagelist.removeQueuedMessageValue": "Supprimer le message en file d'attente {value}",
+  "queuedmessagelist.reorderQueuedMessageValue": "Réorganiser le message en file d'attente {value}",
   "queuedmessagelist.saveQueuedMessageValue": "Enregistrer le message en file d'attente {value}",
   "queuedmessagelist.steer": "diriger",
   "queuedmessagelist.valueQueuedMessages": "{length} messages en file d'attente",

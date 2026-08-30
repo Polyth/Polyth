@@ -14,8 +14,23 @@ Object.assign(globalThis, {
   Node: dom.Node,
   Event: dom.Event,
   MouseEvent: dom.MouseEvent,
+  KeyboardEvent: dom.KeyboardEvent,
 });
 Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configurable: true });
+Object.defineProperty(globalThis, "requestAnimationFrame", {
+  configurable: true,
+  value: (callback: FrameRequestCallback) => { callback(0); return 1; },
+});
+Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: () => {} });
+Object.defineProperty(dom, "matchMedia", {
+  configurable: true,
+  value: () => ({
+    matches: false,
+    media: "",
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }),
+});
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let items: QueueItemDto[] = [
@@ -97,8 +112,23 @@ test("queued messages hand editing to the composer and drag-reorder through the 
     });
     assert.equal(container.querySelectorAll(".queue-chip").length, 3);
 
-    const edit = container.querySelector<HTMLElement>('button[aria-label="Edit queued message 1"]');
-    assert.ok(edit);
+    const steer = container.querySelector<HTMLElement>(".queue-steer");
+    assert.ok(steer, "steer is an icon control on the row");
+    assert.equal(steer.getAttribute("aria-label"), "steer");
+    assert.equal(steer.textContent?.trim(), "", "steer has no visible label");
+    assert.equal(container.querySelector(".queue-delivery"), null);
+
+    const grip = container.querySelector<HTMLElement>(".queue-grip");
+    assert.ok(grip, "the leading control is a drag handle");
+    assert.equal(grip.tagName, "SPAN");
+    assert.equal(grip.getAttribute("draggable"), "true");
+    assert.equal(container.querySelector(".queue-chip")?.getAttribute("draggable"), null);
+    assert.equal(container.querySelector(".queue-more"), null);
+    assert.equal(container.querySelector("[role='menu']"), null);
+
+    const edit = container.querySelector<HTMLElement>(".queue-edit");
+    assert.ok(edit, "edit is a pencil on the row");
+    assert.equal(edit.getAttribute("aria-label"), "Edit queued message 1");
     await act(async () => { click(edit); });
     assert.equal(editing?.id, "q1", "the parent composer owns the edit buffer");
     assert.equal(container.querySelector("textarea"), null, "queue rows never render an inline editor");
@@ -120,7 +150,9 @@ test("queued messages hand editing to the composer and drag-reorder through the 
     });
 
     const chips = [...container.querySelectorAll<HTMLElement>(".queue-chip")];
-    await act(async () => { drag(chips[0]!, "dragstart"); });
+    const sourceGrip = chips[0]!.querySelector<HTMLElement>(".queue-grip");
+    assert.ok(sourceGrip);
+    await act(async () => { drag(sourceGrip, "dragstart"); });
     await act(async () => { drag(chips[2]!, "dragover"); });
     await act(async () => {
       drag(chips[2]!, "drop");
@@ -137,7 +169,7 @@ test("queued messages hand editing to the composer and drag-reorder through the 
     const held = [...container.querySelectorAll<HTMLElement>(".queue-chip")]
       .find((chip) => chip.textContent?.includes("third"));
     assert.ok(held);
-    assert.equal(held.getAttribute("draggable"), "false");
+    assert.equal(held.querySelector(".queue-grip")?.getAttribute("draggable"), "false");
     assert.match(held.textContent ?? "", /Held for review/);
   } finally {
     await act(async () => { root.unmount(); });

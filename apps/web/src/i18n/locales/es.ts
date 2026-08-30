@@ -1010,6 +1010,7 @@ export const es: AppMessages = {
   "queuedmessagelist.queuedMessageRemoved": "Mensaje en cola eliminado",
   "queuedmessagelist.queuedMessageUpdated": "Mensaje en cola actualizado",
   "queuedmessagelist.removeQueuedMessageValue": "Eliminar mensaje en cola {value}",
+  "queuedmessagelist.reorderQueuedMessageValue": "Reordenar el mensaje en cola {value}",
   "queuedmessagelist.saveQueuedMessageValue": "Guardar mensaje en cola {value}",
   "queuedmessagelist.steer": "buey",
   "queuedmessagelist.valueQueuedMessages": "{length} mensajes en cola",

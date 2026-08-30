@@ -1010,6 +1010,7 @@ export const de: AppMessages = {
   "queuedmessagelist.queuedMessageRemoved": "Nachricht in der Warteschlange entfernt",
   "queuedmessagelist.queuedMessageUpdated": "Nachricht in der Warteschlange aktualisiert",
   "queuedmessagelist.removeQueuedMessageValue": "Entferne die in der Warteschlange befindliche Nachricht {value}",
+  "queuedmessagelist.reorderQueuedMessageValue": "Nachricht {value} in der Warteschlange neu anordnen",
   "queuedmessagelist.saveQueuedMessageValue": "Nachricht in der Warteschlange speichern {value}",
   "queuedmessagelist.steer": "steuern",
   "queuedmessagelist.valueQueuedMessages": "{length} Nachrichten in der Warteschlange",

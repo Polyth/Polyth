@@ -1013,6 +1013,7 @@ export const en = {
   "queuedmessagelist.queuedMessageRemoved": "Queued message removed",
   "queuedmessagelist.queuedMessageUpdated": "Queued message updated",
   "queuedmessagelist.removeQueuedMessageValue": "Remove queued message {value}",
+  "queuedmessagelist.reorderQueuedMessageValue": "Reorder queued message {value}",
   "queuedmessagelist.saveQueuedMessageValue": "Save queued message {value}",
   "queuedmessagelist.steer": "steer",
   "queuedmessagelist.valueQueuedMessages": "{length} queued messages",

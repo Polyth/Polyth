@@ -6,6 +6,9 @@ import { api } from "@polyth/session/web-api";
 import { useStore } from "../store.ts";
 import { announce } from "./a11y/live.tsx";
 import { tr } from "../i18n/index.ts";
+import IconButton from "./ui/IconButton.tsx";
+import Icon from "./ui/Icon.tsx";
+import { DeleteIcon, DragHandleIcon, EditIcon, EnterIcon } from "./ui/icons.ts";
 
 const QUEUE_DRAG_TYPE = "application/x-polyth-queued-message";
 
@@ -28,14 +31,17 @@ export default function QueuedMessageList({
   sessionId,
   editingId = null,
   onEdit,
+  onSteer,
 }: {
   sessionId: string;
   editingId?: string | null;
   onEdit?: (item: QueueItemDto) => void;
+  onSteer?: (item: QueueItemDto) => void | Promise<void>;
 }) {
   const [items, setItems] = useState<QueueItemDto[]>([]);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
   // queue/* events bump the model version; refetch on any event activity
   const eventCount = useStore((s) => (s.events[sessionId] ?? []).length);
 
@@ -60,7 +66,7 @@ export default function QueuedMessageList({
     }
   };
 
-  const startDrag = (id: string, event: ReactDragEvent<HTMLDivElement>) => {
+  const startDrag = (id: string, event: ReactDragEvent<HTMLElement>) => {
     setDraggedId(id);
     event.dataTransfer?.setData(QUEUE_DRAG_TYPE, id);
     if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
@@ -76,47 +82,105 @@ export default function QueuedMessageList({
   };
 
   const remove = async (id: string) => {
+    setBusyId(id);
     try {
       await api.queueRemove(sessionId, id);
       announce(tr("queuedmessagelist.queuedMessageRemoved"));
     } finally {
+      setBusyId(null);
+      refresh();
+    }
+  };
+
+  const steer = async (item: QueueItemDto) => {
+    if (!onSteer || item.heldForReview) return;
+    setBusyId(item.id);
+    try {
+      await onSteer(item);
+    } finally {
+      setBusyId(null);
       refresh();
     }
   };
 
   return (
     <div className="queue-list" role="list" aria-label={tr("queuedmessagelist.valueQueuedMessages", { length: visibleItems.length })}>
-      {visibleItems.map((item) => (
-        <div
-          key={item.id}
-          className={`queue-chip${draggedId === item.id ? " dragging" : ""}${dropTargetId === item.id ? " drag-over" : ""}${item.heldForReview ? " held" : ""}`}
-          role="listitem"
-          draggable={!item.heldForReview}
-          onDragStart={(event) => {
-            if (item.heldForReview) return;
-            startDrag(item.id, event);
-          }}
-          onDragEnd={() => { setDraggedId(null); setDropTargetId(null); }}
-          onDragOver={(event) => {
-            if (!draggedId || draggedId === item.id) return;
-            event.preventDefault();
-            if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-            setDropTargetId(item.id);
-          }}
-          onDragLeave={() => { if (dropTargetId === item.id) setDropTargetId(null); }}
-          onDrop={(event) => drop(item.id, event)}
-        >
-          <span className="queue-grip" aria-hidden="true">⠿</span>
-          <span className="queue-pos">#{item.position + 1}</span>
-          <span className="queue-text" title={item.text}>{item.text}</span>
-          <span className="muted queue-delivery">{item.delivery === "steer" ? tr("queuedmessagelist.steer") : tr("queuedmessagelist.queued")}</span>
-          {item.heldForReview && (
-            <span className="queue-held">{tr("queuedmessagelist.heldForReview")}</span>
-          )}
-          <button aria-label={tr("queuedmessagelist.editQueuedMessageValue", { value: item.position + 1 })} onClick={() => onEdit?.(item)}>✎</button>
-          <button aria-label={tr("queuedmessagelist.removeQueuedMessageValue", { value: item.position + 1 })} onClick={() => void remove(item.id)}>✕</button>
-        </div>
-      ))}
+      {visibleItems.map((item) => {
+        const n = item.position + 1;
+        const busy = busyId === item.id;
+        const reorderLabel = tr("queuedmessagelist.reorderQueuedMessageValue", { value: n });
+        return (
+          <div
+            key={item.id}
+            className={`queue-chip${draggedId === item.id ? " dragging" : ""}${dropTargetId === item.id ? " drag-over" : ""}${item.heldForReview ? " held" : ""}`}
+            role="listitem"
+            onDragEnd={() => { setDraggedId(null); setDropTargetId(null); }}
+            onDragOver={(event) => {
+              if (!draggedId || draggedId === item.id) return;
+              event.preventDefault();
+              if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+              setDropTargetId(item.id);
+            }}
+            onDragLeave={() => { if (dropTargetId === item.id) setDropTargetId(null); }}
+            onDrop={(event) => drop(item.id, event)}
+          >
+            <span
+              className="queue-grip"
+              draggable={!item.heldForReview}
+              aria-label={reorderLabel}
+              title={reorderLabel}
+              onDragStart={(event) => {
+                if (item.heldForReview) {
+                  event.preventDefault();
+                  return;
+                }
+                startDrag(item.id, event);
+              }}
+            >
+              <Icon icon={DragHandleIcon} size="sm" />
+            </span>
+            <span className="queue-text" title={item.text}>{item.text}</span>
+            {item.heldForReview && (
+              <span className="queue-held">{tr("queuedmessagelist.heldForReview")}</span>
+            )}
+            <div
+              className="queue-actions"
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              {!item.heldForReview && (
+                <IconButton
+                  className="queue-steer"
+                  icon={EnterIcon}
+                  label={tr("queuedmessagelist.steer")}
+                  size="sm"
+                  pressed={item.delivery === "steer"}
+                  busy={busy}
+                  disabled={busy || !onSteer}
+                  onClick={() => void steer(item)}
+                />
+              )}
+              <IconButton
+                className="queue-remove"
+                icon={DeleteIcon}
+                label={tr("queuedmessagelist.removeQueuedMessageValue", { value: n })}
+                size="sm"
+                variant="ghost"
+                busy={busy}
+                disabled={busy}
+                onClick={() => void remove(item.id)}
+              />
+              <IconButton
+                className="queue-edit"
+                icon={EditIcon}
+                label={tr("queuedmessagelist.editQueuedMessageValue", { value: n })}
+                size="sm"
+                disabled={busy || !onEdit}
+                onClick={() => onEdit?.(item)}
+              />
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -1357,6 +1357,25 @@ export default function Composer({
       )}
       {/* Widget-areas (WA4): the uncommitted-changes bar area, above the box. */}
       <SlotHost slot="composer.pending" context={slotContext} />
+      {session?.id && (
+        <QueuedMessageList
+          sessionId={session.id}
+          editingId={queueEdit?.sessionId === session.id ? queueEdit.id : null}
+          onEdit={beginQueuedEdit}
+          onSteer={async (item) => {
+            const target = sessionIdRef.current;
+            if (!target) return;
+            const ok = await sendMessage(item.text, undefined, undefined, {
+              targetSessionId: target,
+              delivery: "steer",
+              ...(item.attachments?.length ? { attachments: item.attachments } : {}),
+              dismissPending: true,
+            });
+            if (!ok) return;
+            await api.queueRemove(target, item.id);
+          }}
+        />
+      )}
       <div
         className="composer-card"
         onDragOver={(e) => { const k = dragKind(e.dataTransfer); if (k) { e.preventDefault(); setDropHint(k); } }}
@@ -1383,13 +1402,6 @@ export default function Composer({
         <div className="composer-note composer-profile-missing" role="alert">
           {PROFILE_MISSING_NOTE}
         </div>
-      )}
-      {session?.id && (
-        <QueuedMessageList
-          sessionId={session.id}
-          editingId={queueEdit?.sessionId === session.id ? queueEdit.id : null}
-          onEdit={beginQueuedEdit}
-        />
       )}
       {attachments.length > 0 && (
         <AttachmentPills

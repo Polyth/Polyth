@@ -1010,6 +1010,7 @@ export const pl: AppMessages = {
   "queuedmessagelist.queuedMessageRemoved": "Usunięto wiadomość z kolejki",
   "queuedmessagelist.queuedMessageUpdated": "Zaktualizowano wiadomość w kolejce",
   "queuedmessagelist.removeQueuedMessageValue": "Usuń wiadomość w kolejce {value}",
+  "queuedmessagelist.reorderQueuedMessageValue": "Zmień kolejność wiadomości {value} w kolejce",
   "queuedmessagelist.saveQueuedMessageValue": "Zapisz wiadomość w kolejce {value}",
   "queuedmessagelist.steer": "sterować",
   "queuedmessagelist.valueQueuedMessages": "{length} wiadomości w kolejce",

@@ -1010,6 +1010,7 @@ export const zhCN: AppMessages = {
   "queuedmessagelist.queuedMessageRemoved": "已移除排队消息",
   "queuedmessagelist.queuedMessageUpdated": "已更新排队消息",
   "queuedmessagelist.removeQueuedMessageValue": "移除已排队的消息{value}",
+  "queuedmessagelist.reorderQueuedMessageValue": "重新排序排队消息{value}",
   "queuedmessagelist.saveQueuedMessageValue": "保存已排队的消息{value}",
   "queuedmessagelist.steer": "转向",
   "queuedmessagelist.valueQueuedMessages": "{length}已排队的消息",

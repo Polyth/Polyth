@@ -1010,6 +1010,7 @@ export const bg: AppMessages = {
   "queuedmessagelist.queuedMessageRemoved": "Премахнато съобщение от опашката",
   "queuedmessagelist.queuedMessageUpdated": "Съобщението в опашката е актуализирано",
   "queuedmessagelist.removeQueuedMessageValue": "Премахване на съобщение от опашката {value}",
+  "queuedmessagelist.reorderQueuedMessageValue": "Пренареди съобщението в опашката {value}",
   "queuedmessagelist.saveQueuedMessageValue": "Запазване на съобщение в опашката {value}",
   "queuedmessagelist.steer": "кормилото",
   "queuedmessagelist.valueQueuedMessages": "{length} съобщения в опашката",

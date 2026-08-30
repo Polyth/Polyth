@@ -1010,6 +1010,7 @@ export const uk: AppMessages = {
   "queuedmessagelist.queuedMessageRemoved": "Повідомлення з черги видалено",
   "queuedmessagelist.queuedMessageUpdated": "Повідомлення в черзі оновлено",
   "queuedmessagelist.removeQueuedMessageValue": "Видалити повідомлення з черги {value}",
+  "queuedmessagelist.reorderQueuedMessageValue": "Змінити порядок повідомлення в черзі {value}",
   "queuedmessagelist.saveQueuedMessageValue": "Зберегти повідомлення в черзі {value}",
   "queuedmessagelist.steer": "керувати",
   "queuedmessagelist.valueQueuedMessages": "{length} повідомлень у черзі",

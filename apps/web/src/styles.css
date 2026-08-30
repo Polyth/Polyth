@@ -2850,37 +2850,62 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .github-link-copy { margin: 0 0 var(--space-3); color: var(--muted); font-size: var(--font-meta); }
 .github-link-error { margin-top: var(--space-2); color: var(--red); font-size: var(--font-meta); }
 
-/* ---------- WP3: queued message chips ---------- */
+/* ---------- WP3: queued message rows ---------- */
 .queue-list {
   width: 100%; max-width: 100%; overflow: hidden;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  margin: 0 0 8px;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
 }
 .queue-chip {
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  display: grid;
-  grid-template-columns: 12px auto minmax(0, 1fr) auto auto auto;
+  display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12.5px;
-  background: var(--elevated); border: 1px solid var(--hair-strong);
-  border-radius: var(--radius-control); padding: 6px 9px; box-shadow: var(--inset-hi);
-  cursor: grab;
+  gap: var(--space-2);
+  min-height: var(--control-h);
+  padding: var(--space-2) var(--space-3);
+  background: var(--elevated);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  color: var(--text);
 }
 .queue-chip.dragging { opacity: 0.5; }
 .queue-chip.drag-over { border-color: var(--accent); background: var(--accent-wash); }
-.queue-chip .queue-grip { color: var(--muted); font-size: 14px; }
-.queue-chip .queue-pos { color: var(--muted); font-variant-numeric: tabular-nums; }
-.queue-chip .queue-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.queue-chip .queue-delivery { font-size: var(--font-meta); }
-.queue-chip button { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 2px 4px; }
-.queue-chip button:hover { color: inherit; }
-.queue-chip button:disabled { opacity: 0.35; cursor: default; }
+.queue-chip .queue-grip {
+  flex: none;
+  align-self: stretch;
+  display: grid;
+  place-items: center;
+  min-width: max(var(--icon-md), var(--hit-min));
+  min-height: max(var(--icon-md), var(--hit-min));
+  margin-inline-start: calc(var(--space-1) * -1);
+  color: var(--muted);
+  cursor: grab;
+  touch-action: none;
+}
+.queue-chip .queue-grip:hover { color: var(--text); }
+.queue-chip.dragging .queue-grip { cursor: grabbing; }
+.queue-chip.held .queue-grip { cursor: default; }
+.queue-chip .queue-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-body);
+  line-height: 1.4;
+}
+.queue-chip .queue-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-inline-start: auto;
+}
 
 /* ---------- WP4: shared Markdown renderer ---------- */
 .md-para { margin: 0 0 6px; }
@@ -4381,8 +4406,10 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 }
 .queue-chip.held { cursor: default; }
 .queue-held {
+  flex: none;
   color: var(--text-dim);
   font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
 }
 
 /* Focus is a conversation, not a dashboard. */
@@ -5819,8 +5846,8 @@ min-height: var(--tap);
 .shell-pid { color: var(--session-blue); }
 
 /* Composer card (P2-W3A): typing first — the editor is the top of the card,
-   one quiet rail underneath. Notes, queued messages, and attachment pills
-   keep DOM order (order 0) above the editor. --------------------------------- */
+   one quiet rail underneath. Notes and attachment pills keep DOM order
+   (order 0) above the editor. Queued prompts sit above the card. ------------- */
 .composer-simple .composer-card {
   display: flex;
   flex-direction: column;
@@ -8041,6 +8068,13 @@ grid-template-columns: 1fr;
     margin-block: -6px;
     padding: 0;
   }
+  .queue-chip .queue-grip {
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    min-height: var(--tap);
+    margin-block: -6px;
+  }
   .msg.assistant .msg-action-btn,
   .focus-conversation .msg.assistant .msg-action-btn,
   .msg.assistant .msg-actions-entry {
@@ -8181,19 +8215,6 @@ opacity: 1;
 
 @media (pointer: coarse), (max-width: 480px) {
 .pane-tab-group.active > .reorder-controls { display: inline-flex; }
-  .queue-chip {
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
-    grid-template-areas:
-      "pos text delivery delivery"
-      "move move edit remove";
-  }
-  .queue-chip .queue-grip { display: none; }
-  .queue-chip .queue-pos { grid-area: pos; }
-  .queue-chip .queue-text { grid-area: text; }
-  .queue-chip .queue-delivery { grid-area: delivery; }
-  .queue-chip .reorder-controls { grid-area: move; }
-  .queue-chip > button:nth-of-type(1) { grid-area: edit; }
-  .queue-chip > button:nth-of-type(2) { grid-area: remove; }
 }
 
 

@@ -1010,6 +1010,7 @@ export const it: AppMessages = {
   "queuedmessagelist.queuedMessageRemoved": "Messaggio in coda rimosso",
   "queuedmessagelist.queuedMessageUpdated": "Messaggio in coda aggiornato",
   "queuedmessagelist.removeQueuedMessageValue": "Rimuovi il messaggio in coda {value}",
+  "queuedmessagelist.reorderQueuedMessageValue": "Riordina il messaggio in coda {value}",
   "queuedmessagelist.saveQueuedMessageValue": "Salva il messaggio in coda {value}",
   "queuedmessagelist.steer": "sterzare",
   "queuedmessagelist.valueQueuedMessages": "{length} messaggi in coda",

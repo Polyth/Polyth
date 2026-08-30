@@ -1010,6 +1010,7 @@ export const ptBR: AppMessages = {
   "queuedmessagelist.queuedMessageRemoved": "Mensagem enfileirada removida",
   "queuedmessagelist.queuedMessageUpdated": "Mensagem em fila atualizada",
   "queuedmessagelist.removeQueuedMessageValue": "Remover mensagem enfileirada {value}",
+  "queuedmessagelist.reorderQueuedMessageValue": "Reordenar mensagem enfileirada {value}",
   "queuedmessagelist.saveQueuedMessageValue": "Salvar mensagem enfileirada {value}",
   "queuedmessagelist.steer": "direção",
   "queuedmessagelist.valueQueuedMessages": "{length} mensagens enfileiradas",
