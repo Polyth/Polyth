@@ -22,7 +22,7 @@ import {
   type StarterIconId,
 } from "../../starters.ts";
 import { tr } from "../../i18n/index.ts";
-import { Button, Checkbox, ResponsiveOverlay } from "../ui/index.ts";
+import { Button, Checkbox, ResponsiveOverlay, Textarea, TextInput } from "../ui/index.ts";
 import { useShellMode } from "../../responsiveShell.ts";
 
 const ICONS: Record<StarterIconId, () => React.ReactElement> = {
@@ -194,7 +194,7 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
         <div className="starter-form">
           <label className="starter-field">
             <span>{tr("mobile.starterpicker.name")}</span>
-            <input
+            <TextInput
               value={form.label}
               maxLength={40}
               placeholder={tr("mobile.starterpicker.reviewMyChanges")}
@@ -203,7 +203,7 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
           </label>
           <label className="starter-field">
             <span>{tr("mobile.starterpicker.prompt")}</span>
-            <textarea
+            <Textarea
               value={form.prompt}
               rows={4}
               placeholder={tr("mobile.starterpicker.whatShouldTheAgentDoWhenThis")}
@@ -286,7 +286,7 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
       {!phone && (
         <div className="sheet-search">
           <Icon.search />
-          <input
+          <TextInput
             type="search"
             value={query}
             placeholder={search.placeholder}

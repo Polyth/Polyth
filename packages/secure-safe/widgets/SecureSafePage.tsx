@@ -3,6 +3,7 @@ import type { SecureSafeEntryDto } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 import { confirmAlert } from "../../../apps/web/src/alerts.ts";
 import { EmptyState, PageHead } from "../../../apps/web/src/components/settings/parts.tsx";
+import { Button, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 
 export default function SecureSafePage() {
@@ -90,7 +91,7 @@ export default function SecureSafePage() {
               {entry.purpose && <div className="set-row-hint">{entry.purpose}</div>}
             </div>
             <div className="set-row-control">
-              <button className="small-btn danger-btn" onClick={() => void remove(entry)}>{tr("common.delete")}</button>
+              <Button size="sm" variant="danger" onClick={() => void remove(entry)}>{tr("common.delete")}</Button>
             </div>
           </div>
         ))}
@@ -100,11 +101,11 @@ export default function SecureSafePage() {
         <div className="secure-safe-form-row">
           <label>
             <span>{tr("settings.securesafepage.label")}</span>
-            <input value={label} required placeholder={tr("settings.securesafepage.deploymentToken")} onChange={(event) => setLabel(event.target.value)} />
+            <TextInput value={label} required placeholder={tr("settings.securesafepage.deploymentToken")} onChange={(event) => setLabel(event.target.value)} />
           </label>
           <label>
             <span>{tr("settings.securesafepage.handle")}</span>
-            <input
+            <TextInput
               className="mono"
               value={handle}
               required
@@ -117,11 +118,11 @@ export default function SecureSafePage() {
         </div>
         <label>
           <span>{tr("settings.securesafepage.purpose")}{" "}<small>{tr("settings.securesafepage.optional")}</small></span>
-          <input value={purpose} placeholder={tr("settings.securesafepage.usedForProductionDeployments")} onChange={(event) => setPurpose(event.target.value)} />
+          <TextInput value={purpose} placeholder={tr("settings.securesafepage.usedForProductionDeployments")} onChange={(event) => setPurpose(event.target.value)} />
         </label>
         <label>
           <span>{tr("settings.securesafepage.credentialValue")}</span>
-          <input
+          <TextInput
             type="password"
             autoComplete="off"
             value={value}
@@ -131,9 +132,9 @@ export default function SecureSafePage() {
           />
         </label>
         <div className="secure-safe-form-actions">
-          <button className="small-btn" type="submit" disabled={busy || !handle.trim() || !label.trim() || !value}>
-            {busy ? tr("common.saving") : tr("settings.securesafepage.addToSecureSafe")}
-          </button>
+          <Button size="sm" variant="primary" type="submit" busy={busy} disabled={busy || !handle.trim() || !label.trim() || !value}>
+            {tr("settings.securesafepage.addToSecureSafe")}
+          </Button>
           <span className="muted">{tr("settings.securesafepage.theValueIsClearedAsSoonAs")}</span>
         </div>
       </form>

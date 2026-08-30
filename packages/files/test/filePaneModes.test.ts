@@ -13,10 +13,26 @@ const dom = new Window({ url: "http://localhost:3000/" });
 Object.assign(globalThis, {
   window: dom as unknown as typeof globalThis & Window,
   document: dom.document as unknown as Document,
+  HTMLElement: dom.HTMLElement,
+  Element: dom.Element,
+  Node: dom.Node,
+  getComputedStyle: (elt: Element) =>
+    (dom as unknown as { getComputedStyle(el: Element): CSSStyleDeclaration }).getComputedStyle(elt),
 });
 Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configurable: true });
 Object.defineProperty(globalThis, "localStorage", { value: dom.localStorage, configurable: true });
 Object.defineProperty(globalThis, "location", { value: dom.location, configurable: true });
+Object.defineProperty(globalThis, "requestAnimationFrame", {
+  configurable: true,
+  value: (callback: FrameRequestCallback) => {
+    callback(0);
+    return 1;
+  },
+});
+Object.defineProperty(globalThis, "cancelAnimationFrame", {
+  configurable: true,
+  value: () => {},
+});
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // Deterministic files API: reads serve fixed content, stats agree with reads.
@@ -97,7 +113,7 @@ test("code files open straight into edit mode with a highlight backdrop; toolbar
 
     // Every removed capability is reachable from the menu.
     await act(async () => { click(more!); });
-    const menu = container.querySelector<HTMLElement>('[role="menu"]');
+    const menu = document.querySelector<HTMLElement>('[role="menu"]');
     assert.ok(menu, "actions menu opens");
     const items = [...menu!.querySelectorAll("button")].map((b) => (b.textContent ?? "").trim());
     for (const needed of ["Add file to chat", "Copy path", "Rename / move…", "Delete…"]) {

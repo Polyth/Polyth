@@ -10,6 +10,16 @@ import type { SshBrowseDto } from "@polyth/contracts";
 import { addSshProject } from "../../../../apps/web/src/init.ts";
 import { connectionTarget, remoteBasename, stateBadge } from "./sshUi.ts";
 import { tr } from "../../../../apps/web/src/i18n/index.ts";
+import {
+  Button,
+  Checkbox,
+  CloseIcon,
+  HomeIcon,
+  IconButton,
+  ParentFolderIcon,
+  Select,
+  TextInput,
+} from "../../../../apps/web/src/components/ui/index.ts";
 
 const errorText = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
@@ -113,7 +123,7 @@ function SshProjectDialog({ onClose, onOpened }: {
             <div className="folder-dialog-subtitle">
               {tr("ssh.sshprojectsource.theCodingAgentRunsOnTheServer")}</div>
           </div>
-          <button className="icon-btn" aria-label={tr("common.close")} disabled={busy} onClick={requestClose}>✕</button>
+          <IconButton icon={CloseIcon} label={tr("common.close")} disabled={busy} onClick={requestClose} />
         </div>
 
         {connections !== null && connections.length === 0 ? (
@@ -122,39 +132,37 @@ function SshProjectDialog({ onClose, onOpened }: {
         ) : (
           <>
             <label className="ssh-dialog-server">
-              {tr("ssh.sshprojectsource.server")}<select
+              {tr("ssh.sshprojectsource.server")}
+              <Select
+                label={tr("ssh.sshprojectsource.server")}
                 value={connectionId}
                 disabled={busy || loading}
-                onChange={(e) => setConnectionId(e.target.value)}
-              >
-                {(connections ?? []).map((conn) => (
-                  <option key={conn.id} value={conn.id}>
-                    {conn.name} ({connectionTarget(conn)}) — {stateBadge(conn.status?.state).text}
-                  </option>
-                ))}
-              </select>
+                onChange={setConnectionId}
+                options={(connections ?? []).map((conn) => ({
+                  value: conn.id,
+                  label: `${conn.name} (${connectionTarget(conn)}) — ${stateBadge(conn.status?.state).text}`,
+                }))}
+              />
             </label>
 
             <div className="folder-toolbar">
-              <button
-                className="small-btn"
+              <IconButton
+                icon={HomeIcon}
+                size="sm"
                 title={tr("ssh.sshprojectsource.remoteHomeDirectory")}
-                aria-label={tr("ssh.sshprojectsource.goToRemoteHomeDirectory")}
+                label={tr("ssh.sshprojectsource.goToRemoteHomeDirectory")}
                 disabled={busy || loading || !browse}
                 onClick={() => browse && void loadDir(connectionId, browse.home)}
-              >
-                ~
-              </button>
-              <button
-                className="small-btn"
+              />
+              <IconButton
+                icon={ParentFolderIcon}
+                size="sm"
                 title={tr("ssh.sshprojectsource.parentFolder")}
-                aria-label={tr("ssh.sshprojectsource.goToParentFolder")}
+                label={tr("ssh.sshprojectsource.goToParentFolder")}
                 disabled={busy || loading || !browse?.parent}
                 onClick={() => browse?.parent && void loadDir(connectionId, browse.parent)}
-              >
-                ↑
-              </button>
-              <input
+              />
+              <TextInput
                 className="folder-path mono"
                 value={pathInput}
                 aria-label={tr("ssh.sshprojectsource.remotePath")}
@@ -231,21 +239,21 @@ function SshProjectDialog({ onClose, onOpened }: {
 
             <div className="ssh-dialog-meta">
               <label className="ssh-dialog-name">
-                {tr("ssh.sshprojectsource.projectName")}<input
+                {tr("ssh.sshprojectsource.projectName")}
+                <TextInput
                   value={suggestedName}
                   placeholder={tr("ssh.sshprojectsource.remoteProject")}
                   disabled={busy}
                   onChange={(e) => { setNameTouched(true); setName(e.target.value); }}
                 />
               </label>
-              <label className="ssh-dialog-create">
-                <input
-                  type="checkbox"
-                  checked={createDirectory}
-                  disabled={busy}
-                  onChange={(e) => setCreateDirectory(e.target.checked)}
-                />
-                {tr("ssh.sshprojectsource.createTheFolderIfItDoesnT")}</label>
+              <Checkbox
+                className="ssh-dialog-create"
+                checked={createDirectory}
+                disabled={busy}
+                onChange={setCreateDirectory}
+                label={tr("ssh.sshprojectsource.createTheFolderIfItDoesnT")}
+              />
             </div>
 
             {error && <div className="form-error folder-error" role="alert">{error}</div>}
@@ -253,13 +261,14 @@ function SshProjectDialog({ onClose, onOpened }: {
             <div className="folder-foot">
               <span className="header-spacer" />
               <span className="folder-selected mono" title={target}>{target}</span>
-              <button
-                className="primary-btn"
+              <Button
+                variant="primary"
                 disabled={busy || loading || !connectionId || !target}
+                busy={busy}
                 onClick={() => void create()}
               >
-                {busy ? tr("ssh.sshprojectsource.opening") : tr("ssh.sshprojectsource.openRemoteProject")}
-              </button>
+                {tr("ssh.sshprojectsource.openRemoteProject")}
+              </Button>
             </div>
           </>
         )}
@@ -280,13 +289,14 @@ export default function SshProjectSource(props: Record<string, unknown>) {
 
   return (
     <>
-      <button
+      <Button
         type="button"
+        variant="ghost"
         className="ghost-link ssh-open-remote"
         disabled={pickerBusy}
         onClick={() => setOpen(true)}
       >
-        {tr("ssh.sshprojectsource.openOnAServer")}</button>
+        {tr("ssh.sshprojectsource.openOnAServer")}</Button>
       {open && (
         <SshProjectDialog
           onClose={() => setOpen(false)}

@@ -14,6 +14,7 @@ import {
 import { handOffWorkflowLaunch } from "./workflowLaunch.ts";
 import { subscribeWorkflowRuns } from "./workflowMonitor.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { Button, Spinner } from "../../../apps/web/src/components/ui/index.ts";
 
 function WorkflowRunIndicator() {
   const projectId = useStore((state) => state.activeProjectId);
@@ -91,17 +92,19 @@ function WorkflowRunIndicator() {
     });
     setActiveView("workflow");
   };
-  return createElement("button", {
+  return createElement(Button, {
     type: "button",
     className: `header-action workflow-run-indicator${actionLabel ? " waiting" : ""}`,
+    size: "sm",
+    variant: "ghost",
     title: actionLabel
       ? `Workflow action required: ${actionLabel.toLowerCase()}`
       : "Open active workflow",
     "aria-label": `${actionLabel ?? runLabel}, ${done} of ${run.nodes.length} nodes finished. Open workflow`,
     onClick: openRun,
   },
-  createElement("span", { className: "workflow-status-spinner", "aria-hidden": true }),
-  createElement("span", { "aria-live": "polite" }, actionLabel ?? `${runLabel} ${done}/${run.nodes.length}`));
+  createElement(Spinner, { size: "sm" }),
+  actionLabel ?? `${runLabel} ${done}/${run.nodes.length}`);
 }
 
 export const WORKFLOW_WIDGET_PLUGIN: WidgetPlugin = {

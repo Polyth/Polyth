@@ -12,6 +12,8 @@ Object.assign(globalThis, {
   HTMLElement: dom.HTMLElement,
   Element: dom.Element,
   Node: dom.Node,
+  getComputedStyle: (elt: Element) =>
+    (dom as unknown as { getComputedStyle(el: Element): CSSStyleDeclaration }).getComputedStyle(elt),
 });
 Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configurable: true });
 Object.defineProperty(globalThis, "requestAnimationFrame", {

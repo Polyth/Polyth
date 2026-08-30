@@ -26,6 +26,37 @@ Object.assign(globalThis, {
   CustomEvent: dom.CustomEvent,
 });
 Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configurable: true });
+if (typeof window.matchMedia !== "function") {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener() {},
+      removeListener() {},
+      addEventListener() {},
+      removeEventListener() {},
+      dispatchEvent() { return false; },
+    }),
+  });
+}
+Object.defineProperty(globalThis, "requestAnimationFrame", {
+  configurable: true,
+  value: (callback: FrameRequestCallback) => {
+    callback(0);
+    return 1;
+  },
+});
+Object.defineProperty(globalThis, "cancelAnimationFrame", {
+  configurable: true,
+  value: () => undefined,
+});
+Object.defineProperty(globalThis, "getComputedStyle", {
+  configurable: true,
+  value: (elt: Element) =>
+    (window as unknown as Window).getComputedStyle(elt as never),
+});
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 register("./tsxHooks.mjs", import.meta.url);
@@ -56,6 +87,16 @@ const buttonByText = (container: Element, text: string): HTMLButtonElement => {
     .find((candidate) => candidate.textContent?.trim().includes(text));
   assert.ok(button, `button containing "${text}" exists`);
   return button as HTMLButtonElement;
+};
+
+const pickPickerOption = async (root: ParentNode, optionLabel: string): Promise<void> => {
+  const trigger = root.querySelector<HTMLButtonElement>(".picker-chip");
+  assert.ok(trigger, "picker trigger exists");
+  await act(async () => { trigger.click(); });
+  const option = [...document.querySelectorAll(".picker-item")].find((el) =>
+    el.querySelector(".palette-label")?.textContent?.trim() === optionLabel);
+  assert.ok(option, `picker option "${optionLabel}" exists`);
+  await act(async () => { (option as HTMLElement).click(); });
 };
 
 const setControlValue = (
@@ -354,11 +395,9 @@ test("kanban journeys drive Jira and Trello through selection, agent handoff, st
         assert.match(harness.prompts[0] ?? "", /Keep the regression covered/);
         assert.match(container.textContent ?? "", /Linked\. The agent is starting work/);
 
-        const status = container.querySelector<HTMLSelectElement>(".tt-status-row select");
-        assert.ok(status);
-        await act(async () => {
-          setControlValue(status, harness.expected.inProgressStatusId, "change");
-        });
+        const statusRow = container.querySelector(".tt-status-row");
+        assert.ok(statusRow);
+        await pickPickerOption(statusRow, "In Progress");
         await act(async () => { buttonByText(container, "Update status").click(); });
         await settle(5);
         assert.match(container.textContent ?? "", /Moved to In Progress/);

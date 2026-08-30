@@ -2,6 +2,7 @@ import { useState } from "react";
 import { replySecret } from "../../../apps/web/src/init.ts";
 import type { PendingSecret } from "../../../apps/web/src/reduce.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { Button, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 
 function SecretRequest({ secret }: { secret: PendingSecret }) {
   const [value, setValue] = useState("");
@@ -32,7 +33,7 @@ function SecretRequest({ secret }: { secret: PendingSecret }) {
       </div>
       <label className="secure-safe-value">
         <span>{tr("securesafecard.credentialValue")}</span>
-        <input
+        <TextInput
           type="password"
           autoComplete="off"
           value={value}
@@ -49,10 +50,10 @@ function SecretRequest({ secret }: { secret: PendingSecret }) {
         />
       </label>
       <div className="secure-safe-actions">
-        <button className="primary" disabled={!value || submitted} onClick={save}>
+        <Button variant="primary" disabled={!value || submitted} onClick={save}>
           {submitted ? tr("securesafecard.submitted") : tr("securesafecard.saveToSecureSafe")}
-        </button>
-        <button disabled={submitted} onClick={dismiss}>{tr("securesafecard.dismiss")}</button>
+        </Button>
+        <Button disabled={submitted} onClick={dismiss}>{tr("securesafecard.dismiss")}</Button>
       </div>
     </div>
   );

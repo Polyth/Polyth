@@ -12,7 +12,14 @@ import { Icon } from "../../../apps/web/src/icons.tsx";
 import Dialog from "../../../apps/web/src/components/a11y/Dialog.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { workflowNodeCount } from "./workflowRun.ts";
-import WorkflowButtonContent from "./WorkflowButtonContent.tsx";
+import {
+  AddIcon,
+  Button,
+  CloseIcon,
+  IconButton,
+  Textarea,
+  WorkflowIcon,
+} from "../../../apps/web/src/components/ui/index.ts";
 
 export interface WorkflowLauncherProps {
   projectId?: string;
@@ -133,22 +140,23 @@ export default function WorkflowLauncher({
 
   return (
     <>
-      <button
-        type="button"
+      <IconButton
         className={`header-action composer-workflow${open ? " on" : ""}`}
+        icon={WorkflowIcon}
+        size="md"
+        variant="ghost"
         disabled={!projectId}
+        pressed={open}
         onClick={openLauncher}
         title={!projectId
           ? tr("workflowlauncher.openProject")
           : draftText.trim()
             ? tr("workflowlauncher.chooseWorkflowDraft")
             : tr("workflowlauncher.chooseWorkflowRun")}
-        aria-label={tr("workflowview.runWorkflow")}
+        label={tr("workflowview.runWorkflow")}
         aria-haspopup="dialog"
         aria-expanded={open}
-      >
-        <Icon.workflow /><span>{tr("workflowview.runWorkflow")}</span>
-      </button>
+      />
       {open && typeof document !== "undefined" && createPortal(
         <Dialog
           title={tr("workflowlauncher.title")}
@@ -164,21 +172,19 @@ export default function WorkflowLauncher({
               <h2>{tr("workflowlauncher.title")}</h2>
               <p id="workflow-launch-description">{tr("workflowlauncher.chooseSavedPipeline")}</p>
             </div>
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label={tr("workflowlauncher.close")}
+            <IconButton
+              icon={CloseIcon}
+              size="sm"
+              label={tr("workflowlauncher.close")}
               disabled={!!busyId || closing}
               title={busyId ? tr("workflowlauncher.waitToClose") : tr("workflowlauncher.close")}
               onClick={close}
-            >
-              <Icon.close />
-            </button>
+            />
           </header>
           <label className="workflow-field workflow-launch-task">
             <span>{tr("workflowlauncher.task")}</span>
-            <textarea
-              rows={4}
+            <Textarea
+              minRows={4}
               value={task}
               placeholder={tr("workflowlauncher.taskPlaceholder")}
               disabled={!!busyId}
@@ -209,13 +215,9 @@ export default function WorkflowLauncher({
             <div className="workflow-launch-empty workflow-launch-failed">
               <strong role="alert">{tr("workflowlauncher.couldNotLoad")}</strong>
               <span>{error}. {tr("workflowlauncher.taskStillHere")}</span>
-              <button
-                type="button"
-                className="small-btn workflow-button"
-                onClick={() => setLoadAttempt((attempt) => attempt + 1)}
-              >
+              <Button size="sm" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>
                 {tr("common.retry")}
-              </button>
+              </Button>
             </div>
           ) : workflows.length > 0 ? (
             <ul className="workflow-launch-list" aria-label={tr("workflowlauncher.savedWorkflows")}>
@@ -226,30 +228,25 @@ export default function WorkflowLauncher({
                     <strong>{workflow.name}</strong>
                     <small>{workflowNodeCount(workflow.nodes.length)} · {workflow.defaults?.permissions === "manual" ? tr("workflowlauncher.manualApproval") : tr("workflowlauncher.autoApprove")}</small>
                   </span>
-                  <button
-                    type="button"
-                    className="small-btn workflow-button"
+                  <Button
+                    size="sm"
                     disabled={!!busyId}
                     aria-label={tr("workflowlauncher.editValue", { name: workflow.name })}
                     onClick={() => openBuilder(workflow.id)}
                   >
                     {tr("common.edit")}
-                  </button>
-                  <button
-                    type="button"
-                    className="primary-btn workflow-button"
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="primary"
                     disabled={!task.trim() || !!busyId}
+                    busy={busyId === workflow.id}
                     title={!task.trim() ? tr("workflowlauncher.enterTaskBeforeRunning") : tr("workflowlauncher.runValue", { name: workflow.name })}
                     aria-label={tr("workflowlauncher.runValue", { name: workflow.name })}
-                    aria-busy={busyId === workflow.id}
                     onClick={() => void run(workflow)}
                   >
-                    <WorkflowButtonContent
-                      busy={busyId === workflow.id}
-                      idleLabel={tr("workflowlauncher.run")}
-                      busyLabel={tr("workflowlauncher.starting")}
-                    />
-                  </button>
+                    {tr("workflowlauncher.run")}
+                  </Button>
                 </li>
               ))}
             </ul>
@@ -257,22 +254,21 @@ export default function WorkflowLauncher({
             <div className="workflow-launch-empty">
               <strong>{tr("workflowlauncher.noWorkflows")}</strong>
               <span>{tr("workflowlauncher.buildReusablePipeline")}</span>
-              <button type="button" className="small-btn workflow-button" disabled={!!busyId} onClick={() => openBuilder()}>
-                <Icon.plus />{tr("workflowlauncher.createWorkflow")}
-              </button>
+              <Button size="sm" iconStart={AddIcon} disabled={!!busyId} onClick={() => openBuilder()}>
+                {tr("workflowlauncher.createWorkflow")}
+              </Button>
             </div>
           )}
           <footer className="workflow-launch-footer">
             {(loading || loadFailed || workflows.length > 0) && (
-              <button
-                type="button"
-                className="small-btn workflow-button"
+              <Button
+                size="sm"
+                iconStart={AddIcon}
                 disabled={!!busyId}
-                aria-busy={false}
                 onClick={() => openBuilder()}
               >
-                <Icon.plus />{tr("workflowlauncher.openBuilder")}
-              </button>
+                {tr("workflowlauncher.openBuilder")}
+              </Button>
             )}
             <span aria-live="polite">
               {busyId

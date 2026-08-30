@@ -15,7 +15,6 @@ import { highlight, highlightLines, langOf } from "../../../../apps/web/src/high
 import { formatFileChat, formatSelectionChat, lineRangeOf } from "../../../../apps/web/src/chatclip.ts";
 import { requestComposerInsert } from "../../../../apps/web/src/composerInsert.ts";
 import { MOD } from "../../../../apps/web/src/format.ts";
-import { useEscape } from "../../../../apps/web/src/useEscape.ts";
 import { clampMenuPosition } from "../../../../apps/web/src/selectionActions.ts";
 import { copyText } from "../../../../apps/web/src/utils.ts";
 import { getEditorPrefs, setEditorPreviewDefault, useUiSettings } from "../../../../apps/web/src/uiPrefs.ts";
@@ -25,10 +24,12 @@ import {
   CheckIcon,
   CloseIcon,
   IconButton,
+  Menu,
   MoreIcon,
   Spinner,
   Switch,
   TextInput,
+  type MenuEntry,
 } from "../../../../apps/web/src/components/ui/index.ts";
 import {
   autosaveDelay,
@@ -93,8 +94,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   const [hlRange, setHlRange] = useState<[number, number] | null>(null);
   const [gotoOpen, setGotoOpen] = useState(false);
   const [gotoVal, setGotoVal] = useState("");
-  // UX-FILES-TIMELINE-03 findings 3–5: actions menu + contextual selection hint.
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [selHint, setSelHint] = useState<{ x: number; y: number } | null>(null);
 
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -156,13 +156,6 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
     const kind = previewKindForPath(doc.path);
     if (opts.persist !== false && kind) setEditorPreviewDefault(kind, on);
   };
-
-  const MENU_W = 210;
-  const MENU_H = 300;
-  const openMenu = (x: number, y: number) => {
-    setMenu(clampMenuPosition(x, y, MENU_W, MENU_H, window.innerWidth, window.innerHeight));
-  };
-  useEscape(menu !== null, () => setMenu(null));
 
   const gotoLine = (start: number, end?: number) => {
     const last = end !== undefined && end >= start ? end : start;
@@ -462,7 +455,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
         e.preventDefault();
         setGotoOpen(true);
       } else if (e.key === "Escape") {
-        if (menu) return; // the menu's own capture-phase Escape closes it
+        if (menuOpen) return; // the menu's own capture-phase Escape closes it
         if (gotoOpen) { setGotoOpen(false); return; }
         if (selHint) { setSelHint(null); return; }
         if (confirmDel) { setConfirmDel(false); return; }
@@ -595,51 +588,52 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
             onClick={() => void save()}
           />
         )}
-        <IconButton
-          icon={MoreIcon}
-          size="sm"
-          className="editor-more-btn"
-          aria-haspopup="menu"
-          aria-expanded={menu !== null}
+        <Menu
           label={tr("editor.filepane.actionsForValue", { path: doc.path })}
           title={tr("editor.filepane.fileActions")}
-          onClick={(e) => {
-            const r = e.currentTarget.getBoundingClientRect();
-            openMenu(r.right - MENU_W, r.bottom + 4);
-          }}
-        />
+          align="end"
+          open={menuOpen}
+          onOpenChange={setMenuOpen}
+          entries={([
+            { id: "add-file", label: tr("editor.filepane.addFileToChat"), onSelect: () => addFile() },
+            { id: "add-selection", label: tr("editor.filepane.addSelectionToChatValueL", { MOD }), onSelect: () => addSelection() },
+            { id: "copy-path", label: tr("editor.filepane.copyPath"), onSelect: () => void copyText(doc.path) },
+            { id: "goto", label: tr("editor.filepane.goToLineValueG", { MOD }), onSelect: () => setGotoOpen(true) },
+            {
+              id: "wrap",
+              label: wrap ? tr("editor.filepane.wrapLines") : tr("editor.filepane.wrapLines2"),
+              kind: "checkbox",
+              checked: wrap,
+              onSelect: () => setWrap((value) => !value),
+            },
+            ...(!readOnly && dirty
+              ? [{
+                  id: "discard",
+                  label: tr("editor.filepane.discardChanges"),
+                  onSelect: () => {
+                    void confirmAlert(tr("editor.filepane.discardUnsavedChanges"), {
+                      title: tr("common.discardChanges"),
+                      confirmLabel: tr("common.discard"),
+                    }).then((ok) => { if (ok) setBuf(doc.content); });
+                  },
+                } satisfies MenuEntry]
+              : []),
+            { id: "rename", label: tr("editor.filepane.renameMove"), onSelect: () => setRenameTo(doc.path) },
+            { id: "delete", label: tr("editor.filepane.delete"), danger: true, onSelect: () => setConfirmDel(true) },
+          ] satisfies MenuEntry[])}
+        >
+          {(trigger) => (
+            <IconButton
+              {...trigger}
+              icon={MoreIcon}
+              size="sm"
+              className="editor-more-btn"
+              label={tr("editor.filepane.actionsForValue", { path: doc.path })}
+              title={tr("editor.filepane.fileActions")}
+            />
+          )}
+        </Menu>
       </div>
-      {menu && (
-        <div className="ctx-backdrop" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}>
-          <div
-            className="ctx-menu"
-            role="menu"
-            aria-label={tr("editor.filepane.actionsForValue", { path: doc.path })}
-            style={{ left: menu.x, top: menu.y }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button role="menuitem" onClick={() => { setMenu(null); addFile(); }}>{tr("editor.filepane.addFileToChat")}</button>
-            <button role="menuitem" onClick={() => { setMenu(null); addSelection(); }}>{tr("editor.filepane.addSelectionToChatValueL", { MOD: MOD })}</button>
-            <button role="menuitem" onClick={() => { setMenu(null); void copyText(doc.path); }}>{tr("editor.filepane.copyPath")}</button>
-            <button role="menuitem" onClick={() => { setMenu(null); setGotoOpen(true); }}>{tr("editor.filepane.goToLineValueG", { MOD: MOD })}</button>
-            <button role="menuitemcheckbox" aria-checked={wrap} onClick={() => setWrap((v) => !v)}>
-              {wrap ? tr("editor.filepane.wrapLines") : tr("editor.filepane.wrapLines2")}
-            </button>
-            {!readOnly && dirty && (
-              <button
-                role="menuitem"
-                onClick={() => {
-                  setMenu(null);
-                  void confirmAlert(tr("editor.filepane.discardUnsavedChanges"), { title: tr("common.discardChanges"), confirmLabel: tr("common.discard") }).then((ok) => { if (ok) setBuf(doc.content); });
-                }}
-              >
-                {tr("editor.filepane.discardChanges")}</button>
-            )}
-            <button role="menuitem" onClick={() => { setMenu(null); setRenameTo(doc.path); }}>{tr("editor.filepane.renameMove")}</button>
-            <button role="menuitem" className="danger" onClick={() => { setMenu(null); setConfirmDel(true); }}>{tr("editor.filepane.delete")}</button>
-          </div>
-        </div>
-      )}
       {selHint && (
         <button
           className="editor-sel-hint"
@@ -710,7 +704,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
             // The textarea keeps its native menu (paste, spell-check, …).
             if (e.target === taRef.current) return;
             e.preventDefault();
-            openMenu(e.clientX, e.clientY);
+            setMenuOpen(true);
           }}
         >
           {!wrap && (
@@ -775,7 +769,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
         <div
           className="editor-body"
           ref={bodyRef}
-          onContextMenu={(e) => { e.preventDefault(); openMenu(e.clientX, e.clientY); }}
+          onContextMenu={(e) => { e.preventDefault(); setMenuOpen(true); }}
         >
           {lines.length <= MAX_ROWED_LINES ? (
             <div className={`code-lines${wrap ? " wrap" : ""}`}>

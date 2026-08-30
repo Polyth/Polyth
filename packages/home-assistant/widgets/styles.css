@@ -8,9 +8,9 @@ min-height: 100%; display: flex; flex-direction: column; gap: var(--space-2); pa
 .ha-connection > code {
 overflow: hidden; color: var(--muted); font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap;
 }
-.ha-connection > button,
-.ha-entity > button {
-align-self: flex-start; margin-top: auto; font-size: var(--font-meta);
+.ha-connection > .ui-btn,
+.ha-entity > .ui-btn {
+align-self: flex-start; margin-top: auto;
 }
 .ha-status {
 display: flex; align-items: center; gap: var(--space-2);
@@ -29,7 +29,7 @@ background: var(--red); box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 15%,
 min-width: 0; display: flex; flex-direction: column;
 }
 .ha-status strong {
-font-size: 12px;
+font-size: var(--font-meta);
 }
 .ha-status span {
 overflow: hidden; color: var(--muted); font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap;
@@ -100,20 +100,8 @@ font-size: 19px;
 .ha-temperature {
 display: flex; align-items: center; gap: var(--space-1);
 }
-/* Compact steppers keep icon-button geometry with a transparent --hit-min
-   tap box, mirroring the .ui-icon-btn primitive. */
-.ha-temperature button {
-position: relative; width: 24px; height: 24px; padding: 0;
-  border-radius: var(--radius-control);
-}
-.ha-temperature button::after {
-content: "";
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: max(100%, var(--hit-min));
-  height: max(100%, var(--hit-min));
-  transform: translate(-50%, -50%);
+.ha-temperature .ui-icon-btn {
+flex: none;
 }
 .ha-temperature > span {
 display: flex; flex-direction: column; align-items: center;
@@ -131,7 +119,7 @@ min-width: 0; display: flex; flex-direction: column; padding: 8px; border: 1px s
 overflow: hidden; color: var(--muted); font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap;
 }
 .ha-sensors strong {
-margin-top: 2px; font-size: 12px;
+margin-top: 2px; font-size: var(--font-meta);
 }
 .ha-error,
 .ha-settings-message {
@@ -146,13 +134,13 @@ display: flex; flex-direction: column; gap: 8px;
 .ha-settings > label {
 display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: var(--font-meta);
 }
-.ha-settings > label input {
+.ha-settings > label .ui-input {
 width: 100%; min-width: 0;
 }
 .ha-settings > small {
 color: var(--faint); font-size: var(--font-meta); line-height: 1.4;
 }
-.ha-settings > button {
+.ha-settings > .ui-btn {
 align-self: flex-start;
 }
 .placed-mini-widget:has(.ha-mini),
@@ -175,13 +163,8 @@ min-width: 0;
 overflow-wrap: anywhere;
 }
 @container feature-panel (max-width: 700px) {
-.ha-settings > button {
+.ha-settings > .ui-btn {
 width: 100%; align-self: stretch;
-}
-
-:is(.ha-connection, .ha-entity) > button,
-.ha-temperature button {
-min-width: var(--tap); min-height: var(--tap);
 }
 
 .ha-climate > section {

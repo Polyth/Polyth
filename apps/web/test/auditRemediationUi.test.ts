@@ -155,9 +155,9 @@ test("header primary rail exposes a permanent Terminal toggle after project acti
   const rail = await mounted(createElement(ContextRail));
   try {
     const search = [...header.container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent?.trim() === "Search");
+      .find((button) => button.getAttribute("aria-label") === "Search commands and actions");
     const history = [...header.container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent?.trim() === "History");
+      .find((button) => button.getAttribute("aria-label") === "Search session history");
     const terminal = header.container.querySelector<HTMLButtonElement>(
       '.view-switcher .view-icon[aria-label="Open Terminal (Ctrl+`)"]',
     );

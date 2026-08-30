@@ -18,6 +18,7 @@ import {
   Button,
   Checkbox,
   EditIcon,
+  PullRequestIcon,
   Select,
   Tabs,
   Textarea,
@@ -505,9 +506,9 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                   <Button
                     variant="primary"
                     busy={conflictAgentBusy}
+                    iconStart={PullRequestIcon}
                     onClick={() => void startConflictAgent()}
                   >
-                    <Icon.pullRequest />
                     {tr("pullrequestview.fixConflictsWithAgent")}
                   </Button>
                   {conflictAgentMsg && (

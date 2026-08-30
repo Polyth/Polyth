@@ -1,16 +1,11 @@
 import "./styles.css";
-import { createElement, useState, type ComponentType } from "react";
+import { createElement, useState } from "react";
 import { defineWebPackage, type WidgetRenderContext } from "@polyth/web-sdk";
 import { GoalAttachForm } from "./GoalStrip.tsx";
 import GoalsView from "./GoalsView.tsx";
+import { IconButton, TargetIcon } from "../../../apps/web/src/components/ui/index.ts";
 
-function GoalAction({
-  context,
-  TargetIcon,
-}: {
-  context: WidgetRenderContext;
-  TargetIcon: ComponentType;
-}) {
+function GoalAction({ context }: { context: WidgetRenderContext }) {
   const [open, setOpen] = useState(false);
   const sessionId = typeof context.sessionId === "string" ? context.sessionId : null;
   const suppliedToggle = typeof context.toggleGoal === "function"
@@ -18,24 +13,21 @@ function GoalAction({
     : null;
   const on = context.goalOn === true;
   return <>
-    <button
-      type="button"
+    <IconButton
       className={`header-action composer-goals${on ? " on" : ""}`}
-      aria-label={sessionId ? "Attach session goal" : on ? "Disable goal mode" : "Use first message as goal"}
-      aria-pressed={!sessionId ? on : undefined}
+      icon={TargetIcon}
+      size="md"
+      variant="ghost"
+      label={sessionId ? "Attach session goal" : on ? "Disable goal mode" : "Use first message as goal"}
+      pressed={!sessionId ? on : undefined}
       onClick={() => suppliedToggle ? suppliedToggle() : setOpen(true)}
-    >
-      <TargetIcon /><span>Goal</span>
-    </button>
+    />
     {open && <GoalAttachForm onDone={() => setOpen(false)} />}
   </>;
 }
 
 export default defineWebPackage((host) => () => {
-  const renderGoal = (context: WidgetRenderContext) => createElement(GoalAction, {
-    context,
-    TargetIcon: host.ui.icons.target ?? (() => null),
-  });
+  const renderGoal = (context: WidgetRenderContext) => createElement(GoalAction, { context });
   const off = [
     host.workspaceSurfaces.register({ id: "goals", title: "Session goals", description: "Attach an objective and let the auditor drive continuations to completion.", order: 20, plugin: "goals", requires: "project", component: () => createElement(GoalsView) }),
     host.capabilities.register({ id: "goals", label: "Goals & progress", plainDescription: "Track goals and work progress.", keywords: ["goals", "progress", "status"], standardTier: "primary", standardRank: 3, open: () => host.navigation.setActiveView("goals"), available: () => true }),

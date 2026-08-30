@@ -15,6 +15,15 @@ import type {
 import { api } from "@polyth/session/web-api";
 import { defineWidgetPlugin, registerWidgetPlugin } from "../../../apps/web/src/widgets/catalog.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import {
+  Button,
+  HomeIcon,
+  IconButton,
+  MinusIcon,
+  PlusIcon,
+  RefreshIcon,
+  TextInput,
+} from "../../../apps/web/src/components/ui/index.ts";
 
 const WORKSPACE_SLOTS = [
   "workspace.header",
@@ -142,7 +151,7 @@ function ConnectionWidget() {
         </div>
       </div>
       {status?.baseUrl && <code>{status.baseUrl}</code>}
-      <button type="button" onClick={() => void reload()}>{tr("common.refresh")}</button>
+      <Button size="sm" iconStart={RefreshIcon} onClick={() => void reload()}>{tr("common.refresh")}</Button>
     </div>
   );
 }
@@ -179,7 +188,7 @@ function EntityStateWidget() {
           ))}
         </dl>
       )}
-      <button type="button" onClick={() => void reload()}>{tr("widgets.homeassistantplugin.refreshState")}</button>
+      <Button size="sm" iconStart={RefreshIcon} onClick={() => void reload()}>{tr("widgets.homeassistantplugin.refreshState")}</Button>
     </div>
   );
 }
@@ -257,9 +266,21 @@ function ClimateSensorsWidget() {
             <strong>{typeof currentRaw === "number" ? `${currentRaw}°` : climate.state}</strong>
           </div>
           <div className="ha-temperature">
-            <button type="button" disabled={acting || !Number.isFinite(target)} onClick={() => void setTemperature(target - 0.5)}>−</button>
+            <IconButton
+              icon={MinusIcon}
+              size="sm"
+              label={`− ${tr("widgets.homeassistantplugin.target")}`}
+              disabled={acting || !Number.isFinite(target)}
+              onClick={() => void setTemperature(target - 0.5)}
+            />
             <span><small>{tr("widgets.homeassistantplugin.target")}</small><b>{Number.isFinite(target) ? `${target}°` : "—"}</b></span>
-            <button type="button" disabled={acting || !Number.isFinite(target)} onClick={() => void setTemperature(target + 0.5)}>+</button>
+            <IconButton
+              icon={PlusIcon}
+              size="sm"
+              label={`+ ${tr("widgets.homeassistantplugin.target")}`}
+              disabled={acting || !Number.isFinite(target)}
+              onClick={() => void setTemperature(target + 0.5)}
+            />
           </div>
         </section>
       )}
@@ -327,16 +348,16 @@ export function HomeAssistantSettings() {
 
   return (
     <form className="ha-settings" onSubmit={(event) => void save(event)}>
-      <label>{tr("widgets.homeassistantplugin.homeAssistantUrl")}<input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder={tr("widgets.homeassistantplugin.httpHomeassistantLocal8123")} /></label>
-      <label>{tr("widgets.homeassistantplugin.tokenEnvironmentName")}<input value={tokenEnv} onChange={(event) => setTokenEnv(event.target.value)} placeholder={tr("widgets.homeassistantplugin.homeAssistantToken")} /></label>
-      <label>{tr("widgets.homeassistantplugin.longLivedToken")}<input type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder={config?.tokenConfigured ? tr("widgets.homeassistantplugin.configuredLeaveBlankToKeep") : tr("widgets.homeassistantplugin.writeOnlyToken")} autoComplete="new-password" /></label>
-      <label>{tr("widgets.homeassistantplugin.stateEntity")}<input value={stateEntityId} onChange={(event) => setStateEntityId(event.target.value)} placeholder={tr("widgets.homeassistantplugin.binarySensorFrontDoor")} /></label>
-      <label>{tr("widgets.homeassistantplugin.lightEntity")}<input value={lightEntityId} onChange={(event) => setLightEntityId(event.target.value)} placeholder={tr("widgets.homeassistantplugin.lightKitchen")} /></label>
-      <label>{tr("widgets.homeassistantplugin.climateEntity")}<input value={climateEntityId} onChange={(event) => setClimateEntityId(event.target.value)} placeholder={tr("widgets.homeassistantplugin.climateDownstairs")} /></label>
-      <label>{tr("widgets.homeassistantplugin.sensorEntities")}<input value={sensorEntityIds} onChange={(event) => setSensorEntityIds(event.target.value)} placeholder={tr("widgets.homeassistantplugin.sensorTemperatureSensorHumidity")} /></label>
+      <label>{tr("widgets.homeassistantplugin.homeAssistantUrl")}<TextInput value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder={tr("widgets.homeassistantplugin.httpHomeassistantLocal8123")} /></label>
+      <label>{tr("widgets.homeassistantplugin.tokenEnvironmentName")}<TextInput value={tokenEnv} onChange={(event) => setTokenEnv(event.target.value)} placeholder={tr("widgets.homeassistantplugin.homeAssistantToken")} /></label>
+      <label>{tr("widgets.homeassistantplugin.longLivedToken")}<TextInput type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder={config?.tokenConfigured ? tr("widgets.homeassistantplugin.configuredLeaveBlankToKeep") : tr("widgets.homeassistantplugin.writeOnlyToken")} autoComplete="new-password" /></label>
+      <label>{tr("widgets.homeassistantplugin.stateEntity")}<TextInput value={stateEntityId} onChange={(event) => setStateEntityId(event.target.value)} placeholder={tr("widgets.homeassistantplugin.binarySensorFrontDoor")} /></label>
+      <label>{tr("widgets.homeassistantplugin.lightEntity")}<TextInput value={lightEntityId} onChange={(event) => setLightEntityId(event.target.value)} placeholder={tr("widgets.homeassistantplugin.lightKitchen")} /></label>
+      <label>{tr("widgets.homeassistantplugin.climateEntity")}<TextInput value={climateEntityId} onChange={(event) => setClimateEntityId(event.target.value)} placeholder={tr("widgets.homeassistantplugin.climateDownstairs")} /></label>
+      <label>{tr("widgets.homeassistantplugin.sensorEntities")}<TextInput value={sensorEntityIds} onChange={(event) => setSensorEntityIds(event.target.value)} placeholder={tr("widgets.homeassistantplugin.sensorTemperatureSensorHumidity")} /></label>
       <small>{tr("widgets.homeassistantplugin.theTokenValueIsWriteOnlyPolyth")}</small>
       {(message || error) && <p className="ha-settings-message">{message || error}</p>}
-      <button type="submit" disabled={saving}>{saving ? tr("common.saving") : tr("widgets.homeassistantplugin.saveHomeAssistant")}</button>
+      <Button type="submit" variant="primary" busy={saving}>{tr("widgets.homeassistantplugin.saveHomeAssistant")}</Button>
     </form>
   );
 }
@@ -345,14 +366,17 @@ function StatusAction() {
   const { status, error, reload } = useConnection();
   const state = status?.status ?? "unconfigured";
   return (
-    <button
-      type="button"
-      className={`header-action ha-mini ha-status-${state}`}
-      onClick={() => void reload()}
-      title={status?.message || error || tr("widgets.homeassistantplugin.refreshHomeAssistantStatus")}
-    >
-      <i aria-hidden="true" /><span>{tr("widgets.homeassistantplugin.home")}</span>
-    </button>
+    <span className={`header-action ha-mini ha-status-${state}`}>
+      <IconButton
+        icon={HomeIcon}
+        size="md"
+        variant="ghost"
+        label={tr("widgets.homeassistantplugin.refreshHomeAssistantStatus")}
+        title={status?.message || error || tr("widgets.homeassistantplugin.refreshHomeAssistantStatus")}
+        onClick={() => void reload()}
+      />
+      <i aria-hidden="true" />
+    </span>
   );
 }
 

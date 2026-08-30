@@ -14,6 +14,7 @@ import {
   previousPackageTourStep, setPackageTourStep, subscribePackageTour,
 } from "../packages/onboarding/controller.ts";
 import { tr } from "../i18n/index.ts";
+import { Button } from "./ui/index.ts";
 import { useModalScrollLock } from "./a11y/Dialog.tsx";
 
 /** Caption for the highlight card, keyed by where the control actually lives
@@ -264,19 +265,19 @@ export default function PackageTourOverlay() {
           </div>
           <div className="package-tour-actions">
             {step > 0 && (
-              <button type="button" className="btn-soft" onClick={previousPackageTourStep}>{tr("common.back")}</button>
+              <Button size="sm" onClick={previousPackageTourStep}>{tr("common.back")}</Button>
             )}
-            <button type="button" className="btn-accent" onClick={nextPackageTourStep}>
+            <Button size="sm" variant="primary" onClick={nextPackageTourStep}>
               {lastStep ? tr("common.done") : tr("common.next")}
-            </button>
+            </Button>
           </div>
         </div>
         <div className="package-tour-skips">
-          <button type="button" className="package-tour-skip" onClick={() => closePackageTour("skip")}>
-            {tr("packagetouroverlay.skipThisTour")}</button>
+          <Button type="button" variant="ghost" size="sm" className="package-tour-skip" onClick={() => closePackageTour("skip")}>
+            {tr("packagetouroverlay.skipThisTour")}</Button>
           <span aria-hidden="true">·</span>
-          <button type="button" className="package-tour-skip" onClick={() => closePackageTour("skip-all")}>
-            {tr("packagetouroverlay.skipAllOnboardings")}</button>
+          <Button type="button" variant="ghost" size="sm" className="package-tour-skip" onClick={() => closePackageTour("skip-all")}>
+            {tr("packagetouroverlay.skipAllOnboardings")}</Button>
         </div>
       </div>
     </div>

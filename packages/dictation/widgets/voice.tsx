@@ -19,9 +19,8 @@ import { getState, openSettingsPage, subscribeStore } from "../../../apps/web/sr
 import { api } from "@polyth/session/web-api";
 import { startStreamingDictation, type StreamingDictation } from "./dictationClient.ts";
 import { announce } from "../../../apps/web/src/components/a11y/live.tsx";
-import { Icon } from "../../../apps/web/src/icons.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
-import { Button } from "@polyth/web/ui";
+import { Button, IconButton, MicIcon } from "@polyth/web/ui";
 
 // ---- voice prefs store ------------------------------------------------------
 
@@ -287,16 +286,17 @@ function MicButton() {
 
   return (
     <span className={`mic-control mic-${error ? "failed" : phase}`}>
-      <button
+      <IconButton
         type="button"
         className={`mic-btn${phase === "listening" ? " listening" : ""}`}
-        aria-label={phase === "listening" ? tr("voice.stopDictation") : tr("voice.dictate")}
-        {...(phase === "listening" ? { "aria-pressed": true } : {})}
+        icon={MicIcon}
+        size="md"
+        variant="ghost"
+        label={phase === "listening" ? tr("voice.stopDictation") : tr("voice.dictate")}
+        pressed={phase === "listening"}
         disabled={!availability.available || busy}
         onClick={() => (phase === "listening" ? stop() : start())}
-      >
-        <span aria-hidden="true" className="mic-icon"><Icon.mic /></span>
-      </button>
+      />
       {status && <span className="mic-status">{status}</span>}
       {error !== null && (
         <Button size="sm" className="mic-retry" onClick={start}>

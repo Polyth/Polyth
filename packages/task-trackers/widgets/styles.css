@@ -21,40 +21,30 @@
   container: task-tracker / inline-size;
 }
 
-.tt-board button,
-.tt-board select,
-.tt-board input,
-.tt-board textarea,
-.tt-linked-widget button,
-.tt-linked-widget select,
-.tt-linked-widget a {
-  min-height: var(--tap);
+.tt-task-card,
+.tt-list-row,
+.tt-provider-tabs button,
+.tt-view-toggle button {
+  min-height: max(var(--control-h), var(--hit-min));
   touch-action: manipulation;
 }
 
-.tt-board button,
-.tt-linked-widget button {
-  color: inherit;
-}
-
-.tt-board select,
-.tt-board input,
-.tt-board textarea,
-.tt-linked-widget select {
+.tt-board-picker .picker,
+.tt-board-picker .picker-chip,
+.tt-filters .picker,
+.tt-filters .picker-chip,
+.tt-status-row .picker,
+.tt-status-row .picker-chip,
+.tt-linked-actions .picker,
+.tt-linked-actions .picker-chip {
+  width: 100%;
   min-width: 0;
-  max-width: 100%;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  color: var(--text);
-  background: color-mix(in srgb, var(--elevated) 92%, transparent);
-  outline: none;
-  transition: border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
 }
 
-.tt-board :is(select, input, textarea):focus-visible,
-.tt-linked-widget select:focus-visible {
-  border-color: color-mix(in srgb, var(--accent) 68%, var(--border));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+.tt-board-picker .chip-k,
+.tt-filters .chip-k,
+.tt-status-row .chip-k {
+  display: none;
 }
 
 .tt-board-header {
@@ -91,14 +81,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: var(--space-2);
   min-height: 44px;
   border: 0;
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--muted);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-meta);
   font-weight: 650;
   cursor: pointer;
   transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
@@ -111,8 +101,7 @@
 }
 
 .tt-provider-tabs button:active,
-.tt-view-toggle button:active,
-.tt-icon-btn:active:not(:disabled) {
+.tt-view-toggle button:active {
   transform: scale(.97);
 }
 
@@ -175,7 +164,7 @@
 }
 
 .tt-header-actions {
-  gap: 7px;
+  gap: var(--space-2);
 }
 
 .tt-view-toggle {
@@ -190,27 +179,8 @@
   padding: 0 10px;
 }
 
-.tt-icon-btn {
-  display: inline-grid;
-  width: 44px;
-  min-width: 44px;
-  height: 44px;
-  padding: 0;
-  place-items: center;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  background: var(--elevated);
-  cursor: pointer;
-}
-
-.tt-icon-btn:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
-  background: var(--accent-wash);
-}
-
-.tt-icon-btn svg {
-  width: 17px;
-  height: 17px;
+.tt-header-actions .ui-icon-btn {
+  flex: none;
 }
 
 .tt-provider-panel {
@@ -261,7 +231,7 @@
 }
 
 .tt-demo-banner strong {
-  font-size: 12px;
+  font-size: var(--font-meta);
 }
 
 .tt-demo-banner small {
@@ -315,12 +285,6 @@
   text-transform: uppercase;
 }
 
-.tt-board-picker select {
-  width: 100%;
-  padding: 0 34px 0 11px;
-  font-size: 13px;
-}
-
 .tt-filters {
   display: grid;
   min-width: 0;
@@ -329,29 +293,15 @@
   padding: 0 14px 12px;
 }
 
-.tt-search,
-.tt-filter-select {
+.tt-search {
   position: relative;
   display: flex;
   min-width: 0;
   align-items: center;
 }
 
-.tt-search > svg,
-.tt-filter-select > svg {
-  position: absolute;
-  z-index: 1;
-  left: 12px;
-  width: 15px;
-  color: var(--muted);
-  pointer-events: none;
-}
-
-.tt-search input,
-.tt-filter-select select {
+.tt-search .ui-input {
   width: 100%;
-  padding: 0 12px 0 36px;
-  font-size: 13px;
 }
 
 .tt-board-content {
@@ -417,7 +367,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--font-meta);
 }
 
 .tt-column > header > span:last-child {
@@ -699,7 +649,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--font-meta);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -802,7 +752,7 @@
 .tt-facts {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 7px 12px;
+  gap: var(--space-2) var(--space-3);
   margin: 0;
   padding: 11px;
   border: 1px solid var(--border);
@@ -846,7 +796,7 @@
 }
 
 .tt-section-heading strong {
-  font-size: 12px;
+  font-size: var(--font-meta);
 }
 
 .tt-section-heading small {
@@ -867,14 +817,8 @@
   font-weight: 800;
 }
 
-.tt-detail-section textarea {
+.tt-detail-section .ui-textarea {
   width: 100%;
-  min-height: 78px;
-  resize: vertical;
-  padding: 10px;
-  font: inherit;
-  font-size: 13px;
-  line-height: 1.45;
 }
 
 .tt-action-row,
@@ -882,74 +826,17 @@
   display: grid;
   min-width: 0;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px;
-}
-
-.tt-action-row button,
-.tt-status-row button,
-.tt-complete {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  background: var(--elevated);
-  font: inherit;
-  font-size: var(--font-meta);
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.tt-action-row button svg,
-.tt-complete svg {
-  width: 14px;
-  height: 14px;
-}
-
-.tt-action-row .tt-primary {
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  color: var(--accent-ink);
-  background: var(--accent);
-}
-
-.tt-action-row button:hover:not(:disabled),
-.tt-status-row button:hover:not(:disabled),
-.tt-complete:hover:not(:disabled),
-.tt-external:hover,
-.tt-linked-actions :is(button, a):hover {
-  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
-  background: color-mix(in srgb, var(--accent) 9%, var(--elevated));
-}
-
-.tt-action-row .tt-primary:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 72%, white);
-  background: color-mix(in srgb, var(--accent) 90%, white);
-}
-
-.tt-status-row label,
-.tt-status-row select {
-  width: 100%;
-}
-
-.tt-status-row select {
-  padding: 0 10px;
-  font-size: 12px;
+  gap: var(--space-2);
 }
 
 .tt-complete {
   width: 100%;
-  border-color: color-mix(in srgb, var(--green) 38%, var(--border));
-  color: color-mix(in srgb, var(--green) 82%, var(--text));
-  background: color-mix(in srgb, var(--green) 9%, var(--elevated));
 }
 
-.tt-board button:disabled,
-.tt-linked-widget button:disabled,
-.tt-board select:disabled,
-.tt-linked-widget select:disabled {
+.tt-task-card:disabled,
+.tt-list-row:disabled,
+.tt-provider-tabs button:disabled,
+.tt-view-toggle button:disabled {
   cursor: not-allowed;
   opacity: .5;
 }
@@ -965,7 +852,7 @@
   min-height: 44px;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   color: var(--text);
@@ -1107,7 +994,7 @@
   margin: 0;
   overflow-wrap: anywhere;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--font-meta);
   line-height: 1.55;
 }
 
@@ -1190,7 +1077,7 @@
 .tt-linked-main > div strong {
   min-width: 0;
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--font-meta);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1198,41 +1085,23 @@
 .tt-linked-actions {
   display: grid;
   min-width: 0;
-  grid-template-columns: minmax(100px, 1fr) auto auto 44px;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 6px;
+  align-items: center;
 }
 
-.tt-linked-actions select {
-  width: 100%;
-  padding: 0 9px;
-  font-size: 12px;
-}
-
-.tt-linked-actions button,
 .tt-linked-actions a {
   display: inline-flex;
-  min-width: 44px;
+  min-width: var(--tap);
+  min-height: var(--tap);
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  padding: 0 10px;
+  padding: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   background: var(--sunken);
-  font: inherit;
-  font-size: var(--font-meta);
-  font-weight: 700;
-  text-decoration: none;
-}
-
-.tt-linked-actions a {
-  padding: 0;
   color: var(--text);
-}
-
-.tt-linked-actions svg {
-  width: 14px;
-  height: 14px;
+  text-decoration: none;
 }
 
 .tt-linked-done {
@@ -1276,7 +1145,7 @@
   min-height: 32px;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: var(--space-2);
   color: var(--muted);
   font-size: var(--font-meta);
 }
@@ -1353,8 +1222,8 @@
     min-height: 44px;
   }
 
-  .tt-header-actions .tt-icon-btn {
-    flex: 0 0 44px;
+  .tt-header-actions .ui-icon-btn {
+    flex: none;
   }
 
   .tt-kanban {
@@ -1373,7 +1242,7 @@
 
   .tt-list-row {
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 7px 10px;
+    gap: var(--space-2) var(--space-3);
   }
 
   .tt-list-assignee {
@@ -1389,7 +1258,7 @@
 
   .tt-board-header {
     align-items: center;
-    gap: 7px;
+    gap: var(--space-2);
     flex-direction: row;
     padding-top: 8px;
     padding-bottom: 8px;
@@ -1438,11 +1307,9 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .tt-board-picker select,
-  .tt-filters :is(input, select),
-  .tt-detail-section textarea,
-  .tt-status-row select {
-    font-size: 16px;
+  .tt-action-row .ui-btn,
+  .tt-status-row .ui-btn {
+    width: 100%;
   }
 
   .tt-kanban {
@@ -1454,11 +1321,6 @@
   .tt-action-row,
   .tt-status-row {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .tt-action-row button,
-  .tt-status-row button {
-    width: 100%;
   }
 
   .tt-detail-header {
@@ -1490,20 +1352,11 @@
 
 @container feature-panel (max-width: 480px) {
   .tt-linked-actions {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) var(--tap);
   }
 
-  .tt-linked-actions select {
+  .tt-linked-actions .picker {
     grid-column: 1 / -1;
-    font-size: 16px;
-  }
-
-  .tt-linked-actions button {
-    padding: 0 8px;
-  }
-
-  .tt-linked-actions button:not(.tt-complete) {
-    min-width: 0;
   }
 }
 
@@ -1514,8 +1367,7 @@
   .tt-column,
   .tt-demo-banner,
   .tt-provider-tabs button,
-  .tt-view-toggle button,
-  .tt-icon-btn {
+  .tt-view-toggle button {
     transition: none;
     animation: none;
   }

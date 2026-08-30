@@ -18,6 +18,7 @@ import { modelDisplayName } from "../../../apps/web/src/composer/discovery.ts";
 import ProviderLogo from "./ProviderLogo.tsx";
 import MoveControls from "../../../apps/web/src/components/MoveControls.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { FavoriteIcon, IconButton, Switch, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 
 type Scope = "connected" | "all";
 
@@ -141,8 +142,8 @@ export default function ModelsPage() {
         blurb={tr("settings.modelspage.whatTheModelPickerOffersTogglesAre")}
       />
       <div className="models-toolbar" data-settings-item="models.catalog">
-        <input
-          className="set-search models-search"
+        <TextInput
+          className="models-search"
           value={q}
           placeholder={tr("settings.modelspage.searchModels")}
           aria-label={tr("settings.modelspage.searchModels2")}
@@ -244,34 +245,33 @@ export default function ModelsPage() {
                     const displayName = modelDisplayName(m, catalogModels);
                     return (
                       <div key={m.key} className={`set-model-row ${m.enabled ? "" : "model-disabled"}`}>
-                        <button
+                        <IconButton
+                          icon={FavoriteIcon}
+                          size="sm"
+                          variant="ghost"
                           className={`star-btn ${fav ? "on" : ""}`}
-                          title={fav ? tr("settings.modelspage.removeFavorite") : tr("settings.modelspage.addFavorite")}
-                          aria-pressed={fav}
+                          pressed={fav}
+                          label={fav ? tr("settings.modelspage.removeFavorite") : tr("settings.modelspage.addFavorite")}
                           onClick={() => toggleModelFavorite(m.key)}
-                        >{fav ? "★" : "☆"}</button>
+                        />
                         <span className="set-model-name" title={displayName}>{displayName}</span>
                         {m.context !== undefined && <span className="set-model-ctx mono">{fmtContext(m.context)}</span>}
                         <span className="set-model-meta mono">{m.key}</span>
-                        <button
-                          className="switch switch-sm"
-                          role="switch"
-                          aria-checked={m.enabled}
-                          aria-label={m.enabled
+                        <Switch
+                          className="switch-sm"
+                          checked={m.enabled}
+                          label={m.enabled
                             ? tr("settings.modelspage.disableValue", { value: displayName })
                             : tr("settings.modelspage.enableValue", { value: displayName })}
                           disabled={busyKey === m.key || !p.enabled}
-                          title={!p.enabled ? tr("settings.modelspage.enableTheProviderFirst") : m.enabled ? tr("settings.modelspage.disableModel") : tr("settings.modelspage.enableModel")}
-                          onClick={() => void mutate(
+                          onChange={(on) => void mutate(
                             m.key,
                             (catalog) => catalog.map((provider) => provider.id === p.id
-                              ? { ...provider, models: provider.models.map((model) => model.key === m.key ? { ...model, enabled: !m.enabled } : model) }
+                              ? { ...provider, models: provider.models.map((model) => model.key === m.key ? { ...model, enabled: on } : model) }
                               : provider),
-                            () => api.setModelEnabled(m.key, !m.enabled),
+                            () => api.setModelEnabled(m.key, on),
                           )}
-                        >
-                          <i />
-                        </button>
+                        />
                       </div>
                     );
                   })}

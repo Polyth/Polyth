@@ -27,6 +27,7 @@ import {
   CloseIcon,
   CopyIcon,
   IconButton,
+  Menu,
   TextInput,
 } from "../../../apps/web/src/components/ui/index.ts";
 
@@ -1007,43 +1008,66 @@ export default function TermPane(props: TermPaneProps) {
         />
       </div>
 
-      {contextMenu && (
-        <div
-          className="term-context"
-          role="menu"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <button
-            role="menuitem"
-            disabled={!selection}
-            onClick={() => {
+      <Menu
+        key={contextMenu ? `${contextMenu.x}:${contextMenu.y}` : "closed"}
+        label={tr("terminalview.terminalValue", { title: label })}
+        open={contextMenu !== null}
+        onOpenChange={(open) => { if (!open) setContextMenu(null); }}
+        entries={[
+          {
+            id: "copy",
+            label: tr("terminalview.copy"),
+            detail: "Ctrl+Shift+C",
+            disabled: !selection,
+            onSelect: () => {
               void copySelection();
-              setContextMenu(null);
               bodyRef.current?.focus();
-            }}
-          >{tr("terminalview.copy")} <kbd>Ctrl+Shift+C</kbd></button>
-          <button
-            role="menuitem"
-            onClick={() => {
+            },
+          },
+          {
+            id: "paste",
+            label: tr("terminalview.paste"),
+            detail: "Ctrl+Shift+V",
+            onSelect: () => {
               pasteFromClipboard();
-              setContextMenu(null);
               bodyRef.current?.focus();
-            }}
-          >{tr("terminalview.paste")} <kbd>Ctrl+Shift+V</kbd></button>
-          <button
-            role="menuitem"
-            onClick={() => {
+            },
+          },
+          {
+            id: "select-all",
+            label: tr("terminalview.selectAll"),
+            onSelect: () => {
               setSelection({
                 anchor: { row: 0, col: 0 },
                 focus: { row: Math.max(0, emu.bufferLength() - 1), col: emu.cols() },
               });
-              setContextMenu(null);
               bodyRef.current?.focus();
+            },
+          },
+        ]}
+      >
+        {(trigger) => (
+          <button
+            {...trigger}
+            type="button"
+            className="term-ctx-anchor"
+            tabIndex={-1}
+            aria-hidden="true"
+            style={{
+              position: "fixed",
+              left: contextMenu?.x ?? 0,
+              top: contextMenu?.y ?? 0,
+              width: 1,
+              height: 1,
+              padding: 0,
+              margin: 0,
+              overflow: "hidden",
+              opacity: 0,
+              pointerEvents: "none",
             }}
-          >{tr("terminalview.selectAll")}</button>
-        </div>
-      )}
+          />
+        )}
+      </Menu>
 
       {behind && !followRef.current && (
         <Button

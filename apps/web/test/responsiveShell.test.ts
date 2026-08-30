@@ -262,8 +262,8 @@ test("Focus uses compact mobile composer controls without editor chrome", async 
   );
   assert.ok(!composer.includes('label={tr("composer.addFiles")}'), "no separate upload chip remains");
   assert.ok(!composer.includes("<Icon.focus />"), "Focus removes the focused-editor header action");
-  assert.ok(permissions.includes("<ShieldIcon />"), "Focus exposes the auto-approve shield");
-  assert.ok(goals.includes("<TargetIcon />"), "Focus exposes the goals target");
+  assert.ok(permissions.includes("icon: ShieldIcon"), "Focus exposes the auto-approve shield");
+  assert.ok(goals.includes("icon={TargetIcon}"), "Focus exposes the goals target");
   assert.ok(composer.includes("<Icon.send />"), "Focus uses a paper-plane send icon");
   const css = await read("../src/styles.css");
   assert.ok(css.includes(".composer-agent-chip .chip-k { display: none; }"), "technical picker keys are hidden");
@@ -280,9 +280,9 @@ test("desktop header keeps brand, workspace modes, and a named utility cluster",
   assert.ok(!header.includes("header-breadcrumbs"), "project and branch crumbs are removed");
   assert.ok(sidebar.includes('setOverlay("project-picker")'), "project switching remains available in the project sidebar");
   assert.ok(header.includes('<div className="header-actions"'), "utilities share one right-side cluster");
-  for (const key of ["common.search", "widgets.builtinminiwidgets.history", "common.settings"]) {
-    assert.ok(actions.includes(`<span>{tr("${key}")}</span>`), `${key} utility remains named`);
-  }
+  assert.ok(actions.includes('label={tr("widgets.builtinminiwidgets.searchCommandsAndActions")}'), "search utility remains named");
+  assert.ok(actions.includes('label={tr("widgets.builtinminiwidgets.searchSessionHistory2")}'), "history utility remains named");
+  assert.ok(actions.includes('label={tr("common.settings")}'), "settings utility remains named");
   assert.ok(!header.includes('className="header-global-search"'), "Search is not duplicated in the header");
 });
 

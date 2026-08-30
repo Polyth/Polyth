@@ -9,7 +9,7 @@ display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--hair-st
 width: 100%; resize: vertical;
 }
 .sched-every {
-display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px;
+display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--font-meta);
 }
 .sched-card {
 display: flex; gap: 12px; align-items: flex-start; justify-content: space-between;
@@ -32,7 +32,7 @@ display: flex; gap: 6px; flex-shrink: 0;
 }
 .sched-preview {
 border: 1px solid var(--hair-strong); border-radius: var(--radius-control); padding: 9px 11px;
-  background: var(--sunken); display: flex; flex-direction: column; gap: 3px; font-size: 12px;
+  background: var(--sunken); display: flex; flex-direction: column; gap: 3px; font-size: var(--font-meta);
 }
 .sched-preview-desc {
 color: var(--text);
@@ -49,7 +49,7 @@ display: inline-block; margin-right: 6px; padding: 1px 6px; border-radius: 999px
 display: flex; flex-direction: column; gap: 3px; margin-top: 6px;
 }
 .sched-run {
-display: flex; align-items: center; gap: 8px; font-size: 12px;
+display: flex; align-items: center; gap: 8px; font-size: var(--font-meta);
 }
 .sched-run-dot {
 width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none;

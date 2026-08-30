@@ -9,6 +9,7 @@ import {
   type WidgetSettingsContext,
 } from "../../../apps/web/src/widgets/catalog.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { Checkbox } from "../../../apps/web/src/components/ui/index.ts";
 
 type GithubSummaryMetric = "showFiles" | "showAdditions" | "showDeletions";
 
@@ -88,14 +89,12 @@ function GithubPrSummarySettings({ config, updateConfig }: WidgetSettingsContext
   return (
     <div className="widget-schema-settings" aria-label={tr("widgets.githubplugin.githubPullRequestMetrics")}>
       {SUMMARY_METRICS.map((metric) => (
-        <label key={metric.id}>
-          <input
-            type="checkbox"
-            checked={metricVisible(config, metric.id)}
-            onChange={(event) => updateConfig({ ...config, [metric.id]: event.target.checked })}
-          />
-          <span><strong>{metric.label}</strong></span>
-        </label>
+        <Checkbox
+          key={metric.id}
+          checked={metricVisible(config, metric.id)}
+          onChange={(checked) => updateConfig({ ...config, [metric.id]: checked })}
+          label={<strong>{metric.label}</strong>}
+        />
       ))}
     </div>
   );

@@ -17,16 +17,11 @@ import {
 import { defineWidgetPlugin, registerWidgetPlugin } from "../widgets/catalog.ts";
 import { getLocale, tr } from "../i18n/index.ts";
 import { RAIL_ICONS } from "../railIcons.ts";
-import { Button } from "./ui/index.ts";
+import { Button, BellIcon, IconButton } from "./ui/index.ts";
 
 /** The rail-surface id the workspace.right.tabs slot bridge derives for the
  *  panel — what the bell toggles and hosts persist as the open surface. */
 export const NOTIFICATION_SURFACE_ID = "slot:notification-centre";
-
-const STROKE = {
-  fill: "none", stroke: "currentColor", strokeWidth: 1.5,
-  strokeLinecap: "round", strokeLinejoin: "round",
-} as const;
 
 /** Header bell: global unread badge + rail toggle. Global inbox — available
  *  with or without an active session. The badge caps at 99+ visually while the
@@ -36,19 +31,19 @@ export function NotificationBell({ centre = notificationCentre }: { centre?: Not
   const open = useStore((s) => s.railPlugin) === NOTIFICATION_SURFACE_ID;
   const badge = bellBadge(unread);
   return (
-    <button
-      className={`header-action notification-bell${open ? " active" : ""}`}
-      title={tr("notificationcentre.notifications")}
-      aria-label={bellName(unread)}
-      aria-expanded={open}
-      onClick={() => toggleRailPlugin(NOTIFICATION_SURFACE_ID)}
-    >
-      <svg className="ui-icon ui-icon--sm" viewBox="0 0 16 16" aria-hidden="true" {...STROKE}>
-        <path d="M8 2a4 4 0 0 0-4 4v2.6L2.8 11.2h10.4L12 8.6V6a4 4 0 0 0-4-4z" />
-        <path d="M6.6 13.2a1.5 1.5 0 0 0 2.8 0" />
-      </svg>
+    <span className={`header-action notification-bell${open ? " active" : ""}`}>
+      <IconButton
+        icon={BellIcon}
+        size="md"
+        variant="ghost"
+        label={bellName(unread)}
+        title={tr("notificationcentre.notifications")}
+        pressed={open}
+        aria-expanded={open}
+        onClick={() => toggleRailPlugin(NOTIFICATION_SURFACE_ID)}
+      />
       {badge !== null && <span className="notification-badge" aria-hidden="true">{badge}</span>}
-    </button>
+    </span>
   );
 }
 

@@ -163,10 +163,10 @@ test("narrow source-control shell keeps every change group above the commit comp
                     <span class="source-branch">feature/mobile-layout</span>
                   </div>
                   <div class="source-remote-actions">
-                    <button class="small-btn">Fetch</button>
-                    <button class="small-btn">Pull</button>
-                    <button class="small-btn">Push</button>
-                    <button class="small-btn icon-only">Refresh</button>
+                    <button class="ui-btn ui-btn--quiet ui-btn--sm source-action-btn">Fetch</button>
+                    <button class="ui-btn ui-btn--quiet ui-btn--sm source-action-btn">Pull</button>
+                    <button class="ui-btn ui-btn--quiet ui-btn--sm source-action-btn">Push</button>
+                    <button class="ui-icon-btn ui-icon-btn--ghost ui-icon-btn--sm source-refresh-btn" aria-label="Refresh">R</button>
                   </div>
                 </header>
                 <nav class="source-tabs">
@@ -187,8 +187,8 @@ test("narrow source-control shell keeps every change group above the commit comp
                   </div>
                   <section id="composer" class="git-commit-composer" aria-label="Commit staged changes">
                     <div class="git-commit-heading"><strong>Commit 4 staged files</strong></div>
-                    <textarea class="commit-msg">message</textarea>
-                    <div class="commit-row"><button>Generate</button><button>Commit</button></div>
+                    <textarea class="ui-textarea commit-msg">message</textarea>
+                    <div class="commit-row"><button class="ui-btn ui-btn--quiet ui-btn--sm">Generate</button><button class="ui-btn ui-btn--primary ui-btn--sm">Commit</button></div>
                   </section>
                 </div>
               </main>

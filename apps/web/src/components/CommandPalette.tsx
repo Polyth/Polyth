@@ -8,7 +8,7 @@ import { openSession, refreshSessions } from "../init.ts";
 import { announce } from "./a11y/live.tsx";
 import { tr } from "../i18n/index.ts";
 import { useShellMode } from "../responsiveShell.ts";
-import { commandIcon, Icon, ResponsiveOverlay } from "./ui/index.ts";
+import { commandIcon, Button, Icon, ResponsiveOverlay, TextInput } from "./ui/index.ts";
 import { orderEntries, type PaletteEntry } from "../paletteOrdering.ts";
 import { promptAlert } from "../alerts.ts";
 import {
@@ -317,7 +317,7 @@ export default function CommandPalette() {
         </div>
       )}
       {!phone && (
-        <input
+        <TextInput
           className="palette-input"
           value={q}
           role="combobox"
@@ -363,16 +363,18 @@ export default function CommandPalette() {
                           : tr("sidebar.sessionlist.pinToTop")
                         : tr("common.rename");
                     return (
-                      <button
+                      <Button
                         key={verb}
                         type="button"
+                        size="sm"
+                        variant="ghost"
                         className={`palette-session-action${n === i && sessionActionIndex === actionIndex ? " active" : ""}`}
                         aria-label={`${label}: ${entry.item.title}`}
                         tabIndex={-1}
                         onClick={() => void runSessionVerb(entry, verb)}
                       >
                         {label}
-                      </button>
+                      </Button>
                     );
                   })}
                 </span>

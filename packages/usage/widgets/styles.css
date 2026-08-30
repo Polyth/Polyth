@@ -44,10 +44,10 @@ max-width: 82px; overflow: hidden; color: var(--text); font-size: 15px; text-ove
 color: var(--muted); font-size: var(--font-meta); text-transform: uppercase;
 }
 .provider-share-legend {
-display: flex; flex-direction: column; gap: 7px; min-width: 0;
+display: flex; flex-direction: column; gap: var(--space-2); min-width: 0;
 }
 .provider-share-legend > div {
-display: grid; grid-template-columns: 20px 9px minmax(0, 1fr) auto; align-items: center; gap: 7px; font-size: var(--font-meta);
+display: grid; grid-template-columns: 20px 9px minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); font-size: var(--font-meta);
 }
 .provider-share-logo {
 width: 20px; height: 20px;
@@ -85,13 +85,13 @@ display: flex; align-items: center; gap: 8px; font-size: 13px;
 width: 24px; height: 24px;
 }
 .quota-error {
-color: var(--amber); font-size: 12px;
+color: var(--amber); font-size: var(--font-meta);
 }
 .quota-window {
 display: flex; flex-direction: column; gap: 3px;
 }
 .quota-window-head {
-display: flex; justify-content: space-between; font-size: 12.5px;
+display: flex; justify-content: space-between; font-size: var(--font-meta);
 }
 .quota-progress {
 height: 6px; border-radius: calc(3px * var(--corner-radius-scale)); background: var(--sunken); overflow: hidden;
@@ -114,7 +114,7 @@ display: flex; flex-direction: column; gap: 8px;
 .quota-group-head {
 display: flex; align-items: center; gap: 6px; width: 100%;
   background: none; border: none; padding: 2px 0; cursor: pointer;
-  color: var(--text); font-size: 12px; font-weight: 600; text-align: left;
+  color: var(--text); font-size: var(--font-meta); font-weight: 600; text-align: left;
 }
 .quota-group-head:hover {
 color: var(--accent);
@@ -177,7 +177,7 @@ border: 0; padding: 2px 3px; background: transparent; color: inherit; font: inhe
 color: var(--accent);
 }
 .usage-quota-summary {
-flex: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: 7px; padding: 9px;
+flex: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: var(--space-2); padding: 9px;
 }
 .usage-quota-summary > div {
 min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 7px 9px; border: 1px solid var(--hair); border-radius: var(--radius-card); background: var(--sunken);
@@ -289,7 +289,7 @@ position: relative;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 7px;
+  gap: var(--space-2);
   padding: 15px;
   overflow: hidden;
 }
@@ -300,7 +300,7 @@ display: none;
 display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 7px;
+  gap: var(--space-2);
   color: var(--muted);
   font-size: var(--font-meta);
   font-weight: 620;
@@ -334,7 +334,7 @@ position: relative;
   min-height: 15px;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-2);
   color: var(--faint);
   font-size: var(--font-meta);
 }
@@ -455,7 +455,7 @@ width: 30px;
 width: 14px; height: 14px;
 }
 .usage-chart-empty strong {
-font-size: 12px;
+font-size: var(--font-meta);
 }
 .usage-chart-empty small {
 color: var(--muted); font-size: var(--font-meta);
@@ -724,7 +724,7 @@ width: 38px; height: 38px;
 width: 110px; display: flex; flex-direction: column; gap: 5px;
 }
 .usage-limit-cell > div {
-display: flex; justify-content: space-between; gap: 7px;
+display: flex; justify-content: space-between; gap: var(--space-2);
 }
 .usage-limit-cell > div span {
 color: var(--text); font-size: var(--font-meta);
@@ -874,7 +874,7 @@ overflow: hidden; margin: 3px 0 0; color: var(--muted); font-size: var(--font-me
 .usage-provider-error {
 display: flex;
   align-items: flex-start;
-  gap: 7px;
+  gap: var(--space-2);
   margin-top: 11px;
   padding: 9px 10px;
   border: 1px solid color-mix(in srgb, var(--amber) 30%, var(--border-soft));

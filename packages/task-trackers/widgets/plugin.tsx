@@ -28,6 +28,19 @@ import type {
 } from "@polyth/web-sdk";
 import { friendlyError } from "@polyth/web-sdk";
 import { api } from "./api.ts";
+import {
+  Button,
+  CheckIcon,
+  Checkbox,
+  CloseIcon,
+  IconButton,
+  LinkIcon,
+  RefreshIcon,
+  Select,
+  SendIcon,
+  TextInput,
+  Textarea,
+} from "../../../apps/web/src/components/ui/index.ts";
 
 type BoardView = "kanban" | "list";
 
@@ -321,9 +334,7 @@ function TaskDetail({
           </span>
           <h3>{task.title}</h3>
         </div>
-        <button type="button" className="tt-icon-btn" onClick={onClose} aria-label="Close task details">
-          <Icon.close />
-        </button>
+        <IconButton icon={CloseIcon} size="sm" label="Close task details" onClick={onClose} />
       </header>
 
       <div className="tt-detail-scroll">
@@ -354,33 +365,33 @@ function TaskDetail({
               <small>{demo ? "Sample task context is logged before work starts." : "Task context is logged before work starts."}</small>
             </div>
           </div>
-          <textarea
+          <Textarea
             value={instructions}
             onChange={(event) => setInstructions(event.target.value)}
             placeholder="Optional instructions for the agent…"
             aria-label="Additional instructions for the agent"
             maxLength={2000}
-            rows={3}
+            minRows={3}
             disabled={busy !== null}
           />
           <div className="tt-action-row">
-            <button
-              type="button"
-              className="tt-primary"
+            <Button
+              variant="primary"
+              iconStart={SendIcon}
+              busy={busy === "link"}
               disabled={!sessionId || busy !== null}
               onClick={() => void link(true)}
             >
-              {busy === "link" ? <span className="tt-button-spinner" aria-hidden="true" /> : <Icon.send />}
-              {busy === "link" ? "Starting…" : linked ? "Start agent" : "Link & start agent"}
-            </button>
-            <button
-              type="button"
+              {linked ? "Start agent" : "Link & start agent"}
+            </Button>
+            <Button
+              iconStart={LinkIcon}
+              busy={busy === "select"}
               disabled={!sessionId || busy !== null}
               onClick={() => void link(false)}
             >
-              {busy === "select" ? <span className="tt-button-spinner" aria-hidden="true" /> : <Icon.link />}
-              {busy === "select" ? "Linking…" : linked ? "Refresh link" : "Link only"}
-            </button>
+              {linked ? "Refresh link" : "Link only"}
+            </Button>
           </div>
           {!sessionId && <small className="tt-inline-hint">Open a session to link this task.</small>}
         </section>
@@ -396,38 +407,38 @@ function TaskDetail({
           {statuses.length > 0 ? (
             <>
               <div className="tt-status-row">
-                <label>
-                  <span className="sr-only">Task status</span>
-                  <select
-                    value={statusId}
-                    onChange={(event) => setStatusId(event.target.value)}
-                    disabled={!sessionId || busy !== null}
-                  >
-                    <option value={task.status.id}>{task.status.name}</option>
-                    {statuses.filter((status) => status.id !== task.status.id).map((status) => (
-                      <option key={status.id} value={status.id}>{status.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <button
-                  type="button"
+                <Select
+                  label="Task status"
+                  ariaLabel="Task status"
+                  value={statusId}
+                  disabled={!sessionId || busy !== null}
+                  onChange={setStatusId}
+                  options={[
+                    { value: task.status.id, label: task.status.name },
+                    ...statuses.filter((status) => status.id !== task.status.id).map((status) => ({
+                      value: status.id,
+                      label: status.name,
+                    })),
+                  ]}
+                />
+                <Button
+                  busy={busy === "status"}
                   disabled={!sessionId || busy !== null || statusId === task.status.id}
                   onClick={() => void mutate("status", statusId)}
                 >
-                  {busy === "status" && <span className="tt-button-spinner" aria-hidden="true" />}
-                  {busy === "status" ? "Updating…" : "Update status"}
-                </button>
+                  Update status
+                </Button>
               </div>
               {doneStatus && task.status.category !== "done" && (
-                <button
-                  type="button"
+                <Button
                   className="tt-complete"
+                  iconStart={CheckIcon}
+                  busy={busy === "complete"}
                   disabled={!sessionId || busy !== null}
                   onClick={() => void mutate("complete", doneStatus.id)}
                 >
-                  {busy === "complete" ? <span className="tt-button-spinner" aria-hidden="true" /> : <Icon.check />}
-                  {busy === "complete" ? "Completing…" : "Mark complete"}
-                </button>
+                  Mark complete
+                </Button>
               )}
             </>
           ) : (
@@ -693,7 +704,7 @@ export function TaskTrackerBoard({
           icon={<Icon.refresh />}
           title="Task trackers didn’t load"
           body={error || "The server didn’t return provider information."}
-          action={<button type="button" onClick={() => setLoadEpoch((value) => value + 1)}>Try again</button>}
+          action={<Button size="sm" onClick={() => setLoadEpoch((value) => value + 1)}>Try again</Button>}
         />
       </div>
     );
@@ -731,30 +742,33 @@ export function TaskTrackerBoard({
         </div>
         <div className="tt-header-actions">
           <div className="tt-view-toggle" aria-label="Board view">
-            <button
+            <Button
               type="button"
+              size="sm"
+              variant="ghost"
               className={view === "kanban" ? "active" : ""}
               aria-pressed={view === "kanban"}
               onClick={() => chooseView("kanban")}
               title="Kanban view"
-            ><Icon.widgets /><span>Board</span></button>
-            <button
+            >Board</Button>
+            <Button
               type="button"
+              size="sm"
+              variant="ghost"
               className={view === "list" ? "active" : ""}
               aria-pressed={view === "list"}
               onClick={() => chooseView("list")}
               title="List view"
-            ><Icon.list /><span>List</span></button>
+            >List</Button>
           </div>
-          <button
-            type="button"
-            className="tt-icon-btn"
-            onClick={() => setRefreshKey((value) => value + 1)}
+          <IconButton
+            icon={RefreshIcon}
+            size="sm"
+            label="Refresh tasks"
+            busy={loading === "tasks"}
             disabled={!board || loading !== null}
-            aria-label="Refresh tasks"
-          >
-            <span className={loading === "tasks" ? "tt-refreshing" : ""}><Icon.refresh /></span>
-          </button>
+            onClick={() => setRefreshKey((value) => value + 1)}
+          />
         </div>
       </header>
 
@@ -782,61 +796,64 @@ export function TaskTrackerBoard({
           <div className="tt-board-picker">
             <label>
               <span>Workspace</span>
-              <select
+              <Select
+                label="Workspace"
                 value={projectId}
-                onChange={(event) => {
-                  setProjectId(event.target.value);
+                onChange={(value) => {
+                  setProjectId(value);
                   setStatusFilter("all");
                   closeTask();
                 }}
-              >
-                <option value="">All workspaces</option>
-                {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-              </select>
+                options={[
+                  { value: "", label: "All workspaces" },
+                  ...projects.map((project) => ({ value: project.id, label: project.name })),
+                ]}
+              />
             </label>
             <label>
               <span>Board</span>
-              <select
+              <Select
+                label="Board"
                 value={boardId}
-                onChange={(event) => {
-                  setBoardId(event.target.value);
+                disabled={loading === "boards" || boards.length === 0}
+                onChange={(value) => {
+                  setBoardId(value);
                   setStatusFilter("all");
                   closeTask();
                 }}
-                disabled={loading === "boards" || boards.length === 0}
-              >
-                {boards.length === 0 && <option value="">No boards found</option>}
-                {boards.map((item) => (
-                  <option key={item.id} value={item.id}>{item.name} · {item.type}</option>
-                ))}
-              </select>
+                options={boards.length === 0
+                  ? [{ value: "", label: "No boards found" }]
+                  : boards.map((item) => ({ value: item.id, label: `${item.name} · ${item.type}` }))}
+              />
             </label>
           </div>
 
           {board && (
             <div className="tt-filters">
               <label className="tt-search">
-                <Icon.search />
                 <span className="sr-only">Search tasks</span>
-                <input
+                <TextInput
                   type="search"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="Search tasks"
+                  aria-label="Search tasks"
                 />
               </label>
-              <label className="tt-filter-select">
-                <Icon.filter />
-                <span className="sr-only">Filter by status</span>
-                <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-                  <option value="all">All statuses · {tasks.length}</option>
-                  {statuses.map((status) => (
-                    <option key={status.id} value={status.tasks[0]?.status.id}>
-                      {status.name} · {status.tasks.length}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <Select
+                className="tt-filter-select"
+                label="Filter by status"
+                ariaLabel="Filter by status"
+                value={statusFilter}
+                onChange={setStatusFilter}
+                options={[
+                  { value: "all", label: `All statuses · ${tasks.length}` },
+                  ...statuses.map((status) => ({
+                    value: status.tasks[0]?.status.id ?? status.id,
+                    label: `${status.name} · ${status.tasks.length}`,
+                  })),
+                ]}
+              />
             </div>
           )}
 
@@ -853,7 +870,7 @@ export function TaskTrackerBoard({
                   icon={<Icon.search />}
                   title="No matching tasks"
                   body="Clear the search or choose another status."
-                  action={<button type="button" onClick={() => { setQuery(""); setStatusFilter("all"); }}>Clear filters</button>}
+                  action={<Button size="sm" onClick={() => { setQuery(""); setStatusFilter("all"); }}>Clear filters</Button>}
                 />
               ) : view === "kanban" ? (
                 <div className="tt-kanban" aria-label={`${board?.name ?? "Task"} kanban board`}>
@@ -922,15 +939,15 @@ export function TaskTrackerBoard({
       {error && <div className="tt-board-error" role="alert">
         <span>{error}</span>
         <div>
-          <button
-            type="button"
+          <Button
+            size="sm"
             onClick={() => {
               setError("");
               if (selected) openTask(selected);
               else setLoadEpoch((value) => value + 1);
             }}
-          >Try again</button>
-          <button type="button" onClick={() => setError("")}>Dismiss</button>
+          >Try again</Button>
+          <Button size="sm" onClick={() => setError("")}>Dismiss</Button>
         </div>
       </div>}
     </div>
@@ -1012,7 +1029,7 @@ export function LinkedTaskWidget({ sessionId }: Pick<WidgetRenderContext, "sessi
   if (loading && !linked) return <div className="tt-linked-empty" role="status"><span className="tt-spinner" /> Loading linked task…</div>;
   if (!linked && error) return <div className="tt-linked-empty tt-linked-load-error" role="alert">
     <span>{error}</span>
-    <button type="button" onClick={() => setReloadKey((value) => value + 1)}>Try again</button>
+    <Button size="sm" onClick={() => setReloadKey((value) => value + 1)}>Try again</Button>
   </div>;
   if (!linked) return <div className="tt-linked-empty"><Icon.link /><span>No task is linked to this session yet.</span></div>;
 
@@ -1035,28 +1052,34 @@ export function LinkedTaskWidget({ sessionId }: Pick<WidgetRenderContext, "sessi
       </div>
       {task && statuses.length > 0 && !linked.completed && (
         <div className="tt-linked-actions">
-          <select
-            aria-label="Linked task status"
+          <Select
+            label="Linked task status"
+            ariaLabel="Linked task status"
             value={statusId}
             disabled={loading}
-            onChange={(event) => setStatusId(event.target.value)}
-          >
-            <option value={task.status.id}>{task.status.name}</option>
-            {statuses.filter((item) => item.id !== task.status.id).map((item) => (
-              <option key={item.id} value={item.id}>{item.name}</option>
-            ))}
-          </select>
-          <button
-            type="button"
+            onChange={setStatusId}
+            options={[
+              { value: task.status.id, label: task.status.name },
+              ...statuses.filter((item) => item.id !== task.status.id).map((item) => ({
+                value: item.id,
+                label: item.name,
+              })),
+            ]}
+          />
+          <Button
+            size="sm"
             disabled={loading || statusId === task.status.id}
             onClick={() => void update(statusId)}
-          >Update</button>
-          {doneStatus && <button
-            type="button"
-            className="tt-complete"
-            disabled={loading}
-            onClick={() => void update(doneStatus.id)}
-          ><Icon.check /><span>Complete</span></button>}
+          >Update</Button>
+          {doneStatus && (
+            <Button
+              size="sm"
+              className="tt-complete"
+              iconStart={CheckIcon}
+              disabled={loading}
+              onClick={() => void update(doneStatus.id)}
+            >Complete</Button>
+          )}
           {task.url && <a href={task.url} target="_blank" rel="noreferrer" aria-label={`Open ${task.key} in ${PROVIDER_LABELS[task.provider]}`}>
             <Icon.external />
           </a>}
@@ -1082,24 +1105,20 @@ export function LinkedTaskWidget({ sessionId }: Pick<WidgetRenderContext, "sessi
 function TaskTrackerSettings({ config, updateConfig }: WidgetSettingsContext) {
   return (
     <div className="widget-schema-settings" aria-label="Task board settings">
-      <label>
-        <span><strong>Default view</strong></span>
-        <select
-          value={config.defaultView === "list" ? "list" : "kanban"}
-          onChange={(event) => updateConfig({ ...config, defaultView: event.target.value })}
-        >
-          <option value="kanban">Kanban board</option>
-          <option value="list">Task list</option>
-        </select>
-      </label>
-      <label>
-        <input
-          type="checkbox"
-          checked={config.hideCompleted === true}
-          onChange={(event) => updateConfig({ ...config, hideCompleted: event.target.checked })}
-        />
-        <span><strong>Hide completed tasks</strong></span>
-      </label>
+      <Select
+        label="Default view"
+        value={config.defaultView === "list" ? "list" : "kanban"}
+        onChange={(value) => updateConfig({ ...config, defaultView: value })}
+        options={[
+          { value: "kanban", label: "Kanban board" },
+          { value: "list", label: "Task list" },
+        ]}
+      />
+      <Checkbox
+        checked={config.hideCompleted === true}
+        onChange={(checked) => updateConfig({ ...config, hideCompleted: checked })}
+        label={<strong>Hide completed tasks</strong>}
+      />
     </div>
   );
 }

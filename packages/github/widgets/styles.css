@@ -1,8 +1,4 @@
 /* Package-owned github web styles. */
-.github-page .small-btn.icon-only,
-.pr-surface .small-btn.icon-only {
-width: var(--control-h); min-width: var(--control-h); height: var(--control-h); padding: 0;
-}
 .github-head .view-title {
 margin-bottom: 3px;
 }
@@ -33,7 +29,7 @@ display: flex; flex-direction: column; gap: 2px;
 }
 .gh-row {
 display: flex; align-items: center; gap: 10px;
-  border: 1px solid var(--hair); border-radius: var(--radius-control); background: var(--elevated); padding: 8px 11px; font-size: 12.5px;
+  border: 1px solid var(--hair); border-radius: var(--radius-control); background: var(--elevated); padding: 8px 11px; font-size: var(--font-meta);
 }
 .gh-state {
 flex-shrink: 0; width: 52px; text-align: center; font-size: var(--font-meta); font-weight: 700; text-transform: uppercase; border-radius: var(--radius-control); padding: 1px 0;
@@ -83,7 +79,7 @@ background: var(--elevated); border: 1px solid var(--hair-strong); border-radius
 display: flex; flex-direction: column; gap: 2px;
 }
 .pr-file-row {
-display: flex; align-items: center; gap: 10px; padding: 4px 6px; border-radius: calc(var(--radius-control) - 2px); font-size: 12.5px;
+display: flex; align-items: center; gap: 10px; padding: 4px 6px; border-radius: calc(var(--radius-control) - 2px); font-size: var(--font-meta);
 }
 .pr-file-row:hover {
 background: var(--raised);
@@ -92,7 +88,7 @@ background: var(--raised);
 flex: 1; overflow: hidden; text-overflow: ellipsis;
 }
 .check-row {
-display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: calc(var(--radius-control) - 2px); font-size: 12.5px;
+display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: calc(var(--radius-control) - 2px); font-size: var(--font-meta);
 }
 .check-row:hover {
 background: var(--raised);
@@ -125,19 +121,19 @@ display: flex; flex-direction: column; gap: 8px;
 border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--elevated); padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; box-shadow: var(--inset-hi);
 }
 .pr-comment-head {
-display: flex; align-items: center; gap: 8px; font-size: 12px;
+display: flex; align-items: center; gap: 8px; font-size: var(--font-meta);
 }
 .pr-comment-body {
 font-size: 13px; white-space: pre-wrap;
 }
 .pr-review-form {
-border: 1px dashed var(--border); border-radius: var(--radius-card); background: var(--sunken); padding: 12px; display: flex; flex-direction: column; gap: 7px;
+border: 1px dashed var(--border); border-radius: var(--radius-card); background: var(--sunken); padding: 12px; display: flex; flex-direction: column; gap: var(--space-2);
 }
 .pr-create-panel,
 .pr-merge-area,
 .pr-edit-form {
 border: 1px dashed var(--border); border-radius: var(--radius-card); background: var(--sunken);
-  padding: 12px; display: flex; flex-direction: column; gap: 7px;
+  padding: 12px; display: flex; flex-direction: column; gap: var(--space-2);
 }
 .github-pr-summary {
 display: flex; align-items: stretch; gap: 12px; padding: 10px 12px;
@@ -149,7 +145,7 @@ min-width: 0; flex: 1; display: flex; flex-direction: column; justify-content: c
 color: var(--muted); font-size: var(--font-meta);
 }
 .github-pr-summary > a strong {
-overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap;
+overflow: hidden; color: var(--text); font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap;
 }
 .github-pr-summary-metrics {
 display: flex; align-items: stretch; gap: 6px;
@@ -190,26 +186,18 @@ min-width: 0; display: flex; flex-direction: column; gap: 3px;
 color: var(--text); font-size: 13px;
 }
 .github-conflict-copy > span {
-overflow: hidden; color: var(--text-dim); font-size: 12px; text-overflow: ellipsis; white-space: nowrap;
+overflow: hidden; color: var(--text-dim); font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap;
 }
 .github-conflict-copy code {
 width: fit-content; max-width: 100%; overflow: hidden; color: var(--muted);
   font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap;
 }
-.github-conflict-card > .small-btn {
+.github-conflict-card > .ui-btn {
 justify-self: end; white-space: nowrap;
 }
 .github-page {
 width: 100%; max-width: 1440px; margin-inline: auto;
   padding: var(--space-4) var(--gutter); gap: 14px;
-}
-/* Legacy controls inherit core chrome; github only normalizes their layout
-   inside its action rows. */
-.github-page .small-btn,
-.github-page .primary-btn,
-.pr-surface .small-btn,
-.pr-surface .primary-btn {
-min-height: var(--control-h); padding: 0 var(--control-pad-x); display: inline-flex; align-items: center; justify-content: center; gap: 7px;
 }
 .github-head {
 display: flex; align-items: center; gap: 14px; min-width: 0;
@@ -246,7 +234,7 @@ width: 21px; height: 21px;
 display: flex; flex: 1; min-width: 0; max-width: 100%; flex-direction: column; gap: 4px; overflow: hidden;
 }
 .gh-repo-copy .muted {
-overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px;
+overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-meta);
 }
 .gh-repo-meta {
 min-width: 0; max-width: 100%; flex-wrap: wrap; justify-content: flex-end;
@@ -283,11 +271,11 @@ display: flex; align-items: center; gap: 16px; padding: 13px 14px;
 border-color: var(--border); background: var(--raised);
 }
 .gh-card-main {
-display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 7px;
+display: flex; flex: 1; min-width: 0; flex-direction: column; gap: var(--space-2);
 }
 .gh-card-kicker,
 .gh-card-meta {
-display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: var(--muted); font-size: var(--font-meta);
+display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); color: var(--muted); font-size: var(--font-meta);
 }
 .gh-state {
 width: auto; min-width: 50px; min-height: 20px; display: inline-grid; place-items: center; padding: 2px 7px;
@@ -356,7 +344,7 @@ flex: none;
 display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px;
 }
 .pr-title-block > div {
-display: flex; align-items: center; gap: 7px;
+display: flex; align-items: center; gap: var(--space-2);
 }
 .pr-title-block > a {
 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); text-decoration: none; font-size: 15px; font-weight: 650;
@@ -376,7 +364,7 @@ display: flex; align-items: stretch; align-self: stretch; gap: 0; min-height: 46
   border-bottom: 1px solid var(--hair-strong);
 }
 .pr-tabbar .ui-tab {
-min-width: max-content; min-height: max(var(--tap), var(--hit-min)); display: inline-flex; align-items: center; gap: 7px; padding: 0 16px;
+min-width: max-content; min-height: max(var(--tap), var(--hit-min)); display: inline-flex; align-items: center; gap: var(--space-2); padding: 0 16px;
 }
 .pr-tabbar .ui-tab > span {
 min-width: 20px; height: 20px; display: inline-grid; place-items: center; padding: 0 5px; border-radius: 999px; background: var(--surface-overlay-strong); font-size: var(--font-meta);
@@ -390,7 +378,7 @@ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px;
 }
 .pr-summary-cards > div,
 .check-summary-cards > div {
-min-height: 78px; display: flex; flex-direction: column; justify-content: center; gap: 7px; padding: 11px 13px;
+min-height: 78px; display: flex; flex-direction: column; justify-content: center; gap: var(--space-2); padding: 11px 13px;
   border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--elevated);
 }
 .pr-summary-cards span,
@@ -427,7 +415,7 @@ min-height: 100px; margin: 0; padding: 16px; font-size: 13.5px; line-height: 1.5
 }
 .pr-edit-form label,
 .pr-create-field {
-display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 620;
+display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: var(--font-meta); font-weight: 620;
 }
 .pr-edit-form .ui-textarea,
 .pr-create-panel .ui-textarea {
@@ -473,7 +461,7 @@ display: flex; align-items: end; gap: 14px;
 width: min(260px, 100%);
 }
 .pr-create-actions {
-display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
 }
 .pr-files {
 gap: 8px;
@@ -483,7 +471,7 @@ min-height: 54px; display: flex; align-items: center; gap: 8px; padding: 7px 10p
   border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--elevated);
 }
 .pr-files-toolbar > div {
-display: flex; flex-direction: column; gap: 3px; font-size: 12.5px;
+display: flex; flex-direction: column; gap: 3px; font-size: var(--font-meta);
 }
 .pr-file-card {
 overflow: hidden; border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--elevated);
@@ -502,7 +490,7 @@ background: var(--raised); border-color: transparent;
 background: var(--surface-overlay);
 }
 .pr-file-path {
-min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px;
+min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-meta);
 }
 .pr-file-stat {
 display: inline-flex; align-items: center; gap: 8px; font: 600 11px var(--mono);
@@ -652,7 +640,7 @@ animation: gh-agent-pulse 1.6s ease-in-out infinite;
 .gh-agent-thinking {
 min-height: 64px; display: flex; align-items: center; justify-content: center; gap: 5px;
   border: 1px dashed var(--accent-line); border-radius: var(--radius-card); background: var(--accent-wash);
-  color: var(--muted); font-size: 12px;
+  color: var(--muted); font-size: var(--font-meta);
 }
 .gh-agent-thinking i {
 width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
@@ -876,7 +864,7 @@ flex-direction: column; align-items: flex-end; gap: 1px;
 }
 
 .pr-diff {
-font-size: 12px;
+font-size: var(--font-meta);
 }
 
 .pr-diff-ln {
@@ -895,12 +883,12 @@ min-width: calc(100% - 100px);
 order: 3; margin-left: 16px;
 }
 
-.check-row .small-btn {
+.check-row .ui-btn {
 order: 4; margin-left: auto;
 }
 
 .pr-surface .pr-comment {
-grid-template-columns: 30px minmax(0, 1fr); gap: 7px;
+grid-template-columns: 30px minmax(0, 1fr); gap: var(--space-2);
 }
 
 .pr-comment-avatar {
@@ -1004,7 +992,7 @@ position: relative;
 }
 .merge-status-badge {
 align-self: flex-start; width: auto; padding: 3px 8px; border-radius: 999px;
-  font-size: 12px !important; line-height: 1.4;
+  font-size: var(--font-meta) !important; line-height: 1.4;
 }
 .merge-status-badge.st-mergeable {
 color: var(--green-on-wash); background: var(--green-wash);
@@ -1035,7 +1023,7 @@ flex: 1; border: 0; padding: 0; background: transparent; color: inherit;
   font: inherit; white-space: pre;
 }
 .pr-review-kind {
-display: flex; align-items: center; gap: 8px; color: var(--text-dim); font-size: 12px;
+display: flex; align-items: center; gap: 8px; color: var(--text-dim); font-size: var(--font-meta);
 }
 .pr-review-kind > span {
 flex: none;
@@ -1049,10 +1037,10 @@ min-height: 64px; display: grid; grid-template-columns: minmax(0, 1fr) auto minm
 display: flex; flex-direction: column; gap: 3px; overflow: hidden;
 }
 .pr-compare-summary small {
-color: var(--muted); font-size: 12px;
+color: var(--muted); font-size: var(--font-meta);
 }
 .pr-compare-summary strong {
-overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px;
+overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-meta);
 }
 .pr-compare-arrow {
 color: var(--muted);
@@ -1066,7 +1054,7 @@ color: var(--muted);
 font-size: max(12px, 1em);
 }
 .pr-tabbar .ui-tab > span {
-font-size: 12px;
+font-size: var(--font-meta);
 }
 @container source-surface (max-width: 700px) {
 .github-head {
@@ -1182,7 +1170,7 @@ transform: rotate(90deg); justify-self: center;
 grid-template-columns: 36px minmax(0, 1fr);
 }
 
-.github-conflict-card > .small-btn {
+.github-conflict-card > .ui-btn {
 grid-column: 1 / -1; width: 100%;
 }
 
@@ -1203,7 +1191,7 @@ width: 100%;
   mask: radial-gradient(circle at center, transparent 5px, black 5.5px);
   -webkit-mask: radial-gradient(circle at center, transparent 5px, black 5.5px);
 }
-.checks-headline { font-size: 12.5px; font-weight: 600; }
+.checks-headline { font-size: var(--font-meta); font-weight: 600; }
 .checks-headline.hl-failure { color: var(--red); }
 .checks-headline.hl-pending { color: var(--amber); }
 .checks-headline.hl-success { color: var(--green); }
@@ -1214,7 +1202,7 @@ width: 100%;
 }
 .checks-group-head {
   min-height: max(var(--control-h), var(--hit-min)); display: flex; align-items: center; gap: 8px;
-  padding: 0 12px; border-bottom: 1px solid var(--hair); font-size: 12.5px;
+  padding: 0 12px; border-bottom: 1px solid var(--hair); font-size: var(--font-meta);
 }
 .checks-group-head span {
   display: inline-grid; place-items: center; min-width: 20px; height: 20px;

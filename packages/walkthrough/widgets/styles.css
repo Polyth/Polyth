@@ -13,7 +13,7 @@ margin-left: 12px;
 }
 .wt-file {
 padding: 10px 14px; border-bottom: 1px solid var(--border-soft);
-  font-family: var(--mono); font-size: 12.5px; font-weight: 600;
+  font-family: var(--mono); font-size: var(--font-meta); font-weight: 600;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .wt-diff {
@@ -75,7 +75,7 @@ width: 90px;
 }
 .auto-review-banner {
 display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--elevated); padding: 10px 12px; font-size: 12.5px;
+  border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--elevated); padding: 10px 12px; font-size: var(--font-meta);
 }
 .auto-review-banner.passed {
 border-color: var(--green);
@@ -88,13 +88,13 @@ border-color: var(--red);
 border-color: var(--amber);
 }
 .review-card {
-border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--elevated); padding: 12px 14px; display: flex; flex-direction: column; gap: 7px; box-shadow: var(--inset-hi);
+border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--elevated); padding: 12px 14px; display: flex; flex-direction: column; gap: var(--space-2); box-shadow: var(--inset-hi);
 }
 .review-summary {
 font-size: 13px; white-space: pre-wrap;
 }
 .review-finding {
-display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; flex-wrap: wrap;
+display: flex; align-items: baseline; gap: 8px; font-size: var(--font-meta); flex-wrap: wrap;
 }
 .review-finding.sev-critical .tag,
 .review-finding.sev-high .tag {
@@ -120,7 +120,7 @@ color: var(--red); border-color: var(--red);
 }
 .walkthrough-stale {
 border: 1px solid var(--amber); color: var(--amber); border-radius: var(--radius-control);
-  padding: 8px 10px; font-size: 12.5px;
+  padding: 8px 10px; font-size: var(--font-meta);
 }
 .walkthrough-stage {
 border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--elevated); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; box-shadow: var(--inset-hi);
@@ -132,7 +132,7 @@ font-weight: 600; font-size: 14px;
 display: flex; flex-direction: column; gap: 4px;
 }
 .walkthrough-stop-explain {
-font-size: 12.5px; color: var(--muted);
+font-size: var(--font-meta); color: var(--muted);
 }
 .walkthrough-page {
 width: 100%;

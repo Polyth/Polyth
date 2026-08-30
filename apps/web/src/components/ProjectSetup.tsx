@@ -18,6 +18,7 @@ import "../widgets/builtinWidgets.tsx";
 import { announce } from "./a11y/live.tsx";
 import { useModalSurface } from "./a11y/Dialog.tsx";
 import { tr } from "../i18n/index.ts";
+import { Button, CloseIcon, IconButton } from "./ui/index.ts";
 
 const MODE_COPY: Array<[WidgetAudience, string, string]> = [
   ["simple", tr("projectsetup.simple"), tr("projectsetup.simpleDescription")],
@@ -143,7 +144,7 @@ export default function ProjectSetup() {
             <h1 id="project-setup-heading">{tr("projectsetup.setUpThisProject")}</h1>
             <p id="project-setup-desc">{tr("projectsetup.chooseAStartingCanvasForThisProject")}</p>
           </div>
-          <button className="project-setup-close" onClick={dismiss} aria-label={tr("projectsetup.closeProjectSetup")}>{tr("projectsetup.message")}</button>
+          <IconButton className="project-setup-close" icon={CloseIcon} label={tr("projectsetup.closeProjectSetup")} onClick={dismiss} />
         </header>
 
         <ol className="guided-setup-steps" aria-label={tr("projectsetup.setupProgress")}>
@@ -235,9 +236,9 @@ export default function ProjectSetup() {
             <section>
               <div className="guided-step-title"><span>{tr("projectsetup.step4Of4")}</span><h2>{tr("projectsetup.yourProjectCanvas")}</h2><p>{tr("projectsetup.reviewTheChoicesBelowNothingIsLocked")}</p></div>
               <div className="guided-review">
-                <article><span>{tr("projectsetup.workflow")}</span><strong>{workflowOption(draft.workflow).label}</strong><button type="button" onClick={() => setStep(0)}>{tr("common.edit")}</button></article>
-                <article><span>{tr("projectsetup.control")}</span><strong>{MODE_COPY.find(([id]) => id === draft.audience)?.[1]}</strong><button type="button" onClick={() => setStep(1)}>{tr("common.edit")}</button></article>
-                <article><span>{tr("projectsetup.widgets")}</span><strong>{draft.widgetIds.length} {tr("projectsetup.selected2")}</strong><button type="button" onClick={() => setStep(2)}>{tr("common.edit")}</button></article>
+                <article><span>{tr("projectsetup.workflow")}</span><strong>{workflowOption(draft.workflow).label}</strong><Button type="button" size="sm" variant="ghost" onClick={() => setStep(0)}>{tr("common.edit")}</Button></article>
+                <article><span>{tr("projectsetup.control")}</span><strong>{MODE_COPY.find(([id]) => id === draft.audience)?.[1]}</strong><Button type="button" size="sm" variant="ghost" onClick={() => setStep(1)}>{tr("common.edit")}</Button></article>
+                <article><span>{tr("projectsetup.widgets")}</span><strong>{draft.widgetIds.length} {tr("projectsetup.selected2")}</strong><Button type="button" size="sm" variant="ghost" onClick={() => setStep(2)}>{tr("common.edit")}</Button></article>
                 <div className="guided-review-widgets">
                   {draft.widgetIds.map((id) => {
                     const widget = widgets.find((item) => item.id === id);
@@ -251,12 +252,12 @@ export default function ProjectSetup() {
         </div>
 
         <footer className="guided-setup-foot">
-          <button type="button" className="project-setup-skip" onClick={dismiss}>{tr("projectsetup.skipForNow")}</button>
+          <Button variant="ghost" className="project-setup-skip" onClick={dismiss}>{tr("projectsetup.skipForNow")}</Button>
           <span />
-          {step > 0 && <button type="button" onClick={() => setStep((current) => current - 1)}>{tr("common.back")}</button>}
+          {step > 0 && <Button onClick={() => setStep((current) => current - 1)}>{tr("common.back")}</Button>}
           {step < 3
-            ? <button type="button" className="btn-accent" onClick={() => setStep((current) => current + 1)}>{tr("common.continue")}</button>
-            : <button type="button" className="btn-accent" disabled={!validSetupWidgetCount(draft.widgetIds)} onClick={finish}>{tr("projectsetup.finishSetup")}</button>}
+            ? <Button variant="primary" onClick={() => setStep((current) => current + 1)}>{tr("common.continue")}</Button>
+            : <Button variant="primary" disabled={!validSetupWidgetCount(draft.widgetIds)} onClick={finish}>{tr("projectsetup.finishSetup")}</Button>}
         </footer>
       </div>
     </div>

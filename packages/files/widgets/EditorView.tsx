@@ -10,7 +10,6 @@ import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
 import { requestComposerInsert } from "../../../apps/web/src/composerInsert.ts";
 import { setDragPath } from "../../../apps/web/src/dnd.ts";
 import { MOD } from "../../../apps/web/src/format.ts";
-import { useEscape } from "../../../apps/web/src/useEscape.ts";
 import { usePaneVisible } from "../../../apps/web/src/workspace/paneVisibility.ts";
 import { setPaneLastResource } from "../../../apps/web/src/workspace/panePrefs.ts";
 import type { PaneTab } from "../../../apps/web/src/workspace/paneStore.ts";
@@ -22,7 +21,7 @@ import { desktopBridge } from "../../../apps/web/src/desktopBridge.ts";
 import "./editor/FilePane.tsx"; // registers the "file" pane provider
 import "../../../apps/web/src/workspace/mainSlotPanes.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts"; // registers the "plugin" slot bridge
-import { BackIcon, IconButton, SearchIcon, Tabs, TextInput } from "../../../apps/web/src/components/ui/index.ts";
+import { BackIcon, IconButton, Menu, SearchIcon, Tabs, TextInput, type MenuEntry } from "../../../apps/web/src/components/ui/index.ts";
 
 interface Row {
   e: FileEntry;
@@ -232,8 +231,6 @@ export default function EditorView() {
     }
   };
 
-  useEscape(ctx !== null, () => setCtx(null));
-
   // Escape with no open document closes the Files pane (non-terminal Escape
   // → the command path restores focus to the invoker). FilePane owns Escape
   // while a document is active.
@@ -419,35 +416,56 @@ export default function EditorView() {
         )}
       </aside>
 
-      {ctx && (
-        <div className="ctx-backdrop" onClick={() => setCtx(null)} onContextMenu={(e) => { e.preventDefault(); setCtx(null); }}>
-          <div
-            className="ctx-menu"
-            role="menu"
-            style={{ left: Math.min(ctx.x, window.innerWidth - 200), top: Math.min(ctx.y, window.innerHeight - 220) }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {!ctx.entry.dir && (
-              <button role="menuitem" onClick={() => { openFile(ctx.entry.path); setCtx(null); }}>{tr("common.open")}</button>
-            )}
-            <button role="menuitem" onClick={() => { attachPath(ctx.entry.path); setCtx(null); }}>{tr("editorview.addToChat")}</button>
-            <button role="menuitem" onClick={() => { void navigator.clipboard?.writeText(ctx.entry.path); setCtx(null); }}>{tr("editorview.copyPath")}</button>
-            {desktopBridge() && !project?.remote && (
-              <button role="menuitem" onClick={() => { void revealNative(ctx.entry); setCtx(null); }}>
-                {tr(ctx.entry.dir ? "editorview.openInFileManager" : "editorview.revealInFileManager")}
-              </button>
-            )}
-            {ctx.entry.dir && (
-              <>
-                <button role="menuitem" onClick={() => { void ctxNew(ctx.entry.path, "file"); setCtx(null); }}>{tr("editorview.newFile")}</button>
-                <button role="menuitem" onClick={() => { void ctxNew(ctx.entry.path, "folder"); setCtx(null); }}>{tr("editorview.newFolder")}</button>
-              </>
-            )}
-            <button role="menuitem" onClick={() => { void ctxRename(ctx.entry); setCtx(null); }}>{tr("editorview.renameMove")}</button>
-            <button role="menuitem" className="danger" onClick={() => { void ctxDelete(ctx.entry); setCtx(null); }}>{tr("editorview.delete")}</button>
-          </div>
-        </div>
-      )}
+      <Menu
+        key={ctx ? `${ctx.entry.path}:${ctx.x}:${ctx.y}` : "closed"}
+        label={ctx ? tr("filerowactions.actionsForValue", { path: ctx.entry.path }) : tr("editorview.files")}
+        open={ctx !== null}
+        onOpenChange={(open) => { if (!open) setCtx(null); }}
+        entries={ctx ? ([
+          ...(!ctx.entry.dir
+            ? [{ id: "open", label: tr("common.open"), onSelect: () => openFile(ctx.entry.path) }]
+            : []),
+          { id: "chat", label: tr("editorview.addToChat"), onSelect: () => attachPath(ctx.entry.path) },
+          { id: "copy", label: tr("editorview.copyPath"), onSelect: () => void navigator.clipboard?.writeText(ctx.entry.path) },
+          ...(desktopBridge() && !project?.remote
+            ? [{
+                id: "reveal",
+                label: tr(ctx.entry.dir ? "editorview.openInFileManager" : "editorview.revealInFileManager"),
+                onSelect: () => void revealNative(ctx.entry),
+              }]
+            : []),
+          ...(ctx.entry.dir
+            ? [
+                { id: "new-file", label: tr("editorview.newFile"), onSelect: () => void ctxNew(ctx.entry.path, "file") },
+                { id: "new-folder", label: tr("editorview.newFolder"), onSelect: () => void ctxNew(ctx.entry.path, "folder") },
+              ]
+            : []),
+          { id: "rename", label: tr("editorview.renameMove"), onSelect: () => void ctxRename(ctx.entry) },
+          { id: "delete", label: tr("editorview.delete"), danger: true, onSelect: () => void ctxDelete(ctx.entry) },
+        ] satisfies MenuEntry[]) : []}
+      >
+        {(trigger) => (
+          <button
+            {...trigger}
+            type="button"
+            className="files-ctx-anchor"
+            tabIndex={-1}
+            aria-hidden="true"
+            style={{
+              position: "fixed",
+              left: ctx?.x ?? 0,
+              top: ctx?.y ?? 0,
+              width: 1,
+              height: 1,
+              padding: 0,
+              margin: 0,
+              overflow: "hidden",
+              opacity: 0,
+              pointerEvents: "none",
+            }}
+          />
+        )}
+      </Menu>
 
       <PaneHost
         ref={paneRef}

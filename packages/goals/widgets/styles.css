@@ -115,17 +115,14 @@ border-bottom: 1px solid var(--border);
   padding: 12px var(--gutter);
   display: flex; flex-direction: column; gap: 8px;
 }
-.goal-attach textarea {
-width: 100%; resize: none; font-size: 13px;
+.goal-attach .ui-textarea {
+width: 100%;
 }
 .goal-attach-row {
 display: flex; gap: 10px; align-items: flex-end;
 }
 .goal-attach-label {
-display: grid; gap: 3px; color: var(--muted); font-size: 12px; font-weight: 600;
-}
-.goal-attach-submit {
-padding: 5px 16px; font-size: 12px;
+display: grid; gap: 3px; color: var(--muted); font-size: var(--font-meta); font-weight: 600;
 }
 .goal-toggle {
 display: flex; align-items: center; gap: 8px; width: 100%;
@@ -203,7 +200,7 @@ gap: 16px;
   background: transparent;
 }
 .goal-dialog .goal-attach-label {
-gap: 7px; color: var(--text-dim);
+gap: var(--space-2); color: var(--text-dim);
 }
 .goal-dialog .goal-attach-label > span {
 display: flex; align-items: baseline; gap: 6px;

@@ -25,6 +25,7 @@ import {
   type WidgetSizeFilter,
 } from "../../widgets/widgetLibrary.ts";
 import { tr } from "../../i18n/index.ts";
+import { Button, CloseIcon, IconButton, MoreVerticalIcon, PlusIcon, Select, Tabs, TextInput } from "../ui/index.ts";
 
 const ZONE_LABEL: Record<WidgetZone, string> = {
   header: tr("settings.widgetlibraryoverlay.header"),
@@ -81,7 +82,14 @@ function WidgetLibraryCard({
       <div className="widget-library-card-copy">
         <div className="widget-library-card-title">
           <strong>{widget.title}</strong>
-          <button type="button" aria-label={tr("settings.widgetlibraryoverlay.moreAboutValue", { title: widget.title })} title={tr("settings.widgetlibraryoverlay.valueWidget", { value: pluginDisplayName(widget) })}>•••</button>
+          <IconButton
+            icon={MoreVerticalIcon}
+            size="sm"
+            variant="ghost"
+            className="widget-library-more"
+            label={tr("settings.widgetlibraryoverlay.moreAboutValue", { title: widget.title })}
+            title={tr("settings.widgetlibraryoverlay.valueWidget", { value: pluginDisplayName(widget) })}
+          />
         </div>
         <p>{widget.description}</p>
         <div className="widget-library-meta">
@@ -89,15 +97,18 @@ function WidgetLibraryCard({
           <span>{tr("settings.widgetlibraryoverlay.placements")}{" "}<b>{slots.map(slotLabel).join(", ")}</b></span>
         </div>
       </div>
-      <button
+      <Button
         type="button"
+        size="sm"
+        variant={visible ? "quiet" : "primary"}
         className="widget-library-add"
         disabled={visible}
+        iconStart={visible ? undefined : PlusIcon}
         onClick={() => onAdd(widget)}
         aria-label={visible ? tr("settings.widgetlibraryoverlay.valueIsOnTheCanvas", { title: widget.title }) : tr("settings.widgetlibraryoverlay.addValue", { title: widget.title })}
       >
-        {visible ? tr("settings.widgetlibraryoverlay.added") : <>{tr("common.add")}{" "}<b aria-hidden="true">＋</b></>}
-      </button>
+        {visible ? tr("settings.widgetlibraryoverlay.added") : tr("common.add")}
+      </Button>
     </article>
   );
 }
@@ -187,42 +198,61 @@ export default function WidgetLibraryOverlay({
             <p>{tr("settings.widgetlibraryoverlay.browseAndAddWidgetsToYourWorkspace")}</p>
           </div>
           <span><kbd>{tr("settings.widgetlibraryoverlay.esc")}</kbd> {tr("settings.widgetlibraryoverlay.close")}</span>
-          <button type="button" onClick={onClose} aria-label={tr("settings.widgetlibraryoverlay.closeWidgetLibrary")}>{tr("settings.widgetlibraryoverlay.message")}</button>
+          <IconButton icon={CloseIcon} size="sm" label={tr("settings.widgetlibraryoverlay.closeWidgetLibrary")} onClick={onClose} />
         </header>
 
         <div className="widget-library-filters">
           <label className="widget-library-search">
             <span aria-hidden="true">⌕</span>
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tr("settings.widgetlibraryoverlay.searchWidgets")} aria-label={tr("settings.widgetlibraryoverlay.searchWidgets2")} />
+            <TextInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tr("settings.widgetlibraryoverlay.searchWidgets")} aria-label={tr("settings.widgetlibraryoverlay.searchWidgets2")} />
           </label>
-          <select aria-label={tr("settings.widgetlibraryoverlay.filterByPlugin")} value={pluginId} onChange={(event) => setPluginId(event.target.value)}>
-            <option value="all">{tr("settings.widgetlibraryoverlay.allPlugins")}</option>
-            {plugins.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
-          </select>
-          <select aria-label={tr("settings.widgetlibraryoverlay.filterBySize")} value={size} onChange={(event) => setSize(event.target.value as WidgetSizeFilter)}>
-            <option value="all">{tr("settings.widgetlibraryoverlay.allSizes")}</option>
-            <option value="small">{tr("settings.widgetlibraryoverlay.small")}</option>
-            <option value="medium">{tr("settings.widgetlibraryoverlay.medium")}</option>
-            <option value="large">{tr("settings.widgetlibraryoverlay.large")}</option>
-          </select>
-          <select aria-label={tr("settings.widgetlibraryoverlay.filterByZone")} value={zone} onChange={(event) => setZone(event.target.value as WidgetZone | "all")}>
-            <option value="all">{tr("settings.widgetlibraryoverlay.allZones")}</option>
-            {Object.entries(ZONE_LABEL).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-          </select>
-          <button type="button" className="widget-library-clear" disabled={!hasFilters} onClick={resetFilters}>{tr("settings.widgetlibraryoverlay.clearFilters")}</button>
+          <Select
+            label={tr("settings.widgetlibraryoverlay.filterByPlugin")}
+            ariaLabel={tr("settings.widgetlibraryoverlay.filterByPlugin")}
+            value={pluginId}
+            onChange={setPluginId}
+            options={[
+              { value: "all", label: tr("settings.widgetlibraryoverlay.allPlugins") },
+              ...plugins.map(({ id, label }) => ({ value: id, label })),
+            ]}
+          />
+          <Select
+            label={tr("settings.widgetlibraryoverlay.filterBySize")}
+            ariaLabel={tr("settings.widgetlibraryoverlay.filterBySize")}
+            value={size}
+            onChange={(value) => setSize(value as WidgetSizeFilter)}
+            options={[
+              { value: "all", label: tr("settings.widgetlibraryoverlay.allSizes") },
+              { value: "small", label: tr("settings.widgetlibraryoverlay.small") },
+              { value: "medium", label: tr("settings.widgetlibraryoverlay.medium") },
+              { value: "large", label: tr("settings.widgetlibraryoverlay.large") },
+            ]}
+          />
+          <Select
+            label={tr("settings.widgetlibraryoverlay.filterByZone")}
+            ariaLabel={tr("settings.widgetlibraryoverlay.filterByZone")}
+            value={zone}
+            onChange={(value) => setZone(value as WidgetZone | "all")}
+            options={[
+              { value: "all", label: tr("settings.widgetlibraryoverlay.allZones") },
+              ...Object.entries(ZONE_LABEL).map(([id, label]) => ({ value: id, label })),
+            ]}
+          />
+          <Button type="button" size="sm" className="widget-library-clear" disabled={!hasFilters} onClick={resetFilters}>{tr("settings.widgetlibraryoverlay.clearFilters")}</Button>
         </div>
 
-        <div className="widget-library-tabs ui-scroll-tabs" role="tablist" aria-label={tr("settings.widgetlibraryoverlay.widgetCollections")}>
-          {([
-            ["recommended", tr("projectsetup.recommended")],
-            ["plugin", tr("settings.widgetlibraryoverlay.byPlugin")],
-            ["recent", tr("settings.widgetlibraryoverlay.recentlyUsed")],
-          ] as const).map(([id, label]) => (
-            <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>
-              {label}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          className="widget-library-tabs ui-scroll-tabs"
+          size="sm"
+          label={tr("settings.widgetlibraryoverlay.widgetCollections")}
+          value={tab}
+          onChange={(id) => setTab(id as WidgetLibraryTab)}
+          tabs={[
+            { id: "recommended", label: tr("projectsetup.recommended") },
+            { id: "plugin", label: tr("settings.widgetlibraryoverlay.byPlugin") },
+            { id: "recent", label: tr("settings.widgetlibraryoverlay.recentlyUsed") },
+          ]}
+        />
 
         <div className="widget-library-results">
           {tab === "recommended" ? (
@@ -271,17 +301,17 @@ export default function WidgetLibraryOverlay({
             <div className="widget-library-empty">
               <strong>{tr("settings.widgetlibraryoverlay.noMatchingWidgets")}</strong>
               <span>{tr("settings.widgetlibraryoverlay.clearAFilterOrTryADifferent")}</span>
-              <button type="button" onClick={resetFilters}>{tr("settings.widgetlibraryoverlay.clearFilters")}</button>
+              <Button type="button" size="sm" onClick={resetFilters}>{tr("settings.widgetlibraryoverlay.clearFilters")}</Button>
             </div>
           )}
         </div>
 
         <footer className="widget-library-footer">
           <span>{tr("settings.widgetlibraryoverlay.canTFindWhatYouNeedInstall")}</span>
-          <button type="button" onClick={() => {
+          <Button type="button" size="sm" variant="ghost" className="widget-library-browse" onClick={() => {
             onClose();
             window.dispatchEvent(new CustomEvent("polyth:settings-page", { detail: "plugins" }));
-          }}>{tr("settings.widgetlibraryoverlay.browsePlugins")}</button>
+          }}>{tr("settings.widgetlibraryoverlay.browsePlugins")}</Button>
         </footer>
       </section>
 

@@ -11,9 +11,18 @@ import type { JsonObject, JsonValue, UiSlot } from "@polyth/contracts";
 import { useStore } from "../store.ts";
 import SlotHost from "../components/slots/SlotHost.ts";
 import ViewErrorBoundary from "../components/ViewErrorBoundary.ts";
-import { Icon } from "../icons.tsx";
 import { useEscape } from "../useEscape.ts";
-import { CloseIcon, IconButton, TextInput } from "../components/ui/index.ts";
+import {
+  AddIcon,
+  Button,
+  Checkbox,
+  CloseIcon,
+  IconButton,
+  Menu,
+  MoreVerticalIcon,
+  Select,
+  TextInput,
+} from "../components/ui/index.ts";
 import { getWidget, useWidgetCatalog, type WidgetDef } from "./catalog.ts";
 import {
   applyWidgetLayoutMutations,
@@ -87,35 +96,33 @@ function SchemaWidgetSettings({
           : [];
         if (property.type === "boolean") {
           return (
-            <label key={key}>
-              <input
-                type="checkbox"
-                checked={value === true}
-                onChange={(event) => updateConfig({ ...config, [key]: event.target.checked })}
-              />
-              <span><strong>{label}</strong>{description && <small>{description}</small>}</span>
-            </label>
+            <Checkbox
+              key={key}
+              checked={value === true}
+              onChange={(checked) => updateConfig({ ...config, [key]: checked })}
+              label={<><strong>{label}</strong>{description && <small>{description}</small>}</>}
+            />
           );
         }
         if (choices.length > 0) {
           return (
             <label key={key}>
               <span><strong>{label}</strong>{description && <small>{description}</small>}</span>
-              <select
+              <Select
+                label={label}
                 value={typeof value === "string" ? value : choices[0]}
-                onChange={(event) => updateConfig({ ...config, [key]: event.target.value })}
-              >
-                {choices.map((choice) => <option key={choice} value={choice}>{choice}</option>)}
-              </select>
+                onChange={(next) => updateConfig({ ...config, [key]: next })}
+                options={choices.map((choice) => ({ value: choice, label: choice }))}
+              />
             </label>
           );
         }
         return (
           <label key={key}>
             <span><strong>{label}</strong>{description && <small>{description}</small>}</span>
-            <input
+            <TextInput
               type={property.type === "number" || property.type === "integer" ? "number" : "text"}
-              value={typeof value === "string" || typeof value === "number" ? value : ""}
+              value={typeof value === "string" || typeof value === "number" ? String(value) : ""}
               onChange={(event) => updateConfig({
                 ...config,
                 [key]: property.type === "number" || property.type === "integer"
@@ -173,10 +180,8 @@ function WidgetCard({
   sessionId: string | null;
 }) {
   const layout = useWidgetLayout();
-  const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const moveCleanupRef = useRef<(() => void) | null>(null);
-  useEscape(menuOpen, () => setMenuOpen(false));
   useEscape(settingsOpen, () => setSettingsOpen(false));
   const config = placement.config ?? {};
   const updateConfig = (next: JsonObject) => {
@@ -292,39 +297,45 @@ function WidgetCard({
         >⠿</button>
         <strong>{placement.title ?? widget.title}</strong>
         <div className="widget-card-menu-shell" onPointerDown={(event) => event.stopPropagation()}>
-          <button
-            className="widget-card-more"
-            aria-label={tr("widgets.widgetcanvas.moreOptionsForValue", { title: widget.title })}
-            aria-expanded={menuOpen}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => setMenuOpen((open) => !open)}
-          >⋮</button>
-          {menuOpen && (
-            <div className="widget-card-menu" role="menu">
-              <button role="menuitem" onClick={() => {
-                setSettingsOpen(true);
-                setMenuOpen(false);
-              }}>{tr("common.settings")}</button>
-              {widget.duplicatable && (
-                <button role="menuitem" onClick={() => {
-                  updateWidgetLayout((current) => applyWidgetLayoutMutations(
-                    current,
-                    [{ type: "duplicate", id: instanceId }],
-                    [widget],
-                  ));
-                  setMenuOpen(false);
-                }}>{tr("widgets.widgetcanvas.duplicate")}</button>
-              )}
-              <button role="menuitem" onClick={() => {
-                updateWidgetLayout((current) => applyWidgetLayoutMutations(
+          <Menu
+            label={tr("widgets.widgetcanvas.moreOptionsForValue", { title: widget.title })}
+            align="end"
+            entries={[
+              { id: "settings", label: tr("common.settings"), onSelect: () => setSettingsOpen(true) },
+              ...(widget.duplicatable
+                ? [{
+                    id: "duplicate",
+                    label: tr("widgets.widgetcanvas.duplicate"),
+                    onSelect: () => updateWidgetLayout((current) => applyWidgetLayoutMutations(
+                      current,
+                      [{ type: "duplicate", id: instanceId }],
+                      [widget],
+                    )),
+                  }]
+                : []),
+              {
+                id: "remove",
+                label: tr("widgets.widgetcanvas.removeFromCanvas"),
+                onSelect: () => updateWidgetLayout((current) => applyWidgetLayoutMutations(
                   current,
                   [{ type: "visibility", id: instanceId, visible: false }],
                   [widget],
-                ));
-                setMenuOpen(false);
-              }}>{tr("widgets.widgetcanvas.removeFromCanvas")}</button>
-            </div>
-          )}
+                )),
+              },
+            ]}
+          >
+            {(trigger) => (
+              <IconButton
+                {...trigger}
+                className="widget-card-more"
+                icon={MoreVerticalIcon}
+                size="sm"
+                variant="ghost"
+                label={tr("widgets.widgetcanvas.moreOptionsForValue", { title: widget.title })}
+                onPointerDown={(event) => event.stopPropagation()}
+              />
+            )}
+          </Menu>
         </div>
       </header>
       <div className="widget-card-body">
@@ -332,22 +343,20 @@ function WidgetCard({
           <div className="widget-instance-settings">
             <header>
               <strong>{tr("widgets.widgetcanvas.widgetSettings")}</strong>
-              <button type="button" aria-label={tr("widgets.widgetcanvas.closeWidgetSettings")} onClick={() => setSettingsOpen(false)}>{tr("widgets.widgetcanvas.message")}</button>
+              <IconButton icon={CloseIcon} size="sm" label={tr("widgets.widgetcanvas.closeWidgetSettings")} onClick={() => setSettingsOpen(false)} />
             </header>
             <label className="widget-placement-setting">
               <span>{tr("widgets.widgetcanvas.placement")}</span>
-              <select
+              <Select
+                label={tr("widgets.widgetcanvas.placement")}
                 value={widgetSlotOf(layout, instanceId) ?? widget.defaultSlot}
-                onChange={(event) => updateWidgetLayout((current) => applyWidgetLayoutMutations(
+                onChange={(slot) => updateWidgetLayout((current) => applyWidgetLayoutMutations(
                   current,
-                  [{ type: "place", id: instanceId, slot: event.target.value as UiSlot }],
+                  [{ type: "place", id: instanceId, slot: slot as UiSlot }],
                   [widget],
                 ))}
-              >
-                {supportedWidgetSlots(widget).map((slot) => (
-                  <option key={slot} value={slot}>{slotLabel(slot)}</option>
-                ))}
-              </select>
+                options={supportedWidgetSlots(widget).map((slot) => ({ value: slot, label: slotLabel(slot) }))}
+              />
             </label>
             {widget.settingsRender
               ? widget.settingsRender({
@@ -502,8 +511,9 @@ export default function WidgetCanvas() {
           />
         ))}
         {cards.length === 0 && (
-          <button className="widget-canvas-empty" onClick={() => setMenuOpen(true)}>
-            <Icon.plus /> {tr("widgets.widgetcanvas.addYourFirstWidget")}</button>
+          <Button className="widget-canvas-empty" iconStart={AddIcon} onClick={() => setMenuOpen(true)}>
+            {tr("widgets.widgetcanvas.addYourFirstWidget")}
+          </Button>
         )}
         <SlotHost
           slot="workspace.canvas"
@@ -513,14 +523,16 @@ export default function WidgetCanvas() {
       {/* Shift-key customization mode: the customize trigger is the canvas's
           LAST item; the menu applies add/remove instantly. */}
       {customizeVisible && (
-        <button
+        <Button
           className="widget-menu-trigger"
+          size="sm"
+          iconStart={AddIcon}
           aria-label={tr("widgets.widgetcanvas.addWidgets")}
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((open) => !open)}
         >
-          <Icon.plus /><span>{tr("widgets.widgetcanvas.widgets")}</span>
-        </button>
+          {tr("widgets.widgetcanvas.widgets")}
+        </Button>
       )}
       {menuOpen && <WidgetMenu widgets={canvasWidgets} onClose={() => setMenuOpen(false)} />}
     </div>

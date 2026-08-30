@@ -15,7 +15,7 @@ border-color: var(--accent);
 }
 .term-tab {
 border: none; border-radius: 0; color: var(--muted);
-  padding: 5px 10px; font-size: 12px; font-family: var(--mono); background: transparent;
+  padding: 5px 10px; font-size: var(--font-meta); font-family: var(--mono); background: transparent;
   display: inline-flex; align-items: center; gap: 6px;
 }
 .term-tab:hover {
@@ -38,7 +38,7 @@ background: var(--amber); box-shadow: 0 0 0 2px color-mix(in srgb, var(--amber) 
 }
 .term-tab-x {
 border: none; border-left: 1px solid var(--border-soft); border-radius: 0;
-  color: var(--muted); padding: 0 7px; font-size: 12px; background: transparent;
+  color: var(--muted); padding: 0 7px; font-size: var(--font-meta); background: transparent;
 }
 .term-tab-rename-action {
 width: 30px; min-width: 30px; padding: 0;
@@ -67,7 +67,7 @@ background: var(--accent-wash);
 }
 .term-tab-rename {
 border: none; border-radius: 0; width: 120px;
-  padding: 5px 10px; font-size: 12px; font-family: var(--mono);
+  padding: 5px 10px; font-size: var(--font-meta); font-family: var(--mono);
   background: var(--elevated); color: var(--text);
 }
 .term-tab-dead {
@@ -188,11 +188,11 @@ position: absolute; top: 8px; right: 14px; z-index: 4;
   border: 1px solid var(--border); border-radius: var(--radius-card);
   background: var(--elevated); padding: var(--space-1); box-shadow: var(--shadow-lg);
 }
-.term-search input {
+.term-search .ui-input {
 width: 180px; border: none; background: transparent; color: var(--text);
-  font-size: 12px; padding: 3px 6px; outline: none;
+  font-size: var(--font-meta); padding: 3px 6px; outline: none;
 }
-.term-search input.no-match {
+.term-search .ui-input.no-match {
 color: var(--red);
 }
 .term-search .term-search-count {
@@ -200,26 +200,6 @@ color: var(--muted); font-size: var(--font-meta); min-width: 44px; text-align: c
 }
 .term-search button[aria-pressed="true"] {
 color: var(--accent); background: var(--accent-wash);
-}
-.term-context {
-position: fixed; z-index: var(--z-popover); min-width: 144px;
-  display: flex; flex-direction: column; gap: 2px; padding: 5px;
-  border: 1px solid var(--overlay-border); border-radius: var(--radius-control);
-  background: var(--overlay-bg, var(--elevated)); box-shadow: var(--overlay-shadow, var(--shadow-lg));
-}
-.term-context button {
-width: 100%; min-height: 28px; padding: 4px 7px; border: none;
-  display: flex; align-items: center; justify-content: space-between; gap: 14px;
-  background: transparent; color: var(--text); font-size: var(--font-meta); text-align: left;
-}
-.term-context button:hover:not(:disabled) {
-background: var(--raised);
-}
-.term-context button:disabled {
-color: var(--faint);
-}
-.term-context kbd {
-color: var(--muted); font: 10px var(--mono);
 }
 .term-exit-note {
 position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 3;

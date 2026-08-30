@@ -33,6 +33,14 @@ import {
   type MobileShortcutId, type RailIconSize, type ResponseActionId,
 } from "../../uiPrefs.ts";
 import { tr } from "../../i18n/index.ts";
+import {
+  AddIcon,
+  Button,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  IconButton,
+  Select,
+} from "../ui/index.ts";
 
 type MiniPlaceId = "composer" | "session-footer" | "app-header";
 type InterfaceSurfaceId = "top-rail" | "right-rail" | "response-footer" | MiniPlaceId;
@@ -259,18 +267,24 @@ function OrderedToggleList<T extends string>({
             <span className="widget-placement-item-label widget-order-label">{labels[id]}</span>
             {visible && (
               <span className="widget-order-controls">
-                <button
+                <IconButton
                   type="button"
-                  aria-label={`Move ${labels[id]} earlier`}
+                  size="sm"
+                  variant="ghost"
+                  icon={ChevronLeftIcon}
+                  label={`Move ${labels[id]} earlier`}
                   disabled={index <= 0}
                   onClick={() => moveBy(id, -1)}
-                >←</button>
-                <button
+                />
+                <IconButton
                   type="button"
-                  aria-label={`Move ${labels[id]} later`}
+                  size="sm"
+                  variant="ghost"
+                  icon={ChevronRightIcon}
+                  label={`Move ${labels[id]} later`}
                   disabled={index < 0 || index >= selected.length - 1}
                   onClick={() => moveBy(id, 1)}
-                >→</button>
+                />
               </span>
             )}
           </div>
@@ -410,23 +424,30 @@ export default function WidgetsPage() {
       <div className="widget-placement-toolbar">
         <label className="widget-project-scope">
           <span>{tr("settings.widgetspage.layoutFor")}</span>
-          <select aria-label={tr("settings.widgetspage.projectLayout")} value={activeProjectId ?? ""} onChange={(event) => activateProject(event.target.value || null)}>
-            {projects.map((project) => <option key={project.id} value={project.id}>{project.name || project.path}</option>)}
-          </select>
+          <Select
+            label={tr("settings.widgetspage.layoutFor")}
+            ariaLabel={tr("settings.widgetspage.projectLayout")}
+            value={activeProjectId ?? ""}
+            onChange={(id) => activateProject(id || null)}
+            options={projects.map((project) => ({
+              value: project.id,
+              label: project.name || project.path,
+            }))}
+          />
         </label>
         {(storeStatus.saveStatus !== "saved" || notice !== "") && (
           <span className={`widget-save-state ${storeStatus.saveStatus}`} role="status">
             {storeStatus.saveStatus === "saving"
               ? tr("common.saving")
               : storeStatus.saveStatus === "error"
-                ? <>{tr("settings.widgetspage.couldnTSave")}{" "}<button type="button" onClick={retryWidgetSave}>{tr("common.retry")}</button></>
+                ? <>{tr("settings.widgetspage.couldnTSave")}{" "}<Button type="button" size="sm" variant="ghost" onClick={retryWidgetSave}>{tr("common.retry")}</Button></>
                 : notice}
           </span>
         )}
         <div className="widget-toolbar-actions">
-          <button type="button" onClick={undoWidgetLayout} disabled={!storeStatus.canUndo}>{tr("settings.widgetspage.undo")}</button>
-          <button type="button" onClick={applyToAllProjects} disabled={!activeProjectId || projects.length < 2}>{tr("settings.widgetspage.applyToAllProjects")}</button>
-          <button type="button" className="widget-reset-button" onClick={resetAllPlacement}>{tr("settings.widgetspage.resetLayout")}</button>
+          <Button type="button" size="sm" onClick={undoWidgetLayout} disabled={!storeStatus.canUndo}>{tr("settings.widgetspage.undo")}</Button>
+          <Button type="button" size="sm" onClick={applyToAllProjects} disabled={!activeProjectId || projects.length < 2}>{tr("settings.widgetspage.applyToAllProjects")}</Button>
+          <Button type="button" size="sm" variant="danger" className="widget-reset-button" onClick={resetAllPlacement}>{tr("settings.widgetspage.resetLayout")}</Button>
         </div>
       </div>
 
@@ -486,49 +507,54 @@ export default function WidgetsPage() {
               itemId={index === 0 ? "widgets.capabilities" : undefined}
               key={place.id}
               action={(
-                <button
+                <IconButton
                   type="button"
                   className="widget-place-add"
-                  aria-label={tr("settings.widgetspage.addAButtonToValue", { title: place.title })}
+                  icon={AddIcon}
+                  size="sm"
+                  variant="ghost"
+                  label={tr("settings.widgetspage.addAButtonToValue", { title: place.title })}
                   aria-expanded={openPlace === place.id}
                   onClick={() => setOpenPlace(openPlace === place.id ? null : place.id)}
-                >＋</button>
+                />
               )}
             >
               <div className="widget-rail-controls">
                 {place.id === "primary" && (
                   <label className="widget-rail-control">
                     <span>{tr("settings.widgetspage.position")}</span>
-                    <select
-                      aria-label={tr("settings.widgetspage.chatTopRailPosition")}
+                    <Select
+                      label={tr("settings.widgetspage.position")}
+                      ariaLabel={tr("settings.widgetspage.chatTopRailPosition")}
                       value={ui.topRailAlignment}
-                      onChange={(event) => setUiSettings({
-                        topRailAlignment: event.target.value === "left" ? "left" : "center",
+                      onChange={(value) => setUiSettings({
+                        topRailAlignment: value === "left" ? "left" : "center",
                       })}
-                    >
-                      <option value="center">{tr("settings.widgetspage.centered")}</option>
-                      <option value="left">{tr("settings.widgetspage.leftOfCenter")}</option>
-                    </select>
+                      options={[
+                        { value: "center", label: tr("settings.widgetspage.centered") },
+                        { value: "left", label: tr("settings.widgetspage.leftOfCenter") },
+                      ]}
+                    />
                   </label>
                 )}
                 <label className="widget-rail-control">
                   <span>{tr("settings.widgetspage.iconSize")}</span>
-                  <select
-                    aria-label={place.id === "primary"
+                  <Select
+                    label={tr("settings.widgetspage.iconSize")}
+                    ariaLabel={place.id === "primary"
                       ? tr("settings.widgetspage.topRailIconSize")
                       : tr("settings.widgetspage.rightRailIconSize")}
                     value={place.id === "primary" ? ui.topRailIconSize : ui.rightRailIconSize}
-                    onChange={(event) => {
-                      const size = event.target.value;
+                    onChange={(size) => {
                       if (size !== "sm" && size !== "md" && size !== "lg") return;
                       if (place.id === "primary") setUiSettings({ topRailIconSize: size });
                       else setUiSettings({ rightRailIconSize: size });
                     }}
-                  >
-                    {RAIL_ICON_SIZE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
+                    options={RAIL_ICON_SIZE_OPTIONS.map((option) => ({
+                      value: option.value,
+                      label: option.label,
+                    }))}
+                  />
                 </label>
               </div>
               <div className="widget-place-chips">
@@ -585,13 +611,16 @@ export default function WidgetsPage() {
               itemId={index === 0 ? "widgets.actions" : undefined}
               key={place.id}
               action={(
-                <button
+                <IconButton
                   type="button"
                   className="widget-place-add"
-                  aria-label={tr("settings.widgetspage.addAButtonToValue", { title: place.title })}
+                  icon={AddIcon}
+                  size="sm"
+                  variant="ghost"
+                  label={tr("settings.widgetspage.addAButtonToValue", { title: place.title })}
                   aria-expanded={openPlace === place.id}
                   onClick={() => setOpenPlace(openPlace === place.id ? null : place.id)}
-                >＋</button>
+                />
               )}
             >
               <div className="widget-place-chips">

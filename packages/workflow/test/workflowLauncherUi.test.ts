@@ -75,7 +75,6 @@ test("chat composer keeps the Run workflow launcher mounted after project activa
     const composer = container.querySelector(".composer-simple");
     assert.ok(composer, "Chat mode renders the simple composer");
     const trigger = composer.querySelector<HTMLButtonElement>(".composer-workflow");
-    assert.equal(trigger?.textContent?.trim(), "Run workflow");
     assert.equal(trigger?.getAttribute("aria-label"), "Run workflow");
 
     const input = composer.querySelector<HTMLTextAreaElement>('[aria-label="Message"]');
@@ -208,7 +207,6 @@ test("composer workflow action opens the launcher with the live draft", async ()
     });
 
     const trigger = container.querySelector<HTMLButtonElement>(".composer-workflow");
-    assert.equal(trigger?.textContent?.trim(), "Run workflow");
     assert.equal(trigger?.getAttribute("aria-label"), "Run workflow");
     assert.equal(trigger?.getAttribute("aria-haspopup"), "dialog");
 

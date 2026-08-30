@@ -542,9 +542,9 @@ test("approval is always action-required: intent, target, risk, and decisions vi
     assert.ok(allow && allow.textContent?.includes("Allow once"));
     assert.ok(deny && deny.textContent?.includes("Deny"));
     // Always scope stays an explicit choice, never a silent global.
-    const scopeSelect = container.querySelector<HTMLSelectElement>(".perm-always select");
-    assert.ok(scopeSelect);
-    assert.equal(scopeSelect.value, "session");
+    const scopeChip = container.querySelector(".perm-always .picker-chip-text");
+    assert.ok(scopeChip);
+    assert.match(scopeChip.textContent ?? "", /this session/i);
   } finally {
     await act(async () => root.unmount());
     container.remove();

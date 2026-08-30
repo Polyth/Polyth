@@ -22,6 +22,37 @@ Object.assign(globalThis, {
   CustomEvent: dom.CustomEvent,
 });
 Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configurable: true });
+if (typeof window.matchMedia !== "function") {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener() {},
+      removeListener() {},
+      addEventListener() {},
+      removeEventListener() {},
+      dispatchEvent() { return false; },
+    }),
+  });
+}
+Object.defineProperty(globalThis, "requestAnimationFrame", {
+  configurable: true,
+  value: (callback: FrameRequestCallback) => {
+    callback(0);
+    return 1;
+  },
+});
+Object.defineProperty(globalThis, "cancelAnimationFrame", {
+  configurable: true,
+  value: () => undefined,
+});
+Object.defineProperty(globalThis, "getComputedStyle", {
+  configurable: true,
+  value: (elt: Element) =>
+    (window as unknown as Window).getComputedStyle(elt as never),
+});
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 register("./tsxHooks.mjs", import.meta.url);
@@ -78,6 +109,16 @@ const clickByText = (container: Element, text: string): HTMLButtonElement => {
   return button as HTMLButtonElement;
 };
 
+const pickPickerOption = async (root: ParentNode, optionLabel: string): Promise<void> => {
+  const trigger = root.querySelector<HTMLButtonElement>(".picker-chip");
+  assert.ok(trigger, "picker trigger exists");
+  await act(async () => { trigger.click(); });
+  const option = [...document.querySelectorAll(".picker-item")].find((el) =>
+    el.querySelector(".palette-label")?.textContent?.trim() === optionLabel);
+  assert.ok(option, `picker option "${optionLabel}" exists`);
+  await act(async () => { (option as HTMLElement).click(); });
+};
+
 const setControlValue = (
   control: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
   value: string,
@@ -116,8 +157,8 @@ test("task board utilities choose sensible views and stable status columns", () 
 
 test("task tracker surfaces enforce mobile containment, touch, zoom, and safe-area rules", async () => {
   const css = await readFile(new URL("../widgets/styles.css", import.meta.url), "utf8");
-  assert.match(css, /\.tt-board button,[\s\S]*min-height:\s*44px/);
-  assert.match(css, /@container task-tracker \(max-width: 480px\)[\s\S]*font-size:\s*16px/);
+  assert.match(css, /\.tt-task-card,[\s\S]*min-height:\s*max\(var\(--control-h\), var\(--hit-min\)\)/);
+  assert.match(css, /\.tt-search \.ui-input[\s\S]*width:\s*100%/);
   assert.match(css, /@container task-tracker \(max-width: 480px\)[\s\S]*\.tt-empty[\s\S]*min-height:\s*0/);
   assert.match(css, /@container task-tracker \(max-width: 480px\)[\s\S]*\.tt-board-header[\s\S]*flex-direction:\s*row/);
   assert.match(css, /@container task-tracker \(max-width: 480px\)[\s\S]*\.tt-board-picker,[\s\S]*grid-template-columns:\s*repeat\(2/);
@@ -364,11 +405,9 @@ test("task board completes browse, filter, link, status, complete, and refresh j
     assert.equal(links.length, 2);
     assert.equal(links[1]?.startAgent, false);
 
-    const status = container.querySelector<HTMLSelectElement>(".tt-status-row select");
-    assert.ok(status);
-    await act(async () => {
-      setControlValue(status, "review", "change");
-    });
+    const statusRow = container.querySelector(".tt-status-row");
+    assert.ok(statusRow);
+    await pickPickerOption(statusRow, "Review");
     await act(async () => { clickByText(container, "Update status").click(); });
     await settle();
     assert.deepEqual(updates, ["review"]);

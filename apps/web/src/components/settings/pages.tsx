@@ -204,7 +204,7 @@ function ThemeSection() {
         </button>
         {pickerOpen && (
           <div className="theme-picker-pop" id="theme-picker-options">
-            <input
+            <TextInput
               autoFocus
               role="combobox"
               aria-expanded="true"

@@ -34,7 +34,7 @@ display: flex; align-items: center; gap: 12px; margin-bottom: 10px;
 display: flex; flex-direction: column;
 }
 .plugin-library-head strong {
-font-size: 13px;
+font-size: var(--font-label);
 }
 .plugin-library-head span {
 color: var(--muted); font-size: var(--font-meta);
@@ -90,11 +90,8 @@ font-size: var(--font-meta); font-weight: 550;
 .plugin-card-actions {
 display: flex; flex-wrap: wrap; gap: 5px; margin-top: auto; padding: 9px 10px; border-top: 1px solid var(--border-soft); background: var(--bg);
 }
-.plugin-card-actions button {
-height: 27px; padding: 0 7px; font-size: var(--font-meta);
-}
-.plugin-card-actions .danger-btn {
-margin-left: auto; border-color: transparent;
+.plugin-card-actions .ui-btn--danger {
+margin-left: auto;
 }
 .settings-pane-body .plugin-library {
 min-width: 0;
@@ -114,22 +111,16 @@ min-height: 58px; display: flex; align-items: center; gap: 9px; padding: 9px 12p
 display: flex; flex-direction: column;
 }
 .plugin-detail > header strong {
-font-size: 12px;
+font-size: var(--font-meta);
 }
 .plugin-detail > header small {
 color: var(--muted); font-size: var(--font-meta);
 }
-.plugin-detail > header > button {
-margin-left: auto; width: 28px; height: 28px; padding: 0; border: 0;
+.plugin-detail > header .ui-icon-btn {
+margin-left: auto;
 }
 .plugin-detail-tabs {
 display: flex; gap: 5px; overflow-x: auto; padding: 0 10px; border-bottom: 1px solid var(--border-soft);
-}
-.plugin-detail-tabs button {
-flex: none; border: 0; border-radius: 0; padding: 7px 4px; border-bottom: 2px solid transparent; color: var(--muted); font-size: var(--font-meta);
-}
-.plugin-detail-tabs button.active {
-border-bottom-color: var(--accent); color: var(--text);
 }
 .plugin-detail-body {
 min-height: 70px; padding: 11px 13px; color: var(--muted); font-size: var(--font-meta);
@@ -146,8 +137,8 @@ position: sticky; bottom: 10px; display: flex; align-items: center; gap: 9px; ma
 .plugin-toast span {
 flex: 1;
 }
-.plugin-toast button {
-border: 0; color: var(--accent); background: transparent; font-size: var(--font-meta);
+.plugin-toast .ui-btn {
+flex: none;
 }
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
 .settings-pane-body .plugin-card-grid {
@@ -169,11 +160,11 @@ grid-template-columns: minmax(0, 1fr);
 display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.plugin-card-actions button {
-width: 100%; height: auto;
+.plugin-card-actions .ui-btn {
+width: 100%;
 }
 
-.plugin-card-actions .danger-btn {
+.plugin-card-actions .ui-btn--danger {
 margin-left: 0;
 }
 
@@ -189,7 +180,7 @@ margin-left: 0;
 align-items: stretch; flex-direction: column;
 }
 
-.plugin-toast button {
+.plugin-toast .ui-btn {
 width: 100%;
 }
 }

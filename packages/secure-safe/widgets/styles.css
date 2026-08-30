@@ -6,7 +6,7 @@ border-top: 1px solid color-mix(in srgb, var(--green) 45%, var(--border));
   display: flex; flex-direction: column; gap: 10px;
 }
 .secure-safe-title {
-color: var(--green); font-weight: 600; font-size: 12.5px;
+color: var(--green); font-weight: 600; font-size: var(--font-meta);
 }
 .secure-safe-request {
 display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.5fr) auto;
@@ -18,7 +18,7 @@ display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.5fr) au
 display: flex; flex-direction: column; gap: 4px; min-width: 0;
 }
 .secure-safe-details > div {
-display: flex; align-items: baseline; gap: 8px; font-size: 12px;
+display: flex; align-items: baseline; gap: 8px; font-size: var(--font-meta);
 }
 .secure-safe-details span,
 .secure-safe-value > span {
@@ -35,23 +35,16 @@ color: var(--amber); font-weight: 600;
 .secure-safe-value {
 display: flex; flex-direction: column; gap: 5px; min-width: 0;
 }
-.secure-safe-value input {
-width: 100%; min-width: 180px; background: var(--sunken); color: var(--text);
-  border: 1px solid var(--border); border-radius: var(--radius-control); padding: 7px 9px;
-}
-.secure-safe-value input:focus {
-border-color: var(--accent); outline: none;
+.secure-safe-value .ui-input {
+width: 100%; min-width: 180px;
 }
 .secure-safe-actions {
 display: flex; gap: 6px; white-space: nowrap;
 }
-.secure-safe-actions .primary {
-font-weight: 600;
-}
 .secure-safe-note {
 padding: 10px 12px; margin-bottom: 14px; border: 1px solid var(--accent-line);
   border-radius: var(--radius-card); background: color-mix(in srgb, var(--accent) 7%, var(--sunken));
-  color: var(--muted); font-size: 12.5px; line-height: 1.5;
+  color: var(--muted); font-size: var(--font-meta); line-height: 1.5;
 }
 .secure-safe-settings-list {
 display: flex; flex-direction: column; gap: 4px;
@@ -65,13 +58,6 @@ display: grid; grid-template-columns: 1fr 1fr; gap: 9px;
 }
 .secure-safe-form label {
 display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: var(--font-meta);
-}
-.secure-safe-form input {
-width: 100%; background: var(--elevated); color: var(--text); border: 1px solid var(--border);
-  border-radius: var(--radius-control); padding: 7px 9px; font-size: 12.5px;
-}
-.secure-safe-form input:focus {
-border-color: var(--accent); outline: none;
 }
 .secure-safe-form-actions {
 display: flex; align-items: center; gap: 9px;
@@ -96,7 +82,7 @@ align-items: stretch;
     flex-direction: column;
 }
 
-.settings-pane-body .secure-safe-form-actions > button {
+.settings-pane-body .secure-safe-form-actions > .ui-btn {
 width: 100%;
     max-width: none;
 }

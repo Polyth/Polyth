@@ -7,7 +7,7 @@ import { openSession } from "../init.ts";
 import { ago, deriveSessionTitle } from "../format.ts";
 import { firstUserText } from "../utils.ts";
 import { tr } from "../i18n/index.ts";
-import { Button, ResponsiveOverlay } from "./ui/index.ts";
+import { Button, Checkbox, ResponsiveOverlay, TextInput } from "./ui/index.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import {
   matchesSessionSearchFacets,
@@ -132,18 +132,17 @@ export default function SessionSearch() {
         <span className="palette-heading-description">
           {tr("sessionsearch.recentSessionsAndConversationContent")}</span>
         {!phone && (
-          <label className="session-search-scope">
-            <input
-              type="checkbox"
+          <div className="session-search-scope">
+            <Checkbox
               checked={allProjects}
-              onChange={(event) => setAllProjects(event.target.checked)}
+              onChange={setAllProjects}
+              label={tr("sessionsearch.allProjects")}
             />
-            <span>{tr("sessionsearch.allProjects")}</span>
-          </label>
+          </div>
         )}
       </div>
       {!phone && (
-        <input
+        <TextInput
           className="palette-input"
           value={q}
           role="combobox"

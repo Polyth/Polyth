@@ -16,7 +16,7 @@ import {
   workflowTimelineNodes,
 } from "./workflowRun.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
-import WorkflowButtonContent from "./WorkflowButtonContent.tsx";
+import { Button, ChevronDownIcon, ChevronUpIcon, Spinner, StopIcon } from "../../../apps/web/src/components/ui/index.ts";
 
 const needsHuman = (node: WorkflowRunNodeDto): boolean => workflowHumanWait(node) !== null;
 
@@ -25,7 +25,7 @@ function TimelineStatusIcon({ node }: { node: WorkflowRunNodeDto }) {
   if (node.status === "error") return <Icon.close />;
   if (node.status === "stopped") return <Icon.stop />;
   if (node.status === "skipped") return <Icon.branch />;
-  if (node.status === "running") return <span className="workflow-status-spinner" />;
+  if (node.status === "running") return <Spinner size="sm" />;
   return <Icon.clock />;
 }
 
@@ -133,24 +133,20 @@ export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
               <small title={workflowNodeDetail(node)}>{workflowNodeDetail(node)}</small>
             </span>
             {node.sessionId && (
-              <button
-                type="button"
-                className={`small-btn workflow-button${needsHuman(node) ? " primary-btn" : ""}`}
+              <Button
+                size="sm"
+                variant={needsHuman(node) ? "primary" : "quiet"}
                 disabled={!!openingSessionId}
-                aria-busy={openingSessionId === node.sessionId}
+                busy={openingSessionId === node.sessionId}
                 aria-label={needsHuman(node)
                   ? tr("workflowtimeline.reviewAndRespondValue", { role: node.role })
                   : tr("workflowtimeline.openChildValue", { role: node.role })}
                 onClick={() => void openChildSession(node.sessionId!)}
               >
-                <WorkflowButtonContent
-                  busy={openingSessionId === node.sessionId}
-                  idleLabel={needsHuman(node)
-                    ? tr("workflowtimeline.reviewAndRespond")
-                    : tr("workflowtimeline.openSession")}
-                  busyLabel={tr("workflowtimeline.opening")}
-                />
-              </button>
+                {needsHuman(node)
+                  ? tr("workflowtimeline.reviewAndRespond")
+                  : tr("workflowtimeline.openSession")}
+              </Button>
             )}
           </li>
         ))}
@@ -164,44 +160,40 @@ export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
               total: visibleWindow.total,
             })}
           </span>
-          <button
-            type="button"
-            className="small-btn workflow-timeline-nodes-toggle"
+          <Button
+            size="sm"
+            variant="ghost"
+            className="workflow-timeline-nodes-toggle"
+            iconStart={expanded ? ChevronUpIcon : ChevronDownIcon}
             aria-expanded={expanded}
             onClick={() => setExpanded((current) => !current)}
           >
-            {expanded ? <Icon.chevronUp /> : <Icon.chevronDown />}
             {expanded
               ? tr("workflowtimeline.showFocused")
               : tr("workflowtimeline.showAllValue", { count: shownRun.nodes.length })}
-          </button>
+          </Button>
         </div>
       )}
       <footer>
-        <button
-          type="button"
-          className="small-btn workflow-button"
+        <Button
+          size="sm"
           disabled={!!openingSessionId}
           onClick={viewWorkflow}
         >
           {tr("workflowtimeline.viewWorkflow")}
-        </button>
+        </Button>
         {shownRun.status === "running" && (
-          <button
-            type="button"
-            className="small-btn danger-btn workflow-button"
+          <Button
+            size="sm"
+            variant="danger"
+            iconStart={StopIcon}
+            busy={stopping}
             disabled={stopping}
-            aria-busy={stopping}
             aria-label={tr("workflowtimeline.stopValue", { name: shownRun.name })}
             onClick={stop}
           >
-            <WorkflowButtonContent
-              busy={stopping}
-              idleLabel={tr("workflowtimeline.stopRun")}
-              busyLabel={tr("workflowtimeline.stopping")}
-              idleIcon={<Icon.stop />}
-            />
-          </button>
+            {tr("workflowtimeline.stopRun")}
+          </Button>
         )}
       </footer>
     </section>

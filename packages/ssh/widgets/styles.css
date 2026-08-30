@@ -1,6 +1,6 @@
 /* Package-owned ssh web styles. */
 .ssh-row-label {
-display: flex; align-items: center; flex-wrap: wrap; gap: 7px;
+display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2);
 }
 .ssh-project-dialog {
 gap: 0;
@@ -9,8 +9,12 @@ gap: 0;
 display: flex; flex-direction: column; gap: 6px; margin: 0 18px;
   font-size: var(--font-meta); font-weight: 600;
 }
-.ssh-dialog-server select {
-align-self: flex-start; max-width: 100%; font-weight: 400;
+.ssh-dialog-server .picker,
+.ssh-dialog-server .picker-chip {
+width: 100%;
+}
+.ssh-dialog-server .chip-k {
+display: none;
 }
 .ssh-remote-list {
 height: min(34vh, 260px);
@@ -21,11 +25,11 @@ display: flex; align-items: flex-end; gap: 16px; margin: 0 18px;
 .ssh-dialog-name {
 display: flex; flex-direction: column; gap: 6px; font-size: var(--font-meta); font-weight: 600;
 }
-.ssh-dialog-name input {
-min-height: var(--control-h-sm); padding: 0 9px; font-size: var(--font-label); font-weight: 400;
+.ssh-dialog-name .ui-input {
+width: 100%;
 }
 .ssh-dialog-create {
-display: inline-flex; align-items: center; gap: 7px; padding-bottom: 7px;
+display: inline-flex; align-items: center; gap: var(--space-2); padding-bottom: 7px;
   color: var(--muted); font-size: var(--font-meta);
 }
 @media (max-width: 700px) {
@@ -41,10 +45,6 @@ width: 100%;
 margin-inline: 12px;
 }
 
-.ssh-dialog-server select {
-width: 100%; align-self: stretch;
-}
-
 .ssh-dialog-meta {
 align-items: stretch;
     flex-direction: column;
@@ -52,8 +52,12 @@ align-items: stretch;
     margin-inline: 12px;
 }
 
+.ssh-dialog-server .picker {
+width: 100%;
+}
+
 .ssh-dialog-name,
-.ssh-dialog-name input {
+.ssh-dialog-name .ui-input {
 width: 100%;
 }
 

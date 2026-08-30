@@ -629,7 +629,6 @@ export default function PreviewView() {
                   icon={BackIcon}
                   size="sm"
                   variant="ghost"
-                  className="browser-icon-btn"
                   title={tr("common.back")}
                   label={tr("common.back")}
                   disabled={busy}
@@ -639,7 +638,6 @@ export default function PreviewView() {
                   icon={ChevronRightIcon}
                   size="sm"
                   variant="ghost"
-                  className="browser-icon-btn"
                   title={tr("previewview.forward")}
                   label={tr("previewview.forward")}
                   disabled={busy}
@@ -649,7 +647,6 @@ export default function PreviewView() {
                   icon={RefreshIcon}
                   size="sm"
                   variant="ghost"
-                  className="browser-icon-btn"
                   title={tr("previewview.reload")}
                   label={tr("previewview.reload")}
                   disabled={busy}
@@ -693,7 +690,7 @@ export default function PreviewView() {
             </form>
             {browserMode && browser.url !== "about:blank" && (
               <a
-                className="browser-icon-btn"
+                className="ui-icon-btn ui-icon-btn--ghost ui-icon-btn--sm"
                 href={browser.url}
                 target="_blank"
                 rel="noreferrer"

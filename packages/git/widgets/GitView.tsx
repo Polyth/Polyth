@@ -20,17 +20,27 @@ import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
 import PrCreatePanel from "../../github/widgets/PrCreatePanel.tsx";
 import {
   AddIcon,
+  AssistIcon,
+  BackIcon,
+  BranchIcon,
   Button,
   Checkbox,
   CloseIcon,
   DeleteIcon,
   Dialog,
+  FetchIcon,
   IconButton,
+  PullIcon,
+  PullRequestIcon,
+  PushIcon,
   RefreshIcon,
+  SessionIcon,
+  StageIcon,
   Tabs,
   Textarea,
   TextInput,
   UndoIcon,
+  WorktreeIcon,
 } from "../../../apps/web/src/components/ui/index.ts";
 
 type GitTab = "changes" | "log" | "branches" | "stashes";
@@ -483,12 +493,19 @@ export default function GitView() {
         </div>
         <div className="source-remote-actions" aria-label={tr("gitview.remoteRepositoryActions")}>
           {(["fetch", "pull", "push"] as const).map((step) => (
-            <Button key={step} size="sm" className="source-action-btn" disabled={busyRemote !== null || busy} onClick={() => void runRemote(step)}>
-              {step === "fetch" ? <Icon.fetch /> : step === "pull" ? <Icon.pull /> : <Icon.push />}
-              <span>{busyRemote === step ? remoteLabel[step].busy : remoteLabel[step].idle}</span>
+            <Button
+              key={step}
+              size="sm"
+              className="source-action-btn"
+              iconStart={step === "fetch" ? FetchIcon : step === "pull" ? PullIcon : PushIcon}
+              busy={busyRemote === step}
+              disabled={busyRemote !== null || busy}
+              onClick={() => void runRemote(step)}
+            >
+              {busyRemote === step ? remoteLabel[step].busy : remoteLabel[step].idle}
             </Button>
           ))}
-          <IconButton icon={RefreshIcon} size="sm" label={tr("gitview.refreshSourceControl")} disabled={busy || busyRemote !== null} onClick={() => void refresh()} />
+          <IconButton icon={RefreshIcon} size="sm" className="source-refresh-btn" label={tr("gitview.refreshSourceControl")} disabled={busy || busyRemote !== null} onClick={() => void refresh()} />
         </div>
       </header>
 
@@ -580,8 +597,8 @@ export default function GitView() {
                 </div>
                 <span className="header-spacer" />
                 {(status?.unstaged.length || status?.untracked.length || status?.conflicted.length) ? (
-                  <Button size="sm" disabled={busy} onClick={() => void run(() => api.gitFolder(projectId, "", "stage", sessionId ?? undefined))}>
-                    <Icon.stage /> {tr("gitview.stageAll")}
+                  <Button size="sm" iconStart={StageIcon} disabled={busy} onClick={() => void run(() => api.gitFolder(projectId, "", "stage", sessionId ?? undefined))}>
+                    {tr("gitview.stageAll")}
                   </Button>
                 ) : null}
                 {status && status.staged.length > 0 && (
@@ -614,7 +631,7 @@ export default function GitView() {
             <section className="git-detail-pane" aria-label={tr("gitview.changeDetails")}>
               {selected && (
                 <div className="git-mobile-detail-head">
-                  <Button size="sm" onClick={() => setMobileDetail(false)}><Icon.back /> {tr("gitview.tabChanges")}</Button>
+                  <Button size="sm" iconStart={BackIcon} onClick={() => setMobileDetail(false)}>{tr("gitview.tabChanges")}</Button>
                   <span className="mono" title={selected.path}>{selected.path}</span>
                 </div>
               )}
@@ -706,20 +723,20 @@ export default function GitView() {
                 <strong>{status.staged.length === 1 ? tr("gitview.commitOneStagedFile") : tr("gitview.commitStagedFilesValue", { count: status.staged.length })}</strong>
                 <span className="muted">{tr("gitview.changesAreCommittedTo")} <span className="mono">{status.branch || "HEAD"}</span></span>
               </div>
-              <Textarea className="commit-msg" rows={2} placeholder={tr("gitview.commitMessage")} value={commitMsg} onChange={(event) => setCommitMsg(event.target.value)} />
+              <Textarea className="commit-msg" minRows={2} maxRows={6} autoGrow placeholder={tr("gitview.commitMessage")} value={commitMsg} onChange={(event) => setCommitMsg(event.target.value)} />
               <div className="commit-row">
-                <Button size="sm" disabled={generating || busy} onClick={() => {
+                <Button size="sm" iconStart={AssistIcon} busy={generating} disabled={generating || busy} onClick={() => {
                   setGenerating(true);
                   void api.gitCommitMessage(projectId, sessionId ?? undefined)
                     .then((result) => { if (result.message) setCommitMsg(result.message); })
                     .finally(() => setGenerating(false));
-                }}>{generating ? tr("gitview.generating") : tr("gitview.generate")}</Button>
-                <Button size="sm" variant="primary" disabled={!commitMsg.trim() || busy} onClick={() => void run(async () => {
+                }}>{tr("gitview.generate")}</Button>
+                <Button size="sm" variant="primary" busy={busy && !!commitMsg.trim()} disabled={!commitMsg.trim() || busy} onClick={() => void run(async () => {
                   await api.gitCommit(projectId, commitMsg.trim(), sessionId ?? undefined);
                   setCommitMsg("");
                   setSelected(null);
                   setMobileDetail(false);
-                })}>{busy ? tr("gitview.committing") : tr("gitview.commit")}</Button>
+                })}>{tr("gitview.commit")}</Button>
               </div>
             </section>
           )}
@@ -735,8 +752,8 @@ export default function GitView() {
               {graphQuery && <IconButton icon={CloseIcon} size="sm" variant="ghost" className="source-search-clear" label={tr("gitview.clearSearch")} onClick={() => setGraphQuery("")} />}
             </div>
             <div className="git-ref-chips ui-scroll-tabs" aria-label={tr("gitview.filterByBranch")}>
-              <Button size="sm" variant="ghost" className={!graphRef ? "active" : ""} aria-pressed={!graphRef} onClick={() => setGraphRef("")}>{tr("gitview.allBranches")}</Button>
-              {branchChips.map((ref) => <Button size="sm" variant="ghost" key={ref} className={graphRef === ref ? "active" : ""} aria-pressed={graphRef === ref} onClick={() => setGraphRef(ref)}>{ref}</Button>)}
+              <Button size="sm" variant={!graphRef ? "primary" : "ghost"} aria-pressed={!graphRef} onClick={() => setGraphRef("")}>{tr("gitview.allBranches")}</Button>
+              {branchChips.map((ref) => <Button size="sm" variant={graphRef === ref ? "primary" : "ghost"} key={ref} aria-pressed={graphRef === ref} onClick={() => setGraphRef(ref)}>{ref}</Button>)}
             </div>
             <div className="git-graph">
               {!loadError && visibleGraph.length === 0 && <div className="git-filter-empty">{tr("gitview.noCommitsMatchThisFilter")}</div>}
@@ -762,7 +779,7 @@ export default function GitView() {
           <section className="git-detail-pane">
             {commitSel && (
               <div className="git-mobile-detail-head">
-                <Button size="sm" onClick={() => setMobileDetail(false)}><Icon.back /> {tr("gitview.tabLog")}</Button>
+                <Button size="sm" iconStart={BackIcon} onClick={() => setMobileDetail(false)}>{tr("gitview.tabLog")}</Button>
                 <span className="mono">{selectedCommit?.shortSha ?? commitSel.slice(0, 7)}</span>
               </div>
             )}
@@ -794,21 +811,21 @@ export default function GitView() {
               <p>{tr("gitview.switchContextOrStartAnIsolated")}</p>
             </div>
             <span className="header-spacer" />
-            <Button size="sm" onClick={() => {
+            <Button size="sm" iconStart={BranchIcon} onClick={() => {
               setShowBranchForm(true);
               setShowTreeForm(false);
               setShowPrForm(false);
-            }}><Icon.branch /> {tr("gitview.newBranch")}</Button>
-            <Button size="sm" onClick={() => {
+            }}>{tr("gitview.newBranch")}</Button>
+            <Button size="sm" iconStart={WorktreeIcon} onClick={() => {
               setShowTreeForm(true);
               setShowBranchForm(false);
               setShowPrForm(false);
-            }}><Icon.worktree /> {tr("gitview.newWorktree")}</Button>
-            <Button size="sm" variant="primary" onClick={() => {
+            }}>{tr("gitview.newWorktree")}</Button>
+            <Button size="sm" variant="primary" iconStart={PullRequestIcon} onClick={() => {
               setShowPrForm(true);
               setShowBranchForm(false);
               setShowTreeForm(false);
-            }}><Icon.pullRequest /> {tr("gitview.createPr")}</Button>
+            }}>{tr("gitview.createPr")}</Button>
           </div>
           <div className="git-resource-grid">
             <section className="git-resource-card">
@@ -875,7 +892,7 @@ export default function GitView() {
                       <span className="muted mono">{tree.head.slice(0, 7)}</span>
                     </div>
                     <span className={`tag ${tree.isMain ? "green" : ""}`}>{tree.isMain ? tr("gitview.main") : tr("gitview.linked")}</span>
-                    <Button size="sm" title={tr("gitview.newSessionInValue", { branch: tree.branch ?? tr("gitview.thisWorktree") })} onClick={() => openWorktreeSessionDialog(projectId, tree.path)}><Icon.session /> {tr("gitview.session")}</Button>
+                    <Button size="sm" iconStart={SessionIcon} title={tr("gitview.newSessionInValue", { branch: tree.branch ?? tr("gitview.thisWorktree") })} onClick={() => openWorktreeSessionDialog(projectId, tree.path)}>{tr("gitview.session")}</Button>
                     {!tree.isMain && <IconButton icon={DeleteIcon} size="sm" variant="danger" title={tr("gitview.removeWorktree")} label={tr("gitview.removeWorktreeValue", { branch: tree.branch ?? tree.path })} disabled={busy} onClick={() => setConfirmRequest({
                       title: tr("gitview.removeWorktreeQuestion"),
                       description: tr("gitview.theLinkedWorktreeAtValue", { path: tree.path }),
@@ -885,7 +902,7 @@ export default function GitView() {
                   </article>
                 ))}
               </div>
-              <Button size="sm" className="git-new-session-btn" onClick={() => openWorktreeSessionDialog(projectId)}><Icon.session /> {tr("gitview.newWorktreeSession")}</Button>
+              <Button size="sm" className="git-new-session-btn" iconStart={SessionIcon} onClick={() => openWorktreeSessionDialog(projectId)}>{tr("gitview.newWorktreeSession")}</Button>
             </section>
           </div>
         </div>
@@ -965,8 +982,8 @@ function DiffPrefsToolbar() {
   return (
     <div className="diff-prefs">
       <div className="diff-layout-toggle">
-        <Button size="sm" variant="ghost" className={prefs.layout === "unified" ? "active" : ""} aria-pressed={prefs.layout === "unified"} onClick={() => setGitPrefs({ layout: "unified" })}>{tr("gitview.unified")}</Button>
-        <Button size="sm" variant="ghost" className={prefs.layout === "split" ? "active" : ""} aria-pressed={prefs.layout === "split"} onClick={() => setGitPrefs({ layout: "split" })}>{tr("gitview.split")}</Button>
+        <Button size="sm" variant={prefs.layout === "unified" ? "primary" : "ghost"} aria-pressed={prefs.layout === "unified"} onClick={() => setGitPrefs({ layout: "unified" })}>{tr("gitview.unified")}</Button>
+        <Button size="sm" variant={prefs.layout === "split" ? "primary" : "ghost"} aria-pressed={prefs.layout === "split"} onClick={() => setGitPrefs({ layout: "split" })}>{tr("gitview.split")}</Button>
       </div>
       <Checkbox checked={prefs.ignoreWhitespace} onChange={(checked) => setGitPrefs({ ignoreWhitespace: checked })} label={tr("gitview.ignoreWhitespace")} />
       <Checkbox checked={prefs.wrap} onChange={(checked) => setGitPrefs({ wrap: checked })} label={tr("gitview.wrapLines")} />

@@ -37,7 +37,11 @@ test("guided choices stay in one draft and persist only from Finish setup", asyn
   assert.ok(src.includes("useState<ProjectSetupDraft>"), "one draft owns the four setup steps");
   assert.ok(src.includes("applyProjectSetup(current, draft, widgets)"), "Finish uses the shared layout engine");
   assert.ok(src.includes("aria-pressed="), "choices expose programmatic selected state");
-  assert.ok(src.includes('{tr("projectsetup.finishSetup")}</button>'), "one named confirmation action persists the draft");
+  assert.ok(
+    src.includes('{tr("projectsetup.finishSetup")}</button>')
+    || src.includes('{tr("projectsetup.finishSetup")}</Button>'),
+    "one named confirmation action persists the draft",
+  );
   assert.ok(src.includes("completeProjectSetup();"), "Finish records completion for the active project");
 });
 

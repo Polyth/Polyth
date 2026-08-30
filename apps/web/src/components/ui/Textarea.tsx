@@ -36,7 +36,8 @@ export default function Textarea({
   useLayoutEffect(() => {
     const el = inner.current;
     if (!el || !autoGrow) return;
-    const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20;
+    const computed = typeof getComputedStyle === "function" ? getComputedStyle(el) : undefined;
+    const lineHeight = parseFloat(computed?.lineHeight ?? "") || 20;
     el.style.height = "auto";
     const min = minRows * lineHeight;
     const max = maxRows * lineHeight;

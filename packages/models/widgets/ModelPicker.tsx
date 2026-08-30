@@ -28,11 +28,17 @@ import { dismissKeyboard } from "@polyth/web/mobile-viewport";
 import { tapFeedback } from "@polyth/web/haptics";
 import { useSheetTrigger } from "@polyth/web/sheet-trigger";
 import {
-  Icon as UiIcon,
   InfoIcon,
+  BackIcon,
+  Button,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  FavoriteIcon,
+  IconButton,
   ResponsiveOverlay,
   SheetRow,
   SheetSection,
+  TextInput,
 } from "@polyth/web/ui";
 import { Icon } from "@polyth/web/icons";
 import ProviderLogo from "./ProviderLogo.tsx";
@@ -99,10 +105,9 @@ function ModelDetails({
   ];
   return (
     <div className="model-details">
-      <button type="button" className="model-details-back" onClick={onBack}>
-        <span aria-hidden="true"><Icon.back /></span>
+      <Button type="button" className="model-details-back" size="sm" variant="ghost" iconStart={BackIcon} onClick={onBack}>
         {tr("common.back")}
-      </button>
+      </Button>
       <div className="model-details-head">
         <ProviderLogo
           providerID={model.providerID}
@@ -126,9 +131,9 @@ function ModelDetails({
         {selected
           ? <span className="model-details-current">{tr("modelpicker.currentModel")}</span>
           : (
-            <button type="button" className="model-details-use" onClick={onUse}>
+            <Button type="button" className="model-details-use" variant="primary" onClick={onUse}>
               {tr("modelpicker.useThisModel")}
-            </button>
+            </Button>
           )}
       </div>
     </div>
@@ -338,35 +343,41 @@ export default function ModelPicker({
   const star = (model: ModelDescriptor, variant: "row" | "sheet" = "row") => {
     const favorite = isFavorite(prefs, modelKey(model));
     return (
-      <button
+      <IconButton
         type="button"
         className={`${variant === "sheet" ? "sheet-row-star" : "star-btn"}${favorite ? " on" : ""}`}
+        icon={FavoriteIcon}
+        size="sm"
+        variant="ghost"
+        pressed={favorite}
         title={favorite ? tr("modelpicker.removeFavorite") : tr("modelpicker.addFavorite")}
-        aria-label={favorite
+        label={favorite
           ? tr("modelpicker.removeValueFromFavorites", { name: model.name })
           : tr("modelpicker.addValueToFavorites", { name: model.name })}
-        aria-pressed={favorite}
         tabIndex={variant === "row" ? -1 : undefined}
         onClick={(event) => {
           event.stopPropagation();
           toggleModelFavorite(modelKey(model));
         }}
-      >{favorite ? "★" : "☆"}</button>
+      />
     );
   };
 
   const infoButton = (model: ModelDescriptor, variant: "row" | "sheet" = "row") => (
-    <button
+    <IconButton
       type="button"
       className={variant === "sheet" ? "sheet-row-info" : "model-row-info"}
+      icon={InfoIcon}
+      size="sm"
+      variant="ghost"
       title={tr("modelpicker.detailsForValue", { name: model.name })}
-      aria-label={tr("modelpicker.detailsForValue", { name: model.name })}
+      label={tr("modelpicker.detailsForValue", { name: model.name })}
       tabIndex={variant === "row" ? -1 : undefined}
       onClick={(event) => {
         event.stopPropagation();
         setDetail(model);
       }}
-    ><UiIcon icon={InfoIcon} size="sm" /></button>
+    />
   );
 
   /** Row meta: modality/context, plus provider identity in the favorites
@@ -448,20 +459,26 @@ export default function ModelPicker({
       ariaLabel={tr("modelpicker.useValue", { name: model.name })}
       trailing={editing && group === "favorites" ? (
         <span className="sheet-row-tools">
-          <button
+          <IconButton
             type="button"
             className="sheet-row-tool"
-            aria-label={tr("modelpicker.moveValueUp", { name: model.name })}
+            icon={ChevronUpIcon}
+            size="sm"
+            variant="ghost"
+            label={tr("modelpicker.moveValueUp", { name: model.name })}
             disabled={favorites.findIndex((favorite) => modelKey(favorite) === modelKey(model)) <= 0}
             onClick={() => moveFavorite(model, -1)}
-          >↑</button>
-          <button
+          />
+          <IconButton
             type="button"
             className="sheet-row-tool"
-            aria-label={tr("modelpicker.moveValueDown", { name: model.name })}
+            icon={ChevronDownIcon}
+            size="sm"
+            variant="ghost"
+            label={tr("modelpicker.moveValueDown", { name: model.name })}
             disabled={favorites.findIndex((favorite) => modelKey(favorite) === modelKey(model)) >= favorites.length - 1}
             onClick={() => moveFavorite(model, 1)}
-          >↓</button>
+          />
         </span>
       ) : (
         <span className="sheet-row-tools">
@@ -583,7 +600,7 @@ export default function ModelPicker({
         ) : (
             <>
               <div className="model-pop-search">
-                <input
+                <TextInput
                   value={pickerState.query}
                   placeholder={tr("modelpicker.searchModels2")}
                   role="combobox"

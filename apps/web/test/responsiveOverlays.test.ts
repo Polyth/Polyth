@@ -73,7 +73,7 @@ test("project and configuration actions remain attached to their handlers", asyn
   assert.match(worktree, /onClick=\{\(\) => void submit\(\)\}/);
   assert.match(profile, /onClick=\{\(\) => void save\(true\)\}/);
   assert.match(widgetLibrary, /onClick=\{\(\) => onAdd\(widget\)\}/);
-  assert.match(widgetLibrary, /onChange=\{\(event\) => setPluginId\(event\.target\.value\)\}/);
+  assert.match(widgetLibrary, /onChange=\{setPluginId\}/);
 });
 
 test("390px dialogs use an internally scrolling bottom sheet", { skip: !CHROME }, async () => {

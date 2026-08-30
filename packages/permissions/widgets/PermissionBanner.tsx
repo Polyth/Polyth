@@ -7,7 +7,7 @@ import { useState } from "react";
 import { replyPermission } from "../../../apps/web/src/init.ts";
 import type { PendingPermission } from "../../../apps/web/src/reduce.ts";
 import { Icon } from "../../../apps/web/src/icons.tsx";
-import Button from "../../../apps/web/src/components/ui/Button.tsx";
+import { Button, Select } from "../../../apps/web/src/components/ui/index.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 
 type AlwaysScope = "session" | "project";
@@ -56,14 +56,17 @@ function PermissionRow({ p }: { p: PendingPermission }) {
             <Button variant="quiet" onClick={() => replyPermission(p.requestId, "always", scope)}>
               {tr("permissionbanner.always")}
             </Button>
-            <select
-              aria-label={tr("permissionbanner.alwaysScope")}
+            <Select
+              label={tr("permissionbanner.alwaysScope")}
+              ariaLabel={tr("permissionbanner.alwaysScope")}
               value={scope}
-              onChange={(e) => setScope(e.target.value === "project" ? "project" : "session")}
-            >
-              {scopes.includes("session") && <option value="session">{tr("permissionbanner.thisSession")}</option>}
-              {scopes.includes("project") && <option value="project">{tr("permissionbanner.thisProject")}</option>}
-            </select>
+              options={[
+                ...(scopes.includes("session") ? [{ value: "session", label: tr("permissionbanner.thisSession") }] : []),
+                ...(scopes.includes("project") ? [{ value: "project", label: tr("permissionbanner.thisProject") }] : []),
+              ]}
+              onChange={(value) => setScope(value === "project" ? "project" : "session")}
+              className="perm-always-scope"
+            />
           </span>
         )}
         <Button variant="danger" className="permission-deny" onClick={() => replyPermission(p.requestId, "reject")}>

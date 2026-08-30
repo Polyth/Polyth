@@ -1,16 +1,11 @@
 import "./styles.css";
-import { createElement, useState, type ComponentType } from "react";
+import { createElement, useState } from "react";
 import { defineWebPackage, type WidgetRenderContext } from "@polyth/web-sdk";
 import { api } from "@polyth/session/web-api";
 import PermissionBanner from "./PermissionBanner.tsx";
+import { IconButton, ShieldIcon } from "../../../apps/web/src/components/ui/index.ts";
 
-function AutoApproveAction({
-  context,
-  ShieldIcon,
-}: {
-  context: WidgetRenderContext;
-  ShieldIcon: ComponentType;
-}) {
+function AutoApproveAction({ context }: { context: WidgetRenderContext }) {
   const sessionId = typeof context.sessionId === "string" ? context.sessionId : null;
   const [busy, setBusy] = useState(false);
   const suppliedToggle = typeof context.toggleAutoApprove === "function"
@@ -23,23 +18,20 @@ function AutoApproveAction({
     setBusy(true);
     void api.autoAcceptSet(sessionId, on ? "off" : "on").finally(() => setBusy(false));
   };
-  return <button
-    type="button"
-    className={`header-action composer-auto-approve${on ? " on" : ""}`}
-    aria-label={on ? "Turn off auto-approve" : "Turn on auto-approve"}
-    aria-pressed={on}
-    disabled={busy || context.autoApproveBusy === true}
-    onClick={toggle}
-  >
-    <ShieldIcon /><span>Auto-approve</span>
-  </button>;
+  return createElement(IconButton, {
+    className: `header-action composer-auto-approve${on ? " on" : ""}`,
+    icon: ShieldIcon,
+    size: "md",
+    variant: "ghost",
+    label: on ? "Turn off auto-approve" : "Turn on auto-approve",
+    pressed: on,
+    disabled: busy || context.autoApproveBusy === true,
+    onClick: toggle,
+  });
 }
 
 export default defineWebPackage((host) => () => {
-  const renderAutoApprove = (context: WidgetRenderContext) => createElement(AutoApproveAction, {
-    context,
-    ShieldIcon: host.ui.icons.shield ?? (() => null),
-  });
+  const renderAutoApprove = (context: WidgetRenderContext) => createElement(AutoApproveAction, { context });
   const off = [
     host.slots.register({
       slot: "session.timeline.after",
