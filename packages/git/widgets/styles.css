@@ -128,6 +128,7 @@ font-size: var(--font-heading); line-height: 1.2;
 }
 .pending-changes-bar--collapsed {
   width: max-content;
+  min-width: max-content;
   max-width: 100%;
   align-self: start;
   align-items: flex-start;
@@ -139,19 +140,24 @@ font-size: var(--font-heading); line-height: 1.2;
   box-shadow: none;
   color: var(--text-dim);
 }
-.pending-changes-bubble {
+body[data-rounding] button.pending-changes-bubble,
+button.pending-changes-bubble {
   display: inline-flex;
   align-items: center;
   gap: var(--control-gap);
   box-sizing: border-box;
   width: max-content;
+  min-width: max-content;
   max-width: 100%;
-  height: var(--control-h-sm);
+  height: auto;
   min-height: max(var(--control-h-sm), var(--hit-min));
-  padding: var(--space-2) var(--control-pad-x-sm);
+  padding: 0 var(--control-pad-x-sm);
   border: 1px solid var(--hair);
   border-radius: 999px;
   background: transparent;
+  box-shadow: none;
+  transform: none;
+  overflow: visible;
   color: var(--text-dim);
   font: inherit;
   font-size: var(--font-meta);
@@ -164,10 +170,23 @@ font-size: var(--font-heading); line-height: 1.2;
     color var(--motion-fast) var(--motion-ease),
     border-color var(--motion-fast) var(--motion-ease);
 }
-.pending-changes-bubble:hover,
-.pending-changes-bubble:focus-visible {
+body[data-rounding] button.pending-changes-bubble:hover,
+body[data-rounding] button.pending-changes-bubble:focus-visible,
+button.pending-changes-bubble:hover,
+button.pending-changes-bubble:focus-visible {
   background: var(--surface-overlay);
   color: var(--text);
+  transform: none;
+  box-shadow: none;
+}
+body[data-rounding] button.pending-changes-bubble:active,
+body[data-rounding] button.pending-changes-bubble:active:not(:disabled),
+button.pending-changes-bubble:active,
+button.pending-changes-bubble:active:not(:disabled),
+button.pending-changes-bubble:not(:disabled):active {
+  background: var(--surface-overlay);
+  transform: none;
+  box-shadow: none;
 }
 .pending-changes-bubble-icon {
   display: inline-flex;
@@ -477,6 +496,7 @@ grid-column: auto;
 .focus-conversation > .placed-mini-widget:has(.pending-changes-bar--collapsed) > .pending-changes-bar--collapsed,
 .focus-conversation > .pending-changes-bar--collapsed {
   width: max-content;
+  min-width: max-content;
   max-width: 100%;
   margin: 0;
 }

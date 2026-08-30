@@ -12,6 +12,7 @@ import {
   confirmAlert,
   FileDiffIcon,
   Icon,
+  IconButton,
   UndoIcon,
 } from "../../../apps/web/src/components/ui/index.ts";
 
@@ -84,6 +85,11 @@ function DiffTotals({ stats }: { stats: DiffLineStats }) {
 export default function PendingChangesBar() {
   const model = useActiveModel();
   const projectId = useStore((state) => state.activeProjectId);
+  const repoRoot = useStore((state) => {
+    const id = state.activeProjectId;
+    if (!id) return null;
+    return state.projectRegistry.projects.find((project) => project.id === id)?.path ?? null;
+  });
   // Sessions without a worktree resolve to the project's primary checkout —
   // scope status/diff reads to the project entry so spawning or switching such
   // sessions never triggers an extra git fetch (worktree sessions stay scoped).
@@ -94,10 +100,10 @@ export default function PendingChangesBar() {
   const working = model.turn?.status === "working";
   const status = useGitStatus(projectId, working, sessionId);
   const selected = useMemo(
-    () => selectPendingChanges(status, sessionEditedPaths(model.messages)),
-    [status, model.messages],
+    () => selectPendingChanges(status, sessionEditedPaths(model.messages), repoRoot),
+    [status, model.messages, repoRoot],
   );
-  const changeKey = `${selected.source}:${[...selected.paths].sort().join("\0")}`;
+  const changeKey = [...selected.paths].sort().join("\0");
   const [diffStats, setDiffStats] = useState<DiffStatsSnapshot | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [filesExpanded, setFilesExpanded] = useState(false);
@@ -109,12 +115,21 @@ export default function PendingChangesBar() {
 
   useEffect(() => {
     let cancelled = false;
-    if (!projectId || !status || selected.source !== "git") {
-      setDiffStats(null);
+    const keepKnownStats = (prev: DiffStatsSnapshot | null): DiffStatsSnapshot | null => {
+      if (!prev) return null;
+      const files: Record<string, DiffLineStats> = {};
+      for (const path of selected.paths) {
+        const stats = prev.files[path];
+        if (stats) files[path] = stats;
+      }
+      return { changeKey, files };
+    };
+    if (!projectId || !status || selected.dirtyPaths.length === 0) {
+      setDiffStats(keepKnownStats);
       return;
     }
 
-    const requests = selected.paths.map(async (path) => {
+    const requests = selected.dirtyPaths.map(async (path) => {
       const parts: DiffLineStats[] = [];
       if (status.staged.some((file) => file.path === path)) {
         try {
@@ -137,10 +152,21 @@ export default function PendingChangesBar() {
 
     void Promise.all(requests).then((entries) => {
       if (cancelled) return;
-      setDiffStats({ changeKey, files: Object.fromEntries(entries) });
+      setDiffStats((prev) => {
+        const files: Record<string, DiffLineStats> = {};
+        for (const path of selected.paths) {
+          const previous = prev?.files[path];
+          if (previous) files[path] = previous;
+        }
+        for (const [path, stats] of entries) {
+          const empty = stats.additions === 0 && stats.deletions === 0;
+          if (!empty || files[path] === undefined) files[path] = stats;
+        }
+        return { changeKey, files };
+      });
     });
     return () => { cancelled = true; };
-  }, [changeKey, projectId, selected.paths, selected.source, sessionId, status]);
+  }, [changeKey, projectId, selected.dirtyPaths, selected.paths, sessionId, status]);
 
   if (selected.paths.length === 0) return null;
   const count = selected.paths.length;
@@ -154,7 +180,7 @@ export default function PendingChangesBar() {
   const totals = fileStats ? totalDiffStats(Object.values(fileStats)) : null;
   const visible = visibleEditedPaths(selected.paths, filesExpanded);
   const overflow = hiddenEditedCount(count);
-  const canUndo = selected.source === "git" && Boolean(projectId);
+  const canUndo = selected.dirtyPaths.length > 0 && Boolean(projectId);
   const moreLabel = filesExpanded
     ? tr("pendingchangesbar.showLess")
     : overflow === 1
@@ -163,16 +189,17 @@ export default function PendingChangesBar() {
 
   const undoAll = async () => {
     if (!projectId || !canUndo || undoing) return;
-    const message = count === 1
-      ? tr("gitview.allUncommittedChangesInValue", { path: selected.paths[0]! })
-      : tr("pendingchangesbar.undoAllChangesDescription", { count });
+    const dirtyCount = selected.dirtyPaths.length;
+    const message = dirtyCount === 1
+      ? tr("gitview.allUncommittedChangesInValue", { path: selected.dirtyPaths[0]! })
+      : tr("pendingchangesbar.undoAllChangesDescription", { count: dirtyCount });
     if (!await confirmAlert(message, {
       title: tr("pendingchangesbar.undoAllChanges"),
       confirmLabel: tr("pendingchangesbar.undo"),
     })) return;
     setUndoing(true);
     try {
-      await api.gitDiscard(projectId, selected.paths, sessionId ?? undefined);
+      await api.gitDiscard(projectId, selected.dirtyPaths, sessionId ?? undefined);
       await refreshGitStatus(projectId, sessionId);
     } catch (cause) {
       setUiError(friendlyError(tr("gitview.couldntUpdateTheRepository"), cause));
@@ -214,14 +241,6 @@ export default function PendingChangesBar() {
           </div>
         </div>
         <div className="pending-changes-actions">
-          <Button
-            variant="ghost"
-            size="sm"
-            iconStart={ChevronUpIcon}
-            onClick={() => setDetailsOpen(false)}
-          >
-            {tr("pendingchangesbar.collapse")}
-          </Button>
           {canUndo && (
             <Button
               variant="ghost"
@@ -243,6 +262,13 @@ export default function PendingChangesBar() {
           >
             {tr("pendingchangesbar.review")}
           </Button>
+          <IconButton
+            variant="ghost"
+            size="sm"
+            icon={ChevronDownIcon}
+            label={tr("pendingchangesbar.collapse")}
+            onClick={() => setDetailsOpen(false)}
+          />
         </div>
       </div>
       <div className="pending-changes-list">

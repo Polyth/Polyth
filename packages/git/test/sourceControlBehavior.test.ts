@@ -31,7 +31,7 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { activateProject, activateSession, applyEvents, getState, seedSessionCache } = await import("../../../apps/web/src/store.ts");
+const { activateProject, activateSession, applyEvents, applyProjectAdded, getState, seedSessionCache } = await import("../../../apps/web/src/store.ts");
 const { default: GitView, DiffContent } = await import("../widgets/GitView.tsx");
 const { api } = await import("@polyth/session/web-api");
 const {
@@ -296,6 +296,12 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
   };
 
   activateProject(projectId);
+  applyProjectAdded({
+    id: projectId,
+    path: repoRoot,
+    name: "edited files",
+    createdAt: 1,
+  });
   seedSessionCache({
     id: sessionId,
     projectId,
@@ -384,8 +390,12 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
     assert.ok(review);
     await act(async () => { review.click(); });
 
-    const collapse = labeledButton(view.container, "Collapse");
+    const collapse = view.container.querySelector<HTMLButtonElement>('button[aria-label="Collapse"]');
     assert.ok(collapse, "Collapse returns to the bubble");
+    assert.equal(collapse.querySelector(".ui-btn-label"), null, "Collapse is icon-only");
+    assert.ok(collapse.querySelector("svg"), "Collapse keeps a visible icon");
+    const actions = [...view.container.querySelectorAll(".pending-changes-actions button")];
+    assert.equal(actions.at(-1), collapse, "Collapse is the rightmost header action");
     await act(async () => { collapse.click(); });
     const collapsed = view.container.querySelector<HTMLButtonElement>(".pending-changes-bubble");
     assert.ok(collapsed);
@@ -414,7 +424,12 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
       await delay(30);
     });
     assert.deepEqual(discarded, files);
-    assert.equal(view.container.querySelector(".pending-changes-bar"), null);
+    assert.ok(view.container.querySelector(".pending-changes-bar"), "session files stay listed after discard");
+    assert.equal(labeledButton(view.container, "Undo"), undefined, "Undo hides when nothing is dirty");
+    assert.deepEqual(
+      [...view.container.querySelectorAll(".pending-changes-file-name")].map((node) => node.textContent),
+      ["src/a.ts", "src/b.ts", "src/c.ts"],
+    );
   } finally {
     await view.unmount();
     activateSession(null);

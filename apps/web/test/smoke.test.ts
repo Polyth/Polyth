@@ -219,7 +219,7 @@ test("edit tool results derive changed files and a new prompt clears the turn su
   assert.deepEqual(model.changedFiles, []);
 });
 
-test("pending-change source intersects session tool paths with dirty git", () => {
+test("pending-change source lists session tool paths independently of leftover git dirt", () => {
   assert.deepEqual(extractChangedFiles("read_file", { path: "src/a.ts" }), []);
   assert.deepEqual(extractChangedFiles("write", { filePath: "./src/a.ts" }, { changedFiles: ["src/a.ts", "src/b.ts"] }), [
     "src/a.ts",
@@ -234,37 +234,59 @@ test("pending-change source intersects session tool paths with dirty git", () =>
     untracked: [{ path: "leftover.ts", status: "untracked", staged: false }],
     conflicted: [],
   };
+  const clean = { ...dirty, staged: [], untracked: [] };
+  const leftoverOnly = { ...dirty, staged: [] };
   assert.deepEqual(selectPendingChanges(dirty, ["src/a.ts"]), {
     source: "git",
     paths: ["src/a.ts"],
+    dirtyPaths: ["src/a.ts"],
   });
   assert.deepEqual(selectPendingChanges(dirty, ["/tmp/polyth-demo-repo/src/a.ts"]), {
     source: "git",
     paths: ["src/a.ts"],
+    dirtyPaths: ["src/a.ts"],
   });
   assert.deepEqual(selectPendingChanges(dirty, ["C:\\tmp\\polyth-demo-repo\\src\\a.ts"]), {
     source: "git",
     paths: ["src/a.ts"],
+    dirtyPaths: ["src/a.ts"],
   });
-  assert.deepEqual(selectPendingChanges({ ...dirty, staged: [] }, ["src/a.ts"]), {
-    source: "git",
-    paths: [],
+  assert.deepEqual(
+    selectPendingChanges(dirty, ["/tmp/polyth-demo-repo/src/a.ts"], "/tmp/polyth-demo-repo"),
+    { source: "git", paths: ["src/a.ts"], dirtyPaths: ["src/a.ts"] },
+  );
+  assert.deepEqual(selectPendingChanges(leftoverOnly, ["src/a.ts"]), {
+    source: "tools",
+    paths: ["src/a.ts"],
+    dirtyPaths: [],
   });
-  assert.deepEqual(selectPendingChanges({ ...dirty, staged: [], untracked: [] }, ["src/a.ts"]), {
-    source: "git",
-    paths: [],
+  assert.deepEqual(selectPendingChanges(clean, ["src/a.ts"]), {
+    source: "tools",
+    paths: ["src/a.ts"],
+    dirtyPaths: [],
   });
+  assert.deepEqual(
+    selectPendingChanges(clean, ["/tmp/polyth-demo-repo/src/a.ts"], "/tmp/polyth-demo-repo"),
+    { source: "tools", paths: ["src/a.ts"], dirtyPaths: [] },
+  );
+  assert.deepEqual(
+    selectPendingChanges(clean, ["/tmp/polyth-demo-repo/src/a.ts"], "/tmp/polyth-demo-repo/"),
+    { source: "tools", paths: ["src/a.ts"], dirtyPaths: [] },
+  );
   assert.deepEqual(selectPendingChanges(null, ["src/a.ts", "./src/a.ts", "src/b.ts"]), {
     source: "tools",
     paths: ["src/a.ts", "src/b.ts"],
+    dirtyPaths: [],
   });
   assert.deepEqual(selectPendingChanges(dirty, []), {
     source: "git",
     paths: [],
+    dirtyPaths: [],
   });
   assert.deepEqual(selectPendingChanges(null, []), {
     source: "tools",
     paths: [],
+    dirtyPaths: [],
   });
   const nested = {
     ...dirty,
@@ -276,6 +298,7 @@ test("pending-change source intersects session tool paths with dirty git", () =>
   assert.deepEqual(selectPendingChanges(nested, ["/repo/pkg/src/a.ts"]), {
     source: "git",
     paths: ["pkg/src/a.ts"],
+    dirtyPaths: ["pkg/src/a.ts"],
   });
   const suffixTrap = {
     ...dirty,
@@ -283,8 +306,9 @@ test("pending-change source intersects session tool paths with dirty git", () =>
     untracked: [],
   };
   assert.deepEqual(selectPendingChanges(suffixTrap, ["foo.ts"]), {
-    source: "git",
-    paths: [],
+    source: "tools",
+    paths: ["foo.ts"],
+    dirtyPaths: [],
   });
 });
 

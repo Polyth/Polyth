@@ -75,10 +75,21 @@ export function gitChangedFiles(status: GitStatus): string[] {
 export interface PendingChangeSource {
   source: "git" | "tools";
   paths: string[];
+  dirtyPaths: string[];
 }
 
 function usableToolPaths(toolPaths: readonly string[]): string[] {
   return [...new Set(toolPaths.map((path) => usablePath(path)).filter((path): path is string => path !== null))];
+}
+
+/** Map an OpenCode absolute path onto the git-relative form once it leaves the dirty set. */
+export function relativizeToRepo(path: string, repoRoot: string): string {
+  const normalized = path.replaceAll("\\", "/");
+  const root = repoRoot.replaceAll("\\", "/").replace(/\/+$/, "");
+  if (!root) return normalized;
+  if (normalized === root) return ".";
+  if (normalized.startsWith(`${root}/`)) return normalized.slice(root.length + 1);
+  return normalized;
 }
 
 /** Union of edit-tool paths from every tool message in the active render model. */
@@ -97,26 +108,31 @@ export function sessionEditedPaths(
 }
 
 /**
- * Session edit-tool paths are the source of truth. When git status is
- * available, keep session writes that are still dirty (suffix-matched to
- * git-relative paths); extra worktree dirt never appears. Empty session
- * tools hide the card.
+ * Session edit-tool paths are the source of truth. Git dirt is not a filter
+ * for inclusion: leftover worktree files this session did not write never
+ * appear, and empty session tools hide the control even when git is dirty.
+ * After commit/push, session files stay listed with `source: "tools"`.
  */
 export function selectPendingChanges(
   status: GitStatus | null,
   toolPaths: readonly string[],
+  repoRoot?: string | null,
 ): PendingChangeSource {
   const sessionPaths = usableToolPaths(toolPaths);
-  if (sessionPaths.length === 0) return { source: status ? "git" : "tools", paths: [] };
-  if (!status) return { source: "tools", paths: sessionPaths };
+  if (sessionPaths.length === 0) return { source: status ? "git" : "tools", paths: [], dirtyPaths: [] };
+  if (!status) return { source: "tools", paths: sessionPaths, dirtyPaths: [] };
   const dirty = gitChangedFiles(status);
   const paths: string[] = [];
+  const dirtyPaths: string[] = [];
   const seen = new Set<string>();
   for (const sessionPath of sessionPaths) {
     const match = longestMatchingDirtyPath(sessionPath, dirty);
-    if (match === undefined || seen.has(match)) continue;
-    seen.add(match);
-    paths.push(match);
+    const display = match
+      ?? (repoRoot ? relativizeToRepo(sessionPath, repoRoot) : sessionPath);
+    if (seen.has(display)) continue;
+    seen.add(display);
+    paths.push(display);
+    if (match !== undefined) dirtyPaths.push(display);
   }
-  return { source: "git", paths };
+  return { source: dirtyPaths.length > 0 ? "git" : "tools", paths, dirtyPaths };
 }
