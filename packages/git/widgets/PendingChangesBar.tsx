@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useGitStatus, refreshGitStatus } from "./gitStatusStore.ts";
-import { selectPendingChanges } from "../../../apps/web/src/pendingChanges.ts";
+import { selectPendingChanges, sessionEditedPaths } from "../../../apps/web/src/pendingChanges.ts";
 import { openChanges, setUiError, useActiveModel, useStore } from "../../../apps/web/src/store.ts";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
 import { api } from "@polyth/session/web-api";
@@ -94,8 +94,8 @@ export default function PendingChangesBar() {
   const working = model.turn?.status === "working";
   const status = useGitStatus(projectId, working, sessionId);
   const selected = useMemo(
-    () => selectPendingChanges(status, model.changedFiles),
-    [status, model.changedFiles],
+    () => selectPendingChanges(status, sessionEditedPaths(model.messages)),
+    [status, model.messages],
   );
   const changeKey = `${selected.source}:${[...selected.paths].sort().join("\0")}`;
   const [diffStats, setDiffStats] = useState<DiffStatsSnapshot | null>(null);

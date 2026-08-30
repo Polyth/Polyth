@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { register } from "node:module";
 import { Window } from "happy-dom";
 import type { ReactNode } from "react";
+import type { JsonObject, SessionEvent } from "@polyth/contracts";
 
 const dom = new Window({ url: "http://127.0.0.1:4400/" });
 Object.assign(globalThis, {
@@ -30,7 +31,7 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { activateProject, getState } = await import("../../../apps/web/src/store.ts");
+const { activateProject, activateSession, applyEvents, getState, seedSessionCache } = await import("../../../apps/web/src/store.ts");
 const { default: GitView, DiffContent } = await import("../widgets/GitView.tsx");
 const { api } = await import("@polyth/session/web-api");
 const {
@@ -250,13 +251,19 @@ test("edited-files preview shows three paths until expanded", () => {
 
 test("edited-files card lists a preview, expands, reviews a file, and undoes via gitDiscard", async () => {
   const projectId = "edited-files-card-project";
+  const sessionId = "edited-files-card-session";
   const files = ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"];
+  const leftover = "src/leftover.ts";
+  const repoRoot = "/tmp/polyth-demo-repo";
   let discarded: string[] | null = null;
   let clean = false;
   globalThis.fetch = async (input, init) => {
     const url = String(input);
     if (url.startsWith("/api/git/status")) {
-      const entries = files.map((path) => ({ path, status: "modified", staged: false }));
+      const entries = [
+        { path: leftover, status: "modified", staged: false },
+        ...files.map((path) => ({ path, status: "modified", staged: false })),
+      ];
       return response({
         branch: "main", ahead: 0, behind: 0, conflicted: [], staged: [], untracked: [],
         unstaged: clean ? [] : entries,
@@ -281,6 +288,40 @@ test("edited-files card lists a preview, expands, reviews a file, and undoes via
   };
 
   activateProject(projectId);
+  seedSessionCache({
+    id: sessionId,
+    projectId,
+    title: "edited files",
+    status: "idle",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  let seq = 0;
+  const ev = (type: string, data: JsonObject): SessionEvent => {
+    seq += 1;
+    return {
+      id: `${sessionId}-e${seq}`,
+      sessionId,
+      seq,
+      time: 1_700_000_000_000 + seq,
+      type,
+      data,
+      v: 1,
+    };
+  };
+  applyEvents([
+    ev("user/message", { text: "edit a and b" }),
+    ev("tool/call", { callId: "w1", tool: "write", input: { filePath: `${repoRoot}/${files[0]!}` } }),
+    ev("tool/result", { callId: "w1", tool: "write", output: "ok" }),
+    ev("tool/call", { callId: "w2", tool: "write", input: { filePath: `${repoRoot}/${files[1]!}` } }),
+    ev("tool/result", { callId: "w2", tool: "write", output: "ok" }),
+    ev("user/message", { text: "edit c and d" }),
+    ev("tool/call", { callId: "w3", tool: "write", input: { filePath: `${repoRoot}/${files[2]!}` } }),
+    ev("tool/result", { callId: "w3", tool: "write", output: "ok" }),
+    ev("tool/call", { callId: "w4", tool: "write", input: { filePath: `${repoRoot}/${files[3]!}` } }),
+    ev("tool/result", { callId: "w4", tool: "write", output: "ok" }),
+  ]);
+  activateSession(sessionId);
   const view = await mounted(createElement(PendingChangesBar));
   try {
     await act(async () => { await delay(40); });
@@ -289,6 +330,8 @@ test("edited-files card lists a preview, expands, reviews a file, and undoes via
     assert.match(view.container.textContent ?? "", /-4/);
     const listed = [...view.container.querySelectorAll(".pending-changes-file-name")].map((node) => node.textContent);
     assert.deepEqual(listed, ["src/a.ts", "src/b.ts", "src/c.ts"]);
+    assert.ok(!listed.includes(leftover));
+    assert.equal(view.container.textContent?.includes(leftover), false);
     const more = view.container.querySelector<HTMLButtonElement>(".pending-changes-more");
     assert.ok(more, "show-more control is available");
     assert.match(more.textContent ?? "", /Show 1 more file/);
@@ -341,6 +384,36 @@ test("edited-files card lists a preview, expands, reviews a file, and undoes via
     });
     assert.deepEqual(discarded, files);
     assert.equal(view.container.querySelector(".pending-changes-bar"), null);
+  } finally {
+    await view.unmount();
+    activateSession(null);
+    activateProject(null);
+  }
+});
+
+test("edited-files card stays hidden when git is dirty but this session edited nothing", async () => {
+  const projectId = "edited-files-leftover-only-project";
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith("/api/git/status")) {
+      return response({
+        branch: "main", ahead: 0, behind: 0, conflicted: [], staged: [], untracked: [],
+        unstaged: [{ path: "src/leftover.ts", status: "modified", staged: false }],
+        isRepo: true,
+      });
+    }
+    if (url.startsWith("/api/git/diff")) {
+      return response({ path: "src/leftover.ts", diff: "@@ -1 +1 @@\n-old\n+new" });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+
+  activateProject(projectId);
+  const view = await mounted(createElement(PendingChangesBar));
+  try {
+    await act(async () => { await delay(40); });
+    assert.equal(view.container.querySelector(".pending-changes-bar"), null);
+    assert.equal(view.container.textContent?.includes("src/leftover.ts"), false);
   } finally {
     await view.unmount();
     activateProject(null);

@@ -50,7 +50,7 @@ import {
 } from "../src/uiPrefs.ts";
 import { normalizeScheduleList } from "../../../packages/schedule/widgets/scheduleData.ts";
 import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../src/composerDefaults.ts";
-import { extractChangedFiles, selectPendingChanges } from "../src/pendingChanges.ts";
+import { extractChangedFiles, selectPendingChanges, sessionEditedPaths } from "../src/pendingChanges.ts";
 import { sessionSurfaceKind, type SurfaceModel } from "../src/sessionSurface.ts";
 import { mergeThinking } from "../src/utils.ts";
 import { tr } from "../src/i18n/index.ts";
@@ -219,33 +219,88 @@ test("edit tool results derive changed files and a new prompt clears the turn su
   assert.deepEqual(model.changedFiles, []);
 });
 
-test("pending-change source prefers authoritative git status and dedupes file paths", () => {
+test("pending-change source intersects session tool paths with dirty git", () => {
   assert.deepEqual(extractChangedFiles("read_file", { path: "src/a.ts" }), []);
   assert.deepEqual(extractChangedFiles("write", { filePath: "./src/a.ts" }, { changedFiles: ["src/a.ts", "src/b.ts"] }), [
     "src/a.ts",
     "src/b.ts",
   ]);
-  const status = {
+  const dirty = {
     branch: "main",
     ahead: 0,
     behind: 0,
     staged: [{ path: "src/a.ts", status: "modified", staged: true }],
-    unstaged: [{ path: "src/a.ts", status: "modified", staged: false }],
-    untracked: [{ path: "src/new.ts", status: "untracked", staged: false }],
+    unstaged: [],
+    untracked: [{ path: "leftover.ts", status: "untracked", staged: false }],
     conflicted: [],
   };
-  assert.deepEqual(selectPendingChanges(status, ["fallback.ts"]), {
+  assert.deepEqual(selectPendingChanges(dirty, ["src/a.ts"]), {
     source: "git",
-    paths: ["src/a.ts", "src/new.ts"],
+    paths: ["src/a.ts"],
   });
-  assert.deepEqual(selectPendingChanges({ ...status, staged: [], unstaged: [], untracked: [] }, ["fallback.ts"]), {
+  assert.deepEqual(selectPendingChanges(dirty, ["/tmp/polyth-demo-repo/src/a.ts"]), {
+    source: "git",
+    paths: ["src/a.ts"],
+  });
+  assert.deepEqual(selectPendingChanges(dirty, ["C:\\tmp\\polyth-demo-repo\\src\\a.ts"]), {
+    source: "git",
+    paths: ["src/a.ts"],
+  });
+  assert.deepEqual(selectPendingChanges({ ...dirty, staged: [] }, ["src/a.ts"]), {
     source: "git",
     paths: [],
   });
-  assert.deepEqual(selectPendingChanges(null, ["fallback.ts", "./fallback.ts"]), {
-    source: "tools",
-    paths: ["fallback.ts"],
+  assert.deepEqual(selectPendingChanges({ ...dirty, staged: [], untracked: [] }, ["src/a.ts"]), {
+    source: "git",
+    paths: [],
   });
+  assert.deepEqual(selectPendingChanges(null, ["src/a.ts", "./src/a.ts", "src/b.ts"]), {
+    source: "tools",
+    paths: ["src/a.ts", "src/b.ts"],
+  });
+  assert.deepEqual(selectPendingChanges(dirty, []), {
+    source: "git",
+    paths: [],
+  });
+  assert.deepEqual(selectPendingChanges(null, []), {
+    source: "tools",
+    paths: [],
+  });
+  const nested = {
+    ...dirty,
+    staged: [
+      { path: "src/a.ts", status: "modified", staged: true },
+      { path: "pkg/src/a.ts", status: "modified", staged: true },
+    ],
+  };
+  assert.deepEqual(selectPendingChanges(nested, ["/repo/pkg/src/a.ts"]), {
+    source: "git",
+    paths: ["pkg/src/a.ts"],
+  });
+  const suffixTrap = {
+    ...dirty,
+    staged: [{ path: "barfoo.ts", status: "modified", staged: true }],
+    untracked: [],
+  };
+  assert.deepEqual(selectPendingChanges(suffixTrap, ["foo.ts"]), {
+    source: "git",
+    paths: [],
+  });
+});
+
+test("sessionEditedPaths unions edit-tool files across turns", () => {
+  const model = buildModel([
+    ev("user/message", { text: "first" }),
+    ev("tool/call", { callId: "w1", tool: "write", input: { filePath: "./src/a.ts" } }),
+    ev("tool/result", { callId: "w1", tool: "write", output: "ok" }),
+    ev("user/message", { text: "second" }),
+    ev("tool/call", { callId: "read", tool: "read_file", input: { path: "src/skip.ts" } }),
+    ev("tool/result", { callId: "read", tool: "read_file", output: "ok" }),
+    ev("tool/call", { callId: "w2", tool: "write", input: { filePath: "src/b.ts" } }),
+    ev("tool/result", { callId: "w2", tool: "write", output: "ok" }),
+  ]);
+  assert.deepEqual(model.changedFiles, ["src/b.ts"]);
+  assert.deepEqual(sessionEditedPaths(model.messages), ["src/a.ts", "src/b.ts"]);
 });
 
 test("task snapshot revisions derive ordered semantic activity exactly once", () => {
