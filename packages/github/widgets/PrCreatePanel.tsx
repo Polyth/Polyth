@@ -70,7 +70,7 @@ export default function PrCreatePanel({ projectId, sessionId, onClose, onCreated
   if (created) {
     return (
       <div className="pr-create-panel" role="status">
-        <div className="knowledge-notice">
+        <div className="form-success">
           {tr("prcreatepanel.pullRequestCreatedNbsp")}{" "}<a href={created.url} target="_blank" rel="noreferrer" className="mono">#{created.number}</a>
         </div>
         <div className="commit-row">

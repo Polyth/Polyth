@@ -10,6 +10,7 @@ import {
 } from "@polyth/contracts";
 import { getState, subscribeStore } from "../store.ts";
 import { tr } from "../i18n/index.ts";
+import { areaRecommends, getArea, listAreas } from "./areas.ts";
 
 export type WidgetZone = "header" | "left" | "main" | "right" | "bottom" | "floating";
 export type { WidgetAudience, WidgetScope, WidgetSize } from "@polyth/contracts";
@@ -51,6 +52,9 @@ export interface WidgetLayoutDefinition {
   resizable?: boolean;
   duplicatable?: boolean;
   floating?: boolean;
+  /** Author hint that this widget is a strong fit for its supported areas.
+   * Drives the "recommended" fit level; never restricts placement. */
+  recommended?: boolean;
 }
 
 export interface WidgetPlacement {
@@ -561,37 +565,62 @@ export function widgetDefinitionId(layout: WidgetLayout, instanceId: string): st
   return layout.widgets[instanceId]?.definitionId ?? instanceId;
 }
 
+/** How well a widget suits an area. Placement is never blocked — `fit` and
+ * `note` only drive ordering and hints in the Widget Library.
+ * - `recommended`: the area lists the widget, or the widget explicitly lists
+ *   the area and is flagged `recommended`.
+ * - `supported`: the area is among the widget's resolved default slots.
+ * - `unusual`: neither — still allowed, just hinted. */
+export type WidgetFit = "recommended" | "supported" | "unusual";
+
 export interface WidgetPlacementCheck {
-  ok: boolean;
-  reason?: string;
+  /** Always `true`: any widget may be assigned to any area. */
+  ok: true;
+  fit: WidgetFit;
+  /** Localized guidance for an unusual or tight placement. */
+  note?: string;
 }
 
 export function canPlaceWidget(
   definition: WidgetLayoutDefinition | undefined,
   target: WidgetPlacementTarget,
 ): WidgetPlacementCheck {
-  if (!definition) {
-    return { ok: false, reason: tr("widgets.widgetlayout.widgetPluginUnavailable") };
-  }
   const slot = isWidgetZone(target) ? widgetSlotFromZone(target) : target;
+  if (!definition) {
+    return { ok: true, fit: "unusual", note: tr("widgets.widgetlayout.widgetPluginUnavailable") };
+  }
   const supported = supportedSlotsFor(definition);
-  if (!supported.includes(slot)) {
-    return {
-      ok: false,
-      reason: tr("widgets.widgetlayout.widgetDoesNotFitSelectedArea", {
-        widget: definition.title ?? tr("widgets.widgetlayout.thisWidget"),
-      }),
-    };
+  const fit: WidgetFit =
+    areaRecommends(slot, definition.id)
+    || (definition.recommended === true && supported.includes(slot))
+      ? "recommended"
+      : supported.includes(slot)
+        ? "supported"
+        : "unusual";
+
+  const notes: string[] = [];
+  if (fit === "unusual") {
+    notes.push(tr("widgets.widgetlayout.widgetDoesNotFitSelectedArea", {
+      widget: definition.title ?? tr("widgets.widgetlayout.thisWidget"),
+    }));
   }
-  if (slot === "workspace.header" && (definition.minSize?.h ?? definition.defaultSize?.h ?? 1) > 3) {
-    return {
-      ok: false,
-      reason: tr("widgets.widgetlayout.widgetNeedsMoreHeaderHeight", {
-        widget: definition.title ?? tr("widgets.widgetlayout.thisWidget"),
-      }),
-    };
+  const area = getArea(slot);
+  const tightRow = area
+    ? area.orientation !== "canvas" && (area.sizeHint === "icon" || area.sizeHint === "compact")
+    : slot === "workspace.header";
+  if (tightRow && (definition.minSize?.h ?? definition.defaultSize?.h ?? 1) > 3) {
+    notes.push(tr("widgets.widgetlayout.widgetNeedsMoreHeaderHeight", {
+      widget: definition.title ?? tr("widgets.widgetlayout.thisWidget"),
+    }));
   }
-  return { ok: true };
+  return { ok: true, fit, ...(notes.length > 0 ? { note: notes.join(" ") } : {}) };
+}
+
+/** Every area a widget can be assigned to: the six canvas zones plus every
+ * registered area. Order follows the area registry, zones first. */
+export function allPlacementAreas(): UiSlot[] {
+  const zoneSlots = WIDGET_ZONES.map(widgetSlotFromZone);
+  return [...new Set<UiSlot>([...zoneSlots, ...listAreas().map((area) => area.id)])];
 }
 
 const isWidgetZone = (value: WidgetPlacementTarget): value is WidgetZone =>
@@ -608,7 +637,10 @@ export function moveWidgetToSlot(
 ): WidgetLayout {
   const current = layout.widgets[id];
   if (!current) return layout;
-  if (definition && !canPlaceWidget(definition, slot).ok) return layout;
+  // Widget-areas (WA1): placement is never blocked. The `definition` parameter
+  // is still accepted for call-site compatibility and future per-area
+  // heuristics; the Widget Library surfaces `canPlaceWidget(...).fit` as a soft
+  // hint instead of rejecting the move here.
   const zones = Object.fromEntries(
     WIDGET_ZONES.map((name) => [name, layout.zones[name].filter((widgetId) => widgetId !== id)]),
   ) as Record<WidgetZone, string[]>;

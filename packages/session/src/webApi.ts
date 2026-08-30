@@ -71,6 +71,12 @@ export interface BrowserSessionDto {
   engine: "chromium" | "fake" | "unavailable";
 }
 
+/** User navigation can intentionally pause for an origin approval. */
+export type BrowserNavigateResponse = BrowserSessionDto | {
+  session: BrowserSessionDto | null;
+  approval: { origin: string; message: string };
+};
+
 export type BrowserTargetDto =
   | { selector: string }
   | { text: string; exact?: boolean }
@@ -1201,7 +1207,7 @@ export const api = {
       (): BrowserSessionDto[] => [],
     ),
   browserNavigate: (id: string, url: string, actor: "user" | "agent" = "user") =>
-    jfetch<BrowserSessionDto>(`/api/browser/sessions/${encodeURIComponent(id)}/navigate`, json("POST", { url, actor })),
+    jfetch<BrowserNavigateResponse>(`/api/browser/sessions/${encodeURIComponent(id)}/navigate`, json("POST", { url, actor })),
   browserAction: (id: string, action: BrowserActionDto, actor: "user" | "agent" = "user") =>
     jfetch<{ actionId: string; session: BrowserSessionDto; result?: JsonObject }>(
       `/api/browser/sessions/${encodeURIComponent(id)}/actions`, json("POST", { action, actor }),

@@ -82,7 +82,7 @@ import { seedMultiRunPrompt } from "@polyth/multirun/prompt-seed";
 import WorkflowTimelineCard from "../../../../packages/workflow/widgets/WorkflowTimelineCard.tsx";
 import { tr } from "../i18n/index.ts";
 import ExecutionRow, { useCollapsePresence } from "./ExecutionRow.tsx";
-import { Button } from "./ui/index.ts";
+import { Button, Notice } from "./ui/index.ts";
 
 /** One announcement per copy/mutation outcome; text is the accessible record,
  *  checkmarks only supplement it. Screen readers ignore repeats, so identical
@@ -1709,16 +1709,15 @@ export default function Timeline({
           </details>
         )}
         {turnBroken && (
-          <div className="turn-error" role="alert">
-            <span className="turn-error-text">
-              {turn.status === "aborted" ? tr("timeline.turnAborted") : tr("timeline.lastTurnFailed")}
-            </span>
-            {turn.status === "failed" && lastUser && sessionId && (
-              <button
-                type="button"
+          <Notice
+            tone="error"
+            className="turn-error"
+            role="alert"
+            actions={turn.status === "failed" && lastUser && sessionId ? (
+              <Button
+                size="sm"
                 className="turn-error-retry"
                 title={tr("timeline.retryTheLastMessage")}
-                aria-label={tr("timeline.retryTheLastMessage")}
                 onClick={() => {
                   const draft = {
                     text: lastUser.raw ?? lastUser.text,
@@ -1727,9 +1726,11 @@ export default function Timeline({
                   applyComposerSeed(sessionId, `turn-failed:${turn.turnId}`, draft);
                   requestComposerReplace(draft.text);
                 }}
-              >{tr("common.retry")}</button>
-            )}
-          </div>
+              >{tr("common.retry")}</Button>
+            ) : undefined}
+          >
+            {turn.status === "aborted" ? tr("timeline.turnAborted") : tr("timeline.lastTurnFailed")}
+          </Notice>
         )}
         <div className="msg-live" role="status" aria-live="polite">{liveText}</div>
         <SlotHost slot="session.timeline.after" context={slotSummary} />

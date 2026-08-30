@@ -20,15 +20,21 @@ import AlertDialog from "./components/AlertDialog.tsx";
 import { useWorkspaceMode } from "./widgets/workspaceMode.ts";
 import { useShellMode } from "./responsiveShell.ts";
 import { tr } from "./i18n/index.ts";
+import { IconButton, Notice } from "./components/ui/index.ts";
+import { CloseIcon } from "./components/ui/icons.ts";
 
 function ErrorBanner() {
   const message = useStore((s) => s.uiError);
   if (!message) return null;
   return (
-    <div className="error-banner" role="alert">
-      <span className="error-banner-text">{message}</span>
-      <button className="error-banner-x" aria-label={tr("app.dismissError")} onClick={clearUiError}>{tr("app.message")}</button>
-    </div>
+    <Notice
+      tone="error"
+      className="error-banner"
+      role="alert"
+      actions={<IconButton icon={CloseIcon} label={tr("app.dismissError")} size="sm" onClick={clearUiError} />}
+    >
+      {message}
+    </Notice>
   );
 }
 

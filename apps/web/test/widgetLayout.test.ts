@@ -318,7 +318,7 @@ test("invalid persisted layouts fall back to defaults", () => {
   );
 });
 
-test("shared mutation engine enforces zones and min/max widget sizes", () => {
+test("shared mutation engine allows any area while still clamping min/max sizes", () => {
   const definitions = [{
     id: "sample.widget",
     title: "Sample",
@@ -329,17 +329,24 @@ test("shared mutation engine enforces zones and min/max widget sizes", () => {
     maxSize: { w: 8, h: 6 },
   }];
   const initial = createDefaultWidgetLayout(definitions);
-  const rejected = applyWidgetLayoutMutations(initial, [
+
+  // Widget-areas (WA1): a move into an unsupported zone now succeeds; the
+  // engine no longer blocks placement.
+  const moved = applyWidgetLayoutMutations(initial, [
     { type: "move", id: "sample.widget", zone: "header" },
   ], definitions);
-  assert.equal(rejected, initial);
-  assert.match(canPlaceWidget(definitions[0], "header").reason ?? "", /doesn’t fit/);
+  assert.equal(widgetZoneOf(moved, "sample.widget"), "header");
+  const headerFit = canPlaceWidget(definitions[0], "header");
+  assert.equal(headerFit.ok, true);
+  assert.equal(headerFit.fit, "unusual");
+  assert.match(headerFit.note ?? "", /fit|area/i);
 
   const changed = applyWidgetLayoutMutations(initial, [
     { type: "move", id: "sample.widget", zone: "right" },
     { type: "resize", id: "sample.widget", size: { w: 12, h: 1 } },
   ], definitions);
   assert.equal(widgetZoneOf(changed, "sample.widget"), "right");
+  assert.equal(canPlaceWidget(definitions[0], "right").fit, "supported");
   assert.deepEqual(changed.widgets["sample.widget"]?.size, { w: 8, h: 3 });
 });
 
@@ -387,11 +394,11 @@ test("mini-widgets persist and move across first-class panel and toolbar slots",
   const parsed = parseWidgetLayout(serializeWidgetLayout(moved), [definition]);
   assert.equal(widgetSlotOf(parsed, definition.id), "composer.trailing");
   assert.equal(parsed.widgets[definition.id]?.kind, "mini-widget");
-  assert.equal(
-    moveWidgetToSlot(parsed, definition.id, "workspace.main", 0, definition),
-    parsed,
-    "unsupported canvas placement is rejected",
-  );
+  // Widget-areas (WA1): a mini-widget can still be dropped onto a canvas zone;
+  // the placement lands and is only flagged as an "unusual" fit.
+  const ontoCanvas = moveWidgetToSlot(parsed, definition.id, "workspace.main", 0, definition);
+  assert.equal(widgetSlotOf(ontoCanvas, definition.id), "workspace.main");
+  assert.equal(canPlaceWidget(definition, "workspace.main").fit, "unusual");
 });
 
 test("self-describing plugin placements survive parsing as missing-plugin placeholders", () => {

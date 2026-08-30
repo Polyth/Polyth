@@ -21,6 +21,8 @@ import {
 } from "./store.ts";
 import { installBuiltinMiniWidgets } from "./widgets/builtinMiniWidgets.tsx";
 import { installSystemWidgets } from "./widgets/systemWidgets.tsx";
+import { exposeAreas } from "./widgets/areas.ts";
+import { installBuiltinAreas } from "./widgets/builtinAreas.ts";
 import { installNotificationCentre } from "./components/NotificationCentre.tsx";
 import { installOpenCodeRestartControl } from "./components/OpenCodeRestartControl.tsx";
 import { installRuntimeEpochBanner } from "./components/RuntimeEpochBanner.tsx";
@@ -45,6 +47,11 @@ exposeSurfaces();
 exposeCapabilities();
 exposeWorkspaceSurfaces();
 exposeWidgets();
+exposeAreas();
+// Widget-areas (WA1): register the built-in placement areas before any widget
+// plugin boots, so `canPlaceWidget` fit hints and the Widget Library see the
+// full area catalogue from the first render.
+installBuiltinAreas();
 installBuiltinMiniWidgets();
 installSystemWidgets();
 // NTF-01: bell + panel arrive through the slot registry, never via App.tsx.

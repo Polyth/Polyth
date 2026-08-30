@@ -102,5 +102,6 @@ test("isPrivateAddress covers v6 forms and treats malformed as unsafe", () => {
 
 test("originOf canonicalizes for approval keys", () => {
   assert.equal(originOf("HTTPS://Example.COM/path?q=1"), "https://example.com");
+  assert.equal(originOf("localhost:5173/workbench"), "http://localhost:5173");
   assert.equal(originOf("not a url"), null);
 });

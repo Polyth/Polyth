@@ -233,7 +233,7 @@ export default function GithubReplyPanel({
           )}
         </div>
       </div>
-      {notice && <div className={noticeError ? "form-error" : "knowledge-notice"} role="status">{notice}</div>}
+      {notice && <div className={noticeError ? "form-error" : "form-success"} role="status">{notice}</div>}
     </section>
   );
 }

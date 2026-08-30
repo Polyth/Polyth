@@ -21,6 +21,7 @@ import {
   redactObservationText,
   type BrowserService,
 } from "./index.ts";
+import { originOf } from "./policy.ts";
 
 const STATUS: Record<string, number> = {
   "not-found": 404,
@@ -179,10 +180,21 @@ export function browserRoutes(deps: {
               message: failure.message,
             });
           }
-          json(STATUS[failure.code ?? ""] ?? 500, {
-            error: failure.code ?? "internal",
-            message: failure.message,
-          });
+          // A user navigation that needs approval is an expected product flow,
+          // not a failed transport request. Keep the durable failed-action
+          // record, but let the client open its approval dialog without a
+          // noisy 403 in the browser console.
+          if (actor === "user" && failure.code === "approval-required") {
+            json(200, {
+              session: browser.get(id),
+              approval: { origin: originOf(target) ?? target, message: failure.message },
+            });
+          } else {
+            json(STATUS[failure.code ?? ""] ?? 500, {
+              error: failure.code ?? "internal",
+              message: failure.message,
+            });
+          }
         }
         return true;
       }

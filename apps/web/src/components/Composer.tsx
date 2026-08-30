@@ -109,7 +109,7 @@ import SessionContextBar, {
   type SessionContextBarProps,
 } from "./mobile/SessionContextBar.tsx";
 import {
-  Button, Menu, SendIcon, StopIcon,
+  Button, Menu, Notice, SendIcon, StopIcon,
 } from "./ui/index.ts";
 import { getSendFailure, subscribeSendFailures } from "../sendFailure.ts";
 import { isNativeMobile } from "@polyth/mobile/runtime";
@@ -1251,10 +1251,12 @@ export default function Composer({
           switched project or spawned a new session instead of retargeting. */}
       {!session && <SessionContextBar {...contextBar} />}
       {failedSend && (
-        <div className="composer-send-failure" role="alert">
-          <span>{tr("composer.sendUnavailableDraftPreserved")}</span>
-          <Button size="sm" onClick={() => send()}>{tr("common.retry")}</Button>
-        </div>
+        <Notice
+          tone="warning"
+          className="composer-send-failure"
+          role="alert"
+          actions={<Button size="sm" onClick={() => send()}>{tr("common.retry")}</Button>}
+        >{tr("composer.sendUnavailableDraftPreserved")}</Notice>
       )}
       <div
         className="composer-card"

@@ -436,7 +436,7 @@ display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; 
 display: flex; flex-direction: column; gap: 4px;
 }
 .pr-conflict-agent-area > .form-error,
-.pr-conflict-agent-area > .knowledge-notice {
+.pr-conflict-agent-area > .form-success {
 grid-column: 1 / -1; margin: 0;
 }
 .pr-merge-controls {
@@ -1185,7 +1185,6 @@ width: 100%;
 
 
 /* Rules moved from core styles.css: github-only check and form surfaces. */
-.form-warning { color: var(--amber); font-size: var(--font-meta); overflow-wrap: anywhere; }
 .checks-ring {
   width: 18px; height: 18px; border-radius: 50%; display: inline-block; flex: none;
   mask: radial-gradient(circle at center, transparent 5px, black 5.5px);

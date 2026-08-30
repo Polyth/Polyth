@@ -67,7 +67,7 @@ function ServerEndpointForm({ server, onSaved }: { server: VoiceSettingsDto; onS
           onChange={(e) => setTts({ ...tts, apiKeyEnv: e.target.value })} aria-label={tr("settings.voicepage.ttsApiKeyEnvVar")} />
       </div>
 
-      {msg && <div className={saveFailed ? "form-error" : "knowledge-notice"}>{msg}</div>}
+      {msg && <div className={saveFailed ? "form-error" : "form-success"}>{msg}</div>}
       <div className="mcp-form-row">
         <span className="muted voice-form-note">
           {tr("settings.voicepage.keysAreReadFromTheServerS")}</span>

@@ -138,7 +138,7 @@ export default function KnowledgePanel() {
         onChange={(value) => setKind(value === "__all__" ? "" : value as KnowledgeKindDto)}
       />
       {error && <div className="form-error">{error}</div>}
-      {notice && <div className="knowledge-notice">{notice}</div>}
+      {notice && <div className="form-success">{notice}</div>}
       {items.length === 0 && <EmptyState title={q ? tr("knowledgepanel.noMatches") : tr("knowledgepanel.noKnowledgeYetCaptureNotesPlansOr")} />}
       {items.map((it) => (
         <div key={it.id} className="knowledge-card">

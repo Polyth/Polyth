@@ -14,6 +14,7 @@ export { default as Select, type SelectProps, type SelectOption } from "./Select
 export { default as Badge, type BadgeProps, type BadgeTone } from "./Badge.tsx";
 export { default as Separator, type SeparatorProps } from "./Separator.tsx";
 export { default as Spinner, type SpinnerProps, type SpinnerSize } from "./Spinner.tsx";
+export { default as Notice, type NoticeProps, type NoticeTone } from "./Notice.tsx";
 export { default as Progress, type ProgressProps } from "./Progress.tsx";
 export { default as Skeleton, type SkeletonProps } from "./Skeleton.tsx";
 export { default as VisuallyHidden } from "./VisuallyHidden.tsx";

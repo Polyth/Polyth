@@ -24,9 +24,6 @@ display: flex; gap: 4px;
 .files-create .ui-input {
 flex: 1; min-width: 0;
 }
-.files-error {
-color: var(--red); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere;
-}
 .files-breadcrumbs {
 display: flex; align-items: center; font-size: var(--font-meta); padding: 2px 0; flex-wrap: wrap;
 }

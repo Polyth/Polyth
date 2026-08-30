@@ -1081,7 +1081,41 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   background: var(--surface-overlay-hover); border: 1px solid var(--hair);
   border-radius: calc(var(--radius-control) - 3px); padding: 3px 5px; letter-spacing: 0.02em;
 }
-.form-error { color: var(--red); font-size: 12px; overflow-wrap: anywhere; }
+/* Shared feedback language. Use the Notice component for new surfaces; these
+   compact aliases keep existing form/status surfaces visually aligned while
+   package widgets migrate. */
+.ui-notice {
+  --notice-tone: var(--blue);
+  --notice-wash: var(--blue-wash);
+  display: flex; align-items: flex-start; gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--notice-tone) 34%, var(--border));
+  border-radius: var(--radius-card); background: color-mix(in srgb, var(--elevated) 76%, var(--notice-wash));
+  box-shadow: var(--inset-hi); color: var(--text-dim); font-size: var(--font-meta); line-height: var(--font-meta-lh);
+}
+.ui-notice--error { --notice-tone: var(--red); --notice-wash: var(--red-wash); }
+.ui-notice--warning { --notice-tone: var(--amber); --notice-wash: var(--amber-wash); }
+.ui-notice--success { --notice-tone: var(--green); --notice-wash: var(--green-wash); }
+.ui-notice-icon { flex: none; margin-top: 1px; color: var(--notice-tone); }
+.ui-notice-copy { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.ui-notice-heading { display: block; margin-bottom: var(--space-1); color: var(--text); font-size: var(--font-label); }
+.ui-notice-body { min-width: 0; }
+.ui-notice-actions { display: flex; flex: none; align-items: center; gap: var(--space-2); margin-left: auto; }
+.form-error,
+.form-warning,
+.form-success,
+.inline-error {
+  display: block; padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--red) 30%, var(--border)); border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--elevated) 78%, var(--red-wash)); color: var(--text-dim);
+  font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere;
+}
+.form-warning { border-color: color-mix(in srgb, var(--amber) 30%, var(--border)); background: color-mix(in srgb, var(--elevated) 78%, var(--amber-wash)); }
+.form-success { border-color: color-mix(in srgb, var(--green) 30%, var(--border)); background: color-mix(in srgb, var(--elevated) 78%, var(--green-wash)); }
+.form-error,
+.inline-error { border-inline-start: 3px solid var(--red); }
+.form-warning { border-inline-start: 3px solid var(--amber); }
+.form-success { border-inline-start: 3px solid var(--green); }
 .form-actions { display: flex; justify-content: flex-end; gap: 6px; }
 /* Legacy filled primary: matches .ui-btn--primary chrome. */
 .primary-btn { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
@@ -2088,22 +2122,11 @@ border-color: var(--accent); color: var(--accent); background: var(--accent-wash
 
 /* ---------- transient error toast + app-owned alerts ---------- */
 .error-banner {
-  position: fixed; right: 20px; bottom: 20px; z-index: var(--z-toast);
-  display: flex; align-items: center; gap: 9px;
-  width: min(420px, calc(100vw - 32px)); padding: 11px 10px 11px 13px;
-  background: color-mix(in srgb, var(--elevated) 92%, var(--red-wash)); color: var(--text);
-  border: 1px solid color-mix(in srgb, var(--red) 48%, var(--border)); border-radius: var(--radius-sheet);
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.16);
-  font-size: 12.5px; line-height: 1.45;
+  position: fixed; right: var(--space-5); bottom: var(--space-5); z-index: var(--z-toast);
+  width: min(440px, calc(100vw - (2 * var(--screen-gutter)))); border-radius: var(--radius-sheet);
+  box-shadow: var(--shadow-md); font-size: var(--font-label);
   animation: toast-in var(--motion-normal) ease-out;
 }
-.error-banner svg { color: var(--red); flex: none; }
-.error-banner-text { min-width: 0; overflow-wrap: anywhere; }
-.error-banner-x {
-  border: none; background: transparent; color: var(--muted); border-radius: calc(var(--radius-control) - 2px);
-  width: 24px; height: 24px; padding: 0; display: grid; place-items: center; flex: none;
-}
-.error-banner-x:hover { color: var(--text); background: var(--raised); border-color: transparent; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 .alert-dialog { width: min(440px, 92vw); gap: 0; overflow: hidden; }
 .alert-dialog-body { display: flex; flex-direction: column; gap: var(--space-3); }
@@ -4232,33 +4255,16 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .app.view-session.mode-edit .railbar:not(.railbar-open) { display: none; }
 
 .turn-error {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
-  max-width: 100%; padding: 3px 2px; border: 0;
-  border-radius: 0; background: transparent;
+  width: min(var(--chat-measure), 100%); margin-inline: auto;
+  align-items: center; border-inline-start-width: 3px;
 }
-.turn-error-text { flex: 1 1 280px; min-width: 0; overflow-wrap: anywhere; color: var(--text-dim); }
 .turn-error-retry {
-  display: inline-grid; place-items: center; flex: none;
-  min-height: var(--control-h-sm); padding-inline: var(--space-2); border: 0; border-radius: var(--radius-control);
-  background: transparent; color: var(--muted);
-}
-.turn-error-retry:hover, .turn-error-retry:focus-visible {
-  border-color: transparent; background: transparent; color: var(--accent);
-  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 76%, transparent));
+  flex: none; white-space: nowrap;
 }
 .composer-send-failure {
   width: min(var(--chat-measure), calc(100% - (2 * var(--gutter))));
   margin-inline: auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid color-mix(in srgb, var(--amber) 32%, transparent);
-  border-radius: var(--radius-control);
-  background: var(--amber-wash);
-  color: var(--text-dim);
-  font-size: var(--nav-meta-size);
+  border-inline-start-width: 3px;
 }
 .composer-send-failure .ui-btn { flex: none; }
 .runtime-recovery {

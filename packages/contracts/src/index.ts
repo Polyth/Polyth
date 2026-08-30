@@ -1928,6 +1928,12 @@ export const UI_SLOTS = [
   "workspace.right", "workspace.bottom", "workspace.floating",
   // parity slots (WP1): focused seams instead of mega-component imports
   "workspace.main.tabs", "workspace.right.tabs",
+  // Widget-areas (WA1): every shell region the layout engine can host widgets
+  // in is a named area. `workspace.rail` is the right icon rail (replaces the
+  // capability-tier rails); the header/sidebar/composer rows are fine-grained
+  // toolbars the Widget Library can target directly.
+  "app.header.leading", "app.header.center", "workspace.rail",
+  "sidebar.toolbar", "composer.meta", "composer.pending",
   // project creation sources beyond the local folder picker (e.g. SSH remotes)
   "project.create.options",
   "session.timeline.before", "session.timeline.after", "session.composer.before",

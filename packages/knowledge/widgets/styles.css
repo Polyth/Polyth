@@ -1,7 +1,4 @@
 /* Package-owned knowledge web styles. */
-.knowledge-notice {
-color: var(--green); font-size: var(--font-meta);
-}
 .knowledge-panel,
 .knowledge-editor {
 display: flex; flex-direction: column; gap: 8px;

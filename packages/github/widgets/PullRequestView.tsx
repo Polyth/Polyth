@@ -513,7 +513,7 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                   </Button>
                   {conflictAgentMsg && (
                     <div
-                      className={conflictAgentFailed ? "form-error" : "knowledge-notice"}
+                      className={conflictAgentFailed ? "form-error" : "form-success"}
                       role={conflictAgentFailed ? "alert" : "status"}
                     >
                       {conflictAgentMsg}
@@ -548,7 +548,7 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                   </div>
                 </section>
               )}
-              {mergeMsg && <div className={mergeFailed ? "form-error" : "knowledge-notice"} role="status">{mergeMsg}</div>}
+              {mergeMsg && <div className={mergeFailed ? "form-error" : "form-success"} role="status">{mergeMsg}</div>}
             </div>
           )}
 
@@ -699,7 +699,7 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                 </div>
                 {writeMsg && (
                   <div
-                    className={writeTone === "error" ? "form-error" : writeTone === "warning" ? "form-warning" : "knowledge-notice"}
+                    className={writeTone === "error" ? "form-error" : writeTone === "warning" ? "form-warning" : "form-success"}
                     role={writeTone === "success" ? "status" : "alert"}
                   >
                     {writeMsg}

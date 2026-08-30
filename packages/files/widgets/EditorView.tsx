@@ -319,7 +319,7 @@ export default function EditorView() {
           />
           <IconButton icon={SearchIcon} size="sm" label={tr("editorview.searchFiles2")} onClick={() => void search()} />
         </div>
-        {treeErr && <div className="files-error">{treeErr}</div>}
+        {treeErr && <div className="form-error">{treeErr}</div>}
         {searchResults !== null ? (
           <div className="files-list">
             <div className="files-actions">

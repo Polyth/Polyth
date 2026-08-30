@@ -2,13 +2,12 @@
 // primary agent, and subagents. Revisioned frames stream over /ws; element
 // pointing turns screenshot coordinates into durable chat context.
 import { useEffect, useId, useRef, useState } from "react";
-import { api, type BrowserSessionDto } from "@polyth/session/web-api";
+import { api, type BrowserNavigateResponse, type BrowserSessionDto } from "@polyth/session/web-api";
 import { attachUpload, removeAttachment } from "../../../apps/web/src/attachments.ts";
 import {
   annotationViewportRect,
   BROWSER_DEVICE_PRESETS,
   BROWSER_INSPECTOR_TABS,
-  browserApprovalRequired,
   browserElementContext,
   browserPointedElementLabel,
   containedImageRect,
@@ -39,6 +38,7 @@ import {
   Icon,
   IconButton,
   ImageIcon,
+  Notice,
   PauseIcon,
   PlayIcon,
   RefreshIcon,
@@ -65,6 +65,10 @@ interface Capability {
   available: boolean;
   engine: "chromium" | "fake" | null;
   reason?: string;
+}
+
+function isApprovalResponse(response: BrowserNavigateResponse): response is Extract<BrowserNavigateResponse, { approval: unknown }> {
+  return "approval" in response;
 }
 
 export default function PreviewView() {
@@ -255,18 +259,12 @@ export default function PreviewView() {
       let opened = dto;
       const requestedUrl = urlInput.trim();
       if (requestedUrl) {
-        try {
-          opened = await api.browserNavigate(dto.id, requestedUrl, "user");
-        } catch (navigationError) {
-          if (browserApprovalRequired(navigationError)) {
-            setApproval({
-              url: requestedUrl,
-              message: navigationError instanceof Error ? navigationError.message : String(navigationError),
-            });
-            setApprovalError("");
-          } else {
-            throw navigationError;
-          }
+        const navigation = await api.browserNavigate(dto.id, requestedUrl, "user");
+        if (isApprovalResponse(navigation)) {
+          setApproval({ url: requestedUrl, message: navigation.approval.message });
+          setApprovalError("");
+        } else {
+          opened = navigation;
         }
       }
       setBrowser(opened);
@@ -310,16 +308,14 @@ export default function PreviewView() {
     setOperation("navigate");
     setError("");
     try {
-      setBrowser(await api.browserNavigate(browser.id, requestedUrl, "user"));
-    } catch (e) {
-      if (browserApprovalRequired(e)) {
-        setApproval({
-          url: requestedUrl,
-          message: e instanceof Error ? e.message : String(e),
-        });
+      const navigation = await api.browserNavigate(browser.id, requestedUrl, "user");
+      if (isApprovalResponse(navigation)) {
+        setApproval({ url: requestedUrl, message: navigation.approval.message });
         setApprovalError("");
         return;
       }
+      setBrowser(navigation);
+    } catch (e) {
       setError(friendlyError(tr("previewview.navigationFailed"), e));
     } finally {
       setOperation(null);
@@ -332,7 +328,12 @@ export default function PreviewView() {
     setApprovalError("");
     try {
       await api.browserApprove(approval.url);
-      setBrowser(await api.browserNavigate(browser.id, approval.url, "user"));
+      const navigation = await api.browserNavigate(browser.id, approval.url, "user");
+      if (isApprovalResponse(navigation)) {
+        setApprovalError(navigation.approval.message);
+        return;
+      }
+      setBrowser(navigation);
       setApproval(null);
     } catch (cause) {
       setApprovalError(friendlyError(tr("previewview.couldnTApproveThisOrigin"), cause));
@@ -835,11 +836,12 @@ export default function PreviewView() {
         </div>
 
         {error && (
-          <div className="browser-alert" role="alert">
-            <Icon icon={ShieldIcon} size="sm" />
-            <span>{error}</span>
-            <IconButton icon={CloseIcon} size="sm" variant="ghost" label={tr("previewview.dismissBrowserError")} onClick={() => setError("")} />
-          </div>
+          <Notice
+            tone="error"
+            className="browser-alert"
+            role="alert"
+            actions={<IconButton icon={CloseIcon} size="sm" variant="ghost" label={tr("previewview.dismissBrowserError")} onClick={() => setError("")} />}
+          >{error}</Notice>
         )}
 
         <div className="preview-body">

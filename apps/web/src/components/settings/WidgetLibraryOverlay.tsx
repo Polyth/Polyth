@@ -143,17 +143,15 @@ export default function WidgetLibraryOverlay({
   const dragged = draggedId ? widgets.find((widget) => widget.id === draggedId) : undefined;
 
   const add = (widget: WidgetDef, target: UiSlot = defaultSlot(widget)) => {
+    // Widget-areas (WA1): any widget can go in any area. `canPlaceWidget` only
+    // yields a soft `note` for an unusual placement — surface it, never block.
     const check = canPlaceWidget(widget, target);
-    if (!check.ok) {
-      setStatus(check.reason ?? tr("settings.widgetlibraryoverlay.zoneNotCompatible"));
-      return;
-    }
     updateWidgetLayout((current) => applyWidgetLayoutMutations(current, [
       { type: "visibility", id: widget.id, visible: true },
       { type: "place", id: widget.id, slot: target },
     ], widgets));
     setRecent(noteWidgetUsed(widget.id));
-    setStatus(tr("settings.widgetlibraryoverlay.valueAddedToValue", {
+    setStatus(check.note ?? tr("settings.widgetlibraryoverlay.valueAddedToValue", {
       title: widget.title,
       slot: slotLabel(target),
     }));
@@ -322,7 +320,10 @@ export default function WidgetLibraryOverlay({
         </header>
         <div className={`widget-preview-canvas${dragged ? " is-dragging" : ""}`}>
           {(["header", "left", "main", "right", "bottom", "floating"] as const).map((target) => {
-            const check = dragged ? canPlaceWidget(dragged, target) : { ok: true };
+            // Widget-areas (WA1): every zone is a valid drop target. An
+            // "unusual" fit is shown amber with its note, never disabled.
+            const check = dragged ? canPlaceWidget(dragged, target) : null;
+            const unusual = check?.fit === "unusual";
             const itemIds = layout.zones[target].filter((id) => layout.widgets[id]?.visible);
             return (
               <div
@@ -330,7 +331,7 @@ export default function WidgetLibraryOverlay({
                 className={[
                   "widget-preview-zone",
                   `zone-${target}`,
-                  dragged ? (check.ok ? "compatible" : "incompatible") : "",
+                  dragged ? (unusual ? "incompatible" : "compatible") : "",
                   overZone === target ? "over" : "",
                 ].filter(Boolean).join(" ")}
                 onDragEnter={() => setOverZone(target)}
@@ -339,8 +340,8 @@ export default function WidgetLibraryOverlay({
                 }}
                 onDragOver={(event) => {
                   if (!event.dataTransfer.types.includes(WIDGET_MIME)) return;
-                  if (check.ok) event.preventDefault();
-                  event.dataTransfer.dropEffect = check.ok ? "move" : "none";
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
                 }}
                 onDrop={(event) => drop(target, event)}
                 aria-label={tr("settings.widgetlibraryoverlay.valueDropZone", { value: ZONE_LABEL[target] })}
@@ -354,8 +355,8 @@ export default function WidgetLibraryOverlay({
                   ))}
                   {itemIds.length > 3 && <small>+{itemIds.length - 3}</small>}
                 </div>
-                {dragged && check.ok && <b>{tr("settings.widgetlibraryoverlay.dropHere")}</b>}
-                {dragged && !check.ok && <em>{check.reason}</em>}
+                {dragged && !unusual && <b>{tr("settings.widgetlibraryoverlay.dropHere")}</b>}
+                {dragged && check?.note && <em>{check.note}</em>}
               </div>
             );
           })}

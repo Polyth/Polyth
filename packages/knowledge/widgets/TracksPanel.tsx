@@ -125,7 +125,7 @@ export default function TracksPanel() {
       )}
 
       {error && <div className="form-error" role="alert">{error}</div>}
-      {notice && <div className="knowledge-notice" role="status">{notice}</div>}
+      {notice && <div className="form-success" role="status">{notice}</div>}
       {tracks.length === 0 && !creating && (
         <EmptyState title={tr("trackspanel.noTracksYetCreateOneToSave")} />
       )}

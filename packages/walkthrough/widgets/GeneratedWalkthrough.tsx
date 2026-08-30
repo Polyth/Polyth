@@ -206,7 +206,7 @@ export default function GeneratedWalkthrough() {
               <span className="muted">({Math.round(f.confidence * 100)}%)</span>
             </div>
           ))}
-          {labelMsg && <div className={labelMsg.includes("failed") ? "form-error" : "knowledge-notice"}>{labelMsg}</div>}
+          {labelMsg && <div className={labelMsg.includes("failed") ? "form-error" : "form-success"}>{labelMsg}</div>}
         </div>
       )}
 

@@ -62,7 +62,16 @@ export function isLoopbackAddress(ip: string): boolean {
 /** Canonical origin string for approvals ("https://example.com"). */
 export function originOf(raw: string): string | null {
   try {
-    return new URL(raw).origin.toLowerCase();
+    // Navigation accepts a convenient host:port shorthand. Approvals must use
+    // the identical parsing rule; otherwise a user can reach the approval
+    // dialog for `localhost:3000` only to have the approval POST rejected.
+    const trimmed = raw.trim();
+    const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)
+      ? trimmed
+      : `http://${trimmed}`;
+    const url = new URL(candidate);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url.origin.toLowerCase();
   } catch {
     return null;
   }

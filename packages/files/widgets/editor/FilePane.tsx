@@ -696,7 +696,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
       )}
       {doc.truncated && <div className="editor-banner">{tr("editor.filepane.truncatedFileExceeds512KbReadOnly")}</div>}
       {doc.tooLarge && <div className="editor-banner">{tr("editor.filepane.binaryFileDetectedReadOnly")}</div>}
-      {error && <div className="files-error editor-error">{error}</div>}
+      {error && <div className="form-error editor-error">{error}</div>}
       {editing && !readOnly ? (
         <div
           className="editor-edit"

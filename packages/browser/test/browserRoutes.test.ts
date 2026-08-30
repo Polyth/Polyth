@@ -156,6 +156,29 @@ test("failed actions append action-failed with the policy code", async () => {
   assert.equal(calls[1]!.data!.code, "blocked-private");
 });
 
+test("user navigation returns approval state without a transport failure", async () => {
+  const { call } = makeHarness();
+  const created = await call("POST", "/api/browser/sessions", { projectId: "p1", url: HOME });
+  const id = (created.payload as { id: string }).id;
+
+  const navigation = await call("POST", `/api/browser/sessions/${id}/navigate`, {
+    actor: "user",
+    url: "localhost:9999",
+  });
+  assert.equal(navigation.status, 200);
+  const pending = navigation.payload as {
+    session: { id: string } | null;
+    approval: { origin: string; message: string };
+  };
+  assert.equal(pending.session?.id, id);
+  assert.equal(pending.approval.origin, "http://localhost:9999");
+  assert.match(pending.approval.message, /needs approval/);
+
+  const approved = await call("POST", "/api/browser/approvals", { origin: "localhost:9999" });
+  assert.equal(approved.status, 200);
+  assert.deepEqual(approved.payload, { origins: ["http://localhost:9999"] });
+});
+
 test("browser sessions without a linked polyth session append nothing", async () => {
   const { calls, call } = makeHarness();
   const created = await call("POST", "/api/browser/sessions", { projectId: "p1", url: HOME });
