@@ -149,7 +149,7 @@ width: 16px; height: 16px; flex: none; color: var(--text-dim);
 }
 /* Desktop popover (chrome from .ui-popover): search on top, one scroll list. */
 .model-pop {
-width: min(400px, calc(100vw - 28px)); padding: 6px; display: flex; flex-direction: column;
+  width: min(400px, calc(100vw - 28px)); padding: 4px; display: flex; flex-direction: column;
 }
 .model-pop-search {
 padding: 2px 2px 6px;
@@ -219,11 +219,11 @@ cursor: grabbing;
 width: 18px; height: 18px;
 }
 .model-picker-row {
-min-height: 44px;
+  min-height: 34px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 8px;
+  padding: 3px 8px;
   border-radius: var(--radius-control);
   cursor: pointer;
 }
@@ -240,13 +240,13 @@ width: 14px; flex: none; color: var(--accent);
 color: var(--faint); font-size: 14px; cursor: grab;
 }
 .model-picker-copy {
-min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px;
+  min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 0;
 }
 .model-picker-copy strong {
-overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-label); font-weight: 580;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-label); font-weight: 580; line-height: 1.2;
 }
 .model-picker-copy small {
-overflow: hidden; color: var(--muted); font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap;
+  overflow: hidden; color: var(--muted); font-size: var(--font-meta); line-height: 1.15; text-overflow: ellipsis; white-space: nowrap;
 }
 .model-row-offline {
 margin-inline-start: 6px; color: var(--amber); font-size: var(--font-meta); font-style: normal; font-weight: 520;

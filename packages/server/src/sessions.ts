@@ -369,10 +369,10 @@ export function createSessionService(deps: {
   const turnReply = new Map<string, Map<string, string>>();
   const replyText = (sessionId: string): string =>
     [...(turnReply.get(sessionId)?.values() ?? [])].filter((t) => t.trim()).join("\n\n");
-      // The web preference arrives with the first prompt. Keep that intent
-      // until OpenCode publishes the semantic title it generated from the
-      // prompt — or until a new explicit rename supersedes it.
-      const autoTitleRequested = new Set<string>();
+  // The web preference arrives with the first prompt. Keep that intent until
+  // OpenCode publishes the semantic title it generated from the prompt — or
+  // until an explicit rename supersedes it.
+  const autoTitleRequested = new Set<string>();
   const titleRefreshInFlight = new Set<string>();
 
   const broadcastTail = async <T>(
