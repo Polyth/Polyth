@@ -81,33 +81,13 @@ test("canvas top row is placeable and editing borders use theme colors", async (
   assert.doesNotMatch(styles, /\.widget-card\.editing\s*\{[^}]*accent-line/s);
 });
 
-test("settings uses named button places without canvas layout controls", async () => {
+test("settings is a visual workspace customizer with library, live preview, and inspector", async () => {
   const source = await readFile(new URL("../src/components/settings/WidgetsPage.tsx", import.meta.url), "utf8");
-  for (const key of [
-    "settings.widgetspage.topRail",
-    "settings.widgetspage.rightRail",
-    "settings.widgetspage.responseActions",
-    "settings.widgetspage.composerActions",
-    "settings.widgetspage.sessionFooter",
-    "settings.widgetspage.headerActions",
-  ]) {
-    assert.ok(source.includes(`tr("${key}")`), `${key} is a named settings place`);
-  }
-  for (const removed of [
-    "Choose a starting layout",
-    "Workspace preview",
-    "Help me set up my workspace",
-    "Build & Debug",
-    "Who is this for",
-    "More tools / right rail",
-    "Technical menu",
-    "Session header stats",
-  ]) {
-    assert.ok(!source.includes(removed), `${removed} stays out of widget settings`);
-  }
-  // Widget-areas (WA2): the Widget Library opens from the settings page.
-  assert.match(source, /import WidgetLibraryOverlay from "\.\/WidgetLibraryOverlay\.tsx"/);
-  assert.match(source, /tr\("settings\.widgetspage\.openWidgetLibrary"\)/);
+  assert.match(source, /Customize workspace/);
+  assert.match(source, /WidgetLibraryPanel/);
+  assert.match(source, /WidgetCanvas editing/);
+  assert.match(source, /workspace-inspector/);
+  assert.match(source, /redoWidgetLayout/);
 });
 
 test("chat top rail is configured directly without a More tools overflow", async () => {
@@ -117,24 +97,22 @@ test("chat top rail is configured directly without a More tools overflow", async
   assert.doesNotMatch(source, /CapabilityMenu/);
 });
 
-test("widget settings exposes a persistent Chat top rail position", async () => {
+test("customizer exposes responsive live controls and widget inspector settings", async () => {
   const source = await readFile(new URL("../src/components/settings/WidgetsPage.tsx", import.meta.url), "utf8");
-  assert.match(source, /settings\.widgetspage\.chatTopRailPosition/);
-  assert.match(source, /settings\.widgetspage\.leftOfCenter/);
-  assert.match(source, /topRailAlignment/);
-  assert.match(source, /Mobile shortcut rail/);
+  assert.match(source, /"desktop", "tablet", "phone"/);
+  assert.match(source, /Mobile shortcuts/);
   assert.match(source, /ui\.mobileShortcuts/);
   assert.match(source, /setUiSettings\(\{ mobileShortcuts \}\)/);
+  assert.match(source, /Widget settings/);
+  assert.match(source, /Compact", "Default", "Large/);
 });
 
-test("ordered settings chips support touch dragging and explicit keyboard moves", async () => {
-  const source = await readFile(new URL("../src/components/settings/WidgetsPage.tsx", import.meta.url), "utf8");
-  assert.match(source, /setPointerCapture\(event\.pointerId\)/, "touch sorting captures the long-press pointer");
-  assert.match(source, /LONG_PRESS_MS/, "touch sorting distinguishes a long press from a tap");
-  assert.match(source, /document\.elementFromPoint\(event\.clientX, event\.clientY\)/, "dragging resolves the chip under the finger");
-  assert.match(source, /event\.key === "ArrowLeft" \|\| event\.key === "ArrowUp"/, "reorder handles accept keyboard arrows");
-  assert.match(source, /Move \$\{labels\[id\]\} earlier/, "visible move-earlier control is exposed");
-  assert.match(source, /Move \$\{labels\[id\]\} later/, "visible move-later control is exposed");
+test("library drag uses the shared widget DnD payload and canvas accepts it", async () => {
+  const library = await readFile(new URL("../src/components/settings/WidgetLibraryPanel.tsx", import.meta.url), "utf8");
+  const canvas = await readFile(new URL("../src/widgets/WidgetCanvas.tsx", import.meta.url), "utf8");
+  assert.match(library, /setDragWidget/);
+  assert.match(canvas, /getDragWidget/);
+  assert.match(canvas, /onDropSlot/);
 });
 
 test("critic-reported mobile controls use 44px hit boxes", async () => {

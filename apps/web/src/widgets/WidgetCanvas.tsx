@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type DragEvent,
   type KeyboardEvent,
   type PointerEvent,
 } from "react";
@@ -48,6 +49,7 @@ import "./builtinWidgets.tsx";
 import { tr } from "../i18n/index.ts";
 import { useShiftArmed } from "../useShiftArmed.ts";
 import { useShellMode } from "../responsiveShell.ts";
+import { getDragWidget, WIDGET_MIME } from "../dnd.ts";
 
 const GRID_GAP = 10;
 const GRID_ROW = 36;
@@ -60,7 +62,7 @@ interface SchemaProperty {
   enum?: unknown;
 }
 
-function SchemaWidgetSettings({
+export function SchemaWidgetSettings({
   schema,
   config,
   updateConfig,
@@ -159,12 +161,16 @@ function WidgetCard({
   placement,
   projectId,
   sessionId,
+  selected,
+  onSelect,
 }: {
   instanceId: string;
   widget: WidgetDef;
   placement: WidgetPlacement;
   projectId: string | null;
   sessionId: string | null;
+  selected?: boolean;
+  onSelect?: (id: string) => void;
 }) {
   const layout = useWidgetLayout();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -275,7 +281,7 @@ function WidgetCard({
   };
 
   return (
-    <section className="widget-card editing" style={positionStyle(placement)} data-widget-id={instanceId}>
+    <section className={`widget-card editing${selected ? " selected" : ""}`} style={positionStyle(placement)} data-widget-id={instanceId} onClick={() => onSelect?.(instanceId)}>
       <header className="widget-card-head widget-card-head-draggable" onPointerDown={startMove}>
         <button
           className="widget-drag"
@@ -451,7 +457,17 @@ function WidgetMenu({ widgets, onClose }: { widgets: WidgetDef[]; onClose: () =>
   );
 }
 
-export default function WidgetCanvas() {
+export default function WidgetCanvas({
+  selectedId,
+  onSelect,
+  onDropSlot,
+  editing = false,
+}: {
+  selectedId?: string | null;
+  onSelect?: (id: string) => void;
+  onDropSlot?: (id: string) => void;
+  editing?: boolean;
+} = {}) {
   const widgets = useWidgetCatalog();
   const canvasWidgets = useMemo(
     () => widgets.filter((widget) => supportedWidgetZones(widget).length > 0),
@@ -467,7 +483,7 @@ export default function WidgetCanvas() {
   // persistent (there is no modifier key to hold on touch).
   const shiftArmed = useShiftArmed();
   const wide = useShellMode() === "wide";
-  const customizeVisible = !wide || shiftArmed || menuOpen;
+  const customizeVisible = editing || !wide || shiftArmed || menuOpen;
 
   useEffect(() => {
     ensureWidgets(canvasWidgets);
@@ -486,7 +502,14 @@ export default function WidgetCanvas() {
 
   return (
     <div className="widget-workspace">
-      <div className="widget-canvas-grid">
+      <div className="widget-canvas-grid" data-widget-surface="workspace-canvas"
+        onDragOver={(event) => {
+          if (event.dataTransfer.types.includes(WIDGET_MIME)) event.preventDefault();
+        }}
+        onDrop={(event: DragEvent<HTMLDivElement>) => {
+          const id = getDragWidget(event.dataTransfer);
+          if (id) { event.preventDefault(); onDropSlot?.(id); }
+        }}>
         {cards.map(({ instanceId, placement, widget }) => (
           <WidgetCard
             key={instanceId}
@@ -495,6 +518,8 @@ export default function WidgetCanvas() {
             placement={placement}
             projectId={projectId}
             sessionId={sessionId}
+            selected={selectedId === instanceId}
+            onSelect={onSelect}
           />
         ))}
         {cards.length === 0 && (

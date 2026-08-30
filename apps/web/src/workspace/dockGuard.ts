@@ -37,6 +37,21 @@ function throughLayeredUi(hit: Element, chatEl: Element): boolean {
   return false;
 }
 
+/** True when the action sits inside a horizontally scrollable ancestor within
+ *  Chat (the composer rail scrolls when it cannot fit every group). Such an
+ *  action's rect is clipped beyond Chat's box, but it is scroll-reachable —
+ *  exactly the phone preset — and is NOT covered by the docked pane, so a
+ *  dock that leaves that layout must not be rejected. */
+function inScrollableOverflow(action: Element, chatEl: Element): boolean {
+  const win = chatEl.ownerDocument.defaultView;
+  if (!win) return false;
+  for (let el: Element | null = action.parentElement; el !== null && el !== chatEl; el = el.parentElement) {
+    const overflowX = win.getComputedStyle(el).overflowX;
+    if (overflowX === "auto" || overflowX === "scroll") return true;
+  }
+  return false;
+}
+
 /**
  * Judge the ACTUAL post-dock Chat layout. `chatEl` is Chat's workspace
  * container; `chatFloor` is the content-box floor (CHAT_FLOOR).
@@ -63,7 +78,12 @@ export function chatDockViability(chatEl: Element | null, chatFloor: number): Do
   for (const action of composer.querySelectorAll(ACTION_SELECTOR)) {
     const r = action.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) continue; // hidden action: fine
-    // Clipping an action outside Chat's rectangle is never success.
+    // Clipping an action outside Chat's rectangle is never success — unless it
+    // is scroll-reachable inside Chat itself (see inScrollableOverflow): a
+    // scrolled-out rail button reports a rect beyond Chat and its center hit
+    // test lands on the scroll container, but it is reachable by scrolling, so
+    // it is not covered by the docked pane.
+    if (inScrollableOverflow(action, chatEl)) continue;
     if (r.left < chat.left - 0.5 || r.right > chat.right + 0.5) return "blocked";
     if (typeof doc.elementFromPoint === "function") {
       const hit = doc.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);

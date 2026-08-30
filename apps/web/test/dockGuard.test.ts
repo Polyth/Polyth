@@ -17,6 +17,7 @@ interface FakeInit {
   role?: string;
   rect?: [left: number, top: number, width: number, height: number];
   position?: string;
+  overflowX?: string;
 }
 
 class FakeEl {
@@ -25,6 +26,7 @@ class FakeEl {
   role: string | null;
   rectBox: { left: number; top: number; width: number; height: number };
   position: string;
+  overflowX: string;
   parentElement: FakeEl | null = null;
   kids: FakeEl[] = [];
   ownerDocument!: FakeDoc;
@@ -36,6 +38,7 @@ class FakeEl {
     const [left, top, width, height] = init.rect ?? [0, 0, 0, 0];
     this.rectBox = { left, top, width, height };
     this.position = init.position ?? "static";
+    this.overflowX = init.overflowX ?? "visible";
   }
 
   add(...children: FakeEl[]): this {
@@ -95,7 +98,7 @@ class FakeEl {
 class FakeDoc {
   root: FakeEl;
   defaultView = {
-    getComputedStyle: (el: FakeEl) => ({ position: el.position }),
+    getComputedStyle: (el: FakeEl) => ({ position: el.position, overflowX: el.overflowX }),
   };
 
   constructor(root: FakeEl) {
@@ -226,6 +229,43 @@ test("guard: the docked pane itself covering composer actions is blocked", () =>
   // A static-flow sibling outside chat paints over Send's center.
   f.app.add(new FakeEl({ cls: "rail", rect: [380, 0, 400, 900], position: "relative" }));
   assert.equal(chatDockViability(asEl(f.chat), FLOOR), "blocked");
+});
+
+test("guard: a scroll-reachable action clipped by the composer rail is NOT a dock defect", () => {
+  // The rail scrolls horizontally when groups cannot fit (phone preset and the
+  // composer container reflow): a scrolled-out button's rect lies beyond Chat,
+  // but it is reachable by scrolling, so the dock stays viable. Build a
+  // self-contained settled chat whose only actions live inside the rail.
+  const chat = new FakeEl({ cls: "workspace", rect: [0, 0, 450, 900] });
+  const app = new FakeEl({ cls: "app", rect: [0, 0, 1440, 900] });
+  new FakeDoc(app);
+  app.add(chat);
+  const timeline = new FakeEl({ cls: "timeline-wrap", rect: [0, 0, 450, 700] });
+  const composer = new FakeEl({ cls: "composer", rect: [0, 700, 450, 200] });
+  chat.add(timeline, composer);
+  const rail = new FakeEl({ cls: "composer-rail", rect: [0, 760, 450, 40], overflowX: "auto" });
+  const inView = new FakeEl({ tag: "button", rect: [10, 760, 32, 32] });
+  const scrolled = new FakeEl({ tag: "button", rect: [500, 760, 40, 40] });
+  composer.add(rail);
+  rail.add(inView, scrolled);
+  assert.equal(chatDockViability(asEl(chat), FLOOR), "viable");
+});
+
+test("guard: a non-scrollable action beyond Chat's box is still blocked", () => {
+  // Same geometry but the rail clips (overflow hidden = non-scrollable), so
+  // the action is genuinely unreachable and the dock must be rejected.
+  const chat = new FakeEl({ cls: "workspace", rect: [0, 0, 450, 900] });
+  const app = new FakeEl({ cls: "app", rect: [0, 0, 1440, 900] });
+  new FakeDoc(app);
+  app.add(chat);
+  const timeline = new FakeEl({ cls: "timeline-wrap", rect: [0, 0, 450, 700] });
+  const composer = new FakeEl({ cls: "composer", rect: [0, 700, 450, 200] });
+  chat.add(timeline, composer);
+  const rail = new FakeEl({ cls: "composer-rail", rect: [0, 760, 450, 40], overflowX: "hidden" });
+  const scrolled = new FakeEl({ tag: "button", rect: [500, 760, 40, 40] });
+  composer.add(rail);
+  rail.add(scrolled);
+  assert.equal(chatDockViability(asEl(chat), FLOOR), "blocked");
 });
 
 // ---- observer targets ------------------------------------------------------------

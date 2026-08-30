@@ -1051,6 +1051,7 @@ let state = parseWidgetLayout(read(activeProjectId), knownWidgetDefinitions());
 const listeners = new Set<() => void>();
 const statusListeners = new Set<() => void>();
 let history: WidgetLayout[] = [];
+let future: WidgetLayout[] = [];
 let saveStatus: WidgetSaveStatus = "saved";
 
 // Drag-resize commits many layouts per second; a trailing timer batches them
@@ -1088,6 +1089,7 @@ subscribeStore(() => {
   activeProjectId = nextProjectId;
   state = parseWidgetLayout(read(activeProjectId), knownWidgetDefinitions());
   history = [];
+  future = [];
   saveStatus = "saved";
   for (const listener of [...listeners]) listener();
   for (const listener of [...statusListeners]) listener();
@@ -1095,7 +1097,10 @@ subscribeStore(() => {
 
 function commit(next: WidgetLayout, recordHistory = true, immediate = false): void {
   if (next === state) return;
-  if (recordHistory) history = [...history.slice(-39), state];
+  if (recordHistory) {
+    history = [...history.slice(-39), state];
+    future = [];
+  }
   state = next;
   if (immediate) {
     if (writeTimer !== null) clearTimeout(writeTimer);
@@ -1123,7 +1128,16 @@ export function undoWidgetLayout(): void {
   const previous = history.at(-1);
   if (!previous) return;
   history = history.slice(0, -1);
+  future = [...future.slice(-39), state];
   commit(previous, false);
+}
+
+export function redoWidgetLayout(): void {
+  const next = future.at(-1);
+  if (!next) return;
+  future = future.slice(0, -1);
+  history = [...history.slice(-39), state];
+  commit(next, false);
 }
 
 export function canUndoWidgetLayout(): boolean {
@@ -1215,17 +1229,18 @@ export function useWidgetLayout(): WidgetLayout {
   );
 }
 
-export function useWidgetStoreStatus(): { saveStatus: WidgetSaveStatus; canUndo: boolean } {
+export function useWidgetStoreStatus(): { saveStatus: WidgetSaveStatus; canUndo: boolean; canRedo: boolean } {
   const snapshot = useSyncExternalStore(
     (listener) => {
       statusListeners.add(listener);
       return () => { statusListeners.delete(listener); };
     },
-    () => `${saveStatus}:${history.length}`,
+    () => `${saveStatus}:${history.length}:${future.length}`,
   );
-  const [status, count] = snapshot.split(":");
+  const [status, count, futureCount] = snapshot.split(":");
   return {
     saveStatus: status as WidgetSaveStatus,
     canUndo: Number(count) > 0,
+    canRedo: Number(futureCount) > 0,
   };
 }
