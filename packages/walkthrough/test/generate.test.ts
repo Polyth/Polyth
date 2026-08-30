@@ -131,6 +131,20 @@ test("buildWalkthroughPrompt lists every non-binary hunk by id", () => {
   assert.match(prompt, /ONLY JSON/);
 });
 
+test("buildWalkthroughPrompt applies one global budget across many and enormous hunks", () => {
+  const many = Array.from({ length: 300 }, (_, i) => [
+    `diff --git a/src/${i}.ts b/src/${i}.ts`, `--- a/src/${i}.ts`, `+++ b/src/${i}.ts`,
+    `@@ -${i + 1},1 +${i + 1},1 @@`, "-old", "+new",
+  ].join("\n")).join("\n");
+  const prompt = buildWalkthroughPrompt(parseUnifiedDiffText(many), 12_000);
+  assert.ok(prompt.length <= 12_000);
+  const huge = buildWalkthroughPrompt(parseUnifiedDiffText(
+    `diff --git a/a.ts b/a.ts\n@@ -1,1 +1,1 @@\n${" context\n".repeat(20_000)}-old\n+new`,
+  ), 2_000);
+  assert.ok(huge.length <= 2_000);
+  assert.match(huge, /\+new/);
+});
+
 // ---- review assessment parser ------------------------------------------------
 
 test("parseReviewAssessment accepts a valid payload and clamps benign noise", () => {

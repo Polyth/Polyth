@@ -165,6 +165,9 @@ function CapabilityNav() {
             </button>
           );
         })}
+        {/* Widget-areas (WA3): widgets placed into the "Top toolbar" area
+            render alongside the built-in tier rail. */}
+        <SlotHost slot="app.header.center" context={{ editing: false }} />
       </div>
     </nav>
   );

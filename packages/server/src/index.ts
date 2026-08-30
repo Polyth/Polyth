@@ -80,9 +80,17 @@ import { createMcpConfigService, mcpEntriesFromBackendConfig } from "./mcp.ts";
 import { createSecureSafeService, secureSafeBehaviorSection } from "./secureSafe.ts";
 import { createModelVisibilityService } from "./modelVisibility.ts";
 import { createVoiceSettings } from "./voice.ts";
-import { buildNotePrompt, createAssistService, createAssistSettings, parseNoteReply, type AssistService } from "./assist.ts";
+import {
+  buildNotePrompt,
+  createAssistService,
+  createAssistSettings,
+  createManualSuggestionService,
+  parseNoteReply,
+  type AssistService,
+} from "./assist.ts";
 import { assistRoutes } from "./routes/assist.ts";
 import { oneShot } from "./oneshot.ts";
+import { createSmallModelService } from "./smallModel.ts";
 import { attachWs } from "./ws.ts";
 import { createTrackWorkflow, type TrackWorkflow, type TrackWorkflowDeps } from "./tracks.ts";
 import { createRouteRegistry } from "./routeRegistry.ts";
@@ -808,6 +816,10 @@ export async function boot(opts: BootOptions = {}) {
           if (result.kind === "confirmed") liveStreamSessionIds.add(req.sessionId);
           return result;
         }),
+      ...(inner.completeSmallModel
+        ? { completeSmallModel: (request: Parameters<NonNullable<AgentRuntime["completeSmallModel"]>>[0]) =>
+            useRuntime(() => inner.completeSmallModel!(request)) }
+        : {}),
       steer: (sessionId, text) =>
         useRuntime(() => inner.steer?.(sessionId, text) ?? Promise.resolve(false)),
       steerOperation: (sessionId, text, operationId) =>
@@ -1287,6 +1299,7 @@ export async function boot(opts: BootOptions = {}) {
     httpServerCallbacks.push(cb);
   };
 
+  const smallModels = createSmallModelService(store);
   const packageHost: Omit<ServerPackageHost, "pluginId"> = {
     storageDir: dataDir,
     routes: routeRegistry,
@@ -1305,6 +1318,8 @@ export async function boot(opts: BootOptions = {}) {
       },
     },
     oneShot: (runtime, options) => oneShot(runtime, options, store),
+    smallModelComplete: (runtime, options) => smallModels.complete(runtime, options),
+    smallModelInputBudget: (runtime, model, maxOutputTokens) => smallModels.inputBudget(runtime, model, maxOutputTokens),
     smallModel,
     resolveSessionRuntime,
     loadPlugin: (plugin) => loadPlugin(root, plugin, {}),
@@ -1460,6 +1475,11 @@ export async function boot(opts: BootOptions = {}) {
       ...(smallModel() ? { model: smallModel()! } : proj?.model ? { model: proj.model } : {}),
     }, store);
   };
+  const manualSuggestion = createManualSuggestionService({
+    latestSeq: (sessionId) => store.latestSeq(sessionId),
+    events: (sessionId) => store.events(sessionId),
+    complete: assistComplete,
+  });
   assist = createAssistService({
     settings: () => assistSettings.get(),
     latestSeq: (sessionId) => store.latestSeq(sessionId),
@@ -1574,6 +1594,7 @@ export async function boot(opts: BootOptions = {}) {
       settings: assistSettings,
       projection: (sessionId) => store.projection(sessionId),
       latestSeq: (sessionId) => store.latestSeq(sessionId),
+      suggestion: (sessionId) => manualSuggestion.generate(sessionId),
       distill: async (sessionId) => {
         const transcript = await assistTranscript(sessionId);
         if (!transcript.trim()) {

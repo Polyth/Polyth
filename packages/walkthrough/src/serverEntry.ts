@@ -215,7 +215,7 @@ interface DiffGithubService {
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   // WP11: generated walkthroughs, structured reviews, bounded review flow.
   // The source diff is captured through git/gh only; the model call is a
-  // one-shot on the project's runtime (never a user session).
+  // small-model utility request on the project's runtime (never a user session).
   const captureDiff = async (source: WalkthroughSource): Promise<string> => {
     const project = await host.projects.get(source.projectId);
     if (!project) throw Object.assign(new Error("unknown project"), { code: "not-found" });
@@ -227,15 +227,22 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     if (!r.ok) throw Object.assign(new Error(r.reason), { code: "invalid-input" });
     return r.data;
   };
-  const generate = async (source: WalkthroughSource, prompt: string): Promise<string> => {
+  const generate = async (source: WalkthroughSource, prompt: string, signal?: AbortSignal): Promise<string> => {
     const project = await host.projects.get(source.projectId);
     const rt = await host.runtimes.forProject(source.projectId);
-    return host.oneShot(rt, {
+    const result = await host.smallModelComplete(rt, {
       cwd: project?.path ?? process.cwd(),
       prompt,
       ...(host.smallModel() ? { model: host.smallModel()! } : {}),
+      maxOutputTokens: 2_048,
       timeoutMs: 180_000,
+      ...(signal ? { signal } : {}),
     });
+    return result.text;
+  };
+  const inputBudget = async (source: WalkthroughSource): Promise<number> => {
+    const rt = await host.runtimes.forProject(source.projectId);
+    return host.smallModelInputBudget(rt, host.smallModel(), 2_048);
   };
   const append = (sessionId: string, type: string, data: JsonObject) =>
     host.events.append(sessionId, type, data, { ignorable: true, producerPlugin: "review" });
@@ -245,6 +252,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     generate,
     append,
     cacheFile: join(host.storageDir, "walkthroughs.json"),
+    inputBudget,
     ...(host.smallModel()
       ? { modelId: `${host.smallModel()!.providerID}/${host.smallModel()!.modelID}` }
       : {}),

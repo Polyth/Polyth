@@ -12,7 +12,7 @@ import {
 } from "./widgetLayout.ts";
 
 export type WidgetSizeFilter = "all" | "small" | "medium" | "large";
-export type WidgetLibraryTab = "recommended" | "plugin" | "recent";
+export type WidgetLibraryTab = "all" | "recommended" | "plugin" | "recent";
 
 export interface WidgetLibraryFilters {
   query: string;

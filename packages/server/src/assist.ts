@@ -5,6 +5,8 @@
 // suggestion), so ANY new event makes it stale. Hard settings switch: disabled
 // means nothing is generated at all. One flight per session bounds token spend.
 import type { SessionAssist } from "@polyth/contracts";
+import { latestCompletedExchange } from "@polyth/session/next-action";
+import type { SessionEvent } from "@polyth/contracts";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -119,6 +121,95 @@ export function parseNoteReply(raw: string): { title: string; body: string } {
   const nl = clean.indexOf("\n");
   if (nl === -1) return { title: clean.slice(0, 60), body: "" };
   return { title: clean.slice(0, nl).trim().slice(0, 120), body: clean.slice(nl + 1).trim() };
+}
+
+// ------------------------------------------------------------- next action
+
+export const NEXT_ACTION_CONTEXT_MAX_CHARS = 12_000;
+export const NEXT_ACTION_OUTPUT_MAX_CHARS = 800;
+
+const capChars = (text: string, max: number): string =>
+  text.length <= max ? text : text.slice(0, max).trimEnd();
+
+/** Plain-text, two-message prompt for the explicit composer action. */
+export function buildNextActionPrompt(input: { user: string; assistant: string }): string {
+  return [
+    "You generate the single best next message the user could send to a coding agent.",
+    "Based only on the latest user message and the assistant's latest response, produce ONE immediately sendable next user message that moves the current task forward.",
+    "",
+    "Rules:",
+    "- Return only the message itself.",
+    "- No label such as \"Suggestion:\".",
+    "- No explanation.",
+    "- No markdown wrapper.",
+    "- No alternatives.",
+    "- Pick one best next action yourself.",
+    "- Do not use \"or\" to make the user choose between actions.",
+    "- Do not repeat a question whose answer is already present in the assistant response.",
+    "- Do not ask to inspect implementation details merely for the sake of inspection.",
+    "- Do not ask for exact code, file paths, or prompt locations if they were already provided.",
+    "- Do not generate generic workflow requests such as \"Run tests\" unless testing is clearly the unresolved next step.",
+    "- Prefer a concrete action: implement the proposed improvement; fix the identified problem; validate the latest change; improve the current approach; resolve a remaining issue; explain an important trade-off; or continue the task from the current result.",
+    "- Do not invent facts, decisions, values, preferences, credentials, or requirements on behalf of the user.",
+    "- Match the language of the latest conversation exchange.",
+    "- Match the user's concise/direct tone where it can be inferred.",
+    "- Keep the message concise but complete enough to send without editing.",
+    "",
+    "If no useful next action can reasonably be inferred, return an empty string.",
+    "",
+    "LATEST USER MESSAGE:",
+    capChars(input.user, NEXT_ACTION_CONTEXT_MAX_CHARS),
+    "",
+    "LATEST ASSISTANT RESPONSE:",
+    capChars(input.assistant, NEXT_ACTION_CONTEXT_MAX_CHARS),
+  ].join("\n");
+}
+
+/** Be forgiving of common model adornments while keeping the result sendable. */
+export function sanitizeNextActionReply(raw: string): string {
+  let text = raw.trim()
+    .replace(/^```[^\n]*\n?/, "")
+    .replace(/\n?```$/, "")
+    .trim()
+    .replace(/^(?:suggestion|next(?:\s+(?:user\s+)?(?:message|action))?)\s*:\s*/i, "");
+  const quoted = text.match(/^["“]([\s\S]*)["”]$/);
+  if (quoted) text = quoted[1]!.trim();
+  return capChars(text, NEXT_ACTION_OUTPUT_MAX_CHARS);
+}
+
+export interface ManualSuggestionService {
+  generate(sessionId: string): Promise<{ suggestion: string; atSeq: number }>;
+}
+
+/** One explicit, ephemeral request per session. This never writes the session log or projection. */
+export function createManualSuggestionService(deps: {
+  latestSeq(sessionId: string): Promise<number>;
+  events(sessionId: string): Promise<SessionEvent[]>;
+  complete(sessionId: string, prompt: string): Promise<string>;
+}): ManualSuggestionService {
+  const inFlight = new Set<string>();
+  const fail = (code: "in-flight" | "stale" | "no-completed-exchange"): never => {
+    throw Object.assign(new Error(code), { code });
+  };
+
+  return {
+    async generate(sessionId) {
+      if (inFlight.has(sessionId)) fail("in-flight");
+      inFlight.add(sessionId);
+      try {
+        const atSeq = await deps.latestSeq(sessionId);
+        const exchange = latestCompletedExchange(await deps.events(sessionId));
+        if (exchange === null) throw Object.assign(new Error("no-completed-exchange"), { code: "no-completed-exchange" });
+        const prompt = buildNextActionPrompt(exchange);
+        if ((await deps.latestSeq(sessionId)) !== atSeq) fail("stale");
+        const raw = await deps.complete(sessionId, prompt);
+        if ((await deps.latestSeq(sessionId)) !== atSeq) fail("stale");
+        return { suggestion: sanitizeNextActionReply(raw), atSeq };
+      } finally {
+        inFlight.delete(sessionId);
+      }
+    },
+  };
 }
 
 // ------------------------------------------------------------- service

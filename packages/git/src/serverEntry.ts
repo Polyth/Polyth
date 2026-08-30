@@ -1,4 +1,6 @@
 import { posix } from "node:path";
+import { createHash } from "node:crypto";
+import type { AgentRuntime, ModelRef } from "@polyth/contracts";
 import type { ProjectService, RouteHandler, SessionService } from "@polyth/contracts";
 import {
   serverServiceKey,
@@ -6,6 +8,79 @@ import {
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { createGitService, pathsUnder, type GitService } from "./index.ts";
+
+const COMMIT_PROMPT_VERSION = 2;
+const COMMIT_OUTPUT_TOKENS = 120;
+const COMMIT_CACHE_TTL_MS = 60_000;
+
+const digest = (text: string): string => createHash("sha256").update(text).digest("hex");
+
+/** Keep both ends of a large diff: file headers and the final change are often
+ * the most useful identity signals. The caller supplies a model-aware global
+ * budget, so this is never a per-file arbitrary limit. */
+export function buildCommitMessagePrompt(diff: string, inputBudget: number): string {
+  const prefix = [
+    "Write a git commit message. Output only the message.",
+    "Use one imperative subject of at most 72 characters; add a short body only when necessary.",
+    "Do not use markdown fences.",
+    "<diff>",
+  ].join("\n");
+  const suffix = "\n</diff>";
+  const available = Math.max(0, inputBudget - prefix.length - suffix.length);
+  const marker = "\n… diff truncated …\n";
+  const compact = diff.length <= available ? diff : available < 256
+    ? diff.slice(0, available)
+    : `${diff.slice(0, Math.floor((available - marker.length) * 0.7))}${marker}${diff.slice(-Math.floor((available - marker.length) * 0.3))}`;
+  return `${prefix}\n${compact}${suffix}`;
+}
+
+export interface CommitMessageGeneratorDeps {
+  diff(root: string, opts?: { staged?: boolean }): Promise<{ diff: string }>;
+  runtime(root: string): Promise<AgentRuntime>;
+  model?: ModelRef;
+  inputBudget(runtime: AgentRuntime, model: ModelRef | undefined, maxOutputTokens: number): Promise<number>;
+  complete(runtime: AgentRuntime, options: {
+    cwd: string; prompt: string; model?: ModelRef; maxOutputTokens: number; timeoutMs?: number;
+  }): Promise<{ text: string }>;
+  now?: () => number;
+}
+
+/** Content-addressed, short-lived commit utility cache with single-flight
+ * coalescing. It intentionally stores only generated text, never secrets. */
+export function createCommitMessageGenerator(deps: CommitMessageGeneratorDeps): (root: string) => Promise<string> {
+  const cache = new Map<string, { text: string; expiresAt: number }>();
+  const inFlight = new Map<string, Promise<string>>();
+  const now = deps.now ?? Date.now;
+  return async (root) => {
+    const staged = await deps.diff(root, { staged: true });
+    const stagedSelected = !!staged.diff.trim();
+    const diff = stagedSelected ? staged.diff : (await deps.diff(root)).diff;
+    if (!diff.trim()) throw Object.assign(new Error("nothing to describe"), { code: "invalid-input" });
+    const modelKey = deps.model ? `${deps.model.providerID}/${deps.model.modelID}` : "default";
+    const key = `${digest(diff)}:${stagedSelected ? "staged" : "unstaged"}:${modelKey}:v${COMMIT_PROMPT_VERSION}`;
+    const hit = cache.get(key);
+    if (hit && hit.expiresAt > now()) return hit.text;
+    const pending = inFlight.get(key);
+    if (pending) return pending;
+    const task = (async () => {
+      const runtime = await deps.runtime(root);
+      const budget = await deps.inputBudget(runtime, deps.model, COMMIT_OUTPUT_TOKENS);
+      const result = await deps.complete(runtime, {
+        cwd: root,
+        model: deps.model,
+        maxOutputTokens: COMMIT_OUTPUT_TOKENS,
+        timeoutMs: 30_000,
+        prompt: buildCommitMessagePrompt(diff, budget),
+      });
+      const text = result.text.replace(/^```[a-z]*\n?|```$/g, "").trim();
+      if (!text) throw new Error("small model returned an empty commit message");
+      cache.set(key, { text, expiresAt: now() + COMMIT_CACHE_TTL_MS });
+      return text;
+    })().finally(() => { inFlight.delete(key); });
+    inFlight.set(key, task);
+    return task;
+  };
+}
 
 export function assertGitRelativePath(value: string, allowEmpty = false): string {
   if (value.length === 0 && allowEmpty) return value;
@@ -195,30 +270,21 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   return {
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
+      const commitMessage = createCommitMessageGenerator({
+        diff: (root, opts) => git.diff(root, opts),
+        runtime: async (root) => {
+          const project = (await host.projects.list()).find((candidate) => candidate.path === root);
+          return host.runtimes.forProject(project?.id ?? "__default__");
+        },
+        model: host.smallModel(),
+        inputBudget: (runtime, model, maxOutputTokens) => host.smallModelInputBudget(runtime, model, maxOutputTokens),
+        complete: (runtime, options) => host.smallModelComplete(runtime, options),
+      });
       routes ??= gitRoutes({
         projects: host.projects,
         sessions: host.sessions,
         git,
-        commitMessage: async (root) => {
-          const staged = await git.diff(root, { staged: true });
-          const diff = staged.diff.trim() || (await git.diff(root)).diff;
-          if (!diff.trim()) {
-            throw Object.assign(new Error("nothing to describe"), { code: "invalid-input" });
-          }
-          const project = (await host.projects.list()).find((candidate) => candidate.path === root);
-          const runtime = await host.runtimes.forProject(project?.id ?? "__default__");
-          const text = await host.oneShot(runtime, {
-            cwd: root,
-            ...(host.smallModel() ? { model: host.smallModel()! } : {}),
-            prompt: [
-              "Write a git commit message for the diff below. Output ONLY the message.",
-              "Format: a <=72 character imperative subject line; add a short body only if the change is non-obvious.",
-              "Do not use tools. Do not wrap the answer in code fences.",
-              "", "<diff>", diff.slice(0, 24_000), "</diff>",
-            ].join("\n"),
-          });
-          return text.replace(/^```[a-z]*\n?|```$/g, "").trim();
-        },
+        commitMessage,
       });
     },
   };

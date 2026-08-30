@@ -1,6 +1,6 @@
 import type { AttachmentRef } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
-import { addAttachment, MAX_PENDING_ATTACHMENTS } from "../../../apps/web/src/attachments.ts";
+import { addAttachment, MAX_PENDING_ATTACHMENTS, newAttachmentId } from "../../../apps/web/src/attachments.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 
 export interface GithubUrlParts {
@@ -42,7 +42,7 @@ export function githubUrlMatchesRepo(
 /** Build the pill for a matching GitHub URL. Link-only: nothing is fetched. */
 export function githubUrlRef(parts: GithubUrlParts): AttachmentRef {
   return {
-    id: crypto.randomUUID(),
+    id: newAttachmentId(),
     name: `${parts.kind === "pull" ? "PR" : tr("common.issue")} #${parts.number}`,
     mime: "text/uri-list",
     size: 0,

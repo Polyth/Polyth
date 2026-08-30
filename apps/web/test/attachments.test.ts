@@ -12,7 +12,7 @@ const mem = new Map<string, string>();
 };
 
 const {
-  addAttachment, clearAttachments, MAX_PENDING_ATTACHMENTS, pendingAttachments,
+  addAttachment, clearAttachments, MAX_PENDING_ATTACHMENTS, newAttachmentId, pendingAttachments,
   removeAttachment, takeAttachments,
 } = await import("../src/attachments.ts");
 const { buildModel } = await import("../src/reduce.ts");
@@ -62,6 +62,20 @@ test("no-session pills stay in memory only", () => {
   assert.equal(pendingAttachments(null).length, 1);
   assert.ok(![...mem.keys()].some((k) => k === "polyth.draft.att."));
   assert.equal(takeAttachments(null)[0]?.id, "hero");
+});
+
+test("attachment IDs fall back when randomUUID is unavailable", () => {
+  const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  Object.defineProperty(globalThis, "crypto", {
+    configurable: true,
+    value: { getRandomValues: (bytes: Uint8Array) => bytes.fill(0) },
+  });
+  try {
+    assert.equal(newAttachmentId(), "00000000-0000-4000-8000-000000000000");
+  } finally {
+    if (cryptoDescriptor) Object.defineProperty(globalThis, "crypto", cryptoDescriptor);
+    else delete (globalThis as { crypto?: unknown }).crypto;
+  }
 });
 
 test("reducer surfaces attachments on user messages; junk rows are dropped", () => {

@@ -294,14 +294,10 @@ export default function TermPane(props: TermPaneProps) {
     const body = bodyRef.current;
     if (!body) return cellRef.current;
     const probe = document.createElement("span");
-    probe.className = "term-row";
-    probe.style.position = "absolute";
-    // `.term-row` normally stretches from left to right for virtualized
-    // output. That makes its bounding rect equal the pane width, which was
-    // then divided by 20 and reported a 20px-wide "character" on phones.
-    // The measurement probe must instead shrink to its twenty glyphs.
-    probe.style.right = "auto";
-    probe.style.width = "max-content";
+    // This must not use `.term-row`: rendered rows intentionally have a
+    // minimum width equal to the pane, which turns the pane width into a fake
+    // glyph width and can resize the server PTY down to two columns.
+    probe.style.cssText = "position:absolute;display:inline-block;left:0;top:0;min-width:0;width:max-content;white-space:pre;pointer-events:none;";
     probe.style.visibility = "hidden";
     probe.textContent = "W".repeat(20);
     body.appendChild(probe);
@@ -319,28 +315,52 @@ export default function TermPane(props: TermPaneProps) {
   }, []);
 
   useLayoutEffect(() => {
-    measure();
     const body = bodyRef.current;
-    if (!body || typeof ResizeObserver === "undefined") return;
+    if (!body) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const ro = new ResizeObserver(() => {
+    let frame = 0;
+    const resizeTerminal = () => {
+      const el = bodyRef.current;
+      // A kept-alive workspace pane is briefly 0×0 while opening. Resizing
+      // during that frame permanently wraps shell output at two columns.
+      if (!el || el.clientWidth <= 0 || el.clientHeight <= 0) return;
+      const measuredCell = measure();
+      if (measuredCell.w <= 0 || measuredCell.h <= 0) return;
+      const style = getComputedStyle(el);
+      const paddingX = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+      const paddingY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+      setViewportH(el.clientHeight);
+      const cols = Math.max(2, Math.floor((el.clientWidth - paddingX) / measuredCell.w));
+      const rows = Math.max(2, Math.floor((el.clientHeight - paddingY) / measuredCell.h));
+      // A desktop terminal with fewer than eight columns is a measurement
+      // failure, not a useful terminal. Keep the last valid PTY grid until a
+      // later observer pass can measure the visible pane correctly.
+      if (el.clientWidth >= 160 && cols < 8) return;
+      if (cols !== emu.cols() || rows !== emu.rows()) {
+        emu.resize(cols, rows);
+        onResize(cols, rows);
+      }
+    };
+    const scheduleResize = () => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        const measuredCell = measure();
-        const el = bodyRef.current;
-        if (!el) return;
-        setViewportH(el.clientHeight);
-        const c = measuredCell;
-        const cols = Math.max(2, Math.floor((el.clientWidth - 16) / c.w));
-        const rows = Math.max(2, Math.floor((el.clientHeight - 16) / c.h));
-        if (cols !== emu.cols() || rows !== emu.rows()) {
-          emu.resize(cols, rows);
-          onResize(cols, rows);
-        }
-      }, 80);
-    });
-    ro.observe(body);
-    return () => { ro.disconnect(); if (timer) clearTimeout(timer); };
+      timer = setTimeout(resizeTerminal, 80);
+    };
+    // A pane can mount while its parent is transitioning from hidden to
+    // visible. Retry after layout even when ResizeObserver has only observed
+    // the hidden 0×0 box.
+    resizeTerminal();
+    frame = raf(resizeTerminal);
+    const ro = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(scheduleResize);
+    ro?.observe(body);
+    window.addEventListener("resize", scheduleResize);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", scheduleResize);
+      if (frame) caf(frame);
+      if (timer) clearTimeout(timer);
+    };
   }, [measure, emu, onResize]);
 
   // ---- follow / scroll ----

@@ -224,7 +224,7 @@ export default function ContextRail() {
         capabilityId: capability.descriptor.id,
         title: capability.descriptor.label,
         icon: railIconFor(capability.descriptor.id),
-        badge: 0,
+        badge: capability.descriptor.id === "git" ? ctx.changeCount : 0,
         active: activeCapability(capability),
         activate: () => {
           setRailPlugin(null);
@@ -699,6 +699,9 @@ export default function ContextRail() {
               <Badge n={s.badge} />
             </button>
             ))}
+            {/* Widget-areas (WA3): widgets placed into the "Right rail" area
+                render below the built-in tier launchers. */}
+            <SlotHost slot="workspace.rail" context={{ editing: false }} />
             {(shiftArmed || customizeOpen) && (
               <Menu
                 label={tr("settingsview.customize")}

@@ -39,17 +39,13 @@ test("tickWidth: base, active, and cursor emphasis", () => {
   assert.equal(tickWidth(4, 4, 4), RAIL_CURSOR_WIDTH);
 });
 
-test("tickWidth proximity wave falls off with distance and floors at base", () => {
+test("tickWidth uses three compact proximity levels", () => {
   const w0 = tickWidth(10, -1, 10);
   const w1 = tickWidth(11, -1, 10);
   const w2 = tickWidth(12, -1, 10);
   const w3 = tickWidth(13, -1, 10);
-  const w4 = tickWidth(14, -1, 10);
-  assert.ok(w0 > w1 && w1 > w2 && w2 > w3, `wave must decay: ${[w0, w1, w2, w3].join(",")}`);
-  assert.ok(w3 > RAIL_BASE_WIDTH, "distance 3 still swells");
-  assert.equal(w4, RAIL_BASE_WIDTH, "outside the falloff the tick stays at base");
-  // The wave never shrinks the active tick below its own emphasis.
-  assert.equal(tickWidth(14, 14, 10), RAIL_ACTIVE_WIDTH);
+  assert.deepEqual([w0, w1, w2, w3], [RAIL_CURSOR_WIDTH, 12, RAIL_BASE_WIDTH, RAIL_BASE_WIDTH]);
+  assert.equal(tickWidth(14, 14, 10), RAIL_BASE_WIDTH, "hover emphasis beats active emphasis");
 });
 
 test("cursorTickIndex maps tape offsets to visible ticks", () => {

@@ -439,14 +439,29 @@ export function createGithubService(deps: { exec?: ExecFn } = {}): GithubService
       const r = await ghJson<{
         number: number; title: string; state: string; isDraft: boolean;
         author: { login: string } | null; url: string; body: string | null;
-        baseRefName: string; headRefName: string; headRefOid: string;
+        baseRefName: string; headRefName: string; headRefOid?: string;
         additions: number; deletions: number; changedFiles: number;
         mergeable: string | null; createdAt: string; updatedAt: string;
       }>(cwd, [
         "pr", "view", String(number), "--json",
-        "number,title,state,isDraft,author,url,body,baseRefName,headRefName,headRefOid,additions,deletions,changedFiles,mergeable,createdAt,updatedAt",
+        // headRefOid is not available in older gh releases (for example,
+        // Ubuntu's gh 2.4.0), while the other detail fields are. Requesting
+        // it here makes gh reject the entire PR response as an unknown field.
+        "number,title,state,isDraft,author,url,body,baseRefName,headRefName,additions,deletions,changedFiles,mergeable,createdAt,updatedAt",
       ]);
       if (!r.ok) return r;
+      let headRefOid = r.data.headRefOid ?? "";
+      if (!headRefOid) {
+        // The REST representation exposes the same value as head.sha and is
+        // available through gh api even when pr view does not know headRefOid.
+        // This is enrichment only: a failure must not prevent the PR detail
+        // surface from loading on older CLIs or with restricted API access.
+        const sha = await ghJson<{ head?: { sha?: string } }>(
+          cwd,
+          ["api", `repos/{owner}/{repo}/pulls/${number}`],
+        );
+        if (sha.ok && typeof sha.data.head?.sha === "string") headRefOid = sha.data.head.sha;
+      }
       return {
         ok: true,
         data: {
@@ -454,7 +469,7 @@ export function createGithubService(deps: { exec?: ExecFn } = {}): GithubService
           isDraft: r.data.isDraft === true, author: r.data.author?.login ?? "",
           url: r.data.url, body: r.data.body ?? "",
           baseRefName: r.data.baseRefName, headRefName: r.data.headRefName,
-          headRefOid: r.data.headRefOid ?? "",
+          headRefOid,
           additions: r.data.additions ?? 0, deletions: r.data.deletions ?? 0,
           changedFiles: r.data.changedFiles ?? 0, mergeable: r.data.mergeable ?? "UNKNOWN",
           createdAt: r.data.createdAt, updatedAt: r.data.updatedAt,

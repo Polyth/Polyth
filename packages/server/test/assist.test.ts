@@ -8,8 +8,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SessionAssist, SessionProjection } from "@polyth/contracts";
 import {
-  buildAssistPrompt, buildNotePrompt, capWords, createAssistService, createAssistSettings,
-  isFresh, parseAssistReply, parseNoteReply, RECAP_MAX_WORDS,
+  buildAssistPrompt, buildNextActionPrompt, buildNotePrompt, capWords, createAssistService, createAssistSettings,
+  createManualSuggestionService, isFresh, parseAssistReply, parseNoteReply, RECAP_MAX_WORDS,
+  sanitizeNextActionReply,
 } from "../src/assist.ts";
 import { assistRoutes } from "../src/routes/assist.ts";
 import type { RouteRequest } from "../src/http.ts";
@@ -63,6 +64,60 @@ test("pure helpers: word cap, freshness, reply parsing", () => {
 
   assert.match(buildAssistPrompt("T"), /<conversation>\nT\n<\/conversation>/);
   assert.match(buildNotePrompt("T"), /project note/);
+
+  const next = buildNextActionPrompt({ user: "Fix the retry path", assistant: "I found the missing await." });
+  assert.match(next, /LATEST USER MESSAGE:\nFix the retry path/);
+  assert.match(next, /LATEST ASSISTANT RESPONSE:\nI found the missing await/);
+  assert.equal(sanitizeNextActionReply("```\nSuggestion: Add a regression test.\n```"), "Add a regression test.");
+  assert.equal(sanitizeNextActionReply(`"${"x".repeat(900)}"`).length, 800);
+});
+
+const completedExchangeEvents = () => [
+  { id: "e1", sessionId: "s1", seq: 1, time: 1, type: "user/message", data: { text: "older prompt" }, v: 1 },
+  { id: "e2", sessionId: "s1", seq: 2, time: 2, type: "assistant/message", data: { text: "older answer" }, v: 1 },
+  { id: "e3", sessionId: "s1", seq: 3, time: 3, type: "user/message", data: { text: "latest prompt" }, v: 1 },
+  { id: "e4", sessionId: "s1", seq: 4, time: 4, type: "turn/started", data: { turnId: "t1" }, v: 1, ignorable: true },
+  { id: "e5", sessionId: "s1", seq: 5, time: 5, type: "tool/result", data: { callId: "c", tool: "read", output: "tool-only" }, v: 1 },
+  { id: "e6", sessionId: "s1", seq: 6, time: 6, type: "assistant/message", data: { text: "latest answer" }, v: 1 },
+  { id: "e7", sessionId: "s1", seq: 7, time: 7, type: "turn/stopped", data: { turnId: "t1", reason: "completed" }, v: 1, ignorable: true },
+] as unknown as import("@polyth/contracts").SessionEvent[];
+
+test("manual next-action service sends only the latest completed exchange and returns an ephemeral suggestion", async () => {
+  const prompts: string[] = [];
+  const svc = createManualSuggestionService({
+    latestSeq: async () => 7,
+    events: async () => completedExchangeEvents(),
+    complete: async (_id, prompt) => { prompts.push(prompt); return "Suggestion: Implement the missing await."; },
+  });
+  assert.deepEqual(await svc.generate("s1"), { suggestion: "Implement the missing await.", atSeq: 7 });
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0]!, /latest prompt/);
+  assert.match(prompts[0]!, /latest answer/);
+  assert.doesNotMatch(prompts[0]!, /older prompt|older answer|tool-only/);
+});
+
+test("manual next-action service rejects no exchange, stale results, and duplicate flights", async () => {
+  const noExchange = createManualSuggestionService({
+    latestSeq: async () => 0,
+    events: async () => [],
+    complete: async () => "must not run",
+  });
+  await assert.rejects(noExchange.generate("s1"), { code: "no-completed-exchange" });
+
+  let seq = 7;
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const svc = createManualSuggestionService({
+    latestSeq: async () => seq,
+    events: async () => completedExchangeEvents(),
+    complete: async () => { await blocked; return "Continue with the fix."; },
+  });
+  const first = svc.generate("s1");
+  await Promise.resolve();
+  await assert.rejects(svc.generate("s1"), { code: "in-flight" });
+  seq = 8;
+  release();
+  await assert.rejects(first, { code: "stale" });
 });
 
 // -------------------------------------------------------------- service
@@ -163,6 +218,7 @@ function routeHarness(opts: {
   latestSeq?: number;
   distill?: (sessionId: string) => Promise<{ title: string; body: string }>;
   taskBrief?: (sessionId: string) => Promise<string>;
+  suggestion?: (sessionId: string) => Promise<{ suggestion: string; atSeq: number }>;
 }) {
   const settings = createAssistSettings({ file: join(tmp(), "assist.json") });
   const routes = assistRoutes({
@@ -171,6 +227,7 @@ function routeHarness(opts: {
     latestSeq: async () => opts.latestSeq ?? 0,
     ...(opts.distill ? { distill: opts.distill } : {}),
     ...(opts.taskBrief ? { taskBrief: opts.taskBrief } : {}),
+    ...(opts.suggestion ? { suggestion: opts.suggestion } : {}),
   });
   const call = async (method: string, path: string, body: Record<string, unknown> = {}) => {
     let status = 0;
@@ -259,4 +316,34 @@ test("POST task-brief is guarded and returns the small-model summary", async () 
 
   const wired = routeHarness({ projections: { s1: proj("s1") }, taskBrief: async () => "Ship mobile task overview" });
   assert.deepEqual((await wired.call("POST", "/api/sessions/s1/task-brief")).payload, { brief: "Ship mobile task overview" });
+});
+
+test("POST assist/suggestion returns an ephemeral result and typed conflicts", async () => {
+  const unknown = routeHarness({ suggestion: async () => ({ suggestion: "x", atSeq: 7 }) });
+  assert.equal((await unknown.call("POST", "/api/sessions/nope/assist/suggestion")).status, 404);
+
+  const unavailable = routeHarness({ projections: { s1: proj("s1") } });
+  assert.equal((await unavailable.call("POST", "/api/sessions/s1/assist/suggestion")).status, 503);
+
+  const ok = routeHarness({
+    projections: { s1: proj("s1") },
+    suggestion: async () => ({ suggestion: "Validate the change.", atSeq: 7 }),
+  });
+  assert.deepEqual((await ok.call("POST", "/api/sessions/s1/assist/suggestion")).payload, {
+    suggestion: "Validate the change.", atSeq: 7,
+  });
+
+  const stale = routeHarness({
+    projections: { s1: proj("s1") },
+    suggestion: async () => { throw Object.assign(new Error("stale"), { code: "stale" }); },
+  });
+  const conflict = await stale.call("POST", "/api/sessions/s1/assist/suggestion");
+  assert.equal(conflict.status, 409);
+  assert.deepEqual(conflict.payload, { error: "stale", message: "the session changed during suggestion generation" });
+
+  const failure = routeHarness({
+    projections: { s1: proj("s1") },
+    suggestion: async () => { throw new Error("small model offline"); },
+  });
+  assert.equal((await failure.call("POST", "/api/sessions/s1/assist/suggestion")).status, 502);
 });

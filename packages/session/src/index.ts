@@ -63,6 +63,7 @@ import {
   compactionSummariesFromEvents,
   dialogueFromMessages,
 } from "./recovery.ts";
+import { effectiveHistory, recoveredUserText } from "./history.ts";
 
 export { sessionRetentionSummary } from "./retention.ts";
 export type { SessionRetentionSummary } from "./retention.ts";
@@ -145,8 +146,8 @@ export function compactionRecoveryText(input: {
   return lines.join("\n");
 }
 
-export const recoveredUserText = (text: string, recoveryContext?: string): string =>
-  recoveryContext ? `${recoveryContext}\n\n${text}` : text;
+export { effectiveHistory, recoveredUserText } from "./history.ts";
+export { latestCompletedExchange, type CompletedExchange } from "./nextAction.ts";
 
 export {
   EPOCH_RECOVERY_BUDGET_SHARE,
@@ -3436,47 +3437,6 @@ export function activeRewind(events: readonly SessionEvent[]): ActiveRewind | nu
  *  prefix. Rewinds splice history without mutating old rows: redo restores the
  *  captured tail; a replacement clear permanently drops it and lets subsequent
  *  events form a new tail. */
-export interface EffectiveHistory {
-  /** Visible events in order; rewind markers themselves are excluded. */
-  events: SessionEvent[];
-  /** Tail hidden by the currently active rewind marker (empty when none). */
-  hidden: SessionEvent[];
-  /** The active (unresolved) rewind marker, if any. */
-  rewind: { markerSeq: number; atSeq: number } | null;
-}
-
-export function effectiveHistory(events: readonly SessionEvent[]): EffectiveHistory {
-  let visibleEvents: SessionEvent[] = [];
-  let hidden: { markerSeq: number; atSeq: number; events: SessionEvent[] } | null = null;
-
-  for (const ev of events) {
-    if (ev.type === "session/rewound") {
-      const atSeq = Number((ev.data as { atSeq?: unknown }).atSeq);
-      if (Number.isSafeInteger(atSeq) && atSeq > 0) {
-        hidden = { markerSeq: ev.seq, atSeq, events: visibleEvents.filter((item) => item.seq >= atSeq) };
-        visibleEvents = visibleEvents.filter((item) => item.seq < atSeq);
-      }
-      continue;
-    }
-    if (ev.type === "session/rewind-cleared" && hidden) {
-      const d = ev.data as { rewindSeq?: unknown; replaced?: unknown };
-      const markerMatches = d.rewindSeq === undefined || Number(d.rewindSeq) === hidden.markerSeq;
-      if (markerMatches) {
-        if (d.replaced !== true) visibleEvents.push(...hidden.events);
-        hidden = null;
-      }
-      continue;
-    }
-    visibleEvents.push(ev);
-  }
-
-  return {
-    events: visibleEvents,
-    hidden: hidden?.events ?? [],
-    rewind: hidden ? { markerSeq: hidden.markerSeq, atSeq: hidden.atSeq } : null,
-  };
-}
-
 /** Composer seed for the active rewind marker: the hidden target's exact
  *  `raw ?? text` plus attachments. Null when no rewind is active. */
 export function rewindDraft(events: readonly SessionEvent[]): { text: string; attachments: AttachmentRef[] } | null {

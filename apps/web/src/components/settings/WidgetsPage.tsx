@@ -22,6 +22,7 @@ import {
 } from "../../widgets/widgetLayout.ts";
 import { supportedWidgetSlots } from "../../widgets/widgetLibrary.ts";
 import "../../widgets/builtinWidgets.tsx";
+import WidgetLibraryOverlay from "./WidgetLibraryOverlay.tsx";
 import {
   PageHead,
   WidgetPlacementChip,
@@ -304,6 +305,7 @@ export default function WidgetsPage() {
   const activeProjectId = useStore((state) => state.activeProjectId);
   const [openPlace, setOpenPlace] = useState<PlaceId | null>(null);
   const [notice, setNotice] = useState("");
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   useEffect(() => {
     ensureWidgets(widgets);
@@ -414,6 +416,10 @@ export default function WidgetsPage() {
     window.setTimeout(() => target?.classList.remove("widget-surface-flash"), 1400);
   };
 
+  if (libraryOpen) {
+    return <WidgetLibraryOverlay widgets={widgets} onClose={() => setLibraryOpen(false)} />;
+  }
+
   return (
     <>
       <PageHead
@@ -445,6 +451,7 @@ export default function WidgetsPage() {
           </span>
         )}
         <div className="widget-toolbar-actions">
+          <Button type="button" size="sm" variant="primary" iconStart={AddIcon} onClick={() => setLibraryOpen(true)}>{tr("settings.widgetspage.openWidgetLibrary")}</Button>
           <Button type="button" size="sm" onClick={undoWidgetLayout} disabled={!storeStatus.canUndo}>{tr("settings.widgetspage.undo")}</Button>
           <Button type="button" size="sm" onClick={applyToAllProjects} disabled={!activeProjectId || projects.length < 2}>{tr("settings.widgetspage.applyToAllProjects")}</Button>
           <Button type="button" size="sm" variant="danger" className="widget-reset-button" onClick={resetAllPlacement}>{tr("settings.widgetspage.resetLayout")}</Button>

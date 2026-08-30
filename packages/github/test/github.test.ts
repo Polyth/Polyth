@@ -290,6 +290,37 @@ test("prDetail/prFiles/prChecks parse gh JSON and fail soft", async () => {
   assert.equal(soft.ok, false);
 });
 
+test("prDetail works with gh versions that do not support headRefOid", async () => {
+  const calls: string[][] = [];
+  const exec: ExecFn = async (_bin, args) => {
+    calls.push(args);
+    if (args[0] === "pr") {
+      return {
+        stdout: JSON.stringify({
+          number: 4, title: "T", state: "OPEN", isDraft: false, author: { login: "kat" },
+          url: "u", body: "body", baseRefName: "main", headRefName: "feat",
+          additions: 10, deletions: 2, changedFiles: 3, mergeable: "MERGEABLE",
+          createdAt: "c", updatedAt: "d",
+        }),
+        stderr: "",
+      };
+    }
+    assert.deepEqual(args, ["api", "repos/{owner}/{repo}/pulls/4"]);
+    return { stdout: JSON.stringify({ head: { sha: "abc123" } }), stderr: "" };
+  };
+
+  const result = await createGithubService({ exec }).prDetail("/repo", 4);
+  assert.ok(result.ok);
+  if (result.ok) assert.equal(result.data.headRefOid, "abc123");
+  assert.deepEqual(calls, [
+    [
+      "pr", "view", "4", "--json",
+      "number,title,state,isDraft,author,url,body,baseRefName,headRefName,additions,deletions,changedFiles,mergeable,createdAt,updatedAt",
+    ],
+    ["api", "repos/{owner}/{repo}/pulls/4"],
+  ]);
+});
+
 test("prComments merges issue comments and reviews sorted by time", async () => {
   const exec: ExecFn = async () => ({
     stdout: JSON.stringify({

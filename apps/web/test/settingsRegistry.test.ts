@@ -65,7 +65,9 @@ test("Widgets & Layout exposes place-first workspace and composer controls", asy
   assert.match(widgets, /tr\("settings\.widgetspage\.centeredWorkspaceButtonsAtThe"\)/);
   assert.doesNotMatch(widgets, /More tools \/ right rail|Technical menu|Session header stats/);
   assert.match(widgets, /tr\("settings\.widgetspage\.composerActions"\)/);
-  assert.doesNotMatch(widgets, /Top &amp; side workspace buttons|Workspace preview|Choose a starting layout|Help me set up|WidgetLibraryOverlay/);
+  assert.doesNotMatch(widgets, /Top &amp; side workspace buttons|Workspace preview|Choose a starting layout|Help me set up/);
+  // Widget-areas (WA2): the settings page now opens the Widget Library.
+  assert.match(widgets, /import WidgetLibraryOverlay from "\.\/WidgetLibraryOverlay\.tsx"/);
 });
 
 test("items on hidden/unknown pages are skipped", () => {

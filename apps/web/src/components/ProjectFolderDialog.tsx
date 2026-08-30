@@ -1,6 +1,6 @@
 // Full-screen folder picker (the "open project" dialog) — the one reusable
 // picker for first run and every later Add/Open. A real file manager over the
-// localhost-only /api/browse route: labelled path input, Home/Parent actions,
+// server-host /api/browse route: labelled path input, Home/Parent actions,
 // an active-descendant listbox, hidden toggle, optional new-folder creation.
 //
 // UX-ONBOARDING contract: initial focus lands on the path input with its text

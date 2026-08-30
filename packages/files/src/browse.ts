@@ -1,7 +1,6 @@
 // Host directory browsing for the project folder picker. Unlike FileService
 // this is NOT project-scoped: it lists directories anywhere the server user
-// can read, so the HTTP layer must expose it to localhost only. Sensitive
-// pseudo-filesystems are refused outright.
+// can read. Sensitive pseudo-filesystems are refused outright.
 import { lstat, mkdir, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";

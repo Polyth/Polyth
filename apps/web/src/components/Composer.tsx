@@ -6,6 +6,7 @@ import {
   activateProject,
   clearNewSessionDraft,
   getState,
+  lastSeq,
   openSettingsPage,
   setUiError,
   saveNewSessionDraftText,
@@ -23,6 +24,7 @@ import {
 } from "../init.ts";
 import {
   api,
+  errorCodeOf,
   type ComposerCatalogResult,
   type GitBranches,
   type SlashCommand,
@@ -30,6 +32,8 @@ import {
   type Worktree,
 } from "@polyth/session/web-api";
 import { loadDraft, saveDraft, type AutocompleteItem } from "../utils.ts";
+import { canApplyNextAction, nextActionInsertMode, type NextActionRequest } from "../nextAction.ts";
+import { latestCompletedExchange } from "@polyth/session/next-action";
 import SlotHost from "./slots/SlotHost.ts";
 import { dragKind, dropIntoSession } from "../dnd.ts";
 import {
@@ -47,6 +51,7 @@ import {
   COMPOSER_REPLACE,
   drainComposerReplacement,
   drainInserts,
+  requestComposerInsert,
   requestComposerReplace,
 } from "../composerInsert.ts";
 import { activeToken, completeToken, shellCommand, type PromptToken } from "../composer/language.ts";
@@ -109,7 +114,7 @@ import SessionContextBar, {
   type SessionContextBarProps,
 } from "./mobile/SessionContextBar.tsx";
 import {
-  Button, Menu, Notice, SendIcon, StopIcon,
+  AssistIcon, Button, IconButton, Menu, Notice, SendIcon, StopIcon, Tooltip,
 } from "./ui/index.ts";
 import { getSendFailure, subscribeSendFailures } from "../sendFailure.ts";
 import { isNativeMobile } from "@polyth/mobile/runtime";
@@ -316,6 +321,14 @@ export default function Composer({
   const settings = useStore((s) => s.settings);
   const sessionDefaults = useSessionDefaults();
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
+  const activeSessionSeq = useStore((s) => {
+    const events = s.activeSessionId ? s.events[s.activeSessionId] : undefined;
+    return events?.at(-1)?.seq ?? 0;
+  });
+  const hasCompletedExchange = useStore((s) => {
+    const events = s.activeSessionId ? s.events[s.activeSessionId] : undefined;
+    return !!events && latestCompletedExchange(events) !== null;
+  });
   const failedSend = useSyncExternalStore(
     subscribeSendFailures,
     () => getSendFailure(session?.id ?? null),
@@ -372,6 +385,8 @@ export default function Composer({
   queueEditRef.current = queueEdit;
   const committedTextRef = useRef(text);
   committedTextRef.current = text;
+  const draftRevisionRef = useRef(0);
+  const [suggestionBusy, setSuggestionBusy] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   // UX-MOBILE-01 §9/§10/§11/§42: on phones the composer is a compact resting
   // control that expands into the full model/mode surface once the user
@@ -612,12 +627,14 @@ export default function Composer({
   // through the command handle so an active composition is never interrupted.
   useEffect(() => {
     const replaceText = (detail: string) => {
+      draftRevisionRef.current += 1;
       setText(detail);
       inputRef.current?.replaceText(detail);
     };
     const insert = (detail: string) => {
       const h = inputRef.current;
       if (!h) return;
+      draftRevisionRef.current += 1;
       const cur = h.getText();
       h.replaceText(cur ? `${cur} ${detail}` : detail);
     };
@@ -974,6 +991,7 @@ export default function Composer({
   // in-flight request, so a stale response never reopens or replaces results.
   const onTextChange = useCallback(
     (val: string) => {
+      draftRevisionRef.current += 1;
       setText(val);
       if (sessionIdRef.current === null && activeProjectId) saveNewSessionDraftText(activeProjectId, val);
       if (!applyingHistory.current) historyCursor.current = emptyPromptHistoryCursor();
@@ -1215,6 +1233,36 @@ export default function Composer({
     || (queueEdit ? !text.trim() : (!text.trim() && attachments.length === 0))
     || (!queueEdit && !shellMode && (noModels || profileMissing));
   const phoneLayout = isPhone;
+  const canGenerateNextAction = !!session?.id && !working && hasCompletedExchange && !suggestionBusy;
+  const generateNextAction = useCallback(() => {
+    const target = sessionIdRef.current;
+    if (!target || !canGenerateNextAction) return;
+    const draft = inputRef.current?.getText() ?? text;
+    const request: NextActionRequest = {
+      sessionId: target,
+      atSeq: activeSessionSeq,
+      draftRevision: draftRevisionRef.current,
+      draft,
+    };
+    setSuggestionBusy(true);
+    void api.assistSuggestion(target)
+      .then((result) => {
+        const mode = nextActionInsertMode(request, result.suggestion);
+        if (!mode || !canApplyNextAction(request, {
+          activeSessionId: getState().activeSessionId,
+          latestSeq: lastSeq(target),
+          draftRevision: draftRevisionRef.current,
+        }, result)) return;
+        if (mode === "replace") requestComposerReplace(result.suggestion);
+        else requestComposerInsert(result.suggestion);
+      })
+      .catch((error) => {
+        const code = errorCodeOf(error);
+        if (code === "stale" || code === "no-completed-exchange" || code === "in-flight") return;
+        setUiError(friendlyError(tr("composer.couldNotGenerateNextAction"), error));
+      })
+      .finally(() => setSuggestionBusy(false));
+  }, [activeSessionSeq, canGenerateNextAction, text]);
   const hasDraft = text.trim() !== "" || attachments.length > 0;
   const expanded = !phoneLayout || inputFocused || hasDraft || working || shellMode;
   const stateClass = phoneLayout
@@ -1444,6 +1492,18 @@ export default function Composer({
             <SlotHost slot="composer.leading" context={slotContext} />
             <SlotHost slot="composer.trailing" context={slotContext} />
           </span>
+          {(canGenerateNextAction || suggestionBusy) && (
+            <Tooltip content={tr("composer.generateNextAction")}>
+              <IconButton
+                className="composer-next-action"
+                icon={AssistIcon}
+                label={tr("composer.generateNextAction")}
+                size="sm"
+                busy={suggestionBusy}
+                onClick={generateNextAction}
+              />
+            </Tooltip>
+          )}
           <span className="composer-primary">
             {working ? (
               (queueEdit || (followUp === "queue" && !sendDisabled)) ? (

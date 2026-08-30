@@ -97,7 +97,6 @@ test("settings uses named button places without canvas layout controls", async (
     "Choose a starting layout",
     "Workspace preview",
     "Help me set up my workspace",
-    "WidgetLibraryOverlay",
     "Build & Debug",
     "Who is this for",
     "More tools / right rail",
@@ -106,6 +105,9 @@ test("settings uses named button places without canvas layout controls", async (
   ]) {
     assert.ok(!source.includes(removed), `${removed} stays out of widget settings`);
   }
+  // Widget-areas (WA2): the Widget Library opens from the settings page.
+  assert.match(source, /import WidgetLibraryOverlay from "\.\/WidgetLibraryOverlay\.tsx"/);
+  assert.match(source, /tr\("settings\.widgetspage\.openWidgetLibrary"\)/);
 });
 
 test("chat top rail is configured directly without a More tools overflow", async () => {

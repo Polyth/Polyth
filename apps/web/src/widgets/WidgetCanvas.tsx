@@ -43,6 +43,7 @@ import {
   supportedWidgetSlots,
   supportedWidgetZones,
 } from "./widgetLibrary.ts";
+import { areaPlacementOptions } from "./areaFit.ts";
 import "./builtinWidgets.tsx";
 import { tr } from "../i18n/index.ts";
 import { useShiftArmed } from "../useShiftArmed.ts";
@@ -50,20 +51,6 @@ import { useShellMode } from "../responsiveShell.ts";
 
 const GRID_GAP = 10;
 const GRID_ROW = 36;
-
-const SLOT_LABELS: Partial<Record<UiSlot, string>> = {
-  "session.composer.before": tr("widgets.widgetcanvas.belowChatAboveComposer"),
-  "workspace.header": tr("widgets.widgetcanvas.header"),
-  "workspace.left": tr("widgets.widgetcanvas.leftSide"),
-  "workspace.main": tr("widgets.widgetcanvas.mainWorkspace"),
-  "workspace.right": tr("widgets.widgetcanvas.rightSide"),
-  "workspace.bottom": tr("widgets.widgetcanvas.bottomStrip"),
-  "workspace.floating": tr("widgets.widgetcanvas.floating"),
-};
-
-const slotLabel = (slot: UiSlot): string =>
-  SLOT_LABELS[slot]
-  ?? slot.split(".").map((part) => part[0]!.toUpperCase() + part.slice(1)).join(" · ");
 
 interface SchemaProperty {
   type?: unknown;
@@ -355,7 +342,7 @@ function WidgetCard({
                   [{ type: "place", id: instanceId, slot: slot as UiSlot }],
                   [widget],
                 ))}
-                options={supportedWidgetSlots(widget).map((slot) => ({ value: slot, label: slotLabel(slot) }))}
+                options={areaPlacementOptions(widget)}
               />
             </label>
             {widget.settingsRender

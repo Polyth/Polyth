@@ -37,10 +37,6 @@ export default function EffortMenu({
       className="composer-effort-control"
       title={tr("composer.thinkingEffortValue", { value: label })}
     >
-      <span className="composer-effort-label">
-        <span>{tr("composer.thinking")}</span>
-        <output>{label}</output>
-      </span>
       <span className="composer-effort-track">
         <input
           type="range"

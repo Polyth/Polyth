@@ -1574,27 +1574,10 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   --composer-effort-width: 112px;
   min-width: 0;
   display: inline-grid;
-  grid-template-columns: auto minmax(72px, var(--composer-effort-width));
+  grid-template-columns: minmax(72px, var(--composer-effort-width));
   align-items: center;
-  gap: var(--space-2);
   color: var(--text-dim);
   cursor: pointer;
-}
-.composer-effort-label {
-  min-width: 0;
-  display: inline-flex;
-  flex-direction: column;
-  font-size: var(--font-meta);
-  font-weight: 650;
-  line-height: 1.1;
-  white-space: nowrap;
-}
-.composer-effort-label output {
-  overflow: hidden;
-  color: var(--muted);
-  font-size: var(--font-meta);
-  font-weight: 550;
-  text-overflow: ellipsis;
 }
 .composer-effort-track {
   position: relative;
@@ -3176,7 +3159,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   -webkit-mask-image: linear-gradient(to bottom, transparent, #000 28px, #000 calc(100% - 28px), transparent);
   mask-image: linear-gradient(to bottom, transparent, #000 28px, #000 calc(100% - 28px), transparent);
 }
-/* Each tick is a real button: a 28px-wide hit zone at the 6px pitch; the
+/* Each tick is a real button: a 28px-wide hit zone at the 8px pitch; the
    visual bar is a 2px line whose width the component drives (active tick and
    cursor proximity wave). */
 .prompt-nav-tick {
@@ -5094,6 +5077,42 @@ html[dir="rtl"] input[type="number"] {
 .widget-preview-tips strong { font-size: 8.5px; }
 .widget-preview-tips small { color: var(--muted); font-size: 7.5px; line-height: 1.35; }
 
+/* Widget-areas (WA2): the Library's area inspector — a per-area picker, what
+   is currently placed there, and every area as a drop target. */
+.widget-fit-chip { flex: none; }
+.widget-library-preview .ui-picker-chip { margin: 10px 16px 0; }
+.widget-inspector-now,
+.widget-inspector-recommend { margin: 14px 16px 0; padding: 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-card); background: var(--elevated); }
+.widget-inspector-now h3,
+.widget-inspector-recommend h3,
+.widget-area-droplist h3 { margin: 0 0 8px; font-size: var(--font-meta); }
+.widget-inspector-empty { margin: 0; color: var(--muted); font-size: var(--font-meta); }
+.widget-inspector-row { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-h-sm); }
+.widget-inspector-row > span { flex: 1; min-width: 0; overflow: hidden; font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap; }
+.widget-inspector-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.widget-area-droplist { margin: 14px 16px; padding: 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-card); background: var(--elevated); }
+.widget-area-droplist.is-dragging { border-color: var(--accent-line); background: var(--accent-wash); }
+.widget-area-droplist section { margin-top: 10px; }
+.widget-area-droplist h4 { margin: 0 0 4px; color: var(--muted); font-size: var(--font-meta); }
+.widget-area-drop { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-h-sm); padding: 0 var(--control-pad-x-sm); border: 1px dashed var(--border); border-radius: var(--radius-control); background: var(--raised); cursor: pointer; transition: background .15s ease, border-color .15s ease; }
+.widget-area-drop + .widget-area-drop { margin-top: var(--space-1); }
+.widget-area-drop > span { flex: 1; min-width: 0; overflow: hidden; font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap; }
+.widget-area-drop.focused { border-style: solid; border-color: var(--accent-line); background: var(--accent-wash); }
+.widget-area-drop.over { border-style: solid; border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--focus-wash); }
+.widget-area-drop.unusual { border-color: color-mix(in srgb, var(--warning) 45%, var(--border)); }
+.widget-inspector-status { margin: 0 16px 14px; }
+
+/* Widget-areas (WA3): a capability launcher placed into a rail area matches
+   the built-in rail icons of whichever rail it lands in. */
+.capability-launcher { display: grid; place-items: center; width: var(--control-h-sm); height: var(--control-h-sm); padding: 0; border: none; border-radius: var(--radius-control); color: var(--muted); background: transparent; cursor: pointer; }
+.capability-launcher > svg { width: var(--icon-md); height: var(--icon-md); }
+.capability-launcher:hover { color: var(--text); background: var(--elevated); }
+.capability-launcher-label { display: none; }
+.view-switcher-pill .capability-launcher { width: var(--rail-icon-size-top, var(--control-h-sm)); height: var(--rail-icon-size-top, var(--control-h-sm)); }
+.view-switcher-pill .capability-launcher > svg { width: var(--rail-icon-glyph-top, var(--icon-md)); height: var(--rail-icon-glyph-top, var(--icon-md)); }
+.plugin-strip .capability-launcher { width: var(--rail-icon-size-right, var(--control-h-sm)); height: var(--rail-icon-size-right, var(--control-h-sm)); }
+.plugin-strip .capability-launcher > svg { width: var(--rail-icon-glyph-right, var(--icon-md)); height: var(--rail-icon-glyph-right, var(--icon-md)); }
+
 /* Per-project setup uses progressive disclosure over the mounted workspace. */
 .guided-setup { width: min(850px, calc(100vw - 28px)); height: min(720px, calc(100vh - 28px)); display: flex; flex-direction: column; padding: 0; overflow: hidden; background: var(--elevated); }
 .guided-setup-head { display: flex; align-items: center; gap: 12px; padding: 18px 22px 12px; }
@@ -5662,6 +5681,7 @@ min-height: var(--tap);
 .focus-conversation,
 .app .workspace { background: var(--chat-bg); }
 .composer-chat {
+  padding-top: 0;
   padding-bottom: 18px;
   background: var(--chat-bg);
 }
@@ -5855,7 +5875,7 @@ width: 44px;
   .header-chat .chat-metric small,
   .header-chat .chat-metric strong { white-space: nowrap; }
   .timeline { padding: 28px 16px 34px; gap: 20px; }
-  .composer-chat { padding: 8px var(--screen-gutter) 14px; }
+  .composer-chat { padding: 0 var(--screen-gutter) 14px; }
   .workspace { padding-bottom: 0; }
 }
 
@@ -8154,8 +8174,10 @@ opacity: 1;
   height: max(100%, var(--hit-min));
   transform: translate(-50%, -50%);
 }
-.prompt-nav { width: 44px; }
-.prompt-nav-tick { width: 44px; height: 24px; }
+/* Keep the rail dense on desktop too. This late rule used to expand every
+   tick to a 24px vertical slot, undoing the compact rail above. */
+.prompt-nav { width: 28px; }
+.prompt-nav-tick { width: 28px; height: 8px; }
 .prompt-nav-page { height: 32px; }
 
 .agent-reply-header,

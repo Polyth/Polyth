@@ -10,6 +10,7 @@ import {
   compactionRecoveryText,
   createStore,
   deriveMessages,
+  latestCompletedExchange,
   unrestoredCompactionSeq,
 } from "@polyth/session";
 import type { SessionEvent, SessionProjection } from "@polyth/contracts";
@@ -180,6 +181,39 @@ test("deriveMessages: ignorable flag filters, consecutive same-role merges, ques
     { role: "assistant", parts: [{ type: "text", text: "Continue?" }] },
     { role: "user", parts: [{ type: "text", text: '{"go":"yes"}' }] },
   ]);
+});
+
+test("latestCompletedExchange uses the last completed turn and excludes tools and older history", () => {
+  const events: SessionEvent[] = [
+    ev(1, "user/message", { text: "old request" }),
+    ev(2, "turn/started", { turnId: "old" }, "s1", true),
+    ev(3, "assistant/message", { text: "old answer" }),
+    ev(4, "turn/stopped", { turnId: "old", reason: "completed" }, "s1", true),
+    ev(5, "user/message", { text: "latest request" }),
+    ev(6, "turn/started", { turnId: "latest" }, "s1", true),
+    ev(7, "tool/call", { callId: "c1", tool: "read", input: { path: "secret.ts" } }),
+    ev(8, "tool/result", { callId: "c1", tool: "read", output: "tool noise" }),
+    ev(9, "assistant/message", { text: "latest answer" }),
+    ev(10, "turn/stopped", { turnId: "latest", reason: "completed" }, "s1", true),
+  ];
+  assert.deepEqual(latestCompletedExchange(events), {
+    user: "latest request", assistant: "latest answer", userSeq: 5, assistantSeq: 9,
+  });
+});
+
+test("latestCompletedExchange ignores incomplete assistant turns and supports legacy finalized logs", () => {
+  const incomplete = [
+    ev(1, "user/message", { text: "first" }),
+    ev(2, "assistant/message", { text: "first answer" }),
+    ev(3, "user/message", { text: "new work" }),
+    ev(4, "turn/started", { turnId: "current" }, "s1", true),
+  ];
+  assert.equal(latestCompletedExchange(incomplete), null);
+
+  const legacy = [ev(1, "user/message", { text: "legacy prompt" }), ev(2, "assistant/message", { text: "legacy answer" })];
+  assert.deepEqual(latestCompletedExchange(legacy), {
+    user: "legacy prompt", assistant: "legacy answer", userSeq: 1, assistantSeq: 2,
+  });
 });
 
 test("compaction recovery folds active pins and deduplicates from durable user metadata", () => {

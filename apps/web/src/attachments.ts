@@ -10,6 +10,25 @@ export const MAX_PENDING_ATTACHMENTS = 16;
 const DRAFT_ATT = "polyth.draft.att.";
 const EMPTY: AttachmentRef[] = [];
 
+/** Browser-compatible UUID for attachment references. Some embedded WebViews
+ * expose `crypto` but do not implement `crypto.randomUUID()`. */
+export function newAttachmentId(): string {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") return cryptoApi.randomUUID();
+
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+    bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+    const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  // Attachment IDs are local UI references; retain a collision-resistant
+  // fallback for older WebViews without Web Crypto.
+  return `attachment-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 interface Entry { refs: AttachmentRef[]; listeners: Set<() => void> }
 const entries = new Map<string, Entry>();
 
@@ -133,7 +152,7 @@ export async function attachProjectFile(
   }
   const mime = st.mime || "application/octet-stream";
   const ref: AttachmentRef = {
-    id: crypto.randomUUID(),
+    id: newAttachmentId(),
     name: range ? `${basename(path)} (${range[0]}–${range[1]})` : basename(path),
     mime,
     size: st.size,

@@ -27,7 +27,10 @@ export const BUILTIN_AREAS: readonly WidgetArea[] = [
     orientation: "row",
     sizeHint: "icon",
     preferredKind: "mini-widget",
-    recommends: ["core.quick-actions", "usage.quota-summary"],
+    recommends: [
+      "capability:files", "capability:browser", "capability:goals", "capability:workflow",
+      "core.quick-actions", "usage.quota-summary",
+    ],
     order: 11,
   },
   {
@@ -49,7 +52,11 @@ export const BUILTIN_AREAS: readonly WidgetArea[] = [
     orientation: "column",
     sizeHint: "icon",
     preferredKind: "mini-widget",
-    recommends: [],
+    recommends: [
+      "capability:git", "capability:terminal", "capability:usage", "capability:github",
+      "capability:knowledge", "capability:schedule", "capability:multirun", "capability:context",
+      "system.status",
+    ],
     order: 13,
   },
   // ---- sidebar ----------------------------------------------------------

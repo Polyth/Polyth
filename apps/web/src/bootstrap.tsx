@@ -23,6 +23,7 @@ import { installBuiltinMiniWidgets } from "./widgets/builtinMiniWidgets.tsx";
 import { installSystemWidgets } from "./widgets/systemWidgets.tsx";
 import { exposeAreas } from "./widgets/areas.ts";
 import { installBuiltinAreas } from "./widgets/builtinAreas.ts";
+import { installCapabilityWidgets } from "./widgets/capabilityWidgets.tsx";
 import { installNotificationCentre } from "./components/NotificationCentre.tsx";
 import { installOpenCodeRestartControl } from "./components/OpenCodeRestartControl.tsx";
 import { installRuntimeEpochBanner } from "./components/RuntimeEpochBanner.tsx";
@@ -54,6 +55,9 @@ exposeAreas();
 installBuiltinAreas();
 installBuiltinMiniWidgets();
 installSystemWidgets();
+// Every rail capability is also a placeable mini-widget; subscribes to the
+// capability registry so packages that register late still get a widget.
+installCapabilityWidgets();
 // NTF-01: bell + panel arrive through the slot registry, never via App.tsx.
 installNotificationCentre();
 installOpenCodeRestartControl();

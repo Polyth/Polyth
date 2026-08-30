@@ -5,13 +5,12 @@
 // keeps the active tick visible when there are more prompts than ticks.
 
 export const RAIL_MAX_TICKS = 30;
-export const RAIL_TICK_PITCH = 6;
-export const RAIL_BASE_WIDTH = 10;
+export const RAIL_TICK_PITCH = 8;
+export const RAIL_BASE_WIDTH = 7;
 export const RAIL_ACTIVE_WIDTH = 14;
 export const RAIL_CURSOR_WIDTH = 20;
+export const RAIL_CURSOR_NEAR_WIDTH = 12;
 export const RAIL_PANEL_ROWS = 8;
-/** Wave strength by distance from the cursor tick (0 = under the cursor). */
-export const RAIL_PROXIMITY_FALLOFF = [1, 0.6, 0.35, 0.15];
 
 /** Slice of prompt indexes shown as ticks: the whole list when it fits,
  *  otherwise a MAX_TICKS window centered on the active prompt. */
@@ -26,19 +25,16 @@ export function railWindow(
   return { start, end: start + maxTicks };
 }
 
-/** Visual width of one tick, combining the active emphasis with the cursor
- *  proximity wave (the larger of the two wins). */
+/** Visual width of one tick. While navigating, the cursor owns the emphasis:
+ *  the hovered tick is largest, its immediate neighbour is smaller, and all
+ *  remaining ticks use the compact 7px level. */
 export function tickWidth(index: number, activeIndex: number, cursorIndex: number): number {
-  let width = index === activeIndex ? RAIL_ACTIVE_WIDTH : RAIL_BASE_WIDTH;
   if (cursorIndex >= 0) {
     const distance = Math.abs(index - cursorIndex);
-    const falloff = RAIL_PROXIMITY_FALLOFF[distance];
-    if (falloff !== undefined) {
-      const wave = RAIL_BASE_WIDTH + (RAIL_CURSOR_WIDTH - RAIL_BASE_WIDTH) * falloff;
-      if (wave > width) width = wave;
-    }
+    return distance === 0 ? RAIL_CURSOR_WIDTH
+      : distance === 1 ? RAIL_CURSOR_NEAR_WIDTH : RAIL_BASE_WIDTH;
   }
-  return Math.round(width);
+  return index === activeIndex ? RAIL_ACTIVE_WIDTH : RAIL_BASE_WIDTH;
 }
 
 /** Map a pointer offset (px from the top of the tape) to a tick index within

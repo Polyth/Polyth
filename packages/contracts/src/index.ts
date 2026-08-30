@@ -1383,6 +1383,32 @@ export interface CanonicalTurnRequest {
   agent?: string;
 }
 
+/** A stateless, small-model completion.  Unlike a turn this has no canonical
+ * session, no tools, and no event stream to persist.  It is deliberately
+ * optional on AgentRuntime so adapters which cannot safely address a provider
+ * directly can retain the session-backed compatibility path. */
+export interface SmallModelCompletionRequest {
+  cwd: string;
+  prompt: string;
+  systemPrompt?: string;
+  model?: ModelRef;
+  maxOutputTokens?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  /** A provider-neutral JSON-schema-shaped value. Providers may decline it. */
+  responseSchema?: JsonObject;
+}
+
+export interface SmallModelCompletionResult {
+  text: string;
+  providerID: string;
+  modelID: string;
+  inputTruncated: boolean;
+  transport: "direct" | "compatibility";
+  latencyMs: number;
+  firstTokenMs?: number;
+}
+
 /** Provider-neutral exact-history branch request (UX-MSG-ACTIONS).
  *  `sourceSessionId` and `target.sessionId` are canonical ids; the server
  *  passes only the canonical effective model history and never knows a
@@ -1458,6 +1484,9 @@ export interface AgentRuntime {
     req: CanonicalTurnRequest,
     operationId: string,
   ): Promise<MutationOutcome<{ admissionId?: string }>>;
+  /** Direct stateless provider request for lightweight utility inference.
+   * Implementations must not create a backend session. */
+  completeSmallModel?(request: SmallModelCompletionRequest): Promise<SmallModelCompletionResult>;
   /** Live steering of an active turn. Returns false when unsupported/rejected;
    *  callers must fall back to queueing. Optional so old fakes remain valid. */
   steer?(sessionId: string, text: string): Promise<boolean>;

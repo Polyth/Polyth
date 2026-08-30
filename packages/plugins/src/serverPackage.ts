@@ -83,6 +83,27 @@ export interface ServerOneShotOptions {
   taskId?: string;
 }
 
+export interface ServerSmallModelOptions {
+  cwd: string;
+  prompt: string;
+  systemPrompt?: string;
+  model?: ModelRef;
+  maxOutputTokens: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  responseSchema?: JsonObject;
+}
+
+export interface ServerSmallModelResult {
+  text: string;
+  providerID: string;
+  modelID: string;
+  inputTruncated: boolean;
+  transport: "direct" | "compatibility";
+  latencyMs: number;
+  firstTokenMs?: number;
+}
+
 export type AppendEventOptions = Partial<
   Pick<SessionEvent, "ignorable" | "surfaceOp" | "sourceEventSeqs" | "producerPlugin">
 >;
@@ -159,6 +180,10 @@ export interface ServerPackageHost extends TrustedServerPluginHost {
   /** One-shot cheap-model completion on a throwaway backend session (never a
    *  user session; never written to the canonical log). */
   oneShot(runtime: AgentRuntime, opts: ServerOneShotOptions): Promise<string>;
+  /** Lightweight utility inference. Uses a direct provider request whenever
+   * supported; oneShot is only a compatibility fallback. */
+  smallModelComplete(runtime: AgentRuntime, opts: ServerSmallModelOptions): Promise<ServerSmallModelResult>;
+  smallModelInputBudget(runtime: AgentRuntime, model: ModelRef | undefined, maxOutputTokens: number): Promise<number>;
   /** POLYTH_SMALL_MODEL when configured — cheap model for auditors/summaries. */
   smallModel(): ModelRef | undefined;
   /** Resolve a session's project runtime + cwd/model/agent context. */

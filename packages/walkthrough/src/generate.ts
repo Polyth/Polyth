@@ -4,7 +4,8 @@
 import { createHash } from "node:crypto";
 import type { GeneratedWalkthroughStage, GeneratedWalkthroughStop } from "@polyth/contracts";
 
-export const WALKTHROUGH_PROMPT_VERSION = 1;
+export const WALKTHROUGH_PROMPT_VERSION = 2;
+export const DEFAULT_WALKTHROUGH_INPUT_BUDGET = 96_000;
 
 const sha = (text: string): string => createHash("sha256").update(text).digest("hex");
 
@@ -152,8 +153,23 @@ export function heuristicStages(files: DiffFileSummary[]): GeneratedWalkthroughS
   return stages;
 }
 
-/** Prompt the model for stage JSON referencing hunks by their stable ids. */
-export function buildWalkthroughPrompt(files: DiffFileSummary[]): string {
+const compactHunk = (hunk: DiffHunk, limit: number): string => {
+  if (hunk.text.length <= limit) return hunk.text;
+  const changed = hunk.text.split("\n").filter((line) => line.startsWith("+") || line.startsWith("-"));
+  const useful = [hunk.header, ...changed].join("\n");
+  const contextMarker = "\n… unchanged context omitted …";
+  const truncatedMarker = "\n… hunk body truncated …";
+  if (useful.length + contextMarker.length <= limit) return `${useful}${contextMarker}`;
+  return useful.slice(0, Math.max(0, limit - truncatedMarker.length)) + truncatedMarker.slice(0, limit);
+};
+
+/** Prompt the model for stage JSON referencing hunks by their stable ids.
+ * `inputBudget` is global, model-aware, and includes all instructions.  Bodies
+ * are shared across hunks rather than granting every hunk an unbounded slice. */
+export function buildWalkthroughPrompt(
+  files: DiffFileSummary[],
+  inputBudget = DEFAULT_WALKTHROUGH_INPUT_BUDGET,
+): string {
   const lines: string[] = [
     "You are producing a guided walkthrough of a code change for a reviewer.",
     "Group the hunks below into logical stages (ordered for understanding, not file order).",
@@ -162,14 +178,23 @@ export function buildWalkthroughPrompt(files: DiffFileSummary[]): string {
     "Every hunkId must come from the list below. Explain intent and risk; never invent changes.",
     "",
   ];
-  for (const f of files) {
-    if (f.binary) continue;
-    for (const h of f.hunks) {
-      lines.push(`--- hunk ${h.id} (${h.path})`);
-      lines.push(h.text.slice(0, 4_000));
+  const hunks = files.filter((f) => !f.binary).flatMap((f) => f.hunks);
+  const fixed = lines.join("\n").length;
+  const labels = hunks.map((h) => `--- hunk ${h.id} (${h.path}) ${h.header}`);
+  const labelLength = labels.reduce((n, label) => n + label.length + 1, 0);
+  let remaining = Math.max(0, inputBudget - fixed - labelLength);
+  for (const [index, hunk] of hunks.entries()) {
+    const left = hunks.length - index;
+    const share = Math.max(0, Math.floor(remaining / left));
+    lines.push(labels[index]!);
+    if (share > 0) {
+      const body = compactHunk(hunk, share);
+      lines.push(body);
+      remaining -= body.length + 1;
     }
   }
-  return lines.join("\n");
+  const prompt = lines.join("\n");
+  return prompt.length <= inputBudget ? prompt : prompt.slice(0, inputBudget);
 }
 
 export type StageParse =

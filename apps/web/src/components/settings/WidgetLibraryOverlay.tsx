@@ -1,50 +1,49 @@
+// Widget-areas (WA2): the Widget Library. Browse every widget, see how well
+// each one fits the area you're placing into, and drop it into ANY area —
+// nothing is off-limits. `supportedSlots` / per-area `recommends` only order
+// and label the list.
 import { useMemo, useState, type DragEvent } from "react";
 import type { UiSlot } from "@polyth/contracts";
 import { getDragWidget, setDragWidget, WIDGET_MIME } from "../../dnd.ts";
 import { useEscape } from "../../useEscape.ts";
 import type { WidgetDef } from "../../widgets/catalog.ts";
 import {
-  canPlaceWidget,
   applyWidgetLayoutMutations,
+  canPlaceWidget,
   updateWidgetLayout,
   useWidgetLayout,
-  widgetSlotFromZone,
   widgetSlotOf,
-  type WidgetZone,
 } from "../../widgets/widgetLayout.ts";
+import { useAreas, type WidgetArea, type WidgetAreaGroup } from "../../widgets/areas.ts";
+import {
+  areaLabel,
+  areaWidgetEntries,
+  bucketWidgetsForArea,
+  fitBadgeLabel,
+  fitTone,
+  widgetFitInArea,
+} from "../../widgets/areaFit.ts";
 import {
   filterWidgetLibrary,
-  groupWidgetsByPlugin,
   noteWidgetUsed,
   pluginDisplayName,
   readRecentWidgets,
-  supportedWidgetSlots,
   widgetPluginOptions,
-  widgetSizeLabel,
   type WidgetLibraryTab,
-  type WidgetSizeFilter,
 } from "../../widgets/widgetLibrary.ts";
 import { tr } from "../../i18n/index.ts";
-import { Button, CloseIcon, IconButton, MoreVerticalIcon, PlusIcon, Select, Tabs, TextInput } from "../ui/index.ts";
+import { Badge, Button, CloseIcon, IconButton, Notice, PlusIcon, Select, Tabs, TextInput } from "../ui/index.ts";
 
-const ZONE_LABEL: Record<WidgetZone, string> = {
-  header: tr("settings.widgetlibraryoverlay.header"),
-  left: tr("settings.widgetlibraryoverlay.leftSide"),
-  main: tr("settings.widgetlibraryoverlay.mainWorkspace"),
-  right: tr("settings.widgetlibraryoverlay.rightSide"),
-  bottom: tr("settings.widgetlibraryoverlay.bottomStrip"),
-  floating: tr("settings.widgetlibraryoverlay.floating"),
+const GROUP_ORDER: WidgetAreaGroup[] = ["shell", "sidebar", "workspace", "session", "composer"];
+const GROUP_LABEL: Record<WidgetAreaGroup, string> = {
+  shell: tr("settings.widgetlibraryoverlay.groupShell"),
+  sidebar: tr("settings.widgetlibraryoverlay.groupSidebar"),
+  workspace: tr("settings.widgetlibraryoverlay.groupWorkspace"),
+  session: tr("settings.widgetlibraryoverlay.groupSession"),
+  composer: tr("settings.widgetlibraryoverlay.groupComposer"),
 };
 
-const slotLabel = (slot: UiSlot): string => {
-  const zone = slot.startsWith(tr("settings.widgetlibraryoverlay.workspace")) ? slot.slice(tr("settings.widgetlibraryoverlay.workspace").length) as WidgetZone : null;
-  return zone && zone in ZONE_LABEL
-    ? ZONE_LABEL[zone]
-    : slot.split(".").map((part) => part[0]!.toUpperCase() + part.slice(1)).join(" · ");
-};
-
-const defaultSlot = (widget: WidgetDef): UiSlot =>
-  widget.defaultSlot ?? widgetSlotFromZone(widget.zone ?? "main");
+type KindFilter = "all" | "widget" | "mini-widget";
 
 function WidgetGlyph({ widget }: { widget: WidgetDef }) {
   const glyph = widget.id === "core.chat"
@@ -59,21 +58,29 @@ function WidgetGlyph({ widget }: { widget: WidgetDef }) {
   return <span className="widget-library-glyph" aria-hidden="true">{glyph}</span>;
 }
 
+function areaOptions(areas: readonly WidgetArea[]) {
+  return [...areas]
+    .sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group) || a.order - b.order)
+    .map((area) => ({ value: area.id, label: area.label, group: GROUP_LABEL[area.group] }));
+}
+
 function WidgetLibraryCard({
   widget,
-  visible,
+  areaId,
+  placed,
   onDrag,
   onAdd,
 }: {
   widget: WidgetDef;
-  visible: boolean;
+  areaId: UiSlot;
+  placed: boolean;
   onDrag: (widget: WidgetDef, event: DragEvent<HTMLElement>) => void;
   onAdd: (widget: WidgetDef) => void;
 }) {
-  const slots = supportedWidgetSlots(widget);
+  const fit = widgetFitInArea(widget, areaId);
   return (
     <article
-      className={`widget-library-card${visible ? " on-canvas" : ""}`}
+      className={`widget-library-card${placed ? " on-canvas" : ""}`}
       draggable
       onDragStart={(event) => onDrag(widget, event)}
       onDragEnd={(event) => onDrag(widget, event)}
@@ -82,32 +89,24 @@ function WidgetLibraryCard({
       <div className="widget-library-card-copy">
         <div className="widget-library-card-title">
           <strong>{widget.title}</strong>
-          <IconButton
-            icon={MoreVerticalIcon}
-            size="sm"
-            variant="ghost"
-            className="widget-library-more"
-            label={tr("settings.widgetlibraryoverlay.moreAboutValue", { title: widget.title })}
-            title={tr("settings.widgetlibraryoverlay.valueWidget", { value: pluginDisplayName(widget) })}
-          />
+          <Badge tone={fitTone(fit)} className="widget-fit-chip">{fitBadgeLabel(fit)}</Badge>
         </div>
         <p>{widget.description}</p>
         <div className="widget-library-meta">
-          <span>{tr("settings.widgetlibraryoverlay.size")}{" "}<b>{widgetSizeLabel(widget)[0]!.toUpperCase()}</b></span>
-          <span>{tr("settings.widgetlibraryoverlay.placements")}{" "}<b>{slots.map(slotLabel).join(", ")}</b></span>
+          <span>{pluginDisplayName(widget)}</span>
+          {widget.kind === "mini-widget" && <span>{tr("settings.widgetlibraryoverlay.controls")}</span>}
         </div>
       </div>
       <Button
         type="button"
         size="sm"
-        variant={visible ? "quiet" : "primary"}
+        variant={placed ? "ghost" : "primary"}
         className="widget-library-add"
-        disabled={visible}
-        iconStart={visible ? undefined : PlusIcon}
+        iconStart={placed ? undefined : PlusIcon}
+        disabled={placed}
         onClick={() => onAdd(widget)}
-        aria-label={visible ? tr("settings.widgetlibraryoverlay.valueIsOnTheCanvas", { title: widget.title }) : tr("settings.widgetlibraryoverlay.addValue", { title: widget.title })}
       >
-        {visible ? tr("settings.widgetlibraryoverlay.added") : tr("common.add")}
+        {placed ? tr("settings.widgetlibraryoverlay.added") : tr("common.add")}
       </Button>
     </article>
   );
@@ -121,46 +120,68 @@ export default function WidgetLibraryOverlay({
   onClose: () => void;
 }) {
   const layout = useWidgetLayout();
+  const areas = useAreas();
   const [query, setQuery] = useState("");
   const [pluginId, setPluginId] = useState("all");
-  const [size, setSize] = useState<WidgetSizeFilter>("all");
-  const [zone, setZone] = useState<WidgetZone | "all">("all");
-  const [tab, setTab] = useState<WidgetLibraryTab>("recommended");
+  const [kind, setKind] = useState<KindFilter>("all");
+  const [tab, setTab] = useState<WidgetLibraryTab>("all");
   const [recent, setRecent] = useState(readRecentWidgets);
+  const [focusedArea, setFocusedArea] = useState<UiSlot>(
+    () => (areas.find((area) => area.id === "workspace.main") ?? areas[0])?.id ?? "workspace.main",
+  );
   const [draggedId, setDraggedId] = useState<string | null>(null);
-  const [overZone, setOverZone] = useState<WidgetZone | null>(null);
+  const [overArea, setOverArea] = useState<UiSlot | null>(null);
   const [status, setStatus] = useState("");
   useEscape(true, onClose);
 
-  const plugins = useMemo(
-    () => widgetPluginOptions(widgets),
-    [widgets],
-  );
-  const filtered = useMemo(() => filterWidgetLibrary(widgets, {
-    query, pluginId, size, zone, category: "all", tab, recentlyUsed: recent,
-  }, layout.audience), [widgets, query, pluginId, size, zone, tab, recent, layout.audience]);
-  const groups = useMemo(() => groupWidgetsByPlugin(filtered), [filtered]);
-  const dragged = draggedId ? widgets.find((widget) => widget.id === draggedId) : undefined;
+  const plugins = useMemo(() => widgetPluginOptions(widgets), [widgets]);
+  const filtered = useMemo(() => {
+    const base = filterWidgetLibrary(widgets, {
+      query, pluginId, size: "all", zone: "all", category: "all",
+      tab, recentlyUsed: recent,
+    }, layout.audience);
+    return kind === "all" ? base : base.filter((widget) => (widget.kind ?? "widget") === kind);
+  }, [widgets, query, pluginId, kind, tab, recent, layout.audience]);
 
-  const add = (widget: WidgetDef, target: UiSlot = defaultSlot(widget)) => {
-    // Widget-areas (WA1): any widget can go in any area. `canPlaceWidget` only
-    // yields a soft `note` for an unusual placement — surface it, never block.
+  const entries = useMemo(
+    () => areaWidgetEntries(filtered, focusedArea),
+    [filtered, focusedArea],
+  );
+  const focused = areas.find((area) => area.id === focusedArea);
+  const placedIds = new Set([
+    ...(layout.slotPlacements[focusedArea] ?? []),
+    ...Object.values(layout.zones).flat().filter((id) => widgetSlotOf(layout, id) === focusedArea),
+  ].filter((id) => layout.widgets[id]?.visible));
+
+  const dragged = draggedId ? widgets.find((widget) => widget.id === draggedId) : undefined;
+  const buckets = useMemo(() => bucketWidgetsForArea(filtered, focusedArea), [filtered, focusedArea]);
+  const recommendedUnplaced = buckets.recommended.filter((widget) => !placedIds.has(widget.id));
+
+  const add = (widget: WidgetDef, target: UiSlot = focusedArea) => {
     const check = canPlaceWidget(widget, target);
     updateWidgetLayout((current) => applyWidgetLayoutMutations(current, [
       { type: "visibility", id: widget.id, visible: true },
       { type: "place", id: widget.id, slot: target },
     ], widgets));
     setRecent(noteWidgetUsed(widget.id));
-    setStatus(check.note ?? tr("settings.widgetlibraryoverlay.valueAddedToValue", {
-      title: widget.title,
-      slot: slotLabel(target),
-    }));
+    setStatus(check.note
+      ? check.note
+      : tr("settings.widgetlibraryoverlay.valueAddedToValue", {
+          title: widget.title,
+          slot: areaLabel(target),
+        }));
+  };
+
+  const remove = (instanceId: string) => {
+    updateWidgetLayout((current) => applyWidgetLayoutMutations(
+      current, [{ type: "visibility", id: instanceId, visible: false }], widgets,
+    ));
   };
 
   const startDrag = (widget: WidgetDef, event: DragEvent<HTMLElement>) => {
     if (event.type === "dragend") {
       setDraggedId(null);
-      setOverZone(null);
+      setOverArea(null);
       return;
     }
     setDragWidget(event.dataTransfer, widget.id);
@@ -169,23 +190,27 @@ export default function WidgetLibraryOverlay({
     setStatus(tr("settings.widgetlibraryoverlay.youReDraggingValue", { title: widget.title }));
   };
 
-  const drop = (target: WidgetZone, event: DragEvent<HTMLDivElement>) => {
+  const drop = (target: UiSlot, event: DragEvent<HTMLElement>) => {
     const id = getDragWidget(event.dataTransfer) ?? draggedId;
     const widget = widgets.find((item) => item.id === id);
     if (!widget) return;
     event.preventDefault();
-    add(widget, widgetSlotFromZone(target));
+    add(widget, target);
     setDraggedId(null);
-    setOverZone(null);
+    setOverArea(null);
   };
 
   const resetFilters = () => {
     setQuery("");
     setPluginId("all");
-    setSize("all");
-    setZone("all");
+    setKind("all");
+    setTab("all");
   };
-  const hasFilters = query !== "" || pluginId !== "all" || size !== "all" || zone !== "all";
+  const hasFilters = query !== "" || pluginId !== "all" || kind !== "all" || tab !== "all";
+
+  const groupedAreas = GROUP_ORDER
+    .map((group) => [group, areas.filter((area) => area.group === group)] as const)
+    .filter(([, list]) => list.length > 0);
 
   return (
     <div className="widget-library-overlay" aria-label={tr("settings.widgetlibraryoverlay.addWidget")}>
@@ -193,10 +218,10 @@ export default function WidgetLibraryOverlay({
         <header className="widget-library-heading">
           <div>
             <h2>{tr("settings.widgetlibraryoverlay.addWidget")}</h2>
-            <p>{tr("settings.widgetlibraryoverlay.browseAndAddWidgetsToYourWorkspace")}</p>
+            <p>{tr("settings.widgetlibraryoverlay.dropOntoAnyArea")}</p>
           </div>
           <span><kbd>{tr("settings.widgetlibraryoverlay.esc")}</kbd> {tr("settings.widgetlibraryoverlay.close")}</span>
-          <IconButton icon={CloseIcon} size="sm" label={tr("settings.widgetlibraryoverlay.closeWidgetLibrary")} onClick={onClose} />
+          <IconButton icon={CloseIcon} size="sm" variant="ghost" label={tr("settings.widgetlibraryoverlay.closeWidgetLibrary")} onClick={onClose} />
         </header>
 
         <div className="widget-library-filters">
@@ -206,96 +231,56 @@ export default function WidgetLibraryOverlay({
           </label>
           <Select
             label={tr("settings.widgetlibraryoverlay.filterByPlugin")}
-            ariaLabel={tr("settings.widgetlibraryoverlay.filterByPlugin")}
             value={pluginId}
             onChange={setPluginId}
-            options={[
-              { value: "all", label: tr("settings.widgetlibraryoverlay.allPlugins") },
-              ...plugins.map(({ id, label }) => ({ value: id, label })),
-            ]}
+            options={[{ value: "all", label: tr("settings.widgetlibraryoverlay.allPlugins") }, ...plugins.map(({ id, label }) => ({ value: id, label }))]}
           />
           <Select
-            label={tr("settings.widgetlibraryoverlay.filterBySize")}
-            ariaLabel={tr("settings.widgetlibraryoverlay.filterBySize")}
-            value={size}
-            onChange={(value) => setSize(value as WidgetSizeFilter)}
+            label={tr("settings.widgetlibraryoverlay.filterByType")}
+            value={kind}
+            onChange={(value) => setKind(value as KindFilter)}
             options={[
-              { value: "all", label: tr("settings.widgetlibraryoverlay.allSizes") },
-              { value: "small", label: tr("settings.widgetlibraryoverlay.small") },
-              { value: "medium", label: tr("settings.widgetlibraryoverlay.medium") },
-              { value: "large", label: tr("settings.widgetlibraryoverlay.large") },
+              { value: "all", label: tr("settings.widgetlibraryoverlay.allTypes") },
+              { value: "widget", label: tr("settings.widgetlibraryoverlay.panels") },
+              { value: "mini-widget", label: tr("settings.widgetlibraryoverlay.controls") },
             ]}
           />
-          <Select
-            label={tr("settings.widgetlibraryoverlay.filterByZone")}
-            ariaLabel={tr("settings.widgetlibraryoverlay.filterByZone")}
-            value={zone}
-            onChange={(value) => setZone(value as WidgetZone | "all")}
-            options={[
-              { value: "all", label: tr("settings.widgetlibraryoverlay.allZones") },
-              ...Object.entries(ZONE_LABEL).map(([id, label]) => ({ value: id, label })),
-            ]}
-          />
-          <Button type="button" size="sm" className="widget-library-clear" disabled={!hasFilters} onClick={resetFilters}>{tr("settings.widgetlibraryoverlay.clearFilters")}</Button>
+          <Button type="button" size="sm" variant="ghost" className="widget-library-clear" disabled={!hasFilters} onClick={resetFilters}>{tr("settings.widgetlibraryoverlay.clearFilters")}</Button>
         </div>
 
         <Tabs
-          className="widget-library-tabs ui-scroll-tabs"
-          size="sm"
+          className="widget-library-tabs"
           label={tr("settings.widgetlibraryoverlay.widgetCollections")}
-          value={tab}
-          onChange={(id) => setTab(id as WidgetLibraryTab)}
           tabs={[
+            { id: "all", label: tr("settings.widgetlibraryoverlay.tabAll") },
             { id: "recommended", label: tr("projectsetup.recommended") },
-            { id: "plugin", label: tr("settings.widgetlibraryoverlay.byPlugin") },
             { id: "recent", label: tr("settings.widgetlibraryoverlay.recentlyUsed") },
           ]}
+          value={tab}
+          onChange={(id) => setTab(id as WidgetLibraryTab)}
         />
 
         <div className="widget-library-results">
-          {tab === "recommended" ? (
-            <section>
-              <div className="widget-library-section-head">
-                <div><h3>{tr("settings.widgetlibraryoverlay.recommendedForYou")}</h3><p>{tr("settings.widgetlibraryoverlay.usefulBuildingBlocksForYourCurrentWorkspace")}</p></div>
-                <span>{Math.min(filtered.length, 6)} {tr("settings.widgetlibraryoverlay.widgets")}</span>
-              </div>
-              <div className="widget-library-card-grid">
-                {filtered.slice(0, 6).map((widget) => (
-                  <WidgetLibraryCard
-                    key={widget.id}
-                    widget={widget}
-                    visible={layout.widgets[widget.id]?.visible === true}
-                    onDrag={startDrag}
-                    onAdd={add}
-                  />
-                ))}
-              </div>
-            </section>
-          ) : (
-            <section className="widget-library-plugin-groups">
-              <div className="widget-library-section-head">
-                <div><h3>{tab === "recent" ? tr("settings.widgetlibraryoverlay.recentlyUsed") : tr("settings.widgetlibraryoverlay.widgetsByPlugin")}</h3><p>{tr("settings.widgetlibraryoverlay.widgetsComeFromYourInstalledPlugins")}</p></div>
-                <span>{filtered.length} {tr("settings.widgetlibraryoverlay.widgets")}</span>
-              </div>
-              {[...groups.entries()].map(([name, items], index) => (
-                <details key={name} open={index < 2 || tab === "recent"}>
-                  <summary><span>{name}</span><b>{items.length}</b></summary>
-                  <div className="widget-library-card-grid">
-                    {items.map((widget) => (
-                      <WidgetLibraryCard
-                        key={widget.id}
-                        widget={widget}
-                        visible={layout.widgets[widget.id]?.visible === true}
-                        onDrag={startDrag}
-                        onAdd={add}
-                      />
-                    ))}
-                  </div>
-                </details>
-              ))}
-            </section>
-          )}
-          {filtered.length === 0 && (
+          <div className="widget-library-section-head">
+            <div>
+              <h3>{tr("settings.widgetlibraryoverlay.recommendedForValue", { value: focused?.label ?? areaLabel(focusedArea) })}</h3>
+              <p>{focused?.description ?? ""}</p>
+            </div>
+            <span>{entries.length} {tr("settings.widgetlibraryoverlay.widgets")}</span>
+          </div>
+          <div className="widget-library-card-grid">
+            {entries.map(({ widget }) => (
+              <WidgetLibraryCard
+                key={widget.id}
+                widget={widget}
+                areaId={focusedArea}
+                placed={layout.widgets[widget.id]?.visible === true && widgetSlotOf(layout, widget.id) === focusedArea}
+                onDrag={startDrag}
+                onAdd={(item) => add(item)}
+              />
+            ))}
+          </div>
+          {entries.length === 0 && (
             <div className="widget-library-empty">
               <strong>{tr("settings.widgetlibraryoverlay.noMatchingWidgets")}</strong>
               <span>{tr("settings.widgetlibraryoverlay.clearAFilterOrTryADifferent")}</span>
@@ -315,66 +300,82 @@ export default function WidgetLibraryOverlay({
 
       <aside className="widget-library-preview" aria-label={tr("settings.widgetlibraryoverlay.liveWorkspacePreview")}>
         <header>
-          <div><strong>{tr("settings.widgetlibraryoverlay.liveWorkspacePreview2")}</strong><span>{tr("settings.widgetlibraryoverlay.dropAWidgetIntoACompatibleZone")}</span></div>
-          <span className="live-badge"><i /> {tr("settings.widgetlibraryoverlay.live")}</span>
+          <div><strong>{tr("settings.widgetlibraryoverlay.placingIn")}</strong></div>
         </header>
-        <div className={`widget-preview-canvas${dragged ? " is-dragging" : ""}`}>
-          {(["header", "left", "main", "right", "bottom", "floating"] as const).map((target) => {
-            // Widget-areas (WA1): every zone is a valid drop target. An
-            // "unusual" fit is shown amber with its note, never disabled.
-            const check = dragged ? canPlaceWidget(dragged, target) : null;
-            const unusual = check?.fit === "unusual";
-            const itemIds = layout.zones[target].filter((id) => layout.widgets[id]?.visible);
+        <Select
+          label={tr("settings.widgetlibraryoverlay.placingIn")}
+          value={focusedArea}
+          onChange={(value) => setFocusedArea(value as UiSlot)}
+          options={areaOptions(areas)}
+        />
+
+        <div className="widget-inspector-now">
+          <h3>{tr("settings.widgetlibraryoverlay.inThisAreaNow")}</h3>
+          {[...placedIds].length === 0 && <p className="widget-inspector-empty">{tr("settings.widgetlibraryoverlay.nothingPlacedHere")}</p>}
+          {[...placedIds].map((instanceId) => {
+            const placement = layout.widgets[instanceId];
             return (
-              <div
-                key={target}
-                className={[
-                  "widget-preview-zone",
-                  `zone-${target}`,
-                  dragged ? (unusual ? "incompatible" : "compatible") : "",
-                  overZone === target ? "over" : "",
-                ].filter(Boolean).join(" ")}
-                onDragEnter={() => setOverZone(target)}
-                onDragLeave={(event) => {
-                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOverZone(null);
-                }}
-                onDragOver={(event) => {
-                  if (!event.dataTransfer.types.includes(WIDGET_MIME)) return;
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = "move";
-                }}
-                onDrop={(event) => drop(target, event)}
-                aria-label={tr("settings.widgetlibraryoverlay.valueDropZone", { value: ZONE_LABEL[target] })}
-              >
-                <span>{ZONE_LABEL[target]}</span>
-                <div>
-                  {itemIds.slice(0, 3).map((id) => (
-                    <i key={id} title={layout.widgets[id]?.title ?? id}>
-                      {(layout.widgets[id]?.title ?? id).slice(0, 1)}
-                    </i>
-                  ))}
-                  {itemIds.length > 3 && <small>+{itemIds.length - 3}</small>}
-                </div>
-                {dragged && !unusual && <b>{tr("settings.widgetlibraryoverlay.dropHere")}</b>}
-                {dragged && check?.note && <em>{check.note}</em>}
+              <div key={instanceId} className="widget-inspector-row">
+                <span>{placement?.title ?? instanceId}</span>
+                <IconButton icon={CloseIcon} size="sm" variant="ghost" label={tr("common.remove")} onClick={() => remove(instanceId)} />
               </div>
             );
           })}
         </div>
-        <div className="widget-preview-status" aria-live="polite">
-          {dragged
-            ? <><WidgetGlyph widget={dragged} /><span><small>{tr("settings.widgetlibraryoverlay.youReDragging")}</small><strong>{dragged.title}</strong></span></>
-            : <span>{status || tr("settings.widgetlibraryoverlay.dragWidgetToPreview")}</span>}
+
+        {recommendedUnplaced.length > 0 && (
+          <div className="widget-inspector-recommend">
+            <h3>{tr("projectsetup.recommended")}</h3>
+            <div className="widget-inspector-chips">
+              {recommendedUnplaced.map((widget) => (
+                <Button key={widget.id} type="button" size="sm" variant="ghost" iconStart={PlusIcon} onClick={() => add(widget)}>
+                  {widget.title}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className={`widget-area-droplist${dragged ? " is-dragging" : ""}`}>
+          <h3>{tr("settings.widgetlibraryoverlay.dropOntoAnyArea")}</h3>
+          {groupedAreas.map(([group, list]) => (
+            <section key={group}>
+              <h4>{GROUP_LABEL[group]}</h4>
+              {list.map((area) => {
+                const fit = dragged ? widgetFitInArea(dragged, area.id) : null;
+                return (
+                  <div
+                    key={area.id}
+                    className={[
+                      "widget-area-drop",
+                      area.id === focusedArea ? "focused" : "",
+                      overArea === area.id ? "over" : "",
+                      fit === "unusual" ? "unusual" : "",
+                    ].filter(Boolean).join(" ")}
+                    onClick={() => setFocusedArea(area.id)}
+                    onDragEnter={() => setOverArea(area.id)}
+                    onDragLeave={(event) => {
+                      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOverArea(null);
+                    }}
+                    onDragOver={(event) => {
+                      if (!event.dataTransfer.types.includes(WIDGET_MIME)) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                    }}
+                    onDrop={(event) => drop(area.id, event)}
+                  >
+                    <span>{area.label}</span>
+                    {fit && <Badge tone={fitTone(fit)}>{fitBadgeLabel(fit)}</Badge>}
+                  </div>
+                );
+              })}
+            </section>
+          ))}
         </div>
-        <div className="widget-preview-tips">
-          <h3>{tr("settings.widgetlibraryoverlay.tips")}</h3>
-          <ul>
-            <li><b>↔</b><span><strong>{tr("settings.widgetlibraryoverlay.dragAndDrop")}</strong><small>{tr("settings.widgetlibraryoverlay.moveWidgetsDirectlyIntoHighlightedZones")}</small></span></li>
-            <li><b>＋</b><span><strong>{tr("settings.widgetlibraryoverlay.quickAdd")}</strong><small>{tr("settings.widgetlibraryoverlay.addPutsAWidgetInItsPreferred")}</small></span></li>
-            <li><b>⌕</b><span><strong>{tr("settings.widgetlibraryoverlay.filterByPlugin")}</strong><small>{tr("settings.widgetlibraryoverlay.narrowTheLibraryBySourceSizeOr")}</small></span></li>
-            <li><b>✓</b><span><strong>{tr("settings.widgetlibraryoverlay.zoneCompatibility")}</strong><small>{tr("settings.widgetlibraryoverlay.onlyZonesWhereAWidgetFitsBecome")}</small></span></li>
-          </ul>
-        </div>
+
+        {status && (
+          <Notice tone={dragged ? "info" : "success"} className="widget-inspector-status">{status}</Notice>
+        )}
       </aside>
     </div>
   );

@@ -71,6 +71,7 @@ import {
   createProtocolAdapter,
   type ProtocolSelection,
 } from "./protocol.ts";
+import { completeSmallModelDirect } from "./smallModel.ts";
 
 export interface OpenCodeAdapterOptions {
   projectId?: string;
@@ -775,6 +776,7 @@ export const createOpenCodeRuntimeFacade = (
       if (outcome.kind === "confirmed") admitTurn(req.sessionId);
       return outcome;
     },
+    completeSmallModel: (request) => completeSmallModelDirect(request),
     async steer(sessionId: string, text: string): Promise<boolean> {
       // Only meaningful while a turn is active; posting to an idle session
       // would start a fresh turn instead of steering.

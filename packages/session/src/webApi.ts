@@ -125,7 +125,7 @@ export interface SessionSearchResult {
   matches: Array<{ field: string; snippet: string }>;
 }
 
-// ---- host directory browsing (project folder picker; localhost-only) --------
+// ---- host directory browsing (project folder picker; server-host route) ------
 export interface BrowseEntryDto {
   name: string;
   path: string;
@@ -446,6 +446,7 @@ export interface VoiceSettingsDto {
 // ---- idle assist (F9) ----------------------------------------------------------
 export interface AssistSettingsDto { enabled: boolean; idleSeconds: number }
 export interface AssistDto { recap: string; suggestion: string; atSeq: number; generatedAt: number }
+export interface AssistSuggestionDto { suggestion: string; atSeq: number }
 export interface TaskBriefDto { brief: string }
 
 // ---- PR detail + checks (WP11) ----------------------------------------------
@@ -729,7 +730,7 @@ export const api = {
   opencodeApplyRestart: () =>
     jfetch<OpenCodeApplyRestartResponseDto>("/api/opencode/apply-restart", json("POST", {})),
 
-  // ---- host directory browsing (folder picker; localhost-only route) --------
+  // ---- host directory browsing (folder picker; server-host route) -----------
   browseHost: (path?: string, hidden?: boolean) =>
     jfetch<BrowseResultDto>(`/api/browse?${new URLSearchParams({
       ...(path ? { path } : {}),
@@ -1327,6 +1328,9 @@ export const api = {
   /** 404s when nothing fresh exists — callers rely on the projection instead. */
   assistGet: (sessionId: string) =>
     jfetch<AssistDto>(`/api/sessions/${encodeURIComponent(sessionId)}/assist`),
+  /** Explicit ephemeral composer draft; it is never saved to the session. */
+  assistSuggestion: (sessionId: string) =>
+    jfetch<AssistSuggestionDto>(`/api/sessions/${encodeURIComponent(sessionId)}/assist/suggestion`, json("POST", {})),
   /** Small-model chat→note DRAFT; saving still goes through knowledgeCreate. */
   assistNote: (sessionId: string) =>
     jfetch<{ title: string; body: string }>(`/api/sessions/${encodeURIComponent(sessionId)}/assist/note`, json("POST", {})),

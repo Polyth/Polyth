@@ -13,6 +13,8 @@ export function assistRoutes(deps: {
   distill?: (sessionId: string) => Promise<{ title: string; body: string }>;
   /** Small-model summary of the latest user prompt for mobile task chrome. */
   taskBrief?: (sessionId: string) => Promise<string>;
+  /** Explicit, ephemeral next-action suggestion for the composer. */
+  suggestion?: (sessionId: string) => Promise<{ suggestion: string; atSeq: number }>;
 }): RouteHandler {
   return async (rc) => {
     const { path, method, json } = rc;
@@ -38,6 +40,29 @@ export function assistRoutes(deps: {
         return true;
       }
       json(200, assist);
+      return true;
+    }
+
+    m = path.match(/^\/api\/sessions\/([^/]+)\/assist\/suggestion$/);
+    if (m && method === "POST") {
+      const sessionId = decodeURIComponent(m[1]!);
+      const proj = await deps.projection(sessionId);
+      if (!proj) { json(404, { error: "not-found", message: "unknown session" }); return true; }
+      if (!deps.suggestion) {
+        json(503, { error: "unavailable", message: "no small model configured for next-action suggestion" });
+        return true;
+      }
+      try {
+        json(200, await deps.suggestion(sessionId));
+      } catch (error) {
+        const code = typeof (error as { code?: unknown })?.code === "string"
+          ? (error as { code: string }).code : "upstream";
+        if (code === "stale" || code === "in-flight" || code === "no-completed-exchange") {
+          json(409, { error: code, message: code === "stale" ? "the session changed during suggestion generation" : code });
+        } else {
+          json(502, { error: "upstream", message: error instanceof Error ? error.message : String(error) });
+        }
+      }
       return true;
     }
 

@@ -146,6 +146,35 @@ test("walkthrough job: walkthrough/generated is logged before the job is ready",
   assert.equal(readyAtLogTime, "running"); // logged before status flipped
 });
 
+test("walkthrough jobs coalesce identical generation and cancellation aborts the provider", async () => {
+  let calls = 0;
+  let aborted = false;
+  let release: (() => void) | undefined;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  const svc = createWalkthroughJobService({
+    captureDiff: async () => DIFF,
+    generate: async (_source, prompt, signal) => {
+      calls += 1;
+      signal?.addEventListener("abort", () => { aborted = true; release?.(); }, { once: true });
+      await pending;
+      if (signal?.aborted) throw new DOMException("aborted", "AbortError");
+      const id = /--- hunk (\w+)/.exec(prompt)![1]!;
+      return JSON.stringify({ stages: [{ title: "Change", stops: [{ hunkId: id }] }] });
+    },
+  });
+  const [first, second] = await Promise.all([svc.create(source), svc.create(source)]);
+  await Promise.resolve();
+  assert.equal(calls, 1);
+  svc.cancel(first.id);
+  assert.equal(aborted, false); // second subscriber still wants the result
+  svc.cancel(second.id);
+  await svc.settled(first.id);
+  await svc.settled(second.id);
+  assert.equal(aborted, true);
+  assert.equal(svc.get(first.id)!.error, "cancelled");
+  assert.equal(svc.get(second.id)!.error, "cancelled");
+});
+
 // ---- review generation ---------------------------------------------------
 
 test("review generation logs review/generated and review/risk-scored before returning", async () => {
