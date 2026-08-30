@@ -99,11 +99,12 @@ export default function PendingChangesBar() {
   );
   const changeKey = `${selected.source}:${[...selected.paths].sort().join("\0")}`;
   const [diffStats, setDiffStats] = useState<DiffStatsSnapshot | null>(null);
-  const [expanded, setExpanded] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [filesExpanded, setFilesExpanded] = useState(false);
   const [undoing, setUndoing] = useState(false);
 
   useEffect(() => {
-    setExpanded(false);
+    setFilesExpanded(false);
   }, [changeKey]);
 
   useEffect(() => {
@@ -146,12 +147,15 @@ export default function PendingChangesBar() {
   const title = count === 1
     ? tr("pendingchangesbar.editedOneFile")
     : tr("pendingchangesbar.editedFilesValue", { count });
+  const bubbleCount = count === 1
+    ? tr("pendingchangesbar.bubbleCountOne")
+    : tr("pendingchangesbar.bubbleCountValue", { count });
   const fileStats = diffStats?.changeKey === changeKey ? diffStats.files : null;
   const totals = fileStats ? totalDiffStats(Object.values(fileStats)) : null;
-  const visible = visibleEditedPaths(selected.paths, expanded);
+  const visible = visibleEditedPaths(selected.paths, filesExpanded);
   const overflow = hiddenEditedCount(count);
   const canUndo = selected.source === "git" && Boolean(projectId);
-  const moreLabel = expanded
+  const moreLabel = filesExpanded
     ? tr("pendingchangesbar.showLess")
     : overflow === 1
       ? tr("pendingchangesbar.showMoreFile")
@@ -177,6 +181,26 @@ export default function PendingChangesBar() {
     }
   };
 
+  if (!detailsOpen) {
+    return (
+      <section className="pending-changes-bar pending-changes-bar--collapsed">
+        <button
+          type="button"
+          className="pending-changes-bubble"
+          aria-expanded={false}
+          aria-label={title}
+          onClick={() => setDetailsOpen(true)}
+        >
+          <span className="pending-changes-bubble-icon" aria-hidden="true">
+            <Icon icon={FileDiffIcon} size="sm" />
+          </span>
+          <span className="pending-changes-bubble-count">{bubbleCount}</span>
+          {totals && <DiffTotals stats={totals} />}
+        </button>
+      </section>
+    );
+  }
+
   return (
     <section className="pending-changes-bar" aria-label={title}>
       <div className="pending-changes-head">
@@ -190,6 +214,14 @@ export default function PendingChangesBar() {
           </div>
         </div>
         <div className="pending-changes-actions">
+          <Button
+            variant="ghost"
+            size="sm"
+            iconStart={ChevronUpIcon}
+            onClick={() => setDetailsOpen(false)}
+          >
+            {tr("pendingchangesbar.collapse")}
+          </Button>
           {canUndo && (
             <Button
               variant="ghost"
@@ -232,9 +264,9 @@ export default function PendingChangesBar() {
           variant="ghost"
           size="sm"
           className="pending-changes-more"
-          iconEnd={expanded ? ChevronUpIcon : ChevronDownIcon}
-          aria-expanded={expanded}
-          onClick={() => setExpanded((open) => !open)}
+          iconEnd={filesExpanded ? ChevronUpIcon : ChevronDownIcon}
+          aria-expanded={filesExpanded}
+          onClick={() => setFilesExpanded((open) => !open)}
         >
           {moreLabel}
         </Button>

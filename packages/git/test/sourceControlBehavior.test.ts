@@ -249,7 +249,15 @@ test("edited-files preview shows three paths until expanded", () => {
   });
 });
 
-test("edited-files card lists a preview, expands, reviews a file, and undoes via gitDiscard", async () => {
+function labeledButton(container: Element, label: string): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll("button")].find((button) =>
+    (button.querySelector(".ui-btn-label")?.textContent
+      ?? button.getAttribute("aria-label")
+      ?? button.textContent) === label,
+  );
+}
+
+test("edited-files bubble expands to a card, lists a preview, reviews a file, and undoes via gitDiscard", async () => {
   const projectId = "edited-files-card-project";
   const sessionId = "edited-files-card-session";
   const files = ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"];
@@ -325,9 +333,25 @@ test("edited-files card lists a preview, expands, reviews a file, and undoes via
   const view = await mounted(createElement(PendingChangesBar));
   try {
     await act(async () => { await delay(40); });
-    assert.match(view.container.textContent ?? "", /Edited 4 files/);
+    const bubble = view.container.querySelector<HTMLButtonElement>(".pending-changes-bubble");
+    assert.ok(bubble, "collapsed bubble is the default");
+    assert.equal(bubble.getAttribute("aria-expanded"), "false");
+    assert.equal(bubble.getAttribute("aria-label"), "Edited 4 files");
+    assert.match(view.container.textContent ?? "", /4 files/);
     assert.match(view.container.textContent ?? "", /\+10/);
     assert.match(view.container.textContent ?? "", /-4/);
+    assert.equal(view.container.querySelector(".pending-changes-file"), null);
+    assert.equal(labeledButton(view.container, "Undo"), undefined);
+    assert.equal(labeledButton(view.container, "Review"), undefined);
+    assert.equal(view.container.textContent?.includes(leftover), false);
+
+    await act(async () => { bubble.click(); });
+    assert.equal(view.container.querySelector(".pending-changes-bubble"), null);
+    assert.match(view.container.textContent ?? "", /Edited 4 files/);
+    assert.equal(
+      view.container.querySelector(".pending-changes-bar")?.getAttribute("aria-label"),
+      "Edited 4 files",
+    );
     const listed = [...view.container.querySelectorAll(".pending-changes-file-name")].map((node) => node.textContent);
     assert.deepEqual(listed, ["src/a.ts", "src/b.ts", "src/c.ts"]);
     assert.ok(!listed.includes(leftover));
@@ -356,15 +380,22 @@ test("edited-files card lists a preview, expands, reviews a file, and undoes via
     await act(async () => { firstFile.click(); });
     assert.equal(getState().gitDiffPath, "src/a.ts");
 
-    const review = [...view.container.querySelectorAll("button")].find((button) =>
-      (button.querySelector(".ui-btn-label")?.textContent ?? button.textContent) === "Review",
-    );
+    const review = labeledButton(view.container, "Review");
     assert.ok(review);
     await act(async () => { review.click(); });
 
-    const undo = [...view.container.querySelectorAll("button")].find((button) =>
-      (button.getAttribute("aria-label") ?? button.querySelector(".ui-btn-label")?.textContent) === "Undo",
-    );
+    const collapse = labeledButton(view.container, "Collapse");
+    assert.ok(collapse, "Collapse returns to the bubble");
+    await act(async () => { collapse.click(); });
+    const collapsed = view.container.querySelector<HTMLButtonElement>(".pending-changes-bubble");
+    assert.ok(collapsed);
+    assert.equal(collapsed.getAttribute("aria-expanded"), "false");
+    assert.equal(view.container.querySelector(".pending-changes-file"), null);
+    assert.equal(labeledButton(view.container, "Undo"), undefined);
+    assert.equal(labeledButton(view.container, "Review"), undefined);
+
+    await act(async () => { collapsed.click(); });
+    const undo = labeledButton(view.container, "Undo");
     assert.ok(undo, "Undo is present");
     assert.equal(undo.getAttribute("aria-label"), "Undo");
     assert.equal(undo.querySelector(".ui-btn-label")?.textContent, "Undo");

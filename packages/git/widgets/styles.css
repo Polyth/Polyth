@@ -126,6 +126,58 @@ font-size: var(--font-heading); line-height: 1.2;
   align-self: start;
   width: max-content;
 }
+.pending-changes-bar--collapsed {
+  width: max-content;
+  max-width: 100%;
+  align-self: start;
+  align-items: flex-start;
+  gap: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-dim);
+}
+.pending-changes-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--control-gap);
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 100%;
+  height: var(--control-h-sm);
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  padding: var(--space-2) var(--control-pad-x-sm);
+  border: 1px solid var(--hair);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-align: start;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease);
+}
+.pending-changes-bubble:hover,
+.pending-changes-bubble:focus-visible {
+  background: var(--surface-overlay);
+  color: var(--text);
+}
+.pending-changes-bubble-icon {
+  display: inline-flex;
+  flex: none;
+  color: inherit;
+}
+.pending-changes-bubble-count {
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
 @container pending-changes (max-width: 360px) {
   .pending-changes-head {
     flex-wrap: wrap;
@@ -417,9 +469,15 @@ grid-column: auto;
   flex: none;
   margin: var(--space-4) auto 0;
 }
-.focus-conversation > .placed-mini-widget:has(.pending-changes-bar) > .pending-changes-bar,
-.focus-conversation > .pending-changes-bar {
+.focus-conversation > .placed-mini-widget:has(.pending-changes-bar:not(.pending-changes-bar--collapsed)) > .pending-changes-bar,
+.focus-conversation > .pending-changes-bar:not(.pending-changes-bar--collapsed) {
   width: 100%;
+  margin: 0;
+}
+.focus-conversation > .placed-mini-widget:has(.pending-changes-bar--collapsed) > .pending-changes-bar--collapsed,
+.focus-conversation > .pending-changes-bar--collapsed {
+  width: max-content;
+  max-width: 100%;
   margin: 0;
 }
 .focus-conversation > .placed-slot-widget:has(.pending-changes-bar) {
