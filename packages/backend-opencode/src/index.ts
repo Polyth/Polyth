@@ -373,7 +373,7 @@ export const createOpenCodeRuntimeFacade = (
   const observationListeners = new Set<(sessionId: string, observation: RuntimeObservation) => void>();
   const lifecycleListeners = new Set<Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]>();
   const translate = new Map<string, TranslateState>();
-  const activeTurn = new Map<string, { turnId: string; aborting: boolean }>();
+  const activeTurn = new Map<string, { turnId: string }>();
   const suppressedAfterAbort = new Set<string>();
   const reconciliationOrdinals = new Map<string, number>();
   const seenEventIds = new Set<string>();
@@ -407,7 +407,7 @@ export const createOpenCodeRuntimeFacade = (
     suppressedAfterAbort.delete(sessionId);
     if (activeTurn.has(sessionId)) return;
     const turnId = `turn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-    activeTurn.set(sessionId, { turnId, aborting: false });
+    activeTurn.set(sessionId, { turnId });
     admitTranslateTurn(stateFor(sessionId), turnId);
     emit(sessionId, { type: "turn/started", turnId });
   };
@@ -428,7 +428,7 @@ export const createOpenCodeRuntimeFacade = (
         ...assistant,
         {
           type: "turn/stopped",
-          reason: turn.aborting ? "aborted" : "completed",
+          reason: "completed",
         },
       ];
     }
@@ -442,12 +442,8 @@ export const createOpenCodeRuntimeFacade = (
     }];
   };
 
-  const finishAbortedTurn = (
-    sessionId: string,
-    turn: { turnId: string; aborting: boolean } | undefined,
-  ): void => {
+  const finishAbortedTurn = (sessionId: string, turn: { turnId: string } | undefined): void => {
     if (!turn) return;
-    turn.aborting = true;
     activeTurn.delete(sessionId);
     finishTranslateTurn(stateFor(sessionId), turn.turnId);
     suppressedAfterAbort.add(sessionId);

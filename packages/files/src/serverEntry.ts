@@ -56,6 +56,8 @@ export function workspaceRoutes(deps: {
     if (path === "/api/files/raw" && method === "GET") {
       const raw = await deps.files.readRaw(await rootOfQuery(), query("path") ?? "");
       const inline = raw.mime.startsWith("image/")
+        || raw.mime.startsWith("audio/")
+        || raw.mime.startsWith("video/")
         || raw.mime === "application/pdf"
         || raw.mime === "text/plain";
       res.writeHead(200, {

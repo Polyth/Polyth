@@ -65,7 +65,7 @@ export function createSmallModelService(store: RuntimeMutationStore): SmallModel
 
     async complete(runtime, options) {
       const started = performance.now();
-      if (runtime.completeSmallModel && options.model) {
+      if (runtime.completeSmallModel) {
         try {
           return await runtime.completeSmallModel({
             cwd: options.cwd,

@@ -315,13 +315,6 @@ export const admitTranslateTurn = (
   state.latestAssistantCompletion = undefined;
 };
 
-export const markTranslateTurnAborting = (
-  state: TranslateState,
-  turnId: string,
-): void => {
-  if (state.admittedTurnId === turnId) state.abortingTurnId = turnId;
-};
-
 export const finishTranslateTurn = (
   state: TranslateState,
   turnId: string,
@@ -331,6 +324,13 @@ export const finishTranslateTurn = (
   state.abortingTurnId = undefined;
   state.pendingTerminal = undefined;
   state.latestAssistantCompletion = undefined;
+};
+
+export const markTranslateTurnAborting = (
+  state: TranslateState,
+  turnId: string,
+): void => {
+  if (state.admittedTurnId === turnId) state.abortingTurnId = turnId;
 };
 
 /** First classification wins: later updates can never migrate already

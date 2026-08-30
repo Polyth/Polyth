@@ -4,6 +4,8 @@ import { Dialog } from "./ui/index.ts";
 import { formatNumber, tr } from "../i18n/index.ts";
 
 const TEXT_EXTENSIONS = /\.(?:c|cc|cpp|css|csv|go|h|hpp|html?|java|js|jsx|json|log|md|mjs|py|rb|rs|scss|sh|sql|svg|toml|ts|tsx|txt|vue|xml|yaml|yml)$/i;
+const VIDEO_EXTENSIONS = /\.(?:m4v|mov|mp4|ogv|webm)$/i;
+const AUDIO_EXTENSIONS = /\.(?:aac|flac|m4a|mp3|oga|ogg|wav|weba)$/i;
 const MAX_TEXT_PREVIEW = 512 * 1024;
 
 type PreviewKind = "image" | "video" | "audio" | "pdf" | "text" | "link" | "unsupported";
@@ -11,8 +13,8 @@ type PreviewKind = "image" | "video" | "audio" | "pdf" | "text" | "link" | "unsu
 function previewKind(attachment: AttachmentRef): PreviewKind {
   if (attachment.kind === "url") return "link";
   if (attachment.kind === "image" || attachment.mime.startsWith("image/")) return "image";
-  if (attachment.mime.startsWith("video/")) return "video";
-  if (attachment.mime.startsWith("audio/")) return "audio";
+  if (attachment.mime.startsWith("video/") || VIDEO_EXTENSIONS.test(attachment.name)) return "video";
+  if (attachment.mime.startsWith("audio/") || AUDIO_EXTENSIONS.test(attachment.name)) return "audio";
   if (attachment.mime === "application/pdf") return "pdf";
   if (attachment.mime.startsWith("text/") || TEXT_EXTENSIONS.test(attachment.name)) return "text";
   return "unsupported";
