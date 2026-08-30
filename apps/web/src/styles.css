@@ -5804,7 +5804,6 @@ width: 44px;
 .sidebar-service-bar { padding-top: max(8px, env(safe-area-inset-top, 0px)); }
   .side-scroll { padding-inline: 8px; }
   .composer-simple .composer-card { border-radius: var(--radius-sheet); }
-  .pending-changes-location { display: inline; }
   .composer-simple .composer-actions { flex-wrap: nowrap; }
   .composer-simple .composer-actions .icon-btn { width: 42px; height: 42px; }
 }

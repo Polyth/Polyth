@@ -167,8 +167,9 @@ test("source-control surfaces keep responsive and accessible audit contracts", (
   assert.match(pullRequest, /reviewBusy/);
   assert.match(pullRequest, /<MarkdownDoc/);
   assert.doesNotMatch(pending, /<details/);
-  assert.match(
-    pending,
-    /aria-haspopup="menu"/,
-  );
+  assert.doesNotMatch(pending, /window\.confirm/);
+  assert.match(pending, /confirmAlert/);
+  assert.match(pending, /gitDiscard/);
+  assert.match(pending, /openChanges\(\)/);
+  assert.match(pending, /EDITED_FILES_PREVIEW/);
 });

@@ -28,10 +28,16 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { activateProject } = await import("../../../apps/web/src/store.ts");
+const { activateProject, getState } = await import("../../../apps/web/src/store.ts");
 const { default: GitView, DiffContent } = await import("../widgets/GitView.tsx");
 const { api } = await import("@polyth/session/web-api");
-const { pendingChangesMenuPosition } = await import("../widgets/PendingChangesBar.tsx");
+const {
+  addDiffStats,
+  hiddenEditedCount,
+  visibleEditedPaths,
+  default: PendingChangesBar,
+} = await import("../widgets/PendingChangesBar.tsx");
+const { resolveAlert } = await import("../../../apps/web/src/alerts.ts");
 
 const delay = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -226,9 +232,115 @@ test("GitView reports branch/graph/stash/worktree load failures with Retry", asy
   }
 });
 
-test("pending-changes menu clamps its 320px placement to viewport gutters", () => {
-  assert.deepEqual(
-    pendingChangesMenuPosition({ right: 257, top: 500 }, { width: 320, height: 640 }),
-    { left: 12, bottom: 148, width: 296 },
-  );
+test("edited-files preview shows three paths until expanded", () => {
+  const paths = ["a.ts", "b.ts", "c.ts", "d.ts", "e.ts"];
+  assert.deepEqual(visibleEditedPaths(paths, false), ["a.ts", "b.ts", "c.ts"]);
+  assert.equal(hiddenEditedCount(paths.length), 2);
+  assert.equal(hiddenEditedCount(4), 1);
+  assert.deepEqual(visibleEditedPaths(paths, true), paths);
+  assert.deepEqual(visibleEditedPaths(paths.slice(0, 3), false), ["a.ts", "b.ts", "c.ts"]);
+  assert.equal(hiddenEditedCount(3), 0);
+  assert.deepEqual(addDiffStats({ additions: 2, deletions: 1 }, { additions: 4, deletions: 3 }), {
+    additions: 6,
+    deletions: 4,
+  });
+});
+
+test("edited-files card lists a preview, expands, reviews a file, and undoes via gitDiscard", async () => {
+  const projectId = "edited-files-card-project";
+  const files = ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"];
+  let discarded: string[] | null = null;
+  let clean = false;
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    if (url.startsWith("/api/git/status")) {
+      const entries = files.map((path) => ({ path, status: "modified", staged: false }));
+      return response({
+        branch: "main", ahead: 0, behind: 0, conflicted: [], staged: [], untracked: [],
+        unstaged: clean ? [] : entries,
+        isRepo: true,
+      });
+    }
+    if (url.startsWith("/api/git/diff")) {
+      const encoded = url.split("path=")[1]?.split("&")[0] ?? "";
+      const path = decodeURIComponent(encoded);
+      const extra = files.indexOf(path) + 1;
+      return response({
+        path,
+        diff: ["@@ -1 +1 @@", "-old", ...Array.from({ length: extra }, () => "+new")].join("\n"),
+      });
+    }
+    if (url === "/api/git/discard" && init?.method === "POST") {
+      discarded = (JSON.parse(String(init.body)) as { paths: string[] }).paths;
+      clean = true;
+      return response({ ok: true });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+
+  activateProject(projectId);
+  const view = await mounted(createElement(PendingChangesBar));
+  try {
+    await act(async () => { await delay(40); });
+    assert.match(view.container.textContent ?? "", /Edited 4 files/);
+    assert.match(view.container.textContent ?? "", /\+10/);
+    assert.match(view.container.textContent ?? "", /-4/);
+    const listed = [...view.container.querySelectorAll(".pending-changes-file-name")].map((node) => node.textContent);
+    assert.deepEqual(listed, ["src/a.ts", "src/b.ts", "src/c.ts"]);
+    const more = view.container.querySelector<HTMLButtonElement>(".pending-changes-more");
+    assert.ok(more, "show-more control is available");
+    assert.match(more.textContent ?? "", /Show 1 more file/);
+    assert.equal(more.getAttribute("aria-expanded"), "false");
+    await act(async () => { more.click(); });
+    assert.deepEqual(
+      [...view.container.querySelectorAll(".pending-changes-file-name")].map((node) => node.textContent),
+      files,
+    );
+    assert.equal(more.getAttribute("aria-expanded"), "true");
+    assert.match(more.textContent ?? "", /Show less/);
+    await act(async () => { more.click(); });
+    assert.deepEqual(
+      [...view.container.querySelectorAll(".pending-changes-file-name")].map((node) => node.textContent),
+      ["src/a.ts", "src/b.ts", "src/c.ts"],
+    );
+    assert.equal(more.getAttribute("aria-expanded"), "false");
+    assert.match(more.textContent ?? "", /Show 1 more file/);
+
+    const firstFile = view.container.querySelector<HTMLButtonElement>(".pending-changes-file");
+    assert.ok(firstFile);
+    await act(async () => { firstFile.click(); });
+    assert.equal(getState().gitDiffPath, "src/a.ts");
+
+    const review = [...view.container.querySelectorAll("button")].find((button) =>
+      (button.querySelector(".ui-btn-label")?.textContent ?? button.textContent) === "Review",
+    );
+    assert.ok(review);
+    await act(async () => { review.click(); });
+
+    const undo = [...view.container.querySelectorAll("button")].find((button) =>
+      (button.getAttribute("aria-label") ?? button.querySelector(".ui-btn-label")?.textContent) === "Undo",
+    );
+    assert.ok(undo, "Undo is present");
+    assert.equal(undo.getAttribute("aria-label"), "Undo");
+    assert.equal(undo.querySelector(".ui-btn-label")?.textContent, "Undo");
+    assert.ok(undo.querySelector("svg"), "Undo keeps a visible icon");
+    await act(async () => {
+      undo.click();
+      await delay(0);
+      resolveAlert(false);
+    });
+    assert.equal(discarded, null);
+
+    await act(async () => {
+      undo.click();
+      await delay(0);
+      resolveAlert(true);
+      await delay(30);
+    });
+    assert.deepEqual(discarded, files);
+    assert.equal(view.container.querySelector(".pending-changes-bar"), null);
+  } finally {
+    await view.unmount();
+    activateProject(null);
+  }
 });

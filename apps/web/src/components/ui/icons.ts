@@ -96,6 +96,7 @@ export {
   Folder as FolderIcon,
   FolderUp as ParentFolderIcon,
   File as FileIcon,
+  FileDiff as FileDiffIcon,
   Terminal as TerminalIcon,
   GitBranch as BranchIcon,
   Globe as GlobeIcon,

@@ -1,42 +1,32 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useGitStatus } from "./gitStatusStore.ts";
+import { useEffect, useMemo, useState } from "react";
+import { useGitStatus, refreshGitStatus } from "./gitStatusStore.ts";
 import { selectPendingChanges } from "../../../apps/web/src/pendingChanges.ts";
-import { openChanges, useActiveModel, useStore } from "../../../apps/web/src/store.ts";
-import { Icon } from "../../../apps/web/src/icons.tsx";
+import { openChanges, setUiError, useActiveModel, useStore } from "../../../apps/web/src/store.ts";
+import { friendlyError } from "../../../apps/web/src/settings.ts";
 import { api } from "@polyth/session/web-api";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
-import { useDismissibleMenu } from "../../../apps/web/src/components/a11y/Menu.ts";
+import {
+  Button,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  confirmAlert,
+  FileDiffIcon,
+  Icon,
+  UndoIcon,
+} from "../../../apps/web/src/components/ui/index.ts";
 
 export interface DiffLineStats {
   additions: number;
   deletions: number;
 }
 
-export interface PendingChangesMenuPosition {
-  left: number;
-  bottom: number;
-  width: number;
-}
+export const EDITED_FILES_PREVIEW = 3;
 
-/** Position the fixed menu inside a 12px viewport gutter, even beside narrow composers. */
-export function pendingChangesMenuPosition(
-  trigger: Pick<DOMRect, "right" | "top">,
-  viewport: { width: number; height: number },
-): PendingChangesMenuPosition {
-  const gutter = 12;
-  const width = Math.max(0, Math.min(420, viewport.width - gutter * 2));
-  const idealLeft = trigger.right - width;
-  const left = Math.max(gutter, Math.min(idealLeft, viewport.width - width - gutter));
-  return {
-    left,
-    bottom: Math.max(gutter, viewport.height - trigger.top + 8),
-    width,
-  };
-}
+const EMPTY_STATS: DiffLineStats = { additions: 0, deletions: 0 };
 
 interface DiffStatsSnapshot {
   changeKey: string;
-  value: DiffLineStats;
+  files: Record<string, DiffLineStats>;
 }
 
 /** Count unified-diff content lines while excluding the file headers. */
@@ -49,6 +39,46 @@ export function summarizeUnifiedDiff(diff: string): DiffLineStats {
     else if (line.startsWith("-")) deletions++;
   }
   return { additions, deletions };
+}
+
+export function addDiffStats(left: DiffLineStats, right: DiffLineStats): DiffLineStats {
+  return { additions: left.additions + right.additions, deletions: left.deletions + right.deletions };
+}
+
+export function totalDiffStats(parts: Iterable<DiffLineStats>): DiffLineStats {
+  let total = EMPTY_STATS;
+  for (const part of parts) total = addDiffStats(total, part);
+  return total;
+}
+
+/** First three paths until the user expands the remainder. */
+export function visibleEditedPaths(
+  paths: readonly string[],
+  expanded: boolean,
+  preview = EDITED_FILES_PREVIEW,
+): string[] {
+  if (expanded || paths.length <= preview) return [...paths];
+  return paths.slice(0, preview);
+}
+
+export function hiddenEditedCount(pathCount: number, preview = EDITED_FILES_PREVIEW): number {
+  return Math.max(0, pathCount - preview);
+}
+
+function DiffTotals({ stats }: { stats: DiffLineStats }) {
+  if (stats.additions === 0 && stats.deletions === 0) return null;
+  return (
+    <span
+      className="pending-change-stats"
+      aria-label={tr("pendingchangesbar.valueAdditionsValueDeletions", {
+        additions: stats.additions,
+        deletions: stats.deletions,
+      })}
+    >
+      <span className="additions" aria-hidden="true">+{stats.additions}</span>
+      <span className="deletions" aria-hidden="true">-{stats.deletions}</span>
+    </span>
+  );
 }
 
 export default function PendingChangesBar() {
@@ -68,124 +98,147 @@ export default function PendingChangesBar() {
     [status, model.changedFiles],
   );
   const changeKey = `${selected.source}:${[...selected.paths].sort().join("\0")}`;
-  const [dismissedKey, setDismissedKey] = useState("");
   const [diffStats, setDiffStats] = useState<DiffStatsSnapshot | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [menuPosition, setMenuPosition] = useState<PendingChangesMenuPosition | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const onMenuKeyDown = useDismissibleMenu({
-    open: menuOpen,
-    menuRef,
-    triggerRef,
-    onClose: () => setMenuOpen(false),
-  });
+  const [expanded, setExpanded] = useState(false);
+  const [undoing, setUndoing] = useState(false);
 
-  useLayoutEffect(() => {
-    if (!menuOpen || !triggerRef.current) {
-      setMenuPosition(null);
-      return;
-    }
-    const update = () => {
-      const trigger = triggerRef.current;
-      if (!trigger) return;
-      setMenuPosition(pendingChangesMenuPosition(trigger.getBoundingClientRect(), {
-        width: window.innerWidth,
-        height: window.innerHeight,
-      }));
-    };
-    update();
-    window.addEventListener("resize", update);
-    window.addEventListener("scroll", update, true);
-    return () => {
-      window.removeEventListener("resize", update);
-      window.removeEventListener("scroll", update, true);
-    };
-  }, [menuOpen]);
+  useEffect(() => {
+    setExpanded(false);
+  }, [changeKey]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!projectId || !status || selected.source !== "git") return;
-
-    const requests: Array<Promise<DiffLineStats>> = [];
-    for (const path of selected.paths) {
-      if (status.staged.some((file) => file.path === path)) {
-        requests.push(api.gitDiff(projectId, path, true, false, sessionId ?? undefined)
-          .then((result) => summarizeUnifiedDiff(result.diff)));
-      }
-      if ([...status.unstaged, ...status.untracked, ...status.conflicted].some((file) => file.path === path)) {
-        requests.push(api.gitDiff(projectId, path, false, false, sessionId ?? undefined)
-          .then((result) => summarizeUnifiedDiff(result.diff)));
-      }
+    if (!projectId || !status || selected.source !== "git") {
+      setDiffStats(null);
+      return;
     }
 
-    void Promise.all(requests).then((parts) => {
+    const requests = selected.paths.map(async (path) => {
+      const parts: DiffLineStats[] = [];
+      if (status.staged.some((file) => file.path === path)) {
+        try {
+          const result = await api.gitDiff(projectId, path, true, false, sessionId ?? undefined);
+          parts.push(summarizeUnifiedDiff(result.diff));
+        } catch {
+          // Keep the rest of the card if one staged patch cannot be read.
+        }
+      }
+      if ([...status.unstaged, ...status.untracked, ...status.conflicted].some((file) => file.path === path)) {
+        try {
+          const result = await api.gitDiff(projectId, path, false, false, sessionId ?? undefined);
+          parts.push(summarizeUnifiedDiff(result.diff));
+        } catch {
+          // Keep the rest of the card if one working-tree patch cannot be read.
+        }
+      }
+      return [path, totalDiffStats(parts)] as const;
+    });
+
+    void Promise.all(requests).then((entries) => {
       if (cancelled) return;
-      setDiffStats({
-        changeKey,
-        value: parts.reduce<DiffLineStats>(
-          (total, part) => ({
-            additions: total.additions + part.additions,
-            deletions: total.deletions + part.deletions,
-          }),
-          { additions: 0, deletions: 0 },
-        ),
-      });
-    }).catch(() => {
-      // Preserve the last known totals during a transient refresh failure.
+      setDiffStats({ changeKey, files: Object.fromEntries(entries) });
     });
     return () => { cancelled = true; };
-  }, [changeKey, projectId, selected.source, sessionId, status]);
+  }, [changeKey, projectId, selected.paths, selected.source, sessionId, status]);
 
-  if (selected.paths.length === 0 || dismissedKey === changeKey) return null;
+  if (selected.paths.length === 0) return null;
   const count = selected.paths.length;
-  const visibleStats = diffStats?.changeKey === changeKey ? diffStats.value : null;
+  const title = count === 1
+    ? tr("pendingchangesbar.editedOneFile")
+    : tr("pendingchangesbar.editedFilesValue", { count });
+  const fileStats = diffStats?.changeKey === changeKey ? diffStats.files : null;
+  const totals = fileStats ? totalDiffStats(Object.values(fileStats)) : null;
+  const visible = visibleEditedPaths(selected.paths, expanded);
+  const overflow = hiddenEditedCount(count);
+  const canUndo = selected.source === "git" && Boolean(projectId);
+  const moreLabel = expanded
+    ? tr("pendingchangesbar.showLess")
+    : overflow === 1
+      ? tr("pendingchangesbar.showMoreFile")
+      : tr("pendingchangesbar.showMoreFilesValue", { count: overflow });
+
+  const undoAll = async () => {
+    if (!projectId || !canUndo || undoing) return;
+    const message = count === 1
+      ? tr("gitview.allUncommittedChangesInValue", { path: selected.paths[0]! })
+      : tr("pendingchangesbar.undoAllChangesDescription", { count });
+    if (!await confirmAlert(message, {
+      title: tr("pendingchangesbar.undoAllChanges"),
+      confirmLabel: tr("pendingchangesbar.undo"),
+    })) return;
+    setUndoing(true);
+    try {
+      await api.gitDiscard(projectId, selected.paths, sessionId ?? undefined);
+      await refreshGitStatus(projectId, sessionId);
+    } catch (cause) {
+      setUiError(friendlyError(tr("gitview.couldntUpdateTheRepository"), cause));
+    } finally {
+      setUndoing(false);
+    }
+  };
 
   return (
-    <div className="pending-changes-bar" role="status">
-      <button className="pending-changes-main" onClick={() => openChanges()}>
-        <span className="pending-changes-icon" aria-hidden="true">
-          <Icon.fileEdit />
-        </span>
-        {count} {count === 1 ? tr("pendingchangesbar.file") : tr("pendingchangesbar.files")}
-        {visibleStats && (
-          <span
-            className="pending-change-stats"
-            aria-label={tr("pendingchangesbar.valueAdditionsValueDeletions", { additions: visibleStats.additions, deletions: visibleStats.deletions })}
-          >
-            <span className="additions" aria-hidden="true">+{visibleStats.additions}</span>
-            <span className="deletions" aria-hidden="true">-{visibleStats.deletions}</span>
+    <section className="pending-changes-bar" aria-label={title}>
+      <div className="pending-changes-head">
+        <div className="pending-changes-lead">
+          <span className="pending-changes-icon" aria-hidden="true">
+            <Icon icon={FileDiffIcon} size="sm" />
           </span>
-        )}
-      </button>
-      <div className="pending-changes-files">
-        <button
-          ref={triggerRef}
-          className="pending-changes-trigger"
-          aria-label={tr("pendingchangesbar.listChangedFiles")}
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          onClick={() => setMenuOpen((open) => !open)}
-        ><Icon.chevronDown /></button>
-        {menuOpen && <div ref={menuRef} className="pending-changes-menu" role="menu" aria-label={tr("pendingchangesbar.changedFiles")} style={menuPosition ?? undefined} onKeyDown={onMenuKeyDown}>
-
-          {selected.paths.map((path) => (
-            <button key={path} role="menuitem" className="mono" title={path} onClick={() => {
-              setMenuOpen(false);
-              openChanges(path);
-            }}>
-              {path}
-            </button>
-          ))}
-        </div>}
+          <div className="pending-changes-copy">
+            <span className="pending-changes-title">{title}</span>
+            {totals && <DiffTotals stats={totals} />}
+          </div>
+        </div>
+        <div className="pending-changes-actions">
+          {canUndo && (
+            <Button
+              variant="ghost"
+              size="sm"
+              iconStart={UndoIcon}
+              busy={undoing}
+              aria-label={tr("pendingchangesbar.undo")}
+              onClick={() => void undoAll()}
+            >
+              {tr("pendingchangesbar.undo")}
+            </Button>
+          )}
+          <Button
+            variant="quiet"
+            size="sm"
+            className="pending-changes-review"
+            disabled={undoing}
+            onClick={() => openChanges()}
+          >
+            {tr("pendingchangesbar.review")}
+          </Button>
+        </div>
       </div>
-      <button
-        className="pending-changes-dismiss"
-        aria-label={tr("pendingchangesbar.dismissChangedFiles")}
-        title={tr("pendingchangesbar.dismissUntilTheFileSetChanges")}
-        onClick={() => setDismissedKey(changeKey)}
-      >
-        {tr("pendingchangesbar.message")}</button>
-    </div>
+      <div className="pending-changes-list">
+        {visible.map((path) => (
+          <button
+            key={path}
+            type="button"
+            className="pending-changes-file"
+            title={path}
+            onClick={() => openChanges(path)}
+          >
+            <span className="pending-changes-file-name">{path}</span>
+            {fileStats?.[path] && <DiffTotals stats={fileStats[path]!} />}
+          </button>
+        ))}
+      </div>
+      {overflow > 0 && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="pending-changes-more"
+          iconEnd={expanded ? ChevronUpIcon : ChevronDownIcon}
+          aria-expanded={expanded}
+          onClick={() => setExpanded((open) => !open)}
+        >
+          {moreLabel}
+        </Button>
+      )}
+    </section>
   );
 }
