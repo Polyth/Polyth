@@ -742,6 +742,19 @@ export function createSessionService(deps: {
     return open;
   };
 
+  // A durable terminal event is enough to admit a follow-up after a stopped
+  // turn, even if the backend cannot provide a comparable reconciliation
+  // watermark. Unresolved runtime operations remain a separate hard block.
+  const hasPersistedStoppedTurn = (events: readonly SessionEvent[]): boolean => {
+    let lastTurnEvent: SessionEvent | undefined;
+    for (const event of events) {
+      if (event.type === "turn/started" || event.type === "turn/stopped") {
+        lastTurnEvent = event;
+      }
+    }
+    return lastTurnEvent?.type === "turn/stopped";
+  };
+
   const terminalizeReconciledTurn = async (
     sessionId: string,
     state: "idle" | "failed" | "interrupted",
@@ -1733,7 +1746,7 @@ export function createSessionService(deps: {
     if (
       ev.type === "turn/stopped"
       && !observationReplay
-      && (await store.events(sessionId)).findLast((event) => event.type === "turn/stopped")
+      && hasPersistedStoppedTurn(await store.events(sessionId))
     ) {
       return;
     }
@@ -3004,12 +3017,13 @@ export function createSessionService(deps: {
     withSessionLock(sessionId, async () => {
       const current = (await store.projection(sessionId)) ?? proj;
       const active = turnActive(sessionId);
+      const stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
       const unsafeStatus = current.status === "reconciling"
-        || current.status === "unknown";
+        || (current.status === "unknown" && !stoppedTurnRecorded);
       const reconciliation = await durable.reconciliation(sessionId);
       const barrier = reconciliation?.state === "reconciling"
         || reconciliation?.state === "blocked"
-        || reconciliation?.state === "unknown";
+        || (reconciliation?.state === "unknown" && !stoppedTurnRecorded);
       const unresolved = await sendAdmissionBlocking(sessionId);
       const reservedId = reserved?.operation.operationId;
       const blocking = unresolved && unresolved.operationId !== reservedId
@@ -3755,6 +3769,7 @@ export function createSessionService(deps: {
     async send(sessionId, input: UserTurnInput): Promise<SendResult> {
       let proj = await store.projection(sessionId);
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      const stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
       // Attachments are verified before any state changes (rewind reset,
       // queueing, admission) so a bad ref can never dirty the durable log.
       if (input.attachments !== undefined) {
@@ -3799,7 +3814,10 @@ export function createSessionService(deps: {
         await reconcileUnderLock(sessionId, proj, candidateRuntime, "send-after-restart");
         proj = (await store.projection(sessionId)) ?? proj;
       }
-      if (proj.status === "reconciling" || (proj.status === "unknown" && !recoverEpoch)) {
+      if (
+        proj.status === "reconciling"
+        || (proj.status === "unknown" && !recoverEpoch && !stoppedTurnRecorded)
+      ) {
         throw Object.assign(new Error(`cannot send while the session is ${proj.status}`), {
           code: "conflict",
         });
@@ -3814,7 +3832,7 @@ export function createSessionService(deps: {
         const existingReconciliation = await durable.reconciliation(sessionId);
         if (existingReconciliation?.state === "reconciling"
           || existingReconciliation?.state === "blocked"
-          || existingReconciliation?.state === "unknown") {
+          || (existingReconciliation?.state === "unknown" && !stoppedTurnRecorded)) {
           throw Object.assign(
             new Error(`cannot send while reconciliation is ${existingReconciliation.state}`),
             { code: "conflict" },
@@ -3841,7 +3859,7 @@ export function createSessionService(deps: {
       if (
         proj.status === "reconciling"
         || proj.status === "epoch-pending"
-        || proj.status === "unknown"
+        || (proj.status === "unknown" && !stoppedTurnRecorded)
       ) {
         throw Object.assign(new Error(`cannot send while the session is ${proj.status}`), {
           code: proj.status === "epoch-pending" ? "epoch-pending" : "conflict",
@@ -3850,7 +3868,7 @@ export function createSessionService(deps: {
       const readyReconciliation = await durable.reconciliation(sessionId);
       if (readyReconciliation?.state === "reconciling"
         || readyReconciliation?.state === "blocked"
-        || readyReconciliation?.state === "unknown") {
+        || (readyReconciliation?.state === "unknown" && !stoppedTurnRecorded)) {
         throw Object.assign(
           new Error(`cannot send while reconciliation is ${readyReconciliation.state}`),
           { code: "conflict" },
@@ -4989,6 +5007,20 @@ export function createSessionService(deps: {
         if (effective && p.status === "waiting") await reconcilePendingPermissions(p.id);
       }
       return { setting, effective: await effectiveAutoAccept(sessionId) };
+    },
+
+    async saveDraft(sessionId, text) {
+      const proj = await store.projection(sessionId);
+      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      const now = Date.now();
+      // Last-write-wins: only overwrite if incoming timestamp is newer (or absent).
+      if (proj.draftUpdatedAt && proj.draftUpdatedAt > now) return;
+      await applyProjection(sessionId, (current) => ({
+        ...current,
+        draft: text || undefined,
+        draftUpdatedAt: text ? now : undefined,
+        updatedAt: now,
+      }));
     },
   };
 

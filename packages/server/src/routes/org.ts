@@ -62,6 +62,20 @@ export function orgRoutes(deps: {
       return true;
     }
 
+    // ---- session draft (server-synced composer text) ----------------------
+    m = path.match(/^\/api\/sessions\/([^/]+)\/draft$/);
+    if (m && method === "PATCH") {
+      if (!sessions.saveDraft) { json(501, { error: "unsupported" }); return true; }
+      const b = await body();
+      if (typeof b.text !== "string") {
+        json(400, { error: "invalid-input", message: "text must be a string" });
+        return true;
+      }
+      await sessions.saveDraft(m[1]!, b.text);
+      json(200, { ok: true });
+      return true;
+    }
+
     // ---- bulk archive/restore ----------------------------------------------
     if (path === "/api/sessions/bulk" && method === "POST") {
       const b = await body();

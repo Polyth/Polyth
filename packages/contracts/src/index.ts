@@ -526,6 +526,11 @@ export interface SessionProjection {
   /** F18: effective auto-accept policy (own setting or nearest parent's) —
    *  drives the loud header indicator. Never a global default. */
   autoAccept?: boolean;
+  /** Per-session composer draft text, persisted server-side so it syncs
+   *  across clients. Cleared on send. */
+  draft?: string;
+  /** Timestamp (ms) of the last draft write; last-write-wins on conflicts. */
+  draftUpdatedAt?: number;
 }
 
 /** F18: per-session auto-accept policy. "inherit" (the default) walks to the
@@ -678,6 +683,8 @@ export interface SessionService {
   autoAcceptSet?(sessionId: string, setting: AutoAcceptSetting): Promise<AutoAcceptDto>;
   /** User-confirmed borrowed/external runtime replacement. Never auto-epochs. */
   confirmBorrowedRuntimeEpoch?(sessionId: string): Promise<SessionProjection>;
+  /** Persist a per-session composer draft server-side (synced via projection). */
+  saveDraft?(sessionId: string, text: string): Promise<void>;
 }
 
 export interface SessionOrganizePatch {

@@ -605,6 +605,44 @@ test("idle snapshot without a comparable watermark remains unknown and blocks ad
   await store.close();
 });
 
+test("a stopped turn can send again when reconciliation status is unknown", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-stopped-send-"));
+  const endpoint = endpointFor(dir);
+  let submissions = 0;
+  const runtime = runtimeWithSnapshot(endpoint, (binding) => ({
+    authorityId: binding.authorityId,
+    generation: binding.generation,
+    location: binding.location,
+    backendSessionId: binding.backendSessionId!,
+    reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+    state: { value: "idle" },
+    completeness: { events: "partial", permissions: "partial", questions: "partial" },
+    permissions: [],
+    questions: [],
+    events: [],
+  }));
+  runtime.startTurn = async () => { submissions += 1; };
+  const { sessions, store, project } = makeHarness(runtime, dir);
+  const sessionId = "session-stopped-send";
+  await store.upsertProjection({
+    id: sessionId,
+    projectId: project.id,
+    backendSessionId: "backend-stopped-send",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-stopped-send"),
+    title: "Stopped turn",
+    status: "idle",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  await store.append(sessionId, "turn/stopped", { turnId: "stopped-1", reason: "completed" });
+
+  await sessions.events(sessionId, 0);
+  assert.equal((await store.reconciliation(sessionId))?.state, "unknown");
+  await sessions.send(sessionId, { text: "continue after stop" });
+  assert.equal(submissions, 1);
+  await store.close();
+});
+
 test("equal status evidence is idempotent but a stale terminal revision cannot reopen admission", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-stale-terminal-"));
   const endpoint = endpointFor(dir);

@@ -312,6 +312,37 @@ export function saveDraft(sessionId: string, text: string): void {
   }
 }
 
+// ---- server-side draft sync (debounced, fire-and-forget) -------------------
+
+const serverDraftTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** Debounced server sync: 800ms after the last local edit, push the draft to
+ *  the server so other clients see it. Fire-and-forget — localStorage is the
+ *  fast local truth; the server projection catches up. */
+export function syncDraftToServer(sessionId: string, text: string): void {
+  const existing = serverDraftTimers.get(sessionId);
+  if (existing) clearTimeout(existing);
+  serverDraftTimers.set(sessionId, setTimeout(() => {
+    serverDraftTimers.delete(sessionId);
+    // Dynamic import to avoid circular deps; api is a singleton.
+    import("@polyth/session/web-api").then(({ api }) =>
+      api.saveDraft(sessionId, text).catch(() => { /* best-effort */ }),
+    );
+  }, 800));
+}
+
+/** Flush any pending server draft sync for a session (e.g. before session switch). */
+export function flushDraftToServer(sessionId: string): void {
+  const t = serverDraftTimers.get(sessionId);
+  if (!t) return;
+  clearTimeout(t);
+  serverDraftTimers.delete(sessionId);
+  const text = loadDraft(sessionId);
+  import("@polyth/session/web-api").then(({ api }) =>
+    api.saveDraft(sessionId, text).catch(() => { /* best-effort */ }),
+  );
+}
+
 function copyTextFallback(text: string): boolean {
   if (typeof document === "undefined" || !document.body || typeof document.execCommand !== "function") {
     return false;

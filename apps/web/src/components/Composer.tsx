@@ -31,7 +31,7 @@ import {
   type SnippetDef,
   type Worktree,
 } from "@polyth/session/web-api";
-import { loadDraft, saveDraft, type AutocompleteItem } from "../utils.ts";
+import { loadDraft, saveDraft, syncDraftToServer, flushDraftToServer, type AutocompleteItem } from "../utils.ts";
 import { canApplyNextAction, nextActionInsertMode, type NextActionRequest } from "../nextAction.ts";
 import { latestCompletedExchange } from "@polyth/session/next-action";
 import SlotHost from "./slots/SlotHost.ts";
@@ -441,12 +441,23 @@ export default function Composer({
       saveDraft(outgoing, editing?.sessionId === outgoing
         ? editing.draftBefore
         : inputRef.current?.getText() ?? committedTextRef.current);
+      flushDraftToServer(outgoing);
       if (editing?.sessionId === outgoing) void api.queueEditCancel(outgoing, editing.id).catch(() => {});
     }
     sessionIdRef.current = session?.id ?? null;
-    const t = session?.id ? loadDraft(session.id) : newSessionIntent?.draft ?? "";
+    // Prefer server-synced draft from the projection (cross-client sync);
+    // fall back to localStorage for offline / fast local edits.
+    const serverDraft = session?.draft;
+    const localDraft = session?.id ? loadDraft(session.id) : "";
+    const t = session?.id
+      ? (serverDraft !== undefined && serverDraft !== localDraft ? serverDraft : localDraft || serverDraft || "")
+      : newSessionIntent?.draft ?? "";
     setText(t);
     inputRef.current?.replaceText(t);
+    // If server draft differs from local, update localStorage to match.
+    if (session?.id && serverDraft !== undefined && serverDraft !== localDraft) {
+      saveDraft(session.id, serverDraft);
+    }
     historyCursor.current = emptyPromptHistoryCursor();
     setCfg(loadComposerConfig(session?.id ?? null));
     setAcToken(null);
@@ -455,7 +466,7 @@ export default function Composer({
     setQueueEdit(null);
     setQueueEditStarting(false);
     setQueueEditSaving(false);
-  }, [session?.id, newSessionIntent]);
+  }, [session?.id, session?.draft, newSessionIntent]);
 
   // Disengage after an outside click has reached its target. Collapsing on
   // pointer-down can move a timeline control before pointer-up and swallow the
@@ -480,9 +491,13 @@ export default function Composer({
     const flush = () => {
       const id = sessionIdRef.current;
       const editing = queueEditRef.current;
-      if (id !== null) saveDraft(id, editing?.sessionId === id
-        ? editing.draftBefore
-        : inputRef.current?.getText() ?? committedTextRef.current);
+      if (id !== null) {
+        const t = editing?.sessionId === id
+          ? editing.draftBefore
+          : inputRef.current?.getText() ?? committedTextRef.current;
+        saveDraft(id, t);
+        flushDraftToServer(id);
+      }
     };
     window.addEventListener("pagehide", flush);
     return () => {
@@ -493,13 +508,33 @@ export default function Composer({
     };
   }, []);
 
-  // Debounced draft persistence of committed text.
+  // Debounced draft persistence of committed text (local + server sync).
   useEffect(() => {
     const id = session?.id;
     if (!id || queueEdit?.sessionId === id) return;
-    const t = setTimeout(() => saveDraft(id, text), 250);
+    const t = setTimeout(() => {
+      saveDraft(id, text);
+      syncDraftToServer(id, text);
+    }, 250);
     return () => clearTimeout(t);
   }, [session?.id, text, queueEdit]);
+
+  // Apply server-side draft updates from other clients when the composer is
+  // empty (user hasn't started typing). Active local edits always win — the
+  // debounced sync ensures the server catches up eventually.
+  const lastServerDraftRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const serverDraft = session?.draft;
+    if (serverDraft === undefined) return;
+    if (serverDraft === lastServerDraftRef.current) return;
+    lastServerDraftRef.current = serverDraft;
+    // Only apply if the composer is empty (no local work in progress).
+    if (!text && serverDraft) {
+      setText(serverDraft);
+      inputRef.current?.replaceText(serverDraft);
+      if (session?.id) saveDraft(session.id, serverDraft);
+    }
+  }, [session?.draft, session?.id, text]);
 
   // Drag-and-drop: tree paths and desktop files become attachment pills.
   const [dropHint, setDropHint] = useState<"path" | "files" | null>(null);
@@ -869,7 +904,10 @@ export default function Composer({
     setText("");
     inputRef.current?.replaceText("");
     historyCursor.current = emptyPromptHistoryCursor();
-    if (target) saveDraft(target, "");
+    if (target) {
+      saveDraft(target, "");
+      syncDraftToServer(target, ""); // clear server draft on send
+    }
     setAcToken(null);
     acTokenRef.current = null;
   }, [
@@ -1169,6 +1207,7 @@ export default function Composer({
         setText("");
         inputRef.current?.replaceText("");
         saveDraft(session.id, "");
+        syncDraftToServer(session.id, "");
         announce(tr("composer.goalAttached"));
       })
       .catch((error) => setUiError(friendlyError(tr("composer.couldnTAttachTheGoal"), error)))
@@ -1179,7 +1218,10 @@ export default function Composer({
     inputRef.current?.replaceText("");
     historyCursor.current = emptyPromptHistoryCursor();
     const target = sessionIdRef.current;
-    if (target) saveDraft(target, "");
+    if (target) {
+      saveDraft(target, "");
+      syncDraftToServer(target, "");
+    }
     // A workflow/run-started event can replace the empty-session hero composer
     // before the launch request resolves. This callback may therefore belong
     // to an unmounted instance; notify the currently mounted composer too, but

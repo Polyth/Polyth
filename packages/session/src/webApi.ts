@@ -589,6 +589,8 @@ export const api = {
     jfetch<SessionProjection>(`/api/sessions/${id}/runtime-epoch`, json("POST", { confirm: true })),
   renameSession: (id: string, title: string) =>
     jfetch<{ ok: true }>(`/api/sessions/${id}/rename`, json("POST", { title })),
+  saveDraft: (id: string, text: string) =>
+    jfetch<{ ok: true }>(`/api/sessions/${id}/draft`, json("PATCH", { text })),
 
   // ---- delivery queue (WP3) -------------------------------------------------
   queueList: (id: string) =>
