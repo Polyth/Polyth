@@ -3,9 +3,10 @@ import { Icon } from "../../icons.tsx";
 import { setRailPlugin, setSidebarOpen, useStore } from "../../store.ts";
 import { IconButton, LayersIcon, MenuIcon } from "../ui/index.ts";
 import { tr } from "../../i18n/index.ts";
+import type { TranslationKey } from "../../i18n/types.ts";
 import { Tools } from "./MobileSessionHeader.tsx";
 
-const VIEW_LABEL: Record<string, string> = {
+const VIEW_LABEL: Record<string, TranslationKey> = {
   goals: "statusbar.goals",
   multirun: "statusbar.workflows",
   workflow: "statusbar.workflows",

@@ -1534,42 +1534,6 @@ export function createSessionService(deps: {
           if (result.kind !== "applied") continue;
           for (const event of result.events) broadcast.event(event);
         }
-        // A Polyth restart loses the in-memory active-turn map. If the
-        // reattached runtime cannot supply a comparable status watermark, do
-        // not leave a durable `turn/started` stranded forever. Abort the
-        // orphaned backend turn with a durable operation; a confirmed abort is
-        // the same authoritative boundary used by the explicit Stop action.
-        if (
-          (reason === "session-reattached" || reason === "send-after-restart")
-          && authoritativeState.value === "unknown"
-          && !turnActive(sessionId)
-        ) {
-          const open = openTurnFromEvents(await store.events(sessionId));
-          if (open) {
-            const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
-              sessionId,
-              mutationKind: "turn-abort",
-              intentEvent: {
-                type: "turn/abort-requested",
-                data: { reason: "restart-recovery" },
-                ignorable: true,
-              },
-            }));
-            const outcome = await runPreparedOperation<Record<string, never>, void>(
-              prepared.operation,
-              (operationId) => rt.abortOperation
-                ? rt.abortOperation(sessionId, operationId)
-                : rt.abort(sessionId),
-              () => ({}),
-              undefined,
-              ABORT_AWAIT_MS,
-            );
-            if (outcome.kind === "confirmed") {
-              await stopLocally(sessionId);
-              authoritativeState = { value: "idle", causalOperationId: prepared.operation.operationId };
-            }
-          }
-        }
         if (
           authoritativeState.value === "idle"
           || authoritativeState.value === "failed"

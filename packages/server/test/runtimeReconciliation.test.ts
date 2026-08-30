@@ -643,10 +643,9 @@ test("a stopped turn can send again when reconciliation status is unknown", asyn
   await store.close();
 });
 
-test("send recovers an orphaned turn when runtime status is unknown", async () => {
+test("send does not abort an open turn when runtime status is unknown", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-orphaned-turn-"));
   const endpoint = endpointFor(dir);
-  let aborts = 0;
   let submissions = 0;
   const runtime = runtimeWithSnapshot(endpoint, (binding) => ({
     authorityId: binding.authorityId,
@@ -660,7 +659,6 @@ test("send recovers an orphaned turn when runtime status is unknown", async () =
     questions: [],
     events: [],
   }));
-  runtime.abort = async () => { aborts += 1; };
   runtime.startTurn = async () => { submissions += 1; };
   const { sessions, store, project } = makeHarness(runtime, dir);
   const sessionId = "session-orphaned-turn";
@@ -676,15 +674,16 @@ test("send recovers an orphaned turn when runtime status is unknown", async () =
   });
   await store.append(sessionId, "turn/started", { turnId: "orphaned-1" });
 
-  await sessions.send(sessionId, { text: "continue after restart" });
+  await assert.rejects(
+    sessions.send(sessionId, { text: "continue after restart" }),
+    { code: "conflict", message: "cannot send while the session is unknown" },
+  );
 
   assert.deepEqual(
     (await store.events(sessionId)).filter((event) => event.type.startsWith("turn/")).map((event) => event.type),
-    ["turn/started", "turn/abort-requested", "turn/stopped"],
+    ["turn/started"],
   );
-  assert.equal(aborts, 1);
-  assert.equal(submissions, 1);
-  assert.equal((await store.events(sessionId)).some((event) => event.type === "turn/stopped"), true);
+  assert.equal(submissions, 0);
   await store.close();
 });
 
