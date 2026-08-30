@@ -72,17 +72,6 @@ const formatChartMoney = (value: number): string => {
   }).format(value);
 };
 
-const formatRange = (start: number, end: number): string => {
-  const startDate = new Date(start);
-  const endDate = new Date(end);
-  const sameYear = startDate.getFullYear() === endDate.getFullYear();
-  const short = new Intl.DateTimeFormat(getLocale(), { month: "short", day: "numeric" });
-  const dated = new Intl.DateTimeFormat(getLocale(), { month: "short", day: "numeric", year: "numeric" });
-  return sameYear
-    ? `${short.format(start)} – ${short.format(end)}, ${endDate.getFullYear()}`
-    : `${dated.format(start)} – ${dated.format(end)}`;
-};
-
 const aggregateSeries = (series: readonly UsageChartSeries[], points: number): number[] =>
   Array.from({ length: points }, (_, point) =>
     series.reduce((total, item) => total + (item.values[point] ?? 0), 0));
@@ -742,12 +731,6 @@ function ProviderDetails({
 }) {
   return (
     <div className="usage-provider-view" data-settings-item="usage.providers">
-      <section className="usage-provider-view-intro">
-        <div><span>{tr("usage.usagedashboard.discovered")}</span><strong>{providers.length}</strong></div>
-        <div><span>{tr("usage.usagedashboard.freshFeeds")}</span><strong>{providers.filter((provider) => provider.snapshot && !provider.stale).length}</strong></div>
-        <div><span>{tr("usage.usagedashboard.visible")}</span><strong>{providers.filter((provider) => !hiddenProviders.includes(providerPreferenceId(provider))).length}</strong></div>
-        <Button size="sm" variant="primary" iconStart={AddIcon} onClick={onAddProvider}>{tr("usage.usagedashboard.addProvider")}</Button>
-      </section>
       <div className="usage-provider-detail-grid">
         {providers.map((provider, index) => {
           const preferenceId = providerPreferenceId(provider);
@@ -841,6 +824,12 @@ function ProviderDetails({
           />
         )}
       </div>
+      <section className="usage-provider-view-intro">
+        <div><span>{tr("usage.usagedashboard.discovered")}</span><strong>{providers.length}</strong></div>
+        <div><span>{tr("usage.usagedashboard.freshFeeds")}</span><strong>{providers.filter((provider) => provider.snapshot && !provider.stale).length}</strong></div>
+        <div><span>{tr("usage.usagedashboard.visible")}</span><strong>{providers.filter((provider) => !hiddenProviders.includes(providerPreferenceId(provider))).length}</strong></div>
+        <Button size="sm" variant="primary" iconStart={AddIcon} onClick={onAddProvider}>{tr("usage.usagedashboard.addProvider")}</Button>
+      </section>
     </div>
   );
 }
@@ -888,8 +877,6 @@ export function UsageDashboard(): ReactNode {
     const tokens = tokenSeries[index] ?? 0;
     return tokens > 0 ? cost / tokens * 1_000 : 0;
   });
-  const freshFeeds = snapshots.filter((snapshot) => !snapshot.stale).length;
-  const staleFeeds = snapshots.length - freshFeeds;
   const averageSessionCost = data.totals.sessions > 0 ? data.totals.cost / data.totals.sessions : 0;
   const addProvider = () => window.dispatchEvent(new CustomEvent("polyth:settings-page", { detail: "models" }));
   const refreshAll = async () => {
@@ -910,31 +897,6 @@ export function UsageDashboard(): ReactNode {
       aria-busy={quotaBusy}
       ref={dashboardRef}
     >
-      <section className="usage-dashboard-hero">
-        <div className="usage-hero-mark"><Icon.usage /></div>
-        <div>
-          <span className="usage-eyebrow">{tr("usage.usagedashboard.workspaceTelemetry")}</span>
-          <h2>{tr("usage.usagedashboard.understandTheSessionsBehind")}</h2>
-          <p>{tr("usage.usagedashboard.rangesUseEachSessions")}</p>
-        </div>
-        <div className="usage-hero-status" aria-live="polite">
-          {quotaLoading ? (
-            <span className="loading"><Icon.refresh /> {tr("usage.usagedashboard.loadingQuotaFeeds")}</span>
-          ) : quotaError ? (
-            <span className="error"><i /> {tr("usage.usagedashboard.quotaFeedsUnavailable")}</span>
-          ) : snapshots.length === 0 ? (
-            <span className="neutral"><i /> {tr("usage.usagedashboard.sessionDataOnly")}</span>
-          ) : (
-            <span className={staleFeeds > 0 ? "warning" : ""}>
-              <i />{staleFeeds > 0
-                ? tr("usage.usagedashboard.valueValueFeedsFresh", { fresh: freshFeeds, total: snapshots.length })
-                : freshFeeds === 1 ? tr("usage.usagedashboard.oneFreshFeed") : tr("usage.usagedashboard.valueFreshFeeds", { count: freshFeeds })}
-            </span>
-          )}
-          <small>{formatRange(data.rangeStart, data.rangeEnd)}</small>
-        </div>
-      </section>
-
       <div className="usage-dashboard-toolbar">
         <Tabs
           className="usage-view-tabs"

@@ -274,15 +274,6 @@ test("Usage dashboard responds to a docked panel instead of the viewport", { ski
     await page.setContent(`
       <style>${coreCss}\n${usageCss}</style>
       <main class="usage-dashboard" style="width:${width}px">
-        <section class="usage-dashboard-hero">
-          <div class="usage-hero-mark">U</div>
-          <div>
-            <span class="usage-eyebrow">Workspace telemetry</span>
-            <h2>Understand the sessions behind every token</h2>
-            <p>Ranges use each session's recorded activity.</p>
-          </div>
-          <div class="usage-hero-status"><span class="neutral"><i></i>Session data only</span><small>30 days</small></div>
-        </section>
         <div class="usage-dashboard-toolbar">
           <div class="usage-view-tabs"><button>Overview</button><button>Providers</button></div>
           <span class="usage-toolbar-spacer"></span>
@@ -296,32 +287,20 @@ test("Usage dashboard responds to a docked panel instead of the viewport", { ski
     const layout: {
       clientWidth: number;
       scrollWidth: number;
-      copyBottom: number;
-      statusTop: number;
-      statusMinWidth: string;
-      overflowWrap: string;
-      wordBreak: string;
+      toolbarScrollWidth: number;
+      toolbarClientWidth: number;
     } = await page.evaluate(() => {
       const dashboard = document.querySelector<HTMLElement>(".usage-dashboard")!;
-      const copy = document.querySelector<HTMLElement>(".usage-dashboard-hero > div:nth-child(2)")!;
-      const title = document.querySelector<HTMLElement>(".usage-dashboard-hero h2")!;
-      const status = document.querySelector<HTMLElement>(".usage-hero-status")!;
-      const titleStyle = getComputedStyle(title);
+      const toolbar = document.querySelector<HTMLElement>(".usage-dashboard-toolbar")!;
       return {
         clientWidth: dashboard.clientWidth,
         scrollWidth: dashboard.scrollWidth,
-        copyBottom: copy.getBoundingClientRect().bottom,
-        statusTop: status.getBoundingClientRect().top,
-        statusMinWidth: getComputedStyle(status).minWidth,
-        overflowWrap: titleStyle.overflowWrap,
-        wordBreak: titleStyle.wordBreak,
+        toolbarScrollWidth: toolbar.scrollWidth,
+        toolbarClientWidth: toolbar.clientWidth,
       };
     });
 
     assert.ok(layout.scrollWidth <= layout.clientWidth + 1, `${width}px dashboard has no horizontal overflow`);
-    assert.ok(layout.statusTop >= layout.copyBottom, `${width}px status stacks below the title`);
-    assert.equal(layout.statusMinWidth, "0px");
-    assert.equal(layout.overflowWrap, "normal");
-    assert.equal(layout.wordBreak, "normal");
+    assert.ok(layout.toolbarScrollWidth <= layout.toolbarClientWidth + 1, `${width}px toolbar has no horizontal overflow`);
   }
 });

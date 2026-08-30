@@ -94,7 +94,11 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   assert.match(source, /: tr\("usage\.usagedashboard\.hideValueInBreakdowns"/);
   assert.match(source, /value > 0 && value < \.0001 \? "<\$0\.0001"/);
   assert.match(source, /const formatChartMoney[\s\S]*?value < \.001 \? 5 : value < 1 \? 4 : 2/);
-  assert.match(source, /tr\("usage\.usagedashboard\.rangesUseEachSessions"\)/);
+  assert.ok(
+    source.indexOf('className="usage-provider-detail-grid"')
+      < source.indexOf('className="usage-provider-view-intro"'),
+    "provider summary follows the provider cards",
+  );
   assert.match(source, /new ResizeObserver/);
   assert.doesNotMatch(source, /role="(?:tab|radio)"/);
   assert.doesNotMatch(source, /usage-dashboard-sidebar/);
@@ -118,13 +122,13 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   assert.match(styles, /\.usage-provider-error \{[\s\S]*?padding: 9px 10px;/);
   assert.match(styles, /@container usage-dashboard \(min-width: 701px\) and \(max-width: 760px\)\s*\{[\s\S]*?\.usage-view-tabs\s*\{[^}]*width:\s*100%;\s*margin:\s*0;/);
 
+  assert.doesNotMatch(source, /usage-dashboard-hero|usage-hero-status|workspaceTelemetry/);
   const usageMobileStart = styles.indexOf(
     "@container usage-dashboard (max-width: 480px) {",
     styles.indexOf(".usage-dashboard {"),
   );
   const usageMobileEnd = styles.indexOf("@media (prefers-reduced-motion: reduce)", usageMobileStart);
   const usageMobileStyles = styles.slice(usageMobileStart, usageMobileEnd);
-  assert.match(usageMobileStyles, /\.usage-eyebrow\s*\{\s*font-size:\s*var\(--font-meta\);\s*letter-spacing:\s*\.075em;\s*line-height:\s*1\.35;/);
   assert.match(usageMobileStyles, /\.usage-spend-legend \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;[\s\S]*?max-width: none;/);
   assert.match(styles, /\.usage-view-tabs \.ui-tab\s*\{\s*flex:\s*1;\s*\}/);
   assert.match(styles, /\.usage-layout-compact \.usage-cohort-chart\s*\{\s*height:\s*174px;/);

@@ -48,13 +48,9 @@ test("Usage layout is container-responsive in narrow docked surfaces", async () 
   assert.doesNotMatch(usage, /@media[^{]*max-width/);
   assert.match(
     usage,
-    /@container usage-dashboard \(max-width: 820px\)[\s\S]*?\.usage-dashboard-hero\s*\{[\s\S]*?grid-template-columns:\s*42px minmax\(0, 1fr\)/,
+    /@container usage-dashboard \(max-width: 820px\)[\s\S]*?\.usage-dashboard-toolbar\s*\{[\s\S]*?flex-wrap:\s*wrap/,
   );
-  assert.match(
-    usage,
-    /@container usage-dashboard \(max-width: 820px\)[\s\S]*?\.usage-hero-status\s*\{[^}]*grid-column:\s*1 \/ -1[^}]*min-width:\s*0/s,
-  );
-  assert.match(usage, /\.usage-dashboard-hero :is\(h2, p\)\s*\{[^}]*overflow-wrap:\s*normal[^}]*word-break:\s*normal/s);
+  assert.doesNotMatch(usage, /usage-dashboard-hero|usage-hero-status|usage-eyebrow/);
 });
 
 test("shared style behavior is owned by core instead of copied across packages", async () => {

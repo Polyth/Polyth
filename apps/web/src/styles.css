@@ -4654,7 +4654,12 @@ html[dir="rtl"] input[type="number"] {
 .settings-nav-icon svg { width: 15px; height: 15px; color: currentColor; }
 .settings-nav .nav-foot { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-top: 1px solid var(--border-soft); color: var(--faint); font-size: var(--font-meta); }
 .settings-nav .nav-foot button { height: var(--control-h-sm); border-color: var(--border-soft); background: var(--elevated); color: var(--text-dim); font-size: var(--font-meta); }
-.settings-pane-head { min-height: 68px; padding: var(--space-3) var(--space-5); background: var(--elevated); }
+.settings-pane-head {
+  height: var(--control-h-lg);
+  min-height: var(--control-h-lg);
+  padding: var(--space-2) var(--space-5);
+  background: var(--elevated);
+}
 .settings-pane-head-copy { flex: 1; min-width: 0; }
 .settings-pane-head-copy .modal-desc { overflow-wrap: anywhere; }
 .settings-pane-title { font-size: var(--font-label); }
