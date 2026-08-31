@@ -9,6 +9,7 @@ import {
   createBrowserToolBridge,
   createBrowserToolPluginSource,
   prepareBrowserToolEnvironment,
+  resolveBrowserToolAction,
 } from "../src/browserTool.ts";
 
 const HOME = "http://127.0.0.1:5173/";
@@ -81,7 +82,13 @@ test("browser tool maps polyth-like actions onto the shared BrowserService", asy
 
     const capture = await call("browser.capture", { label: "../../After fix" });
     assert.equal(capture.path, ".polyth/screenshots/after-fix-2026-08-22T05-00-00-000.webp");
+    assert.match(String(capture.hint), /!\[\]\(\.polyth\/screenshots\/after-fix/);
     await access(join(cwd, String(capture.path)));
+
+    const openedByBareName = await call("open", { url: HOME });
+    assert.equal(openedByBareName.url, HOME);
+    const snapByBareName = await call("snapshot");
+    assert.match(String(snapByBareName.text), /Welcome/);
 
     await assert.rejects(
       () => call("browser.click"),
@@ -148,7 +155,7 @@ test("managed browser tool plugin merges with existing OpenCode plugins without 
             execute(
               input: Record<string, unknown>,
               context: { sessionID: string; directory: string; abort: AbortSignal },
-            ): Promise<string>;
+            ): Promise<string | { title: string; output: string }>;
           };
         };
       }>;
@@ -163,7 +170,9 @@ test("managed browser tool plugin merges with existing OpenCode plugins without 
       directory: dir,
       abort: new AbortController().signal,
     });
-    assert.equal(JSON.parse(output).ok, true);
+    const payload = typeof output === "string" ? JSON.parse(output) : JSON.parse(output.output);
+    assert.equal(payload.ok, true);
+    assert.equal(typeof output === "string" ? undefined : output.title, "Open a page in the browser panel");
     const request = captured.request;
     assert.ok(request);
     assert.equal(request?.url, env.POLYTH_BROWSER_TOOL_URL);
@@ -176,6 +185,7 @@ test("managed browser tool plugin merges with existing OpenCode plugins without 
     assert.equal(forwarded.action, "browser.open");
     assert.deepEqual(forwarded.parameters, { url: HOME, viewport: "mobile" });
     assert.deepEqual(forwarded.context, { sessionID: "backend-1", directory: dir });
+    assert.equal((forwarded as { tool?: string }).tool, "polyth_browser");
   } finally {
     globalThis.fetch = originalFetch;
     if (originalEndpoint === undefined) delete process.env.POLYTH_BROWSER_TOOL_URL;
@@ -183,5 +193,45 @@ test("managed browser tool plugin merges with existing OpenCode plugins without 
     if (originalToken === undefined) delete process.env.POLYTH_BROWSER_TOOL_TOKEN;
     else process.env.POLYTH_BROWSER_TOOL_TOKEN = originalToken;
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("bare action names resolve inside the browser tool", () => {
+  assert.equal((resolveBrowserToolAction("open") as { action: string }).action, "browser.open");
+  assert.equal((resolveBrowserToolAction("snapshot") as { action: string }).action, "browser.snapshot");
+  assert.equal((resolveBrowserToolAction("browser.click") as { action: string }).action, "browser.click");
+  assert.match((resolveBrowserToolAction("read") as { error: string }).error, /Use one of:/);
+  assert.match((resolveBrowserToolAction("") as { error: string }).error, /missing/);
+});
+
+test("plugin schema tells the model how to drive the page", () => {
+  const source = createBrowserToolPluginSource();
+  assert.match(source, /only way to drive a page/);
+  assert.match(source, /"const":"browser\.open"/);
+  assert.match(source, /context\.metadata/);
+  assert.match(source, /tool: "polyth_browser"/);
+});
+
+test("missing Chromium is an immediate agent-facing failure, not a timeout", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "polyth-browser-tool-"));
+  const browser = createBrowserService({ driver: null, unavailableReason: "browser engine unavailable: nope" });
+  const bridge = createBrowserToolBridge({ browser });
+  const registration = bridge.register({ projectId: "project-1", cwd });
+  try {
+    await assert.rejects(
+      () => bridge.execute(registration.token, {
+        action: "open",
+        parameters: { url: HOME },
+      }),
+      (error: Error & { code?: string }) => {
+        assert.equal(error.code, "unavailable");
+        assert.match(error.message, /no Chromium executable was found/);
+        assert.match(error.message, /POLYTH_CHROMIUM_PATH/);
+        return true;
+      },
+    );
+  } finally {
+    registration.dispose();
+    await rm(cwd, { recursive: true, force: true });
   }
 });

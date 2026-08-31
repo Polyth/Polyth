@@ -9,22 +9,55 @@ import { stripJsonc } from "./config.ts";
 
 export const BROWSER_TOOL_PATH = "/internal/opencode/browser-tool";
 const TOOL_SCHEMA_VERSION = 1;
-const ACTIONS = [
-  "browser.open",
-  "browser.snapshot",
-  "browser.click",
-  "browser.type",
-  "browser.scroll",
-  "browser.back",
-  "browser.forward",
-  "browser.inspect",
-  "browser.capture",
-  "browser.resize",
-  "browser.colorScheme",
-] as const;
-type BrowserToolAction = typeof ACTIONS[number];
+const TOOL_NAME = "polyth_browser";
 
+/** Per-action copy is what the model reads; titles are native tool metadata. */
+const ACTION_DEFINITIONS = [
+  { action: "browser.open", title: "Open a page in the browser panel", description: "Open url in the in-app browser; use it to look at the running app. Set viewport to mobile, tablet or desktop to lay the page out at that size" },
+  { action: "browser.snapshot", title: "Read the open page", description: "Read the open page: url, title, visible text, and interactive elements with the selectors the other browser actions accept. Pass selector to read only that part of a long page. Reports any errors the page logged" },
+  { action: "browser.click", title: "Click on the open page", description: "Click an element; give selector, or text to match a link or button by its visible label" },
+  { action: "browser.type", title: "Type into the open page", description: "Type value into the field matched by selector; set submit to press Enter afterwards" },
+  { action: "browser.scroll", title: "Scroll the open page", description: "Scroll the page; direction is up, down, top, or bottom, or pass selector to bring one element into view" },
+  { action: "browser.back", title: "Go back in the browser panel", description: "Return to the previous page in this tab; no parameters" },
+  { action: "browser.forward", title: "Go forward in the browser panel", description: "Move forward again in this tab; no parameters" },
+  { action: "browser.inspect", title: "Read how an element renders", description: "Read the computed styles of the element matched by selector — colours, fonts, spacing, borders — as the page actually renders them" },
+  { action: "browser.capture", title: "Save a screenshot of the page", description: "Save what is currently visible as an image file in the project and return its path, so a change can be shown rather than described. Pass label to name it (for example before-fix)" },
+  { action: "browser.resize", title: "Change the page viewport", description: "Lay the open page out at a different size; viewport is mobile, tablet, desktop, or fill to use the whole panel" },
+  { action: "browser.colorScheme", title: "Change the page color scheme", description: "Emulate prefers-color-scheme on the open page; colorScheme is light, dark, or no-preference" },
+] as const;
+type BrowserToolAction = typeof ACTION_DEFINITIONS[number]["action"];
+const ACTIONS = ACTION_DEFINITIONS.map((entry) => entry.action);
 const ACTION_SET = new Set<string>(ACTIONS);
+const ACTION_TITLES = Object.fromEntries(
+  ACTION_DEFINITIONS.map((entry) => [entry.action, entry.title]),
+);
+
+const ENGINE_UNAVAILABLE =
+  "The controlled browser is not available here: no Chromium executable was found. "
+  + "Set POLYTH_CHROMIUM_PATH to a Chrome or Chromium binary. Nothing was changed. "
+  + "Mention this to the user only if it affects what they asked for.";
+
+const WEB_TOOL_DESCRIPTION =
+  "Look at and interact with a web page in Polyth's in-app browser so you can check your own work rather than describing what you expect. This is the only way to drive a page — there is no separate browser MCP. Use one action per call. Open a page, snapshot it to read its text and interactive elements, then click, type or scroll using the selectors the snapshot returned; snapshots also report any errors the page logged. Pass a selector to browser.snapshot to read one part of a long page. browser.inspect returns computed styles when the question is how something renders. Set viewport to check a layout at mobile, tablet or desktop size. The page is an isolated Chromium context, not the user's personal browser.";
+
+const bareName = (action: string): string => {
+  const separator = action.indexOf(".");
+  return separator === -1 ? action : action.slice(separator + 1);
+};
+
+/** Models drop the `browser.` namespace once the tool is already named *browser*. */
+export function resolveBrowserToolAction(requested: unknown): { action: BrowserToolAction } | { error: string } {
+  const value = typeof requested === "string" ? requested.trim() : "";
+  if (value && ACTION_SET.has(value)) return { action: value as BrowserToolAction };
+  if (value) {
+    const matches = ACTIONS.filter((candidate) => bareName(candidate) === value);
+    if (matches.length === 1) return { action: matches[0]! };
+  }
+  return {
+    error: `Unsupported browser action: ${value || "missing"}. Use one of: ${ACTIONS.join(", ")}`,
+  };
+}
+
 const VIEWPORTS = {
   mobile: { width: 390, height: 844 },
   tablet: { width: 768, height: 1024 },
@@ -173,9 +206,12 @@ export function createBrowserToolBridge(options: {
 
   const execute = async (token: string, payload: BrowserToolPayload): Promise<JsonObject> => {
     const context = registrationOf(token);
-    const action = nonEmpty(payload.action);
-    if (!action || !ACTION_SET.has(action)) {
-      throw usage(`Unsupported browser action: ${action ?? "missing"}. Use one of: ${ACTIONS.join(", ")}`);
+    const resolution = resolveBrowserToolAction(payload.action);
+    if ("error" in resolution) throw usage(resolution.error);
+    const action = resolution.action;
+    const capability = options.browser.capability();
+    if (!capability.available) {
+      throw Object.assign(new Error(ENGINE_UNAVAILABLE), { code: "unavailable" });
     }
     const parameters = asObject(payload.parameters);
     const backendSessionId = nonEmpty(payload.context?.sessionID);
@@ -296,10 +332,12 @@ export function createBrowserToolBridge(options: {
       if (rel.startsWith("..")) throw new Error("screenshot path escaped the project");
       await mkdir(resolve(context.cwd, ".polyth", "screenshots"), { recursive: true });
       await writeFile(absolutePath, observation.screenshot.data);
+      const path = relativePath.split("\\").join("/");
       return {
         ...publicSession(options.browser.get(session.id) ?? session),
-        path: relativePath.split("\\").join("/"),
+        path,
         mime: observation.screenshot.mime,
+        hint: `Write ![](${path}) in your reply to show this image to the user; it is rendered under your message.`,
       };
     }
 
@@ -337,12 +375,15 @@ export function createBrowserToolBridge(options: {
         return true;
       }
       const body = await rc.body();
+      const requested = nonEmpty((body as { action?: unknown }).action);
+      const resolved = resolveBrowserToolAction(requested);
+      const reported = "action" in resolved ? resolved.action : requested ?? "unknown";
       try {
         const data = await execute(registration, body as BrowserToolPayload);
         rc.json(200, {
           schemaVersion: TOOL_SCHEMA_VERSION,
           ok: true,
-          action: nonEmpty(body.action) ?? "unknown",
+          action: reported,
           data,
         });
       } catch (error) {
@@ -350,7 +391,7 @@ export function createBrowserToolBridge(options: {
         rc.json(200, {
           schemaVersion: TOOL_SCHEMA_VERSION,
           ok: false,
-          action: nonEmpty(body.action) ?? "unknown",
+          action: reported,
           error: {
             message: e.message,
             kind: e.code === "invalid-input" ? "usage" : "runtime",
@@ -364,38 +405,97 @@ export function createBrowserToolBridge(options: {
 
 export function createBrowserToolPluginSource(): string {
   const parameters = {
-    url: { type: "string", description: "Absolute http(s) URL for browser.open" },
-    selector: { type: "string", description: "CSS selector from the page" },
-    text: { type: "string", description: "Visible label for browser.click" },
-    exact: { type: "boolean" },
-    value: { type: "string", description: "Text for browser.type" },
-    submit: { type: "boolean" },
-    direction: { type: "string", enum: ["up", "down", "top", "bottom"] },
-    viewport: { type: "string", enum: ["mobile", "tablet", "desktop", "fill"] },
-    colorScheme: { type: "string", enum: ["light", "dark", "no-preference"] },
-    label: { type: "string", description: "Short filename label for browser.capture" },
+    url: { type: "string", description: "http(s) URL for browser.open" },
+    selector: { type: "string", description: "CSS selector from a browser.snapshot result" },
+    text: { type: "string", description: "Visible label to match when no selector is given" },
+    exact: { type: "boolean", description: "Require an exact visible-label match for browser.click" },
+    value: { type: "string", description: "Text to type for browser.type" },
+    submit: { type: "boolean", description: "Press Enter after typing" },
+    direction: { type: "string", enum: ["up", "down", "top", "bottom"], description: "Scroll direction for browser.scroll" },
+    viewport: { type: "string", enum: ["mobile", "tablet", "desktop", "fill"], description: "Page layout size; snapshots report which one is in effect" },
+    colorScheme: { type: "string", enum: ["light", "dark", "no-preference"], description: "prefers-color-scheme emulation for browser.colorScheme" },
+    label: { type: "string", description: "Short name for a browser.capture image, such as before-fix" },
+  };
+  const actionSchema = {
+    type: "string",
+    enum: ACTIONS,
+    oneOf: ACTION_DEFINITIONS.map((entry) => ({ const: entry.action, description: entry.description })),
+    description: "Browser action to perform",
   };
   return `export const PolythBrowserPlugin = async () => ({
   tool: {
-    polyth_browser: {
-      description: ${JSON.stringify("Look at and interact with the controlled browser shared with Polyth. Use one browser.* action per call. Open a page, snapshot it, then use selectors to click, type, scroll, inspect, capture, resize, or emulate a color scheme.")},
+    ${TOOL_NAME}: {
+      description: ${JSON.stringify(WEB_TOOL_DESCRIPTION)},
       args: {
-        action: { type: "string", enum: ${JSON.stringify(ACTIONS)}, description: "Browser action to perform" },
-        parameters: { type: "object", properties: ${JSON.stringify(parameters)}, additionalProperties: false, description: "Action inputs; use an empty object when none are needed" },
+        action: ${JSON.stringify(actionSchema)},
+        parameters: { type: "object", properties: ${JSON.stringify(parameters)}, additionalProperties: false, description: "Inputs for the action; use an empty object when none are needed" },
       },
       async execute(input, context) {
+        const { action: requestedAction, parameters, ...flattened } = input ?? {}
+        const resolvedParameters = { ...flattened, ...(parameters ?? {}) }
+        const actionTitles = ${JSON.stringify(ACTION_TITLES)}
+        const title = actionTitles[requestedAction]
+          ?? actionTitles["browser." + requestedAction]
+          ?? requestedAction
+        if (typeof context.metadata === "function") {
+          context.metadata({
+            title,
+            metadata: {
+              ${TOOL_NAME}: {
+                schemaVersion: ${TOOL_SCHEMA_VERSION},
+                action: requestedAction,
+                description: title,
+              },
+            },
+          })
+        }
         const endpoint = process.env.POLYTH_BROWSER_TOOL_URL
         const token = process.env.POLYTH_BROWSER_TOOL_TOKEN
-        const { action, parameters, ...flattened } = input ?? {}
-        const resolvedParameters = { ...flattened, ...(parameters ?? {}) }
-        if (!endpoint || !token) return JSON.stringify({ schemaVersion: 1, ok: false, action: action ?? "unknown", error: { message: "Polyth browser tool connection is unavailable", kind: "runtime" } })
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: { authorization: "Bearer " + token, "content-type": "application/json" },
-          body: JSON.stringify({ action, parameters: resolvedParameters, context: { sessionID: context.sessionID, directory: context.directory } }),
-          signal: context.abort,
+        const failure = (payload) => ({
+          title,
+          output: JSON.stringify(payload),
+          metadata: { polyth: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: requestedAction, description: title, ok: false } },
         })
-        return await response.text()
+        if (!endpoint || !token) {
+          return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: requestedAction ?? "unknown", error: { message: "Polyth browser tool connection is unavailable", kind: "runtime" } })
+        }
+        try {
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+            body: JSON.stringify({
+              action: requestedAction,
+              parameters: resolvedParameters,
+              tool: ${JSON.stringify(TOOL_NAME)},
+              context: { sessionID: context.sessionID, directory: context.directory },
+            }),
+            signal: context.abort,
+          })
+          const output = await response.text()
+          let result = null
+          try { result = JSON.parse(output) } catch {}
+          const valid = result?.schemaVersion === ${TOOL_SCHEMA_VERSION} && typeof result?.ok === "boolean" && typeof result?.action === "string"
+          if (typeof context.metadata === "function") {
+            context.metadata({
+              title,
+              metadata: {
+                ${TOOL_NAME}: {
+                  schemaVersion: ${TOOL_SCHEMA_VERSION},
+                  action: requestedAction,
+                  description: title,
+                  ok: valid && result.ok === true,
+                },
+              },
+            })
+          }
+          if (valid) {
+            return { title, output, metadata: { polyth: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: result.action, description: title, ok: result.ok === true } } }
+          }
+          return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: requestedAction ?? "unknown", error: { message: "Polyth returned an invalid response", kind: "runtime", status: response.status } })
+        } catch (error) {
+          if (context.abort?.aborted) throw error
+          return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: requestedAction ?? "unknown", error: { message: error instanceof Error ? error.message : String(error), kind: "runtime" } })
+        }
       },
     },
   },

@@ -21,7 +21,7 @@ export type { BrowserDriver, DriverPage, DriverPageEvent, DriverObservation, Dri
 export { createFakeDriver, demoWeb, type FakeWeb, type FakePage } from "./fake.ts";
 export { checkUrl, isPrivateAddress, isLoopbackAddress, originOf, type UrlDecision, type UrlPolicyOptions, type Resolver } from "./policy.ts";
 export { redactObservationText, type RedactOptions } from "./redact.ts";
-export { createChromiumDriver, findChromiumExecutable } from "./chromium.ts";
+export { createChromiumDriver, findChromiumExecutable, CHROMIUM_CANDIDATE_PATHS } from "./chromium.ts";
 
 export interface BrowserFrame {
   browserSessionId: string;

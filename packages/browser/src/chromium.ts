@@ -7,25 +7,44 @@ import { constants } from "node:fs";
 import type { BrowserTarget } from "@polyth/contracts";
 import type { BrowserDriver, DriverNav, DriverPage, DriverPageEvent } from "./driver.ts";
 
-const CANDIDATE_PATHS = [
+export const CHROMIUM_CANDIDATE_PATHS = [
   "/usr/bin/chromium",
   "/usr/bin/chromium-browser",
+  "/usr/local/bin/chromium",
   "/usr/bin/google-chrome",
   "/usr/bin/google-chrome-stable",
+  "/usr/local/bin/google-chrome",
+  "/opt/google/chrome/google-chrome",
   "/snap/bin/chromium",
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   "/Applications/Chromium.app/Contents/MacOS/Chromium",
 ];
 
-/** Configured or well-known Chromium executable, or null (fallback mode). */
+const executable = async (path: string): Promise<string | null> => {
+  try {
+    await access(path, constants.X_OK);
+    return path;
+  } catch {
+    return null;
+  }
+};
+
+/** Configured or well-known Chromium executable, or null (fallback mode).
+ *  Never downloads a browser; playwright-core's bundled Chrome is used only
+ *  when that file is already on disk. */
 export async function findChromiumExecutable(env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
-  const configured = env.POLYTH_CHROMIUM_PATH;
-  const candidates = configured ? [configured] : CANDIDATE_PATHS;
-  for (const p of candidates) {
-    try {
-      await access(p, constants.X_OK);
-      return p;
-    } catch { /* keep looking */ }
+  const configured = env.POLYTH_CHROMIUM_PATH?.trim();
+  if (configured) return executable(configured);
+  for (const path of CHROMIUM_CANDIDATE_PATHS) {
+    const found = await executable(path);
+    if (found) return found;
+  }
+  try {
+    const { chromium } = await import("playwright-core");
+    const bundled = chromium.executablePath();
+    if (bundled) return executable(bundled);
+  } catch {
+    // playwright-core absent or no local browser install
   }
   return null;
 }

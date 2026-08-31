@@ -105,6 +105,7 @@ export {
   createBrowserToolBridge,
   createBrowserToolPluginSource,
   prepareBrowserToolEnvironment,
+  resolveBrowserToolAction,
 } from "./browserTool.ts";
 export type {
   BrowserToolBridge,
