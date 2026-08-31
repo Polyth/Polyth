@@ -27,6 +27,26 @@ export function firstUserTextCached(events: readonly SessionEvent[] | undefined)
   return text;
 }
 
+/** Text of the latest non-empty user message in a session's event log, if any. */
+export function lastUserText(events: readonly SessionEvent[] | undefined): string | undefined {
+  if (!events) return undefined;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i]!.type !== "user/message") continue;
+    const t = (events[i]!.data as JsonObject).text;
+    if (typeof t === "string" && t.trim()) return t;
+  }
+}
+
+const lastUserTextCache = new WeakMap<readonly SessionEvent[], string | undefined>();
+
+export function lastUserTextCached(events: readonly SessionEvent[] | undefined): string | undefined {
+  if (events === undefined) return undefined;
+  if (lastUserTextCache.has(events)) return lastUserTextCache.get(events);
+  const text = lastUserText(events);
+  lastUserTextCache.set(events, text);
+  return text;
+}
+
 export interface AutocompleteItem {
   label: string;
   detail: string;

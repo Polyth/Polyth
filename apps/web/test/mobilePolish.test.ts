@@ -114,7 +114,6 @@ test("fresh mobile chat exposes project targets and attachments use the platform
   const header = read("../src/components/Header.tsx");
   const mobileHeader = read("../src/components/mobile/MobileSessionHeader.tsx");
   const mobileNavigation = read("../src/components/mobile/MobileNavigationRail.tsx");
-  const widgetsSettings = read("../src/components/settings/WidgetsPage.tsx");
   const css = readWebStylesSync();
 
   // UX-MOBILE-01 §5: the compact context bar belongs to the shared composer,
@@ -143,17 +142,38 @@ test("fresh mobile chat exposes project targets and attachments use the platform
   assert.match(css, /\.composer-mobile\.composer-collapsed:not\(\.composer-has-draft\) \.composer-workflow\s*\{\s*display:\s*none;/);
   assert.match(css, /\.composer-mobile\.composer-has-draft \.composer-workflow\s*\{\s*display:\s*inline-flex;/);
   assert.match(mobileHeader, /displaySessionTitle\(session\.title, session\.id, firstUserTextCached\(events\[session\.id\]\)\)/);
-  assert.match(mobileHeader, /const activeTask = model\.tasks\?\.items\.find\(\(task\) => task\.status === "active"\)/);
-  assert.match(mobileHeader, /label="Recent sessions"/);
-  assert.match(mobileHeader, /api\.taskBrief\(sessionId\)/);
-  assert.match(mobileHeader, /<SheetSection title="Task list" count=\{tasks\.length\}>/);
+  assert.match(mobileHeader, /buildIslandItems\(/);
+  assert.doesNotMatch(mobileHeader, /label="Recent sessions"/);
+  assert.match(mobileHeader, /lastUserTextCached/);
+  assert.match(mobileHeader, /origin="top"/);
+  assert.match(mobileHeader, /tr\("mobile.island.tasks"\)/);
   assert.match(css, /\.mobile-float-navigation, \.mobile-float-actions \{ display: inline-grid; grid-auto-flow: column;/);
-  assert.match(css, /\.mobile-task-hero\s*\{[^}]*var\(--accent-wash\)/s);
+  assert.match(css, /\.mobile-island-now\s*\{/s);
+  assert.match(css, /\.sheet-origin-top\s*\{/s);
+  assert.match(css, /@keyframes sheet-drop/);
   assert.match(header, /<MobileSessionHeader \/>/);
   assert.doesNotMatch(header, /WorkspaceBottomNav/);
   assert.match(mobileNavigation, /ui\.mobileShortcuts/);
-  assert.match(widgetsSettings, /settings\.widgetspage\.canvasAvailableTabletDesktop/);
   assert.match(css, /\.polyth-gradient\s*\{[^}]*linear-gradient/s);
+});
+
+test("the phone session island combines recents, tasks, and requests", () => {
+  const mobileHeader = read("../src/components/mobile/MobileSessionHeader.tsx");
+  const sheet = read("../src/components/mobile/Sheet.tsx");
+  const css = readWebStylesSync();
+  assert.match(mobileHeader, /buildIslandItems\(/);
+  assert.match(mobileHeader, /origin="top"/);
+  assert.match(mobileHeader, /lastUserTextCached/);
+  assert.match(mobileHeader, /eventsHaveCodeChanges/);
+  assert.match(mobileHeader, /prefetchSessionTail/);
+  assert.doesNotMatch(mobileHeader, /ClockIcon|Recent sessions|SessionSwitcher|taskBrief/);
+  assert.doesNotMatch(mobileHeader, /count=\{tasks\.length\}|count=\{recent\.length\}/);
+  assert.match(sheet, /origin = "bottom"/);
+  assert.match(sheet, /sheet-origin-top/);
+  assert.match(css, /\.mobile-island-kind/);
+  assert.match(css, /\.mobile-island-diff \.add/);
+  assert.match(css, /@keyframes island-task-pulse/);
+  assert.match(css, /@keyframes sheet-drop/);
 });
 
 test("source-control surfaces keep responsive and accessible audit contracts", () => {

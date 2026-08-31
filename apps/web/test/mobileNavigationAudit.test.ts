@@ -14,13 +14,12 @@ test("every phone view uses the same three-segment shell bar", async () => {
     readWebStyles(),
   ]);
 
-  assert.match(header, /if \(mode === "phone"\) \{\s*return <MobileSessionHeader \/>;\s*\}/s);
-  assert.doesNotMatch(header, /chatSurface\s*\?\s*<MobileSessionHeader/);
+  assert.match(header, /if \(mode === "phone"\) \{\s*return chatSurface \? <MobileSessionHeader \/> : <MobileViewHeader \/>;\s*\}/s);
   assert.doesNotMatch(header, /WorkspaceBottomNav/);
   assert.match(mobileHeader, /label="Open navigation"/);
   assert.match(mobileHeader, /label="New session"/);
   assert.match(mobileHeader, /label="Open tools"/);
-  assert.match(mobileHeader, /title="Select a session"/);
+  assert.match(mobileHeader, /origin="top"/);
   assert.match(mobileHeader, /title="Tools"/);
   assert.doesNotMatch(mobileHeader, /Icon\.plus/);
   assert.match(css, /\.app-shell\s*\{[^}]*padding-top:\s*calc\(var\(--safe-top\) \+ var\(--tap\) \+ var\(--space-6\)\)/s);

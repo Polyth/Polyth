@@ -11,6 +11,7 @@ import {
   filterCommands,
   filterSnippets,
   firstUserText,
+  lastUserText,
   goalChecklist,
   groupWork,
   loadDraft,
@@ -1147,6 +1148,14 @@ test("firstUserText finds the first non-empty user message", () => {
   assert.equal(firstUserText([ev("user/message", { text: "hi" })]), "hi");
   assert.equal(firstUserText(undefined), undefined);
   assert.equal(firstUserText([]), undefined);
+});
+
+test("lastUserText finds the latest non-empty user message", () => {
+  assert.equal(lastUserText([
+    ev("user/message", { text: "first" }),
+    ev("user/message", { text: "second" }),
+  ]), "second");
+  assert.equal(lastUserText([ev("user/message", { text: "   " })]), undefined);
 });
 
 test("copyText supports an injected clipboard and reports failure without a fallback", async () => {

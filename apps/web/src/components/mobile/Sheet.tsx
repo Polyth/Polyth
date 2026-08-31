@@ -48,6 +48,8 @@ export interface SheetProps {
   className?: string;
   /** `tall` reserves near-fullscreen height for long, searchable lists. */
   size?: "auto" | "tall";
+  /** Bottom sheets rise from the composer; top sheets drop from the island. */
+  origin?: "bottom" | "top";
   /** Explicit focus destination after every close path. */
   restoreFocusRef?: RefObject<HTMLElement | null>;
 }
@@ -64,6 +66,7 @@ export default function Sheet({
   footer,
   className,
   size = "auto",
+  origin = "bottom",
   restoreFocusRef,
 }: SheetProps) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -118,17 +121,23 @@ export default function Sheet({
   };
   const onGrabberMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (dragFrom.current === null) return;
-    setDrag(Math.max(0, event.clientY - dragFrom.current));
+    const delta = origin === "top"
+      ? dragFrom.current - event.clientY
+      : event.clientY - dragFrom.current;
+    setDrag(Math.max(0, delta));
   };
   const onGrabberUp = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (dragFrom.current === null) return;
-    endDrag(Math.max(0, event.clientY - dragFrom.current));
+    const delta = origin === "top"
+      ? dragFrom.current - event.clientY
+      : event.clientY - dragFrom.current;
+    endDrag(Math.max(0, delta));
     event.currentTarget.releasePointerCapture?.(event.pointerId);
   };
 
   const surface = (
     <div
-      className="sheet-backdrop"
+      className={`sheet-backdrop${origin === "top" ? " sheet-backdrop-top" : ""}`}
       // Ghost-click guard. The gesture that opens a sheet finishes with a
       // click delivered at the finger's position — which the sheet now covers,
       // so a row right under the trigger would be "chosen" instantly. A
@@ -151,8 +160,8 @@ export default function Sheet({
         aria-label={title}
         tabIndex={-1}
         data-sheet-focus=""
-        className={`sheet sheet-${size}${className ? ` ${className}` : ""}`}
-        style={drag > 0 ? { transform: `translateY(${drag}px)` } : undefined}
+        className={`sheet sheet-${size}${origin === "top" ? " sheet-origin-top" : ""}${className ? ` ${className}` : ""}`}
+        style={drag > 0 ? { transform: `translateY(${origin === "top" ? -drag : drag}px)` } : undefined}
         onPointerDown={(event) => {
           // Keep focus (and therefore Escape and the Tab trap) inside the
           // sheet when a press lands on non-interactive chrome.

@@ -526,18 +526,18 @@ test("phone views expose only floating power-on-demand controls", async () => {
   const navigation = await read("../src/components/mobile/MobileNavigationRail.tsx");
   const css = await readWebStyles();
 
-  assert.match(header, /if \(mode === "phone"\) \{\s*return <MobileSessionHeader \/>;\s*\}/s, "every phone view mounts the floating shell");
+  assert.match(header, /if \(mode === "phone"\) \{\s*return chatSurface \? <MobileSessionHeader \/> : <MobileViewHeader \/>;\s*\}/s, "phone chat uses the session island; other phone views use the view header");
   const phoneBranch = header.slice(header.indexOf('if (mode === "phone")'), header.indexOf("\n\n  return (", header.indexOf('if (mode === "phone")')));
   assert.doesNotMatch(phoneBranch, /MobileNavigationRail/, "the phone branch cannot bring back the legacy rail");
   assert.doesNotMatch(header, /WorkspaceBottomNav/, "active phone chat has no bottom navigation");
   assert.match(mobileHeader, /label="Open navigation"/);
   assert.match(mobileHeader, /label="Open tools"/);
   assert.match(mobileHeader, /label="New session"/);
-  assert.match(mobileHeader, /<SessionSwitcher/);
+  assert.match(mobileHeader, /<IslandOverview/);
   assert.match(mobileHeader, /<Tools/);
   assert.doesNotMatch(mobileHeader, /Icon\.plus/);
   assert.match(css, /\.mobile-session-floats\s*\{[^}]*position:\s*fixed/s);
-  assert.match(css, /\.mobile-session-switcher\.sheet, \.mobile-tools-sheet\.sheet, \.mobile-task-overview\.sheet\s*\{[^}]*width:\s*calc\(100vw/s);
+  assert.match(css, /\.mobile-tools-sheet\.sheet\s*\{[^}]*width:\s*calc\(100vw/s);
   assert.match(css, /\.app-shell\s*\{[^}]*padding-top:\s*calc\(var\(--safe-top\) \+ var\(--tap\) \+ var\(--space-6\)\)/s, "non-chat phone views clear the floating shell");
   assert.ok(navigation.includes("useResolvedCapabilities()"), "the rail follows configured capabilities");
   assert.ok(navigation.includes("useRailSurfaceModel()"), "notification and plugin surfaces stay reachable");
