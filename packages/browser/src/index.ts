@@ -14,12 +14,12 @@ import type {
   JsonValue,
 } from "@polyth/contracts";
 import type { BrowserDriver, DriverPage, DriverPageEvent } from "./driver.ts";
-import { checkUrl, originOf, type UrlPolicyOptions } from "./policy.ts";
+import { checkUrl, isLoopbackAddress, isLoopbackHost, originOf, type UrlPolicyOptions } from "./policy.ts";
 import { redactObservationText } from "./redact.ts";
 
 export type { BrowserDriver, DriverPage, DriverPageEvent, DriverObservation, DriverNav, DriverOpenOptions } from "./driver.ts";
 export { createFakeDriver, demoWeb, type FakeWeb, type FakePage } from "./fake.ts";
-export { checkUrl, isPrivateAddress, isLoopbackAddress, originOf, type UrlDecision, type UrlPolicyOptions, type Resolver } from "./policy.ts";
+export { checkUrl, isLoopbackHost, isPrivateAddress, isLoopbackAddress, originAliases, originOf, type UrlDecision, type UrlPolicyOptions, type Resolver } from "./policy.ts";
 export { redactObservationText, type RedactOptions } from "./redact.ts";
 export { createChromiumDriver, findChromiumExecutable, CHROMIUM_CANDIDATE_PATHS } from "./chromium.ts";
 
@@ -237,7 +237,22 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
         ...viewport,
         colorScheme: dto.colorScheme,
         guardNavigation: async (url) => {
-          const decision = await checkUrl(url, policyOpts());
+          let decision = await checkUrl(url, policyOpts());
+          if (!decision.ok && decision.code === "approval-required") {
+            try {
+              const parsed = new URL(/^https?:\/\//i.test(url.trim()) ? url.trim() : `http://${url.trim()}`);
+              const host = parsed.hostname.toLowerCase();
+              const loopback = isLoopbackHost(host)
+                || (/^\d+\.\d+\.\d+\.\d+$/.test(host) && isLoopbackAddress(host));
+              if (!loopback) {
+                const o = originOf(url);
+                if (o) {
+                  approved.add(o);
+                  decision = await checkUrl(url, policyOpts());
+                }
+              }
+            } catch { /* fall through to block */ }
+          }
           if (!decision.ok) {
             emit({ browserSessionId: id, kind: "navigation-blocked", url, message: decision.reason });
             throw err(decision.code, decision.reason);

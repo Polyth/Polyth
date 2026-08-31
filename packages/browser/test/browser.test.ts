@@ -261,3 +261,82 @@ test("redactObservationText scrubs common credential shapes", () => {
   assert.equal(redactObservationText("keep customsecret out", { secrets: ["customsecret"] }).includes("customsecret"), false);
   assert.equal(redactObservationText("x".repeat(30), { maxChars: 10 }).startsWith("xxxxxxxxxx"), true);
 });
+
+const EXAMPLE = "https://example.com/";
+
+test("in-page click to unapproved public origin auto-follows and records approval", async () => {
+  const svc = createBrowserService({
+    driver: createFakeDriver({
+      pages: {
+        [HOME]: {
+          title: "App",
+          text: "welcome",
+          links: { "a#ext": EXAMPLE },
+        },
+        [EXAMPLE]: { title: "Example", text: "example domain" },
+      },
+    }),
+    allowedOrigins: () => ["http://127.0.0.1:5173"],
+    resolve: async () => ["93.184.216.34"],
+  });
+  const s = await svc.create({ projectId: "p1", url: HOME });
+  const { session: after } = await svc.action(s.id, { kind: "click", target: { selector: "a#ext" } }, "user");
+  assert.equal(after.url, EXAMPLE);
+  assert.ok(svc.approvals().includes("https://example.com"));
+  await svc.close(s.id);
+});
+
+test("navigate() to a new public origin still requires explicit approval", async () => {
+  const svc = service();
+  const s = await svc.create({ projectId: "p1", url: HOME });
+  await assert.rejects(
+    () => svc.navigate(s.id, EXAMPLE, "user"),
+    (e: Error & { code?: string }) => e.code === "approval-required",
+  );
+  assert.ok(!svc.approvals().includes("https://example.com"));
+  await svc.close(s.id);
+});
+
+test("in-page hop to unapproved loopback stays blocked; private IPs stay blocked", async () => {
+  const loopbackSvc = createBrowserService({
+    driver: createFakeDriver({
+      pages: {
+        [HOME]: {
+          title: "App",
+          links: { "a#loop": "http://127.0.0.1:9999/" },
+        },
+        "http://127.0.0.1:9999/": { title: "Other loopback", text: "should not land" },
+      },
+    }),
+    allowedOrigins: () => ["http://127.0.0.1:5173"],
+    resolve: async () => ["93.184.216.34"],
+  });
+  const loop = await loopbackSvc.create({ projectId: "p1", url: HOME });
+  await assert.rejects(
+    () => loopbackSvc.action(loop.id, { kind: "click", target: { selector: "a#loop" } }, "user"),
+    (e: Error & { code?: string }) => e.code === "approval-required",
+  );
+  assert.equal(loopbackSvc.get(loop.id)!.url, HOME);
+  await loopbackSvc.close(loop.id);
+
+  const privateSvc = createBrowserService({
+    driver: createFakeDriver({
+      pages: {
+        [HOME]: {
+          title: "App",
+          links: { "a#priv": "http://10.0.0.5/" },
+        },
+        "http://10.0.0.5/": { title: "Private", text: "blocked" },
+      },
+    }),
+    allowedOrigins: () => ["http://127.0.0.1:5173"],
+    resolve: async () => ["93.184.216.34"],
+  });
+  const priv = await privateSvc.create({ projectId: "p1", url: HOME });
+  await assert.rejects(
+    () => privateSvc.action(priv.id, { kind: "click", target: { selector: "a#priv" } }, "user"),
+    (e: Error & { code?: string }) => e.code === "blocked-private",
+  );
+  assert.equal(privateSvc.get(priv.id)!.url, HOME);
+  await privateSvc.close(priv.id);
+});
