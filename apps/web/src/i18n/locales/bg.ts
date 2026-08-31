@@ -174,6 +174,7 @@ export const bg: AppMessages = {
   "composer.discovery.addsALinkOnly": "Добавя само линк",
   "composer.discovery.attachGoal": "Прикачи цел…",
   "composer.discovery.attachmentCompatibilityNotReported": "Съвместимостта на прикачените файлове не се отчита от този доставчик",
+  "composer.discovery.attachmentImagesNotSupported": "Този модел не поддържа прикачени изображения",
   "composer.discovery.clearDraftBeforeShell": "Изчистете черновата, преди да влезете в режим на черупка.",
   "composer.discovery.commands": "Команди",
   "composer.discovery.commandsUnavailable": "В момента командите не са достъпни.",

@@ -814,14 +814,26 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   position: absolute;
   z-index: 2;
   left: calc(var(--nav-session-row-indent, var(--nav-indent-session)) - var(--space-4));
-  top: 0;
+  top: calc((var(--nav-row-session) - var(--icon-sm)) / 2);
   display: grid;
-  width: var(--control-h-sm);
-  min-height: var(--nav-row-session);
+  width: var(--icon-sm);
+  height: var(--icon-sm);
   place-items: center;
   border: 0;
+  padding: 0;
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--muted);
+}
+/* Transparent hit-area extension on coarse pointers (--hit-min is 0px on fine). */
+.session-subagent-toggle::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, var(--hit-min));
+  height: max(100%, var(--hit-min));
+  transform: translate(-50%, -50%);
 }
 .session-subagent-toggle:hover { color: var(--text); background: var(--elevated); }
 .session-subagent-toggle svg { width: var(--icon-sm); height: var(--icon-sm); }
@@ -2728,18 +2740,12 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
   width: 212px; min-width: 212px; display: flex; flex-direction: column;
   background: var(--sunken); border-right: 1px solid var(--border-soft);
 }
-.settings-nav-title {
-  margin: 14px 14px 8px;
-  color: var(--text);
-  font-size: 15px;
-  font-weight: 650;
-  letter-spacing: -.02em;
-}
 .settings-nav-head { padding: 14px 14px 8px; }
 .settings-nav-head h2 { margin: 0; font-size: 15px; letter-spacing: -0.02em; }
 .settings-nav-search { margin: 0 10px 8px; font-size: 12px; padding: 5px 8px; }
+.ui-input.settings-nav-search { width: auto; }
 .settings-nav-list { flex: 1; overflow-y: auto; padding: 0 6px 10px; display: flex; flex-direction: column; gap: 1px; }
-.settings-nav-item { text-align: left; border: none; border-radius: calc(var(--radius-control) - 2px); padding: 6px 10px; font-size: 12.5px; color: var(--muted); }
+.settings-nav-item { text-align: left; border: none; border-radius: calc(var(--radius-control) - 2px); padding: 6px 10px; font-size: var(--font-body); color: var(--muted); }
 .settings-nav-item:hover { color: var(--text); background: var(--elevated); }
 .settings-nav-item.active { background: var(--accent-wash); color: var(--text); }
 .settings-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -4849,7 +4855,7 @@ html[dir="rtl"] input[type="number"] {
 .settings-nav-search { margin: 12px 12px 8px; }
 .settings-nav-list { padding: 0 8px 10px; }
 .settings-nav-group { padding: 12px 10px 4px; font-size: var(--font-meta); }
-.settings-nav-item { min-height: var(--control-h-sm); display: flex; align-items: center; padding: 0 var(--space-2); border-radius: var(--radius-control); font-size: var(--font-meta); }
+.settings-nav-item { min-height: var(--control-h-sm); display: flex; align-items: center; padding: 0 var(--space-2); border-radius: var(--radius-control); font-size: var(--font-body); }
 .settings-nav-item.active { color: var(--accent); background: var(--accent-wash); font-weight: 650; }
 .settings-nav-icon {
   display: inline-grid;
@@ -5515,7 +5521,7 @@ grid-template-columns: 1fr !important;
   min-height: 35px;
   padding: 7px 10px;
   color: var(--text-dim);
-  font-size: var(--font-meta);
+  font-size: var(--font-body);
 }
 .settings-nav-item:hover { color: var(--text); background: var(--elevated); }
 @media (max-width: 700px) {
@@ -5527,7 +5533,6 @@ grid-template-columns: 1fr !important;
     width: 100%; min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; padding-bottom: 0;
     border-right: none;
   }
-  .settings-nav-title { flex: none; margin: 14px 14px 8px; font-size: 18px; }
   .settings-mobile-nav.settings-shell .settings-nav { height: 100%; }
   .settings-nav-head, .settings-nav > .nav-foot { display: none; }
   .settings-nav-search { flex: none; margin: 12px 12px 8px; }
@@ -7950,7 +7955,7 @@ min-height: var(--tap);
   .settings-nav-item {
     min-height: 48px;
     gap: 3px;
-    font-size: 14px;
+    font-size: var(--font-body);
   }
   .settings-nav-icon { width: 22px; margin-right: 8px; }
   .settings-nav-icon svg { width: 18px; height: 18px; }
@@ -10275,11 +10280,11 @@ html[data-font] body :is(
 .reasoning-chevron { width: 16px; height: 16px; display: grid; place-items: center; color: var(--faint); }
 .reasoning-chevron svg { width: 14px; height: 14px; stroke-width: 1.75; }
 /* Expanded thinking: the real reasoning as secondary prose in a height-capped
-   well — long thinking scrolls internally and never breaks the page. The
-   35px indent matches .execution-details.tool-body (icon + gap + padding).
-   The expand shell animates the collapse when the stream settles: the block
-   stays open while forming, then folds with the same 0fr→1fr grid slide the
-   execution groups use. */
+   well — long thinking scrolls internally and never breaks the page. The body
+   is indented on both edges (see .reasoning-body padding) so text reads as a
+   recessed paragraph, not flush with the toggle. The expand shell animates
+   the collapse when the stream settles: the block stays open while forming,
+   then folds with the same 0fr→1fr grid slide the execution groups use. */
 .reasoning-expand-shell {
   display: grid;
   grid-template-rows: 0fr;
@@ -10297,7 +10302,9 @@ html[data-font] body :is(
   overflow: auto;
   overscroll-behavior: contain;
   margin: 0;
-  padding: 2px 0;
+  /* 24px inline indent aligns the body text with the "Thinking" label (icon
+     18px + gap 6px) and gives the right edge breathing room. */
+  padding: 2px 24px;
   color: var(--muted);
   font-size: calc(14px * var(--ui-font-scale, 1));
   line-height: 1.55;

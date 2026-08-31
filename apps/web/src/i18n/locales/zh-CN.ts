@@ -174,6 +174,7 @@ export const zhCN: AppMessages = {
   "composer.discovery.addsALinkOnly": "仅添加链接",
   "composer.discovery.attachGoal": "设定目标……",
   "composer.discovery.attachmentCompatibilityNotReported": "此提供程序未报告附件兼容性",
+  "composer.discovery.attachmentImagesNotSupported": "此模型不支持图片附件",
   "composer.discovery.clearDraftBeforeShell": "在进入外壳模式之前清除草稿。",
   "composer.discovery.commands": "命令",
   "composer.discovery.commandsUnavailable": "命令当前不可用。",

@@ -1,11 +1,51 @@
 // Conservative file-reference grammar (WP4): `path`, `path:line`,
 // `path:line:column`, `path:start-end`. Pure and DOM-free. URLs, bare words,
-// and windows-style separators are not file references.
+// and windows-style separators are not file references. A path that appears as
+// a shell-command operand (e.g. `node server/dist/index.cjs`) is NOT a file
+// reference — it is part of a command, so it is left as text.
 import type { EditorLocation } from "@polyth/contracts";
 
 const EXT_RE = /\.(ts|tsx|js|jsx|mjs|cjs|json|md|css|scss|html|py|rs|go|java|kt|c|h|cpp|hpp|cs|rb|php|sh|bash|zsh|yml|yaml|toml|ini|sql|txt|svg|vue|svelte|lock|env|xml|proto|graphql|prisma|tf|dockerfile)$/i;
 
 const REF_RE = /^([A-Za-z0-9_@][A-Za-z0-9_@\-./]*?)(?::(\d+)(?:(?::(\d+))|(?:-(\d+)))?)?$/;
+
+// Common shell/command executables. When one of these begins a text run (or
+// immediately precedes a path token), the path is a command operand, not a
+// file reference the reader would want to open.
+const COMMAND_WORDS = new Set([
+  "node", "npm", "npx", "pnpm", "yarn", "bun", "deno", "tsc", "ts-node",
+  "python", "python3", "pip", "pip3", "go", "cargo", "rustc",
+  "git", "gh", "cd", "ls", "ll", "cat", "less", "more", "grep", "rg", "ag",
+  "sed", "awk", "cut", "sort", "uniq", "wc", "find", "xargs", "tar", "gzip",
+  "gunzip", "zip", "unzip", "rsync", "scp", "ssh",
+  "bash", "sh", "zsh", "fish", "sudo", "env", "time", "watch", "make", "cmake",
+  "docker", "docker-compose", "podman", "kubectl", "helm", "terraform", "tofu",
+  "curl", "wget", "jq", "yq",
+  "rm", "cp", "mv", "mkdir", "rmdir", "touch", "chmod", "chown", "ln", "source",
+  "export", "unset", "alias", "nvm", "which", "where", "echo", "printf",
+  "top", "htop", "ps", "kill", "systemctl", "journalctl",
+  "apt", "apt-get", "brew", "snap", "dnf", "yum", "pacman",
+]);
+
+/** First bare word of a run (a command name, not a path). */
+function firstWord(text: string): string | undefined {
+  return /^[A-Za-z0-9_@][A-Za-z0-9_@-]*/.exec(text.trimStart())?.[0];
+}
+
+/** Does the run begin with a known command word? If so, treat the whole run as
+ *  command text (no file references, no matter whose operands look like paths). */
+function isCommandRun(text: string): boolean {
+  const first = firstWord(text);
+  return first !== undefined && COMMAND_WORDS.has(first);
+}
+
+/** Does the text before a path token end with a known command word? Catches a
+ *  command embedded mid-prose (e.g. "Let me run node server/dist/index.cjs"). */
+function precededByCommand(gap: string): boolean {
+  const words = gap.trim().split(/\s+/);
+  const last = words[words.length - 1];
+  return last !== undefined && COMMAND_WORDS.has(last);
+}
 
 /** Parse one candidate token into an EditorLocation, or null when it does not
  *  look like a real repository path. */
@@ -43,12 +83,13 @@ export function parseFileRef(token: string): EditorLocation | null {
 export function findFileRefs(text: string): Array<{ kind: "text"; text: string } | { kind: "ref"; text: string; loc: EditorLocation }> {
   const out: Array<{ kind: "text"; text: string } | { kind: "ref"; text: string; loc: EditorLocation }> = [];
   const re = /[A-Za-z0-9_@][A-Za-z0-9_@\-./:]*/g;
+  const commandRun = isCommandRun(text);
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
     const token = m[0];
     const loc = parseFileRef(token);
-    if (!loc) continue;
+    if (!loc || commandRun || precededByCommand(text.slice(last, m.index))) continue;
     if (m.index > last) out.push({ kind: "text", text: text.slice(last, m.index) });
     // preserve the exact matched token text (minus what parseFileRef trimmed)
     out.push({ kind: "ref", text: token, loc });

@@ -57,6 +57,7 @@ import {
 import { activeToken, completeToken, shellCommand, type PromptToken } from "../composer/language.ts";
 import {
   ATTACHMENT_COMPAT_NOTE,
+  attachmentCompatibility,
   catalogFromResult,
   commandAutocomplete,
   fileAutocomplete,
@@ -1178,6 +1179,21 @@ export default function Composer({
   const selectedThinking = requestedSelectedThinking && selectedModel?.variants?.includes(requestedSelectedThinking)
     ? requestedSelectedThinking
     : undefined;
+  // Honest attachment note from the next-turn model's normalized capabilities:
+  // `input:image`/`attachment` = supported (no note); an input report without
+  // image support names the block when an image pill is pending; no report
+  // keeps the legacy "not reported" line.
+  const attachNote = (() => {
+    if (attachments.length === 0 || !selectedModel) return null;
+    const compatibility = attachmentCompatibility(selectedModel);
+    if (compatibility === "supported") return null;
+    if (compatibility === "unsupported"
+      && attachments.some((attachment) =>
+        attachment.kind === "image" || attachment.mime.startsWith("image/"))) {
+      return tr("composer.discovery.attachmentImagesNotSupported");
+    }
+    return ATTACHMENT_COMPAT_NOTE;
+  })();
   const pickThinking = (thinking: string | undefined) => {
     if (selectedModel) setModelThinking(selectedModel, thinking);
     updateCfg(withExplicitThinking(cfg, thinking));
@@ -1418,8 +1434,8 @@ export default function Composer({
           onRemove={(id) => removeAttachment(session?.id ?? null, id)}
         />
       )}
-      {attachments.length > 0 && !noModels && (
-        <div className="composer-attach-note">{ATTACHMENT_COMPAT_NOTE}</div>
+      {attachments.length > 0 && !noModels && attachNote && (
+        <div className="composer-attach-note">{attachNote}</div>
       )}
       {phoneLayout && executionControls && (
         <div className="composer-config-top">

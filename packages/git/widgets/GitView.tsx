@@ -26,11 +26,13 @@ import {
   BranchIcon,
   Button,
   Checkbox,
+  ChevronDownIcon,
   CloseIcon,
   DeleteIcon,
   Dialog,
   FetchIcon,
   IconButton,
+  Menu,
   PullIcon,
   PullRequestIcon,
   PushIcon,
@@ -148,8 +150,8 @@ function GitFileRow({ file, selected, busy, onOpen, onStage, onDiscard }: {
             icon={DeleteIcon}
             size="sm"
             variant="danger"
-            title={tr("gitview.discard")}
-            label={tr("gitview.discardValue", { path: file.path })}
+            title={tr("gitview.revert")}
+            label={tr("gitview.revertValue", { path: file.path })}
             disabled={busy}
             onClick={onDiscard}
           />
@@ -188,7 +190,7 @@ function ChangeSection({ id, title, files, closed, selected, busy, onToggle, onO
               busy={busy}
               onOpen={() => onOpen(file)}
               onStage={() => onStage(file)}
-              {...(!file.staged && file.status !== "untracked" ? { onDiscard: () => onDiscard(file) } : {})}
+              {...(file.status !== "conflicted" ? { onDiscard: () => onDiscard(file) } : {})}
             />
           ))}
         </div>
@@ -571,6 +573,20 @@ export default function GitView() {
     setMobileDetail(false);
   };
 
+  const commitStaged = async () => {
+    await api.gitCommit(projectId, commitMsg.trim(), sessionId ?? undefined);
+    setCommitMsg("");
+    setSelected(null);
+    setMobileDetail(false);
+  };
+
+  /** Commit, then bring the branch in line with the remote. */
+  const commitAndSync = async () => {
+    await commitStaged();
+    await api.gitPush(projectId, "origin", sessionId ?? undefined);
+    await api.gitPull(projectId, "origin", sessionId ?? undefined);
+  };
+
   return (
     <div className="view-page git-page">
       <header className="source-control-head">
@@ -718,6 +734,18 @@ export default function GitView() {
                     {tr("gitview.stageAll")}
                   </Button>
                 ) : null}
+                {(status?.unstaged.length || status?.untracked.length) ? (
+                  <Button size="sm" iconStart={DeleteIcon} disabled={busy} onClick={() => setConfirmRequest({
+                    title: tr("gitview.revertAllChangesQuestion"),
+                    description: tr("pendingchangesbar.undoAllChangesDescription", {
+                      count: (status?.unstaged.length ?? 0) + (status?.untracked.length ?? 0),
+                    }),
+                    confirmLabel: tr("gitview.revertAll"),
+                    action: () => api.gitFolder(projectId, "", "discard", sessionId ?? undefined),
+                  })}>
+                    {tr("gitview.revertAll")}
+                  </Button>
+                ) : null}
                 {status && status.staged.length > 0 && (
                   <IconButton icon={UndoIcon} size="sm" label={tr("gitview.unstageAll")} disabled={busy} onClick={() => void run(() => api.gitFolder(projectId, "", "unstage", sessionId ?? undefined))} />
                 )}
@@ -848,12 +876,32 @@ export default function GitView() {
                     .then((result) => { if (result.message) setCommitMsg(result.message); })
                     .finally(() => setGenerating(false));
                 }}>{tr("gitview.generate")}</Button>
-                <Button size="sm" variant="primary" busy={busy && !!commitMsg.trim()} disabled={!commitMsg.trim() || busy} onClick={() => void run(async () => {
-                  await api.gitCommit(projectId, commitMsg.trim(), sessionId ?? undefined);
-                  setCommitMsg("");
-                  setSelected(null);
-                  setMobileDetail(false);
-                })}>{tr("gitview.commit")}</Button>
+                <div className="git-commit-split">
+                  <Button size="sm" variant="primary" busy={busy && !!commitMsg.trim()} disabled={!commitMsg.trim() || busy} onClick={() => void run(commitStaged)}>{tr("gitview.commit")}</Button>
+                  <Menu
+                    label={tr("gitview.commitStagedChanges")}
+                    align="end"
+                    entries={[
+                      {
+                        id: "sync",
+                        label: tr("gitview.syncRepository"),
+                        disabled: !commitMsg.trim() || busy,
+                        onSelect: () => void run(commitAndSync),
+                      },
+                    ]}
+                  >
+                    {(trigger) => (
+                      <IconButton
+                        {...trigger}
+                        icon={ChevronDownIcon}
+                        size="sm"
+                        variant="quiet"
+                        label={tr("gitview.syncRepository")}
+                        disabled={!commitMsg.trim() || busy}
+                      />
+                    )}
+                  </Menu>
+                </div>
               </div>
             </section>
           )}

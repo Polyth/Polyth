@@ -149,11 +149,11 @@ test("failed actions append action-failed with the policy code", async () => {
   const id = (created.payload as { id: string }).id;
   calls.length = 0;
 
-  const nav = await call("POST", `/api/browser/sessions/${id}/navigate`, { url: "http://10.0.0.1/", actor: "agent" });
+  const nav = await call("POST", `/api/browser/sessions/${id}/navigate`, { url: "http://93.184.216.34/", actor: "agent" });
   assert.equal(nav.status, 403);
   const types = calls.filter((c) => c.kind === "append").map((c) => c.type);
   assert.deepEqual(types, ["browser/action-requested", "browser/action-failed"]);
-  assert.equal(calls[1]!.data!.code, "blocked-private");
+  assert.equal(calls[1]!.data!.code, "approval-required");
 });
 
 test("user navigation returns approval state without a transport failure", async () => {
@@ -163,7 +163,7 @@ test("user navigation returns approval state without a transport failure", async
 
   const navigation = await call("POST", `/api/browser/sessions/${id}/navigate`, {
     actor: "user",
-    url: "localhost:9999",
+    url: "http://93.184.216.34/",
   });
   assert.equal(navigation.status, 200);
   const pending = navigation.payload as {
@@ -171,12 +171,12 @@ test("user navigation returns approval state without a transport failure", async
     approval: { origin: string; message: string };
   };
   assert.equal(pending.session?.id, id);
-  assert.equal(pending.approval.origin, "http://localhost:9999");
-  assert.match(pending.approval.message, /needs approval/);
+  assert.equal(pending.approval.origin, "http://93.184.216.34");
+  assert.match(pending.approval.message, /needs.*approval/);
 
-  const approved = await call("POST", "/api/browser/approvals", { origin: "localhost:9999" });
+  const approved = await call("POST", "/api/browser/approvals", { origin: "93.184.216.34" });
   assert.equal(approved.status, 200);
-  assert.deepEqual(approved.payload, { origins: ["http://localhost:9999"] });
+  assert.deepEqual(approved.payload, { origins: ["http://93.184.216.34"] });
 });
 
 test("browser sessions without a linked polyth session append nothing", async () => {

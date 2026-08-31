@@ -174,6 +174,7 @@ export const fr: AppMessages = {
   "composer.discovery.addsALinkOnly": "Ajoute un lien uniquement",
   "composer.discovery.attachGoal": "Attacher un objectif…",
   "composer.discovery.attachmentCompatibilityNotReported": "La compatibilité des pièces jointes n'est pas signalée par ce fournisseur",
+  "composer.discovery.attachmentImagesNotSupported": "Ce modèle ne prend pas en charge les images en pièce jointe",
   "composer.discovery.clearDraftBeforeShell": "Effacez le brouillon avant d'entrer en mode shell.",
   "composer.discovery.commands": "Commandes",
   "composer.discovery.commandsUnavailable": "Les commandes sont actuellement indisponibles.",

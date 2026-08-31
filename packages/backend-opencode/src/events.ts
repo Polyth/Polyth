@@ -1181,10 +1181,14 @@ const semanticIdentityOf = (
     return {
       artifactKind: "turn",
       entityId: sessionId,
-      // Session snapshots often omit a revision. The title is a distinct,
-      // durable update, so it must not be deduplicated against the initial
-      // placeholder snapshot that precedes it.
-      revision: directRevision ?? (ev.type === "session.compacted" ? "compacted" : `title:${title}`),
+      // The title is a distinct, durable update, so it must not be
+      // deduplicated against the initial placeholder snapshot that precedes
+      // it. Direct revisions are unusable here: session snapshots embed the
+      // OpenCode version (`info.version`, constant across every update), and
+      // `directRevision` would fold every title change into the first
+      // placeholder observation, dropping the semantic title forever. The
+      // title (or the compaction marker) always identifies the observation.
+      revision: ev.type === "session.compacted" ? "compacted" : `title:${title}`,
       checkpoint: { type: ev.type },
     };
   }

@@ -136,20 +136,21 @@ export async function checkUrl(raw: string, opts: UrlPolicyOptions = {}): Promis
   const approved = new Set([...(opts.approvedOrigins ?? [])].map((o) => o.toLowerCase()));
   const host = url.hostname.toLowerCase();
 
-  // Loopback: only origins Polyth started or the user approved.
-  if (isLoopbackHost(host) || (!host.includes(":") && /^\d+\.\d+\.\d+\.\d+$/.test(host) && isLoopbackAddress(host))) {
-    if (listedHas(allowed, origin) || listedHas(approved, origin)) return { ok: true, url: canonical, origin };
-    return { ok: false, code: "approval-required", reason: `loopback origin ${origin} needs approval` };
+  // Loopback and private-network targets are local-first: they open without
+  // approval or blocking. This is a local tool the operator drives, so the
+  // SSRF-style private-range defense is dropped — intranets, routers, dev
+  // servers, and localhost must all "just work".
+  if (isLoopbackHost(host) || (/^\d+\.\d+\.\d+\.\d+$/.test(host) && isLoopbackAddress(host))) {
+    return { ok: true, url: canonical, origin };
   }
 
   // Literal IP host: no DNS ambiguity, decide directly.
   if (/^\d+\.\d+\.\d+\.\d+$/.test(host) || host.startsWith("[")) {
     const ip = host.replace(/^\[|\]$/g, "");
-    if (isPrivateAddress(ip)) {
-      return { ok: false, code: "blocked-private", reason: `private-network address ${ip} is blocked` };
-    }
+    if (isPrivateAddress(ip)) return { ok: true, url: canonical, origin };
   } else {
-    // Hostname: every resolved address must be public (rebinding defense).
+    // Hostname: resolving into a private/loopback range is a legitimate
+    // intranet/local setup, not a reason to block.
     const resolve = opts.resolve ?? defaultResolve;
     let addrs: string[];
     try {
@@ -160,17 +161,8 @@ export async function checkUrl(raw: string, opts: UrlPolicyOptions = {}): Promis
     if (addrs.length === 0) {
       return { ok: false, code: "dns-error", reason: `cannot resolve ${host}: no addresses` };
     }
-    const bad = addrs.find((ip) => isPrivateAddress(ip) && !isLoopbackAddress(ip));
-    if (bad) {
-      return { ok: false, code: "blocked-private", reason: `${host} resolves to private address ${bad}` };
-    }
-    if (addrs.some(isLoopbackAddress)) {
-      // A public name resolving to loopback is a rebinding attempt. Only
-      // origins Polyth itself started may do this; user approval of an
-      // external origin never grants loopback access.
-      if (!listedHas(allowed, origin)) {
-        return { ok: false, code: "blocked-private", reason: `${host} resolves to a loopback address` };
-      }
+    if (addrs.some(isPrivateAddress)) {
+      return { ok: true, url: canonical, origin };
     }
   }
 

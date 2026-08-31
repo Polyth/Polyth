@@ -965,6 +965,40 @@ test("title snapshots without upstream revisions remain independently ingestible
   assert.deepEqual(generated.observation.events, [{ type: "session/title-generated", title: "Stabilize reconnect behavior" }]);
 });
 
+test("session.updated revisions ignore the embedded OpenCode version so titles are not deduplicated", () => {
+  // Real V2 session snapshots carry `info.version` (the OpenCode engine
+  // version, constant across every update). Using it as the observation
+  // revision folds every title change into the first placeholder snapshot,
+  // so the semantic title is dropped as a duplicate by the store.
+  const observed = {
+    authorityId: "authority-a", generation: 1, location: { directory: "/project" },
+    backendSessionId: "ses_1", reconciliationOrdinal: 1,
+  };
+  const normalize = (title: string) => normalizeOcObservation({
+    data: {
+      type: "session.updated",
+      properties: {
+        info: { id: "ses_1", title, version: "1.18.18", time: { updated: 1788191131386 } },
+      },
+    },
+    channel: "sse", observed, current: observed,
+  });
+
+  const placeholder = normalize("New session - 2026-08-31T15:45:28.650Z");
+  const generated = normalize("Greeting");
+  assert.equal(placeholder.kind, "accepted");
+  assert.equal(generated.kind, "accepted");
+  if (placeholder.kind !== "accepted" || generated.kind !== "accepted") return;
+  assert.notEqual(
+    placeholder.observation.identity.revision,
+    generated.observation.identity.revision,
+    "the semantic title observation must not deduplicate against the placeholder snapshot",
+  );
+  assert.equal(placeholder.observation.identity.revision, "title:New session - 2026-08-31T15:45:28.650Z");
+  assert.equal(generated.observation.identity.revision, "title:Greeting");
+  assert.deepEqual(generated.observation.events, [{ type: "session/title-generated", title: "Greeting" }]);
+});
+
 test("session compaction and compaction parts translate to canonical runtime events", () => {
   const st = createTranslateState();
   assert.deepEqual(

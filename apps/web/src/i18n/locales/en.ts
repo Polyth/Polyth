@@ -177,6 +177,7 @@ export const en = {
   "composer.discovery.addsALinkOnly": "Adds a link only",
   "composer.discovery.attachGoal": "Attach goal…",
   "composer.discovery.attachmentCompatibilityNotReported": "Attachment compatibility is not reported by this provider",
+  "composer.discovery.attachmentImagesNotSupported": "This model does not support image attachments",
   "composer.discovery.clearDraftBeforeShell": "Clear the draft before entering shell mode.",
   "composer.discovery.commands": "Commands",
   "composer.discovery.commandsUnavailable": "Commands are currently unavailable.",

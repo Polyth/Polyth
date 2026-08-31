@@ -174,6 +174,7 @@ export const ar: AppMessages = {
   "composer.discovery.addsALinkOnly": "يضيف رابطًا فقط",
   "composer.discovery.attachGoal": "حدد الهدف...",
   "composer.discovery.attachmentCompatibilityNotReported": "لا يتم الإبلاغ عن توافق المرفق من قبل هذا المزود",
+  "composer.discovery.attachmentImagesNotSupported": "هذا النموذج لا يدعم الصور المرفقة",
   "composer.discovery.clearDraftBeforeShell": "امسح المسودة قبل الدخول في وضع shell.",
   "composer.discovery.commands": "الأوامر",
   "composer.discovery.commandsUnavailable": "الأوامر غير متاحة حاليًا.",

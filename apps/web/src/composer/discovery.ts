@@ -303,3 +303,16 @@ export function modelDisplayName(
 
 export const ATTACHMENT_COMPAT_NOTE =
   tr("composer.discovery.attachmentCompatibilityNotReported");
+
+/** Honest attachment compatibility from normalized `ModelDescriptor.capabilities`:
+ *  `input:image` or the legacy `attachment` flag = supported; an explicit input
+ *  report without them = unsupported; no report = unknown (older provider).
+ *  Send stays backend-governed — this only drives the composer's note. */
+export type AttachmentCompatibility = "supported" | "unsupported" | "unknown";
+
+export function attachmentCompatibility(m: { capabilities?: string[] }): AttachmentCompatibility {
+  const capabilities = m.capabilities ?? [];
+  if (capabilities.includes("input:image") || capabilities.includes("attachment")) return "supported";
+  if (capabilities.some((capability) => capability.startsWith("input:"))) return "unsupported";
+  return "unknown";
+}

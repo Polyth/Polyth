@@ -333,9 +333,6 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
             <strong data-settings-focus-target tabIndex={-1}>{tr("common.settings")}</strong>
             <IconButton icon={CloseIcon} label={tr("common.close")} onClick={closeSettings} />
           </div>
-          <h1 className="settings-nav-title" data-settings-focus-target tabIndex={-1}>
-            {tr("common.settings")}
-          </h1>
           <TextInput
             className="settings-nav-search"
             uiSize="sm"

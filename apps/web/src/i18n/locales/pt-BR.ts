@@ -174,6 +174,7 @@ export const ptBR: AppMessages = {
   "composer.discovery.addsALinkOnly": "Adiciona apenas um link",
   "composer.discovery.attachGoal": "Anexar meta…",
   "composer.discovery.attachmentCompatibilityNotReported": "A compatibilidade do anexo não é relatada por este provedor",
+  "composer.discovery.attachmentImagesNotSupported": "Este modelo não suporta imagens em anexos",
   "composer.discovery.clearDraftBeforeShell": "Limpe o rascunho antes de entrar no modo shell.",
   "composer.discovery.commands": "Comandos",
   "composer.discovery.commandsUnavailable": "Os comandos estão indisponíveis no momento.",

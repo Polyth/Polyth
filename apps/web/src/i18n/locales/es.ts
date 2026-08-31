@@ -174,6 +174,7 @@ export const es: AppMessages = {
   "composer.discovery.addsALinkOnly": "Solo agrega un enlace",
   "composer.discovery.attachGoal": "Adjuntar objetivo…",
   "composer.discovery.attachmentCompatibilityNotReported": "Este proveedor no informa sobre la compatibilidad de los archivos adjuntos",
+  "composer.discovery.attachmentImagesNotSupported": "Este modelo no admite imágenes adjuntas",
   "composer.discovery.clearDraftBeforeShell": "Borre el borrador antes de entrar en el modo shell.",
   "composer.discovery.commands": "Comandos",
   "composer.discovery.commandsUnavailable": "Los comandos no están disponibles en este momento.",

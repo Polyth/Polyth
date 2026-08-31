@@ -1,5 +1,5 @@
-// WP14 URL policy: canonicalization, unsafe schemes, private networks,
-// approvals, and DNS-rebinding defense via per-hop re-resolution.
+// WP14 URL policy: canonicalization, unsafe schemes, private/loopback
+// always-open, approvals, and DNS resolution errors.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { checkUrl, isPrivateAddress, originAliases, originOf, type Resolver } from "../src/index.ts";
@@ -28,34 +28,30 @@ test("garbage input is invalid-url; bare host:port gets an http scheme", async (
   if (bare.ok) assert.equal(bare.origin, "http://localhost:5173");
 });
 
-test("loopback allowed only for polyth-started or approved origins", async () => {
-  const allowed = await checkUrl("http://127.0.0.1:5173/app", { allowedOrigins: ["http://127.0.0.1:5173"] });
-  assert.equal(allowed.ok, true);
-  const denied = await checkUrl("http://127.0.0.1:9999/", {});
-  assert.equal(denied.ok, false);
-  if (!denied.ok) assert.equal(denied.code, "approval-required");
-  const approved = await checkUrl("http://localhost:9999/", { approvedOrigins: new Set(["http://localhost:9999"]) });
-  assert.equal(approved.ok, true);
-});
-
-test("private/link-local/CGNAT/metadata literal IPs are blocked even if approved", async () => {
-  for (const ip of ["10.1.2.3", "172.16.0.9", "192.168.1.1", "169.254.169.254", "100.64.3.2", "0.0.0.0"]) {
-    const d = await checkUrl(`http://${ip}/`, { approvedOrigins: new Set([`http://${ip}`]) });
-    assert.equal(d.ok, false, ip);
-    if (!d.ok) assert.equal(d.code, "blocked-private", ip);
+test("loopback opens without approval", async () => {
+  for (const raw of ["http://127.0.0.1:5173/app", "http://127.0.0.1:9999/", "http://localhost:9999/"]) {
+    const d = await checkUrl(raw, {});
+    assert.equal(d.ok, true, raw);
+    if (d.ok) assert.equal(d.origin, new URL(raw).origin.toLowerCase(), raw);
   }
 });
 
-test("hostname resolving to a private address is blocked (SSRF)", async () => {
-  const d = await checkUrl("https://internal.example.com/", {
-    approvedOrigins: new Set(["https://internal.example.com"]),
-    resolve: async () => ["10.0.0.5"],
-  });
-  assert.equal(d.ok, false);
-  if (!d.ok) assert.equal(d.code, "blocked-private");
+test("private/link-local/CGNAT/metadata literal IPs open without approval", async () => {
+  for (const ip of ["10.1.2.3", "172.16.0.9", "192.168.1.1", "169.254.169.254", "100.64.3.2", "0.0.0.0"]) {
+    const d = await checkUrl(`http://${ip}/`, {});
+    assert.equal(d.ok, true, ip);
+  }
 });
 
-test("DNS rebinding: second hop re-resolves and gets blocked", async () => {
+test("hostname resolving to a private address opens (local-first intranet)", async () => {
+  const d = await checkUrl("https://internal.example.com/", {
+    resolve: async () => ["10.0.0.5"],
+  });
+  assert.equal(d.ok, true);
+  if (d.ok) assert.equal(d.origin, "https://internal.example.com");
+});
+
+test("DNS rebinding: re-resolving to loopback on a later hop still opens", async () => {
   let calls = 0;
   const flipFlop: Resolver = async () => {
     calls++;
@@ -64,10 +60,9 @@ test("DNS rebinding: second hop re-resolves and gets blocked", async () => {
   const opts = { approvedOrigins: new Set(["https://evil.example.com"]), resolve: flipFlop };
   const first = await checkUrl("https://evil.example.com/", opts);
   assert.equal(first.ok, true);
-  // redirect hop: policy re-runs, resolver now answers loopback → blocked
+  // redirect hop: policy re-runs; loopback is now an allowed target
   const second = await checkUrl("https://evil.example.com/next", opts);
-  assert.equal(second.ok, false);
-  if (!second.ok) assert.equal(second.code, "blocked-private");
+  assert.equal(second.ok, true);
 });
 
 test("external public origins need per-origin approval", async () => {

@@ -174,6 +174,7 @@ export const pl: AppMessages = {
   "composer.discovery.addsALinkOnly": "Dodaje tylko link",
   "composer.discovery.attachGoal": "Załącz cel…",
   "composer.discovery.attachmentCompatibilityNotReported": "Kompatybilność załączników nie jest zgłaszana przez tego dostawcę",
+  "composer.discovery.attachmentImagesNotSupported": "Ten model nie obsługuje załączników obrazów",
   "composer.discovery.clearDraftBeforeShell": "Wyczyść wersję roboczą przed wejściem w tryb skorupy.",
   "composer.discovery.commands": "Polecenia",
   "composer.discovery.commandsUnavailable": "Polecenia są obecnie niedostępne.",

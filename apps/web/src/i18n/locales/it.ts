@@ -174,6 +174,7 @@ export const it: AppMessages = {
   "composer.discovery.addsALinkOnly": "Aggiunge solo un collegamento",
   "composer.discovery.attachGoal": "Allega obiettivo…",
   "composer.discovery.attachmentCompatibilityNotReported": "La compatibilità degli allegati non è segnalata da questo fornitore",
+  "composer.discovery.attachmentImagesNotSupported": "Questo modello non supporta immagini allegate",
   "composer.discovery.clearDraftBeforeShell": "Cancellare la bozza prima di entrare in modalità shell.",
   "composer.discovery.commands": "Comandi",
   "composer.discovery.commandsUnavailable": "I comandi non sono attualmente disponibili.",

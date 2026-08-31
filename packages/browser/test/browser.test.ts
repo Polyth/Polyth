@@ -151,22 +151,20 @@ test("downloads are denied and surfaced as events", async () => {
   await svc.close(s.id);
 });
 
-test("redirect hops re-run policy; blocked origins never land", async () => {
+test("redirect hops re-run policy; private-network hops land", async () => {
   const svc = createBrowserService({
     driver: createFakeDriver({
       pages: {
         [HOME]: { title: "App" },
         [`${HOME}evil`]: { title: "Evil", redirectTo: "http://169.254.169.254/latest/meta-data" },
+        "http://169.254.169.254/latest/meta-data": { title: "Metadata", text: "iam" },
       },
     }),
     allowedOrigins: () => ["http://127.0.0.1:5173"],
   });
   const s = await svc.create({ projectId: "p1", url: HOME });
-  await assert.rejects(
-    () => svc.navigate(s.id, `${HOME}evil`, "user"),
-    (e: Error & { code?: string }) => e.code === "blocked-private",
-  );
-  assert.equal(svc.get(s.id)!.url, HOME); // still on the safe page
+  const after = await svc.navigate(s.id, `${HOME}evil`, "user");
+  assert.equal(after.url, "http://169.254.169.254/latest/meta-data");
   await svc.close(s.id);
 });
 
@@ -297,46 +295,26 @@ test("navigate() to a new public origin still requires explicit approval", async
   await svc.close(s.id);
 });
 
-test("in-page hop to unapproved loopback stays blocked; private IPs stay blocked", async () => {
-  const loopbackSvc = createBrowserService({
+test("in-page hops to loopback and private networks open without approval", async () => {
+  const svc = createBrowserService({
     driver: createFakeDriver({
       pages: {
         [HOME]: {
           title: "App",
-          links: { "a#loop": "http://127.0.0.1:9999/" },
+          links: { "a#loop": "http://127.0.0.1:9999/", "a#priv": "http://10.0.0.5/" },
         },
-        "http://127.0.0.1:9999/": { title: "Other loopback", text: "should not land" },
+        "http://127.0.0.1:9999/": { title: "Other loopback", text: "landed", links: { "a#priv": "http://10.0.0.5/" } },
+        "http://10.0.0.5/": { title: "Private", text: "landed" },
       },
     }),
     allowedOrigins: () => ["http://127.0.0.1:5173"],
     resolve: async () => ["93.184.216.34"],
   });
-  const loop = await loopbackSvc.create({ projectId: "p1", url: HOME });
-  await assert.rejects(
-    () => loopbackSvc.action(loop.id, { kind: "click", target: { selector: "a#loop" } }, "user"),
-    (e: Error & { code?: string }) => e.code === "approval-required",
-  );
-  assert.equal(loopbackSvc.get(loop.id)!.url, HOME);
-  await loopbackSvc.close(loop.id);
-
-  const privateSvc = createBrowserService({
-    driver: createFakeDriver({
-      pages: {
-        [HOME]: {
-          title: "App",
-          links: { "a#priv": "http://10.0.0.5/" },
-        },
-        "http://10.0.0.5/": { title: "Private", text: "blocked" },
-      },
-    }),
-    allowedOrigins: () => ["http://127.0.0.1:5173"],
-    resolve: async () => ["93.184.216.34"],
-  });
-  const priv = await privateSvc.create({ projectId: "p1", url: HOME });
-  await assert.rejects(
-    () => privateSvc.action(priv.id, { kind: "click", target: { selector: "a#priv" } }, "user"),
-    (e: Error & { code?: string }) => e.code === "blocked-private",
-  );
-  assert.equal(privateSvc.get(priv.id)!.url, HOME);
-  await privateSvc.close(priv.id);
+  const s = await svc.create({ projectId: "p1", url: HOME });
+  const loop = await svc.action(s.id, { kind: "click", target: { selector: "a#loop" } }, "user");
+  assert.equal(loop.session.url, "http://127.0.0.1:9999/");
+  const priv = await svc.action(s.id, { kind: "click", target: { selector: "a#priv" } }, "user");
+  assert.equal(priv.session.url, "http://10.0.0.5/");
+  assert.ok(!svc.approvals().some((o) => o.includes("10.0.0.5") || o.includes("127.0.0.1:9999")));
+  await svc.close(s.id);
 });

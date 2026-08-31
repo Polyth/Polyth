@@ -136,6 +136,16 @@ test("findFileRefs splits prose into text and ref segments", () => {
   assert.equal(segs.map((s) => s.text).join(""), "see src/app.ts:12 for details");
 });
 
+test("file refs: command operands stay text, not links", () => {
+  // Run starts with a command word → the whole run is command text.
+  assert.equal(findFileRefs("node server/dist/index.cjs").filter((s) => s.kind === "ref").length, 0);
+  assert.equal(findFileRefs("node --experimental-strip-types packages/server/src/index.ts").filter((s) => s.kind === "ref").length, 0);
+  // Command word mid-prose → the following path operand stays text.
+  assert.equal(findFileRefs("Let me run node server/dist/index.cjs").filter((s) => s.kind === "ref").length, 0);
+  // A plain path in prose still linkifies.
+  assert.equal(findFileRefs("see src/app.ts:12 for details").filter((s) => s.kind === "ref").length, 1);
+});
+
 // ---------------------------------------------------------------- thinking
 
 const user = (id: string, text: string): UserMsg => ({ kind: "user", id, eventSeq: 1, text, time: 0 });

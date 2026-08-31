@@ -14,7 +14,7 @@ import type {
   JsonValue,
 } from "@polyth/contracts";
 import type { BrowserDriver, DriverPage, DriverPageEvent } from "./driver.ts";
-import { checkUrl, isLoopbackAddress, isLoopbackHost, originOf, type UrlPolicyOptions } from "./policy.ts";
+import { checkUrl, originOf, type UrlPolicyOptions } from "./policy.ts";
 import { redactObservationText } from "./redact.ts";
 
 export type { BrowserDriver, DriverPage, DriverPageEvent, DriverObservation, DriverNav, DriverOpenOptions } from "./driver.ts";
@@ -239,19 +239,13 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
         guardNavigation: async (url) => {
           let decision = await checkUrl(url, policyOpts());
           if (!decision.ok && decision.code === "approval-required") {
-            try {
-              const parsed = new URL(/^https?:\/\//i.test(url.trim()) ? url.trim() : `http://${url.trim()}`);
-              const host = parsed.hostname.toLowerCase();
-              const loopback = isLoopbackHost(host)
-                || (/^\d+\.\d+\.\d+\.\d+$/.test(host) && isLoopbackAddress(host));
-              if (!loopback) {
-                const o = originOf(url);
-                if (o) {
-                  approved.add(o);
-                  decision = await checkUrl(url, policyOpts());
-                }
-              }
-            } catch { /* fall through to block */ }
+            // In-page hops to public origins auto-follow (approval recorded);
+            // loopback/private never reach here — they are always allowed.
+            const o = originOf(url);
+            if (o) {
+              approved.add(o);
+              decision = await checkUrl(url, policyOpts());
+            }
           }
           if (!decision.ok) {
             emit({ browserSessionId: id, kind: "navigation-blocked", url, message: decision.reason });

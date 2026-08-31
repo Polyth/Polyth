@@ -16,7 +16,7 @@ const mem = new Map<string, string>();
 
 const {
   ATTACHMENT_COMPAT_NOTE, CATALOG_LOADING, OPEN_PROJECT_FIRST, OPEN_SESSION_FIRST,
-  SHELL_DRAFT_BLOCK, addMenuRows, autocompleteOptionId, catalogFromResult,
+  SHELL_DRAFT_BLOCK, addMenuRows, attachmentCompatibility, autocompleteOptionId, catalogFromResult,
   commandAutocomplete, contextTokensLabel, fileAutocomplete, modelDetail,
   modelDisplayName, modelSupportsTextWorkflow, planCommandInsert, planShellEntry,
   planSigilInsert, snippetAutocomplete,
@@ -259,6 +259,17 @@ test("text workflows reject reported non-text modalities and distinguish duplica
   assert.equal(modelDisplayName(catalog[0]!, catalog), "Nano Banana · google/nano-v1");
   assert.equal(modelDisplayName(catalog[1]!, catalog), "nano   banana · vertex/nano-v2-preview");
   assert.equal(modelDisplayName(catalog[2]!, catalog), "GPT");
+});
+
+test("attachment compatibility is honest: image/attachment capability = supported, input report without image = unsupported, no report = unknown", () => {
+  assert.equal(attachmentCompatibility({ capabilities: ["input:text", "input:image", "output:text"] }), "supported");
+  assert.equal(attachmentCompatibility({ capabilities: ["attachment", "toolcall"] }), "supported", "legacy attachment flag");
+  assert.equal(attachmentCompatibility({ capabilities: ["input:image"] }), "supported");
+  assert.equal(attachmentCompatibility({ capabilities: ["input:text", "output:text"] }), "unsupported", "explicit report without image");
+  assert.equal(attachmentCompatibility({ capabilities: ["input:none", "output:text"] }), "unsupported");
+  assert.equal(attachmentCompatibility({}), "unknown", "older provider without modality report");
+  assert.equal(attachmentCompatibility({ capabilities: ["toolcall"] }), "unknown", "toolcall alone is not a modality report");
+  assert.equal(attachmentCompatibility({ capabilities: ["output:image"] }), "unknown", "output modality never implies input support");
 });
 
 // ---------------------------------------------------------------- configuration

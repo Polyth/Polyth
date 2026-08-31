@@ -686,6 +686,17 @@ min-height: 54px; max-height: 100px;
 .git-commit-composer .commit-row {
 align-self: stretch; align-items: center;
 }
+/* Commit split control: primary Commit button with an attached chevron that
+   opens the sync menu. Joined so the pair reads as one control. */
+.git-commit-split {
+display: inline-flex; align-items: stretch; gap: 1px;
+}
+.git-commit-split .ui-btn {
+border-start-end-radius: 0; border-end-end-radius: 0;
+}
+.git-commit-split .ui-icon-btn {
+border-start-start-radius: 0; border-end-start-radius: 0;
+}
 .git-log-layout .git-master-pane {
 padding: 10px;
 }
@@ -848,6 +859,12 @@ min-width: 0;
 }
 .git-page * {
 min-width: 0;
+}
+/* .git-page is a shrinking flex column with overflow-y: auto; the tab strip's
+   overflow-x: auto zeroes its automatic min-height, so flex-shrink crushes
+   it as the active tab's content grows. Pin its height so tabs never vanish. */
+.git-page > .source-tabs {
+  flex: none;
 }
 .git-folder-chevron svg {
 transition: transform var(--motion-fast) var(--motion-ease);

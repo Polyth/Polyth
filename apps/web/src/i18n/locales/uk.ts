@@ -174,6 +174,7 @@ export const uk: AppMessages = {
   "composer.discovery.addsALinkOnly": "Додає лише посилання",
   "composer.discovery.attachGoal": "Прикріпити ціль…",
   "composer.discovery.attachmentCompatibilityNotReported": "Цей постачальник не повідомляє про сумісність вкладень",
+  "composer.discovery.attachmentImagesNotSupported": "Ця модель не підтримує зображення у вкладеннях",
   "composer.discovery.clearDraftBeforeShell": "Очистіть чернетку перед входом в режим оболонки.",
   "composer.discovery.commands": "Команди",
   "composer.discovery.commandsUnavailable": "Наразі команди недоступні.",

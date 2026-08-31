@@ -174,6 +174,7 @@ export const de: AppMessages = {
   "composer.discovery.addsALinkOnly": "Fügt nur einen Link hinzu",
   "composer.discovery.attachGoal": "Ziel anfügen…",
   "composer.discovery.attachmentCompatibilityNotReported": "Die Kompatibilität von Anhängen wird von diesem Anbieter nicht gemeldet",
+  "composer.discovery.attachmentImagesNotSupported": "Dieses Modell unterstützt keine Bildanhänge",
   "composer.discovery.clearDraftBeforeShell": "Löschen Sie den Entwurf, bevor Sie in den Shell-Modus wechseln.",
   "composer.discovery.commands": "Befehle",
   "composer.discovery.commandsUnavailable": "Befehle sind derzeit nicht verfügbar.",
