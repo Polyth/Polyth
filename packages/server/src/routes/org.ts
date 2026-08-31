@@ -62,6 +62,20 @@ export function orgRoutes(deps: {
       return true;
     }
 
+    // ---- session read cursor (navigator unread bold) ----------------------
+    m = path.match(/^\/api\/sessions\/([^/]+)\/read$/);
+    if (m && method === "POST") {
+      const b = await body();
+      const seq = Number(b.seq ?? 0);
+      if (!Number.isSafeInteger(seq) || seq <= 0) {
+        json(400, { error: "invalid-input", message: "seq must be a positive integer" });
+        return true;
+      }
+      await sessions.markRead?.(m[1]!, seq);
+      json(200, { ok: true });
+      return true;
+    }
+
     // ---- session draft (server-synced composer text) ----------------------
     m = path.match(/^\/api\/sessions\/([^/]+)\/draft$/);
     if (m && method === "PATCH") {

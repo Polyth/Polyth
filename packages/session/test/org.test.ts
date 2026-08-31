@@ -127,9 +127,30 @@ test("attentionFor counts only unresolved questions/permissions per session", as
   await store.append("s2", "question/answered", { requestId: "q2" });
 
   const counts = await store.attentionFor(["s1", "s2", "s3"]);
-  assert.deepEqual(counts.s1, { questions: 1, permissions: 1 });
-  assert.deepEqual(counts.s2, { questions: 0, permissions: 0 });
-  assert.deepEqual(counts.s3, { questions: 0, permissions: 0 });
+  assert.deepEqual(counts.s1, { questions: 1, permissions: 1, unread: 0 });
+  assert.deepEqual(counts.s2, { questions: 0, permissions: 0, unread: 0 });
+  assert.deepEqual(counts.s3, { questions: 0, permissions: 0, unread: 0 });
+  await store.close();
+});
+
+test("setReadCursor advances monotonically and attentionFor counts unread assistant messages past it", async () => {
+  const store = freshStore();
+  await store.append("s1", "user/message", { text: "hi" });
+  await store.append("s1", "assistant/message", { text: "one" });
+  await store.append("s1", "assistant/message", { text: "two" });
+
+  // No cursor yet: nothing is unread (legacy sessions count as read).
+  assert.deepEqual((await store.attentionFor(["s1"])).s1, { questions: 0, permissions: 0, unread: 0 });
+
+  assert.equal(await store.setReadCursor("s1", 1), true);
+  assert.deepEqual((await store.attentionFor(["s1"])).s1, { questions: 0, permissions: 0, unread: 2 });
+
+  assert.equal(await store.setReadCursor("s1", 2), true);
+  assert.equal(await store.setReadCursor("s1", 2), false, "no-op when not advancing");
+  assert.deepEqual((await store.attentionFor(["s1"])).s1, { questions: 0, permissions: 0, unread: 1 });
+
+  assert.equal(await store.setReadCursor("s1", 99), true);
+  assert.deepEqual((await store.attentionFor(["s1"])).s1, { questions: 0, permissions: 0, unread: 0 });
   await store.close();
 });
 

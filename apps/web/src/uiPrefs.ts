@@ -291,9 +291,11 @@ export function applyUiSettings(s: UiSettings = settings): void {
   b.style?.setProperty("--rail-icon-size-right", rightRail.box);
   b.style?.setProperty("--rail-icon-glyph-right", rightRail.glyph);
   b.style?.setProperty("--rail-strip-width-right", "calc(var(--rail-icon-size-right) + var(--space-2))");
-  // Every radius derives from the one scale in tokens.css. Do not publish a
-  // second runtime radius vocabulary here.
-  b.style?.setProperty("--corner-radius-scale", String(s.rounding / 5));
+  // Every radius token derives from the one scale in tokens.css. Tokens are
+  // declared on :root, so their var(--corner-radius-scale) resolves there too —
+  // a scale set on <body> would never reach them. Do not publish a second
+  // runtime radius vocabulary here.
+  document.documentElement.style?.setProperty("--corner-radius-scale", String(s.rounding / 5));
 }
 
 export function getUiSettings(): UiSettings {

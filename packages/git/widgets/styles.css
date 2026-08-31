@@ -483,38 +483,57 @@ grid-column: auto;
 }
 }
 /* Minimised bar above the composer (session.composer.before / session.footer /
-   composer.pending): the widget wrapper carries no chrome — the inner bar owns
-   its fill. Nested under .composer too, so descendant (not child) selectors. */
-.focus-conversation :is(.placed-mini-widget, .placed-slot-widget):has(.pending-changes-bar),
-.composer :is(.placed-mini-widget, .placed-slot-widget):has(.pending-changes-bar) {
+   composer.pending): the placed widget wrapper carries no chrome — the inner
+   bar owns its fill. Descendant (not child) selectors because the wrapper can
+   sit under .focus-conversation or nested inside .composer. */
+.focus-conversation > .placed-mini-widget:has(.pending-changes-bar) {
   display: block;
   width: min(var(--chat-measure), calc(100% - 48px));
   flex: none;
   margin: var(--space-4) auto 0;
+}
+.focus-conversation > .placed-mini-widget:has(.pending-changes-bar),
+.focus-conversation > .placed-slot-widget:has(.pending-changes-bar),
+.composer .placed-mini-widget:has(.pending-changes-bar),
+.composer .placed-slot-widget:has(.pending-changes-bar) {
   border: 0;
   background: transparent;
   box-shadow: none;
 }
-.focus-conversation :is(.placed-mini-widget, .placed-slot-widget):has(.pending-changes-bar:not(.pending-changes-bar--collapsed)) > .pending-changes-bar,
+.focus-conversation > .placed-mini-widget:has(.pending-changes-bar:not(.pending-changes-bar--collapsed)) > .pending-changes-bar,
 .focus-conversation > .pending-changes-bar:not(.pending-changes-bar--collapsed) {
   width: 100%;
   margin: 0;
 }
 /* Sitting on the composer surface: the bar keeps its own fill but drops the
-   lifted shadow, mirroring the flat composer card above it. */
-.focus-conversation :is(.placed-mini-widget, .placed-slot-widget):has(.pending-changes-bar) > .pending-changes-bar,
-.focus-conversation > .pending-changes-bar {
+   lifted inset shadow, mirroring the flat composer card above it. */
+.focus-conversation > .placed-mini-widget:has(.pending-changes-bar) > .pending-changes-bar,
+.focus-conversation > .placed-slot-widget:has(.pending-changes-bar) > .pending-changes-bar,
+.focus-conversation > .pending-changes-bar,
+.composer .placed-mini-widget:has(.pending-changes-bar) > .pending-changes-bar,
+.composer .placed-slot-widget:has(.pending-changes-bar) > .pending-changes-bar {
   box-shadow: none;
 }
-.focus-conversation :is(.placed-mini-widget, .placed-slot-widget):has(.pending-changes-bar--collapsed) > .pending-changes-bar--collapsed,
+.focus-conversation > .placed-mini-widget:has(.pending-changes-bar) .pending-changes-bubble,
+.focus-conversation > .placed-slot-widget:has(.pending-changes-bar) .pending-changes-bubble,
+.composer .placed-mini-widget:has(.pending-changes-bar) .pending-changes-bubble,
+.composer .placed-slot-widget:has(.pending-changes-bar) .pending-changes-bubble {
+  box-shadow: none;
+  background: transparent;
+}
+.focus-conversation > .placed-mini-widget:has(.pending-changes-bar--collapsed) > .pending-changes-bar--collapsed,
 .focus-conversation > .pending-changes-bar--collapsed {
   width: max-content;
   min-width: max-content;
   max-width: 100%;
   margin: 0;
 }
+.focus-conversation > .placed-slot-widget:has(.pending-changes-bar) {
+  width: min(var(--chat-measure), calc(100% - 48px));
+  margin: var(--space-4) auto 0;
+}
 @media (max-width: 820px) {
-.focus-conversation :is(.placed-mini-widget, .placed-slot-widget):has(.pending-changes-bar) {
+.focus-conversation > .placed-mini-widget:has(.pending-changes-bar) {
   width: calc(100% - 24px);
 }
 }

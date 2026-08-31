@@ -749,6 +749,9 @@ export interface SessionService {
   confirmBorrowedRuntimeEpoch?(sessionId: string): Promise<SessionProjection>;
   /** Persist a per-session composer draft server-side (synced via projection). */
   saveDraft?(sessionId: string, text: string): Promise<void>;
+  /** Advance the user's read cursor (highest seen event seq) and broadcast the
+   *  updated attention so navigator unread bold reflects what was viewed. */
+  markRead?(sessionId: string, seq: number): Promise<void>;
 }
 
 export interface SessionOrganizePatch {
@@ -822,6 +825,9 @@ export interface SessionPersistence {
   /** Hard-delete one session's events, projection, and queued messages in a
    *  single transaction. Optional so existing fakes remain valid. */
   deleteSession?(sessionId: string): Promise<void>;
+  /** Advance the user's read cursor (highest seen event seq); returns whether
+   *  it moved. Optional so existing fakes remain valid. */
+  setReadCursor?(sessionId: string, seq: number): Promise<boolean>;
   close(): Promise<void>;
 }
 

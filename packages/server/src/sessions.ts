@@ -204,7 +204,7 @@ type ReliabilityRuntime = AgentRuntime & {
 /** Organization seams implemented by @polyth/session's Store (WP5). */
 export interface OrgStore {
   folderList(projectId: string): Promise<SessionFolderDto[]>;
-  attentionFor(sessionIds: string[]): Promise<Record<string, { questions: number; permissions: number }>>;
+  attentionFor(sessionIds: string[]): Promise<Record<string, { questions: number; permissions: number; unread: number }>>;
 }
 
 /** Workflow hooks (goals today, multirun/review later) — plugins observe turns
@@ -5033,14 +5033,25 @@ export function createSessionService(deps: {
       }
     },
 
+    async markRead(sessionId, seq) {
+      if (!store.setReadCursor) return;
+      const advanced = await store.setReadCursor(sessionId, seq);
+      if (!advanced) return;
+      const projection = await store.projection(sessionId);
+      if (!projection) return;
+      const counts = await deps.org?.attentionFor([sessionId]).catch(() => undefined);
+      const attention = counts?.[sessionId];
+      broadcast.projection(attention ? { ...projection, attention } : projection);
+    },
+
     async list(projectId) {
       const projections = await store.projections(projectId);
       if (!deps.org || projections.length === 0) return projections;
       // Attention badges derive from durable events on every read (WP5).
-      const counts = await deps.org.attentionFor(projections.map((p) => p.id)).catch(() => ({} as Record<string, { questions: number; permissions: number }>));
+      const counts = await deps.org.attentionFor(projections.map((p) => p.id)).catch(() => ({} as Record<string, { questions: number; permissions: number; unread: number }>));
       return projections.map((p) => {
         const c = counts[p.id];
-        return c ? { ...p, attention: { questions: c.questions, permissions: c.permissions, unread: 0 } } : p;
+        return c ? { ...p, attention: { questions: c.questions, permissions: c.permissions, unread: c.unread } } : p;
       });
     },
     async sync(projectId) {

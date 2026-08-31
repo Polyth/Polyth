@@ -225,9 +225,10 @@ test("tail prefetch dedupes and click paints its cache before reconcile resolves
   assert.equal(store.getState().activeSessionId, sessionId, "cached tail activates before reconcile");
   assert.deepEqual(store.getState().events[sessionId]?.map((event) => event.seq), [1]);
   assert.deepEqual(requestedPaths.slice(1), [
+    `/api/sessions/${sessionId}/read`,
     `/api/sessions/${sessionId}`,
     `/api/sessions/${sessionId}/events?afterSeq=1&prefetch=0`,
-  ]);
+  ], "opening a session advances its read cursor");
 
   unblockFetches();
   await opening;

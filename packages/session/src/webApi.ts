@@ -596,6 +596,9 @@ export const api = {
     jfetch<SessionProjection>(`/api/sessions/${id}/runtime-epoch`, json("POST", { confirm: true })),
   renameSession: (id: string, title: string) =>
     jfetch<{ ok: true }>(`/api/sessions/${id}/rename`, json("POST", { title })),
+  /** Advance the user's read cursor so navigator unread bold clears. */
+  markSessionRead: (id: string, seq: number) =>
+    jfetch<{ ok: true }>(`/api/sessions/${id}/read`, json("POST", { seq })),
   saveDraft: (id: string, text: string) =>
     jfetch<{ ok: true }>(`/api/sessions/${id}/draft`, json("PATCH", { text })),
 

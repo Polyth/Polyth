@@ -69,7 +69,7 @@ export { sessionRetentionSummary } from "./retention.ts";
 export type { SessionRetentionSummary } from "./retention.ts";
 
 /** Unresolved-request counters derived from durable events (never cached). */
-export interface AttentionCounts { questions: number; permissions: number }
+export interface AttentionCounts { questions: number; permissions: number; unread: number }
 
 export interface SearchHit { sessionId: string; field: "message"; snippet: string }
 
@@ -276,6 +276,9 @@ export interface Store extends SessionPersistence {
   labelRemove(id: string): Promise<boolean>;
   // -- derived counters + search (WP5) --
   attentionFor(sessionIds: string[]): Promise<Record<string, AttentionCounts>>;
+  /** Advance the user's read cursor (highest event seq actually seen).
+   *  Returns whether the cursor moved; unread bold derives from it. */
+  setReadCursor(sessionId: string, seq: number): Promise<boolean>;
   /** Bounded LIKE search over message text; snippets are trimmed around the hit. */
   searchEventText(q: string, limit?: number): Promise<SearchHit[]>;
   // -- server-owned agent profiles (WP8) --
@@ -749,6 +752,19 @@ export function createStore(dbPath: string): Store {
         ALTER TABLE session_queue
           ADD COLUMN held_for_review INTEGER NOT NULL DEFAULT 0
           CHECK (held_for_review IN (0, 1));
+      `);
+    },
+    // v9: per-session read cursors. The cursor is the highest event seq the
+    // user has actually seen; navigator unread bold counts assistant messages
+    // past it. Sessions without a cursor (legacy, never opened since the
+    // feature shipped) count as read — bold only appears for messages that
+    // arrived after the user last looked.
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS session_read (
+          session_id TEXT PRIMARY KEY,
+          seq INTEGER NOT NULL
+        )
       `);
     },
   ];
@@ -2851,6 +2867,7 @@ export function createStore(dbPath: string): Store {
       prep("DELETE FROM session_queue WHERE session_id = ?").run(input.binding.canonicalSessionId);
       prep("DELETE FROM attention_open WHERE session_id = ?").run(input.binding.canonicalSessionId);
       prep("DELETE FROM response_intents WHERE session_id = ?").run(input.binding.canonicalSessionId);
+      prep("DELETE FROM session_read WHERE session_id = ?").run(input.binding.canonicalSessionId);
       prep("DELETE FROM observations WHERE session_id = ?").run(input.binding.canonicalSessionId);
       prep("DELETE FROM session_reconciliations WHERE session_id = ?")
         .run(input.binding.canonicalSessionId);
@@ -2928,6 +2945,7 @@ export function createStore(dbPath: string): Store {
       prep("DELETE FROM session_queue WHERE session_id = ?").run(sessionId);
       prep("DELETE FROM attention_open WHERE session_id = ?").run(sessionId);
       prep("DELETE FROM response_intents WHERE session_id = ?").run(sessionId);
+      prep("DELETE FROM session_read WHERE session_id = ?").run(sessionId);
       prep("DELETE FROM observations WHERE session_id = ?").run(sessionId);
       prep("DELETE FROM session_reconciliations WHERE session_id = ?").run(sessionId);
       db.exec("COMMIT");
@@ -3238,7 +3256,7 @@ export function createStore(dbPath: string): Store {
   async function attentionFor(sessionIds: string[]): Promise<Record<string, AttentionCounts>> {
     const out: Record<string, AttentionCounts> = {};
     if (sessionIds.length === 0) return out;
-    for (const id of sessionIds) out[id] = { questions: 0, permissions: 0 };
+    for (const id of sessionIds) out[id] = { questions: 0, permissions: 0, unread: 0 };
     // Counters come from the append-maintained attention_open table — a
     // primary-key range count per session instead of replaying event logs.
     const placeholders = sessionIds.map(() => "?").join(",");
@@ -3254,7 +3272,37 @@ export function createStore(dbPath: string): Store {
       if (r.kind === "question") slot.questions = Number(r.n);
       else if (r.kind === "permission") slot.permissions = Number(r.n);
     }
+    // Unread assistant messages past the read cursor (session_read). The
+    // (session_id, seq) primary key keeps this a per-session range scan.
+    const unreadRows = db
+      .prepare(
+        `SELECT e.session_id, COUNT(*) AS n FROM events e
+         JOIN session_read r ON r.session_id = e.session_id
+         WHERE e.session_id IN (${placeholders})
+           AND e.type = 'assistant/message'
+           AND e.seq > r.seq
+         GROUP BY e.session_id`,
+      )
+      .all(...sessionIds) as Array<{ session_id: string; n: number }>;
+    for (const r of unreadRows) {
+      const slot = out[r.session_id];
+      if (slot) slot.unread = Number(r.n);
+    }
     return out;
+  }
+
+  function setReadCursor(sessionId: string, seq: number): Promise<boolean> {
+    if (!Number.isSafeInteger(seq) || seq <= 0) return Promise.resolve(false);
+    const advanced = transaction(() => {
+      const row = db.prepare("SELECT seq FROM session_read WHERE session_id = ?")
+        .get(sessionId) as { seq: number } | undefined;
+      if (row !== undefined && row.seq >= seq) return false;
+      prep(
+        "INSERT INTO session_read (session_id, seq) VALUES (?, ?) ON CONFLICT(session_id) DO UPDATE SET seq = excluded.seq",
+      ).run(sessionId, seq);
+      return true;
+    });
+    return Promise.resolve(advanced);
   }
 
   const SNIPPET_RADIUS = 40;
@@ -3356,6 +3404,7 @@ export function createStore(dbPath: string): Store {
     labelUpdate,
     labelRemove,
     attentionFor,
+    setReadCursor,
     searchEventText,
     profileList,
     profileGet,

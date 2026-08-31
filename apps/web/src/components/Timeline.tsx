@@ -802,7 +802,7 @@ function AssistantView({
   terminal?: boolean;
   segmentStartedAt?: number;
 }) {
-  const hasAnswer = m.text !== "" || !m.finalized;
+  const hasAnswer = m.text.trim() !== "" || !m.finalized;
   const answer = useSmoothText(m.text);
   const galleryAvailable = /!\[[^\]]*]\([^)]+\)/.test(m.text);
   const openGallery = () => {
@@ -1335,6 +1335,14 @@ function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnL
 // Footer under the last message once the turn ended: exactly one terminal
 // turn's own start/stop and usage (UX-MSG-ACTIONS) — see turnFooterLine().
 
+/** A finalized assistant row with only whitespace (no text, no reasoning) is
+ *  an invisible no-op — the model emitted blank lines between blocks. It stays
+ *  in the log but is dropped from the timeline so it can't open a second gap
+ *  between real rows (the 1px ghost bubble sandwiching two timeline gaps). */
+function blankAssistant(m: RenderMessage): boolean {
+  return m.kind === "assistant" && m.finalized && m.text.trim() === "" && m.reasoning.trim() === "";
+}
+
 export default function Timeline({
   model,
   latestRevealTarget,
@@ -1589,8 +1597,8 @@ export default function Timeline({
   const revertOk = revertAvailability(guards);
   const forkOk = forkAvailability(guards);
 
-  const visibleMessages = useMemo(() => model.messages.filter((message) => !message.undone), [model]);
-  const undoneMessages = useMemo(() => model.messages.filter((message) => message.undone), [model]);
+  const visibleMessages = useMemo(() => model.messages.filter((message) => !message.undone && !blankAssistant(message)), [model]);
+  const undoneMessages = useMemo(() => model.messages.filter((message) => message.undone && !blankAssistant(message)), [model]);
   const rows = useMemo(() => groupWork(mergeThinking(visibleMessages)), [visibleMessages]);
   const undoneRows = useMemo(() => groupWork(mergeThinking(undoneMessages)), [undoneMessages]);
   // One identity panel per completed turn, on the turn's terminal answer only.

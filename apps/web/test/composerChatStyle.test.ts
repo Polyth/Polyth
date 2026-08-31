@@ -26,7 +26,7 @@ test("composer radius uses the shared corner setting", () => {
   assert.match(css, /\.composer-mobile \.composer-card\s*\{[^}]*border-radius:\s*var\(--radius-composer\)/s);
 });
 
-test("conversation rows omit role chrome and keep assistant prose unboxed", () => {
+test("conversation rows omit role chrome and box assistant answers like user turns", () => {
   const timeline = read("../src/components/Timeline.tsx");
   const css = read("../src/styles.css");
 
@@ -35,7 +35,7 @@ test("conversation rows omit role chrome and keep assistant prose unboxed", () =
   assert.match(css, /\.msg\.user\s*\{\s*align-items:\s*flex-end;/);
   assert.match(css, /\.msg\.assistant\s*\{\s*align-items:\s*flex-start;/);
   assert.match(css, /\.msg\.user \.bubble\s*\{[^}]*background:\s*color-mix/s);
-  assert.match(css, /\.msg\.assistant > \.bubble\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;/s);
+  assert.match(css, /\.msg\.assistant > \.bubble\s*\{[^}]*background:\s*color-mix/s);
 });
 
 test("message actions use one lightweight copy control and local hover zones", () => {
@@ -93,7 +93,7 @@ test("thinking, tasks, and every execution share the compact activity-card treat
   const execution = read("../src/components/ExecutionRow.tsx");
   const css = read("../src/styles.css");
 
-  assert.match(timeline, /<details className="reasoning" open=\{open\}>/);
+  assert.match(timeline, /className=\{`reasoning\$\{open \? " open" : ""\}`\}>/);
   assert.match(timeline, /<strong>Thinking<\/strong>/);
   assert.match(execution, /<div className=\{`tool-card execution-row/);
   assert.match(css, /\.reasoning,\s*\.task-list,\s*\.tool-card\.execution-row\s*\{[^}]*border:\s*0;/s);

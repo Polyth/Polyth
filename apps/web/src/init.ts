@@ -474,6 +474,13 @@ function startSync(): void {
       scheduleFlush();
     } else if (msg.type === "projection") {
       store.upsertSession(msg.session);
+      // The user just watched a turn end in the active session — the tail is
+      // read. (Streaming "working" broadcasts are skipped; leaving mid-stream
+      // leaves the cursor behind, which is exactly the unread-bold state.)
+      if (
+        msg.session.status !== "working"
+        && msg.session.id === store.getState().activeSessionId
+      ) markActiveSessionRead();
     } else if (msg.type === "projections") {
       store.upsertSessions(msg.sessions);
     } else if (msg.type === "notification/added") {
@@ -628,6 +635,21 @@ function scheduleAutoBackfill(sessionId: string, generation: number): void {
   setTimeout(() => void step(), 200); // let the fresh window paint first
 }
 
+// ---- unread tracking (navigator bold) ------------------------------------
+// The server keeps a per-session read cursor; the client advances it only
+// when the user is actually looking at the session: on open, and whenever a
+// projection broadcast lands the ACTIVE session in a non-working state (the
+// user watched the turn end). A session the user leaves mid-stream keeps its
+// cursor behind the tail, so the completed session's last agent message
+// stays unread (bold) in the navigator.
+function markActiveSessionRead(): void {
+  const sessionId = store.getState().activeSessionId;
+  if (!sessionId) return;
+  const seq = store.lastSeq(sessionId);
+  if (seq <= 0) return;
+  void api.markSessionRead(sessionId, seq).catch(() => {});
+}
+
 export async function openSession(
   sessionId: string,
   opts: {
@@ -681,6 +703,7 @@ export async function openSession(
       if (generation === openSessionGeneration) {
         maybeSeedFromReplay(sessionId);
         scheduleAutoBackfill(sessionId, generation);
+        if (store.getState().activeSessionId === sessionId) markActiveSessionRead();
       }
       return;
     }
@@ -703,6 +726,7 @@ export async function openSession(
       store.activateSession(sessionId);
       if (opts.showChat !== false) store.showSessionChat();
       scheduleAutoBackfill(sessionId, generation);
+      markActiveSessionRead();
     }
     if (tailWasPrefetched) await reconcileSession(sessionId, store.lastSeq(sessionId), generation);
   } finally {

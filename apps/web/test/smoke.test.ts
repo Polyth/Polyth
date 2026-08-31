@@ -583,7 +583,10 @@ test("setUiSettings persists and applies visual data attributes", () => {
   });
   Object.defineProperty(globalThis, "document", {
     configurable: true,
-    value: { body: { dataset, style: { setProperty: (name: string, value: string) => styles.set(name, value) } } },
+    value: {
+      body: { dataset, style: { setProperty: (name: string, value: string) => styles.set(name, value) } },
+      documentElement: { style: { setProperty: (name: string, value: string) => styles.set(name, value) } },
+    },
   });
 
   setUiSettings({ density: "compact", fontSize: "s", rounding: 10, chatWidth: "wide" });
