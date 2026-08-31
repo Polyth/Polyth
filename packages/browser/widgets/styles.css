@@ -75,19 +75,19 @@ max-width: 180px;
 width: 100%;
 }
 .browser-device {
-width: 156px;
+width: 168px;
 }
 .browser-display {
-width: 140px;
+width: 168px;
 }
 .browser-scheme {
-width: 112px;
+width: 132px;
 }
 .browser-size-fields {
 display: inline-flex; align-items: center; gap: var(--space-1);
 }
 .browser-size-fields .browser-size-input {
-width: 4.5em; min-width: 4.5em; height: var(--control-h-sm); padding: 0 var(--control-pad-x-sm);
+width: 6em; min-width: 6em; height: var(--control-h-sm); padding: 0 var(--control-pad-x-sm);
   border: 1px solid var(--border); border-radius: var(--radius-control);
   background: var(--input-bg); font: 500 var(--font-meta)/1 var(--mono);
 }
