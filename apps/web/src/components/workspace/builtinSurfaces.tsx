@@ -181,6 +181,9 @@ function RecentSessions({ projectId }: { projectId: string | null }) {
       <ul>
         {recent.map((session) => {
           const status = resolveSessionStatus(session);
+          const done = session.status === "finished";
+          const unread = (session.attention?.unread ?? 0) > 0;
+          const statusLabel = done ? tr("notificationcentre.completed") : status.label;
           return (
             <li key={session.id}>
               <button
@@ -191,12 +194,20 @@ function RecentSessions({ projectId }: { projectId: string | null }) {
               >
                 <span
                   className={`hero-recent-status ${status.kind}`}
-                  title={status.label}
-                  aria-label={status.label}
+                  title={statusLabel}
+                  aria-label={statusLabel}
                 >
-                  <span aria-hidden>{status.glyph}</span>
+                  {status.kind === "working" ? (
+                    <span className="ui-spinner ui-spinner--sm" aria-hidden />
+                  ) : done ? (
+                    <span className="hero-recent-check" aria-hidden>✓</span>
+                  ) : (
+                    <span aria-hidden>{status.glyph}</span>
+                  )}
                 </span>
-                <span className="hero-recent-title">{displaySessionTitle(session.title, session.id)}</span>
+                <span className={`hero-recent-title${done && unread ? " hero-recent-title--unread" : ""}`}>
+                  {displaySessionTitle(session.title, session.id)}
+                </span>
                 <span className="hero-recent-time">{ago(session.lastTurnAt ?? session.createdAt)}</span>
               </button>
             </li>

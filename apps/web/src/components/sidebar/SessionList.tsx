@@ -13,7 +13,7 @@ import {
 import { openSession, prefetchSessionTail, deleteSession, restoreSession, forkSession, refreshSessions } from "../../init.ts";
 import { markSessionPerformance } from "../../sessionPerformance.ts";
 import { resolveSessionStatus, type SessionRowStatus } from "../../sessionStatus.ts";
-import { fullSessionTitle } from "../../format.ts";
+import { ago, fullSessionTitle } from "../../format.ts";
 import { friendlyError } from "../../settings.ts";
 import { confirmAlert } from "../../alerts.ts";
 import {
@@ -36,7 +36,7 @@ import {
   applyManualProjectOrder, reorderManualProjects, setSessionOrder, useProjectSortMode, useSessionOrder,
 } from "../../sidebarPrefs.ts";
 import { Icon } from "../../icons.tsx";
-import { formatRelativeTime, getLocale, tr } from "../../i18n/index.ts";
+import { getLocale, tr } from "../../i18n/index.ts";
 import { errorFeedback, successFeedback, tapFeedback } from "../../haptics.ts";
 import { horizontalDistance, SESSION_SWIPE_REVEAL, type GesturePoint } from "../../mobileGestures.ts";
 import { useShiftArmed } from "../../useShiftArmed.ts";
@@ -55,10 +55,7 @@ export function sessionActivityLabel(
     return new Date(activityAt).toLocaleTimeString(getLocale(), { hour: "2-digit", minute: "2-digit" });
   }
   const age = Math.max(0, now - activityAt);
-  if (age < 60_000) return formatRelativeTime(0, "second", { numeric: "auto", style: "narrow" });
-  if (age < 60 * 60_000) return formatRelativeTime(-Math.floor(age / 60_000), "minute", { numeric: "auto", style: "narrow" });
-  if (age < 24 * 60 * 60_000) return formatRelativeTime(-Math.floor(age / 3_600_000), "hour", { numeric: "auto", style: "narrow" });
-  if (age < 7 * 24 * 60 * 60_000) return formatRelativeTime(-Math.floor(age / 86_400_000), "day", { numeric: "auto", style: "narrow" });
+  if (age < 7 * 24 * 60 * 60_000) return ago(activityAt, now);
   return new Date(s.updatedAt).toLocaleDateString(getLocale(), { month: "short", day: "numeric" });
 }
 

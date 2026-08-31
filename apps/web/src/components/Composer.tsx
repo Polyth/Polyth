@@ -338,10 +338,17 @@ export default function Composer({
   const { contextBar, newSessionTarget } = useComposerLocation(session);
   const model = useActiveModel();
   const working = model.turn?.status === "working";
+  // The session projection can lag the event log (e.g. a re-attach marks the
+  // session `unknown` after the turn already stopped). A terminal turn status
+  // is authoritative: never offer Stop for a turn the log has already closed.
+  const turn = model.turn;
   const canStop = working || (
     session?.status !== undefined
     && session.status !== "idle"
     && session.status !== "archived"
+    && turn?.status !== "aborted"
+    && turn?.status !== "stopped"
+    && turn?.status !== "failed"
   );
   const abortPendingRef = useRef(false);
   const [abortPending, setAbortPending] = useState(false);

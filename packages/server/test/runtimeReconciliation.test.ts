@@ -607,6 +607,54 @@ test("idle snapshot without a comparable watermark remains unknown and blocks ad
   await store.close();
 });
 
+test("a locally stopped turn is not wedged back to unknown when the backend is unreachable", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-stopped-unknown-"));
+  const endpoint = endpointFor(dir);
+  let submissions = 0;
+  const runtime = runtimeWithSnapshot(endpoint, (binding) => ({
+    authorityId: binding.authorityId,
+    generation: binding.generation,
+    location: binding.location,
+    backendSessionId: binding.backendSessionId!,
+    reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+    state: { value: "unknown" },
+    completeness: {
+      events: "partial",
+      permissions: "partial",
+      questions: "partial",
+    },
+    permissions: [],
+    questions: [],
+    events: [],
+  }));
+  runtime.startTurn = async () => {
+    submissions += 1;
+  };
+  const { sessions, store, project } = makeHarness(runtime, dir);
+  const sessionId = "session-stopped-unknown";
+  await store.upsertProjection({
+    id: sessionId,
+    projectId: project.id,
+    backendSessionId: "backend-stopped-unknown",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-stopped-unknown"),
+    title: "Stopped before re-attach",
+    status: "working",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  await store.append(sessionId, "turn/started", { turnId: "stopped-unknown-1" });
+  await store.append(sessionId, "turn/stopped", { turnId: "stopped-unknown-1", reason: "aborted" });
+
+  await sessions.events(sessionId, 0);
+
+  // The durable stop is authoritative: reconciliation must not resurrect
+  // `unknown` (which would leave a dead Stop button in the UI).
+  assert.equal((await store.projection(sessionId))?.status, "idle");
+  await sessions.send(sessionId, { text: "continue after stop" });
+  assert.equal(submissions, 1);
+  await store.close();
+});
+
 test("a stopped turn can send again when reconciliation status is unknown", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-stopped-send-"));
   const endpoint = endpointFor(dir);

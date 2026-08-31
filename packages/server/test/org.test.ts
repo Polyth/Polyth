@@ -261,6 +261,28 @@ test("list derives attention badges from unresolved request events", async () =>
   assert.deepEqual(s.attention, { questions: 1, permissions: 1, unread: 0 });
 });
 
+test("list counts assistant messages past the read cursor as unread; markRead clears them", async () => {
+  const { sessions, store } = makeService();
+  const { id } = await sessions.create({ projectId: "p1", title: "S" });
+  const ev1 = await store.append(id, "user/message", { text: "hi" });
+  await store.append(id, "assistant/message", { text: "one" });
+  const ev3 = await store.append(id, "assistant/message", { text: "two" });
+
+  // No cursor (never opened since the feature shipped): everything counts as read.
+  const fresh = (await sessions.list("p1")).find((x) => x.id === id)!;
+  assert.equal(fresh.attention?.unread, 0);
+
+  // A cursor behind the tail makes the newer assistant messages unread.
+  await sessions.markRead!(id, ev1.seq);
+  const partial = (await sessions.list("p1")).find((x) => x.id === id)!;
+  assert.equal(partial.attention?.unread, 2);
+
+  // Reading to the tail clears the badge.
+  await sessions.markRead!(id, ev3.seq);
+  const read = (await sessions.list("p1")).find((x) => x.id === id)!;
+  assert.equal(read.attention?.unread, 0);
+});
+
 test("bulk semantics: mixed ids report partial failures without aborting", async () => {
   const { sessions } = makeService();
   const a = await sessions.create({ projectId: "p1", title: "A" });

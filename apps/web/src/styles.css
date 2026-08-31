@@ -985,7 +985,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   position: absolute;
   z-index: 3;
   top: 50%;
-  right: 4px;
+  right: 0;
   width: 32px;
   min-width: 32px;
   height: 32px;
@@ -7132,6 +7132,20 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
 .hero-recent-status.reconciling { color: var(--amber); }
 .hero-recent-status.failed { color: var(--red); }
 .hero-recent-status.unread { color: var(--text-dim); }
+.hero-recent-status.working .ui-spinner { width: 12px; height: 12px; }
+.hero-recent-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  border: 1.5px solid color-mix(in srgb, var(--green) 55%, var(--border));
+  border-radius: calc(var(--radius-control) * 0.6);
+  color: var(--green);
+  font-size: 11px;
+  line-height: 1;
+}
+.hero-recent-title--unread { color: var(--text); font-weight: 700; }
 .hero-recent-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hero-recent-time { flex: none; color: var(--faint); font-size: var(--font-meta); }
 
@@ -8589,6 +8603,18 @@ button[aria-busy="true"] { position: relative; }
   transition: none;
 }
 .session-row[data-swipe="revealed"] .session-btn { transform: translateX(-96px); }
+/* Pressed state draws inside the same inset rect as hover/selection: the
+   global button:active fill, scale and inset shadow would cover the whole
+   row and look larger than the ::before state rect. */
+.session-row .session-btn:active {
+  background: transparent;
+  transform: none;
+  box-shadow: none;
+}
+.session-row .session-btn:active::before {
+  background: color-mix(in srgb, var(--session-blue, var(--accent)) 12%, transparent);
+  opacity: 1;
+}
 .session-row[data-swipe="dragging"] .session-menu-trigger,
 .session-row[data-swipe="revealed"] .session-menu-trigger {
   opacity: 0;
@@ -8661,7 +8687,7 @@ button[aria-busy="true"] { position: relative; }
 @media (pointer: coarse), (max-width: 480px) {
 .session-row { touch-action: pan-y; }
   .session-row:not(.menu-open) { overflow: hidden; border-radius: var(--radius-control); }
-  .session-menu-trigger { right: 2px; width: var(--tap); height: var(--tap); }
+  .session-menu-trigger { right: 0; width: var(--tap); height: var(--tap); }
 }
 
 

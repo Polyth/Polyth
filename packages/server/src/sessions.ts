@@ -1583,6 +1583,12 @@ export function createSessionService(deps: {
           if (recovered) facts = await logFacts(sessionId);
         }
         const recoveredRestartIds = await restartRecoveredOperationIds(sessionId);
+        // A durable turn/stopped already closed the turn locally. When the
+        // backend is unreachable (`unknown`), that terminal record is
+        // authoritative — marking the session `unknown` again would wedge the
+        // Stop button on a dead turn. Admission already treats
+        // `unknown && stoppedTurnRecorded` as safe.
+        const stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
         const unresolved = (await durable.operations(sessionId)).find((operation) =>
           operation.operationId !== ignoredOperationId
           && isRuntimeOperationBlocking(operation)
@@ -1593,9 +1599,11 @@ export function createSessionService(deps: {
             ? (openRequestTotal(facts) > 0 ? "waiting" : "working")
             : authoritativeState.value === "idle"
               ? (openRequestTotal(facts) > 0 ? "waiting" : "idle")
-              : authoritativeState.value === "unknown"
-                ? "unknown"
-                : "failed";
+              : authoritativeState.value === "unknown" && stoppedTurnRecorded
+                ? (openRequestTotal(facts) > 0 ? "waiting" : "idle")
+                : authoritativeState.value === "unknown"
+                  ? "unknown"
+                  : "failed";
         const barrierState = unresolved
           ? "blocked"
           : authoritativeState.value === "unknown"

@@ -642,11 +642,14 @@ function scheduleAutoBackfill(sessionId: string, generation: number): void {
 // user watched the turn end). A session the user leaves mid-stream keeps its
 // cursor behind the tail, so the completed session's last agent message
 // stays unread (bold) in the navigator.
+const lastMarkedSeq = new Map<string, number>();
 function markActiveSessionRead(): void {
   const sessionId = store.getState().activeSessionId;
   if (!sessionId) return;
   const seq = store.lastSeq(sessionId);
   if (seq <= 0) return;
+  if (lastMarkedSeq.get(sessionId) === seq) return; // already marked at this seq
+  lastMarkedSeq.set(sessionId, seq);
   void api.markSessionRead(sessionId, seq).catch(() => {});
 }
 
@@ -728,7 +731,12 @@ export async function openSession(
       scheduleAutoBackfill(sessionId, generation);
       markActiveSessionRead();
     }
-    if (tailWasPrefetched) await reconcileSession(sessionId, store.lastSeq(sessionId), generation);
+    if (tailWasPrefetched) {
+      await reconcileSession(sessionId, store.lastSeq(sessionId), generation);
+      // The reconcile suffix can carry events newer than the mark above (the
+      // prefetch→open gap) — the user is viewing, so those are read too.
+      if (store.getState().activeSessionId === sessionId) markActiveSessionRead();
+    }
   } finally {
     // A newer concurrent open owns the claim and active-session transition.
     if (
