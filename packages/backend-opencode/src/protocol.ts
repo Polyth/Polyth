@@ -99,6 +99,24 @@ const performProbe = async (
   endpoint: RuntimeEndpoint,
   deadlineMs: number,
 ): Promise<ProtocolProbe> => {
+  // `/doc` is a generated OpenAPI document (~0.5–1s, hundreds of KB). Owned
+  // OpenCode already proved liveness via `/global/health`; prompt paths are
+  // negotiated lazily on first submit. Probe health first so connect is not
+  // gated on that document.
+  const globalHealth = await queryOptional(
+    transport,
+    endpoint,
+    "/global/health",
+    deadlineMs,
+  );
+  const globalMarker = protocolMarker(globalHealth);
+  if (globalMarker) return { protocol: globalMarker, legacyPromptPaths: [] };
+  if (globalHealth !== undefined) return { protocol: "legacy", legacyPromptPaths: [] };
+
+  const apiHealth = await queryOptional(transport, endpoint, "/api/health", deadlineMs);
+  const apiMarker = protocolMarker(apiHealth);
+  if (apiMarker) return { protocol: apiMarker, legacyPromptPaths: [] };
+
   const document = await queryOptional(transport, endpoint, "/doc", deadlineMs);
   const legacyPromptPaths = legacyPromptPathsFromDocument(document);
   // OpenCode 1.x can advertise its experimental V2 routes alongside the
@@ -108,23 +126,6 @@ const performProbe = async (
   // can explicitly select V2 when operating a V2-only endpoint.
   if (legacyPromptPaths.length > 0) return { protocol: "legacy", legacyPromptPaths };
   if (hasV2ProtocolDocument(document)) return { protocol: "v2", legacyPromptPaths };
-
-  const apiHealth = await queryOptional(transport, endpoint, "/api/health", deadlineMs);
-  const apiMarker = protocolMarker(apiHealth);
-  if (apiMarker) return { protocol: apiMarker, legacyPromptPaths };
-
-  const globalHealth = await queryOptional(
-    transport,
-    endpoint,
-    "/global/health",
-    deadlineMs,
-  );
-  const globalMarker = protocolMarker(globalHealth);
-  if (globalMarker) return { protocol: globalMarker, legacyPromptPaths };
-
-  // /global/health is a pinned legacy endpoint. Its mere successful response
-  // identifies the protocol, but does not prove either prompt mutation path.
-  if (globalHealth !== undefined) return { protocol: "legacy", legacyPromptPaths };
   return { legacyPromptPaths };
 };
 
@@ -149,12 +150,27 @@ export const probeProtocol = (
 export const createProtocolAdapter = async (
   options: CreateProtocolAdapterOptions,
 ): Promise<ProtocolAdapter> => {
+  if (options.protocol === "legacy") {
+    return createLegacyProtocolAdapter({
+      transport: options.transport,
+      endpoint: options.endpoint,
+      deadlineMs: options.deadlineMs,
+    });
+  }
+  if (options.protocol === "v2") {
+    return createV2ProtocolAdapter({
+      transport: options.transport,
+      endpoint: options.endpoint,
+      deadlineMs: options.deadlineMs,
+    });
+  }
+
   const probe = await probeProtocol(
     options.transport,
     options.endpoint,
     options.deadlineMs,
   );
-  const selected = options.protocol === "auto" ? probe.protocol : options.protocol;
+  const selected = probe.protocol;
   if (!selected) {
     throw Object.assign(
       new Error("OpenCode endpoint does not expose a supported protocol contract"),

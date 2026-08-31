@@ -125,11 +125,62 @@ fi
     .trim()
     .split("\n")
     .map((line) => line.split("\t"));
-  assert.deepEqual(invocations.map(([argument]) => argument), ["--version", "db"]);
+  assert.deepEqual(
+    [...invocations.map(([argument]) => argument)].sort(),
+    ["--version", "db"].sort(),
+  );
   assert.ok(invocations[0]![1], "the version probe must receive OPENCODE_DB");
-  assert.equal(invocations[1]![1], invocations[0]![1]);
+  assert.ok(invocations[1]![1], "the db-path probe must receive OPENCODE_DB");
   assert.match(invocations[0]![1]!, /polyth-opencode-db-probe-.+\/probe\.db$/);
-  assert.deepEqual(invocations.map((fields) => fields[2]), ["true", "true"]);
+  assert.match(invocations[1]![1]!, /polyth-opencode-db-probe-.+\/probe\.db$/);
+  assert.notEqual(
+    invocations[0]![1],
+    invocations[1]![1],
+    "version and db-path probes must not share a probe DB",
+  );
+  assert.deepEqual(invocations.map((fields) => fields[2]).sort(), ["true", "true"]);
+});
+
+test("engine inspect caches identity for an unchanged binary and coalesces in-flight probes", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-engine-inspect-cache-"));
+  t.after(async () => {
+    await rm(directory, { recursive: true, force: true });
+  });
+  const executable = join(directory, "opencode-test");
+  const capture = join(directory, "probe-env.txt");
+  await writeFile(executable, `#!/bin/sh
+printf '%s\\n' "$1" >> "$POLYTH_PROBE_CAPTURE"
+if [ "$1" = "--version" ]; then
+  printf '1.18.18\\n'
+elif [ "$1" = "db" ] && [ "$2" = "path" ]; then
+  printf '%s\\n' "$OPENCODE_DB"
+else
+  exit 2
+fi
+`);
+  await chmod(executable, 0o700);
+
+  const previousCapture = process.env.POLYTH_PROBE_CAPTURE;
+  process.env.POLYTH_PROBE_CAPTURE = capture;
+  try {
+    const [first, second] = await Promise.all([
+      inspectOpenCodeEngine(executable),
+      inspectOpenCodeEngine(executable),
+    ]);
+    assert.deepEqual(first, second);
+    const third = await inspectOpenCodeEngine(executable);
+    assert.deepEqual(third, first);
+  } finally {
+    if (previousCapture === undefined) delete process.env.POLYTH_PROBE_CAPTURE;
+    else process.env.POLYTH_PROBE_CAPTURE = previousCapture;
+  }
+
+  const invocations = (await readFile(capture, "utf8")).trim().split("\n");
+  assert.equal(
+    invocations.length,
+    2,
+    "an unchanged binary must not relaunch --version or db path",
+  );
 });
 
 test("binary resolution prefers desktop absolute paths, then override, configured, and PATH", async (t) => {

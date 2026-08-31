@@ -158,6 +158,7 @@ export type {
 } from "./endpoint.ts";
 export {
   createRuntimeLifecycle,
+  DEFAULT_RUNTIME_READY_PATHS,
   waitForRuntimeReady,
 } from "./runtime.ts";
 export {
@@ -269,7 +270,7 @@ export const createOpenCodeRuntimeLifecycle = async (
     async createProtocol(transport, endpoint) {
       await waitForRuntimeReady(transport, {
         startupDeadlineMs: options.startupDeadlineMs ?? 20_000,
-        probeDeadlineMs: options.probeDeadlineMs ?? 1_000,
+        probeDeadlineMs: options.probeDeadlineMs ?? 250,
       });
       return await createProtocolAdapter({
         protocol: options.protocol ?? "auto",
@@ -932,7 +933,9 @@ export const createOpenCodeRuntime = async (
   try {
     lifecycle = await createOpenCodeRuntimeLifecycle({
       lease,
-      protocol: opts.protocol,
+      // Owned local is the OpenCode we just spawned. Skip /doc auto-discovery
+      // so models() can run as soon as health is 200.
+      protocol: opts.protocol ?? "legacy",
       startupDeadlineMs: opts.startupDeadlineMs,
       probeDeadlineMs: opts.probeDeadlineMs,
     });

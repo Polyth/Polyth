@@ -235,6 +235,38 @@ test("protocol probe cache is isolated by endpoint generation", async () => {
   assert.equal(fake.queries.length, 2, "new generation is negotiated independently");
 });
 
+test("auto protocol uses /global/health and does not fetch /doc", async () => {
+  const fake = transportDouble({
+    query: (path) => {
+      if (path.startsWith("/global/health")) return { healthy: true, version: "1.18.18" };
+      throw new Error(`unexpected probe ${path}`);
+    },
+  });
+  const adapter = await createProtocolAdapter({
+    protocol: "auto",
+    transport: fake.transport,
+    endpoint: endpoint(),
+  });
+  assert.equal(adapter.protocol, "legacy");
+  assert.equal(fake.queries.length, 1);
+  assert.match(fake.queries[0]!, /\/global\/health/);
+});
+
+test("explicit legacy adapter skips protocol probing", async () => {
+  const fake = transportDouble({
+    query: () => {
+      throw new Error("protocol probe should not run for an explicit legacy selection");
+    },
+  });
+  const adapter = await createProtocolAdapter({
+    protocol: "legacy",
+    transport: fake.transport,
+    endpoint: endpoint(),
+  });
+  assert.equal(adapter.protocol, "legacy");
+  assert.equal(fake.queries.length, 0);
+});
+
 test("auto negotiation prefers the complete legacy contract when V2 is also advertised", async () => {
   const fake = transportDouble({
     query: () => dualProtocolDocument,

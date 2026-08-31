@@ -193,64 +193,122 @@ const digestFile = async (file: string): Promise<string> => {
   }
 };
 
+interface EngineInspectCacheEntry {
+  ino: number;
+  mtimeMs: number;
+  size: number;
+  pending: Promise<OpenCodeEngineIdentity>;
+}
+
+const engineInspectCache = new Map<string, EngineInspectCacheEntry>();
+
+const isolatedProbeEnv = (dbPath: string): NodeJS.ProcessEnv => ({
+  ...process.env,
+  OPENCODE_DB: dbPath,
+  [OPENCODE_UPDATE_DISABLE_ENV]: "true",
+});
+
+const lastNonEmptyLine = (text: string): string =>
+  text.trim().split(/\r?\n/).at(-1)?.trim() ?? "";
+
+const inspectOpenCodeEngineUncached = async (
+  executable: string,
+): Promise<OpenCodeEngineIdentity> => {
+  const versionDirectory = await mkdtemp(join(tmpdir(), "polyth-opencode-db-probe-"));
+  const dbDirectory = await mkdtemp(join(tmpdir(), "polyth-opencode-db-probe-"));
+  const versionDb = join(versionDirectory, "probe.db");
+  const expectedDb = join(dbDirectory, "probe.db");
+  try {
+    const versionProbe = async (): Promise<string> => {
+      try {
+        const result = await execute(executable, ["--version"], {
+          env: isolatedProbeEnv(versionDb),
+          timeout: 10_000,
+        });
+        const version = lastNonEmptyLine(result.stdout);
+        if (!version) throw unavailable(`OpenCode at ${executable} returned an empty version`);
+        return version;
+      } catch (error) {
+        if ((error as { code?: string }).code === "unavailable") throw error;
+        throw unavailable(`could not read the OpenCode version from ${executable}`, error);
+      }
+    };
+    const versionPromise = versionProbe();
+    const dbProbe = async (): Promise<void> => {
+      try {
+        const result = await execute(executable, ["db", "path"], {
+          env: isolatedProbeEnv(expectedDb),
+          timeout: 10_000,
+        });
+        const actualDb = lastNonEmptyLine(result.stdout);
+        if (!actualDb || resolve(actualDb) !== resolve(expectedDb)) {
+          const version = await versionPromise.catch(() => "unknown");
+          throw unavailable(
+            `OpenCode ${version} does not honor OPENCODE_DB; expected ${expectedDb}, got ${actualDb || "no path"}. `
+            + "Polyth refuses to start an owned runtime because its global OpenCode DB would not be isolated.",
+          );
+        }
+      } catch (error) {
+        if ((error as { code?: string }).code === "unavailable") throw error;
+        const version = await versionPromise.catch(() => "unknown");
+        throw unavailable(
+          `could not verify OPENCODE_DB support in OpenCode ${version}; Polyth refuses to use the global OpenCode DB`,
+          error,
+        );
+      }
+    };
+
+    const [version, binaryDigest] = await Promise.all([
+      versionPromise,
+      dbProbe().then(() => undefined),
+      digestFile(executable),
+    ]).then(([probedVersion, , digest]) => [probedVersion, digest] as const);
+
+    return {
+      engine: "opencode",
+      version,
+      binaryDigest,
+      protocolGeneration: OPENCODE_PROTOCOL_GENERATION,
+    };
+  } finally {
+    await Promise.all([
+      rm(versionDirectory, { recursive: true, force: true }).catch(() => {}),
+      rm(dbDirectory, { recursive: true, force: true }).catch(() => {}),
+    ]);
+  }
+};
+
 /** Resolve the exact executable, hash its bytes, and prove this OpenCode build
- * honors OPENCODE_DB before any owned worker is allowed to start. */
+ * honors OPENCODE_DB before any owned worker is allowed to start. Unchanged
+ * binaries (realpath + inode/mtime/size) reuse the in-flight or completed
+ * probe so project fan-out and restarts do not relaunch the 100MB+ CLI. */
 export const inspectOpenCodeEngine = async (
   bin = "opencode",
 ): Promise<OpenCodeEngineIdentity> => {
   const executable = await resolveExecutable(bin);
-  const probeDirectory = await mkdtemp(join(tmpdir(), "polyth-opencode-db-probe-"));
-  const expectedDb = join(probeDirectory, "probe.db");
-  let version: string;
-  try {
-    try {
-      const result = await execute(executable, ["--version"], {
-        env: {
-          ...process.env,
-          OPENCODE_DB: expectedDb,
-          [OPENCODE_UPDATE_DISABLE_ENV]: "true",
-        },
-        timeout: 10_000,
-      });
-      version = result.stdout.trim().split(/\r?\n/).at(-1)?.trim() ?? "";
-    } catch (error) {
-      throw unavailable(`could not read the OpenCode version from ${executable}`, error);
-    }
-    if (!version) throw unavailable(`OpenCode at ${executable} returned an empty version`);
-
-    try {
-      const result = await execute(executable, ["db", "path"], {
-        env: {
-          ...process.env,
-          OPENCODE_DB: expectedDb,
-          [OPENCODE_UPDATE_DISABLE_ENV]: "true",
-        },
-        timeout: 10_000,
-      });
-      const actualDb = result.stdout.trim().split(/\r?\n/).at(-1)?.trim();
-      if (!actualDb || resolve(actualDb) !== resolve(expectedDb)) {
-        throw unavailable(
-          `OpenCode ${version} does not honor OPENCODE_DB; expected ${expectedDb}, got ${actualDb || "no path"}. `
-          + "Polyth refuses to start an owned runtime because its global OpenCode DB would not be isolated.",
-        );
-      }
-    } catch (error) {
-      if ((error as { code?: string }).code === "unavailable") throw error;
-      throw unavailable(
-        `could not verify OPENCODE_DB support in OpenCode ${version}; Polyth refuses to use the global OpenCode DB`,
-        error,
-      );
-    }
-  } finally {
-    await rm(probeDirectory, { recursive: true, force: true }).catch(() => {});
+  const info = await stat(executable);
+  const cached = engineInspectCache.get(executable);
+  if (
+    cached
+    && cached.ino === info.ino
+    && cached.mtimeMs === info.mtimeMs
+    && cached.size === info.size
+  ) {
+    return { ...await cached.pending };
   }
-
-  return {
-    engine: "opencode",
-    version,
-    binaryDigest: await digestFile(executable),
-    protocolGeneration: OPENCODE_PROTOCOL_GENERATION,
-  };
+  const pending = inspectOpenCodeEngineUncached(executable).catch((error) => {
+    if (engineInspectCache.get(executable)?.pending === pending) {
+      engineInspectCache.delete(executable);
+    }
+    throw error;
+  });
+  engineInspectCache.set(executable, {
+    ino: info.ino,
+    mtimeMs: info.mtimeMs,
+    size: info.size,
+    pending,
+  });
+  return { ...await pending };
 };
 
 export const OPENCODE_BINARY_DIGEST_RE = /^[a-f0-9]{64}$/;

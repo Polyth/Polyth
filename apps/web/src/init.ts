@@ -357,9 +357,12 @@ async function restoreSelectionAfterReady(): Promise<void> {
 // that first answer bricked session creation until a manual reload (QA P0).
 // Retry with capped backoff until a non-empty catalog lands; a WS (re)connect
 // also re-checks immediately, so recovery follows the backend, not a timer.
-const MODEL_RETRY_BASE_MS = 2_000;
-const MODEL_RETRY_MAX_MS = 30_000;
-const MODEL_REQUEST_TIMEOUT_MS = 8_000;
+const MODEL_RETRY_BASE_MS = 250;
+const MODEL_RETRY_MAX_MS = 5_000;
+// Inspect + serve listen + health + /provider can exceed 8s on a cold
+// 100MB+ OpenCode binary. Aborting earlier turns a still-spawning runtime
+// into "No models available" even though the backend is coming up.
+const MODEL_REQUEST_TIMEOUT_MS = 45_000;
 let modelRetryTimer: ReturnType<typeof setTimeout> | undefined;
 let modelRetryDelay = MODEL_RETRY_BASE_MS;
 let modelFetchAbort: AbortController | undefined;

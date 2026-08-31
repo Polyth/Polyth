@@ -29,6 +29,7 @@ import {
 } from "../src/endpoint.ts";
 import {
   createRuntimeLifecycle,
+  DEFAULT_RUNTIME_READY_PATHS,
   waitForRuntimeReady,
 } from "../src/runtime.ts";
 import {
@@ -1203,4 +1204,46 @@ test("waitReady bounds a transport probe that ignores its own deadline", async (
     /not ready within 80ms/,
   );
   assert.ok(Date.now() - startedAt < 500);
+});
+
+test("waitReady does not treat /provider or /agent as default liveness", () => {
+  assert.deepEqual([...DEFAULT_RUNTIME_READY_PATHS], ["/global/health", "/api/health"]);
+});
+
+test("waitReady returns as soon as any health path succeeds without waiting on a hung sibling", async () => {
+  const transport: OpenCodeTransport = {
+    async query<T>(request: { method: "GET" | "HEAD"; path: string; deadlineMs: number }) {
+      if (request.path === "/global/health") {
+        await new Promise((resolveHang) => setTimeout(resolveHang, request.deadlineMs + 50));
+        throw new Error("hung health");
+      }
+      return { status: 200, body: { healthy: true } } as T;
+    },
+    async mutate<T>(request: {
+      method: "POST" | "PUT" | "PATCH" | "DELETE";
+      path: string;
+      body?: unknown;
+      operationId: string;
+      deadlineMs: number;
+      replay: ReplayPolicy;
+    }) {
+      return {
+        kind: "unknown",
+        operationId: request.operationId,
+        message: "unused",
+      };
+    },
+    async stream() {},
+  };
+  const startedAt = Date.now();
+  await waitForRuntimeReady(transport, {
+    startupDeadlineMs: 1_000,
+    probeDeadlineMs: 400,
+    retryDelayMs: 1,
+    paths: ["/global/health", "/api/health"],
+  });
+  assert.ok(
+    Date.now() - startedAt < 150,
+    "a ready sibling must not wait for a hung health path",
+  );
 });

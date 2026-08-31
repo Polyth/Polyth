@@ -770,9 +770,43 @@ export interface RuntimeReadyOptions {
   paths?: readonly string[];
 }
 
-/** Probe under one absolute startup deadline. Every individual query receives
- * only a short slice of the remaining budget, so one hung endpoint cannot
- * defeat the outer deadline. */
+/** Cheap liveness only. `/provider` and `/agent` initialize catalogs and can
+ * take hundreds of milliseconds plus megabytes; they are not readiness. */
+export const DEFAULT_RUNTIME_READY_PATHS = ["/global/health", "/api/health"] as const;
+
+const probePath = async (
+  transport: OpenCodeTransport,
+  path: string,
+  deadlineMs: number,
+): Promise<void> => {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const response = await Promise.race([
+      transport.query<unknown>({
+        method: "GET",
+        path,
+        deadlineMs,
+      }),
+      new Promise<never>((_, rejectProbe) => {
+        timer = setTimeout(
+          () => rejectProbe(unavailable(`readiness probe ${path} exceeded ${deadlineMs}ms`)),
+          deadlineMs,
+        );
+      }),
+    ]);
+    const status = response && typeof response === "object" && "status" in response
+      ? (response as { status?: unknown }).status
+      : undefined;
+    if (typeof status === "number" && (status < 200 || status >= 300)) {
+      throw unavailable(`HTTP ${status}`);
+    }
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
+/** Probe under one absolute startup deadline. Health paths run in parallel so a
+ * hung sibling cannot stall a path that is already 200. */
 export const waitForRuntimeReady = async (
   transport: OpenCodeTransport,
   options: RuntimeReadyOptions,
@@ -780,48 +814,36 @@ export const waitForRuntimeReady = async (
   if (!Number.isFinite(options.startupDeadlineMs) || options.startupDeadlineMs <= 0) {
     throw new RangeError("startupDeadlineMs must be a positive finite number");
   }
-  const probeDeadlineMs = options.probeDeadlineMs ?? 1_000;
+  const probeDeadlineMs = options.probeDeadlineMs ?? 250;
   if (!Number.isFinite(probeDeadlineMs) || probeDeadlineMs <= 0) {
     throw new RangeError("probeDeadlineMs must be a positive finite number");
   }
-  const paths = options.paths ?? ["/global/health", "/api/health", "/agent", "/provider"];
+  const paths = options.paths ?? DEFAULT_RUNTIME_READY_PATHS;
+  if (paths.length === 0) {
+    throw new RangeError("readiness probe requires at least one path");
+  }
   const deadlineAt = Date.now() + options.startupDeadlineMs;
   let lastError = "";
 
   while (Date.now() < deadlineAt) {
-    for (const path of paths) {
-      const remaining = deadlineAt - Date.now();
-      if (remaining <= 0) break;
-      try {
-        const deadlineMs = Math.max(1, Math.min(probeDeadlineMs, remaining));
-        let timer: NodeJS.Timeout | undefined;
-        const response = await Promise.race([
-          transport.query<unknown>({
-            method: "GET",
-            path,
-            deadlineMs,
-          }),
-          new Promise<never>((_, rejectProbe) => {
-            timer = setTimeout(
-              () => rejectProbe(unavailable(`readiness probe ${path} exceeded ${deadlineMs}ms`)),
-              deadlineMs,
-            );
-          }),
-        ]).finally(() => {
-          if (timer) clearTimeout(timer);
-        });
-        const status = response && typeof response === "object" && "status" in response
-          ? (response as { status?: unknown }).status
-          : undefined;
-        if (typeof status !== "number" || (status >= 200 && status < 300)) return;
-        lastError = `HTTP ${status}`;
-      } catch (error) {
+    const remaining = deadlineAt - Date.now();
+    if (remaining <= 0) break;
+    const deadlineMs = Math.max(1, Math.min(probeDeadlineMs, remaining));
+    try {
+      await Promise.any(paths.map((path) => probePath(transport, path, deadlineMs)));
+      return;
+    } catch (error) {
+      if (error instanceof AggregateError) {
+        lastError = error.errors
+          .map((cause) => cause instanceof Error ? cause.message : String(cause))
+          .join("; ");
+      } else {
         lastError = error instanceof Error ? error.message : String(error);
       }
     }
-    const remaining = deadlineAt - Date.now();
-    if (remaining <= 0) break;
-    await sleep(Math.min(options.retryDelayMs ?? 100, remaining));
+    const retryRemaining = deadlineAt - Date.now();
+    if (retryRemaining <= 0) break;
+    await sleep(Math.min(options.retryDelayMs ?? 20, retryRemaining));
   }
   throw unavailable(
     `OpenCode runtime was not ready within ${options.startupDeadlineMs}ms${lastError ? ` (${lastError})` : ""}`,

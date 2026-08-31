@@ -39,7 +39,9 @@ import {
   createConfigApplier,
   createOpenCodeRuntime,
   createRemoteOpenCodeRuntime,
+  inspectOpenCodeEngine,
   probeRemoteOpenCode,
+  resolveOpenCodeBinary,
   sweepOpenCodeRuntimes,
   type OpenCodeAdapterOptions,
 } from "@polyth/backend-opencode";
@@ -365,6 +367,17 @@ export async function boot(opts: BootOptions = {}) {
   const writerLease = await acquireDataDirectoryLease(requestedDataDir);
   const dataDir = writerLease.canonicalDataDir;
   try {
+  // Warm the engine identity cache while the rest of boot (sweep, packages,
+  // HTTP) runs so the first owned spawn does not wait on `--version`/`db path`
+  // / hashing the OpenCode binary.
+  void resolveOpenCodeBinary({
+    ...(opts.opencode?.bin ? { bin: opts.opencode.bin } : {}),
+    ...(opts.opencode?.binarySource
+      ? { binarySource: opts.opencode.binarySource }
+      : {}),
+  })
+    .then((binary) => inspectOpenCodeEngine(binary.executablePath))
+    .catch(() => {});
   const openCodeRuntimesDir = join(dataDir, "runtimes", "opencode");
   await sweepOpenCodeRuntimes(openCodeRuntimesDir);
   const packagesDir = opts.packagesDir ?? resolve(__dirname, "../..");

@@ -882,6 +882,10 @@ export const createFakeOpenCode = async (
       jsonResponse(response, 200, { healthy: true, version: "fake-legacy-1" });
       return true;
     }
+    if (method === "GET" && path === "/api/health") {
+      jsonResponse(response, 200, { healthy: true, version: "fake-v2" });
+      return true;
+    }
     if (method === "GET" && path === "/doc") {
       jsonResponse(response, 200, {
         openapi: "3.1.0",
@@ -1056,7 +1060,7 @@ export const createFakeOpenCode = async (
         || incoming.headers.authorization === `Basic ${Buffer.from(
           `${basicAuth.username}:${basicAuth.password}`,
         ).toString("base64")}`;
-      if (incoming.method === "GET" && url.pathname === "/event") {
+      if (incoming.method === "GET" && (url.pathname === "/event" || url.pathname === "/api/event")) {
         if (!authorized) {
           jsonResponse(response, 401, { error: "unauthorized" }, {
             "www-authenticate": 'Basic realm="fake-opencode"',
