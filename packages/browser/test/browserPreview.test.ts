@@ -10,6 +10,7 @@ import {
   captureFileName,
   containedImageRect,
   devicePresetForViewport,
+  fittedWidthImageRect,
   normalizedPointInImage,
   normalizedRectInImage,
   previewImageRect,
@@ -53,7 +54,15 @@ test("previewImageRect maps pointer coordinates per display mode", () => {
   assert.deepEqual(entire, containedImageRect(1000, 1000, 1440, 900));
 
   const fit = previewImageRect("fit", 800, 600, 1440, 900);
-  assert.deepEqual(fit, { left: 0, top: 0, width: 800, height: 600 });
+  assert.deepEqual(fit, { left: 0, top: 0, width: 800, height: 500 });
+  assert.deepEqual(fit, fittedWidthImageRect(800, 1440, 900));
+  assert.deepEqual(normalizedPointInImage(400, 250, fit), { x: 0.5, y: 0.5 });
+  assert.equal(normalizedPointInImage(400, 550, fit), null);
+
+  const fitPortrait = previewImageRect("fit", 400, 300, 390, 844);
+  assert.equal(fitPortrait.width, 400);
+  assert.ok(fitPortrait.height > 300);
+  assert.equal(fitPortrait.height, 400 * 844 / 390);
 
   const actual = previewImageRect("actual", 390, 844, 390, 844);
   assert.deepEqual(actual, { left: 0, top: 0, width: 390, height: 844 });

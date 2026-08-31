@@ -257,10 +257,11 @@ export default function PreviewView() {
     const stage = stageRef.current;
     const update = () => {
       if (!stage || operation) return;
-      const viewport = clampViewport(
-        Math.round(stage.clientWidth),
-        Math.round(stage.clientHeight),
-      );
+      const width = Math.round(stage.clientWidth);
+      if (width <= 0) return;
+      // Fit matches pane width only; height stays so the frame can overflow
+      // and the stage scrolls instead of stretching the screenshot.
+      const viewport = clampViewport(width, browser.viewport.height);
       if (
         viewport.width === browser.viewport.width
         && viewport.height === browser.viewport.height
@@ -286,18 +287,6 @@ export default function PreviewView() {
       observer.disconnect();
     };
   }, [displayMode, browser?.id, browser?.viewport.width, browser?.viewport.height, operation]);
-
-  useEffect(() => {
-    const stage = stageRef.current;
-    if (!stage || displayMode !== "fit" || !browser) return;
-    const handler = (event: WheelEvent) => {
-      if (annotating || pointing || operation) return;
-      event.preventDefault();
-      void act({ kind: "scroll", x: event.deltaX, y: event.deltaY });
-    };
-    stage.addEventListener("wheel", handler, { passive: false });
-    return () => stage.removeEventListener("wheel", handler);
-  }, [displayMode, annotating, pointing, operation, browser?.id]);
 
   // Console poll only while the inspector shows it AND the pane is visible.
   useEffect(() => {
@@ -821,7 +810,7 @@ export default function PreviewView() {
                     (candidate) => candidate.id === value as BrowserDevicePresetId,
                   );
                   if (!preset) return;
-                  // Fit mode owns the pane size; a named or default preset
+                  // Fit mode matches pane width; a named or default preset
                   // must leave fit so ResizeObserver does not overwrite it.
                   if (displayMode === "fit") setDisplayMode("entire");
                   void act({ kind: "resize", viewport: { width: preset.width, height: preset.height } });
