@@ -432,16 +432,15 @@ function metadataValue(metadata: JsonObject | undefined, keys: readonly string[]
 export function ExecutionRow({
   message,
   subagent,
-  activeTurn = false,
 }: {
   message: ToolMsg;
   subagent?: Subagent;
-  /** Preserve the announced call and input while the turn is still running. */
-  activeTurn?: boolean;
 }) {
   const status = displayStatus(message, subagent?.status);
-  const done = status === "done" || status === "error" || status === "cancelled";
-  const [open, setOpen] = useState(activeTurn || !done);
+  // Always folded by default — even while running or in the active turn. The
+  // reader opens a row by hand; nothing auto-expands (same contract as
+  // WorkedGroup).
+  const [open, setOpen] = useState(false);
   const detailsPresent = useCollapsePresence(open);
   const rowRef = useRef<HTMLDivElement>(null);
   const pointerScrollAnchor = useRef<(TimelineScrollAnchor & { capturedAt: number }) | null>(null);
@@ -469,11 +468,9 @@ export function ExecutionRow({
     ?? (typeof message.input.cwd === "string" ? message.input.cwd : undefined);
   const elapsed = fmtMs(Math.max(0, (message.finishTime ?? Date.now()) - message.time));
   const webUrl = typeof message.input.url === "string" ? message.input.url : undefined;
-
-  useEffect(() => {
-    if (!done) setOpen(true);
-    else if (!activeTurn) setOpen(false);
-  }, [activeTurn, done]);
+  // The collapsed summary prints out on appearance (and types new arrivals
+  // while a call streams) — same fast catch-up type-out the output uses.
+  const typedPreview = usePrintText(presentation.preview);
 
   const openFile = () => {
     if (presentation.path) openEditorFile(presentation.path);
@@ -520,7 +517,7 @@ export function ExecutionRow({
           <span className="tool-icon execution-icon" aria-hidden="true"><ExecutionIcon kind={presentation.kind} /></span>
           <span className="execution-main">
             <span className="tool-name">{presentation.label}</span>
-            <span className={`tool-preview${presentation.kind === "shell" || presentation.kind === "test" ? " command" : ""}`}>{presentation.preview}</span>
+            <span className={`tool-preview${presentation.kind === "shell" || presentation.kind === "test" ? " command" : ""}`}>{typedPreview}</span>
           </span>
           <StatusMark message={message} childStatus={subagent?.status} />
           <span className="tool-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>

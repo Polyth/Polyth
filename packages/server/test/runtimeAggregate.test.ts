@@ -46,9 +46,25 @@ test("aggregates projects in parallel, skips failures, dedupes by key", async ()
   ]);
 
   assert.deepEqual(
-    out.map((m) => `${m.providerID}/${m.modelID}`),
+    out.items.map((m) => `${m.providerID}/${m.modelID}`),
     ["a/m1", "b/m2", "c/m3"], // deduped, stable project order
   );
+  assert.equal(out.complete, false, "a rejected runtime marks the fan-out incomplete");
+});
+
+test("a fully-answered fan-out is reported complete", async () => {
+  const byProject: Record<string, AgentRuntime> = {
+    p1: runtimeOf(async () => [model("a", "m1")]),
+    p2: runtimeOf(async () => [model("b", "m2")]),
+  };
+  const runtimes = { forProject: async (id: string) => byProject[id]! };
+  const out = await aggregateRuntimes(
+    { projects: projectsOf(["p1", "p2"]), runtimes },
+    (rt) => rt.models(),
+    (m) => `${m.providerID}/${m.modelID}`,
+  );
+  assert.equal(out.complete, true);
+  assert.equal(out.items.length, 2);
 });
 
 test("no projects falls back to the __default__ pool", async () => {
@@ -61,5 +77,6 @@ test("no projects falls back to the __default__ pool", async () => {
   };
   const out = await aggregateRuntimes({ projects: projectsOf([]), runtimes }, (rt) => rt.models());
   assert.deepEqual(asked, ["__default__"]);
-  assert.equal(out.length, 1);
+  assert.equal(out.items.length, 1);
+  assert.equal(out.complete, true);
 });

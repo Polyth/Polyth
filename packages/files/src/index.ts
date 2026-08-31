@@ -138,7 +138,7 @@ export function createFileService(): FileService {
     },
 
     async read(root, rel) {
-      const abs = await resolveInside(root, rel);
+      const abs = await resolveInside(root, rel, { allowAbsolute: true });
       const fh = await open(abs, "r");
       try {
         const st = await fh.stat();
@@ -164,7 +164,7 @@ export function createFileService(): FileService {
     },
 
     async stat(root, rel) {
-      const abs = await resolveInside(root, rel);
+      const abs = await resolveInside(root, rel, { allowAbsolute: true });
       const st = await lstat(abs);
       const kind = st.isDirectory() ? "dir" as const : "file" as const;
       const out: FileStatResult = { path: posix(rel), kind, size: st.size };
@@ -177,7 +177,7 @@ export function createFileService(): FileService {
     },
 
     async readRaw(root, rel) {
-      const abs = await resolveInside(root, rel);
+      const abs = await resolveInside(root, rel, { allowAbsolute: true });
       const st = await lstat(abs);
       if (!st.isFile()) throw new Error(`Not a file: ${rel}`);
       if (st.size > MAX_RAW) throw new Error(`File too large to serve raw: ${rel}`);
@@ -365,8 +365,12 @@ export function assertRelative(rel: string): void {
 async function resolveInside(
   root: string,
   rel: string,
-  opts: { forWrite?: boolean } = {},
+  opts: { forWrite?: boolean; allowAbsolute?: boolean } = {},
 ): Promise<string> {
+  // Read-only escape hatch: files the agent generated or read may live
+  // anywhere (e.g. /tmp/opencode/…). An absolute path resolves as-is, so
+  // the editor can view it; writes stay strictly project-scoped.
+  if (opts.allowAbsolute && path.isAbsolute(rel)) return realpath(rel);
   assertRelative(rel);
   const rootAbs = path.resolve(root);
   let rootReal: string;

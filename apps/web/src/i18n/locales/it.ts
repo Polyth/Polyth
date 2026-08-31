@@ -2010,6 +2010,8 @@ export const it: AppMessages = {
   "timeline.output": "Produzione",
   "timeline.pinIntoContext": "Inserisci nel contesto",
   "timeline.plan2": "Piano",
+  "timeline.promptBubble.collapse": "Comprimi il prompt",
+  "timeline.promptBubble.expand": "Espandi il prompt",
   "timeline.regenerate": "Rigenerare",
   "timeline.regenerateThisAssistantAnswer": "Rigenera questa risposta assistente",
   "timeline.restoreAndDiscardTheEditedDraft": "Ripristina e scarta la bozza modificata",

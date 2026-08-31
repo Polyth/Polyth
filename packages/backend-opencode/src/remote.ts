@@ -198,9 +198,14 @@ export const probeRemoteOpenCode = async (
   }
   const version = out.split("\n").pop()?.trim();
   if (expectedDb) {
+    // `db path` must be able to OPEN the database, so the probe directory has
+    // to exist first; the probe.db trio is removed right after (the owned
+    // runtime only ever contains opencode.db*).
     const dbResult = await host.exec(
       `${REMOTE_PATH}; export ${OPENCODE_UPDATE_DISABLE_ENV}=true; `
-        + `OPENCODE_DB=${shq(expectedDb)} ${safeBin} db path 2>/dev/null`,
+        + `mkdir -p ${shq(posix.dirname(expectedDb))} && `
+        + `OPENCODE_DB=${shq(expectedDb)} ${safeBin} db path 2>/dev/null; `
+        + `CODE=$?; rm -f ${shq(expectedDb)} ${shq(`${expectedDb}-wal`)} ${shq(`${expectedDb}-shm`)}; exit $CODE`,
       { timeoutMs: 20_000 },
     );
     const actualDb = dbResult.stdout.trim().split(/\r?\n/).at(-1)?.trim();

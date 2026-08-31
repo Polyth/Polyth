@@ -3349,6 +3349,33 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .prompt-nav { display: none; }
 }
 
+/* Transient prompt bubble: shown at the top of the viewport while the active
+   prompt is scrolled out of view and no prompt rail exists (<3 prompts).
+   Auto-dismisses 5s after the last scroll; hover pauses the timer. */
+.prompt-bubble {
+  position: absolute; top: 12px; left: 50%; translate: -50% 0; z-index: 5;
+  display: flex; align-items: stretch; gap: 2px; padding: 4px;
+  max-width: min(440px, 82%);
+  background: var(--overlay-bg); border: 1px solid var(--overlay-border);
+  border-radius: var(--radius-card); box-shadow: var(--shadow-md);
+  animation: rise var(--motion-normal) var(--motion-ease);
+}
+.prompt-bubble-main {
+  flex: 1; min-width: 0; display: flex; align-items: center;
+  border: 0; background: none; color: var(--text); cursor: pointer;
+  font-size: 12.5px; line-height: 1.45; text-align: left;
+  padding: 4px 6px; border-radius: calc(var(--radius-card) - 2px);
+}
+.prompt-bubble-main:hover, .prompt-bubble-main:focus-visible { background: var(--panel); color: var(--accent); }
+.prompt-bubble-text {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  word-break: break-word;
+}
+.prompt-bubble[data-expanded] .prompt-bubble-text {
+  white-space: pre-wrap; max-height: min(280px, 45vh); overflow-y: auto;
+}
+.prompt-bubble-toggle { flex: 0 0 auto; align-self: center; }
+
 
 /* L13: selection quick actions + windowed-timeline reveal bar */
 .selection-menu {

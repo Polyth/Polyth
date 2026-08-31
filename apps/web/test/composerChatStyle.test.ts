@@ -63,6 +63,17 @@ test("message actions use one lightweight copy control and local hover zones", (
   assert.match(timeline, /tr\("timeline\.startNewMultiRunFromThisAnswer"\)/);
 });
 
+test("assistant identity panel renders only after the turn completes", () => {
+  const timeline = read("../src/components/Timeline.tsx");
+  // While the session is actively working (or paused mid-turn on a request),
+  // every finalized answer renders only the minimal preliminary header; the
+  // full panel appears once the turn completes. A turn stranded by an unclear
+  // session state still counts as completed and shows the panel.
+  assert.match(timeline, /const sessionActive = sessionStatus === "working" \|\| sessionStatus === "waiting";/);
+  assert.match(timeline, /preliminary=\{r\.kind === "assistant" && turn\?\.status === "working" && sessionActive\}/);
+  assert.doesNotMatch(timeline, /turn\.startedAt === undefined \|\| r\.time >= turn\.startedAt/);
+});
+
 test("thinking, tasks, and every execution share the compact activity-card treatment", () => {
   const timeline = read("../src/components/Timeline.tsx");
   const execution = read("../src/components/ExecutionRow.tsx");

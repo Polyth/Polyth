@@ -65,10 +65,9 @@ test("read detects binary via NUL in first 8KB", async () => {
   });
 });
 
-test("rejects path escapes: .., absolute, symlink out", async () => {
+test("rejects path escapes: .., symlink out; writes stay scoped", async () => {
   await withRoot(async (root) => {
     await assert.rejects(() => files.read(root, "../secret"), /escapes/i);
-    await assert.rejects(() => files.read(root, "/etc/passwd"), /escapes/i);
     await assert.rejects(() => files.write(root, "../../x", "no"), /escapes/i);
     await assert.rejects(() => files.tree(root, { path: ".." }), /escapes/i);
 
@@ -77,6 +76,10 @@ test("rejects path escapes: .., absolute, symlink out", async () => {
       await writeFile(path.join(outside, "secret.txt"), "nope");
       await symlink(outside, path.join(root, "link"));
       await assert.rejects(() => files.read(root, "link/secret.txt"), /escapes/i);
+      // Absolute reads are allowed (agent-generated/read files may live
+      // anywhere) but absolute writes are not.
+      assert.equal((await files.read(root, path.join(outside, "secret.txt"))).content, "nope");
+      await assert.rejects(() => files.write(root, path.join(outside, "secret.txt"), "x"), /escapes/i);
     } finally {
       await rm(outside, { recursive: true, force: true });
     }
@@ -217,7 +220,30 @@ test("stat returns kind/size/mime/revision and rejects traversal", async () => {
     assert.equal(dir.kind, "dir");
 
     await assert.rejects(() => files.stat(root, "../outside"), /escapes/);
-    await assert.rejects(() => files.stat(root, "/etc/passwd"), /escapes/);
+  });
+});
+
+test("absolute paths outside the root are viewable (read/stat/readRaw), never writable", async () => {
+  await withRoot(async (root) => {
+    const outside = await mkdtemp(path.join(tmpdir(), "polyth-out-"));
+    try {
+      const abs = path.join(outside, "notes.txt");
+      await writeFile(abs, "outside text");
+      const got = await files.read(root, abs);
+      assert.equal(got.content, "outside text");
+      assert.equal(got.path, abs);
+      const st = await files.stat(root, abs);
+      assert.equal(st.kind, "file");
+      assert.equal(st.mime, "text/plain");
+      const raw = await files.readRaw(root, abs);
+      assert.equal(raw.size, "outside text".length);
+      await assert.rejects(() => files.write(root, abs, "x"), /escapes/i);
+      await assert.rejects(() => files.mkdir(root, abs), /escapes/i);
+      await assert.rejects(() => files.remove(root, abs), /escapes/i);
+      await assert.rejects(() => files.rename(root, abs, "in-root.txt"), /escapes/i);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });
 

@@ -179,6 +179,12 @@ padding: var(--space-1) var(--control-pad-x);
 .editor-body {
 flex: 1; min-height: 0; overflow: auto; background: var(--sunken);
 }
+.editor-media {
+display: flex; align-items: center; justify-content: center; padding: var(--space-3);
+}
+.editor-media-item {
+max-width: 100%; max-height: 100%; border-radius: var(--radius-1);
+}
 .cl-row {
 display: flex;
 }

@@ -63,6 +63,22 @@ const MAX_ROWED_LINES = 8000;
 const AUTOSAVE_MS = 1_500;
 const FILE_REFRESH_MS = 8_000;
 
+type MediaKind = "image" | "audio" | "video" | "pdf";
+/** Mirrors the server's RAW_MIME allowlist: binary files of these kinds are
+ *  viewable in the pane through /api/files/raw instead of an empty buffer. */
+const MEDIA_EXT: Record<string, MediaKind> = {
+  ".png": "image", ".jpg": "image", ".jpeg": "image", ".gif": "image",
+  ".webp": "image", ".avif": "image", ".bmp": "image", ".ico": "image",
+  ".mp4": "video", ".m4v": "video", ".mov": "video", ".ogv": "video", ".webm": "video",
+  ".aac": "audio", ".flac": "audio", ".m4a": "audio", ".mp3": "audio",
+  ".oga": "audio", ".ogg": "audio", ".wav": "audio", ".weba": "audio",
+  ".pdf": "pdf",
+};
+const mediaKindOf = (path: string): MediaKind | null => {
+  const ext = path.toLowerCase().match(/\.[^.]+$/)?.[0] ?? "";
+  return MEDIA_EXT[ext] ?? null;
+};
+
 /** Coordinators (tree, git) listen for this to refresh after file ops. */
 export function announceFilesChanged(): void {
   window.dispatchEvent(new CustomEvent("polyth:files-changed"));
@@ -469,6 +485,8 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
 
   // ---- render -----------------------------------------------------------------
   const lang = doc ? langOf(doc.path) : "";
+  const mediaKind = doc && doc.tooLarge ? mediaKindOf(doc.path) : null;
+  const rawUrl = doc ? api.filesRawUrl(projectId, doc.path, sid) : "";
   const lines = useMemo(
     () => (doc && !editing ? highlightLines(doc.content, lang) : []),
     [doc, editing, lang],
@@ -764,6 +782,13 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
           {jsonValue === undefined && (
             <pre className="code-view editor-plain">{buf}</pre>
           )}
+        </div>
+      ) : mediaKind ? (
+        <div className="editor-body editor-media">
+          {mediaKind === "image" && <img className="editor-media-item" src={rawUrl} alt={doc.path} />}
+          {mediaKind === "video" && <video className="editor-media-item" src={rawUrl} controls preload="metadata" />}
+          {mediaKind === "audio" && <audio className="editor-media-item" src={rawUrl} controls preload="metadata" />}
+          {mediaKind === "pdf" && <iframe className="editor-media-item" src={rawUrl} title={doc.path} />}
         </div>
       ) : (
         <div

@@ -689,6 +689,98 @@ test("send does not abort an open turn when runtime status is unknown", async ()
   await store.close();
 });
 
+test("Stop always closes the turn even when the backend abort outcome is unknown", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-stop-unknown-"));
+  const endpoint = endpointFor(dir);
+  const runtime = runtimeWithSnapshot(endpoint, (binding) => ({
+    authorityId: binding.authorityId,
+    generation: binding.generation,
+    location: binding.location,
+    backendSessionId: binding.backendSessionId!,
+    reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+    state: { value: "idle" },
+    completeness: { events: "partial", permissions: "partial", questions: "partial" },
+    permissions: [],
+    questions: [],
+    events: [],
+  }));
+  // The stranded backend cannot be reached to acknowledge the abort.
+  runtime.abort = async () => { throw new Error("backend unreachable after restart"); };
+  const { sessions, store, project } = makeHarness(runtime, dir);
+  const sessionId = "session-stop-unknown";
+  await store.upsertProjection({
+    id: sessionId,
+    projectId: project.id,
+    backendSessionId: "backend-stop-unknown",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-stop-unknown"),
+    title: "Stop unknown",
+    status: "unknown",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  await store.append(sessionId, "turn/started", { turnId: "stranded-1" });
+
+  await sessions.abort(sessionId); // must not throw
+
+  const turnEvents = (await store.events(sessionId))
+    .filter((event) => event.type.startsWith("turn/"))
+    .map((event) => event.type);
+  assert.deepEqual(turnEvents, ["turn/started", "turn/abort-requested", "turn/stopped"]);
+  const stop = (await store.events(sessionId)).find((event) => event.type === "turn/stopped");
+  assert.equal((stop?.data as { reason?: string }).reason, "aborted");
+  await store.close();
+});
+
+test("a steer to an unrecovered unknown session is admitted immediately as the next turn", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-steer-unknown-"));
+  const endpoint = endpointFor(dir);
+  let submissions = 0;
+  const runtime = runtimeWithSnapshot(endpoint, (binding) => ({
+    authorityId: binding.authorityId,
+    generation: binding.generation,
+    location: binding.location,
+    backendSessionId: binding.backendSessionId!,
+    reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+    // Reconciliation cannot recover the stranded turn.
+    state: { value: "unknown" },
+    completeness: { events: "partial", permissions: "partial", questions: "partial" },
+    permissions: [],
+    questions: [],
+    events: [],
+  }));
+  runtime.startTurn = async () => { submissions += 1; };
+  const { sessions, store, project } = makeHarness(runtime, dir);
+  const sessionId = "session-steer-unknown";
+  await store.upsertProjection({
+    id: sessionId,
+    projectId: project.id,
+    backendSessionId: "backend-steer-unknown",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-steer-unknown"),
+    title: "Steer unknown",
+    status: "unknown",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  await store.append(sessionId, "turn/started", { turnId: "stranded-1" });
+
+  await sessions.send(sessionId, { text: "go left instead", delivery: "steer" }); // must not throw
+
+  const events = await store.events(sessionId);
+  const turnEvents = events.filter((event) => event.type.startsWith("turn/")).map((event) => event.type);
+  // The stranded turn is closed by a local aborted stop, then the steer text
+  // is admitted to the backend as the next turn (the fake runtime records the
+  // submission but emits no turn lifecycle events of its own).
+  assert.deepEqual(turnEvents, ["turn/started", "turn/stopped"]);
+  assert.equal((events.find((event) => event.type === "turn/stopped")?.data as { reason?: string }).reason, "aborted");
+  assert.equal(submissions, 1);
+  assert.equal(
+    events.some((event) => event.type === "user/message"
+      && (event.data as { text?: string }).text === "go left instead"),
+    true,
+  );
+  await store.close();
+});
+
 test("equal status evidence is idempotent but a stale terminal revision cannot reopen admission", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-stale-terminal-"));
   const endpoint = endpointFor(dir);

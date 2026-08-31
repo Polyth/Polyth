@@ -4050,6 +4050,21 @@ export function createSessionService(deps: {
         proj = (await store.projection(sessionId)) ?? proj;
         stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
       }
+      // Steer and interrupt are "act on it now" intents. When a Polyth restart
+      // left the session `unknown` and reconciliation could not recover the
+      // stranded backend turn, do not reject the message: record the durable
+      // aborted stop (which lifts the send-admission barrier) and let the text
+      // continue immediately as the next turn on the rebound runtime.
+      if (
+        proj.status === "unknown"
+        && !recoverEpoch
+        && !stoppedTurnRecorded
+        && (input.delivery === "steer" || input.delivery === "interrupt")
+      ) {
+        await withSessionLock(sessionId, () => stopLocally(sessionId));
+        proj = (await store.projection(sessionId)) ?? proj;
+        stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
+      }
       if (
         proj.status === "reconciling"
         || (proj.status === "unknown" && !recoverEpoch && !stoppedTurnRecorded)
@@ -4478,7 +4493,23 @@ export function createSessionService(deps: {
       await withSessionLock(sessionId, async () => {
         const projection = await store.projection(sessionId);
         if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
-        const runtime = sessionRuntime.get(sessionId) ?? await ensureWired(sessionId, projection);
+        // Stop is an unconditional intent. Whatever the session state — idle,
+        // working, failed, or `unknown` after a Polyth restart stranded an
+        // in-flight turn — the canonical turn is closed locally and the Stop
+        // button never wedges. Backend I/O is best-effort.
+        let runtime: AgentRuntime | undefined = sessionRuntime.get(sessionId);
+        if (!runtime) {
+          try {
+            runtime = await ensureWired(sessionId, projection);
+          } catch (error) {
+            console.error(`[polyth] abort could not wire a runtime for ${sessionId}`, error);
+          }
+        }
+        if (!runtime) {
+          // No reachable backend to ask; the durable aborted stop still wins.
+          await stopLocally(sessionId);
+          return;
+        }
         const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
           sessionId,
           mutationKind: "turn-abort",
@@ -4490,23 +4521,22 @@ export function createSessionService(deps: {
         }));
         const outcome = await runPreparedOperation<Record<string, never>, void>(
           prepared.operation,
-          (operationId) => runtime.abortOperation
-            ? runtime.abortOperation(sessionId, operationId)
-            : runtime.abort(sessionId),
+          (operationId) => runtime!.abortOperation
+            ? runtime!.abortOperation(sessionId, operationId)
+            : runtime!.abort(sessionId),
           () => ({}),
           undefined,
           ABORT_AWAIT_MS,
         );
-        if (outcome.kind === "confirmed") {
-          // OpenCode acknowledges abort before it necessarily publishes the
-          // matching idle event. Close the canonical turn now; a late runtime
-          // terminal event is ignored by the durable turn guard.
-          await stopLocally(sessionId);
-        } else if (outcome.kind === "unknown") {
-          await updateProjection(sessionId, { status: "unknown" });
+        // OpenCode acknowledges abort before it necessarily publishes the
+        // matching idle event, and a restart-stranded turn may leave the
+        // backend outcome `unknown` or `rejected`. In every case close the
+        // canonical turn now; a late runtime terminal event is ignored by the
+        // durable turn guard. An `unknown` backend outcome still reconciles in
+        // the background to re-sync backend truth.
+        await stopLocally(sessionId);
+        if (outcome.kind === "unknown") {
           scheduleReconciliation(sessionId, projection, runtime, "abort-outcome-unknown");
-        } else if (outcome.kind === "rejected") {
-          throw outcomeError(outcome);
         }
       });
     },

@@ -100,7 +100,7 @@ test("remote file service round-trips through a real remote shell", async () => 
     await fs.writeBytes(root, "src/big.bin", big);
     const bigBack = await fs.readRaw(root, "src/big.bin");
     assert.equal(bigBack.data.length, big.length);
-    assert.ok(bigBack.data.equals(big));
+    assert.ok(Buffer.compare(Buffer.from(bigBack.data), big) === 0);
 
     // rename + remove
     await fs.rename(root, "src/hello.txt", "src/renamed.txt");
@@ -116,6 +116,24 @@ test("remote file service round-trips through a real remote shell", async () => 
     assert.equal(scored[0]!.path, "src/hello.txt");
     assert.equal(scored[0]!.kind, "file");
     assert.ok(scored[0]!.score > 0.8);
+
+    // absolute paths outside the root are viewable (agent-generated/read
+    // files), while writes through absolutes stay rejected
+    const outside = mkdtempSync(join(tmpdir(), "polyth-remote-out-"));
+    try {
+      const abs = join(outside, "shot.png");
+      writeFileSync(abs, Buffer.from([0x89, 0x50, 0x00, 0x47]));
+      const absRead = await fs.read(root, abs);
+      assert.equal(absRead.tooLarge, true);
+      const absSt = await fs.stat(root, abs);
+      assert.equal(absSt.kind, "file");
+      assert.equal(absSt.mime, "image/png");
+      assert.equal((await fs.readRaw(root, abs)).size, 4);
+      await assert.rejects(fs.write(root, abs, "x"), /escapes/i);
+      await assert.rejects(fs.remove(root, abs), /escapes/i);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

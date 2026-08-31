@@ -2010,6 +2010,8 @@ export const fr: AppMessages = {
   "timeline.output": "Sortie",
   "timeline.pinIntoContext": "Épingler dans le contexte",
   "timeline.plan2": "Plan",
+  "timeline.promptBubble.collapse": "Réduire le prompt",
+  "timeline.promptBubble.expand": "Développer le prompt",
   "timeline.regenerate": "Régénérer",
   "timeline.regenerateThisAssistantAnswer": "Régénérer cette réponse d'assistant",
   "timeline.restoreAndDiscardTheEditedDraft": "Rétablir et supprimer le brouillon modifié",

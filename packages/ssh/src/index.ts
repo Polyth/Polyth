@@ -334,6 +334,9 @@ export function createSshService(options: SshServiceOptions): SshService {
     "-o", `ControlPersist=${persistSeconds}s`,
     "-o", "ServerAliveInterval=30",
     "-o", "ServerAliveCountMax=3",
+    // Without this, every slave prints "Shared connection to X closed." on
+    // clean exit — it lands in composer-shell tool output.
+    "-o", "LogLevel=ERROR",
     ...(conn.port !== undefined ? ["-p", String(conn.port)] : []),
     ...(conn.authMode === "identity-file" && conn.identityFile
       ? ["-i", conn.identityFile, "-o", "IdentitiesOnly=yes"]

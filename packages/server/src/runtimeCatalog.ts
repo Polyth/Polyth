@@ -21,6 +21,17 @@ export function createRuntimeCatalog(deps: {
   let agents: AgentDescriptor[] | undefined;
   let modelsPending: Promise<ModelDescriptor[]> | undefined;
   let agentsPending: Promise<AgentDescriptor[]> | undefined;
+  let modelAttempts = 0;
+  let agentAttempts = 0;
+
+  // A cold-boot fan-out settles before every project's runtime has finished
+  // spawning, so it can be empty OR partial — e.g. only the always-free
+  // `opencode` provider answered while the credentialed ones warm up. Freezing
+  // that for the server lifetime is what makes "only OpenCode Zen models show"
+  // survive until a restart. Cache only a complete fan-out; keep retrying
+  // otherwise, but stop after a few tries so one permanently unreachable
+  // project can't force a full fan-out on every Settings open.
+  const MAX_PARTIAL_ATTEMPTS = 8;
 
   const loadModels = () => {
     if (models) return Promise.resolve(models);
@@ -28,12 +39,11 @@ export function createRuntimeCatalog(deps: {
       deps,
       (runtime) => runtime.models(),
       (model) => `${model.providerID}/${model.modelID}`,
-    ).then((items) => {
-      // A cold-boot fan-out can settle with an empty catalog (runtimes still
-      // spawning/verifying). Never cache that: the next call re-aggregates and
-      // eventually caches a real catalog instead of showing "no models" until
-      // the next server restart.
-      if (items.length > 0) models = items;
+    ).then(({ items, complete }) => {
+      modelAttempts += 1;
+      if (items.length > 0 && (complete || modelAttempts >= MAX_PARTIAL_ATTEMPTS)) {
+        models = items;
+      }
       return items;
     }).finally(() => { modelsPending = undefined; });
     return modelsPending;
@@ -45,8 +55,11 @@ export function createRuntimeCatalog(deps: {
       deps,
       (runtime) => runtime.agents(),
       (agent) => agent.name,
-    ).then((items) => {
-      if (items.length > 0) agents = items;
+    ).then(({ items, complete }) => {
+      agentAttempts += 1;
+      if (items.length > 0 && (complete || agentAttempts >= MAX_PARTIAL_ATTEMPTS)) {
+        agents = items;
+      }
       return items;
     }).finally(() => { agentsPending = undefined; });
     return agentsPending;

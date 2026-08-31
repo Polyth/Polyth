@@ -181,7 +181,8 @@ export function createHttpServer(deps: HttpDeps): Server {
 
   // Aggregate across live runtimes (per-project pools may differ).
   const aggregate = <T>(fetch: (rt: AgentRuntime) => Promise<T[]>): Promise<T[]> =>
-    aggregateRuntimes({ projects, runtimes: deps.runtimes }, fetch);
+    aggregateRuntimes({ projects, runtimes: deps.runtimes }, fetch)
+      .then((result) => result.items);
   const models = () => deps.catalog?.models() ?? aggregate<ModelDescriptor>((runtime) => runtime.models());
 
   return createServer(async (req, res) => {

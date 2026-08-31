@@ -2010,6 +2010,8 @@ export const ar: AppMessages = {
   "timeline.output": "الناتج",
   "timeline.pinIntoContext": "تثبيت في السياق",
   "timeline.plan2": "يخطط",
+  "timeline.promptBubble.collapse": "طي المطالبة",
+  "timeline.promptBubble.expand": "توسيع المطالبة",
   "timeline.regenerate": "تجديد",
   "timeline.regenerateThisAssistantAnswer": "أعد إنشاء إجابة المساعد هذه",
   "timeline.restoreAndDiscardTheEditedDraft": "استعد المسودة المعدلة وتخلص منها",

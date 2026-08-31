@@ -222,7 +222,11 @@ test("execution row renders collapsed value first, expands inline, and opens lev
     const disclosure = container.querySelector<HTMLButtonElement>(".execution-summary");
     assert.ok(disclosure);
     assert.equal(disclosure.getAttribute("aria-expanded"), "false");
-    assert.match(disclosure.textContent ?? "", /Shell.*git diff.*420ms.*✓/s);
+    // The summary prints out on appearance (typing animation), so the visible
+    // text is still typing; the accessible name always carries the full
+    // command.
+    assert.ok((disclosure.getAttribute("aria-label") ?? "")
+      .includes("Expand Shell: git diff -- apps/web/src/components/Timeline.tsx"));
     assert.equal(container.querySelector(".execution-details"), null, "raw details do not clutter the collapsed row");
 
     await act(async () => disclosure.click());
@@ -279,6 +283,9 @@ test("execution row renders collapsed value first, expands inline, and opens lev
       await new Promise((resolve) => setTimeout(resolve, 200));
     });
     assert.equal(container.querySelector(".execution-details"), null, "details unmount after the motion-normal collapse");
+    // The appearance print-out has settled by now: the visible summary reads
+    // label + typed command + duration + check mark.
+    assert.match(disclosure.textContent ?? "", /Shell.*git diff.*420ms.*✓/s);
   } finally {
     await act(async () => root.unmount());
     timeline.remove();
@@ -333,16 +340,26 @@ test("pending and running execution states stay visually and accessibly distinct
   }
 });
 
-test("a completed call remains open during its active turn", async () => {
+test("execution rows stay folded by default while running and after settling", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   try {
-    await act(async () => root.render(createElement(ExecutionRow, { message: tool(), activeTurn: true })));
-    assert.equal(container.querySelector(".execution-summary")?.getAttribute("aria-expanded"), "true");
-    assert.match(container.querySelector(".execution-details")?.textContent ?? "", /git diff/);
-    await act(async () => root.render(createElement(ExecutionRow, { message: tool(), activeTurn: false })));
-    assert.equal(container.querySelector(".execution-summary")?.getAttribute("aria-expanded"), "false");
+    await act(async () => root.render(createElement(ExecutionRow, {
+      message: tool({ status: "running", output: undefined, finishTime: undefined }),
+    })));
+    assert.equal(container.querySelector(".execution-summary")?.getAttribute("aria-expanded"), "false",
+      "a running call is folded by default");
+    assert.equal(container.querySelector(".execution-details"), null,
+      "inline details stay hidden while folded");
+
+    await act(async () => root.render(createElement(ExecutionRow, { message: tool() })));
+    assert.equal(container.querySelector(".execution-summary")?.getAttribute("aria-expanded"), "false",
+      "a settled call is folded by default too");
+
+    await act(async () => container.querySelector<HTMLButtonElement>(".execution-summary")!.click());
+    assert.equal(container.querySelector(".execution-summary")?.getAttribute("aria-expanded"), "true",
+      "a hand toggle still expands the row");
   } finally {
     await act(async () => root.unmount());
     container.remove();

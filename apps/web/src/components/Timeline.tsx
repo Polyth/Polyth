@@ -83,6 +83,7 @@ import WorkflowTimelineCard from "../../../../packages/workflow/widgets/Workflow
 import { tr } from "../i18n/index.ts";
 import ExecutionRow, { useCollapsePresence } from "./ExecutionRow.tsx";
 import Picker from "./Picker.tsx";
+import PromptBubble from "./PromptBubble.tsx";
 import type { PickerItem } from "../picker.ts";
 import { Button, Notice } from "./ui/index.ts";
 import type { TurnLimitState } from "../reduce.ts";
@@ -612,7 +613,8 @@ function AssistantAgentHeader({
   announce?: Announce;
   /** Present only for the terminal assistant answer of the current turn. */
   turn?: RenderModel["turn"];
-  /** A finalized interim update from the turn currently in progress. */
+  /** Any finalized answer while the session is actively working: only the
+   *  minimal header renders; the identity panel appears after the turn. */
   preliminary: boolean;
 }) {
   const session = useStore((state) =>
@@ -875,8 +877,9 @@ function GithubConflictCard({ message }: { message: GithubConflictMsg }) {
   );
 }
 
-// Consecutive tool calls share one lightweight execution milestone. Completed
-// history folds by default; active and failed work stays visible.
+// Consecutive tool calls share one lightweight execution milestone. Every
+// milestone — running or settled — folds by default; the reader opens it by
+// hand.
 function childForTool(tool: ToolMsg, subagents: SubagentState | null): SubagentState["agents"][number] | undefined {
   if (!subagents || executionPresentation(tool).kind !== "subagent") return undefined;
   const metadataId = ["sessionId", "sessionID", "childSessionId", "child_session_id"]
@@ -936,14 +939,13 @@ export function WorkedGroup({
   );
 }
 
-function MessageView({ m, announce, plan, regeneratePrompt, turn, preliminary, activeTurn, onRevert, onFork, revert, fork }: {
+function MessageView({ m, announce, plan, regeneratePrompt, turn, preliminary, onRevert, onFork, revert, fork }: {
   m: RenderMessage;
   announce?: Announce;
   plan?: NonNullable<RenderModel["tasks"]>;
   regeneratePrompt?: string;
   turn?: RenderModel["turn"];
   preliminary?: boolean;
-  activeTurn?: boolean;
   onRevert?: (message: UserMsg) => void;
   onFork?: (message: UserMsg) => void;
   revert?: ActionAvailability;
@@ -977,7 +979,7 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, preliminary, a
   }
   if (m.kind === "github-conflict") return <GithubConflictCard message={m} />;
   if (m.kind === "task") return <TaskActivityRow activity={m} />;
-  return <ExecutionRow message={m} activeTurn={activeTurn} />;
+  return <ExecutionRow message={m} />;
 }
 
 // ---- memoized rows -----------------------------------------------------------
@@ -1029,7 +1031,6 @@ const MessageRow = memo(function MessageRow(props: Parameters<typeof MessageView
   // model.turn mutates in place: any row holding it must always re-render
   && prev.turn === undefined && next.turn === undefined
   && prev.preliminary === next.preliminary
-  && prev.activeTurn === next.activeTurn
   && prev.regeneratePrompt === next.regeneratePrompt
   && prev.announce === next.announce
   && prev.onRevert === next.onRevert
@@ -1535,6 +1536,15 @@ export default function Timeline({
   // model plus the authoritative queue; the server re-validates inside the
   // per-session lock, so a raced action returns a typed conflict, not a lie.
   const archived = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId)?.status === "archived");
+  // The assistant identity panel is a completed-turn artifact: while the
+  // runtime is actively generating (or paused mid-turn on a request) every
+  // finalized answer renders only the minimal preliminary header, and the
+  // panel appears once the turn completes. A turn stranded by an unclear
+  // session state (unknown / reconciling / idle without a stop) still counts
+  // as completed and shows the panel.
+  const sessionStatus = useStore((s) =>
+    s.activeSessionId === null ? undefined : s.sessions.find((x) => x.id === s.activeSessionId)?.status);
+  const sessionActive = sessionStatus === "working" || sessionStatus === "waiting";
   // Paginated hydration caches only the newest window; true while the server
   // still holds events OLDER than the cached window (primitive selector, so
   // streamed appends don't re-render the shell through this subscription).
@@ -1855,9 +1865,7 @@ export default function Timeline({
                 plan={r.kind === "assistant" && r.id === latestAssistantId && model.tasks ? model.tasks : undefined}
                 regeneratePrompt={r.kind === "assistant" ? regenerateSources.get(r.eventSeq) : undefined}
                 turn={r.kind === "assistant" && r.id === latestAssistantId && turn?.status !== "working" ? turn : undefined}
-                preliminary={r.kind === "assistant" && turn?.status === "working"
-                  && (turn.startedAt === undefined || r.time >= turn.startedAt)}
-                activeTurn={r.kind === "tool" && turn?.status === "working"}
+                preliminary={r.kind === "assistant" && turn?.status === "working" && sessionActive}
                 announce={announce}
                 onRevert={revert}
                 onFork={fork}
@@ -1950,6 +1958,11 @@ export default function Timeline({
           onJump={jump}
           containerRef={ref}
         />
+      )}
+      {/* Fewer than three prompts → no rail: a transient bubble tops the
+          viewport while the current prompt is scrolled out of view. */}
+      {!showNav && prompts.length > 0 && prompts.length < 3 && (
+        <PromptBubble prompts={prompts} containerRef={ref} onJump={jump} />
       )}
       {latestReveal && (latestRevealTarget ? createPortal(latestReveal, latestRevealTarget) : latestReveal)}
       </div>

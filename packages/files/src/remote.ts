@@ -74,19 +74,24 @@ const collect = (host: RemoteHost, command: string): Promise<string> =>
   });
 
 export function createRemoteFileService(host: RemoteHost): FileService {
-  /** Run `cd <root> && <body>`; rel paths are validated before interpolation. */
+  /** Run `cd <root> && <body>`; rel paths are validated before interpolation.
+   *  allowAbsolute skips the check for read-only views of agent-touched files
+   *  outside the root (absolute paths ignore the cd entirely). */
   const run = async (
     root: string,
     rel: string,
     body: string,
-    opts?: { timeoutMs?: number; maxOutputBytes?: number },
+    opts: { timeoutMs?: number; maxOutputBytes?: number; allowAbsolute?: boolean } = {},
   ) => {
-    assertRelative(rel);
-    return host.exec(`cd -- ${shq(root)} && ${body}`, opts);
+    if (!opts.allowAbsolute) assertRelative(rel);
+    return host.exec(`cd -- ${shq(root)} && ${body}`, {
+      ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+      ...(opts.maxOutputBytes !== undefined ? { maxOutputBytes: opts.maxOutputBytes } : {}),
+    });
   };
 
   const stat = async (root: string, rel: string): Promise<FileStatResult> => {
-    const result = await run(root, rel, `stat_one() { ${STAT_EXPR}; }; stat_one ${shq(rel)}`);
+    const result = await run(root, rel, `stat_one() { ${STAT_EXPR}; }; stat_one ${shq(rel)}`, { allowAbsolute: true });
     if (result.code !== 0) {
       throw new Error(`cannot stat ${rel || "."}: ${result.stderr.trim() || `exit ${result.code}`}`);
     }
@@ -188,21 +193,27 @@ export function createRemoteFileService(host: RemoteHost): FileService {
     async writeBytes(root, rel, data) {
       const dir = posix.dirname(rel);
       const b64 = Buffer.from(data).toString("base64");
+      // One exec per chunk: a single command must stay far below the
+      // ~128 KiB per-argument limit, so large payloads go over several
+      // bounded `printf | base64 -d` round trips through one tmp file.
+      // The tmp name is minted locally (not `$$` — every exec is a fresh
+      // remote shell with its own pid).
       const step = Math.ceil(WRITE_CHUNK_BYTES / 3) * 4;
       const chunks: string[] = [];
       for (let i = 0; i < b64.length; i += step) chunks.push(b64.slice(i, i + step));
-      // `$$` stays outside shq so every remote shell mints its own tmp path.
-      const tmpExpr = `${shq(rel)}.polyth-tmp.$$`;
-      let cmd = [
+      const tmpExpr = shq(`${rel}.polyth-tmp.${Math.random().toString(36).slice(2, 8)}`);
+      let result = await run(root, rel, [
         `mkdir -p -- ${shq(dir)}`,
         `TMP=${tmpExpr}`,
         `printf '%s' ${shq(chunks.shift() ?? "")} | base64 -d > "$TMP"`,
-      ].join(" && ");
+      ].join(" && "), { timeoutMs: 60_000 });
       for (const chunk of chunks) {
-        cmd += ` && printf '%s' ${shq(chunk)} | base64 -d >> "$TMP"`;
+        if (result.code !== 0) break;
+        result = await run(root, rel, `TMP=${tmpExpr} && printf '%s' ${shq(chunk)} | base64 -d >> "$TMP"`, { timeoutMs: 60_000 });
       }
-      cmd += ` && mv -- "$TMP" ${shq(rel)}`;
-      const result = await run(root, rel, cmd, { timeoutMs: 60_000 });
+      if (result.code === 0) {
+        result = await run(root, rel, `TMP=${tmpExpr} && mv -- "$TMP" ${shq(rel)}`, { timeoutMs: 60_000 });
+      }
       if (result.code !== 0) {
         throw new Error(`cannot write ${rel}: ${result.stderr.trim() || `exit ${result.code}`}`);
       }

@@ -2010,6 +2010,8 @@ export const zhCN: AppMessages = {
   "timeline.output": "输出",
   "timeline.pinIntoContext": "将其置于上下文中",
   "timeline.plan2": "计划",
+  "timeline.promptBubble.collapse": "收起提示词",
+  "timeline.promptBubble.expand": "展开提示词",
   "timeline.regenerate": "重新生成",
   "timeline.regenerateThisAssistantAnswer": "重新生成此助理答案",
   "timeline.restoreAndDiscardTheEditedDraft": "恢复并丢弃已编辑的草稿",
