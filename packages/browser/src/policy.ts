@@ -28,8 +28,36 @@ const defaultResolve: Resolver = async (hostname) => {
   return results.map((r) => r.address);
 };
 
-function isLoopbackHost(host: string): boolean {
+export function isLoopbackHost(host: string): boolean {
   return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]" || host.endsWith(".localhost");
+}
+
+/** Canonical origins that share one approval (www ↔ apex). Loopback and literal IPs are not aliased. */
+export function originAliases(origin: string): string[] {
+  try {
+    const url = new URL(origin);
+    const host = url.hostname.toLowerCase();
+    const canonical = url.origin.toLowerCase();
+    if (isLoopbackHost(host)) return [canonical];
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(host) || host.startsWith("[")) return [canonical];
+    if (host.startsWith("www.")) {
+      const apexUrl = new URL(origin);
+      apexUrl.hostname = host.slice(4);
+      return [...new Set([canonical, apexUrl.origin.toLowerCase()])];
+    }
+    const wwwUrl = new URL(origin);
+    wwwUrl.hostname = `www.${host}`;
+    return [...new Set([canonical, wwwUrl.origin.toLowerCase()])];
+  } catch {
+    return [origin.toLowerCase()];
+  }
+}
+
+function listedHas(listed: ReadonlySet<string>, origin: string): boolean {
+  for (const alias of originAliases(origin)) {
+    if (listed.has(alias)) return true;
+  }
+  return false;
 }
 
 /** Private / link-local / metadata / CGNAT / unspecified addresses. */
@@ -110,7 +138,7 @@ export async function checkUrl(raw: string, opts: UrlPolicyOptions = {}): Promis
 
   // Loopback: only origins Polyth started or the user approved.
   if (isLoopbackHost(host) || (!host.includes(":") && /^\d+\.\d+\.\d+\.\d+$/.test(host) && isLoopbackAddress(host))) {
-    if (allowed.has(origin) || approved.has(origin)) return { ok: true, url: canonical, origin };
+    if (listedHas(allowed, origin) || listedHas(approved, origin)) return { ok: true, url: canonical, origin };
     return { ok: false, code: "approval-required", reason: `loopback origin ${origin} needs approval` };
   }
 
@@ -140,12 +168,12 @@ export async function checkUrl(raw: string, opts: UrlPolicyOptions = {}): Promis
       // A public name resolving to loopback is a rebinding attempt. Only
       // origins Polyth itself started may do this; user approval of an
       // external origin never grants loopback access.
-      if (!allowed.has(origin)) {
+      if (!listedHas(allowed, origin)) {
         return { ok: false, code: "blocked-private", reason: `${host} resolves to a loopback address` };
       }
     }
   }
 
-  if (allowed.has(origin) || approved.has(origin)) return { ok: true, url: canonical, origin };
+  if (listedHas(allowed, origin) || listedHas(approved, origin)) return { ok: true, url: canonical, origin };
   return { ok: false, code: "approval-required", reason: `external origin ${origin} needs a per-origin approval` };
 }

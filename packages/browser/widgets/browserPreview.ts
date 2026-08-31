@@ -1,15 +1,23 @@
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 
 export const BROWSER_DEVICE_PRESETS = [
-  { id: "responsive", label: tr("browserpreview.responsive"), width: 1280, height: 800 },
-  { id: "iphone-14", label: tr("browserpreview.iphone14"), width: 390, height: 844 },
-  { id: "pixel-7", label: tr("browserpreview.pixel7"), width: 412, height: 915 },
-  { id: "ipad-mini", label: tr("browserpreview.ipadMini"), width: 768, height: 1024 },
-  { id: "laptop", label: tr("browserpreview.laptop"), width: 1366, height: 768 },
-  { id: "desktop", label: tr("browserpreview.desktop"), width: 1440, height: 900 },
+  { id: "responsive", labelKey: "browserpreview.responsive", width: 1280, height: 800 },
+  { id: "iphone-14", labelKey: "browserpreview.iphone14", width: 390, height: 844 },
+  { id: "pixel-7", labelKey: "browserpreview.pixel7", width: 412, height: 915 },
+  { id: "ipad-mini", labelKey: "browserpreview.ipadMini", width: 768, height: 1024 },
+  { id: "laptop", labelKey: "browserpreview.laptop", width: 1366, height: 768 },
+  { id: "desktop", labelKey: "browserpreview.desktop", width: 1440, height: 900 },
 ] as const;
 
 export type BrowserDevicePresetId = typeof BROWSER_DEVICE_PRESETS[number]["id"];
+
+export type BrowserDisplayMode = "fit" | "entire" | "actual";
+
+export const BROWSER_DISPLAY_MODES = [
+  { id: "fit", labelKey: "previewview.displayFit" },
+  { id: "entire", labelKey: "previewview.displayEntire" },
+  { id: "actual", labelKey: "previewview.displayActual" },
+] as const;
 
 export const BROWSER_INSPECTOR_TABS = ["snapshot", "console", "activity"] as const;
 export type BrowserInspectorTab = typeof BROWSER_INSPECTOR_TABS[number];
@@ -116,6 +124,40 @@ export function containedImageRect(
     top: (elementHeight - height) / 2,
     width,
     height,
+  };
+}
+
+/** Map pointer coordinates to viewport pixels for the active preview display mode.
+ * For `actual`, the img is sized to viewport CSS pixels (not stretched to the stage);
+ * pass the img client box — the fill rect is the full img element. */
+export function previewImageRect(
+  mode: BrowserDisplayMode,
+  elementWidth: number,
+  elementHeight: number,
+  sourceWidth: number,
+  sourceHeight: number,
+): ImageRect {
+  if (mode === "entire") {
+    return containedImageRect(elementWidth, elementHeight, sourceWidth, sourceHeight);
+  }
+  if (elementWidth <= 0 || elementHeight <= 0) {
+    return { left: 0, top: 0, width: 0, height: 0 };
+  }
+  if (mode === "fit") {
+    return { left: 0, top: 0, width: elementWidth, height: elementHeight };
+  }
+  return { left: 0, top: 0, width: elementWidth, height: elementHeight };
+}
+
+export const VIEWPORT_WIDTH_MIN = 320;
+export const VIEWPORT_WIDTH_MAX = 3840;
+export const VIEWPORT_HEIGHT_MIN = 240;
+export const VIEWPORT_HEIGHT_MAX = 2160;
+
+export function clampViewport(width: number, height: number): { width: number; height: number } {
+  return {
+    width: Math.max(VIEWPORT_WIDTH_MIN, Math.min(width, VIEWPORT_WIDTH_MAX)),
+    height: Math.max(VIEWPORT_HEIGHT_MIN, Math.min(height, VIEWPORT_HEIGHT_MAX)),
   };
 }
 

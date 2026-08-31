@@ -2,7 +2,7 @@
 // approvals, and DNS-rebinding defense via per-hop re-resolution.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkUrl, isPrivateAddress, originOf, type Resolver } from "../src/index.ts";
+import { checkUrl, isPrivateAddress, originAliases, originOf, type Resolver } from "../src/index.ts";
 
 const publicDns: Resolver = async () => ["93.184.216.34"];
 
@@ -104,4 +104,34 @@ test("originOf canonicalizes for approval keys", () => {
   assert.equal(originOf("HTTPS://Example.COM/path?q=1"), "https://example.com");
   assert.equal(originOf("localhost:5173/workbench"), "http://localhost:5173");
   assert.equal(originOf("not a url"), null);
+});
+
+test("originAliases pairs www and apex; loopback and literal IPs are not aliased", () => {
+  const aliases = originAliases("https://example.com");
+  assert.deepEqual([...aliases].sort(), ["https://example.com", "https://www.example.com"].sort());
+  assert.deepEqual(originAliases("https://www.example.com").sort(), aliases.sort());
+  assert.deepEqual(originAliases("http://127.0.0.1:5173"), ["http://127.0.0.1:5173"]);
+  assert.deepEqual(originAliases("http://93.184.216.34"), ["http://93.184.216.34"]);
+});
+
+test("www and apex share an approval in both directions", async () => {
+  const approvedWww = await checkUrl("https://example.com/docs", {
+    approvedOrigins: new Set(["https://www.example.com"]),
+    resolve: publicDns,
+  });
+  assert.equal(approvedWww.ok, true);
+  if (approvedWww.ok) assert.equal(approvedWww.origin, "https://example.com");
+
+  const approvedApex = await checkUrl("https://www.example.com/about", {
+    approvedOrigins: new Set(["https://example.com"]),
+    resolve: publicDns,
+  });
+  assert.equal(approvedApex.ok, true);
+  if (approvedApex.ok) assert.equal(approvedApex.origin, "https://www.example.com");
+});
+
+test("new public origin without approval is still approval-required", async () => {
+  const d = await checkUrl("https://other.example.org/", { resolve: publicDns });
+  assert.equal(d.ok, false);
+  if (!d.ok) assert.equal(d.code, "approval-required");
 });

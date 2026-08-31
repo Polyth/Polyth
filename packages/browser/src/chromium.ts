@@ -85,12 +85,27 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
         javaScriptEnabled: true,
         serviceWorkers: "block",
       });
-      // No secondary windows: agent/user share exactly one visible page. The
-      // "page" event also fires for the initial page while newPage() is still
-      // pending, so compare against a ref that is only set once it resolves.
+      // Popups (target=_blank) navigate the main tab instead of opening a second
+      // window. The "page" event also fires for the initial page while
+      // newPage() is still pending, so compare against a ref set once it resolves.
       let mainPage: import("playwright-core").Page | null = null;
+      let refreshTitle = async (): Promise<void> => {};
       context.on("page", (extra) => {
-        if (mainPage && extra !== mainPage) void extra.close().catch(() => {});
+        if (!mainPage || extra === mainPage) return;
+        void (async () => {
+          let target = extra.url();
+          try {
+            await extra.waitForURL((u) => u.toString() !== "about:blank", { timeout: 5000 });
+            target = extra.url();
+          } catch { /* timed out or navigated away */ }
+          try { await extra.close(); } catch { /* already gone */ }
+          if (target.startsWith("http://") || target.startsWith("https://")) {
+            try {
+              await mainPage!.goto(target, { waitUntil: "domcontentloaded" });
+              await refreshTitle();
+            } catch { /* policy or load failure */ }
+          }
+        })();
       });
       const page = await context.newPage();
       mainPage = page;
@@ -126,7 +141,7 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
 
       const nav = (): DriverNav => ({ url: page.url(), title: lastTitle });
       let lastTitle = "";
-      const refreshTitle = async (): Promise<void> => {
+      refreshTitle = async (): Promise<void> => {
         try { lastTitle = await page.title(); } catch { /* navigating */ }
       };
 
