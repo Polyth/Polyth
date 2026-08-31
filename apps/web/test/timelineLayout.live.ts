@@ -819,7 +819,7 @@ test("event purity: hover, jumps, dialog, reveal, menu, copy, and reasoning appe
     await page.click(".jump-latest");
     await page.waitForTimeout(150);
     // Reasoning disclosure open + close.
-    const summary = page.locator("details.reasoning summary");
+    const summary = page.locator(".reasoning-toggle");
     await summary.scrollIntoViewIfNeeded();
     await summary.click();
     await summary.click();

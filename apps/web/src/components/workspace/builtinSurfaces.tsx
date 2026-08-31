@@ -9,7 +9,7 @@ import Timeline from "../Timeline.tsx";
 import Composer from "../Composer.tsx";
 import QuestionCards from "../QuestionCards.tsx";
 import { focusComposer, setOverlay, setRailPlugin, setUiError, useActiveModel, useStore } from "../../store.ts";
-import { openSession, restoreSession } from "../../init.ts";
+import { openSession, prefetchSessionTail, restoreSession } from "../../init.ts";
 import { friendlyError } from "../../settings.ts";
 import { composerBlockedByArchive, sessionSurfaceKind } from "../../sessionSurface.ts";
 import { registerWorkspaceSurface } from "../../workspace/surfaceRegistry.ts";
@@ -28,7 +28,7 @@ import { nextWorkingActivity, useUiSettings } from "../../uiPrefs.ts";
 import { useSheetTrigger } from "../mobile/sheetTrigger.ts";
 import { HeroWidget, HeroWidgetSettings } from "../mobile/HeroWidgets.tsx";
 import { useShiftArmed } from "../../useShiftArmed.ts";
-import { ago, displaySessionTitle } from "../../format.ts";
+import { ago, displaySessionTitle, isPlaceholderTitle } from "../../format.ts";
 import {
   noteStarterUsed,
   starterContextFrom,
@@ -165,8 +165,15 @@ function RecentSessions({ projectId }: { projectId: string | null }) {
   const sessions = useStore((s) => s.sessions);
   const recent = useMemo(() => sessions
     .filter((session) => session.projectId === projectId && session.status !== "archived")
-    .sort((a, b) => (b.lastTurnAt ?? b.updatedAt) - (a.lastTurnAt ?? a.updatedAt))
+    .sort((a, b) => (b.lastTurnAt ?? b.createdAt) - (a.lastTurnAt ?? a.createdAt))
     .slice(0, 3), [sessions, projectId]);
+  useEffect(() => {
+    for (const session of recent) {
+      if (isPlaceholderTitle(session.title, session.id)) {
+        prefetchSessionTail(session.id);
+      }
+    }
+  }, [recent]);
   if (recent.length === 0) return null;
   return (
     <HeroWidget id="recent"><div className="hero-recent">
@@ -190,7 +197,7 @@ function RecentSessions({ projectId }: { projectId: string | null }) {
                   <span aria-hidden>{status.glyph}</span>
                 </span>
                 <span className="hero-recent-title">{displaySessionTitle(session.title, session.id)}</span>
-                <span className="hero-recent-time">{ago(session.lastTurnAt ?? session.updatedAt)}</span>
+                <span className="hero-recent-time">{ago(session.lastTurnAt ?? session.createdAt)}</span>
               </button>
             </li>
           );

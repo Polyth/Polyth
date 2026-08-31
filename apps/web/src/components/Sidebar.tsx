@@ -153,7 +153,9 @@ export default function Sidebar() {
     return filtered.sort((a, b) => {
       if (sort === "name") return (a.name || a.path).localeCompare(b.name || b.path);
       const latest = (projectId: string) => sessions.reduce(
-        (value, session) => session.projectId === projectId ? Math.max(value, session.updatedAt) : value,
+        (value, session) => session.projectId === projectId
+          ? Math.max(value, session.lastTurnAt ?? session.createdAt)
+          : value,
         0,
       );
       return latest(b.id) - latest(a.id) || (a.name || a.path).localeCompare(b.name || b.path);

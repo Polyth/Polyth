@@ -262,3 +262,19 @@ test("a server placeholder projection does not clobber the client-derived title"
   const s = getState().sessions.find((x) => x.id === "guard-s");
   assert.equal(s?.title, titleFromPrompt("Fix the flaky test"));
 });
+
+test("an older-history backfill containing the first user/message derives the title", () => {
+  seedSession("backfill-s");
+  // Tail load arrives first and only contains later assistant/tool events.
+  applyEvents([
+    mk("backfill-s", 2, "turn/started", { turnId: "t1" }),
+    mk("backfill-s", 3, "assistant/chunk", { partId: "p1", text: "hello" }),
+  ]);
+  assert.equal(getState().sessions.find((x) => x.id === "backfill-s")?.title, "");
+  // Backfill now brings in the first user message.
+  applyEvents([mk("backfill-s", 1, "user/message", { text: "Refactor the auth layer" })]);
+  assert.equal(
+    getState().sessions.find((x) => x.id === "backfill-s")?.title,
+    titleFromPrompt("Refactor the auth layer"),
+  );
+});

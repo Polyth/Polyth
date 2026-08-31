@@ -46,14 +46,15 @@ const INITIAL_VISIBLE_SESSIONS = 6;
 const INLINE_LABEL_LIMIT = 6;
 
 export function sessionActivityLabel(
-  s: Pick<SessionProjection, "updatedAt" | "status" | "attention">,
+  s: Pick<SessionProjection, "createdAt" | "lastTurnAt" | "updatedAt" | "status" | "attention">,
   relative: boolean,
   now = Date.now(),
 ): string {
+  const activityAt = s.lastTurnAt ?? s.createdAt;
   if (!relative) {
-    return new Date(s.updatedAt).toLocaleTimeString(getLocale(), { hour: "2-digit", minute: "2-digit" });
+    return new Date(activityAt).toLocaleTimeString(getLocale(), { hour: "2-digit", minute: "2-digit" });
   }
-  const age = Math.max(0, now - s.updatedAt);
+  const age = Math.max(0, now - activityAt);
   if (age < 60_000) return formatRelativeTime(0, "second", { numeric: "auto", style: "narrow" });
   if (age < 60 * 60_000) return formatRelativeTime(-Math.floor(age / 60_000), "minute", { numeric: "auto", style: "narrow" });
   if (age < 24 * 60 * 60_000) return formatRelativeTime(-Math.floor(age / 3_600_000), "hour", { numeric: "auto", style: "narrow" });
@@ -669,6 +670,12 @@ export default function SessionList({
   useEffect(() => {
     setVisibleCount(INITIAL_VISIBLE_SESSIONS);
   }, [projectId, query, attentionOnly]);
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
+    if (projectSessions.length === 0) void refreshSessions(projectId);
+  }, [projectId]);
   const reloadOrg = () => {
     void api.listLabels().then(setLabels);
     void api.listWorktrees(projectId).then(setWorktrees);
@@ -686,7 +693,7 @@ export default function SessionList({
       const items = sessions.filter((s) => s.projectId === projectId);
       return sort === "manual"
         ? applyManualProjectOrder(items, sessionOrder)
-        : items.sort((a, b) => b.updatedAt - a.updatedAt);
+        : items.sort((a, b) => (b.lastTurnAt ?? b.createdAt) - (a.lastTurnAt ?? a.createdAt));
     },
     [sessions, projectId, sessionOrder, sort],
   );
@@ -734,7 +741,7 @@ export default function SessionList({
     byWorktree.set(key, [...(byWorktree.get(key) ?? []), s]);
   }
   if (sort !== "manual") for (const grouped of byWorktree.values()) {
-    grouped.sort((a, b) => b.updatedAt - a.updatedAt);
+    grouped.sort((a, b) => (b.lastTurnAt ?? b.createdAt) - (a.lastTurnAt ?? a.createdAt));
   }
   // A project's checkout is its root, not another branch in the navigation.
   // Only linked worktrees get their own expandable subtrees.
@@ -887,7 +894,7 @@ export default function SessionList({
   };
 
   if (searchMode) {
-    const results = [...orderedActive, ...archived].sort((a, b) => b.updatedAt - a.updatedAt);
+    const results = [...orderedActive, ...archived].sort((a, b) => (b.lastTurnAt ?? b.createdAt) - (a.lastTurnAt ?? a.createdAt));
     return (
       <div className="session-org session-search-mode">
         {results.map((session) => row(

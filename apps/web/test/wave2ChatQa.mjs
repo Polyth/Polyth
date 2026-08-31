@@ -50,10 +50,10 @@ const P = "w2-project";
 // ---- thinking: collapsed label, expanded capped body, live tail ---------------
 {
   const { page, context } = await open(1280, 900, `/p/${P}/s/w2-thinking`);
-  await page.waitForSelector("details.reasoning", { timeout: 15000 });
+  await page.waitForSelector(".reasoning", { timeout: 15000 });
   console.log("thinking collapsed label:", JSON.stringify(await page.locator(".reasoning-label").textContent()));
   await shot(page, "01-thinking-collapsed-desktop");
-  await page.locator("details.reasoning summary").click();
+  await page.locator(".reasoning-toggle").click();
   await page.waitForTimeout(300);
   console.log("thinking expanded body height:", (await page.locator(".reasoning-body").boundingBox())?.height);
   await shot(page, "02-thinking-expanded-desktop");
@@ -61,7 +61,7 @@ const P = "w2-project";
 }
 {
   const { page, context } = await open(1280, 900, `/p/${P}/s/w2-thinking-live`);
-  await page.waitForSelector("details.reasoning", { timeout: 15000 });
+  await page.waitForSelector(".reasoning", { timeout: 15000 });
   console.log(
     "live label:", JSON.stringify(await page.locator(".reasoning-label").textContent()),
     "preview:", JSON.stringify(await page.locator(".reasoning-preview").textContent().catch(() => "(none)")),
@@ -152,8 +152,8 @@ const P = "w2-project";
 // ---- phone widths: thinking + tools --------------------------------------------
 {
   const { page, context } = await open(390, 844, `/p/${P}/s/w2-thinking`);
-  await page.waitForSelector("details.reasoning", { timeout: 15000 });
-  await page.locator("details.reasoning summary").click();
+  await page.waitForSelector(".reasoning", { timeout: 15000 });
+  await page.locator(".reasoning-toggle").click();
   await page.waitForTimeout(300);
   console.log("thinking phone horizontal overflow:", await overflow(page));
   await shot(page, "12-thinking-expanded-phone");

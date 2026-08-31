@@ -140,7 +140,7 @@ export function notablePeers(
     .sort((a, b) => {
       const byKind = rank(a.status.kind) - rank(b.status.kind);
       if (byKind !== 0) return byKind;
-      return (b.session.lastTurnAt ?? b.session.updatedAt) - (a.session.lastTurnAt ?? a.session.updatedAt);
+      return (b.session.lastTurnAt ?? b.session.createdAt) - (a.session.lastTurnAt ?? a.session.createdAt);
     })
     .slice(0, limit)
     .map((row) => ({ id: row.session.id, title: row.title, status: row.status }));
@@ -153,7 +153,7 @@ export function recentSessionsForIsland(
 ): SessionProjection[] {
   return sessions
     .filter((session) => session.status !== "archived" && session.id !== activeId)
-    .sort((a, b) => (b.lastTurnAt ?? b.updatedAt) - (a.lastTurnAt ?? a.updatedAt))
+    .sort((a, b) => (b.lastTurnAt ?? b.createdAt) - (a.lastTurnAt ?? a.createdAt))
     .slice(0, limit);
 }
 

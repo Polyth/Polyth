@@ -233,10 +233,12 @@ export function useSessionOrder(): string[] {
   );
 }
 
-/** Pure: order `projects` by the stored manual order, appending any project
- *  the stored order does not mention (a freshly added one) in its incoming
- *  position so it lands predictably at the end. Stable for equal ranks. */
-export function applyManualProjectOrder<T extends { id: string }>(
+/** Pure: order `projects` by the stored manual order. Anything the stored
+ *  order does not mention (a freshly added session/project) is treated as
+ *  "new" and sorted to the top by `createdAt` descending, so the default
+ *  manual view is newest-first until the user drags something. Stable for
+ *  equal ranks. */
+export function applyManualProjectOrder<T extends { id: string; createdAt?: number }>(
   projects: readonly T[],
   order: readonly string[],
 ): T[] {
@@ -244,9 +246,12 @@ export function applyManualProjectOrder<T extends { id: string }>(
   return projects
     .map((project, index) => ({ project, index }))
     .sort((a, b) => {
-      const ra = rank.get(a.project.id) ?? Number.MAX_SAFE_INTEGER;
-      const rb = rank.get(b.project.id) ?? Number.MAX_SAFE_INTEGER;
-      return ra - rb || a.index - b.index;
+      const ra = rank.get(a.project.id);
+      const rb = rank.get(b.project.id);
+      if (ra !== undefined && rb !== undefined) return ra - rb || a.index - b.index;
+      if (ra !== undefined) return 1;
+      if (rb !== undefined) return -1;
+      return (b.project.createdAt ?? 0) - (a.project.createdAt ?? 0) || a.index - b.index;
     })
     .map((entry) => entry.project);
 }

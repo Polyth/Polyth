@@ -805,19 +805,17 @@ export function applyEvents(evs: readonly SessionEvent[]): void {
     if (merged === list) continue;
     next ??= { ...state.events };
     next[sessionId] = merged;
-    // Newly admitted first user message → persist the prompt-derived title into
-    // the session record now. Sidebar and recent read the session title; this
-    // shows it instantly (no server round trip) and keeps it durable across
-    // event-cache eviction, instead of depending on firstUserText fallback.
-    if (incoming.some((e) => e.type === "user/message")) {
-      const cur = state.sessions.find((s) => s.id === sessionId);
-      if (cur && isPlaceholderTitle(cur.title, sessionId)) {
-        const text = firstUserText(merged);
-        if (text) {
-          nextSessions ??= state.sessions.slice();
-          const i = nextSessions.findIndex((s) => s.id === sessionId);
-          if (i >= 0) nextSessions[i] = { ...nextSessions[i]!, title: titleFromPrompt(text) };
-        }
+    // Persist the prompt-derived title into the session record as soon as the
+    // first user message is visible in the merged log. This handles both the
+    // common tail load and older-history backfills, and keeps the title durable
+    // across event-cache eviction so sidebar/recent reads don't need events.
+    const cur = state.sessions.find((s) => s.id === sessionId);
+    if (cur && isPlaceholderTitle(cur.title, sessionId)) {
+      const text = firstUserText(merged);
+      if (text) {
+        nextSessions ??= state.sessions.slice();
+        const i = nextSessions.findIndex((s) => s.id === sessionId);
+        if (i >= 0) nextSessions[i] = { ...nextSessions[i]!, title: titleFromPrompt(text) };
       }
     }
   }

@@ -157,6 +157,7 @@ function Thinking({ m }: { m: AssistantMsg }) {
   const userToggled = useRef(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const reasoningAtBottom = useRef(true);
+  const bodyPresent = useCollapsePresence(open);
   const head = reasoningHead(m.reasoning);
   const reasoning = useSmoothText(m.reasoning);
   // Expanded while forming; auto-folds when the stream settles unless the
@@ -211,12 +212,13 @@ function Thinking({ m }: { m: AssistantMsg }) {
     );
   }
   return (
-    <details className="reasoning" open={open}>
-      <summary
+    <div className={`reasoning${open ? " open" : ""}`}>
+      <button
+        type="button"
+        className="reasoning-toggle"
         aria-label={reasoningToggleName(open)}
         aria-expanded={open}
-        onClick={(e) => {
-          e.preventDefault();
+        onClick={() => {
           userToggled.current = true;
           setOpen((value) => {
             if (!value) reasoningAtBottom.current = true;
@@ -230,9 +232,13 @@ function Thinking({ m }: { m: AssistantMsg }) {
           {!open && head !== "" && <span className="reasoning-preview">{head}</span>}
         </span>
         <span className="reasoning-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
-      </summary>
-      {open && body}
-    </details>
+      </button>
+      <div className="reasoning-expand-shell" aria-hidden={!open}>
+        <div className="reasoning-collapse-content">
+          {bodyPresent && body}
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -81,6 +81,24 @@ test("manual ordering moves a session into its drop target's slot", () => {
   assert.deepEqual(applyManualProjectOrder(sessions, order).map((item) => item.id), order);
 });
 
+test("manual order defaults to newest-created first when nothing was dragged", () => {
+  const sessions = [
+    session({ id: "old", createdAt: 100 }),
+    session({ id: "new", createdAt: 300 }),
+    session({ id: "mid", createdAt: 200 }),
+  ];
+  assert.deepEqual(applyManualProjectOrder(sessions, []).map((item) => item.id), ["new", "mid", "old"]);
+});
+
+test("manual order keeps unknown items above stored ones and sorts them by createdAt", () => {
+  const sessions = [
+    session({ id: "a", createdAt: 300 }),
+    session({ id: "b", createdAt: 100 }),
+    session({ id: "c", createdAt: 200 }),
+  ];
+  assert.deepEqual(applyManualProjectOrder(sessions, ["b"]).map((item) => item.id), ["a", "c", "b"]);
+});
+
 test("plugin groupings need a pure keyOf, no duplicates; dispose falls back", () => {
   assert.throws(() => registerGrouping({ id: "byagent", label: "Agent" }), /keyOf/);
   assert.throws(() => registerGrouping({ id: "status", label: "clash", keyOf: () => "x" }), /already/);

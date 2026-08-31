@@ -144,7 +144,7 @@ function IslandOverview({
             <SheetRow
               key={item.id}
               title={itemTitle}
-              meta={status.kind === "regular" ? ago(item.lastTurnAt ?? item.updatedAt) : status.label}
+              meta={status.kind === "regular" ? ago(item.lastTurnAt ?? item.createdAt) : status.label}
               icon={<SessionLiveIcon status={status} />}
               trailing={eventsHaveCodeChanges(events[item.id]) ? <CodeChangedMark /> : undefined}
               onClick={() => {

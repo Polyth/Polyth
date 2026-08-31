@@ -79,7 +79,7 @@ export default function SessionSearch() {
       .filter((s): s is NonNullable<typeof s> =>
         s !== undefined && inScope(s.projectId) && matchesSessionSearchFacets(s, query));
     return [...local, ...extra]
-      .sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id))
+      .sort((a, b) => (b.lastTurnAt ?? b.createdAt) - (a.lastTurnAt ?? a.createdAt) || a.id.localeCompare(b.id))
       .map((s) => ({ s, matches: snippets.get(s.id) ?? [] }));
   }, [sessions, query, remote, allProjects, activeProjectId]);
 
@@ -180,7 +180,7 @@ export default function SessionSearch() {
                 <span key={k} className="palette-snippet"><em>{m.field}</em> {m.snippet}</span>
               ))}
             </span>
-            <span className="palette-meta">{ago(s.updatedAt)} · {s.status}</span>
+            <span className="palette-meta">{ago(s.lastTurnAt ?? s.createdAt)} · {s.status}</span>
           </button>
         ))}
       </div>

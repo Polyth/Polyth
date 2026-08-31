@@ -196,7 +196,7 @@ test("state matrix: completed/failed/empty/active/waiting/queued/active-revert r
       const state = await page.evaluate(() => ({
         metas: document.querySelectorAll(".msg-meta").length,
         times: Array.from(document.querySelectorAll("time.msg-time")).map((t) => t.getAttribute("datetime") ?? ""),
-        reasoning: document.querySelectorAll("details.reasoning").length,
+        reasoning: document.querySelectorAll(".reasoning").length,
         footer: document.querySelector(".turn-footer")?.textContent ?? "",
         entries: Array.from(document.querySelectorAll<HTMLElement>(".msg-actions-entry")).map((e) => {
           const r = e.getBoundingClientRect();
@@ -479,7 +479,7 @@ test("names, copy announcements, focus retention, reasoning disclosure, stable t
   assert.ok(!JSON.stringify(payload).includes("oc_"), "backend identifiers leaked into the copy payload");
 
   // Reasoning disclosure: pointer, Enter, Space; truthful expanded state.
-  const summary = page.locator("details.reasoning summary");
+  const summary = page.locator(".reasoning-toggle");
   const expanded = () => summary.getAttribute("aria-expanded");
   const initially = await expanded();
   await summary.click();

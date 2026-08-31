@@ -1240,7 +1240,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   scroll-behavior: auto; /* chaseTail rAF loop needs instant scrollTop; html's smooth breaks it */
   padding-block: var(--gutter) 40px;
   padding-inline: max(var(--gutter), calc((100% - var(--chat-measure)) / 2));
-  display: flex; flex-direction: column; gap: var(--space-4);
+  display: flex; flex-direction: column; gap: var(--space-3);
 }
 /* A column-flex SCROLLER must never compress its rows: rows with
    overflow:hidden (tool cards) have min-height:auto collapsing to 0, so the
@@ -1263,17 +1263,24 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 /* Rows ease in on mount instead of popping: appended messages, tool cards,
    task states, the working indicator, and items joining a work group.
    Row keys stay stable while a row streams, so this plays once per new row —
-   in-place updates never restart it. Compositor-only (opacity + transform). */
+   in-place updates never restart it. Blocks that mount AFTER their row
+   (thinking, task plan, terminal identity panel, gallery shortcut) ride the
+   same rise so late-arriving content slides up from the bottom instead of
+   appearing from nowhere. Compositor-only (opacity + transform). */
 @media (prefers-reduced-motion: no-preference) {
   .timeline > .msg,
   .timeline > .tool-card,
   .timeline > .task-activity,
+  .timeline > .msg > .reasoning,
+  .timeline > .msg > .task-list,
+  .timeline > .msg > .agent-reply-header,
+  .timeline > .msg > .assistant-gallery-shortcut,
   .execution-group-items > .execution-row,
   .execution-group-items > .task-activity {
     animation: msg-in var(--motion-surface) var(--motion-ease);
   }
   @keyframes msg-in {
-    from { opacity: 0; transform: translateY(8px); }
+    from { opacity: 0; transform: translateY(14px); }
     to { opacity: 1; transform: none; }
   }
 }
@@ -3417,6 +3424,8 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .session-pinned { margin-bottom: 5px; padding-bottom: 4px; border-bottom: 1px solid var(--border-soft); }
 .session-row[draggable="true"] { cursor: grab; }
 .session-row[draggable="true"]:active { cursor: grabbing; }
+:is(.project-entry, .project-tree-node).reorderable { cursor: grab; }
+:is(.project-entry, .project-tree-node).reorderable:active { cursor: grabbing; }
 .session-archived { border-top: 1px solid var(--border-soft); margin-top: 6px; padding-top: 2px; }
 .session-check {
   position: absolute;
@@ -4569,7 +4578,7 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .tool-head { min-height: 32px; padding: 5px 9px; }
 .tool-body { padding: 0 9px 9px; }
 .turn-footer {
-  margin-top: -12px; padding: 0 2px;
+  margin-top: -6px; padding: 0 2px;
   color: var(--faint); font-size: var(--font-meta); line-height: 1.4;
   letter-spacing: .005em;
 }
@@ -7584,9 +7593,9 @@ body[data-rounding] .composer-send-split .composer-send-options {
 /* Comfortable and compact are shared layout modes, rather than a few sidebar
    exceptions. The compact values preserve usable controls while tightening
    every primary work surface. */
-body[data-density="comfortable"] { --density-gap: 16px; --density-pad: 12px; }
-body[data-density="balanced"] { --density-gap: 12px; --density-pad: 10px; }
-body[data-density="compact"] { --density-gap: 8px; --density-pad: 8px; }
+body[data-density="comfortable"] { --density-gap: 8px; --density-pad: 12px; }
+body[data-density="balanced"] { --density-gap: 4px; --density-pad: 10px; }
+body[data-density="compact"] { --density-gap: 0px; --density-pad: 8px; }
 body[data-density] .timeline { gap: var(--density-gap); }
 body[data-density] .bubble { padding: var(--density-pad) calc(var(--density-pad) + 2px); }
 body[data-density] .set-row { padding-block: calc(var(--density-pad) - 1px); }
@@ -9746,8 +9755,8 @@ color: var(--text);
    One dense timeline across tool families. The first disclosure stays inline;
    only explicitly requested full output uses the level-three viewer. */
 .msg.assistant > .bubble {
-  font-size: calc(17px * var(--ui-font-scale, 1));
-  line-height: 1.68;
+  font-size: calc(16px * var(--ui-font-scale, 1));
+  line-height: 1.58;
 }
 
 .tool-card.execution-row {
@@ -9840,15 +9849,13 @@ color: var(--text);
   height: 18px;
   display: grid;
   place-items: center;
-  border: 1px solid currentColor;
-  border-radius: 50%;
-  font: 650 12px/1 var(--ui-font-family);
+  font: 650 15px/1 var(--ui-font-family);
 }
 .execution-status.done .execution-status-icon { color: color-mix(in srgb, var(--green) 74%, var(--text)); }
-.execution-status.error .execution-status-icon { border-color: transparent; color: var(--red); font-size: 17px; }
+.execution-status.error .execution-status-icon { color: var(--red); font-size: 17px; }
 .execution-status.cancelled .execution-status-icon { color: var(--muted); }
 .execution-status.pending .execution-status-icon { color: var(--muted); font-size: 18px; }
-.execution-status.running .execution-status-icon { border-color: transparent; color: var(--text-dim); }
+.execution-status.running .execution-status-icon { color: var(--text-dim); }
 .execution-status .ui-spinner,
 .reasoning-mark .ui-spinner,
 .execution-group-mark .ui-spinner {
@@ -10181,8 +10188,7 @@ html[data-font] body :is(
   margin: 0;
 }
 .msg > .reasoning + .bubble { margin-top: var(--space-1); }
-.reasoning:not([open]) { width: 100%; }
-.reasoning summary {
+.reasoning-toggle {
   width: 100%;
   min-height: 32px;
   display: grid;
@@ -10190,17 +10196,17 @@ html[data-font] body :is(
   align-items: center;
   gap: 6px;
   padding: 2px 0;
+  border: 0;
   border-radius: var(--radius-control);
+  background: transparent;
   color: var(--text-dim);
   cursor: pointer;
-  list-style: none;
   text-align: left;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
-.reasoning summary::-webkit-details-marker { display: none; }
-.reasoning summary:hover { background: color-mix(in srgb, var(--text) 3%, transparent); }
-.reasoning summary:active { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.reasoning-toggle:hover { background: color-mix(in srgb, var(--text) 3%, transparent); }
+.reasoning-toggle:active { background: color-mix(in srgb, var(--text) 4%, transparent); }
 .reasoning-mark {
   width: 18px;
   height: 18px;
@@ -10239,17 +10245,30 @@ html[data-font] body :is(
 .reasoning-chevron svg { width: 14px; height: 14px; stroke-width: 1.75; }
 /* Expanded thinking: the real reasoning as secondary prose in a height-capped
    well — long thinking scrolls internally and never breaks the page. The
-   35px indent matches .execution-details.tool-body (icon + gap + padding). */
-.reasoning-content { padding: 0 0 4px; }
+   35px indent matches .execution-details.tool-body (icon + gap + padding).
+   The expand shell animates the collapse when the stream settles: the block
+   stays open while forming, then folds with the same 0fr→1fr grid slide the
+   execution groups use. */
+.reasoning-expand-shell {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows var(--motion-normal) cubic-bezier(.4,0,.2,1), opacity var(--motion-normal) var(--motion-ease);
+}
+.reasoning.open > .reasoning-expand-shell {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.reasoning-collapse-content { min-height: 0; overflow: hidden; }
+.reasoning-content { padding: 8px 0 4px; }
 .reasoning-body {
   max-height: min(42vh, 380px);
   overflow: auto;
   overscroll-behavior: contain;
   margin: 0;
   padding: 2px 0;
-  border-inline-start: 2px solid var(--border-soft);
   color: var(--muted);
-  font-size: calc(13.25px * var(--ui-font-scale, 1));
+  font-size: calc(14px * var(--ui-font-scale, 1));
   line-height: 1.55;
   overflow-wrap: anywhere;
   white-space: normal; /* legacy .reasoning-body rules set pre-wrap */
@@ -10264,7 +10283,7 @@ html[data-font] body :is(
 }
 .reasoning-body p { margin: 0.45em 0; }
 .reasoning-body pre { max-width: 100%; font-size: calc(12.5px * var(--ui-font-scale, 1)); }
-.reasoning-foot { display: flex; min-height: 24px; align-items: center; padding-inline-start: 0; }
+.reasoning-foot { display: flex; min-height: 24px; align-items: center; justify-content: flex-end; padding-inline-start: 0; }
 .reasoning-foot .copy-btn {
   width: auto;
   min-height: 28px;
@@ -10393,7 +10412,7 @@ html[data-font] body :is(
 }
 
 @media (max-width: 620px) {
-  .msg.assistant > .bubble { font-size: calc(16px * var(--ui-font-scale, 1)); line-height: 1.64; }
+  .msg.assistant > .bubble { font-size: calc(15px * var(--ui-font-scale, 1)); line-height: 1.55; }
   .execution-summary.tool-disclosure {
     min-height: 36px;
     grid-template-columns: 18px minmax(0, 1fr) 67px 14px;
@@ -10413,7 +10432,7 @@ html[data-font] body :is(
   .execution-input dl > div { grid-template-columns: 84px minmax(0, 1fr); }
   .execution-group-copy { display: grid; gap: 1px; }
   .execution-group-copy strong, .execution-group-copy small { display: block; }
-  .reasoning summary { min-height: 36px; padding-inline: 0; }
+  .reasoning-toggle { min-height: 36px; padding-inline: 0; }
   .reasoning-body { max-height: min(50vh, 360px); }
   .task-list-summary { min-height: 36px; }
   .task-list-title { display: grid; gap: 0; }
@@ -10438,7 +10457,8 @@ html[data-font] body :is(
   .tool-card.execution-row,
   .execution-highlight { animation: none; }
   .execution-expand-shell,
-  .execution-group-expand-shell { transition: none; }
+  .execution-group-expand-shell,
+  .reasoning-expand-shell { transition: none; }
   .reasoning-mark.running svg { animation: none; }
   .execution-status .ui-spinner,
   .reasoning-mark .ui-spinner,
