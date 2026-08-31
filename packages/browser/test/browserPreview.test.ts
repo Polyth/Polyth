@@ -12,6 +12,7 @@ import {
   devicePresetForViewport,
   normalizedPointInImage,
   normalizedRectInImage,
+  previewImageRect,
 } from "../widgets/browserPreview.ts";
 
 test("browser device presets expose distinct phone, tablet, laptop, and desktop viewports", () => {
@@ -45,6 +46,18 @@ test("contained frame geometry excludes letterboxing before clicks or annotation
   assert.ok(center);
   assert.ok(Math.abs(center!.x - 0.5) < 1e-9);
   assert.ok(Math.abs(center!.y - 0.5) < 1e-9);
+});
+
+test("previewImageRect maps pointer coordinates per display mode", () => {
+  const entire = previewImageRect("entire", 1000, 1000, 1440, 900);
+  assert.deepEqual(entire, containedImageRect(1000, 1000, 1440, 900));
+
+  const fit = previewImageRect("fit", 800, 600, 1440, 900);
+  assert.deepEqual(fit, { left: 0, top: 0, width: 800, height: 600 });
+
+  const actual = previewImageRect("actual", 390, 844, 390, 844);
+  assert.deepEqual(actual, { left: 0, top: 0, width: 390, height: 844 });
+  assert.deepEqual(normalizedPointInImage(195, 422, actual), { x: 0.5, y: 0.5 });
 });
 
 test("drag selections normalize, clamp to the image, and map to viewport pixels", () => {

@@ -7,16 +7,19 @@ import { attachUpload, removeAttachment } from "../../../apps/web/src/attachment
 import {
   annotationViewportRect,
   BROWSER_DEVICE_PRESETS,
+  BROWSER_DISPLAY_MODES,
   BROWSER_INSPECTOR_TABS,
   browserElementContext,
   browserPointedElementLabel,
-  containedImageRect,
+  clampViewport,
   devicePresetForViewport,
   normalizedPointInImage,
   normalizedRectInImage,
+  previewImageRect,
   renderBrowserCapture,
   type BrowserAnnotation,
   type BrowserDevicePresetId,
+  type BrowserDisplayMode,
   type BrowserInspectorTab,
   type BrowserPointedElement,
   type ImageRect,
@@ -95,6 +98,9 @@ export default function PreviewView() {
   const [pointing, setPointing] = useState(false);
   const [pointedElement, setPointedElement] = useState<BrowserPointedElement | null>(null);
   const [annotations, setAnnotations] = useState<BrowserAnnotation[]>([]);
+  const [displayMode, setDisplayMode] = useState<BrowserDisplayMode>("fit");
+  const [customWidth, setCustomWidth] = useState("");
+  const [customHeight, setCustomHeight] = useState("");
   const [imageRect, setImageRect] = useState<ImageRect>({ left: 0, top: 0, width: 0, height: 0 });
   const [captureBusy, setCaptureBusy] = useState(false);
   const [connection, setConnection] = useState<BrowserConnection>("idle");
@@ -104,6 +110,7 @@ export default function PreviewView() {
   const wsRef = useRef<WebSocket | null>(null);
   const revisionRef = useRef(0);
   const imgRef = useRef<HTMLImageElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const addressInputRef = useRef<HTMLInputElement>(null);
   const inspectorButtonRef = useRef<HTMLButtonElement>(null);
   const nextAnnotationId = useRef(1);
@@ -216,10 +223,18 @@ export default function PreviewView() {
   }, [browser?.id]);
 
   useEffect(() => {
+    if (browser?.viewport) {
+      setCustomWidth(String(browser.viewport.width));
+      setCustomHeight(String(browser.viewport.height));
+    }
+  }, [browser?.viewport.width, browser?.viewport.height]);
+
+  useEffect(() => {
     const image = imgRef.current;
     if (!image || !browser) return;
     const update = () => {
-      setImageRect(containedImageRect(
+      setImageRect(previewImageRect(
+        displayMode,
         image.clientWidth,
         image.clientHeight,
         browser.viewport.width,
@@ -234,7 +249,55 @@ export default function PreviewView() {
     const observer = new ResizeObserver(update);
     observer.observe(image);
     return () => observer.disconnect();
-  }, [browser?.viewport.width, browser?.viewport.height, frame?.revision]);
+  }, [browser?.viewport.width, browser?.viewport.height, frame?.revision, displayMode]);
+
+  useEffect(() => {
+    if (displayMode !== "fit" || !browser || !stageRef.current) return;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const stage = stageRef.current;
+    const update = () => {
+      if (!stage || operation) return;
+      const viewport = clampViewport(
+        Math.round(stage.clientWidth),
+        Math.round(stage.clientHeight),
+      );
+      if (
+        viewport.width === browser.viewport.width
+        && viewport.height === browser.viewport.height
+      ) return;
+      void act({ kind: "resize", viewport });
+    };
+    const debounced = () => {
+      if (timeout) clearTimeout(timeout);
+      timeout = setTimeout(update, 150);
+    };
+    debounced();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", debounced);
+      return () => {
+        if (timeout) clearTimeout(timeout);
+        window.removeEventListener("resize", debounced);
+      };
+    }
+    const observer = new ResizeObserver(debounced);
+    observer.observe(stage);
+    return () => {
+      if (timeout) clearTimeout(timeout);
+      observer.disconnect();
+    };
+  }, [displayMode, browser?.id, browser?.viewport.width, browser?.viewport.height, operation]);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || displayMode !== "fit" || !browser) return;
+    const handler = (event: WheelEvent) => {
+      if (annotating || pointing || operation) return;
+      event.preventDefault();
+      void act({ kind: "scroll", x: event.deltaX, y: event.deltaY });
+    };
+    stage.addEventListener("wheel", handler, { passive: false });
+    return () => stage.removeEventListener("wheel", handler);
+  }, [displayMode, annotating, pointing, operation, browser?.id]);
 
   // Console poll only while the inspector shows it AND the pane is visible.
   useEffect(() => {
@@ -519,7 +582,8 @@ export default function PreviewView() {
   const clickFrame = (e: React.MouseEvent<HTMLImageElement>) => {
     if (!browser || !frame || !imgRef.current || operation) return;
     const elementRect = imgRef.current.getBoundingClientRect();
-    const visibleImage = containedImageRect(
+    const visibleImage = previewImageRect(
+      displayMode,
       elementRect.width,
       elementRect.height,
       browser.viewport.width,
@@ -569,6 +633,23 @@ export default function PreviewView() {
     if (outcome.ok) setTypeText("");
   };
 
+  const applyCustomViewport = () => {
+    if (!browser || operation) return;
+    const viewport = clampViewport(
+      Number.parseInt(customWidth, 10) || browser.viewport.width,
+      Number.parseInt(customHeight, 10) || browser.viewport.height,
+    );
+    setCustomWidth(String(viewport.width));
+    setCustomHeight(String(viewport.height));
+    if (displayMode === "fit") setDisplayMode("entire");
+    if (
+      viewport.width !== browser.viewport.width
+      || viewport.height !== browser.viewport.height
+    ) {
+      void act({ kind: "resize", viewport });
+    }
+  };
+
   const activateFrameFromKeyboard = (event: React.KeyboardEvent<HTMLImageElement>) => {
     if (!browser || !frame || operation || (event.key !== "Enter" && event.key !== " ")) return;
     event.preventDefault();
@@ -585,6 +666,10 @@ export default function PreviewView() {
 
   const browserMode = !!browser && browser.status !== "closed";
   const busy = operation !== null || captureBusy;
+  const viewportPresetId = browserMode
+    ? devicePresetForViewport(browser.viewport.width, browser.viewport.height)
+    : "responsive";
+  const showCustomViewport = browserMode && viewportPresetId === "responsive" && displayMode !== "fit";
   const connectionLabel: Record<BrowserConnection, string> = {
     idle: tr("previewview.disconnected"),
     connecting: tr("previewview.connecting"),
@@ -706,36 +791,92 @@ export default function PreviewView() {
           {browserMode && (
             <div className="browser-tools-row" aria-label={tr("previewview.browserTools")}>
               <Select
+                className="browser-display"
+                ariaLabel={tr("previewview.displayMode")}
+                label={tr(BROWSER_DISPLAY_MODES.find((mode) => mode.id === displayMode)?.labelKey
+                  ?? "previewview.displayMode")}
+                disabled={busy}
+                value={displayMode}
+                options={BROWSER_DISPLAY_MODES.map((mode) => ({
+                  value: mode.id,
+                  label: tr(mode.labelKey),
+                }))}
+                onChange={(value) => setDisplayMode(value as BrowserDisplayMode)}
+              />
+              <Select
                 className="browser-device"
                 ariaLabel={tr("previewview.browserDevicePreset")}
-                label={BROWSER_DEVICE_PRESETS.find((preset) =>
-                  preset.id === devicePresetForViewport(browser.viewport.width, browser.viewport.height))?.label
-                  ?? tr("previewview.browserDevicePreset")}
+                label={(() => {
+                  const preset = BROWSER_DEVICE_PRESETS.find((p) => p.id === viewportPresetId);
+                  return preset ? tr(preset.labelKey) : tr("previewview.browserDevicePreset");
+                })()}
                 disabled={busy}
-                value={devicePresetForViewport(browser.viewport.width, browser.viewport.height)}
+                value={viewportPresetId}
                 options={BROWSER_DEVICE_PRESETS.map((preset) => ({
                   value: preset.id,
-                  label: `${preset.label} · ${preset.width}×${preset.height}`,
+                  label: `${tr(preset.labelKey)} · ${preset.width}×${preset.height}`,
                 }))}
                 onChange={(value) => {
                   const preset = BROWSER_DEVICE_PRESETS.find(
                     (candidate) => candidate.id === value as BrowserDevicePresetId,
                   );
-                  if (preset) void act({ kind: "resize", viewport: { width: preset.width, height: preset.height } });
+                  if (!preset) return;
+                  // Fit mode owns the pane size; a named or default preset
+                  // must leave fit so ResizeObserver does not overwrite it.
+                  if (displayMode === "fit") setDisplayMode("entire");
+                  void act({ kind: "resize", viewport: { width: preset.width, height: preset.height } });
                 }}
               />
+              {showCustomViewport && (
+                <span className="browser-size-fields" aria-label={tr("previewview.viewportSize")}>
+                  <TextInput
+                    className="browser-size-input"
+                    uiSize="sm"
+                    type="number"
+                    min={320}
+                    max={3840}
+                    value={customWidth}
+                    disabled={busy}
+                    aria-label={tr("previewview.viewportWidth")}
+                    onChange={(event) => setCustomWidth(event.target.value)}
+                    onBlur={() => applyCustomViewport()}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        applyCustomViewport();
+                      }
+                    }}
+                  />
+                  <span className="browser-size-sep" aria-hidden="true">×</span>
+                  <TextInput
+                    className="browser-size-input"
+                    uiSize="sm"
+                    type="number"
+                    min={240}
+                    max={2160}
+                    value={customHeight}
+                    disabled={busy}
+                    aria-label={tr("previewview.viewportHeight")}
+                    onChange={(event) => setCustomHeight(event.target.value)}
+                    onBlur={() => applyCustomViewport()}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        applyCustomViewport();
+                      }
+                    }}
+                  />
+                </span>
+              )}
               <Select
                 className="browser-scheme"
                 ariaLabel={tr("previewview.emulatedColorScheme")}
-                label={browser.colorScheme === "light"
-                  ? tr("previewview.lightTheme")
-                  : browser.colorScheme === "dark"
-                    ? tr("previewview.darkTheme")
-                    : tr("previewview.systemTheme")}
+                label={browser.colorScheme === "dark"
+                  ? tr("previewview.darkTheme")
+                  : tr("previewview.lightTheme")}
                 disabled={busy}
-                value={browser.colorScheme}
+                value={browser.colorScheme === "dark" ? "dark" : "light"}
                 options={[
-                  { value: "no-preference", label: tr("previewview.systemTheme") },
                   { value: "light", label: tr("previewview.lightTheme") },
                   { value: "dark", label: tr("previewview.darkTheme") },
                 ]}
@@ -849,29 +990,61 @@ export default function PreviewView() {
             {browserMode ? (
               frame ? (
                 <div className="browser-frame-wrap">
-                  <div className={`browser-frame-stage${pointing ? " is-pointing" : ""}${annotating ? " is-annotating" : ""}`}>
-                    <img
-                      ref={imgRef}
-                      src={frame.src}
-                      alt={tr("previewview.interactiveBrowserFrameValue", { title: browser.title || browser.url || tr("previewview.untitledPage") })}
-                      className={`browser-frame-img${annotating ? " annotating" : ""}${pointing ? " pointing" : ""}`}
-                      aria-describedby={frameStatusId}
-                      role="button"
-                      tabIndex={0}
-                      draggable={false}
-                      onClick={clickFrame}
-                      onKeyDown={activateFrameFromKeyboard}
-                      onPointerDown={beginAnnotation}
-                      onPointerMove={moveAnnotation}
-                      onPointerUp={endAnnotation}
-                      onPointerCancel={() => { annotationDragStart.current = null; }}
-                      onLoad={(event) => setImageRect(containedImageRect(
-                        event.currentTarget.clientWidth,
-                        event.currentTarget.clientHeight,
-                        browser.viewport.width,
-                        browser.viewport.height,
-                      ))}
-                    />
+                  <div
+                    ref={stageRef}
+                    className={`browser-frame-stage is-${displayMode}${pointing ? " is-pointing" : ""}${annotating ? " is-annotating" : ""}`}
+                  >
+                    <div
+                      className="browser-frame-shot"
+                      style={displayMode === "actual"
+                        ? { width: browser.viewport.width, height: browser.viewport.height }
+                        : undefined}
+                    >
+                      <img
+                        ref={imgRef}
+                        src={frame.src}
+                        alt={tr("previewview.interactiveBrowserFrameValue", { title: browser.title || browser.url || tr("previewview.untitledPage") })}
+                        className={`browser-frame-img${annotating ? " annotating" : ""}${pointing ? " pointing" : ""}`}
+                        style={displayMode === "actual"
+                          ? { width: browser.viewport.width, height: browser.viewport.height }
+                          : undefined}
+                        aria-describedby={frameStatusId}
+                        role="button"
+                        tabIndex={0}
+                        draggable={false}
+                        onClick={clickFrame}
+                        onKeyDown={activateFrameFromKeyboard}
+                        onPointerDown={beginAnnotation}
+                        onPointerMove={moveAnnotation}
+                        onPointerUp={endAnnotation}
+                        onPointerCancel={() => { annotationDragStart.current = null; }}
+                        onLoad={(event) => setImageRect(previewImageRect(
+                          displayMode,
+                          event.currentTarget.clientWidth,
+                          event.currentTarget.clientHeight,
+                          browser.viewport.width,
+                          browser.viewport.height,
+                        ))}
+                      />
+                      <div className="browser-annotation-layer" aria-label={tr("previewview.browserAnnotations")}>
+                        {annotations.map((annotation, index) => annotation.width > 0 && annotation.height > 0 ? (
+                          <div
+                            key={annotation.id}
+                            className={`browser-annotation-box${pointedElement ? " pointed" : ""}`}
+                            style={{
+                              left: imageRect.left + annotation.x * imageRect.width,
+                              top: imageRect.top + annotation.y * imageRect.height,
+                              width: annotation.width * imageRect.width,
+                              height: annotation.height * imageRect.height,
+                            }}
+                            aria-label={`${pointedElement ? tr("previewview.pointedElement") : tr("previewview.annotation")} ${index + 1}${annotation.note ? `: ${annotation.note}` : ""}`}
+                            role="img"
+                          >
+                            <span>{pointedElement ? <Icon icon={TargetIcon} size="sm" /> : index + 1}</span>
+                          </div>
+                        ) : null)}
+                      </div>
+                    </div>
                     {(annotating || pointing) && (
                       <div className="browser-frame-mode" role="status">
                         {operation === "point"
@@ -882,24 +1055,6 @@ export default function PreviewView() {
                         <kbd>Esc</kbd>
                       </div>
                     )}
-                    <div className="browser-annotation-layer" aria-label={tr("previewview.browserAnnotations")}>
-                      {annotations.map((annotation, index) => annotation.width > 0 && annotation.height > 0 ? (
-                        <div
-                          key={annotation.id}
-                          className={`browser-annotation-box${pointedElement ? " pointed" : ""}`}
-                          style={{
-                            left: imageRect.left + annotation.x * imageRect.width,
-                            top: imageRect.top + annotation.y * imageRect.height,
-                            width: annotation.width * imageRect.width,
-                            height: annotation.height * imageRect.height,
-                          }}
-                          aria-label={`${pointedElement ? tr("previewview.pointedElement") : tr("previewview.annotation")} ${index + 1}${annotation.note ? `: ${annotation.note}` : ""}`}
-                          role="img"
-                        >
-                          <span>{pointedElement ? <Icon icon={TargetIcon} size="sm" /> : index + 1}</span>
-                        </div>
-                      ) : null)}
-                    </div>
                   </div>
 
                   <div className="browser-frame-bar" id={frameStatusId}>

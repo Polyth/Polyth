@@ -77,8 +77,25 @@ width: 100%;
 .browser-device {
 width: 156px;
 }
+.browser-display {
+width: 140px;
+}
 .browser-scheme {
 width: 112px;
+}
+.browser-size-fields {
+display: inline-flex; align-items: center; gap: var(--space-1);
+}
+.browser-size-fields .browser-size-input {
+width: 4.5em; min-width: 4.5em; height: var(--control-h-sm); padding: 0 var(--control-pad-x-sm);
+  border: 1px solid var(--border); border-radius: var(--radius-control);
+  background: var(--input-bg); font: 500 var(--font-meta)/1 var(--mono);
+}
+.browser-size-fields .browser-size-input:focus-visible {
+outline: 2px solid var(--focus-wash); outline-offset: 0;
+}
+.browser-size-sep {
+color: var(--muted); font-size: var(--font-meta); line-height: 1;
 }
 .browser-tool-divider {
 width: 1px; height: 18px; margin-inline: 2px; background: var(--border-soft);
@@ -107,15 +124,35 @@ flex: none; border-top: 0; border-inline: 0; border-radius: 0;
 display: flex; flex-direction: column; width: 100%; height: 100%;
 }
 .browser-frame-stage {
-position: relative; flex: 1; min-height: 0; overflow: hidden;
+position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column;
+  overflow: hidden;
   background:
     linear-gradient(45deg, color-mix(in srgb, var(--border-soft) 24%, transparent) 25%, transparent 25%) 0 0 / 16px 16px,
     linear-gradient(-45deg, color-mix(in srgb, var(--border-soft) 24%, transparent) 25%, transparent 25%) 0 8px / 16px 16px,
     var(--sunken);
 }
+.browser-frame-stage.is-actual {
+overflow: auto; align-items: flex-start;
+}
+.browser-frame-shot {
+position: relative; width: 100%; height: 100%; min-height: 0; flex: 1;
+}
+.browser-frame-stage.is-actual .browser-frame-shot {
+flex: none; width: auto; height: auto;
+}
 .browser-frame-img {
 position: absolute; inset: 0; z-index: 1; object-fit: contain;
   cursor: pointer; width: 100%; height: 100%; background: transparent;
+}
+.browser-frame-stage.is-fit .browser-frame-img {
+object-fit: fill;
+}
+.browser-frame-stage.is-entire .browser-frame-img {
+object-fit: contain;
+}
+.browser-frame-stage.is-actual .browser-frame-img {
+position: relative; inset: auto; width: auto; height: auto; max-width: none;
+  object-fit: fill;
 }
 .browser-frame-img.annotating {
 cursor: crosshair; touch-action: none; user-select: none;
@@ -391,9 +428,14 @@ display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
 width: auto; max-width: none;
 }
 
+.browser-tools-row .browser-display,
 .browser-tools-row .browser-device,
 .browser-tools-row .browser-scheme {
-grid-column: span 3;
+grid-column: span 2;
+}
+
+.browser-tools-row .browser-size-fields {
+grid-column: 1 / -1; justify-content: flex-start;
 }
 
 .browser-tool-divider {
