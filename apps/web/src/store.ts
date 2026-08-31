@@ -326,20 +326,15 @@ export function applyProjectRemoved(id: string): void {
  *  entries (UX-FILES-TIMELINE-03 finding 9: the sidebar folder mode shows
  *  several projects' sessions at once, so a refresh must not evict them). */
 export function setSessions(projectId: string, sessions: SessionProjection[]): void {
-  const byId = new Map(sessions.map((p) => [p.id, p]));
-  const kept = state.sessions
-    .filter((s) => s.projectId === projectId)
-    .map((s) => {
-      const next = byId.get(s.id);
-      if (next) {
-        byId.delete(s.id);
-        return preserveTitle(s, next);
-      }
-      return s;
-    });
-  for (const p of byId.values()) kept.push(p);
+  const currentByProject = new Map(
+    state.sessions.filter((s) => s.projectId === projectId).map((s) => [s.id, s]),
+  );
+  const merged = sessions.map((p) => {
+    const cur = currentByProject.get(p.id);
+    return cur ? preserveTitle(cur, p) : p;
+  });
   const others = state.sessions.filter((s) => s.projectId !== projectId);
-  set({ sessions: others.length === 0 ? kept : [...others, ...kept] });
+  set({ sessions: others.length === 0 ? merged : [...others, ...merged] });
 }
 export function setModels(models: ModelDescriptor[]): void {
   set({ models });
