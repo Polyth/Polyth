@@ -29,7 +29,6 @@ import { useSheetTrigger } from "../mobile/sheetTrigger.ts";
 import { HeroWidget, HeroWidgetSettings } from "../mobile/HeroWidgets.tsx";
 import { useShiftArmed } from "../../useShiftArmed.ts";
 import { ago, displaySessionTitle } from "../../format.ts";
-import { firstUserTextCached } from "../../utils.ts";
 import {
   noteStarterUsed,
   starterContextFrom,
@@ -159,8 +158,11 @@ function HeroStartersWidget({
 /** §50: recent work stays a light, bounded list — the new-chat screen is a
  *  starting point, never a dashboard. Three rows, no cards, no metrics. */
 function RecentSessions({ projectId }: { projectId: string | null }) {
+  // Subscribes only to the session list. The prompt-derived title is persisted
+  // into the session record on the first user message (store.applyEvents), so
+  // this panel doesn't need the whole events map — and won't re-render on every
+  // streamed chunk of any session.
   const sessions = useStore((s) => s.sessions);
-  const events = useStore((s) => s.events);
   const recent = useMemo(() => sessions
     .filter((session) => session.projectId === projectId && session.status !== "archived")
     .sort((a, b) => (b.lastTurnAt ?? b.updatedAt) - (a.lastTurnAt ?? a.updatedAt))
@@ -187,7 +189,7 @@ function RecentSessions({ projectId }: { projectId: string | null }) {
                 >
                   <span aria-hidden>{status.glyph}</span>
                 </span>
-                <span className="hero-recent-title">{displaySessionTitle(session.title, session.id, firstUserTextCached(events[session.id]))}</span>
+                <span className="hero-recent-title">{displaySessionTitle(session.title, session.id)}</span>
                 <span className="hero-recent-time">{ago(session.lastTurnAt ?? session.updatedAt)}</span>
               </button>
             </li>

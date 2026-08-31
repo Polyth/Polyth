@@ -607,15 +607,15 @@ function AssistantAgentHeader({
   m,
   announce,
   turn,
-  preliminary,
+  segmentStartedAt,
 }: {
   m: AssistantMsg;
   announce?: Announce;
   /** Present only for the terminal assistant answer of the current turn. */
   turn?: RenderModel["turn"];
-  /** Any finalized answer while the session is actively working: only the
-   *  minimal header renders; the identity panel appears after the turn. */
-  preliminary: boolean;
+  /** Opening prompt time of the answer's turn — the fallback duration source
+   *  for terminal answers whose turn state is no longer in the store. */
+  segmentStartedAt?: number;
 }) {
   const session = useStore((state) =>
     state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null);
@@ -634,10 +634,11 @@ function AssistantAgentHeader({
   const agent = (turn?.agent ?? m.agent ?? session?.agent ?? tr("composer.build")).replace(/[-_]+/g, " ");
   const agentName = agent ? agent[0]!.toUpperCase() + agent.slice(1) : tr("composer.build");
   const wholeTurnDuration = turnDurationMs(turn ?? null);
+  const fallbackStart = segmentStartedAt && segmentStartedAt > 0 ? segmentStartedAt : m.time;
   const duration = wholeTurnDuration !== null
     ? normalizedDuration(wholeTurnDuration)
     : m.completedAt !== undefined
-      ? normalizedDuration(Math.max(0, m.completedAt - m.time))
+      ? normalizedDuration(Math.max(0, m.completedAt - fallbackStart))
       : null;
   const usage = turn?.usage?.tokens;
   const hasUsage = usage !== undefined && (usage.input > 0 || usage.output > 0);
@@ -678,14 +679,6 @@ function AssistantAgentHeader({
     seedMultiRunPrompt(m.text);
     setActiveView("multirun");
   };
-  if (preliminary) {
-    return (
-      <header className="agent-reply-header agent-reply-header-preliminary">
-        <time className="agent-reply-item" dateTime={timeIso(assistantTime(m))}>{timeShort(assistantTime(m))}</time>
-      </header>
-    );
-  }
-
   return (
     <header className="agent-reply-header">
       <ProviderLogo
@@ -790,14 +783,18 @@ function AssistantView({
   plan,
   regeneratePrompt,
   turn,
-  preliminary = false,
+  terminal = false,
+  segmentStartedAt,
 }: {
   m: AssistantMsg;
   announce?: Announce;
   plan?: NonNullable<RenderModel["tasks"]>;
   regeneratePrompt?: string;
   turn?: RenderModel["turn"];
-  preliminary?: boolean;
+  /** Terminal answer of a completed turn: the only row that carries the
+   *  identity panel (one per turn, rendered after the turn completes). */
+  terminal?: boolean;
+  segmentStartedAt?: number;
 }) {
   const hasAnswer = m.text !== "" || !m.finalized;
   const answer = useSmoothText(m.text);
@@ -811,16 +808,26 @@ function AssistantView({
     ? ({ role: "article", "aria-label": assistantArticleName(m.finalized, assistantTime(m)) } as const)
     : undefined;
   return (
-    <div className={`msg assistant${preliminary ? " assistant-preliminary" : ""}`} data-message-seq={m.eventSeq} {...(articleProps ?? {})}>
+    <div className="msg assistant" data-message-seq={m.eventSeq} {...(articleProps ?? {})}>
       {m.reasoning !== "" && <Thinking m={m} />}
       {hasAnswer && (
-        <div className="bubble" dir="auto">{renderMarkdown(answer || "", m.id)}{!m.finalized && <span className="caret" />}</div>
+        <div className="bubble" dir="auto">
+          {renderMarkdown(answer || "", m.id)}
+          {!m.finalized && <span className="caret" />}
+          {announce && (
+            <span className="bubble-copy">
+              <CopyButton text={m.text} label={tr("timeline.copyAnswer")} />
+            </span>
+          )}
+        </div>
       )}
       {plan && plan.items.length > 0 && <TaskList plan={plan} />}
       {m.finalized && m.text !== "" && announce && galleryAvailable && (
         <button className="assistant-gallery-shortcut" onClick={openGallery}><Icon.image /> {tr("timeline.openAnswerImages")}</button>
       )}
-      {m.finalized && hasAnswer && <AssistantAgentHeader m={m} announce={announce} turn={turn} preliminary={preliminary} />}
+      {m.finalized && hasAnswer && terminal && (
+        <AssistantAgentHeader m={m} announce={announce} turn={turn} segmentStartedAt={segmentStartedAt} />
+      )}
     </div>
   );
 }
@@ -939,13 +946,14 @@ export function WorkedGroup({
   );
 }
 
-function MessageView({ m, announce, plan, regeneratePrompt, turn, preliminary, onRevert, onFork, revert, fork }: {
+function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segmentStartedAt, onRevert, onFork, revert, fork }: {
   m: RenderMessage;
   announce?: Announce;
   plan?: NonNullable<RenderModel["tasks"]>;
   regeneratePrompt?: string;
   turn?: RenderModel["turn"];
-  preliminary?: boolean;
+  terminal?: boolean;
+  segmentStartedAt?: number;
   onRevert?: (message: UserMsg) => void;
   onFork?: (message: UserMsg) => void;
   revert?: ActionAvailability;
@@ -975,7 +983,7 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, preliminary, o
     );
   }
   if (m.kind === "assistant") {
-    return <AssistantView m={m} announce={announce} plan={plan} regeneratePrompt={regeneratePrompt} turn={turn} preliminary={preliminary} />;
+    return <AssistantView m={m} announce={announce} plan={plan} regeneratePrompt={regeneratePrompt} turn={turn} terminal={terminal} segmentStartedAt={segmentStartedAt} />;
   }
   if (m.kind === "github-conflict") return <GithubConflictCard message={m} />;
   if (m.kind === "task") return <TaskActivityRow activity={m} />;
@@ -1030,7 +1038,8 @@ const MessageRow = memo(function MessageRow(props: Parameters<typeof MessageView
   && prev.plan === next.plan
   // model.turn mutates in place: any row holding it must always re-render
   && prev.turn === undefined && next.turn === undefined
-  && prev.preliminary === next.preliminary
+  && prev.terminal === next.terminal
+  && prev.segmentStartedAt === next.segmentStartedAt
   && prev.regeneratePrompt === next.regeneratePrompt
   && prev.announce === next.announce
   && prev.onRevert === next.onRevert
@@ -1537,11 +1546,11 @@ export default function Timeline({
   // per-session lock, so a raced action returns a typed conflict, not a lie.
   const archived = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId)?.status === "archived");
   // The assistant identity panel is a completed-turn artifact: while the
-  // runtime is actively generating (or paused mid-turn on a request) every
-  // finalized answer renders only the minimal preliminary header, and the
-  // panel appears once the turn completes. A turn stranded by an unclear
-  // session state (unknown / reconciling / idle without a stop) still counts
-  // as completed and shows the panel.
+  // runtime is actively generating (or paused mid-turn on a request) no
+  // answer shows any metadata row, and the panel appears once the turn
+  // completes. A turn stranded by an unclear session state (unknown /
+  // reconciling / idle without a stop) still counts as completed and shows
+  // the panel.
   const sessionStatus = useStore((s) =>
     s.activeSessionId === null ? undefined : s.sessions.find((x) => x.id === s.activeSessionId)?.status);
   const sessionActive = sessionStatus === "working" || sessionStatus === "waiting";
@@ -1578,6 +1587,28 @@ export default function Timeline({
   const undoneMessages = useMemo(() => model.messages.filter((message) => message.undone), [model]);
   const rows = useMemo(() => groupWork(mergeThinking(visibleMessages)), [visibleMessages]);
   const undoneRows = useMemo(() => groupWork(mergeThinking(undoneMessages)), [undoneMessages]);
+  // One identity panel per completed turn, on the turn's terminal answer only.
+  // The terminal answer is the last assistant message before the next prompt
+  // (or the log tail); the map also records the opening prompt time so the
+  // panel's duration stays truthful when the turn state is no longer in the
+  // store. While the session is actively working no answer shows any metadata
+  // row; panels appear once the turn completes.
+  const terminalAnswers = useMemo(() => {
+    const terminal = new Map<number, number>();
+    let openAt = 0;
+    let lastAssistant: AssistantMsg | null = null;
+    for (const message of visibleMessages) {
+      if (message.kind === "user" || message.kind === "github-conflict") {
+        if (lastAssistant !== null) terminal.set(lastAssistant.eventSeq, openAt);
+        lastAssistant = null;
+        openAt = message.time;
+      } else if (message.kind === "assistant") {
+        lastAssistant = message;
+      }
+    }
+    if (lastAssistant !== null) terminal.set(lastAssistant.eventSeq, openAt);
+    return terminal;
+  }, [visibleMessages]);
   const hasRunningAction = rows.some((row) => row.kind === "work" && (
     row.tools.some((tool) => tool.status === "pending" || tool.status === "running")
     || row.tasks.some((task) => task.action === "started")
@@ -1865,7 +1896,8 @@ export default function Timeline({
                 plan={r.kind === "assistant" && r.id === latestAssistantId && model.tasks ? model.tasks : undefined}
                 regeneratePrompt={r.kind === "assistant" ? regenerateSources.get(r.eventSeq) : undefined}
                 turn={r.kind === "assistant" && r.id === latestAssistantId && turn?.status !== "working" ? turn : undefined}
-                preliminary={r.kind === "assistant" && turn?.status === "working" && sessionActive}
+                terminal={r.kind === "assistant" && !sessionActive && terminalAnswers.has(r.eventSeq)}
+                segmentStartedAt={r.kind === "assistant" ? terminalAnswers.get(r.eventSeq) : undefined}
                 announce={announce}
                 onRevert={revert}
                 onFork={fork}

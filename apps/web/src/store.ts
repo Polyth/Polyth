@@ -10,6 +10,8 @@ import type {
   SessionProjection,
 } from "@polyth/contracts";
 import { createModelCache, emptyModel, type RenderModel } from "./reduce.ts";
+import { isPlaceholderTitle, titleFromPrompt } from "./format.ts";
+import { firstUserText } from "./utils.ts";
 import { applySettingsToDom, loadSettings, saveSettings, type PolythSettings } from "./settings.ts";
 import { getRailPrefs, setRailLastOpen } from "./railPrefs.ts";
 import { loadActiveView, saveActiveView } from "./viewPrefs.ts";
@@ -324,8 +326,20 @@ export function applyProjectRemoved(id: string): void {
  *  entries (UX-FILES-TIMELINE-03 finding 9: the sidebar folder mode shows
  *  several projects' sessions at once, so a refresh must not evict them). */
 export function setSessions(projectId: string, sessions: SessionProjection[]): void {
+  const byId = new Map(sessions.map((p) => [p.id, p]));
+  const kept = state.sessions
+    .filter((s) => s.projectId === projectId)
+    .map((s) => {
+      const next = byId.get(s.id);
+      if (next) {
+        byId.delete(s.id);
+        return preserveTitle(s, next);
+      }
+      return s;
+    });
+  for (const p of byId.values()) kept.push(p);
   const others = state.sessions.filter((s) => s.projectId !== projectId);
-  set({ sessions: others.length === 0 ? sessions : [...others, ...sessions] });
+  set({ sessions: others.length === 0 ? kept : [...others, ...kept] });
 }
 export function setModels(models: ModelDescriptor[]): void {
   set({ models });
@@ -693,9 +707,22 @@ export function clearUiError(): void {
   set({ uiError: null });
 }
 
+/** A server placeholder title must not clobber a title the client already
+ *  derived from the first user message (applyEvents persists it instantly,
+ *  before OpenCode's slower semantic title lands). Keeps it durable across
+ *  event-cache eviction and projection refreshes. */
+function preserveTitle(cur: SessionProjection, inc: SessionProjection): SessionProjection {
+  if (!isPlaceholderTitle(cur.title, cur.id) && isPlaceholderTitle(inc.title, inc.id)) {
+    return { ...inc, title: cur.title };
+  }
+  return inc;
+}
+
 export function upsertSession(p: SessionProjection): void {
   const i = state.sessions.findIndex((s) => s.id === p.id);
-  const sessions = i >= 0 ? state.sessions.map((s, j) => (j === i ? p : s)) : [...state.sessions, p];
+  const cur = i >= 0 ? state.sessions[i] : undefined;
+  const incoming = cur ? preserveTitle(cur, p) : p;
+  const sessions = i >= 0 ? state.sessions.map((s, j) => (j === i ? incoming : s)) : [...state.sessions, incoming];
   set({ sessions });
 }
 
@@ -706,8 +733,11 @@ export function upsertSessions(list: readonly SessionProjection[]): void {
   const byId = new Map(list.map((p) => [p.id, p]));
   const sessions = state.sessions.map((s) => {
     const next = byId.get(s.id);
-    if (next) byId.delete(s.id);
-    return next ?? s;
+    if (next) {
+      byId.delete(s.id);
+      return preserveTitle(s, next);
+    }
+    return s;
   });
   for (const p of byId.values()) sessions.push(p);
   set({ sessions });
@@ -773,14 +803,30 @@ export function applyEvents(evs: readonly SessionEvent[]): void {
     else bySession.set(ev.sessionId, [ev]);
   }
   let next: Record<string, SessionEvent[]> | null = null;
+  let nextSessions: SessionProjection[] | null = null;
   for (const [sessionId, incoming] of bySession) {
     const list = state.events[sessionId] ?? EMPTY_EVENTS;
     const merged = mergeEvents(list, incoming);
     if (merged === list) continue;
     next ??= { ...state.events };
     next[sessionId] = merged;
+    // Newly admitted first user message → persist the prompt-derived title into
+    // the session record now. Sidebar and recent read the session title; this
+    // shows it instantly (no server round trip) and keeps it durable across
+    // event-cache eviction, instead of depending on firstUserText fallback.
+    if (incoming.some((e) => e.type === "user/message")) {
+      const cur = state.sessions.find((s) => s.id === sessionId);
+      if (cur && isPlaceholderTitle(cur.title, sessionId)) {
+        const text = firstUserText(merged);
+        if (text) {
+          nextSessions ??= state.sessions.slice();
+          const i = nextSessions.findIndex((s) => s.id === sessionId);
+          if (i >= 0) nextSessions[i] = { ...nextSessions[i]!, title: titleFromPrompt(text) };
+        }
+      }
+    }
   }
-  if (next) set({ events: next });
+  if (next) set(nextSessions ? { events: next, sessions: nextSessions } : { events: next });
 }
 
 export function lastSeq(sessionId: string): number {

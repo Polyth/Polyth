@@ -717,21 +717,20 @@ export default function Sidebar() {
                           ? <img src={p.icon} alt="" />
                         : <span aria-hidden="true">{p.icon}</span>
                       : <Icon.files />}
+                    {p.remote && (
+                      <span
+                        className="project-remote-marker"
+                        role="img"
+                        aria-label={tr("ssh.sshprojectsource.remoteProject")}
+                        title={tr("ssh.sshprojectsource.remoteProject")}
+                      >
+                        <Icon.globe />
+                      </span>
+                    )}
                   </span>
                   <span className="project-meta">
                     <span className="project-name-line">
                       <span className="project-name" title={p.path}>{p.name || p.path}</span>
-                      {p.remote && (
-                        <span
-                          className="project-remote-marker"
-                          role="img"
-                          aria-label={tr("ssh.sshprojectsource.remoteProject")}
-                          title={tr("ssh.sshprojectsource.remoteProject")}
-                        >
-                          <Icon.globe />
-                          <span aria-hidden="true">SSH</span>
-                        </span>
-                      )}
                     </span>
                     <span className="project-path">{p.path}</span>
                   </span>

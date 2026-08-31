@@ -106,7 +106,9 @@ test("remote projects are marked separately from local projects in the sidebar",
 
     assert.equal(localCard?.querySelector(".project-remote-marker"), null);
     assert.equal(marker?.getAttribute("aria-label"), "Remote project");
-    assert.match(marker?.textContent ?? "", /SSH/);
+    // Badge is an overlay on the project glyph, not an inline label next to the name.
+    assert.equal(remoteCard?.querySelector(".project-name-line .project-remote-marker"), null);
+    assert.ok(remoteCard?.querySelector(".project-glyph .project-remote-marker"));
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();

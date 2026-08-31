@@ -5,7 +5,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { JsonObject, SessionEvent } from "@polyth/contracts";
 import { buildModel, cloneModel, createModelCache, reduceEvent } from "../src/reduce.ts";
-import { applyEvent, applyEvents, getState, lastSeq, subscribeStore } from "../src/store.ts";
+import { applyEvent, applyEvents, getState, lastSeq, seedSessionCache, subscribeStore, upsertSession } from "../src/store.ts";
+import { titleFromPrompt } from "../src/format.ts";
 
 function mk(sessionId: string, seq: number, type = "user/message", data: JsonObject = {}): SessionEvent {
   return {
@@ -216,4 +217,48 @@ test("duplicate tool callIds keep first-wins routing (index matches the old scan
   assert.equal(tools.length, 2);
   assert.equal(tools[0]!.kind === "tool" ? tools[0]!.status : "", "done"); // first gets the result
   assert.equal(tools[1]!.kind === "tool" ? tools[1]!.status : "", "running");
+});
+
+// ---- UX: prompt-derived title persisted into the session record -------------
+
+function seedSession(id: string, title = ""): void {
+  seedSessionCache({
+    id,
+    projectId: "proj",
+    title,
+    status: "idle",
+    createdAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_000_000,
+  });
+}
+
+test("first user/message derives and persists the session title immediately", () => {
+  seedSession("titled-s");
+  applyEvents([mk("titled-s", 1, "user/message", { text: "Add auth middleware to the API" })]);
+  const s = getState().sessions.find((x) => x.id === "titled-s");
+  assert.ok(s);
+  assert.equal(s.title, titleFromPrompt("Add auth middleware to the API"));
+});
+
+test("a later non-user event does not re-derive or clobber an existing real title", () => {
+  seedSession("kept-s", "Manual title");
+  applyEvents([mk("kept-s", 1, "user/message", { text: "ignored prompt" })]);
+  const s = getState().sessions.find((x) => x.id === "kept-s");
+  assert.equal(s?.title, "Manual title");
+});
+
+test("a server placeholder projection does not clobber the client-derived title", () => {
+  seedSession("guard-s");
+  applyEvents([mk("guard-s", 1, "user/message", { text: "Fix the flaky test" })]);
+  // Server projection arrives still titled by a placeholder (OpenCode not done).
+  upsertSession({
+    id: "guard-s",
+    projectId: "proj",
+    title: "",
+    status: "idle",
+    createdAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_000_000,
+  });
+  const s = getState().sessions.find((x) => x.id === "guard-s");
+  assert.equal(s?.title, titleFromPrompt("Fix the flaky test"));
 });

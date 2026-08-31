@@ -58,20 +58,34 @@ test("message actions use one lightweight copy control and local hover zones", (
   assert.match(css, /@media \(max-width:\s*480px\)[\s\S]*\.msg\.assistant \.msg-actions\s*\{\s*display:\s*flex;/);
   assert.match(timeline, /key: "gallery"/);
   assert.match(timeline, /key: "regenerate"/);
-  assert.match(timeline, /<AssistantAgentHeader m=\{m\} announce=\{announce\} turn=\{turn\} preliminary=\{preliminary\} \/>/);
+  assert.match(timeline, /<AssistantAgentHeader m=\{m\} announce=\{announce\} turn=\{turn\} segmentStartedAt=\{segmentStartedAt\} \/>/);
   assert.match(timeline, /prefs\.responseActions\.map/);
   assert.match(timeline, /tr\("timeline\.startNewMultiRunFromThisAnswer"\)/);
 });
 
-test("assistant identity panel renders only after the turn completes", () => {
+test("assistant identity panel renders once per turn, after the turn completes", () => {
   const timeline = read("../src/components/Timeline.tsx");
   // While the session is actively working (or paused mid-turn on a request),
-  // every finalized answer renders only the minimal preliminary header; the
-  // full panel appears once the turn completes. A turn stranded by an unclear
-  // session state still counts as completed and shows the panel.
+  // no answer renders any metadata row. After the turn completes, exactly the
+  // terminal answer (last assistant message before the next prompt) carries
+  // the identity panel; a turn stranded by an unclear session state still
+  // counts as completed and shows the panel.
   assert.match(timeline, /const sessionActive = sessionStatus === "working" \|\| sessionStatus === "waiting";/);
-  assert.match(timeline, /preliminary=\{r\.kind === "assistant" && turn\?\.status === "working" && sessionActive\}/);
-  assert.doesNotMatch(timeline, /turn\.startedAt === undefined \|\| r\.time >= turn\.startedAt/);
+  assert.match(timeline, /terminal=\{r\.kind === "assistant" && !sessionActive && terminalAnswers\.has\(r\.eventSeq\)\}/);
+  assert.match(timeline, /if \(lastAssistant !== null\) terminal\.set\(lastAssistant\.eventSeq, openAt\);/);
+  assert.doesNotMatch(timeline, /preliminary|assistant-preliminary|agent-reply-header-preliminary/);
+});
+
+test("answer text blocks expose a hover copy control at the block end", () => {
+  const timeline = read("../src/components/Timeline.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(timeline, /className="bubble-copy"/);
+  assert.match(timeline, /<CopyButton text=\{m\.text\} label=\{tr\("timeline\.copyAnswer"\)\} \/>/);
+  assert.match(css, /\.bubble-copy\s*\{[^}]*position:\s*absolute;[^}]*inset-block-end:\s*4px;[^}]*inset-inline-end:\s*4px;[^}]*opacity:\s*0;/s);
+  assert.match(css, /\.msg\.assistant > \.bubble:hover \.bubble-copy,[\s\S]*?focus-within \.bubble-copy \{\s*opacity:\s*1;/);
+  assert.match(css, /\.bubble-copy \.copy-btn\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--panel\) 84%, transparent\);/s);
+  assert.match(css, /@media \(hover: none\) and \(pointer: coarse\) and \(min-width: 481px\)[\s\S]*?\.bubble-copy \{\s*opacity:\s*1;/);
 });
 
 test("thinking, tasks, and every execution share the compact activity-card treatment", () => {

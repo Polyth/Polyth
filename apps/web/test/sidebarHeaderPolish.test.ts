@@ -97,7 +97,8 @@ test("assistant response header carries identity, timing, and configured actions
   assert.match(timeline, /className="agent-reply-item agent-reply-duration"/);
   assert.match(timeline, /timeShort\(assistantTime\(m\)\)/);
   const response = timeline.indexOf("<div className=\"bubble\"");
-  const footer = timeline.lastIndexOf("<AssistantAgentHeader m={m} announce={announce} turn={turn} preliminary={preliminary} />");
+  const footer = timeline.lastIndexOf("<AssistantAgentHeader m={m} announce={announce} turn={turn} segmentStartedAt={segmentStartedAt} />");
   assert.ok(footer > response, "assistant identity and actions follow the response body");
-  assert.match(timeline, /agent-reply-header-preliminary/);
+  assert.match(timeline, /terminal=\{r\.kind === "assistant" && !sessionActive && terminalAnswers\.has\(r\.eventSeq\)\}/,
+    "the identity panel renders once per completed turn, on the terminal answer only");
 });
