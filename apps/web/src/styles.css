@@ -9541,6 +9541,16 @@ html[dir="rtl"] .panel-sheet { animation-name: module-slide-in-rtl; }
 .source-inline-status.success { border-color: color-mix(in srgb, var(--green) 45%, var(--hair)); color: var(--green); }
 .source-inline-status.error { border-color: color-mix(in srgb, var(--red) 45%, var(--hair)); color: var(--red); }
 .source-inline-status > span { flex: 1; min-width: min(220px, 100%); }
+.conflict-agent-bar {
+  border-color: var(--accent-line);
+  background: color-mix(in srgb, var(--accent-wash) 48%, var(--surface-overlay));
+  color: var(--text-dim);
+}
+.conflict-agent-bar .conflict-agent-copy { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: min(220px, 100%); }
+.conflict-agent-bar .conflict-agent-copy strong { color: var(--text); }
+.conflict-agent-bar .conflict-agent-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.conflict-agent-bar > .form-error,
+.conflict-agent-bar > .form-success { flex-basis: 100%; margin: 0; }
 .source-search {
   min-height: max(var(--control-h), var(--hit-min)); display: flex; align-items: center; gap: 8px; padding: 0 10px;
   border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--sunken); color: var(--muted);

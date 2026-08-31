@@ -402,6 +402,12 @@ export const en = {
   "worktreesessiondialog.workInValue": "Work in {value}",
   "worktreesessiondialog.worktreeCreatedBeforeSession": "The worktree is created before the session is registered.",
   "worktreesessiondialog.worktreeSource": "Worktree source",
+  "gitview.conflictAgentStarted": "Conflict resolution started.",
+  "gitview.filesConflictedHint": "{count} unresolved merge conflict(s).",
+  "gitview.historyDivergedHint": "Local and upstream history have diverged.",
+  "gitview.resolveConflictWithAgent": "Resolve this conflict with an agent",
+  "gitview.resolveInNewSession": "In a new session",
+  "gitview.resolveInThisSession": "In this session",
 } as const;
 
 export type GitMessageKey = keyof typeof en;

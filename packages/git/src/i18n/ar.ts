@@ -400,4 +400,10 @@ export const ar: GitMessages = {
   "worktreesessiondialog.workInValue": "العمل في {value}",
   "worktreesessiondialog.worktreeCreatedBeforeSession": "يتم إنشاء شجرة العمل قبل تسجيل الجلسة.",
   "worktreesessiondialog.worktreeSource": "مصدر Worktree",
+  "gitview.conflictAgentStarted": "بدأ حلّ التعارضات.",
+  "gitview.filesConflictedHint": "{count} تعارض دمج غير محلول.",
+  "gitview.historyDivergedHint": "تباعد السجل المحلي وسجل المصدر البعيد.",
+  "gitview.resolveConflictWithAgent": "حلّ هذا التعارض باستخدام وكيل",
+  "gitview.resolveInNewSession": "في جلسة جديدة",
+  "gitview.resolveInThisSession": "في هذه الجلسة",
 };

@@ -400,4 +400,10 @@ export const bg: GitMessages = {
   "worktreesessiondialog.workInValue": "Работете в {value}",
   "worktreesessiondialog.worktreeCreatedBeforeSession": "Работното дърво се създава преди регистрирането на сесията.",
   "worktreesessiondialog.worktreeSource": "Източник Worktree",
+  "gitview.conflictAgentStarted": "Разрешаването на конфликти започна.",
+  "gitview.filesConflictedHint": "{count} неразрешени конфликта при сливане.",
+  "gitview.historyDivergedHint": "Локалната и отдалечената история се разминаха.",
+  "gitview.resolveConflictWithAgent": "Разреши този конфликт с агент",
+  "gitview.resolveInNewSession": "В нова сесия",
+  "gitview.resolveInThisSession": "В тази сесия",
 };

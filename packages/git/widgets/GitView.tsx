@@ -6,6 +6,7 @@ import { refreshGitStatus, useGitStatus } from "./gitStatusStore.ts";
 import { highlight, langOf } from "../../../apps/web/src/highlight.ts";
 import { getLocale, tr } from "../../../apps/web/src/i18n/index.ts";
 import { Icon } from "../../../apps/web/src/icons.tsx";
+import { openSession } from "../../../apps/web/src/init.ts";
 import { splitPrDiff } from "./prDiff.ts";
 import {
   commentState, hunkDigest, loadComments, saveComments, splitHunks,
@@ -196,9 +197,64 @@ function ChangeSection({ id, title, files, closed, selected, busy, onToggle, onO
   );
 }
 
+type ConflictAgentTarget = "new-session" | "current-session";
+
+/** Inline "resolve this conflict with an agent" affordance. Shown wherever the
+ *  git surface knows the repo is conflicted — a diverged fast-forward pull or
+ *  unresolved working-tree merge conflicts — and offers the handoff in the
+ *  current session or a fresh one, seeded with the user's default prompt. */
+function ConflictAgentBanner({
+  hint, defaultTarget, hasCurrentSession, busy, message, failed, onResolve,
+}: {
+  hint: string;
+  defaultTarget: ConflictAgentTarget;
+  hasCurrentSession: boolean;
+  busy: ConflictAgentTarget | null;
+  message: string;
+  failed: boolean;
+  onResolve: (target: ConflictAgentTarget) => void;
+}) {
+  return (
+    <div className="source-inline-status conflict-agent-bar" role="group" aria-label={tr("gitview.resolveConflictWithAgent")}>
+      <div className="conflict-agent-copy">
+        <strong>{tr("gitview.resolveConflictWithAgent")}</strong>
+        <span className="muted">{hint}</span>
+      </div>
+      <div className="conflict-agent-actions">
+        <Button
+          size="sm"
+          variant={defaultTarget === "current-session" ? "primary" : "ghost"}
+          iconStart={AssistIcon}
+          busy={busy === "current-session"}
+          disabled={busy !== null || !hasCurrentSession}
+          onClick={() => onResolve("current-session")}
+        >
+          {tr("gitview.resolveInThisSession")}
+        </Button>
+        <Button
+          size="sm"
+          variant={defaultTarget === "new-session" ? "primary" : "ghost"}
+          iconStart={AssistIcon}
+          busy={busy === "new-session"}
+          disabled={busy !== null}
+          onClick={() => onResolve("new-session")}
+        >
+          {tr("gitview.resolveInNewSession")}
+        </Button>
+      </div>
+      {message && (
+        <div className={failed ? "form-error" : "form-success"} role={failed ? "alert" : "status"}>
+          {message}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function GitView() {
   const projectId = useStore((state) => state.activeProjectId);
   const sessionId = useStore((state) => state.activeSessionId);
+  const settings = useStore((state) => state.settings);
   const diffPath = useStore((state) => state.gitDiffPath);
   const status = useGitStatus(projectId, true, sessionId);
   const prefs = useGitPrefs();
@@ -232,6 +288,9 @@ export default function GitView() {
   const [busyRemote, setBusyRemote] = useState<RemoteStep | null>(null);
   const [remoteStatus, setRemoteStatus] = useState<{ step: RemoteStep; error?: string } | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [conflictAgentBusy, setConflictAgentBusy] = useState<ConflictAgentTarget | null>(null);
+  const [conflictAgentMsg, setConflictAgentMsg] = useState("");
+  const [conflictAgentFailed, setConflictAgentFailed] = useState(false);
   const [closedGroups, setClosedGroups] = useState<ReadonlySet<string>>(new Set());
   const [comments, setComments] = useState<ReviewComment[]>([]);
   const [draft, setDraft] = useState<{ digest: string; line: number } | null>(null);
@@ -370,6 +429,40 @@ export default function GitView() {
       setRemoteStatus({ step, error: cause instanceof Error ? cause.message : String(cause) });
     } finally {
       setBusyRemote(null);
+    }
+  };
+
+  const startConflictAgent = async (target: ConflictAgentTarget) => {
+    if (conflictAgentBusy || !projectId) return;
+    if (target === "current-session" && !sessionId) {
+      setConflictAgentFailed(true);
+      setConflictAgentMsg(tr("pullrequestview.conflictAgentNeedsCurrentSession"));
+      return;
+    }
+    setConflictAgentBusy(target);
+    setConflictAgentMsg("");
+    setConflictAgentFailed(false);
+    try {
+      const result = await api.gitResolveConflictAgent({
+        projectId,
+        target,
+        prompt: settings.conflictAgentPrompt,
+        ...(target === "current-session" && sessionId ? { sessionId } : {}),
+      });
+      if (!result.ok) {
+        setConflictAgentFailed(true);
+        setConflictAgentMsg(result.reason);
+        return;
+      }
+      if (target === "new-session" || result.data.sessionId !== sessionId) {
+        await openSession(result.data.sessionId);
+      }
+      setConflictAgentMsg(tr("gitview.conflictAgentStarted"));
+    } catch (cause) {
+      setConflictAgentFailed(true);
+      setConflictAgentMsg(friendlyError(tr("pullrequestview.conflictAgentFailed"), cause));
+    } finally {
+      setConflictAgentBusy(null);
     }
   };
 
@@ -517,6 +610,19 @@ export default function GitView() {
         </div>
       )}
 
+      {remoteStatus?.error && remoteStatus.step === "pull"
+        && /diverged|fast-forward/i.test(remoteStatus.error) && (
+        <ConflictAgentBanner
+          hint={tr("gitview.historyDivergedHint")}
+          defaultTarget={settings.conflictAgentTarget}
+          hasCurrentSession={!!sessionId}
+          busy={conflictAgentBusy}
+          message={conflictAgentMsg}
+          failed={conflictAgentFailed}
+          onResolve={(target) => void startConflictAgent(target)}
+        />
+      )}
+
       {loadError && status && (
         <div className="source-inline-status error" role="alert">
           <span>{loadError}</span>
@@ -588,6 +694,17 @@ export default function GitView() {
 
       {tab === "changes" && (
         <div className="git-changes-layout">
+          {status && status.conflicted.length > 0 && (
+            <ConflictAgentBanner
+              hint={tr("gitview.filesConflictedHint", { count: status.conflicted.length })}
+              defaultTarget={settings.conflictAgentTarget}
+              hasCurrentSession={!!sessionId}
+              busy={conflictAgentBusy}
+              message={conflictAgentMsg}
+              failed={conflictAgentFailed}
+              onResolve={(target) => void startConflictAgent(target)}
+            />
+          )}
           <div className={`git-master-detail ${mobileDetail ? "detail-open" : ""}`}>
             <section className="git-master-pane" aria-label={tr("gitview.changedFiles")}>
               <div className="git-pane-toolbar">

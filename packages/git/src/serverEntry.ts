@@ -1,13 +1,18 @@
 import { posix } from "node:path";
 import { createHash } from "node:crypto";
-import type { AgentRuntime, ModelRef } from "@polyth/contracts";
+import type { AgentRuntime, JsonObject, ModelRef, SessionProjection } from "@polyth/contracts";
 import type { ProjectService, RouteHandler, SessionService } from "@polyth/contracts";
 import {
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
-import { createGitService, pathsUnder, type GitService } from "./index.ts";
+import {
+  buildLocalConflictResolutionPrompt,
+  createGitService,
+  pathsUnder,
+  type GitService,
+} from "./index.ts";
 
 const COMMIT_PROMPT_VERSION = 2;
 const COMMIT_OUTPUT_TOKENS = 120;
@@ -111,6 +116,10 @@ export function gitRoutes(deps: {
   sessions: SessionService;
   git: GitService;
   commitMessage(root: string): Promise<string>;
+  /** Session-log append seam for the conflict-resolution handoff. Optional so
+   *  minimal deployments and existing test fakes stay valid; when absent the
+   *  handoff still sends the prompt, it just skips the marker event. */
+  append?: (sessionId: string, type: string, data: JsonObject) => Promise<unknown>;
 }): RouteHandler {
   const { git } = deps;
   const projectRootOf = async (projectId: string | null | undefined): Promise<string> => {
@@ -195,6 +204,86 @@ export function gitRoutes(deps: {
     if (path === "/api/worktrees" && method === "GET") {
       const root = await projectRootOf(query("projectId"));
       json(200, (await git.isRepo(root)) ? await git.worktrees.list(root) : []);
+      return true;
+    }
+
+    // Hand a local conflict (diverged fast-forward pull, or an in-progress
+    // merge/rebase with markers) to an agent session with a default prompt.
+    // Sibling of /api/github/pr/conflict-agent, minus the PR context.
+    if (path === "/api/git/resolve-conflict-agent" && method === "POST") {
+      const input = await body();
+      const projectId = String(input.projectId ?? "").trim();
+      const projectRoot = await projectRootOf(projectId);
+      const target = String(input.target ?? "");
+      if (target !== "new-session" && target !== "current-session") {
+        json(400, { ok: false, reason: "target must be new-session or current-session" });
+        return true;
+      }
+      const givenSessionId = input.sessionId ? String(input.sessionId) : "";
+
+      let root = projectRoot;
+      if (target === "current-session") {
+        if (!givenSessionId) {
+          json(400, { ok: false, reason: "sessionId is required for current-session" });
+          return true;
+        }
+        let session: SessionProjection;
+        try {
+          session = await deps.sessions.snapshot(givenSessionId);
+        } catch {
+          json(404, { ok: false, reason: "target session not found" });
+          return true;
+        }
+        if (session.projectId !== projectId) {
+          json(400, { ok: false, reason: "target session belongs to another project" });
+          return true;
+        }
+        if (session.worktreeState === "missing") {
+          json(409, { ok: false, reason: "the target session's worktree is missing" });
+          return true;
+        }
+        root = session.worktreePath ?? projectRoot;
+      }
+
+      if (!(await git.isRepo(root))) {
+        json(409, { ok: false, reason: "this project is not a git repository" });
+        return true;
+      }
+      const status = await git.status(root);
+      const conflictedPaths = status.conflicted.map((file) => file.path);
+      const diverged = status.ahead > 0 && status.behind > 0;
+      if (conflictedPaths.length === 0 && !diverged) {
+        json(409, { ok: false, reason: "there is no git conflict to resolve in this repository" });
+        return true;
+      }
+
+      let sessionId = givenSessionId;
+      if (target === "new-session") {
+        sessionId = (await deps.sessions.create({
+          projectId,
+          title: "Resolve git conflicts",
+        })).id;
+      }
+
+      const prompt = buildLocalConflictResolutionPrompt(
+        {
+          branch: status.branch,
+          ahead: status.ahead,
+          behind: status.behind,
+          conflictedPaths,
+          diverged,
+        },
+        String(input.prompt ?? ""),
+      );
+      await deps.append?.(sessionId, "git/conflict-resolution-started", {
+        branch: status.branch ?? "",
+        ahead: status.ahead,
+        behind: status.behind,
+        conflictedCount: conflictedPaths.length,
+        diverged,
+      });
+      await deps.sessions.send(sessionId, { text: prompt, githubConflictResolution: true });
+      json(200, { ok: true, data: { sessionId } });
       return true;
     }
 
@@ -298,6 +387,12 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         sessions: host.sessions,
         git,
         commitMessage,
+        append: (sessionId, type, data) => host.events.append(
+          sessionId,
+          type,
+          data,
+          { ignorable: true, producerPlugin: "git" },
+        ),
       });
     },
   };

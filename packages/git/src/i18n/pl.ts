@@ -400,4 +400,10 @@ export const pl: GitMessages = {
   "worktreesessiondialog.workInValue": "Praca w {value}",
   "worktreesessiondialog.worktreeCreatedBeforeSession": "Drzewo robocze jest tworzone przed rejestracją sesji.",
   "worktreesessiondialog.worktreeSource": "Źródło Worktree",
+  "gitview.conflictAgentStarted": "Rozpoczęto rozwiązywanie konfliktów.",
+  "gitview.filesConflictedHint": "Nierozwiązane konflikty scalania: {count}.",
+  "gitview.historyDivergedHint": "Historia lokalna i zdalna rozeszły się.",
+  "gitview.resolveConflictWithAgent": "Rozwiąż ten konflikt za pomocą agenta",
+  "gitview.resolveInNewSession": "W nowej sesji",
+  "gitview.resolveInThisSession": "W tej sesji",
 };

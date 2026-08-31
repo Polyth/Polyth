@@ -115,6 +115,56 @@ export function pathsUnder(
   };
 }
 
+/** Compose the model-visible handoff prompt for resolving a *local* git
+ *  conflict — a diverged fast-forward pull, or an in-progress merge/rebase/
+ *  stash whose working tree carries conflict markers. Pure text: the server
+ *  fills in the live repo state, the caller passes the user's default
+ *  instruction (settings.conflictAgentPrompt). Sibling of the github
+ *  package's buildConflictResolutionPrompt, which is PR-scoped. */
+export function buildLocalConflictResolutionPrompt(
+  state: {
+    branch: string | null;
+    ahead: number;
+    behind: number;
+    conflictedPaths: string[];
+    diverged: boolean;
+  },
+  userPrompt: string,
+): string {
+  const instructions = userPrompt.trim();
+  const lines = [
+    "Resolve the git conflict in this repository's working tree.",
+    "",
+    "Repository state:",
+    `- Branch: ${state.branch ?? "(detached HEAD)"}`,
+    `- Local commits ahead of upstream: ${state.ahead}`,
+    `- Upstream commits not yet integrated: ${state.behind}`,
+  ];
+  if (state.conflictedPaths.length > 0) {
+    lines.push(`- Files with conflict markers (${state.conflictedPaths.length}):`);
+    for (const path of state.conflictedPaths.slice(0, 50)) lines.push(`  - ${path}`);
+    if (state.conflictedPaths.length > 50) lines.push("  - …");
+  } else if (state.diverged) {
+    lines.push(
+      "- No files are conflicted yet: a fast-forward pull failed because local and upstream history diverged.",
+    );
+  }
+  lines.push(
+    "",
+    "User instructions:",
+    instructions || "Inspect and resolve every merge conflict in the working tree.",
+    "",
+    "Required steps:",
+    "- If no merge or rebase is in progress yet, integrate the upstream branch first. This project keeps a linear history, so rebase the local commits onto the upstream branch (e.g. `git pull --rebase`) unless the user asked for a merge.",
+    "- Resolve every conflict by understanding both sides; explain each non-obvious decision.",
+    "- Remove all conflict markers and keep the code buildable.",
+    "- Run the relevant tests or checks once the tree is clean.",
+    "- Stage the resolved files and complete the rebase or merge locally.",
+    "- Do NOT push or force-push without explicit user approval.",
+  );
+  return lines.join("\n");
+}
+
 export interface GitServiceOptions {
   /** Configurable git binary (OC-13-011). */
   bin?: string;
