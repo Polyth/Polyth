@@ -1,9 +1,10 @@
 import type { IncomingMessage, Server } from "node:http";
-import { resolve } from "node:path";
+import { posix, resolve } from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import type {
   JsonObject,
   ProjectService,
+  RemoteHost,
   RouteHandler,
   SessionEvent,
   SessionService,
@@ -14,6 +15,10 @@ import {
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { createTerminalService, type TerminalService } from "./index.ts";
+
+interface SshTransportService {
+  host(connectionId: string): RemoteHost;
+}
 
 export function terminalRoutes(deps: {
   projects: ProjectService;
@@ -61,6 +66,7 @@ export function terminalRoutes(deps: {
       }
       const project = await deps.projects.get(projectId);
       if (!project) throw Object.assign(new Error("unknown project"), { code: "not-found" });
+      const resolveWorkspacePath = project.remote ? posix.resolve : resolve;
       let cwd = project.path;
       if (input.sessionId) {
         const session = await deps.sessions.snapshot(String(input.sessionId));
@@ -73,12 +79,12 @@ export function terminalRoutes(deps: {
           throw Object.assign(new Error("session worktree is missing"), { code: "not-found" });
         }
         cwd = session.worktreePath ?? project.path;
-        if (input.cwd && resolve(String(input.cwd)) !== resolve(cwd)) {
+        if (input.cwd && resolveWorkspacePath(String(input.cwd)) !== resolveWorkspacePath(cwd)) {
           throw Object.assign(new Error("terminal cwd does not match the session workspace"), {
             code: "invalid-path",
           });
         }
-      } else if (input.cwd && resolve(String(input.cwd)) !== resolve(project.path)) {
+      } else if (input.cwd && resolveWorkspacePath(String(input.cwd)) !== resolveWorkspacePath(project.path)) {
         throw Object.assign(new Error("terminal cwd requires a matching session"), {
           code: "invalid-path",
         });
@@ -225,6 +231,19 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     ...(Number(process.env.POLYTH_MAX_TERMINALS) > 0
       ? { maxSessions: Number(process.env.POLYTH_MAX_TERMINALS) }
       : {}),
+    remoteHostForProject: async (projectId) => {
+      const project = await host.projects.get(projectId);
+      if (!project) throw Object.assign(new Error("unknown project"), { code: "not-found" });
+      if (project.remote?.kind !== "ssh") return undefined;
+      const ssh = host.services.get(serverServiceKey<SshTransportService>("ssh"));
+      if (!ssh) {
+        throw Object.assign(
+          new Error("SSH support unavailable: the ssh package did not load"),
+          { code: "unavailable" },
+        );
+      }
+      return ssh.host(project.remote.connectionId);
+    },
   });
   host.services.provide(serverServiceKey<TerminalService>("terminal"), terminals);
   // Order matters at the gateway: the session gateway aborts /ws upgrades it

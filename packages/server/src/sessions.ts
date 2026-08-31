@@ -4,10 +4,10 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type {
   AgentProfile, AgentRuntime, AttachmentRef, AutoAcceptSetting, CanonicalEventInput, ChildSnapshotResult, ClientSettingsDto, CreateSessionInput, DeliveryMode,
-  Disposable, DurableOperation, ForkDraft, ForkResult, JsonObject, MutationOutcome, NotificationRecord,
+  Disposable, DurableOperation, ForkDraft, ForkResult, JsonObject, ModelRef, MutationOutcome, NotificationRecord,
   PersistedRuntimeBinding,
-  InstalledPluginDto, PackageDescriptorDto, QueueItemDto, RuntimeEvent,
-  RuntimeEpochTransitionResult,
+  InstalledPluginDto, PackageDescriptorDto, QueueItemDto, RateLimitRetry, RateLimitRetryHint, RuntimeEvent,
+  RuntimeEpochTransitionResult, TurnResumeCancelledData,
   RuntimeEndpoint, RuntimeLifecycleNotification, RuntimeMutationKind, RuntimeObservation,
   RuntimeSessionBinding, RuntimeSnapshot,
   SecretRequestData, SecretResolvedData, SecureSafeKind, SecureSafeService,
@@ -30,6 +30,7 @@ import {
 import { buildPermissionPreview, PERMISSION_ALLOWED_SCOPES } from "./permissionPreview.ts";
 import { sanitizeAttachments } from "./attachments.ts";
 import { settleAllOrThrow } from "./settle.ts";
+import { createResumeScheduler, planResume } from "./resume.ts";
 
 export interface Broadcaster {
   event(ev: SessionEvent): void;
@@ -808,6 +809,11 @@ export function createSessionService(deps: {
   const updateProjection = async (sessionId: string, patch: Partial<SessionProjection>) => {
     await applyProjection(sessionId, (current) => ({ ...current, ...patch, updatedAt: Date.now() }));
   };
+  // Runtime wiring and reconciliation maintain the projection; they are not
+  // session activity and must not change the sidebar's recent order.
+  const updateProjectionQuietly = async (sessionId: string, patch: Partial<SessionProjection>) => {
+    await applyProjection(sessionId, (current) => ({ ...current, ...patch }));
+  };
 
   const applyRuntimeProjection = async (
     sessionId: string,
@@ -915,7 +921,6 @@ export function createSessionService(deps: {
         await applyProjection(proj.id, (current) => ({
           ...current,
           runtimeBinding: currentBinding,
-          updatedAt: Date.now(),
         }));
       }
       return {
@@ -939,7 +944,6 @@ export function createSessionService(deps: {
       await applyProjection(proj.id, (current) => ({
         ...current,
         runtimeBinding: compatibilityBinding,
-        updatedAt: Date.now(),
       }));
     }
     return {
@@ -1327,7 +1331,7 @@ export function createSessionService(deps: {
         reason,
       ));
     }
-    await updateProjection(sessionId, {
+    await updateProjectionQuietly(sessionId, {
       status: "epoch-pending",
       runtimeControl: endpoint.control.kind === "owned" ? "owned" : "borrowed",
     });
@@ -1346,7 +1350,7 @@ export function createSessionService(deps: {
     if (existing) return existing;
     const run = (async () => {
       const started = await broadcastTail(sessionId, () => durable.startReconciliation(sessionId));
-      await updateProjection(sessionId, { status: "reconciling" });
+      await updateProjectionQuietly(sessionId, { status: "reconciling" });
       try {
         const project = await projects.get(proj.projectId);
         const cwd = proj.worktreePath ?? project?.path ?? process.cwd();
@@ -1359,7 +1363,7 @@ export function createSessionService(deps: {
             "unknown",
             !binding ? "backend session binding is unavailable" : "runtime reconciliation is unavailable",
           ));
-          await updateProjection(sessionId, { status: "unknown" });
+          await updateProjectionQuietly(sessionId, { status: "unknown" });
           return;
         }
         const cursor = await durable.observationCursor({
@@ -1546,7 +1550,7 @@ export function createSessionService(deps: {
             if (!current.runtimeBinding) return current;
             const runtimeBinding = { ...current.runtimeBinding };
             delete runtimeBinding.historyBaseline;
-            return { ...current, runtimeBinding, updatedAt: Date.now() };
+            return { ...current, runtimeBinding };
           });
           if (historyBaseline === "import") {
             await appendAndBroadcast(
@@ -1607,7 +1611,7 @@ export function createSessionService(deps: {
               ? "runtime status evidence is insufficient"
               : undefined,
         ));
-        await updateProjection(sessionId, { status: nextStatus });
+        await updateProjectionQuietly(sessionId, { status: nextStatus });
       } catch (error) {
         if (await markOwnedEpochPending(sessionId, proj, rt, error, started.ordinal)) {
           return;
@@ -1620,7 +1624,7 @@ export function createSessionService(deps: {
             "unknown",
             error instanceof Error ? error.message : "runtime reconciliation failed",
           ));
-          await updateProjection(sessionId, { status: "unknown" });
+          await updateProjectionQuietly(sessionId, { status: "unknown" });
         }
       }
     })().finally(() => {
@@ -1733,6 +1737,132 @@ export function createSessionService(deps: {
     void attempt(0);
   }
 
+  // ---- rate-limit auto-resume ------------------------------------------------
+  // A provider capacity stop (rate limit / quota / overload) is recoverable:
+  // the backend adapter tags turn/stopped with a retry hint, we persist a
+  // SessionResumeState on the projection and arm a timer that re-sends the
+  // last user message. The user can cancel the wait or continue on another
+  // model instead (both go through cancelResume / send).
+  const resumeScheduler = createResumeScheduler({
+    fire: (sessionId) => runScheduledResume(sessionId),
+    onError: (sessionId, err) =>
+      console.error(`[polyth] rate-limit resume failed for ${sessionId}`, err),
+  });
+
+  const lastUserMessage = (
+    events: readonly SessionEvent[],
+  ): { seq: number; text: string; attachments?: JsonObject[] } | undefined => {
+    for (let i = events.length - 1; i >= 0; i--) {
+      const ev = events[i]!;
+      if (ev.type !== "user/message") continue;
+      const data = ev.data as {
+        text?: unknown; raw?: unknown; attachments?: unknown; githubConflictResolution?: unknown;
+      };
+      if (data.githubConflictResolution === true) return undefined;
+      const text = typeof data.raw === "string" && data.raw.trim()
+        ? data.raw
+        : typeof data.text === "string" ? data.text : "";
+      return {
+        seq: ev.seq,
+        text,
+        ...(Array.isArray(data.attachments) && data.attachments.length
+          ? { attachments: data.attachments as JsonObject[] }
+          : {}),
+      };
+    }
+    return undefined;
+  };
+
+  /** Compute + persist the resume plan for a limit stop and arm the timer.
+   *  Returns the plan so the caller can embed it in the turn/stopped event. */
+  const scheduleResume = async (
+    sessionId: string,
+    hint: RateLimitRetryHint,
+    events: readonly SessionEvent[],
+  ): Promise<RateLimitRetry | undefined> => {
+    const last = lastUserMessage(events);
+    if (!last) return undefined;
+    const previous = (await store.projection(sessionId))?.resume;
+    const state = planResume({
+      hint,
+      userMessageSeq: last.seq,
+      ...(previous
+        ? { previous: { attempt: previous.attempt, userMessageSeq: previous.userMessageSeq } }
+        : {}),
+      now: Date.now(),
+    });
+    await applyProjection(sessionId, (current) => ({ ...current, resume: state, updatedAt: Date.now() }));
+    resumeScheduler.arm(sessionId, state.resumeAt);
+    return {
+      scope: state.scope,
+      ...(state.provider ? { provider: state.provider } : {}),
+      ...(state.retryAfterSec ? { retryAfterSec: state.retryAfterSec } : {}),
+      resumeAt: state.resumeAt,
+      attempt: state.attempt,
+    };
+  };
+
+  /** Drop a pending resume (user cancel, model switch, superseded, resumed). */
+  const clearResume = async (
+    sessionId: string,
+    reason: TurnResumeCancelledData["reason"],
+  ): Promise<boolean> => {
+    resumeScheduler.cancel(sessionId);
+    if (!(await store.projection(sessionId))?.resume) return false;
+    await applyProjection(sessionId, (current) => {
+      const next = { ...current, updatedAt: Date.now() };
+      delete next.resume;
+      return next;
+    });
+    await appendAndBroadcast(sessionId, "turn/resume-cancelled", { reason }, { ignorable: true });
+    return true;
+  };
+
+  // Runs from the timer (no session lock held). The check + clear are done
+  // under the lock; service.send runs after release so it can take the lock
+  // through its own admission path.
+  const runScheduledResume = async (sessionId: string): Promise<void> => {
+    const plan = await withSessionLock(sessionId, async (): Promise<
+      { text: string; attachments?: AttachmentRef[]; model?: ModelRef } | null
+    > => {
+      const proj = await store.projection(sessionId);
+      if (!proj?.resume) return null;
+      if (proj.status === "working" || proj.status === "reconciling" || proj.status === "archived") {
+        return null;
+      }
+      const last = lastUserMessage(await store.events(sessionId));
+      if (!last || last.seq !== proj.resume.userMessageSeq || !last.text.trim()) {
+        await clearResume(sessionId, "user");
+        return null;
+      }
+      await clearResume(sessionId, "resumed");
+      return {
+        text: last.text,
+        ...(last.attachments
+          ? { attachments: last.attachments as unknown as AttachmentRef[] }
+          : {}),
+        ...(proj.model ? { model: proj.model } : {}),
+      };
+    });
+    if (plan) await service.send(sessionId, { ...plan, autoResume: true });
+  };
+
+  /** Boot: re-arm timers for sessions that stopped rate-limited before a
+   *  restart. A resumeAt already in the past fires on the next tick. */
+  const rehydrateResume = async (): Promise<void> => {
+    let rows: SessionProjection[] = [];
+    try {
+      rows = await store.projections();
+    } catch {
+      return;
+    }
+    for (const row of rows) {
+      if (row.resume && row.status !== "archived") {
+        resumeScheduler.arm(row.id, row.resume.resumeAt);
+      }
+    }
+  };
+
   const onRuntimeEvent = async (
     sessionId: string,
     ev: RuntimeEvent,
@@ -1757,9 +1887,75 @@ export function createSessionService(deps: {
     ) {
       return;
     }
+    // OpenCode creates delegated sessions itself. Adopt those exact backend
+    // sessions as children before publishing the parent's task snapshot, so a
+    // task card and the navigator always point at the same canonical session.
+    if (ev.type === "subagent/snapshot" && sideEffects) {
+      const parent = await store.projection(sessionId);
+      const runtime = sessionRuntime.get(sessionId);
+      if (parent && runtime) {
+        const remote = new Map((await runtime.sessions()).map((item) => [item.id, item]));
+        const known = await store.projections(parent.projectId);
+        const canonicalByBackend = new Map(
+          known.flatMap((item) => item.backendSessionId ? [[item.backendSessionId, item.id] as const] : []),
+        );
+        const agents = [] as typeof ev.agents;
+        for (const agent of ev.agents) {
+          const child = remote.get(agent.sessionId);
+          // A task call can precede the backend session metadata. Keep its
+          // temporary identifier until OpenCode supplies a real child.
+          if (!child || child.parentId !== parent.backendSessionId) {
+            agents.push(agent);
+            continue;
+          }
+          let childId = canonicalByBackend.get(child.id);
+          if (!childId) {
+            childId = randomUUID();
+            const project = await projects.get(parent.projectId);
+            const cwd = parent.worktreePath ?? project?.path ?? process.cwd();
+            const projection: SessionProjection = {
+              id: childId,
+              projectId: parent.projectId,
+              parentId: sessionId,
+              title: child.title || agent.label,
+              status: "reconciling",
+              backendSessionId: child.id,
+              runtimeBinding: await newRuntimeBinding(runtime, child.id, cwd, "import"),
+              createdAt: child.createdAt,
+              updatedAt: child.updatedAt,
+            };
+            await store.upsertProjection(projection);
+            await appendAndBroadcast(childId, "session/imported", { backendSessionId: child.id }, { ignorable: true });
+            broadcast.projection(projection);
+            await ensureWired(childId, projection);
+            canonicalByBackend.set(child.id, childId);
+          }
+          agents.push({ ...agent, sessionId: childId });
+        }
+        ev = { ...ev, agents };
+      }
+    }
+    // Delegated work asks its parent for input by default. The child retains
+    // the request (the runtime binding belongs there), while the parent gets a
+    // replyable mirror marked with the canonical child ID.
+    if (
+      sideEffects
+      && (ev.type === "permission/requested"
+        || (ev.type === "question/asked" && !ev.questions.some((question) => secureRequest(ev.requestId, question))))
+    ) {
+      const child = await store.projection(sessionId);
+      if (child?.parentId) {
+        const { type: _type, ...data } = ev;
+        await appendAndBroadcast(child.parentId, ev.type, {
+          ...data as unknown as JsonObject,
+          sourceSessionId: sessionId,
+        }, { ignorable: true });
+        await updateProjection(child.parentId, { status: "waiting" });
+      }
+    }
     switch (ev.type) {
       case "turn/started":
-        await persist(sessionId, "turn/started", { turnId: ev.turnId }, { ignorable: true });
+        await persist(sessionId, "turn/started", { turnId: ev.turnId, ...(ev.model ? { model: ev.model } : {}) } as unknown as JsonObject, { ignorable: true });
         if (sideEffects) {
           const applied = await applyRuntimeProjection(
             sessionId,
@@ -1775,6 +1971,9 @@ export function createSessionService(deps: {
             lastTurnId.set(sessionId, ev.turnId);
             admitting.delete(sessionId);
             turnReply.set(sessionId, new Map());
+            // A fresh turn (auto-resume, manual retry, or new prompt) settles
+            // any pending rate-limit wait.
+            await clearResume(sessionId, "resumed");
           }
         }
         break;
@@ -1811,13 +2010,23 @@ export function createSessionService(deps: {
         }
         break;
       }
-      case "turn/stopped":
+      case "turn/stopped": {
+        // A provider capacity stop is recoverable: plan the auto-resume before
+        // persisting so its resumeAt/attempt travel with the terminal event
+        // (the UI renders a countdown instead of a generic failure).
+        const retry = sideEffects && !observationReplay && ev.reason === "error" && ev.retry
+          ? await scheduleResume(sessionId, ev.retry, await store.events(sessionId))
+          : undefined;
         await persist(sessionId, "turn/stopped", {
           turnId: ev.turnId ?? lastTurnId.get(sessionId) ?? ev.type,
           reason: ev.reason,
           ...(ev.error ? { error: ev.error } : {}),
+          ...(retry ? { retry: retry as unknown as JsonObject } : {}),
         }, { ignorable: true });
         if (sideEffects) {
+          // Any non-limit terminal stop (completed / aborted / hard error)
+          // supersedes a pending resume from an earlier limit stop.
+          if (!retry) await clearResume(sessionId, "user");
           // An interrupt abort stops the turn as reason "error" ("Aborted").
           // Treating that as a failure would wedge the session: status
           // "failed" blocks queue dispatch and the queued interrupt message
@@ -1855,6 +2064,7 @@ export function createSessionService(deps: {
           }
         }
         break;
+      }
       case "permission/requested": {
         const { type: _t, ...reqData } = ev;
         // Redacted preview + explicit scopes are generated BEFORE the request
@@ -2211,12 +2421,11 @@ export function createSessionService(deps: {
             ...attachedProjection,
             backendSessionId: recoveredBackendId,
             status: "reconciling",
-            updatedAt: Date.now(),
           };
           await store.upsertProjection(attachedProjection);
           broadcast.projection(attachedProjection);
         } else {
-          await updateProjection(sessionId, { status: "unknown" });
+          await updateProjectionQuietly(sessionId, { status: "unknown" });
           throw Object.assign(new Error("backend session creation outcome is unknown"), {
             code: "outcome-unknown",
           });
@@ -2249,7 +2458,7 @@ export function createSessionService(deps: {
           `reattach:${sessionId}`,
         );
       } catch (error) {
-        await updateProjection(sessionId, { status: "unknown" });
+        await updateProjectionQuietly(sessionId, { status: "unknown" });
         throw error;
       }
       wire(sessionId, rt);
@@ -2909,6 +3118,7 @@ export function createSessionService(deps: {
         ...(model ? { resolvedModel: model as unknown as JsonObject } : {}),
         ...(agent ? { resolvedAgent: agent } : {}),
       } : {}),
+      ...(input.autoResume === true ? { autoResume: true } : {}),
     };
     let operation = reserved?.operation;
     const existingEvents = reserved ? await store.events(sessionId) : [];
@@ -4301,6 +4511,34 @@ export function createSessionService(deps: {
       });
     },
 
+    async cancelResume(sessionId) {
+      await withSessionLock(sessionId, () => clearResume(sessionId, "user"));
+    },
+
+    async resumeNow(sessionId, model): Promise<SendResult> {
+      const plan = await withSessionLock(sessionId, async (): Promise<
+        { text: string; attachments?: AttachmentRef[]; model?: ModelRef }
+      > => {
+        const proj = await store.projection(sessionId);
+        if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        if (!proj.resume) throw Object.assign(new Error("no pending resume"), { code: "no-resume" });
+        const last = lastUserMessage(await store.events(sessionId));
+        if (!last || last.seq !== proj.resume.userMessageSeq || !last.text.trim()) {
+          await clearResume(sessionId, "user");
+          throw Object.assign(new Error("resume target is stale"), { code: "no-resume" });
+        }
+        await clearResume(sessionId, model ? "model-switch" : "resumed");
+        return {
+          text: last.text,
+          ...(last.attachments
+            ? { attachments: last.attachments as unknown as AttachmentRef[] }
+            : {}),
+          ...(model ?? proj.model ? { model: model ?? proj.model } : {}),
+        };
+      });
+      return service.send(sessionId, { ...plan, autoResume: true });
+    },
+
     // UX-MSG-ACTIONS Fork: backend branch is prepared FIRST; the canonical
     // child (prefix + projection + one lineage marker) publishes in a single
     // store transaction only after the backend id is verified. Failure at any
@@ -4744,7 +4982,7 @@ export function createSessionService(deps: {
       // folderId: undefined must actually clear the stored key
       const current = await store.projection(sessionId);
       if (!current) return;
-      const merged = { ...current, ...next, updatedAt: Date.now() };
+      const merged = { ...current, ...next };
       if (patch.folderId === null) delete merged.folderId;
       if (patch.pinned === null) delete merged.pinned;
       await store.upsertProjection(merged);
@@ -4937,13 +5175,27 @@ export function createSessionService(deps: {
     },
 
     async replyPermission(sessionId, requestId, reply, scope) {
-      await withSessionLock(sessionId, () =>
-        replyPermissionCore(sessionId, requestId, reply, scope));
+      await withSessionLock(sessionId, async () => {
+        const forwarded = (await logFacts(sessionId)).openPermissions.get(requestId)?.data as
+          { sourceSessionId?: unknown } | undefined;
+        const target = typeof forwarded?.sourceSessionId === "string" ? forwarded.sourceSessionId : sessionId;
+        await replyPermissionCore(target, requestId, reply, scope);
+        if (target !== sessionId) {
+          await appendAndBroadcast(sessionId, "permission/resolved", { requestId, reply }, { ignorable: true });
+        }
+      });
     },
 
     async replyQuestion(sessionId, requestId, answers) {
-      await withSessionLock(sessionId, () =>
-        replyQuestionCore(sessionId, requestId, answers));
+      await withSessionLock(sessionId, async () => {
+        const forwarded = (await logFacts(sessionId)).openQuestions.get(requestId)?.data as
+          { sourceSessionId?: unknown } | undefined;
+        const target = typeof forwarded?.sourceSessionId === "string" ? forwarded.sourceSessionId : sessionId;
+        await replyQuestionCore(target, requestId, answers);
+        if (target !== sessionId) {
+          await appendAndBroadcast(sessionId, "question/answered", { requestId, answers }, { ignorable: true });
+        }
+      });
     },
 
     async replySecret(sessionId, requestId, reply) {
@@ -5091,6 +5343,13 @@ export function createSessionService(deps: {
       }
     });
   };
+
+  // Re-arm rate-limit resume timers for sessions that were waiting when the
+  // server last stopped. Fire-and-forget: timers are unref'd and a past
+  // resumeAt simply resends on the next tick.
+  void rehydrateResume().catch(
+    (err: unknown) => console.error("[polyth] rate-limit resume rehydrate failed", err),
+  );
 
   return service;
 }

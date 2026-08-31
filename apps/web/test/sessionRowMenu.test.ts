@@ -142,6 +142,30 @@ function rowOf(container: HTMLElement, title: string): HTMLElement {
   return row!;
 }
 
+test("subagent sessions stay collapsed under their parent until expanded", async () => {
+  activateProject("p1");
+  setSessions("p1", [
+    session({ id: "parent", title: "Parent session" }),
+    session({ id: "child", parentId: "parent", title: "Delegated review" }),
+  ]);
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(createElement(SessionList, { projectId: "p1" })));
+    assert.match(container.textContent ?? "", /Parent session/);
+    assert.doesNotMatch(container.textContent ?? "", /Delegated review/);
+    const toggle = container.querySelector<HTMLButtonElement>(".session-subagent-toggle");
+    assert.equal(toggle?.getAttribute("aria-expanded"), "false");
+    await act(async () => toggle?.click());
+    assert.match(container.textContent ?? "", /Delegated review/);
+    assert.equal(toggle?.getAttribute("aria-expanded"), "true");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
 test("right-click opens the row-scoped menu with delete/archive/pin and menu ARIA", async () => {
   const { container, unmount } = await mountList();
   try {

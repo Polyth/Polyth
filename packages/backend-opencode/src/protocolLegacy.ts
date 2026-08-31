@@ -76,7 +76,7 @@ export interface CreateLegacyProtocolAdapterOptions {
   transport: OpenCodeTransport;
   endpoint: RuntimeEndpoint;
   deadlineMs?: number;
-  /** Read-only OpenAPI negotiation result. An empty list means unsupported. */
+  /** Read-only OpenAPI negotiation result. */
   promptPaths?: ReadonlyArray<LegacyPromptPath>;
 }
 
@@ -600,6 +600,12 @@ export const createLegacyProtocolAdapter = (
       deadlineMs,
     );
     promptPaths = document.ok ? legacyPromptPathsFromDocument(document.value) : [];
+    // Some compatible legacy servers omit /doc (or publish an incomplete
+    // document) while still implementing OpenCode's long-standing async
+    // prompt endpoint. Choose exactly this one known endpoint; a definitive
+    // unsupported response removes it for later operations, never replaying
+    // the current turn against another route.
+    if (promptPaths.length === 0) promptPaths = ["prompt_async"];
     return promptPaths;
   };
 

@@ -6,7 +6,7 @@ import { fmtDuration, fmtTokens } from "../format.ts";
 import { groupWork, mergeThinking, promptIndex, copyText, loadDraft, type WorkGroup } from "../utils.ts";
 import { executionGroupLabel, executionPresentation, reasoningHead } from "../execution.ts";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
-import { forkSession, loadOlderEvents } from "../init.ts";
+import { cancelResume, forkSession, loadOlderEvents, resumeNow } from "../init.ts";
 import { markSessionPerformance } from "../sessionPerformance.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
 import {
@@ -82,7 +82,10 @@ import { seedMultiRunPrompt } from "@polyth/multirun/prompt-seed";
 import WorkflowTimelineCard from "../../../../packages/workflow/widgets/WorkflowTimelineCard.tsx";
 import { tr } from "../i18n/index.ts";
 import ExecutionRow, { useCollapsePresence } from "./ExecutionRow.tsx";
+import Picker from "./Picker.tsx";
+import type { PickerItem } from "../picker.ts";
 import { Button, Notice } from "./ui/index.ts";
+import type { TurnLimitState } from "../reduce.ts";
 
 /** One announcement per copy/mutation outcome; text is the accessible record,
  *  checkmarks only supplement it. Screen readers ignore repeats, so identical
@@ -1208,6 +1211,111 @@ function PromptNavigator({ prompts, onJump, containerRef }: {
   );
 }
 
+/** Live seconds remaining until `target` (ms epoch); ticks once a second and
+ *  stops at zero. */
+function useRemainingSeconds(target: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    if (target <= Date.now()) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [target]);
+  return Math.max(0, Math.ceil((target - now) / 1000));
+}
+
+function formatWait(totalSeconds: number): string {
+  const s = totalSeconds % 60;
+  const m = Math.floor(totalSeconds / 60) % 60;
+  const h = Math.floor(totalSeconds / 3600);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
+/** Provider capacity stop: countdown to the server's auto-resume, with
+ *  cancel-wait and continue-on-another-model actions. Replaces the generic
+ *  "Last turn failed" line while `turn.limit` is set. */
+function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnLimitState }) {
+  const models = useStore((s) => s.models);
+  const remaining = useRemainingSeconds(limit.resumeAt);
+  const [busy, setBusy] = useState<null | "resume" | "cancel" | "switch">(null);
+
+  const providerLabel = limit.provider
+    ? limit.provider.charAt(0).toUpperCase() + limit.provider.slice(1)
+    : undefined;
+  const scopeLabel =
+    limit.scope === "quota"
+      ? tr("timeline.rateLimit.scopeQuota")
+      : limit.scope === "overloaded"
+        ? tr("timeline.rateLimit.scopeOverloaded")
+        : tr("timeline.rateLimit.scopeRate");
+  const heading = providerLabel
+    ? tr("timeline.rateLimit.headingProvider", { provider: providerLabel, scope: scopeLabel })
+    : tr("timeline.rateLimit.heading", { scope: scopeLabel });
+
+  const modelItems = useMemo<PickerItem[]>(
+    () =>
+      models.map((m) => ({
+        id: `${m.providerID}/${m.modelID}`,
+        label: m.name,
+        group: m.providerName ?? m.providerID,
+      })),
+    [models],
+  );
+
+  const run = (kind: "resume" | "cancel", op: Promise<unknown>) => {
+    setBusy(kind);
+    void op.finally(() => setBusy(null));
+  };
+  const pickModel = (id: string) => {
+    // Item id is `${providerID}/${modelID}`; providerID never contains a slash,
+    // but some model ids do — split on the first separator only.
+    const slash = id.indexOf("/");
+    if (slash < 1) return;
+    setBusy("switch");
+    void resumeNow(sessionId, { providerID: id.slice(0, slash), modelID: id.slice(slash + 1) })
+      .finally(() => setBusy(null));
+  };
+
+  return (
+    <Notice
+      tone="warning"
+      className="turn-rate-limit"
+      role="status"
+      aria-live="polite"
+      heading={heading}
+      actions={
+        <>
+          <Button
+            size="sm"
+            busy={busy === "resume"}
+            disabled={busy !== null}
+            onClick={() => run("resume", resumeNow(sessionId))}
+          >{tr("timeline.rateLimit.resumeNow")}</Button>
+          <Picker
+            label={tr("timeline.rateLimit.switchModel")}
+            items={modelItems}
+            onPick={pickModel}
+            disabled={busy !== null || modelItems.length === 0}
+          />
+          <Button
+            size="sm"
+            variant="ghost"
+            busy={busy === "cancel"}
+            disabled={busy !== null}
+            onClick={() => run("cancel", cancelResume(sessionId))}
+          >{tr("timeline.rateLimit.cancelWait")}</Button>
+        </>
+      }
+    >
+      {remaining > 0
+        ? tr("timeline.rateLimit.resumesIn", { time: formatWait(remaining) })
+        : tr("timeline.rateLimit.resuming")}
+      {limit.attempt > 1 ? ` · ${tr("timeline.rateLimit.attempt", { n: String(limit.attempt) })}` : ""}
+    </Notice>
+  );
+}
+
 // Footer under the last message once the turn ended: exactly one terminal
 // turn's own start/stop and usage (UX-MSG-ACTIONS) — see turnFooterLine().
 
@@ -1249,7 +1357,8 @@ export default function Timeline({
   // lands in one step instead of gliding through the restored history.
   const chaseRaf = useRef(0);
   const chasing = useRef(false);
-  const selfScroll = useRef(false);
+  const touchY = useRef<number | null>(null);
+  const expectedScrollTop = useRef<number | null>(null);
   const instantFollow = useRef(true);
   // Latest-reveal state (§2.4): true while the reader holds a position away
   // from the tail, mounting the reserved Jump to latest region.
@@ -1313,9 +1422,8 @@ export default function Timeline({
   // Tail follow (§2.4): at/near the tail the timeline follows growth; a reader
   // who scrolled up keeps the chosen position and sees the reveal control.
   // The follow EASES instead of teleporting (exponential rAF chase, re-targeted
-  // per commit), so appended rows visibly push older messages up. Programmatic
-  // writes mark themselves via selfScroll; any other scroll event — wheel,
-  // drag, keyboard — hands control back to the reader immediately.
+  // per commit), so appended rows visibly push older messages up. Any reader
+  // scroll hands control back immediately.
   const chaseTail = useCallback(() => {
     cancelAnimationFrame(chaseRaf.current);
     chasing.current = true;
@@ -1323,13 +1431,14 @@ export default function Timeline({
       const el = ref.current;
       if (!el || !atBottom.current) { chasing.current = false; return; }
       const gap = el.scrollHeight - el.clientHeight - el.scrollTop;
-      selfScroll.current = true;
       if (Math.abs(gap) < 1) {
-        el.scrollTop = el.scrollHeight - el.clientHeight;
+        expectedScrollTop.current = el.scrollHeight - el.clientHeight;
+        el.scrollTop = expectedScrollTop.current;
         chasing.current = false;
         return;
       }
-      el.scrollTop += gap * 0.3;
+      expectedScrollTop.current = el.scrollTop + gap * 0.3;
+      el.scrollTop = expectedScrollTop.current;
       chaseRaf.current = requestAnimationFrame(step);
     };
     chaseRaf.current = requestAnimationFrame(step);
@@ -1346,8 +1455,8 @@ export default function Timeline({
         // Session open/switch: land at the tail in one step, never glide.
         cancelAnimationFrame(chaseRaf.current);
         chasing.current = false;
-        selfScroll.current = true;
-        el.scrollTop = el.scrollHeight;
+        expectedScrollTop.current = Math.max(0, el.scrollHeight - el.clientHeight);
+        el.scrollTop = expectedScrollTop.current;
       } else {
         chaseTail();
       }
@@ -1360,9 +1469,10 @@ export default function Timeline({
   const onScroll = () => {
     const el = ref.current;
     if (!el) return;
-    if (selfScroll.current) {
-      selfScroll.current = false; // the follow's own write, not reader intent
+    if (expectedScrollTop.current !== null && Math.abs(el.scrollTop - expectedScrollTop.current) < 1) {
+      expectedScrollTop.current = null;
     } else {
+      expectedScrollTop.current = null;
       chasing.current = false;
       cancelAnimationFrame(chaseRaf.current);
       const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
@@ -1379,6 +1489,14 @@ export default function Timeline({
       const now = ref.current;
       if (now) saveTimelineAnchor(sessionId, captureTimelineAnchor(now, atBottom.current));
     }, 200);
+  };
+
+  const stopFollowing = () => {
+    chasing.current = false;
+    cancelAnimationFrame(chaseRaf.current);
+    expectedScrollTop.current = null;
+    atBottom.current = false;
+    setShowJump(true);
   };
 
   // Debounce safety: reload and unmount flush the stable anchor immediately.
@@ -1695,6 +1813,16 @@ export default function Timeline({
         tabIndex={-1}
         ref={ref}
         onScroll={onScroll}
+        onWheelCapture={(event) => {
+          if (event.deltaY < 0) stopFollowing();
+        }}
+        onTouchStartCapture={(event) => { touchY.current = event.touches[0]?.clientY ?? null; }}
+        onTouchMoveCapture={(event) => {
+          const y = event.touches[0]?.clientY;
+          if (touchY.current !== null && y !== undefined && y > touchY.current) stopFollowing();
+          touchY.current = y ?? null;
+        }}
+        onTouchEndCapture={() => { touchY.current = null; }}
       >
         <SlotHost slot="session.timeline.before" context={slotSummary} />
         {model.messages.length === 0 && !model.workflowRun && (
@@ -1786,7 +1914,10 @@ export default function Timeline({
             </div>
           </details>
         )}
-        {turnBroken && (
+        {turnBroken && turn.status === "failed" && turn.limit && sessionId && (
+          <RateLimitNotice sessionId={sessionId} limit={turn.limit} />
+        )}
+        {turnBroken && !(turn.status === "failed" && turn.limit) && (
           <Notice
             tone="error"
             className="turn-error"

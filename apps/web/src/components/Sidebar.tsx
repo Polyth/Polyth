@@ -1,7 +1,7 @@
 import {
   useEffect, useMemo, useRef, useState, useSyncExternalStore,
-  type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent,
-  type PointerEvent as ReactPointerEvent, type TouchEvent as ReactTouchEvent,
+  type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent, type TouchEvent as ReactTouchEvent,
 } from "react";
 import {
   getState, useStore, activateProject, openWorkspacePane, openWorktreeSessionDialog, setOverlay,
@@ -28,7 +28,7 @@ import {
 } from "../sidebarPrefs.ts";
 import EmptyState from "./EmptyState.tsx";
 import {
-  Button, CloseIcon, ComposeIcon, DragHandleIcon, FilterIcon, IconButton, Menu, Popover,
+  Button, CloseIcon, ComposeIcon, FilterIcon, IconButton, Menu, Popover,
   SearchIcon, SidebarIcon, SortIcon,
   type MenuEntry,
 } from "./ui/index.ts";
@@ -298,17 +298,11 @@ export default function Sidebar() {
     }
   };
 
-  // Manual project order: drag a card (touch or mouse) or use the handle's
-  // arrow keys. The persisted list keeps every known project so filtered-out
-  // ones hold their slot; only the visible order is what the user rearranges.
+  // The persisted list keeps every known project so filtered-out ones hold
+  // their slot; only the visible order is what the user rearranges.
   const manualReorder = sort === "manual" && query.trim() === "";
   const [draggedProject, setDraggedProject] = useState<string | null>(null);
   const [dragOverProject, setDragOverProject] = useState<string | null>(null);
-  const pointerReorder = useRef<{ id: string; pointerId: number; active: boolean; target: string } | null>(null);
-  const reorderLongPress = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (reorderLongPress.current !== null) clearTimeout(reorderLongPress.current);
-  }, []);
   const fullProjectOrder = () => applyManualProjectOrder(projects, projectOrder).map((p) => p.id);
   const commitReorder = (draggedId: string, targetId: string) => {
     if (!draggedId || draggedId === targetId) return;
@@ -325,70 +319,22 @@ export default function Sidebar() {
     setProjectOrder(ids);
     announce(tr("sidebar.projectsReordered"));
   };
-  const clearPointerReorder = () => {
-    if (reorderLongPress.current !== null) clearTimeout(reorderLongPress.current);
-    reorderLongPress.current = null;
-    pointerReorder.current = null;
+  const clearProjectDrag = () => {
     setDraggedProject(null);
     setDragOverProject(null);
   };
-  const finishPointerReorder = (event: ReactPointerEvent<HTMLButtonElement>, cancelled = false) => {
-    const current = pointerReorder.current;
-    if (!current || current.pointerId !== event.pointerId) return;
-    if (current.active) {
-      event.preventDefault();
-      if (!cancelled) commitReorder(current.id, current.target);
-    }
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    clearPointerReorder();
+  const startProjectDrag = (event: ReactDragEvent<HTMLDivElement>, id: string) => {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", id);
+    setDraggedProject(id);
+    setDragOverProject(id);
   };
-  const reorderHandle = (p: { id: string; name: string; path: string }) => (
-    <button
-      type="button"
-      className="project-drag-handle"
-      aria-label={tr("sidebar.reorderValue", { value: p.name || p.path })}
-      title={tr("sidebar.reorderValue", { value: p.name || p.path })}
-      onClick={(event) => event.stopPropagation()}
-      onKeyDown={(event) => {
-        if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
-          event.preventDefault();
-          moveProjectBy(p.id, -1);
-        } else if (event.key === "ArrowDown" || event.key === "ArrowRight") {
-          event.preventDefault();
-          moveProjectBy(p.id, 1);
-        }
-      }}
-      onPointerDown={(event) => {
-        if (!event.isPrimary) return;
-        event.currentTarget.setPointerCapture(event.pointerId);
-        pointerReorder.current = { id: p.id, pointerId: event.pointerId, active: false, target: p.id };
-        reorderLongPress.current = setTimeout(() => {
-          if (pointerReorder.current?.pointerId !== event.pointerId) return;
-          pointerReorder.current.active = true;
-          setDraggedProject(p.id);
-          setDragOverProject(p.id);
-          tapFeedback();
-        }, 300);
-      }}
-      onPointerMove={(event) => {
-        const current = pointerReorder.current;
-        if (!current || current.pointerId !== event.pointerId || !current.active) return;
-        event.preventDefault();
-        const target = document.elementFromPoint(event.clientX, event.clientY)
-          ?.closest<HTMLElement>("[data-project-id]")?.dataset.projectId;
-        if (target && target !== current.target) {
-          current.target = target;
-          setDragOverProject(target);
-        }
-      }}
-      onPointerUp={(event) => finishPointerReorder(event)}
-      onPointerCancel={(event) => finishPointerReorder(event, true)}
-    >
-      <DragHandleIcon />
-    </button>
-  );
+  const dropProject = (event: ReactDragEvent<HTMLDivElement>, targetId: string) => {
+    if (!draggedProject) return;
+    event.preventDefault();
+    commitReorder(draggedProject, targetId);
+    clearProjectDrag();
+  };
 
   const sortEntries: MenuEntry[] = [
     { heading: tr("sidebar.sortSessions") },
@@ -745,10 +691,21 @@ export default function Sidebar() {
                   className={`project-card ${p.id === activeProjectId ? "active" : ""}`}
                   aria-current={p.id === activeProjectId ? "true" : undefined}
                   aria-expanded={effectiveViewMode === "tree" ? expandedTrees.has(p.id) : undefined}
+                  aria-keyshortcuts={manualReorder ? "Alt+Shift+ArrowUp Alt+Shift+ArrowDown" : undefined}
                   onClick={() => {
                     if (p.id !== activeProjectId) activateProject(p.id);
                     if (effectiveViewMode === "tree") toggleTree(p.id);
                     else closeDrawer();
+                  }}
+                  onKeyDown={(event) => {
+                    if (!manualReorder || !event.altKey || !event.shiftKey) return;
+                    if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      moveProjectBy(p.id, -1);
+                    } else if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      moveProjectBy(p.id, 1);
+                    }
                   }}
                   onDoubleClick={() => { setRenamingProject(p.id); setProjectName(p.name); }}
                 >
@@ -762,7 +719,20 @@ export default function Sidebar() {
                       : <Icon.files />}
                   </span>
                   <span className="project-meta">
-                    <span className="project-name" title={p.path}>{p.name || p.path}</span>
+                    <span className="project-name-line">
+                      <span className="project-name" title={p.path}>{p.name || p.path}</span>
+                      {p.remote && (
+                        <span
+                          className="project-remote-marker"
+                          role="img"
+                          aria-label={tr("ssh.sshprojectsource.remoteProject")}
+                          title={tr("ssh.sshprojectsource.remoteProject")}
+                        >
+                          <Icon.globe />
+                          <span aria-hidden="true">SSH</span>
+                        </span>
+                      )}
+                    </span>
                     <span className="project-path">{p.path}</span>
                   </span>
                 </button>
@@ -843,19 +813,30 @@ export default function Sidebar() {
               </div>
             );
             const reorderClass = `${manualReorder ? " reorderable" : ""}${draggedProject === p.id ? " dragging" : ""}${dragOverProject === p.id ? " drag-over" : ""}`;
-            const cardRow = manualReorder
-              ? <div className="project-reorder-row">{reorderHandle(p)}{card}</div>
-              : card;
+            const dragProps = manualReorder ? {
+              draggable: true,
+              onDragStart: (event: ReactDragEvent<HTMLDivElement>) => {
+                if ((event.target as HTMLElement).closest(".session-row")) return;
+                startProjectDrag(event, p.id);
+              },
+              onDragOver: (event: ReactDragEvent<HTMLDivElement>) => {
+                if (!draggedProject) return;
+                event.preventDefault();
+                setDragOverProject(p.id);
+              },
+              onDragEnd: clearProjectDrag,
+              onDrop: (event: ReactDragEvent<HTMLDivElement>) => dropProject(event, p.id),
+            } : {};
             if (effectiveViewMode !== "tree") {
               return (
-                <div key={p.id} data-project-id={p.id} className={`project-entry${reorderClass}`}>
-                  {cardRow}
+                <div key={p.id} data-project-id={p.id} className={`project-entry${reorderClass}`} {...dragProps}>
+                  {card}
                 </div>
               );
             }
             return (
-              <div key={p.id} data-project-id={p.id} className={`project-tree-node${reorderClass}`}>
-                {cardRow}
+              <div key={p.id} data-project-id={p.id} className={`project-tree-node${reorderClass}`} {...dragProps}>
+                {card}
                 {expandedTrees.has(p.id) && (
                   <div className="project-tree-sessions">
                     <SessionList

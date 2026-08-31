@@ -33,6 +33,7 @@ import {
 import {
   reorderPinnedSessions,
   sortPinnedSessions,
+  applyManualProjectOrder, reorderManualProjects, setSessionOrder, useProjectSortMode, useSessionOrder,
 } from "../../sidebarPrefs.ts";
 import { Icon } from "../../icons.tsx";
 import { formatRelativeTime, getLocale, tr } from "../../i18n/index.ts";
@@ -152,8 +153,10 @@ interface RowProps {
   onOpen: (id: string) => void;
   onTogglePin: (session: SessionProjection) => void;
   pinnedSection: boolean;
-  onPinDragStart: (id: string) => void;
-  onPinDrop: (targetId: string) => void;
+  reorderable: boolean;
+  onReorderStart: () => void;
+  onReorderDrop: () => void;
+  onReorderEnd: () => void;
   contextLabel?: string;
   pinnedWorktreeLabel?: string;
   /** Shift-key customization mode (desktop): hovering the row reveals the
@@ -163,7 +166,7 @@ interface RowProps {
 
 function SessionRow({
   s, activeSessionId, labels, eventsTitle, opening, relativeTime, selectMode, selected,
-  onToggleSelect, onChanged, onOpen, onTogglePin, pinnedSection, onPinDragStart, onPinDrop,
+  onToggleSelect, onChanged, onOpen, onTogglePin, pinnedSection, reorderable, onReorderStart, onReorderDrop, onReorderEnd,
   contextLabel, pinnedWorktreeLabel, shiftQuick,
 }: RowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -382,10 +385,16 @@ function SessionRow({
       className={`session-row ${rowStatus.kind}${contextLabel ? " search-result" : ""} ${s.id === activeSessionId ? "active" : ""} ${s.status === "archived" ? "archived" : ""}${menuOpen ? " menu-open" : ""}${shiftQuick && !renaming ? " shift-quick" : ""}`}
       style={swipeX === null ? undefined : { "--session-swipe-x": `${swipeX}px` } as CSSProperties}
       data-swipe={swipeX !== null ? "dragging" : swipeRevealed ? "revealed" : "closed"}
-      draggable={pinnedSection}
-      onDragStart={() => { if (pinnedSection) onPinDragStart(s.id); }}
-      onDragOver={(event) => { if (pinnedSection) event.preventDefault(); }}
-      onDrop={(event) => { if (pinnedSection) { event.preventDefault(); onPinDrop(s.id); } }}
+       draggable={reorderable}
+       onDragStart={(event) => {
+         if (!reorderable) return;
+         event.dataTransfer.effectAllowed = "move";
+         event.dataTransfer.setData("text/plain", s.id);
+         onReorderStart();
+       }}
+       onDragOver={(event) => { if (reorderable) event.preventDefault(); }}
+       onDragEnd={onReorderEnd}
+       onDrop={(event) => { if (reorderable) { event.preventDefault(); onReorderDrop(); } }}
       onPointerDown={startSwipe}
       onPointerMove={moveSwipe}
       onPointerUp={finishSwipe}
@@ -634,11 +643,16 @@ export default function SessionList({
   }, [titlesFingerprint]);
   const expandArchived = useStore((st) => st.settings.showArchived);
   const relativeTime = useStore((st) => st.settings.relativeTime);
+  const sort = useProjectSortMode();
+  const sessionOrder = useSessionOrder();
   const [labels, setLabels] = useState<WorkspaceLabel[]>([]);
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  // Delegated sessions are intentionally quiet in navigation until requested.
+  const [expandedSubagents, setExpandedSubagents] = useState<ReadonlySet<string>>(new Set());
   const [showArchived, setShowArchived] = useState(expandArchived);
   const [draggedPin, setDraggedPin] = useState<string | null>(null);
+  const [draggedSession, setDraggedSession] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_SESSIONS);
   const [removeTarget, setRemoveTarget] = useState<Worktree | null>(null);
   const [deleteBranch, setDeleteBranch] = useState(false);
@@ -668,8 +682,13 @@ export default function SessionList({
   };
 
   const projectSessions = useMemo(
-    () => sessions.filter((s) => s.projectId === projectId).sort((a, b) => b.updatedAt - a.updatedAt),
-    [sessions, projectId],
+    () => {
+      const items = sessions.filter((s) => s.projectId === projectId);
+      return sort === "manual"
+        ? applyManualProjectOrder(items, sessionOrder)
+        : items.sort((a, b) => b.updatedAt - a.updatedAt);
+    },
+    [sessions, projectId, sessionOrder, sort],
   );
   const needle = query.trim().toLowerCase();
   const matchesFilters = (session: SessionProjection) => {
@@ -714,7 +733,7 @@ export default function SessionList({
     const key = worktreeKey(s);
     byWorktree.set(key, [...(byWorktree.get(key) ?? []), s]);
   }
-  for (const grouped of byWorktree.values()) {
+  if (sort !== "manual") for (const grouped of byWorktree.values()) {
     grouped.sort((a, b) => b.updatedAt - a.updatedAt);
   }
   // A project's checkout is its root, not another branch in the navigation.
@@ -765,6 +784,19 @@ export default function SessionList({
       onChanged();
     }
   };
+  const manualReorder = sort === "manual" && !searchMode && query.trim() === "" && !selectMode;
+  const dropSession = (targetId: string) => {
+    const draggedId = draggedSession;
+    setDraggedSession(null);
+    if (!draggedId || draggedId === targetId) return;
+    const known = applyManualProjectOrder(sessions, sessionOrder).map((session) => session.id);
+    const knownIds = new Set(known);
+    setSessionOrder([
+      ...reorderManualProjects(known, draggedId, targetId),
+      ...sessionOrder.filter((id) => !knownIds.has(id)),
+    ]);
+    tapFeedback();
+  };
 
   const row = (
     s: SessionProjection,
@@ -791,8 +823,19 @@ export default function SessionList({
       })}
       onTogglePin={(session) => void togglePin(session)}
       pinnedSection={pinnedSection}
-      onPinDragStart={setDraggedPin}
-      onPinDrop={(targetId) => void dropPin(targetId)}
+      reorderable={pinnedSection || manualReorder}
+      onReorderStart={() => {
+        if (pinnedSection) setDraggedPin(s.id);
+        else setDraggedSession(s.id);
+      }}
+      onReorderDrop={() => {
+        if (pinnedSection) void dropPin(s.id);
+        else dropSession(s.id);
+      }}
+      onReorderEnd={() => {
+        if (pinnedSection) setDraggedPin(null);
+        else setDraggedSession(null);
+      }}
       contextLabel={contextLabel}
       pinnedWorktreeLabel={pinnedWorktreeLabel}
       shiftQuick={shiftQuick}
@@ -808,6 +851,39 @@ export default function SessionList({
   const startInWorktree = (key: string) => {
     startNewSession(projectId, key === "__main__" ? {} : { worktreePath: key });
     if (getState().sidebarOpen) setSidebarOpen(false);
+  };
+  const sessionTree = (items: readonly SessionProjection[]) => {
+    const byParent = new Map<string, SessionProjection[]>();
+    const ids = new Set(items.map((item) => item.id));
+    for (const item of items) {
+      if (!item.parentId || !ids.has(item.parentId)) continue;
+      byParent.set(item.parentId, [...(byParent.get(item.parentId) ?? []), item]);
+    }
+    const roots = items.filter((item) => !item.parentId || !ids.has(item.parentId));
+    return roots.map((item) => {
+      const children = byParent.get(item.id) ?? [];
+      const expanded = expandedSubagents.has(item.id);
+      return (
+        <div className="session-subagent-parent" key={item.id}>
+          {row(item)}
+          {children.length > 0 && (
+            <button
+              type="button"
+              className="session-subagent-toggle"
+              aria-expanded={expanded}
+              aria-label={`${expanded ? "Collapse" : "Expand"} ${children.length} subagents`}
+              onClick={() => setExpandedSubagents((previous) => {
+                const next = new Set(previous);
+                if (next.has(item.id)) next.delete(item.id);
+                else next.add(item.id);
+                return next;
+              })}
+            >{expanded ? <Icon.chevronDown /> : <Icon.chevronRight />}</button>
+          )}
+          {expanded && <div className="session-subagent-children">{children.map((child) => row(child))}</div>}
+        </div>
+      );
+    });
   };
 
   if (searchMode) {
@@ -833,7 +909,7 @@ export default function SessionList({
       )}
       {mainSessions.length > 0 && (
         <div className="session-project-sessions session-worktree-sessions">
-          {mainSessions.map((session) => row(session))}
+          {sessionTree(mainSessions)}
         </div>
       )}
       {worktreeGroups.map((group) => {
@@ -882,7 +958,7 @@ export default function SessionList({
             </div>
             {!isCollapsed && (
               <div className="session-worktree-sessions">
-                {group.sessions.map((session) => row(session))}
+                {sessionTree(group.sessions)}
                 {group.sessions.length === 0 && <div className="empty session-list-empty">{tr("sidebar.sessionlist.noMatchingSessions")}</div>}
               </div>
             )}

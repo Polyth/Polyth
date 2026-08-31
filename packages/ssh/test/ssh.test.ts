@@ -269,6 +269,32 @@ test("host() fails honestly when the connection cannot be established", async ()
   );
 });
 
+test("interactive host processes allocate an SSH TTY and forward terminal input", async () => {
+  const spawned: string[][] = [];
+  const writes: string[] = [];
+  const { runner } = fakeRunner({
+    check: () => 0,
+    dial: () => ({ code: 0, stdout: "", stderr: "" }),
+  });
+  const spawner: SshSpawner = (args, opts) => {
+    spawned.push(args);
+    assert.equal(opts?.interactive, true);
+    return {
+      onOutput: () => ({ dispose: () => {} }),
+      onExit: () => ({ dispose: () => {} }),
+      write: (data) => { writes.push(data); },
+      kill: () => {},
+    };
+  };
+  const service = createSshService({ file: tempFile(), runner, spawner });
+  const conn = service.create({ host: "build.example" });
+  const process = await service.host(conn.id).start("exec sh -i", { interactive: true });
+
+  process.write?.("echo ready\n");
+  assert.ok(spawned[0]!.includes("-tt"));
+  assert.deepEqual(writes, ["echo ready\n"]);
+});
+
 test("disconnect and remove tear down the mux; concurrent connects dedupe", async () => {
   let dials = 0;
   let exits = 0;

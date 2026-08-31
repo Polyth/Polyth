@@ -52,7 +52,7 @@ with **Ctrl/⌘+K** and choose **Open Terminal**.
 
 *Agent presets reported by the runtime — build, plan, explore, and more — plus reusable agent profiles.*
 
-Beyond settings: six bundled themes (plus follow-system and paste-your-own JSON token themes), an editable keymap with conflict detection, your own slash commands and `#` snippets at user or project scope, server-owned behavior instructions, and a typed client-side UI-slot registry (`window.__polythSlots`) so the agent — or browser-side code — can add surfaces without touching core files. Installed server-side plugins can declare slot contributions, but those descriptors are not yet rendered in the client.
+Beyond settings: six bundled themes (plus follow-system and paste-your-own JSON token themes), an editable keymap with conflict detection, your own slash commands and `#` snippets at user or project scope, server-owned behavior instructions, and a bounded web-package SDK (`@polyth/web-sdk`) so feature packages register their UI — slots, widgets, surfaces, capabilities, settings pages — without touching core files. Installed server-side plugins can declare slot contributions, but those descriptors are not yet rendered in the client.
 
 ## Status
 

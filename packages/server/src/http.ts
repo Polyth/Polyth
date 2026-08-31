@@ -303,6 +303,21 @@ export function createHttpServer(deps: HttpDeps): Server {
         await (m[2] === "abort" ? sessions.abort(m[1]!) : m[2] === "archive" ? sessions.archive(m[1]!) : sessions.restore(m[1]!));
         return json(res, 200, { ok: true });
       }
+      m = path.match(/^\/api\/sessions\/([^/]+)\/resume\/(cancel|now)$/);
+      if (m && method === "POST") {
+        if (m[2] === "cancel") {
+          await sessions.cancelResume?.(m[1]!);
+          return json(res, 200, { ok: true });
+        }
+        if (!sessions.resumeNow) {
+          throw Object.assign(new Error("rate-limit resume unavailable"), { code: "unsupported" });
+        }
+        const b = await readBody(req);
+        const model = b.model && typeof b.model === "object" && !Array.isArray(b.model)
+          ? (b.model as { providerID: string; modelID: string })
+          : undefined;
+        return json(res, 200, await sessions.resumeNow(m[1]!, model));
+      }
       m = path.match(/^\/api\/sessions\/([^/]+)\/fork$/);
       if (m && method === "POST") {
         const b = await readBody(req);

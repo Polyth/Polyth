@@ -5,12 +5,14 @@ import type {
   ObservationCheckpoint,
   ObservationIdentity,
   ObservationIngestionResult,
+  RateLimitRetryHint,
   RuntimeEvent,
   RuntimeLocation,
   RuntimeSnapshot,
   TokenUsage,
 } from "@polyth/contracts";
 import type { Store as SessionStore } from "@polyth/session";
+import { classifyProviderLimit } from "./providerLimit.ts";
 
 export interface OcEvent {
   id?: string;
@@ -789,6 +791,13 @@ export const errorMessageOf = (ev: OcEvent): string | undefined => {
   if (typeof data?.message === "string") return data.message;
   if (typeof err?.message === "string") return err.message;
   return "session error";
+};
+
+/** Non-null when a failed turn is a provider rate-limit / quota / overload
+ *  stop the server can wait out and auto-resume, rather than a hard failure. */
+export const providerLimitOf = (ev: OcEvent): RateLimitRetryHint | undefined => {
+  if (ev.type !== "session.error") return undefined;
+  return classifyProviderLimit(ev.properties?.error) ?? undefined;
 };
 
 // ------------------------------------------------ semantic observation ingestion

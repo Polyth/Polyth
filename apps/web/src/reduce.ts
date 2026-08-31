@@ -9,6 +9,7 @@ import type {
   ModelRef,
   MultirunDto,
   MultirunRunDto,
+  RateLimitScope,
   SessionEvent,
   TokenUsage,
   WorkflowRunDto,
@@ -198,6 +199,20 @@ export type ContextGauge =
       level: "unknown";
     };
 
+/** Provider capacity stop with a scheduled server-side auto-resume. Present
+ *  on a failed turn only while the wait is pending; cleared when the resend
+ *  starts or the user cancels. */
+export interface TurnLimitState {
+  scope: RateLimitScope;
+  provider?: string;
+  /** Provider-advised wait in seconds, when the error carried one. */
+  retryAfterSec?: number;
+  /** ms epoch the server will resend the last message. */
+  resumeAt: number;
+  /** 1 on the first hit for this message, higher on repeats. */
+  attempt: number;
+}
+
 export interface TurnState {
   turnId: string;
   status: "working" | "stopped" | "aborted" | "failed";
@@ -205,6 +220,8 @@ export interface TurnState {
   agent?: string;
   reason?: string;
   error?: string;
+  /** Set when `status === "failed"` because the provider is rate-limited. */
+  limit?: TurnLimitState;
   /** Event-derived wall-clock bounds of THIS turn (UX-MSG-ACTIONS): the footer
    *  duration is `stoppedAt - startedAt`, absent while working or when a
    *  copied/unmatched stop carries no start. */
@@ -823,6 +840,20 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const reason = str(d, "reason");
       const status: TurnState["status"] =
         reason === "aborted" ? "aborted" : reason === "error" ? "failed" : "stopped";
+      // A provider rate-limit / quota / overload stop carries a resume plan;
+      // the timeline shows a countdown with cancel / switch-model instead of
+      // the generic failure line.
+      const retry = obj(d, "retry");
+      const limit: TurnLimitState | undefined =
+        retry && typeof retry.resumeAt === "number"
+          ? {
+              scope: (typeof retry.scope === "string" ? retry.scope : "unknown") as RateLimitScope,
+              ...(typeof retry.provider === "string" ? { provider: retry.provider } : {}),
+              ...(typeof retry.retryAfterSec === "number" ? { retryAfterSec: retry.retryAfterSec } : {}),
+              resumeAt: retry.resumeAt,
+              attempt: typeof retry.attempt === "number" ? retry.attempt : 1,
+            }
+          : undefined;
       const t = model.turn;
       if (t) {
         t.status = status;
@@ -830,10 +861,20 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         t.stoppedAt = ev.time;
         const error = str(d, "error");
         if (error !== undefined) t.error = error;
+        if (limit) t.limit = limit;
+        else delete t.limit;
       } else {
         // Unmatched stop (copied/partial log): no startedAt, so no duration.
-        model.turn = { turnId: str(d, "turnId") ?? "", status, reason, error: str(d, "error"), stoppedAt: ev.time };
+        model.turn = {
+          turnId: str(d, "turnId") ?? "", status, reason, error: str(d, "error"), stoppedAt: ev.time,
+          ...(limit ? { limit } : {}),
+        };
       }
+      break;
+    }
+    case "turn/resume-cancelled": {
+      // The wait ended (user cancelled, switched model, or the resend fired).
+      if (model.turn) delete model.turn.limit;
       break;
     }
     case "usage/recorded": {

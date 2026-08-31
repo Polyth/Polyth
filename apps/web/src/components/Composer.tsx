@@ -1313,7 +1313,7 @@ export default function Composer({
       .finally(() => setSuggestionBusy(false));
   }, [activeSessionSeq, canGenerateNextAction, text]);
   const hasDraft = text.trim() !== "" || attachments.length > 0;
-  const expanded = !phoneLayout || inputFocused || hasDraft || working || shellMode;
+  const expanded = !phoneLayout || inputFocused || working || shellMode;
   const stateClass = phoneLayout
     ? ` composer-mobile ${expanded ? "composer-expanded" : "composer-collapsed"}${inputFocused ? " composer-input-active" : ""}${hasDraft ? " composer-has-draft" : ""}`
     : "";

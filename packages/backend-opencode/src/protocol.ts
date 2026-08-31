@@ -166,7 +166,10 @@ export const createProtocolAdapter = async (
       transport: options.transport,
       endpoint: options.endpoint,
       deadlineMs: options.deadlineMs,
-      promptPaths: probe.legacyPromptPaths,
+      // An absent contract is distinct from a selected list: let the legacy
+      // adapter use its single compatible prompt_async fallback for older
+      // servers that expose /global/health but no useful /doc.
+      ...(probe.legacyPromptPaths.length > 0 ? { promptPaths: probe.legacyPromptPaths } : {}),
     });
   }
   return createV2ProtocolAdapter({

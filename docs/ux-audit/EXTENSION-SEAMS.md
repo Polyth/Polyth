@@ -1,5 +1,12 @@
 # UX modernization extension seams
 
+> **Status: historical specification (2026-08-20).** The architecture below
+> was implemented and has since evolved: the package-facing UI seam is now
+> `@polyth/web-sdk` (`defineWebPackage`/`WebPackageHost` — see
+> `docs/dev/ui.md`); the `registerSlot()`-era text in this file describes the
+> host-internal registry, which package features reach only through the
+> web-sdk host. Mounting-matrix details remain accurate for host rendering.
+
 - Case: `UX-EXT-SEAMS`
 - Model / role: `SOL` / architecture specification
 - Specified: `2026-08-20`

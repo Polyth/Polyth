@@ -4,9 +4,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { SessionProjection } from "@polyth/contracts";
 import {
-  BUILTIN_GROUPINGS, getGroupingMode, groupSessions, listGroupings,
+  applyManualProjectOrder, BUILTIN_GROUPINGS, getGroupingMode, groupSessions, listGroupings,
   parseGroupingMode, registerGrouping, reorderPinnedSessions, setGroupingMode,
-  sortPinnedSessions,
+  reorderManualProjects, sortPinnedSessions,
 } from "../src/sidebarPrefs.ts";
 
 const session = (over: Partial<SessionProjection> & { id: string }): SessionProjection => ({
@@ -72,6 +72,13 @@ test("pinned sessions sort by position and reorder to normalized persisted posit
   assert.deepEqual(reordered.map((item) => item.id), ["second", "first", "tie-newer"]);
   assert.deepEqual(reordered.map((item) => item.pinned?.position), [0, 1, 2]);
   assert.equal(reorderPinnedSessions(sessions, "missing", "first")[0]?.id, "first");
+});
+
+test("manual ordering moves a session into its drop target's slot", () => {
+  const sessions = [session({ id: "new" }), session({ id: "middle" }), session({ id: "old" })];
+  const order = reorderManualProjects(sessions.map((item) => item.id), "old", "new");
+  assert.deepEqual(order, ["old", "new", "middle"]);
+  assert.deepEqual(applyManualProjectOrder(sessions, order).map((item) => item.id), order);
 });
 
 test("plugin groupings need a pure keyOf, no duplicates; dispose falls back", () => {

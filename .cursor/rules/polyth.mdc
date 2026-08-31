@@ -3,4 +3,9 @@ description: Polyth agent rules — read AGENTS.md before any change
 globs: **/*
 alwaysApply: true
 ---
-Read and follow `/workspace/AGENTS.md` for all work. For UI/CSS changes, also read `docs/dev/styles.md`.
+Read and follow `AGENTS.md` (repo root) for all work. For UI/CSS changes also
+read `docs/dev/ui.md` (extension seams + ownership), `docs/dev/components.md`
+(component contract), `docs/dev/widgets.md` (widgets), and
+`docs/dev/styles.md` (canonical tokens + styling rules) before editing.
+Feature workflow: `docs/dev/README.md`. Never edit the host shell
+(`apps/web`) to expose a feature — register through `@polyth/web-sdk`.

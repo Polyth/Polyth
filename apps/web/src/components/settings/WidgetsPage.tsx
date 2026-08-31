@@ -12,6 +12,7 @@ import { areaPlacementOptions } from "../../widgets/areaFit.ts";
 import WidgetLibraryPanel from "./WidgetLibraryPanel.tsx";
 import { Button, Select } from "../ui/index.ts";
 import { useUiSettings, setUiSettings } from "../../uiPrefs.ts";
+import SlotHost from "../slots/SlotHost.ts";
 import "../../widgets/builtinWidgets.tsx";
 
 type PreviewMode = "desktop" | "tablet" | "phone";
@@ -21,6 +22,12 @@ export function moveOrderedSelection<T extends string>(selected: readonly T[], i
   const next = selected.filter((id) => id !== item);
   next.splice(next.indexOf(target), 0, item);
   return next;
+}
+
+function ButtonSurface({ slot }: { slot: UiSlot }) {
+  const projectId = useStore((state) => state.activeProjectId);
+  const sessionId = useStore((state) => state.activeSessionId);
+  return <SlotHost slot={slot} context={{ projectId, sessionId, editing: true }} />;
 }
 
 function PreviewControls({ mode }: { mode: PreviewMode }) {
@@ -35,9 +42,10 @@ function PreviewControls({ mode }: { mode: PreviewMode }) {
     <small>Mobile shortcuts</small><div>{ui.mobileShortcuts.map((id) => <button key={id} type="button" onClick={() => reorder(ui.mobileShortcuts, (mobileShortcuts) => setUiSettings({ mobileShortcuts }))(id)}>{id.replaceAll("-", " ")}</button>)}</div>
   </section>;
   return <>
-    <section className="workspace-live-rail" aria-label="Top toolbar"><small>Top toolbar</small><div><button type="button">Files</button><button type="button">Browser</button><button type="button">Goals</button></div></section>
+    <section className="workspace-live-rail" aria-label="Top toolbar"><small>Top toolbar</small><div><ButtonSurface slot="app.header.center" /></div></section>
+    <section className="workspace-right-rail-preview" aria-label="Right rail"><small>Right rail</small><div><ButtonSurface slot="workspace.rail" /></div></section>
     <section className="workspace-response-preview" aria-label="Response actions"><p>Agent answer preview…</p><div>{ui.responseActions.map((id) => <button key={id} type="button" onClick={() => reorder(ui.responseActions, (responseActions) => setUiSettings({ responseActions }))(id)}>{id}</button>)}</div></section>
-    <section className="workspace-composer-preview" aria-label="Composer controls"><input aria-label="Message preview" placeholder="Ask anything…" readOnly /><div><button type="button">+ Files</button><button type="button">Model</button><button type="button">Send</button></div></section>
+    <section className="workspace-composer-preview" aria-label="Composer controls"><input aria-label="Message preview" placeholder="Ask anything…" readOnly /><div><ButtonSurface slot="composer.leading" /><span className="workspace-composer-spacer" /><ButtonSurface slot="composer.trailing" /><button type="button">Send</button></div><ButtonSurface slot="session.footer" /></section>
   </>;
 }
 
@@ -76,7 +84,7 @@ export default function WidgetsPage() {
   const [mode, setMode] = useState<PreviewMode>("desktop");
   useEffect(() => { ensureWidgets(widgets); }, [widgets]);
   const selected = useMemo(() => selectedId && layout.widgets[selectedId] ? selectedId : null, [selectedId, layout]);
-  const add = (widget: WidgetDef) => updateWidgetLayout((current) => applyWidgetLayoutMutations(current, [{ type: "visibility", id: widget.id, visible: true }, { type: "place", id: widget.id, slot: widget.defaultSlot ?? "workspace.main" }], widgets));
+  const add = (widget: WidgetDef, target?: UiSlot) => updateWidgetLayout((current) => applyWidgetLayoutMutations(current, [{ type: "visibility", id: widget.id, visible: true }, { type: "place", id: widget.id, slot: target ?? widget.defaultSlot ?? "workspace.main" }], widgets));
   return <div className={`workspace-customizer preview-${mode}`}>
     <header className="workspace-customizer-toolbar"><strong>Customize workspace</strong><span>Scope: {project?.name ?? "This project"}</span><div className="workspace-preview-modes">{(["desktop", "tablet", "phone"] as const).map((value) => <Button key={value} type="button" size="sm" variant={mode === value ? "primary" : "ghost"} onClick={() => setMode(value)}>{value[0]!.toUpperCase() + value.slice(1)}</Button>)}</div><small role="status">{status.saveStatus === "saving" ? "Saving" : "Saved"}</small><Button type="button" size="sm" onClick={undoWidgetLayout} disabled={!status.canUndo}>Undo</Button><Button type="button" size="sm" onClick={redoWidgetLayout} disabled={!status.canRedo}>Redo</Button><Button type="button" size="sm" variant="ghost" onClick={() => resetWidgetLayout(widgets)}>Reset workspace</Button></header>
     <div className="workspace-customizer-body"><WidgetLibraryPanel widgets={widgets} onAdd={add} /><main className="workspace-live-preview"><PreviewControls mode={mode} /><WidgetCanvas editing selectedId={selected} onSelect={setSelectedId} onDropSlot={(id) => { const widget = widgets.find((item) => item.id === id); if (widget) add(widget); }} /></main><Inspector selectedId={selected} widgets={widgets} /></div>

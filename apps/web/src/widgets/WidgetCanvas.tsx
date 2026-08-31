@@ -470,7 +470,9 @@ export default function WidgetCanvas({
 } = {}) {
   const widgets = useWidgetCatalog();
   const canvasWidgets = useMemo(
-    () => widgets.filter((widget) => supportedWidgetZones(widget).length > 0),
+    // Buttons belong to their shell surface. Never let a mini-widget turn into
+    // a canvas card merely because a plugin supplied a broad slot list.
+    () => widgets.filter((widget) => widget.kind !== "mini-widget" && supportedWidgetZones(widget).length > 0),
     [widgets],
   );
   const layout = useWidgetLayout();
@@ -494,7 +496,9 @@ export default function WidgetCanvas({
     return placed.flatMap((instanceId) => {
       const placement = layout.widgets[instanceId];
       const widget = getWidget(widgetDefinitionId(layout, instanceId));
-      return placement?.visible && widget ? [{ instanceId, placement, widget }] : [];
+      return placement?.visible && widget && widget.kind !== "mini-widget"
+        ? [{ instanceId, placement, widget }]
+        : [];
     }).sort((a, b) =>
       a.placement.position.y - b.placement.position.y
       || a.placement.position.x - b.placement.position.x);
@@ -508,7 +512,9 @@ export default function WidgetCanvas({
         }}
         onDrop={(event: DragEvent<HTMLDivElement>) => {
           const id = getDragWidget(event.dataTransfer);
-          if (id) { event.preventDefault(); onDropSlot?.(id); }
+          if (id && canvasWidgets.some((widget) => widget.id === id)) {
+            event.preventDefault(); onDropSlot?.(id);
+          }
         }}>
         {cards.map(({ instanceId, placement, widget }) => (
           <WidgetCard

@@ -145,6 +145,7 @@ const writeKey = (key: string, value: string): void => {
 
 export const PROJECT_SORT_KEY = "polyth.sidebar.projectSort";
 export const PROJECT_ORDER_KEY = "polyth.sidebar.projectOrder";
+export const SESSION_ORDER_KEY = "polyth.sidebar.sessionOrder";
 export type ProjectSortMode = "recent" | "name" | "manual";
 
 export function parseProjectSortMode(raw: string | null): ProjectSortMode {
@@ -205,6 +206,30 @@ export function useProjectOrder(): string[] {
     },
     getProjectOrder,
     () => storedProjectOrder,
+  );
+}
+
+let storedSessionOrder: string[] = parseProjectOrder(readKey(SESSION_ORDER_KEY));
+const sessionOrderListeners = new Set<() => void>();
+
+export function getSessionOrder(): string[] {
+  return storedSessionOrder;
+}
+
+export function setSessionOrder(ids: readonly string[]): void {
+  storedSessionOrder = [...ids];
+  writeKey(SESSION_ORDER_KEY, JSON.stringify(storedSessionOrder));
+  for (const l of [...sessionOrderListeners]) l();
+}
+
+export function useSessionOrder(): string[] {
+  return useSyncExternalStore(
+    (cb) => {
+      sessionOrderListeners.add(cb);
+      return () => { sessionOrderListeners.delete(cb); };
+    },
+    getSessionOrder,
+    () => storedSessionOrder,
   );
 }
 

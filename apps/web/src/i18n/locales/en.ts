@@ -2258,6 +2258,17 @@ export const en = {
   "workstatus.workStatus": "Work status",
   "workstatus.workStatusSectionsHidden": "Work status sections hidden.",
   "worktreesessiondialog.existingWorktree": "Existing worktree",
+  "timeline.rateLimit.heading": "Provider limit reached — {scope}",
+  "timeline.rateLimit.headingProvider": "{provider} limit reached — {scope}",
+  "timeline.rateLimit.scopeRate": "rate limit",
+  "timeline.rateLimit.scopeQuota": "quota exhausted",
+  "timeline.rateLimit.scopeOverloaded": "overloaded",
+  "timeline.rateLimit.resumesIn": "Work resumes in {time}",
+  "timeline.rateLimit.resuming": "Resuming the run…",
+  "timeline.rateLimit.attempt": "attempt {n}",
+  "timeline.rateLimit.resumeNow": "Resume now",
+  "timeline.rateLimit.cancelWait": "Cancel wait",
+  "timeline.rateLimit.switchModel": "Other model",
 } as const;
 
 export type AppMessageKey = keyof typeof en;

@@ -140,6 +140,32 @@ test("read-only negotiation selects one prompt endpoint and never falls through"
   assert.ok(fake.mutations.every((request) => request.replay.kind === "never"));
 });
 
+test("legacy prompt submission uses the compatible async endpoint when /doc lacks a contract", async () => {
+  const fake = transportDouble({
+    query: () => ({ paths: {} }),
+    mutate: () => ({ kind: "response", status: 204, headers: {}, body: undefined }),
+  });
+  const adapter = createLegacyProtocolAdapter({ transport: fake.transport, endpoint: endpoint() });
+
+  const result = await adapter.submit({ session: binding(), text: "generate a next action" }, "operation-fallback");
+
+  assert.equal(result.kind, "confirmed");
+  assert.match(fake.mutations[0]!.path, /\/session\/session-a\/prompt_async/);
+});
+
+test("auto legacy discovery keeps the compatible prompt fallback when /doc is absent", async () => {
+  const fake = transportDouble({
+    query: (path) => path.startsWith("/global/health") ? { healthy: true } : undefined,
+    mutate: () => ({ kind: "response", status: 204, headers: {}, body: undefined }),
+  });
+  const adapter = await createProtocolAdapter({ protocol: "auto", transport: fake.transport, endpoint: endpoint() });
+
+  const result = await adapter.submit({ session: binding(), text: "generate a next action" }, "operation-auto-fallback");
+
+  assert.equal(result.kind, "confirmed");
+  assert.match(fake.mutations[0]!.path, /\/session\/session-a\/prompt_async/);
+});
+
 test("legacy mutation classification keeps 5xx unknown and validation rejected", async () => {
   const responses: Array<MutationTransportResult<unknown>> = [
     {

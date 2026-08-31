@@ -1,62 +1,100 @@
 # Polyth — agent rules
 
-Polyth is a local web app for project-scoped OpenCode coding-agent sessions: a Node HTTP/WS server serves a React 19 SPA and persists every conversation as append-only SQLite events. Parity target is polyth/Paseo; `docs/parity/polyth-parity.yaml` still has `planned`/`implementing` rows — never describe those as done.
+Polyth is a local web product for project-scoped OpenCode coding-agent sessions: a Node HTTP/WS server serves a React 19 SPA and persists every conversation as append-only SQLite events. Parity target is polyth/Paseo; `docs/parity/polyth-parity.yaml` still has `planned`/`implementing` rows — never describe those as done.
+
+## Source-of-truth hierarchy
+
+When documents conflict, resolve in this order:
+
+1. The current runtime implementation and public type contracts (`packages/contracts`, `packages/web-sdk`, `packages/plugins`).
+2. This file (`/AGENTS.md`) — architectural invariants.
+3. `docs/dev/ui.md`, `docs/dev/components.md`, `docs/dev/widgets.md`, `docs/dev/styles.md` — specialized guides.
+4. `docs/dev/README.md` (feature workflow) and `docs/dev/architecture.md` (deep reference).
+5. Historical plans (`docs/dev/new-features.md`, `implementation-order.md`, `runtime-*-plan.md`, `HANDOFF.md`, `docs/PHASE-3-HANDOFF.md`) and `docs/parity/*` — never let a plan silently override an implementation doc.
 
 ## Package map
 
-- `apps/web` — the only app: React 19 SPA, esbuild bundle, typed UI-slot registry (`src/slots.ts`).
-- `packages/contracts` — normative surface: DTOs, `SessionEvent`, service interfaces, `UiSlot` (types) plus runtime exports (`cap`, `CAP`, `UI_SLOTS`, `isUiSlot`, `MODEL_VISIBLE_TYPES`).
+- `apps/web` — the React 19 SPA **host shell**: shell components, registries, shared UI primitives, canonical tokens. Feature UI does NOT live here (see below).
+- `apps/desktop` — Electron shell: boots the server on a loopback port, bundles OpenCode, packaging/release.
+- `apps/mobile` — Capacitor shell: native client for an existing Polyth server; renders the same web build.
+- `packages/contracts` — normative surface: DTOs, `SessionEvent`, `UiSlot`/`UI_SLOTS` (types + runtime exports: `cap`, `CAP`, `isUiSlot`, `MODEL_VISIBLE_TYPES`).
 - `packages/kernel` — scoped plugin contexts: provide/inject capabilities, events/waterfalls, LIFO effect disposal, slot contributions.
 - `packages/session` — append-only `node:sqlite` WAL event store, projections, queue, `deriveMessages`.
 - `packages/backend-opencode` — the ONLY OpenCode integration: spawns/attaches `opencode serve`, translates SSE to runtime events.
 - `packages/server` — composition root: HTTP/WS gateway, `RouteHandler` chain, per-project runtime pool, broadcast, auth, static web.
-- Feature packages (one dir each under `packages/`): permissions, goals, files, git, commands, terminal, multirun, fusion, walkthrough, schedule, knowledge, github, usage, browser, dictation, models, hotkeys, plugins.
+- `packages/web-sdk` — **the supported feature/package UI integration seam**: `defineWebPackage`, `WebPackageHost` (slots, widgets, surfaces, workspace surfaces, capabilities, settings, reducers, store, navigation, ui, errors), `createApiTransport`.
+- `packages/plugins` — server-side package seam: `ServerPackageHost` (routes, events, services, runtimes, oneShot/smallModel), package discovery via `polyth.serverEntry`.
+- Feature packages (one dir each under `packages/`): permissions, goals, files, git, commands, terminal, multirun, fusion, walkthrough, schedule, knowledge, github, usage, browser, dictation, models, hotkeys, plugins, ssh, secure-safe, home-assistant, task-trackers, workflow, example-feature.
+
+Every browser feature package declares `"polyth": { "webEntry": "./widgets/index.tsx" }` and owns a `widgets/` dir (web entry + feature UI + `styles.css`). Every server feature package declares `"polyth": { "serverEntry": "./src/serverEntry.ts" }`. The build bundles each `widgets/index.tsx` into `packages/<id>/dist/web/` and publishes `/packages-manifest.json`; the shell loads each entry and calls `default(host)` → installer.
+
+## Where each kind of code belongs
+
+| Concern | Location |
+|---|---|
+| DTOs / event payloads / service interfaces | `packages/contracts/src/index.ts` |
+| Feature service logic + package persistence | `packages/<feature>/src/index.ts` |
+| Feature REST routes | `packages/<feature>/src/serverEntry.ts` (route handler + `routes:` on the returned `ServerPackage`); legacy routes may sit in `packages/server/src/routes/` — new feature routes belong to the package |
+| Composition-root wiring (cross-cutting) | `packages/server/src/index.ts` (`boot()`) |
+| Feature web UI (views, widgets, settings pages, surfaces, slot contributions) | `packages/<feature>/widgets/` |
+| Package web entry (registrations) | `packages/<feature>/widgets/index.tsx` — `defineWebPackage` |
+| Shared shell components / primitives / registries | `apps/web/src/components/`, `apps/web/src/components/ui/`, `apps/web/src/*.ts` |
+| Canonical design tokens | `apps/web/src/tokens.css` (contract), theme values in `apps/web/src/theme.ts` |
+| Feature CSS | `packages/<feature>/widgets/styles.css` |
+| Tests | `packages/<feature>/test/*.test.ts`, `apps/web/test/*.test.ts` |
 
 ## Styling (non-negotiable)
 
 - Read `docs/dev/styles.md` before editing UI styles.
-- Canonical web tokens live in `apps/web/src/tokens.css`; the main web app owns this contract and packages inherit it.
-- Package widget CSS extends the token contract only with package-scoped additions. Do not hardcode a color, spacing, radius, type, motion, or control value when a canonical token exists.
-- Scope package selectors under the package root. Never add cross-package selectors or redefine canonical tokens in a package.
-- Shared UI primitives such as empty states, buttons, cards, and control geometry live in core `apps/web/src/styles.css`; do not duplicate them in package CSS.
-- Embedded panel and card content responds to container queries. Viewport media queries are reserved for shell-level behavior.
+- Canonical tokens live in `apps/web/src/tokens.css`; the host owns this contract and packages inherit it. Never hardcode a color, spacing, radius, type, motion, or control value when a canonical token exists.
+- Feature CSS is scoped under a stable package root in `packages/<feature>/widgets/styles.css`. Never add cross-package selectors, never redefine canonical tokens, never style another package's or the shell's components.
+- Shared primitives (buttons, inputs, empty states, dialogs, menus, cards) live in `apps/web/src/styles.css` / `apps/web/src/components/ui/`; do not duplicate them in package CSS.
+- Embedded panel/card content responds to container queries. Viewport media queries are reserved for shell-level behavior.
 - Never add styles to `packages/server/src/http.ts` or edit `App.tsx` for styling.
 
 ## Non-negotiable rules
 
 - Erasable TS only (Node >= 22.14; scripts enable type stripping explicitly): no enums, no namespaces, no parameter properties.
-- Local imports use explicit `.ts`. Cross-package imports use workspace names (`@polyth/contracts`); every package's `exports` is `"." : "./src/index.ts"`.
-- Only `packages/backend-opencode` may talk to the OpenCode process/SDK. Grep gate enforced.
+- Local imports use explicit `.ts`. Cross-package imports use workspace names (`@polyth/contracts`, `@polyth/web-sdk`, `@polyth/plugins`); every package's `exports` is `"." : "./src/index.ts"`.
+- Only `packages/backend-opencode` may talk to the OpenCode process/SDK. Check with a repo-wide grep before committing (`grep -rn "opencode" packages/*/src packages/*/widgets` should only hit `backend-opencode` and config/string data).
 - Everything model-visible is appended to the session event log BEFORE UI display; pure UI state stays out of the log.
 - Event types are `domain/past-tense` with JSON payloads; unknown types are safely ignored by the reducer, never crash.
-- New feature routes are `RouteHandler`s registered at the composition root — never edit `packages/server/src/http.ts` for a feature.
-- UI extensions register through the slot registry — never edit `App.tsx` to add a slot item.
+- Feature web UI registers through `@polyth/web-sdk` (`defineWebPackage`) — never edit `App.tsx`, `Main.tsx`, or host registries (`apps/web/src/slots.ts`, `widgets/catalog.ts`, `surfaces.ts`, `workspace/surfaceRegistry.ts`, `capabilities.ts`, `settings/registry.ts`) to expose a feature. Host edits are for host/core work only.
+- Feature packages may import from `apps/web/src` ONLY the documented generic shell modules (store, reduce, i18n, `components/ui`, `widgets/catalog.ts`, …). The authoritative allowlist is the `GENERIC_SHELL_IMPORTS` set in `apps/web/test/packageContainment.test.ts` — anything else belongs in the package.
+- New feature routes are `RouteHandler`s registered through the package's `serverEntry` (or the composition-root `routes` array) — never edit `packages/server/src/http.ts` for a feature.
 - Secrets stay out of config and API responses (env-var names only; e.g. `mcp-secrets.json` values are never returned).
+
+## Before editing X, read Y
+
+| You are about to… | Read first |
+|---|---|
+| Touch any CSS / style / layout | `docs/dev/styles.md` |
+| Add or change feature web UI | `docs/dev/ui.md` |
+| Create/modify a component | `docs/dev/components.md` |
+| Add a widget / change widget behavior | `docs/dev/widgets.md` |
+| Add a feature or change its server surface | `docs/dev/README.md` |
+| Change host shell, registries, or primitives | `docs/dev/ui.md` (host vs package boundary) + `docs/dev/architecture.md` |
+| Change public contracts (`@polyth/contracts`, `@polyth/web-sdk`, `@polyth/plugins`) | find every consumer first (`grep -rln "@polyth/<name>" apps packages`) |
+| Touch session events / `deriveMessages` | `docs/dev/architecture.md` (event vocabulary) |
 
 ## Commands (repo root)
 
 - Install: `npm install`
-- Build: `npm run build` (esbuild -> `apps/web/dist`)
-- Start: `npm start` -> `http://127.0.0.1:4400` (env: `PORT`, `POLYTH_DATA_DIR`; needs `opencode` on PATH)
+- Build: `npm run build` (web packages → `packages/*/dist/web`, shell → `apps/web/dist`)
+- Start: `npm start` → `http://127.0.0.1:4400` (env: `PORT`, `POLYTH_DATA_DIR`; needs `opencode` on PATH)
 - Dev: `npm run dev` = build once + start. No watcher/HMR.
 - Test: `npm test` (all) or `node --test <file>`; plain `node:assert`.
 - Typecheck: no root script — run `npx tsc --noEmit` inside each touched package and `apps/web` (each extends `tsconfig.base.json`).
 - Lint / format / CI: none exist in this repo. Do not invent them.
-
-## Parity tooling
-
-Feature-parity work needs both reference CLIs on PATH (`$HOME/.opencode/bin` + npm global bin): `curl -fsSL https://opencode.ai/install | bash` (opencode, v1.18.x) and `npm i -g @polyth/web` (polyth).
-
-## Where things live
-
-- Developer docs: `docs/dev/` — `README.md` (feature workflow), `architecture.md` (orientation + deep reference), `parity.md`, `new-features.md`, `implementation-order.md`, `HANDOFF.md`. Parity matrix: `docs/parity/polyth-parity.yaml`.
-- Tests: `packages/*/test/*.test.ts`, `apps/*/test/*.test.ts`.
-- Runtime data: `./data` (override `POLYTH_DATA_DIR`) — `sessions.db`, `knowledge.db`, `projects.json`, `behavior.md`, `mcp.json`, `auth.json`, …
 
 ## Never do
 
 - Call OpenCode from any package except `backend-opencode`.
 - Show model-visible content in the UI before it is in the event log.
 - Use enums/namespaces/parameter properties or omit `.ts` on local imports.
+- Edit `App.tsx`/`Main.tsx`/host registries to add a feature, or import a feature component into the host to "make it visible".
+- Add a widget/settings page/surface by hand-wiring into `apps/web` when the `web-sdk` seam exists.
+- Create a second implementation of a primitive that already exists in the host.
+- Persist pure presentation preferences in the event log, or move model-visible state into transient React/browser state.
 - Claim planned/implementing parity rows as shipped, or claim complete polyth/Paseo parity.
 - Store or return secret values from any API.

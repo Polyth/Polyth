@@ -111,6 +111,11 @@ const kindOfFn = [
   "}",
 ].join(" ");
 
+// Fragments forming compound statements (case/esac, if/fi) MUST be joined
+// with newlines: a "; " join injects a stray `;` after `case ... in` (and
+// before `esac`), which POSIX shells reject as a syntax error and echo the
+// whole command line to stderr — surfacing as a bogus
+// "POLYTH_PREPARE_ERROR" fragment instead of the real failure.
 const refuseOpenCodeGlobalDir = [
   'OC_GLOBAL="${XDG_DATA_HOME:-$HOME/.local/share}/opencode"',
   'case "$RUNTIME_DIR" in',
@@ -119,7 +124,7 @@ const refuseOpenCodeGlobalDir = [
   "    exit 78",
   "    ;;",
   "esac",
-].join("; ");
+].join("\n");
 
 export const resolveRemoteRuntimeDir = async (options: {
   host: RemoteHost;
@@ -144,7 +149,7 @@ export const resolveRemoteRuntimeDir = async (options: {
       "esac",
       refuseOpenCodeGlobalDir,
       'echo "POLYTH_RUNTIME_DIR=$RUNTIME_DIR"',
-    ].join("; "),
+    ].join("\n"),
     { timeoutMs: 20_000 },
   );
   if (result.code !== 0) {
@@ -527,7 +532,7 @@ const inspectRemoteStorage = async (
         + 'echo "POLYTH_DIGEST_CACHE_SIZE=$CACHE_SIZE"; '
         + 'echo "POLYTH_DIGEST_CACHE_MTIME=$CACHE_MTIME"; '
         + 'echo "POLYTH_DIGEST_CACHE_DIGEST=$CACHE_DIGEST"; fi',
-    ].join("; "),
+    ].join("\n"),
     { timeoutMs: 20_000 },
   );
   const error = taggedLine(result.stdout, "POLYTH_PREPARE_ERROR");

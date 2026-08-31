@@ -164,7 +164,41 @@ export interface RuntimeRestartRecoveredData {
   recoveredOperationIds: string[];
 }
 export interface TurnStartedData { turnId: string; model?: ModelRef; agent?: string }
-export interface TurnStoppedData { turnId: string; reason: "completed" | "aborted" | "error"; error?: string }
+
+/** Provider capacity failure classification for an error turn/stopped. */
+export type RateLimitScope = "rate" | "quota" | "overloaded" | "unknown";
+
+/** What the backend adapter could tell about a provider-limit failure — the
+ *  raw hint before the server applies its resume policy. */
+export interface RateLimitRetryHint {
+  scope: RateLimitScope;
+  provider?: string;
+  /** Provider-advised wait in seconds, when it could be parsed from the error. */
+  retryAfterSec?: number;
+}
+
+/** Resume guidance the server attaches to an error turn/stopped when the
+ *  failure is a provider rate-limit / quota exhaustion. */
+export interface RateLimitRetry extends RateLimitRetryHint {
+  /** ms epoch when the server will auto-resend the last user message. */
+  resumeAt: number;
+  /** 1 on the first limit hit for this message, incremented on repeats. */
+  attempt: number;
+}
+
+export interface TurnStoppedData {
+  turnId: string;
+  reason: "completed" | "aborted" | "error";
+  error?: string;
+  retry?: RateLimitRetry;
+}
+
+export interface TurnResumeCancelledData {
+  turnId?: string;
+  /** "user" cancelled the wait, "model-switch" continued on another model,
+   *  "resumed" the scheduled resend fired. */
+  reason: "user" | "model-switch" | "resumed";
+}
 export interface TokenUsage { input: number; output: number; reasoning?: number; cacheRead?: number; cacheWrite?: number }
 export interface UsageRecordedData { model: ModelRef; tokens: TokenUsage; cost?: number }
 export interface GoalAttachedData { objective: string; budgetTokens?: number; maxContinuations?: number }
@@ -443,6 +477,9 @@ export interface UserTurnInput {
    *  stored profile, and an omitted field inherits it. The three are never
    *  conflated (UX-COMPOSER-DISC). */
   agentProfileId?: string | null;
+  /** Set by the server's rate-limit auto-resume when it re-sends the last user
+   *  message. Tags the persisted user/message so the UI can mark it. */
+  autoResume?: boolean;
 }
 
 export type SessionStatus =
@@ -491,6 +528,20 @@ export interface SessionAssist {
   generatedAt: number;
 }
 
+/** Server-owned pending resume after a provider rate-limit / quota stop. */
+export interface SessionResumeState {
+  /** ms epoch when the last user message is auto-resent. */
+  resumeAt: number;
+  scope: RateLimitScope;
+  provider?: string;
+  /** Provider-advised wait in seconds, when the error carried one. */
+  retryAfterSec?: number;
+  /** 1 on the first limit hit for this message, incremented on repeats. */
+  attempt: number;
+  /** seq of the user/message that will be re-sent. */
+  userMessageSeq: number;
+}
+
 export interface SessionProjection {
   id: string; projectId: string; parentId?: string;
   title: string; status: SessionStatus;
@@ -523,6 +574,11 @@ export interface SessionProjection {
   backgroundWork?: BackgroundWorkState;
   /** Small-model idle assist (F9); stale once the log grows past atSeq. */
   assist?: SessionAssist;
+  /** Pending auto-resume after a provider rate-limit / quota stop. The server
+   *  owns the timer and re-sends the last user message at resumeAt; the UI
+   *  shows a countdown with cancel / switch-model actions. Cleared when the
+   *  resend starts, the user cancels, or any newer turn begins. */
+  resume?: SessionResumeState;
   /** F18: effective auto-accept policy (own setting or nearest parent's) —
    *  drives the loud header indicator. Never a global default. */
   autoAccept?: boolean;
@@ -627,6 +683,14 @@ export interface SessionService {
   /** Result carries turnId for admitted turns or queueId+queued for deferred delivery. */
   send(sessionId: string, input: UserTurnInput): Promise<SendResult>;
   abort(sessionId: string): Promise<void>;
+  /** Drop a pending rate-limit auto-resume (projection.resume). No-op when
+   *  nothing is scheduled. */
+  cancelResume?(sessionId: string): Promise<void>;
+  /** Run the pending rate-limit resume immediately: re-send the last user
+   *  message now, optionally switching to `model` (which also becomes the
+   *  session's model going forward). Rejects `no-resume` when nothing is
+   *  scheduled. */
+  resumeNow?(sessionId: string, model?: ModelRef): Promise<SendResult>;
   /** No atSeq: copy the complete effective history. With atSeq: per-message
    *  fork — the child prefix ends strictly BEFORE the target user message and
    *  the excluded prompt returns as an editable draft. */
@@ -1430,7 +1494,7 @@ export interface RuntimeBranchRequest {
 
 // Runtime events the adapter yields; session service translates + persists them.
 export type RuntimeEvent =
-  | { type: "turn/started"; turnId: string }
+  | { type: "turn/started"; turnId: string; model?: ModelRef }
   | { type: "session/title-generated"; title: string }
   | { type: "assistant/chunk"; partId: string; text: string }
   | { type: "assistant/reasoning-chunk"; partId: string; text: string }
@@ -1444,7 +1508,7 @@ export type RuntimeEvent =
   | ({ type: "secret/requested" } & SecretRequestData)
   | { type: "session/compacted"; backendEventId?: string }
   | { type: "compaction/part-recorded"; partId: string; messageId?: string; auto?: boolean }
-  | { type: "turn/stopped"; turnId?: string; reason: "completed" | "aborted" | "error"; error?: string }
+  | { type: "turn/stopped"; turnId?: string; reason: "completed" | "aborted" | "error"; error?: string; retry?: RateLimitRetryHint }
   | { type: "usage/recorded"; model: ModelRef; tokens: TokenUsage; cost?: number }
   // Full revisioned snapshots (WP8): replay-deterministic task/subagent state.
   | { type: "task/snapshot"; listId: string; revision: number; items: Array<{ id: string; text: string; status: TaskItemStatus }> }
@@ -1820,6 +1884,8 @@ export interface RemoteProcessHandle {
   /** Combined stdout+stderr of the remote process, as it streams in. */
   onOutput(cb: (chunk: string) => void): Disposable;
   onExit(cb: (code: number | null) => void): Disposable;
+  /** Input for an interactive remote process, when the host supports it. */
+  write?(data: string): void;
   /** Best-effort termination of the remote process. */
   kill(): Promise<void>;
 }
@@ -1832,9 +1898,12 @@ export interface RemoteHost {
   /** Human-readable identity for error messages (e.g. "user@host"). */
   label: string;
   /** Run a command to completion (bounded output, POSIX sh on the far side). */
-  exec(command: string, opts?: { timeoutMs?: number }): Promise<{ code: number; stdout: string; stderr: string }>;
+  exec(
+    command: string,
+    opts?: { timeoutMs?: number; maxOutputBytes?: number },
+  ): Promise<{ code: number; stdout: string; stderr: string }>;
   /** Start a long-lived remote process whose output can be observed. */
-  start(command: string): Promise<RemoteProcessHandle>;
+  start(command: string, opts?: { interactive?: boolean }): Promise<RemoteProcessHandle>;
   /** Forward a fresh local port to `remotePort` on the remote loopback. */
   forward(remotePort: number): Promise<RemoteForwardHandle>;
 }

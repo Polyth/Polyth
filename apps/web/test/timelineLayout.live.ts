@@ -573,12 +573,12 @@ test("streaming: tail follow, reader-held position, keyboard Jump to latest, res
   );
 
   // --- scrolled-up reader holds while the stream grows ----------------------
-  const held = await page.evaluate(() => {
-    const el = document.querySelector<HTMLElement>(".timeline")!;
-    el.scrollTop = Math.max(0, el.scrollTop - Math.max(200, el.clientHeight / 2));
-    return el.scrollTop;
-  });
+  const timelineBox = await page.locator(".timeline").boundingBox();
+  assert.ok(timelineBox, "timeline has no visible scrollport");
+  await page.mouse.move(timelineBox.x + timelineBox.width / 2, timelineBox.y + timelineBox.height / 2);
+  await page.mouse.wheel(0, -Math.max(200, timelineBox.height / 2));
   await page.waitForSelector(".timeline-reveal .jump-latest", { state: "visible", timeout: 5000 });
+  const held = await page.evaluate(() => document.querySelector<HTMLElement>(".timeline")!.scrollTop);
   await sendMessage(SESSIONS.stream, "Stream two: hold the reading line.");
   const hold = await page.evaluate(async (heldTop: number) => {
     const el = document.querySelector<HTMLElement>(".timeline")!;

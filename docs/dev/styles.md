@@ -5,7 +5,10 @@ design tokens. The main web app owns this contract. `apps/web/src/theme.ts`
 overrides theme-dependent values at runtime; feature packages inherit the
 result and do not publish competing global tokens.
 
-Read this guide before editing UI or CSS.
+Read this guide before editing UI or CSS. Ownership/extension questions:
+`docs/dev/ui.md`. Component construction: `docs/dev/components.md`. Widgets:
+`docs/dev/widgets.md`. The token catalog below is the single authoritative
+list — other docs link here instead of restating it.
 
 ## Ownership and inheritance
 

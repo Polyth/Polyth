@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { JsonObject } from "@polyth/contracts";
+import { api } from "@polyth/session/web-api";
 import { fmtMs } from "../format.ts";
 import {
   executionPresentation,
@@ -258,6 +259,64 @@ function McpResult({ output }: { output: string }) {
 
 type Subagent = SubagentState["agents"][number];
 
+function SubagentWork({ sessionId, status }: { sessionId: string; status: string }) {
+  const [events, setEvents] = useState<Array<{ seq: number; type: string; data: Record<string, unknown> }>>([]);
+  const [steering, setSteering] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const running = /^(?:running|active|working|pending|queued)$/i.test(status);
+
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      void api.getEvents(sessionId).then((next) => {
+        if (alive) setEvents(next as typeof events);
+      }).catch(() => {});
+    };
+    load();
+    const timer = running ? setInterval(load, 1_500) : undefined;
+    return () => { alive = false; if (timer) clearInterval(timer); };
+  }, [sessionId, running]);
+
+  const activity = events.filter((event) =>
+    event.type === "user/message" || event.type === "assistant/message" || event.type === "assistant/chunk" || event.type === "tool/call",
+  ).slice(-8);
+  const steer = () => {
+    const text = steering.trim();
+    if (!text || sending) return;
+    setSending(true);
+    setError("");
+    void api.sendMessage(sessionId, { text, delivery: "steer" })
+      .then(() => setSteering(""))
+      .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
+      .finally(() => setSending(false));
+  };
+  return (
+    <div className="execution-subagent-work" aria-label="Subagent work and steering">
+      <div className="execution-subagent-activity">
+        {activity.length === 0 ? <span>Waiting for subagent activity…</span> : activity.map((event) => {
+          const data = event.data;
+          const text = typeof data.text === "string" ? data.text
+            : typeof data.output === "string" ? data.output
+              : typeof data.tool === "string" ? data.tool : event.type;
+          return <p key={event.seq}><b>{event.type.startsWith("assistant") ? "Agent" : event.type.startsWith("user") ? "You" : "Tool"}</b>{text}</p>;
+        })}
+      </div>
+      <div className="execution-subagent-steer">
+        <textarea
+          value={steering}
+          onChange={(event) => setSteering(event.target.value)}
+          placeholder="Steer this subagent…"
+          aria-label="Steer subagent"
+          onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") steer(); }}
+        />
+        <button type="button" onClick={steer} disabled={!steering.trim() || sending}>{sending ? "Sending…" : "Steer"}</button>
+      </div>
+      {error && <p className="execution-subagent-error" role="alert">{error}</p>}
+    </div>
+  );
+}
+
 function SubagentDetail({ subagent }: { subagent: Subagent }) {
   const sessions = useStore((state) => state.sessions);
   const activeSessionId = useStore((state) => state.activeSessionId);
@@ -297,6 +356,7 @@ function SubagentDetail({ subagent }: { subagent: Subagent }) {
           <div><dt>Model</dt><dd>{modelLabel}{inheritedModel ? " · inherited" : ""}</dd></div>
           <div><dt>Parent</dt><dd>{parentLabel}</dd></div>
         </dl>
+        {childSession && <SubagentWork sessionId={childSession.id} status={subagent.status} />}
       </div>
       <button type="button" onClick={openChild}>Open child session <Icon.external /></button>
     </section>

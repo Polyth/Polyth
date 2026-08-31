@@ -2,20 +2,27 @@
 
 This is the working contract for adding features to Polyth. It describes the seams a
 feature must use, the invariants it must keep, and the checklist that makes a change
-mergeable. Read `architecture.md` for the system as it exists, `parity.md` for what is
-missing, `new-features.md` for the implement-now catalog, `tracks.md` for the
-spec-driven track lifecycle, `desktop.md` for Electron packaging and release
-operations, and `implementation-order.md` for sequencing.
+mergeable. Read `architecture.md` for the system as it exists, `ui.md` for the web
+UI extension architecture (host vs package boundary, slots, surfaces, settings,
+capabilities), `components.md` for the component contract, `widgets.md` for widgets,
+`styles.md` for canonical styling, `parity.md` for what is missing,
+`new-features.md` for the historical implement-now catalog (F-numbers; all shipped),
+`tracks.md` for the spec-driven track lifecycle, `desktop.md` for Electron packaging
+and release operations, and `implementation-order.md` for sequencing.
 
 ## The one-paragraph mental model
 
 Polyth is a web product on a plugin microkernel. A tiny composition root
 (`packages/server/src/index.ts`) wires capability providers (session store, projects,
-permissions, runtime pool) into a kernel context, then hands feature packages three
-seams: a **RouteHandler** for REST, an **append+broadcast** function for durable events,
-and (client-side) a **typed UI slot**. Every conversation is an append-only
-`SessionEvent` log in SQLite; the web app is a projection of that log delivered over one
-WebSocket. Only `packages/backend-opencode` may talk to the OpenCode process.
+permissions, runtime pool) into a kernel context, then hands feature packages two
+seams: a **server package seam** (`@polyth/plugins` `ServerPackageHost`: RouteHandler
+routes, append+broadcast events, services, runtimes) and a **web package seam**
+(`@polyth/web-sdk` `WebPackageHost`: slots, widgets, surfaces, capabilities, settings,
+reducers, navigation). Every conversation is an append-only `SessionEvent` log in
+SQLite; the web app is a projection of that log delivered over one WebSocket. Only
+`packages/backend-opencode` may talk to the OpenCode process. Feature web UI lives in
+the feature package and registers through the web-sdk — see `ui.md` before any UI
+work.
 
 ## Ground rules (violating any of these fails review)
 
@@ -25,7 +32,9 @@ WebSocket. Only `packages/backend-opencode` may talk to the OpenCode process.
    workspace names (`import type { SessionEvent } from "@polyth/contracts"`), resolved by
    npm workspaces via each package's `"exports": { ".": "./src/index.ts" }`.
 2. **Only `packages/backend-opencode` talks to OpenCode.** No other package may import
-   the OpenCode SDK, spawn `opencode`, or hit its HTTP API. A grep gate enforces this.
+   the OpenCode SDK, spawn `opencode`, or hit its HTTP API. Verify with a repo-wide
+   grep before committing (`grep -rn "opencode" packages/*/src packages/*/widgets`
+   should only hit `backend-opencode` and config/string data).
    If your feature needs a model call, use the seams the server already exposes:
    `oneShot(runtime, …)` for utility completions or `sessions.send(...)` for
    conversational turns.
@@ -52,13 +61,15 @@ WebSocket. Only `packages/backend-opencode` may talk to the OpenCode process.
 | Kernel (contexts, plugin loader) | `packages/kernel` — rarely changes |
 | Durable session log + projections | `packages/session` (node:sqlite, WAL) |
 | Feature services (pure logic + own persistence) | `packages/<feature>/src/index.ts` |
-| REST endpoints | `packages/server/src/routes/<feature>.ts` as a `RouteHandler` |
+| Feature REST routes | `packages/<feature>/src/serverEntry.ts` (route handler + `routes:` on the returned `ServerPackage`); legacy routes sit in `packages/server/src/routes/` — new feature routes belong to the package |
 | Wiring / composition | `packages/server/src/index.ts` (`boot()`) |
 | WS fan-out | `packages/server/src/ws.ts` (extend only for new stream kinds) |
-| Web UI views/components | `apps/web/src/components/` |
+| Feature web UI (views, widgets, settings pages, surfaces, slot contributions) | `packages/<feature>/widgets/` |
+| Package web entry (registrations) | `packages/<feature>/widgets/index.tsx` — `defineWebPackage` from `@polyth/web-sdk` |
+| Host shell / shared primitives / registries | `apps/web/src/components/`, `apps/web/src/components/ui/`, `apps/web/src/*.ts` (host work only — see `ui.md`) |
 | Web client state | `apps/web/src/store.ts` (+ `reduce.ts` render model) |
-| Client API wrappers | `apps/web/src/api.ts` |
-| UI slot registrations | `registerSlot()` from `apps/web/src/slots.ts` |
+| Client API wrappers | `apps/web/src/api.ts`; package UI may use `createApiTransport` from `@polyth/web-sdk` |
+| UI slot registrations | `host.slots.register(...)` through `@polyth/web-sdk` (never `apps/web/src/slots.ts` directly) |
 | Electron host / native IPC / packaging | `apps/desktop` |
 | Tests | `packages/<feature>/test/*.test.ts`, `apps/web/test/*.test.ts` |
 
@@ -76,9 +87,13 @@ appender passes `{ ignorable: true }` — the type stays in the log but
 ### 2. Build the service package
 
 Create `packages/<name>` with `package.json` (`"name": "@polyth/<name>"`,
-`"exports": { ".": "./src/index.ts" }`), a `tsconfig.json` extending
-`../../tsconfig.base.json`, `src/index.ts`, and `test/`. The service is a factory
-function taking its dependencies as an options object — never importing the server:
+`"exports": { ".": "./src/index.ts" }`, and the `polyth` markers:
+`"serverEntry": "./src/serverEntry.ts"` when the feature has a server
+surface, `"webEntry": "./widgets/index.tsx"` when it has web UI, plus the
+`descriptor` block with name/description/core/enabled/hasSettings), a
+`tsconfig.json` extending `../../tsconfig.base.json`, `src/index.ts`, and
+`test/`. The service is a factory function taking its dependencies as an
+options object — never importing the server:
 
 ```ts
 export interface FooService { list(): Promise<FooDto[]>; /* … */ }
@@ -96,66 +111,95 @@ Persistence rules:
   session tables).
 - Browser-only preferences → namespaced localStorage keys in the web app
   (`polyth.<area>.<key>`), via `apps/web/src/settings.ts` / `uiPrefs.ts` /
-  `prefs.ts`. Server-owned settings (shared across devices) go through a settings
-  route + package store instead — decide by asking "should another device see this?".
+  `prefs.ts`; widget placement/config is browser-local per project under
+  `polyth.widgetLayout.<projectId>`. Server-owned settings (shared across devices) go
+  through a settings route + package store instead — decide by asking "should another
+  device see this?".
 
 ### 3. Expose REST routes
 
-Add `packages/server/src/routes/<name>.ts` exporting a `RouteHandler` factory. The
-handler pattern-matches path+method and returns `true` when handled:
+Declare `"polyth": { "serverEntry": "./src/serverEntry.ts" }` in the package
+manifest and export a `registerPackage(host)` factory from it (see
+`packages/example-feature/src/serverEntry.ts` — the minimal template). The
+returned `ServerPackage` carries `routes:` (a `RouteHandler`), and the
+package is discovered and wired automatically; routes are added while the
+package is enabled and removed when disabled. The handler pattern-matches
+path+method and returns `true` when handled:
 
 ```ts
-export function fooRoutes(foo: FooService): RouteHandler {
+// packages/<name>/src/serverEntry.ts
+import type { RouteHandler } from "@polyth/contracts";
+import type { ServerPackage, ServerPackageHost } from "@polyth/plugins";
+
+export function fooRoutes(host: ServerPackageHost): RouteHandler {
   return async ({ path, method, json, body }) => {
     if (path === "/api/foo" && method === "GET") { json(200, await foo.list()); return true; }
     return false;
   };
 }
+
+export default function registerPackage(host: ServerPackageHost): ServerPackage {
+  return { routes: fooRoutes(host) };
+}
 ```
 
-Register it in the `routes` array in `boot()`. Validate ownership on every mutating
-endpoint (project/session ids must exist and match), reject path traversal, and never
-derive URLs from the `Host` header. Throw `Object.assign(new Error(msg), { code })` for
-typed failures.
+Cross-cutting routes that do not belong to one package may still be
+registered in the `routes` array in `boot()`. Validate ownership on every
+mutating endpoint (project/session ids must exist and match), reject path
+traversal, and never derive URLs from the `Host` header. Throw
+`Object.assign(new Error(msg), { code })` for typed failures.
 
 ### 4. Emit durable events + broadcast
 
-If the feature produces model-visible or session-relevant state, inject an appender the
-way `boot()` does for knowledge/schedule/review:
+If the feature produces model-visible or session-relevant state, append
+through the package host's persist-then-broadcast seam:
 
 ```ts
-append: async (sessionId, type, data) => {
-  const ev = await store.append(sessionId, type, data, { ignorable: true, producerPlugin: "foo" });
-  broadcast.event(ev);
-  return ev;
-},
+// inside a package service (via host.events, captured in registerPackage):
+append: async (sessionId, type, data) =>
+  host.events.append(sessionId, type, data, { ignorable: true, producerPlugin: "foo" }),
 ```
 
-`store.append` allocates the per-session `seq` transactionally; `broadcast.event` fans
-out over `/ws`. Clients that were offline recover the same events via gap-fill
-(`GET /api/sessions/:id/events?afterSeq=` or the WS `subscribe` message) — you get
-reconnect safety for free by staying on this path.
+`host.events.append` persists the event to the session log (allocating the
+per-session `seq` transactionally), then broadcasts it over `/ws`. Clients
+that were offline recover the same events via gap-fill
+(`GET /api/sessions/:id/events?afterSeq=` or the WS `subscribe` message) —
+you get reconnect safety for free by staying on this path. Cross-cutting
+services wired directly in `boot()` use the same shape
+(`store.append` + `broadcast.event`, as knowledge/schedule/review do).
 
 ### 5. Build the UI
 
-- Full-screen surface → add a component under `apps/web/src/components/`, extend the
-  `AppView` union in `store.ts`, and add the view branch in `Main.tsx` + nav entry.
-- Right-rail panel → extend the `RailPlugin` union and `ContextRail.tsx` (or contribute
-  through the `contextRail.tabs` slot).
-- Injection point inside existing UI → use `registerSlot(slot, id, render, order)` with
-  a typed `UiSlot` (`composer.leading`, `session.message.actions`,
-  `settings.pages`, `commandPalette.commands`, `workStatus.sections`, …). Adding a new
-  slot means extending the `UiSlot` union in contracts and rendering
-  `renderSlot("your.slot", props)` at the injection point — never importing feature
+Feature UI lives in `packages/<feature>/widgets/` and registers through
+`@polyth/web-sdk` in `widgets/index.tsx` — see `docs/dev/ui.md` for the full
+decision table and `docs/dev/widgets.md` for widgets. The mechanisms:
+
+- Full main-area module (Fusion, Walkthrough, Goals-style) → register a
+  **workspace surface** with `host.workspaceSurfaces.register(...)` (the
+  `AppView` switch is gone; `Main.tsx` is shell composition only).
+- Right-rail panel → **rail surface** with `host.surfaces.register(...)`, or
+  a `workspace.right.tabs` slot contribution (Knowledge's Tracks panel).
+- Injection point inside existing UI → `host.slots.register({ slot, id,
+  render, order, meta })` with a typed `UiSlot` (`composer.leading`,
+  `session.message.actions`, `settings.pages`, `commandPalette.commands`,
+  `workStatus.sections`, …). Adding a new slot is host/contract work
+  (`UI_SLOTS` in contracts + a `SlotHost` mount) — never import feature
   components directly into `App.tsx`.
-- Events → state: the client receives `{ type: "event" | "projection" }` messages; add
-  reducer logic in `apps/web/src/reduce.ts` so the render model derives from events
-  (same replay guarantee as the server).
-- Commands & shortcuts → register palette commands (`apps/web/src/commands.ts`) and, if
-  a default binding makes sense, a `CommandDescriptor.defaultShortcut`; users can rebind
-  in Settings → Shortcuts.
-- Settings → contribute a page through the `settings.pages` slot and item descriptors
-  (`SettingsSearchItem`) so item-level settings search keeps working.
+- User-placeable dashboard content → **widget** via
+  `host.widgets.registerPlugin(...)` (`widgets.md`).
+- Settings → `host.settings.registerPage(...)` (group `Workspace |
+  Engineering | Customize | System`) plus `host.settings.registerItems(...)`
+  so item-level settings search keeps working.
+- Discoverable "open this feature" entry → `host.capabilities.register(...)`
+  (feeds header, rails, command search, Settings from one model).
+- Events → state: the client receives `{ type: "event" | "projection" }`
+  messages; the shell's `apps/web/src/reduce.ts` derives the render model.
+  Package event handling belongs in the built-in reducer only for
+  shell-level state; package UI can register a client reducer with
+  `host.reducers.register(eventType, reducer)` (pure, DOM-free).
+- Commands & shortcuts → `commandPalette.commands` slot contribution
+  (bridged by the shell) with `CommandDescriptor.defaultShortcut` for
+  default bindings; users rebind in Settings → Shortcuts.
 
 ### 6. Test
 
@@ -181,7 +225,7 @@ row's `status`, `tests`, and `notes`. Do not add rows for internal refactors.
 
 ```bash
 npm install
-npm run build        # bundles apps/web with esbuild
+npm run build        # package web entries (packages/*/dist/web) + apps/web shell
 npm start            # http://127.0.0.1:4400, spawns `opencode serve` per project
 npm test             # node --test across all packages
 ```

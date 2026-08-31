@@ -107,12 +107,18 @@ test("customizer exposes responsive live controls and widget inspector settings"
   assert.match(source, /Compact", "Default", "Large/);
 });
 
-test("library drag uses the shared widget DnD payload and canvas accepts it", async () => {
+test("buttons stay on shell surfaces while the canvas accepts only full widgets", async () => {
   const library = await readFile(new URL("../src/components/settings/WidgetLibraryPanel.tsx", import.meta.url), "utf8");
   const canvas = await readFile(new URL("../src/widgets/WidgetCanvas.tsx", import.meta.url), "utf8");
+  const slots = await readFile(new URL("../src/components/slots/SlotHost.ts", import.meta.url), "utf8");
+  assert.match(library, /Widgets" : "Buttons/);
+  assert.match(library, /Add buttons to/);
   assert.match(library, /setDragWidget/);
   assert.match(canvas, /getDragWidget/);
+  assert.match(canvas, /widget\.kind !== "mini-widget"/);
   assert.match(canvas, /onDropSlot/);
+  assert.match(slots, /setDragWidget/);
+  assert.match(slots, /getDragWidget/);
 });
 
 test("critic-reported mobile controls use 44px hit boxes", async () => {

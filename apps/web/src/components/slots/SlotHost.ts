@@ -10,6 +10,7 @@
 import { Component, createElement, Fragment, useSyncExternalStore, type ReactNode } from "react";
 import type { UiSlot } from "@polyth/contracts";
 import { listSlots, slotVersion, subscribeSlots, type SlotItem } from "../../slots.ts";
+import { getDragWidget, setDragWidget } from "../../dnd.ts";
 import { useWidgetCatalog, type WidgetDef } from "../../widgets/catalog.ts";
 import {
   setWidgetConfig,
@@ -118,12 +119,12 @@ export function placedWidgetItems(
           ...(widget.kind === "mini-widget" ? {
             draggable: true,
             onDragStart: (event: DragEvent) => {
-              event.dataTransfer?.setData("text/polyth-widget", instanceId);
+              if (event.dataTransfer) setDragWidget(event.dataTransfer, instanceId);
             },
             onDragOver: (event: DragEvent) => event.preventDefault(),
             onDrop: (event: DragEvent) => {
               event.preventDefault();
-              const draggedId = event.dataTransfer?.getData("text/polyth-widget") ?? "";
+              const draggedId = event.dataTransfer ? getDragWidget(event.dataTransfer) ?? "" : "";
               const targetIndex = layout.slotPlacements[slot]?.indexOf(instanceId) ?? -1;
               if (!draggedId || targetIndex < 0) return;
               updateWidgetLayout((current) => moveWidgetToSlot(current, draggedId, slot, targetIndex));

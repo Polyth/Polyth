@@ -22,7 +22,7 @@ export const en = {
   "ssh.sshprojectsource.remoteFolders": "Remote folders",
   "ssh.sshprojectsource.remoteHomeDirectory": "Remote home directory",
   "ssh.sshprojectsource.remotePath": "Remote path",
-  "ssh.sshprojectsource.remoteProject": "remote-project",
+  "ssh.sshprojectsource.remoteProject": "Remote project",
   "ssh.sshprojectsource.theCodingAgentRunsOnTheServer": "The coding agent runs on the server, next to the files — only the conversation travels over SSH.",
   "ssh.sshsettings.addAServerToOpenRemoteProjects": "Add a server to open remote projects on it.",
   "ssh.sshsettings.addServer": "Add server",

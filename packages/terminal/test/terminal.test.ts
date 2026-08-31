@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import type { RemoteHost } from "@polyth/contracts";
 import { createReplayBuffer, createTerminalService, hasRealPty } from "../src/index.ts";
 
 let cwd: string;
@@ -55,6 +56,57 @@ test("list filters by projectId", async () => {
   assert.equal(a.length, 1);
   assert.equal(a[0]!.projectId, "proj-a");
   assert.equal(t.list().length, 2);
+});
+
+test("remote projects use an interactive shell on their assigned host", async () => {
+  let command = "";
+  let interactive = false;
+  let output: ((data: string) => void) | undefined;
+  let exit: ((code: number | null) => void) | undefined;
+  const writes: string[] = [];
+  const remote: RemoteHost = {
+    label: "dev@build.example",
+    exec: async () => ({ code: 0, stdout: "", stderr: "" }),
+    async start(nextCommand, opts) {
+      command = nextCommand;
+      interactive = opts?.interactive === true;
+      return {
+        onOutput(callback) {
+          output = callback;
+          return { dispose: () => { output = undefined; } };
+        },
+        onExit(callback) {
+          exit = callback;
+          return { dispose: () => { exit = undefined; } };
+        },
+        write(data) {
+          writes.push(data);
+          output?.(`remote: ${data}`);
+        },
+        async kill() { exit?.(0); },
+      };
+    },
+    async forward() { throw new Error("not used by terminal"); },
+  };
+  const t = createTerminalService({
+    remoteHostForProject: async (projectId) => projectId === "remote" ? remote : undefined,
+  });
+  services.push(t);
+  const { id } = await t.create({ projectId: "remote", cwd: "/srv/work", cols: 97, rows: 41 });
+
+  assert.equal(interactive, true);
+  assert.match(command, /^cd -- '\/srv\/work' && \{ stty cols 97 rows 41 2>\/dev\/null \|\| true; \} && TERM=xterm-256color COLORTERM=truecolor exec "\$\{SHELL:-\/bin\/sh\}" -i$/);
+  const received = new Promise<string>((resolve) => {
+    const sub = t.onData((terminalId, data) => {
+      if (terminalId === id) { sub.dispose(); resolve(data); }
+    });
+  });
+  t.write(id, "echo ready\n");
+  assert.deepEqual(writes, ["echo ready\n"]);
+  assert.equal(await received, "remote: echo ready\n");
+
+  await t.close(id);
+  assert.equal(t.get(id), undefined);
 });
 
 test("optional terminal limit bounds concurrent child processes", async () => {

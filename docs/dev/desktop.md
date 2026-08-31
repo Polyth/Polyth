@@ -7,7 +7,7 @@ does not call OpenCode itself.
 
 ## Local builds
 
-Use Node 22.18 or newer.
+Use Node 22.14 or newer (matching `scripts/check-node.mjs` and `.nvmrc`).
 
 ```sh
 npm install

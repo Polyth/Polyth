@@ -979,6 +979,26 @@ export async function abortSession(): Promise<void> {
   }
 }
 
+/** Rate-limit wait: stop the scheduled auto-resume; the turn stays failed. */
+export async function cancelResume(sessionId: string): Promise<void> {
+  try {
+    await api.cancelResume(sessionId);
+  } catch (err) {
+    console.error("cancel resume failed", err);
+    store.setUiError(friendlyError(tr("common.error"), err));
+  }
+}
+
+/** Rate-limit wait: resend the last message now, optionally on another model. */
+export async function resumeNow(sessionId: string, model?: JsonObject): Promise<void> {
+  try {
+    await api.resumeNow(sessionId, model as ModelRef | undefined);
+  } catch (err) {
+    console.error("resume now failed", err);
+    store.setUiError(friendlyError(tr("common.error"), err));
+  }
+}
+
 export function replyPermission(requestId: string, reply: "once" | "always" | "reject", scope?: "session" | "project"): void {
   const id = store.getState().activeSessionId;
   if (!id) return;

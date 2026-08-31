@@ -584,6 +584,13 @@ export const api = {
   sendMessage: (id: string, body: { text: string; autoTitle?: boolean; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; delivery?: string; dismissPending?: boolean; agentProfileId?: string | null }) =>
     jfetch<SendResult>(`/api/sessions/${id}/message`, json("POST", body)),
   abort: (id: string) => jfetch<void>(`/api/sessions/${id}/abort`, { method: "POST" }),
+  /** Drop a pending rate-limit auto-resume; the session stays failed. */
+  cancelResume: (id: string) =>
+    jfetch<{ ok: true }>(`/api/sessions/${id}/resume/cancel`, { method: "POST" }),
+  /** Run the pending rate-limit resume now, optionally on a different model
+   *  (which also becomes the session's model going forward). */
+  resumeNow: (id: string, model?: ModelRef) =>
+    jfetch<SendResult>(`/api/sessions/${id}/resume/now`, json("POST", model ? { model } : {})),
   taskBrief: (id: string) => jfetch<TaskBriefDto>(`/api/sessions/${encodeURIComponent(id)}/task-brief`, json("POST", {})),
   confirmBorrowedRuntimeEpoch: (id: string) =>
     jfetch<SessionProjection>(`/api/sessions/${id}/runtime-epoch`, json("POST", { confirm: true })),

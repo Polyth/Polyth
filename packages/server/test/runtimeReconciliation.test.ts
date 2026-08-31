@@ -165,6 +165,8 @@ test("passive event-tail prefetch does not materialize a runtime", async () => {
   assert.equal(materializations, 0);
   await sessions.events("session-prefetch", 1, { prefetch: false });
   assert.equal(materializations, 1, "interactive reconcile still wires the runtime");
+  assert.equal((await store.projection("session-prefetch"))?.updatedAt, 1,
+    "opening an idle session does not count as activity");
   await store.close();
 });
 

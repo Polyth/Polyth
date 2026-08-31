@@ -74,10 +74,11 @@ export function createSmallModelService(store: RuntimeMutationStore): SmallModel
             ...(options.signal ? { signal: options.signal } : {}),
             ...(options.responseSchema ? { responseSchema: options.responseSchema } : {}),
           });
-        } catch {
-          // Fall through to oneShot for all direct-provider failures —
-          // transient errors (expired tokens, rate limits, network) degrade
-          // to the session-based fallback instead of surfacing as 500.
+        } catch (error) {
+          // Only an explicitly unsupported provider falls back. Retrying a
+          // timed-out/directly accepted request as a session turn delays the
+          // UI by the full timeout and can double-charge the same completion.
+          if ((error as { code?: unknown }).code !== "unsupported") throw error;
         }
       }
       if (options.signal?.aborted) throw options.signal.reason ?? new DOMException("aborted", "AbortError");

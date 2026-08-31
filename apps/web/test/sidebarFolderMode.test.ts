@@ -80,6 +80,39 @@ test("parseSidebarViewMode defaults to the session tree; setter persists and rou
   assert.equal(getSidebarViewMode(), "list");
 });
 
+test("remote projects are marked separately from local projects in the sidebar", async () => {
+  const ticket = store.beginProjectListRequest();
+  store.publishProjectList(ticket, [
+    project("local"),
+    {
+      ...project("remote"),
+      remote: { kind: "ssh", connectionId: "ssh_1" },
+    },
+  ]);
+  store.activateProject("local");
+  setSidebarViewMode("tree");
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(Sidebar)); });
+
+    const localCard = [...container.querySelectorAll<HTMLElement>(".project-card")]
+      .find((card) => (card.textContent ?? "").includes("local"));
+    const remoteCard = [...container.querySelectorAll<HTMLElement>(".project-card")]
+      .find((card) => (card.textContent ?? "").includes("remote"));
+    const marker = remoteCard?.querySelector<HTMLElement>(".project-remote-marker");
+
+    assert.equal(localCard?.querySelector(".project-remote-marker"), null);
+    assert.equal(marker?.getAttribute("aria-label"), "Remote project");
+    assert.match(marker?.textContent ?? "", /SSH/);
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
 test("setSessions merges per project — one project's refresh keeps the others", () => {
   store.setSessions("alpha", sessionsByProject.alpha!);
   store.setSessions("beta", sessionsByProject.beta!);

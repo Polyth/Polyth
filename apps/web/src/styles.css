@@ -555,30 +555,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 }
 .project-tree-node { margin-bottom: 2px; }
 .project-tree-node .project-card-shell { margin-bottom: 0; }
-/* Manual order: a drag handle sits before the card; the row is the drop unit. */
-.project-reorder-row {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-.project-reorder-row .project-card-shell { flex: 1; min-width: 0; }
-.project-drag-handle {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  min-width: 28px;
-  height: var(--nav-row-project);
-  flex: none;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--muted);
-  cursor: grab;
-  touch-action: none;
-}
-.project-drag-handle:hover { color: var(--text); background: var(--elevated); }
-.project-drag-handle svg { width: 15px; height: 15px; }
 :is(.project-entry, .project-tree-node).dragging { opacity: 0.5; }
 :is(.project-entry, .project-tree-node).drag-over { box-shadow: inset 0 2px 0 var(--accent); }
 .project-tree-sessions {
@@ -677,7 +653,10 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .project-glyph img { width: 19px; height: 19px; object-fit: contain; }
 .project-glyph-mask { width: 19px; height: 19px; display: block; background: currentColor; -webkit-mask-position: center; -webkit-mask-repeat: no-repeat; -webkit-mask-size: contain; mask-position: center; mask-repeat: no-repeat; mask-size: contain; }
 .project-meta { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.project-name-line { min-width: 0; display: flex; align-items: center; gap: var(--space-1); }
 .project-name {
+  min-width: 0;
+  flex: 1;
   overflow: hidden;
   color: var(--text);
   font-size: var(--nav-project-size);
@@ -687,6 +666,20 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.project-remote-marker {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: var(--space-1);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-control);
+  background: var(--blue-wash);
+  color: var(--blue);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  line-height: 1;
+}
+.project-remote-marker svg { width: var(--icon-sm); height: var(--icon-sm); }
 .project-path { display: none; }
 /* Quiet inline row, not a CTA card: adding a project is a rare action once
    the workspace is set up, so it reads like one more list entry. */
@@ -814,6 +807,23 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   margin: 0;
   padding: 0;
 }
+.session-subagent-parent { position: relative; }
+.session-subagent-toggle {
+  position: absolute;
+  z-index: 2;
+  left: calc(var(--nav-session-row-indent, var(--nav-indent-session)) - var(--space-4));
+  top: 0;
+  display: grid;
+  width: var(--control-h-sm);
+  min-height: var(--nav-row-session);
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+.session-subagent-toggle:hover { color: var(--text); background: var(--elevated); }
+.session-subagent-toggle svg { width: var(--icon-sm); height: var(--icon-sm); }
+.session-subagent-children { --nav-session-row-indent: calc(var(--nav-indent-session) + var(--space-4)); }
 .session-btn {
   isolation: isolate;
   position: relative;
@@ -3376,8 +3386,8 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   letter-spacing: 0.04em; color: var(--muted);
 }
 .session-pinned { margin-bottom: 5px; padding-bottom: 4px; border-bottom: 1px solid var(--border-soft); }
-.session-pinned .session-row[draggable="true"] { cursor: grab; }
-.session-pinned .session-row[draggable="true"]:active { cursor: grabbing; }
+.session-row[draggable="true"] { cursor: grab; }
+.session-row[draggable="true"]:active { cursor: grabbing; }
 .session-archived { border-top: 1px solid var(--border-soft); margin-top: 6px; padding-top: 2px; }
 .session-check {
   position: absolute;
@@ -3759,7 +3769,7 @@ color: var(--text-dim);
   .panel-sheet { width: 100vw; border-left: none; }
 
   /* Compact composer: the rail keeps one row; chips shrink first. */
-  .composer { padding-inline: 8px; }
+  .composer { border-top: 0; padding-inline: 8px; }
   .composer-actions .icon-btn { width: 44px; height: 44px; font-size: 20px; }
   .composer-actions .send, .composer-actions .stop { min-height: 44px; }
 
@@ -4376,6 +4386,16 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .turn-error-retry {
   flex: none; white-space: nowrap;
 }
+.turn-rate-limit {
+  width: min(var(--chat-measure), 100%); margin-inline: auto;
+  border-inline-start-width: 3px;
+}
+.turn-rate-limit .ui-notice-body { font-variant-numeric: tabular-nums; }
+.turn-rate-limit .ui-notice-actions { flex-wrap: wrap; row-gap: var(--space-1); }
+@media (max-width: 640px) {
+  .turn-rate-limit { flex-wrap: wrap; }
+  .turn-rate-limit .ui-notice-actions { margin-left: 0; width: 100%; }
+}
 .composer-send-failure {
   width: min(var(--chat-measure), calc(100% - (2 * var(--gutter))));
   margin-inline: auto;
@@ -4750,10 +4770,11 @@ html[dir="rtl"] input[type="number"] {
 .widget-quick-actions button strong { font-size: var(--font-meta); }
 .widget-quick-actions button small { color: var(--muted); font-size: 8.5px; }
 
-/* Settings is a focused, centered two-pane workspace. */
-.settings-scrim { padding: 4vh max(4vw, 16px); }
+/* Settings pages share the Usage workbench footprint on desktop. A page must
+   adapt inside this shell rather than widening the modal by itself. */
+.settings-scrim { padding: 3vh max(2vw, 12px); }
 .settings-shell {
-  width: min(92vw, 800px); max-width: 800px; height: 92vh; max-height: none;
+  width: min(96vw, 1180px); max-width: 1180px; height: 94vh; max-height: none;
   border-radius: var(--radius-sheet);
 }
 .settings-nav { width: 232px; min-width: 232px; padding-bottom: 0; background: var(--panel); }
@@ -7208,6 +7229,10 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
     padding: 12px 0;
     overflow: hidden;
   }
+  .composer-mobile.composer-collapsed.composer-has-draft .composer-card textarea {
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 .composer-mobile.composer-collapsed:not(.composer-has-draft) .composer-goals {
 display: none;
 }
@@ -7266,18 +7291,24 @@ display: none;
     padding: var(--space-2) var(--space-2) 0;
   }
   .composer-mobile.composer-collapsed .composer-config-top { display: none; }
+  .composer-mobile .composer-config-top > .model-picker {
+    flex: 3 1 0;
+    min-width: 0;
+  }
+  .composer-mobile .composer-config-top .model-picker-trigger {
+    width: 100%;
+    max-width: none;
+  }
   .composer-mobile .composer-config-top .config-chip,
   .composer-mobile .composer-config-top .picker-chip {
-    flex: none;
     min-height: var(--tap);
-    max-width: 42vw;
     font-size: 12px;
   }
   .composer-mobile .composer-config-top .composer-effort-control {
-    flex: 1 1 auto;
+    flex: 2 1 0;
     min-width: 0;
     min-height: var(--tap);
-    grid-template-columns: auto minmax(64px, 1fr);
+    grid-template-columns: 1fr;
   }
   .composer-mobile .composer-config-top .composer-effort-track input { min-width: 0; }
   .composer-mobile .composer-card textarea {
@@ -7503,6 +7534,7 @@ body[data-density="comfortable"] .header { min-height: 60px; }
 .workspace-library > header, .workspace-inspector > strong { font-size: var(--font-label); }
 .workspace-library-kinds { display: flex; gap: var(--space-1); }
 .workspace-library-kinds .ui-btn { flex: 1; }
+.workspace-button-surface { display: flex; flex-direction: column; gap: var(--space-1); color: var(--text-dim); font-size: var(--font-meta); }
 .workspace-library-results { display: flex; flex-direction: column; gap: var(--space-1); }
 .workspace-library-item { min-height: var(--tap); display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); border-bottom: 1px solid var(--border-soft); cursor: grab; }
 .workspace-library-item:active { cursor: grabbing; }
@@ -7512,10 +7544,12 @@ body[data-density="comfortable"] .header { min-height: 60px; }
 .workspace-library-empty { color: var(--muted); font-size: var(--font-meta); }
 .workspace-live-preview { min-width: 0; display: flex; flex-direction: column; overflow: auto; background: var(--sunken); }
 .workspace-live-preview > .widget-workspace { min-height: 440px; flex: 1; }
-.workspace-live-rail, .workspace-response-preview, .workspace-composer-preview, .workspace-mobile-preview { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border-soft); background: var(--panel); }
-.workspace-live-rail small, .workspace-mobile-preview small { color: var(--muted); font-size: var(--font-meta); }
-.workspace-live-rail > div, .workspace-response-preview > div, .workspace-composer-preview > div, .workspace-mobile-preview > div { display: flex; flex-wrap: wrap; gap: var(--space-1); }
-.workspace-live-rail button, .workspace-response-preview button, .workspace-composer-preview button, .workspace-mobile-preview button { min-height: var(--control-h-sm); border: 0; background: transparent; color: var(--text-dim); font-size: var(--font-meta); }
+.workspace-live-rail, .workspace-right-rail-preview, .workspace-response-preview, .workspace-composer-preview, .workspace-mobile-preview { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border-soft); background: var(--panel); }
+.workspace-live-rail small, .workspace-right-rail-preview small, .workspace-mobile-preview small { color: var(--muted); font-size: var(--font-meta); }
+.workspace-live-rail > div, .workspace-right-rail-preview > div, .workspace-response-preview > div, .workspace-composer-preview > div, .workspace-mobile-preview > div { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
+.workspace-live-rail button, .workspace-right-rail-preview button, .workspace-response-preview button, .workspace-composer-preview button, .workspace-mobile-preview button { min-height: var(--control-h-sm); border: 0; background: transparent; color: var(--text-dim); font-size: var(--font-meta); }
+.workspace-right-rail-preview { justify-content: flex-end; }
+.workspace-composer-spacer { flex: 1; }
 .workspace-response-preview { justify-content: space-between; background: var(--elevated); }
 .workspace-response-preview p { margin: 0; color: var(--text-dim); font-size: var(--font-meta); }
 .workspace-composer-preview { display: block; }
@@ -9803,6 +9837,15 @@ color: var(--text);
 .execution-subagent-state.failed { color: var(--red); }
 .execution-subagent-detail > button { min-height: 44px; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .execution-subagent-detail > button svg { width: 12px; height: 12px; }
+.execution-subagent-work { grid-column: 1 / -1; display: grid; gap: var(--space-2); margin-top: var(--space-2); }
+.execution-subagent-activity { display: grid; gap: var(--space-1); max-height: 12rem; overflow: auto; padding: var(--space-2); border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: var(--sunken); }
+.execution-subagent-activity > span { color: var(--muted); font-size: var(--font-meta); }
+.execution-subagent-activity p { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-2); margin: 0; white-space: normal; overflow-wrap: anywhere; }
+.execution-subagent-activity b { color: var(--text-dim); font-size: var(--font-meta); }
+.execution-subagent-steer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); }
+.execution-subagent-steer textarea { min-height: var(--control-h); padding: var(--space-2); border: 1px solid var(--control-border); border-radius: var(--radius-control); background: var(--input-bg); color: var(--text); font: inherit; resize: vertical; }
+.execution-subagent-steer button { min-height: var(--control-h); align-self: end; }
+.execution-subagent-error { color: var(--red); font-size: var(--font-meta); }
 
 .execution-viewer-backdrop {
   position: fixed;

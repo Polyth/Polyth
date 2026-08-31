@@ -29,6 +29,7 @@ import type {
   CanonicalTurnRequest,
   Disposable,
   JsonObject,
+  ModelRef,
   MutationOutcome,
   RuntimeBranchRequest,
   RuntimeEndpoint,
@@ -45,6 +46,7 @@ import {
   claimTerminalStateEvidence,
   createTranslateState,
   errorMessageOf,
+  providerLimitOf,
   finishTranslateTurn,
   flushAssistantOnIdle,
   markTranslateTurnAborting,
@@ -404,13 +406,13 @@ export const createOpenCodeRuntimeFacade = (
     return s;
   };
 
-  const admitTurn = (sessionId: string): void => {
+  const admitTurn = (sessionId: string, model?: ModelRef): void => {
     suppressedAfterAbort.delete(sessionId);
     if (activeTurn.has(sessionId)) return;
     const turnId = `turn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     activeTurn.set(sessionId, { turnId, aborting: false });
     admitTranslateTurn(stateFor(sessionId), turnId);
-    emit(sessionId, { type: "turn/started", turnId });
+    emit(sessionId, { type: "turn/started", turnId, ...(model ? { model } : {}) });
   };
 
   const terminalEvents = (
@@ -436,10 +438,12 @@ export const createOpenCodeRuntimeFacade = (
     if (terminal.state === "interrupted") {
       return [{ type: "turn/stopped", reason: "aborted" }];
     }
+    const retry = providerLimitOf(event);
     return [{
       type: "turn/stopped",
       reason: "error",
       error: errorMessageOf(event) ?? "session failed",
+      ...(retry ? { retry } : {}),
     }];
   };
 
@@ -787,7 +791,7 @@ export const createOpenCodeRuntimeFacade = (
         ...(req.agent ? { agent: req.agent } : {}),
       }, randomUUID());
       outcomeValue(outcome);
-      admitTurn(req.sessionId);
+      admitTurn(req.sessionId, req.model);
     },
     async startTurnOperation(req, operationId) {
       const outcome = await lifecycle.submit({
@@ -797,7 +801,7 @@ export const createOpenCodeRuntimeFacade = (
         ...(req.model ? { model: req.model } : {}),
         ...(req.agent ? { agent: req.agent } : {}),
       }, operationId);
-      if (outcome.kind === "confirmed") admitTurn(req.sessionId);
+      if (outcome.kind === "confirmed") admitTurn(req.sessionId, req.model);
       return outcome;
     },
     completeSmallModel: (request) => completeSmallModelDirect(request),

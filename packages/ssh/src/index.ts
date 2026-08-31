@@ -38,15 +38,19 @@ import type {
 export interface SshExecResult { code: number; stdout: string; stderr: string }
 
 /** Bounded one-shot `ssh <args>` execution. Injectable for tests. */
-export type SshRunner = (args: string[], opts: { timeoutMs: number }) => Promise<SshExecResult>;
+export type SshRunner = (
+  args: string[],
+  opts: { timeoutMs: number; maxOutputBytes?: number },
+) => Promise<SshExecResult>;
 
 /** Long-lived `ssh <args>` child (remote process channel). Injectable. */
 export interface SshChild {
   onOutput(cb: (chunk: string) => void): Disposable;
   onExit(cb: (code: number | null) => void): Disposable;
+  write?(data: string): void;
   kill(): void;
 }
-export type SshSpawner = (args: string[]) => SshChild;
+export type SshSpawner = (args: string[], opts?: { interactive?: boolean }) => SshChild;
 
 export interface SshService {
   list(): SshConnectionDto[];
@@ -184,6 +188,7 @@ const classifyFailure = (result: SshExecResult): { state: SshConnectionState; me
 const defaultRunner: SshRunner = (args, opts) =>
   new Promise((resolve) => {
     const child = spawn("ssh", args, { stdio: ["ignore", "pipe", "pipe"] });
+    const maxBytes = opts.maxOutputBytes ?? 262_144;
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -191,7 +196,7 @@ const defaultRunner: SshRunner = (args, opts) =>
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ code, stdout: stdout.slice(0, 262_144), stderr: stderr.slice(0, 262_144) });
+      resolve({ code, stdout: stdout.slice(0, maxBytes), stderr: stderr.slice(0, maxBytes) });
     };
     const timer = setTimeout(() => {
       stderr += "\nssh command timed out";
@@ -204,8 +209,10 @@ const defaultRunner: SshRunner = (args, opts) =>
     child.on("exit", (code) => settle(code ?? -1));
   });
 
-const defaultSpawner: SshSpawner = (args) => {
-  const child = spawn("ssh", args, { stdio: ["ignore", "pipe", "pipe"] });
+const defaultSpawner: SshSpawner = (args, opts) => {
+  const child = spawn("ssh", args, {
+    stdio: [opts?.interactive ? "pipe" : "ignore", "pipe", "pipe"],
+  });
   const outputs = new Set<(chunk: string) => void>();
   const exits = new Set<(code: number | null) => void>();
   const onChunk = (chunk: Buffer) => {
@@ -224,6 +231,9 @@ const defaultSpawner: SshSpawner = (args) => {
     onExit(cb) {
       exits.add(cb);
       return { dispose: () => { exits.delete(cb); } };
+    },
+    write(data) {
+      try { child.stdin?.write(data); } catch { /* process exited */ }
     },
     kill() {
       if (!child.killed) child.kill("SIGTERM");
@@ -344,8 +354,16 @@ export function createSshService(options: SshServiceOptions): SshService {
     return status;
   };
 
-  const execOn = async (conn: StoredConnection, command: string, timeoutMs = execTimeoutMs): Promise<SshExecResult> =>
-    run([...dialArgs(conn), "--", destination(conn), command], { timeoutMs });
+  const execOn = async (
+    conn: StoredConnection,
+    command: string,
+    timeoutMs = execTimeoutMs,
+    maxOutputBytes?: number,
+  ): Promise<SshExecResult> =>
+    run([...dialArgs(conn), "--", destination(conn), command], {
+      timeoutMs,
+      ...(maxOutputBytes !== undefined ? { maxOutputBytes } : {}),
+    });
 
   const connect = async (id: string): Promise<SshConnectionStatusDto> => {
     const running = connecting.get(id);
@@ -373,9 +391,9 @@ export function createSshService(options: SshServiceOptions): SshService {
     }
   };
 
-  const exec = async (id: string, command: string, opts?: { timeoutMs?: number }): Promise<SshExecResult> => {
+  const exec = async (id: string, command: string, opts?: { timeoutMs?: number; maxOutputBytes?: number }): Promise<SshExecResult> => {
     const conn = must(id);
-    return execOn(conn, command, opts?.timeoutMs ?? execTimeoutMs);
+    return execOn(conn, command, opts?.timeoutMs ?? execTimeoutMs, opts?.maxOutputBytes);
   };
 
   const homeOf = async (id: string): Promise<string> => {
@@ -530,13 +548,18 @@ export function createSshService(options: SshServiceOptions): SshService {
       return {
         label: destination(conn),
         exec: (command, opts) => exec(id, command, opts),
-        async start(command) {
+        async start(command, opts) {
           await ensureConnected(id);
           const fresh = must(id);
-          const child = spawnChild([...dialArgs(fresh), "--", destination(fresh), command]);
+          const child = spawnChild([
+            ...dialArgs(fresh),
+            ...(opts?.interactive ? ["-tt"] : []),
+            "--", destination(fresh), command,
+          ], opts);
           return {
             onOutput: (cb) => child.onOutput(cb),
             onExit: (cb) => child.onExit(cb),
+            ...(child.write ? { write: (data: string) => child.write!(data) } : {}),
             kill: async () => child.kill(),
           };
         },

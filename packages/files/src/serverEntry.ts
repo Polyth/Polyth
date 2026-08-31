@@ -1,10 +1,11 @@
-import type { ProjectService, RouteHandler, SessionService } from "@polyth/contracts";
+import type { ProjectService, RemoteHost, RouteHandler, SessionService } from "@polyth/contracts";
 import {
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { createFileService, MAX_RAW_BYTES, type FileService } from "./index.ts";
+import { createRemoteFileService } from "./remote.ts";
 
 /** Attachment existence/size verification seam consumed by the session
  *  service (F2). Published so the composition root never imports this package. */
@@ -13,11 +14,25 @@ export interface AttachmentStatService {
   maxBytes: number;
 }
 
+interface SshTransportService {
+  host(connectionId: string): RemoteHost;
+}
+
 export function workspaceRoutes(deps: {
   projects: ProjectService;
   files: FileService;
   sessions: SessionService;
+  ssh?: SshTransportService;
 }): RouteHandler {
+  /** Remote projects read/write through the SSH transport; everything else
+   *  stays on the local filesystem implementation. */
+  const filesFor = async (projectId: string | null): Promise<FileService> => {
+    if (!deps.ssh || !projectId) return deps.files;
+    const project = await deps.projects.get(projectId);
+    if (project?.remote?.kind !== "ssh") return deps.files;
+    return createRemoteFileService(deps.ssh.host(project.remote.connectionId));
+  };
+
   const rootOf = async (
     projectId: string | null,
     sessionId?: string | null,
@@ -50,11 +65,13 @@ export function workspaceRoutes(deps: {
         input.sessionId ? String(input.sessionId) : undefined,
       );
     if (path === "/api/files/stat" && method === "GET") {
-      json(200, await deps.files.stat(await rootOfQuery(), query("path") ?? ""));
+      const fs = await filesFor(query("projectId"));
+      json(200, await fs.stat(await rootOfQuery(), query("path") ?? ""));
       return true;
     }
     if (path === "/api/files/raw" && method === "GET") {
-      const raw = await deps.files.readRaw(await rootOfQuery(), query("path") ?? "");
+      const fs = await filesFor(query("projectId"));
+      const raw = await fs.readRaw(await rootOfQuery(), query("path") ?? "");
       const inline = raw.mime.startsWith("image/")
         || raw.mime.startsWith("audio/")
         || raw.mime.startsWith("video/")
@@ -71,19 +88,22 @@ export function workspaceRoutes(deps: {
       return true;
     }
     if (path === "/api/files/tree" && method === "GET") {
-      json(200, await deps.files.tree(await rootOfQuery(), {
+      const fs = await filesFor(query("projectId"));
+      json(200, await fs.tree(await rootOfQuery(), {
         ...(query("path") ? { path: query("path")! } : {}),
         hidden: query("hidden") === "true",
       }));
       return true;
     }
     if (path === "/api/files/read" && method === "GET") {
-      json(200, await deps.files.read(await rootOfQuery(), query("path") ?? ""));
+      const fs = await filesFor(query("projectId"));
+      json(200, await fs.read(await rootOfQuery(), query("path") ?? ""));
       return true;
     }
     if (path === "/api/files/write" && method === "POST") {
       const input = await body();
-      const result = await deps.files.write(
+      const fs = await filesFor(String(input.projectId ?? ""));
+      const result = await fs.write(
         await rootOfBody(input),
         String(input.path ?? ""),
         String(input.content ?? ""),
@@ -98,7 +118,8 @@ export function workspaceRoutes(deps: {
     }
     if (path === "/api/files/upload" && method === "POST") {
       const input = await body();
-      await deps.files.writeBytes(
+      const fs = await filesFor(String(input.projectId ?? ""));
+      await fs.writeBytes(
         await rootOfBody(input),
         String(input.path ?? ""),
         Buffer.from(String(input.base64 ?? ""), "base64"),
@@ -108,19 +129,22 @@ export function workspaceRoutes(deps: {
     }
     if (path === "/api/files/mkdir" && method === "POST") {
       const input = await body();
-      await deps.files.mkdir(await rootOfBody(input), String(input.path ?? ""));
+      const fs = await filesFor(String(input.projectId ?? ""));
+      await fs.mkdir(await rootOfBody(input), String(input.path ?? ""));
       json(200, { ok: true });
       return true;
     }
     if (path === "/api/files/delete" && method === "POST") {
       const input = await body();
-      await deps.files.remove(await rootOfBody(input), String(input.path ?? ""));
+      const fs = await filesFor(String(input.projectId ?? ""));
+      await fs.remove(await rootOfBody(input), String(input.path ?? ""));
       json(200, { ok: true });
       return true;
     }
     if (path === "/api/files/rename" && method === "POST") {
       const input = await body();
-      await deps.files.rename(
+      const fs = await filesFor(String(input.projectId ?? ""));
+      await fs.rename(
         await rootOfBody(input),
         String(input.from ?? ""),
         String(input.to ?? ""),
@@ -129,7 +153,8 @@ export function workspaceRoutes(deps: {
       return true;
     }
     if (path === "/api/files/search" && method === "GET") {
-      json(200, await deps.files.searchScored(
+      const fs = await filesFor(query("projectId"));
+      json(200, await fs.searchScored(
         await rootOfQuery(),
         query("q") ?? "",
         {
@@ -164,6 +189,9 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         projects: host.projects,
         sessions: host.sessions,
         files,
+        ...(host.services.get(serverServiceKey<SshTransportService>("ssh"))
+          ? { ssh: host.services.get(serverServiceKey<SshTransportService>("ssh"))! }
+          : {}),
       });
     },
   };

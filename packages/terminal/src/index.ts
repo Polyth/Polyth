@@ -12,7 +12,13 @@ import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { basename } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import type { Disposable, TerminalCreateInput, TerminalInfo } from "@polyth/contracts";
+import type {
+  Disposable,
+  RemoteHost,
+  RemoteProcessHandle,
+  TerminalCreateInput,
+  TerminalInfo,
+} from "@polyth/contracts";
 
 // ------------------------------------------------------------- optional PTY
 
@@ -109,6 +115,7 @@ interface TermSession {
   /** Exactly one of these is set: real PTY or pipe-backed child. */
   pty: NodePty | null;
   proc: ChildProcess | null;
+  remote: RemoteProcessHandle | null;
   pid: number | undefined;
   cols: number;
   rows: number;
@@ -148,6 +155,18 @@ export interface TerminalRunResult {
 
 const defaultShell = (): string => process.env.SHELL || "/bin/sh";
 
+const shq = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
+
+/** The SSH transport allocates the actual pseudo-terminal; this command only
+ * places the remote shell in the selected project/session workspace. `stty`
+ * is best-effort (a host without it still gets a shell), and the user's own
+ * login shell is preferred over plain sh. */
+const remoteTerminalCommand = (cwd: string, cmd: string | undefined, cols: number, rows: number): string =>
+  `cd -- ${shq(cwd)} && { stty cols ${cols} rows ${rows} 2>/dev/null || true; } `
+    + `&& TERM=xterm-256color COLORTERM=truecolor exec "\${SHELL:-/bin/sh}" ${cmd ? `-lc ${shq(cmd)}` : "-i"}`;
+
+export type RemoteHostForProject = (projectId: string) => Promise<RemoteHost | undefined>;
+
 const toInfo = (s: TermSession): TerminalInfo => ({
   id: s.id, title: s.title, cwd: s.cwd, projectId: s.projectId,
   createdAt: s.createdAt, running: s.running,
@@ -158,6 +177,8 @@ export function createTerminalService(opts: {
   replayBytes?: number;
   forcePipe?: boolean;
   maxSessions?: number;
+  /** Resolve a project's execution host; absent means a local shell. */
+  remoteHostForProject?: RemoteHostForProject;
 } = {}): TerminalService {
   const sessions = new Map<string, TermSession>();
   const dataCbs = new Set<(id: string, data: string) => void>();
@@ -176,6 +197,7 @@ export function createTerminalService(opts: {
     }
     try { s.pty?.kill(signal); } catch { /* already gone */ }
     try { s.proc?.kill(signal); } catch { /* already gone */ }
+    if (s.remote) void s.remote.kill().catch(() => {});
   };
 
   const emitExit = (s: TermSession, exitCode: number | null) => {
@@ -209,7 +231,7 @@ export function createTerminalService(opts: {
 
       const s: TermSession = {
         id, projectId: input.projectId, cwd, title, cmd: input.cmd,
-        pty: null, proc: null, pid: undefined, cols, rows,
+        pty: null, proc: null, remote: null, pid: undefined, cols, rows,
         createdAt: Date.now(), running: true,
         replay: createReplayBuffer(replayBytes), decoder: new StringDecoder("utf8"),
       };
@@ -219,50 +241,72 @@ export function createTerminalService(opts: {
         for (const cb of dataCbs) cb(id, text);
       };
 
-      let spawned = false;
-      if (usePty && nodePty) {
-        try {
-          const shell = defaultShell();
-          const args = input.cmd ? ["-c", input.cmd] : ["-i"];
-          const pty = nodePty.spawn(shell, args, {
-            name: "xterm-256color", cols, rows, cwd, env,
-          });
-          pty.onData((data) => {
-            if (!s.running) return;
-            s.replay.push(Buffer.from(data, "utf8")); // byte-exact within the cap
-            emitText(data);
-          });
-          pty.onExit(({ exitCode }) => emitExit(s, typeof exitCode === "number" ? exitCode : null));
-          s.pty = pty;
-          s.pid = pty.pid;
-          spawned = true;
-        } catch {
-          spawned = false; // PTY allocation failed — fall back to pipes below
+      const remoteHost = await opts.remoteHostForProject?.(input.projectId);
+      if (remoteHost) {
+        const remote = await remoteHost.start(
+          remoteTerminalCommand(cwd, input.cmd, cols, rows),
+          { interactive: true },
+        );
+        if (!remote.write) {
+          await remote.kill().catch(() => {});
+          throw Object.assign(
+            new Error(`interactive terminal unavailable on ${remoteHost.label}`),
+            { code: "unsupported" },
+          );
         }
-      }
-
-      if (!spawned) {
-        // pipe fallback: export the grid so line tools wrap correctly; bash -i
-        // prints a harmless "cannot set terminal process group" warning that is
-        // forwarded to the client like any output
-        env.COLUMNS = String(cols);
-        env.LINES = String(rows);
-        const proc = input.cmd
-          ? spawn(input.cmd, { cwd, shell: true, env })
-          : spawn(defaultShell(), ["-i"], { cwd, env });
-        proc.on("error", () => emitExit(s, null));
-        proc.on("exit", (code) => emitExit(s, typeof code === "number" ? code : null));
-        const push = (chunk: Buffer) => {
+        s.remote = remote;
+        remote.onOutput((data) => {
           if (!s.running) return;
-          s.replay.push(chunk); // raw bytes, byte-exact within the cap
-          // StringDecoder holds split multi-byte sequences until they complete,
-          // so a chunk boundary can never corrupt live UTF-8 output (OC#1181)
-          emitText(s.decoder.write(chunk));
-        };
-        proc.stdout?.on("data", push);
-        proc.stderr?.on("data", push);
-        s.proc = proc;
-        s.pid = proc.pid;
+          s.replay.push(Buffer.from(data, "utf8"));
+          emitText(data);
+        });
+        remote.onExit((exitCode) => emitExit(s, exitCode));
+      } else {
+        let spawned = false;
+        if (usePty && nodePty) {
+          try {
+            const shell = defaultShell();
+            const args = input.cmd ? ["-c", input.cmd] : ["-i"];
+            const pty = nodePty.spawn(shell, args, {
+              name: "xterm-256color", cols, rows, cwd, env,
+            });
+            pty.onData((data) => {
+              if (!s.running) return;
+              s.replay.push(Buffer.from(data, "utf8")); // byte-exact within the cap
+              emitText(data);
+            });
+            pty.onExit(({ exitCode }) => emitExit(s, typeof exitCode === "number" ? exitCode : null));
+            s.pty = pty;
+            s.pid = pty.pid;
+            spawned = true;
+          } catch {
+            spawned = false; // PTY allocation failed — fall back to pipes below
+          }
+        }
+
+        if (!spawned) {
+          // pipe fallback: export the grid so line tools wrap correctly; bash -i
+          // prints a harmless "cannot set terminal process group" warning that is
+          // forwarded to the client like any output
+          env.COLUMNS = String(cols);
+          env.LINES = String(rows);
+          const proc = input.cmd
+            ? spawn(input.cmd, { cwd, shell: true, env })
+            : spawn(defaultShell(), ["-i"], { cwd, env });
+          proc.on("error", () => emitExit(s, null));
+          proc.on("exit", (code) => emitExit(s, typeof code === "number" ? code : null));
+          const push = (chunk: Buffer) => {
+            if (!s.running) return;
+            s.replay.push(chunk); // raw bytes, byte-exact within the cap
+            // StringDecoder holds split multi-byte sequences until they complete,
+            // so a chunk boundary can never corrupt live UTF-8 output (OC#1181)
+            emitText(s.decoder.write(chunk));
+          };
+          proc.stdout?.on("data", push);
+          proc.stderr?.on("data", push);
+          s.proc = proc;
+          s.pid = proc.pid;
+        }
       }
 
       sessions.set(id, s);
@@ -282,7 +326,10 @@ export function createTerminalService(opts: {
       const result = new Promise<TerminalRunResult>((resolve) => { resolveResult = resolve; });
       const dataSub = service.onData((id, data) => {
         if (id !== terminalId || settled) return;
-        output += data;
+        // PTY-backed channels (node-pty locally, ssh -tt remotely) translate
+        // \n to \r\n; plain results keep \n. Normalize CRLF so composer-shell
+        // output renders like any other tool result.
+        output += data.replace(/\r\n/g, "\n");
         if (Buffer.byteLength(output, "utf8") > maxOutputBytes) {
           truncated = true;
           // Retain a little extra by character first, then tighten by bytes.
@@ -322,6 +369,7 @@ export function createTerminalService(opts: {
       if (!s || !s.running) return;
       try {
         if (s.pty) s.pty.write(data);
+        else if (s.remote?.write) s.remote.write(data);
         else s.proc?.stdin?.write(data);
       } catch { /* process gone */ }
     },
@@ -336,6 +384,7 @@ export function createTerminalService(opts: {
         try { s.pty.resize(s.cols, s.rows); } catch { /* ignore */ }
         return;
       }
+      if (s.remote) return; // its initial remote PTY dimensions are set at spawn
       // pipe fallback: no real terminal size; SIGWINCH at least wakes the
       // shell (bash re-reads LINES/COLUMNS)
       try { killGroup(s, "SIGWINCH"); } catch { /* ignore */ }

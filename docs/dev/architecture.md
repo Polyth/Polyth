@@ -11,9 +11,18 @@ One-minute map for a new agent; everything after this section is the deep refere
 - **Truth lives in the event log.** `packages/session` stores append-only events in SQLite (WAL). Anything model-visible is appended before the UI sees it; `deriveMessages` rebuilds model history from the log (skipping `ignorable` events).
 - **Contracts first.** `packages/contracts` is the normative surface — mostly types (DTOs, `SessionEvent`, `UiSlot`) plus a few runtime exports (`cap`, `CAP`, `UI_SLOTS`, `isUiSlot`, `MODEL_VISIBLE_TYPES`). `packages/kernel` provides plugin scopes, capabilities, and slot contributions. Built-in feature services are wired directly at the composition root (`packages/server/src/index.ts`), not dynamically loaded; the kernel and the installed-plugin registry are the plugin seams.
 - **Extending the server:** add a feature package exposing a `RouteHandler` and register it at the composition root — never edit `packages/server/src/http.ts`.
-- **Extending the UI:** register into the typed slot registry (`apps/web/src/slots.ts`; slot names are the `UiSlot` union) — never edit `App.tsx` for a slot item.
-- **Feature packages** (one directory each under `packages/`): permissions, goals, files, git, commands, terminal, preview, multirun, fusion, walkthrough, schedule, knowledge, github, usage, browser, dictation, models, hotkeys, plugins.
-- **Conventions:** erasable TS on Node >= 22.18 (type stripping; earlier 22.x fails; no enums/namespaces/parameter properties), explicit `.ts` on local imports, `@polyth/*` workspace imports, `node --test` + `node:assert`. Full rules: `/AGENTS.md`. Feature workflow: `docs/dev/README.md`. Feature status: `docs/parity/polyth-parity.yaml`.
+- **Extending the UI:** feature UI lives in the feature package
+  (`packages/<feature>/widgets/`) and registers through `@polyth/web-sdk`
+  (`defineWebPackage` → `WebPackageHost`: slots, widgets, surfaces,
+  workspace surfaces, capabilities, settings, reducers). The host owns the
+  registries (`apps/web/src/slots.ts`, `widgets/catalog.ts`, `surfaces.ts`,
+  `workspace/surfaceRegistry.ts`, `capabilities.ts`, `settings/registry.ts`)
+  and renders contributions through `SlotHost`/surface hosts — never edit
+  `App.tsx`/`Main.tsx` for a feature. Full guide: `docs/dev/ui.md`.
+- **Feature packages** (one directory each under `packages/`): permissions, goals, files, git, commands, terminal, multirun, fusion, walkthrough, schedule, knowledge, github, usage, browser, dictation, models, hotkeys, plugins, ssh, secure-safe, home-assistant, task-trackers, workflow, example-feature.
+- **Conventions:** erasable TS on Node >= 22.14 (type stripping; no
+  enums/namespaces/parameter properties), explicit `.ts` on local imports,
+  `@polyth/*` workspace imports, `node --test` + `node:assert`. Full rules: `/AGENTS.md`. Feature workflow: `docs/dev/README.md`. Feature status: `docs/parity/polyth-parity.yaml`.
 
 ## Topology
 
@@ -60,11 +69,14 @@ packages/session (node:sqlite WAL: events + projections + queue/org/profiles)
 | `plugins` | Installed-plugin registry (install/enable/disable from dir sources, trust classes, contribution manifests). |
 | `server` | Composition root + everything HTTP/WS: see below. |
 
-`apps/web` is the only UI implementation: React 19, bundled by
-`apps/web/build.ts` (esbuild), served statically by the server with SPA
-fallback. `apps/desktop` and `apps/mobile` are platform shells around that
-canonical output; mobile never starts Node or OpenCode. See
-`docs/mobile/architecture.md`.
+`apps/web` is the host shell of the single React UI implementation: React 19,
+bundled by `apps/web/build.ts` (esbuild), served statically by the server with
+SPA fallback. Feature UI is bundled separately per package
+(`apps/web/buildPackages.ts` → `packages/<id>/dist/web/`, published via
+`/packages-manifest.json`) and registered at boot through the web-sdk host
+(`apps/web/src/packages/webEntries.ts` + `registry.ts`). `apps/desktop` and
+`apps/mobile` are platform shells around that canonical output; mobile never
+starts Node or OpenCode. See `docs/mobile/architecture.md`.
 
 ## Server internals (`packages/server/src`)
 
@@ -280,8 +292,22 @@ ignored by the web reducer (never crash).
   turn input sample for the context estimate) — pure and testable.
 - `sync.ts` — reconnect-safe WS client (see above).
 - `api.ts` — typed fetch wrappers over the REST surface.
-- `slots.ts` — client slot registry mirroring the `UiSlot` union; exposed as
-  `window.__polythSlots` for out-of-tree plugins.
+- `slots.ts` — client slot registry mirroring the `UiSlot` union; the
+  host-internal implementation behind `host.slots.register`. Also exposed as
+  `window.__polythSlots` for legacy out-of-tree plugins.
+- `packages/` — the web package loader: `webHost.ts` implements the
+  `WebPackageHost` from `@polyth/web-sdk` over the host registries,
+  `webEntries.ts` loads `/packages-manifest.json` and imports each package's
+  `widgets/index.tsx` entry, `registry.ts` (`bootPackages()`) installs/
+  uninstalls entries in sync with `/api/packages` enabled state, and
+  `reducers.ts` hosts client-side event reducers.
+- `widgets/` — widget system: `catalog.ts` (definitions + `registerWidget`/
+  `registerWidgetPlugin`), `widgetLayout.ts` (zones, placement, per-instance
+  config, `polyth.widgetLayout.<projectId>` localStorage persistence),
+  `WidgetCanvas.tsx` (the drag/resize canvas), `widgetLibrary.ts`,
+  `builtinWidgets.tsx`/`builtinMiniWidgets.tsx`/`capabilityWidgets.tsx`
+  (shell widgets), `areas.ts`/`builtinAreas.ts` (placement areas). Full
+  guide: `docs/dev/widgets.md`.
 - `components/` — views + panels. Notables: `Composer` (drafts, delivery modes, prompt
   token grammar from `composer/language.ts`, mic button via slot), `Timeline` +
   markdown pipeline (`markdown/` — fenced code, Mermaid, KaTeX, JSON tree, galleries,
@@ -384,22 +410,43 @@ user text.
   `/?session=<id>`, which `boot()` resolves and strips. Nothing in this path
   implements a remote relay or E2EE pairing.
 
-## UI slot model
+## UI extension model
 
 `UiSlot` (contracts) enumerates injection points: `app.nav`,
 `session.header.actions`, `session.list.badges`, `composer.leading`,
 `composer.trailing`, `contextRail.tabs`, `settings.pages`,
 `commandPalette.commands`, `workspace.main.tabs`, `workspace.right.tabs`,
 `session.timeline.before/after`, `session.message.actions`,
-`sidebar.project.actions`, `sidebar.session.actions`, `workStatus.sections`.
+`sidebar.project.actions`, `sidebar.session.actions`, `workStatus.sections`,
+the widget placement slots (`workspace.header/left/main/right/bottom/floating`,
+`widget.catalog`, `widget.settings`), and the fine-grained toolbar areas
+(`app.header.leading/center`, `workspace.rail`, `sidebar.toolbar`,
+`composer.meta/pending`, `session.footer`, `session.empty.widgets`,
+`project.create.options`).
 
-Installed server-side plugins declare `UiSlotItem` descriptors (slot + module key)
-in their manifests, and `PluginContext.contribute` is the kernel seam — but the
-production registry is wired with no slot sink and no client module bridge, so
-those descriptors are validated and stored, not rendered. Rendering happens only
-through the client registry (`apps/web/src/slots.ts`, exposed as
-`window.__polythSlots`), where built-in features register — extending a slot must
-never require editing `App.tsx`.
+Feature web UI registers through the **web-sdk host**
+(`@polyth/web-sdk`: `defineWebPackage` + `WebPackageHost` — slots, widgets,
+surfaces, workspace surfaces, capabilities, settings pages/items, reducers,
+store, navigation, ui, errors). The host implements that contract in
+`apps/web/src/packages/webHost.ts` over the client registries
+(`slots.ts`, `widgets/catalog.ts`, `surfaces.ts`,
+`workspace/surfaceRegistry.ts`, `capabilities.ts`, `settings/registry.ts`,
+`packages/reducers.ts`); `SlotHost` and the surface/canvas hosts render
+contributions with per-contribution error isolation and deterministic
+ordering. Workspace main-area modules are workspace surfaces
+(`workspace/surfaceRegistry.ts`, hosted by
+`components/workspace/WorkspaceHost.ts`); right-rail panels are rail surfaces
+(`surfaces.ts`, hosted by `ContextRail.tsx`), and `workspace.right.tabs`
+slot items bridge into the rail (`slotSurfaces`).
+
+Installed server-side plugins declare `UiSlotItem` descriptors (slot + module
+key) in their manifests, and `PluginContext.contribute` is the kernel seam —
+but the production registry is wired with no slot sink and no client module
+bridge, so those descriptors are validated and stored, not rendered. The
+rendered extension path for packages is the web-sdk seam above; the
+`window.__polythSlots`/`__polythWidgets`/`__polythSurfaces`/
+`__polythWorkspaceSurfaces`/`__polythCapabilities` globals remain for legacy
+out-of-tree browser scripts.
 
 ## Persistence layout (`POLYTH_DATA_DIR`, default `./data`)
 

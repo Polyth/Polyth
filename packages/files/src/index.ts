@@ -12,6 +12,10 @@ const MAX_RAW = 20 * 1024 * 1024;
 
 /** Shared binary cap: raw serving, uploads, and message attachments (F2). */
 export const MAX_RAW_BYTES = MAX_RAW;
+/** Text-read cap shared with the remote implementation (see remote.ts). */
+export const MAX_READ_BYTES = MAX_READ;
+/** NUL-scan length shared with the remote implementation (see remote.ts). */
+export const BINARY_SCAN_BYTES = BINARY_SCAN;
 
 export interface FileEntry {
   name: string;
@@ -301,7 +305,7 @@ const SEARCH_MAX_ENTRIES = 20_000;
 const SEARCH_TIME_BUDGET_MS = 400;
 
 /** Case/diacritic fold for matching ("Café" → "cafe"). */
-function fold(s: string): string {
+export function fold(s: string): string {
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
@@ -348,7 +352,8 @@ export function scorePath(relPath: string, query: string): { score: number; matc
   return { score: 0.2 + 0.2 * density, matches: [] };
 }
 
-function assertRelative(rel: string): void {
+/** Reject rel paths that could escape the project root (`..`, absolute). */
+export function assertRelative(rel: string): void {
   if (!rel || rel === ".") return;
   if (path.isAbsolute(rel) || rel.startsWith("/") || /^[A-Za-z]:[\\/]/.test(rel)) {
     throw new Error(`Path escapes project root: ${rel}`);
