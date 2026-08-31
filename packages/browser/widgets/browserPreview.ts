@@ -127,9 +127,28 @@ export function containedImageRect(
   };
 }
 
+/** Bounds of a width-fitted image: full element width, height from source aspect.
+ * The painted image may be taller than the stage and scroll vertically. */
+export function fittedWidthImageRect(
+  elementWidth: number,
+  sourceWidth: number,
+  sourceHeight: number,
+): ImageRect {
+  if (elementWidth <= 0 || sourceWidth <= 0 || sourceHeight <= 0) {
+    return { left: 0, top: 0, width: 0, height: 0 };
+  }
+  return {
+    left: 0,
+    top: 0,
+    width: elementWidth,
+    height: elementWidth * sourceHeight / sourceWidth,
+  };
+}
+
 /** Map pointer coordinates to viewport pixels for the active preview display mode.
  * For `actual`, the img is sized to viewport CSS pixels (not stretched to the stage);
- * pass the img client box — the fill rect is the full img element. */
+ * pass the img client box — the fill rect is the full img element.
+ * For `fit`, the img is width-fitted (aspect preserved); height may overflow the stage. */
 export function previewImageRect(
   mode: BrowserDisplayMode,
   elementWidth: number,
@@ -140,11 +159,11 @@ export function previewImageRect(
   if (mode === "entire") {
     return containedImageRect(elementWidth, elementHeight, sourceWidth, sourceHeight);
   }
+  if (mode === "fit") {
+    return fittedWidthImageRect(elementWidth, sourceWidth, sourceHeight);
+  }
   if (elementWidth <= 0 || elementHeight <= 0) {
     return { left: 0, top: 0, width: 0, height: 0 };
-  }
-  if (mode === "fit") {
-    return { left: 0, top: 0, width: elementWidth, height: elementHeight };
   }
   return { left: 0, top: 0, width: elementWidth, height: elementHeight };
 }
