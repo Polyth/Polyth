@@ -5,12 +5,11 @@ import {
 } from "react";
 import {
   getState, useStore, activateProject, openWorkspacePane, openWorktreeSessionDialog, setOverlay,
-  setSidebarOpen, setUiError, startNewSession,
+  openSettingsPage, setSidebarOpen, setUiError, startNewSession,
 } from "../store.ts";
 import {
   getSyncStatus, reconnectSync, refreshSessions, removeProject, renameProject, subscribeSyncStatus,
 } from "../init.ts";
-import { MOD } from "../format.ts";
 import { friendlyError } from "../settings.ts";
 import { Icon } from "../icons.tsx";
 import SessionList from "./sidebar/SessionList.tsx";
@@ -19,7 +18,6 @@ import { useShellMode } from "../responsiveShell.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
 import SlotHost from "./slots/SlotHost.ts";
 import { useSidebarExpanded } from "../sidebarPresentation.ts";
-import { useShiftArmed } from "../useShiftArmed.ts";
 import {
   applyManualProjectOrder, reorderManualProjects,
   setProjectOrder, setProjectSortMode,
@@ -93,7 +91,6 @@ export default function Sidebar() {
   const setSort = (mode: ProjectSortMode) => setProjectSortMode(mode);
   const projectOrder = useProjectOrder();
   const [connectionOpen, setConnectionOpen] = useState(false);
-  const shiftHeld = useShiftArmed();
   const [appearanceProjectId, setAppearanceProjectId] = useState<string | null>(null);
   const [attentionOnly, setAttentionOnly] = useState(false);
   const [pullDistance, setPullDistance] = useState(0);
@@ -510,7 +507,7 @@ export default function Sidebar() {
             />
           </div>
         )}
-        <div className="sidebar-service-bar">
+        <div className="sidebar-service-bar customize-zone">
           <div className="sidebar-search">
             <Icon.search />
             <input
@@ -568,6 +565,7 @@ export default function Sidebar() {
           <SlotHost
             slot="sidebar.toolbar"
             context={{ projectId: project?.id, query, attentionOnly, compact }}
+            customizable
           />
           <div className="sidebar-popover-anchor">
             <button
@@ -592,14 +590,12 @@ export default function Sidebar() {
               <Button size="sm" className="sidebar-reconnect" onClick={() => { reconnectSync(); setConnectionOpen(false); }}>{tr("sidebar.reconnect")}</Button>
             </Popover>
           </div>
-          {shiftHeld && (
-            <button
-              className="sidebar-service-btn"
-              aria-label={tr("common.settings")}
-              title={tr("sidebar.settingsValue", { MOD: MOD })}
-              onClick={() => setOverlay("settings")}
-            ><Icon.gear /></button>
-          )}
+          <button
+            className="sidebar-service-btn zone-customize-trigger zone-edit-button"
+            aria-label={tr("settingsview.customize")}
+            title={tr("settingsview.customize")}
+            onClick={() => openSettingsPage("widgets")}
+          ><Icon.sliders /></button>
         </div>
         <div
           ref={sideScrollRef}

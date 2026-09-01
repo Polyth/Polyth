@@ -47,8 +47,6 @@ import {
 import { areaPlacementOptions } from "./areaFit.ts";
 import "./builtinWidgets.tsx";
 import { tr } from "../i18n/index.ts";
-import { useShiftArmed } from "../useShiftArmed.ts";
-import { useShellMode } from "../responsiveShell.ts";
 import { getDragWidget, WIDGET_MIME } from "../dnd.ts";
 
 const GRID_GAP = 10;
@@ -480,13 +478,6 @@ export default function WidgetCanvas({
   const sessionId = useStore((state) => state.activeSessionId);
   const [menuOpen, setMenuOpen] = useState(false);
   useEscape(menuOpen, () => setMenuOpen(false));
-  // Shift-key customization mode: on desktop the add/remove trigger stays
-  // hidden until Shift is held over the canvas; compact shells keep it
-  // persistent (there is no modifier key to hold on touch).
-  const shiftArmed = useShiftArmed();
-  const wide = useShellMode() === "wide";
-  const customizeVisible = editing || !wide || shiftArmed || menuOpen;
-
   useEffect(() => {
     ensureWidgets(canvasWidgets);
   }, [canvasWidgets]);
@@ -505,7 +496,7 @@ export default function WidgetCanvas({
   }, [layout]);
 
   return (
-    <div className="widget-workspace">
+    <div className="widget-workspace customize-zone">
       <div className="widget-canvas-grid" data-widget-surface="workspace-canvas"
         onDragOver={(event) => {
           if (event.dataTransfer.types.includes(WIDGET_MIME)) event.preventDefault();
@@ -536,22 +527,21 @@ export default function WidgetCanvas({
         <SlotHost
           slot="workspace.canvas"
           context={{ editing: true, visibleWidgetIds: cards.map((card) => card.instanceId) }}
+          customizable
         />
       </div>
       {/* Shift-key customization mode: the customize trigger is the canvas's
           LAST item; the menu applies add/remove instantly. */}
-      {customizeVisible && (
-        <Button
-          className="widget-menu-trigger"
-          size="sm"
-          iconStart={AddIcon}
-          aria-label={tr("widgets.widgetcanvas.addWidgets")}
-          aria-expanded={menuOpen}
-          onClick={() => setMenuOpen((open) => !open)}
-        >
-          {tr("widgets.widgetcanvas.widgets")}
-        </Button>
-      )}
+      <Button
+        className={`widget-menu-trigger zone-customize-trigger${editing || menuOpen ? " force-visible" : ""}`}
+        size="sm"
+        iconStart={AddIcon}
+        aria-label={tr("widgets.widgetcanvas.addWidgets")}
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen((open) => !open)}
+      >
+        {tr("widgets.widgetcanvas.widgets")}
+      </Button>
       {menuOpen && <WidgetMenu widgets={canvasWidgets} onClose={() => setMenuOpen(false)} />}
     </div>
   );

@@ -82,6 +82,15 @@ export function resolvePlacements(
   return resolved;
 }
 
+export function moveCapabilityBefore(
+  ordered: readonly string[], draggedId: string, targetId: string,
+): string[] {
+  if (draggedId === targetId || !ordered.includes(targetId)) return [...ordered];
+  const next = ordered.filter((id) => id !== draggedId);
+  next.splice(next.indexOf(targetId), 0, draggedId);
+  return next;
+}
+
 function read(projectId: string | null): CapabilityLayoutRecord {
   if (projectId === null) return { ...EMPTY_LAYOUT, placements: {} };
   try {
@@ -133,6 +142,19 @@ export function setPlacementOverride(id: string, placement: PlacementOverride | 
     placements[id] = placement;
   } else {
     return;
+  }
+  state = { version: 1, placements };
+  write(activeProjectId, state);
+  emit();
+}
+
+/** Persist one complete visual order. Items may come from another tier, which
+ * makes dropping between the top and right rails a move rather than a copy. */
+export function setCapabilityTierOrder(tier: CapabilityTier, ids: readonly string[]): void {
+  const placements = { ...state.placements };
+  for (const [rank, id] of [...new Set(ids)].entries()) {
+    if (!(id in placements) && Object.keys(placements).length >= MAX_PLACEMENT_OVERRIDES) break;
+    placements[id] = { tier, rank };
   }
   state = { version: 1, placements };
   write(activeProjectId, state);

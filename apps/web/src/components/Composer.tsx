@@ -35,6 +35,7 @@ import { loadDraft, saveDraft, syncDraftToServer, flushDraftToServer, type Autoc
 import { canApplyNextAction, nextActionInsertMode, type NextActionRequest } from "../nextAction.ts";
 import { latestCompletedExchange } from "@polyth/session/next-action";
 import SlotHost from "./slots/SlotHost.ts";
+import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import { dragKind, dropIntoSession } from "../dnd.ts";
 import {
   addAttachment, attachUpload, removeAttachment, takeAttachments, usePendingAttachments,
@@ -1542,29 +1543,32 @@ export default function Composer({
             attachFiles(files);
           }}
         />
-        <ComposerAddMenu
-          hasProject={!!activeProjectId}
-          hasSession={!!session?.id}
-          goalsEnabled
-          draftText={text}
-          commands={commandCatalog}
-          snippets={snippetCatalog}
-          direction="up"
-          onUpload={openAttachmentPicker}
-          onInsertMention={menuMention}
-          onInsertCommand={menuCommand}
-          onInsertSnippet={menuSnippet}
-          onEnterShell={menuShell}
-          onAttachGoal={toggleGoal}
-          attachGithub={attachGithub}
-        />
-        {/* Extensions (icon actions) lead the rail; the config cluster
-            (model · effort · agent) is right-anchored beside Send. */}
-        <span className="composer-extensions composer-mobile-extensions">
-          <SlotHost slot="composer.leading" context={slotContext} />
-          <SlotHost slot="composer.trailing" context={slotContext} />
+        <span className="composer-leading-zone customize-zone">
+          <ComposerAddMenu
+            hasProject={!!activeProjectId}
+            hasSession={!!session?.id}
+            goalsEnabled
+            draftText={text}
+            commands={commandCatalog}
+            snippets={snippetCatalog}
+            direction="up"
+            onUpload={openAttachmentPicker}
+            onInsertMention={menuMention}
+            onInsertCommand={menuCommand}
+            onInsertSnippet={menuSnippet}
+            onEnterShell={menuShell}
+            onAttachGoal={toggleGoal}
+            attachGithub={attachGithub}
+          />
+          {/* Extensions (icon actions) lead the rail; the config cluster
+              (model · effort · agent) is right-anchored beside Send. */}
+          <span className="composer-extensions composer-mobile-extensions">
+            <SlotHost slot="composer.leading" context={slotContext} customizable />
+            <SlotHost slot="composer.trailing" context={slotContext} customizable />
+          </span>
+          <CustomizeZoneButton />
         </span>
-        <div className="composer-actions">
+        <div className="composer-actions customize-zone">
           {(canGenerateNextAction || suggestionBusy) && (
             <Tooltip content={tr("composer.generateNextAction")}>
               <IconButton
@@ -1663,6 +1667,7 @@ export default function Composer({
               </button>
             )}
           </span>
+          <CustomizeZoneButton />
         </div>
       </div>
       {focusMode && (

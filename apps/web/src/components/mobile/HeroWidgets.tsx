@@ -5,6 +5,7 @@ import { useSyncExternalStore, type ReactNode } from "react";
 import Sheet, { SheetRow } from "./Sheet.tsx";
 import { Icon } from "../../icons.tsx";
 import { tr } from "../../i18n/index.ts";
+import { useCustomizeActive } from "../../useShiftArmed.ts";
 
 export type HeroWidgetId = "starters" | "recent";
 
@@ -14,6 +15,7 @@ export interface HeroWidgetPrefs {
 }
 
 const KEY = "polyth.heroWidgets.v1";
+const HERO_WIDGET_MIME = "application/x-polyth-hero-widget";
 const DEFAULTS: HeroWidgetPrefs = { order: ["starters", "recent"], hidden: [] };
 const ids: HeroWidgetId[] = ["starters", "recent"];
 let prefs = read();
@@ -53,8 +55,30 @@ export function useHeroWidgetPrefs(): HeroWidgetPrefs {
 /** Frame a slot contribution; hidden widgets render nothing, order is CSS. */
 export function HeroWidget({ id, children }: { id: HeroWidgetId; children: ReactNode }) {
   const value = useHeroWidgetPrefs();
+  const customizeActive = useCustomizeActive();
   if (value.hidden.includes(id)) return null;
-  return <section className={`hero-widget hero-widget-${id}`} style={{ order: value.order.indexOf(id) }}>{children}</section>;
+  return (
+    <section
+      className={`hero-widget hero-widget-${id}`}
+      style={{ order: value.order.indexOf(id) }}
+      draggable={customizeActive}
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData(HERO_WIDGET_MIME, id);
+      }}
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes(HERO_WIDGET_MIME)) event.preventDefault();
+      }}
+      onDrop={(event) => {
+        const dragged = event.dataTransfer.getData(HERO_WIDGET_MIME) as HeroWidgetId;
+        if (!ids.includes(dragged) || dragged === id) return;
+        event.preventDefault();
+        const order = value.order.filter((item) => item !== dragged);
+        order.splice(order.indexOf(id), 0, dragged);
+        commit({ ...value, order });
+      }}
+    >{children}</section>
+  );
 }
 
 export function HeroWidgetSettings({ onClose }: { onClose: () => void }) {

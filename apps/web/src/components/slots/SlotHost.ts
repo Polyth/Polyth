@@ -20,6 +20,7 @@ import {
   widgetDefinitionId,
   type WidgetLayout,
 } from "../../widgets/widgetLayout.ts";
+import { useCustomizeActive } from "../../useShiftArmed.ts";
 
 /** Re-render whenever any slot contribution registers, replaces, or disposes. */
 export function useSlotVersion(): number {
@@ -116,7 +117,7 @@ export function placedWidgetItems(
         {
           className: widget.kind === "mini-widget" ? "placed-mini-widget" : "placed-slot-widget",
           "data-widget-id": instanceId,
-          ...(widget.kind === "mini-widget" ? {
+          ...(widget.kind === "mini-widget" && hostContext.editing === true ? {
             draggable: true,
             onDragStart: (event: DragEvent) => {
               if (event.dataTransfer) setDragWidget(event.dataTransfer, instanceId);
@@ -162,13 +163,17 @@ export interface SlotHostProps {
   slot: UiSlot;
   /** Host-owned bounded context passed to every contribution. */
   context?: SlotContext;
+  /** Enables Shift/edit-mode drag reordering for placed mini-widgets. */
+  customizable?: boolean;
 }
 
-export default function SlotHost({ slot, context = {} }: SlotHostProps): ReactNode {
+export default function SlotHost({ slot, context = {}, customizable = false }: SlotHostProps): ReactNode {
   useSlotVersion();
   const widgets = useWidgetCatalog();
   const layout = useWidgetLayout();
-  const children = placeableSlotHostChildren(slot, context, widgets, layout);
+  const customizeActive = useCustomizeActive(customizable);
+  const hostContext = customizable ? { ...context, editing: customizeActive } : context;
+  const children = placeableSlotHostChildren(slot, hostContext, widgets, layout);
   if (children.length === 0) return null;
   return createElement(Fragment, null, children);
 }

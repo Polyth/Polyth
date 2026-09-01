@@ -14,7 +14,7 @@
 // polyth.workspacePane.v1.<projectId>.
 import {
   useEffect, useLayoutEffect, useRef, useState,
-  type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent,
+  type CSSProperties, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent,
 } from "react";
 import { formatCombo } from "@polyth/hotkeys";
 import SlotHost, { useSlotVersion } from "./slots/SlotHost.ts";
@@ -38,14 +38,15 @@ import { getWorkspacePanePrefs, setPanePreferredWidth } from "../workspace/paneP
 import { chatDockViability, dockGuardTargets } from "../workspace/dockGuard.ts";
 import { PaneVisibilityContext } from "../workspace/paneVisibility.ts";
 import "./railSurfaces.tsx";
-import { setPlacementOverride } from "../capabilityLayout.ts";
+import { moveCapabilityBefore, setCapabilityTierOrder, setPlacementOverride } from "../capabilityLayout.ts";
 import { tr } from "../i18n/index.ts";
 import { MOD } from "../format.ts";
 import { useKeymap } from "../../../../packages/hotkeys/widgets/hotkeys.ts";
 import { railIconFor } from "../railIcons.ts";
 import { Icon } from "../icons.tsx";
 import { Menu, type MenuEntry } from "./ui/index.ts";
-import { useShiftArmed } from "../useShiftArmed.ts";
+import { useCustomizeActive } from "../useShiftArmed.ts";
+import { CAPABILITY_MIME, getDragCapability, setDragCapability } from "../dnd.ts";
 
 const NO_EVENTS: never[] = [];
 /** Fallback separator chrome before the real element is measured. */
@@ -250,7 +251,7 @@ export default function ContextRail() {
   // removes capability panels instantly (checkbox entries keep the menu
   // open), by moving the capability between the `more` and `technical`
   // tiers of the per-project placement layout.
-  const shiftArmed = useShiftArmed();
+  const customizeActive = useCustomizeActive();
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const railIds = new Set(railButtons.map((button) => button.id));
   const rankAfter = (tier: "more" | "technical") =>
@@ -278,6 +279,17 @@ export default function ContextRail() {
         },
       };
     });
+  const capabilityIds = new Set(resolved.map((capability) => capability.descriptor.id));
+  const dropRailButton = (event: ReactDragEvent<HTMLButtonElement>, targetId: string) => {
+    const draggedId = getDragCapability(event.dataTransfer);
+    if (!draggedId || !capabilityIds.has(targetId)) return;
+    event.preventDefault();
+    setCapabilityTierOrder("more", moveCapabilityBefore(
+      railButtons.map((button) => button.id).filter((id) => capabilityIds.has(id)),
+      draggedId,
+      targetId,
+    ));
+  };
   // Keep-alive: panels stay mounted once visited so their state survives
   // switching surfaces; surfaces that lose content-driven visibility unmount.
   const [visited, setVisited] = useState<string[]>([]);
@@ -685,7 +697,7 @@ export default function ContextRail() {
         </div>
         )}
         {!compact && (
-          <div className="rail-icon-col plugin-strip" aria-label={tr("contextrail.workspacePanels")}>
+          <div className="rail-icon-col plugin-strip customize-zone" aria-label={tr("contextrail.workspacePanels")}>
             {railButtons.map((s) => (
             <button
               key={s.id}
@@ -693,6 +705,15 @@ export default function ContextRail() {
               title={s.title}
               aria-label={s.title}
               aria-pressed={s.active}
+              draggable={customizeActive && capabilityIds.has(s.id)}
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = "move";
+                setDragCapability(event.dataTransfer, s.id);
+              }}
+              onDragOver={(event) => {
+                if (customizeActive && event.dataTransfer.types.includes(CAPABILITY_MIME)) event.preventDefault();
+              }}
+              onDrop={(event) => dropRailButton(event, s.id)}
               {...(s.presentation ? { "data-pane-launcher": s.id } : {})}
               onClick={s.activate}
             >
@@ -702,8 +723,8 @@ export default function ContextRail() {
             ))}
             {/* Widget-areas (WA3): widgets placed into the "Right rail" area
                 render below the built-in tier launchers. */}
-            <SlotHost slot="workspace.rail" context={{ editing: false }} />
-            {(shiftArmed || customizeOpen) && (
+            <SlotHost slot="workspace.rail" context={{ editing: false }} customizable />
+            {(
               <Menu
                 label={tr("settingsview.customize")}
                 align="end"
@@ -714,7 +735,7 @@ export default function ContextRail() {
                 {(trigger) => (
                   <button
                     {...trigger}
-                    className="rail-icon strip-btn rail-customize"
+                    className="rail-icon strip-btn rail-customize zone-customize-trigger"
                     title={tr("settingsview.customize")}
                     aria-label={tr("settingsview.customize")}
                   ><Icon.sliders /></button>

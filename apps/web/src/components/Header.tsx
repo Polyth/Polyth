@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import { formatCombo } from "@polyth/hotkeys";
 import {
   closeWorkspacePane, getState, setActiveView, useActiveModel, useStore,
@@ -28,6 +28,10 @@ import { tr } from "../i18n/index.ts";
 import { useKeymap } from "@polyth/hotkeys/widgets";
 import { listSurfaces } from "../surfaces.ts";
 import { getWorkspaceSurface } from "../workspace/surfaceRegistry.ts";
+import { getDragCapability, setDragCapability, CAPABILITY_MIME } from "../dnd.ts";
+import { moveCapabilityBefore, setCapabilityTierOrder } from "../capabilityLayout.ts";
+import { setCustomizeMode, useCustomizeActive, useCustomizeMode } from "../useShiftArmed.ts";
+import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -99,6 +103,7 @@ function CapabilityNav() {
   const resolved = useResolvedCapabilities();
   const ui = useUiSettings();
   const keymap = useKeymap();
+  const customizeActive = useCustomizeActive();
   const view = useStore((s) => s.activeView);
   const rail = useStore((s) => s.railPlugin);
   const paneFullscreen = useStore((s) => s.paneFullscreen);
@@ -143,10 +148,18 @@ function CapabilityNav() {
   const terminalLabel = tr("terminalview.openTerminalShortcut", {
     shortcut: formatCombo(keymap.viewTerminal, MOD === "⌘"),
   });
+  const dropBefore = (event: DragEvent<HTMLButtonElement>, targetId: string) => {
+    const draggedId = getDragCapability(event.dataTransfer);
+    if (!draggedId) return;
+    event.preventDefault();
+    setCapabilityTierOrder("primary", moveCapabilityBefore(
+      topRail.map((capability) => capability.descriptor.id), draggedId, targetId,
+    ));
+  };
 
   return (
     <nav
-      className={`view-switcher top-rail-${ui.topRailAlignment}`}
+      className={`view-switcher top-rail-${ui.topRailAlignment} customize-zone`}
       aria-label={ui.topRailAlignment === "left" ? tr("header.workspaceToolsLeftOfCenter") : tr("header.workspaceToolsCentered")}
     >
       <div className="view-switcher-pill">
@@ -160,6 +173,15 @@ function CapabilityNav() {
               title={label}
               aria-label={label}
               aria-pressed={isActive(c)}
+              draggable={customizeActive}
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = "move";
+                setDragCapability(event.dataTransfer, c.descriptor.id);
+              }}
+              onDragOver={(event) => {
+                if (event.dataTransfer.types.includes(CAPABILITY_MIME)) event.preventDefault();
+              }}
+              onDrop={(event) => dropBefore(event, c.descriptor.id)}
               onClick={() => terminalAction ? toggleWorkspacePane("terminal") : c.descriptor.open()}
             >
               {capabilityIcon(c.descriptor.id)}
@@ -168,8 +190,9 @@ function CapabilityNav() {
         })}
         {/* Widget-areas (WA3): widgets placed into the "Top toolbar" area
             render alongside the built-in tier rail. */}
-        <SlotHost slot="app.header.center" context={{ editing: false }} />
+        <SlotHost slot="app.header.center" context={{ editing: false }} customizable />
       </div>
+      <CustomizeZoneButton />
     </nav>
   );
 }
@@ -316,6 +339,7 @@ export default function Header() {
   const view = useStore((s) => s.activeView);
   const workspaceMode = useWorkspaceMode();
   const [githubUser, setGithubUser] = useState<GithubStatusDto["user"]>(null);
+  const customizeMode = useCustomizeMode();
 
   const mode = useShellMode();
   const compact = mode !== "wide";
@@ -377,7 +401,7 @@ export default function Header() {
           </button>
         )}
         {(!compact || !chatSurface) && (
-          <div className="workspace-mode-switch" role="group" aria-label={tr("header.workspaceView")}>
+          <div className="workspace-mode-switch customize-zone" role="group" aria-label={tr("header.workspaceView")}>
             <button
               className={workspaceMode === "chat" ? "active" : ""}
               aria-pressed={workspaceMode === "chat"}
@@ -388,6 +412,11 @@ export default function Header() {
               aria-pressed={workspaceMode !== "chat"}
               onClick={() => switchWorkspaceMode("widgets")}
             >{tr("header.canvas")}</button>
+            <button
+              className={customizeMode ? "active" : ""}
+              aria-pressed={customizeMode}
+              onClick={() => setCustomizeMode(!customizeMode)}
+            >{customizeMode ? tr("common.done") : tr("common.edit")}</button>
           </div>
         )}
         {workspaceMode === "chat" && !compact && <CapabilityNav />}

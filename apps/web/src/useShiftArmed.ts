@@ -5,10 +5,24 @@ import { useSyncExternalStore } from "react";
 // is tracked at the window before any hover begins, so pressing Shift and
 // then pointing at a row still arms it; keyup or window blur disarms.
 let shiftKeyDown = false;
+let customizeMode = false;
 let listening = false;
 const subscribers = new Set<() => void>();
 
 const snapshot = (): boolean => shiftKeyDown;
+const customizeSnapshot = (): boolean => customizeMode;
+const activeSnapshot = (): boolean => shiftKeyDown || customizeMode;
+
+export function shouldArmShift(key: string, editingText: boolean): boolean {
+  return key === "Shift" && !editingText;
+}
+
+function isTextEditing(target: EventTarget | null): boolean {
+  const element = target instanceof Element ? target : document.activeElement;
+  return element instanceof Element && element.closest(
+    "input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox'], [data-composer-input]",
+  ) !== null;
+}
 
 // Chrome retroactively marks the pointer-focused element :focus-visible on
 // ANY keydown — including a bare Shift — which painted a stark focus ring
@@ -29,12 +43,22 @@ function setKeyDown(down: boolean): void {
   for (const notify of [...subscribers]) notify();
 }
 
+export function setCustomizeMode(on: boolean): void {
+  if (customizeMode === on) return;
+  customizeMode = on;
+  if (typeof document !== "undefined") {
+    if (on) document.body.dataset.uiEditing = "true";
+    else delete document.body.dataset.uiEditing;
+  }
+  for (const notify of [...subscribers]) notify();
+}
+
 function ensureListeners(): void {
   if (listening || typeof window === "undefined") return;
   listening = true;
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Shift") setKeyDown(true);
-    else setBodyShiftFlag(false);
+    setKeyDown(shouldArmShift(event.key, isTextEditing(event.target)));
+    if (event.key === "Escape" && customizeMode) setCustomizeMode(false);
   });
   window.addEventListener("keyup", (event) => {
     if (event.key === "Shift") setKeyDown(false);
@@ -52,6 +76,34 @@ export function useShiftArmed(): boolean {
       return () => { subscribers.delete(onChange); };
     },
     snapshot,
+    () => false,
+  );
+}
+
+
+/** Explicit edit mode used by the persistent Edit/Done control. */
+export function useCustomizeMode(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      ensureListeners();
+      subscribers.add(onChange);
+      return () => { subscribers.delete(onChange); };
+    },
+    customizeSnapshot,
+    () => false,
+  );
+}
+
+/** Shift quick-edit or the explicit edit mode. */
+export function useCustomizeActive(enabled = true): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      if (!enabled) return () => {};
+      ensureListeners();
+      subscribers.add(onChange);
+      return () => { subscribers.delete(onChange); };
+    },
+    enabled ? activeSnapshot : () => false,
     () => false,
   );
 }
