@@ -1,181 +1,302 @@
-/* Package-owned home-assistant web styles. */
-.ha-empty {
-margin: auto; padding: 18px; color: var(--muted); font-size: var(--font-meta); text-align: center;
-}
-.ha-connection {
-min-height: 100%; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3);
-}
-.ha-connection > code {
-overflow: hidden; color: var(--muted); font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap;
-}
-.ha-connection > .ui-btn,
-.ha-entity > .ui-btn {
-align-self: flex-start; margin-top: auto;
-}
-.ha-status {
-display: flex; align-items: center; gap: var(--space-2);
-}
-.ha-status > i,
-.ha-mini > i {
-flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--faint); box-shadow: 0 0 0 3px color-mix(in srgb, var(--faint) 15%, transparent);
-}
-.ha-status-connected > i {
-background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 16%, transparent);
-}
-.ha-status-unavailable > i {
-background: var(--red); box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 15%, transparent);
-}
-.ha-status > div {
-min-width: 0; display: flex; flex-direction: column;
-}
-.ha-status strong {
-font-size: var(--font-meta);
-}
-.ha-status span {
-overflow: hidden; color: var(--muted); font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap;
-}
-.ha-entity {
-min-height: 100%; display: flex; flex-direction: column; gap: var(--space-2); padding: 12px;
-}
-.ha-entity-primary {
-display: flex; flex-direction: column; gap: 2px; padding: var(--space-2); border: 1px solid var(--border-soft); border-radius: var(--radius-card); background: var(--sunken);
-}
-.ha-entity-primary > span {
-color: var(--muted); font-size: var(--font-meta);
-}
-.ha-entity-primary > strong {
-font-size: 20px;
-}
-.ha-entity-primary > code {
-color: var(--faint); font-size: var(--font-meta);
-}
-.ha-entity dl {
-display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-1); margin: 0;
-}
-.ha-entity dl > div {
-min-width: 0; padding: var(--space-2); border-bottom: 1px solid var(--border-soft);
-}
-.ha-entity dt {
-overflow: hidden; color: var(--muted); font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap;
-}
-.ha-entity dd {
-overflow: hidden; margin: 2px 0 0; font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap;
-}
-.ha-light {
-min-height: 100%; padding: var(--space-2);
-}
-.ha-light > button {
-width: 100%; height: 100%; min-height: 85px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; padding: 12px; border-color: var(--border-soft); background: var(--sunken);
-}
-.ha-light > button > span {
-color: var(--faint); font-size: 22px;
-}
-.ha-light.is-on > button {
-border-color: color-mix(in srgb, var(--amber) 50%, var(--border)); background: var(--amber-wash);
-}
-.ha-light.is-on > button > span {
-color: var(--amber-on-wash); text-shadow: 0 0 10px color-mix(in srgb, var(--amber) 50%, transparent);
-}
-.ha-light strong {
-font-size: var(--font-meta);
-}
-.ha-light small {
-color: var(--muted); font-size: var(--font-meta);
-}
-.ha-climate {
-min-height: 100%; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3);
-}
-.ha-climate > section {
-display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); border: 1px solid var(--border-soft); border-radius: var(--radius-card); background: var(--sunken);
-}
-.ha-climate > section > div:first-child {
-min-width: 0; display: flex; flex: 1; flex-direction: column;
-}
-.ha-climate > section span {
-color: var(--muted); font-size: var(--font-meta);
-}
-.ha-climate > section strong {
-font-size: 19px;
-}
-.ha-temperature {
-display: flex; align-items: center; gap: var(--space-1);
-}
-.ha-temperature .ui-icon-btn {
-flex: none;
-}
-.ha-temperature > span {
-display: flex; flex-direction: column; align-items: center;
-}
-.ha-temperature b {
-color: var(--text); font-size: var(--font-meta);
-}
-.ha-sensors {
-display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2);
-}
-.ha-sensors > div {
-min-width: 0; display: flex; flex-direction: column; padding: 8px; border: 1px solid var(--border-soft); border-radius: var(--radius-control);
-}
-.ha-sensors span {
-overflow: hidden; color: var(--muted); font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap;
-}
-.ha-sensors strong {
-margin-top: 2px; font-size: var(--font-meta);
-}
-.ha-error,
-.ha-settings-message {
-margin: 0; color: var(--red); font-size: var(--font-meta);
-}
-.ha-loading {
-color: var(--muted); font-size: var(--font-meta);
-}
-.ha-settings {
-display: flex; flex-direction: column; gap: 8px;
-}
-.ha-settings > label {
-display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: var(--font-meta);
-}
-.ha-settings > label .ui-input {
-width: 100%; min-width: 0;
-}
-.ha-settings > small {
-color: var(--faint); font-size: var(--font-meta); line-height: 1.4;
-}
-.ha-settings > .ui-btn {
-align-self: flex-start;
-}
-.placed-mini-widget:has(.ha-mini),
-.placed-mini-widget:has(.ha-mini-light) {
-display: inline-flex;
-}
-.ha-mini i {
-width: 7px; height: 7px;
-}
-.ha-mini-light.is-on {
-border-color: color-mix(in srgb, var(--amber) 48%, var(--border)); color: var(--amber-on-wash); background: var(--amber-wash);
-}
 :is(.ha-connection, .ha-entity, .ha-light, .ha-climate, .ha-settings) {
-min-width: 0;
+  container: home-assistant-widget / inline-size;
+  min-width: 0;
   max-width: 100%;
 }
-:is(.ha-connection, .ha-entity) > code,
-.ha-settings-message,
-.ha-error {
-overflow-wrap: anywhere;
+
+.ha-empty {
+  margin: auto;
+  padding: var(--space-4);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  text-align: center;
 }
-@container feature-panel (max-width: 700px) {
-.ha-settings > .ui-btn {
-width: 100%; align-self: stretch;
+
+.ha-connection,
+.ha-entity,
+.ha-climate {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.ha-connection > code,
+.ha-status span,
+.ha-entity :is(dt, dd),
+.ha-sensors :is(span, strong) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ha-connection > code {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.ha-connection > .ui-btn,
+.ha-entity > .ui-btn {
+  align-self: flex-start;
+  margin-top: auto;
+}
+
+.ha-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ha-status > i,
+.ha-mini > i {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.ha-status-connected > i {
+  background: var(--green);
+}
+
+.ha-status-unavailable > i {
+  background: var(--red);
+}
+
+.ha-status > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.ha-status strong,
+.ha-status span,
+.ha-entity-primary > span,
+.ha-entity-primary > code,
+.ha-entity :is(dt, dd),
+.ha-light :is(strong, small),
+.ha-climate > section span,
+.ha-temperature b,
+.ha-sensors :is(span, strong),
+.ha-error,
+.ha-loading,
+.ha-settings-message {
+  font-size: var(--font-meta);
+}
+
+.ha-status span,
+.ha-entity-primary > span,
+.ha-entity dt,
+.ha-light small,
+.ha-climate > section span,
+.ha-sensors span,
+.ha-loading {
+  color: var(--muted);
+}
+
+.ha-entity-primary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-block: var(--space-2);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.ha-entity-primary > strong {
+  font-size: var(--font-heading);
+}
+
+.ha-entity-primary > code {
+  color: var(--faint);
+}
+
+.ha-entity dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.ha-entity dl > div {
+  min-width: 0;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.ha-entity dd {
+  margin: var(--space-1) 0 0;
+}
+
+.ha-light {
+  min-height: 100%;
+  padding: var(--space-2);
+}
+
+.ha-light > button {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 85px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-card);
+  background: var(--panel);
+  color: var(--text);
+}
+
+.ha-light > button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.ha-light > button > span {
+  color: var(--faint);
+  font-size: var(--font-heading);
+}
+
+.ha-light.is-on > button {
+  border-color: var(--amber);
+  background: var(--amber-wash);
+}
+
+.ha-light.is-on > button > span {
+  color: var(--amber-on-wash);
 }
 
 .ha-climate > section {
-align-items: stretch; flex-direction: column;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-block: var(--space-2);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.ha-climate > section > div:first-child {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.ha-climate > section strong {
+  font-size: var(--font-heading);
 }
 
 .ha-temperature {
-justify-content: space-between;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.ha-temperature .ui-icon-btn {
+  flex: none;
+}
+
+.ha-temperature > span {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.ha-temperature b {
+  color: var(--text);
 }
 
 .ha-sensors {
-grid-template-columns: minmax(0, 1fr);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
 }
+
+.ha-sensors > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.ha-sensors strong {
+  margin-top: var(--space-1);
+}
+
+.ha-error,
+.ha-settings-message {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--red);
+}
+
+.ha-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ha-settings > label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.ha-settings > label .ui-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.ha-settings > small {
+  color: var(--faint);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.ha-settings > .ui-btn {
+  align-self: flex-start;
+}
+
+.ha-mini i {
+  width: 7px;
+  height: 7px;
+}
+
+.ha-mini-light.is-on {
+  border-color: var(--amber);
+  background: var(--amber-wash);
+  color: var(--amber-on-wash);
+}
+
+@container home-assistant-widget (max-width: 700px) {
+  .ha-settings > .ui-btn {
+    width: 100%;
+    align-self: stretch;
+  }
+
+  .ha-climate > section {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ha-temperature {
+    justify-content: space-between;
+  }
+
+  .ha-sensors,
+  .ha-entity dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (pointer: coarse) {
+  .ha-light > button,
+  .ha-mini-light {
+    min-height: var(--tap);
+  }
 }

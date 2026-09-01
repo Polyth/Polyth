@@ -183,9 +183,9 @@ test("source-control surfaces keep responsive and accessible audit contracts", (
   const pending = read("../../../packages/git/widgets/PendingChangesBar.tsx");
   const css = readWebStylesSync();
 
-  assert.match(css, /container:\s*source-surface\s*\/\s*inline-size/);
-  assert.match(css, /@container source-surface \(max-width: 700px\)[\s\S]*\.git-master-detail/);
-  assert.match(css, /@container source-surface \(max-width: 599px\)[\s\S]*\.gh-card-overflow/);
+  assert.match(css, /container:\s*feature-panel\s*\/\s*inline-size/);
+  assert.match(css, /@container feature-panel \(max-width: 700px\)[\s\S]*\.git-master-detail/);
+  assert.match(css, /@container feature-panel \(max-width: 599px\)[\s\S]*\.gh-card-overflow/);
   assert.match(git, /aria-pressed=\{prefs\.layout === "unified"\}/);
   assert.doesNotMatch(git, /window\.confirm/);
   assert.match(git, /tr\("gitview\.couldntLoadTheFileDiff"\)/);

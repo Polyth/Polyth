@@ -207,11 +207,17 @@ host.surfaces.register({
   minWidth, preferredMaxWidth, keepAlive, escape }` block, which makes them
   dockable beside Chat with the pane host. Contextual surfaces
   (Context/Knowledge/Usage/Events) leave `presentation` undefined.
+- Every registered surface renders through the host's single `ModuleView`
+  structure: header, title/description, actions, close, body, and content
+  wrapper. The host chooses `page`, `panel`, or `workspace` content behavior;
+  package components return feature content only. Packages must not add
+  `.view-page`, `.module-view*`, their own outer close/fullscreen controls, or
+  a second page title. Package toolbars and detail headings remain content.
 - `order` then `id` determine strip order; replacement is by id; disposal is
   identity-based.
 - The `workspace.right.tabs` **slot** is bridged into rail surfaces
   (`slotSurfaces` in `surfaces.ts`): a slot contribution with
-  `meta: { title, order, icon, capabilityId }` becomes a rail panel. This is
+  `meta: { title, description, order, icon, capabilityId }` becomes a rail panel. This is
   the right mechanism when you already have a slot-shaped contribution
   (e.g. `packages/knowledge`'s Tracks panel).
 
@@ -221,6 +227,10 @@ Main-area modules (what used to be an `AppView` switch in `Main.tsx`) render
 through `apps/web/src/workspace/surfaceRegistry.ts`, hosted by
 `components/workspace/WorkspaceHost.ts`. The host provides the standard
 project/session empty states — surfaces never invent their own.
+`WorkspaceHost` also supplies the same `ModuleView` used by rail surfaces,
+including core page padding, scrolling, responsive containment, and phone
+presentation. A workspace component starts at its stable package root (for
+example `.workflow-page`), not a generic shell wrapper.
 
 ```tsx
 host.workspaceSurfaces.register({

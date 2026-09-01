@@ -81,9 +81,12 @@ list — other docs link here instead of restating it.
 | `--surface-overlay` | Subtle theme-aware overlay. |
 | `--surface-overlay-hover` | Hover-strength theme-aware overlay. |
 | `--surface-overlay-strong` | Selected/pressed theme-aware overlay. |
-| `--overlay-bg` | Floating overlay surface (popover, menu, dialog, sheet). |
-| `--overlay-border` | Floating overlay boundary. |
-| `--overlay-shadow` | Floating overlay elevation. |
+| `--material-glass` | Readable opaque fallback material for popovers, menus, and pickers; enhanced to translucent glass when backdrop blur is supported. |
+| `--material-glass-strong` | More opaque glass material for dialogs and sheets. |
+| `--material-glass-border` | Theme-derived glass edge. |
+| `--material-glass-highlight` | Inset highlight shared by glass surfaces. |
+| `--material-glass-shadow` | Shared floating-surface elevation. |
+| `--material-glass-blur` | Backdrop blur strength for capable, full-resource clients. |
 
 ### Spacing and control geometry
 
@@ -267,6 +270,9 @@ the purpose column.
 | `--success` | Deprecated alias of `--green`. |
 | `--info` | Deprecated alias of `--blue`. |
 | `--border-subtle` | Deprecated alias of `--border-soft`. |
+| `--overlay-bg` | Deprecated legacy floating-surface background; use `--material-glass`. |
+| `--overlay-border` | Deprecated legacy floating-surface boundary; use `--material-glass-border`. |
+| `--overlay-shadow` | Deprecated legacy floating-surface elevation; use `--material-glass-shadow`. |
 
 ## Core UI primitives
 
@@ -278,6 +284,13 @@ components instead of minting new button/menu/dialog classes; packages adopt
 them per-package during Phase 1c. UI action icons come from `ui/icons.ts`
 (Lucide) sized by the icon tokens; domain/project identity marks keep their
 existing assets. `docs/ui-redesign/design-system.md` is the usage guide.
+
+Popover, Menu, Dialog, Sheet, Picker, and ResponsiveOverlay use the Quiet
+Glass material tokens. Their default is opaque and readable. Core CSS adds
+translucency only inside a backdrop-filter `@supports` rule and restores the
+opaque material for reduced motion or
+`body[data-desktop-low-resource="true"]`; packages must not apply blur or
+recreate this fallback locally.
 
 ## Shared empty states
 

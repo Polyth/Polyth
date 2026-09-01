@@ -643,6 +643,7 @@ export default function ContextRail() {
             title={open?.title ?? ""}
             {...(open?.description ? { description: open.description } : {})}
             variant="rail"
+            contentMode={isWorkspacePane ? "workspace" : "panel"}
             onClose={() => {
               if (compact) closeAllModules();
               else if (isWorkspacePane) closeWorkspacePane();

@@ -48,7 +48,7 @@ export default function GoalsView() {
   const pct = goal && goal.budgetTokens > 0 ? Math.min(100, Math.round((goal.tokensUsed / goal.budgetTokens) * 100)) : 0;
 
   return (
-    <div className="view-page goals-page">
+    <div className="goals-page">
       {/* Title, description and the single close control now come from the
           shared ModuleView frame (WorkspaceHost). The empty state below still
           offers "Attach goal"; a redundant header button was removed. */}

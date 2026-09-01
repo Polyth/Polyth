@@ -58,7 +58,7 @@ test("coarse pointers, focus, motion, radii, and empty states share polish token
   assert.match(css, /:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/s);
   assert.match(css, /\.modal\s*\{[^}]*animation:\s*rise var\(--motion-surface\) var\(--motion-ease\)/s);
   assert.match(css, /\.empty-state\s*\{[^}]*animation:\s*empty-state-enter var\(--motion-surface\)/s);
-  assert.match(css, /\.empty-state-mark\s*\{[^}]*linear-gradient[^}]*var\(--shadow-sm\)/s);
+  assert.match(css, /\.empty-state-mark\s*\{[^}]*background:\s*var\(--accent-wash\)[^}]*box-shadow:\s*var\(--inset-hi\)/s);
   for (const selector of [
     ".agent-reply-actions",
     ".term-tab-rename-action",
@@ -85,7 +85,8 @@ test("P1 mobile refinements remain wired to their visible surfaces", async () =>
 
   assert.match(sessions, /aria-busy=\{opening \|\| undefined\}/, "session switching exposes loading state");
   assert.match(sessions, /data-swipe=\{/, "session rows expose swipe state");
-  assert.match(sessions, /numeric: "auto"/, "timestamps use smart relative labels");
+  assert.match(sessions, /age < 7 \* 24 \* 60 \* 60_000\) return ago\(activityAt, now\)/,
+    "recent timestamps use relative labels before falling back to calendar dates");
   assert.match(sidebar, /className=\{`pull-refresh/, "the project/session picker supports pull-to-refresh");
   assert.match(settings, /isEdgeBackSwipe/, "settings supports the mobile back gesture");
   assert.match(models, /className="model-row-provider-logo"/, "mobile model rows identify providers");

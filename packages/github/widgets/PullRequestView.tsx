@@ -115,7 +115,7 @@ function DiffLines({ diff, path }: { diff: string; path: string }) {
           ? tr("pullrequestview.oldLineNewLineValue", { old: oldShown, new: newShown })
           : oldShown ? tr("pullrequestview.oldLineValue", { old: oldShown }) : newShown ? tr("pullrequestview.newLineValue", { new: newShown }) : tr("pullrequestview.diffMetadata");
         return (
-          <div key={index} className={`git-diff-line ${className}`} role="row" aria-label={lineLabel}>
+          <div key={index} className={`git-diff-line pr-diff-line ${className}`} role="row" aria-label={lineLabel}>
             <span className="pr-diff-ln" aria-hidden="true"><i>{oldShown}</i><i>{newShown}</i></span>
             <code role="cell" dangerouslySetInnerHTML={{ __html: highlight(row.text, langOf(path)) }} />
           </div>

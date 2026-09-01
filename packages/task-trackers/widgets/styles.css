@@ -4,8 +4,6 @@
 }
 
 .tt-board {
-  --tt-blue: #5b8cff;
-  --tt-violet: #9b7bff;
   position: relative;
   display: flex;
   flex: 1;
@@ -15,9 +13,7 @@
   flex-direction: column;
   overflow: hidden;
   color: var(--text);
-  background:
-    radial-gradient(circle at 12% -20%, color-mix(in srgb, var(--tt-blue) 11%, transparent), transparent 34%),
-    var(--bg);
+  background: var(--bg);
   container: task-tracker / inline-size;
 }
 
@@ -52,12 +48,10 @@
   min-width: 0;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--elevated) 78%, transparent);
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 3%, transparent);
-  backdrop-filter: blur(16px);
+  background: var(--panel);
 }
 
 .tt-provider-tabs,
@@ -69,8 +63,8 @@
 }
 
 .tt-provider-tabs {
-  gap: 4px;
-  padding: 3px;
+  gap: var(--space-1);
+  padding: var(--space-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-surface);
   background: var(--sunken);
@@ -82,7 +76,7 @@
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  min-height: 44px;
+  min-height: max(var(--control-h), var(--hit-min));
   border: 0;
   border-radius: var(--radius-control);
   background: transparent;
@@ -91,18 +85,13 @@
   font-size: var(--font-meta);
   font-weight: 650;
   cursor: pointer;
-  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
+  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
 }
 
 .tt-provider-tabs button:hover:not(.active),
 .tt-view-toggle button:hover:not(.active) {
   color: var(--text);
   background: color-mix(in srgb, var(--elevated) 52%, transparent);
-}
-
-.tt-provider-tabs button:active,
-.tt-view-toggle button:active {
-  transform: scale(.97);
 }
 
 .tt-provider-tabs button {
@@ -114,7 +103,6 @@
 .tt-view-toggle button.active {
   color: var(--text);
   background: var(--elevated);
-  box-shadow: var(--shadow-sm);
 }
 
 .tt-provider-tabs button > i {
@@ -168,8 +156,8 @@
 }
 
 .tt-view-toggle {
-  gap: 2px;
-  padding: 3px;
+  gap: var(--space-1);
+  padding: var(--space-1);
   border-radius: var(--radius-card);
   background: var(--sunken);
 }
@@ -196,16 +184,13 @@
   min-width: 0;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
-  margin: 12px 14px 0;
-  padding: 10px 12px;
+  gap: var(--space-2);
+  margin: var(--space-3) var(--space-4) 0;
+  padding: var(--space-2) var(--space-3);
   border: 1px solid color-mix(in srgb, var(--amber) 32%, var(--border));
   border-radius: var(--radius-card);
   color: var(--text);
-  background:
-    linear-gradient(110deg, color-mix(in srgb, var(--amber) 9%, transparent), transparent 62%),
-    color-mix(in srgb, var(--elevated) 88%, transparent);
-  box-shadow: var(--shadow-sm);
+  background: var(--amber-wash);
   animation: tt-rise var(--motion-normal) var(--motion-ease) both;
 }
 
@@ -262,8 +247,8 @@
   display: grid;
   min-width: 0;
   grid-template-columns: minmax(150px, .7fr) minmax(200px, 1fr);
-  gap: 10px;
-  padding: 12px 14px 8px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4) var(--space-2);
 }
 
 .tt-board-picker label,
@@ -289,8 +274,8 @@
   display: grid;
   min-width: 0;
   grid-template-columns: minmax(160px, 1fr) minmax(150px, auto);
-  gap: 8px;
-  padding: 0 14px 12px;
+  gap: var(--space-2);
+  padding: 0 var(--space-4) var(--space-3);
 }
 
 .tt-search {
@@ -347,11 +332,10 @@
   min-width: 0;
   max-height: 100%;
   flex-direction: column;
-  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius-surface);
-  background: color-mix(in srgb, var(--sunken) 80%, transparent);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 3%, transparent);
-  animation: tt-rise var(--motion-normal) ease-out both;
+  background: var(--sunken);
+  animation: tt-rise var(--motion-normal) var(--motion-ease) both;
 }
 
 .tt-column > header {
@@ -390,7 +374,7 @@
 }
 
 .tt-column.todo .tt-column-dot { background: var(--muted); }
-.tt-column.in_progress .tt-column-dot { background: var(--tt-blue); }
+.tt-column.in_progress .tt-column-dot { background: var(--blue); }
 .tt-column.done .tt-column-dot { background: var(--green); }
 
 .tt-column-cards {
@@ -417,17 +401,14 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   background: var(--elevated);
-  box-shadow: var(--shadow-sm);
   text-align: left;
   cursor: pointer;
-  transition: border-color var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
+  transition: border-color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
 }
 
 .tt-task-card:hover {
-  z-index: 1;
   border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
-  box-shadow: var(--shadow-md);
-  transform: translateY(-1px);
+  background: var(--raised);
 }
 
 .tt-task-card:focus-visible {
@@ -436,10 +417,7 @@
 }
 
 .tt-task-card.linked {
-  border-color: color-mix(in srgb, var(--tt-violet) 42%, var(--border));
-  background:
-    linear-gradient(140deg, color-mix(in srgb, var(--tt-violet) 7%, transparent), transparent 48%),
-    var(--elevated);
+  border-color: color-mix(in srgb, var(--purple) 42%, var(--border));
 }
 
 .tt-task-card.selected,
@@ -493,8 +471,8 @@
 }
 
 .tt-status.in_progress {
-  color: color-mix(in srgb, var(--tt-blue) 85%, var(--text));
-  background: color-mix(in srgb, var(--tt-blue) 13%, transparent);
+  color: var(--blue);
+  background: var(--blue-wash);
 }
 
 .tt-status.done {
@@ -506,8 +484,8 @@
   gap: 4px;
   min-height: 24px;
   padding: 0 7px;
-  color: color-mix(in srgb, var(--tt-violet) 82%, var(--text));
-  background: color-mix(in srgb, var(--tt-violet) 13%, transparent);
+  color: var(--purple);
+  background: var(--purple-wash);
 }
 
 .tt-linked-chip svg {
@@ -523,7 +501,7 @@
 .tt-task-key {
   flex: none;
   color: var(--muted);
-  font-family: var(--font-mono);
+  font-family: var(--mono);
   font-size: var(--font-meta);
   font-weight: 650;
 }
@@ -548,7 +526,7 @@
   border: 1px solid var(--border);
   border-radius: 50%;
   color: var(--text);
-  background: linear-gradient(145deg, var(--accent-wash), var(--elevated));
+  background: var(--panel);
   font-size: var(--font-meta);
   font-weight: 800;
 }
@@ -595,18 +573,12 @@
   background: var(--elevated);
   text-align: left;
   cursor: pointer;
-  transition: border-color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
+  transition: border-color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
 }
 
 .tt-list-row:hover {
   border-color: color-mix(in srgb, var(--accent) 46%, var(--border));
   background: color-mix(in srgb, var(--accent) 4%, var(--elevated));
-  transform: translateY(-1px);
-}
-
-.tt-list-row:active,
-.tt-task-card:active {
-  transform: scale(.992);
 }
 
 .tt-list-title {
@@ -620,7 +592,7 @@
 .tt-list-title small {
   grid-row: 1 / 3;
   color: var(--muted);
-  font-family: var(--font-mono);
+  font-family: var(--mono);
 }
 
 .tt-list-title strong {
@@ -635,7 +607,7 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  color: var(--tt-violet);
+  color: var(--purple);
   font-size: var(--font-meta);
   font-style: normal;
 }
@@ -664,7 +636,6 @@
   overflow: hidden;
   border-left: 1px solid var(--border);
   background: var(--bg);
-  box-shadow: var(--shadow-md);
   animation: tt-detail-in var(--motion-normal) var(--motion-ease) both;
 }
 
@@ -776,9 +747,7 @@
   min-width: 0;
   gap: 10px;
   padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-surface);
-  background: color-mix(in srgb, var(--elevated) 76%, transparent);
+  border-top: 1px solid var(--border-soft);
 }
 
 .tt-section-heading {
@@ -1047,11 +1016,10 @@
   gap: 8px;
   padding: 10px;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--tt-violet, #9b7bff) 30%, var(--border));
-  border-radius: var(--radius-surface);
-  background:
-    linear-gradient(140deg, color-mix(in srgb, #9b7bff 7%, transparent), transparent 48%),
-    var(--elevated);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--panel);
+  container: task-tracker-linked / inline-size;
 }
 
 .tt-linked-main {
@@ -1070,7 +1038,7 @@
 
 .tt-linked-main > div span {
   color: var(--muted);
-  font-family: var(--font-mono);
+  font-family: var(--mono);
   font-size: var(--font-meta);
 }
 
@@ -1350,7 +1318,7 @@
   }
 }
 
-@container feature-panel (max-width: 480px) {
+@container task-tracker-linked (max-width: 480px) {
   .tt-linked-actions {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) var(--tap);
   }

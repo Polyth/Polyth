@@ -90,6 +90,8 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   assert.match(source, /role="progressbar"/);
   assert.match(source, /className="usage-quota-alert" role="alert"/);
   assert.match(source, /className="usage-chart-empty" role="status"/);
+  assert.match(source, /className="usage-inline-empty" role="status"/);
+  assert.match(styles, /\.usage-inline-empty\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column/s);
   assert.match(source, /aria-label=\{hidden \? tr\("usage\.usagedashboard\.showValueInBreakdowns"/);
   assert.match(source, /: tr\("usage\.usagedashboard\.hideValueInBreakdowns"/);
   assert.match(source, /value > 0 && value < \.0001 \? "<\$0\.0001"/);
@@ -117,8 +119,6 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   assert.doesNotMatch(styles, /--usage-bg: #0d0e10/);
   assert.match(styles, /\.usage-status-pill\.session-only/);
   assert.match(styles, /@container usage-dashboard \(max-width: 700px\)[\s\S]*?\.usage-providers-card tbody tr/);
-  assert.match(styles, /\.usage-spend-legend > \.empty-state \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;[\s\S]*?align-self: stretch;/);
-  assert.match(styles, /\.usage-spend-legend > \.empty-state \.empty-state-title \{[\s\S]*?overflow-wrap: normal;[\s\S]*?word-break: normal;[\s\S]*?white-space: normal;/);
   assert.match(styles, /\.usage-provider-error \{[\s\S]*?padding: 9px 10px;/);
   assert.match(styles, /@container usage-dashboard \(min-width: 701px\) and \(max-width: 760px\)\s*\{[\s\S]*?\.usage-view-tabs\s*\{[^}]*width:\s*100%;\s*margin:\s*0;/);
 

@@ -1,22 +1,37 @@
-/* Package-owned hotkeys web styles. */
-.hotkey-conflict {
-color: var(--red);
-}
-.hotkey-kbd {
-border-color: transparent; padding: 2px 4px;
-}
-.hotkey-kbd:hover kbd {
-border-color: var(--accent); color: var(--text);
-}
-.hotkey-capture {
-width: 130px; font-size: var(--font-meta); padding: 4px 8px; border-color: var(--accent);
-}
-@container feature-panel (max-width: 700px) {
-.hotkey-capture {
-width: 100%;
+.pkg-hotkeys {
+  container: hotkeys-settings / inline-size;
 }
 
-.hotkey-kbd {
-min-width: var(--tap); min-height: var(--tap);
+.pkg-hotkeys .hotkey-conflict {
+  color: var(--red);
 }
+
+.pkg-hotkeys .hotkey-kbd {
+  padding: var(--space-1) var(--space-2);
+  border-color: transparent;
+}
+
+.pkg-hotkeys .hotkey-kbd:hover kbd {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.pkg-hotkeys .hotkey-capture {
+  width: 130px;
+  padding: var(--space-1) var(--space-2);
+  border-color: var(--accent);
+  font-size: var(--font-meta);
+}
+
+@container hotkeys-settings (max-width: 700px) {
+  .pkg-hotkeys .hotkey-capture {
+    width: 100%;
+  }
+}
+
+@media (pointer: coarse) {
+  .pkg-hotkeys .hotkey-kbd {
+    min-width: var(--tap);
+    min-height: var(--tap);
+  }
 }

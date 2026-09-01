@@ -620,6 +620,50 @@ test("PID reuse is rejected without signalling the unrelated process", async () 
   }
 });
 
+test("separate runtime directories do not reap each other's local child", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-endpoint-instances-"));
+  const runtimeA = join(directory, "instance-a");
+  const runtimeB = join(directory, "instance-b");
+  const children: FakeChild[] = [];
+  const signalled: number[] = [];
+  const spawn = ((_bin: string, args: readonly string[]) => {
+    const child = createFakeChild(
+      1100 + children.length,
+      `opencode server listening on http://127.0.0.1:${args.at(-1)}\n`,
+    );
+    children.push(child);
+    return child;
+  }) as unknown as typeof nodeSpawn;
+  const makeLease = (runtimeDir: string, port: number) => createOwnedLocalEndpointLease({
+    ...isolatedLocalOptions(directory),
+    runtimeDir,
+    cwd: directory,
+    pickPort: async () => port,
+    spawn,
+    readProcessIdentity: async (pid) => ({
+      startIdentity: `start-${pid}`,
+      executable: "/usr/bin/opencode",
+      command: `opencode-${pid}`,
+    }),
+    signalProcess(pid) { signalled.push(pid); },
+    gracefulStopMs: 20,
+  });
+  try {
+    const first = await makeLease(runtimeA, 41001);
+    await first.endpoint();
+    const second = await makeLease(runtimeB, 41002);
+    await second.endpoint();
+
+    assert.deepEqual(signalled, []);
+    assert.equal(children.length, 2);
+    await stat(join(runtimeA, "opencode.pid.json"));
+    await stat(join(runtimeB, "opencode.pid.json"));
+    await Promise.all([first.dispose(), second.dispose()]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 // Phase-4 regression (OC-REAL-059): when the owned child dies but the
 // one-shot post-disconnect refresh raced ahead of Node's exit notification,
 // every later acquisition goes through lease.endpoint(). Handing out the dead

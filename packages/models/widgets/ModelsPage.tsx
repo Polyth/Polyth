@@ -122,21 +122,21 @@ export default function ModelsPage() {
   const isOpen = (id: string) => query.length > 0 || prefs.expandedProviders.includes(id);
 
   if (providers === null && !error) {
-    return <><PageHead title={tr("settings.modelspage.providersModels")} /><EmptyState title={tr("settings.modelspage.loadingCatalog")} busy /></>;
+    return <div className="models-page"><PageHead title={tr("settings.modelspage.providersModels")} /><EmptyState title={tr("settings.modelspage.loadingCatalog")} busy /></div>;
   }
   if (providers !== null && providers.length === 0) {
     return (
-      <>
+      <div className="models-page">
         <PageHead title={tr("settings.modelspage.providersModels")} />
         <EmptyState title={tr("settings.modelspage.noModelsAvailable")} body={tr("settings.modelspage.checkThatTheBackendIsRunningAnd")} />
-      </>
+      </div>
     );
   }
 
   const chipProviders = (providers ?? []).filter((p) => (scope === "connected" ? p.connected : true));
 
   return (
-    <>
+    <div className="models-page">
       <PageHead
         title={tr("settings.modelspage.providersModels")}
         blurb={tr("settings.modelspage.whatTheModelPickerOffersTogglesAre")}
@@ -249,7 +249,7 @@ export default function ModelsPage() {
                           icon={FavoriteIcon}
                           size="sm"
                           variant="ghost"
-                          className={`star-btn ${fav ? "on" : ""}`}
+                          className={`model-star-btn ${fav ? "on" : ""}`}
                           pressed={fav}
                           label={fav ? tr("settings.modelspage.removeFavorite") : tr("settings.modelspage.addFavorite")}
                           onClick={() => toggleModelFavorite(m.key)}
@@ -258,7 +258,6 @@ export default function ModelsPage() {
                         {m.context !== undefined && <span className="set-model-ctx mono">{fmtContext(m.context)}</span>}
                         <span className="set-model-meta mono">{m.key}</span>
                         <Switch
-                          className="switch-sm"
                           checked={m.enabled}
                           label={m.enabled
                             ? tr("settings.modelspage.disableValue", { value: displayName })
@@ -283,6 +282,6 @@ export default function ModelsPage() {
         })}
         {shown.length === 0 && <EmptyState title={tr("settings.modelspage.noMatches")} body={tr("settings.modelspage.tryTheAllScopeOrClearThe")} />}
       </div>
-    </>
+    </div>
   );
 }

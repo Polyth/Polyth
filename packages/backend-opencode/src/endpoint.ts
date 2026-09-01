@@ -556,11 +556,9 @@ export const createOwnedLocalEndpointLease = async (
     );
   }
   const hostname = options.hostname ?? "127.0.0.1";
-  // The isolated DB, not just the checkout, defines process ownership. Two
-  // Polyth servers may serve the same project from different data directories;
-  // sharing the old cwd-keyed record made each server reap the other's child.
-  const pidFile = options.pidFile
-    ?? pidFileForDirectory(cwd, options.projectId, options.runtimeDir);
+  // Keep process ownership inside the isolated runtime. Two Polyth data
+  // directories may legitimately run the same project/worktree concurrently.
+  const pidFile = options.pidFile ?? join(resolve(options.runtimeDir), "opencode.pid.json");
   const legacyStateFile = `${pidFile}.lease.json`;
   const stateFile = options.stateFile ?? legacyStateFile;
   const readIdentity = options.readProcessIdentity ?? readProcessIdentity;

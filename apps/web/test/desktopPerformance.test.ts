@@ -27,7 +27,8 @@ test("desktop session hydration batches metadata and history with stale-while-re
 
   assert.match(openSession, /Promise\.all\(\[/);
   assert.match(openSession, /api\.getSession\(sessionId\)/);
-  assert.match(openSession, /api\.getEvents\(sessionId, afterSeq\)/);
+  assert.match(openSession, /requestSessionTail\(sessionId, false\)/);
+  assert.match(source, /api\.getEvents\(sessionId, afterSeq, \{ prefetch: false \}\)/);
   assert.match(openSession, /useCachedView/);
   assert.match(openSession, /generation !== openSessionGeneration/);
 });

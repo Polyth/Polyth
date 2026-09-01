@@ -35,7 +35,7 @@ test("recovery surfaces preserve drafts and never auto-send a failed turn", asyn
   const timeline = await readFile(new URL("../src/components/Timeline.tsx", import.meta.url), "utf8");
   const banner = await readFile(new URL("../src/components/RuntimeEpochBanner.tsx", import.meta.url), "utf8");
 
-  assert.match(composer, /className="composer-send-failure" role="alert"/);
+  assert.match(composer, /<Notice[\s\S]*?className="composer-send-failure"[\s\S]*?role="alert"/);
   assert.match(composer, /saveDraft\(targetSessionId, t\)/);
   assert.match(timeline, /applyComposerSeed\(sessionId, `turn-failed:\$\{turn\.turnId\}`/);
   assert.match(timeline, /requestComposerReplace\(draft\.text\)/);

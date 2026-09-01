@@ -50,7 +50,16 @@
   --blue-wash: rgba(130, 191, 244, 0.18);
   --purple-wash: rgba(196, 167, 238, 0.18);
 
-  /* overlay surfaces (popovers, menus, dialogs, sheets share one look) */
+  /* Quiet Glass overlay material. Base surfaces are deliberately opaque;
+     capable clients opt into translucency and blur in core styles. */
+  --material-glass: color-mix(in srgb, var(--elevated) 88%, var(--panel));
+  --material-glass-strong: color-mix(in srgb, var(--elevated) 96%, var(--panel));
+  --material-glass-border: color-mix(in srgb, var(--border-soft) 88%, var(--text) 12%);
+  --material-glass-highlight: var(--inset-hi);
+  --material-glass-shadow: var(--shadow-lg);
+  --material-glass-blur: 18px;
+
+  /* Deprecated overlay aliases. Do not use for new glass surfaces. */
   --overlay-bg: var(--elevated);
   --overlay-border: var(--border);
   --overlay-shadow: var(--shadow-md);

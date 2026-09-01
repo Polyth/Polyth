@@ -1,9 +1,9 @@
 /* Package-owned walkthrough web styles. */
 .wt-card {
-border: 1px solid var(--border-soft); border-radius: var(--radius-card); background: var(--panel); overflow: hidden;
+overflow: hidden; border-radius: var(--radius-card); background: var(--elevated);
 }
 .walkthrough-page {
-padding: 28px max(28px, calc((100% - 900px) / 2));
+container: walkthrough-page / inline-size;
 }
 .wt-header {
 display: flex; align-items: center;
@@ -33,9 +33,8 @@ color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent);
 color: var(--purple);
 }
 .wt-explain {
-border: 1px solid color-mix(in srgb, var(--purple) 35%, var(--panel)); border-radius: var(--radius-card);
-  background: color-mix(in srgb, var(--purple) 9%, var(--panel));
-  padding: 12px 14px; font-size: 13px; color: color-mix(in srgb, var(--purple) 40%, var(--text)); line-height: 1.55;
+border-inline-start: var(--space-1) solid var(--purple); padding: var(--space-2) var(--space-3);
+  font-size: var(--font-meta); color: var(--text-dim); line-height: 1.55;
 }
 .wt-footer {
 display: flex; justify-content: space-between; align-items: center;
@@ -46,19 +45,19 @@ display: flex; gap: 8px;
 .wt-approve {
 padding: 7px 18px;
 }
-.step-dots {
+.walkthrough-page .step-dots {
 display: flex; gap: 6px; flex-wrap: wrap;
 }
-.step-dot {
+.walkthrough-page .step-dot {
 width: 10px; height: 10px; padding: 0; border-radius: 50%; background: var(--elevated); border-color: var(--border);
 }
-.step-dot.current {
+.walkthrough-page .step-dot.current {
 outline: 2px solid var(--accent); outline-offset: 1px;
 }
-.step-dot.approved {
+.walkthrough-page .step-dot.approved {
 background: var(--green); border-color: var(--green);
 }
-.step-dot.rejected {
+.walkthrough-page .step-dot.rejected {
 background: var(--red); border-color: var(--red);
 }
 .walkthrough-generated {
@@ -73,49 +72,49 @@ width: 130px;
 .walkthrough-pr-input {
 width: 90px;
 }
-.auto-review-banner {
+.walkthrough-page .auto-review-banner {
 display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--elevated); padding: 10px 12px; font-size: var(--font-meta);
+  padding-block: var(--space-2); border-bottom: 1px solid var(--border-soft); font-size: var(--font-meta);
 }
-.auto-review-banner.passed {
+.walkthrough-page .auto-review-banner.passed {
 border-color: var(--green);
 }
-.auto-review-banner.failed,
-.auto-review-banner.stopped {
+.walkthrough-page .auto-review-banner.failed,
+.walkthrough-page .auto-review-banner.stopped {
 border-color: var(--red);
 }
-.auto-review-banner.paused {
+.walkthrough-page .auto-review-banner.paused {
 border-color: var(--amber);
 }
-.review-card {
-border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--elevated); padding: 12px 14px; display: flex; flex-direction: column; gap: var(--space-2); box-shadow: var(--inset-hi);
+.walkthrough-page .review-card {
+padding-block: var(--space-3); border-block: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: var(--space-2);
 }
-.review-summary {
-font-size: 13px; white-space: pre-wrap;
+.walkthrough-page .review-summary {
+font-size: var(--font-label); white-space: pre-wrap;
 }
-.review-finding {
+.walkthrough-page .review-finding {
 display: flex; align-items: baseline; gap: 8px; font-size: var(--font-meta); flex-wrap: wrap;
 }
-.review-finding.sev-critical .tag,
-.review-finding.sev-high .tag {
+.walkthrough-page .review-finding.sev-critical .tag,
+.walkthrough-page .review-finding.sev-high .tag {
 color: var(--red); border-color: var(--red);
 }
-.review-finding.sev-medium .tag {
+.walkthrough-page .review-finding.sev-medium .tag {
 color: var(--amber); border-color: var(--amber);
 }
-.risk-badge {
+.walkthrough-page .risk-badge {
 padding: 2px 8px; border-radius: 999px; font-size: var(--font-meta); font-weight: 700;
   border: 1px solid var(--border); color: var(--muted);
 }
-.risk-badge.risk-1,
-.risk-badge.risk-2 {
+.walkthrough-page .risk-badge.risk-1,
+.walkthrough-page .risk-badge.risk-2 {
 color: var(--green); border-color: var(--green);
 }
-.risk-badge.risk-3 {
+.walkthrough-page .risk-badge.risk-3 {
 color: var(--amber); border-color: var(--amber);
 }
-.risk-badge.risk-4,
-.risk-badge.risk-5 {
+.walkthrough-page .risk-badge.risk-4,
+.walkthrough-page .risk-badge.risk-5 {
 color: var(--red); border-color: var(--red);
 }
 .walkthrough-stale {
@@ -123,7 +122,7 @@ border: 1px solid var(--amber); color: var(--amber); border-radius: var(--radius
   padding: 8px 10px; font-size: var(--font-meta);
 }
 .walkthrough-stage {
-border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--elevated); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; box-shadow: var(--inset-hi);
+padding-block: var(--space-3); border-bottom: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: var(--space-2);
 }
 .walkthrough-stage-title {
 font-weight: 600; font-size: 14px;
@@ -143,7 +142,7 @@ min-width: 0;
 .walkthrough-stage-title {
 overflow-wrap: anywhere;
 }
-@container feature-panel (max-width: 700px) {
+@container walkthrough-page (max-width: 700px) {
 .wt-header {
 align-items: stretch;
     flex-direction: column;
@@ -203,7 +202,7 @@ display: grid; grid-template-columns: minmax(0, 1fr);
 display: none;
 }
 
-.step-dots {
+.walkthrough-page .step-dots {
 max-width: 100%;
     flex-wrap: nowrap;
     overflow-x: auto;
@@ -211,11 +210,11 @@ max-width: 100%;
     scrollbar-width: none;
 }
 
-.step-dots::-webkit-scrollbar {
+.walkthrough-page .step-dots::-webkit-scrollbar {
 display: none;
 }
 
-.step-dot {
+.walkthrough-page .step-dot {
 position: relative;
     width: var(--tap);
     min-width: var(--tap);
@@ -225,7 +224,7 @@ position: relative;
     background: transparent;
 }
 
-.step-dot::before {
+.walkthrough-page .step-dot::before {
 content: "";
     position: absolute;
     inset: 16px;
@@ -234,31 +233,31 @@ content: "";
     background: var(--elevated);
 }
 
-.step-dot.current::before {
+.walkthrough-page .step-dot.current::before {
 outline: 2px solid var(--accent); outline-offset: 2px;
 }
 
-.step-dot.approved::before {
+.walkthrough-page .step-dot.approved::before {
 border-color: var(--green); background: var(--green);
 }
 
-.step-dot.rejected::before {
+.walkthrough-page .step-dot.rejected::before {
 border-color: var(--red); background: var(--red);
 }
 
-.auto-review-banner {
+.walkthrough-page .auto-review-banner {
 align-items: stretch; flex-direction: column;
 }
 
-.auto-review-banner .header-spacer {
+.walkthrough-page .auto-review-banner .header-spacer {
 display: none;
 }
 
-.review-finding {
+.walkthrough-page .review-finding {
 align-items: flex-start; flex-direction: column;
 }
 }
-@container feature-panel (max-width: 420px) {
+@container walkthrough-page (max-width: 420px) {
 .wt-footer,
 .wt-footer-mid {
 grid-template-columns: minmax(0, 1fr);
@@ -271,10 +270,10 @@ grid-column: 1;
 }
 
 /* Rules moved from core styles.css: walkthrough context badges. */
-.ctx-badge { font-size: var(--font-meta); padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border); }
-.ctx-badge.green { color: var(--green); border-color: var(--green); }
-.ctx-badge.yellow { color: var(--amber); border-color: var(--amber); }
-.ctx-badge.red { color: var(--red); border-color: var(--red); }
+.walkthrough-page .ctx-badge { font-size: var(--font-meta); padding: var(--space-1) var(--space-2); border-radius: 999px; border: 1px solid var(--border); }
+.walkthrough-page .ctx-badge.green { color: var(--green); border-color: var(--green); }
+.walkthrough-page .ctx-badge.yellow { color: var(--amber); border-color: var(--amber); }
+.walkthrough-page .ctx-badge.red { color: var(--red); border-color: var(--red); }
 
 /* Toolbar progress + step status: meta type role, no inline styles. */
 .wt-progress {

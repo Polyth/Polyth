@@ -142,8 +142,8 @@ function EventsView(props?: RailSurfaceComponentProps) {
   return props?.active !== false ? <ActiveEventsView /> : null;
 }
 
-registerSurface({ id: "context", title: tr("railsurfaces.context"), capabilityId: "context", order: 30, icon: RAIL_ICONS.context, component: ContextView });
+registerSurface({ id: "context", title: tr("railsurfaces.context"), description: "Inspect session status, usage, and pinned context.", capabilityId: "context", order: 30, icon: RAIL_ICONS.context, component: ContextView });
 registerSurface({
-  id: "events", title: tr("railsurfaces.events"), capabilityId: "events", order: 60, icon: RAIL_ICONS.events,
+  id: "events", title: tr("railsurfaces.events"), description: "Inspect the session event stream.", capabilityId: "events", order: 60, icon: RAIL_ICONS.events,
   component: EventsView, badge: (ctx) => ctx.eventCount,
 });

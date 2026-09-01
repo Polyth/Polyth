@@ -352,9 +352,11 @@ test("the composer is adaptive, with one primary action at a time", async () => 
   assert.ok(composer.includes("composer-input-active"), "textarea focus is exposed for keyboard-safe shell CSS");
   assert.ok(composer.includes("composer-has-draft"), "the draft state drives the mic/send morph");
   assert.ok(
-    composer.includes("inputFocused || hasDraft || working || shellMode"),
-    "text, attachments, and active runs all count as in use",
+    composer.includes("const expanded = !phoneLayout || inputFocused || working || shellMode"),
+    "focus, active runs, and shell mode expand the phone composer",
   );
+  assert.ok(composer.includes('hasDraft ? " composer-has-draft" : ""'),
+    "text and attachments retain their independent draft state");
   assert.ok(composer.includes("useViewportMetrics().height"), "auto-grow reacts to the visible viewport");
   assert.ok(
     composer.includes("Math.max(44, Math.min(visible * 0.42, visible - 240))"),
@@ -515,7 +517,7 @@ test("touch targets and design tokens are centralized", async () => {
   );
   assert.match(
     dictationCss,
-    /@media \(pointer: coarse\) \{\s*\.composer-mobile-extensions \.mic-btn \{[^}]*min-width:\s*var\(--tap\);/s,
+    /@media \(pointer: coarse\) \{\s*\.mic-control \.mic-btn,[^}]*\{[^}]*min-width:\s*var\(--tap\);[^}]*min-height:\s*var\(--tap\);/s,
     "the compact Dictate control remains a full touch target on coarse pointers",
   );
 });

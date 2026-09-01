@@ -177,7 +177,7 @@ export default function GithubView() {
 
   if (openItem !== null) {
     return (
-      <div className="view-page github-page">
+      <div className="github-page">
         {openItem.kind === "prs"
           ? <PullRequestView number={openItem.number} onClose={() => setOpenItem(null)} />
           : <IssueDetailView number={openItem.number} onClose={() => setOpenItem(null)} />}
@@ -190,7 +190,7 @@ export default function GithubView() {
     : [{ id: "all", label: tr("githubview.all") }, { id: "open", label: tr("githubview.open") }, { id: "closed", label: tr("githubview.closed") }];
 
   return (
-    <div className="view-page github-page">
+    <div className="github-page">
       <header className="github-head">
         {/* Title + description + close come from the shared ModuleView frame. */}
         <span className="header-spacer" />

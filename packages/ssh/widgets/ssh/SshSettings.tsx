@@ -106,7 +106,7 @@ export default function SshSettings() {
   const set = (patch: Partial<SshFormValues>) => setForm((current) => ({ ...current, ...patch }));
 
   return (
-    <div data-settings-item="ssh-servers">
+    <div className="pkg-ssh" data-settings-item="ssh-servers">
       <PageHead
         title={tr("ssh.sshsettings.sshServers")}
         blurb={tr("ssh.sshsettings.projectsOpenedOnAServerRunTheir")}

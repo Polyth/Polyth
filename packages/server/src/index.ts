@@ -491,7 +491,7 @@ export async function boot(opts: BootOptions = {}) {
   // the first through the cwd-keyed pidfile — leaving the surviving facade
   // pointing at a killed process, so model/agent lookups came back empty.
   const cwdFor = async (projectId: string, cwd?: string): Promise<string> =>
-    cwd ?? (await projects.get(projectId))?.path ?? process.cwd();
+    resolve(cwd ?? (await projects.get(projectId))?.path ?? process.cwd());
 
   // The bridge is created after package discovery (it consumes the browser
   // package's service) but the pool only spawns runtimes after boot completes.

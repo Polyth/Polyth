@@ -539,7 +539,7 @@ export default function WorkflowView() {
   };
 
   return (
-    <div className="view-page workflow-page" aria-busy={loading || isBusy}>
+    <div className="workflow-page" aria-busy={loading || isBusy}>
       {/* Title, description and the single close control come from the shared
           ModuleView frame (WorkspaceHost). No per-view header or "Back to
           chat" button, and no bottom save/status bar. */}
@@ -555,7 +555,7 @@ export default function WorkflowView() {
       )}
 
       <div className="workflow-layout">
-        <aside className="sched-form workflow-sidebar" aria-label={tr("workflowview.definitions")}>
+        <aside className="workflow-sidebar" aria-label={tr("workflowview.definitions")}>
           <div className="workflow-section-heading">
             <div>
               <h2>{tr("workflowview.definitions")}</h2>
@@ -640,7 +640,7 @@ export default function WorkflowView() {
 
           {draft && (
             <>
-              <section className="sched-form workflow-editor-header">
+              <section className="workflow-editor-header">
                 <div className="workflow-editor-toolbar">
                   <label className="workflow-field workflow-name-field">
                     <span>{tr("workflowview.workflowName")}</span>
@@ -740,7 +740,7 @@ export default function WorkflowView() {
                 {draft.nodes.map((node, nodeIndex) => (
                   <article
                     key={node.id}
-                    className="sched-form workflow-node-card"
+                    className="workflow-node-card"
                     aria-labelledby={`workflow-node-${nodeIndex}-title`}
                   >
                     <div className="workflow-node-heading">
@@ -919,7 +919,7 @@ export default function WorkflowView() {
                 ))}
               </section>
 
-              <section className="sched-form workflow-run-form">
+              <section className="workflow-run-form">
                 <div className="workflow-section-heading">
                   <div>
                     <h2>{tr("workflowview.runWorkflow")}</h2>
@@ -1108,7 +1108,7 @@ export default function WorkflowView() {
                     {shownRun.nodes.map((node) => {
                       const needsHuman = workflowHumanWait(node) !== null;
                       return (
-                      <article key={node.id} className={`sched-card workflow-run-card status-${node.status}${needsHuman ? " needs-human" : ""}`}>
+                      <article key={node.id} className={`workflow-run-card status-${node.status}${needsHuman ? " needs-human" : ""}`}>
                         <div className="workflow-run-card-heading">
                           <strong>{node.role}</strong>
                           <StatusBadge status={node.status} />

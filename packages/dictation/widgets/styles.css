@@ -1,124 +1,102 @@
-/* Package-owned dictation web styles. */
+.pkg-dictation {
+  container: dictation-settings / inline-size;
+}
+
 .mic-control {
-display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
 }
-.mic-btn {
-display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0;
-  border: 0; border-radius: var(--radius-control);
-  background: transparent; color: var(--muted);
+
+.mic-control .mic-btn {
+  flex: none;
+  color: var(--muted);
 }
-.mic-btn:hover {
-color: var(--text); border-color: transparent; background: color-mix(in srgb, var(--text) 6%, transparent);
+
+.mic-control .mic-btn.listening {
+  color: var(--red);
+  background: var(--red-wash);
+  animation: dictation-pulse 1.2s var(--motion-ease) infinite;
 }
-.mic-btn:disabled {
-opacity: 0.55; cursor: default; transform: none;
+
+.mic-control .mic-icon {
+  display: grid;
+  place-items: center;
 }
-.mic-btn.listening {
-color: var(--red); border-color: transparent; background: var(--red-wash); animation: pulse 1.2s ease-in-out infinite;
+
+.mic-control .mic-icon > svg {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
 }
-.mic-icon {
-display: grid; place-items: center;
+
+.mic-control .mic-status {
+  max-width: 220px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.mic-status {
-font-size: var(--font-meta); color: var(--muted); min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px;
+
+.mic-control.mic-failed .mic-status {
+  color: var(--red);
 }
-.mic-failed .mic-status {
-color: var(--red);
+
+.mic-control:is(.mic-listening, .mic-transcribing, .mic-starting) .mic-status {
+  color: var(--text-dim);
 }
-.mic-listening .mic-status,
-.mic-transcribing .mic-status,
-.mic-starting .mic-status {
-color: var(--text-dim);
+
+body[data-dictate="false"] .mic-control .mic-btn {
+  display: none;
 }
+
+.pkg-dictation .voice-form-note {
+  font-size: var(--font-meta);
+}
+
+@keyframes dictation-pulse {
+  50% { opacity: .65; }
+}
+
 @media (pointer: coarse) {
-.mic-btn {
-min-height: var(--tap); min-width: var(--tap);
+  .mic-control .mic-btn,
+  .mic-control .mic-retry,
+  .mic-control .mic-settings {
+    min-width: var(--tap);
+    min-height: var(--tap);
+  }
 }
-}
+
 @media (max-width: 640px) {
-.mic-btn {
-min-height: var(--tap);
+  .mic-control .mic-status { max-width: 160px; }
 }
 
-.mic-status {
-max-width: 160px;
-}
-}
-@media (max-height: 560px) and (max-width: 480px) and (pointer: fine) {
-.mic-btn {
-min-height: 32px; min-width: 0;
-}
-}
-body[data-dictate="false"] .mic-btn {
-display: none !important;
-}
-.composer-mobile-extensions .mic-btn {
-width: var(--control-h);
-  min-width: var(--control-h);
-  height: var(--control-h);
-  padding: 0;
-  border-radius: var(--radius-control);
-}
-@media (pointer: coarse) {
-.composer-mobile-extensions .mic-btn {
-width: var(--tap);
-  min-width: var(--tap);
-  height: var(--tap);
-}
-}
-.mic-icon > svg {
-width: var(--icon-lg); height: var(--icon-lg);
-}
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-.composer-mobile .composer-mobile-extensions .mic-control {
-display: contents;
-}
+  .composer-mobile .composer-mobile-extensions .mic-control { display: contents; }
 
-.composer-mobile .composer-mobile-extensions .mic-status,
-.composer-mobile .composer-mobile-extensions .mic-retry,
-.composer-mobile .composer-mobile-extensions .mic-settings {
-display: none;
-}
+  .composer-mobile .composer-mobile-extensions :is(.mic-status, .mic-retry, .mic-settings) {
+    display: none;
+  }
 
-.composer-mobile .composer-mobile-extensions .mic-btn {
-width: var(--tap);
+  .composer-mobile .composer-mobile-extensions .mic-btn {
+    width: var(--tap);
     min-width: var(--tap);
     height: var(--tap);
     min-height: var(--tap);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
     padding: 0;
-    border: 0;
-    border-radius: var(--radius-control);
-    background: transparent;
-    color: var(--muted);
+  }
+
+  /* Dictation inserts into the draft; once text exists the draft owns the
+     compact leading slot and the mic yields until it is cleared. */
+  .composer-mobile.composer-has-draft .composer-mobile-extensions .mic-btn {
+    display: none;
+  }
 }
 
-.composer-mobile .composer-mobile-extensions .mic-btn:active {
-color: var(--text);
-    background: color-mix(in srgb, var(--text) 8%, transparent);
-}
-
-.composer-mobile.composer-has-draft .composer-mobile-extensions .mic-btn {
-display: none;
-}
-}
-.mic-icon > svg {
-transform: none;
-}
-/* Only the package-owned mic button; composer-owned controls get their tap
-   floor from core styles. */
-@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-.composer-actions .mic-btn {
-width: var(--tap);
-    min-width: var(--tap);
-    height: var(--tap);
-    min-height: var(--tap);
-}
-}
-/* Settings form footnote keeps the shared meta role. */
-.voice-form-note {
-font-size: var(--font-meta);
+@media (prefers-reduced-motion: reduce) {
+  .mic-control .mic-btn.listening {
+    animation: none;
+  }
 }

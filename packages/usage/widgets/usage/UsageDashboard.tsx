@@ -502,13 +502,12 @@ function ProviderSpendDonut({
             </div>
           ))}
           {arcs.length === 0 && (
-            <EmptyState
-              variant="compact"
-              title={hiddenSpend ? tr("usage.usagedashboard.allSpendIsHidden") : tr("usage.usagedashboard.noSpendRecorded")}
-              description={hiddenSpend
+            <div className="usage-inline-empty" role="status">
+              <strong>{hiddenSpend ? tr("usage.usagedashboard.allSpendIsHidden") : tr("usage.usagedashboard.noSpendRecorded")}</strong>
+              <span>{hiddenSpend
                 ? tr("usage.usagedashboard.showAProviderToIncludeSpend")
-                : tr("usage.usagedashboard.costAppearsWhenTheActive")}
-            />
+                : tr("usage.usagedashboard.costAppearsWhenTheActive")}</span>
+            </div>
           )}
         </div>
       </div>
