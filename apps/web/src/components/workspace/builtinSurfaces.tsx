@@ -25,7 +25,7 @@ import { useShellMode } from "../../responsiveShell.ts";
 import { tapFeedback } from "../../haptics.ts";
 import { dismissKeyboard } from "../../mobileViewport.ts";
 import { useSheetTrigger } from "../mobile/sheetTrigger.ts";
-import { HeroWidget, HeroWidgetSettings } from "../mobile/HeroWidgets.tsx";
+import { HeroWidget, HeroWidgetMenu } from "../mobile/HeroWidgets.tsx";
 import { ago, displaySessionTitle, isPlaceholderTitle } from "../../format.ts";
 import {
   noteStarterUsed,
@@ -58,13 +58,11 @@ function SessionHero({ starterContext }: { starterContext: StarterContext }) {
   // one offers exploration and planning.
   const shell = useShellMode();
   const starterPrefs = useStarterPrefs();
-  const [heroWidgetsOpen, setHeroWidgetsOpen] = useState(false);
   // §22: pointer-down activation, like every other sheet trigger.
   const starterPickerTrigger = useSheetTrigger(shell === "phone", () => {
     setOverlay("starter-picker");
     void dismissKeyboard();
   });
-  const heroWidgetsTrigger = useSheetTrigger(shell === "phone", () => setHeroWidgetsOpen(true));
   const chips = useMemo(
     () => visibleStarters(starterPrefs, starterContext, shell === "phone" ? 2 : 3),
     [starterPrefs, starterContext, shell],
@@ -95,20 +93,12 @@ function SessionHero({ starterContext }: { starterContext: StarterContext }) {
           {/* Shift-key customization mode: on desktop the customize entry
               stays hidden until Shift is held (hover reveals nothing else).
               Compact shells keep the always-visible sheet trigger. */}
-          <button
-            type="button"
-            className="hero-widget-settings zone-customize-trigger"
-            aria-label={tr("workspace.builtinsurfaces.customizeNewChatWidgets")}
-            title={tr("workspace.builtinsurfaces.customizeNewChatWidgets")}
-            aria-expanded={heroWidgetsOpen}
-            {...heroWidgetsTrigger}
-          ><Icon.sliders /></button>
+          <HeroWidgetMenu />
         </div>
         <div className="hero-dock">
           <Composer />
         </div>
       </div>
-      {heroWidgetsOpen && <HeroWidgetSettings onClose={() => setHeroWidgetsOpen(false)} />}
     </div>
   );
 }

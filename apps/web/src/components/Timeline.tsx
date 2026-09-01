@@ -763,6 +763,19 @@ function AssistantAgentHeader({
 
 const TASK_MARK = { done: "✓", active: "●", failed: "×", pending: "○" } as const;
 
+function TodoWriteList({ items }: { items: NonNullable<RenderModel["tasks"]>["items"] }) {
+  return (
+    <ul className="execution-todo-list" aria-label="Todo items">
+      {items.map((item) => (
+        <li key={item.id} className={item.status}>
+          <span className="execution-todo-mark" aria-hidden="true">{TASK_MARK[item.status]}</span>
+          <span>{item.text}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function TaskList({ plan }: { plan: NonNullable<RenderModel["tasks"]> }) {
   const completed = plan.items.filter((item) => item.status === "done").length;
   const failed = plan.items.filter((item) => item.status === "failed").length;
@@ -770,16 +783,10 @@ function TaskList({ plan }: { plan: NonNullable<RenderModel["tasks"]> }) {
   const settled = plan.items.every((item) => item.status === "done" || item.status === "failed");
   const active = plan.items.find((item) => item.status === "active");
   const [open, setOpen] = useState(!settled);
+  const itemsPresent = useCollapsePresence(open);
   useEffect(() => {
     if (settled) setOpen(false);
   }, [settled]);
-  const revealTask = (id: string) => {
-    const row = document.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(id)}"]`);
-    if (!row) return;
-    row.scrollIntoView({ block: "center", behavior: "smooth" });
-    row.classList.add("execution-highlight");
-    window.setTimeout(() => row.classList.remove("execution-highlight"), 1200);
-  };
   const detail = [
     `${completed}/${plan.items.length} complete`,
     ...(failed > 0 ? [`${failed} failed`] : []),
@@ -797,19 +804,21 @@ function TaskList({ plan }: { plan: NonNullable<RenderModel["tasks"]> }) {
         </span>
         <span className="task-list-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronDown />}</span>
       </button>
-      {open && (
-        <ul>
-          {plan.items.map((item) => (
-            <li key={item.id} className={item.status}>
-              <button type="button" onClick={() => revealTask(item.id)}>
-                <span aria-hidden="true">{TASK_MARK[item.status]}</span>
-                <span>{item.text}</span>
-                {item.status !== "pending" && <VisuallyHiddenStatus status={item.status} />}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <div className="task-list-expand-shell" aria-hidden={!open}>
+        <div className="task-list-collapse-content">
+          {itemsPresent && (
+            <ul>
+              {plan.items.map((item) => (
+                <li key={item.id} className={item.status}>
+                  <span className="task-list-item-mark" aria-hidden="true">{TASK_MARK[item.status]}</span>
+                  <span>{item.text}</span>
+                  {item.status !== "pending" && <VisuallyHiddenStatus status={item.status} />}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
     </section>
   );
 }
@@ -968,7 +977,7 @@ export function WorkedGroup({
         onClick={() => setOpen((value) => !value)}
       >
         <span className={`execution-group-mark ${running ? "running" : failed ? "error" : "done"}`} aria-hidden="true">
-          {running ? <span className="ui-spinner ui-spinner--sm" /> : failed ? "×" : "✓"}
+          {running ? <span className="ui-spinner ui-spinner--sm" /> : failed ? "×" : <span className="execution-group-check" />}
         </span>
         <span className="execution-group-copy">
           <strong>{running ? `Working · ${label}` : label}</strong>

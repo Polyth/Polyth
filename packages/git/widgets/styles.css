@@ -122,6 +122,7 @@
   width: max-content;
   min-width: max-content;
   max-width: 100%;
+  margin-inline: max(var(--screen-gutter), calc((100% - var(--chat-measure)) / 2)) 0;
   align-self: start;
   align-items: flex-start;
   gap: 0;

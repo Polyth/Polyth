@@ -401,6 +401,25 @@ test("mini-widgets persist and move across first-class panel and toolbar slots",
   assert.equal(canPlaceWidget(definition, "workspace.main").fit, "unusual");
 });
 
+test("drag order inside an icon zone survives serialization", () => {
+  const definitions = ["first", "second"].map((id) => ({
+    id: `sample.${id}`,
+    title: id,
+    kind: "mini-widget" as const,
+    defaultSlot: "composer.trailing" as const,
+    defaultVisible: true,
+  }));
+  const reordered = moveWidgetToSlot(
+    createDefaultWidgetLayout(definitions),
+    "sample.second",
+    "composer.trailing",
+    0,
+    definitions[1],
+  );
+  const restored = parseWidgetLayout(serializeWidgetLayout(reordered), definitions);
+  assert.deepEqual(restored.slotPlacements["composer.trailing"], ["sample.second", "sample.first"]);
+});
+
 test("self-describing plugin placements survive parsing as missing-plugin placeholders", () => {
   const parsed = parseWidgetLayout(JSON.stringify({
     version: 1,

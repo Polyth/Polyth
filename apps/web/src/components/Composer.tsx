@@ -1564,9 +1564,8 @@ export default function Composer({
               (model · effort · agent) is right-anchored beside Send. */}
           <span className="composer-extensions composer-mobile-extensions">
             <SlotHost slot="composer.leading" context={slotContext} customizable />
-            <SlotHost slot="composer.trailing" context={slotContext} customizable />
           </span>
-          <CustomizeZoneButton />
+          <CustomizeZoneButton slot="composer.leading" align="start" />
         </span>
         <div className="composer-actions customize-zone">
           {(canGenerateNextAction || suggestionBusy) && (
@@ -1581,6 +1580,9 @@ export default function Composer({
               />
             </Tooltip>
           )}
+          <span className="composer-extensions">
+            <SlotHost slot="composer.trailing" context={slotContext} customizable />
+          </span>
           <div className="composer-config">
             {!phoneLayout && executionControls}
             {chatAgents.length > 0 ? (
@@ -1667,7 +1669,7 @@ export default function Composer({
               </button>
             )}
           </span>
-          <CustomizeZoneButton />
+          <CustomizeZoneButton slot="composer.trailing" />
         </div>
       </div>
       {focusMode && (

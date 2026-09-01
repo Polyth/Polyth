@@ -38,7 +38,7 @@ export const DEFAULT_OPTIONS: SupervisorOptions = {
   gitIntervalMs: 10_000,
   pull: false,
   restart: "auto",
-  graceMs: 5_000,
+  graceMs: 10_000,
   initialBuild: true,
   maxCrashes: 5,
 };
@@ -274,7 +274,7 @@ Flags
   --git-interval=<sec>    HEAD poll interval in git mode (default: 10)
   --pull                  git mode only: fetch and \`git pull --ff-only\` before
                           comparing (default: off, git stays read-only)
-  --grace=<ms>            SIGTERM → SIGKILL grace period (default: 5000)
+  --grace=<ms>            SIGTERM → SIGKILL grace period (default: 10000)
   --max-crashes=<n>       fast crashes before staying down (default: 5)
   --no-initial-build      start the server without building first
   -h, --help              show this help

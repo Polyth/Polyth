@@ -33,7 +33,7 @@ import { clampRailWidth, railWidthOf, setRailWidth } from "../railPrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
 import { useResolvedCapabilities, type ResolvedCapability } from "../capabilities.ts";
-import { PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY } from "../builtinCapabilities.ts";
+import { isCapabilityActive, toggleCapability } from "../builtinCapabilities.ts";
 import { getWorkspacePanePrefs, setPanePreferredWidth } from "../workspace/panePrefs.ts";
 import { chatDockViability, dockGuardTargets } from "../workspace/dockGuard.ts";
 import { PaneVisibilityContext } from "../workspace/paneVisibility.ts";
@@ -43,10 +43,10 @@ import { tr } from "../i18n/index.ts";
 import { MOD } from "../format.ts";
 import { useKeymap } from "../../../../packages/hotkeys/widgets/hotkeys.ts";
 import { railIconFor } from "../railIcons.ts";
-import { Icon } from "../icons.tsx";
-import { Menu, type MenuEntry } from "./ui/index.ts";
+import { type MenuEntry } from "./ui/index.ts";
 import { useCustomizeActive } from "../useShiftArmed.ts";
 import { CAPABILITY_MIME, getDragCapability, setDragCapability } from "../dnd.ts";
+import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 
 const NO_EVENTS: never[] = [];
 /** Fallback separator chrome before the real element is measured. */
@@ -182,7 +182,6 @@ export default function ContextRail() {
   const { rail, surfaces, open, ctx } = useRailSurfaceModel();
   const projectId = useStore((s) => s.activeProjectId);
   const paneExpanded = useStore((s) => s.paneExpanded);
-  const view = useStore((s) => s.activeView);
   const resolved = useResolvedCapabilities();
   const keymap = useKeymap();
   const terminalShortcut = formatCombo(keymap.viewTerminal, MOD === "⌘");
@@ -190,13 +189,7 @@ export default function ContextRail() {
   const badgeOf = (surface: RailSurface): number => surface.badge?.(ctx) ?? 0;
   const surfaceByCapability = new Map(surfaces.map((surface) => [surface.capabilityId ?? surface.id, surface]));
   const activeCapability = (capability: ResolvedCapability): boolean => {
-    const id = capability.descriptor.id;
-    const activeView = VIEW_OF_CAPABILITY[id];
-    if (activeView !== undefined) return view === activeView;
-    const pane = PANE_OF_CAPABILITY[id];
-    if (pane !== undefined) return rail === pane;
-    const panel = PANEL_OF_CAPABILITY[id];
-    return panel !== undefined && rail === panel;
+    return isCapabilityActive(capability.descriptor.id);
   };
   const buttonForSurface = (surface: RailSurface): RailButton => ({
     id: surface.capabilityId ?? surface.id,
@@ -207,7 +200,7 @@ export default function ContextRail() {
     icon: surface.icon ?? railIconFor(surface.capabilityId ?? surface.id),
     badge: badgeOf(surface),
     presentation: surface.presentation,
-    active: rail === surface.id,
+    active: isCapabilityActive(surface.capabilityId ?? surface.id),
     activate: () => toggleRailPlugin(surface.id),
   });
   const configuredRailButtons: RailButton[] = resolved
@@ -227,10 +220,7 @@ export default function ContextRail() {
         icon: railIconFor(capability.descriptor.id),
         badge: capability.descriptor.id === "git" ? ctx.changeCount : 0,
         active: activeCapability(capability),
-        activate: () => {
-          setRailPlugin(null);
-          capability.descriptor.open();
-        },
+        activate: () => toggleCapability(capability.descriptor.id, capability.descriptor.open),
       };
     });
   // Slot-contributed panels are not necessarily capabilities, but still
@@ -241,10 +231,7 @@ export default function ContextRail() {
       || configuredRailButtons.some((button) => button.id === capabilityId)) continue;
     configuredRailButtons.push(buttonForSurface(surface));
   }
-  const openButton = open ? buttonForSurface(open) : null;
-  const railButtons = openButton && !configuredRailButtons.some((button) => button.id === openButton.id)
-    ? [openButton, ...configuredRailButtons]
-    : configuredRailButtons;
+  const railButtons = configuredRailButtons;
 
   // Shift-key customization mode: holding Shift over the rail reveals one
   // customize trigger as the strip's LAST item. Its checkbox menu adds or
@@ -252,7 +239,6 @@ export default function ContextRail() {
   // open), by moving the capability between the `more` and `technical`
   // tiers of the per-project placement layout.
   const customizeActive = useCustomizeActive();
-  const [customizeOpen, setCustomizeOpen] = useState(false);
   const railIds = new Set(railButtons.map((button) => button.id));
   const rankAfter = (tier: "more" | "technical") =>
     Math.max(-1, ...resolved.filter((capability) => capability.tier === tier)
@@ -724,24 +710,14 @@ export default function ContextRail() {
             {/* Widget-areas (WA3): widgets placed into the "Right rail" area
                 render below the built-in tier launchers. */}
             <SlotHost slot="workspace.rail" context={{ editing: false }} customizable />
-            {(
-              <Menu
-                label={tr("settingsview.customize")}
-                align="end"
-                open={customizeOpen}
-                onOpenChange={setCustomizeOpen}
-                entries={customizeEntries}
-              >
-                {(trigger) => (
-                  <button
-                    {...trigger}
-                    className="rail-icon strip-btn rail-customize zone-customize-trigger"
-                    title={tr("settingsview.customize")}
-                    aria-label={tr("settingsview.customize")}
-                  ><Icon.sliders /></button>
-                )}
-              </Menu>
-            )}
+            <CustomizeZoneButton
+              slot="workspace.rail"
+              className="rail-icon strip-btn rail-customize"
+              extraEntries={[
+                { heading: tr("contextrail.workspacePanels") },
+                ...customizeEntries,
+              ]}
+            />
           </div>
         )}
       </aside>

@@ -6,6 +6,7 @@ import Sheet, { SheetRow } from "./Sheet.tsx";
 import { Icon } from "../../icons.tsx";
 import { tr } from "../../i18n/index.ts";
 import { useCustomizeActive } from "../../useShiftArmed.ts";
+import { Menu, type MenuEntry } from "../ui/index.ts";
 
 export type HeroWidgetId = "starters" | "recent";
 
@@ -78,6 +79,45 @@ export function HeroWidget({ id, children }: { id: HeroWidgetId; children: React
         commit({ ...value, order });
       }}
     >{children}</section>
+  );
+}
+
+export function HeroWidgetMenu() {
+  const value = useHeroWidgetPrefs();
+  const labels: Record<HeroWidgetId, string> = {
+    starters: tr("mobile.herowidgets.quickStarters"),
+    recent: tr("mobile.herowidgets.recentSessions"),
+  };
+  const active = value.order.filter((id) => !value.hidden.includes(id));
+  const inactive = value.order.filter((id) => value.hidden.includes(id));
+  const action = (id: HeroWidgetId, checked: boolean): MenuEntry => ({
+    id,
+    label: labels[id],
+    kind: "checkbox",
+    checked,
+    onSelect: () => commit({
+      ...value,
+      hidden: checked ? [...value.hidden, id] : value.hidden.filter((item) => item !== id),
+    }),
+  });
+  const entries: MenuEntry[] = [
+    { heading: tr("settings.packagespage.enabled") },
+    ...active.map((id) => action(id, true)),
+    ...(inactive.length > 0 ? ["separator" as const, { heading: tr("settings.packagespage.disabled") }] : []),
+    ...inactive.map((id) => action(id, false)),
+  ];
+  return (
+    <Menu label={tr("workspace.builtinsurfaces.customizeNewChatWidgets")} align="center" entries={entries}>
+      {(trigger) => (
+        <button
+          {...trigger}
+          type="button"
+          className="hero-widget-settings zone-customize-trigger"
+          aria-label={tr("workspace.builtinsurfaces.customizeNewChatWidgets")}
+          title={tr("workspace.builtinsurfaces.customizeNewChatWidgets")}
+        ><Icon.sliders /></button>
+      )}
+    </Menu>
   );
 }
 

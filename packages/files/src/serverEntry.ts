@@ -76,12 +76,16 @@ export function workspaceRoutes(deps: {
         || raw.mime.startsWith("audio/")
         || raw.mime.startsWith("video/")
         || raw.mime === "application/pdf"
-        || raw.mime === "text/plain";
+        || raw.mime.startsWith("text/")
+        || raw.mime === "application/json"
+        || raw.mime === "application/javascript"
+        || raw.mime === "application/xml"
+        || raw.mime === "application/octet-stream";
       res.writeHead(200, {
         "content-type": raw.mime,
         "content-length": String(raw.size),
         "x-content-type-options": "nosniff",
-        "content-disposition": inline ? "inline" : "attachment",
+        "content-disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(query("path")?.split(/[\\/]/).pop() ?? "file")}`,
         "cache-control": "no-cache",
       });
       res.end(Buffer.from(raw.data));

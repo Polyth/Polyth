@@ -66,8 +66,7 @@ let down = false;
 let consecutiveCrashes = 0;
 let restartTimer: NodeJS.Timeout | null = null;
 
-/** Signal the child's whole process group — the server spawns OpenCode
- * children of its own, and a bare kill(pid) would orphan them. */
+/** Signal the child's whole process group when forced cleanup is required. */
 function signalGroup(pid: number, signal: NodeJS.Signals): void {
   try {
     process.kill(-pid, signal);
@@ -161,7 +160,9 @@ async function stopServer(): Promise<void> {
   }
   stopping = true;
   const exited = new Promise<void>((done) => target.once("exit", () => done()));
-  signalGroup(target.pid, "SIGTERM");
+  // Let the server stop its own OpenCode children cleanly. If that wedges, the
+  // timeout below still kills the complete detached process group.
+  target.kill("SIGTERM");
   const force = setTimeout(() => {
     log(`server did not stop in ${options.graceMs}ms — sending SIGKILL`);
     signalGroup(target.pid!, "SIGKILL");

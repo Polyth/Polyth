@@ -478,6 +478,7 @@ export async function boot(opts: BootOptions = {}) {
       ? { kind: "writable", targetId: localConfigTargetId }
       : { kind: "read-only" },
   });
+  let refreshSafeBehavior: () => Promise<void> = async () => {};
 
   const isTransportError = (err: unknown): boolean =>
     /fetch failed|terminated|ECONNRESET|ECONNREFUSED/i.test(
@@ -1080,22 +1081,26 @@ export async function boot(opts: BootOptions = {}) {
         p = (async () => {
           const configRestartable = !(await projects.get(projectId))?.remote;
           try {
-            return facadeFor(
+            const facade = facadeFor(
               key,
               projectId,
               dir,
               await spawnRuntime(projectId, dir),
               configRestartable,
             );
+            if (configRestartable) await refreshSafeBehavior();
+            return facade;
           } catch (err) {
             if (!isTransportError(err)) throw err;
-            return facadeFor(
+            const facade = facadeFor(
               key,
               projectId,
               dir,
               await spawnRuntime(projectId, dir),
               configRestartable,
             ); // one spawn retry before any mutation exists
+            if (configRestartable) await refreshSafeBehavior();
+            return facade;
           }
         })();
         runtimesByProject.set(key, p);
@@ -1180,7 +1185,6 @@ export async function boot(opts: BootOptions = {}) {
     restart: (state) => restartRuntimeEntries(state as RuntimeRestartState | undefined),
   });
   const configApplier = createDeferredConfigApplier(directConfigApplier, pendingOpenCode);
-  let refreshSafeBehavior: () => Promise<void> = async () => {};
   const secureSafe = createSecureSafeService({
     dataDir,
     onChanged: () => refreshSafeBehavior(),
@@ -1196,6 +1200,7 @@ export async function boot(opts: BootOptions = {}) {
     decorate: decorateBehavior,
   });
   refreshSafeBehavior = async () => {
+    if (configApplier.configAuthority?.().kind === "read-only") return;
     try {
       await configApplier.applyBehavior(decorateBehavior((await behavior.get()).text));
     } catch (err) {
@@ -1729,7 +1734,8 @@ export async function boot(opts: BootOptions = {}) {
     svc<{ close(): void }>("knowledge")?.close();
     await svc<{ closeAll(): Promise<void> }>("browser")?.closeAll().catch(() => {});
     await svc<{ closeAll(): Promise<void> }>("terminal")?.closeAll().catch(() => {});
-    for (const p of runtimesByProject.values()) await (await p.catch(() => null))?.dispose().catch(() => {});
+    await Promise.all([...runtimesByProject.values()].map(async (p) =>
+      (await p.catch(() => null))?.dispose().catch(() => {})));
     await svc<SshTransportService>("ssh")?.disconnectAll().catch(() => {});
     await root.dispose();
     await store.close();

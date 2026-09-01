@@ -20,6 +20,7 @@ import { openSession, prefetchSessionTail } from "../../init.ts";
 import { setOverlay, setRailPlugin, setSidebarOpen, startNewSession, useActiveModel, useStore } from "../../store.ts";
 import { firstUserTextCached, lastUserTextCached } from "../../utils.ts";
 import { useResolvedCapabilities } from "../../capabilities.ts";
+import { toggleCapability } from "../../builtinCapabilities.ts";
 import { ComposeIcon, IconButton, LayersIcon, MenuIcon } from "../ui/index.ts";
 import Sheet, { SheetRow, SheetSection } from "./Sheet.tsx";
 
@@ -175,7 +176,7 @@ export function Tools({ onClose }: { onClose: () => void }) {
           const CapabilityIcon = railIconFor(capability.descriptor.id);
           return <SheetRow key={capability.descriptor.id} title={capability.descriptor.label}
           icon={<CapabilityIcon />} trailing={<span className="mobile-surface-chevron"><Icon.chevronRight /></span>}
-          onClick={() => { setSidebarOpen(false); setRailPlugin(null); capability.descriptor.open(); onClose(); }} />;
+          onClick={() => { setSidebarOpen(false); onClose(); toggleCapability(capability.descriptor.id, capability.descriptor.open); }} />;
         })}
       </SheetSection>)}
     </Sheet>

@@ -8,7 +8,8 @@
 // top (`defaultVisible: false`). Retiring the tier system is a later step.
 import { listCapabilities, subscribeCapabilities } from "../capabilities.ts";
 import { railIconFor } from "../railIcons.ts";
-import { setRailPlugin } from "../store.ts";
+import { isCapabilityActive, toggleCapability } from "../builtinCapabilities.ts";
+import { useStore } from "../store.ts";
 import { tr } from "../i18n/index.ts";
 import { registerWidget, type WidgetDef } from "./catalog.ts";
 
@@ -31,17 +32,16 @@ const SKIP = new Set(["session"]);
 function CapabilityLauncher({ id }: { id: string }) {
   const RailIcon = railIconFor(id);
   const capability = listCapabilities().find((item) => item.id === id);
+  const active = useStore((state) => isCapabilityActive(id, state));
   if (!capability || !capability.available()) return null;
   return (
     <button
       type="button"
-      className="capability-launcher"
+      className={`capability-launcher${active ? " active" : ""}`}
       title={capability.label}
       aria-label={capability.label}
-      onClick={() => {
-        setRailPlugin(null);
-        capability.open();
-      }}
+      aria-pressed={active}
+      onClick={() => toggleCapability(id, capability.open)}
     >
       <RailIcon />
       <span className="capability-launcher-label">{capability.label}</span>

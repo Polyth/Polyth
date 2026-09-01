@@ -14,7 +14,7 @@ import { Icon } from "../icons.tsx";
 import { openSession } from "../init.ts";
 import { openEditorFile, setUiError, useStore } from "../store.ts";
 import { parseDiffLines } from "../utils.ts";
-import type { SubagentState, ToolMsg } from "../reduce.ts";
+import type { SubagentState, TaskListState, ToolMsg } from "../reduce.ts";
 import CopyButton from "./CopyButton.tsx";
 import Dialog from "./a11y/Dialog.tsx";
 
@@ -134,6 +134,30 @@ function DetailHeading({ label, copy }: { label: string; copy?: string }) {
       <span>{label}</span>
       {copy !== undefined && <CopyButton text={copy} label={`Copy ${label.toLowerCase()}`} />}
     </div>
+  );
+}
+
+const TODO_MARK = { done: "✓", active: "●", failed: "×", pending: "○" } as const;
+
+function TodoWritePreview({ items }: { items: TaskListState["items"] }) {
+  const completed = items.filter((item) => item.status === "done").length;
+  const open = useCollapsePresence(true);
+  return (
+    <section className="execution-todo-preview" aria-label="Todo list">
+      <div className="execution-todo-count"><strong>Tasks</strong><span>{completed}/{items.length} complete</span></div>
+      <div className="execution-todo-list-shell">
+        <div className="execution-todo-list-content">
+          {open && <ul>
+            {items.map((item) => (
+              <li key={item.id} className={item.status}>
+                <span className="execution-todo-mark" aria-hidden="true">{TODO_MARK[item.status]}</span>
+                <span>{item.text}</span>
+              </li>
+            ))}
+          </ul>}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -454,6 +478,16 @@ export function ExecutionRow({
   // derivations (JSON.stringify of potentially large outputs) run once per
   // actual change instead of on every parent render.
   const presentation = useMemo(() => executionPresentation(message), [message, message.rev]);
+  const todoItems = useMemo(() => {
+    if (!/^(?:todowrite|todo)$/i.test(message.tool)) return undefined;
+    const value = message.input.todos;
+    return Array.isArray(value) ? value.filter((item): item is TaskListState["items"][number] => {
+      if (!item || typeof item !== "object") return false;
+      const candidate = item as Record<string, unknown>;
+      return typeof candidate.id === "string" && (typeof candidate.content === "string" || typeof candidate.text === "string") &&
+        (candidate.status === "pending" || candidate.status === "active" || candidate.status === "done" || candidate.status === "failed");
+    }).map((item) => ({ id: item.id, text: item.text, status: item.status })) : undefined;
+  }, [message, message.rev]);
   const inputEntries = useMemo(() => normalizedInputEntries(message.input), [message, message.rev]);
   const inputJson = useMemo(() => JSON.stringify(message.input, null, 2), [message, message.rev]);
   const raw = useMemo(() => JSON.stringify({
@@ -544,7 +578,7 @@ export function ExecutionRow({
                   onOpenFull={() => openViewer(`${presentation.label} full diff`, presentation.diff ?? "")}
                 />
               )}
-              {inputEntries.length > 0 && (
+              {todoItems && todoItems.length > 0 ? <TodoWritePreview items={todoItems} /> : inputEntries.length > 0 && (
                 <section className="execution-detail-section execution-input">
                   <DetailHeading label="Details" />
                   <dl>

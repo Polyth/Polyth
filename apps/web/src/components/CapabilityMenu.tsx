@@ -5,6 +5,7 @@ import {
   capabilityGroup,
   type ResolvedCapability,
 } from "../capabilities.ts";
+import { toggleCapability } from "../builtinCapabilities.ts";
 import { tr } from "../i18n/index.ts";
 
 interface CapabilityMenuProps {
@@ -81,7 +82,7 @@ export default function CapabilityMenu({
                       title={reason ?? capability.descriptor.plainDescription}
                       onClick={() => {
                         onClose();
-                        capability.descriptor.open();
+                        toggleCapability(capability.descriptor.id, capability.descriptor.open);
                       }}
                     >
                       <span>{capability.descriptor.label}{alias}</span>

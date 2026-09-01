@@ -112,7 +112,7 @@ test("ContextRail has no JUMPS rows — every placed capability gets a launcher"
   assert.ok(!src.includes("JUMPS"), "jump rows were replaced by workspace pane launchers");
   assert.ok(src.includes("onClick={s.activate}"), "strip buttons use their shared launcher");
   assert.ok(src.includes('capability.tier === "more"'), "right-rail placement drives the button list");
-  assert.ok(src.includes("capability.descriptor.open()"), "capabilities without panel surfaces still open");
+  assert.ok(src.includes("toggleCapability"), "capabilities without panel surfaces use the shared toggle");
 });
 
 test("right-rail utilities use distinct semantic icons", async () => {

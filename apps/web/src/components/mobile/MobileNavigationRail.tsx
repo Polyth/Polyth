@@ -1,5 +1,5 @@
 import {
-  PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY,
+  PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY, toggleCapability,
 } from "../../builtinCapabilities.ts";
 import { useResolvedCapabilities } from "../../capabilities.ts";
 import { Icon } from "../../icons.tsx";
@@ -128,7 +128,7 @@ export default function MobileNavigationRail() {
             : workspaceSurface !== undefined
               ? view === id && rail === null
               : packageSurface !== undefined && rail === packageSurface.id,
-      open: capability.descriptor.open,
+      open: () => toggleCapability(id, capability.descriptor.open),
     }];
   });
 

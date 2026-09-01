@@ -5,7 +5,7 @@ import {
 } from "react";
 import {
   getState, useStore, activateProject, openWorkspacePane, openWorktreeSessionDialog, setOverlay,
-  openSettingsPage, setSidebarOpen, setUiError, startNewSession,
+  setSidebarOpen, setUiError, startNewSession,
 } from "../store.ts";
 import {
   getSyncStatus, reconnectSync, refreshSessions, removeProject, renameProject, subscribeSyncStatus,
@@ -17,6 +17,7 @@ import ImportSessionsDialog from "./ImportSessionsDialog.tsx";
 import { useShellMode } from "../responsiveShell.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
 import SlotHost from "./slots/SlotHost.ts";
+import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import { useSidebarExpanded } from "../sidebarPresentation.ts";
 import {
   applyManualProjectOrder, reorderManualProjects,
@@ -590,12 +591,7 @@ export default function Sidebar() {
               <Button size="sm" className="sidebar-reconnect" onClick={() => { reconnectSync(); setConnectionOpen(false); }}>{tr("sidebar.reconnect")}</Button>
             </Popover>
           </div>
-          <button
-            className="sidebar-service-btn zone-customize-trigger zone-edit-button"
-            aria-label={tr("settingsview.customize")}
-            title={tr("settingsview.customize")}
-            onClick={() => openSettingsPage("widgets")}
-          ><Icon.sliders /></button>
+          <CustomizeZoneButton slot="sidebar.toolbar" className="sidebar-service-btn" />
         </div>
         <div
           ref={sideScrollRef}

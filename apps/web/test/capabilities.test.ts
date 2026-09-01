@@ -9,9 +9,9 @@ import {
   type CapabilityDescriptor,
 } from "../src/capabilities.ts";
 import {
-  PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY,
+  isCapabilityActive, PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, toggleCapability, VIEW_OF_CAPABILITY,
 } from "../src/builtinCapabilities.ts";
-import { closeWorkspacePane, getState, openWorkspacePane, setActiveView, setSidebarOpen } from "../src/store.ts";
+import { closeWorkspacePane, getState, openWorkspacePane, setActiveView, setRailPlugin, setSidebarOpen } from "../src/store.ts";
 import { registerSurface } from "../src/surfaces.ts";
 import { getWorkspaceMode, setWorkspaceMode } from "../src/widgets/workspaceMode.ts";
 
@@ -217,6 +217,27 @@ test("a dynamically registered primary capability can reveal its destination", (
     setSidebarOpen(false);
     setActiveView("session");
     setWorkspaceMode("chat");
+    dispose();
+  }
+});
+
+test("capability launchers share active state and toggle an open rail surface closed", () => {
+  const dispose = registerSurface({
+    id: "toggle-capability",
+    title: "Toggle capability",
+    capabilityId: "toggle-capability",
+    order: 999,
+    component: () => null,
+  });
+  try {
+    setRailPlugin("toggle-capability");
+    assert.equal(isCapabilityActive("toggle-capability"), true);
+    let opened = false;
+    toggleCapability("toggle-capability", () => { opened = true; });
+    assert.equal(opened, false, "an active launcher closes instead of reopening");
+    assert.equal(getState().railPlugin, null);
+  } finally {
+    setRailPlugin(null);
     dispose();
   }
 });

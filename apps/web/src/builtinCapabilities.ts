@@ -7,8 +7,11 @@ import {
   BUILTIN_CAPABILITY_META, registerCapability, type CapabilityMeta,
 } from "./capabilities.ts";
 import {
-  closeWorkspacePane, openSettingsPage, openWorkspacePane, setActiveView, setRailPlugin, setSidebarOpen, type AppView,
+  closeWorkspacePane, getState, openSettingsPage, openWorkspacePane, setActiveView, setRailPlugin, setSidebarOpen,
+  type AppState, type AppView,
 } from "./store.ts";
+import { isWorkspaceSurface, listSurfaces } from "./surfaces.ts";
+import { getWorkspaceSurface } from "./workspace/surfaceRegistry.ts";
 import { setWorkspaceMode } from "./widgets/workspaceMode.ts";
 
 /** Capability id → full workspace view, used for active-state highlighting.
@@ -25,6 +28,43 @@ export const PANEL_OF_CAPABILITY: Partial<Record<string, string>> = {
   events: "events",
   context: "context",
 };
+
+type CapabilityState = Pick<AppState, "activeView" | "railPlugin" | "paneFullscreen">;
+
+/** One active-state rule for every place a capability launcher can render. */
+export function isCapabilityActive(id: string, current: CapabilityState = getState()): boolean {
+  const view = VIEW_OF_CAPABILITY[id];
+  if (view) return current.activeView === view && !(view === "session" && current.paneFullscreen);
+  const pane = PANE_OF_CAPABILITY[id];
+  if (pane) return current.railPlugin === pane;
+  const panel = PANEL_OF_CAPABILITY[id];
+  if (panel) return current.railPlugin === panel;
+  const railSurface = listSurfaces().find((surface) => (surface.capabilityId ?? surface.id) === id);
+  if (railSurface) return current.railPlugin === railSurface.id;
+  return getWorkspaceSurface(id) !== undefined
+    && current.activeView === id
+    && current.railPlugin === null;
+}
+
+/** Capability launchers are toggles, regardless of which rail they live in. */
+export function toggleCapability(id: string, open: () => void): void {
+  const current = getState();
+  if (isCapabilityActive(id, current)) {
+    if (current.railPlugin !== null) {
+      const surface = listSurfaces().find((candidate) => candidate.id === current.railPlugin);
+      if (surface && isWorkspaceSurface(surface)) {
+        closeWorkspacePane();
+      } else {
+        setRailPlugin(null);
+      }
+    } else if (current.activeView !== "session") {
+      setActiveView("session");
+    }
+    return;
+  }
+  if (current.railPlugin !== null) setRailPlugin(null);
+  open();
+}
 
 function openOf(meta: CapabilityMeta): () => void {
   const view = VIEW_OF_CAPABILITY[meta.id];

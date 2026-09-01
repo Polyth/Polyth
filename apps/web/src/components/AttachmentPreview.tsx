@@ -79,7 +79,7 @@ function AttachmentContent({ attachment, kind }: { attachment: AttachmentRef; ki
   }
   return (
     <div className="attachment-preview-state attachment-preview-download">
-      <span>{tr("common.unavailable")}</span>
+      <span>{attachment.mime || tr("common.unavailable")}</span>
       <a href={attachment.url} target="_blank" rel="noreferrer" download={attachment.name}>{attachment.name}</a>
     </div>
   );
@@ -115,6 +115,7 @@ export default function AttachmentPreview({ attachments, start, onClose }: {
         }}
       >
         <div className="attachment-preview-toolbar">
+          <strong className="attachment-preview-title" title={attachment.name}>{attachment.name}</strong>
           <div className="attachment-preview-details">
             <span>{attachment.mime}</span>
             {attachment.path && <span className="attachment-preview-path" title={attachment.path}>{attachment.path}</span>}

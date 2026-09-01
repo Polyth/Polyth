@@ -12,12 +12,13 @@ import {
   useResolvedCapabilities,
   type ResolvedCapability,
 } from "../capabilities.ts";
-import { PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY } from "../builtinCapabilities.ts";
+import { isCapabilityActive, toggleCapability, VIEW_OF_CAPABILITY } from "../builtinCapabilities.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import { Icon } from "../icons.tsx";
 import { setWorkspaceMode, useWorkspaceMode } from "../widgets/workspaceMode.ts";
 import {
   FolderIcon, IconButton, InfoIcon, LockIcon, Menu, MenuIcon, SettingsIcon,
+  type MenuEntry,
 } from "./ui/index.ts";
 import { useUiSettings } from "../uiPrefs.ts";
 import MobileNavigationRail from "./mobile/MobileNavigationRail.tsx";
@@ -26,10 +27,10 @@ import MobileViewHeader from "./mobile/MobileViewHeader.tsx";
 import { api, type GithubStatusDto } from "@polyth/session/web-api";
 import { tr } from "../i18n/index.ts";
 import { useKeymap } from "@polyth/hotkeys/widgets";
-import { listSurfaces } from "../surfaces.ts";
-import { getWorkspaceSurface } from "../workspace/surfaceRegistry.ts";
 import { getDragCapability, setDragCapability, CAPABILITY_MIME } from "../dnd.ts";
-import { moveCapabilityBefore, setCapabilityTierOrder } from "../capabilityLayout.ts";
+import {
+  moveCapabilityBefore, setCapabilityTierOrder, setPlacementOverride, useCapabilityPlacements,
+} from "../capabilityLayout.ts";
 import { setCustomizeMode, useCustomizeActive, useCustomizeMode } from "../useShiftArmed.ts";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 
@@ -101,50 +102,29 @@ function capabilityIcon(id: string): React.ReactNode {
  *  instead of depending on a customizable app.header.actions placement. */
 function CapabilityNav() {
   const resolved = useResolvedCapabilities();
+  const placements = useCapabilityPlacements();
   const ui = useUiSettings();
   const keymap = useKeymap();
   const customizeActive = useCustomizeActive();
-  const view = useStore((s) => s.activeView);
-  const rail = useStore((s) => s.railPlugin);
-  const paneFullscreen = useStore((s) => s.paneFullscreen);
+  useStore((s) => `${s.activeView}:${s.railPlugin ?? ""}:${s.paneFullscreen}`);
+  const isActive = (c: ResolvedCapability): boolean => isCapabilityActive(c.descriptor.id);
 
-  const isActive = (c: ResolvedCapability): boolean => {
-    const v = VIEW_OF_CAPABILITY[c.descriptor.id];
-    if (v) return view === v && !(v === "session" && paneFullscreen);
-    const pane = PANE_OF_CAPABILITY[c.descriptor.id];
-    if (pane) return rail === pane;
-    const panel = PANEL_OF_CAPABILITY[c.descriptor.id];
-    if (panel) return rail === panel;
-    const packageSurface = listSurfaces().find((surface) =>
-      (surface.capabilityId ?? surface.id) === c.descriptor.id);
-    if (packageSurface) return rail === packageSurface.id;
-    return getWorkspaceSurface(c.descriptor.id) !== undefined
-      && view === c.descriptor.id;
+  // Workflow and Terminal retain their discoverable defaults only until the
+  // user explicitly changes them. Thereafter the persisted tier/rank is the
+  // whole truth, so drag order and active/inactive choices survive reloads.
+  const defaultPinned = (id: string) => (id === "workflow" || id === "terminal") && placements[id] === undefined;
+  let topRail = resolved.filter((capability) =>
+    capability.descriptor.available() && (capability.tier === "primary" || defaultPinned(capability.descriptor.id)));
+  const moveAfter = (items: ResolvedCapability[], id: string, afterId: string): ResolvedCapability[] => {
+    const item = items.find((candidate) => candidate.descriptor.id === id);
+    if (!item) return items;
+    const next = items.filter((candidate) => candidate !== item);
+    const at = next.findIndex((candidate) => candidate.descriptor.id === afterId);
+    next.splice(at < 0 ? next.length : at + 1, 0, item);
+    return next;
   };
-
-  const eligiblePrimaries = resolved.filter((c) =>
-    (c.tier === "primary" || c.descriptor.id === "workflow")
-    && c.descriptor.id !== "terminal"
-    && c.descriptor.available());
-  // Workflows is package-owned and may retain its default "more" placement.
-  // Keep it beside Chat so enabling the package always creates a discoverable
-  // destination without relying on the configurable right rail.
-  const workflow = eligiblePrimaries.find((c) => c.descriptor.id === "workflow");
-  const primaries = workflow
-    ? [
-        ...eligiblePrimaries.filter((c) => c.descriptor.id === "session"),
-        workflow,
-        ...eligiblePrimaries.filter((c) =>
-          c.descriptor.id !== "session" && c.descriptor.id !== "workflow"),
-      ]
-    : eligiblePrimaries;
-  const terminal = resolved.find((c) =>
-    c.descriptor.id === "terminal" && c.descriptor.available());
-  const filesIndex = primaries.findIndex((c) => c.descriptor.id === "files");
-  const terminalIndex = filesIndex < 0 ? primaries.length : filesIndex + 1;
-  const topRail = terminal
-    ? [...primaries.slice(0, terminalIndex), terminal, ...primaries.slice(terminalIndex)]
-    : primaries;
+  if (placements.workflow === undefined) topRail = moveAfter(topRail, "workflow", "session");
+  if (placements.terminal === undefined) topRail = moveAfter(topRail, "terminal", "files");
   const terminalLabel = tr("terminalview.openTerminalShortcut", {
     shortcut: formatCombo(keymap.viewTerminal, MOD === "⌘"),
   });
@@ -156,6 +136,27 @@ function CapabilityNav() {
       topRail.map((capability) => capability.descriptor.id), draggedId, targetId,
     ));
   };
+  const topIds = new Set(topRail.map((capability) => capability.descriptor.id));
+  const rankAfter = (tier: "primary" | "technical") =>
+    Math.max(-1, ...resolved.filter((capability) => capability.tier === tier).map((capability) => capability.rank)) + 1;
+  const entryFor = (capability: ResolvedCapability, checked: boolean): MenuEntry => ({
+    id: `capability:${capability.descriptor.id}`,
+    label: capability.descriptor.label,
+    kind: "checkbox",
+    checked,
+    disabled: capability.descriptor.id === "session",
+    onSelect: () => setPlacementOverride(capability.descriptor.id, checked
+      ? { tier: "technical", rank: rankAfter("technical") }
+      : { tier: "primary", rank: rankAfter("primary") }),
+  });
+  const available = resolved.filter((capability) => capability.descriptor.available());
+  const capabilityEntries: MenuEntry[] = [
+    { heading: tr("settings.packagespage.enabled") },
+    ...available.filter((capability) => topIds.has(capability.descriptor.id)).map((capability) => entryFor(capability, true)),
+    "separator",
+    { heading: tr("settings.packagespage.disabled") },
+    ...available.filter((capability) => !topIds.has(capability.descriptor.id)).map((capability) => entryFor(capability, false)),
+  ];
 
   return (
     <nav
@@ -182,7 +183,9 @@ function CapabilityNav() {
                 if (event.dataTransfer.types.includes(CAPABILITY_MIME)) event.preventDefault();
               }}
               onDrop={(event) => dropBefore(event, c.descriptor.id)}
-              onClick={() => terminalAction ? toggleWorkspacePane("terminal") : c.descriptor.open()}
+              onClick={() => terminalAction
+                ? toggleWorkspacePane("terminal")
+                : toggleCapability(c.descriptor.id, c.descriptor.open)}
             >
               {capabilityIcon(c.descriptor.id)}
             </button>
@@ -192,7 +195,7 @@ function CapabilityNav() {
             render alongside the built-in tier rail. */}
         <SlotHost slot="app.header.center" context={{ editing: false }} customizable />
       </div>
-      <CustomizeZoneButton />
+      <CustomizeZoneButton slot="app.header.center" extraEntries={capabilityEntries} />
     </nav>
   );
 }
@@ -422,17 +425,23 @@ export default function Header() {
         {workspaceMode === "chat" && !compact && <CapabilityNav />}
         <span className="header-spacer" />
         {(!compact || !chatSurface) && (
-          <div className="header-actions" aria-label={tr("header.application")}>
+          <div className="header-actions customize-zone" aria-label={tr("header.application")}>
             {showContextRing && <ContextRing gauge={gauge} />}
             {workspaceMode === "chat" && session && (
               <SlotHost
                 slot="session.header.actions"
                 context={{ sessionId: session.id, status: session.status, working: model.turn?.status === "working" }}
+                customizable
               />
             )}
             <SlotHost
               slot="app.header.actions"
               context={{ projectId: project?.id ?? null, sessionId: session?.id ?? null, workspaceMode }}
+              customizable
+            />
+            <CustomizeZoneButton
+              slot="app.header.actions"
+              slots={["session.header.actions", "app.header.actions"]}
             />
           </div>
         )}

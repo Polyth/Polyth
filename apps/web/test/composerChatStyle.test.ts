@@ -101,6 +101,26 @@ test("thinking, tasks, and every execution share the compact activity-card treat
   assert.match(css, /\.task-list\s*\{[^}]*margin:\s*var\(--space-1\) 0 0;/s);
 });
 
+test("task plans expand as a styled list instead of opening raw task activity", () => {
+  const timeline = read("../src/components/Timeline.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(timeline, /className="task-list-expand-shell"/);
+  assert.match(timeline, /className="task-list-item-mark"/);
+  assert.doesNotMatch(timeline, /const revealTask|onClick=\{\(\) => revealTask/);
+  assert.match(css, /\.task-list\.open > \.task-list-expand-shell\s*\{[^}]*grid-template-rows:\s*1fr;/s);
+  assert.match(css, /\.task-list li\.active\s*\{[^}]*background:\s*var\(--accent-wash\)/s);
+});
+
+test("todowrite details use the same task presentation instead of raw input", () => {
+  const execution = read("../src/components/ExecutionRow.tsx");
+  const css = read("../src/styles.css");
+  assert.match(execution, /TodoWritePreview/);
+  assert.match(execution, /if \(!\/\^\(\?:todowrite\|todo\)\$\/i\.test\(message\.tool\)\)/);
+  assert.match(execution, /todoItems && todoItems\.length > 0 \? <TodoWritePreview/);
+  assert.match(css, /\.execution-todo-list li\.active\s*\{[^}]*background:\s*var\(--accent-wash\)/s);
+});
+
 test("a live thought reveals expanded, types out, then folds when formed", () => {
   const timeline = read("../src/components/Timeline.tsx");
 
