@@ -21,11 +21,16 @@ export async function aggregateRuntimes<T>(
   deps: { projects: ProjectService; runtimes: RuntimePool },
   fetch: (rt: AgentRuntime) => Promise<T[]>,
   key: (item: T) => string = (item) => JSON.stringify(item),
+  onResult?: (items: T[]) => void,
 ): Promise<RuntimeAggregate<T>> {
   const projectList = await deps.projects.list();
   const ids = projectList.length ? projectList.map((p) => p.id) : ["__default__"];
   const settled = await Promise.allSettled(
-    ids.map(async (id) => fetch(await deps.runtimes.forProject(id))),
+    ids.map(async (id) => {
+      const items = await fetch(await deps.runtimes.forProject(id));
+      onResult?.(items);
+      return items;
+    }),
   );
   const out: T[] = [];
   const seen = new Set<string>();

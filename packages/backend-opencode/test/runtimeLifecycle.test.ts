@@ -211,7 +211,7 @@ test("owned local runtimes require and export exact isolated writable DB paths",
   }
 });
 
-test("default local process records separate projects sharing one worktree", async () => {
+test("default local process records separate servers sharing one project and worktree", async () => {
   const directory = await mkdtemp(join(tmpdir(), "polyth-local-process-isolation-"));
   const leases: Array<Awaited<ReturnType<typeof createOwnedLocalEndpointLease>>> = [];
   let nextPid = 7050;
@@ -228,12 +228,12 @@ test("default local process records separate projects sharing one worktree", asy
       `opencode server listening on http://127.0.0.1:${Number(args.at(-1))}\n`,
     );
   }) as unknown as typeof nodeSpawn;
-  const boot = async (projectId: string, port: number) => {
+  const boot = async (runtimeId: string, port: number) => {
     const lease = await createOwnedLocalEndpointLease({
-      projectId,
+      projectId: "project-a",
       cwd: directory,
-      runtimeDir: join(directory, "runtimes", projectId),
-      stateFile: join(directory, "state", `${projectId}.lease.json`),
+      runtimeDir: join(directory, "runtimes", runtimeId),
+      stateFile: join(directory, "state", `${runtimeId}.lease.json`),
       resolveBinary: resolveTestBinary,
       inspectEngine: async () => TEST_ENGINE,
       spawn: fakeSpawn,
@@ -250,8 +250,8 @@ test("default local process records separate projects sharing one worktree", asy
   };
 
   try {
-    const first = await boot("project-a", 43111);
-    const second = await boot("project-b", 43112);
+    const first = await boot("server-a", 43111);
+    const second = await boot("server-b", 43112);
     assert.notEqual(first.authorityId, second.authorityId);
   } finally {
     await Promise.all(leases.map((lease) => lease.dispose()));

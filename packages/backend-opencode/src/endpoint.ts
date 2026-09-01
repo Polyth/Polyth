@@ -149,10 +149,16 @@ const processIdentityMatches = (
   && actual.executable === expected.executable
   && actual.command === expected.command;
 
-export const pidFileForDirectory = (cwd: string, projectId?: string): string => {
+export const pidFileForDirectory = (
+  cwd: string,
+  projectId?: string,
+  runtimeDir?: string,
+): string => {
   const digest = createHash("sha256");
   if (projectId) digest.update(projectId).update("\0");
-  const key = digest.update(resolve(cwd)).digest("hex").slice(0, 24);
+  digest.update(resolve(cwd));
+  if (runtimeDir) digest.update("\0").update(resolve(runtimeDir));
+  const key = digest.digest("hex").slice(0, 24);
   return join(tmpdir(), "polyth-opencode", `${key}.pid.json`);
 };
 

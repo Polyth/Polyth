@@ -1,0 +1,32 @@
+[
+  {
+    "id": "59f0fd8a-cf87-48e5-8fc0-3702881625fe",
+    "name": "mempalace",
+    "transport": {
+      "kind": "stdio",
+      "command": "python3",
+      "args": [
+        "-m",
+        "mempalace.mcp_server"
+      ],
+      "envKeys": []
+    },
+    "enabled": true,
+    "status": "starting",
+    "revision": 1
+  },
+  {
+    "id": "ea14a92a-9fe8-4ba8-8cda-e7b98a1b90ec",
+    "name": "linear",
+    "transport": {
+      "kind": "http",
+      "url": "https://mcp.linear.app/mcp",
+      "headersSecretRefs": [
+        "Authorization"
+      ]
+    },
+    "enabled": true,
+    "status": "starting",
+    "revision": 1
+  }
+]
