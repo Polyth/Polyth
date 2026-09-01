@@ -68,9 +68,12 @@ Polyth tracks feature parity with polyth and Paseo in a per-feature matrix: [`do
 ## Development
 
 ```bash
+npm run watch        # build, start, then rebuild + restart on change; keeps the server alive
 npm test             # node --test across packages
 mkdir -p /tmp/oc-probe   # the live smoke test hard-codes this cwd
 POLYTH_REAL_OPENCODE=1 node --test packages/backend-opencode/test/adapter.test.ts  # live opencode smoke
 ```
+
+`npm run watch` restarts the server for `packages/*/src` changes, rebuilds the bundles for `packages/*/widgets` and `apps/web/src` changes, and restarts the server with backoff if it exits. `npm run watch -- --help` lists the flags (watch new commits instead of the working tree, always restart, backoff limits).
 
 No root typecheck script: run `npx tsc --noEmit` inside each package you touch (each extends `tsconfig.base.json`).

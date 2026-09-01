@@ -82,7 +82,8 @@ Every browser feature package declares `"polyth": { "webEntry": "./widgets/index
 - Install: `npm install`
 - Build: `npm run build` (web packages → `packages/*/dist/web`, shell → `apps/web/dist`)
 - Start: `npm start` → `http://127.0.0.1:4400` (env: `PORT`, `POLYTH_DATA_DIR`; needs `opencode` on PATH)
-- Dev: `npm run dev` = build once + start. No watcher/HMR.
+- Dev: `npm run dev` = build once + start. No HMR.
+- Watch: `npm run watch` (`scripts/supervisor.ts`) = build, start, then rebuild/restart on change and keep the server alive across crashes. `packages/*/src` changes restart only; `packages/*/widgets` and `apps/web/src` changes rebuild (reload the browser). Flags: `--watch=fs|git|both`, `--restart=auto|always`, `--pull`, `npm run watch -- --help`.
 - Test: `npm test` (all) or `node --test <file>`; plain `node:assert`.
 - Typecheck: no root script — run `npx tsc --noEmit` inside each touched package and `apps/web` (each extends `tsconfig.base.json`).
 - Lint / format / CI: none exist in this repo. Do not invent them.

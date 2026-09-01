@@ -5,12 +5,12 @@ import { renderMarkdown } from "../markdown.tsx";
 import { fmtDuration, fmtTokens } from "../format.ts";
 import { groupWork, mergeThinking, promptIndex, copyText, loadDraft, type WorkGroup } from "../utils.ts";
 import { executionGroupLabel, executionPresentation, reasoningHead } from "../execution.ts";
-import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
+import { nextWorkingActivity, setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { cancelResume, forkSession, loadOlderEvents, resumeNow } from "../init.ts";
 import { markSessionPerformance } from "../sessionPerformance.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
 import {
-  applyEvent, setActiveView, setUiError, startNewSession, useStore,
+  applyEvent, setActiveView, setRailPlugin, setUiError, startNewSession, useStore,
 } from "../store.ts";
 import { api } from "@polyth/session/web-api";
 import {
@@ -107,25 +107,33 @@ function smoothTextOff(): boolean {
  *  lags the stream by a bounded ~300ms and reads as one continuous fast
  *  type-out instead of blocks popping in. Shrinking targets (rewind) and
  *  motion-off snap immediately.
+ *  `fromEmpty` mounts the chase at "" instead of the full target: a fresh
+ *  live block types its FIRST backlog over a watchable ~90 frames (~1.5s at
+ *  60fps) so a one-shot thought reads as typing, not a pop-in; after that
+ *  first catch-up the rate returns to the bounded ~300ms chase.
  *  ponytail: re-parses one message's markdown per reveal frame; per-block
  *  memo caching in markdown/render.tsx is the upgrade if profiling complains. */
-function useSmoothText(target: string): string {
-  const [shown, setShown] = useState(target);
-  const shownRef = useRef(target);
+function useSmoothText(target: string, fromEmpty = false): string {
+  const [shown, setShown] = useState(fromEmpty ? "" : target);
+  const shownRef = useRef(fromEmpty ? "" : target);
   const rateRef = useRef(0);
+  const revealRef = useRef(fromEmpty);
   const raf = useRef(0);
   useEffect(() => {
     cancelAnimationFrame(raf.current);
     if (target.length < shownRef.current.length || smoothTextOff()) {
       shownRef.current = target;
       rateRef.current = 0;
+      revealRef.current = false;
       setShown(target);
       return;
     }
     if (shownRef.current.length >= target.length) return;
     // Fixed-time catch-up from THIS arrival's backlog; the floor keeps short
-    // drips visibly typing instead of teleporting.
-    rateRef.current = Math.max(4, Math.ceil((target.length - shownRef.current.length) / 18));
+    // drips visibly typing instead of teleporting. The initial reveal spans
+    // ~90 frames so the first full thought is readable while it types.
+    const frames = revealRef.current ? 90 : 18;
+    rateRef.current = Math.max(4, Math.ceil((target.length - shownRef.current.length) / frames));
     const step = () => {
       const behind = target.length - shownRef.current.length;
       if (behind <= 0) return;
@@ -133,6 +141,7 @@ function useSmoothText(target: string): string {
       shownRef.current = target.slice(0, target.length - behind + take);
       setShown(shownRef.current);
       if (shownRef.current.length < target.length) raf.current = requestAnimationFrame(step);
+      else revealRef.current = false;
     };
     raf.current = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf.current);
@@ -142,25 +151,49 @@ function useSmoothText(target: string): string {
 }
 
 // Merged thinking block (P2-W2): progressive disclosure over the REAL
-// reasoning stream. The block stays expanded while the stream forms, then
-// folds to a single line — the brain mark plus the first thought, faded out
-// toward the line end. Expanded it renders the reasoning as secondary-styled
-// markdown inside a height-capped, self-following scroll well, so long
-// thinking never breaks the page.
+// reasoning stream. While the thought FORMS the block mounts expanded and its
+// text types out (useSmoothText fromEmpty reveal); as soon as the thought is
+// formed — the reasoning part finalized, the answer text started, or the
+// stream went quiet — the block folds to a single line: the brain mark plus
+// the first thought, faded out toward the line end. Expanded it renders the
+// reasoning as secondary-styled markdown inside a height-capped,
+// self-following scroll well, so long thinking never breaks the page.
 // UX-MSG-ACTIONS: the disclosure is a native, keyboard-operable control with
 // a purpose-and-target name and truthful expanded state; expanding/collapsing
 // appends no event.
-function Thinking({ m }: { m: AssistantMsg }) {
+
+/** Reasoning reveals that already played in this app session. A remount of
+ *  the same (or grown) reasoning — row-key change on the reasoning→answer
+ *  merge, switching away and back mid-turn — must never re-type from empty.
+ *  ponytail: unbounded module set, one string per revealed thought; cap or
+ *  per-session reset if long-running tabs ever matter. */
+const revealedReasoning = new Set<string>();
+function reasoningSeen(text: string): boolean {
+  for (const seen of revealedReasoning) {
+    if (text === seen || text.startsWith(seen) || seen.startsWith(text)) return true;
+  }
+  return false;
+}
+
+function Thinking({ m, live }: { m: AssistantMsg; live: boolean }) {
   const prefs = useUiSettings();
-  const active = !m.finalized;
+  // Fresh live thought: its row is the turn's live latest, the answer has not
+  // started, and this reasoning never revealed before → type out from empty.
+  const fresh = live && m.text === "" && !reasoningSeen(m.reasoning);
+  const reasoning = useSmoothText(m.reasoning, fresh);
+  const typing = reasoning.length < m.reasoning.length;
+  // Block stays expanded while the thought is forming: either the reveal is
+  // still typing, or the reasoning part has not finalized yet (turn working,
+  // latest row). Pauses in the stream do NOT collapse — only a real
+  // finalization (part-final / answer started / turn ended) folds it.
+  const active = typing || (!m.finalized && live && m.text === "");
   const [open, setOpen] = useState(active || prefs.thinkingDefaultExpanded);
   const userToggled = useRef(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const reasoningAtBottom = useRef(true);
   const bodyPresent = useCollapsePresence(open);
   const head = reasoningHead(m.reasoning);
-  const reasoning = useSmoothText(m.reasoning);
-  // Expanded while forming; auto-folds when the stream settles unless the
+  // Expanded while forming; auto-folds when the thought is formed unless the
   // reader pinned it by hand.
   useEffect(() => {
     if (active) {
@@ -170,6 +203,10 @@ function Thinking({ m }: { m: AssistantMsg }) {
       setOpen(prefs.thinkingDefaultExpanded);
     }
   }, [active, prefs.thinkingDefaultExpanded]);
+  // A played reveal registers its reasoning so any remount shows it formed.
+  useEffect(() => {
+    if (fresh && !typing) revealedReasoning.add(m.reasoning);
+  }, [fresh, typing, m.reasoning]);
   // Streaming follow mirrors the conversation reader contract: follow while
   // the well is at its tail, but preserve an intentional scroll-up position.
   // Deps track the SMOOTHED text so the well follows the per-frame reveal.
@@ -791,6 +828,7 @@ function AssistantView({
   turn,
   terminal = false,
   segmentStartedAt,
+  live = false,
 }: {
   m: AssistantMsg;
   announce?: Announce;
@@ -801,9 +839,12 @@ function AssistantView({
    *  identity panel (one per turn, rendered after the turn completes). */
   terminal?: boolean;
   segmentStartedAt?: number;
+  /** True while this row is the latest assistant row of a working turn: its
+   *  thinking block is the live thought and reveals with the typing effect. */
+  live?: boolean;
 }) {
   const hasAnswer = m.text.trim() !== "" || !m.finalized;
-  const answer = useSmoothText(m.text);
+  const answer = m.text;
   const galleryAvailable = /!\[[^\]]*]\([^)]+\)/.test(m.text);
   const openGallery = () => {
     const message = Array.from(document.querySelectorAll<HTMLElement>(tr("timeline.msgAssistant")))
@@ -815,7 +856,7 @@ function AssistantView({
     : undefined;
   return (
     <div className="msg assistant" data-message-seq={m.eventSeq} {...(articleProps ?? {})}>
-      {m.reasoning !== "" && <Thinking m={m} />}
+      {m.reasoning !== "" && <Thinking m={m} live={live} />}
       {hasAnswer && (
         <div className="bubble" dir="auto">
           {renderMarkdown(answer || "", m.id)}
@@ -952,7 +993,41 @@ export function WorkedGroup({
   );
 }
 
-function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segmentStartedAt, onRevert, onFork, revert, fork }: {
+// The single turn-level working indicator. Sits as the timeline's last row
+// (moved from below the timeline — it used to double up with a spinner row
+// here) and keeps the accessible live announcement of the row it replaced.
+function WorkingIndicator() {
+  const { workingIndicator } = useUiSettings();
+  const [activityStep, setActivityStep] = useState(0);
+  const activityLabels = tr("workspace.builtinsurfaces.activityItems").split("|");
+  useEffect(() => {
+    if (workingIndicator !== "activity") return;
+    setActivityStep((step) => nextWorkingActivity(step, activityLabels.length));
+    const timer = window.setInterval(
+      () => setActivityStep((step) => nextWorkingActivity(step, activityLabels.length)),
+      2400,
+    );
+    return () => window.clearInterval(timer);
+  }, [activityLabels.length, workingIndicator]);
+  const activityLabel = activityLabels[activityStep] ?? tr("workspace.builtinsurfaces.working");
+  return (
+    <button className={`focus-working focus-working--${workingIndicator}`} type="button" onClick={() => setRailPlugin("context")}>
+      {workingIndicator === "pulse" && <span className="focus-working-spinner" aria-hidden="true" />}
+      {workingIndicator === "cursor" && <span className="focus-working-cursor" aria-hidden="true" />}
+      {workingIndicator === "cat" && (
+        <svg className="focus-working-cat" viewBox="0 0 32 16" aria-hidden="true">
+          <path d="M4 10V5l3 2 3-3 3 3 4 1c3 0 5 2 5 4v1H7c-2 0-3-1-3-3Z" />
+          <path d="M22 9c4-4 6 1 3 3M9 13v2M17 13v2" />
+          <circle cx="11" cy="9" r=".7" fill="currentColor" stroke="none" />
+        </svg>
+      )}
+      {workingIndicator === "activity" && <span className="focus-working-activity" aria-hidden="true"><i /><i /><i /></span>}
+      <span>{workingIndicator === "activity" ? activityLabel : tr("workspace.builtinsurfaces.working")}</span>
+    </button>
+  );
+}
+
+function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segmentStartedAt, live, onRevert, onFork, revert, fork }: {
   m: RenderMessage;
   announce?: Announce;
   plan?: NonNullable<RenderModel["tasks"]>;
@@ -960,6 +1035,7 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segm
   turn?: RenderModel["turn"];
   terminal?: boolean;
   segmentStartedAt?: number;
+  live?: boolean;
   onRevert?: (message: UserMsg) => void;
   onFork?: (message: UserMsg) => void;
   revert?: ActionAvailability;
@@ -989,7 +1065,7 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segm
     );
   }
   if (m.kind === "assistant") {
-    return <AssistantView m={m} announce={announce} plan={plan} regeneratePrompt={regeneratePrompt} turn={turn} terminal={terminal} segmentStartedAt={segmentStartedAt} />;
+    return <AssistantView m={m} announce={announce} plan={plan} regeneratePrompt={regeneratePrompt} turn={turn} terminal={terminal} segmentStartedAt={segmentStartedAt} live={live} />;
   }
   if (m.kind === "github-conflict") return <GithubConflictCard message={m} />;
   if (m.kind === "task") return <TaskActivityRow activity={m} />;
@@ -1045,6 +1121,7 @@ const MessageRow = memo(function MessageRow(props: Parameters<typeof MessageView
   // model.turn mutates in place: any row holding it must always re-render
   && prev.turn === undefined && next.turn === undefined
   && prev.terminal === next.terminal
+  && prev.live === next.live
   && prev.segmentStartedAt === next.segmentStartedAt
   && prev.regeneratePrompt === next.regeneratePrompt
   && prev.announce === next.announce
@@ -1642,6 +1719,7 @@ export default function Timeline({
     return bySeq;
   }, [visibleMessages]);
   const turn = model.turn;
+  const turnWorking = turn?.status === "working";
   const turnBroken = turn && (turn.status === "failed" || turn.status === "aborted");
   const lastPromptBoundary = [...model.messages].reverse()
     .find((message) => message.kind === "user" || message.kind === "github-conflict");
@@ -1910,6 +1988,9 @@ export default function Timeline({
                 plan={r.kind === "assistant" && r.id === latestAssistantId && model.tasks ? model.tasks : undefined}
                 regeneratePrompt={r.kind === "assistant" ? regenerateSources.get(r.eventSeq) : undefined}
                 turn={r.kind === "assistant" && r.id === latestAssistantId && turn?.status !== "working" ? turn : undefined}
+                // The latest assistant row of a working turn owns the live
+                // thinking reveal; every other row shows its thought formed.
+                live={r.kind === "assistant" && turnWorking && r.id === latestAssistantId}
                 terminal={r.kind === "assistant" && !sessionActive && terminalAnswers.has(r.eventSeq)}
                 segmentStartedAt={r.kind === "assistant" ? terminalAnswers.get(r.eventSeq) : undefined}
                 announce={announce}
@@ -1920,12 +2001,9 @@ export default function Timeline({
               />
             )
         ))}
-        {turn?.status === "working" && !hasRunningAction && (
-          <div className="msg assistant execution-group current" role="status" aria-live="polite">
-            <div className="execution-group-toggle">
-              <span className="execution-group-mark running" aria-hidden="true"><span className="ui-spinner ui-spinner--sm" /></span>
-              <span className="execution-group-copy"><strong>{tr("timeline.working")}</strong></span>
-            </div>
+        {turnWorking && !hasRunningAction && (
+          <div role="status" aria-live="polite">
+            <WorkingIndicator />
           </div>
         )}
         {model.workflowRun && <WorkflowTimelineCard run={model.workflowRun} />}

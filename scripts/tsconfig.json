@@ -1,0 +1,4 @@
+{
+  "extends": "../tsconfig.base.json",
+  "include": ["supervisor.ts", "supervisorPlan.ts", "test/**/*.ts"]
+}

@@ -21,6 +21,8 @@
     "start": "node --experimental-strip-types packages/server/src/index.ts",
     "predev": "node scripts/check-node.mjs",
     "dev": "npm run build:web && node --experimental-strip-types packages/server/src/index.ts",
+    "prewatch": "node scripts/check-node.mjs",
+    "watch": "node --experimental-strip-types scripts/supervisor.ts",
     "desktop:download-opencode": "npm --workspace @polyth/desktop run download:opencode",
     "desktop:dev": "npm run build:desktop && npm run desktop:download-opencode && npm --workspace @polyth/desktop start",
     "desktop:dist:linux": "npm run build:web && npm run desktop:download-opencode && npm --workspace @polyth/desktop run dist:linux",
@@ -32,7 +34,7 @@
     "mobile:open:ios": "npm --workspace @polyth/mobile run open:ios",
     "mobile:build:android": "npm run build:web && npm --workspace @polyth/mobile run sync && npm --workspace @polyth/mobile run build:android",
     "pretest": "node scripts/check-node.mjs",
-    "test": "node --experimental-strip-types --test packages/*/test/*.test.ts apps/*/test/*.test.ts"
+    "test": "node --experimental-strip-types --test packages/*/test/*.test.ts apps/*/test/*.test.ts scripts/test/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

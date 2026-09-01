@@ -4539,16 +4539,17 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
   border: 1px solid color-mix(in srgb, var(--accent) 8%, var(--border-soft));
   border-radius: var(--radius-surface);
   background: color-mix(in srgb, var(--accent) 4%, var(--panel));
-  color: var(--text-dim); font-size: 14px; line-height: 1.65;
+  color: var(--text-dim); font-size: 14px; line-height: 1.6;
   box-shadow: 0 4px 16px -15px color-mix(in srgb, var(--text) 30%, transparent);
 }
 .msg.assistant > .bubble {
-  width: 100%; max-inline-size: 100%;
+  width: calc(100% - 16px); max-inline-size: calc(100% - 16px);
+  align-self: flex-start;
   padding: 12px 16px;
-  border: 1px solid color-mix(in srgb, var(--accent) 8%, var(--border-soft));
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius-surface);
-  background: color-mix(in srgb, var(--accent) 4%, var(--panel));
-  color: var(--text-dim); font-size: 14px; line-height: 1.72;
+  background: var(--elevated);
+  color: var(--text-dim); font-size: 15px; line-height: 1.62;
   box-shadow: 0 4px 16px -15px color-mix(in srgb, var(--text) 30%, transparent);
 }
 .bubble > :last-child { margin-bottom: 0; }
@@ -9791,8 +9792,8 @@ color: var(--text);
    One dense timeline across tool families. The first disclosure stays inline;
    only explicitly requested full output uses the level-three viewer. */
 .msg.assistant > .bubble {
-  font-size: calc(16px * var(--ui-font-scale, 1));
-  line-height: 1.58;
+  font-size: calc(15px * var(--ui-font-scale, 1));
+  line-height: 1.6;
 }
 
 .tool-card.execution-row {
@@ -10450,7 +10451,7 @@ html[data-font] body :is(
 }
 
 @media (max-width: 620px) {
-  .msg.assistant > .bubble { font-size: calc(15px * var(--ui-font-scale, 1)); line-height: 1.55; }
+  .msg.assistant > .bubble { font-size: calc(15px * var(--ui-font-scale, 1)); line-height: 1.6; }
   .execution-summary.tool-disclosure {
     min-height: 36px;
     grid-template-columns: 18px minmax(0, 1fr) 67px 14px;

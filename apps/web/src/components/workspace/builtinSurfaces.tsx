@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import Timeline from "../Timeline.tsx";
 import Composer from "../Composer.tsx";
 import QuestionCards from "../QuestionCards.tsx";
-import { focusComposer, setOverlay, setRailPlugin, setUiError, useActiveModel, useStore } from "../../store.ts";
+import { focusComposer, setOverlay, setUiError, useActiveModel, useStore } from "../../store.ts";
 import { openSession, prefetchSessionTail, restoreSession } from "../../init.ts";
 import { friendlyError } from "../../settings.ts";
 import { composerBlockedByArchive, sessionSurfaceKind } from "../../sessionSurface.ts";
@@ -24,7 +24,6 @@ import { useGitStatus } from "../../../../../packages/git/widgets/gitStatusStore
 import { useShellMode } from "../../responsiveShell.ts";
 import { tapFeedback } from "../../haptics.ts";
 import { dismissKeyboard } from "../../mobileViewport.ts";
-import { nextWorkingActivity, useUiSettings } from "../../uiPrefs.ts";
 import { useSheetTrigger } from "../mobile/sheetTrigger.ts";
 import { HeroWidget, HeroWidgetSettings } from "../mobile/HeroWidgets.tsx";
 import { useShiftArmed } from "../../useShiftArmed.ts";
@@ -295,16 +294,6 @@ function SessionSurface() {
   const pendingQuestions = model.questions.filter((q) => q.status === "pending");
   const pendingSecrets = model.secrets.filter((secret) => secret.status === "pending");
   const archived = composerBlockedByArchive(session);
-  const hasPrimaryProgress = model.messages.some((message) =>
-    (message.kind === "tool" && (message.status === "pending" || message.status === "running"))
-    || (message.kind === "assistant" && !message.finalized))
-    || model.tasks?.items.some((item) => item.status === "active")
-    || model.subagents?.agents.some((agent) => agent.status === "running");
-  const showFallbackWorking = model.turn?.status === "working"
-    && !hasPrimaryProgress
-    && pendingQuestions.length === 0
-    && pendingSecrets.length === 0
-    && pendingPermissions.length === 0;
 
   return (
     <>
@@ -312,7 +301,6 @@ function SessionSurface() {
       <div className="timeline-wrap">
         <Timeline model={model} latestRevealTarget={latestRevealAnchor} />
       </div>
-      {showFallbackWorking && <WorkingIndicator />}
       {pendingQuestions.length > 0 && <QuestionCards questions={pendingQuestions} />}
       <SlotHost
         slot="session.timeline.after"
@@ -331,37 +319,6 @@ function SessionSurface() {
     </div>
     {picker}
     </>
-  );
-}
-
-function WorkingIndicator() {
-  const { workingIndicator } = useUiSettings();
-  const [activityStep, setActivityStep] = useState(0);
-  const activityLabels = tr("workspace.builtinsurfaces.activityItems").split("|");
-  useEffect(() => {
-    if (workingIndicator !== "activity") return;
-    setActivityStep((step) => nextWorkingActivity(step, activityLabels.length));
-    const timer = window.setInterval(
-      () => setActivityStep((step) => nextWorkingActivity(step, activityLabels.length)),
-      2400,
-    );
-    return () => window.clearInterval(timer);
-  }, [activityLabels.length, workingIndicator]);
-  const activityLabel = activityLabels[activityStep] ?? tr("workspace.builtinsurfaces.working");
-  return (
-    <button className={`focus-working focus-working--${workingIndicator}`} type="button" onClick={() => setRailPlugin("context")}>
-      {workingIndicator === "pulse" && <span className="focus-working-spinner" aria-hidden="true" />}
-      {workingIndicator === "cursor" && <span className="focus-working-cursor" aria-hidden="true" />}
-      {workingIndicator === "cat" && (
-        <svg className="focus-working-cat" viewBox="0 0 32 16" aria-hidden="true">
-          <path d="M4 10V5l3 2 3-3 3 3 4 1c3 0 5 2 5 4v1H7c-2 0-3-1-3-3Z" />
-          <path d="M22 9c4-4 6 1 3 3M9 13v2M17 13v2" />
-          <circle cx="11" cy="9" r=".7" fill="currentColor" stroke="none" />
-        </svg>
-      )}
-      {workingIndicator === "activity" && <span className="focus-working-activity" aria-hidden="true"><i /><i /><i /></span>}
-      <span>{workingIndicator === "activity" ? activityLabel : tr("workspace.builtinsurfaces.working")}</span>
-    </button>
   );
 }
 

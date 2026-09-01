@@ -6,12 +6,12 @@ import { resolve } from "node:path";
 const read = (path: string) => readFileSync(resolve(import.meta.dirname, path), "utf8");
 
 test("working status is compact and does not claim repository indexing", () => {
-  const surface = read("../src/components/workspace/builtinSurfaces.tsx");
+  const timeline = read("../src/components/Timeline.tsx");
   const css = read("../src/styles.css");
 
-  assert.doesNotMatch(surface, /Scanning repositories|indexing|usually takes a few seconds/i);
+  assert.doesNotMatch(timeline, /Scanning repositories|indexing|usually takes a few seconds/i);
   assert.match(
-    surface,
+    timeline,
     /workingIndicator === "activity" \? activityLabel : tr\("workspace\.builtinsurfaces\.working"\)/,
     "the configured activity indicator may use a specific step while compact modes say Working",
   );
@@ -35,7 +35,7 @@ test("conversation rows omit role chrome and box assistant answers like user tur
   assert.match(css, /\.msg\.user\s*\{\s*align-items:\s*flex-end;/);
   assert.match(css, /\.msg\.assistant\s*\{\s*align-items:\s*flex-start;/);
   assert.match(css, /\.msg\.user \.bubble\s*\{[^}]*background:\s*color-mix/s);
-  assert.match(css, /\.msg\.assistant > \.bubble\s*\{[^}]*background:\s*color-mix/s);
+  assert.match(css, /\.msg\.assistant > \.bubble\s*\{[^}]*border:\s*1px solid/s);
 });
 
 test("message actions use one lightweight copy control and local hover zones", () => {
@@ -98,4 +98,24 @@ test("thinking, tasks, and every execution share the compact activity-card treat
   assert.match(execution, /<div className=\{`tool-card execution-row/);
   assert.match(css, /\.reasoning,\s*\.task-list,\s*\.tool-card\.execution-row\s*\{[^}]*border:\s*0;/s);
   assert.match(css, /\.task-list\s*\{[^}]*margin:\s*var\(--space-1\) 0 0;/s);
+});
+
+test("a live thought reveals expanded, types out, then folds when formed", () => {
+  const timeline = read("../src/components/Timeline.tsx");
+
+  // The latest assistant row of a working turn owns the live reveal.
+  assert.match(timeline, /live=\{r\.kind === "assistant" && turnWorking && r\.id === latestAssistantId\}/);
+  // Fresh live thought types from empty instead of popping in fully formed.
+  assert.match(timeline, /const fresh = live && m\.text === "" && !reasoningSeen\(m\.reasoning\);/);
+  assert.match(timeline, /const reasoning = useSmoothText\(m\.reasoning, fresh\);/);
+  // Block stays expanded while forming: typing OR the reasoning part has not
+  // finalized yet (turn working, latest row, no answer). Pauses do not fold.
+  assert.match(timeline, /const active = typing \|\| \(!m\.finalized && live && m\.text === ""\);/);
+  // The initial reveal types over a watchable window, later chunks keep the
+  // bounded catch-up.
+  assert.match(timeline, /const frames = revealRef\.current \? 90 : 18;/);
+  // A played reveal never re-types: remounts (reasoning→answer merge, session
+  // switch-back) show the thought formed.
+  assert.match(timeline, /function reasoningSeen\(text: string\): boolean/);
+  assert.match(timeline, /if \(fresh && !typing\) revealedReasoning\.add\(m\.reasoning\);/);
 });
