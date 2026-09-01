@@ -149,10 +149,16 @@ const processIdentityMatches = (
   && actual.executable === expected.executable
   && actual.command === expected.command;
 
-export const pidFileForDirectory = (cwd: string, projectId?: string): string => {
+export const pidFileForDirectory = (
+  cwd: string,
+  projectId?: string,
+  runtimeDir?: string,
+): string => {
   const digest = createHash("sha256");
   if (projectId) digest.update(projectId).update("\0");
-  const key = digest.update(resolve(cwd)).digest("hex").slice(0, 24);
+  digest.update(resolve(cwd));
+  if (runtimeDir) digest.update("\0").update(resolve(runtimeDir));
+  const key = digest.digest("hex").slice(0, 24);
   return join(tmpdir(), "polyth-opencode", `${key}.pid.json`);
 };
 
@@ -550,7 +556,11 @@ export const createOwnedLocalEndpointLease = async (
     );
   }
   const hostname = options.hostname ?? "127.0.0.1";
-  const pidFile = options.pidFile ?? pidFileForDirectory(cwd, options.projectId);
+  // The isolated DB, not just the checkout, defines process ownership. Two
+  // Polyth servers may serve the same project from different data directories;
+  // sharing the old cwd-keyed record made each server reap the other's child.
+  const pidFile = options.pidFile
+    ?? pidFileForDirectory(cwd, options.projectId, options.runtimeDir);
   const legacyStateFile = `${pidFile}.lease.json`;
   const stateFile = options.stateFile ?? legacyStateFile;
   const readIdentity = options.readProcessIdentity ?? readProcessIdentity;

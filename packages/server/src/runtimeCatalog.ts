@@ -1,4 +1,9 @@
-import type { AgentDescriptor, ModelDescriptor, ProjectService } from "@polyth/contracts";
+import type {
+  AgentDescriptor,
+  AgentRuntime,
+  ModelDescriptor,
+  ProjectService,
+} from "@polyth/contracts";
 import type { RuntimePool } from "./sessions.ts";
 import { aggregateRuntimes } from "./runtimeAggregate.ts";
 
@@ -33,36 +38,81 @@ export function createRuntimeCatalog(deps: {
   // project can't force a full fan-out on every Settings open.
   const MAX_PARTIAL_ATTEMPTS = 8;
 
+  const incremental = <T,>(
+    fetch: (runtime: AgentRuntime) => Promise<T[]>,
+    key: (item: T) => string,
+  ): { first: Promise<T[]>; full: Promise<{ items: T[]; complete: boolean }> } => {
+    let settled = false;
+    let scheduled = false;
+    let resolveFirst!: (items: T[]) => void;
+    let rejectFirst!: (error: unknown) => void;
+    const first = new Promise<T[]>((resolve, reject) => {
+      resolveFirst = resolve;
+      rejectFirst = reject;
+    });
+    const finish = (items: T[]): void => {
+      if (settled) return;
+      settled = true;
+      resolveFirst(items);
+    };
+    const full = aggregateRuntimes(deps, fetch, key, (items) => {
+      if (items.length === 0 || settled || scheduled) return;
+      scheduled = true;
+      // Give an already-finishing fan-out one turn to preserve its complete,
+      // stable ordering. A genuinely slow sibling no longer blocks the first
+      // usable catalog response.
+      setImmediate(() => finish(items));
+    });
+    void full.then(
+      (result) => finish(result.items),
+      (error) => {
+        if (!settled) {
+          settled = true;
+          rejectFirst(error);
+        }
+      },
+    );
+    return { first, full };
+  };
+
   const loadModels = () => {
     if (models) return Promise.resolve(models);
-    modelsPending ??= aggregateRuntimes(
-      deps,
+    if (modelsPending) return modelsPending;
+    const loading = incremental<ModelDescriptor>(
       (runtime) => runtime.models(),
       (model) => `${model.providerID}/${model.modelID}`,
-    ).then(({ items, complete }) => {
+    );
+    const pending = loading.first;
+    modelsPending = pending;
+    void loading.full.then(({ items, complete }) => {
       modelAttempts += 1;
       if (items.length > 0 && (complete || modelAttempts >= MAX_PARTIAL_ATTEMPTS)) {
         models = items;
       }
-      return items;
-    }).finally(() => { modelsPending = undefined; });
-    return modelsPending;
+    }).catch(() => {}).finally(() => {
+      if (modelsPending === pending) modelsPending = undefined;
+    });
+    return pending;
   };
 
   const loadAgents = () => {
     if (agents) return Promise.resolve(agents);
-    agentsPending ??= aggregateRuntimes(
-      deps,
+    if (agentsPending) return agentsPending;
+    const loading = incremental<AgentDescriptor>(
       (runtime) => runtime.agents(),
       (agent) => agent.name,
-    ).then(({ items, complete }) => {
+    );
+    const pending = loading.first;
+    agentsPending = pending;
+    void loading.full.then(({ items, complete }) => {
       agentAttempts += 1;
       if (items.length > 0 && (complete || agentAttempts >= MAX_PARTIAL_ATTEMPTS)) {
         agents = items;
       }
-      return items;
-    }).finally(() => { agentsPending = undefined; });
-    return agentsPending;
+    }).catch(() => {}).finally(() => {
+      if (agentsPending === pending) agentsPending = undefined;
+    });
+    return pending;
   };
 
   return {

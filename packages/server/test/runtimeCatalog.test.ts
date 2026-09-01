@@ -41,6 +41,34 @@ test("runtime catalog single-flights and reuses expensive OpenCode discovery", a
   assert.equal((await catalog.agents())[0]?.mode, "subagent");
 });
 
+test("returns the first useful catalog without waiting for every runtime", async () => {
+  let releaseSlow!: () => void;
+  const slow = new Promise<void>((resolve) => { releaseSlow = resolve; });
+  const runtimes = {
+    forProject: async (id: string) => ({
+      models: async () => {
+        if (id === "slow") await slow;
+        return [{ providerID: id, modelID: "model", name: id }];
+      },
+    } as AgentRuntime),
+  };
+  const catalog = createRuntimeCatalog({ projects: projectsOf(["fast", "slow"]), runtimes });
+
+  const first = await Promise.race([
+    catalog.models(),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("first model was blocked by a slow runtime")), 1_000).unref()),
+  ]);
+  assert.deepEqual(first.map((model) => model.providerID), ["fast"]);
+
+  releaseSlow();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(
+    (await catalog.models()).map((model) => model.providerID),
+    ["fast", "slow"],
+  );
+});
+
 test("a partial cold-boot fan-out is not frozen; the catalog re-aggregates until every project answers", async () => {
   let ready = false;
   const good = { models: async () => [{ providerID: "openai", modelID: "gpt", name: "GPT" }] } as AgentRuntime;
