@@ -2,18 +2,18 @@
 .github-head .view-title {
 margin-bottom: 3px;
 }
-.pr-surface .git-diff {
+.pr-surface .pr-diff {
 max-height: none; min-height: 160px; margin: 10px 0 0; border-color: var(--hair-strong);
 }
-.pr-surface .git-diff-line {
+.pr-surface .pr-diff-line {
 min-height: 20px; line-height: 20px;
 }
-.pr-diff .diff-meta {
+.pr-diff-line.diff-meta {
 color: var(--muted); background: var(--sunken);
 }
 .gh-repo-card {
 display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--elevated); padding: 14px 16px; box-shadow: var(--inset-hi);
+  border: 0; border-radius: var(--radius-card); background: var(--panel); padding: 14px 16px;
 }
 .gh-repo-name {
 font-weight: 700; font-size: 15px; color: var(--text); text-decoration: none;
@@ -29,7 +29,7 @@ display: flex; flex-direction: column; gap: 2px;
 }
 .gh-row {
 display: flex; align-items: center; gap: 10px;
-  border: 1px solid var(--hair); border-radius: var(--radius-control); background: var(--elevated); padding: 8px 11px; font-size: var(--font-meta);
+  border: 0; border-radius: var(--radius-control); background: var(--panel); padding: 8px 11px; font-size: var(--font-meta);
 }
 .gh-state {
 flex-shrink: 0; width: 52px; text-align: center; font-size: var(--font-meta); font-weight: 700; text-transform: uppercase; border-radius: var(--radius-control); padding: 1px 0;
@@ -118,7 +118,7 @@ background: var(--amber);
 display: flex; flex-direction: column; gap: 8px;
 }
 .pr-comment {
-border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--elevated); padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; box-shadow: var(--inset-hi);
+border: 0; border-bottom: 1px solid var(--hair); border-radius: 0; background: transparent; padding: 10px 0; display: flex; flex-direction: column; gap: 4px; box-shadow: none;
 }
 .pr-comment-head {
 display: flex; align-items: center; gap: 8px; font-size: var(--font-meta);
@@ -209,7 +209,7 @@ display: flex; gap: 6px; padding-block: 9px;
 .gh-filter-chips .ui-btn {
 white-space: nowrap;
 }
-@container source-surface (max-width: 700px) {
+@container feature-panel (max-width: 700px) {
 .gh-filter-chips .ui-btn {
 min-width: var(--tap); min-height: var(--tap);
 }
@@ -265,10 +265,10 @@ gap: 8px;
 }
 .gh-card {
 display: flex; align-items: center; gap: 16px; padding: 13px 14px;
-  border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--elevated); box-shadow: var(--inset-hi);
+  border: 0; border-radius: var(--radius-card); background: var(--panel);
 }
 .gh-card:hover {
-border-color: var(--border); background: var(--raised);
+background: var(--raised);
 }
 .gh-card-main {
 display: flex; flex: 1; min-width: 0; flex-direction: column; gap: var(--space-2);
@@ -474,7 +474,7 @@ min-height: 54px; display: flex; align-items: center; gap: 8px; padding: 7px 10p
 display: flex; flex-direction: column; gap: 3px; font-size: var(--font-meta);
 }
 .pr-file-card {
-overflow: hidden; border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--elevated);
+overflow: hidden; border: 0; border-bottom: 1px solid var(--hair); border-radius: 0; background: transparent;
 }
 .pr-file-card.expanded {
 border-color: var(--border);
@@ -595,11 +595,9 @@ padding: 14px 14px 0;
 margin: 14px;
 }
 .gh-reply-panel {
-position: relative; overflow: hidden; padding: 14px; border: 1px solid var(--accent-line);
-  border-radius: var(--radius-card); background:
-    radial-gradient(circle at 0 0, color-mix(in srgb, var(--accent) 10%, transparent), transparent 44%),
-    var(--elevated);
-  box-shadow: var(--inset-hi); display: flex; flex-direction: column; gap: 10px;
+position: relative; overflow: hidden; padding: 14px; border: 0;
+  border-radius: var(--radius-card); background: var(--panel);
+  display: flex; flex-direction: column; gap: 10px;
 }
 .gh-reply-heading,
 .gh-reply-actions,
@@ -631,11 +629,10 @@ display: flex; flex-direction: column; gap: 2px;
 }
 .gh-agent-orb {
 width: 30px; height: 30px; flex: none; border-radius: 10px;
-  background: radial-gradient(circle at 35% 30%, white 0 7%, var(--accent) 9% 35%, color-mix(in srgb, var(--accent) 38%, var(--elevated)) 70%);
-  box-shadow: 0 0 0 1px var(--accent-line), 0 7px 18px color-mix(in srgb, var(--accent) 22%, transparent);
+  background: var(--accent); box-shadow: 0 0 0 1px var(--accent-line);
 }
 .gh-agent-orb.working {
-animation: gh-agent-pulse 1.6s ease-in-out infinite;
+animation: gh-agent-pulse 1.6s var(--motion-ease) infinite;
 }
 .gh-agent-thinking {
 min-height: 64px; display: flex; align-items: center; justify-content: center; gap: 5px;
@@ -644,7 +641,7 @@ min-height: 64px; display: flex; align-items: center; justify-content: center; g
 }
 .gh-agent-thinking i {
 width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
-  animation: gh-thinking-dot 1.2s ease-in-out infinite;
+  animation: gh-thinking-dot 1.2s var(--motion-ease) infinite;
 }
 .gh-agent-thinking i:nth-child(2) {
 animation-delay: var(--motion-fast);
@@ -670,7 +667,7 @@ transition: none; animation: none;
 }
 }
 
-@container source-surface (max-width: 980px) {
+@container feature-panel (max-width: 980px) {
 .gh-list-controls {
 grid-template-columns: 1fr 1fr;
 }
@@ -691,10 +688,10 @@ max-width: 240px;
 
 @media (max-width: 820px) {
 .github-page {
-max-width: none; padding: 10px 10px calc(10px + env(safe-area-inset-bottom, 0px)); gap: 10px;
+max-width: none; padding: var(--space-3) var(--space-3) max(var(--space-3), var(--safe-bottom)); gap: var(--space-3);
 }
 }
-@container source-surface (max-width: 700px) {
+@container feature-panel (max-width: 700px) {
 .github-head {
 align-items: flex-start; flex-wrap: wrap;
 }
@@ -793,8 +790,8 @@ margin-left: auto; max-width: calc(100% - 150px);
 }
 
 .pr-tabbar {
-position: sticky; top: 0; z-index: 8; margin-inline: -10px; padding-inline: 8px;
-    background: color-mix(in srgb, var(--bg) 94%, transparent); backdrop-filter: blur(14px);
+position: sticky; top: 0; z-index: 2; margin-inline: -10px; padding-inline: 8px;
+    background: var(--panel);
 }
 
 .pr-tabbar .ui-tab {
@@ -914,7 +911,7 @@ display: none;
 }
 
 
-@container source-surface (max-width: 430px) {
+@container feature-panel (max-width: 430px) {
 .pr-check-pill {
 order: 1;
 }
@@ -930,7 +927,6 @@ grid-column: auto;
 
 .github-page {
 min-width: 0;
-  container: source-surface / inline-size;
 }
 .github-page *,
 .pr-surface * {
@@ -1056,7 +1052,7 @@ font-size: max(12px, 1em);
 .pr-tabbar .ui-tab > span {
 font-size: var(--font-meta);
 }
-@container source-surface (max-width: 700px) {
+@container feature-panel (max-width: 700px) {
 .github-head {
 align-items: flex-start; flex-wrap: wrap;
 }
@@ -1115,7 +1111,7 @@ order: 2; flex-basis: 100%;
 margin-left: auto;
 }
 }
-@container source-surface (min-width: 600px) and (max-width: 820px) {
+@container feature-panel (min-width: 600px) and (max-width: 820px) {
 .gh-list-controls {
 display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 1fr);
 }
@@ -1136,7 +1132,7 @@ display: grid; grid-template-columns: 1fr; max-width: 230px;
 width: 100%;
 }
 }
-@container source-surface (max-width: 599px) {
+@container feature-panel (max-width: 599px) {
 .gh-card-actions {
 display: grid; grid-template-columns: minmax(0, 1fr) var(--tap);
 }
@@ -1154,7 +1150,7 @@ display: inline-grid;
 }
 }
 
-@container source-surface (max-width: 430px) {
+@container feature-panel (max-width: 430px) {
 .pr-compare-summary {
 grid-template-columns: minmax(0, 1fr);
 }
@@ -1165,7 +1161,7 @@ transform: rotate(90deg); justify-self: center;
 }
 
 
-@container source-surface (max-width: 700px) {
+@container feature-panel (max-width: 700px) {
 .github-conflict-card {
 grid-template-columns: 36px minmax(0, 1fr);
 }

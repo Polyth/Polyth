@@ -56,7 +56,7 @@ opacity: 0.55;
 display: flex; flex-direction: column; gap: 8px; max-height: 56vh; overflow-y: auto;
 }
 .provider-card {
-border: 1px solid var(--hair); border-radius: var(--radius-card); background: var(--elevated);
+border: 0; border-radius: var(--radius-card); background: var(--panel);
 }
 .provider-card.provider-disabled {
 opacity: 0.6;
@@ -100,7 +100,7 @@ color: var(--faint); font-size: var(--font-meta); flex-shrink: 0;
 }
 .provider-filter {
 display: flex; flex-direction: column; gap: 8px; margin: 8px 0 14px; padding: 10px;
-  border: 1px solid var(--border-soft); border-radius: var(--radius-card); background: var(--sunken);
+  border: 0; border-radius: var(--radius-card); background: var(--sunken);
 }
 .provider-filter-head {
 display: flex; align-items: center; gap: 6px;
@@ -149,13 +149,10 @@ width: 16px; height: 16px; flex: none; color: var(--text-dim);
 }
 /* Desktop popover (chrome from .ui-popover): search on top, one scroll list. */
 .model-pop {
-  width: min(400px, calc(100vw - 28px)); padding: 4px; display: flex; flex-direction: column;
+  width: min(400px, calc(100vw - var(--space-6))); padding: 4px; display: flex; flex-direction: column;
 }
 .model-pop-search {
 padding: 2px 2px 6px;
-}
-.model-pop-search .ui-input {
-width: 100%;
 }
 .model-picker-list {
 max-height: min(440px, 56vh); overflow-y: auto; min-height: 0;
@@ -254,7 +251,7 @@ margin-inline-start: 6px; color: var(--amber); font-size: var(--font-meta); font
 /* Row tools stay invisible until the row is hovered or keyboard-active, so
    the list reads as names, not as a button grid. */
 .model-row-info,
-.model-picker-row .star-btn {
+.model-picker-row .model-star-btn {
 flex: none;
   width: 26px;
   height: 26px;
@@ -268,13 +265,13 @@ flex: none;
 }
 .model-picker-row:hover .model-row-info,
 .model-picker-row.active .model-row-info,
-.model-picker-row:hover .star-btn,
-.model-picker-row.active .star-btn,
-.model-picker-row .star-btn.on {
+.model-picker-row:hover .model-star-btn,
+.model-picker-row.active .model-star-btn,
+.model-picker-row .model-star-btn.on {
 opacity: 1;
 }
 .model-row-info:hover,
-.model-picker-row .star-btn:hover {
+.model-picker-row .model-star-btn:hover {
 color: var(--text); background: var(--surface-overlay);
 }
 .model-row-info svg {
@@ -364,17 +361,6 @@ width: 17px; height: 17px;
 .model-sheet .sheet-row-info:active {
 color: var(--text); background: var(--surface-overlay);
 }
-.project-settings-options .model-picker {
-flex: 0 1 280px;
-}
-.project-settings-options .model-picker-trigger {
-width: 100%; justify-content: flex-start;
-}
-@container feature-panel (max-width: 700px) {
-.project-settings-options .model-picker {
-width: 100%; flex-basis: auto;
-}
-}
 /* Tiny monogram inside a 24px logo tile — decorative, not meta text. */
 .provider-logo-fallback {
 font-family: var(--ui-font-family); font-size: 8px; font-weight: 780; letter-spacing: -.04em; line-height: 1;
@@ -418,9 +404,9 @@ width: 28px;
   height: 28px;
   display: grid;
   place-items: center;
-  border: 1px solid var(--border-soft);
-  border-radius: 9px;
-  background: var(--elevated);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--panel);
 }
 @container feature-panel (max-width: 700px) {
 .model-chip {
@@ -460,17 +446,14 @@ transition: none;
 }
 }
 
-/* Rules moved from core styles.css: models settings and picker surfaces. */
+/* Models settings and picker surfaces. */
 .set-provider-logo { width: var(--icon-md); height: var(--icon-md); }
 .set-provider-no-matches { padding: 4px 8px; font-size: var(--font-meta); }
-.star-btn.on,
-.star-btn[aria-pressed="true"] { color: var(--amber); }
-.models-toolbar { display: flex; align-items: center; gap: 10px; margin: var(--space-3) 0 var(--space-2); }
+.model-star-btn.on,
+.model-star-btn[aria-pressed="true"] { color: var(--amber); }
+.models-page { min-width: 0; container: models-page / inline-size; }
+.models-toolbar { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-3) 0 var(--space-2); }
 .models-toolbar .models-search { flex: 1; margin: 0; min-width: 0; }
-.composer-config .model-picker-trigger { max-width: 230px; }
-.switch.switch-sm { width: 28px; height: 16px; padding: 2px; }
-.switch.switch-sm i { width: 10px; height: 10px; }
-.switch.switch-sm[aria-checked="true"] i { transform: translateX(12px); }
 .sheet-section-toggle {
   flex: 1;
   min-height: max(var(--control-h), var(--hit-min));
@@ -490,9 +473,9 @@ transition: none;
 .sheet-section-caret { display: inline-flex; transition: transform var(--motion-fast) var(--motion-ease); }
 .sheet-section-caret svg { width: var(--icon-sm); height: var(--icon-sm); }
 .sheet-section-caret:not(.open) { transform: rotate(-90deg); }
-@container feature-panel (max-width: 700px) {
+@container models-page (max-width: 700px) {
   .models-toolbar { align-items: stretch; flex-direction: column; }
   .models-toolbar > .seg { width: 100%; }
   .models-toolbar > .seg button { flex: 1; }
-  .star-btn { width: var(--tap); min-width: var(--tap); }
+  .model-star-btn { width: var(--tap); min-width: var(--tap); }
 }

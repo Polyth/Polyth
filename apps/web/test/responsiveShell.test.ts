@@ -267,7 +267,9 @@ test("Focus uses compact mobile composer controls without editor chrome", async 
   assert.ok(composer.includes("<Icon.send />"), "Focus uses a paper-plane send icon");
   const css = await read("../src/styles.css");
   assert.ok(css.includes(".composer-agent-chip .chip-k { display: none; }"), "technical picker keys are hidden");
-  assert.ok(css.includes('body[data-dictate="false"] .mic-btn'), "the microphone can be hidden without suppressing other slot items");
+  const dictationCss = await read("../../../packages/dictation/widgets/styles.css");
+  assert.ok(dictationCss.includes('body[data-dictate="false"] .mic-control .mic-btn'),
+    "the package-owned microphone can be hidden without suppressing other slot items");
 });
 
 test("desktop header keeps brand, workspace modes, and a named utility cluster", async () => {
@@ -286,16 +288,17 @@ test("desktop header keeps brand, workspace modes, and a named utility cluster",
   assert.ok(!header.includes('className="header-global-search"'), "Search is not duplicated in the header");
 });
 
-test("Settings uses a focused desktop dialog without a widget preview inspector", async () => {
+test("Settings uses the current desktop workbench and workspace customizer", async () => {
   const settings = await read("../src/components/SettingsView.tsx");
   const css = await read("../src/styles.css");
   const widgets = await read("../src/components/settings/WidgetsPage.tsx");
   const widgetLibrary = await read("../src/components/settings/WidgetLibraryOverlay.tsx");
   const tours = await read("../src/packages/onboarding/tours/builtin.ts");
   assert.ok(settings.includes('className="scrim settings-scrim"'), "Settings owns viewport-specific scrim geometry");
-  assert.ok(css.includes("width: min(92vw, 800px); max-width: 800px; height: 92vh"), "Settings has an 800px desktop width cap");
+  assert.ok(css.includes("width: min(96vw, 1180px); max-width: 1180px; height: 94vh"),
+    "Settings uses the desktop workbench footprint");
   assert.doesNotMatch(css, /\.settings-shell\s*\{[^}]*min-width:\s*1100px/, "Settings no longer forces an 1100px minimum width");
-  assert.ok(!widgets.includes("widget-inspector"), "widget settings no longer render a preview inspector");
+  assert.ok(widgets.includes('className="workspace-inspector"'), "widget settings expose the live preview inspector");
   assert.doesNotMatch(
     [settings, widgets, widgetLibrary, tours].join("\n"),
     /changes (?:are )?save(?:d)? automatically|changes are saved as you edit/i,
@@ -339,6 +342,10 @@ test("open rails remain visible in every workspace mode", async () => {
     );
   }
   assert.ok(!/mode-chat \.railbar\s*[,{][^}]*display:\s*none/.test(css), "Chat never hides an active rail");
+  assert.match(css, /\.railbar:has\(\.rail-fullscreen\)\s*\{[^}]*position:\s*fixed[^}]*inset:\s*0[^}]*overflow:\s*visible/s,
+    "fullscreen package panes escape the floating rail clipping context");
+  assert.match(css, /\.railbar:has\(\.rail-fullscreen\)\s*>\s*\.rail-fullscreen\s*\{[^}]*position:\s*relative[^}]*flex:\s*1/s,
+    "every fullscreen package pane fills the shared viewport host");
 });
 
 test("mobile Settings swaps a vertical page list for content with a back action", async () => {
@@ -368,7 +375,7 @@ test("mobile Settings swaps a vertical page list for content with a back action"
   assert.doesNotMatch(mobile, /\.settings-nav-list\s*\{[^}]*overflow-x:\s*auto/);
 });
 
-test("package and plugin marketplaces use responsive vertical tiles", async () => {
+test("package tiles and plugin marketplace rows stay responsive", async () => {
   const css = [
     await read("../src/styles.css"),
     await read("../../../packages/plugins/widgets/styles.css"),
@@ -380,22 +387,15 @@ test("package and plugin marketplaces use responsive vertical tiles", async () =
   );
   assert.match(
     css,
-    /\.settings-pane-body \.plugin-card-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)\s*!important[^}]*gap:\s*10px/,
-    "plugin grids use two pane-relative columns by default",
-  );
-  assert.match(
-    css,
     /@media \(max-width: 480px\), \(max-height: 480px\) and \(pointer: coarse\)[\s\S]*?\.settings-pane-body \.package-grid\s*\{[^}]*grid-template-columns:\s*1fr/,
     "package grids collapse to one column on phones",
   );
-  assert.match(
-    css,
-    /@media \(max-width: 480px\), \(max-height: 480px\) and \(pointer: coarse\)[\s\S]*?\.settings-pane-body \.plugin-card-grid\s*\{[^}]*grid-template-columns:\s*1fr/,
-    "plugin grids collapse to one column on phones",
-  );
-  assert.doesNotMatch(css, /\.plugin-card-grid, \.package-grid\s*\{[^}]*repeat\([34], minmax\(150px, 1fr\)\)/);
+  assert.match(css, /\.pkg-plugins \.plugin-card-grid\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column/s,
+    "plugins use a vertical list instead of a tile grid");
+  assert.match(css, /\.pkg-plugins \.plugin-card\s*\{[^}]*border-bottom:\s*1px solid var\(--border-soft\)/s,
+    "plugin rows retain visible separation");
   assert.match(css, /\.package-tile\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column[^}]*align-items:\s*center/);
-  assert.match(css, /\.plugin-card-main\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column[^}]*align-items:\s*center/);
+  assert.match(css, /\.pkg-plugins \.plugin-card-main\s*\{[^}]*display:\s*grid[^}]*align-items:\s*center/s);
   assert.match(css, /\.package-icon\s*\{[^}]*width:\s*58px[^}]*height:\s*58px/);
 });
 
@@ -405,6 +405,7 @@ test("shared menu, destructive, failed-turn, and header-action contracts stay wi
   const actions = await read("../src/widgets/builtinMiniWidgets.tsx");
   const sessions = await read("../src/components/sidebar/SessionList.tsx");
   const plugins = await read("../../../packages/plugins/widgets/PluginsPage.tsx");
+  const timeline = await read("../src/components/Timeline.tsx");
   const css = await read("../src/styles.css");
   // Project and session menus render through the ui/Menu primitive, which
   // itself owns the shared dismissible-menu semantics — one contract,
@@ -421,7 +422,9 @@ test("shared menu, destructive, failed-turn, and header-action contracts stay wi
     "every permanent session deletion is guarded by the themed alert contract",
   );
   assert.ok(plugins.includes('disabled={!sourceValid}'), "plugin install stays disabled until minimally valid");
-  assert.match(css, /\.turn-error\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap[^}]*gap:\s*8px/);
+  assert.match(timeline, /<Notice[\s\S]*?className="turn-error"[\s\S]*?role="alert"/,
+    "failed turns use the shared accessible notice primitive");
+  assert.match(css, /\.turn-error\s*\{[^}]*width:\s*min\(var\(--chat-measure\), 100%\)[^}]*border-inline-start-width:\s*3px/s);
 });
 
 test("fresh and existing chats expose the shared composer and stable focus target", async () => {
@@ -445,7 +448,7 @@ test("timeline empty states defer starters to the hero", async () => {
   assert.ok(timeline.includes('tr("timeline.archivedSessionNoMessages")'), "archived sessions get read-only copy");
 });
 
-test("header renders configured primary capabilities and permanent Terminal launchers", async () => {
+test("header and customizer render configured capabilities and permanent Terminal launchers", async () => {
   const header = await read("../src/components/Header.tsx");
   const rail = await read("../src/components/ContextRail.tsx");
   const widgets = await read("../src/components/settings/WidgetsPage.tsx");
@@ -464,7 +467,9 @@ test("header renders configured primary capabilities and permanent Terminal laun
   assert.ok(rail.includes("configuredRailButtons"), "rail renders only configured tool buttons");
   assert.ok(rail.includes('capability.descriptor.id === "terminal"'), "Terminal remains a guaranteed rail launcher");
   assert.ok(!rail.includes("draggable"), "runtime rail buttons do not expose drag-only reordering");
-  assert.ok(widgets.includes("moveCapabilityToOtherRail"), "Widgets settings expose explicit rail placement controls");
+  assert.ok(widgets.includes('aria-label="Top toolbar"'), "the customizer previews top-rail capabilities");
+  assert.ok(widgets.includes('aria-label="Right rail"'), "the customizer previews right-rail capabilities");
+  assert.ok(widgets.includes('label="Placement"'), "the inspector exposes explicit placement controls");
   assert.ok(!store.includes("moreOpen:"), "dead global More-tools state stays removed");
   assert.ok(!store.includes("setMoreOpen"), "dead global More-tools action stays removed");
 });

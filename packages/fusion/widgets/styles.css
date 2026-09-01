@@ -12,10 +12,8 @@
 }
 
 .fusion-view .fusion-setup {
-  padding: var(--space-4);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-surface);
-  background: var(--panel);
+  padding-block-end: var(--space-5);
+  border-bottom: 1px solid var(--surface-divider);
 }
 
 .fusion-view .fusion-setup h2,
@@ -103,9 +101,8 @@
 }
 
 .fusion-view .fusion-prompt {
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-card);
-  background: var(--elevated);
+  padding-block: var(--space-3);
+  border-block: 1px solid var(--border-soft);
 }
 
 .fusion-view .fusion-prompt p {
@@ -133,7 +130,7 @@
   padding: var(--space-5);
   border: 1px solid var(--border);
   border-radius: var(--radius-surface);
-  background: var(--panel);
+  background: var(--elevated);
   color: var(--text-dim);
   line-height: 1.7;
 }
@@ -187,9 +184,9 @@
 .fusion-view .fusion-source {
   min-width: 0;
   overflow: hidden;
-  border: 1px solid var(--border-soft);
+  border: 1px solid var(--border);
   border-radius: var(--radius-card);
-  background: var(--panel);
+  background: var(--elevated);
 }
 
 .fusion-view .fusion-source header {

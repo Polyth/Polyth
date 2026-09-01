@@ -550,7 +550,9 @@ export const createOwnedLocalEndpointLease = async (
     );
   }
   const hostname = options.hostname ?? "127.0.0.1";
-  const pidFile = options.pidFile ?? pidFileForDirectory(cwd, options.projectId);
+  // Keep process ownership inside the isolated runtime. Two Polyth data
+  // directories may legitimately run the same project/worktree concurrently.
+  const pidFile = options.pidFile ?? join(resolve(options.runtimeDir), "opencode.pid.json");
   const legacyStateFile = `${pidFile}.lease.json`;
   const stateFile = options.stateFile ?? legacyStateFile;
   const readIdentity = options.readProcessIdentity ?? readProcessIdentity;

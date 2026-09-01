@@ -4,20 +4,18 @@ import { readFile } from "node:fs/promises";
 
 const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
 
-test("widget placement sections, chips, and pickers use shared settings primitives", async () => {
-  const [parts, page, styles] = await Promise.all([
-    read("../src/components/settings/parts.tsx"),
+test("workspace customizer composes the library, live canvas, and placement inspector", async () => {
+  const [page, styles] = await Promise.all([
     read("../src/components/settings/WidgetsPage.tsx"),
     read("../src/styles.css"),
   ]);
 
-  for (const primitive of ["WidgetSectionCard", "WidgetPlacementChip", "WidgetPlacementPicker"]) {
-    assert.match(parts, new RegExp(`export function ${primitive}`), `${primitive} is a shared settings primitive`);
-    assert.match(page, new RegExp(`<${primitive}`), `${primitive} is used by widget settings`);
-  }
-  assert.match(page, /className=\{`widget-placement-item widget-order-chip/, "ordered toggles join the shared chip family");
-  assert.match(styles, /\.widget-placement-item\s*\{[^}]*min-height:\s*var\(--tap\)[^}]*font-size:\s*var\(--font-label\)/s);
-  assert.match(styles, /\.widget-placement-picker-label\s*\{[^}]*font-weight:\s*650/s);
+  assert.match(page, /<WidgetLibraryPanel widgets=\{widgets\} onAdd=\{add\}/);
+  assert.match(page, /<WidgetCanvas editing selectedId=\{selected\}/);
+  assert.match(page, /<Inspector selectedId=\{selected\} widgets=\{widgets\}/);
+  assert.match(page, /<Select label="Placement"/);
+  assert.match(styles, /\.workspace-customizer-body\s*\{[^}]*grid-template-columns:/s);
+  assert.match(styles, /\.workspace-inspector\s*\{[^}]*display:\s*flex/s);
 });
 
 test("widget placement and settings shell typography use canonical roles", async () => {

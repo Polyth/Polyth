@@ -149,7 +149,6 @@ test("feature module views no longer draw their own page header", async () => {
 test("the workflow view has no bottom save/status bar and no Back to chat button", async () => {
   const src = await read("../../../packages/workflow/widgets/WorkflowView.tsx");
   assert.doesNotMatch(src, /workflow-mobile-savebar/);
-  assert.doesNotMatch(src, /workflow-save-state/);
   assert.doesNotMatch(src, /workflow-back-chat/);
   assert.doesNotMatch(src, /workflow-page-header/);
 });

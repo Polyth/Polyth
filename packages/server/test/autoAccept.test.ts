@@ -191,7 +191,7 @@ test("composer-shell confirmations are never auto-reconciled", async () => {
   assert.equal((await store.projection(id))?.status, "waiting");
 });
 
-test("turn lifecycle reaches the notify seam; aborts pass through as-is", async () => {
+test("turn lifecycle reaches the notify seam once per terminal turn", async () => {
   const { sessions, fake, stopped } = harness();
   const { id } = await sessions.create({ projectId: "p1", title: "T" });
   fake.emit(id, { type: "turn/stopped", reason: "completed" });
@@ -199,6 +199,5 @@ test("turn lifecycle reaches the notify seam; aborts pass through as-is", async 
   await flush();
   assert.deepEqual(stopped, [
     { sessionId: id, reason: "completed" },
-    { sessionId: id, reason: "error" },
-  ]);
+  ], "a later terminal stop for the same turn is deduplicated");
 });

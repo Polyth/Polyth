@@ -12,10 +12,8 @@
 }
 
 .multirun-view .multirun-setup {
-  padding: var(--space-4);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-surface);
-  background: var(--panel);
+  padding-block-end: var(--space-5);
+  border-bottom: 1px solid var(--surface-divider);
 }
 
 .multirun-view .multirun-setup h2,
@@ -102,9 +100,8 @@
   grid-template-columns: minmax(12rem, 1fr) auto;
   align-items: center;
   gap: var(--space-4);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-card);
-  background: var(--elevated);
+  padding-block: var(--space-3);
+  border-block: 1px solid var(--border-soft);
 }
 
 .multirun-view .multirun-summary-states {
@@ -169,9 +166,9 @@
 .multirun-view .multirun-detail {
   min-width: 0;
   overflow: hidden;
-  border: 1px solid var(--border-soft);
+  border: 1px solid var(--border);
   border-radius: var(--radius-surface);
-  background: var(--panel);
+  background: var(--elevated);
 }
 
 .multirun-view .multirun-detail.is-picked {
@@ -188,7 +185,8 @@
   gap: var(--space-3);
   padding: var(--space-2) var(--space-4);
   font-family: var(--mono);
-  background: var(--surface-overlay);
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--sunken);
 }
 
 .multirun-view .multirun-output {
@@ -231,17 +229,18 @@
   gap: var(--space-3);
   width: 100%;
   min-height: max(var(--control-h-lg), var(--hit-min));
-  padding: var(--space-3);
+  padding: var(--space-2) 0;
   color: var(--text);
   text-align: start;
-  border: 1px solid var(--control-border);
-  border-radius: var(--radius-card);
-  background: var(--panel);
+  border: 0;
+  border-bottom: 1px solid var(--border-soft);
+  border-radius: 0;
+  background: transparent;
   cursor: pointer;
 }
 
 .multirun-view .multirun-overview-row:hover {
-  background: var(--raised);
+  background: var(--surface-overlay-hover);
 }
 
 .multirun-view .multirun-overview-status {

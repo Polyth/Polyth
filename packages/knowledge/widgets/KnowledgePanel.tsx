@@ -85,7 +85,7 @@ export default function KnowledgePanel() {
   if (editor) {
     return (
       <div className="knowledge-editor">
-        <div className="view-toolbar-row">
+        <div className="view-toolbar-row knowledge-toolbar">
           <Select
             label={KINDS.find((candidate) => candidate.id === editor.kind)?.label ?? editor.kind}
             value={editor.kind}
@@ -95,7 +95,7 @@ export default function KnowledgePanel() {
             }))}
             onChange={(value) => setEditor({ ...editor, kind: value as KnowledgeKindDto })}
           />
-          <span className="header-spacer" />
+          <span className="header-spacer knowledge-toolbar-spacer" />
           <Button size="sm" variant="ghost" onClick={() => setEditor(null)}>{tr("common.cancel")}</Button>
           <Button size="sm" variant="primary" disabled={!editor.title.trim()} onClick={save}>{tr("common.save")}</Button>
         </div>
@@ -110,7 +110,7 @@ export default function KnowledgePanel() {
 
   return (
     <div className="knowledge-panel">
-      <div className="view-toolbar-row">
+      <div className="view-toolbar-row knowledge-toolbar">
         <TextInput uiSize="sm" className="knowledge-search" placeholder={tr("knowledgepanel.searchKnowledge")} value={q} onChange={(e) => setQ(e.target.value)} />
         {sessionId && (
           <Button

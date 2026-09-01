@@ -114,7 +114,7 @@ export default function VoicePage() {
   };
 
   return (
-    <>
+    <div className="pkg-dictation">
       <PageHead title={tr("settings.voicepage.voice")} blurb={tr("settings.voicepage.dictationAndReadAloudBrowserEnginesBy")} />
       {!support.stt && !support.tts && (
         <EmptyState title={tr("settings.voicepage.speechIsNotSupportedInThisBrowser")} body={tr("settings.voicepage.dictationNeedsTheWebSpeechApiChrome")} />
@@ -221,6 +221,6 @@ export default function VoicePage() {
           onSaved={(s) => { setServer(s); refreshCapability(); }}
         />
       )}
-    </>
+    </div>
   );
 }

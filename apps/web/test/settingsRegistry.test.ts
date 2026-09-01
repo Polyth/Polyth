@@ -55,19 +55,17 @@ test("Widgets & Layout exposes place-first workspace and composer controls", asy
   assert.doesNotMatch(shell, /Change workspace preset|cmd\.customize/);
   assert.doesNotMatch(settings, /Choose a setup/);
   assert.match(settings, /tr\("settingsview\.widgetsLayout"\)/);
-  assert.match(widgets, /<PageHead\s+title=\{tr\("settings\.widgetspage\.widgetsLayout"\)\}/);
+  assert.match(widgets, /className=\{`workspace-customizer preview-\$\{mode\}`\}/);
   assert.match(packages, /<PageHead title=\{tr\("settings\.packagespage\.packages"\)\}/);
-  assert.match(widgets, /itemId=\{index === 0 \? "widgets\.capabilities"/);
-  assert.match(widgets, /itemId=\{index === 0 \? "widgets\.actions"/);
-  assert.match(widgets, /tr\("settings\.widgetspage\.whereButtonsAppear"\)/);
-  assert.match(widgets, /tr\("settings\.widgetspage\.topRail"\)/);
-  assert.match(widgets, /tr\("settings\.widgetspage\.rightRail"\)/);
-  assert.match(widgets, /tr\("settings\.widgetspage\.centeredWorkspaceButtonsAtThe"\)/);
+  assert.match(widgets, /<WidgetLibraryPanel widgets=\{widgets\} onAdd=\{add\}/);
+  assert.match(widgets, /<WidgetCanvas editing selectedId=\{selected\}/);
+  assert.match(widgets, /<Inspector selectedId=\{selected\} widgets=\{widgets\}/);
+  assert.match(widgets, /aria-label="Top toolbar"/);
+  assert.match(widgets, /aria-label="Right rail"/);
+  assert.match(widgets, /aria-label="Response actions"/);
+  assert.match(widgets, /aria-label="Composer controls"/);
   assert.doesNotMatch(widgets, /More tools \/ right rail|Technical menu|Session header stats/);
-  assert.match(widgets, /tr\("settings\.widgetspage\.composerActions"\)/);
-  assert.doesNotMatch(widgets, /Top &amp; side workspace buttons|Workspace preview|Choose a starting layout|Help me set up/);
-  // Widget-areas (WA2): the settings page now opens the Widget Library.
-  assert.match(widgets, /import WidgetLibraryOverlay from "\.\/WidgetLibraryOverlay\.tsx"/);
+  assert.doesNotMatch(widgets, /Choose a starting layout|Help me set up/);
 });
 
 test("items on hidden/unknown pages are skipped", () => {

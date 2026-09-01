@@ -345,7 +345,7 @@ export default function ModelPicker({
     return (
       <IconButton
         type="button"
-        className={`${variant === "sheet" ? "sheet-row-star" : "star-btn"}${favorite ? " on" : ""}`}
+        className={`${variant === "sheet" ? "sheet-row-star" : "model-star-btn"}${favorite ? " on" : ""}`}
         icon={FavoriteIcon}
         size="sm"
         variant="ghost"

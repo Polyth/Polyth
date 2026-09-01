@@ -107,7 +107,7 @@ export function SessionUsageStats({
     });
   }
   return (
-    <div className="widget-stat-grid usage-session-stats">
+    <div className="usage-widget-stat-grid usage-session-stats">
       {rows.map((row) => (
         <div key={row.id} data-usage-metric={row.id}>
           <span>{row.label}</span>
@@ -184,7 +184,7 @@ function ProjectUsageWidget({ projectId }: { projectId: string | null }) {
   if (mine.length === 0) return <div className="widget-empty">{tr("widgets.usageplugin.usageAppearsOnceSessionsRunInThis")}</div>;
   return (
     <div className="usage-widget-panel">
-      <div className="widget-stat-grid">
+      <div className="usage-widget-stat-grid">
         <div><span>{tr("widgets.usageplugin.sessions")}</span><strong>{totals.sessions}</strong></div>
         <div><span>{tr("widgets.usageplugin.tokens")}</span><strong>{fmtTokens(totals.tokens)}</strong></div>
         <div><span>{tr("widgets.usageplugin.cost")}</span><strong>{totals.cost > 0 ? fmtCost(totals.cost) : "—"}</strong></div>

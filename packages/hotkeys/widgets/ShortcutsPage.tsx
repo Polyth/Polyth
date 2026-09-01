@@ -25,7 +25,7 @@ export default function ShortcutsPage() {
   };
 
   return (
-    <>
+    <div className="pkg-hotkeys">
       <PageHead title={tr("settings.shortcutspage.shortcuts")} blurb={tr("settings.shortcutspage.pluginsProvideTheseActionsClickABinding")} />
       {HOTKEY_ACTIONS.map(({ id, label, pluginName }) => {
         const conflictLabels = HOTKEY_ACTIONS
@@ -65,6 +65,6 @@ export default function ShortcutsPage() {
         );
       })}
       <Button size="sm" variant="ghost" onClick={resetKeymap}>{tr("settings.shortcutspage.resetAllToDefaults")}</Button>
-    </>
+    </div>
   );
 }

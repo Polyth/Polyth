@@ -2,6 +2,7 @@
 .knowledge-panel,
 .knowledge-editor {
 display: flex; flex-direction: column; gap: 8px;
+  min-width: 0; container: knowledge-panel / inline-size;
 }
 .knowledge-search {
 flex: 1;
@@ -10,8 +11,8 @@ flex: 1;
 align-self: flex-start;
 }
 .knowledge-card {
-border: 1px solid var(--hair-strong); border-radius: var(--radius-card); padding: 10px 11px;
-  background: var(--elevated); box-shadow: var(--inset-hi); display: flex; flex-direction: column; gap: 5px;
+border: 0; border-bottom: 1px solid var(--hair); border-radius: 0; padding: 10px var(--space-1);
+  background: var(--panel); display: flex; flex-direction: column; gap: 5px;
 }
 .knowledge-card-head {
 display: flex; align-items: center; gap: 6px;
@@ -51,9 +52,9 @@ display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 12px;
-  border: 1px solid var(--border-soft);
+  border: 0;
   border-radius: var(--radius-card);
-  background: var(--elevated);
+  background: var(--panel);
 }
 .track-create-form label {
 display: flex;
@@ -140,9 +141,6 @@ max-height: 160px;
 .knowledge-card {
 min-width: 0;
 }
-.rail-body > :is(.knowledge-panel, .knowledge-editor, .notification-centre, .tracks-panel) {
-min-height: 0;
-}
 .knowledge-actions,
 .knowledge-card-head {
 min-width: 0;
@@ -153,21 +151,21 @@ min-width: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-@container feature-panel (max-width: 700px) {
-.knowledge-panel > .view-toolbar-row,
-.knowledge-editor > .view-toolbar-row,
-.track-create-form .view-toolbar-row {
+@container knowledge-panel (max-width: 700px) {
+.knowledge-panel > .knowledge-toolbar,
+.knowledge-editor > .knowledge-toolbar,
+.track-create-form .knowledge-toolbar {
 align-items: stretch;
     flex-direction: column;
 }
 
-.knowledge-panel > .view-toolbar-row > :is(.ui-text-input, .ui-btn),
-.knowledge-editor > .view-toolbar-row > :is(.ui-picker, .ui-btn) {
+.knowledge-panel > .knowledge-toolbar > :is(.ui-text-input, .ui-btn),
+.knowledge-editor > .knowledge-toolbar > :is(.ui-picker, .ui-btn) {
 width: 100%;
 }
 
-.knowledge-panel .header-spacer,
-.knowledge-editor .header-spacer {
+.knowledge-panel .knowledge-toolbar-spacer,
+.knowledge-editor .knowledge-toolbar-spacer {
 display: none;
 }
 
@@ -202,8 +200,8 @@ width: 100%;
 }
 }
 
-/* Rules moved from core styles.css: knowledge tracks panel. */
-.tracks-panel { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3); }
+/* Package-owned knowledge tracks panel. */
+.tracks-panel { min-height: 0; display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3); container: knowledge-panel / inline-size; }
 .tracks-intro { margin-top: 3px; font-size: var(--font-meta); line-height: var(--font-meta-lh); }
 
 /* Inline notes share the meta type role. */

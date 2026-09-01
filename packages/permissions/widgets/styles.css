@@ -1,193 +1,197 @@
-/* Package-owned permissions web styles.
-   P2-W2: an approval is always action-required UI — the card shows intent,
-   target, risk, and its decision buttons without any disclosure step. The
-   banner is embedded chat content, so narrow layouts use container queries. */
 .perm-banner {
-  container-type: inline-size;
-  display: flex; flex-direction: column; gap: 8px;
-  padding: 10px 0 4px;
-}
-.perm-banner .perm-title {
-  display: flex; align-items: center; gap: var(--space-2);
-  color: var(--amber-on-wash, var(--amber)); font-weight: 600; font-size: var(--font-meta);
-}
-.permission-alert-mark {
-  width: 17px; height: 17px; flex: none;
-  display: grid; place-items: center;
-  border: 1px solid currentColor; border-radius: 50%;
-  font: 700 11px/1 var(--ui-font-family);
-}
-.perm-row.permission-request {
-  display: grid; gap: 8px;
-  padding: 10px 12px 12px;
-  border: 1px solid color-mix(in srgb, var(--amber) 26%, var(--border-soft));
-  border-radius: var(--radius-card);
-  background: color-mix(in srgb, var(--amber) 4%, var(--chat-surface, var(--panel)));
-}
-.permission-request-head {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0;
-}
-.permission-request-title {
-  font-size: 13.5px; font-weight: 600; color: var(--text);
-  overflow-wrap: anywhere;
-}
-.permission-request-tool {
-  color: var(--muted); font-size: var(--font-meta); white-space: nowrap;
-}
-.perm-actions {
-  display: flex; gap: 8px; flex-wrap: wrap; align-items: stretch;
-}
-.perm-actions .permission-deny { margin-inline-start: auto; }
-.permission-mode-icon {
-  flex: none; display: grid; place-items: center;
-  width: 18px; height: 18px; color: var(--muted);
-}
-.permission-mode-icon svg { width: 15px; height: 15px; }
-.permission-risk {
-margin-left: 8px; padding: 1px 6px; border-radius: var(--radius-control);
-  font-size: var(--font-meta); text-transform: uppercase; letter-spacing: 0.04em;
-}
-.permission-risk.risk-low {
-background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green-on-wash);
-}
-.permission-risk.risk-medium {
-background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber-on-wash);
-}
-.permission-risk.risk-high {
-background: color-mix(in srgb, var(--red) 20%, transparent); color: var(--red);
-}
-.permission-preview {
-  display: flex; flex-direction: column; gap: 2px;
-  max-height: 132px; overflow: auto; overscroll-behavior: contain;
-  padding: 7px 9px;
-  border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--text) 4%, transparent);
-  font-family: var(--mono); font-size: var(--font-code); max-width: 100%;
-}
-.permission-preview code {
-  padding: 0; border: 0; background: transparent;
-  color: var(--text-dim); font-size: inherit;
-  white-space: pre-wrap; word-break: break-all;
-}
-.perm-always {
-  display: inline-flex; align-items: stretch; gap: 0;
-}
-.perm-always .ui-btn {
-  border-start-end-radius: 0; border-end-end-radius: 0;
-}
-.perm-always .picker {
-  display: inline-flex; min-width: 0;
-}
-.perm-always .picker-chip {
-  border-inline-start: 0;
-  border-start-start-radius: 0; border-end-start-radius: 0;
-}
-.perm-always .chip-k { display: none; }
-.auto-accept-chip {
-display: inline-flex; align-items: center; gap: 5px; flex: none;
-  padding: 4px 9px; font-size: var(--font-meta); font-weight: 650;
-  color: var(--muted); background: transparent;
-  border: 1px solid var(--border-soft); border-radius: 999px;
-  cursor: pointer; white-space: nowrap;
-}
-.auto-accept-chip:hover {
-color: var(--text); border-color: var(--border);
-}
-.auto-accept-chip.on {
-color: var(--amber, var(--accent)); border-color: currentColor;
-  background: color-mix(in srgb, currentColor 12%, transparent);
-  animation: auto-accept-pulse 2.4s ease-in-out infinite;
-}
-@media (max-width: 820px) {
-.auto-accept-chip {
-min-height: var(--tap);
-}
-}
-@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-.auto-accept-chip {
-width: var(--tap); height: var(--tap); min-width: var(--tap); padding: 0; justify-content: center;
-}
-
-.auto-accept-chip svg {
-width: var(--icon-sm); height: var(--icon-sm);
-}
-
-.auto-accept-chip .auto-accept-text {
-display: none;
-}
-}
-.composer-mobile-extensions .composer-auto-approve.on {
-color: var(--green);
-  background: color-mix(in srgb, var(--green) 11%, transparent);
-}
-.composer-auto-approve > svg {
-width: var(--icon-lg); height: var(--icon-lg);
-}
-@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-.composer-mobile.composer-collapsed:not(.composer-has-draft) .composer-auto-approve {
-display: none;
-}
-
-.composer-mobile .composer-auto-approve {
-width: var(--tap);
-    min-width: var(--tap);
-    height: var(--tap);
-    min-height: var(--tap);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    border: 0;
-    border-radius: var(--radius-control);
-    background: transparent;
-    color: var(--muted);
-}
-
-.composer-mobile .composer-auto-approve:active,
-.composer-mobile .composer-auto-approve:focus-visible {
-color: var(--text);
-    background: color-mix(in srgb, var(--text) 8%, transparent);
-}
-
-.composer-mobile .composer-auto-approve.on {
-color: var(--green);
-    background: color-mix(in srgb, var(--green) 11%, transparent);
-}
-}
-.composer-auto-approve > svg {
-transform: none;
-}
-.permission-toast {
-min-width: 0;
+  container: permission-banner / inline-size;
+  display: flex;
+  max-height: min(62dvh, 520px);
+  min-width: 0;
   max-width: 100%;
-}
-.permission-toast {
-max-height: min(62dvh, 520px);
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-block: var(--space-3) var(--space-1);
   overflow: auto;
   overscroll-behavior: contain;
 }
-.permission-preview code {
-  overflow-wrap: anywhere;
+
+.perm-banner .perm-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--amber-on-wash);
+  font-size: var(--font-meta);
+  font-weight: 600;
 }
-/* Narrow embed: decisions become full-width, thumb-sized rows. The banner is
-   embedded chat content, so this keys off the container, not the viewport. */
-@container (max-width: 480px) {
-  .perm-actions {
+
+.perm-banner .permission-alert-mark {
+  display: grid;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  flex: none;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font: 700 var(--font-meta)/1 var(--ui-font-family);
+}
+
+.perm-banner .permission-request {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-inline-start: 2px solid var(--amber);
+  background: var(--panel);
+}
+
+.perm-banner .permission-request-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.perm-banner .permission-request-title {
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 600;
+}
+
+.perm-banner .permission-request-tool {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  white-space: nowrap;
+}
+
+.perm-banner .permission-mode-icon {
+  display: grid;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  flex: none;
+  place-items: center;
+  color: var(--muted);
+}
+
+.perm-banner .permission-mode-icon svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.perm-banner .permission-risk {
+  margin-inline-start: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: 999px;
+  font-size: var(--font-meta);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.perm-banner .permission-risk.risk-low {
+  background: var(--green-wash);
+  color: var(--green-on-wash);
+}
+
+.perm-banner .permission-risk.risk-medium {
+  background: var(--amber-wash);
+  color: var(--amber-on-wash);
+}
+
+.perm-banner .permission-risk.risk-high {
+  background: var(--red-wash);
+  color: var(--red);
+}
+
+.perm-banner .permission-preview {
+  display: flex;
+  max-width: 100%;
+  max-height: 132px;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  font-family: var(--mono);
+  font-size: var(--font-code);
+}
+
+.perm-banner .permission-preview code {
+  padding: 0;
+  overflow-wrap: anywhere;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: inherit;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.perm-banner .perm-actions {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.perm-banner .permission-deny {
+  margin-inline-start: auto;
+}
+
+.perm-banner .perm-always {
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.perm-banner .perm-always .ui-btn {
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
+}
+
+.perm-banner .perm-always .picker {
+  display: inline-flex;
+  min-width: 0;
+}
+
+.perm-banner .perm-always .picker-chip {
+  border-inline-start: 0;
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+}
+
+.perm-banner .perm-always .chip-k {
+  display: none;
+}
+
+/* The host owns composer geometry; this package only communicates its state. */
+.composer-auto-approve.on {
+  color: var(--green);
+  background: var(--green-wash);
+}
+
+.composer-auto-approve > svg {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+}
+
+@container permission-banner (max-width: 480px) {
+  .perm-banner .perm-actions {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 8px;
   }
-  .perm-actions .ui-btn,
-  .perm-actions .perm-always,
-  .perm-actions .perm-always .picker-chip {
-    min-height: var(--tap);
+
+  .perm-banner .perm-actions > .ui-btn {
+    width: 100%;
   }
-  .perm-actions > .ui-btn { width: 100%; }
-  .perm-actions .permission-deny { margin-inline-start: 0; }
-  .perm-always {
-    grid-column: 1 / -1;
+
+  .perm-banner .permission-deny {
+    margin-inline-start: 0;
+  }
+
+  .perm-banner .perm-always {
     display: grid;
+    grid-column: 1 / -1;
     grid-template-columns: minmax(0, 1fr) auto;
   }
-  .perm-always .ui-btn { width: 100%; }
+
+  .perm-banner .perm-always .ui-btn {
+    width: 100%;
+  }
 }

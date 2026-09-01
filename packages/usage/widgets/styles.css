@@ -6,9 +6,9 @@ display: grid;
   gap: 18px;
   margin: 10px 0 18px;
   padding: 14px 16px;
-  border: 1px solid var(--border-soft);
+  border: 0;
   border-radius: var(--radius-card);
-  background: var(--elevated);
+  background: var(--panel);
 }
 .provider-share-card p {
 margin: 5px 0 0; color: var(--muted); font-size: var(--font-meta);
@@ -73,7 +73,7 @@ grid-template-columns: 1fr;
 display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; margin: 8px 0;
 }
 .quota-card {
-border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--elevated); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; box-shadow: var(--inset-hi);
+border: 0; border-radius: var(--radius-card); background: var(--panel); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;
 }
 .quota-card.quota-stale {
 border-style: dashed; opacity: 0.85;
@@ -132,7 +132,7 @@ display: grid;
   margin: 8px 0 14px;
 }
 .usage-overview-grid > div {
-min-height: 74px; display: flex; flex-direction: column; justify-content: center; gap: 5px; padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-card); background: var(--elevated);
+min-height: 74px; display: flex; flex-direction: column; justify-content: center; gap: 5px; padding: 10px 12px; border: 0; border-radius: var(--radius-card); background: var(--panel);
 }
 .usage-overview-grid span {
 color: var(--muted); font-size: var(--font-meta);
@@ -211,7 +211,7 @@ min-height: 100%;
 }
 .usage-dashboard-toolbar {
 position: sticky;
-  z-index: 12;
+  z-index: 2;
   top: 0;
   min-height: 58px;
   display: flex;
@@ -219,8 +219,7 @@ position: sticky;
   gap: 8px;
   padding: 9px 24px;
   border-bottom: 1px solid var(--border-soft);
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: blur(16px);
+  background: var(--panel);
 }
 .usage-toolbar-spacer {
 flex: 1;
@@ -269,18 +268,18 @@ display: flex;
 .usage-stat-grid {
 display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  overflow: hidden;
+  border-block: 1px solid var(--border-soft);
 }
 .usage-stat-card,
 .usage-dashboard-card,
 .usage-provider-detail-card,
 .usage-provider-view-intro,
 .usage-action-strip {
-border: 1px solid var(--border-soft);
+border: 0;
   border-radius: var(--radius-surface);
-  background: var(--elevated);
+  background: var(--panel);
   color: var(--text);
-  box-shadow: var(--inset-hi);
 }
 .usage-stat-card {
 position: relative;
@@ -292,7 +291,10 @@ position: relative;
   gap: var(--space-2);
   padding: 15px;
   overflow: hidden;
+  border-radius: 0;
+  background: transparent;
 }
+.usage-stat-card + .usage-stat-card { border-inline-start: 1px solid var(--border-soft); }
 .usage-stat-card::after {
 display: none;
 }
@@ -437,9 +439,7 @@ position: absolute;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  border: 1px dashed var(--border-soft);
-  border-radius: var(--radius-card);
-  background: color-mix(in srgb, var(--elevated) 86%, transparent);
+  background: transparent;
   text-align: center;
 }
 .usage-chart-empty > span {
@@ -502,9 +502,7 @@ display: flex;
   padding: 14px;
   border: 1px solid var(--accent-line);
   border-radius: var(--radius-card);
-  background:
-    radial-gradient(circle at 100% 0, var(--accent-wash), transparent 52%),
-    var(--bg);
+  background: var(--sunken);
 }
 .usage-cost-total > span:first-child {
 color: var(--muted); font-size: var(--font-meta);
@@ -584,13 +582,12 @@ margin-top: 2px; font-size: 15px; letter-spacing: -.03em;
 .usage-spend-legend {
 min-width: 0; display: flex; flex-direction: column; gap: 9px;
 }
-.usage-spend-legend > .empty-state {
-width: 100%; min-width: 0; align-self: stretch;
+.usage-inline-empty {
+  display: flex; min-width: 0; flex-direction: column; gap: var(--space-1);
+  color: var(--muted); font-size: var(--font-meta);
 }
-.usage-spend-legend > .empty-state .empty-state-title {
-overflow-wrap: normal; word-break: normal; white-space: normal;
-}
-.usage-spend-legend > div:not(.empty-state) {
+.usage-inline-empty strong { color: var(--text); }
+.usage-spend-legend > div:not(.usage-inline-empty) {
 display: grid;
   grid-template-columns: 17px 6px minmax(48px, 1fr) auto 24px;
   align-items: center;
@@ -998,6 +995,9 @@ height: 54px;
 grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.usage-stat-card:nth-child(odd) { border-inline-start: 0; }
+.usage-stat-card:nth-child(n + 3) { border-top: 1px solid var(--border-soft); }
+
 .usage-primary-grid,
 .usage-breakdown-grid {
 grid-template-columns: 1fr;
@@ -1082,9 +1082,8 @@ margin-left: 24px;
 gap: 10px; padding: 14px 12px 22px;
 }
 
-.usage-stat-grid {
-gap: 8px;
-}
+.usage-stat-card:nth-child(odd) { border-inline-start: 0; }
+.usage-stat-card:nth-child(n + 3) { border-top: 1px solid var(--border-soft); }
 
 .usage-stat-card {
 min-height: 112px; padding: 12px;
@@ -1267,6 +1266,8 @@ width: 100%;
 grid-template-columns: 1fr;
 }
 
+.usage-stat-card + .usage-stat-card { border-inline-start: 0; border-top: 1px solid var(--border-soft); }
+
 .usage-stat-card {
 min-height: 104px;
 }
@@ -1334,14 +1335,14 @@ flex: 1;
 }
 }
 
-/* Rules moved from core styles.css: usage widget stat grid. */
-.widget-stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-2); padding: 10px; }
-.widget-stat-grid > div {
+/* Package-owned compact widget stat grid. */
+.usage-widget-stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-2); padding: var(--space-3); }
+.usage-widget-stat-grid > div {
   display: flex; flex-direction: column; gap: 2px; padding: 9px;
-  border: 1px solid var(--hair); border-radius: var(--radius-card); background: var(--sunken);
+  border: 0; border-radius: var(--radius-card); background: var(--sunken);
 }
-.widget-stat-grid span { color: var(--muted); font-size: var(--font-meta); }
-.widget-stat-grid strong { font: 650 13px var(--mono); }
+.usage-widget-stat-grid span { color: var(--muted); font-size: var(--font-meta); }
+.usage-widget-stat-grid strong { font: 650 var(--font-label) var(--mono); }
 
 /* Quota meta lines share the meta type role instead of inline pixel sizes. */
 .quota-meta {

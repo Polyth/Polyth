@@ -122,6 +122,9 @@ test("rail icon sizes default safely, validate values, and publish token geometr
   const properties = new Map<string, string>();
   const documentBefore = (globalThis as { document?: unknown }).document;
   (globalThis as { document?: unknown }).document = {
+    documentElement: {
+      style: { setProperty: (name: string, value: string) => properties.set(name, value) },
+    },
     body: {
       dataset: {},
       style: { setProperty: (name: string, value: string) => properties.set(name, value) },

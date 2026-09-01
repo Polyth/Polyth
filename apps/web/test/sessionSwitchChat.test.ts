@@ -102,11 +102,10 @@ registerSurface({
 test("user session switch closes the open pane and returns to chat, keeping pane metadata", async () => {
   store.activateProject("p1");
   assert.equal(store.openWorkspacePane("files", "file:src/app.ts"), true);
-  store.setActiveView("goals"); // pane stays open while a workflow page shows
   store.setOverlay("settings");
   setWorkspaceMode("widgets");
   assert.equal(store.getState().railPlugin, "files");
-  assert.equal(store.getState().activeView, "goals");
+  assert.equal(store.getState().activeView, "session");
   assert.equal(getWorkspaceMode(), "widgets");
 
   await openSession("s1");

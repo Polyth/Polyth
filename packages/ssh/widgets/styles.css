@@ -1,71 +1,91 @@
-/* Package-owned ssh web styles. */
-.ssh-row-label {
-display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2);
+.pkg-ssh {
+  container: ssh-surface / inline-size;
 }
+
+.pkg-ssh .ssh-row-label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .ssh-project-dialog {
-gap: 0;
+  gap: 0;
 }
-.ssh-dialog-server {
-display: flex; flex-direction: column; gap: 6px; margin: 0 18px;
-  font-size: var(--font-meta); font-weight: 600;
+
+.ssh-project-dialog .ssh-dialog-server {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-inline: var(--space-4);
+  font-size: var(--font-meta);
+  font-weight: 600;
 }
-.ssh-dialog-server .picker,
-.ssh-dialog-server .picker-chip {
-width: 100%;
+
+.ssh-project-dialog .ssh-dialog-server :is(.picker, .picker-chip),
+.ssh-project-dialog .ssh-dialog-name,
+.ssh-project-dialog .ssh-dialog-name .ui-input {
+  width: 100%;
 }
-.ssh-dialog-server .chip-k {
-display: none;
+
+.ssh-project-dialog .ssh-dialog-server .chip-k {
+  display: none;
 }
-.ssh-remote-list {
-height: min(34vh, 260px);
+
+.ssh-project-dialog .ssh-remote-list {
+  height: min(34vh, 260px);
 }
-.ssh-dialog-meta {
-display: flex; align-items: flex-end; gap: 16px; margin: 0 18px;
+
+.ssh-project-dialog .ssh-remote-list:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
-.ssh-dialog-name {
-display: flex; flex-direction: column; gap: 6px; font-size: var(--font-meta); font-weight: 600;
+
+.ssh-project-dialog .ssh-dialog-meta {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-4);
+  margin-inline: var(--space-4);
 }
-.ssh-dialog-name .ui-input {
-width: 100%;
+
+.ssh-project-dialog .ssh-dialog-name {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--font-meta);
+  font-weight: 600;
 }
-.ssh-dialog-create {
-display: inline-flex; align-items: center; gap: var(--space-2); padding-bottom: 7px;
-  color: var(--muted); font-size: var(--font-meta);
+
+.ssh-project-dialog .ssh-dialog-create {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
 }
+
 @media (max-width: 700px) {
-.dialog-panel.ssh-project-dialog {
-width: 100%;
+  .dialog-panel.ssh-project-dialog {
+    width: 100%;
     height: var(--visual-vh, 100dvh);
     max-height: var(--visual-vh, 100dvh);
     border: 0;
     border-radius: 0;
-}
+  }
+  .ssh-project-dialog .ssh-dialog-server,
+  .ssh-project-dialog .ssh-dialog-meta {
+    margin-inline: var(--space-3);
+  }
 
-.ssh-dialog-server {
-margin-inline: 12px;
-}
-
-.ssh-dialog-meta {
-align-items: stretch;
+  .ssh-project-dialog .ssh-dialog-meta {
+    align-items: stretch;
     flex-direction: column;
-    gap: 10px;
-    margin-inline: 12px;
-}
+    gap: var(--space-3);
+  }
 
-.ssh-dialog-server .picker {
-width: 100%;
-}
-
-.ssh-dialog-name,
-.ssh-dialog-name .ui-input {
-width: 100%;
-}
-
-.ssh-dialog-create {
-min-height: var(--tap); padding: 0;
-}
-}
-.ssh-remote-list:focus-visible {
-outline: 2px solid var(--focus-ring);
-  outline-offset: -2px;
+  .ssh-project-dialog .ssh-dialog-create {
+    min-height: var(--tap);
+    padding: 0;
+  }
 }

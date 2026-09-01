@@ -67,7 +67,7 @@ export default function SecureSafePage() {
   };
 
   return (
-    <>
+    <div className="pkg-secure-safe">
       <PageHead
         title={tr("settings.securesafepage.secureSafe")}
         blurb={tr("settings.securesafepage.storeCredentialsBehindReusableHandlesValuesAre")}
@@ -139,6 +139,6 @@ export default function SecureSafePage() {
         </div>
       </form>
       {error && <div className="form-error" role="alert">{error}</div>}
-    </>
+    </div>
   );
 }

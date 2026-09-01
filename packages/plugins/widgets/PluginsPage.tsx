@@ -351,10 +351,10 @@ export function ManagedPluginsSection() {
 
 export default function PluginsPage() {
   return (
-    <>
+    <div className="pkg-plugins">
       <PageHead title="Plugins" blurb="Configure OpenCode runtime plugins or install managed Polyth UI extensions." />
       <OpenCodePluginsSection />
       <ManagedPluginsSection />
-    </>
+    </div>
   );
 }

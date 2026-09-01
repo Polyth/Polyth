@@ -74,12 +74,12 @@ export default function TracksPanel() {
 
   return (
     <div className="tracks-panel">
-      <div className="view-toolbar-row">
+      <div className="view-toolbar-row knowledge-toolbar">
         <div>
           <strong>{tr("trackspanel.specDrivenTracks")}</strong>
           <div className="muted tracks-intro">{tr("trackspanel.eachVerifiedPlanStepBecomesOneGit")}</div>
         </div>
-        <span className="header-spacer" />
+        <span className="header-spacer knowledge-toolbar-spacer" />
         <Button size="sm" onClick={() => setCreating((value) => !value)}>
           {creating ? tr("common.cancel") : tr("trackspanel.newTrack")}
         </Button>
@@ -114,9 +114,9 @@ export default function TracksPanel() {
               onChange={(event) => setTestCommand(event.target.value)}
             />
           </label>
-          <div className="view-toolbar-row">
+          <div className="view-toolbar-row knowledge-toolbar">
             <span className="muted">{steps.length} {tr("trackspanel.step")}{steps.length === 1 ? "" : tr("trackspanel.s")}</span>
-            <span className="header-spacer" />
+            <span className="header-spacer knowledge-toolbar-spacer" />
             <Button variant="primary" busy={busy === "create"} disabled={!canCreate} onClick={create}>
               {busy === "create" ? tr("trackspanel.creating") : tr("trackspanel.createSpecPlan")}
             </Button>

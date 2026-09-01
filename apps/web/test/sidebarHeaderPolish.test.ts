@@ -77,9 +77,11 @@ test("header and composer controls are configurable and purpose-specific", async
   assert.match(composer, /onUpload=\{openAttachmentPicker\}/);
   assert.match(composer, /pickNativeFiles\(\)\.then/);
   assert.doesNotMatch(widgets, /Session header stats|Response hover actions|Technical menu/);
-  assert.match(widgets, /tr\("settings\.widgetspage\.responseActions"\)/);
-  assert.match(widgets, /tr\("settings\.widgetspage\.whereButtonsAppear"\)/);
-  assert.match(widgets, /draggable/);
+  assert.match(widgets, /className="workspace-response-preview" aria-label="Response actions"/);
+  assert.match(widgets, /ui\.responseActions\.map/);
+  assert.match(widgets, /aria-label="Top toolbar"/);
+  assert.match(widgets, /aria-label="Right rail"/);
+  assert.match(widgets, /<WidgetCanvas editing/);
   assert.match(metrics, /headerMetrics\.map/);
 });
 

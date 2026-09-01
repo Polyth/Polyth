@@ -61,7 +61,7 @@ test("slot-backed feature panels share the responsive surface stylesheet", async
   // are handled by container queries (P2-W2 moved the last combined
   // 700px+coarse viewport query in package CSS to an @container rule).
   assert.match(styles, /\(pointer: coarse\)/);
-  assert.match(styles, /@container \(max-width: 480px\)/);
+  assert.match(styles, /@container feature-panel \(max-width: 480px\)/);
 
   for (const selector of [
     ".goals-head",
@@ -88,7 +88,7 @@ test("feature forms stack and dense lists scroll at narrow panel widths", async 
   const narrow = await packageStyles();
 
   assert.match(narrow, /\.sched-form \.view-toolbar-row\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
-  assert.match(narrow, /\.knowledge-panel > \.view-toolbar-row,[\s\S]*flex-direction:\s*column/);
+  assert.match(narrow, /@container knowledge-panel \(max-width: 700px\)[\s\S]*?\.knowledge-panel > \.knowledge-toolbar,[\s\S]*?flex-direction:\s*column/);
   assert.match(narrow, /\.settings-pane-body \.set-row\s*\{[\s\S]*flex-direction:\s*column/);
   assert.match(narrow, /\.provider-chips\s*\{[\s\S]*overflow-x:\s*auto/);
   assert.match(narrow, /\.step-dots\s*\{[\s\S]*overflow-x:\s*auto/);
