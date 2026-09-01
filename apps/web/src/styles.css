@@ -9101,7 +9101,6 @@ color: var(--muted);
   }
   .sidebar .project-menu-btn { color: var(--text-dim); }
 
-  .view-page > :first-child { flex: none; }
   .msg.assistant .msg-action-btn,
   .msg.assistant .msg-actions-entry,
   .focus-conversation .msg .msg-action-btn,
@@ -9158,8 +9157,7 @@ max-width: 100%;
 min-height: var(--tap);
 }
 }
-.view-page,
-.rail-body,
+.module-view-content,
 .settings-pane-body,
 .widget-card-body {
 container: feature-panel / inline-size;
@@ -9363,16 +9361,11 @@ transition: none;
 }
 .review-note.outdated { opacity: 0.65; border-style: dashed; }
 
-/* One .view-* page scaffold. Full pages carry the title role; the single
-   feature-panel block below moves embedded surfaces to the heading role. */
+/* Legacy title helpers remain for non-module content. Package windows use the
+   core-owned ModuleView frame and content scaffold below. */
 .workspace-toolbar .view-title { flex: 1 1 auto; min-width: 0; }
 .view-title { margin: 0 0 4px; font-size: var(--font-title); line-height: var(--font-title-lh); letter-spacing: -0.02em; }
 .view-sub { margin: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
-.view-page {
-  flex: 1; min-width: 0; max-width: 100%; min-height: 0; overflow: auto;
-  display: flex; flex-direction: column; gap: var(--space-3);
-  padding: var(--space-4) var(--gutter);
-}
 
 /* ============================================================================
    Polyth module-view shell — components/ui/ModuleView.ts
@@ -9431,8 +9424,24 @@ transition: none;
     border-color var(--motion-fast) var(--motion-ease);
 }
 .module-view-close:hover { color: var(--text); background: var(--elevated); border-color: var(--border); }
-.module-view-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.module-view-body > .view-page { flex: 1; }
+.module-view-body,
+.module-view-content {
+  flex: 1; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column;
+}
+.module-view-content--page {
+  gap: var(--space-3);
+  padding: var(--space-4) var(--gutter);
+  overflow: auto;
+}
+.module-view-content--page > :only-child,
+.module-view-content--workspace > .rail-body > :only-child {
+  flex: 1; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column;
+}
+.module-view-content--page > :only-child { gap: var(--space-3); }
+.module-view-content--panel,
+.module-view-content--workspace { overflow: hidden; }
 
 /* Slide-in overlay: on phone every module (main view + any stacked rail panel)
    is a fixed, opaque layer that enters right-to-left, fully covers the
@@ -9498,7 +9507,7 @@ html[dir="rtl"] .panel-sheet { animation-name: module-slide-in-rtl; }
 }
 .prompt-echo-label { color: var(--muted); font-size: var(--font-meta); font-weight: 650; letter-spacing: .03em; }
 .prompt-echo > span:last-child { overflow-wrap: anywhere; }
-:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) :is(
+:is(.module-view-content, .settings-pane-body, .widget-card-body) :is(
   input:not([type="checkbox"]):not([type="radio"]),
   select,
   textarea,
@@ -9512,24 +9521,24 @@ html[dir="rtl"] .panel-sheet { animation-name: module-slide-in-rtl; }
    their own hit areas through --hit-min; only legacy controls receive the
    tap floor here. */
 @container feature-panel (max-width: 700px) {
-  :is(.view-page, .rail-body, .settings-pane-body, .widget-card-body)
+  :is(.module-view-content, .settings-pane-body, .widget-card-body)
     button:not(.switch):not(.package-toggle):not(.widget-drag-handle):not([class^="ui-"]):not([class*=" ui-"]) {
     min-width: var(--tap);
     min-height: var(--tap);
     touch-action: manipulation;
   }
-  :is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) :is(
+  :is(.module-view-content, .settings-pane-body, .widget-card-body) :is(
     input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
     select
   ) {
     min-height: var(--tap);
     font-size: var(--font-input);
   }
-  :is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) textarea {
+  :is(.module-view-content, .settings-pane-body, .widget-card-body) textarea {
     min-height: calc(var(--tap) * 2);
     font-size: var(--font-input);
   }
-  .view-page {
+  .module-view-content--page {
     gap: var(--space-4);
     padding: 18px max(14px, env(safe-area-inset-right, 0px))
       max(24px, env(safe-area-inset-bottom, 0px))

@@ -15,6 +15,7 @@ import { createElement, type ReactNode } from "react";
 import { tr } from "../../i18n/index.ts";
 
 export type ModuleViewVariant = "main" | "rail";
+export type ModuleContentMode = "page" | "panel" | "workspace";
 
 export interface ModuleViewProps {
   /** Stable module id (workspace surface id / rail surface id). */
@@ -31,6 +32,8 @@ export interface ModuleViewProps {
   closeLabel?: string;
   /** "main" = WorkspaceHost surface, "rail" = ContextRail panel. */
   variant?: ModuleViewVariant;
+  /** Core-owned content behavior. Packages only render their feature root. */
+  contentMode?: ModuleContentMode;
   /** Phone stacking depth: a higher value sits on top of lower ones. */
   depth?: number;
   className?: string;
@@ -58,7 +61,7 @@ function CloseGlyph(): ReactNode {
 export default function ModuleView(props: ModuleViewProps): ReactNode {
   const {
     id, title, description, icon, actions, onClose, closeLabel,
-    variant = "main", depth = 0, className, children,
+    variant = "main", contentMode = "page", depth = 0, className, children,
   } = props;
   return createElement(
     "section",
@@ -93,6 +96,14 @@ export default function ModuleView(props: ModuleViewProps): ReactNode {
         createElement(CloseGlyph),
       ),
     ),
-    createElement("div", { className: "module-view-body" }, children),
+    createElement(
+      "div",
+      { className: "module-view-body" },
+      createElement(
+        "div",
+        { className: `module-view-content module-view-content--${contentMode}` },
+        children,
+      ),
+    ),
   );
 }

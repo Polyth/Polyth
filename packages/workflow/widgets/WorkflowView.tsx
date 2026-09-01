@@ -539,7 +539,7 @@ export default function WorkflowView() {
   };
 
   return (
-    <div className="view-page workflow-page" aria-busy={loading || isBusy}>
+    <div className="workflow-page" aria-busy={loading || isBusy}>
       {/* Title, description and the single close control come from the shared
           ModuleView frame (WorkspaceHost). No per-view header or "Back to
           chat" button, and no bottom save/status bar. */}

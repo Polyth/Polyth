@@ -1,14 +1,4 @@
 /* Package-owned git web styles. */
-.source-control-title .view-title {
-margin: 0; flex: none;
-}
-/* Embedded/narrow source surfaces step the page title down to the shared
-   heading role instead of a bespoke pixel size. */
-@container feature-panel (max-width: 700px) {
-.source-control-title .view-title {
-font-size: var(--font-heading); line-height: 1.2;
-}
-}
 .pending-changes-bar {
   --git-edited-icon-well: var(--sunken);
   container: pending-changes / inline-size;
@@ -875,10 +865,6 @@ align-items: flex-start; flex-wrap: wrap;
 width: 100%; flex-wrap: wrap;
 }
 
-.source-control-title .view-title {
-font-size: var(--font-heading); line-height: 1.2;
-}
-
 .git-master-detail {
 display: block; min-height: 0; overflow: visible; border: 0;
     border-radius: 0; background: transparent; box-shadow: none;
@@ -1121,10 +1107,6 @@ max-height: none; min-height: 160px; margin: 10px 0 0; border-color: var(--hair-
 opacity: 1;
 }
 @container feature-panel (max-width: 700px) {
-.source-control-title .view-title {
-font-size: var(--font-heading); line-height: 1.2;
-}
-
 .git-commit-composer .commit-row {
 justify-content: stretch;
 }

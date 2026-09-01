@@ -72,7 +72,8 @@ test("shared style behavior is owned by core instead of copied across packages",
   assert.doesNotMatch(packages, /(^|\n)\s*:root\s*\{/);
   assert.doesNotMatch(packages, /--scroll-affordance:/);
   assert.doesNotMatch(packages, /:is\(\.empty-state,\s*\.set-empty,\s*\.rail-empty/);
-  assert.doesNotMatch(packages, /\.view-page:not\(\.github-page\):not\(\.git-page\)/);
+  assert.doesNotMatch(packages, /\.view-page|\.module-view(?:-body|-content)?/,
+    "packages cannot own or restyle the shared module frame");
   assert.doesNotMatch(packages, /--tt-radius-/);
   assert.doesNotMatch(packages, /:is\(\s*\.audit-(?:note|list),/);
   assert.doesNotMatch(packages, /\.settings-pane-body :is\(/);
@@ -80,7 +81,7 @@ test("shared style behavior is owned by core instead of copied across packages",
 
   assert.equal((styles.match(/--scroll-affordance:/g) ?? []).length, 1);
   assert.match(styles, /\.empty-state--compact,[\s\S]*?\.empty-state--panel\s*\{/);
-  assert.match(styles, /\.view-page,\s*\.rail-body,[\s\S]*?container:\s*feature-panel\s*\/\s*inline-size/);
+  assert.match(styles, /\.module-view-content,\s*\.settings-pane-body,[\s\S]*?container:\s*feature-panel\s*\/\s*inline-size/);
   assert.match(styles, /:is\(\s*\.audit-note,[\s\S]*?overflow-wrap:\s*anywhere/);
   assert.match(styles, /\.settings-pane-body :is\([\s\S]*?\.ha-settings[\s\S]*?min-width:\s*0/);
 });

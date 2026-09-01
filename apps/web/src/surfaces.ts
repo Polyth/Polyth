@@ -101,7 +101,7 @@ export function useSurfaceVersion(): number {
 }
 
 /** Slot bridge: "workspace.right.tabs" items become surfaces (meta.title /
- *  meta.order / meta.icon optional). Plugins that only know the slot API get a
+ *  meta.description / meta.order / meta.icon optional). Plugins that only know the slot API get a
  *  rail surface without touching the registry. The host's already-derived
  *  RailSurfaceContext is the bounded context every bridged renderer receives
  *  (EXT-SEAMS-V2) so contributed panels never spin up independent fetchers. */
@@ -109,9 +109,11 @@ export function slotSurfaces(ctx: RailSurfaceContext): RailSurface[] {
   return listSlots("workspace.right.tabs").map((item) => {
     const icon = item.meta?.icon;
     const capabilityId = item.meta?.capabilityId;
+    const description = item.meta?.description;
     return {
       id: `slot:${item.id}`,
       title: typeof item.meta?.title === "string" ? item.meta.title : item.id,
+      ...(typeof description === "string" ? { description } : {}),
       ...(typeof capabilityId === "string" ? { capabilityId } : {}),
       ...(typeof icon === "function" ? { icon: icon as NonNullable<RailSurface["icon"]> } : {}),
       order: 100 + item.order,

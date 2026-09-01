@@ -225,7 +225,7 @@ export default function ScheduleView() {
     (targetMode !== "existing-session" || sessionId !== "");
 
   return (
-    <div className="view-page schedule-page">
+    <div className="schedule-page">
       {/* Header + close come from the shared ModuleView frame. */}
       <div className="sched-form">
         <Textarea rows={2} value={prompt} placeholder={tr("scheduleview.promptToSendEGSummarizeOvernight")} onChange={(e) => setPrompt(e.target.value)} />

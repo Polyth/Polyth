@@ -46,7 +46,7 @@ export default function WalkthroughView() {
   };
 
   return (
-    <div className="view-page walkthrough-page">
+    <div className="walkthrough-page">
       <div className="wt-header">
         {/* Title + description + close come from the shared ModuleView frame. */}
         <Tabs

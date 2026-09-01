@@ -531,7 +531,7 @@ export default function GitView() {
 
   if (loading && !status) {
     return (
-      <div className="view-page git-page" aria-busy="true" aria-label={tr("gitview.loadingSourceControl")}>
+      <div className="git-page" aria-busy="true" aria-label={tr("gitview.loadingSourceControl")}>
         <div className="source-skeleton skeleton-title" />
         <div className="source-skeleton skeleton-tabs" />
         <div className="source-skeleton skeleton-panel" />
@@ -545,7 +545,7 @@ export default function GitView() {
 
   if (status?.isRepo === false) {
     return (
-      <div className="view-page git-page">
+      <div className="git-page">
         <EmptyState
           title={tr("gitview.thisFolderIsntAGitRepository")}
           description={tr("gitview.initializeGitInThisProject")}
@@ -588,7 +588,7 @@ export default function GitView() {
   };
 
   return (
-    <div className="view-page git-page">
+    <div className="git-page">
       <header className="source-control-head">
         <div className="source-control-title">
           {/* Title + close come from the shared ContextRail / ModuleView header. */}

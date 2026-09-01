@@ -9,6 +9,7 @@ export default defineWebPackage((host) => () => {
     host.surfaces.register({
       id: "usage",
       title: "Usage",
+      description: "Review token, cost, and provider quota usage.",
       capabilityId: "usage",
       order: 50,
       component: UsageDashboard,

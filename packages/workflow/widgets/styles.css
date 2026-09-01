@@ -1,10 +1,4 @@
-/* Package-owned workflow web styles. The core feature-panel scaffold owns the
-   narrow title role (--font-heading); workflow only relaxes its subtitle. */
-@container workflow-page (max-width: 700px) {
-.workflow-page .view-sub {
-max-width: none;
-}
-}
+/* Package-owned workflow web styles. The core ModuleView owns window chrome. */
 
 .workflow-run-indicator {
 color: var(--accent);
@@ -855,10 +849,6 @@ display: none;
 grid-area: title;
 }
 
-.workflow-page .view-sub {
-max-width: none;
-}
-
 .workflow-back-chat {
 grid-area: back; margin: 0;
 }
@@ -954,10 +944,6 @@ padding: max(10px, var(--safe-top)) 10px max(10px, var(--safe-bottom));
 min-height: var(--tap);
 }
 .workflow-page button { min-width: var(--tap); }
-
-.workflow-page-header .view-sub {
-max-width: none;
-}
 
 .workflow-sidebar,
 .workflow-editor-header,

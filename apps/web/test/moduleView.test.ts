@@ -47,6 +47,7 @@ test("ModuleView renders one header, one description, one close button, and a bo
     title: "Demo module",
     description: "A one-line purpose.",
     variant: "main",
+    contentMode: "page",
     onClose: () => { closed += 1; },
     children: createElement("p", { className: "demo-body" }, "content"),
   });
@@ -64,7 +65,8 @@ test("ModuleView renders one header, one description, one close button, and a bo
     (closers[0] as unknown as { click: () => void }).click();
     assert.equal(closed, 1, "the close button calls onClose");
 
-    assert.ok(container.querySelector(".module-view-body .demo-body"), "children land in the body");
+    assert.ok(container.querySelector(".module-view-body > .module-view-content--page > .demo-body"),
+      "children land in the core-owned page content wrapper");
     // No footer / status region is part of the frame.
     assert.equal(container.querySelector(".module-view-footer"), null);
   } finally {
@@ -139,10 +141,17 @@ test("feature module views no longer draw their own page header", async () => {
     "../../../packages/schedule/widgets/ScheduleView.tsx",
     "../../../packages/github/widgets/GithubView.tsx",
     "../../../packages/git/widgets/GitView.tsx",
+    "../../../packages/files/widgets/EditorView.tsx",
+    "../../../packages/terminal/widgets/TerminalView.tsx",
+    "../../../packages/browser/widgets/PreviewView.tsx",
+    "../../../packages/knowledge/widgets/KnowledgePanel.tsx",
+    "../../../packages/knowledge/widgets/TracksPanel.tsx",
+    "../../../packages/usage/widgets/usage/UsageDashboard.tsx",
   ]) {
     const src = await read(rel);
     assert.doesNotMatch(src, /className="view-title"/, `${rel} keeps no local page title`);
     assert.doesNotMatch(src, /className="view-sub"/, `${rel} keeps no local page subtitle`);
+    assert.doesNotMatch(src, /className="view-page/, `${rel} leaves page layout to ModuleView`);
   }
 });
 
@@ -168,6 +177,18 @@ test("each main-area surface registers a description for the shared header", asy
   }
 });
 
+test("each package rail surface registers a description for the shared header", async () => {
+  const pairs: Array<[string, RegExp]> = [
+    ["../../../packages/files/widgets/index.tsx", /surfaces\.register\(\{[^}]*id: "files"[^}]*description:/s],
+    ["../../../packages/git/widgets/index.tsx", /surfaces\.register\(\{[^}]*id: "git"[^}]*description:/s],
+    ["../../../packages/terminal/widgets/index.tsx", /surfaces\.register\(\{[^}]*id: "terminal"[^}]*description:/s],
+    ["../../../packages/browser/widgets/index.tsx", /surfaces\.register\(\{[^}]*id: "browser"[^}]*description:/s],
+    ["../../../packages/knowledge/widgets/index.tsx", /surfaces\.register\(\{[^}]*id: "knowledge"[^}]*description:/s],
+    ["../../../packages/usage/widgets/index.tsx", /surfaces\.register\(\{[\s\S]*?id: "usage"[\s\S]*?description:/],
+  ];
+  for (const [rel, re] of pairs) assert.match(await read(rel), re, `${rel} passes a description to its surface`);
+});
+
 test("styles.css realizes the phone module overlay: slide-in, opaque cover, one close", async () => {
   const css = await read("../src/styles.css");
   assert.match(css, /@keyframes module-slide-in\s*\{\s*from\s*\{\s*transform:\s*translateX\(100%\)/,
@@ -185,6 +206,8 @@ test("ContextRail uses ModuleView rather than its own second header", async () =
   const rail = await read("../src/components/ContextRail.tsx");
   assert.match(rail, /import ModuleView from "\.\/ui\/ModuleView\.ts"/);
   assert.match(rail, /<ModuleView[\s\S]*?variant="rail"/);
+  assert.match(rail, /contentMode=\{isWorkspacePane \? "workspace" : "panel"\}/,
+    "the core host chooses content behavior instead of packages");
   assert.doesNotMatch(rail, /className=\{`rail-head/, "the legacy rail header is gone");
   assert.doesNotMatch(rail, /pane-back/, "there is no rail-specific Back to Chat control");
 });

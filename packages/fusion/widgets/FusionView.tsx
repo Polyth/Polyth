@@ -105,7 +105,7 @@ export default function FusionView() {
   };
 
   return (
-    <div className="view-page fusion-view">
+    <div className="fusion-view">
       {/* Header + close come from the shared ModuleView frame. */}
       {!shown && (
         <section className="fusion-setup" aria-labelledby="fusion-setup-title">

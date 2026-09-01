@@ -274,7 +274,7 @@ export default function MultiRunView() {
   }
 
   return (
-    <div className="view-page multirun-view">
+    <div className="multirun-view">
       {/* Header + close come from the shared ModuleView frame. */}
       {!shown && (
         <section className="multirun-setup" aria-labelledby="multirun-setup-title">

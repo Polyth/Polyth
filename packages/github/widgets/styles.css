@@ -1,7 +1,4 @@
 /* Package-owned github web styles. */
-.github-head .view-title {
-margin-bottom: 3px;
-}
 .pr-surface .pr-diff {
 max-height: none; min-height: 160px; margin: 10px 0 0; border-color: var(--hair-strong);
 }

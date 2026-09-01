@@ -3,7 +3,7 @@
 overflow: hidden; border-radius: var(--radius-card); background: var(--elevated);
 }
 .walkthrough-page {
-container: walkthrough-page / inline-size; padding: var(--space-5) max(var(--space-5), calc((100% - 900px) / 2));
+container: walkthrough-page / inline-size;
 }
 .wt-header {
 display: flex; align-items: center;

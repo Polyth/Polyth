@@ -110,10 +110,10 @@ test("long-press reorder handles keep native scrolling disabled", async () => {
     /:is\(\.settings-shell,[^)]+\) button\s*\{[^}]*touch-action:\s*manipulation/,
     "coarse-pointer button defaults must not override the reorder handle",
   );
-  assert.doesNotMatch(
+  assert.match(
     css,
-    /:is\(\.view-page,[^)]+\) button:not\(\.switch\):not\(\.package-toggle\)\s*\{[^}]*touch-action:\s*manipulation/,
-    "container button defaults must not override the reorder handle",
+    /:is\(\.module-view-content,[^)]+\)\s*button[^\{]*:not\(\.widget-drag-handle\)[^\{]*\{[^}]*touch-action:\s*manipulation/,
+    "container button defaults explicitly preserve the reorder handle",
   );
 });
 
