@@ -983,7 +983,7 @@ export function WorkedGroup({
             {" · "}{fmtDuration(g.ms)}
           </small>
         </span>
-        {(lineStats.add > 0 || lineStats.del > 0) && <DiffStat add={lineStats.add} del={lineStats.del} />}
+        <span className="execution-diff-stat-slot">{(lineStats.add > 0 || lineStats.del > 0) ? <DiffStat add={lineStats.add} del={lineStats.del} /> : null}</span>
         <span className="execution-group-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
       </button>
       <div className="execution-group-expand-shell" aria-hidden={!open}>

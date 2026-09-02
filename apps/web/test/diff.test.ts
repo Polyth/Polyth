@@ -5,6 +5,7 @@ import {
   fileDiffStat,
   normalizePatch,
   parseDiffRows,
+  applyUnifiedDiff,
   revertUnifiedDiff,
   splitFileDiffs,
   unifiedDiff,
@@ -131,4 +132,30 @@ test("revertUnifiedDiff deletes a created file and restores a deleted one", () =
   const restored = revertUnifiedDiff(null, removed);
   assert.deepEqual(restored, { ok: true, action: "write", content: "hello\nworld\n" });
   assert.equal(revertUnifiedDiff("hello\nworld\n", removed).ok, false);
+});
+
+test("applyUnifiedDiff forward redoes a reverted in-file edit", () => {
+  const diff = unifiedDiff("one\ntwo\n", "one\nthree\nfour\n", "f.ts");
+  const reverted = revertUnifiedDiff("one\nthree\nfour\n", diff);
+  assert.deepEqual(reverted, { ok: true, action: "write", content: "one\ntwo\n" });
+  assert.deepEqual(applyUnifiedDiff("one\ntwo\n", diff, "forward"), {
+    ok: true,
+    action: "write",
+    content: "one\nthree\nfour\n",
+  });
+  const already = applyUnifiedDiff("one\nthree\nfour\n", diff, "forward");
+  assert.equal(already.ok, false);
+  if (!already.ok) assert.equal(already.reason, "already-applied");
+});
+
+test("applyUnifiedDiff forward recreates a file that revert deleted", () => {
+  const created = unifiedDiff("", "hello\nworld\n", "new.txt");
+  assert.deepEqual(applyUnifiedDiff(null, created, "forward"), {
+    ok: true,
+    action: "write",
+    content: "hello\nworld\n",
+  });
+  const already = applyUnifiedDiff("hello\nworld\n", created, "forward");
+  assert.equal(already.ok, false);
+  if (!already.ok) assert.equal(already.reason, "already-applied");
 });

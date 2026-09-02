@@ -221,6 +221,13 @@ test("execution code surfaces override the global prose font preference", async 
   const override = css.match(/html\[data-font\] body :is\([\s\S]*?execution-viewer > pre[\s\S]*?\)\s*\{\s*font-family:\s*var\(--mono\);\s*\}/);
   assert.ok(override, "commands, output, diffs, and the full viewer retain the monospace font");
   assert.match(css, /\.execution-group-items\s*\{[\s\S]*?width:\s*100%;[\s\S]*?justify-self:\s*stretch;/);
+  assert.match(css, /\.execution-group-items > \*\s*\{[\s\S]*?min-width:\s*0;/);
+  assert.match(css, /\.execution-details \.git-diff\s*\{[\s\S]*?min-width:\s*0;[\s\S]*?overflow:\s*auto;/);
+  assert.match(css, /\.execution-diff-stat-slot\s*\{/);
+  const rowSource = await readFile(new URL("../src/components/ExecutionRow.tsx", import.meta.url), "utf8");
+  assert.match(rowSource, /reverted \? "Redo" : "Revert changes"/);
+  assert.match(rowSource, /reverted \? RedoIcon : UndoIcon/);
+  assert.match(rowSource, /applyUnifiedDiff\(current, file\.diff, direction\)/);
   assert.match(css, /grid-template-rows var\(--motion-normal\)[\s\S]*?opacity var\(--motion-normal\)/);
   assert.match(css, /\.reasoning-preview\s*\{[\s\S]*?-webkit-mask-image:\s*linear-gradient\(to right, #000 90%, transparent 100%\);[\s\S]*?mask-image:\s*linear-gradient\(to right, #000 90%, transparent 100%\);/);
 });
@@ -387,6 +394,53 @@ test("edit rows show added/removed counts and a git-like file changes view", asy
     assert.equal(actions.querySelector(".copy-btn")?.getAttribute("aria-label"), "Copy diff");
     assert.equal(container.querySelectorAll(".execution-output-actions button").length, 0,
       "short edits stay inline instead of opening a separate viewer");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("execution summary columns stay aligned whether or not a row has line counts", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const shell = tool();
+  const edit = tool({
+    id: "call-edit",
+    callId: "call-edit",
+    eventSeq: 2,
+    tool: "edit",
+    input: {
+      filePath: "apps/web/src/components/Composer.tsx",
+      oldString: "one\ntwo",
+      newString: "one\nthree\nfour",
+    },
+  });
+  const group = {
+    kind: "work" as const,
+    id: "work-align",
+    items: [shell, edit],
+    tools: [shell, edit],
+    tasks: [],
+    ms: 420,
+  };
+  try {
+    await act(async () => root.render(createElement(WorkedGroup, { g: group, subagents: null })));
+    const toggle = container.querySelector<HTMLButtonElement>(".execution-group-toggle")!;
+    assert.equal(toggle.children.length, 4);
+    assert.ok(toggle.children[2]?.classList.contains("execution-diff-stat-slot"));
+    assert.ok(toggle.children[3]?.classList.contains("execution-group-chevron"));
+    await act(async () => toggle.click());
+    const summaries = [...container.querySelectorAll(".execution-summary")];
+    assert.equal(summaries.length, 2);
+    for (const summary of summaries) {
+      assert.equal(summary.children.length, 5, "icon, preview, stats slot, status, and chevron stay in fixed tracks");
+      assert.ok(summary.children[2]?.classList.contains("execution-diff-stat-slot"));
+      assert.ok(summary.children[3]?.classList.contains("execution-status"));
+      assert.ok(summary.children[4]?.classList.contains("tool-chevron"));
+    }
+    assert.equal(summaries[0]?.querySelector(".execution-diff-stat"), null);
+    assert.ok(summaries[1]?.querySelector(".execution-diff-stat"));
   } finally {
     await act(async () => root.unmount());
     container.remove();

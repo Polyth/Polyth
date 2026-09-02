@@ -9932,6 +9932,7 @@ color: var(--text);
 .execution-file-toggle .tool-chevron svg { width: 14px; height: 14px; stroke-width: 1.75; }
 .execution-expand-shell,
 .execution-group-expand-shell {
+  min-width: 0;
   display: grid;
   grid-template-rows: 0fr;
   opacity: 0;
@@ -9948,8 +9949,9 @@ color: var(--text);
   opacity: 1;
 }
 .execution-collapse-content,
-.execution-group-collapse-content { min-height: 0; overflow: hidden; }
+.execution-group-collapse-content { min-width: 0; min-height: 0; overflow: hidden; }
 .execution-details.tool-body {
+  min-width: 0;
   display: grid;
   gap: 8px;
   padding: 0 0 6px;
@@ -10036,6 +10038,12 @@ color: var(--text);
 .execution-input dl > div { min-width: 0; display: grid; grid-template-columns: minmax(80px, 120px) minmax(0, 1fr); gap: 10px; }
 .execution-input dt { color: var(--faint); font-size: calc(11.75px * var(--ui-font-scale, 1)); text-transform: capitalize; }
 .execution-input dd { margin: 0; overflow: hidden; color: var(--text-dim); font: calc(12.5px * var(--ui-font-scale, 1))/1.5 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.execution-diff-stat-slot {
+  display: flex;
+  justify-content: flex-end;
+  justify-self: end;
+  min-width: 0;
+}
 .execution-diff-stat {
   display: inline-flex;
   gap: var(--space-2);
@@ -10113,9 +10121,12 @@ color: var(--text);
   height: var(--icon-sm);
 }
 .execution-details .git-diff {
+  min-width: 0;
+  max-width: 100%;
   max-height: min(50vh, 420px);
   margin: 0;
   padding: 0;
+  overflow: auto;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -10458,6 +10469,10 @@ html[data-font] body :is(
   min-width: 0;
   display: grid;
   justify-self: stretch;
+}
+.execution-group-items > * {
+  min-width: 0;
+  max-width: 100%;
 }
 .execution-highlight { animation: execution-highlight 1.2s ease-out; }
 

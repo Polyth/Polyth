@@ -409,32 +409,40 @@ function findBlock(lines: readonly string[], block: readonly string[], hint: num
   return best;
 }
 
-function applyReverse(lines: readonly string[], hunks: readonly DiffHunk[]): string[] | "already-reverted" | "conflict" {
+function applyHunks(
+  lines: readonly string[],
+  hunks: readonly DiffHunk[],
+  direction: "forward" | "reverse",
+): string[] | "already-reverted" | "conflict" {
   if (hunks.length === 0) return "conflict";
   const next = [...lines];
   let applied = 0;
   let already = 0;
   for (let index = hunks.length - 1; index >= 0; index--) {
     const hunk = hunks[index]!;
-    const newHint = Math.max(0, hunk.newStart > 0 ? hunk.newStart - 1 : 0);
-    const oldHint = Math.max(0, hunk.oldStart > 0 ? hunk.oldStart - 1 : 0);
-    if (hunk.newLines.length === 0) {
-      if (hunk.oldLines.length === 0) continue;
-      if (findBlock(next, hunk.oldLines, oldHint) >= 0) {
+    const from = direction === "reverse" ? hunk.newLines : hunk.oldLines;
+    const to = direction === "reverse" ? hunk.oldLines : hunk.newLines;
+    const fromStart = direction === "reverse" ? hunk.newStart : hunk.oldStart;
+    const toStart = direction === "reverse" ? hunk.oldStart : hunk.newStart;
+    const fromHint = Math.max(0, fromStart > 0 ? fromStart - 1 : 0);
+    const toHint = Math.max(0, toStart > 0 ? toStart - 1 : 0);
+    if (from.length === 0) {
+      if (to.length === 0) continue;
+      if (findBlock(next, to, toHint) >= 0) {
         already += 1;
         continue;
       }
-      next.splice(Math.min(newHint, next.length), 0, ...hunk.oldLines);
+      next.splice(Math.min(fromHint, next.length), 0, ...to);
       applied += 1;
       continue;
     }
-    const at = findBlock(next, hunk.newLines, newHint);
+    const at = findBlock(next, from, fromHint);
     if (at >= 0) {
-      next.splice(at, hunk.newLines.length, ...hunk.oldLines);
+      next.splice(at, from.length, ...to);
       applied += 1;
       continue;
     }
-    if (hunk.oldLines.length === 0 || findBlock(next, hunk.oldLines, oldHint) >= 0) {
+    if (to.length === 0 || findBlock(next, to, toHint) >= 0) {
       already += 1;
       continue;
     }
@@ -449,27 +457,46 @@ function joinLines(lines: readonly string[], trailingNl: boolean): string {
   return `${lines.join("\n")}${trailingNl ? "\n" : ""}`;
 }
 
+export type DiffApplyDirection = "forward" | "reverse";
+
 export type RevertFileResult =
   | { ok: true; action: "write"; content: string }
   | { ok: true; action: "delete" }
-  | { ok: false; reason: "already-reverted" | "conflict" | "empty" };
+  | { ok: false; reason: "already-reverted" | "already-applied" | "conflict" | "empty" };
 
-/** Reverse `diff` against the current file contents (or `null` if the file is gone). */
-export function revertUnifiedDiff(current: string | null, diff: string): RevertFileResult {
+function alreadyAtTarget(direction: DiffApplyDirection): RevertFileResult {
+  return { ok: false, reason: direction === "forward" ? "already-applied" : "already-reverted" };
+}
+
+/** Apply `diff` forward (redo the agent edit) or in reverse (undo it). */
+export function applyUnifiedDiff(
+  current: string | null,
+  diff: string,
+  direction: DiffApplyDirection,
+): RevertFileResult {
   const hunks = parseDiffHunks(diff);
   if (hunks.length === 0) return { ok: false, reason: "empty" };
-  const wasAdd = hunks.every((hunk) => hunk.oldLines.length === 0);
+  const sourceEmpty = hunks.every((hunk) =>
+    (direction === "forward" ? hunk.oldLines : hunk.newLines).length === 0);
+  const targetEmpty = hunks.every((hunk) =>
+    (direction === "forward" ? hunk.newLines : hunk.oldLines).length === 0);
   if (current === null) {
-    if (wasAdd) return { ok: false, reason: "already-reverted" };
-    const applied = applyReverse([], hunks);
-    if (applied === "already-reverted") return { ok: false, reason: "already-reverted" };
+    if (targetEmpty && !sourceEmpty) return alreadyAtTarget(direction);
+    if (!sourceEmpty) return { ok: false, reason: "conflict" };
+    const applied = applyHunks([], hunks, direction);
+    if (applied === "already-reverted") return alreadyAtTarget(direction);
     if (applied === "conflict") return { ok: false, reason: "conflict" };
     return { ok: true, action: "write", content: joinLines(applied, true) };
   }
   const trailing = current.endsWith("\n");
-  const applied = applyReverse(toDiffLines(current), hunks);
-  if (applied === "already-reverted") return { ok: false, reason: "already-reverted" };
+  const applied = applyHunks(toDiffLines(current), hunks, direction);
+  if (applied === "already-reverted") return alreadyAtTarget(direction);
   if (applied === "conflict") return { ok: false, reason: "conflict" };
-  if (wasAdd && applied.length === 0) return { ok: true, action: "delete" };
+  if (targetEmpty && applied.length === 0) return { ok: true, action: "delete" };
   return { ok: true, action: "write", content: joinLines(applied, trailing) };
+}
+
+/** Reverse `diff` against the current file contents (or `null` if the file is gone). */
+export function revertUnifiedDiff(current: string | null, diff: string): RevertFileResult {
+  return applyUnifiedDiff(current, diff, "reverse");
 }

@@ -69,6 +69,7 @@ export {
   Upload as UploadIcon,
   RefreshCw as RefreshIcon,
   RotateCcw as UndoIcon,
+  RotateCw as RedoIcon,
   Search as SearchIcon,
   ListFilter as FilterIcon,
   ArrowUpDown as SortIcon,

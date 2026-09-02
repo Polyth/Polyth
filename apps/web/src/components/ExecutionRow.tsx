@@ -10,7 +10,7 @@ import {
   outputLineCount,
   type ExecutionKind,
 } from "../execution.ts";
-import { revertUnifiedDiff, visibleDiffRows, type FileDiff } from "../diff.ts";
+import { applyUnifiedDiff, visibleDiffRows, type DiffApplyDirection, type FileDiff } from "../diff.ts";
 import { highlight, langOf } from "../highlight.ts";
 import { Icon } from "../icons.tsx";
 import { openSession } from "../init.ts";
@@ -18,7 +18,7 @@ import { getState, openEditorFile, setUiError, useStore } from "../store.ts";
 import type { SubagentState, ToolMsg } from "../reduce.ts";
 import CopyButton from "./CopyButton.tsx";
 import Dialog from "./a11y/Dialog.tsx";
-import { Icon as ActionIcon, UndoIcon } from "./ui/index.ts";
+import { Icon as ActionIcon, RedoIcon, UndoIcon } from "./ui/index.ts";
 
 function ExecutionIcon({ kind }: { kind: ExecutionKind }) {
   const Glyph = kind === "shell" ? Icon.term
@@ -193,7 +193,16 @@ function DiffLines({ diff, path, limit }: { diff: string; path: string; limit?: 
   );
 }
 
-async function revertFileOnDisk(file: FileDiff): Promise<void> {
+function applyFailureMessage(reason: string, direction: DiffApplyDirection): string {
+  if (reason === "already-reverted") return "These changes are already reverted";
+  if (reason === "already-applied") return "This file already matches the edit";
+  if (reason === "empty") return "This change has no file content to apply";
+  return direction === "reverse"
+    ? "The file has changed; these edits can no longer be reverted"
+    : "The file has changed; these edits can no longer be redone";
+}
+
+async function applyFileDiffOnDisk(file: FileDiff, direction: DiffApplyDirection): Promise<void> {
   const projectId = getState().activeProjectId;
   const sessionId = getState().activeSessionId ?? undefined;
   if (!projectId) throw new Error("No project is active");
@@ -201,7 +210,11 @@ async function revertFileOnDisk(file: FileDiff): Promise<void> {
   let revision: string | undefined;
   try {
     const read = await api.filesRead(projectId, file.path, sessionId);
-    if (read.tooLarge || read.truncated) throw new Error("File is too large to revert safely");
+    if (read.tooLarge || read.truncated) {
+      throw new Error(direction === "reverse"
+        ? "File is too large to revert safely"
+        : "File is too large to redo safely");
+    }
     current = read.content;
     revision = read.revision;
   } catch (error) {
@@ -210,14 +223,8 @@ async function revertFileOnDisk(file: FileDiff): Promise<void> {
       || /ENOENT|no such file/i.test(error instanceof Error ? error.message : "");
     if (!missing) throw error;
   }
-  const result = revertUnifiedDiff(current, file.diff);
-  if (!result.ok) {
-    throw new Error(result.reason === "already-reverted"
-      ? "These changes are already reverted"
-      : result.reason === "empty"
-        ? "This change has no file content to revert"
-        : "The file has changed; these edits can no longer be reverted");
-  }
+  const result = applyUnifiedDiff(current, file.diff, direction);
+  if (!result.ok) throw new Error(applyFailureMessage(result.reason, direction));
   if (result.action === "delete") {
     await api.filesDelete(projectId, file.path, sessionId);
     return;
@@ -228,29 +235,36 @@ async function revertFileOnDisk(file: FileDiff): Promise<void> {
 function FileDiffActions({
   file,
   long,
+  reverted,
+  onReverted,
   onOpenFile,
   onOpenFull,
 }: {
   file: FileDiff;
   long: boolean;
+  reverted: boolean;
+  onReverted: (next: boolean) => void;
   onOpenFile: (path: string) => void;
   onOpenFull: () => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(false);
-  const revert = () => {
-    if (busy || done) return;
+  const direction: DiffApplyDirection = reverted ? "forward" : "reverse";
+  const apply = () => {
+    if (busy) return;
     setBusy(true);
-    void revertFileOnDisk(file)
-      .then(() => setDone(true))
+    void applyFileDiffOnDisk(file, direction)
+      .then(() => onReverted(direction === "reverse"))
       .catch((error) => setUiError(error instanceof Error ? error.message : String(error)))
       .finally(() => setBusy(false));
   };
+  const label = busy
+    ? (reverted ? "Redoing…" : "Reverting…")
+    : reverted ? "Redo" : "Revert changes";
   return (
     <div className="execution-file-actions">
-      <button type="button" onClick={revert} disabled={busy || done} aria-busy={busy || undefined}>
-        <ActionIcon icon={UndoIcon} size="sm" />
-        {done ? "Reverted" : busy ? "Reverting…" : "Revert changes"}
+      <button type="button" onClick={apply} disabled={busy} aria-busy={busy || undefined}>
+        <ActionIcon icon={reverted ? RedoIcon : UndoIcon} size="sm" />
+        {label}
       </button>
       <div className="execution-file-actions-end">
         {file.status !== "deleted" && (
@@ -267,12 +281,16 @@ function FileDiffBody({
   file,
   labeled,
   defaultOpen,
+  reverted,
+  onReverted,
   onOpenFile,
   onOpenFull,
 }: {
   file: FileDiff;
   labeled: boolean;
   defaultOpen: boolean;
+  reverted: boolean;
+  onReverted: (next: boolean) => void;
   onOpenFile: (path: string) => void;
   onOpenFull: () => void;
 }) {
@@ -302,7 +320,14 @@ function FileDiffBody({
         ? <p className="muted">No textual changes</p>
         : <DiffLines diff={file.diff} path={file.path} limit={long ? 120 : undefined} />)}
       {showDiff && (
-        <FileDiffActions file={file} long={long} onOpenFile={onOpenFile} onOpenFull={onOpenFull} />
+        <FileDiffActions
+          file={file}
+          long={long}
+          reverted={reverted}
+          onReverted={onReverted}
+          onOpenFile={onOpenFile}
+          onOpenFull={onOpenFull}
+        />
       )}
     </article>
   );
@@ -310,10 +335,14 @@ function FileDiffBody({
 
 function FileChangesView({
   files,
+  revertedPaths,
+  onReverted,
   onOpenFile,
   onOpenFull,
 }: {
   files: readonly FileDiff[];
+  revertedPaths: ReadonlySet<string>;
+  onReverted: (path: string, next: boolean) => void;
   onOpenFile: (path: string) => void;
   onOpenFull: (file: FileDiff) => void;
 }) {
@@ -327,6 +356,8 @@ function FileChangesView({
           file={file}
           labeled={labeled}
           defaultOpen={expandByDefault}
+          reverted={revertedPaths.has(file.path)}
+          onReverted={(next) => onReverted(file.path, next)}
           onOpenFile={onOpenFile}
           onOpenFull={() => onOpenFull(file)}
         />
@@ -624,6 +655,7 @@ export function ExecutionRow({
   // reader opens a row by hand; nothing auto-expands (same contract as
   // WorkedGroup).
   const [open, setOpen] = useState(false);
+  const [revertedPaths, setRevertedPaths] = useState<ReadonlySet<string>>(() => new Set());
   const detailsPresent = useCollapsePresence(open);
   const rowRef = useRef<HTMLDivElement>(null);
   const pointerScrollAnchor = useRef<(TimelineScrollAnchor & { capturedAt: number }) | null>(null);
@@ -712,7 +744,7 @@ export function ExecutionRow({
             <span className="tool-name">{presentation.label}</span>
             <span className={`tool-preview${presentation.kind === "shell" || presentation.kind === "test" ? " command" : ""}`}>{typedPreview}</span>
           </span>
-          {hasLineChanges(stats) ? <DiffStat add={stats.add} del={stats.del} /> : null}
+          <span className="execution-diff-stat-slot">{hasLineChanges(stats) ? <DiffStat add={stats.add} del={stats.del} /> : null}</span>
           <StatusMark message={message} childStatus={subagent?.status} />
           <span className="tool-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
         </button>
@@ -735,6 +767,15 @@ export function ExecutionRow({
               {presentation.files && presentation.files.length > 0 && (
                 <FileChangesView
                   files={presentation.files}
+                  revertedPaths={revertedPaths}
+                  onReverted={(path, next) => {
+                    setRevertedPaths((prev) => {
+                      const nextSet = new Set(prev);
+                      if (next) nextSet.add(path);
+                      else nextSet.delete(path);
+                      return nextSet;
+                    });
+                  }}
                   onOpenFile={(path) => openEditorFile(path)}
                   onOpenFull={(file) => openViewer(`${presentation.label} ${file.path}`, file.diff, "diff")}
                 />
