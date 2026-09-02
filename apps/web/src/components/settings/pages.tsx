@@ -10,7 +10,7 @@ import {
   updateSettings,
   useStore,
 } from "../../store.ts";
-import { UI_DEFAULTS, setUiSettings, useUiSettings } from "../../uiPrefs.ts";
+import { HEADER_METRIC_IDS, RESPONSE_ACTION_IDS, UI_DEFAULTS, setUiSettings, useUiSettings, type HeaderMetricId, type ResponseActionId } from "../../uiPrefs.ts";
 import { DEFAULT_SETTINGS, friendlyError, INTERFACE_FONTS } from "../../settings.ts";
 import { requestNotifyPermission } from "../../notify.ts";
 import { disablePush, enablePush, pushSubscription, pushUnsupportedReason } from "../../push.ts";
@@ -418,6 +418,11 @@ export function ChatPage() {
   const saveAssist = (patch: Partial<AssistSettingsDto>) => {
     void api.assistSettingsSave(patch).then(setAssist).catch(() => {});
   };
+  const metricLabels: Record<HeaderMetricId, string> = { tokens: "Tokens", messages: "Messages", duration: "Duration", cost: "Cost" };
+  const actionLabels: Record<ResponseActionId, string> = { copy: "Copy", image: "Save image", plan: "Save as plan", pin: "Pin to content", session: "Start new session", multirun: "Start multirun" };
+  const toggleOrdered = <T extends string>(current: readonly T[], id: T, update: (value: T[]) => void) => {
+    update(current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  };
   return (
     <>
       <PageHead title={tr("settings.pages.chat")} blurb={tr("settings.pages.conversationLayoutAndDeliveryPreferences")} />
@@ -447,6 +452,12 @@ export function ChatPage() {
       </Row>
       <Row label={tr("settings.pages.messageActions")} hint={tr("settings.pages.showLightweightCopyRevertAndForkControls")} itemId="chat.messageActions">
         <Toggle on={ui.showMessageActions} onChange={(showMessageActions) => setUiSettings({ showMessageActions })} label={tr("settings.pages.messageActions")} />
+      </Row>
+      <Row label="Chat metrics" hint="Choose which session metrics stay visible in the chat header." itemId="chat.headerMetrics">
+        <div className="settings-check-list">{HEADER_METRIC_IDS.map((id) => <label key={id}><Checkbox label={metricLabels[id]} checked={ui.headerMetrics.includes(id)} onChange={() => toggleOrdered(ui.headerMetrics, id, (headerMetrics) => setUiSettings({ headerMetrics }))} /></label>)}</div>
+      </Row>
+      <Row label="Answer quick actions" hint="Choose the buttons shown on agent answers. They appear in this order." itemId="chat.responseActions">
+        <div className="settings-check-list">{RESPONSE_ACTION_IDS.map((id) => <label key={id}><Checkbox label={actionLabels[id]} checked={ui.responseActions.includes(id)} onChange={() => toggleOrdered(ui.responseActions, id, (responseActions) => setUiSettings({ responseActions }))} /></label>)}</div>
       </Row>
       <Row label={tr("settings.pages.copyFormat")} hint={tr("settings.pages.chooseThePayloadUsedByTheSingle")} itemId="chat.copyFormat">
         <Seg

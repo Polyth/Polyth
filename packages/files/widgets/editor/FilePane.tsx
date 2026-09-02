@@ -790,6 +790,11 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
           {mediaKind === "audio" && <audio className="editor-media-item" src={rawUrl} controls preload="metadata" />}
           {mediaKind === "pdf" && <iframe className="editor-media-item" src={rawUrl} title={doc.path} />}
         </div>
+      ) : doc.tooLarge ? (
+        <div className="editor-body editor-media">
+          <iframe className="editor-media-item" src={rawUrl} title={doc.path} />
+          <a className="editor-file-download" href={rawUrl} download={doc.path.split(/[\\/]/).pop()}>Download {doc.path}</a>
+        </div>
       ) : (
         <div
           className="editor-body"

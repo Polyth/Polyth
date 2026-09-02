@@ -3081,10 +3081,11 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .attachment-preview-content { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .attachment-preview-toolbar {
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
-  min-height: 48px; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--hair);
-  position: relative; z-index: 2; background: color-mix(in srgb, var(--elevated) 78%, transparent);
-  backdrop-filter: blur(18px) saturate(1.15); -webkit-backdrop-filter: blur(18px) saturate(1.15);
-  color: var(--muted); font-size: var(--font-meta); box-shadow: 0 8px 24px rgba(0, 0, 0, .12);
+  flex: none; min-height: 48px; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--material-glass-border);
+  position: relative; z-index: 2; background: color-mix(in srgb, var(--material-glass) 86%, transparent);
+  -webkit-backdrop-filter: blur(var(--material-glass-blur)); backdrop-filter: blur(var(--material-glass-blur));
+  color: var(--muted); font-size: var(--font-meta);
+  box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
 }
 .attachment-preview-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: var(--font-body); font-weight: 600; }
 .attachment-preview-details { display: flex; min-width: 0; align-items: center; gap: var(--space-2); }
@@ -3111,6 +3112,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .attachment-preview-state a { display: block; margin-top: var(--space-3); color: var(--accent); overflow-wrap: anywhere; }
 .attachment-preview-link-url { display: block; max-width: min(680px, 100%); margin-bottom: var(--space-3); color: var(--text-dim); overflow-wrap: anywhere; }
 .attachment-preview-download { max-width: 420px; }
+.editor-file-download { margin-top: var(--space-3); color: var(--accent); }
 .attachment-open {
   display: inline-flex; min-width: 0; align-items: center; gap: 6px; padding: 0; border: 0;
   color: inherit; background: transparent; text-align: left; cursor: zoom-in;
@@ -3568,6 +3570,33 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .tracker-dot.task { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
 .tracker-dot.agent { background: var(--amber); animation: pulse 1.6s ease-in-out infinite; }
 .tracker-dot.agent.idle { animation: none; opacity: 0.5; }
+.desktop-session-status { position: relative; }
+.desktop-session-status-trigger {
+  min-height: var(--control-h-sm); display: inline-flex; align-items: center; gap: var(--control-gap); padding: 0 var(--control-pad-x-sm);
+  border: 1px solid var(--control-border); border-radius: var(--radius-control); background: var(--elevated); color: var(--text); font-size: var(--font-meta);
+}
+.desktop-session-status-trigger:hover { background: var(--raised); }
+.desktop-session-status-trigger svg { width: var(--icon-sm); height: var(--icon-sm); }
+.desktop-session-status-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--muted); }
+.desktop-session-status-dot.working { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+.desktop-session-status-dot.needs-approval, .desktop-session-status-dot.needs-reply { background: var(--amber); }
+.desktop-session-status-dot.failed { background: var(--red); }
+.desktop-session-status-dot.unread, .desktop-session-status-dot.epoch-pending, .desktop-session-status-dot.reconciling { background: var(--blue); }
+.desktop-session-status-popover { width: min(360px, calc(100vw - var(--space-4))); }
+.desktop-session-status-popover > header { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3); border-bottom: 1px solid var(--border-soft); }
+.desktop-session-status-popover header div { min-width: 0; display: grid; gap: 2px; }
+.desktop-session-status-popover strong, .desktop-session-status-popover li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-session-status-popover small, .desktop-session-status-popover p { color: var(--muted); font-size: var(--font-meta); }
+.desktop-session-status-popover section { padding: var(--space-3); }
+.desktop-session-status-popover section + section { border-top: 1px solid var(--border-soft); }
+.desktop-session-status-popover h3 { margin: 0 0 var(--space-2); color: var(--muted); font-size: var(--font-meta); text-transform: uppercase; }
+.desktop-session-status-popover ul { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.desktop-session-status-popover li { min-width: 0; display: flex; align-items: center; gap: var(--space-2); font-size: var(--font-meta); }
+.desktop-session-task-mark { width: var(--icon-sm); text-align: center; color: var(--muted); }
+.desktop-session-task-mark.active { color: var(--accent); }.desktop-session-task-mark.done { color: var(--green); }.desktop-session-task-mark.failed { color: var(--red); }
+.desktop-session-status-popover li.done { color: var(--muted); }
+.desktop-session-status-popover li button { width: 100%; min-width: 0; min-height: var(--control-h-sm); display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-control); background: none; color: var(--text); text-align: left; }
+.desktop-session-status-popover li button:hover { background: var(--raised); }
 .picker-trail {
   margin-left: auto; background: none; border: 0; color: var(--muted); cursor: pointer;
   font-size: 12px; padding: 1px 5px; border-radius: calc(4px * var(--corner-radius-scale)); flex-shrink: 0;
@@ -7256,9 +7285,6 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   .file-ref::after { display: none; }
 
   .stage-new { --dock-bg: color-mix(in srgb, var(--bg) 94%, var(--elevated)); }
-  /* Project/worktree selection stays in navigation on phone. Keeping a second
-     permanent row above the composer made a fresh chat look like a form. */
-  .composer-mobile > .session-context-bar { display: none; }
   .hero-body { padding: var(--space-5) var(--screen-gutter) var(--space-4); }
   .stage-new .hero h2 { font-size: clamp(26px, 7.6vw, 32px); line-height: 1.18; }
   /* Last-resort guard: on a very short band (small phone + tall keyboard)
@@ -8822,6 +8848,11 @@ color: var(--muted);
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--space-2);
+    padding: var(--space-1);
+    border: 1px solid var(--material-glass-border);
+    border-radius: var(--radius-surface);
+    background: var(--material-glass);
+    box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
     pointer-events: none;
   }
   .mobile-session-floats button { pointer-events: auto; }
@@ -11099,6 +11130,11 @@ html[data-font] body :is(
 /* Quiet Glass enhances only when the browser and device preference allow it;
    the declarations above remain the readable opaque fallback. */
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .mobile-session-floats {
+    background: color-mix(in srgb, var(--material-glass) 82%, transparent);
+    -webkit-backdrop-filter: blur(var(--material-glass-blur));
+    backdrop-filter: blur(var(--material-glass-blur));
+  }
   :is(.ui-popover, .picker-pop) {
     background: color-mix(in srgb, var(--material-glass) 82%, transparent);
     -webkit-backdrop-filter: blur(var(--material-glass-blur));
@@ -11139,8 +11175,8 @@ html[data-font] body :is(
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .dialog-panel, .sheet, .app > .header, .sidebar, .railbar, .composer-card, .mobile-float-navigation, .mobile-float-actions, .mobile-session-selector, .mobile-view-title, .mobile-island-sheet.sheet),
-  html[data-reduce-animations="true"] :is(.ui-popover, .picker-pop, .dialog-panel, .sheet, .app > .header, .sidebar, .railbar, .composer-card, .mobile-float-navigation, .mobile-float-actions, .mobile-session-selector, .mobile-view-title, .mobile-island-sheet.sheet) {
+  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .dialog-panel, .sheet, .app > .header, .sidebar, .railbar, .composer-card, .mobile-session-floats, .mobile-float-navigation, .mobile-float-actions, .mobile-session-selector, .mobile-view-title, .mobile-island-sheet.sheet),
+  html[data-reduce-animations="true"] :is(.ui-popover, .picker-pop, .dialog-panel, .sheet, .app > .header, .sidebar, .railbar, .composer-card, .mobile-session-floats, .mobile-float-navigation, .mobile-float-actions, .mobile-session-selector, .mobile-view-title, .mobile-island-sheet.sheet) {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }

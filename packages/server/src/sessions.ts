@@ -2548,12 +2548,14 @@ export function createSessionService(deps: {
     }
     const reconciliation = await durable.reconciliation(sessionId);
     if (reconciliation?.state === "reconciling"
-      || reconciliation?.state === "blocked"
-      || reconciliation?.state === "unknown") {
+      || reconciliation?.state === "blocked") {
       throw Object.assign(new Error(`unavailable while reconciliation is ${reconciliation.state}`), {
         code: "conflict",
       });
     }
+    // A stale/insufficient reconciliation snapshot is not itself a mutation
+    // in flight. The runtime binding and live admission checks below are the
+    // authoritative guards; blocking here strands otherwise idle sessions.
     const unresolvedOperation = await blockingOperation(sessionId);
     if (unresolvedOperation) {
       throw Object.assign(

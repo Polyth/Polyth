@@ -105,6 +105,7 @@ export default function AttachmentPreview({ attachments, start, onClose }: {
       className="attachment-preview-dialog"
       onClose={onClose}
       initialFocus=".attachment-preview-stage"
+      hideHeader
     >
       <div
         className="attachment-preview-content"

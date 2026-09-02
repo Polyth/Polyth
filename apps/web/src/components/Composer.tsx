@@ -344,14 +344,7 @@ export default function Composer({
   // session `unknown` after the turn already stopped). A terminal turn status
   // is authoritative: never offer Stop for a turn the log has already closed.
   const turn = model.turn;
-  const canStop = working || (
-    session?.status !== undefined
-    && session.status !== "idle"
-    && session.status !== "archived"
-    && turn?.status !== "aborted"
-    && turn?.status !== "stopped"
-    && turn?.status !== "failed"
-  );
+  const canStop = working;
   const abortPendingRef = useRef(false);
   const [abortPending, setAbortPending] = useState(false);
   useEffect(() => {

@@ -682,6 +682,8 @@ export default function GitView() {
         onChange={(value) => selectTab(value as GitTab)}
       />
 
+      {showPrForm && <PrCreatePanel projectId={projectId} sessionId={sessionId} onClose={() => setShowPrForm(false)} />}
+
       {showBranchForm && (
         <div className="source-inline-form">
           <TextInput id="git-new-branch" className="mono" aria-label={tr("gitview.createABranch")} value={newBranch} placeholder={tr("gitview.branchNamePlaceholder")} onChange={(event) => setNewBranch(event.target.value)} />
@@ -706,8 +708,6 @@ export default function GitView() {
           <Button variant="ghost" onClick={() => setShowTreeForm(false)}>{tr("common.cancel")}</Button>
         </div>
       )}
-      {showPrForm && <PrCreatePanel projectId={projectId} sessionId={sessionId} onClose={() => setShowPrForm(false)} />}
-
       {tab === "changes" && (
         <div className="git-changes-layout">
           {status && status.conflicted.length > 0 && (

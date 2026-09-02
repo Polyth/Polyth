@@ -76,6 +76,8 @@ const BUILTIN_ITEMS: SettingsSearchItem[] = [
   { id: "chat.thinking", pageId: "chat", label: tr("settings.registry.thinkingBlocks"), keywords: ["reasoning", "collapse"], focusTarget: "chat.thinking" },
   { id: "chat.workingIndicator", pageId: "chat", label: tr("settings.pages.workingIndicator"), keywords: ["working", "typing", "cat", "animation"], focusTarget: "chat.workingIndicator" },
   { id: "chat.messageActions", pageId: "chat", label: tr("settings.registry.messageActions"), description: tr("settings.registry.showOrHideCopyRevertAndFork"), keywords: ["hover", "quick actions", "buttons"], focusTarget: "chat.messageActions" },
+  { id: "chat.headerMetrics", pageId: "chat", label: "Chat metrics", description: "Choose metrics shown in the chat header", keywords: ["tokens", "duration", "cost", "header"], focusTarget: "chat.headerMetrics" },
+  { id: "chat.responseActions", pageId: "chat", label: "Answer quick actions", description: "Choose buttons shown on agent answers", keywords: ["pin", "new session", "fork", "copy", "buttons"], focusTarget: "chat.responseActions" },
   { id: "chat.copyFormat", pageId: "chat", label: tr("settings.registry.copyFormat"), description: tr("settings.registry.copyMessagesAsMarkdownOrJson"), keywords: ["clipboard", "markdown", "json"], focusTarget: "chat.copyFormat" },
   { id: "chat.mobileSendShortcut", pageId: "chat", label: tr("settings.pages.mobileSendShortcut"), keywords: ["mobile", "phone", "enter", "shift", "send"], focusTarget: "chat.mobileSendShortcut" },
   { id: "notifications.desktop", pageId: "notifications", label: tr("settings.registry.desktopNotification"), keywords: ["alert", "browser"], focusTarget: "notifications.desktop" },

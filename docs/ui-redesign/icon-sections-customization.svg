@@ -1,0 +1,181 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">Polyth icon sections customization proposal</title>
+  <desc id="desc">A light Polyth workspace with editable icon sections, colored icon groups, dividers, and an add menu.</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="7" stdDeviation="12" flood-color="#263247" flood-opacity=".12"/>
+    </filter>
+    <linearGradient id="canvas" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#f8fafc"/>
+      <stop offset="1" stop-color="#eef2f7"/>
+    </linearGradient>
+    <linearGradient id="menu" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f7f9fc"/>
+    </linearGradient>
+    <style>
+      .ui { font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; fill: #253044; }
+      .muted { fill: #69758a; }
+      .faint { fill: #97a2b2; }
+      .tiny { font-size: 12px; letter-spacing: .03em; }
+      .label { font-size: 14px; font-weight: 650; }
+      .body { font-size: 15px; }
+      .title { font-size: 20px; font-weight: 750; }
+      .stroke { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+      .icon { color: #6d7b91; }
+      .button { fill: #ffffff; stroke: #d6deea; stroke-width: 1; }
+      .soft { fill: #f3f6fa; stroke: #dce3ed; stroke-width: 1; }
+      .selected { fill: #e8efff; stroke: #86a8ee; stroke-width: 1; }
+      .blue { fill: #edf4ff; stroke: #b8d0fb; }
+      .purple { fill: #f2efff; stroke: #c7bff4; }
+      .amber { fill: #fff6e4; stroke: #f2d49b; }
+      .green { fill: #eaf8f1; stroke: #a9dec4; }
+    </style>
+  </defs>
+
+  <!-- application canvas -->
+  <rect width="1600" height="1000" fill="url(#canvas)"/>
+  <rect x="24" y="24" width="1552" height="952" rx="18" fill="#fbfcfe" stroke="#d9e1ec"/>
+  <rect x="24" y="24" width="1552" height="66" rx="18" fill="#ffffff" stroke="#d9e1ec"/>
+  <path d="M24 72h1552" stroke="#e6ebf2"/>
+
+  <!-- header -->
+  <g class="ui">
+    <circle cx="60" cy="57" r="17" fill="#2453b8"/>
+    <path d="M53 48h14v18H53z" fill="#fff" opacity=".95"/>
+    <text x="86" y="63" class="title">polyth</text>
+    <rect x="186" y="38" width="116" height="38" rx="11" class="soft"/>
+    <rect x="190" y="42" width="52" height="30" rx="8" class="selected"/>
+    <text x="203" y="62" class="label">Chat</text>
+    <text x="258" y="62" class="label muted">Canvas</text>
+  </g>
+
+  <!-- centered top icon section -->
+  <g transform="translate(657 34)" class="ui">
+    <rect x="0" y="0" width="286" height="46" rx="13" fill="#f3f6fa" stroke="#d5deea"/>
+    <rect x="7" y="7" width="83" height="32" rx="9" class="blue"/>
+    <rect x="95" y="7" width="83" height="32" rx="9" class="purple"/>
+    <rect x="183" y="7" width="96" height="32" rx="9" class="amber"/>
+    <g class="icon" transform="translate(20 15)"><path class="stroke" d="M1 2h15v11H8l-4 3v-3H1z"/></g>
+    <g class="icon" transform="translate(108 15)"><circle class="stroke" cx="8" cy="8" r="7"/><path class="stroke" d="m8 4 2 4-3 2"/></g>
+    <g class="icon" transform="translate(196 15)"><path class="stroke" d="M2 2h12v12H2zM5 6h6M5 10h4"/></g>
+    <text x="25" y="61" class="tiny muted">drag handles appear only while editing</text>
+  </g>
+
+  <!-- top-right utility icons -->
+  <g class="icon" transform="translate(1375 47)"><circle class="stroke" cx="8" cy="8" r="6"/><path class="stroke" d="m13 13 4 4"/></g>
+  <g class="icon" transform="translate(1418 47)"><circle class="stroke" cx="8" cy="8" r="6"/><path class="stroke" d="M8 4v5M8 12h.01"/></g>
+  <g class="icon" transform="translate(1461 47)"><path class="stroke" d="M8 2a6 6 0 0 0-6 6v4l-2 2h16l-2-2V8a6 6 0 0 0-6-6M6 17h4"/></g>
+  <circle cx="1526" cy="57" r="17" fill="#d9e5f8"/>
+
+  <!-- sidebar -->
+  <g class="ui">
+    <rect x="40" y="108" width="350" height="848" rx="14" fill="#ffffff" stroke="#d9e1ec"/>
+    <rect x="54" y="124" width="322" height="48" rx="11" class="blue"/>
+    <g class="icon" transform="translate(67 139)"><circle class="stroke" cx="7" cy="7" r="6"/><path class="stroke" d="m12 12 4 4"/></g>
+    <text x="94" y="154" class="body muted">Search sessions…</text>
+    <g class="ui" transform="translate(240 132)">
+      <rect x="0" y="0" width="122" height="32" rx="9" class="blue"/>
+      <g class="icon" transform="translate(11 8)"><path class="stroke" d="M3 2h11M3 7h11M3 12h7"/></g>
+      <g class="icon" transform="translate(48 8)"><path class="stroke" d="M8 1v14M1 8h14"/></g>
+      <g class="icon" transform="translate(84 8)"><path class="stroke" d="M2 3h12l-5 5v5l-3 2V8z"/></g>
+    </g>
+    <text x="58" y="207" class="tiny muted">PROJECTS</text>
+    <g transform="translate(54 223)"><path class="stroke icon" d="M2 6h13l3 3v14H2z"/><text x="30" y="17" class="label">polyth</text></g>
+    <path d="M58 255h314" stroke="#e1e7ef"/>
+    <g class="muted body">
+      <text x="76" y="287">Review navigation layout</text><text x="322" y="287" class="tiny">5m</text>
+      <text x="76" y="327">Fix thinking block animation</text><text x="322" y="327" class="tiny">7h</text>
+      <text x="76" y="367">Create the best chart</text><text x="322" y="367" class="tiny">20h</text>
+    </g>
+    <path d="M58 400h314" stroke="#e1e7ef"/>
+    <text x="58" y="431" class="tiny muted">ARCHIVED 15</text>
+    <g transform="translate(54 455)"><path class="stroke icon" d="M2 6h13l3 3v14H2z"/><text x="30" y="17" class="label">case-seek</text></g>
+    <g class="muted body"><text x="76" y="516">Building and starting server</text><text x="322" y="516" class="tiny">17h</text><text x="76" y="560">games</text><text x="76" y="604">cursor-enhanced</text><text x="76" y="648">homeassistant</text></g>
+    <rect x="54" y="887" width="322" height="50" rx="11" class="soft"/>
+    <g class="icon" transform="translate(68 903)"><path class="stroke" d="M8 1v14M1 8h14"/></g>
+    <text x="96" y="925" class="label muted">Add project</text>
+  </g>
+
+  <!-- sidebar hover/edit callout -->
+  <g class="ui">
+    <rect x="374" y="113" width="264" height="180" rx="13" fill="url(#menu)" stroke="#b8c8e2" filter="url(#shadow)"/>
+    <text x="394" y="143" class="label">Customize sidebar</text>
+    <path d="M394 157h224" stroke="#e2e8f0"/>
+    <text x="394" y="183" class="tiny muted">LAYOUT</text>
+    <g class="icon" transform="translate(394 194)"><path class="stroke" d="M2 2h14M2 8h14M2 14h14"/></g><text x="422" y="209" class="body">Move icons</text>
+    <g class="icon" transform="translate(394 231)"><path class="stroke" d="M8 1v15M3 8h10"/></g><text x="422" y="246" class="body">Add divider</text>
+    <g class="icon" transform="translate(534 194)"><rect class="stroke" x="2" y="2" width="14" height="14" rx="3"/><path class="stroke" d="M5 8h8M8 5v6"/></g><text x="562" y="209" class="body">Add icon / widget</text>
+    <g class="icon" transform="translate(534 231)"><circle class="stroke" cx="8" cy="8" r="7"/><path class="stroke" d="M8 4v8M4 8h8"/></g><text x="562" y="246" class="body">New group</text>
+  </g>
+  <path d="M376 145C410 139 420 140 446 140" fill="none" stroke="#5f87d9" stroke-width="2" stroke-dasharray="5 5"/>
+
+  <!-- main content -->
+  <g class="ui">
+    <text x="694" y="273" class="title" font-size="30">What are we working on in <tspan fill="#2453b8">polyth</tspan>?</text>
+    <text x="806" y="306" class="body muted">Start a task or continue where you left off.</text>
+    <g transform="translate(684 334)">
+      <rect x="0" y="0" width="190" height="50" rx="11" class="button"/><rect x="201" y="0" width="164" height="50" rx="11" class="button"/><rect x="376" y="0" width="190" height="50" rx="11" class="button"/><rect x="577" y="0" width="50" height="50" rx="11" class="selected"/>
+      <g class="icon" transform="translate(18 16)"><path class="stroke" d="M2 3h11l3 3v13H2zM5 10h8M5 14h6"/></g><text x="49" y="31" class="label">Review changes</text>
+      <g class="icon" transform="translate(219 16)"><path class="stroke" d="m2 9 4 4 8-9"/></g><text x="249" y="31" class="label">Fix failing tests</text>
+      <g class="icon" transform="translate(394 16)"><circle class="stroke" cx="8" cy="8" r="6"/><path class="stroke" d="M2 8h12"/></g><text x="424" y="31" class="label">Commit changes</text>
+      <path class="stroke icon" d="M593 25h18M602 16v18"/>
+    </g>
+    <text x="706" y="430" class="tiny muted">RECENT</text>
+    <g class="muted body"><circle cx="708" cy="462" r="5" fill="#6a91e2"/><text x="730" y="468">Review navigation layout</text><text x="1305" y="468" class="tiny">5m</text><circle cx="708" cy="510" r="5" fill="none" stroke="#8b98ab"/><text x="730" y="516">Fix thinking block animation</text><text x="1305" y="516" class="tiny">7h</text><circle cx="708" cy="558" r="5" fill="none" stroke="#8b98ab"/><text x="730" y="564">Create the best chart</text><text x="1305" y="564" class="tiny">20h</text></g>
+  </g>
+
+  <!-- right icon rail: groups and dividers -->
+  <g class="ui">
+    <rect x="1510" y="108" width="50" height="848" rx="12" fill="#ffffff" stroke="#d9e1ec"/>
+    <rect x="1514" y="122" width="42" height="128" rx="10" class="blue"/>
+    <rect x="1514" y="266" width="42" height="128" rx="10" class="purple"/>
+    <rect x="1514" y="410" width="42" height="102" rx="10" class="amber"/>
+    <rect x="1514" y="530" width="42" height="178" rx="10" class="green"/>
+    <g class="icon">
+      <g transform="translate(1526 135)"><path class="stroke" d="M2 2h14v12H2zM5 6h8M5 10h5"/></g>
+      <g transform="translate(1526 178)"><path class="stroke" d="M2 2h14v12H2zM5 6h8M5 10h5"/></g>
+      <g transform="translate(1526 221)"><path class="stroke" d="M8 1v15M2 8h12"/></g>
+      <path d="M1521 258h30" stroke="#aab6c7"/>
+      <g transform="translate(1526 279)"><circle class="stroke" cx="8" cy="8" r="7"/><path class="stroke" d="M8 4v8M4 8h8"/></g>
+      <g transform="translate(1526 322)"><path class="stroke" d="M2 8h12M8 2v12"/></g>
+      <g transform="translate(1526 365)"><path class="stroke" d="M2 3h12v10H2zM5 7h6"/></g>
+      <path d="M1521 402h30" stroke="#aab6c7"/>
+      <g transform="translate(1526 423)"><circle class="stroke" cx="8" cy="8" r="7"/><path class="stroke" d="M8 4v4l3 2"/></g>
+      <g transform="translate(1526 466)"><path class="stroke" d="M2 12h12M4 12V5h8v7M7 5V2h2v3"/></g>
+      <g transform="translate(1526 543)"><path class="stroke" d="M2 8h12M8 2v12"/></g>
+      <g transform="translate(1526 586)"><path class="stroke" d="M3 3h10v10H3zM6 6h4M6 9h4"/></g>
+      <g transform="translate(1526 629)"><path class="stroke" d="M2 2h14v12H2zM5 6h8M5 10h5"/></g>
+      <g transform="translate(1526 672)"><path class="stroke" d="M2 8h12M8 2v12"/></g>
+    </g>
+    <rect x="1519" y="724" width="32" height="32" rx="9" fill="#e7edfa" stroke="#9eb8ee"/>
+    <path class="stroke icon" d="M1527 740h16M1535 732v16"/>
+    <text x="1479" y="789" class="tiny muted" transform="rotate(-90 1479 789)">GROUPS ARE COLOR-WASHED</text>
+  </g>
+
+  <!-- composer -->
+  <g class="ui">
+    <rect x="684" y="700" width="770" height="198" rx="16" fill="#ffffff" stroke="#cdd8e8" filter="url(#shadow)"/>
+    <text x="708" y="735" class="body muted">Ask anything…</text>
+    <path d="M708 753h722" stroke="#e6ebf2"/>
+    <rect x="704" y="775" width="174" height="50" rx="12" class="blue"/>
+    <g class="icon" transform="translate(718 791)"><path class="stroke" d="M8 1v15M1 8h14"/></g>
+    <g class="icon" transform="translate(762 791)"><rect class="stroke" x="4" y="1" width="8" height="12" rx="4"/><path class="stroke" d="M1 8v1a7 7 0 0 0 14 0V8M8 16v4M5 20h6"/></g>
+    <g class="icon" transform="translate(806 791)"><circle class="stroke" cx="8" cy="8" r="7"/><circle class="stroke" cx="8" cy="8" r="3"/></g>
+    <g class="icon" transform="translate(850 791)"><path class="stroke" d="M8 1v15M2 8h12"/></g>
+    <rect x="1030" y="775" width="230" height="50" rx="12" class="purple"/>
+    <text x="1050" y="806" class="label">GPT-5.6 Sol</text><path class="stroke icon" d="m1237 798 4 4 4-4"/>
+    <rect x="1272" y="775" width="130" height="50" rx="12" class="amber"/><text x="1290" y="806" class="label">No Agent</text><path class="stroke icon" d="m1377 798 4 4 4-4"/>
+    <rect x="1409" y="775" width="38" height="50" rx="12" fill="#2453b8"/><path d="m1420 800 8 5 9-15-10 7-7-2z" fill="#fff"/>
+    <text x="708" y="858" class="tiny muted">Shift + hover → move, group, divide, or add</text>
+  </g>
+
+  <!-- legend and callout -->
+  <g class="ui">
+    <rect x="684" y="916" width="770" height="32" rx="10" class="soft"/>
+    <circle cx="704" cy="932" r="5" fill="#79a4f0"/><text x="717" y="937" class="tiny muted">icon</text>
+    <rect x="759" y="927" width="16" height="10" rx="4" fill="#ede5ff" stroke="#c7bff4"/><text x="784" y="937" class="tiny muted">group shade</text>
+    <path d="M892 932h26" stroke="#aab6c7"/><text x="928" y="937" class="tiny muted">divider</text>
+    <text x="1175" y="937" class="tiny muted">presentation-only · per project</text>
+  </g>
+</svg>

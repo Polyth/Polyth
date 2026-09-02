@@ -33,6 +33,8 @@ import {
 } from "../capabilityLayout.ts";
 import { setCustomizeMode, useCustomizeActive, useCustomizeMode } from "../useShiftArmed.ts";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
+import DesktopSessionStatus from "./DesktopSessionStatus.tsx";
+import ChatMetrics from "./ChatMetrics.tsx";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -426,6 +428,8 @@ export default function Header() {
         <span className="header-spacer" />
         {(!compact || !chatSurface) && (
           <div className="header-actions customize-zone" aria-label={tr("header.application")}>
+            {chatSurface && <DesktopSessionStatus />}
+            {chatSurface && session && <ChatMetrics session={session} model={model} />}
             {showContextRing && <ContextRing gauge={gauge} />}
             {workspaceMode === "chat" && session && (
               <SlotHost

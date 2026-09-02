@@ -232,6 +232,24 @@ export default function ContextRail() {
     configuredRailButtons.push(buttonForSurface(surface));
   }
   const railButtons = configuredRailButtons;
+  const edgeRevealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (edgeRevealTimer.current !== null) clearTimeout(edgeRevealTimer.current);
+  }, []);
+  const revealFromEdge = () => {
+    if (compact || open || edgeRevealTimer.current !== null) return;
+    const surface = surfaces.find((candidate) => !candidate.presentation) ?? surfaces[0];
+    if (!surface) return;
+    edgeRevealTimer.current = setTimeout(() => {
+      edgeRevealTimer.current = null;
+      setRailPlugin(surface.id);
+    }, 500);
+  };
+  const cancelEdgeReveal = () => {
+    if (edgeRevealTimer.current === null) return;
+    clearTimeout(edgeRevealTimer.current);
+    edgeRevealTimer.current = null;
+  };
 
   // Shift-key customization mode: holding Shift over the rail reveals one
   // customize trigger as the strip's LAST item. Its checkbox menu adds or
@@ -683,7 +701,12 @@ export default function ContextRail() {
         </div>
         )}
         {!compact && (
-          <div className="rail-icon-col plugin-strip customize-zone" aria-label={tr("contextrail.workspacePanels")}>
+          <div
+            className="rail-icon-col plugin-strip customize-zone"
+            aria-label={tr("contextrail.workspacePanels")}
+            onPointerEnter={revealFromEdge}
+            onPointerLeave={cancelEdgeReveal}
+          >
             {railButtons.map((s) => (
             <button
               key={s.id}

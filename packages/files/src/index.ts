@@ -371,6 +371,16 @@ async function resolveInside(
   // anywhere (e.g. /tmp/opencode/…). An absolute path resolves as-is, so
   // the editor can view it; writes stay strictly project-scoped.
   if (opts.allowAbsolute && path.isAbsolute(rel)) return realpath(rel);
+  // Markdown strips the leading slash from Unix paths so `/tmp/a.png` reaches
+  // the file pane as `tmp/a.png`. For read-only operations, recover that path
+  // only when the project-relative candidate does not exist.
+  if (opts.allowAbsolute && rel.startsWith("tmp/")) {
+    try {
+      return await realpath(path.resolve(root, rel));
+    } catch {
+      return realpath(`/${rel}`);
+    }
+  }
   assertRelative(rel);
   const rootAbs = path.resolve(root);
   let rootReal: string;

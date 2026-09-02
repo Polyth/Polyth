@@ -673,7 +673,8 @@ function AssistantAgentHeader({
     ? models.find((candidate) =>
         candidate.providerID === modelRef.providerID && candidate.modelID === modelRef.modelID)
     : undefined;
-  const modelName = descriptor?.name ?? modelRef?.modelID ?? "Polyth";
+  const modelName = descriptor?.name
+    ?? (modelRef ? `${modelRef.providerID}/${modelRef.modelID}` : "Unknown model");
   const agent = (turn?.agent ?? m.agent ?? session?.agent ?? tr("composer.build")).replace(/[-_]+/g, " ");
   const agentName = agent ? agent[0]!.toUpperCase() + agent.slice(1) : tr("composer.build");
   const wholeTurnDuration = turnDurationMs(turn ?? null);

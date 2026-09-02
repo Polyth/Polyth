@@ -247,6 +247,21 @@ test("absolute paths outside the root are viewable (read/stat/readRaw), never wr
   });
 });
 
+test("slashless tmp references from chat resolve read-only when absent in the project", async () => {
+  await withRoot(async (root) => {
+    const name = `polyth-file-ref-${Date.now()}.png`;
+    const abs = path.join(tmpdir(), name);
+    try {
+      await writeFile(abs, Buffer.from([1, 2, 3]));
+      const rel = `tmp/${name}`;
+      assert.equal((await files.stat(root, rel)).mime, "image/png");
+      assert.deepEqual([...(await files.readRaw(root, rel)).data], [1, 2, 3]);
+    } finally {
+      await rm(abs, { force: true });
+    }
+  });
+});
+
 test("readRaw serves bytes with a whitelisted mime; html maps to octet-stream", async () => {
   await withRoot(async (root) => {
     await writeFile(path.join(root, "pic.webp"), Buffer.from([1, 2, 3]));
