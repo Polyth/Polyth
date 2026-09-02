@@ -5,6 +5,7 @@ import type { WidgetDef } from "../../widgets/catalog.ts";
 import { filterWidgetLibrary, noteWidgetUsed, readRecentWidgets, type WidgetLibraryTab } from "../../widgets/widgetLibrary.ts";
 import { useWidgetLayout } from "../../widgets/widgetLayout.ts";
 import { Button, PlusIcon, Select, Tabs, TextInput } from "../ui/index.ts";
+import WidgetGlyph from "../WidgetGlyph.tsx";
 
 /** Discovery is separate from placement: cards go to canvas; buttons go to a
  * real shell surface selected by the user. */
@@ -46,6 +47,7 @@ export default function WidgetLibraryPanel({
     <Tabs label="Widget collections" tabs={[{ id: "all", label: "All" }, { id: "recommended", label: "Recommended" }, { id: "recent", label: "Recent" }]} value={tab} onChange={(id) => setTab(id as WidgetLibraryTab)} />
     <div className="workspace-library-results">
       {shown.map((widget) => <article key={widget.id} className="workspace-library-item" draggable onDragStart={(event) => drag(widget, event)}>
+        <WidgetGlyph widget={widget} />
         <div><strong>{widget.title}</strong><small>{widget.pluginName ?? widget.pluginId}</small></div>
         <Button type="button" size="sm" variant="ghost" iconStart={PlusIcon} aria-label={`Add ${widget.title}`} onClick={() => add(widget)} />
       </article>)}

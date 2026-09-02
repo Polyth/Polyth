@@ -4,7 +4,7 @@ import type { WorkflowDto } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 import { createSession, openSession } from "../../../apps/web/src/init.ts";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
-import { getState, setActiveView, setUiError } from "../../../apps/web/src/store.ts";
+import { getState, openWorkspacePane, setUiError } from "../../../apps/web/src/store.ts";
 import { handOffWorkflowLaunch } from "./workflowLaunch.ts";
 import { publishWorkflowRun } from "./workflowMonitor.ts";
 import { requestComposerReplace } from "../../../apps/web/src/composerInsert.ts";
@@ -15,7 +15,6 @@ import { workflowNodeCount } from "./workflowRun.ts";
 import {
   AddIcon,
   Button,
-  CloseIcon,
   IconButton,
   Textarea,
   WorkflowIcon,
@@ -103,7 +102,7 @@ export default function WorkflowLauncher({
       ...(workflowId ? { workflowId } : {}),
     });
     setOpen(false);
-    setActiveView("workflow");
+    openWorkspacePane("workflow");
   };
 
   const run = async (workflow: WorkflowDto) => {
@@ -165,22 +164,10 @@ export default function WorkflowLauncher({
           backdropClassName={`workflow-launch-backdrop${closing ? " is-closing" : ""}`}
           initialFocus="textarea"
           ariaDescribedBy="workflow-launch-description"
+          showHeader
+          closeLabel={tr("workflowlauncher.close")}
         >
-          <header className="workflow-launch-heading">
-            <span className="workflow-page-icon" aria-hidden="true"><Icon.workflow /></span>
-            <div>
-              <h2>{tr("workflowlauncher.title")}</h2>
-              <p id="workflow-launch-description">{tr("workflowlauncher.chooseSavedPipeline")}</p>
-            </div>
-            <IconButton
-              icon={CloseIcon}
-              size="sm"
-              label={tr("workflowlauncher.close")}
-              disabled={!!busyId || closing}
-              title={busyId ? tr("workflowlauncher.waitToClose") : tr("workflowlauncher.close")}
-              onClick={close}
-            />
-          </header>
+          <p id="workflow-launch-description" className="workflow-launch-description">{tr("workflowlauncher.chooseSavedPipeline")}</p>
           <label className="workflow-field workflow-launch-task">
             <span>{tr("workflowlauncher.task")}</span>
             <Textarea

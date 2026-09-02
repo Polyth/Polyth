@@ -19,6 +19,7 @@ import { announce } from "./a11y/live.tsx";
 import { useModalSurface } from "./a11y/Dialog.tsx";
 import { tr } from "../i18n/index.ts";
 import { Button, CloseIcon, IconButton } from "./ui/index.ts";
+import WidgetGlyph from "./WidgetGlyph.tsx";
 
 const MODE_COPY: Array<[WidgetAudience, string, string]> = [
   ["simple", tr("projectsetup.simple"), tr("projectsetup.simpleDescription")],
@@ -217,7 +218,7 @@ export default function ProjectSetup() {
                       aria-pressed={selected}
                       onClick={() => toggleWidget(widget.id)}
                     >
-                      <i aria-hidden="true">{widget.title.slice(0, 1)}</i>
+                      <WidgetGlyph widget={widget} />
                       <span><strong>{widget.title}</strong><small>{widget.description}</small></span>
                       <b aria-hidden="true">{selected ? "✓" : "+"}</b>
                     </button>

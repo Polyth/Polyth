@@ -47,8 +47,10 @@ test("slot-backed feature panels share the responsive surface stylesheet", async
 
   assert.match(await source("../widgets/index.tsx"), /import "\.\/styles\.css";/);
   assert.doesNotMatch(app, /registerSlot\(|registerWorkspaceSurface\(|registerSurface\(/);
-  assert.match(goals, /host\.workspaceSurfaces\.register/);
-  for (const entry of [files, git, terminal, browser]) assert.match(entry, /host\.surfaces\.register/);
+  for (const entry of [goals, files, git, terminal, browser]) {
+    assert.match(entry, /host\.surfaces\.register/);
+    assert.match(entry, /presentation/);
+  }
   assert.match(settingsView, /listSlots\("settings\.pages"\)/);
   assert.doesNotMatch(builtinWidgets, /GoalsView|GitView|TerminalView|GithubView/);
 

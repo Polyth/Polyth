@@ -48,6 +48,7 @@ import { areaPlacementOptions } from "./areaFit.ts";
 import "./builtinWidgets.tsx";
 import { tr } from "../i18n/index.ts";
 import { getDragWidget, WIDGET_MIME } from "../dnd.ts";
+import WidgetGlyph from "../components/WidgetGlyph.tsx";
 
 const GRID_GAP = 10;
 const GRID_ROW = 36;
@@ -443,6 +444,7 @@ function WidgetMenu({ widgets, onClose }: { widgets: WidgetDef[]; onClose: () =>
                     widgets,
                   ))}
                 >
+                  <WidgetGlyph widget={widget} />
                   <span><strong>{widget.title}</strong><small>{widget.description}</small></span>
                   <span aria-hidden="true">{onCanvas ? "−" : "+"}</span>
                 </button>

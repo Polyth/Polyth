@@ -17,7 +17,7 @@ you are almost certainly on the wrong path — re-read this document.
 - the application shell (`App.tsx`, `Main.tsx`, `Sidebar`, `Header`,
   `ContextRail`, `Timeline`, `Composer`, dialogs/overlays);
 - the extension registries (`slots.ts`, `widgets/catalog.ts`, `surfaces.ts`,
-  `workspace/surfaceRegistry.ts`, `capabilities.ts`, `settings/registry.ts`,
+  `capabilities.ts`, `settings/registry.ts`,
   `packages/reducers.ts`) and their hosts (`components/slots/SlotHost.ts`,
   `components/workspace/WorkspaceHost.ts`, `components/ContextRail.tsx`,
   `widgets/WidgetCanvas.tsx`);
@@ -107,8 +107,7 @@ implementation of the same pattern.
 | Package settings page | `host.settings.registerPage(...)` (web-sdk) |
 | Searchable rows inside any settings page | `host.settings.registerItems(...)` or `settingsItems` on the page |
 | Small UI at an existing injection point (message actions, header, composer, timeline…) | `host.slots.register({ slot: <existing UiSlot>, … })` |
-| Right-rail panel (Context/Knowledge/Usage/Events-style) | `host.surfaces.register(...)` (rail surface) |
-| Full main-area module (AppView-style: Fusion, Walkthrough, Goals…) | `host.workspaceSurfaces.register(...)` (workspace surface) |
+| Package home/window (dynamic, pinned, or fullscreen) | `host.surfaces.register(...)` with required system presentation metadata |
 | User-placeable dashboard block | widget — `host.widgets.register` / `host.widgets.registerPlugin(...)` (see `widgets.md`) |
 | Discoverable "open this feature" navigation entry | `host.capabilities.register(...)` |
 | Client-side handling of a package event type | `host.reducers.register(eventType, reducer)` |
@@ -182,7 +181,7 @@ repo's docs.
 
 ### 4.2 Rail surfaces (`host.surfaces.register`)
 
-Right-rail panels render through the declarative surface registry
+Package windows render through the declarative surface registry
 (`apps/web/src/surfaces.ts`, hosted by `ContextRail.tsx`). A surface is a
 component + navigation metadata; the host handles keep-alive mounting,
 content-driven visibility, badges, and persisted widths.
@@ -202,8 +201,8 @@ host.surfaces.register({
 });
 ```
 
-- **Contextual vs workspace panes:** canonical workspace surfaces (Files/Git/
-  Terminal/Preview) add a `presentation: { kind: "workspace", defaultRatio,
+- **System presentation is required for packages:** every package home adds a
+  `presentation: { kind: "workspace", defaultRatio,
   minWidth, preferredMaxWidth, keepAlive, escape }` block, which makes them
   dockable beside Chat with the pane host. Contextual surfaces
   (Context/Knowledge/Usage/Events) leave `presentation` undefined.
@@ -221,35 +220,13 @@ host.surfaces.register({
   the right mechanism when you already have a slot-shaped contribution
   (e.g. `packages/knowledge`'s Tracks panel).
 
-### 4.3 Workspace surfaces (`host.workspaceSurfaces.register`)
+### 4.3 Built-in workspace surface
 
-Main-area modules (what used to be an `AppView` switch in `Main.tsx`) render
-through `apps/web/src/workspace/surfaceRegistry.ts`, hosted by
-`components/workspace/WorkspaceHost.ts`. The host provides the standard
-project/session empty states — surfaces never invent their own.
-`WorkspaceHost` also supplies the same `ModuleView` used by rail surfaces,
-including core page padding, scrolling, responsive containment, and phone
-presentation. A workspace component starts at its stable package root (for
-example `.workflow-page`), not a generic shell wrapper.
-
-```tsx
-host.workspaceSurfaces.register({
-  id: "myfeature",
-  title: "My Feature",
-  description: "One-line purpose under the module header.",
-  order: 21,
-  plugin: "myfeature",
-  requires: "project",          // "none" | "project" | "session"
-  component: MySurface,         // receives { projectId, sessionId }
-});
-```
-
-- `requires` gates rendering: missing project → standard empty state; missing
-  session (with project) → session empty state. Never hand-roll those.
-- Fallback selection is deterministic (`order` then `id`, session preferred).
-- Open programmatically with `host.navigation.setActiveView(id)` (legacy
-  AppView ids such as `fusion`, `github`) or
-  `host.navigation.openWorkspacePane(id)` for dockable rail panes.
+`WorkspaceHost` is now internal shell infrastructure for the built-in Chat
+surface only. Packages cannot register into it. A package home always uses
+`host.surfaces.register` and opens with `host.navigation.openWorkspacePane(id)`;
+this guarantees the shared header, actions, resize frame, focus handling, and
+dynamic/pinned/fullscreen state machine.
 
 ### 4.4 Capabilities (`host.capabilities.register`)
 
@@ -299,7 +276,7 @@ reducer DOM-free so it can be unit-tested with `node:test`.
 - `host.store` exposes the shell's render state: `getSnapshot()`,
   `subscribe(listener)`, `select(selector)`. Prefer `select` for reactive
   reads; the snapshot shape is `WebStoreSnapshot` in the web-sdk.
-- `host.navigation` — `setActiveView(view)`, `openSettingsPage(pageId)`,
+- `host.navigation` — `setActiveView(view)` for built-in shell navigation, `openSettingsPage(pageId)`,
   `openWorkspacePane(surfaceId, resource?)`, `closeWorkspacePane()`,
   `openRailSurface(surfaceId)`, `setOverlay(overlay | null)`.
 - `host.ui.icons` — the canonical icon map (`apps/web/src/icons.tsx`);
@@ -331,7 +308,7 @@ of raw `fetch`.
   `packages/*` registry internals — the web-sdk host wraps these; feature
   code goes through the host.
 - `window.__polythSlots` / `__polythWidgets` / `__polythSurfaces` /
-  `__polythWorkspaceSurfaces` / `__polythCapabilities` — legacy out-of-tree
+  `__polythCapabilities` — legacy out-of-tree
   browser-script seams, still exported at boot for compatibility. In-tree
   packages must not use them; use `@polyth/web-sdk`.
 

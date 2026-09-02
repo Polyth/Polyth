@@ -3501,6 +3501,7 @@ export function rewindDraft(events: readonly SessionEvent[]): { text: string; at
 
 export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
   const out: ModelMessage[] = [];
+  const emittedAssistantParts = new Set<string>();
   const visibleEvents = effectiveHistory(events).events;
 
   const pushText = (role: "user" | "assistant" | "tool", text: string) => {
@@ -3591,6 +3592,11 @@ export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
         pushUserFiles(d.attachments);
         break;
       case "assistant/message": {
+        const partId = d.partId;
+        if (typeof partId === "string" && partId) {
+          if (emittedAssistantParts.has(partId)) break;
+          emittedAssistantParts.add(partId);
+        }
         const text = String(d.text ?? "");
         const reasoning = d.reasoning === undefined ? undefined : String(d.reasoning);
         if (reasoning) pushReasoning(reasoning);

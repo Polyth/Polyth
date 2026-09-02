@@ -10,7 +10,7 @@ import { cancelResume, forkSession, loadOlderEvents, resumeNow } from "../init.t
 import { markSessionPerformance } from "../sessionPerformance.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
 import {
-  applyEvent, setActiveView, setRailPlugin, setUiError, startNewSession, useStore,
+  applyEvent, openWorkspacePane, setRailPlugin, setUiError, startNewSession, useStore,
 } from "../store.ts";
 import { api } from "@polyth/session/web-api";
 import {
@@ -721,7 +721,7 @@ function AssistantAgentHeader({
       return;
     }
     seedMultiRunPrompt(m.text);
-    setActiveView("multirun");
+    openWorkspacePane("multirun");
   };
   return (
     <header className="agent-reply-header">
@@ -1186,13 +1186,16 @@ const WorkRow = memo(function WorkRow({
 // position, ticks swell in a proximity wave under the cursor, and hover/focus
 // reveals a recent-turns panel. Click jumps via the existing
 // jump()/scrollIntoView path. Presentation-only — no SessionEvent.
-function PromptNavigator({ prompts, onJump, containerRef }: {
+function PromptNavigator({ prompts, onJump, containerRef, canLoadOlder, olderBusy, onLoadOlder }: {
   prompts: Array<{ id: string; preview: string; text: string }>;
   onJump: (id: string) => void;
   containerRef: RefObject<HTMLDivElement | null>;
+  canLoadOlder: boolean;
+  olderBusy: boolean;
+  onLoadOlder: () => void;
 }) {
   const [active, setActive] = useState(-1);
-  const [cursor, setCursor] = useState(-1);
+  const [hovered, setHovered] = useState(-1);
   const [open, setOpen] = useState(false);
   const [panelStart, setPanelStart] = useState(0);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1224,9 +1227,14 @@ function PromptNavigator({ prompts, onJump, containerRef }: {
     const onScroll = () => { if (raf === 0) raf = requestAnimationFrame(measure); };
     el.addEventListener("scroll", onScroll, { passive: true });
     measure();
+    // Timeline restores the tail in its own effect. Measure once more after
+    // that first layout so a long chat gets its initial tick window immediately
+    // instead of waiting for the reader to scroll.
+    const initialMeasure = requestAnimationFrame(measure);
     return () => {
       el.removeEventListener("scroll", onScroll);
       if (raf !== 0) cancelAnimationFrame(raf);
+      cancelAnimationFrame(initialMeasure);
     };
   }, [prompts, containerRef]);
   useEffect(() => () => { if (closeTimer.current !== null) clearTimeout(closeTimer.current); }, []);
@@ -1239,15 +1247,29 @@ function PromptNavigator({ prompts, onJump, containerRef }: {
   // 160ms leave grace so the pointer can cross the gap into the panel.
   const scheduleClose = () => {
     if (closeTimer.current !== null) clearTimeout(closeTimer.current);
-    closeTimer.current = setTimeout(() => { closeTimer.current = null; setOpen(false); setCursor(-1); }, 160);
+    closeTimer.current = setTimeout(() => { closeTimer.current = null; setOpen(false); setHovered(-1); }, 160);
   };
 
-  const { start, end } = railWindow(prompts.length, active);
+  // Hovering a text row can target a prompt outside the current 30-tick
+  // window; center the tape on that same prompt so the two representations
+  // always have a visible counterpart.
+  const { start, end } = railWindow(prompts.length, hovered >= 0 ? hovered : active);
   const visible = prompts.slice(start, end);
+  const hasEarlier = canLoadOlder || start > 0;
+  const hasLater = end < prompts.length;
+  const earlierPrompt = start > 0 ? prompts[start - 1] : prompts[0];
+  const laterPrompt = end < prompts.length ? prompts[end] : undefined;
   const maxPanelStart = Math.max(0, prompts.length - RAIL_PANEL_ROWS);
   const currentPanelStart = Math.min(panelStart, maxPanelStart);
   const panelPrompts = prompts.slice(currentPanelStart, currentPanelStart + RAIL_PANEL_ROWS);
-  const jumpTo = (id: string) => { onJump(id); setOpen(false); setCursor(-1); };
+  const jumpTo = (id: string) => { onJump(id); setOpen(false); setHovered(-1); };
+  const showEarlier = () => {
+    if (start > 0 && earlierPrompt) { jumpTo(earlierPrompt.id); return; }
+    if (canLoadOlder) onLoadOlder();
+  };
+  const showLater = () => {
+    if (laterPrompt) jumpTo(laterPrompt.id);
+  };
 
   return (
     <nav
@@ -1258,13 +1280,24 @@ function PromptNavigator({ prompts, onJump, containerRef }: {
       onFocus={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) reveal(); }}
       onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) scheduleClose(); }}
     >
+      {hasEarlier && (
+        <button
+          type="button"
+          className="prompt-nav-page prompt-nav-edge"
+          aria-label={start > 0 ? tr("timeline.showEarlierMessages") : tr("timeline.loadEarlierHistory")}
+          title={start > 0 ? tr("timeline.showEarlierMessages") : tr("timeline.loadEarlierHistory")}
+          disabled={olderBusy}
+          onClick={showEarlier}
+        >↑</button>
+      )}
       <div
         className="prompt-nav-tape"
         onMouseMove={(e) => {
           const box = e.currentTarget.getBoundingClientRect();
-          setCursor(cursorTickIndex(e.clientY - box.top, visible.length));
+          const local = cursorTickIndex(e.clientY - box.top, visible.length);
+          setHovered(local >= 0 ? start + local : -1);
         }}
-        onMouseLeave={() => setCursor(-1)}
+        onMouseLeave={() => setHovered(-1)}
         data-clip-above={start > 0 || undefined}
         data-clip-below={end < prompts.length || undefined}
       >
@@ -1273,28 +1306,46 @@ function PromptNavigator({ prompts, onJump, containerRef }: {
           return (
             <button
               key={p.id}
-              className="prompt-nav-tick"
+              type="button"
+              className={index === hovered ? "prompt-nav-tick hovered" : "prompt-nav-tick"}
               aria-label={promptJumpName(index, prompts.length, p.text)}
               aria-current={index === active ? "true" : undefined}
+              onMouseEnter={() => setHovered(index)}
+              onFocus={() => setHovered(index)}
+              onBlur={() => setHovered(-1)}
               onClick={() => jumpTo(p.id)}
             >
               <span
                 className="prompt-nav-tick-bar"
                 aria-hidden="true"
-                style={{ width: `${tickWidth(index, active, cursor >= 0 ? start + cursor : -1)}px` }}
+                style={{ width: `${tickWidth(index, active, hovered)}px` }}
               />
             </button>
           );
         })}
       </div>
+      {hasLater && (
+        <button
+          type="button"
+          className="prompt-nav-page prompt-nav-edge"
+          aria-label={tr("timeline.showLaterMessages")}
+          title={tr("timeline.showLaterMessages")}
+          onClick={showLater}
+        >↓</button>
+      )}
       {open && panelPrompts.length > 0 && (
         <div className="prompt-nav-panel">
-          {currentPanelStart > 0 && (
+          {(currentPanelStart > 0 || canLoadOlder) && (
             <button
+              type="button"
               className="prompt-nav-page"
-              aria-label={tr("timeline.showEarlierMessages")}
-              title={tr("timeline.showEarlierMessages")}
-              onClick={() => setPanelStart((value) => Math.max(0, value - RAIL_PANEL_ROWS))}
+              aria-label={currentPanelStart === 0 && canLoadOlder ? tr("timeline.loadEarlierHistory") : tr("timeline.showEarlierMessages")}
+              title={currentPanelStart === 0 && canLoadOlder ? tr("timeline.loadEarlierHistory") : tr("timeline.showEarlierMessages")}
+              disabled={olderBusy}
+              onClick={() => {
+                if (currentPanelStart === 0 && canLoadOlder) onLoadOlder();
+                else setPanelStart((value) => Math.max(0, value - RAIL_PANEL_ROWS));
+              }}
             >↑</button>
           )}
           {panelPrompts.map((p, i) => {
@@ -1302,8 +1353,15 @@ function PromptNavigator({ prompts, onJump, containerRef }: {
             return (
               <button
                 key={p.id}
-                className={index === active ? "prompt-nav-row current" : "prompt-nav-row"}
+                type="button"
+                className={index === active
+                  ? (index === hovered ? "prompt-nav-row current hovered" : "prompt-nav-row current")
+                  : (index === hovered ? "prompt-nav-row hovered" : "prompt-nav-row")}
                 aria-current={index === active ? "true" : undefined}
+                onMouseEnter={() => setHovered(index)}
+                onMouseLeave={() => setHovered(-1)}
+                onFocus={() => setHovered(index)}
+                onBlur={() => setHovered(-1)}
                 onClick={() => jumpTo(p.id)}
               >
                 <span className="prompt-nav-row-text">{p.preview || tr("messageActions.emptyPrompt")}</span>
@@ -1312,6 +1370,7 @@ function PromptNavigator({ prompts, onJump, containerRef }: {
           })}
           {currentPanelStart < maxPanelStart && (
             <button
+              type="button"
               className="prompt-nav-page"
               aria-label={tr("timeline.showLaterMessages")}
               title={tr("timeline.showLaterMessages")}
@@ -1725,7 +1784,11 @@ export default function Timeline({
     || row.tasks.some((task) => task.action === "started")
   ));
   const prompts = useMemo(() => promptIndex(visibleMessages), [visibleMessages]);
-  const showNav = prefs.promptNavigator === "on" || (prefs.promptNavigator === "auto" && prompts.length >= 3);
+  // An unloaded older tail is enough reason to mount the navigator: the rail's
+  // load arrow is the only discoverable way to reach prompts outside the
+  // initial event page when fewer than three prompts are cached.
+  const showNav = prefs.promptNavigator === "on"
+    || (prefs.promptNavigator === "auto" && (prompts.length >= 3 || canLoadOlder));
   // Regenerate resends the user prompt that produced each answer. One forward
   // pass — never a reverse scan per assistant row per streaming render.
   const regenerateSources = useMemo(() => {
@@ -1871,7 +1934,7 @@ export default function Timeline({
   const latestReveal = showJump && !pendingQuestion && !pendingPermission && !pendingSecret ? (
     <div className="timeline-reveal">
       <button className={`jump-latest${model.turn?.status === "working" ? " agent-working" : ""}`} aria-label={JUMP_TO_LATEST_NAME} title={JUMP_TO_LATEST_NAME} onClick={jumpToLatest}>
-        ↓{model.turn?.status === "working" && <span>Agent is working</span>}
+        ↓
       </button>
     </div>
   ) : null;
@@ -2101,6 +2164,9 @@ export default function Timeline({
           prompts={prompts}
           onJump={jump}
           containerRef={ref}
+          canLoadOlder={canLoadOlder}
+          olderBusy={olderBusy}
+          onLoadOlder={() => void loadOlder()}
         />
       )}
       {/* Fewer than three prompts → no rail: a transient bubble tops the

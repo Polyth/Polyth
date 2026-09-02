@@ -18,9 +18,12 @@ import { loadActiveView, saveActiveView } from "./viewPrefs.ts";
 import { isWorkspaceSurface, listSurfaces } from "./surfaces.ts";
 import {
   getWorkspacePanePrefs,
-  setPaneExpanded as persistPaneExpanded,
+  setPersistedPaneMode,
   setPaneLastResource,
   setPaneOpenSurface,
+  transitionPaneWindow,
+  type PaneMode,
+  type PanePreviousMode,
 } from "./workspace/panePrefs.ts";
 import {
   beginListRequest,
@@ -132,9 +135,8 @@ export interface AppState {
   newSessionIntent: NewSessionIntent | null;
   paletteMode: PaletteMode;
   railPlugin: RailPlugin | null;
-  /** Explicit user expansion of the open workspace pane (persisted per
-   *  project). Never set by the automatic full-screen fallback. */
-  paneExpanded: boolean;
+  paneMode: PaneMode;
+  panePreviousMode: PanePreviousMode;
   /** Live presentation truth from the pane host: the open workspace surface
    *  currently covers the workspace (explicit expand, geometry fallback, or
    *  compact). App uses it to make hidden Chat inert. */
@@ -166,7 +168,8 @@ let state: AppState = {
   newSessionIntent: null,
   paletteMode: "all",
   railPlugin: getRailPrefs().lastOpen, // F17: last-open surface survives reload
-  paneExpanded: false,
+  paneMode: "dynamic",
+  panePreviousMode: "dynamic",
   paneFullscreen: false,
   sidebarOpen: false,
   editorFile: null,
@@ -359,13 +362,18 @@ export function activateProject(id: string | null): void {
   // unavailable persisted surface must not restore as visibly open.
   const pane = id !== null ? getWorkspacePanePrefs(id) : null;
   const restored = pane !== null ? paneSurfaceOf(pane.openSurface)?.id ?? null : null;
+  const restoredResource = restored !== null ? pane?.lastResource[restored] : undefined;
   const railPlugin = restored
     ?? (state.railPlugin !== null && paneSurfaceOf(state.railPlugin) !== null ? null : state.railPlugin);
   set({
     activeProjectId: id, activeSessionId: null, gitBranch: "",
     newSessionIntent: null,
     editorFile: null, editorLocation: null, gitDiffPath: null,
-    railPlugin, paneExpanded: restored !== null ? pane!.expanded : false, paneFullscreen: false,
+    railPlugin,
+    paneMode: restored !== null ? pane!.mode : "dynamic",
+    panePreviousMode: restored !== null ? pane!.previousMode : "dynamic",
+    paneFullscreen: false,
+    ...(restored !== null && restoredResource !== undefined ? applyPaneResource(restored, restoredResource) : {}),
   });
   setWorkspaceModeProject(id);
 }
@@ -377,6 +385,12 @@ export function setActiveView(view: AppView | LegacyPaneViewId): void {
       saveActiveView("session");
       set({ activeView: "session" });
     }
+    return;
+  }
+  // Package homes formerly persisted as primary views now resolve through the
+  // single package-window registry once their bundles have registered.
+  if (view !== "session" && paneSurfaceOf(view) !== null) {
+    openWorkspacePane(view);
     return;
   }
   if (!PRIMARY_VIEWS.includes(view)) {
@@ -476,9 +490,9 @@ function restorePaneFocus(surfaceId: string | null): void {
   paneInvoker = null;
   // Defer one tick so the pane is hidden and launchers reflect the new state.
   setTimeout(() => {
-    if (invoker && invoker.isConnected) {
+    if (invoker && invoker.isConnected && invoker.getClientRects().length > 0 && !invoker.closest("[inert]")) {
       invoker.focus();
-      return;
+      if (document.activeElement === invoker) return;
     }
     const launcher = surfaceId !== null
       ? document.querySelector<HTMLElement>(`[data-pane-launcher="${surfaceId}"]`)
@@ -514,6 +528,9 @@ export function openWorkspacePane(surfaceId: string, resource?: string): boolean
   // race and hide a pane that the command path has just opened.
   setWorkspaceMode("chat");
   const projectId = state.activeProjectId;
+  const selectedResource = resource ?? (projectId !== null
+    ? getWorkspacePanePrefs(projectId).lastResource[surfaceId]
+    : undefined);
   if (projectId !== null) {
     setPaneOpenSurface(projectId, surfaceId);
     if (resource !== undefined) setPaneLastResource(projectId, surfaceId, resource);
@@ -523,7 +540,7 @@ export function openWorkspacePane(surfaceId: string, resource?: string): boolean
     // Chat is always the companion: the primary surface stays (or becomes)
     // the session view. Reopening the active surface reuses the instance.
     activeView: "session",
-    ...(resource !== undefined ? applyPaneResource(surfaceId, resource) : {}),
+    ...(selectedResource !== undefined ? applyPaneResource(surfaceId, selectedResource) : {}),
   });
   saveActiveView("session");
   return true;
@@ -534,7 +551,12 @@ export function closeWorkspacePane({ restoreFocus = true }: { restoreFocus?: boo
   if (open === null) return;
   const projectId = state.activeProjectId;
   if (projectId !== null) setPaneOpenSurface(projectId, null);
-  set({ railPlugin: null, paneExpanded: false, paneFullscreen: false });
+  set({
+    railPlugin: null,
+    paneMode: "dynamic",
+    panePreviousMode: "dynamic",
+    paneFullscreen: false,
+  });
   if (restoreFocus) restorePaneFocus(open.id);
   else paneInvoker = null;
 }
@@ -545,20 +567,44 @@ export function toggleWorkspacePane(surfaceId: string): void {
   else openWorkspacePane(surfaceId);
 }
 
-/** Explicit expansion: the pane occupies the workspace, Chat stays mounted. */
-export function expandWorkspacePane(): void {
-  if (paneSurfaceOf(state.railPlugin) === null || state.paneExpanded) return;
-  const projectId = state.activeProjectId;
-  if (projectId !== null) persistPaneExpanded(projectId, true);
-  set({ paneExpanded: true });
+function applyPaneModeTransition(
+  transition: Parameters<typeof transitionPaneWindow>[1],
+  restoreFocus = true,
+): boolean {
+  if (paneSurfaceOf(state.railPlugin) === null) return false;
+  const next = transitionPaneWindow(
+    { mode: state.paneMode, previousMode: state.panePreviousMode },
+    transition,
+  );
+  if (next === null) {
+    closeWorkspacePane({ restoreFocus });
+    return true;
+  }
+  if (next.mode === state.paneMode && next.previousMode === state.panePreviousMode) return false;
+  if (state.activeProjectId !== null) setPersistedPaneMode(state.activeProjectId, next);
+  set({
+    paneMode: next.mode,
+    panePreviousMode: next.previousMode,
+  });
+  return true;
 }
 
-/** Collapse back to the exact preferred dock width (host re-caps it). */
-export function collapseWorkspacePane(): void {
-  if (!state.paneExpanded) return;
-  const projectId = state.activeProjectId;
-  if (projectId !== null) persistPaneExpanded(projectId, false);
-  set({ paneExpanded: false });
+export function togglePaneFullscreen(): void {
+  applyPaneModeTransition({ type: "toggle-fullscreen" });
+}
+
+export function togglePanePin(): void {
+  applyPaneModeTransition({ type: "toggle-pin" });
+}
+
+/** Outside interaction only dismisses a dynamic package window. */
+export function closePaneFromOutside(): void {
+  applyPaneModeTransition({ type: "outside-close" }, false);
+}
+
+/** Returns true when Escape changed mode or closed the package window. */
+export function handlePaneEscape(): boolean {
+  return applyPaneModeTransition({ type: "escape" });
 }
 
 /** Pane-host presentation truth (never persisted as user intent). */

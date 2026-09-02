@@ -592,9 +592,16 @@ function SubagentDetail({ subagent }: { subagent: Subagent }) {
           <div><dt>Model</dt><dd>{modelLabel}{inheritedModel ? " · inherited" : ""}</dd></div>
           <div><dt>Parent</dt><dd>{parentLabel}</dd></div>
         </dl>
-        {childSession && <SubagentWork sessionId={childSession.id} status={effectiveSubagentStatus} />}
+        {childSession && (
+          <details className="execution-subagent-disclosure" open={status === "Running"}>
+            <summary>Live activity <span>· steer agent</span></summary>
+            <SubagentWork sessionId={childSession.id} status={effectiveSubagentStatus} />
+          </details>
+        )}
       </div>
-      <button type="button" onClick={openChild}>Open child session <Icon.external /></button>
+      <button type="button" onClick={openChild} disabled={!childSession}>
+        {childSession ? "Open child session" : "Syncing child session…"} {childSession && <Icon.external />}
+      </button>
     </section>
   );
 }
@@ -830,7 +837,7 @@ export function ExecutionRow({
                   onOpenFull={(file) => openViewer(`${presentation.label} ${file.path}`, file.diff, "diff")}
                 />
               )}
-              {todoItems && todoItems.length > 0 ? <TodoWritePreview items={todoItems} /> : inputEntries.length > 0 && (
+              {todoItems && todoItems.length > 0 ? <TodoWritePreview items={todoItems} /> : presentation.kind !== "subagent" && inputEntries.length > 0 && (
                 <section className="execution-detail-section execution-input">
                   <DetailHeading label="Details" />
                   <dl>
@@ -848,7 +855,7 @@ export function ExecutionRow({
                     ? <McpResult output={message.output} />
                   : <OutputPreview text={message.output} onOpenFull={() => openViewer(`${presentation.label} output`, message.output ?? "")} />
               )}
-              {!presentation.files?.length && (
+              {!presentation.files?.length && presentation.kind !== "subagent" && (
                 <footer className="execution-metadata">
                   {exitCode !== undefined && <span>Exit code {exitCode}</span>}
                   <span>{elapsed}</span>

@@ -33,6 +33,7 @@ import {
 } from "../../widgets/widgetLibrary.ts";
 import { tr } from "../../i18n/index.ts";
 import { Badge, Button, CloseIcon, IconButton, Notice, PlusIcon, Select, Tabs, TextInput } from "../ui/index.ts";
+import WidgetGlyph from "../WidgetGlyph.tsx";
 
 const GROUP_ORDER: WidgetAreaGroup[] = ["shell", "sidebar", "workspace", "session", "composer"];
 const GROUP_LABEL: Record<WidgetAreaGroup, string> = {
@@ -44,19 +45,6 @@ const GROUP_LABEL: Record<WidgetAreaGroup, string> = {
 };
 
 type KindFilter = "all" | "widget" | "mini-widget";
-
-function WidgetGlyph({ widget }: { widget: WidgetDef }) {
-  const glyph = widget.id === "core.chat"
-    ? "✦"
-    : widget.id.includes("quick")
-      ? "⌘"
-      : widget.id.includes("knowledge")
-        ? "◇"
-        : widget.id.includes("git")
-          ? "⑂"
-          : widget.title.slice(0, 1).toUpperCase();
-  return <span className="widget-library-glyph" aria-hidden="true">{glyph}</span>;
-}
 
 function areaOptions(areas: readonly WidgetArea[]) {
   return [...areas]

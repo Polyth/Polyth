@@ -125,7 +125,9 @@ test("user session switch closes the open pane and returns to chat, keeping pane
 
 test("boot restoration keeps the restored workspace pane open", async () => {
   store.activateProject("p1");
+  store.openEditorFile(null);
   assert.equal(store.openWorkspacePane("files"), true);
+  assert.equal(store.getState().editorFile, "src/app.ts", "reopen reapplies the remembered resource");
   setWorkspaceMode("widgets");
 
   await openSession("s2", { showChat: false });

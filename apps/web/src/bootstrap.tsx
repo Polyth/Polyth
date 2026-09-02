@@ -8,7 +8,6 @@ import { exposeSurfaces } from "./surfaces.ts";
 import { exposeCapabilities } from "./capabilities.ts";
 import { installShell } from "./shell.ts";
 import { installCommandSlotBridge } from "./commandBridge.ts";
-import { exposeWorkspaceSurfaces } from "./workspace/surfaceRegistry.ts";
 import { applySettingsToDom } from "./settings.ts";
 import { applyUiSettings } from "./uiPrefs.ts";
 import { setNativeKeyboardInset, startMobileViewport } from "./mobileViewport.ts";
@@ -46,7 +45,6 @@ startMobileViewport();
 exposeSlots();
 exposeSurfaces();
 exposeCapabilities();
-exposeWorkspaceSurfaces();
 exposeWidgets();
 exposeAreas();
 // Widget-areas (WA1): register the built-in placement areas before any widget

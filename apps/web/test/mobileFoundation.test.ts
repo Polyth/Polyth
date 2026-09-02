@@ -122,9 +122,11 @@ test("375px chat keeps a safe-area-aware floating shell and docked composer", as
   const css = await readWebStyles();
   const contract = css;
 
+  // The shell is one edge-to-edge glass panel: pinned to the very top with the
+  // safe-area inset absorbed as padding rather than an offset.
   assert.match(
     contract,
-    /\.mobile-session-floats\s*\{[^}]*top:\s*var\(--safe-top\)/s,
+    /\.mobile-session-floats\s*\{[^}]*top:\s*0[^}]*padding:\s*max\(var\(--safe-top\)/s,
   );
   assert.match(
     contract,

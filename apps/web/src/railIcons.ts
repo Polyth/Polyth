@@ -1,5 +1,6 @@
 import { Icon } from "./icons.tsx";
 import type { JSX } from "react";
+import type { WidgetDef } from "./widgets/catalog.ts";
 
 /**
  * Canonical icon vocabulary for every built-in item that can appear in the
@@ -36,4 +37,10 @@ export type RailIcon = () => JSX.Element;
  * semantic gauge. Extension authors should still provide a distinct icon. */
 export function railIconFor(id: string): RailIcon {
   return RAIL_ICONS[id as keyof typeof RAIL_ICONS] ?? Icon.puzzle;
+}
+
+/** Widget pickers use the same domain mark as panels and launchers. */
+export function widgetIconFor(widget: Pick<WidgetDef, "id" | "pluginId" | "capabilities">): RailIcon {
+  const candidates = [...(widget.capabilities ?? []), widget.pluginId, widget.id.split(".")[0] ?? ""];
+  return candidates.map((id) => RAIL_ICONS[id as keyof typeof RAIL_ICONS]).find(Boolean) ?? Icon.widgets;
 }

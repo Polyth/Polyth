@@ -228,6 +228,10 @@ export default function MobileSessionHeader() {
     for (const item of recent) prefetchSessionTail(item.id);
   }, [peers, recent]);
   const islandLabel = visible ? `${visible.mark} · ${visible.text}` : title;
+  // The resting "SESSION ·" marker is replaced by a live status glyph: a
+  // spinner while the agent works, a green dot once the session has finished.
+  const sessionStatus = session ? resolveSessionStatus(session) : null;
+  const sessionComplete = session?.status === "finished";
 
   return <>
     <div className="mobile-session-floats" aria-label="Workspace navigation">
@@ -246,8 +250,18 @@ export default function MobileSessionHeader() {
         aria-expanded={surface === "island"}
         onClick={() => setSurface("island")}
       >
-        {visible?.live && <span className={`mobile-island-dot ${visible.tone ?? visible.kind}`} aria-hidden="true" />}
-        {visible && <span className="mobile-island-kind">{visible.mark}</span>}
+        {visible?.kind === "session" ? (
+          sessionStatus?.kind === "working"
+            ? <span className="ui-spinner ui-spinner--sm mobile-island-spinner" aria-hidden="true" />
+            : sessionComplete
+              ? <span className="mobile-island-dot done" aria-hidden="true" />
+              : null
+        ) : (
+          <>
+            {visible?.live && <span className={`mobile-island-dot ${visible.tone ?? visible.kind}`} aria-hidden="true" />}
+            {visible && <span className="mobile-island-kind">{visible.mark}</span>}
+          </>
+        )}
         <span className="mobile-island-text" key={visible?.id}>{visible?.text ?? title}</span>
         <Icon.chevronDown />
       </button>

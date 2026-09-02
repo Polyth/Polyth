@@ -5,6 +5,9 @@
 // session drawer (Sidebar) and panel sheet (ContextRail) share one
 // implementation instead of copying focus traps.
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
+import { usePackageWindowOwner } from "../ui/PackageWindowContext.ts";
+import IconButton from "../ui/IconButton.tsx";
+import { CloseIcon } from "../ui/icons.ts";
 
 const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 let openModalSurfaces = 0;
@@ -238,6 +241,9 @@ export interface DialogProps {
   /** Runs after the opener regains focus. */
   onAfterRestoreFocus?: () => void;
   ariaDescribedBy?: string;
+  /** Shared visible title bar for dialogs that do not need custom content chrome. */
+  showHeader?: boolean;
+  closeLabel?: string;
 }
 
 export default function Dialog({
@@ -251,9 +257,12 @@ export default function Dialog({
   ariaDescribedBy,
   resolveRestoreFocus,
   onAfterRestoreFocus,
+  showHeader = false,
+  closeLabel = "Close",
 }: DialogProps) {
   const backdropRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const packageWindowOwner = usePackageWindowOwner();
   useModalSurface({
     open: true,
     onClose,
@@ -268,6 +277,7 @@ export default function Dialog({
     <div
       ref={backdropRef}
       className={`dialog-backdrop${backdropClassName ? ` ${backdropClassName}` : ""}`}
+      data-package-window-owner={packageWindowOwner ?? undefined}
       onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
@@ -279,6 +289,12 @@ export default function Dialog({
         tabIndex={-1}
         className={`dialog-panel dialog-${size}${className ? ` ${className}` : ""}`}
       >
+        {showHeader && (
+          <header className="dialog-system-header">
+            <h2 title={title}>{title}</h2>
+            <IconButton icon={CloseIcon} label={closeLabel} size="sm" onClick={onClose} />
+          </header>
+        )}
         {children}
       </div>
     </div>

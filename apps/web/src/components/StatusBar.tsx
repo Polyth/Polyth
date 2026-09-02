@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from "react";
 import type { WorkflowRunDto } from "@polyth/contracts";
-import { setActiveView, useStore, type AppView } from "../store.ts";
+import { openWorkspacePane, useStore, type AppView } from "../store.ts";
 import { isWorkspaceSurface, listSurfaces } from "../surfaces.ts";
 import { api } from "@polyth/session/web-api";
 import {
@@ -129,7 +129,7 @@ export default function StatusBar() {
         input: activeWorkflow.input,
         run: activeWorkflow,
       });
-      setActiveView("workflow");
+      openWorkspacePane("workflow");
     };
     segments.push({
       key: "workflow",

@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useAnchoredPosition } from "./useAnchoredPosition.ts";
+import { usePackageWindowOwner } from "./PackageWindowContext.ts";
 
 const SHOW_DELAY_MS = 350;
 
@@ -23,6 +24,7 @@ const canHover = (): boolean =>
 
 export default function Tooltip({ content, children, side = "up", className }: TooltipProps) {
   const [open, setOpen] = useState(false);
+  const packageWindowOwner = usePackageWindowOwner();
   const hostRef = useRef<HTMLSpanElement>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -69,6 +71,7 @@ export default function Tooltip({ content, children, side = "up", className }: T
             visibility: position.ready ? undefined : "hidden",
           }}
           aria-hidden="true"
+          data-package-window-owner={packageWindowOwner ?? undefined}
         >
           {content}
         </div>,

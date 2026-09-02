@@ -11,6 +11,7 @@
 //   MSGACT_OC_STATE  where to persist observable state after each mutation
 //                    (the live test reads this FILE — it never talks to this
 //                    process directly)
+//   MSGACT_TURN_DELAY_MS delay for ordinary synthetic turns (default 40)
 //   MSGACT_OC_CATALOG JSON file overriding the served model/agent catalog:
 //                    { providers: <GET /provider body>, agents: <GET /agent
 //                    body> } — used by picker QA fixtures that need several
@@ -25,6 +26,7 @@ const argOf = (flag, dflt) => {
 };
 const hostname = argOf("--hostname", "127.0.0.1");
 const port = Number(argOf("--port", "0"));
+const turnDelayMs = Number(process.env.MSGACT_TURN_DELAY_MS) || 40;
 
 // ---- seeded state -----------------------------------------------------------
 
@@ -238,7 +240,7 @@ const runTurn = (sess, promptText) => {
     sess.messages.push(wireMessage(sess.id, "assistant", replyText, asId));
     persistState();
     emit("session.idle", { sessionID: sess.id });
-  }, 40);
+  }, turnDelayMs);
 };
 
 // ---- HTTP -------------------------------------------------------------------

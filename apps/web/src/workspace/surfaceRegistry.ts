@@ -1,7 +1,7 @@
 // EXTENSION-SEAMS slice 2: reactive registry for workspace surfaces — the
 // main-area views that used to be an AppView switch in components/Main.tsx.
-// Built-ins register in components/workspace/builtinSurfaces.tsx; plugins can
-// reach the registry via window.__polythWorkspaceSurfaces. The host
+// Built-in Chat registers in components/workspace/builtinSurfaces.tsx. Package
+// homes use the system window registry instead; this registry is not public. The host
 // (components/workspace/WorkspaceHost.ts) subscribes through
 // subscribeWorkspaceSurfaces / workspaceSurfaceVersion so registration after
 // the initial React mount, replacement, and disposal all re-render without
@@ -122,26 +122,4 @@ export function workspaceSurfaceGate(
   if (ctx.projectId === null) return "needs-project";
   if (requires === "session" && ctx.sessionId === null) return "needs-session";
   return "ok";
-}
-
-export interface PolythWorkspaceSurfacesApi {
-  registerWorkspaceSurface: typeof registerWorkspaceSurface;
-  listWorkspaceSurfaces: typeof listWorkspaceSurfaces;
-  getWorkspaceSurface: typeof getWorkspaceSurface;
-}
-
-declare global {
-  interface Window {
-    __polythWorkspaceSurfaces?: PolythWorkspaceSurfacesApi;
-  }
-}
-
-export function exposeWorkspaceSurfaces(): void {
-  if (typeof window !== "undefined") {
-    window.__polythWorkspaceSurfaces = {
-      registerWorkspaceSurface,
-      listWorkspaceSurfaces,
-      getWorkspaceSurface,
-    };
-  }
 }

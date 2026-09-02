@@ -27,9 +27,11 @@ export interface WorkspacePanePresentation {
   defaultRatio: number;
   /** Content minimum: docking below this promotes to full-screen. */
   minWidth: number;
+  /** Dynamic-window content minimum. */
+  minHeight?: number;
   /** Cap applied to the dock candidate before the geometry cap. */
   preferredMaxWidth: number;
-  keepAlive: true;
+  keepAlive: boolean;
   /** "close": Escape closes the pane. "content": the surface consumes Escape
    *  (terminal) — only its visible close affordances leave it. */
   escape: "close" | "content";

@@ -183,6 +183,18 @@ test("deriveMessages: ignorable flag filters, consecutive same-role merges, ques
   ]);
 });
 
+test("deriveMessages: reconciliation copies of finalized assistant parts are ignored", () => {
+  const msgs = deriveMessages([
+    ev(1, "user/message", { text: "hello" }),
+    ev(2, "assistant/message", { partId: "p1", text: "hi" }),
+    ev(3, "assistant/message", { partId: "p1", text: "hi" }),
+  ]);
+  assert.deepEqual(msgs, [
+    { role: "user", parts: [{ type: "text", text: "hello" }] },
+    { role: "assistant", parts: [{ type: "text", text: "hi" }] },
+  ]);
+});
+
 test("latestCompletedExchange uses the last completed turn and excludes tools and older history", () => {
   const events: SessionEvent[] = [
     ev(1, "user/message", { text: "old request" }),

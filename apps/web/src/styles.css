@@ -294,6 +294,12 @@ body[data-shift-held] :focus-visible {
   body[data-ui-editing] [draggable="true"]:active { cursor: grabbing; }
 }
 
+/* Touch shells cannot hover to arm a customization zone, so the inline edit
+   pencils are permanent clutter there — zone customization stays in Settings. */
+@media (hover: none), (pointer: coarse) {
+  .zone-customize-trigger { display: none; }
+}
+
 code {
   font-family: var(--mono);
   font-size: 0.9em;
@@ -873,6 +879,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   transform: translate(-50%, -50%);
 }
 .session-subagent-toggle:hover { color: var(--text); background: var(--elevated); }
+.session-subagent-toggle:disabled { opacity: 1; cursor: default; color: var(--accent); }
 .session-subagent-toggle svg { width: var(--icon-sm); height: var(--icon-sm); }
 .session-subagent-children { --nav-session-row-indent: calc(var(--nav-indent-session) + var(--space-4)); }
 .session-btn {
@@ -2012,14 +2019,14 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
    realizes the chosen width (--rail-w). Kept-alive bodies fill the pane
    edge-to-edge and own a single scroll axis inside the surface itself. */
 .rail-workspace .rail-body {
-  display: flex; flex-direction: column; padding: 0; overflow: hidden;
+  display: flex; flex-direction: column; padding: 0; overflow: auto;
   container-type: inline-size;
 }
 .rail-workspace .rail-body[hidden] { display: none; }
 /* Full-screen workspace layer: covers Chat (still mounted, inert underneath).
    The configured launcher strip stays beside it so surfaces remain one click away. */
 .rail-fullscreen {
-  position: fixed; top: 0; left: 0; bottom: 0;
+  position: absolute; top: 0; left: 0; bottom: 0;
   right: var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-2)));
   z-index: 40;
   width: auto; min-width: 0;
@@ -2704,7 +2711,7 @@ html[data-density="compact"] .set-row { padding: 6px 0; }
 /* Compact: workspace surfaces are always the full-screen layer; the desktop
      dock and separator reserve no width. Contextual surfaces use A390's
      modal sheet, while workspace panes retain the pane-model layer. */
-  .rail:not(.rail-fullscreen) { display: none; }
+  .rail:not(.rail-workspace):not(.rail-fullscreen) { display: none; }
   .rail-fullscreen { right: 0; bottom: 0; }
   .timeline { padding-inline: 16px; }
   .composer { padding-inline: 12px; }
@@ -2867,8 +2874,12 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
 .dialog-backdrop {
-  position: fixed; inset: 0; background: var(--scrim);
-  display: flex; align-items: center; justify-content: center; z-index: var(--z-overlay); padding: 24px;
+  position: fixed; inset: auto 0; top: var(--visual-offset);
+  height: min(var(--visual-vh), calc(100dvh - var(--keyboard-inset)));
+  background: var(--scrim); display: flex; align-items: center; justify-content: center;
+  z-index: var(--z-overlay);
+  padding: max(var(--space-5), var(--safe-top)) max(var(--space-5), var(--safe-right))
+    max(var(--space-5), var(--safe-bottom)) max(var(--space-5), var(--safe-left));
 }
 .dialog-panel {
   background: var(--material-glass-strong); border: 1px solid var(--material-glass-border);
@@ -3363,9 +3374,9 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
    The rail lives OUTSIDE the .timeline scroller (absolute sibling inside
    .timeline-viewport), so it stays put while messages scroll, never competes
    with right-aligned user bubbles, and cannot be clipped by the scroller's
-   overflow. right: 10px keeps the tick bars clear of the 10px scrollbar. */
+   overflow. right: 44px keeps the tick bars clear of the right rail. */
 .prompt-nav {
-  position: absolute; top: 50%; right: 10px; transform: translateY(-50%);
+  position: absolute; top: 50%; right: 44px; transform: translateY(-50%);
   width: 28px; z-index: 5;
   display: flex; flex-direction: column; align-items: flex-end;
 }
@@ -3399,7 +3410,8 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   transition: width var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
 }
 .prompt-nav-tick:hover { border: 0; background: transparent; }
-.prompt-nav-tick:hover .prompt-nav-tick-bar { background: var(--muted); }
+.prompt-nav-tick:hover .prompt-nav-tick-bar,
+.prompt-nav-tick.hovered .prompt-nav-tick-bar { background: var(--accent); }
 .prompt-nav-tick[aria-current="true"] .prompt-nav-tick-bar { background: var(--accent); }
 .prompt-nav-tick:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 
@@ -3429,7 +3441,10 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   width: 100%; height: 24px; padding: 0; border: 0; border-radius: calc(var(--radius-control) - 2px);
   background: transparent; color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1;
 }
+.prompt-nav-edge { flex: none; height: 20px; }
+.prompt-nav-page:disabled { opacity: .55; cursor: wait; }
 .prompt-nav-page:hover, .prompt-nav-page:focus-visible { background: var(--panel); color: var(--text); }
+.prompt-nav-row.hovered { background: var(--accent-wash); }
 @media (max-width: 1100px) {
 .prompt-nav { display: none; }
 }
@@ -3609,10 +3624,19 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .desktop-session-status { position: relative; }
 .desktop-session-status-trigger {
   min-height: var(--control-h-sm); display: inline-flex; align-items: center; gap: var(--control-gap); padding: 0 var(--control-pad-x-sm);
-  border: 1px solid var(--control-border); border-radius: var(--radius-control); background: var(--elevated); color: var(--text); font-size: var(--font-meta);
+  border: 1px solid var(--material-glass-border); border-radius: var(--radius-control); background: var(--material-glass); color: var(--text); font-size: var(--font-label); font-weight: 650;
+  box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
 }
-.desktop-session-status-trigger:hover { background: var(--raised); }
+.desktop-session-status-trigger:hover { background: color-mix(in srgb, var(--material-glass) 88%, var(--surface-overlay-hover)); }
 .desktop-session-status-trigger svg { width: var(--icon-sm); height: var(--icon-sm); }
+.desktop-session-status-mask { min-width: 0; max-width: min(32vw, 320px); height: 18px; overflow: hidden; display: block; }
+.desktop-session-status-copy { min-width: 0; height: 18px; display: flex; align-items: center; gap: var(--space-2); overflow: hidden; white-space: nowrap; }
+.desktop-session-status-copy > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.desktop-session-status-copy > span:first-child svg { display: block; width: var(--icon-sm); height: var(--icon-sm); color: var(--muted); }
+.desktop-session-status-copy[data-direction="up"] { animation: header-session-enter-up 260ms var(--motion-ease); }
+.desktop-session-status-copy[data-direction="down"] { animation: header-session-enter-down 260ms var(--motion-ease); }
+@keyframes header-session-enter-up { from { opacity: 0; transform: translateY(45%); } to { opacity: 1; transform: translateY(0); } }
+@keyframes header-session-enter-down { from { opacity: 0; transform: translateY(-45%); } to { opacity: 1; transform: translateY(0); } }
 .desktop-session-status-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--muted); }
 .desktop-session-status-dot.working { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
 .desktop-session-status-dot.needs-approval, .desktop-session-status-dot.needs-reply { background: var(--amber); }
@@ -3623,6 +3647,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .desktop-session-status-popover header div { min-width: 0; display: grid; gap: 2px; }
 .desktop-session-status-popover strong, .desktop-session-status-popover li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desktop-session-status-popover small, .desktop-session-status-popover p { color: var(--muted); font-size: var(--font-meta); }
+.desktop-session-status-popover p { margin: 0; line-height: var(--font-meta-lh); overflow-wrap: anywhere; }
 .desktop-session-status-popover section { padding: var(--space-3); }
 .desktop-session-status-popover section + section { border-top: 1px solid var(--border-soft); }
 .desktop-session-status-popover h3 { margin: 0 0 var(--space-2); color: var(--muted); font-size: var(--font-meta); text-transform: uppercase; }
@@ -3633,6 +3658,10 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .desktop-session-status-popover li.done { color: var(--muted); }
 .desktop-session-status-popover li button { width: 100%; min-width: 0; min-height: var(--control-h-sm); display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-control); background: none; color: var(--text); text-align: left; }
 .desktop-session-status-popover li button:hover { background: var(--raised); }
+@media (prefers-reduced-motion: reduce) {
+  .desktop-session-status-copy { animation: none; }
+  .desktop-session-status-dot.working { animation: none; }
+}
 .picker-trail {
   margin-left: auto; background: none; border: 0; color: var(--muted); cursor: pointer;
   font-size: 12px; padding: 1px 5px; border-radius: calc(4px * var(--corner-radius-scale)); flex-shrink: 0;
@@ -4368,7 +4397,7 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
   max-width: 100%;
   background: var(--bg);
 }
-.app-shell { flex: 1; min-width: 0; min-height: 0; display: flex; overflow: hidden; }
+.app-shell { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; overflow: hidden; }
 .app > .header {
   flex: none;
   width: 100%;
@@ -6359,7 +6388,9 @@ font-style: normal; opacity: .65;
   /* The phone composer, starters, context bar, and sheet system are owned by
      the UX-MOBILE-01 section at the end of this file. */
 
-  .focus-conversation { background: linear-gradient(to bottom, transparent 0%, var(--bg) 100%); }
+  /* The conversation rides directly on the stage tint — no bottom fill band
+     forming a seam above the composer. */
+  .focus-conversation { background: transparent; }
   .timeline { padding: 22px 16px 24px; gap: 18px; }
   .timeline > .msg { width: 100%; }
   .msg.assistant .agent-reply-header { margin-top: 2px; }
@@ -6391,7 +6422,9 @@ font-style: normal; opacity: .65;
 
   .composer-chat {
     padding: 8px 12px max(12px, env(safe-area-inset-bottom, 0px));
-    border-top: 1px solid var(--border-soft);
+    /* No divider or filled band above the phone composer — it rests directly
+       on the conversation canvas. */
+    border-top: 0;
     background: transparent;
   }
 }
@@ -6603,15 +6636,67 @@ color: var(--green);
 .worktree-remove-options { display: grid; gap: 10px; padding: 18px 20px; }
 .worktree-remove-options label { display: flex; align-items: center; gap: 9px; font-size: 13px; }
 
-.header-chat { gap: 4px; }
-.header-chat .header-spacer { flex: 1 1 auto; min-width: 12px; }
-.header .view-switcher {
-  position: absolute; left: 50%; transform: translateX(-50%); z-index: 1;
+.header-chat { gap: var(--space-2); }
+.header-chat .header-spacer { flex: 1 1 auto; min-width: 0; }
+.app > .header {
+  height: 56px; min-height: 56px; padding-inline: var(--space-3); gap: var(--space-2);
 }
-.header .view-switcher.top-rail-left { left: 38%; }
+.header-left-cluster { min-width: 0; display: flex; align-items: center; gap: var(--space-2); }
+.header-divider { width: 1px; height: var(--control-h-sm); flex: none; background: var(--surface-divider); }
+.header-control,
+.header .ui-icon-btn,
+.header-profile,
+.workspace-mode-switch,
+.view-switcher-pill {
+  min-height: var(--control-h-sm); border: 0; border-radius: var(--radius-control);
+  background: var(--surface-overlay); box-shadow: none;
+}
+.header-control:hover,
+.header .ui-icon-btn:hover,
+.header-profile:hover,
+.view-icon:hover { background: var(--surface-overlay-hover); color: var(--text); }
+.header-control:active,
+.header .ui-icon-btn:active,
+.header-profile:active,
+.view-icon:active { background: var(--surface-overlay-strong); }
+.header-control:focus-visible,
+.header .ui-icon-btn:focus-visible,
+.header-profile:focus-visible,
+.view-icon:focus-visible,
+.workspace-mode-switch button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.header-brand { width: var(--control-h-sm); height: var(--control-h-sm); padding: 0; justify-content: center; gap: 0; }
+.header-brand strong { display: none; }
+.polyth-mark { width: 28px; height: 28px; font-size: var(--font-title); }
+.workspace-mode-switch { height: var(--control-h-sm); padding: 2px; gap: 2px; background: var(--sunken); }
+.workspace-mode-switch button { height: 26px; padding-inline: var(--space-3); border-radius: calc(var(--radius-control) - 2px); font-size: var(--font-meta); }
+.workspace-mode-switch button.active { background: var(--surface-overlay-strong); box-shadow: var(--inset-hi); font-weight: 700; }
+.header .view-switcher { position: static; transform: none; flex: none; max-width: none; }
+.view-switcher-pill { gap: 2px; padding: 1px; overflow: visible; background: var(--surface-overlay); }
+.view-icon { width: 28px; height: 28px; border-radius: calc(var(--radius-control) - 2px); }
+.view-icon.active { color: var(--accent); background: var(--surface-overlay-strong); box-shadow: none; }
+.header-rail-overflow { display: none; }
+.desktop-session-status { position: absolute; left: calc(50% + var(--chat-center-offset, 0px)); width: min(var(--chat-measure), calc(100% - (2 * var(--gutter)))); max-width: min(var(--chat-measure), calc(100% - (2 * var(--gutter)))); min-width: 0; transform: translateX(-50%); z-index: 2; }
+.desktop-session-status-trigger { width: 100%; height: var(--control-h); max-width: 100%; padding-inline: var(--space-4); }
 .header-actions,
-.header-user-menu {
-flex: none;
+.header-user-menu { flex: none; }
+.header-actions { gap: var(--space-1); }
+.header-profile { min-width: var(--control-h-sm); height: var(--control-h-sm); padding: 0 2px 0 1px; }
+.header-profile-avatar { width: 28px; height: 28px; }
+.header-profile b { margin-inline-end: 2px; }
+@media (max-width: 1080px) {
+  .header-left-cluster .view-icon:nth-child(n + 4) { display: none; }
+  .header-rail-overflow { display: grid !important; }
+  .desktop-session-status { width: min(var(--chat-measure), calc(100% - (2 * var(--screen-gutter)))); max-width: min(var(--chat-measure), calc(100% - (2 * var(--screen-gutter)))); }
+}
+@media (max-width: 900px) {
+  .header-left-cluster .view-icon:nth-child(n + 3) { display: none; }
+  .desktop-session-status { width: min(var(--chat-measure), calc(100% - (2 * var(--screen-gutter)))); max-width: min(var(--chat-measure), calc(100% - (2 * var(--screen-gutter)))); }
+}
+@media (pointer: coarse) {
+  .header-control::after,
+  .header-profile::after,
+  .desktop-session-status-trigger::after { content: ""; position: absolute; width: max(100%, var(--hit-min)); height: max(100%, var(--hit-min)); left: 50%; top: 50%; transform: translate(-50%, -50%); }
+  .header-profile, .desktop-session-status-trigger { position: relative; }
 }
 
 .agent-reply-header {
@@ -7485,6 +7570,16 @@ display: none;
     min-height: var(--tap);
     font-size: 12px;
   }
+  /* The active model is the one config value worth reading at a glance — give
+     its trigger a legible body-size, medium-weight label. */
+  .composer-mobile .composer-config-top .model-picker-trigger {
+    font-size: var(--font-input);
+  }
+  .composer-mobile .composer-config-top .model-trigger-name {
+    font-size: var(--font-input);
+    font-weight: 600;
+    letter-spacing: 0;
+  }
   .composer-mobile .composer-config-top .composer-effort-control {
     flex: 2 1 0;
     min-width: 0;
@@ -7934,7 +8029,7 @@ html[data-modal-surface="open"] body {
   .scrim.palette-overlay {
     align-items: flex-end;
     justify-content: center;
-    padding: max(48px, env(safe-area-inset-top, 0px)) 0 0;
+    padding: max(var(--space-5), var(--safe-top)) var(--safe-right) var(--safe-bottom) var(--safe-left);
     overflow: hidden;
   }
   .dialog-panel,
@@ -7942,7 +8037,7 @@ html[data-modal-surface="open"] body {
     position: relative;
     width: 100%;
     max-width: 100%;
-    max-height: calc(var(--visual-vh, 100dvh) - max(48px, env(safe-area-inset-top, 0px)));
+    max-height: calc(100% - max(var(--space-5), var(--safe-top)) - var(--safe-bottom));
     margin: 0;
     overflow: hidden;
     border-right: 0;
@@ -8876,19 +8971,23 @@ color: var(--muted);
   .app > .header { display: none; }
   .mobile-session-floats {
     position: fixed;
-    top: var(--safe-top);
-    right: max(var(--screen-gutter), var(--safe-right));
-    left: max(var(--screen-gutter), var(--safe-left));
+    top: 0;
+    right: 0;
+    left: 0;
     z-index: var(--z-shell);
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--space-2);
-    padding: var(--space-1);
-    border: 1px solid var(--material-glass-border);
-    border-radius: var(--radius-surface);
+    /* One edge-to-edge glass panel that runs under the status bar; the safe
+       area becomes top padding so nothing sits behind the notch. */
+    padding: max(var(--safe-top), var(--space-1))
+      max(var(--screen-gutter), var(--safe-right)) var(--space-2)
+      max(var(--screen-gutter), var(--safe-left));
+    border: 0;
+    border-radius: 0;
     background: var(--material-glass);
-    box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
+    box-shadow: none;
     pointer-events: none;
   }
   .mobile-session-floats button { pointer-events: auto; }
@@ -8896,13 +8995,12 @@ color: var(--muted);
   .mobile-float-actions,
   .mobile-session-selector {
     min-height: var(--tap);
-    background: var(--elevated);
-    border: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
-    box-shadow: var(--shadow-sm);
+    background: transparent;
+    border: 0;
+    box-shadow: none;
   }
   .mobile-float-navigation, .mobile-float-actions { display: inline-grid; grid-auto-flow: column; border-radius: var(--radius-control); overflow: hidden; }
-  .mobile-float-navigation button, .mobile-float-actions button { width: var(--tap); display: grid; place-items: center; padding: 0; border: 0; border-left: 1px solid var(--hair); background: transparent; color: var(--text-dim); }
-  .mobile-float-navigation button:first-child, .mobile-float-actions button:first-child { border-left: 0; }
+  .mobile-float-navigation button, .mobile-float-actions button { width: var(--tap); display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--text-dim); }
   .mobile-float-navigation svg, .mobile-float-actions svg { width: var(--icon-lg); height: var(--icon-lg); }
   .mobile-session-selector {
     min-width: 0;
@@ -8958,6 +9056,13 @@ color: var(--muted);
   .mobile-island-dot.needs-reply, .mobile-island-dot.reply { background: var(--blue); box-shadow: 0 0 0 var(--space-1) var(--blue-wash); }
   .mobile-island-dot.failed { background: var(--red); box-shadow: 0 0 0 var(--space-1) var(--red-wash); }
   .mobile-island-dot.active, .mobile-island-dot.working { background: var(--accent); }
+  /* Finished session: a steady green dot instead of the "SESSION" marker. */
+  .mobile-island-dot.done {
+    background: var(--green);
+    box-shadow: 0 0 0 var(--space-1) var(--green-wash);
+    animation: none;
+  }
+  .mobile-island-spinner { flex: none; color: var(--accent); }
   .mobile-view-title {
     min-width: 0;
     min-height: var(--tap);
@@ -9497,45 +9602,41 @@ transition: none;
 .module-view-head,
 .rail-fullscreen .rail-head,
 .panel-sheet .rail-head {
-  flex: none; display: flex; align-items: flex-start; gap: var(--space-3);
-  padding: var(--space-4) var(--gutter) var(--space-3);
-  border-bottom: 1px solid var(--border-soft);
+  position: relative; flex: 0 0 var(--package-window-header-h); min-width: 0;
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: 0 var(--space-3); border-bottom: 0;
+}
+.module-view-head::after {
+  content: ""; position: absolute; inset-inline: var(--space-3) var(--space-5); bottom: 0;
+  height: 1px; pointer-events: none;
+  background: linear-gradient(90deg, var(--border-soft) 0 80%, transparent);
 }
 .module-view-icon {
   flex: none; display: grid; place-items: center;
-  width: 32px; height: 32px; border-radius: var(--radius-control);
-  background: var(--elevated); color: var(--accent);
+  width: var(--icon-md); height: var(--icon-md); color: var(--accent);
 }
-.module-view-icon svg { width: 18px; height: 18px; }
+.module-view-icon svg { width: var(--icon-sm); height: var(--icon-sm); }
 .module-view-heading,
-.rail-heading { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.rail-heading { min-width: 0; display: block; }
 .module-view-title,
 .rail-fullscreen .rail-title,
 .panel-sheet .rail-title {
-  margin: 0; font-size: var(--font-heading); line-height: 1.2;
-  letter-spacing: -0.02em; overflow-wrap: anywhere; font-weight: 700;
+  margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--font-label); line-height: 1.2; letter-spacing: 0; font-weight: 600;
 }
 .module-view-desc,
 .rail-desc {
-  margin: 0; color: var(--muted); overflow-wrap: anywhere;
-  font-size: var(--font-meta); line-height: var(--font-meta-lh);
+  display: none;
 }
 /* Desktop rail keeps a single-line title; the description only shows in the
    full-width (layer / phone) presentations wired in ContextRail. */
 .rail:not(.rail-fullscreen) .rail-desc { display: none; }
 .module-view-title:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
-.module-view-actions { flex: none; display: flex; align-items: center; gap: var(--space-2); }
+.module-view-actions { flex: none; min-width: 0; display: flex; align-items: center; gap: var(--space-1); overflow: hidden; }
 .module-view-close {
-  flex: none; display: inline-grid; place-items: center;
-  width: var(--control-h-sm); height: var(--control-h-sm);
-  border: 1px solid var(--border-soft); border-radius: var(--radius-control);
-  background: var(--panel); color: var(--muted);
-  transition:
-    color var(--motion-fast) var(--motion-ease),
-    background var(--motion-fast) var(--motion-ease),
-    border-color var(--motion-fast) var(--motion-ease);
+  flex: none;
 }
-.module-view-close:hover { color: var(--text); background: var(--elevated); border-color: var(--border); }
+.module-view-system-action { flex: none; }
 .module-view-body,
 .module-view-content {
   flex: 1; min-width: 0; min-height: 0;
@@ -9554,6 +9655,108 @@ transition: none;
 .module-view-content--page > :only-child { gap: var(--space-3); }
 .module-view-content--panel,
 .module-view-content--workspace { overflow: hidden; }
+.dialog-system-header {
+  flex: none; min-width: 0; height: var(--package-window-header-h); display: flex; align-items: center;
+  gap: var(--space-2); padding: 0 var(--space-3); border-bottom: 1px solid var(--border-soft);
+}
+.dialog-panel:has(> .dialog-system-header) { gap: 0; overflow: hidden; }
+.dialog-system-header h2 {
+  min-width: 0; flex: 1; margin: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-size: var(--font-label); font-weight: 600;
+}
+.dialog-panel { container: dialog-panel / inline-size; }
+@container dialog-panel (max-width: 480px) {
+  .dialog-system-header .ui-icon-btn {
+    width: var(--tap); min-width: var(--tap); height: var(--tap); min-height: var(--tap);
+  }
+}
+
+/* One host-owned package window. Dynamic floats above Chat, pinned participates
+   in layout, fullscreen fills only app-shell (global navigation stays visible). */
+.rail-workspace {
+  overflow: hidden;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-surface);
+  background: var(--panel);
+  box-shadow: var(--material-glass-highlight), var(--shadow-md);
+  transition: width var(--motion-surface) var(--motion-ease), height var(--motion-surface) var(--motion-ease);
+}
+.rail-workspace > .module-view { background: transparent; }
+.railbar:has(.rail-dynamic) {
+  pointer-events: none;
+  background: transparent; border: 0; border-radius: 0; box-shadow: none;
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+.railbar:has(.rail-dynamic) > * { pointer-events: auto; }
+.rail-dynamic {
+  flex: none; width: var(--rail-w); min-width: 0; height: var(--package-window-h);
+  max-width: calc(100% - var(--rail-strip-width-right, var(--control-h-sm)) - var(--space-6));
+  max-height: calc(100% - var(--space-6)); margin: var(--space-4) 0;
+  transform: translate(var(--package-window-x), var(--package-window-y));
+  background: var(--panel);
+}
+.rail-workspace.rail-dynamic { transition: none; }
+.railbar:has(.rail-pinned:not(.rail-pinned-narrow)) {
+  position: relative; inset: auto; z-index: auto; flex: none;
+}
+.rail-pinned { height: 100%; border-block: 0; border-radius: var(--radius-surface) 0 0 var(--radius-surface); box-shadow: none; }
+
+@media (min-width: 821px) {
+  /* Keep the floating pane out of flex layout: its launcher strip must stay
+     anchored to the viewport edge while the pane moves underneath it. */
+  .railbar:has(.rail-dynamic) > .rail-dynamic {
+    position: absolute;
+    inset-block-start: var(--space-2);
+    inset-inline-end: var(--rail-strip-width-right, var(--control-h-sm));
+    margin: 0;
+    z-index: 1;
+    max-width: none;
+    max-height: calc(100% - var(--space-4));
+  }
+}
+
+.package-window-resize { position: absolute; z-index: 4; touch-action: none; }
+.package-window-resize--n, .package-window-resize--s { inset-inline: var(--space-3); height: var(--package-window-resize-hit); }
+.package-window-resize--n { inset-block-start: 0; cursor: ns-resize; }
+.package-window-resize--s { inset-block-end: 0; cursor: ns-resize; }
+.package-window-resize--e, .package-window-resize--w { inset-block: var(--space-3); width: var(--package-window-resize-hit); }
+.package-window-resize--e { inset-inline-end: 0; cursor: ew-resize; }
+.package-window-resize--w { inset-inline-start: 0; cursor: ew-resize; }
+.package-window-resize--ne, .package-window-resize--nw,
+.package-window-resize--se, .package-window-resize--sw { width: var(--space-3); height: var(--space-3); }
+.package-window-resize--ne { inset: 0 0 auto auto; cursor: nesw-resize; }
+.package-window-resize--nw { inset: 0 auto auto 0; cursor: nwse-resize; }
+.package-window-resize--se { inset: auto 0 0 auto; cursor: nwse-resize; }
+.package-window-resize--sw { inset: auto auto 0 0; cursor: nesw-resize; }
+.package-window-resize:focus-visible { outline: var(--focus-ring); outline-offset: calc(-1 * var(--package-window-resize-hit)); }
+html[data-package-window-resizing="true"] { user-select: none; cursor: grabbing; }
+html[data-package-window-resizing="true"] .rail-workspace { transition: none; }
+
+.app-shell:has(.rail-pinned-narrow) {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr);
+  grid-template-rows: minmax(240px, 1fr) minmax(200px, 42%);
+}
+.app-shell:has(.rail-pinned-narrow) > .sidebar { grid-column: 1; grid-row: 1 / 3; }
+.app-shell:has(.rail-pinned-narrow) > .workspace { grid-column: 2; grid-row: 1; }
+.railbar-pinned-narrow { position: relative; inset: auto; grid-column: 2; grid-row: 2; width: 100%; min-width: 0; }
+.rail-pinned-narrow { flex: 1 1 auto; width: 100%; min-width: 0; height: 100%; border-radius: var(--radius-surface) 0 0 0; }
+@media (max-width: 820px), (max-height: 480px) and (pointer: coarse) {
+  .railbar:has(.rail-dynamic) {
+    position: absolute; inset: 0; z-index: var(--z-overlay);
+    padding: max(var(--space-2), var(--safe-top)) max(var(--space-2), var(--safe-right))
+      max(var(--space-2), var(--safe-bottom)) max(var(--space-2), var(--safe-left));
+  }
+  .rail-dynamic {
+    width: min(var(--rail-w), 100%); max-width: 100%; max-height: 100%;
+    margin: 0; border-radius: var(--radius-sheet);
+  }
+  .app-shell:has(.rail-pinned-narrow) { grid-template-columns: minmax(0, 1fr); }
+  .app-shell:has(.rail-pinned-narrow) > .sidebar { position: fixed; grid-column: 1; grid-row: 1 / 3; }
+  .app-shell:has(.rail-pinned-narrow) > .workspace,
+  .railbar-pinned-narrow { grid-column: 1; }
+  .rail-pinned-narrow { padding-bottom: var(--safe-bottom); border-radius: var(--radius-surface) var(--radius-surface) 0 0; }
+  body[data-keyboard="open"] .rail-dynamic { max-height: calc(var(--visual-vh) - var(--visual-offset) - var(--space-4)); }
+}
 
 /* Slide-in overlay: on phone every module (main view + any stacked rail panel)
    is a fixed, opaque layer that enters right-to-left, fully covers the
@@ -10319,10 +10522,11 @@ color: var(--text);
   grid-template-columns: 24px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  padding: 7px 9px;
+  padding: var(--space-3);
   border-inline-start: 2px solid color-mix(in srgb, var(--accent) 46%, var(--border-soft));
   border-radius: 0 var(--radius-control) var(--radius-control) 0;
-  background: color-mix(in srgb, var(--accent) 5%, var(--chat-surface));
+  background: color-mix(in srgb, var(--accent) 7%, var(--chat-surface));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .execution-subagent-branch { display: grid; place-items: center; color: var(--accent); }
 .execution-subagent-branch svg { width: 18px; height: 18px; }
@@ -10344,8 +10548,15 @@ color: var(--text);
 .execution-subagent-state { color: var(--muted); font-size: var(--font-meta); }
 .execution-subagent-state.running { color: var(--accent); }
 .execution-subagent-state.failed { color: var(--red); }
-.execution-subagent-detail > button { min-height: 44px; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.execution-subagent-detail > button { min-height: var(--control-h); display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.execution-subagent-detail > button:disabled { opacity: .65; cursor: wait; }
 .execution-subagent-detail > button svg { width: 12px; height: 12px; }
+.execution-subagent-disclosure { grid-column: 1 / -1; margin-top: var(--space-1); border-top: 1px solid var(--border-soft); padding-top: var(--space-2); }
+.execution-subagent-disclosure summary { cursor: pointer; color: var(--text-dim); font-size: var(--font-meta); font-weight: 600; list-style: none; }
+.execution-subagent-disclosure summary::-webkit-details-marker { display: none; }
+.execution-subagent-disclosure summary::before { content: "▸"; display: inline-block; margin-right: var(--space-2); color: var(--accent); transition: transform var(--motion-fast) var(--motion-ease); }
+.execution-subagent-disclosure[open] summary::before { transform: rotate(90deg); }
+.execution-subagent-disclosure summary span { color: var(--muted); font-weight: 400; }
 .execution-subagent-work { grid-column: 1 / -1; display: grid; gap: var(--space-2); margin-top: var(--space-2); }
 .execution-todo-preview { display: grid; gap: var(--space-2); }
 .execution-todo-count { display: flex; align-items: baseline; gap: var(--space-2); color: var(--muted); font: var(--font-meta)/var(--font-meta-lh) var(--ui-font-family); }
@@ -10671,15 +10882,18 @@ html[data-font] body :is(
 /* Approval cards keep their pill risk badge inside the chat column; card
    geometry, actions, and container-query stacking are package-owned. */
 .permission-toast .permission-risk { border-radius: 999px; }
+/* A working turn keeps the compact round arrow — the pulse is the only
+   "agent is busy" signal, no space-hungry label. */
 .jump-latest.agent-working {
-  width: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding-inline: 12px;
-  border-radius: 999px;
+  animation: jump-latest-working 1.7s ease-in-out infinite;
 }
-.jump-latest.agent-working span { font-size: 12px; font-weight: 600; }
+@keyframes jump-latest-working {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+  55% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 0%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .jump-latest.agent-working { animation: none; }
+}
 
 @keyframes execution-row-in {
   from { opacity: 0; transform: translateY(4px); }
@@ -10712,6 +10926,21 @@ html[data-font] body :is(
   .execution-status { width: 67px; gap: 4px; font-size: calc(11.5px * var(--ui-font-scale, 1)); }
   .execution-details.tool-body { padding: 0 0 5px; }
   .execution-command, .execution-output { font-size: calc(12.5px * var(--ui-font-scale, 1)); }
+  /* Multi-file edits: tighten the stack so collapsed file rows read as a list,
+     not spaced-out cards. */
+  .execution-file-changes { gap: var(--space-1); }
+  .execution-file-change { gap: var(--space-1); }
+  .execution-file-actions { gap: var(--space-1) var(--space-2); }
+  /* In-file diff matches the other code surfaces in the row instead of
+     towering over them, and wraps so a long line never widens the screen. */
+  .execution-details .git-diff { font-size: calc(12.5px * var(--ui-font-scale, 1)); }
+  .execution-details .git-diff-line {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    padding-inline: 4px;
+  }
+  .execution-details .git-diff-line > span:last-child { min-width: 0; }
+  .execution-file-toggle .execution-file-path { flex: 1; }
   .execution-input dl > div { grid-template-columns: 84px minmax(0, 1fr); }
   .execution-group-copy { display: grid; gap: 1px; }
   .execution-group-copy strong, .execution-group-copy small { display: block; }
@@ -11181,7 +11410,7 @@ html[data-font] body :is(
     -webkit-backdrop-filter: blur(var(--material-glass-blur));
     backdrop-filter: blur(var(--material-glass-blur));
   }
-  :is(.mobile-float-navigation, .mobile-float-actions, .mobile-session-selector, .mobile-view-title) {
+  .mobile-view-title {
     background: color-mix(in srgb, var(--elevated) 94%, transparent);
     -webkit-backdrop-filter: blur(10px);
     backdrop-filter: blur(10px);
@@ -11218,7 +11447,7 @@ html[data-font] body :is(
   }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-popover, .picker-pop, .app > .header, .sidebar, .railbar) { background: var(--material-glass); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.dialog-panel, .sheet, .composer-card) { background: var(--material-glass-strong); }
-  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.mobile-float-navigation, .mobile-float-actions, .mobile-session-selector, .mobile-view-title) { background: var(--elevated); }
+  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) .mobile-view-title { background: var(--elevated); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) .mobile-island-sheet.sheet { background: var(--panel); }
 }
 
@@ -11231,7 +11460,7 @@ html[data-font] body :is(
   }
   :is(.app > .header, .sidebar, .railbar) { background: var(--material-glass); }
   .composer-card { background: var(--material-glass-strong); }
-  :is(.mobile-float-navigation, .mobile-float-actions, .mobile-session-selector, .mobile-view-title) { background: var(--elevated); }
+  .mobile-view-title { background: var(--elevated); }
   .mobile-island-sheet.sheet { background: var(--panel); }
 }
 
@@ -11252,7 +11481,17 @@ html[data-font] body :is(
     border-radius: var(--radius-surface);
     box-shadow: var(--material-glass-highlight), var(--shadow-sm);
   }
-  .app-shell { position: relative; gap: var(--space-2); }
+   .app-shell { position: relative; gap: var(--space-2); }
+   /* The desktop rail is layered over the shell edge, so the transcript must
+      reserve that width instead of letting its right edge disappear beneath
+      the launcher strip. */
+   .timeline {
+     padding-inline-end: calc(
+       max(var(--gutter), calc((100% - var(--chat-measure)) / 2))
+       + var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-4)))
+       + var(--space-2)
+     );
+   }
   .sidebar {
     border: 1px solid var(--hair);
     border-radius: var(--radius-surface);
@@ -11286,7 +11525,7 @@ html[data-font] body :is(
      rail's clipping/blur containing block, then let the pane and launcher
      strip fill the viewport as normal flex siblings. */
   .railbar:has(.rail-fullscreen) {
-    position: fixed;
+    position: absolute;
     inset: 0;
     margin: 0;
     border: 0;
@@ -11311,6 +11550,7 @@ html[data-font] body :is(
   }
   .rail,
   .rail > .module-view { background: transparent; }
+  .rail.rail-workspace:not(.rail-fullscreen) { background: var(--panel); }
 }
 
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {

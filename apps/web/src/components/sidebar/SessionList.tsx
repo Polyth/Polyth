@@ -646,8 +646,6 @@ export default function SessionList({
   const [labels, setLabels] = useState<WorkspaceLabel[]>([]);
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
-  // Delegated sessions are intentionally quiet in navigation until requested.
-  const [expandedSubagents, setExpandedSubagents] = useState<ReadonlySet<string>>(new Set());
   const [showArchived, setShowArchived] = useState(expandArchived);
   const [draggedPin, setDraggedPin] = useState<string | null>(null);
   const [draggedSession, setDraggedSession] = useState<string | null>(null);
@@ -722,6 +720,20 @@ export default function SessionList({
   const selectedActive = orderedActive.find((session) => session.id === activeSessionId);
   if (!searchMode && selectedActive && !active.some((session) => session.id === selectedActive.id) && active.length > 0) {
     active = [...active.slice(0, -1), selectedActive];
+  }
+  // Children are part of the parent's navigation context. They must not
+  // disappear behind the session pagination while their parent is visible.
+  const visibleIds = new Set(active.map((session) => session.id));
+  let addedChild = true;
+  while (addedChild) {
+    addedChild = false;
+    for (const session of orderedActive) {
+      if (session.parentId && visibleIds.has(session.parentId) && !visibleIds.has(session.id)) {
+        visibleIds.add(session.id);
+        active.push(session);
+        addedChild = true;
+      }
+    }
   }
   const archived = projectSessions.filter((s) => s.status === "archived" && matchesFilters(s));
   const hiddenActive = searchMode ? 0 : Math.max(0, orderedActive.length - active.length);
@@ -866,7 +878,6 @@ export default function SessionList({
     const roots = items.filter((item) => !item.parentId || !ids.has(item.parentId));
     return roots.map((item) => {
       const children = byParent.get(item.id) ?? [];
-      const expanded = expandedSubagents.has(item.id);
       return (
         <div className="session-subagent-parent" key={item.id}>
           {row(item)}
@@ -874,17 +885,12 @@ export default function SessionList({
             <button
               type="button"
               className="session-subagent-toggle"
-              aria-expanded={expanded}
-              aria-label={`${expanded ? "Collapse" : "Expand"} ${children.length} subagents`}
-              onClick={() => setExpandedSubagents((previous) => {
-                const next = new Set(previous);
-                if (next.has(item.id)) next.delete(item.id);
-                else next.add(item.id);
-                return next;
-              })}
-            >{expanded ? <Icon.chevronDown /> : <Icon.chevronRight />}</button>
+              aria-expanded="true"
+              aria-label={`${children.length} subagents`}
+              disabled
+            ><Icon.chevronDown /></button>
           )}
-          {expanded && <div className="session-subagent-children">{children.map((child) => row(child))}</div>}
+          {children.length > 0 && <div className="session-subagent-children">{sessionTree(children)}</div>}
         </div>
       );
     });

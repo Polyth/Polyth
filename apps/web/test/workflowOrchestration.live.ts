@@ -32,6 +32,7 @@ const PERSONA = JSON.stringify({ persona: "engineer", plugins: [] });
 const MANUAL_PARENT = "workflow-manual-parent";
 const MANUAL_CHILD = "workflow-manual-child";
 const ERROR_PARENT = "workflow-error-parent";
+const VISUAL_SESSION = "workflow-visual";
 const WORKFLOW_RELEASE = "workflow-release";
 const WORKFLOW_APPROVAL = "workflow-approval";
 const WORKFLOW_RECOVERY = "workflow-recovery";
@@ -341,6 +342,9 @@ before(async () => {
     finishedAt: errorRun.finishedAt!,
   }, { ignorable: true });
   await store.upsertProjection(projection(ERROR_PARENT, "Failed workflow parent"));
+
+  await store.append(VISUAL_SESSION, "session/created", { title: "Workflow visual baseline" }, { ignorable: true });
+  await store.upsertProjection(projection(VISUAL_SESSION, "Workflow visual baseline"));
   await store.close();
 
   execFileSync(process.execPath, ["--experimental-strip-types", "apps/web/buildPackages.ts"], {
@@ -364,6 +368,7 @@ before(async () => {
       PATH: `${FIXTURE_BIN}:${process.env.PATH ?? ""}`,
       MSGACT_OC_SEED: OC_SEED,
       MSGACT_OC_STATE: OC_STATE,
+      MSGACT_TURN_DELAY_MS: "250",
       POLYTH_FAKE_BROWSER: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -537,6 +542,14 @@ async function assertCarouselGeometry(page: Page, label: string): Promise<void> 
 
   for (const index of [0, Math.floor(count / 2), count - 1]) {
     await items.nth(index).evaluate((element) => element.scrollIntoView({ block: "nearest", inline: "nearest" }));
+    await page.waitForFunction((itemIndex) => {
+      const list = document.querySelector<HTMLElement>(".workflow-definition-list");
+      const item = list?.querySelectorAll<HTMLElement>(".workflow-definition")[itemIndex];
+      if (!list || !item) return false;
+      const clip = list.getBoundingClientRect();
+      const box = item.getBoundingClientRect();
+      return box.left >= clip.left - 1 && box.right <= clip.right + 1;
+    }, index);
     const [clip, item] = await Promise.all([list.boundingBox(), items.nth(index).boundingBox()]);
     assert.ok(
       clip && item && item.x >= clip.x - 1 && item.x + item.width <= clip.x + clip.width + 1,
@@ -564,11 +577,12 @@ async function openWorkflowFromSwitcher(page: Page, label = "Workflows"): Promis
     await page.getByRole("dialog", { name: "Tools" }).getByRole("option", { name: label, exact: true }).click();
   }
   await page.waitForSelector(".workflow-page", { state: "visible" });
-  await waitForAnimations(page, '.module-view--main[data-module-id="workflow"]');
+  await waitForAnimations(page, '.module-view[data-module-id="workflow"]');
+  await waitForAnimations(page, '[data-package-window-owner="workflow"]');
 }
 
 async function closeWorkflowModule(page: Page): Promise<void> {
-  await page.locator('.module-view--main[data-module-id="workflow"] .module-view-close').click();
+  await page.locator('.module-view[data-module-id="workflow"] .module-view-close').click();
   await page.waitForSelector(".app.mode-chat.view-session", { state: "visible" });
 }
 
@@ -594,7 +608,7 @@ test("enabled workflow package is discoverable from Chat and Goals", async () =>
   );
 
   await rail.getByRole("button", { name: /Goals/ }).click();
-  await page.waitForSelector(".app.view-goals", { state: "visible" });
+  await page.waitForSelector('[data-package-window-owner="goals"]', { state: "visible" });
   await workflow.waitFor({ state: "visible" });
   const goalsGeometry = await Promise.all([rail.boundingBox(), workflow.boundingBox()]);
   assert.ok(
@@ -615,7 +629,7 @@ test("current compact navigation exposes Workflows on phones and tablets", async
     const page = await openApp({ ...viewport, sessionId: SESSIONS.main });
     await openWorkflowFromSwitcher(page);
     await page.waitForSelector(".workflow-page", { state: "visible" });
-    assert.equal(await page.locator('.module-view--main[data-module-id="workflow"] .module-view-close').isVisible(), true,
+    assert.equal(await page.locator('.module-view[data-module-id="workflow"] .module-view-close').isVisible(), true,
       `shared module close is hidden at ${viewport.width}px`);
     if (viewport.width <= 480) {
       assert.equal(await page.locator(".mobile-session-floats").isVisible(), true,
@@ -767,17 +781,16 @@ test("complete workflow journey remains synchronized, accessible, and responsive
   assert.equal(await page.locator(".workflow-page").count(), 0, "composer launch must remain in Chat");
   const timeline = page.locator(".workflow-timeline-card");
   await timeline.waitFor({ state: "visible" });
-  await page.waitForSelector(".workflow-run-indicator", { state: "visible" });
-  await page.waitForSelector(".sb-workflow", { state: "visible" });
   assert.match(await timeline.getAttribute("aria-label") ?? "", /Workflow Release pipeline, Running/);
   assert.equal(await timeline.locator("li").count(), 6, "long runs start with a focused node window");
   await page.screenshot({ path: join(ARTIFACTS, "workflow_running_timeline.png") });
 
   const stop = timeline.getByRole("button", { name: "Stop Release pipeline workflow run" });
-  await stop.click();
+  // The synthetic run streams node updates fast enough to replace the timeline
+  // between Playwright's stability checks; invoke the already-visible control.
+  await stop.evaluate((element) => (element as HTMLElement).click());
   await page.waitForSelector(".workflow-timeline-card.status-stopped", { state: "visible" });
   assert.match(await timeline.getAttribute("aria-label") ?? "", /Stopped/);
-  await page.waitForSelector(".workflow-run-indicator", { state: "detached" });
   await page.waitForSelector(".sb-workflow", { state: "detached" });
 
   await timeline.getByRole("button", { name: "Show all 40 nodes" }).click();
@@ -806,11 +819,11 @@ test("complete workflow journey remains synchronized, accessible, and responsive
   const manual = await openApp({ width: 1280, height: 900, sessionId: MANUAL_PARENT, runs: [manualRun] });
   await manual.waitForSelector(".app.mode-chat.view-session", { state: "visible" });
   await manual.waitForSelector(".workflow-timeline-card .needs-human", { state: "visible" });
-  await manual.waitForSelector(".workflow-run-indicator.waiting", { state: "visible" });
   await manual.waitForSelector(".sb-workflow", { state: "visible" });
   assert.match(await manual.locator(".workflow-timeline-summary").textContent() ?? "", /1 waiting for you/);
   await manual.getByRole("button", { name: "View workflow", exact: true }).click();
-  const childAction = manual.getByRole("button", { name: "Review and respond in Reviewer child session" });
+  const childAction = manual.locator('[data-package-window-owner="workflow"]')
+    .getByRole("button", { name: "Review and respond in Reviewer child session" });
   await childAction.waitFor({ state: "visible" });
   const childActionWidths = await childAction.evaluate((element) => {
     const states = [...element.querySelectorAll<HTMLElement>(".workflow-button-content > span")];
@@ -856,7 +869,7 @@ test("complete workflow journey remains synchronized, accessible, and responsive
     await assertNoOverflow(phone, `launcher@${width}`);
     await assertTouchTargets(phone, ".workflow-launch-dialog button, .workflow-launch-dialog textarea", `launcher@${width}`);
     const dialogBox = await phone.locator(".workflow-launch-dialog").boundingBox();
-    assert.ok(dialogBox && dialogBox.width <= width - 20 + 1, `launcher@${width}: dialog is too wide`);
+    assert.ok(dialogBox && dialogBox.width <= width + 1, `launcher@${width}: dialog is too wide`);
     assert.ok(dialogBox.y >= -0.5, `launcher@${width}: dialog starts above the viewport`);
     assert.ok(dialogBox.y + dialogBox.height <= await phone.evaluate(() => innerHeight) + 0.5,
       `launcher@${width}: dialog extends below the viewport`);
@@ -872,7 +885,7 @@ test("complete workflow journey remains synchronized, accessible, and responsive
     await viewWorkflow.evaluate((element) => element.scrollIntoView({ block: "center" }));
     await viewWorkflow.click();
     await phone.waitForSelector(".workflow-page", { state: "visible" });
-    await waitForAnimations(phone, '.module-view--main[data-module-id="workflow"]');
+    await waitForAnimations(phone, '.module-view[data-module-id="workflow"]');
     await phone.waitForSelector(".workflow-editor-toolbar", { state: "visible" });
     await assertNoOverflow(phone, `workflow view@${width}`);
     await assertTouchTargets(
@@ -884,7 +897,7 @@ test("complete workflow journey remains synchronized, accessible, and responsive
       const toolbar = document.querySelector<HTMLElement>(".workflow-editor-toolbar")!.getBoundingClientRect();
       const field = document.querySelector<HTMLElement>(".workflow-name-field")!.getBoundingClientRect();
       const actions = document.querySelector<HTMLElement>(".workflow-editor-actions")!.getBoundingClientRect();
-      const header = document.querySelector<HTMLElement>('.module-view--main[data-module-id="workflow"] .module-view-head')!.getBoundingClientRect();
+      const header = document.querySelector<HTMLElement>('.module-view[data-module-id="workflow"] .module-view-head')!.getBoundingClientRect();
       return {
         toolbarHeight: toolbar.height,
         visibleChildrenHeight: Math.max(field.bottom, actions.bottom) - Math.min(field.top, actions.top),
@@ -898,7 +911,7 @@ test("complete workflow journey remains synchronized, accessible, and responsive
     );
     assert.ok(compactGeometry.childGap >= 0 && compactGeometry.childGap <= 12,
       `workflow view@${width}: name/actions gap is ${compactGeometry.childGap}px`);
-    assert.ok(compactGeometry.headerHeight >= 80 && compactGeometry.headerHeight <= 96,
+    assert.equal(compactGeometry.headerHeight, 42,
       `workflow view@${width}: shared compact module header is ${compactGeometry.headerHeight}px`);
     await assertCarouselGeometry(phone, `workflow carousel@${width}`);
     const [definitionListBox, selectedDefinitionBox] = await Promise.all([
@@ -929,9 +942,90 @@ test("complete workflow journey remains synchronized, accessible, and responsive
     && landscapeDialogBox.y + landscapeDialogBox.height <= 375.5,
   "landscape launcher must remain inside the viewport");
   assert.ok(landscapeFooterBox && landscapeFooterBox.y + landscapeFooterBox.height <= 375.5,
-    "landscape launcher footer must remain immediately reachable");
+    `landscape launcher footer must remain immediately reachable: ${JSON.stringify({ landscapeDialogBox, landscapeFooterBox })}`);
   await landscape.screenshot({ path: join(ARTIFACTS, "workflow_mobile_landscape_launcher.png") });
   await landscape.context().close();
+});
+
+test("package window resizes and preserves dynamic, pinned, and fullscreen behavior", async () => {
+  const page = await openApp({ width: 1280, height: 900, sessionId: VISUAL_SESSION });
+  await page.locator(".view-switcher").getByRole("button", { name: "Workflows", exact: true })
+    .evaluate((element) => (element as HTMLElement).click());
+  await page.waitForSelector(".workflow-page", { state: "visible" });
+  const window = page.locator('[data-package-window-owner="workflow"]');
+  await expectMode("dynamic");
+
+  const drag = async (selector: string, x: number, y: number) => {
+    const handle = window.locator(selector);
+    const box = await handle.boundingBox();
+    assert.ok(box, `${selector} resize handle is missing`);
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(x, y);
+    await page.mouse.up();
+    await waitForAnimations(page, '[data-package-window-owner="workflow"]');
+  };
+  async function expectMode(mode: "dynamic" | "pinned" | "fullscreen") {
+    await page.waitForFunction((expected) =>
+      document.querySelector('[data-package-window-owner="workflow"]')?.getAttribute("data-package-window-mode") === expected,
+    mode);
+  }
+
+  const initial = await window.boundingBox();
+  assert.ok(initial);
+  const eastHandle = await window.locator(".package-window-resize--e").boundingBox();
+  assert.ok(eastHandle);
+  const eastTarget = eastHandle.x + eastHandle.width / 2 - 24;
+  const expectedRight = initial.x + initial.width + eastTarget - (eastHandle.x + eastHandle.width / 2);
+  await drag(".package-window-resize--e", eastTarget, initial.y + initial.height / 2);
+  const eastResized = await window.boundingBox();
+  assert.ok(eastResized && Math.abs(eastResized.x + eastResized.width - expectedRight) <= 2,
+    "east resize handle does not track the pointer");
+  await drag(".package-window-resize--w", 0, initial.y + initial.height / 2);
+  const widest = await window.boundingBox();
+  assert.ok(widest && widest.width > initial.width && widest.x >= -0.5);
+  await drag(".package-window-resize--w", 1270, widest.y + widest.height / 2);
+  const narrowest = await window.boundingBox();
+  assert.ok(narrowest && narrowest.width < widest.width && narrowest.width >= 380);
+
+  const shell = await page.locator(".app-shell").boundingBox();
+  assert.ok(shell);
+  await drag(".package-window-resize--n", narrowest.x + narrowest.width / 2, shell.y + 8);
+  const tallest = await window.boundingBox();
+  assert.ok(tallest && tallest.height > narrowest.height && tallest.y >= -0.5);
+  await drag(".package-window-resize--s", tallest.x + tallest.width / 2, 100);
+  const shortest = await window.boundingBox();
+  assert.ok(shortest && shortest.height < tallest.height && shortest.height >= 240);
+
+  const keyboardResize = window.locator('.package-window-resize--e[role="separator"]');
+  await keyboardResize.focus();
+  await page.keyboard.press("End");
+  await waitForAnimations(page, '[data-package-window-owner="workflow"]');
+  const keyboardWide = await window.boundingBox();
+  await page.keyboard.press("Home");
+  await waitForAnimations(page, '[data-package-window-owner="workflow"]');
+  const keyboardNarrow = await window.boundingBox();
+  assert.ok(keyboardWide && keyboardNarrow && keyboardWide.width > keyboardNarrow.width);
+
+  await window.getByRole("button", { name: "Pin window" }).click();
+  await expectMode("pinned");
+  await window.getByRole("button", { name: "Enter fullscreen" }).click();
+  await expectMode("fullscreen");
+  assert.equal(await page.locator(".header").isVisible(), true, "fullscreen hides global navigation");
+  assert.equal(await window.getAttribute("aria-modal"), null, "non-modal fullscreen claims modal semantics");
+  await page.keyboard.press("Escape");
+  await expectMode("pinned");
+  await window.getByRole("button", { name: "Unpin window" }).click();
+  await expectMode("dynamic");
+
+  await window.getByRole("button", { name: "Workflow options" }).click();
+  const menu = page.getByRole("menu");
+  await menu.dispatchEvent("pointerdown");
+  await expectMode("dynamic");
+  await page.keyboard.press("Escape");
+  await page.locator(".composer-editor").click();
+  await window.waitFor({ state: "detached" });
+  await page.context().close();
 });
 
 test("workflow visual quality matrix uses computed geometry across themes, motion, zoom, and safe areas", async () => {
@@ -943,7 +1037,7 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
     { width: 1440, height: 1000 },
   ];
   for (const viewport of viewports) {
-    const page = await openApp({ ...viewport, sessionId: SESSIONS.main, colorScheme: "dark" });
+    const page = await openApp({ ...viewport, sessionId: VISUAL_SESSION, colorScheme: "dark" });
     await openWorkflowFromSwitcher(page);
     await page.locator(".workflow-definition").filter({ hasText: "Release pipeline" }).click();
     await page.waitForFunction(() =>
@@ -952,7 +1046,7 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
     if (viewport.width <= 480) {
       assert.equal(await page.locator(".mobile-session-floats").isVisible(), true,
         `floating workflow navigation is hidden at ${viewport.width}px`);
-      assert.equal(await page.locator('.module-view--main[data-module-id="workflow"] .module-view-close').isVisible(), true,
+      assert.equal(await page.locator('.module-view[data-module-id="workflow"] .module-view-close').isVisible(), true,
         `workflow module close is hidden at ${viewport.width}px`);
     } else if (viewport.width <= 820) {
       assert.equal(
@@ -993,7 +1087,7 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
         const field = document.querySelector<HTMLElement>(".workflow-name-field")!.getBoundingClientRect();
         const actions = document.querySelector<HTMLElement>(".workflow-editor-actions")!.getBoundingClientRect();
         const scrollport = document.querySelector<HTMLElement>(".workflow-layout")!.getBoundingClientRect();
-        const moduleHead = document.querySelector<HTMLElement>('.module-view--main[data-module-id="workflow"] .module-view-head')!.getBoundingClientRect();
+        const moduleHead = document.querySelector<HTMLElement>('.module-view[data-module-id="workflow"] .module-view-head')!.getBoundingClientRect();
         return {
           toolbarHeight: toolbar.height,
           childrenHeight: Math.max(field.bottom, actions.bottom) - Math.min(field.top, actions.top),
@@ -1008,7 +1102,7 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
       assert.equal(geometry.nameBasis, "auto", `name field still has a vertical flex basis at ${viewport.width}px`);
       assert.ok(geometry.scrollportTop >= geometry.moduleHeadBottom - 0.5,
         `workflow editor overlaps the shared module header at ${viewport.width}px`);
-      assert.equal(await page.locator('.module-view--main[data-module-id="workflow"] .module-view-close').isVisible(), true,
+      assert.equal(await page.locator('.module-view[data-module-id="workflow"] .module-view-close').isVisible(), true,
         `shared module close is hidden at ${viewport.width}px`);
       const lastRole = page.locator(".workflow-node-card input").last();
       await lastRole.scrollIntoViewIfNeeded();
@@ -1045,14 +1139,14 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
     { width: 1280, height: 900 },
     { width: 1440, height: 1000 },
   ]) {
-    const page = await openApp({ ...viewport, sessionId: SESSIONS.main });
+    const page = await openApp({ ...viewport, sessionId: VISUAL_SESSION });
     await openWorkflowLauncher(page);
     const dialog = page.locator(".workflow-launch-dialog");
     await dialog.getByRole("button", { name: "Run Release pipeline workflow" }).waitFor({ state: "visible" });
     const box = await dialog.boundingBox();
-    const expectedWidth = viewport.width <= 480
-      ? viewport.width - 20
-      : Math.min(680, viewport.width - 48);
+    const expectedWidth = viewport.width <= 700
+      ? viewport.width
+      : Math.min(560, viewport.width * 0.92);
     assert.ok(box && Math.abs(box.width - expectedWidth) <= 1,
       `launcher@${viewport.width} computed width ${box?.width}px, expected ${expectedWidth}px`);
     const styles = await dialog.evaluate((element) => {
@@ -1064,10 +1158,13 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
       probe.style.cssText = "position:absolute;visibility:hidden;border-radius:var(--radius-sheet)";
       document.body.append(probe);
       const sheetRadius = getComputedStyle(probe).borderRadius;
+      probe.style.borderRadius = "var(--radius-surface)";
+      const surfaceRadius = getComputedStyle(probe).borderRadius;
       probe.remove();
       return {
         radius: dialogStyle.borderRadius,
         sheetRadius,
+        surfaceRadius,
         animation: dialogStyle.animationName,
         disabledOpacity: disabledStyle?.opacity,
         disabledBackground: disabledStyle?.backgroundColor,
@@ -1076,13 +1173,13 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
     });
     assert.equal(
       styles.radius,
-      styles.sheetRadius,
+      viewport.width <= 700 ? `${styles.sheetRadius} ${styles.sheetRadius} 0px 0px` : styles.surfaceRadius,
       `launcher@${viewport.width} radius ${styles.radius} does not match sheet radius ${styles.sheetRadius}`,
     );
     assert.equal(styles.disabledOpacity, "0.55", `launcher@${viewport.width} disabled primary is opacity-demoted`);
     assert.notEqual(styles.disabledBackground, styles.accent,
       `launcher@${viewport.width} disabled primary still uses the accent fill`);
-    assert.equal(styles.animation, "workflow-dialog-in", `launcher@${viewport.width} normal motion is missing`);
+    assert.equal(styles.animation, "none", `launcher@${viewport.width} must not restore package-owned dialog motion`);
     if (viewport.width === 667) {
       await assertVisualBaseline(page, "workflow_launcher_667x375", ".workflow-launch-dialog");
     }
@@ -1101,19 +1198,12 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
       assert.notEqual(darkFocus.borderColor, darkFocus.outlineColor,
         "dark-theme focus duplicates the accent stroke on both border and outline");
       await page.getByRole("button", { name: "Close workflow launcher" }).click();
-      const closingBackdrop = page.locator(".workflow-launch-backdrop.is-closing");
-      await closingBackdrop.waitFor({ state: "visible" });
-      assert.equal(
-        await closingBackdrop.evaluate((element) => getComputedStyle(element).animationName),
-        "workflow-backdrop-out",
-        "launcher exit motion is missing",
-      );
-      await closingBackdrop.waitFor({ state: "detached" });
+      await page.locator(".workflow-launch-backdrop").waitFor({ state: "detached" });
     }
     await page.context().close();
   }
 
-  const safeArea = await openApp({ width: 375, height: 812, sessionId: SESSIONS.main });
+  const safeArea = await openApp({ width: 375, height: 812, sessionId: VISUAL_SESSION });
   await openWorkflowLauncher(safeArea);
   await safeArea.evaluate(() => {
     const root = document.documentElement.style;
@@ -1150,7 +1240,7 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
     "launcher backdrop does not follow the shrunken visual viewport");
   assert.ok(safeGeometry.dialog.top >= safeGeometry.backdrop.top + 23
     && safeGeometry.dialog.bottom <= safeGeometry.backdrop.bottom - 33,
-  "launcher dialog violates simulated safe areas");
+  `launcher dialog violates simulated safe areas: ${JSON.stringify(safeGeometry)}`);
   assert.ok(safeGeometry.footer.bottom <= safeGeometry.dialog.bottom + 0.5,
     `launcher footer is hidden by the simulated keyboard: ${JSON.stringify(safeGeometry)}`);
   await safeArea.screenshot({ path: join(ARTIFACTS, "workflow_launcher_keyboard_safe_area.png") });
@@ -1159,7 +1249,7 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
   const reduced = await openApp({
     width: 375,
     height: 812,
-    sessionId: SESSIONS.main,
+    sessionId: VISUAL_SESSION,
     reducedMotion: "reduce",
   });
   await openWorkflowLauncher(reduced);
@@ -1173,7 +1263,7 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
   const light = await openApp({
     width: 1280,
     height: 900,
-    sessionId: SESSIONS.main,
+    sessionId: VISUAL_SESSION,
     colorScheme: "light",
   });
   await openWorkflowFromSwitcher(light);
@@ -1263,7 +1353,7 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
     const localized = await openApp({
       width: locale.width,
       height: locale.height,
-      sessionId: SESSIONS.main,
+      sessionId: VISUAL_SESSION,
       storage: { "polyth.locale": locale.id },
     });
     await openWorkflowFromSwitcher(localized, locale.label);
@@ -1286,7 +1376,7 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
     assert.equal(localizedState.defaultModel, locale.defaultModel);
     assert.equal(localizedState.nameLabel, locale.nameLabel);
     await assertNoOverflow(localized, `workflow ${locale.id} locale@${locale.width}`);
-    assert.equal(await localized.locator('.module-view--main[data-module-id="workflow"] .module-view-close').isVisible(), true,
+    assert.equal(await localized.locator('.module-view[data-module-id="workflow"] .module-view-close').isVisible(), true,
       `workflow ${locale.id}: shared module close is hidden`);
     if (locale.direction === "rtl") {
       const rtlGeometry = await localized.evaluate(() => {
@@ -1330,7 +1420,7 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
   // Browser zoom halves the CSS layout viewport while rendering each CSS
   // pixel at twice the device-pixel density. Do not add a second pinch zoom:
   // that would leave only 187.5 visible CSS pixels and test a different mode.
-  const zoomed = await openApp({ width: 750, height: 900, sessionId: SESSIONS.main });
+  const zoomed = await openApp({ width: 750, height: 900, sessionId: VISUAL_SESSION });
   const cdp = await zoomed.context().newCDPSession(zoomed);
   await cdp.send("Emulation.setDeviceMetricsOverride", {
     width: 375,

@@ -13,7 +13,6 @@ import { tr } from "../../../../apps/web/src/i18n/index.ts";
 import {
   Button,
   Checkbox,
-  CloseIcon,
   HomeIcon,
   IconButton,
   ParentFolderIcon,
@@ -115,16 +114,9 @@ function SshProjectDialog({ onClose, onOpened }: {
   const suggestedName = nameTouched ? name : remoteBasename(target);
 
   return (
-    <Dialog title={tr("ssh.sshprojectsource.openAProjectOnAServer")} onClose={requestClose} size="lg" className="ssh-project-dialog">
+    <Dialog title={tr("ssh.sshprojectsource.openAProjectOnAServer")} onClose={requestClose} size="lg" className="ssh-project-dialog" showHeader closeLabel={tr("common.close")}>
       <div className="folder-dialog-body">
-        <div className="folder-dialog-head">
-          <div>
-            <div className="folder-dialog-title">{tr("ssh.sshprojectsource.openAProjectOnAServer")}</div>
-            <div className="folder-dialog-subtitle">
-              {tr("ssh.sshprojectsource.theCodingAgentRunsOnTheServer")}</div>
-          </div>
-          <IconButton icon={CloseIcon} label={tr("common.close")} disabled={busy} onClick={requestClose} />
-        </div>
+        <p className="folder-dialog-subtitle">{tr("ssh.sshprojectsource.theCodingAgentRunsOnTheServer")}</p>
 
         {connections !== null && connections.length === 0 ? (
           <p className="folder-empty">

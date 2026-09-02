@@ -44,6 +44,7 @@ export const it: ScheduleMessages = {
   "scheduleview.runs": "Corse",
   "scheduleview.s": "S",
   "scheduleview.schedule": "Programma",
+  "scheduleview.createSchedule": "Crea pianificazione",
   "scheduleview.sendAPromptOnceOnAnInterval": "Invia un prompt una volta, a intervalli o con cadenza cron con un fuso orario. Ripeti i file in",
   "scheduleview.skipThisRun": "Salta questa corsa",
   "scheduleview.tasks": "Compiti",

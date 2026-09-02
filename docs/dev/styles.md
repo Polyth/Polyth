@@ -108,6 +108,8 @@ list — other docs link here instead of restating it.
 | `--control-pad-x-sm` | Horizontal padding for compact controls. |
 | `--control-pad-x` | Horizontal padding for standard controls. |
 | `--control-gap` | Gap between a control's glyph and its label. |
+| `--package-window-header-h` | Shared compact package-window header height. |
+| `--package-window-resize-hit` | In-frame resize hit area; host-owned, never package-overridden. |
 | `--hit-min` | Density seam: extra hit-area floor. 0px on fine pointers; core raises it to `--tap` under coarse pointers. Use in `max()` with the control's visual size. |
 
 Controls use the smallest visual height appropriate to their density while

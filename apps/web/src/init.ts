@@ -7,7 +7,7 @@ import { friendlyError } from "./settings.ts";
 import { formatAppUrl, parseAppUrl } from "./router.ts";
 import * as store from "./store.ts";
 import { resolveActiveProjectId } from "./projectRegistry.ts";
-import type { AttachmentRef, JsonObject, ModelRef, Project, ProjectPatch, SessionEvent } from "@polyth/contracts";
+import type { AttachmentRef, JsonObject, ModelRef, Project, ProjectPatch, SessionEvent, SessionProjection } from "@polyth/contracts";
 import { suggestWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks, registerServiceWorker } from "./push.ts";
 import { notificationCentre } from "./notificationCentre.ts";
@@ -653,6 +653,28 @@ function markActiveSessionRead(): void {
   void api.markSessionRead(sessionId, seq).catch(() => {});
 }
 
+// A delegated session is adopted asynchronously: the task snapshot can reach
+// the browser a few milliseconds before its projection. Revalidate the
+// project list once instead of sending the user to a dead deep link.
+async function loadSessionForOpen(sessionId: string): Promise<SessionProjection> {
+  try {
+    return await api.getSession(sessionId);
+  } catch (firstError) {
+    const projectId = store.getState().activeProjectId;
+    if (projectId) {
+      store.upsertSessions(await api.listSessions(projectId));
+      const refreshed = store.getState().sessions.find((session) => session.id === sessionId);
+      if (refreshed) return refreshed;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    try {
+      return await api.getSession(sessionId);
+    } catch {
+      throw firstError;
+    }
+  }
+}
+
 export async function openSession(
   sessionId: string,
   opts: {
@@ -716,7 +738,7 @@ export async function openSession(
     const tailWasPrefetched = prefetchedSessions.has(sessionId)
       || tailRequests.get(sessionId)?.passive === true;
     const [session] = await Promise.all([
-      cachedSession ?? api.getSession(sessionId),
+      cachedSession ?? loadSessionForOpen(sessionId),
       requestSessionTail(sessionId, false),
     ]);
     if (generation !== openSessionGeneration) return;

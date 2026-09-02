@@ -24,9 +24,8 @@ canonical signals:
 
 Do **not** use a widget when:
 
-- the UI is an app module with its own navigation identity → **workspace
-  surface** or **rail surface** (`host.workspaceSurfaces.register` /
-  `host.surfaces.register`);
+- the UI is an app module with its own navigation identity → **package
+  surface** (`host.surfaces.register` with system presentation metadata);
 - the UI is a small contribution at a fixed injection point (message
   actions, header buttons, palette commands) → **slot contribution**
   (`host.slots.register`);
@@ -40,8 +39,8 @@ Do **not** use a widget when:
 
 Widget vs surface rule of thumb: a surface is "the feature's home"; a widget
 is "a piece of a feature the user places where they want it". One feature
-commonly has a surface (or workspace surface) **and** widgets (e.g. Usage
-has a rail surface + five widgets; Goals has a workspace surface + header
+commonly has a system window surface **and** widgets (e.g. Usage
+has a package surface + five widgets; Goals has a package surface + header
 widgets).
 
 ## 2. Where widget code lives
@@ -287,7 +286,7 @@ export default defineWebPackage((host) => () => {
 - **`packages/dictation/widgets/voice.tsx`** — a widget defaulting to
   `composer.leading` with custom slot settings.
 - **`packages/fusion/widgets/index.tsx`** — a one-widget plugin registered
-  alongside a workspace surface.
+  alongside a system package-window surface.
 
 ## 14. Checklist (widget work)
 

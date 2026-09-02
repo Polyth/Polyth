@@ -44,6 +44,7 @@ export const uk: ScheduleMessages = {
   "scheduleview.runs": "Пробіжки",
   "scheduleview.s": "с",
   "scheduleview.schedule": "Розклад",
+  "scheduleview.createSchedule": "Створити розклад",
   "scheduleview.sendAPromptOnceOnAnInterval": "Надсилати запит один раз, з інтервалом або в cron ритмі з часовим поясом. Зациклювати файли в",
   "scheduleview.skipThisRun": "Пропустити цей забіг",
   "scheduleview.tasks": "Задачі",

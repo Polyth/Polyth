@@ -13,9 +13,10 @@ export default defineWebPackage((host) => () => {
       capabilityId: "usage",
       order: 50,
       component: UsageDashboard,
+      presentation: { kind: "workspace", defaultRatio: 0.45, minWidth: 320, preferredMaxWidth: 680, keepAlive: true, escape: "close" },
     }),
     host.widgets.registerPlugin(USAGE_WIDGET_PLUGIN),
-    host.capabilities.register({ id: "usage", label: "Usage & cost", plainDescription: "See token, cost, and provider quota usage.", keywords: ["usage", "cost", "tokens", "quota"], standardTier: "more", standardRank: 15, open: () => host.navigation.openRailSurface("usage"), available: () => true }),
+    host.capabilities.register({ id: "usage", label: "Usage & cost", plainDescription: "See token, cost, and provider quota usage.", keywords: ["usage", "cost", "tokens", "quota"], standardTier: "more", standardRank: 15, open: () => host.navigation.openWorkspacePane("usage"), available: () => true }),
   ];
   return () => off.toReversed().forEach((dispose) => dispose());
 });

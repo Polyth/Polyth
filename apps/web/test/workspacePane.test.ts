@@ -87,12 +87,14 @@ test("surfaces split into workspace panes and contextual panels by presentation"
 
 // ---- project-scoped persistence ----------------------------------------------
 
-test("panePrefs: round-trip keeps surface, expansion, widths, and resources", () => {
+test("panePrefs: round-trip keeps surface, mode, dimensions, and resources", () => {
   const prefs: WorkspacePanePrefs = {
     version: WORKSPACE_PANE_PREFS_VERSION,
     openSurface: "files",
-    expanded: true,
+    mode: "fullscreen",
+    previousMode: "pinned",
     widths: { files: 520, git: 400 },
+    heights: { files: 360 },
     lastResource: { files: "file:src/app.ts", git: "changes:a.ts" },
   };
   assert.deepEqual(parseWorkspacePanePrefs(serializeWorkspacePanePrefs(prefs)), prefs);
@@ -105,22 +107,38 @@ test("panePrefs: garbage, wrong version, and absurd widths fall back safely", ()
   const p = parseWorkspacePanePrefs(JSON.stringify({
     version: 1,
     openSurface: "",
-    expanded: "yes",
+    mode: "bogus",
     widths: { files: 12, git: 99999, term: Number.NaN, ok: 431.7 },
+    heights: { tiny: 119, ok: 320.4 },
     lastResource: { files: "", git: "changes:x.ts", weird: 7 },
   }));
   assert.equal(p.openSurface, null); // empty string is not a surface
-  assert.equal(p.expanded, false); // only literal true counts
+  assert.equal(p.mode, "dynamic");
   assert.deepEqual(p.widths, { ok: 432 }); // sanity bounds + rounding
+  assert.deepEqual(p.heights, { ok: 320 });
   assert.deepEqual(p.lastResource, { git: "changes:x.ts" });
+});
+
+test("panePrefs: v1 expanded migrates directly to fullscreen with dynamic restore", () => {
+  const migrated = parseWorkspacePanePrefs(JSON.stringify({
+    version: 1,
+    openSurface: "files",
+    expanded: true,
+    widths: { files: 520 },
+    lastResource: {},
+  }));
+  assert.equal(migrated.version, 2);
+  assert.equal(migrated.mode, "fullscreen");
+  assert.equal(migrated.previousMode, "dynamic");
+  assert.deepEqual(migrated.heights, {});
 });
 
 test("panePrefs: storage keys are per project — records cannot collide", () => {
   assert.notEqual(workspacePaneKey("p1"), workspacePaneKey("p2"));
-  assert.match(workspacePaneKey("p1"), /^polyth\.workspacePane\.v1\./);
+  assert.match(workspacePaneKey("p1"), /^polyth\.workspacePane\.v2\./);
 });
 
-test("panePrefs: browser store isolates projects and clears expansion on close", async () => {
+test("panePrefs: browser store isolates projects and resets mode on close", async () => {
   const values = new Map<string, string>();
   Object.defineProperty(globalThis, "localStorage", {
     configurable: true,
@@ -131,25 +149,27 @@ test("panePrefs: browser store isolates projects and clears expansion on close",
     },
   });
   const {
-    getWorkspacePanePrefs, resetWorkspacePanePrefsCache, setPaneExpanded,
-    setPaneOpenSurface, setPanePreferredWidth,
+    getWorkspacePanePrefs, resetWorkspacePanePrefsCache, setPersistedPaneMode,
+    setPaneDynamicHeight, setPaneOpenSurface, setPanePreferredWidth,
   } = await import("../src/workspace/panePrefs.ts");
   resetWorkspacePanePrefsCache();
 
   setPaneOpenSurface("p1", "files");
-  setPaneExpanded("p1", true);
+  setPersistedPaneMode("p1", { mode: "fullscreen", previousMode: "pinned" });
   setPanePreferredWidth("p1", "files", 520);
+  setPaneDynamicHeight("p1", "files", 360);
   // Project B stays untouched — one project's layout never replicates.
   assert.deepEqual(getWorkspacePanePrefs("p2"), emptyWorkspacePanePrefs);
   assert.equal(getWorkspacePanePrefs("p1").openSurface, "files");
-  assert.equal(getWorkspacePanePrefs("p1").expanded, true);
+  assert.equal(getWorkspacePanePrefs("p1").mode, "fullscreen");
   assert.equal(getWorkspacePanePrefs("p1").widths.files, 520);
 
-  // Closing the pane clears expansion so the next open starts docked.
+  // Closing the pane resets mode so the next open starts dynamic.
   setPaneOpenSurface("p1", null);
   assert.equal(getWorkspacePanePrefs("p1").openSurface, null);
-  assert.equal(getWorkspacePanePrefs("p1").expanded, false);
+  assert.equal(getWorkspacePanePrefs("p1").mode, "dynamic");
   assert.equal(getWorkspacePanePrefs("p1").widths.files, 520); // width survives
+  assert.equal(getWorkspacePanePrefs("p1").heights.files, 360); // height survives
 
   // The record round-trips through storage, not just the in-memory cache.
   resetWorkspacePanePrefsCache();

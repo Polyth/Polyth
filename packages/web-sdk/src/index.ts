@@ -90,8 +90,9 @@ export interface SurfacePresentation {
   kind: "workspace";
   defaultRatio: number;
   minWidth: number;
+  minHeight?: number;
   preferredMaxWidth: number;
-  keepAlive: true;
+  keepAlive: boolean;
   escape: "close" | "content";
 }
 
@@ -107,25 +108,8 @@ export interface SurfaceDefinition {
   component: (props?: SurfaceComponentProps) => ReactNode;
   badge?: (context: SurfaceContext) => number;
   visible?: (context: SurfaceContext) => boolean;
-  presentation?: SurfacePresentation;
-}
-
-export type WorkspaceSurfaceRequirement = "none" | "project" | "session";
-
-export interface WorkspaceSurfaceContext {
-  projectId: string | null;
-  sessionId: string | null;
-}
-
-export interface WorkspaceSurfaceDefinition {
-  id: string;
-  title: string;
-  /** One-line purpose shown under the title in the shared module header. */
-  description?: string;
-  order: number;
-  plugin?: string;
-  requires?: WorkspaceSurfaceRequirement;
-  component: (context: WorkspaceSurfaceContext) => ReactNode;
+  /** Required package-window capabilities. The host owns all resulting chrome. */
+  presentation: SurfacePresentation;
 }
 
 export interface CapabilityDefinition {
@@ -199,9 +183,6 @@ export interface WebPackageHost {
   };
   surfaces: {
     register(definition: SurfaceDefinition): Unregister;
-  };
-  workspaceSurfaces: {
-    register(definition: WorkspaceSurfaceDefinition): Unregister;
   };
   capabilities: {
     register(definition: CapabilityDefinition): Unregister;

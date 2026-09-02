@@ -3,7 +3,7 @@
 // project has no GitHub remote.
 import { useEffect, useState } from "react";
 import { api, type GithubStatusDto } from "@polyth/session/web-api";
-import { setActiveView, setOverlay, useStore } from "../../store.ts";
+import { openWorkspacePane, setOverlay, useStore } from "../../store.ts";
 import { EmptyState, PageHead, Row } from "./parts.tsx";
 import { tr } from "../../i18n/index.ts";
 import { Button } from "../ui/index.ts";
@@ -53,7 +53,7 @@ export default function IntegrationsPage() {
                 </Row>
               )}
               <Row label={tr("settings.integrationspage.fullView")} hint={tr("settings.integrationspage.browseIssuesAndPullRequests")}>
-                <Button size="sm" onClick={() => { setOverlay(null); setActiveView("github"); }}>{tr("settings.integrationspage.openGithubView")}</Button>
+                <Button size="sm" onClick={() => { setOverlay(null); openWorkspacePane("github"); }}>{tr("settings.integrationspage.openGithubView")}</Button>
               </Row>
             </>
           ) : (

@@ -20,7 +20,8 @@ import { formatCombo } from "@polyth/hotkeys";
 import SlotHost, { useSlotVersion } from "./slots/SlotHost.ts";
 import ModuleView from "./ui/ModuleView.ts";
 import {
-  closeAllModules, closeWorkspacePane, collapseWorkspacePane, expandWorkspacePane, setPaneFullscreen,
+  closeAllModules, closePaneFromOutside, closeWorkspacePane, handlePaneEscape, setPaneFullscreen,
+  togglePaneFullscreen, togglePanePin,
   getState, setRailPlugin, setSidebarOpen, toggleRailPlugin, useActiveModel, useStore,
 } from "../store.ts";
 import { useGitStatus } from "../../../../packages/git/widgets/gitStatusStore.ts";
@@ -34,7 +35,7 @@ import { useShellMode } from "../responsiveShell.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
 import { useResolvedCapabilities, type ResolvedCapability } from "../capabilities.ts";
 import { isCapabilityActive, toggleCapability } from "../builtinCapabilities.ts";
-import { getWorkspacePanePrefs, setPanePreferredWidth } from "../workspace/panePrefs.ts";
+import { clampPaneDimension, getWorkspacePanePrefs, setPaneDynamicHeight, setPanePreferredWidth } from "../workspace/panePrefs.ts";
 import { chatDockViability, dockGuardTargets } from "../workspace/dockGuard.ts";
 import { PaneVisibilityContext } from "../workspace/paneVisibility.ts";
 import "./railSurfaces.tsx";
@@ -47,12 +48,16 @@ import { type MenuEntry } from "./ui/index.ts";
 import { useCustomizeActive } from "../useShiftArmed.ts";
 import { CAPABILITY_MIME, getDragCapability, setDragCapability } from "../dnd.ts";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
+import { PackageWindowContext, pathBelongsToPackageWindow } from "./ui/PackageWindowContext.ts";
+import ViewErrorBoundary from "./ViewErrorBoundary.ts";
 
 const NO_EVENTS: never[] = [];
 /** Fallback separator chrome before the real element is measured. */
 const SEPARATOR_FALLBACK = 6;
 const RESIZE_STEP = 16;
 const RESIZE_STEP_LARGE = 64;
+type ResizeEdge = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
+const RESIZE_EDGES: ResizeEdge[] = ["n", "ne", "e", "se", "s", "sw", "w", "nw"];
 
 // Small count badge on strip buttons (UX-33).
 function Badge({ n }: { n: number }) {
@@ -181,7 +186,7 @@ export default function ContextRail() {
   const compact = shellMode !== "wide";
   const { rail, surfaces, open, ctx } = useRailSurfaceModel();
   const projectId = useStore((s) => s.activeProjectId);
-  const paneExpanded = useStore((s) => s.paneExpanded);
+  const paneMode = useStore((s) => s.paneMode);
   const resolved = useResolvedCapabilities();
   const keymap = useKeymap();
   const terminalShortcut = formatCombo(keymap.viewTerminal, MOD === "⌘");
@@ -251,6 +256,7 @@ export default function ContextRail() {
       return {
         id,
         label: capability.descriptor.label,
+        icon: railIconFor(id),
         kind: "checkbox",
         checked: inRail,
         // Terminal is a guaranteed workspace launcher and cannot leave the rail.
@@ -289,28 +295,34 @@ export default function ContextRail() {
   useEffect(() => {
     if (rail !== null && known && open === null) setRailPlugin(null);
   }, [rail, known, open]);
-  const kept = surfaces.filter((s) => s.id === rail || visited.includes(s.id));
+  const kept = surfaces.filter((s) =>
+    s.id === rail || (s.presentation?.keepAlive === true && visited.includes(s.id)));
 
   // ---- geometry: measured post-sidebar workspace (Chat + pane + chrome) --------
   const railbarRef = useRef<HTMLElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
   const separatorRef = useRef<HTMLDivElement>(null);
-  const geometryKey = `${projectId ?? ""}:${open?.id ?? ""}:${presentation ? "workspace" : "context"}:${compact ? "compact" : "wide"}:${paneExpanded ? "expanded" : "normal"}`;
-  const [geometry, setGeometry] = useState<{ key: string; width: number }>({ key: "", width: 0 });
+  const geometryKey = `${projectId ?? ""}:${open?.id ?? ""}:${presentation ? "workspace" : "context"}:${compact ? "compact" : "wide"}:${paneMode}`;
+  const [geometry, setGeometry] = useState<{ key: string; width: number; height: number }>({ key: "", width: 0, height: 0 });
   const workspaceWidth = geometry.key === geometryKey ? geometry.width : 0;
+  const workspaceHeight = geometry.key === geometryKey ? geometry.height : 0;
   const chatElOf = () =>
     railbarRef.current?.closest(".app")?.querySelector(":scope > .app-shell > .workspace") ?? null;
 
   useLayoutEffect(() => {
     const measure = () => {
       const chat = chatElOf();
-      const paneW = presentation && paneRef.current && !paneRef.current.classList.contains("rail-fullscreen")
+      const paneW = presentation && paneRef.current
+        && paneRef.current.classList.contains("rail-pinned")
+        && !paneRef.current.classList.contains("rail-pinned-narrow")
         ? paneRef.current.getBoundingClientRect().width
         : 0;
       const chatW = chat ? chat.getBoundingClientRect().width : 0;
       const width = Math.round(chatW + paneW);
+      const height = Math.round(chat?.getBoundingClientRect().height ?? 0);
       setGeometry((current) =>
-        current.key === geometryKey && current.width === width ? current : { key: geometryKey, width });
+        current.key === geometryKey && current.width === width && current.height === height
+          ? current : { key: geometryKey, width, height });
     };
     measure();
     if (typeof ResizeObserver !== "function") return;
@@ -326,22 +338,21 @@ export default function ContextRail() {
   const geo: DockGeometry = { workspaceWidth, chrome };
 
   // ---- dock decision + presentation mode ----------------------------------------
-  const paneWidths = projectId !== null ? getWorkspacePanePrefs(projectId).widths : {};
+  const panePrefs = projectId !== null ? getWorkspacePanePrefs(projectId) : null;
+  const paneWidths = panePrefs?.widths ?? {};
   const remembered = open !== null && presentation ? paneWidths[open.id] ?? null : null;
   const decision = presentation ? decideDock(remembered, presentation, geo) : null;
 
   // Live (uncommitted) drag width; preferred width persists on commit only.
   const [liveWidth, setLiveWidth] = useState<number | null>(null);
-  useEffect(() => { setLiveWidth(null); }, [open?.id, projectId]);
-
-  // Sticky automatic fallback: once the user interacts inside the full-screen
-  // layer, geometry changes must not yank the mode back behind their back.
-  const [stickyFullscreen, setStickyFullscreen] = useState(false);
-  const interactedRef = useRef(false);
+  const [liveHeight, setLiveHeight] = useState<number | null>(null);
+  const [livePosition, setLivePosition] = useState({ x: 0, y: 0 });
   useEffect(() => {
-    setStickyFullscreen(false);
-    interactedRef.current = false;
-  }, [open?.id]);
+    setLiveWidth(null);
+    setLiveHeight(null);
+    setLivePosition({ x: 0, y: 0 });
+  }, [open?.id, projectId]);
+  useEffect(() => { setLivePosition({ x: 0, y: 0 }); }, [workspaceWidth, workspaceHeight]);
 
   // Layout guard result: docked geometry that clips or covers Chat promotes.
   // The promotion LATCHES (PANE-VERIFY-02): it releases only when a real
@@ -354,28 +365,11 @@ export default function ContextRail() {
   const isWorkspacePane = open !== null && presentation !== undefined;
   const measured = workspaceWidth > 0;
   const admits = decision !== null && decision.dock;
-  const rawMode: "docked" | "layer" = !isWorkspacePane
-    ? "docked"
-    : compact || paneExpanded || stickyFullscreen || guardPromoted || (measured && !admits)
-      ? "layer"
-      : "docked";
   const guardInputs = `${open?.id ?? ""}:${projectId ?? ""}:${remembered ?? "auto"}`;
-  const settledModeRef = useRef<{ key: string; width: number; mode: "docked" | "layer" } | null>(null);
-  const settledKey = `${guardInputs}:${compact}:${paneExpanded}:${stickyFullscreen}:${guardPromoted}`;
-  let mode = rawMode;
-  if (isWorkspacePane && measured) {
-    const settled = settledModeRef.current;
-    if (
-      settled !== null
-      && settled.key === settledKey
-      && Math.abs(settled.width - workspaceWidth) <= GUARD_WIDTH_TOLERANCE
-    ) {
-      mode = settled.mode;
-    } else {
-      settledModeRef.current = { key: settledKey, width: workspaceWidth, mode: rawMode };
-    }
-  }
-  const layered = isWorkspacePane && mode === "layer";
+  const layered = isWorkspacePane && paneMode === "fullscreen";
+  const dynamic = isWorkspacePane && paneMode === "dynamic";
+  const pinned = isWorkspacePane && paneMode === "pinned";
+  const pinnedNarrow = pinned && (compact || (measured && (!admits || guardPromoted)));
 
   const dockWidth = decision !== null && presentation
     ? clampDockWidth(liveWidth ?? decision.width, presentation, geo)
@@ -408,7 +402,7 @@ export default function ContextRail() {
       }
       return; // hold the latch — the layer mode it selected is not a release
     }
-    if (!isWorkspacePane || !measured || mode !== "docked") return;
+    if (!pinned || pinnedNarrow || !measured) return;
 
     const promote = () => {
       const cur = guardLatchRef.current;
@@ -476,7 +470,7 @@ export default function ContextRail() {
       if (raf !== 0) cancelAnimationFrame(raf);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [guardInputs, workspaceWidth, dockWidth, mode, isWorkspacePane, measured]);
+  }, [guardInputs, workspaceWidth, dockWidth, pinned, pinnedNarrow, isWorkspacePane, measured]);
 
   // Publish presentation truth so App can make hidden Chat inert. On phone a
   // contextual sheet also fully covers the session, so it counts too.
@@ -486,7 +480,7 @@ export default function ContextRail() {
     return () => setPaneFullscreen(false);
   }, [railCoversWorkspace]);
 
-  // ---- resize: pointer + keyboard on a real separator ---------------------------
+  // ---- resize: pinned separator + dynamic in-frame edges ------------------------
   const commitWidth = (w: number) => {
     if (open === null) return;
     if (presentation) {
@@ -498,23 +492,14 @@ export default function ContextRail() {
 
   const dragRef = useRef<{ startX: number; startW: number } | null>(null);
   const onHandleDown = (e: ReactPointerEvent) => {
-    if (open === null || layered) return;
+    if (open === null || !pinned || pinnedNarrow) return;
     e.preventDefault();
     dragRef.current = { startX: e.clientX, startW: dockWidth };
+    const direction = document.documentElement.dir === "rtl" ? 1 : -1;
     const move = (ev: PointerEvent) => {
       const d = dragRef.current;
       if (!d) return;
-      const raw = d.startW + (d.startX - ev.clientX);
-      if (presentation && decision !== null && raw < presentation.minWidth - 24) {
-        // Crossing below the content minimum promotes instead of squeezing.
-        dragRef.current = null;
-        window.removeEventListener("pointermove", move);
-        window.removeEventListener("pointerup", up);
-        setLiveWidth(null);
-        setStickyFullscreen(true);
-        interactedRef.current = true;
-        return;
-      }
+      const raw = d.startW + direction * (ev.clientX - d.startX);
       setLiveWidth(presentation ? raw : clampRailWidth(raw));
     };
     const up = (ev: PointerEvent) => {
@@ -522,69 +507,157 @@ export default function ContextRail() {
       dragRef.current = null;
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
       if (!d) return;
-      const raw = d.startW + (d.startX - ev.clientX);
+      const raw = d.startW + direction * (ev.clientX - d.startX);
       const committed = presentation ? clampDockWidth(raw, presentation, geo) : clampRailWidth(raw);
       setLiveWidth(committed);
       commitWidth(committed);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up, { once: true });
   };
 
   const onHandleKey = (e: ReactKeyboardEvent) => {
-    if (open === null) return;
+    if (open === null || !pinned || pinnedNarrow) return;
     const step = e.shiftKey ? RESIZE_STEP_LARGE : RESIZE_STEP;
     let next: number | null = null;
-    if (e.key === "ArrowLeft") next = dockWidth + step;
-    else if (e.key === "ArrowRight") next = dockWidth - step;
+    const rtl = document.documentElement.dir === "rtl";
+    if (e.key === "ArrowLeft") next = dockWidth + (rtl ? -step : step);
+    else if (e.key === "ArrowRight") next = dockWidth + (rtl ? step : -step);
     else if (e.key === "Home") next = presentation ? presentation.minWidth : 240;
     else if (e.key === "End") next = presentation && decision !== null ? decision.maxPane : 640;
     if (next === null) return;
     e.preventDefault();
-    if (presentation && decision !== null && next < presentation.minWidth) {
-      setStickyFullscreen(true);
-      interactedRef.current = true;
-      return;
-    }
     const committed = presentation ? clampDockWidth(next, presentation, geo) : clampRailWidth(next);
     setLiveWidth(committed);
     commitWidth(committed);
   };
 
-  // Non-terminal Escape closes the pane (Files runs its own ladder that ends
-  // in the same command; the terminal consumes Escape for the PTY).
+  const dynamicMaxWidth = Math.max(1, workspaceWidth - 32);
+  const dynamicMinWidth = Math.min(presentation?.minWidth ?? 240, dynamicMaxWidth);
+  const dynamicWidth = clampPaneDimension(liveWidth ?? remembered ?? Math.min(presentation?.preferredMaxWidth ?? 640, workspaceWidth * (presentation?.defaultRatio ?? 0.55)), dynamicMinWidth, workspaceWidth);
+  const dynamicMaxHeight = Math.max(1, workspaceHeight - 16);
+  const dynamicMinHeight = Math.min(presentation?.minHeight ?? 240, dynamicMaxHeight);
+  const rememberedHeight = open ? panePrefs?.heights[open.id] : undefined;
+  const dynamicHeight = clampPaneDimension(liveHeight ?? rememberedHeight ?? dynamicMaxHeight, dynamicMinHeight, dynamicMaxHeight);
+
+  const onDynamicResizeDown = (edge: ResizeEdge, e: ReactPointerEvent) => {
+    if (!dynamic || open === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const start = {
+      x: e.clientX, y: e.clientY, width: dynamicWidth, height: dynamicHeight,
+      position: livePosition,
+      bounds: railbarRef.current?.getBoundingClientRect() ?? null,
+      box: paneRef.current?.getBoundingClientRect() ?? null,
+    };
+    document.documentElement.dataset.packageWindowResizing = "true";
+    const move = (event: PointerEvent) => {
+      const dx = event.clientX - start.x;
+      const dy = event.clientY - start.y;
+      const width = edge.includes("e")
+        ? Math.min(dynamicMaxWidth, Math.max(dynamicMinWidth, start.width + dx))
+        : edge.includes("w")
+          ? Math.min(dynamicMaxWidth, Math.max(dynamicMinWidth, start.width - dx))
+          : start.width;
+      const height = edge.includes("s")
+        ? Math.min(dynamicMaxHeight, Math.max(dynamicMinHeight, start.height + dy))
+        : edge.includes("n")
+          ? Math.min(dynamicMaxHeight, Math.max(dynamicMinHeight, start.height - dy))
+          : start.height;
+      if (edge.includes("e") || edge.includes("w")) setLiveWidth(width);
+      if (edge.includes("n") || edge.includes("s")) setLiveHeight(height);
+      const proposedX = start.position.x + (edge.includes("e") ? width - start.width : 0);
+      const proposedY = start.position.y + (edge.includes("s")
+          ? (height - start.height) / 2
+          : edge.includes("n") ? (start.height - height) / 2 : 0);
+      const baseLeft = start.box ? start.box.right - start.position.x - width : 0;
+      const baseTop = start.bounds ? start.bounds.top + (start.bounds.height - height) / 2 : 0;
+      setLivePosition({
+        x: start.bounds
+          ? Math.min(0, Math.max(start.bounds.left - baseLeft, proposedX))
+          : proposedX,
+        y: start.bounds
+          ? Math.min(start.bounds.bottom - baseTop - height, Math.max(start.bounds.top - baseTop, proposedY))
+          : proposedY,
+      });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      delete document.documentElement.dataset.packageWindowResizing;
+      const width = paneRef.current?.getBoundingClientRect().width ?? dynamicWidth;
+      const height = paneRef.current?.getBoundingClientRect().height ?? dynamicHeight;
+      commitWidth(width);
+      if (projectId !== null) setPaneDynamicHeight(projectId, open.id, height);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up, { once: true });
+    window.addEventListener("pointercancel", up, { once: true });
+  };
+
+  const onDynamicResizeKey = (edge: "e" | "s", e: ReactKeyboardEvent) => {
+    if (!dynamic || open === null) return;
+    const step = e.shiftKey ? RESIZE_STEP_LARGE : RESIZE_STEP;
+    if (edge === "e") {
+      const next = e.key === "Home" ? dynamicMinWidth
+        : e.key === "End" ? dynamicMaxWidth
+          : e.key === "ArrowLeft" ? dynamicWidth - step
+            : e.key === "ArrowRight" ? dynamicWidth + step : null;
+      if (next === null) return;
+      e.preventDefault();
+      const width = Math.min(dynamicMaxWidth, Math.max(dynamicMinWidth, next));
+      setLiveWidth(width);
+      commitWidth(width);
+      return;
+    }
+    const next = e.key === "Home" ? dynamicMinHeight
+      : e.key === "End" ? dynamicMaxHeight
+        : e.key === "ArrowUp" ? dynamicHeight - step
+          : e.key === "ArrowDown" ? dynamicHeight + step : null;
+    if (next === null) return;
+    e.preventDefault();
+    const height = Math.min(dynamicMaxHeight, Math.max(dynamicMinHeight, next));
+    setLiveHeight(height);
+    if (projectId !== null) setPaneDynamicHeight(projectId, open.id, height);
+  };
+
+  // Package-owned portal surfaces carry the owner id through React context,
+  // so interacting with their menu/popover/tooltip is never an outside click.
+  useEffect(() => {
+    if (!dynamic || open === null) return;
+    const id = open.id;
+    const outside = (event: PointerEvent) => {
+      const modal = document.querySelector<HTMLElement>('[aria-modal="true"]');
+      if (modal && modal !== paneRef.current) return;
+      const owned = pathBelongsToPackageWindow(event.composedPath(), id);
+      if (!owned) closePaneFromOutside();
+    };
+    document.addEventListener("pointerdown", outside, true);
+    return () => document.removeEventListener("pointerdown", outside, true);
+  }, [dynamic, open?.id]);
+
   const onPaneKey = (e: ReactKeyboardEvent) => {
     if (e.key !== "Escape" || !isWorkspacePane || presentation === undefined) return;
-    if (presentation.escape !== "close" || open.id === "files") return;
-    e.stopPropagation();
-    closeWorkspacePane();
-  };
-
-  // Interaction inside the automatic full-screen fallback makes it sticky:
-  // geometry becoming admissible again then exposes "Dock beside Chat"
-  // instead of yanking the mode back behind the user's back.
-  const onLayerInteract = () => {
-    if (layered && !paneExpanded && !compact) {
-      interactedRef.current = true;
-      setStickyFullscreen(true);
+    if (presentation.escape !== "close") return;
+    if (e.target instanceof Element) {
+      const transient = e.target.closest('[role="menu"], [role="listbox"], [role="dialog"]');
+      if (transient && transient !== paneRef.current) return;
     }
+    e.stopPropagation();
+    handlePaneEscape();
   };
 
-  const dockNow = () => {
-    setStickyFullscreen(false);
-    interactedRef.current = false;
-    // Explicit user retry: drop the guard latch so the dock is judged fresh;
-    // a still-invalid dock re-promotes once (no loop — the latch re-arms).
-    guardLatchRef.current = null;
-    setGuardPromoted(false);
-    collapseWorkspacePane();
-  };
-
-  const geometryPending = isWorkspacePane && !measured && !compact && !paneExpanded;
+  const geometryPending = isWorkspacePane && !measured;
   const paneStyle: CSSProperties | undefined = open
     ? ({
-        "--rail-w": `${dockWidth}px`,
+        "--rail-w": `${dynamic ? dynamicWidth : dockWidth}px`,
+        "--package-window-h": `${dynamicHeight}px`,
+        "--package-window-x": `${livePosition.x}px`,
+        "--package-window-y": `${livePosition.y}px`,
         ...(geometryPending ? { visibility: "hidden", pointerEvents: "none" } : {}),
       } as CSSProperties)
     : { display: "none" };
@@ -605,23 +678,24 @@ export default function ContextRail() {
   return (
     <>
       {compactContext && <div className="menu-backdrop panel-sheet-backdrop" onClick={() => setRailPlugin(null)} />}
-      <aside className={`railbar${open ? " railbar-open" : ""}`} ref={railbarRef}>
+      <aside className={`railbar${open ? " railbar-open" : ""}${pinnedNarrow ? " railbar-pinned-narrow" : ""}`} ref={railbarRef}>
         {kept.length > 0 && (
         <div
           ref={paneRef}
           id={compact ? "polyth-panel-sheet" : undefined}
           className={compactContext
             ? "panel-sheet"
-            : `rail${isWorkspacePane ? " rail-workspace" : ""}${layered ? " rail-fullscreen" : ""}`}
+            : `rail${isWorkspacePane ? " rail-workspace" : ""}${dynamic ? " rail-dynamic" : ""}${pinned ? " rail-pinned" : ""}${pinnedNarrow ? " rail-pinned-narrow" : ""}${layered ? " rail-fullscreen" : ""}`}
           style={compactContext ? undefined : paneStyle}
-          role={compactContext ? "dialog" : "region"}
+          role={compactContext || layered || dynamic ? "dialog" : "region"}
           aria-modal={compactContext || undefined}
           aria-label={open?.title ?? tr("contextrail.panel")}
+          data-package-window-owner={open?.id}
+          data-package-window-mode={isWorkspacePane ? paneMode : "context"}
           data-geometry-ready={!geometryPending}
           onKeyDown={onPaneKey}
-          onPointerDownCapture={onLayerInteract}
         >
-          {!layered && !compactContext && (
+          {pinned && !pinnedNarrow && !compactContext && (
             <div
               ref={separatorRef}
               className="rail-resize"
@@ -636,31 +710,43 @@ export default function ContextRail() {
               aria-valuenow={dockWidth}
             />
           )}
+          {dynamic && RESIZE_EDGES.map((edge) => (
+            <div
+              key={edge}
+              className={`package-window-resize package-window-resize--${edge}`}
+              aria-hidden={edge !== "e" && edge !== "s"}
+              {...(edge === "e" || edge === "s" ? {
+                tabIndex: 0,
+                role: "separator",
+                "aria-orientation": edge === "e" ? "vertical" as const : "horizontal" as const,
+                "aria-label": tr("contextrail.resizeValue", { value: open.title }),
+                "aria-valuemin": edge === "e" ? dynamicMinWidth : dynamicMinHeight,
+                "aria-valuemax": edge === "e" ? dynamicMaxWidth : dynamicMaxHeight,
+                "aria-valuenow": edge === "e" ? dynamicWidth : dynamicHeight,
+                onKeyDown: (event: ReactKeyboardEvent) => onDynamicResizeKey(edge, event),
+              } : {})}
+              onPointerDown={(event) => onDynamicResizeDown(edge, event)}
+            />
+          ))}
           <ModuleView
             id={open?.id ?? "panel"}
             title={open?.title ?? ""}
             {...(open?.description ? { description: open.description } : {})}
             variant="rail"
             contentMode={isWorkspacePane ? "workspace" : "panel"}
+            icon={open?.icon ? open.icon() : undefined}
+            pinned={pinned}
+            fullscreen={layered}
+            onTogglePin={isWorkspacePane ? togglePanePin : undefined}
+            onToggleFullscreen={isWorkspacePane ? togglePaneFullscreen : undefined}
             onClose={() => {
-              if (compact) closeAllModules();
-              else if (isWorkspacePane) closeWorkspacePane();
+              if (isWorkspacePane) closeWorkspacePane();
+              else if (compact) closeAllModules();
               else setRailPlugin(null);
             }}
-            actions={<>
-              {!isWorkspacePane && (
-                <div className="rail-tabs"><SlotHost slot="contextRail.tabs" context={{ tab: rail, onSelect: toggleRailPlugin }} /></div>
-              )}
-              {isWorkspacePane && !layered && (
-                <button className="rail-toggle" onClick={expandWorkspacePane} title={tr("contextrail.expand")} aria-label={tr("contextrail.expandValue", { value: open?.title ?? tr("contextrail.panel") })}>⤢</button>
-              )}
-              {isWorkspacePane && layered && paneExpanded && !compact && (
-                <button className="rail-toggle" onClick={collapseWorkspacePane} title={tr("contextrail.collapse")} aria-label={tr("contextrail.collapseValue", { value: open?.title ?? tr("contextrail.panel") })}>⤡</button>
-              )}
-              {isWorkspacePane && layered && !paneExpanded && !compact && measured && admits && (
-                <button className="rail-toggle" onClick={dockNow}>{tr("contextrail.dockBesideChat")}</button>
-              )}
-            </>}
+            actions={!isWorkspacePane
+              ? <div className="rail-tabs"><SlotHost slot="contextRail.tabs" context={{ tab: rail, onSelect: toggleRailPlugin }} /></div>
+              : undefined}
           >
           {kept.map((s) => {
             const active = s.id === rail;
@@ -673,9 +759,13 @@ export default function ContextRail() {
                 inert={!active}
                 aria-hidden={!active || undefined}
               >
-                <PaneVisibilityContext.Provider value={active}>
-                  <s.component active={active} />
-                </PaneVisibilityContext.Provider>
+                <PackageWindowContext.Provider value={s.id}>
+                  <PaneVisibilityContext.Provider value={active}>
+                    <ViewErrorBoundary inline resetKey={`${s.id}:${projectId ?? ""}`}>
+                      <s.component active={active} />
+                    </ViewErrorBoundary>
+                  </PaneVisibilityContext.Provider>
+                </PackageWindowContext.Provider>
               </div>
             );
           })}

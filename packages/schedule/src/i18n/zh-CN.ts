@@ -44,6 +44,7 @@ export const zhCN: ScheduleMessages = {
   "scheduleview.runs": "跑",
   "scheduleview.s": "s",
   "scheduleview.schedule": "日程",
+  "scheduleview.createSchedule": "创建计划",
   "scheduleview.sendAPromptOnceOnAnInterval": "发送一次提示符，或按固定时间间隔发送，或按cron计划并指定时区发送。循环处理文件",
   "scheduleview.skipThisRun": "跳过本次运行",
   "scheduleview.tasks": "任务",

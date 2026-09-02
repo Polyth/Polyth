@@ -2,7 +2,6 @@
 .goals-page {
   container: goals-page / inline-size;
   width: 100%;
-  padding: var(--space-5) max(var(--space-5), calc((100% - 880px) / 2));
 }
 
 .goals-page .goals-head {
@@ -342,11 +341,7 @@
   .goals-page .goal-stat-cell + .goal-stat-cell { border-inline-start: 0; border-top: 1px solid var(--border-soft); }
 }
 
-@media (max-width: 820px) {
-  .goals-page { padding-bottom: max(var(--space-5), var(--safe-bottom)); }
-}
-
-@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+@container dialog-panel (max-width: 480px) {
   .goal-dialog .goal-dialog-intro,
   .goal-dialog .goal-attach { padding: var(--space-3); }
   .goal-dialog .goal-attach-row { grid-template-columns: 1fr; }

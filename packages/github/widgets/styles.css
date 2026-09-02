@@ -193,8 +193,7 @@ width: fit-content; max-width: 100%; overflow: hidden; color: var(--muted);
 justify-self: end; white-space: nowrap;
 }
 .github-page {
-width: 100%; max-width: 1440px; margin-inline: auto;
-  padding: var(--space-4) var(--gutter); gap: 14px;
+width: 100%; container: github-page / inline-size; gap: var(--space-3);
 }
 .github-head {
 display: flex; align-items: center; gap: 14px; min-width: 0;
@@ -683,11 +682,6 @@ max-width: 240px;
 }
 
 
-@media (max-width: 820px) {
-.github-page {
-max-width: none; padding: var(--space-3) var(--space-3) max(var(--space-3), var(--safe-bottom)); gap: var(--space-3);
-}
-}
 @container feature-panel (max-width: 700px) {
 .github-head {
 align-items: flex-start; flex-wrap: wrap;

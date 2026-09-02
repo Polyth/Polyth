@@ -3,7 +3,7 @@ import { installIntegrationsPackage } from "./integrations.ts";
 import { installMcpPackage } from "./mcp.ts";
 import { configurePackageReconcile, reconcilePackage } from "./reconcile.ts";
 import { registerBuiltinPackageTours } from "./onboarding/builtinTours.ts";
-import { getState, setActiveView } from "../store.ts";
+import { getState, openWorkspacePane, setActiveView } from "../store.ts";
 import { loadWebPackageInstallers } from "./webEntries.ts";
 import { webPackageHost } from "./webHost.ts";
 
@@ -91,9 +91,9 @@ async function syncPackages(): Promise<void> {
     const install = installers.get(id);
     if (install) active.set(id, install());
   }
-  // An active optional view must not survive a cold boot where its package is
-  // already disabled (there is no installed disposer to perform the handoff).
-  if (!next.has("workflow") && getState().activeView === "workflow") {
+  // Migrate pre-window active-view preferences after package registration.
+  const restoredView = getState().activeView;
+  if (restoredView !== "session" && !openWorkspacePane(restoredView)) {
     setActiveView("session");
   }
 

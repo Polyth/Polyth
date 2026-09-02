@@ -138,6 +138,16 @@ test("feature widgets import only the documented generic web shell", () => {
   );
 });
 
+test("package homes can only register through the system window seam", () => {
+  const violations: string[] = [];
+  for (const { id, dir, manifest } of featureManifests()) {
+    if (!manifest.polyth?.webEntry) continue;
+    const entry = readFileSync(join(dir, "widgets/index.tsx"), "utf8");
+    if (/workspaceSurfaces|__polyth(?:Workspace)?Surfaces/.test(entry)) violations.push(`${id}: legacy surface seam`);
+  }
+  assert.deepEqual(violations, [], "packages supply content and metadata; the host owns every window shell");
+});
+
 // These imports assemble package locale bundles and connect package-owned state
 // to generic shell controls. They are integration infrastructure, not feature UI.
 const GENERIC_PACKAGE_IMPORTERS = new Set([

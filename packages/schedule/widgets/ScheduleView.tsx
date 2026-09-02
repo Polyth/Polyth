@@ -286,7 +286,7 @@ export default function ScheduleView() {
             />
           </div>
           <span className="header-spacer" />
-          <Button variant="primary" disabled={!canCreate} onClick={create}>{tr("scheduleview.schedule")}</Button>
+          <Button variant="primary" disabled={!canCreate} onClick={create}>{tr("scheduleview.createSchedule")}</Button>
         </div>
         {previewError && <div className="form-error">{previewError}</div>}
         {preview && (

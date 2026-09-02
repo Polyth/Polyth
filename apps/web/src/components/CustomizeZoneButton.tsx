@@ -8,6 +8,7 @@ import {
 } from "../widgets/widgetLayout.ts";
 import { widgetsForZone } from "../widgets/zoneWidgets.ts";
 import { EditIcon, IconButton, Menu, type MenuEntry, type MenuProps } from "./ui/index.ts";
+import { widgetIconFor } from "../railIcons.ts";
 
 export default function CustomizeZoneButton({
   slot,
@@ -32,8 +33,9 @@ export default function CustomizeZoneButton({
     entries.push({ heading });
     entries.push(...items.map((widget): MenuEntry => ({
       id: `widget:${widget.id}`,
-      label: widget.title,
-      detail: widget.description,
+       label: widget.title,
+       detail: widget.description,
+       icon: widgetIconFor(widget),
       kind: "checkbox",
       checked,
       disabled: checked && layout.widgets[widget.id]?.requiredVisible === true,
@@ -50,7 +52,7 @@ export default function CustomizeZoneButton({
   addGroup(tr("settings.packagespage.disabled"), groups.inactive, false);
 
   return (
-    <Menu label={tr("settingsview.customize")} align={align} entries={entries}>
+    <Menu className="widget-choice-menu" label={tr("settingsview.customize")} align={align} entries={entries}>
       {(trigger) => (
         <IconButton
           {...trigger}

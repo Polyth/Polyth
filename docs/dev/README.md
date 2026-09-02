@@ -175,7 +175,7 @@ Feature UI lives in `packages/<feature>/widgets/` and registers through
 decision table and `docs/dev/widgets.md` for widgets. The mechanisms:
 
 - Full main-area module (Fusion, Walkthrough, Goals-style) → register a
-  **workspace surface** with `host.workspaceSurfaces.register(...)` (the
+  **package-window surface** with `host.surfaces.register(...)` (the
   `AppView` switch is gone; `Main.tsx` is shell composition only).
 - Right-rail panel → **rail surface** with `host.surfaces.register(...)`, or
   a `workspace.right.tabs` slot contribution (Knowledge's Tracks panel).

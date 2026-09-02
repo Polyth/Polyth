@@ -44,6 +44,7 @@ export const de: ScheduleMessages = {
   "scheduleview.runs": "Läufe",
   "scheduleview.s": "S",
   "scheduleview.schedule": "Zeitplan",
+  "scheduleview.createSchedule": "Zeitplan erstellen",
   "scheduleview.sendAPromptOnceOnAnInterval": "Senden Sie eine Erinnerung einmalig, in regelmäßigen Abständen oder regelmäßig per cron mit Zeitzone. Dateien in Schleife einbinden",
   "scheduleview.skipThisRun": "Diesen Lauf überspringen",
   "scheduleview.tasks": "Aufgaben",

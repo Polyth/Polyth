@@ -45,8 +45,8 @@ Rules of ownership:
 - **Host primitives stay contract-stable.** They are consumed by every
   package; changing one is a shared-contract change (find all consumers,
   update them, update tests).
-- **Package surfaces are content, not windows.** `WorkspaceHost` and
-  `ContextRail` always wrap them in core `ModuleView`; packages never emit or
+- **Package surfaces are content, not windows.** `ContextRail` always wraps
+  them in core `ModuleView`; packages never emit or
   style `.module-view*`/`.view-page`, duplicate the outer title, close,
   fullscreen, padding, scrolling, or responsive frame. A package may style a
   toolbar or detail heading inside its stable feature root.

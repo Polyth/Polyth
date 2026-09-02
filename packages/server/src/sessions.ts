@@ -5056,10 +5056,20 @@ export function createSessionService(deps: {
 
     async list(projectId) {
       const projections = await store.projections(projectId);
-      if (!deps.org || projections.length === 0) return projections;
+      const settled = await Promise.all(projections.map(async (projection) => {
+        if (projection.status !== "working" || !projection.parentId) return projection;
+        const events = await store.events(projection.id);
+        if (openTurnFromEvents(events)) return projection;
+        const latestTurnEvent = [...events].reverse().find((event) =>
+          event.type === "user/message" || event.type === "assistant/message");
+        if (latestTurnEvent?.type !== "assistant/message") return projection;
+        await updateProjectionQuietly(projection.id, { status: "idle" });
+        return (await store.projection(projection.id)) ?? { ...projection, status: "idle" };
+      }));
+      if (!deps.org || settled.length === 0) return settled;
       // Attention badges derive from durable events on every read (WP5).
-      const counts = await deps.org.attentionFor(projections.map((p) => p.id)).catch(() => ({} as Record<string, { questions: number; permissions: number; unread: number }>));
-      return projections.map((p) => {
+      const counts = await deps.org.attentionFor(settled.map((p) => p.id)).catch(() => ({} as Record<string, { questions: number; permissions: number; unread: number }>));
+      return settled.map((p) => {
         const c = counts[p.id];
         return c ? { ...p, attention: { questions: c.questions, permissions: c.permissions, unread: c.unread } } : p;
       });
@@ -5106,8 +5116,17 @@ export function createSessionService(deps: {
       return out;
     },
     async snapshot(sessionId) {
-      const p = await store.projection(sessionId);
+      let p = await store.projection(sessionId);
       if (!p) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      if (p.status === "working" && p.parentId) {
+        const events = await store.events(sessionId);
+        if (openTurnFromEvents(events)) return p;
+        const latestTurnEvent = [...events].reverse().find((event) =>
+          event.type === "user/message" || event.type === "assistant/message");
+        if (latestTurnEvent?.type === "assistant/message") {
+          p = (await updateProjectionQuietly(sessionId, { status: "idle" })) ?? { ...p, status: "idle" };
+        }
+      }
       return p;
     },
     async events(sessionId, afterSeq, page) {

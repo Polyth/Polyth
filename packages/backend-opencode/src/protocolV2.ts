@@ -451,7 +451,7 @@ const normalizeHistory = (body: unknown, path: string): RuntimeSessionMessage[] 
       .filter((part) => part?.type === "reasoning" && typeof part.text === "string")
       .map((part) => String(part?.text))
       .join("\n")
-      .slice(0, 5_000);
+      .slice(0, 50_000);
     if (text || reasoning) {
       result.push({ role: "assistant", text, ...(reasoning ? { reasoning } : {}) });
     }

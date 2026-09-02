@@ -289,7 +289,7 @@ color: var(--green);
 color: var(--red);
 }
 .git-page {
-max-width: 1200px; width: 100%; margin-inline: auto; padding: 24px max(24px, calc((100% - 1180px) / 2));
+width: 100%; container: git-page / inline-size;
 }
 .git-grid {
 display: grid; grid-template-columns: 300px 1fr; gap: 16px; align-items: start;
@@ -419,11 +419,6 @@ opacity: 1;
 @media (pointer: coarse) {
 .git-file-actions {
 opacity: 1; pointer-events: auto;
-}
-}
-@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-.rail-workspace .git-page {
-padding: 10px 12px;
 }
 }
 .git-current-identity {
@@ -743,13 +738,6 @@ color: var(--muted); background: var(--sunken);
 @container feature-panel (max-width: 980px) {
 .git-resource-grid {
 grid-template-columns: 1fr;
-}
-}
-/* Shell-level page chrome only; panel content responds to the feature-panel
-   ancestor supplied by core. */
-@media (max-width: 820px) {
-.git-page {
-max-width: none; padding: 10px 10px calc(10px + env(safe-area-inset-bottom, 0px)); gap: 10px;
 }
 }
 .git-page {

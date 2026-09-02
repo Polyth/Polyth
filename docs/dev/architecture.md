@@ -13,10 +13,10 @@ One-minute map for a new agent; everything after this section is the deep refere
 - **Extending the server:** add a feature package exposing a `RouteHandler` and register it at the composition root — never edit `packages/server/src/http.ts`.
 - **Extending the UI:** feature UI lives in the feature package
   (`packages/<feature>/widgets/`) and registers through `@polyth/web-sdk`
-  (`defineWebPackage` → `WebPackageHost`: slots, widgets, surfaces,
-  workspace surfaces, capabilities, settings, reducers). The host owns the
+  (`defineWebPackage` → `WebPackageHost`: slots, widgets, system package
+  windows, capabilities, settings, reducers). The host owns the
   registries (`apps/web/src/slots.ts`, `widgets/catalog.ts`, `surfaces.ts`,
-  `workspace/surfaceRegistry.ts`, `capabilities.ts`, `settings/registry.ts`)
+  `capabilities.ts`, `settings/registry.ts`)
   and renders contributions through `SlotHost`/surface hosts — never edit
   `App.tsx`/`Main.tsx` for a feature. Full guide: `docs/dev/ui.md`.
 - **Feature packages** (one directory each under `packages/`): permissions, goals, files, git, commands, terminal, multirun, fusion, walkthrough, schedule, knowledge, github, usage, browser, dictation, models, hotkeys, plugins, ssh, secure-safe, home-assistant, task-trackers, workflow, example-feature.
@@ -426,18 +426,16 @@ the widget placement slots (`workspace.header/left/main/right/bottom/floating`,
 
 Feature web UI registers through the **web-sdk host**
 (`@polyth/web-sdk`: `defineWebPackage` + `WebPackageHost` — slots, widgets,
-surfaces, workspace surfaces, capabilities, settings pages/items, reducers,
+system package-window surfaces, capabilities, settings pages/items, reducers,
 store, navigation, ui, errors). The host implements that contract in
 `apps/web/src/packages/webHost.ts` over the client registries
 (`slots.ts`, `widgets/catalog.ts`, `surfaces.ts`,
 `workspace/surfaceRegistry.ts`, `capabilities.ts`, `settings/registry.ts`,
 `packages/reducers.ts`); `SlotHost` and the surface/canvas hosts render
 contributions with per-contribution error isolation and deterministic
-ordering. Workspace main-area modules are workspace surfaces
-(`workspace/surfaceRegistry.ts`, hosted by
-`components/workspace/WorkspaceHost.ts`); right-rail panels are rail surfaces
-(`surfaces.ts`, hosted by `ContextRail.tsx`), and `workspace.right.tabs`
-slot items bridge into the rail (`slotSurfaces`).
+ordering. The built-in Chat remains the only internal workspace surface;
+package homes are system windows from `surfaces.ts`, hosted by
+`ContextRail.tsx` in dynamic, pinned, or fullscreen mode.
 
 Installed server-side plugins declare `UiSlotItem` descriptors (slot + module
 key) in their manifests, and `PluginContext.contribute` is the kernel seam —
@@ -445,7 +443,7 @@ but the production registry is wired with no slot sink and no client module
 bridge, so those descriptors are validated and stored, not rendered. The
 rendered extension path for packages is the web-sdk seam above; the
 `window.__polythSlots`/`__polythWidgets`/`__polythSurfaces`/
-`__polythWorkspaceSurfaces`/`__polythCapabilities` globals remain for legacy
+`__polythCapabilities` globals remain for legacy
 out-of-tree browser scripts.
 
 ## Persistence layout (`POLYTH_DATA_DIR`, default `./data`)

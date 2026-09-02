@@ -5,7 +5,6 @@ import type {
   SurfaceDefinition,
   WebPackageHost,
   WebStoreSnapshot,
-  WorkspaceSurfaceDefinition,
   WidgetDefinition,
   WidgetPlugin,
 } from "@polyth/web-sdk";
@@ -34,7 +33,6 @@ import {
   type WidgetPlugin as HostWidgetPlugin,
 } from "../widgets/catalog.ts";
 import { registerWebReducer } from "./reducers.ts";
-import { registerWorkspaceSurface } from "../workspace/surfaceRegistry.ts";
 
 const snapshot = (): WebStoreSnapshot => {
   const state = getState();
@@ -62,10 +60,6 @@ export const webPackageHost: WebPackageHost = {
   surfaces: {
     register: (definition: SurfaceDefinition) =>
       registerSurface(definition as unknown as RailSurface),
-  },
-  workspaceSurfaces: {
-    register: (definition: WorkspaceSurfaceDefinition) =>
-      registerWorkspaceSurface(definition),
   },
   capabilities: {
     register: (definition: CapabilityDefinition) =>

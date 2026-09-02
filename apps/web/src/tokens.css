@@ -83,6 +83,10 @@
   --control-pad-x-sm: 10px;
   --control-pad-x: 14px;
   --control-gap: var(--space-2);
+  /* Host-owned package-window seam. Packages consume these values and never
+     redefine them; themes may provide a controlled system-wide override. */
+  --package-window-header-h: 42px;
+  --package-window-resize-hit: 5px;
   /* Density seam: 0px on fine pointers; core styles raise it to --tap on
      coarse pointers so hit areas grow without enlarging control visuals. */
   --hit-min: 0px;

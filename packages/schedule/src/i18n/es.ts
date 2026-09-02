@@ -44,6 +44,7 @@ export const es: ScheduleMessages = {
   "scheduleview.runs": "Corre",
   "scheduleview.s": "s",
   "scheduleview.schedule": "Cronograma",
+  "scheduleview.createSchedule": "Crear programación",
   "scheduleview.sendAPromptOnceOnAnInterval": "Enviar un aviso una vez, a intervalos o con una cadencia cron con una zona horaria. Bucle de archivos en",
   "scheduleview.skipThisRun": "Sáltate esta carrera.",
   "scheduleview.tasks": "Tareas",

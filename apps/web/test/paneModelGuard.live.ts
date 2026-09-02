@@ -239,7 +239,7 @@ async function closeApp(h: Harness): Promise<void> {
 
 const paneSeed = (openSurface: string): Record<string, string> => ({
   [`polyth.workspacePane.v1.${projectId}`]: JSON.stringify({
-    version: 1, openSurface, expanded: false, widths: {}, lastResource: {},
+    version: 2, openSurface, mode: "dynamic", previousMode: "dynamic", widths: {}, heights: {}, lastResource: {},
   }),
 });
 

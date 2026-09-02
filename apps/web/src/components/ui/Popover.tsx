@@ -6,6 +6,7 @@ import { useEffect, useRef, type CSSProperties, type ReactNode, type RefObject }
 import { createPortal } from "react-dom";
 import { useEscape } from "../../useEscape.ts";
 import { useAnchoredPosition, type AnchoredAlign, type AnchoredSide } from "./useAnchoredPosition.ts";
+import { usePackageWindowOwner } from "./PackageWindowContext.ts";
 
 export interface PopoverProps {
   open: boolean;
@@ -41,6 +42,7 @@ export default function Popover({
   overflow = "auto",
 }: PopoverProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
+  const packageWindowOwner = usePackageWindowOwner();
   const position = useAnchoredPosition(open, anchorRef, surfaceRef, { align, side });
   useEscape(open, onClose);
 
@@ -66,7 +68,7 @@ export default function Popover({
 
   return createPortal(
     <>
-      <div className="ui-popover-backdrop" onPointerDown={onClose} />
+      <div className="ui-popover-backdrop" data-package-window-owner={packageWindowOwner ?? undefined} onPointerDown={onClose} />
       <div
         ref={surfaceRef}
         {...(role === "presentation" ? {} : { role })}
@@ -75,6 +77,7 @@ export default function Popover({
         style={style}
         data-side={position.side}
         data-overflow={overflow}
+        data-package-window-owner={packageWindowOwner ?? undefined}
       >
         {children}
       </div>

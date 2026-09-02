@@ -74,6 +74,27 @@ test("ModuleView renders one header, one description, one close button, and a bo
   }
 });
 
+test("ModuleView owns pin/fullscreen/close controls and preserves the full long title", async () => {
+  const calls: string[] = [];
+  const longTitle = "A very long translated package title that must remain on one line";
+  const { container, unmount } = await mount(ModuleView, {
+    id: "long", title: longTitle, pinned: true, fullscreen: false,
+    onTogglePin: () => calls.push("pin"),
+    onToggleFullscreen: () => calls.push("fullscreen"),
+    onClose: () => calls.push("close"),
+  });
+  try {
+    const title = container.querySelector(".module-view-title");
+    assert.equal(title?.getAttribute("title"), longTitle);
+    const buttons = [...container.querySelectorAll<HTMLButtonElement>(".module-view-head button")];
+    assert.deepEqual(buttons.map((button) => button.getAttribute("aria-label")), ["Unpin window", "Enter fullscreen", "Close panel"]);
+    buttons.forEach((button) => button.click());
+    assert.deepEqual(calls, ["pin", "fullscreen", "close"]);
+  } finally {
+    await unmount();
+  }
+});
+
 test("WorkspaceHost wraps every non-session surface in ModuleView, and never the session", async () => {
   const offs: Array<() => void> = [];
   setActiveView("session");
@@ -164,8 +185,8 @@ test("the workflow view has no bottom save/status bar and no Back to chat button
 
 test("each main-area surface registers a description for the shared header", async () => {
   const pairs: Array<[string, RegExp]> = [
-    ["../../../packages/goals/widgets/index.tsx", /workspaceSurfaces\.register\(\{[^}]*id: "goals"[^}]*description:/s],
-    ["../../../packages/workflow/widgets/index.tsx", /workspaceSurfaces\.register\(\{[\s\S]*?id: "workflow"[\s\S]*?description:/],
+    ["../../../packages/goals/widgets/index.tsx", /surfaces\.register\(\{[^}]*id: "goals"[^}]*description:/s],
+    ["../../../packages/workflow/widgets/index.tsx", /surfaces\.register\(\{[\s\S]*?id: "workflow"[\s\S]*?description:/],
     ["../../../packages/multirun/widgets/index.tsx", /id: "multirun", title: "[^"]+", description:/],
     ["../../../packages/fusion/widgets/index.tsx", /id: "fusion", title: "[^"]+", description:/],
     ["../../../packages/walkthrough/widgets/index.tsx", /id: "walkthrough", title: "[^"]+", description:/],

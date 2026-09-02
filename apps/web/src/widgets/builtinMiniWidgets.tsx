@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { setOverlay } from "../store.ts";
 import { defineWidgetPlugin, registerWidgetPlugin } from "./catalog.ts";
 import { tr } from "../i18n/index.ts";
@@ -87,5 +88,44 @@ const SHELL_ACTIONS_PLUGIN = defineWidgetPlugin({
     },
   ],
 });
+const COMPOSER_CONTROLS_PLUGIN = defineWidgetPlugin({
+  id: "composer-controls",
+  name: tr("widgets.builtinminiwidgets.applicationShell"),
+  widgets: [
+    {
+      id: "composer.effort",
+      title: tr("composer.thinking"),
+      description: tr("composer.thinking"),
+      kind: "mini-widget",
+      defaultSlot: "composer.trailing",
+      supportedSlots: ["composer.leading", "composer.trailing"],
+      defaultVisible: true,
+      defaultSize: { w: 1, h: 1 },
+      resizable: false,
+      audience: "simple",
+      order: 60,
+      render: (context) => context.composerEffortControl as ReactNode ?? null,
+    },
+    {
+      id: "composer.agent",
+      title: tr("composer.agent"),
+      description: tr("composer.agent"),
+      kind: "mini-widget",
+      defaultSlot: "composer.trailing",
+      supportedSlots: ["composer.leading", "composer.trailing"],
+      defaultVisible: true,
+      defaultSize: { w: 1, h: 1 },
+      resizable: false,
+      audience: "simple",
+      order: 70,
+      render: (context) => context.composerAgentControl as ReactNode ?? null,
+    },
+  ],
+});
 let installed = false;
-export function installBuiltinMiniWidgets(): void { if (installed) return; installed = true; registerWidgetPlugin(SHELL_ACTIONS_PLUGIN); }
+export function installBuiltinMiniWidgets(): void {
+  if (installed) return;
+  installed = true;
+  registerWidgetPlugin(SHELL_ACTIONS_PLUGIN);
+  registerWidgetPlugin(COMPOSER_CONTROLS_PLUGIN);
+}

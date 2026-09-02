@@ -352,8 +352,8 @@ test("the composer is adaptive, with one primary action at a time", async () => 
   assert.ok(composer.includes("composer-input-active"), "textarea focus is exposed for keyboard-safe shell CSS");
   assert.ok(composer.includes("composer-has-draft"), "the draft state drives the mic/send morph");
   assert.ok(
-    composer.includes("const expanded = !phoneLayout || inputFocused || working || shellMode"),
-    "focus, active runs, and shell mode expand the phone composer",
+    composer.includes("const expanded = !phoneLayout || inputFocused || shellMode"),
+    "focus and shell mode expand the phone composer; a working turn alone keeps it minified (Stop stays in the collapsed row)",
   );
   assert.ok(composer.includes('hasDraft ? " composer-has-draft" : ""'),
     "text and attachments retain their independent draft state");

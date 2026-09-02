@@ -9,6 +9,7 @@
 // the menu open so several can be toggled in one visit.
 import { useRef, useState, type ReactNode, type Ref, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import { usePackageWindowOwner } from "./PackageWindowContext.ts";
 import { useDismissibleMenu } from "../a11y/Menu.ts";
 import { useShellMode } from "../../responsiveShell.ts";
 import { tapFeedback } from "../../haptics.ts";
@@ -85,6 +86,7 @@ export default function Menu({
   label, title, entries, children, align = "start", className,
   open: controlledOpen, onOpenChange, returnFocusRef, footer,
 }: MenuProps) {
+  const packageWindowOwner = usePackageWindowOwner();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = controlledOpen ?? uncontrolledOpen;
   const setOpen = (next: boolean) => {
@@ -194,6 +196,7 @@ export default function Menu({
             visibility: position.ready ? undefined : "hidden",
           }}
           data-side={position.side}
+          data-package-window-owner={packageWindowOwner ?? undefined}
           onKeyDown={onMenuKeyDown}
         >
           {entries.map((entry, index) => renderEntry(entry, index, false))}

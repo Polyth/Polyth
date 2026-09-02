@@ -686,7 +686,7 @@ export const createLegacyProtocolAdapter = (
           .filter((part) => part.type === "reasoning")
           .map((part) => part.text ?? "")
           .join("\n")
-          .slice(0, 5_000);
+          .slice(0, 50_000);
         return text || reasoning ? [{ role, text, ...(reasoning ? { reasoning } : {}) }] : [];
       });
     },

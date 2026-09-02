@@ -1247,8 +1247,45 @@ export default function Composer({
     // never clear a different session if navigation happened meanwhile.
     if (getState().activeSessionId === target) requestComposerReplace("");
   };
-  // Bounded callbacks let the same configurable action widget live in either
-  // composer slot without owning session-creation state.
+  const thinkingVariants = selectedModel?.variants ?? [];
+  // UX-MOBILE: phones render model + reasoning effort in a header row above
+  // the editor (where the effort track has room to drag); the desktop rail
+  // keeps the same controls under the text. One element, one owner — only
+  // the placement differs.
+  const modelControl = !noModels && (
+      <ModelPicker
+        models={chatModels}
+        value={cfg.model}
+        recommended={recommendedModel}
+        direction="up"
+        usage={model.contextUsage?.inputTokens}
+        onPick={pickComposerModel}
+      />
+  );
+  const effortControl = !noModels && modelSupportsThinking(selectedModel) ? (
+    <EffortMenu
+      variants={thinkingVariants}
+      value={selectedThinking}
+      onPick={(thinking) => pickThinking(thinking || undefined)}
+      onCommit={preserveKeyboard}
+    />
+  ) : null;
+  const agentControl = chatAgents.length > 0 ? (
+    <Picker
+      className="composer-agent-chip"
+      label={tr("composer.agent")}
+      mobileSheet
+      direction="up"
+      items={agentItems}
+      value={agentValue}
+      searchable={false}
+      onPick={pickAgent}
+      placeholder={activeAgentLabel}
+      ariaLabel={tr("composer.selectAgentModeCurrentValue", { value: activeAgentLabel })}
+    />
+  ) : <span className="agent-type-badge">{activeAgentLabel}</span>;
+  // Composer controls are ordinary mini-widgets: one placement/visibility
+  // system owns Workflow, effort, and agent without duplicating toggle state.
   const slotContext = {
     sessionId: session?.id,
     projectId: activeProjectId ?? undefined,
@@ -1263,32 +1300,9 @@ export default function Composer({
     workflowDraftText: text,
     workflowAttachmentCount: attachments.length,
     consumeWorkflowDraft,
+    composerEffortControl: effortControl,
+    composerAgentControl: agentControl,
   };
-  const thinkingVariants = selectedModel?.variants ?? [];
-  // UX-MOBILE: phones render model + reasoning effort in a header row above
-  // the editor (where the effort track has room to drag); the desktop rail
-  // keeps the same controls under the text. One element, one owner — only
-  // the placement differs.
-  const executionControls = !noModels && (
-    <>
-      <ModelPicker
-        models={chatModels}
-        value={cfg.model}
-        recommended={recommendedModel}
-        direction="up"
-        usage={model.contextUsage?.inputTokens}
-        onPick={pickComposerModel}
-      />
-      {modelSupportsThinking(selectedModel) && (
-        <EffortMenu
-          variants={thinkingVariants}
-          value={selectedThinking}
-          onPick={(thinking) => pickThinking(thinking || undefined)}
-          onCommit={preserveKeyboard}
-        />
-      )}
-    </>
-  );
 
   const followUp = getUiSettings().followUpBehavior;
   const borrowedEpochPending = session?.status === "epoch-pending"
@@ -1330,7 +1344,12 @@ export default function Composer({
       .finally(() => setSuggestionBusy(false));
   }, [activeSessionSeq, canGenerateNextAction, text]);
   const hasDraft = text.trim() !== "" || attachments.length > 0;
-  const expanded = !phoneLayout || inputFocused || working || shellMode;
+  // On phones the composer only unfolds when it is actually being used: focus,
+  // a shell command, or a draft in progress. A working turn alone keeps it in
+  // its minified resting state (same as the fresh-session composer) so a busy
+  // agent never inflates the interaction dock — Stop stays reachable in the
+  // collapsed row.
+  const expanded = !phoneLayout || inputFocused || shellMode;
   const stateClass = phoneLayout
     ? ` composer-mobile ${expanded ? "composer-expanded" : "composer-collapsed"}${inputFocused ? " composer-input-active" : ""}${hasDraft ? " composer-has-draft" : ""}`
     : "";
@@ -1431,9 +1450,9 @@ export default function Composer({
       {attachments.length > 0 && !noModels && attachNote && (
         <div className="composer-attach-note">{attachNote}</div>
       )}
-      {phoneLayout && executionControls && (
+      {phoneLayout && modelControl && (
         <div className="composer-config-top">
-          {executionControls}
+          {modelControl}
         </div>
       )}
       <div className="composer-input">
@@ -1577,23 +1596,7 @@ export default function Composer({
             <SlotHost slot="composer.trailing" context={slotContext} customizable />
           </span>
           <div className="composer-config">
-            {!phoneLayout && executionControls}
-            {chatAgents.length > 0 ? (
-              <Picker
-                className="composer-agent-chip"
-                label={tr("composer.agent")}
-                mobileSheet
-                direction="up"
-                items={agentItems}
-                value={agentValue}
-                searchable={false}
-                onPick={pickAgent}
-                placeholder={activeAgentLabel}
-                ariaLabel={tr("composer.selectAgentModeCurrentValue", { value: activeAgentLabel })}
-              />
-            ) : (
-              <span className="agent-type-badge">{activeAgentLabel}</span>
-            )}
+            {!phoneLayout && modelControl}
           </div>
           <span className="composer-primary">
             {canStop ? (

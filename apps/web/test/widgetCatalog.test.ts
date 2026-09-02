@@ -40,9 +40,21 @@ test("workflow package declares a visible, placeable composer action", () => {
   assert.equal(widget.defaultSlot, "composer.trailing");
   assert.deepEqual(widget.supportedSlots, ["composer.leading", "composer.trailing"]);
   assert.equal(widget.defaultVisible, true);
-  assert.equal(widget.requiredVisible, true);
+  assert.notEqual(widget.requiredVisible, true);
   assert.equal(widget.order, 50);
   assert.equal(typeof widget.render, "function");
+});
+
+test("agent and effort are configurable composer controls", () => {
+  const byId = new Map(listWidgets().map((widget) => [widget.id, widget]));
+  for (const id of ["composer.agent", "composer.effort"]) {
+    const widget = byId.get(id);
+    assert.equal(widget?.kind, "mini-widget");
+    assert.equal(widget?.defaultSlot, "composer.trailing");
+    assert.deepEqual(widget?.supportedSlots, ["composer.leading", "composer.trailing"]);
+    assert.equal(widget?.defaultVisible, true);
+    assert.notEqual(widget?.requiredVisible, true);
+  }
 });
 
 test("workflow package registers its own composer widget", () => {
@@ -50,7 +62,7 @@ test("workflow package registers its own composer widget", () => {
   const widgets = listWidgets().filter((widget) => widget.pluginId === WORKFLOW_WIDGET_PLUGIN.id);
   assert.deepEqual(
     widgets.map((widget) => widget.id).sort(),
-    ["workflow.active-run", "workflow.composer-action"],
+    ["workflow.composer-action"],
   );
   assert.ok(widgets.every((widget) => typeof widget.render === "function"));
   unregister();

@@ -3,7 +3,7 @@ import type { WorkflowRunDto, WorkflowRunNodeDto } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 import { openSession } from "../../../apps/web/src/init.ts";
 import { Icon } from "../../../apps/web/src/icons.tsx";
-import { getState, setActiveView, setUiError } from "../../../apps/web/src/store.ts";
+import { getState, openWorkspacePane, setUiError } from "../../../apps/web/src/store.ts";
 import { handOffWorkflowLaunch } from "./workflowLaunch.ts";
 import { publishWorkflowRun } from "./workflowMonitor.ts";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
@@ -79,7 +79,7 @@ export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
         run: shownRun,
       });
     }
-    setActiveView("workflow");
+    openWorkspacePane("workflow");
   };
 
   return (

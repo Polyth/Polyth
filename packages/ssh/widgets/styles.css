@@ -65,14 +65,8 @@
   font-size: var(--font-meta);
 }
 
-@media (max-width: 700px) {
-  .dialog-panel.ssh-project-dialog {
-    width: 100%;
-    height: var(--visual-vh, 100dvh);
-    max-height: var(--visual-vh, 100dvh);
-    border: 0;
-    border-radius: 0;
-  }
+.ssh-project-dialog { container: ssh-project-dialog / inline-size; }
+@container ssh-project-dialog (max-width: 700px) {
   .ssh-project-dialog .ssh-dialog-server,
   .ssh-project-dialog .ssh-dialog-meta {
     margin-inline: var(--space-3);

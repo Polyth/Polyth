@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { formatCombo } from "@polyth/hotkeys";
 import {
-  closeWorkspacePane, getState, setActiveView, useActiveModel, useStore,
+  closeWorkspacePane, getState, setActiveView, useStore,
   openSettingsPage, setOverlay, setRailPlugin, setSidebarOpen,
   toggleWorkspacePane, type AppView,
 } from "../store.ts";
 import { MOD } from "../format.ts";
-import { contextGauge, type ContextGauge } from "../reduce.ts";
 import { useShellMode, type ShellMode } from "../responsiveShell.ts";
 import {
   useResolvedCapabilities,
@@ -20,7 +19,6 @@ import {
   FolderIcon, IconButton, InfoIcon, LockIcon, Menu, MenuIcon, SettingsIcon,
   type MenuEntry,
 } from "./ui/index.ts";
-import { useUiSettings } from "../uiPrefs.ts";
 import MobileNavigationRail from "./mobile/MobileNavigationRail.tsx";
 import MobileSessionHeader from "./mobile/MobileSessionHeader.tsx";
 import MobileViewHeader from "./mobile/MobileViewHeader.tsx";
@@ -31,10 +29,10 @@ import { getDragCapability, setDragCapability, CAPABILITY_MIME } from "../dnd.ts
 import {
   moveCapabilityBefore, setCapabilityTierOrder, setPlacementOverride, useCapabilityPlacements,
 } from "../capabilityLayout.ts";
-import { setCustomizeMode, useCustomizeActive, useCustomizeMode } from "../useShiftArmed.ts";
+import { useCustomizeActive } from "../useShiftArmed.ts";
+import { useSidebarLayout } from "../sidebarLayout.ts";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import DesktopSessionStatus from "./DesktopSessionStatus.tsx";
-import ChatMetrics from "./ChatMetrics.tsx";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -105,7 +103,6 @@ function capabilityIcon(id: string): React.ReactNode {
 function CapabilityNav() {
   const resolved = useResolvedCapabilities();
   const placements = useCapabilityPlacements();
-  const ui = useUiSettings();
   const keymap = useKeymap();
   const customizeActive = useCustomizeActive();
   useStore((s) => `${s.activeView}:${s.railPlugin ?? ""}:${s.paneFullscreen}`);
@@ -144,6 +141,7 @@ function CapabilityNav() {
   const entryFor = (capability: ResolvedCapability, checked: boolean): MenuEntry => ({
     id: `capability:${capability.descriptor.id}`,
     label: capability.descriptor.label,
+    icon: railIconFor(capability.descriptor.id),
     kind: "checkbox",
     checked,
     disabled: capability.descriptor.id === "session",
@@ -162,8 +160,8 @@ function CapabilityNav() {
 
   return (
     <nav
-      className={`view-switcher top-rail-${ui.topRailAlignment} customize-zone`}
-      aria-label={ui.topRailAlignment === "left" ? tr("header.workspaceToolsLeftOfCenter") : tr("header.workspaceToolsCentered")}
+      className="view-switcher customize-zone"
+      aria-label={tr("header.workspaceToolsLeftOfCenter")}
     >
       <div className="view-switcher-pill">
         {topRail.map((c) => {
@@ -196,39 +194,22 @@ function CapabilityNav() {
         {/* Widget-areas (WA3): widgets placed into the "Top toolbar" area
             render alongside the built-in tier rail. */}
         <SlotHost slot="app.header.center" context={{ editing: false }} customizable />
+        <Menu
+          label="More workspace tools"
+          align="start"
+          entries={topRail.map((capability) => ({
+            id: `open:${capability.descriptor.id}`,
+            label: capability.descriptor.label,
+            onSelect: () => capability.descriptor.id === "terminal"
+              ? toggleWorkspacePane("terminal")
+              : toggleCapability(capability.descriptor.id, capability.descriptor.open),
+          }))}
+        >
+          {(trigger) => <button className="view-icon header-rail-overflow" title="More workspace tools" aria-label="More workspace tools" {...trigger}><Icon.more /></button>}
+        </Menu>
       </div>
       <CustomizeZoneButton slot="app.header.center" extraEntries={capabilityEntries} />
     </nav>
-  );
-}
-
-function ContextRing({ gauge }: { gauge: ContextGauge }) {
-  const r = 13;
-  const c = 2 * Math.PI * r;
-  const pct = gauge.known ? gauge.percent : 0;
-  const dash = (pct / 100) * c;
-  const label = gauge.known
-    ? tr("header.valueContextEstimateValueOfValueTokens", { pct: pct, inputTokens: gauge.inputTokens, contextTokens: gauge.contextTokens })
-    : tr("header.contextEstimateUnknownModelMetadataUnavailable");
-  return (
-    <svg className={`ctx-ring ${gauge.level}`} width="30" height="30" viewBox="0 0 36 36" aria-label={label}>
-      <title>{label}</title>
-      <circle cx="18" cy="18" r={r} fill="none" stroke="var(--border)" strokeWidth="2.6" />
-      <circle
-        cx="18"
-        cy="18"
-        r={r}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.6"
-        strokeLinecap="round"
-        strokeDasharray={`${dash} ${c}`}
-        transform="rotate(-90 18 18)"
-      />
-      <text x="18" y="19.5" textAnchor="middle" fontSize="8.5" fontWeight="700" fill="currentColor">
-        {gauge.known ? pct : "?"}
-      </text>
-    </svg>
   );
 }
 
@@ -339,26 +320,16 @@ function UserMenu({ githubUser }: { githubUser: GithubStatusDto["user"] }) {
 export default function Header() {
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const project = useStore((s) => s.projectRegistry.projects.find((p) => p.id === s.activeProjectId) ?? null);
-  const models = useStore((s) => s.models);
-  const model = useActiveModel();
   const view = useStore((s) => s.activeView);
   const workspaceMode = useWorkspaceMode();
   const [githubUser, setGithubUser] = useState<GithubStatusDto["user"]>(null);
-  const customizeMode = useCustomizeMode();
 
   const mode = useShellMode();
   const compact = mode !== "wide";
+  const sidebarLayout = useSidebarLayout();
   const chatSurface = workspaceMode === "chat" && view === "session";
-  const activeModel = model.contextUsage?.model ?? model.turn?.model ?? session?.model;
-  const activeModelDescriptor = activeModel
-    ? models.find((candidate) =>
-        candidate.providerID === activeModel.providerID
-        && candidate.modelID === activeModel.modelID)
-    : undefined;
-  const gauge = contextGauge(model, activeModelDescriptor?.context);
-  const showContextRing = mode === "wide" && gauge.known && gauge.percent >= 60;
   useResizeFocusHandoff(mode);
-  const switchWorkspaceMode = (next: "chat" | "widgets" | "edit") => {
+  const switchWorkspaceMode = (next: "chat" | "widgets") => {
     closeWorkspacePane();
     setActiveView("session");
     setWorkspaceMode(next);
@@ -387,7 +358,10 @@ export default function Header() {
 
   return (
     <>
-      <header className={`header${compact ? " header-compact" : ""}${chatSurface ? " header-chat" : ""}`}>
+      <header
+        className={`header${compact ? " header-compact" : ""}${chatSurface ? " header-chat" : ""}`}
+        style={{ "--chat-center-offset": compact ? "0px" : `${(sidebarLayout.collapsed ? 46 : sidebarLayout.width) / 2}px` } as React.CSSProperties}
+      >
         {compact && <DrawerTrigger />}
         {compact && chatSurface && (
           <IconButton
@@ -399,45 +373,21 @@ export default function Header() {
             onClick={() => setSidebarOpen(true)}
           />
         )}
-        {(!compact || !chatSurface) && (
-          <button className="header-brand" aria-label={tr("header.polythHome")} onClick={() => switchWorkspaceMode("chat")}>
+        <div className="header-left-cluster">
+          {(!compact || !chatSurface) && <button className="header-brand header-control" aria-label={tr("header.polythHome")} onClick={() => switchWorkspaceMode("chat")}>
             <span className="polyth-mark">{tr("header.p")}</span>
             <strong>{tr("header.polyth")}</strong>
-          </button>
-        )}
-        {(!compact || !chatSurface) && (
-          <div className="workspace-mode-switch customize-zone" role="group" aria-label={tr("header.workspaceView")}>
-            <button
-              className={workspaceMode === "chat" ? "active" : ""}
-              aria-pressed={workspaceMode === "chat"}
-              onClick={() => switchWorkspaceMode("chat")}
-            >{tr("header.chat")}</button>
-            <button
-              className={workspaceMode !== "chat" ? "active" : ""}
-              aria-pressed={workspaceMode !== "chat"}
-              onClick={() => switchWorkspaceMode("widgets")}
-            >{tr("header.canvas")}</button>
-            <button
-              className={customizeMode ? "active" : ""}
-              aria-pressed={customizeMode}
-              onClick={() => setCustomizeMode(!customizeMode)}
-            >{customizeMode ? tr("common.done") : tr("common.edit")}</button>
-          </div>
-        )}
-        {workspaceMode === "chat" && !compact && <CapabilityNav />}
+          </button>}
+          {(!compact || !chatSurface) && <div className="workspace-mode-switch" role="group" aria-label={tr("header.workspaceView")}>
+            <button className={workspaceMode === "chat" ? "active" : ""} aria-pressed={workspaceMode === "chat"} onClick={() => switchWorkspaceMode("chat")}>{tr("header.chat")}</button>
+            <button className={workspaceMode !== "chat" ? "active" : ""} aria-pressed={workspaceMode !== "chat"} onClick={() => switchWorkspaceMode("widgets")}>{tr("header.canvas")}</button>
+          </div>}
+          {workspaceMode === "chat" && !compact && <><span className="header-divider" aria-hidden="true" /><CapabilityNav /></>}
+        </div>
+        {!compact && session && <DesktopSessionStatus />}
         <span className="header-spacer" />
         {(!compact || !chatSurface) && (
           <div className="header-actions customize-zone" aria-label={tr("header.application")}>
-            {chatSurface && <DesktopSessionStatus />}
-            {chatSurface && session && <ChatMetrics session={session} model={model} />}
-            {showContextRing && <ContextRing gauge={gauge} />}
-            {workspaceMode === "chat" && session && (
-              <SlotHost
-                slot="session.header.actions"
-                context={{ sessionId: session.id, status: session.status, working: model.turn?.status === "working" }}
-                customizable
-              />
-            )}
             <SlotHost
               slot="app.header.actions"
               context={{ projectId: project?.id ?? null, sessionId: session?.id ?? null, workspaceMode }}

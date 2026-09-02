@@ -44,6 +44,7 @@ export const bg: ScheduleMessages = {
   "scheduleview.runs": "Бягания",
   "scheduleview.s": "с",
   "scheduleview.schedule": "График",
+  "scheduleview.createSchedule": "Създаване на график",
   "scheduleview.sendAPromptOnceOnAnInterval": "Изпращане на подкана веднъж, на интервал или на cron ритъм с часова зона. Циклично завъртане на файлове в",
   "scheduleview.skipThisRun": "Пропуснете това бягане",
   "scheduleview.tasks": "Задачи",

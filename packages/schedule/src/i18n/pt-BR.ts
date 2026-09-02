@@ -44,6 +44,7 @@ export const ptBR: ScheduleMessages = {
   "scheduleview.runs": "Corridas",
   "scheduleview.s": "s",
   "scheduleview.schedule": "Agendar",
+  "scheduleview.createSchedule": "Criar agendamento",
   "scheduleview.sendAPromptOnceOnAnInterval": "Enviar um aviso uma única vez, em um intervalo ou em uma cadência cron com um fuso horário. Repetir arquivos em",
   "scheduleview.skipThisRun": "Pule esta corrida",
   "scheduleview.tasks": "Tarefas",

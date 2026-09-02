@@ -44,6 +44,7 @@ export const fr: ScheduleMessages = {
   "scheduleview.runs": "Courses",
   "scheduleview.s": "s",
   "scheduleview.schedule": "Calendrier",
+  "scheduleview.createSchedule": "Créer une planification",
   "scheduleview.sendAPromptOnceOnAnInterval": "Envoyer une invite ponctuellement, à intervalles réguliers ou selon une cadence cron avec fuseau horaire. Boucler les fichiers dans",
   "scheduleview.skipThisRun": "Évitez cette course",
   "scheduleview.tasks": "Tâches",

@@ -1,29 +1,10 @@
 /* Package-owned workflow web styles. The core ModuleView owns window chrome. */
 
-.workflow-run-indicator {
-  min-width: 0; max-width: 28rem; color: var(--accent);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.workflow-run-indicator-idle {
-  display: inline-flex; align-items: center; min-height: var(--control-h);
-  padding-inline: var(--control-pad-x); color: var(--text-dim);
-  font-size: var(--font-label); font-weight: 650;
-}
-.workflow-run-indicator.waiting {
-border-color: color-mix(in srgb, var(--amber) 40%, var(--border));
-  background: color-mix(in srgb, var(--amber) 9%, transparent); color: var(--amber);
-}
 .workflow-page {
 container: workflow-page / inline-size; gap: var(--space-4); padding-bottom: var(--space-6);
 }
-.workflow-page-header {
-display: flex; align-items: center; gap: var(--space-3);
-}
 .workflow-page-title {
 min-width: 0;
-}
-.workflow-back-chat {
-margin-left: auto;
 }
 .workflow-page-icon {
 flex: none; width: 40px; height: 40px; display: grid; place-items: center;
@@ -273,9 +254,6 @@ color: var(--accent); font-size: var(--font-meta); letter-spacing: .02em; text-t
 .workflow-layers-toggle {
 align-self: stretch; min-height: 32px;
 }
-.workflow-mobile-savebar {
-display: none;
-}
 .workflow-graph-error {
 min-height: 28px; display: inline-flex; align-items: center;
 }
@@ -485,6 +463,9 @@ font-size: var(--font-meta); line-height: var(--font-meta-lh); font-style: itali
 .workflow-open-session {
 align-self: flex-start; margin-top: auto;
 }
+@media (pointer: coarse) {
+.workflow-open-session { min-height: var(--tap); }
+}
 .workflow-results-actions {
 display: flex; justify-content: flex-end; gap: var(--space-2);
 }
@@ -493,43 +474,9 @@ display: flex; justify-content: flex-end; gap: var(--space-2);
 .workflow-run-form {
 border-radius: 0;
 }
-.dialog-backdrop.workflow-launch-backdrop {
-inset: auto 0; top: var(--visual-offset, 0px);
-  height: min(var(--visual-vh, 100dvh), calc(100dvh - var(--keyboard-inset, 0px)));
-  padding: max(var(--space-3), var(--safe-top)) var(--space-3) max(var(--space-3), var(--safe-bottom));
-  animation: workflow-backdrop-in var(--motion-fast) var(--motion-ease) both;
-}
-.dialog-panel.workflow-launch-dialog {
-width: min(680px, calc(100vw - 48px));
-  max-height: min(
-    760px,
-    calc(
-      min(var(--visual-vh, 100dvh), calc(100dvh - var(--keyboard-inset, 0px)))
-      - max(var(--space-5), var(--safe-top))
-      - max(var(--space-5), var(--safe-bottom))
-    )
-  );
-  gap: 0; overflow: hidden;
-  animation: workflow-dialog-in var(--motion-normal) var(--motion-ease) both;
-}
-.dialog-backdrop.workflow-launch-backdrop.is-closing {
-animation: workflow-backdrop-out var(--motion-fast) var(--motion-ease) both;
-}
-.dialog-backdrop.workflow-launch-backdrop.is-closing .workflow-launch-dialog {
-animation: workflow-dialog-out var(--motion-fast) var(--motion-ease) both;
-}
-.workflow-launch-heading {
-flex: none; display: flex; align-items: center; gap: 11px;
-  padding: 16px 18px 12px; border-bottom: 1px solid var(--hair);
-}
-.workflow-launch-heading > div {
-min-width: 0; flex: 1;
-}
-.workflow-launch-heading h2 {
-margin: 0; color: var(--text); font-size: 16px;
-}
-.workflow-launch-heading p {
-margin: 3px 0 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh);
+.workflow-launch-description {
+margin: 0; padding: var(--space-3) var(--space-4) 0; color: var(--muted);
+  font-size: var(--font-meta); line-height: var(--font-meta-lh);
 }
 .workflow-launch-task {
 flex: none; padding: 14px 18px 10px;
@@ -736,23 +683,7 @@ to { opacity: 1; }
 from { opacity: 0; }
 to { opacity: 1; }
 }
-@keyframes workflow-backdrop-out {
-from { opacity: 1; }
-to { opacity: 0; }
-}
-@keyframes workflow-dialog-in {
-from { opacity: 0; transform: translateY(var(--space-2)) scale(0.98); }
-to { opacity: 1; transform: none; }
-}
-@keyframes workflow-dialog-out {
-from { opacity: 1; transform: none; }
-to { opacity: 0; transform: translateY(var(--space-2)) scale(0.98); }
-}
 @media (prefers-reduced-motion: reduce) {
-.dialog-backdrop.workflow-launch-backdrop,
-.dialog-backdrop.workflow-launch-backdrop.is-closing,
-.workflow-launch-dialog,
-.dialog-backdrop.workflow-launch-backdrop.is-closing .workflow-launch-dialog,
 .workflow-launch-row,
 .workflow-skeleton-row :is(i, b, small),
 .workflow-skeleton-block,
@@ -813,21 +744,7 @@ width: var(--tap); min-width: var(--tap);
 }
 
 }
-/* Launch dialog, chat-timeline card, and header indicator live outside the
-   feature-panel container (overlay/timeline/shell), so their touch floors
-   key off the viewport. */
-@media (max-width: 820px) {
-.workflow-run-indicator {
-width: var(--tap); min-width: var(--tap); height: var(--tap);
-}
-}
-
 @container workflow-page (max-width: 560px) {
-.workflow-page-header,
-.workflow-mobile-savebar {
-flex: none;
-}
-
 .workflow-layout {
 flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto;
     overscroll-behavior-y: contain; scroll-padding-block: 10px; padding-block-end: 2px;
@@ -842,21 +759,8 @@ flex: 0 0 auto;
 white-space: normal;
 }
 
-.workflow-page-header {
-display: grid; grid-template-columns: var(--tap) minmax(0, 1fr); grid-template-areas: "back title";
-    align-items: center; gap: 10px; min-height: 68px;
-}
-
-.workflow-page-header .workflow-page-icon {
-display: none;
-}
-
 .workflow-page-title {
 grid-area: title;
-}
-
-.workflow-back-chat {
-grid-area: back; margin: 0;
 }
 
 .workflow-layout {
@@ -908,10 +812,6 @@ width: 100%;
 flex: 1;
 }
 
-.workflow-back-chat {
-min-height: var(--tap);
-}
-
 .workflow-results-actions {
 align-items: stretch; flex-direction: column;
 }
@@ -922,7 +822,7 @@ width: 100%;
 }
 /* Launcher rows (dialog) and the chat-timeline card footer are outside the
    feature-panel container; their compact layout stays viewport-driven. */
-@media (max-width: 620px) {
+@container dialog-panel (max-width: 620px) {
 .workflow-launch-row {
 align-items: stretch; flex-wrap: wrap;
 }
@@ -940,11 +840,6 @@ flex: 1; min-height: var(--tap);
 }
 }
 
-@media (max-width: 480px) {
-.dialog-backdrop.workflow-launch-backdrop {
-padding: max(10px, var(--safe-top)) 10px max(10px, var(--safe-bottom));
-}
-}
 @container workflow-page (max-width: 440px) {
 .workflow-page :is(button, input:not([type="checkbox"]), select, textarea, .workflow-dependency) {
 min-height: var(--tap);
@@ -1002,25 +897,8 @@ width: 100%;
 }
 /* Launch dialog and chat-timeline card are overlay/timeline surfaces outside
    the feature-panel container; keep their compact layout viewport-driven. */
-@media (max-width: 480px) {
-.workflow-launch-heading {
-padding: 12px;
-}
-
-.workflow-launch-heading > .ui-icon-btn {
-width: var(--tap); min-width: var(--tap); height: var(--tap); min-height: var(--tap); flex: none;
-}
-
+@container dialog-panel (max-width: 480px) {
 .workflow-launch-dialog .ui-btn { min-height: var(--tap); }
-
-.dialog-panel.workflow-launch-dialog {
-width: calc(100vw - 20px);
-    max-height: calc(
-      min(var(--visual-vh, 100dvh), calc(100dvh - var(--keyboard-inset, 0px)))
-      - max(20px, var(--safe-top))
-      - max(20px, var(--safe-bottom))
-    );
-}
 
 .workflow-launch-dialog > .workflow-list-state,
 .workflow-launch-list,
@@ -1030,15 +908,6 @@ min-height: 0;
 
 .workflow-launch-task {
 padding-inline: 12px;
-}
-
-body[data-keyboard="open"] .workflow-launch-heading {
-padding-block: 8px;
-}
-
-body[data-keyboard="open"] .workflow-launch-heading p {
-position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
 
 body[data-keyboard="open"] .workflow-launch-task {
@@ -1069,52 +938,18 @@ align-items: stretch; flex-direction: column; padding: 10px 12px;
 min-width: 0;
 }
 
-.workflow-timeline-card {
-padding: 11px;
 }
 
-.workflow-timeline-card li {
-flex-wrap: wrap;
+@media (max-width: 480px) {
+.workflow-timeline-card { padding: 11px; }
+.workflow-timeline-card li { flex-wrap: wrap; }
+.workflow-timeline-card li > button { width: 100%; min-height: var(--tap); }
+.workflow-timeline-nodes-toggle { width: 100%; justify-content: center; min-height: var(--tap); }
+.workflow-timeline-card > footer { align-items: stretch; flex-direction: column; }
+.workflow-timeline-card > footer .ui-btn { width: 100%; min-height: var(--tap); }
 }
 
-.workflow-timeline-card li > button {
-width: 100%; min-height: var(--tap);
-}
-
-.workflow-timeline-nodes-toggle {
-width: 100%; justify-content: center; min-height: var(--tap);
-}
-
-.workflow-timeline-card > footer {
-align-items: stretch; flex-direction: column;
-}
-
-.workflow-timeline-card > footer .ui-btn {
-width: 100%;
-}
-}
-
-@media (max-height: 480px) and (pointer: coarse) {
-.dialog-backdrop.workflow-launch-backdrop {
-padding: 10px;
-}
-}
 @media (max-height: 560px) {
-.dialog-panel.workflow-launch-dialog {
-max-height: calc(
-      min(var(--visual-vh, 100dvh), calc(100dvh - var(--keyboard-inset, 0px)))
-      - 20px
-    );
-}
-
-.workflow-launch-heading {
-padding-block: 9px;
-}
-
-.workflow-launch-heading .workflow-page-icon {
-width: 34px; height: 34px;
-}
-
 .workflow-launch-task {
 padding-block: 9px 7px;
 }
@@ -1124,17 +959,13 @@ min-height: 54px;
 }
 
 .workflow-launch-list {
-min-height: 72px; padding-bottom: 7px;
+min-height: 64px; padding-bottom: 7px;
 }
 
 .workflow-launch-footer {
 padding-block: 7px;
 }
 }
-.dialog-panel.workflow-launch-dialog {
-border-radius: var(--radius-sheet);
-}
-html[dir="rtl"] .workflow-back-chat > svg,
 html[dir="rtl"] .workflow-definition > svg {
 transform: scaleX(-1);
 }
@@ -1158,11 +989,4 @@ grid-template-columns: minmax(0, 1fr);
 position: static; max-height: none;
 }
 
-.workflow-page-header {
-align-items: flex-start; flex-wrap: wrap;
-}
-
-.workflow-back-chat {
-margin-left: 0;
-}
 }

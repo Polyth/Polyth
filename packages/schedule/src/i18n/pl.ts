@@ -44,6 +44,7 @@ export const pl: ScheduleMessages = {
   "scheduleview.runs": "Biegi",
   "scheduleview.s": "S",
   "scheduleview.schedule": "Harmonogram",
+  "scheduleview.createSchedule": "Utwórz harmonogram",
   "scheduleview.sendAPromptOnceOnAnInterval": "Wyślij monit jednorazowo, w określonych odstępach czasu lub w rytmie cron ze strefą czasową. Pliki w pętli",
   "scheduleview.skipThisRun": "Pomiń ten bieg",
   "scheduleview.tasks": "Zadania",

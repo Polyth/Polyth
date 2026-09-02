@@ -1,122 +1,9 @@
 import "./styles.css";
-import { createElement, useEffect, useState } from "react";
-import type { WorkflowRunDto } from "@polyth/contracts";
+import { createElement } from "react";
 import { defineWebPackage, type WidgetPlugin } from "@polyth/web-sdk";
-import { api } from "@polyth/session/web-api";
 import WorkflowLauncher from "./WorkflowLauncher.tsx";
 import WorkflowView from "./WorkflowView.tsx";
-import { setActiveView, useStore } from "../../../apps/web/src/store.ts";
-import {
-  prioritizeWorkflowRuns,
-  workflowFinishedCount,
-  workflowHumanWait,
-} from "./workflowRun.ts";
-import { handOffWorkflowLaunch } from "./workflowLaunch.ts";
-import { subscribeWorkflowRuns } from "./workflowMonitor.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
-import { Button, Spinner } from "../../../apps/web/src/components/ui/index.ts";
-
-function WorkflowRunIndicator() {
-  const projectId = useStore((state) => state.activeProjectId);
-  const sessionId = useStore((state) => state.activeSessionId);
-  const sessionName = useStore((state) =>
-    state.sessions.find((session) => session.id === state.activeSessionId)?.title ?? "",
-  );
-  const [workflowState, setWorkflowState] = useState<{
-    projectId: string;
-    runs: WorkflowRunDto[];
-  } | null>(null);
-  const runs = workflowState?.projectId === projectId ? workflowState.runs : [];
-  const run = runs[0] ?? null;
-
-  useEffect(() => {
-    if (!projectId) {
-      setWorkflowState(null);
-      return;
-    }
-    setWorkflowState((current) => current?.projectId === projectId ? current : null);
-    let active = true;
-    // Two-tier cadence: fast polling (progress % updates) only while a run is
-    // active; an idle header costs one slow heartbeat. WS pushes wake the fast
-    // poll the moment a run starts.
-    const ACTIVE_POLL_MS = 1_200;
-    const IDLE_POLL_MS = 30_000;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const schedule = (hasActiveRuns: boolean) => {
-      if (!active) return;
-      if (timer !== null) clearTimeout(timer);
-      timer = setTimeout(refresh, hasActiveRuns ? ACTIVE_POLL_MS : IDLE_POLL_MS);
-    };
-    const refresh = () => {
-      void api.listWorkflowRuns(projectId)
-        .then((nextRuns) => {
-          if (!active) return;
-          const prioritized = prioritizeWorkflowRuns(nextRuns);
-          setWorkflowState(prioritized.length > 0
-            ? { projectId, runs: prioritized }
-            : null);
-          schedule(prioritized.length > 0);
-        })
-        .catch(() => schedule(false));
-    };
-    refresh();
-    const unsubscribe = subscribeWorkflowRuns((updated) => {
-      if (updated.projectId && updated.projectId !== projectId) return;
-      setWorkflowState((current) => {
-        const existing = current?.projectId === projectId ? current.runs : [];
-        const prioritized = prioritizeWorkflowRuns([
-          updated,
-          ...existing.filter((candidate) => candidate.id !== updated.id),
-        ]);
-        schedule(prioritized.length > 0);
-        return prioritized.length > 0 ? { projectId, runs: prioritized } : null;
-      });
-    });
-    return () => {
-      active = false;
-      if (timer !== null) clearTimeout(timer);
-      unsubscribe();
-    };
-  }, [projectId]);
-
-  if (!projectId || !sessionId) return null;
-  if (!run) {
-    return createElement("span", {
-      className: "workflow-run-indicator workflow-run-indicator-idle",
-      title: sessionName || "Session",
-      "aria-label": sessionName || "Session",
-    }, sessionName || "Session");
-  }
-  const done = workflowFinishedCount(run);
-  const waits = run.nodes.map(workflowHumanWait);
-  const actionLabel = waits.includes("permission")
-    ? "Approval needed"
-    : waits.includes("answer") ? "Answer needed" : null;
-  const runLabel = runs.length > 1 ? `${runs.length} workflows` : run.name;
-  const openRun = () => {
-    handOffWorkflowLaunch({
-      projectId: run.projectId ?? projectId,
-      ...(run.parentSessionId ? { sessionId: run.parentSessionId } : {}),
-      workflowId: run.workflowId,
-      input: run.input,
-      run,
-    });
-    setActiveView("workflow");
-  };
-  return createElement(Button, {
-    type: "button",
-    className: `header-action workflow-run-indicator${actionLabel ? " waiting" : ""}`,
-    size: "sm",
-    variant: "ghost",
-    title: actionLabel
-      ? `Workflow action required: ${actionLabel.toLowerCase()}`
-      : "Open active workflow",
-    "aria-label": `${actionLabel ?? runLabel}, ${done} of ${run.nodes.length} nodes finished. Open workflow`,
-    onClick: openRun,
-  },
-  createElement(Spinner, { size: "sm" }),
-  actionLabel ?? `${runLabel} ${done}/${run.nodes.length}`);
-}
 
 export const WORKFLOW_WIDGET_PLUGIN: WidgetPlugin = {
   id: "workflow",
@@ -129,7 +16,6 @@ export const WORKFLOW_WIDGET_PLUGIN: WidgetPlugin = {
     defaultSlot: "composer.trailing",
     supportedSlots: ["composer.leading", "composer.trailing"],
     defaultVisible: true,
-    requiredVisible: true,
     defaultSize: { w: 1, h: 1 },
     resizable: false,
     audience: "simple",
@@ -145,34 +31,19 @@ export const WORKFLOW_WIDGET_PLUGIN: WidgetPlugin = {
         ? context.consumeWorkflowDraft as () => void
         : () => {},
     }),
-  }, {
-    id: "workflow.active-run",
-    title: "Workflow status",
-    description: "Show workflow progress and the current session in the top rail.",
-    kind: "widget",
-    defaultSlot: "session.header.actions",
-    supportedSlots: ["session.header.actions", "app.header.actions", "workspace.header"],
-    defaultVisible: true,
-    defaultSize: { w: 3, h: 2 },
-    minSize: { w: 2, h: 1 },
-    maxSize: { w: 6, h: 3 },
-    resizable: true,
-    audience: "simple",
-    order: 45,
-    render: () => createElement(WorkflowRunIndicator),
   }],
 };
 
 export default defineWebPackage((host) => () => {
   const off = [
-    host.workspaceSurfaces.register({
+    host.surfaces.register({
       id: "workflow",
       title: tr("workflowview.workflows"),
       description: tr("capabilities.coordinateAgentRolesInDependencyBasedPipelines"),
+      capabilityId: "workflow",
       order: 22,
-      plugin: "workflow",
-      requires: "project",
       component: () => createElement(WorkflowView),
+      presentation: { kind: "workspace", defaultRatio: 0.6, minWidth: 380, preferredMaxWidth: 760, keepAlive: false, escape: "close" },
     }),
     host.capabilities.register({
       id: "workflow",
@@ -182,7 +53,7 @@ export default defineWebPackage((host) => () => {
       keywords: ["workflow", "dag", "orchestration"],
       standardTier: "more",
       standardRank: 11,
-      open: () => host.navigation.setActiveView("workflow"),
+      open: () => host.navigation.openWorkspacePane("workflow"),
       available: () => true,
     }),
     host.widgets.registerPlugin(WORKFLOW_WIDGET_PLUGIN),

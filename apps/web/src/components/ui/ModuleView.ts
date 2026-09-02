@@ -13,6 +13,7 @@
 // loader — the same rule ViewErrorBoundary.ts follows.
 import { createElement, type ReactNode } from "react";
 import { tr } from "../../i18n/index.ts";
+import { CloseIcon, CollapseIcon, ExpandIcon, PinIcon } from "./icons.ts";
 
 export type ModuleViewVariant = "main" | "rail";
 export type ModuleContentMode = "page" | "panel" | "workspace";
@@ -26,6 +27,12 @@ export interface ModuleViewProps {
   icon?: ReactNode;
   /** Right-aligned controls rendered just before the close button. */
   actions?: ReactNode;
+  /** Window controls are host-owned. Packages cannot replace their order or
+   * geometry; they only declare supported capabilities at registration. */
+  onTogglePin?: () => void;
+  onToggleFullscreen?: () => void;
+  pinned?: boolean;
+  fullscreen?: boolean;
   /** The single close affordance. Callers pass closeAllModules() so one tap
    *  dismisses every open module and returns to the session (UX spec §4). */
   onClose: () => void;
@@ -41,26 +48,25 @@ export interface ModuleViewProps {
   children?: ReactNode;
 }
 
-function CloseGlyph(): ReactNode {
+function systemAction(icon: typeof CloseIcon, label: string, onClick: () => void, pressed?: boolean, className = ""): ReactNode {
   return createElement(
-    "svg",
+    "button",
     {
-      viewBox: "0 0 16 16",
-      width: 16,
-      height: 16,
-      fill: "none",
-      stroke: "currentColor",
-      strokeWidth: 1.75,
-      strokeLinecap: "round",
-      "aria-hidden": true,
+      type: "button",
+      className: `ui-icon-btn ui-icon-btn--ghost ui-icon-btn--sm ${className}`,
+      title: label,
+      "aria-label": label,
+      "aria-pressed": pressed,
+      onClick,
     },
-    createElement("path", { d: "M4 4l8 8M12 4l-8 8" }),
+    createElement(icon, { className: "ui-icon ui-icon--sm", "aria-hidden": true }),
   );
 }
 
 export default function ModuleView(props: ModuleViewProps): ReactNode {
   const {
     id, title, description, icon, actions, onClose, closeLabel,
+    onTogglePin, onToggleFullscreen, pinned = false, fullscreen = false,
     variant = "main", contentMode = "page", depth = 0, className, children,
   } = props;
   return createElement(
@@ -78,23 +84,16 @@ export default function ModuleView(props: ModuleViewProps): ReactNode {
       createElement(
         "div",
         { className: "module-view-heading" },
-        createElement("h1", { className: "module-view-title", tabIndex: -1 }, title),
+        createElement("h1", { className: "module-view-title", tabIndex: -1, title }, title),
         description
           ? createElement("p", { className: "module-view-desc" }, description)
           : null,
       ),
       createElement("span", { className: "header-spacer" }),
       actions ? createElement("div", { className: "module-view-actions" }, actions) : null,
-      createElement(
-        "button",
-        {
-          type: "button",
-          className: "module-view-close",
-          onClick: () => onClose(),
-          "aria-label": closeLabel ?? tr("contextrail.closePanel"),
-        },
-        createElement(CloseGlyph),
-      ),
+      onTogglePin ? systemAction(PinIcon, pinned ? "Unpin window" : "Pin window", onTogglePin, pinned, "module-view-system-action") : null,
+      onToggleFullscreen ? systemAction(fullscreen ? CollapseIcon : ExpandIcon, fullscreen ? "Exit fullscreen" : "Enter fullscreen", onToggleFullscreen, fullscreen, "module-view-system-action") : null,
+      systemAction(CloseIcon, closeLabel ?? tr("contextrail.closePanel"), onClose, undefined, "module-view-close"),
     ),
     createElement(
       "div",

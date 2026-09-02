@@ -46,6 +46,7 @@ export const en = {
   "scheduleview.runs": "Runs",
   "scheduleview.s": "s",
   "scheduleview.schedule": "Schedule",
+  "scheduleview.createSchedule": "Create schedule",
   "scheduleview.sendAPromptOnceOnAnInterval": "Send a prompt once, on an interval, or on a cron cadence with a time zone. Loop files in",
   "scheduleview.skipThisRun": "Skip this run",
   "scheduleview.tasks": "Tasks",

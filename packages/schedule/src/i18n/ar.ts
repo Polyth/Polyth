@@ -44,6 +44,7 @@ export const ar: ScheduleMessages = {
   "scheduleview.runs": "يركض",
   "scheduleview.s": "s",
   "scheduleview.schedule": "جدول",
+  "scheduleview.createSchedule": "إنشاء جدول",
   "scheduleview.sendAPromptOnceOnAnInterval": "أرسل إشعارًا مرة واحدة، أو على فترات زمنية محددة، أو وفقًا لجدول زمني cron مع تحديد المنطقة الزمنية. كرر الملفات في",
   "scheduleview.skipThisRun": "تخطَّ هذه الجولة",
   "scheduleview.tasks": "المهام",
