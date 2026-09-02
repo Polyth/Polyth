@@ -1,6 +1,7 @@
 import type { JsonObject, JsonValue } from "@polyth/contracts";
+import type { FileDiff } from "./diff.ts";
+import { fileDiffsFromInput, looksLikeDiff, splitFileDiffs } from "./diff.ts";
 import type { ToolMsg } from "./reduce.ts";
-import { diffStat } from "./utils.ts";
 
 export type ExecutionKind =
   | "shell"
@@ -27,6 +28,7 @@ export interface ExecutionPresentation {
   query?: string;
   diff?: string;
   stats?: { add: number; del: number };
+  files?: FileDiff[];
 }
 
 const firstString = (input: JsonObject, keys: readonly string[]): string | undefined => {
@@ -140,16 +142,20 @@ export function endTruncate(text: string, max = 96): string {
   return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
 }
 
-function editDiff(input: JsonObject): string | undefined {
-  const patch = firstString(input, ["patch", "diff"]);
-  if (patch) return patch;
-  const before = firstString(input, ["oldString", "old_string", "before"]);
-  const after = firstString(input, ["newString", "new_string", "after", "content"]);
-  if (before === undefined && after === undefined) return undefined;
-  return [
-    ...(before === undefined ? [] : before.split(/\r?\n/).map((line) => `-${line}`)),
-    ...(after === undefined ? [] : after.split(/\r?\n/).map((line) => `+${line}`)),
-  ].join("\n");
+function fileChangesFor(kind: ExecutionKind, input: JsonObject, output: string | undefined, path?: string): FileDiff[] {
+  if (kind !== "edit" && kind !== "write" && kind !== "create" && kind !== "delete") return [];
+  const fromInput = fileDiffsFromInput(input, path ?? "file");
+  if (fromInput.length > 0) return fromInput;
+  if (output && looksLikeDiff(output)) return splitFileDiffs(output, path ?? "file");
+  return [];
+}
+
+function totalStats(files: readonly FileDiff[]): { add: number; del: number } | undefined {
+  if (files.length === 0) return undefined;
+  return files.reduce(
+    (acc, file) => ({ add: acc.add + file.stats.add, del: acc.del + file.stats.del }),
+    { add: 0, del: 0 },
+  );
 }
 
 /** Known integration brand casing; title-case is only the fallback. */
@@ -231,9 +237,11 @@ export function executionPresentation(message: Pick<ToolMsg, "tool" | "input" | 
   const query = firstString(input, ["pattern", "query", "search", "text"]);
   const url = firstString(input, ["url", "href"]);
   const description = firstString(input, ["description", "title", "operation", "action"]);
-  const diff = kind === "edit" || kind === "write" || kind === "create" ? editDiff(input) : undefined;
-  const stats = diff ? diffStat(diff) : undefined;
-  const compactPath = path ? middleTruncatePath(path) : undefined;
+  const files = fileChangesFor(kind, input, output, path);
+  const stats = totalStats(files);
+  const diff = files.length === 0 ? undefined : files.map((file) => file.diff).join("\n");
+  const displayPath = path ?? (files.length === 1 ? files[0]?.path : undefined);
+  const compactPath = displayPath ? middleTruncatePath(displayPath) : undefined;
   let preview = "";
 
   if (kind === "shell" || (kind === "test" && command)) {
@@ -244,8 +252,9 @@ export function executionPresentation(message: Pick<ToolMsg, "tool" | "input" | 
     const range = offset !== undefined ? ` · L${offset}${limit ? `–${offset + limit - 1}` : ""}` : "";
     preview = `${compactPath ?? title ?? "File"}${range}`;
   } else if (kind === "edit" || kind === "write" || kind === "create") {
-    const stat = stats && (stats.add > 0 || stats.del > 0) ? ` · +${stats.add} −${stats.del}` : "";
-    preview = `${compactPath ?? title ?? "File"}${stat}`;
+    preview = files.length > 1
+      ? `${files.length} files`
+      : (compactPath ?? title ?? "File");
   } else if (kind === "delete") {
     preview = compactPath ?? description ?? title ?? "Item";
   } else if (kind === "move") {
@@ -272,11 +281,12 @@ export function executionPresentation(message: Pick<ToolMsg, "tool" | "input" | 
     kind,
     label,
     preview,
-    ...(path ? { path } : {}),
+    ...(displayPath ? { path: displayPath } : {}),
     ...(command ? { command } : {}),
     ...(query ? { query } : {}),
     ...(diff ? { diff } : {}),
     ...(stats ? { stats } : {}),
+    ...(files.length > 0 ? { files } : {}),
   };
 }
 
@@ -406,7 +416,7 @@ export function normalizedMcpResult(output: string): NormalizedResultEntry[] | n
 
 const LARGE_INPUT_KEYS = new Set([
   "command", "cmd", "content", "oldString", "old_string", "newString", "new_string",
-  "patch", "diff", "prompt",
+  "patch", "patchText", "patch_text", "diff", "prompt", "edits", "replacements",
 ]);
 
 export function normalizedInputEntries(input: JsonObject): Array<{ key: string; value: string }> {

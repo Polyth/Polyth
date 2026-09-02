@@ -10,10 +10,11 @@ import {
   outputLineCount,
   type ExecutionKind,
 } from "../execution.ts";
+import { parseDiffRows, type FileDiff } from "../diff.ts";
+import { highlight, langOf } from "../highlight.ts";
 import { Icon } from "../icons.tsx";
 import { openSession } from "../init.ts";
 import { openEditorFile, setUiError, useStore } from "../store.ts";
-import { parseDiffLines } from "../utils.ts";
 import type { SubagentState, ToolMsg } from "../reduce.ts";
 import CopyButton from "./CopyButton.tsx";
 import Dialog from "./a11y/Dialog.tsx";
@@ -146,25 +147,128 @@ function CommandDetail({ command }: { command: string }) {
   );
 }
 
-function DiffPreview({ diff, onOpenFull }: { diff: string; onOpenFull: () => void }) {
-  const allLines = parseDiffLines(diff);
-  const lines = allLines.slice(0, 14);
+export function hasLineChanges(stats?: { add: number; del: number }): stats is { add: number; del: number } {
+  return stats !== undefined && (stats.add > 0 || stats.del > 0);
+}
+
+export function DiffStat({ add, del }: { add: number; del: number }) {
+  const label = `${add === 1 ? "1 line added" : `${add} lines added`}, ${
+    del === 1 ? "1 line removed" : `${del} lines removed`
+  }`;
   return (
-    <section className="execution-detail-section">
-      <DetailHeading label="Changes" copy={diff} />
-      <div className="execution-diff" role="region" aria-label="Change preview">
-        {lines.map((line, index) => (
-          <div key={`${index}:${line.text}`} className={`execution-diff-line ${line.kind}`}>
-            <span>{index + 1}</span><code>{line.text || " "}</code>
+    <span className="execution-diff-stat" aria-label={label}>
+      <span className="add">+{add}</span>
+      <span className="del">−{del}</span>
+    </span>
+  );
+}
+
+function fileLetter(status: FileDiff["status"]): string {
+  if (status === "added") return "A";
+  if (status === "deleted") return "D";
+  if (status === "renamed") return "R";
+  return "M";
+}
+
+function DiffLines({ diff, path, limit }: { diff: string; path: string; limit?: number }) {
+  const rows = parseDiffRows(diff).filter((row) => row.kind !== "meta");
+  const shown = limit === undefined ? rows : rows.slice(0, limit);
+  const lang = langOf(path);
+  return (
+    <div className="execution-diff" role="table" aria-label={`Changes in ${path}`}>
+      {shown.map((row, index) => {
+        const oldShown = row.oldLine === undefined ? "" : String(row.oldLine);
+        const newShown = row.newLine === undefined ? "" : String(row.newLine);
+        const lineLabel = oldShown && newShown
+          ? `line ${oldShown} → ${newShown}`
+          : oldShown ? `removed line ${oldShown}` : newShown ? `added line ${newShown}` : "diff metadata";
+const marker = row.kind === "add" ? "+" : row.kind === "del" ? "-" : row.kind === "hunk" ? "" : " ";
+        const body = row.kind === "hunk" || row.kind === "meta" ? row.text : row.text.slice(1);
+        return (
+          <div key={`${index}:${row.text}`} className={`execution-diff-line ${row.kind}`} role="row" aria-label={lineLabel}>
+            <span className="execution-diff-ln" aria-hidden="true"><i>{oldShown}</i><i>{newShown}</i></span>
+            <span className="execution-diff-marker" aria-hidden="true">{marker}</span>
+            {row.kind === "hunk"
+              ? <code>{row.text}</code>
+              : <code dangerouslySetInnerHTML={{ __html: highlight(body, lang) }} />}
           </div>
-        ))}
-      </div>
-      {allLines.length > lines.length && (
-        <div className="execution-output-actions">
-          <button type="button" onClick={onOpenFull}>View full diff</button>
-          <span>{allLines.length} lines</span>
+        );
+      })}
+    </div>
+  );
+}
+
+function FileChangeCard({
+  file,
+  defaultOpen,
+  onOpenFile,
+  onOpenFull,
+}: {
+  file: FileDiff;
+  defaultOpen: boolean;
+  onOpenFile: (path: string) => void;
+  onOpenFull: () => void;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const rows = parseDiffRows(file.diff).filter((row) => row.kind !== "meta");
+  const long = rows.length > 120;
+  return (
+    <article className={`execution-file-card${open ? " open" : ""}`}>
+      <button
+        type="button"
+        className="execution-file-head"
+        aria-expanded={open}
+        aria-label={`${open ? "Collapse" : "Expand"} ${file.path}, ${file.stats.add} added, ${file.stats.del} removed`}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className={`execution-file-letter ${file.status}`} aria-hidden="true">{fileLetter(file.status)}</span>
+        <span className="execution-file-path" title={file.path}>
+          {file.previousPath && <span className="execution-file-renamed">{file.previousPath} → </span>}
+          {file.path}
+        </span>
+        {hasLineChanges(file.stats) ? <DiffStat add={file.stats.add} del={file.stats.del} /> : null}
+        <span className="tool-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
+      </button>
+      {open && (
+        <div className="execution-file-body">
+          {rows.length === 0
+            ? <p className="execution-file-empty">No textual changes</p>
+            : <DiffLines diff={file.diff} path={file.path} limit={long ? 120 : undefined} />}
+          <div className="execution-inline-actions">
+            {file.status !== "deleted" && (
+              <button type="button" onClick={() => onOpenFile(file.path)}>Open in Files</button>
+            )}
+            <CopyButton text={file.diff} label="Copy diff" />
+            {long && <button type="button" onClick={onOpenFull}>View full diff</button>}
+            {long && <span>{rows.length} lines</span>}
+          </div>
         </div>
       )}
+    </article>
+  );
+}
+
+function FileChangesView({
+  files,
+  onOpenFile,
+  onOpenFull,
+}: {
+  files: readonly FileDiff[];
+  onOpenFile: (path: string) => void;
+  onOpenFull: (file: FileDiff) => void;
+}) {
+  const expandByDefault = files.length <= 4;
+  return (
+    <section className="execution-detail-section execution-file-changes" aria-label="File changes">
+      {files.map((file, index) => (
+        <FileChangeCard
+          key={`${file.path}:${index}`}
+          file={file}
+          defaultOpen={expandByDefault}
+          onOpenFile={onOpenFile}
+          onOpenFull={() => onOpenFull(file)}
+        />
+      ))}
     </section>
   );
 }
@@ -368,9 +472,10 @@ interface TimelineScrollAnchor {
   scrollTop: number;
 }
 
-function FullOutputViewer({ title, text, scrollAnchor, restoreTarget, onClose }: {
+function FullOutputViewer({ title, text, mode = "text", scrollAnchor, restoreTarget, onClose }: {
   title: string;
   text: string;
+  mode?: "text" | "diff";
   scrollAnchor?: TimelineScrollAnchor;
   restoreTarget?: HTMLElement;
   onClose: () => void;
@@ -415,7 +520,9 @@ function FullOutputViewer({ title, text, scrollAnchor, restoreTarget, onClose }:
         <label><Icon.search /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search output" /></label>
         <button type="button" aria-pressed={wrap} onClick={() => setWrap((value) => !value)}>Wrap {wrap ? "on" : "off"}</button>
       </div>
-      <pre className={wrap ? "wrap" : ""}>{filtered || "No matching lines"}</pre>
+      {mode === "diff"
+        ? <div className={wrap ? "execution-viewer-diff wrap" : "execution-viewer-diff"}><DiffLines diff={filtered} path={title} /></div>
+        : <pre className={wrap ? "wrap" : ""}>{filtered || "No matching lines"}</pre>}
     </Dialog>
   );
   return createPortal(viewer, document.body);
@@ -447,6 +554,7 @@ export function ExecutionRow({
   const [viewer, setViewer] = useState<{
     title: string;
     text: string;
+    mode?: "text" | "diff";
     scrollAnchor?: TimelineScrollAnchor;
     restoreTarget?: HTMLElement;
   } | null>(null);
@@ -466,6 +574,7 @@ export function ExecutionRow({
   const exitCode = metadataValue(message.metadata, ["exit", "exitCode", "exit_code"]);
   const cwd = metadataValue(message.metadata, ["cwd"])
     ?? (typeof message.input.cwd === "string" ? message.input.cwd : undefined);
+  const stats = presentation.stats;
   const elapsed = fmtMs(Math.max(0, (message.finishTime ?? Date.now()) - message.time));
   const webUrl = typeof message.input.url === "string" ? message.input.url : undefined;
   // The collapsed summary prints out on appearance (and types new arrivals
@@ -475,7 +584,7 @@ export function ExecutionRow({
   const openFile = () => {
     if (presentation.path) openEditorFile(presentation.path);
   };
-  const openViewer = (title: string, text: string) => {
+  const openViewer = (title: string, text: string, mode: "text" | "diff" = "text") => {
     const timeline = rowRef.current?.closest<HTMLElement>(".timeline");
     const pointerAnchor = pointerScrollAnchor.current;
     pointerScrollAnchor.current = null;
@@ -490,6 +599,7 @@ export function ExecutionRow({
     setViewer({
       title,
       text,
+      mode,
       ...(scrollAnchor ? { scrollAnchor } : {}),
       ...(restoreTarget ? { restoreTarget } : {}),
     });
@@ -511,7 +621,9 @@ export function ExecutionRow({
           type="button"
           className="tool-disclosure execution-summary"
           aria-expanded={open}
-          aria-label={`${open ? "Collapse" : "Expand"} ${presentation.label}: ${presentation.preview}`}
+          aria-label={`${open ? "Collapse" : "Expand"} ${presentation.label}: ${presentation.preview}${
+            hasLineChanges(stats) ? `, ${stats.add} added, ${stats.del} removed` : ""
+          }`}
           onClick={() => setOpen((value) => !value)}
         >
           <span className="tool-icon execution-icon" aria-hidden="true"><ExecutionIcon kind={presentation.kind} /></span>
@@ -519,6 +631,7 @@ export function ExecutionRow({
             <span className="tool-name">{presentation.label}</span>
             <span className={`tool-preview${presentation.kind === "shell" || presentation.kind === "test" ? " command" : ""}`}>{typedPreview}</span>
           </span>
+          {hasLineChanges(stats) ? <DiffStat add={stats.add} del={stats.del} /> : null}
           <StatusMark message={message} childStatus={subagent?.status} />
           <span className="tool-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
         </button>
@@ -528,7 +641,7 @@ export function ExecutionRow({
             <div className="tool-body execution-details">
               {presentation.command && <CommandDetail command={presentation.command} />}
               {subagent && <SubagentDetail subagent={subagent} />}
-              {presentation.path && (
+              {presentation.path && !presentation.files?.length && (
                 <section className="execution-detail-section execution-file-summary">
                   <DetailHeading label="File" copy={presentation.path} />
                   <code>{presentation.path}</code>
@@ -538,10 +651,11 @@ export function ExecutionRow({
                   </div>
                 </section>
               )}
-              {presentation.diff && (
-                <DiffPreview
-                  diff={presentation.diff}
-                  onOpenFull={() => openViewer(`${presentation.label} full diff`, presentation.diff ?? "")}
+              {presentation.files && presentation.files.length > 0 && (
+                <FileChangesView
+                  files={presentation.files}
+                  onOpenFile={(path) => openEditorFile(path)}
+                  onOpenFull={(file) => openViewer(`${presentation.label} ${file.path}`, file.diff, "diff")}
                 />
               )}
               {inputEntries.length > 0 && (
@@ -576,7 +690,7 @@ export function ExecutionRow({
           </div>
         </div>
       </div>
-      {viewer && <FullOutputViewer title={viewer.title} text={viewer.text} scrollAnchor={viewer.scrollAnchor} restoreTarget={viewer.restoreTarget} onClose={() => setViewer(null)} />}
+      {viewer && <FullOutputViewer title={viewer.title} text={viewer.text} mode={viewer.mode} scrollAnchor={viewer.scrollAnchor} restoreTarget={viewer.restoreTarget} onClose={() => setViewer(null)} />}
     </>
   );
 }

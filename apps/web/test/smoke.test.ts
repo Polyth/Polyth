@@ -175,6 +175,23 @@ test("tool call → result fills the card; call → error marks it failed", () =
   assert.equal(t2.error, "permission denied");
 });
 
+test("tool/result merges richer late input onto the call payload", () => {
+  const model = buildModel([
+    ev("tool/call", { callId: "e1", tool: "edit", input: { filePath: "src/a.ts" } }),
+  ]);
+  const after = reduceEvent(model, ev("tool/result", {
+    callId: "e1",
+    tool: "edit",
+    output: "ok",
+    input: { filePath: "src/a.ts", oldString: "a", newString: "b" },
+  }));
+  const message = after.messages[0];
+  assert.equal(message?.kind, "tool");
+  if (message?.kind === "tool") {
+    assert.deepEqual(message.input, { filePath: "src/a.ts", oldString: "a", newString: "b" });
+  }
+});
+
 test("pending tool calls transition to running without duplicating the execution row", () => {
   const pending = ev("tool/call", {
     callId: "queued",

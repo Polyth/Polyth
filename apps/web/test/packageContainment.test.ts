@@ -83,6 +83,7 @@ const GENERIC_SHELL_IMPORTS = new Set([
   "composer/discovery.ts",
   "composerInsert.ts",
   "desktopBridge.ts",
+  "diff.ts",
   "dnd.ts",
   "format.ts",
   "haptics.ts",

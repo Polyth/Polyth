@@ -588,7 +588,9 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         const metadata = obj(d, "metadata");
         if (metadata !== undefined) t.metadata = metadata;
         const lateInput = obj(d, "input");
-        if (lateInput && Object.keys(t.input).length === 0) t.input = lateInput; // opencode fills input late
+        if (lateInput && Object.keys(lateInput).length > 0) {
+          t.input = { ...t.input, ...lateInput };
+        }
         const changedFiles = extractChangedFiles(t.tool, lateInput ?? t.input, obj(d, "metadata"));
         if (changedFiles.length > 0) {
           t.changedFiles = changedFiles;

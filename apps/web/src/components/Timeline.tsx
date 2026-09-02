@@ -81,7 +81,7 @@ import ProviderLogo from "../../../../packages/models/widgets/ProviderLogo.tsx";
 import { seedMultiRunPrompt } from "@polyth/multirun/prompt-seed";
 import WorkflowTimelineCard from "../../../../packages/workflow/widgets/WorkflowTimelineCard.tsx";
 import { tr } from "../i18n/index.ts";
-import ExecutionRow, { useCollapsePresence } from "./ExecutionRow.tsx";
+import ExecutionRow, { DiffStat, useCollapsePresence } from "./ExecutionRow.tsx";
 import Picker from "./Picker.tsx";
 import PromptBubble from "./PromptBubble.tsx";
 import type { PickerItem } from "../picker.ts";
@@ -959,6 +959,11 @@ export function WorkedGroup({
   const itemsPresent = useCollapsePresence(open);
   const label = executionGroupLabel(g.tools);
   const files = new Set(g.tools.flatMap((tool) => tool.changedFiles ?? [])).size;
+  const lineStats = g.tools.reduce((acc, tool) => {
+    const stats = executionPresentation(tool).stats;
+    if (!stats) return acc;
+    return { add: acc.add + stats.add, del: acc.del + stats.del };
+  }, { add: 0, del: 0 });
   const actionCount = g.tools.length + g.tasks.length;
   return (
     <div className={`msg assistant execution-group${open ? " open" : ""}${running ? " current" : ""}`}>
@@ -972,8 +977,13 @@ export function WorkedGroup({
         </span>
         <span className="execution-group-copy">
           <strong>{running ? `Working · ${label}` : label}</strong>
-          <small>{actionCount} {actionCount === 1 ? "action" : "actions"}{files > 0 ? ` · ${files} ${files === 1 ? "file" : "files"} changed` : ""} · {fmtDuration(g.ms)}</small>
+          <small>
+            {actionCount} {actionCount === 1 ? "action" : "actions"}
+            {files > 0 ? ` · ${files} ${files === 1 ? "file" : "files"} changed` : ""}
+            {" · "}{fmtDuration(g.ms)}
+          </small>
         </span>
+        {(lineStats.add > 0 || lineStats.del > 0) && <DiffStat add={lineStats.add} del={lineStats.del} />}
         <span className="execution-group-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
       </button>
       <div className="execution-group-expand-shell" aria-hidden={!open}>

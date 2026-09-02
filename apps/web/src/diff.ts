@@ -1,0 +1,344 @@
+// DOM-free unified-diff helpers for agent file edits and the execution UI.
+import type { JsonObject } from "@polyth/contracts";
+
+const MAX_DIFF_LINES = 1500;
+
+export type DiffRowKind = "meta" | "hunk" | "add" | "del" | "ctx";
+
+export interface DiffRow {
+  text: string;
+  kind: DiffRowKind;
+  oldLine?: number;
+  newLine?: number;
+}
+
+export type FileChangeStatus = "modified" | "added" | "deleted" | "renamed";
+
+export interface FileDiff {
+  path: string;
+  previousPath?: string;
+  diff: string;
+  stats: { add: number; del: number };
+  status: FileChangeStatus;
+}
+
+interface DiffOp { tag: "eq" | "del" | "ins"; line: string }
+
+const firstPath = (input: JsonObject, keys: readonly string[]): string | undefined => {
+  for (const key of keys) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+};
+
+const firstRawString = (input: JsonObject, keys: readonly string[]): string | undefined => {
+  for (const key of keys) {
+    const value = input[key];
+    if (typeof value === "string") return value;
+  }
+  return undefined;
+};
+
+/** Split into lines, dropping the trailing empty element `String.split` adds
+ *  for a trailing newline — otherwise every file would diff one line longer. */
+export function toDiffLines(text: string): string[] {
+  if (!text) return [];
+  const lines = text.split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+
+function diffLines(oldLines: string[], newLines: string[]): DiffOp[] {
+  const n = oldLines.length;
+  const m = newLines.length;
+  const dp: Uint32Array[] = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i]![j] = oldLines[i] === newLines[j] ? dp[i + 1]![j + 1]! + 1 : Math.max(dp[i + 1]![j]!, dp[i]![j + 1]!);
+    }
+  }
+  const ops: DiffOp[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (oldLines[i] === newLines[j]) {
+      ops.push({ tag: "eq", line: oldLines[i]! });
+      i++; j++;
+    } else if (dp[i + 1]![j]! >= dp[i]![j + 1]!) {
+      ops.push({ tag: "del", line: oldLines[i]! });
+      i++;
+    } else {
+      ops.push({ tag: "ins", line: newLines[j]! });
+      j++;
+    }
+  }
+  while (i < n) { ops.push({ tag: "del", line: oldLines[i]! }); i++; }
+  while (j < m) { ops.push({ tag: "ins", line: newLines[j]! }); j++; }
+  return ops;
+}
+
+/** [start, end) index ranges into `ops`, one per hunk, each padded with up to
+ *  `context` lines of unchanged surrounding text; overlapping ranges merge. */
+function hunkRanges(ops: DiffOp[], context: number): Array<[number, number]> {
+  const changed: number[] = [];
+  ops.forEach((op, i) => { if (op.tag !== "eq") changed.push(i); });
+  if (!changed.length) return [];
+  const ranges: Array<[number, number]> = [];
+  let start = Math.max(0, changed[0]! - context);
+  let end = Math.min(ops.length, changed[0]! + 1 + context);
+  for (let k = 1; k < changed.length; k++) {
+    const idx = changed[k]!;
+    const nextStart = Math.max(0, idx - context);
+    if (nextStart <= end) {
+      end = Math.min(ops.length, idx + 1 + context);
+    } else {
+      ranges.push([start, end]);
+      start = nextStart;
+      end = Math.min(ops.length, idx + 1 + context);
+    }
+  }
+  ranges.push([start, end]);
+  return ranges;
+}
+
+function fileHeaders(path: string, oldText: string, newText: string): [string, string] {
+  if (!oldText) return ["--- /dev/null", `+++ b/${path}`];
+  if (!newText) return [`--- a/${path}`, "+++ /dev/null"];
+  return [`--- a/${path}`, `+++ b/${path}`];
+}
+
+/** Standard unified-diff text (`--- a/file`, `+++ b/file`, `@@ ... @@` hunks,
+ *  3 lines of context). Falls back to a whole-file replace hunk for inputs too
+ *  large to diff line-by-line, so callers never pay O(n*m) on huge files. */
+export function unifiedDiff(oldText: string, newText: string, path = "file"): string {
+  if (oldText === newText) return "";
+  const oldLines = toDiffLines(oldText);
+  const newLines = toDiffLines(newText);
+  const header = fileHeaders(path, oldText, newText);
+  if (oldLines.length > MAX_DIFF_LINES || newLines.length > MAX_DIFF_LINES) {
+    return [
+      ...header,
+      `@@ -${oldLines.length ? 1 : 0},${oldLines.length} +${newLines.length ? 1 : 0},${newLines.length} @@`,
+      ...oldLines.map((line) => `-${line}`),
+      ...newLines.map((line) => `+${line}`),
+    ].join("\n");
+  }
+  const ops = diffLines(oldLines, newLines);
+  const oldPrefix = new Array<number>(ops.length + 1).fill(0);
+  const newPrefix = new Array<number>(ops.length + 1).fill(0);
+  for (let i = 0; i < ops.length; i++) {
+    oldPrefix[i + 1] = oldPrefix[i]! + (ops[i]!.tag === "ins" ? 0 : 1);
+    newPrefix[i + 1] = newPrefix[i]! + (ops[i]!.tag === "del" ? 0 : 1);
+  }
+  const out = [...header];
+  for (const [start, end] of hunkRanges(ops, 3)) {
+    const oldStart = oldPrefix[start]!;
+    const newStart = newPrefix[start]!;
+    const oldCount = oldPrefix[end]! - oldStart;
+    const newCount = newPrefix[end]! - newStart;
+    out.push(`@@ -${oldCount ? oldStart + 1 : oldStart},${oldCount} +${newCount ? newStart + 1 : newStart},${newCount} @@`);
+    for (let i = start; i < end; i++) {
+      const op = ops[i]!;
+      out.push((op.tag === "eq" ? " " : op.tag === "del" ? "-" : "+") + op.line);
+    }
+  }
+  return out.join("\n");
+}
+
+/** Convert OpenAI/OpenCode apply_patch markers into `diff --git` file headers. */
+export function normalizePatch(raw: string): string {
+  const text = raw.replace(/\r\n/g, "\n");
+  if (!/^\*{3} /m.test(text)) return text;
+  const out: string[] = [];
+  for (const line of text.split("\n")) {
+    if (line === "*** Begin Patch" || line === "*** End Patch") continue;
+    const update = /^\*{3} Update File:\s*(.+)$/.exec(line);
+    if (update) {
+      const path = update[1]!.trim();
+      out.push(`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`);
+      continue;
+    }
+    const add = /^\*{3} Add File:\s*(.+)$/.exec(line);
+    if (add) {
+      const path = add[1]!.trim();
+      out.push(`diff --git a/${path} b/${path}`, "--- /dev/null", `+++ b/${path}`);
+      continue;
+    }
+    const del = /^\*{3} Delete File:\s*(.+)$/.exec(line);
+    if (del) {
+      const path = del[1]!.trim();
+      out.push(`diff --git a/${path} b/${path}`, `--- a/${path}`, "+++ /dev/null");
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
+const decodePath = (raw: string): string => {
+  const value = raw.trim();
+  if (!value.startsWith('"')) return value;
+  try { return JSON.parse(value) as string; } catch { return value.slice(1, -1); }
+};
+
+const pathAfterPrefix = (raw: string): string | null => {
+  const value = decodePath(raw);
+  if (value === "/dev/null") return null;
+  return value.replace(/^[ab]\//, "");
+};
+
+const gitHeaderPaths = (header: string): [string, string] | null => {
+  const tokens = header.slice("diff --git ".length).match(/"(?:\\.|[^"])*"|\S+/g);
+  return tokens?.length === 2 ? [tokens[0]!, tokens[1]!] : null;
+};
+
+function pathFromUnifiedHeaders(lines: readonly string[]): string | undefined {
+  const plus = lines.find((line) => line.startsWith("+++ "));
+  const minus = lines.find((line) => line.startsWith("--- "));
+  return (plus ? pathAfterPrefix(plus.slice(4)) : null)
+    ?? (minus ? pathAfterPrefix(minus.slice(4)) : null)
+    ?? undefined;
+}
+
+function statusOf(diff: string, previousPath?: string, path?: string): FileChangeStatus {
+  if (previousPath && path && previousPath !== path) return "renamed";
+  if (/^--- \/dev\/null$/m.test(diff)) return "added";
+  if (/^\+\+\+ \/dev\/null$/m.test(diff)) return "deleted";
+  return "modified";
+}
+
+/** Added/removed content-line counts, ignoring file headers. */
+export function fileDiffStat(diff: string): { add: number; del: number } {
+  let add = 0;
+  let del = 0;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+++") || line.startsWith("---")) continue;
+    if (line.startsWith("+")) add += 1;
+    else if (line.startsWith("-")) del += 1;
+  }
+  return { add, del };
+}
+
+function withStats(file: Omit<FileDiff, "stats" | "status">): FileDiff {
+  return {
+    ...file,
+    stats: fileDiffStat(file.diff),
+    status: statusOf(file.diff, file.previousPath, file.path),
+  };
+}
+
+/** Split a (possibly multi-file) unified or apply_patch patch into per-file diffs. */
+export function splitFileDiffs(diff: string, fallbackPath = "file"): FileDiff[] {
+  const normalized = normalizePatch(diff);
+  if (!normalized.trim()) return [];
+  const lines = normalized.split("\n");
+  const starts: number[] = [];
+  lines.forEach((line, index) => {
+    if (line.startsWith("diff --git ")) starts.push(index);
+  });
+  if (starts.length === 0) {
+    return [withStats({ path: pathFromUnifiedHeaders(lines) ?? fallbackPath, diff: normalized })];
+  }
+  return starts.map((start, index) => {
+    const slice = lines.slice(start, starts[index + 1] ?? lines.length);
+    const header = slice[0] ?? "";
+    const paths = gitHeaderPaths(header);
+    const oldHeader = slice.find((line) => line.startsWith("--- "))?.slice(4).trim();
+    const newHeader = slice.find((line) => line.startsWith("+++ "))?.slice(4).trim();
+    const renameFrom = slice.find((line) => line.startsWith("rename from "))?.slice("rename from ".length);
+    const renameTo = slice.find((line) => line.startsWith("rename to "))?.slice("rename to ".length);
+    const oldPath = renameFrom !== undefined
+      ? decodePath(renameFrom)
+      : oldHeader ? pathAfterPrefix(oldHeader) : paths ? pathAfterPrefix(paths[0]) : null;
+    const newPath = renameTo !== undefined
+      ? decodePath(renameTo)
+      : newHeader ? pathAfterPrefix(newHeader) : paths ? pathAfterPrefix(paths[1]) : null;
+    const path = newPath ?? oldPath ?? fallbackPath;
+    return withStats({
+      path,
+      ...(oldPath && newPath && oldPath !== newPath ? { previousPath: oldPath } : {}),
+      diff: slice.join("\n"),
+    });
+  });
+}
+
+function stripFileHeaders(diff: string): string[] {
+  return diff.split("\n").filter((line) =>
+    !line.startsWith("diff --git ")
+    && !line.startsWith("--- ")
+    && !line.startsWith("+++ "));
+}
+
+function editsDiff(input: JsonObject, path: string): string | undefined {
+  const edits = input.edits ?? input.replacements;
+  if (!Array.isArray(edits) || edits.length === 0) return undefined;
+  const hunks: string[] = [];
+  for (const edit of edits) {
+    if (!edit || typeof edit !== "object" || Array.isArray(edit)) continue;
+    const record = edit as JsonObject;
+    const before = firstRawString(record, ["oldString", "old_string", "before"]);
+    const after = firstRawString(record, ["newString", "new_string", "after"]);
+    if (before === undefined && after === undefined) continue;
+    const piece = unifiedDiff(before ?? "", after ?? "", path);
+    if (piece) hunks.push(...stripFileHeaders(piece));
+  }
+  if (hunks.length === 0) return undefined;
+  const emptyOld = !hunks.some((line) => line.startsWith("-"));
+  const emptyNew = !hunks.some((line) => line.startsWith("+"));
+  const headers = fileHeaders(path, emptyOld ? "" : "x", emptyNew ? "" : "x");
+  return [...headers, ...hunks].join("\n");
+}
+
+export function looksLikeDiff(text: string): boolean {
+  return /^(?:diff --git |--- (?:a\/|\/dev\/null)|\+\+\+ (?:b\/|\/dev\/null)|@@ |\*{3} (?:Begin Patch|Update File|Add File|Delete File):)/m
+    .test(text);
+}
+
+/** Build per-file unified diffs from an edit/write/create/delete tool payload. */
+export function fileDiffsFromInput(input: JsonObject, fallbackPath = "file"): FileDiff[] {
+  const path = firstPath(input, ["filePath", "file_path", "path", "file", "target"]) ?? fallbackPath;
+  const patch = firstRawString(input, ["patch", "patchText", "patch_text", "diff"]);
+  if (patch?.trim()) return splitFileDiffs(patch, path);
+  const fromEdits = editsDiff(input, path);
+  if (fromEdits) return splitFileDiffs(fromEdits, path);
+  const before = firstRawString(input, ["oldString", "old_string", "before"]);
+  const after = firstRawString(input, ["newString", "new_string", "after", "content"]);
+  if (before === undefined && after === undefined) return [];
+  const diff = unifiedDiff(before ?? "", after ?? "", path);
+  return diff ? splitFileDiffs(diff, path) : [];
+}
+
+/** Parse a unified diff into display rows with old/new source line numbers. */
+export function parseDiffRows(diff: string): DiffRow[] {
+  if (!diff) return [];
+  let oldLine = 0;
+  let newLine = 0;
+  let inHunk = false;
+  return diff.replace(/\r\n/g, "\n").split("\n").map((text) => {
+    const hunk = /^@@(?: -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)?)?/.exec(text);
+    if (hunk) {
+      oldLine = hunk[1] !== undefined ? Number(hunk[1]) : 1;
+      newLine = hunk[2] !== undefined ? Number(hunk[2]) : 1;
+      inHunk = true;
+      return { text, kind: "hunk" as const };
+    }
+    if (text === "\\ No newline at end of file") return { text, kind: "meta" as const };
+    if (text.startsWith("+") && !text.startsWith("+++")) {
+      if (!inHunk) { inHunk = true; oldLine = 1; newLine = 1; }
+      return { text, kind: "add" as const, newLine: newLine++ };
+    }
+    if (text.startsWith("-") && !text.startsWith("---")) {
+      if (!inHunk) { inHunk = true; oldLine = 1; newLine = 1; }
+      return { text, kind: "del" as const, oldLine: oldLine++ };
+    }
+    if (!inHunk) return { text, kind: "meta" as const };
+    if (text.startsWith(" ") || text === "") {
+      const row = { text, kind: "ctx" as const, oldLine, newLine };
+      oldLine += 1;
+      newLine += 1;
+      return row;
+    }
+    return { text, kind: "meta" as const };
+  });
+}
