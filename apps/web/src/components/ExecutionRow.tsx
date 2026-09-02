@@ -195,24 +195,21 @@ function DiffLines({ diff, path, limit }: { diff: string; path: string; limit?: 
 function FileDiffActions({
   file,
   long,
-  rows,
   onOpenFile,
   onOpenFull,
 }: {
   file: FileDiff;
   long: boolean;
-  rows: number;
   onOpenFile: (path: string) => void;
   onOpenFull: () => void;
 }) {
   return (
-    <div className="execution-inline-actions">
+    <div className="execution-file-actions">
       {file.status !== "deleted" && (
         <button type="button" onClick={() => onOpenFile(file.path)}>Open in Files</button>
       )}
-      <CopyButton text={file.diff} label="Copy diff" />
       {long && <button type="button" onClick={onOpenFull}>View full diff</button>}
-      {long && <span>{rows} lines</span>}
+      <CopyButton text={file.diff} label="Copy diff" />
     </div>
   );
 }
@@ -236,30 +233,32 @@ function FileDiffBody({
   const showDiff = !labeled || open;
   return (
     <article className="execution-file-change">
-      {labeled && (
-        <button
-          type="button"
-          className="execution-file-toggle"
-          aria-expanded={open}
-          aria-label={`${open ? "Collapse" : "Expand"} ${file.path}, ${file.stats.add} added, ${file.stats.del} removed`}
-          onClick={() => setOpen((value) => !value)}
-        >
-          <span className="execution-file-path" title={file.path}>
-            {file.previousPath && <span className="muted">{file.previousPath} → </span>}
-            {file.path}
-          </span>
-          {hasLineChanges(file.stats) ? <DiffStat add={file.stats.add} del={file.stats.del} /> : null}
-          <span className="tool-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
-        </button>
+      {(labeled || showDiff) && (
+        <div className="execution-file-head">
+          {labeled && (
+            <button
+              type="button"
+              className="execution-file-toggle"
+              aria-expanded={open}
+              aria-label={`${open ? "Collapse" : "Expand"} ${file.path}, ${file.stats.add} added, ${file.stats.del} removed`}
+              onClick={() => setOpen((value) => !value)}
+            >
+              <span className="execution-file-path" title={file.path}>
+                {file.previousPath && <span className="muted">{file.previousPath} → </span>}
+                {file.path}
+              </span>
+              {hasLineChanges(file.stats) ? <DiffStat add={file.stats.add} del={file.stats.del} /> : null}
+              <span className="tool-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
+            </button>
+          )}
+          {showDiff && (
+            <FileDiffActions file={file} long={long} onOpenFile={onOpenFile} onOpenFull={onOpenFull} />
+          )}
+        </div>
       )}
-      {showDiff && (
-        <>
-          {rows.length === 0
-            ? <p className="muted">No textual changes</p>
-            : <DiffLines diff={file.diff} path={file.path} limit={long ? 120 : undefined} />}
-          <FileDiffActions file={file} long={long} rows={rows.length} onOpenFile={onOpenFile} onOpenFull={onOpenFull} />
-        </>
-      )}
+      {showDiff && (rows.length === 0
+        ? <p className="muted">No textual changes</p>
+        : <DiffLines diff={file.diff} path={file.path} limit={long ? 120 : undefined} />)}
     </article>
   );
 }
@@ -713,15 +712,17 @@ export function ExecutionRow({
                     ? <McpResult output={message.output} />
                   : <OutputPreview text={message.output} onOpenFull={() => openViewer(`${presentation.label} output`, message.output ?? "")} />
               )}
-              <footer className="execution-metadata">
-                {exitCode !== undefined && <span>Exit code {exitCode}</span>}
-                <span>{elapsed}</span>
-                {cwd && <span>cwd {cwd}</span>}
-                {presentation.kind === "mcp" && <code className="execution-tool-id">{message.tool}</code>}
-                {webUrl && <a href={webUrl} target="_blank" rel="noreferrer">Open link <Icon.external /></a>}
-                <button type="button" onClick={() => openViewer(`${presentation.label} raw result`, raw)}>View raw result</button>
-                {!presentation.command && inputJson !== "{}" && <CopyButton text={inputJson} label="Copy tool input" />}
-              </footer>
+              {!presentation.files?.length && (
+                <footer className="execution-metadata">
+                  {exitCode !== undefined && <span>Exit code {exitCode}</span>}
+                  <span>{elapsed}</span>
+                  {cwd && <span>cwd {cwd}</span>}
+                  {presentation.kind === "mcp" && <code className="execution-tool-id">{message.tool}</code>}
+                  {webUrl && <a href={webUrl} target="_blank" rel="noreferrer">Open link <Icon.external /></a>}
+                  <button type="button" onClick={() => openViewer(`${presentation.label} raw result`, raw)}>View raw result</button>
+                  {!presentation.command && inputJson !== "{}" && <CopyButton text={inputJson} label="Copy tool input" />}
+                </footer>
+              )}
             </div>
           )}
           </div>

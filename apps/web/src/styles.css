@@ -10046,13 +10046,25 @@ color: var(--text);
 .execution-file-changes {
   display: flex;
   flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.execution-file-change {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.execution-file-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: var(--space-2);
   min-width: 0;
 }
-.execution-file-change { min-width: 0; }
+.execution-file-head .execution-file-toggle { flex: 1; width: auto; }
 .execution-file-toggle {
   width: 100%;
-  min-height: max(32px, var(--hit-min));
+  min-height: max(var(--control-h-sm), var(--hit-min));
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -10071,10 +10083,33 @@ color: var(--text);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.execution-file-actions {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0 var(--space-2);
+}
+.execution-file-actions > button:not(.copy-btn) {
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: calc(11.75px * var(--ui-font-scale, 1));
+}
+.execution-file-actions > button:not(.copy-btn):hover {
+  color: var(--text);
+  background: transparent;
+}
 .execution-details .git-diff {
   max-height: min(50vh, 420px);
   margin: 0;
+  padding: 0;
   border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 .execution-viewer-diff { min-height: 0; flex: 1; overflow: auto; }
 .execution-viewer-diff .git-diff { max-height: none; margin: 0; border: 0; }

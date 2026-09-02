@@ -374,6 +374,12 @@ test("edit rows show added/removed counts and a git-like file changes view", asy
     assert.equal(added.length, 2);
     assert.equal(added[0]?.querySelector(".git-diff-ln")?.textContent, "2");
     assert.match(added[0]?.textContent ?? "", /\+three/);
+    assert.equal(container.querySelector(".execution-metadata"), null,
+      "file diffs do not repeat elapsed time, raw result, or a second copy");
+    const actions = container.querySelector(".execution-file-actions")!;
+    assert.match(actions.textContent ?? "", /Open in Files/);
+    assert.equal(container.querySelectorAll(".execution-details .copy-btn").length, 1);
+    assert.equal(actions.querySelector(".copy-btn")?.getAttribute("aria-label"), "Copy diff");
     assert.equal(container.querySelectorAll(".execution-output-actions button").length, 0,
       "short edits stay inline instead of opening a separate viewer");
   } finally {
@@ -432,6 +438,7 @@ test("long edit previews provide a full diff viewer", async () => {
     })));
     await act(async () => container.querySelector<HTMLButtonElement>(".execution-summary")!.click());
     assert.equal(container.querySelector(".execution-file-toggle"), null);
+    assert.equal(container.querySelector(".execution-metadata"), null);
     assert.equal(container.querySelectorAll(".git-diff-line").length, 120);
     assert.equal(container.querySelectorAll(".git-diff-line.diff-add").length, 119);
     const fullDiff = [...container.querySelectorAll<HTMLButtonElement>("button")]
