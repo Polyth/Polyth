@@ -61,17 +61,60 @@ test("file, URL, edit, search, MCP, and subagent previews are semantic", () => {
     input: { filePath: "apps/web/src/components/Composer.tsx", oldString: "one\ntwo", newString: "one\nthree\nfour" },
   }));
   assert.equal(edit.label, "Edit");
-  assert.match(edit.preview, /Composer\.tsx · \+3 −2$/);
+  assert.equal(edit.preview, "apps/web/src/components/Composer.tsx");
+  assert.deepEqual(edit.stats, { add: 2, del: 1 });
+  assert.equal(edit.files?.length, 1);
+  assert.match(edit.diff ?? "", /@@ -1,2 \+1,3 @@/);
+  assert.match(edit.diff ?? "", /\n one\n-two\n\+three\n\+four/);
   const create = executionPresentation(tool({
     tool: "create",
     input: { filePath: "apps/web/src/new.ts", content: "one\ntwo" },
   }));
-  assert.equal(create.preview, "apps/web/src/new.ts · +2 −0");
+  assert.equal(create.preview, "apps/web/src/new.ts");
+  assert.deepEqual(create.stats, { add: 2, del: 0 });
+  assert.equal(create.files?.[0]?.status, "added");
   const write = executionPresentation(tool({
     tool: "write",
     input: { filePath: "apps/web/src/new.ts", newString: "one\ntwo" },
   }));
-  assert.equal(write.preview, "apps/web/src/new.ts · +2 −0");
+  assert.equal(write.preview, "apps/web/src/new.ts");
+  assert.deepEqual(write.stats, { add: 2, del: 0 });
+
+  const patch = executionPresentation(tool({
+    tool: "apply_patch",
+    input: {
+      patchText: [
+        "*** Begin Patch",
+        "*** Update File: src/a.ts",
+        "@@ -1,2 +1,2 @@",
+        " keep",
+        "-old",
+        "+new",
+        "*** Add File: src/b.ts",
+        "+hello",
+        "*** End Patch",
+      ].join("\n"),
+    },
+  }));
+  assert.equal(patch.preview, "2 files");
+  assert.deepEqual(patch.stats, { add: 2, del: 1 });
+  assert.equal(patch.files?.length, 2);
+  assert.equal(patch.files?.[0]?.path, "src/a.ts");
+  assert.equal(patch.files?.[1]?.path, "src/b.ts");
+  assert.equal(patch.files?.[1]?.status, "added");
+
+  const multi = executionPresentation(tool({
+    tool: "multiedit",
+    input: {
+      filePath: "src/app.ts",
+      edits: [
+        { oldString: "alpha", newString: "beta" },
+        { old_string: "one", new_string: "two" },
+      ],
+    },
+  }));
+  assert.equal(multi.preview, "src/app.ts");
+  assert.deepEqual(multi.stats, { add: 2, del: 2 });
 
   const search = executionPresentation(tool({
     tool: "grep",
@@ -178,6 +221,13 @@ test("execution code surfaces override the global prose font preference", async 
   const override = css.match(/html\[data-font\] body :is\([\s\S]*?execution-viewer > pre[\s\S]*?\)\s*\{\s*font-family:\s*var\(--mono\);\s*\}/);
   assert.ok(override, "commands, output, diffs, and the full viewer retain the monospace font");
   assert.match(css, /\.execution-group-items\s*\{[\s\S]*?width:\s*100%;[\s\S]*?justify-self:\s*stretch;/);
+  assert.match(css, /\.execution-group-items > \*\s*\{[\s\S]*?min-width:\s*0;/);
+  assert.match(css, /\.execution-details \.git-diff\s*\{[\s\S]*?min-width:\s*0;[\s\S]*?overflow:\s*auto;/);
+  assert.match(css, /\.execution-diff-stat-slot\s*\{/);
+  const rowSource = await readFile(new URL("../src/components/ExecutionRow.tsx", import.meta.url), "utf8");
+  assert.match(rowSource, /reverted \? "Redo" : "Revert changes"/);
+  assert.match(rowSource, /reverted \? RedoIcon : UndoIcon/);
+  assert.match(rowSource, /applyUnifiedDiff\(current, file\.diff, direction\)/);
   assert.match(css, /grid-template-rows var\(--motion-normal\)[\s\S]*?opacity var\(--motion-normal\)/);
   assert.match(css, /\.reasoning-preview\s*\{[\s\S]*?-webkit-mask-image:\s*linear-gradient\(to right, #000 90%, transparent 100%\);[\s\S]*?mask-image:\s*linear-gradient\(to right, #000 90%, transparent 100%\);/);
 });
@@ -292,11 +342,152 @@ test("execution row renders collapsed value first, expands inline, and opens lev
   }
 });
 
+test("edit rows show added/removed counts and a git-like file changes view", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(createElement(ExecutionRow, {
+      message: tool({
+        tool: "edit",
+        input: {
+          filePath: "apps/web/src/components/Composer.tsx",
+          oldString: "one\ntwo",
+          newString: "one\nthree\nfour",
+        },
+      }),
+    })));
+    const disclosure = container.querySelector<HTMLButtonElement>(".execution-summary")!;
+    assert.match(disclosure.getAttribute("aria-label") ?? "", /2 added, 1 removed/);
+    assert.match(container.querySelector(".execution-diff-stat")?.textContent ?? "", /\+2/);
+    assert.match(container.querySelector(".execution-diff-stat")?.textContent ?? "", /−1/);
+    assert.equal(container.querySelector(".execution-details"), null);
+
+    await act(async () => disclosure.click());
+    assert.equal(container.querySelector(".execution-file-toggle"), null,
+      "a single-file edit does not repeat the path in a nested file header");
+    assert.equal(container.querySelector(".execution-input"), null,
+      "the file path is not repeated in the details list");
+    assert.equal(container.querySelector(".execution-result"), null,
+      "trivial ok output stays hidden when the diff is shown");
+    const pathMentions = [...container.querySelectorAll(".execution-summary .tool-preview, .execution-file-path")]
+      .map((el) => el.textContent ?? "")
+      .filter((text) => text.includes("Composer.tsx"));
+    assert.equal(pathMentions.length, 1);
+    assert.equal(container.querySelectorAll(".execution-diff-stat").length, 1);
+    assert.equal(container.querySelectorAll(".git-diff-line").length, 4);
+    assert.equal(container.querySelector(".git-diff-line.diff-hunk"), null,
+      "hunk headers stay out of the inline change list");
+    const added = [...container.querySelectorAll(".git-diff-line.diff-add")];
+    assert.equal(added.length, 2);
+    assert.equal(added[0]?.querySelector(".git-diff-ln")?.textContent, "2");
+    assert.match(added[0]?.textContent ?? "", /\+three/);
+    assert.equal(container.querySelector(".execution-metadata"), null,
+      "file diffs do not repeat elapsed time, raw result, or a second copy");
+    const actions = container.querySelector(".execution-file-actions")!;
+    assert.match(actions.textContent ?? "", /Revert changes/);
+    assert.match(actions.textContent ?? "", /Open in Files/);
+    const diffEl = container.querySelector(".git-diff");
+    assert.equal(diffEl?.nextElementSibling, actions,
+      "Open in Files / copy sit below the change lines");
+    assert.equal(container.querySelectorAll(".execution-details .copy-btn").length, 1);
+    assert.equal(actions.querySelector(".copy-btn")?.getAttribute("aria-label"), "Copy diff");
+    assert.equal(container.querySelectorAll(".execution-output-actions button").length, 0,
+      "short edits stay inline instead of opening a separate viewer");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("execution summary columns stay aligned whether or not a row has line counts", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const shell = tool();
+  const edit = tool({
+    id: "call-edit",
+    callId: "call-edit",
+    eventSeq: 2,
+    tool: "edit",
+    input: {
+      filePath: "apps/web/src/components/Composer.tsx",
+      oldString: "one\ntwo",
+      newString: "one\nthree\nfour",
+    },
+  });
+  const group = {
+    kind: "work" as const,
+    id: "work-align",
+    items: [shell, edit],
+    tools: [shell, edit],
+    tasks: [],
+    ms: 420,
+  };
+  try {
+    await act(async () => root.render(createElement(WorkedGroup, { g: group, subagents: null })));
+    const toggle = container.querySelector<HTMLButtonElement>(".execution-group-toggle")!;
+    assert.equal(toggle.children.length, 4);
+    assert.ok(toggle.children[2]?.classList.contains("execution-diff-stat-slot"));
+    assert.ok(toggle.children[3]?.classList.contains("execution-group-chevron"));
+    await act(async () => toggle.click());
+    const summaries = [...container.querySelectorAll(".execution-summary")];
+    assert.equal(summaries.length, 2);
+    for (const summary of summaries) {
+      assert.equal(summary.children.length, 5, "icon, preview, stats slot, status, and chevron stay in fixed tracks");
+      assert.ok(summary.children[2]?.classList.contains("execution-diff-stat-slot"));
+      assert.ok(summary.children[3]?.classList.contains("execution-status"));
+      assert.ok(summary.children[4]?.classList.contains("tool-chevron"));
+    }
+    assert.equal(summaries[0]?.querySelector(".execution-diff-stat"), null);
+    assert.ok(summaries[1]?.querySelector(".execution-diff-stat"));
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("multi-file patches list each file with its own line counts", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(createElement(ExecutionRow, {
+      message: tool({
+        tool: "apply_patch",
+        input: {
+          patchText: [
+            "*** Begin Patch",
+            "*** Update File: src/a.ts",
+            "@@ -1,1 +1,1 @@",
+            "-old",
+            "+new",
+            "*** Add File: src/b.ts",
+            "+hello",
+            "*** End Patch",
+          ].join("\n"),
+        },
+      }),
+    })));
+    const disclosure = container.querySelector<HTMLButtonElement>(".execution-summary")!;
+    assert.match(disclosure.getAttribute("aria-label") ?? "", /2 files, 2 added, 1 removed/);
+    await act(async () => disclosure.click());
+    const files = container.querySelectorAll(".execution-file-toggle");
+    assert.equal(files.length, 2);
+    assert.match(files[0]?.textContent ?? "", /src\/a\.ts/);
+    assert.match(files[1]?.textContent ?? "", /src\/b\.ts/);
+    assert.ok(container.querySelector(".git-diff-line.diff-add"));
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
 test("long edit previews provide a full diff viewer", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
-  const content = Array.from({ length: 18 }, (_, index) => `line ${index + 1}`).join("\n");
+  const content = Array.from({ length: 130 }, (_, index) => `line ${index + 1}`).join("\n");
   try {
     await act(async () => root.render(createElement(ExecutionRow, {
       message: tool({
@@ -305,13 +496,18 @@ test("long edit previews provide a full diff viewer", async () => {
       }),
     })));
     await act(async () => container.querySelector<HTMLButtonElement>(".execution-summary")!.click());
-    assert.equal(container.querySelectorAll(".execution-diff-line").length, 14);
-    const fullDiff = [...container.querySelectorAll<HTMLButtonElement>(".execution-output-actions button")]
+    assert.equal(container.querySelector(".execution-file-toggle"), null);
+    assert.equal(container.querySelector(".execution-metadata"), null);
+    assert.equal(container.querySelectorAll(".git-diff-line").length, 120);
+    assert.equal(container.querySelectorAll(".git-diff-line.diff-add").length, 120);
+    assert.equal(container.querySelector(".git-diff-line.diff-hunk"), null);
+    const fullDiff = [...container.querySelectorAll<HTMLButtonElement>("button")]
       .find((button) => button.textContent === "View full diff");
     assert.ok(fullDiff);
     await act(async () => fullDiff.click());
     const viewer = document.body.querySelector<HTMLElement>(".execution-viewer");
-    assert.match(viewer?.textContent ?? "", /Create full diff.*18 lines.*line 18/s);
+    assert.match(viewer?.textContent ?? "", /Create .*generated\.ts/);
+    assert.match(viewer?.querySelector(".git-diff-line.diff-add:last-child")?.textContent ?? "", /line 130/);
     await act(async () => viewer?.querySelector<HTMLButtonElement>(".execution-viewer-close")?.click());
   } finally {
     await act(async () => root.unmount());
@@ -411,6 +607,32 @@ test("an action batch stays closed by default and opens on hand toggle", async (
     assert.equal(toggle.getAttribute("aria-expanded"), "false", "the batch is folded by default");
     await act(async () => toggle.click());
     assert.equal(toggle.getAttribute("aria-expanded"), "true", "hand toggle opens it");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("implementation groups show combined added and removed line counts", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const edit = tool({
+    tool: "edit",
+    input: { filePath: "src/a.ts", oldString: "x", newString: "y" },
+  });
+  const write = tool({
+    id: "call-2",
+    callId: "call-2",
+    eventSeq: 2,
+    tool: "write",
+    input: { filePath: "src/b.ts", content: "hi" },
+  });
+  const group = { kind: "work" as const, id: "work-edits", items: [edit, write], tools: [edit, write], tasks: [], ms: 420 };
+  try {
+    await act(async () => root.render(createElement(WorkedGroup, { g: group, subagents: null })));
+    assert.match(container.querySelector(".execution-group-toggle .execution-diff-stat")?.textContent ?? "", /\+2/);
+    assert.match(container.querySelector(".execution-group-toggle .execution-diff-stat")?.textContent ?? "", /−1/);
   } finally {
     await act(async () => root.unmount());
     container.remove();

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { JsonObject } from "@polyth/contracts";
-import { api } from "@polyth/session/web-api";
+import type { JsonObject, SessionProjection } from "@polyth/contracts";
+import { api, errorCodeOf, httpStatusOf } from "@polyth/session/web-api";
 import { fmtMs } from "../format.ts";
 import {
   executionPresentation,
@@ -10,13 +10,15 @@ import {
   outputLineCount,
   type ExecutionKind,
 } from "../execution.ts";
+import { applyUnifiedDiff, visibleDiffRows, type DiffApplyDirection, type FileDiff } from "../diff.ts";
+import { highlight, langOf } from "../highlight.ts";
 import { Icon } from "../icons.tsx";
 import { openSession } from "../init.ts";
-import { openEditorFile, setUiError, useStore } from "../store.ts";
-import { parseDiffLines } from "../utils.ts";
+import { getState, openEditorFile, setUiError, useStore } from "../store.ts";
 import type { SubagentState, TaskListState, ToolMsg } from "../reduce.ts";
 import CopyButton from "./CopyButton.tsx";
 import Dialog from "./a11y/Dialog.tsx";
+import { Icon as ActionIcon, RedoIcon, UndoIcon } from "./ui/index.ts";
 
 function ExecutionIcon({ kind }: { kind: ExecutionKind }) {
   const Glyph = kind === "shell" ? Icon.term
@@ -170,25 +172,220 @@ function CommandDetail({ command }: { command: string }) {
   );
 }
 
-function DiffPreview({ diff, onOpenFull }: { diff: string; onOpenFull: () => void }) {
-  const allLines = parseDiffLines(diff);
-  const lines = allLines.slice(0, 14);
+export function hasLineChanges(stats?: { add: number; del: number }): stats is { add: number; del: number } {
+  return stats !== undefined && (stats.add > 0 || stats.del > 0);
+}
+
+export function DiffStat({ add, del }: { add: number; del: number }) {
+  const label = `${add === 1 ? "1 line added" : `${add} lines added`}, ${
+    del === 1 ? "1 line removed" : `${del} lines removed`
+  }`;
   return (
-    <section className="execution-detail-section">
-      <DetailHeading label="Changes" copy={diff} />
-      <div className="execution-diff" role="region" aria-label="Change preview">
-        {lines.map((line, index) => (
-          <div key={`${index}:${line.text}`} className={`execution-diff-line ${line.kind}`}>
-            <span>{index + 1}</span><code>{line.text || " "}</code>
+    <span className="execution-diff-stat" aria-label={label}>
+      {add > 0 && <span className="positive">+{add}</span>}
+      {del > 0 && <span className="negative">−{del}</span>}
+    </span>
+  );
+}
+
+function diffLineClass(kind: string): string {
+  if (kind === "add") return "diff-add";
+  if (kind === "del") return "diff-del";
+  if (kind === "hunk") return "diff-hunk";
+  return "";
+}
+
+function DiffLines({ diff, path, limit }: { diff: string; path: string; limit?: number }) {
+  const rows = visibleDiffRows(diff);
+  const shown = limit === undefined ? rows : rows.slice(0, limit);
+  const lang = langOf(path);
+  return (
+    <div className="git-diff" role="table" aria-label={`Changes in ${path}`}>
+      {shown.map((row, index) => {
+        const shownLn = row.kind === "del" ? row.oldLine : row.newLine;
+        const lineLabel = row.kind === "del" && row.oldLine !== undefined
+          ? `removed line ${row.oldLine}`
+          : row.newLine !== undefined ? `line ${row.newLine}` : "diff metadata";
+        return (
+          <div key={`${index}:${row.text}`} className={`git-diff-line ${diffLineClass(row.kind)}`} role="row" aria-label={lineLabel}>
+            <span className="git-diff-ln" aria-hidden="true">{shownLn ?? ""}</span>
+            <span dangerouslySetInnerHTML={{ __html: highlight(row.text, lang) }} />
           </div>
-        ))}
+        );
+      })}
+    </div>
+  );
+}
+
+function applyFailureMessage(reason: string, direction: DiffApplyDirection): string {
+  if (reason === "already-reverted") return "These changes are already reverted";
+  if (reason === "already-applied") return "This file already matches the edit";
+  if (reason === "empty") return "This change has no file content to apply";
+  return direction === "reverse"
+    ? "The file has changed; these edits can no longer be reverted"
+    : "The file has changed; these edits can no longer be redone";
+}
+
+async function applyFileDiffOnDisk(file: FileDiff, direction: DiffApplyDirection): Promise<void> {
+  const projectId = getState().activeProjectId;
+  const sessionId = getState().activeSessionId ?? undefined;
+  if (!projectId) throw new Error("No project is active");
+  let current: string | null = null;
+  let revision: string | undefined;
+  try {
+    const read = await api.filesRead(projectId, file.path, sessionId);
+    if (read.tooLarge || read.truncated) {
+      throw new Error(direction === "reverse"
+        ? "File is too large to revert safely"
+        : "File is too large to redo safely");
+    }
+    current = read.content;
+    revision = read.revision;
+  } catch (error) {
+    const missing = httpStatusOf(error) === 404
+      || errorCodeOf(error) === "not-found"
+      || /ENOENT|no such file/i.test(error instanceof Error ? error.message : "");
+    if (!missing) throw error;
+  }
+  const result = applyUnifiedDiff(current, file.diff, direction);
+  if (!result.ok) throw new Error(applyFailureMessage(result.reason, direction));
+  if (result.action === "delete") {
+    await api.filesDelete(projectId, file.path, sessionId);
+    return;
+  }
+  await api.filesWrite(projectId, file.path, result.content, revision, sessionId);
+}
+
+function FileDiffActions({
+  file,
+  long,
+  reverted,
+  onReverted,
+  onOpenFile,
+  onOpenFull,
+}: {
+  file: FileDiff;
+  long: boolean;
+  reverted: boolean;
+  onReverted: (next: boolean) => void;
+  onOpenFile: (path: string) => void;
+  onOpenFull: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const direction: DiffApplyDirection = reverted ? "forward" : "reverse";
+  const apply = () => {
+    if (busy) return;
+    setBusy(true);
+    void applyFileDiffOnDisk(file, direction)
+      .then(() => onReverted(direction === "reverse"))
+      .catch((error) => setUiError(error instanceof Error ? error.message : String(error)))
+      .finally(() => setBusy(false));
+  };
+  const label = busy
+    ? (reverted ? "Redoing…" : "Reverting…")
+    : reverted ? "Redo" : "Revert changes";
+  return (
+    <div className="execution-file-actions">
+      <button type="button" onClick={apply} disabled={busy} aria-busy={busy || undefined}>
+        <ActionIcon icon={reverted ? RedoIcon : UndoIcon} size="sm" />
+        {label}
+      </button>
+      <div className="execution-file-actions-end">
+        {file.status !== "deleted" && (
+          <button type="button" onClick={() => onOpenFile(file.path)}>Open in Files</button>
+        )}
+        {long && <button type="button" onClick={onOpenFull}>View full diff</button>}
+        <CopyButton text={file.diff} label="Copy diff" />
       </div>
-      {allLines.length > lines.length && (
-        <div className="execution-output-actions">
-          <button type="button" onClick={onOpenFull}>View full diff</button>
-          <span>{allLines.length} lines</span>
-        </div>
+    </div>
+  );
+}
+
+function FileDiffBody({
+  file,
+  labeled,
+  defaultOpen,
+  reverted,
+  onReverted,
+  onOpenFile,
+  onOpenFull,
+}: {
+  file: FileDiff;
+  labeled: boolean;
+  defaultOpen: boolean;
+  reverted: boolean;
+  onReverted: (next: boolean) => void;
+  onOpenFile: (path: string) => void;
+  onOpenFull: () => void;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const rows = visibleDiffRows(file.diff);
+  const long = rows.length > 120;
+  const showDiff = !labeled || open;
+  return (
+    <article className="execution-file-change">
+      {labeled && (
+        <button
+          type="button"
+          className="execution-file-toggle"
+          aria-expanded={open}
+          aria-label={`${open ? "Collapse" : "Expand"} ${file.path}, ${file.stats.add} added, ${file.stats.del} removed`}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <span className="execution-file-path" title={file.path}>
+            {file.previousPath && <span className="muted">{file.previousPath} → </span>}
+            {file.path}
+          </span>
+          {hasLineChanges(file.stats) ? <DiffStat add={file.stats.add} del={file.stats.del} /> : null}
+          <span className="tool-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
+        </button>
       )}
+      {showDiff && (rows.length === 0
+        ? <p className="muted">No textual changes</p>
+        : <DiffLines diff={file.diff} path={file.path} limit={long ? 120 : undefined} />)}
+      {showDiff && (
+        <FileDiffActions
+          file={file}
+          long={long}
+          reverted={reverted}
+          onReverted={onReverted}
+          onOpenFile={onOpenFile}
+          onOpenFull={onOpenFull}
+        />
+      )}
+    </article>
+  );
+}
+
+function FileChangesView({
+  files,
+  revertedPaths,
+  onReverted,
+  onOpenFile,
+  onOpenFull,
+}: {
+  files: readonly FileDiff[];
+  revertedPaths: ReadonlySet<string>;
+  onReverted: (path: string, next: boolean) => void;
+  onOpenFile: (path: string) => void;
+  onOpenFull: (file: FileDiff) => void;
+}) {
+  const labeled = files.length > 1;
+  const expandByDefault = files.length <= 4;
+  return (
+    <section className="execution-detail-section execution-file-changes" aria-label="File changes">
+      {files.map((file, index) => (
+        <FileDiffBody
+          key={`${file.path}:${index}`}
+          file={file}
+          labeled={labeled}
+          defaultOpen={expandByDefault}
+          reverted={revertedPaths.has(file.path)}
+          onReverted={(next) => onReverted(file.path, next)}
+          onOpenFile={onOpenFile}
+          onOpenFull={() => onOpenFull(file)}
+        />
+      ))}
     </section>
   );
 }
@@ -288,7 +485,7 @@ function SubagentWork({ sessionId, status }: { sessionId: string; status: string
   const [steering, setSteering] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
-  const running = /^(?:running|active|working|pending|queued)$/i.test(status);
+  const running = /^(?:running|active|working)$/i.test(status);
 
   useEffect(() => {
     let alive = true;
@@ -341,6 +538,19 @@ function SubagentWork({ sessionId, status }: { sessionId: string; status: string
   );
 }
 
+function childSessionStatus(
+  subagentStatus: string,
+  childSession: SessionProjection | undefined,
+): string {
+  if (/^(?:done|completed|success|succeeded|failed|error|cancelled|canceled|stopped|aborted)$/i.test(subagentStatus)) {
+    return subagentStatus;
+  }
+  if (childSession && !["working", "waiting", "reconciling", "unknown", "epoch-pending"].includes(childSession.status)) {
+    return childSession.status;
+  }
+  return subagentStatus;
+}
+
 function SubagentDetail({ subagent }: { subagent: Subagent }) {
   const sessions = useStore((state) => state.sessions);
   const activeSessionId = useStore((state) => state.activeSessionId);
@@ -355,18 +565,20 @@ function SubagentDetail({ subagent }: { subagent: Subagent }) {
     ? models.find((candidate) =>
         candidate.providerID === model.providerID && candidate.modelID === model.modelID)
     : undefined;
-  const modelLabel = descriptor?.name ?? model?.modelID ?? "Default model";
+  const modelLabel = descriptor?.name
+    ?? (model ? `${model.providerID}/${model.modelID}` : "Unknown model");
   const inheritedModel = childSession?.model === undefined;
   const parentLabel = parentSession?.title ?? "Current session";
   const openChild = () => {
     void openSession(subagent.sessionId).catch((error) =>
       setUiError(error instanceof Error ? error.message : String(error)));
   };
-  const status = /^(?:done|completed|success|succeeded)$/i.test(subagent.status)
+  const effectiveSubagentStatus = childSessionStatus(subagent.status, childSession);
+  const status = /^(?:done|completed|success|succeeded|stopped|aborted|cancelled|canceled)$/i.test(effectiveSubagentStatus)
     ? "Completed"
-    : /^(?:failed|error)$/i.test(subagent.status)
+    : /^(?:failed|error)$/i.test(effectiveSubagentStatus)
       ? "Failed"
-      : /^(?:queued|pending)$/i.test(subagent.status)
+      : /^(?:queued|pending)$/i.test(effectiveSubagentStatus)
         ? "Pending"
         : "Running";
   return (
@@ -380,7 +592,7 @@ function SubagentDetail({ subagent }: { subagent: Subagent }) {
           <div><dt>Model</dt><dd>{modelLabel}{inheritedModel ? " · inherited" : ""}</dd></div>
           <div><dt>Parent</dt><dd>{parentLabel}</dd></div>
         </dl>
-        {childSession && <SubagentWork sessionId={childSession.id} status={subagent.status} />}
+        {childSession && <SubagentWork sessionId={childSession.id} status={effectiveSubagentStatus} />}
       </div>
       <button type="button" onClick={openChild}>Open child session <Icon.external /></button>
     </section>
@@ -392,9 +604,10 @@ interface TimelineScrollAnchor {
   scrollTop: number;
 }
 
-function FullOutputViewer({ title, text, scrollAnchor, restoreTarget, onClose }: {
+function FullOutputViewer({ title, text, mode = "text", scrollAnchor, restoreTarget, onClose }: {
   title: string;
   text: string;
+  mode?: "text" | "diff";
   scrollAnchor?: TimelineScrollAnchor;
   restoreTarget?: HTMLElement;
   onClose: () => void;
@@ -439,7 +652,9 @@ function FullOutputViewer({ title, text, scrollAnchor, restoreTarget, onClose }:
         <label><Icon.search /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search output" /></label>
         <button type="button" aria-pressed={wrap} onClick={() => setWrap((value) => !value)}>Wrap {wrap ? "on" : "off"}</button>
       </div>
-      <pre className={wrap ? "wrap" : ""}>{filtered || "No matching lines"}</pre>
+      {mode === "diff"
+        ? <div className={wrap ? "execution-viewer-diff wrap" : "execution-viewer-diff"}><DiffLines diff={filtered} path={title} /></div>
+        : <pre className={wrap ? "wrap" : ""}>{filtered || "No matching lines"}</pre>}
     </Dialog>
   );
   return createPortal(viewer, document.body);
@@ -451,6 +666,20 @@ function metadataValue(metadata: JsonObject | undefined, keys: readonly string[]
     if (typeof value === "string" || typeof value === "number") return String(value);
   }
   return undefined;
+}
+
+const PATH_DETAIL_KEYS = new Set(["filepath", "file path", "path", "file", "target"]);
+
+function isPathDetailKey(key: string): boolean {
+  return PATH_DETAIL_KEYS.has(key.replace(/_/g, " ").toLowerCase());
+}
+
+function isTrivialFileEditOutput(output: string | undefined, hasDiff: boolean): boolean {
+  if (!hasDiff) return false;
+  const text = (output ?? "").trim();
+  if (text === "") return true;
+  if (/[\r\n]/.test(text) || text.length > 48) return false;
+  return !/error|fail|denied/i.test(text);
 }
 
 export function ExecutionRow({
@@ -465,12 +694,14 @@ export function ExecutionRow({
   // reader opens a row by hand; nothing auto-expands (same contract as
   // WorkedGroup).
   const [open, setOpen] = useState(false);
+  const [revertedPaths, setRevertedPaths] = useState<ReadonlySet<string>>(() => new Set());
   const detailsPresent = useCollapsePresence(open);
   const rowRef = useRef<HTMLDivElement>(null);
   const pointerScrollAnchor = useRef<(TimelineScrollAnchor & { capturedAt: number }) | null>(null);
   const [viewer, setViewer] = useState<{
     title: string;
     text: string;
+    mode?: "text" | "diff";
     scrollAnchor?: TimelineScrollAnchor;
     restoreTarget?: HTMLElement;
   } | null>(null);
@@ -488,7 +719,12 @@ export function ExecutionRow({
         (candidate.status === "pending" || candidate.status === "active" || candidate.status === "done" || candidate.status === "failed");
     }).map((item) => ({ id: item.id, text: item.text, status: item.status })) : undefined;
   }, [message, message.rev]);
-  const inputEntries = useMemo(() => normalizedInputEntries(message.input), [message, message.rev]);
+  const inputEntries = useMemo(() => {
+    const entries = normalizedInputEntries(message.input);
+    return presentation.files?.length
+      ? entries.filter((entry) => !isPathDetailKey(entry.key))
+      : entries;
+  }, [message, message.rev, presentation.files]);
   const inputJson = useMemo(() => JSON.stringify(message.input, null, 2), [message, message.rev]);
   const raw = useMemo(() => JSON.stringify({
     tool: message.tool,
@@ -500,6 +736,7 @@ export function ExecutionRow({
   const exitCode = metadataValue(message.metadata, ["exit", "exitCode", "exit_code"]);
   const cwd = metadataValue(message.metadata, ["cwd"])
     ?? (typeof message.input.cwd === "string" ? message.input.cwd : undefined);
+  const stats = presentation.stats;
   const elapsed = fmtMs(Math.max(0, (message.finishTime ?? Date.now()) - message.time));
   const webUrl = typeof message.input.url === "string" ? message.input.url : undefined;
   // The collapsed summary prints out on appearance (and types new arrivals
@@ -509,7 +746,7 @@ export function ExecutionRow({
   const openFile = () => {
     if (presentation.path) openEditorFile(presentation.path);
   };
-  const openViewer = (title: string, text: string) => {
+  const openViewer = (title: string, text: string, mode: "text" | "diff" = "text") => {
     const timeline = rowRef.current?.closest<HTMLElement>(".timeline");
     const pointerAnchor = pointerScrollAnchor.current;
     pointerScrollAnchor.current = null;
@@ -524,6 +761,7 @@ export function ExecutionRow({
     setViewer({
       title,
       text,
+      mode,
       ...(scrollAnchor ? { scrollAnchor } : {}),
       ...(restoreTarget ? { restoreTarget } : {}),
     });
@@ -545,7 +783,9 @@ export function ExecutionRow({
           type="button"
           className="tool-disclosure execution-summary"
           aria-expanded={open}
-          aria-label={`${open ? "Collapse" : "Expand"} ${presentation.label}: ${presentation.preview}`}
+          aria-label={`${open ? "Collapse" : "Expand"} ${presentation.label}: ${presentation.preview}${
+            hasLineChanges(stats) ? `, ${stats.add} added, ${stats.del} removed` : ""
+          }`}
           onClick={() => setOpen((value) => !value)}
         >
           <span className="tool-icon execution-icon" aria-hidden="true"><ExecutionIcon kind={presentation.kind} /></span>
@@ -553,6 +793,7 @@ export function ExecutionRow({
             <span className="tool-name">{presentation.label}</span>
             <span className={`tool-preview${presentation.kind === "shell" || presentation.kind === "test" ? " command" : ""}`}>{typedPreview}</span>
           </span>
+          <span className="execution-diff-stat-slot">{hasLineChanges(stats) ? <DiffStat add={stats.add} del={stats.del} /> : null}</span>
           <StatusMark message={message} childStatus={subagent?.status} />
           <span className="tool-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
         </button>
@@ -562,7 +803,7 @@ export function ExecutionRow({
             <div className="tool-body execution-details">
               {presentation.command && <CommandDetail command={presentation.command} />}
               {subagent && <SubagentDetail subagent={subagent} />}
-              {presentation.path && (
+              {presentation.path && !presentation.files?.length && (
                 <section className="execution-detail-section execution-file-summary">
                   <DetailHeading label="File" copy={presentation.path} />
                   <code>{presentation.path}</code>
@@ -572,10 +813,20 @@ export function ExecutionRow({
                   </div>
                 </section>
               )}
-              {presentation.diff && (
-                <DiffPreview
-                  diff={presentation.diff}
-                  onOpenFull={() => openViewer(`${presentation.label} full diff`, presentation.diff ?? "")}
+              {presentation.files && presentation.files.length > 0 && (
+                <FileChangesView
+                  files={presentation.files}
+                  revertedPaths={revertedPaths}
+                  onReverted={(path, next) => {
+                    setRevertedPaths((prev) => {
+                      const nextSet = new Set(prev);
+                      if (next) nextSet.add(path);
+                      else nextSet.delete(path);
+                      return nextSet;
+                    });
+                  }}
+                  onOpenFile={(path) => openEditorFile(path)}
+                  onOpenFull={(file) => openViewer(`${presentation.label} ${file.path}`, file.diff, "diff")}
                 />
               )}
               {todoItems && todoItems.length > 0 ? <TodoWritePreview items={todoItems} /> : inputEntries.length > 0 && (
@@ -589,28 +840,30 @@ export function ExecutionRow({
               {message.error !== undefined && (
                 <OutputPreview text={message.error} error onOpenFull={() => openViewer(`${presentation.label} error`, message.error ?? "")} />
               )}
-              {message.output !== undefined && (
+              {message.output !== undefined && !isTrivialFileEditOutput(message.output, Boolean(presentation.files?.length)) && (
                 presentation.kind === "search"
                   ? <SearchResults text={message.output} onOpenFull={() => openViewer(`${presentation.label} results`, message.output ?? "")} />
                   : presentation.kind === "mcp"
                     ? <McpResult output={message.output} />
                   : <OutputPreview text={message.output} onOpenFull={() => openViewer(`${presentation.label} output`, message.output ?? "")} />
               )}
-              <footer className="execution-metadata">
-                {exitCode !== undefined && <span>Exit code {exitCode}</span>}
-                <span>{elapsed}</span>
-                {cwd && <span>cwd {cwd}</span>}
-                {presentation.kind === "mcp" && <code className="execution-tool-id">{message.tool}</code>}
-                {webUrl && <a href={webUrl} target="_blank" rel="noreferrer">Open link <Icon.external /></a>}
-                <button type="button" onClick={() => openViewer(`${presentation.label} raw result`, raw)}>View raw result</button>
-                {!presentation.command && inputJson !== "{}" && <CopyButton text={inputJson} label="Copy tool input" />}
-              </footer>
+              {!presentation.files?.length && (
+                <footer className="execution-metadata">
+                  {exitCode !== undefined && <span>Exit code {exitCode}</span>}
+                  <span>{elapsed}</span>
+                  {cwd && <span>cwd {cwd}</span>}
+                  {presentation.kind === "mcp" && <code className="execution-tool-id">{message.tool}</code>}
+                  {webUrl && <a href={webUrl} target="_blank" rel="noreferrer">Open link <Icon.external /></a>}
+                  <button type="button" onClick={() => openViewer(`${presentation.label} raw result`, raw)}>View raw result</button>
+                  {!presentation.command && inputJson !== "{}" && <CopyButton text={inputJson} label="Copy tool input" />}
+                </footer>
+              )}
             </div>
           )}
           </div>
         </div>
       </div>
-      {viewer && <FullOutputViewer title={viewer.title} text={viewer.text} scrollAnchor={viewer.scrollAnchor} restoreTarget={viewer.restoreTarget} onClose={() => setViewer(null)} />}
+      {viewer && <FullOutputViewer title={viewer.title} text={viewer.text} mode={viewer.mode} scrollAnchor={viewer.scrollAnchor} restoreTarget={viewer.restoreTarget} onClose={() => setViewer(null)} />}
     </>
   );
 }

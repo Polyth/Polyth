@@ -227,9 +227,6 @@ display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 0; f
 .diff-prefs label {
 display: inline-flex; align-items: center; gap: 3px; color: var(--muted);
 }
-.git-diff.wrap {
-white-space: pre-wrap; overflow-wrap: anywhere;
-}
 .split-diff-row.hunk code {
 color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
@@ -290,24 +287,6 @@ color: var(--green);
 }
 .git-ahead-behind .behind {
 color: var(--red);
-}
-.git-diff {
-font-family: var(--mono); font-size: var(--editor-font-size, 14px); background: var(--sunken); border: 1px solid var(--border-soft); border-radius: var(--radius-control); padding: 6px 0; overflow: auto; max-height: 400px; margin: 4px 0;
-}
-.git-diff-line {
-display: flex; padding: 0 8px; white-space: pre;
-}
-.git-diff-ln {
-width: 36px; text-align: right; color: var(--muted); user-select: none; padding-right: 8px; flex-shrink: 0;
-}
-.diff-add {
-background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--green);
-}
-.diff-del {
-background: color-mix(in srgb, var(--red) 15%, transparent); color: var(--red);
-}
-.diff-hunk {
-color: var(--purple);
 }
 .git-page {
 max-width: 1200px; width: 100%; margin-inline: auto; padding: 24px max(24px, calc((100% - 1180px) / 2));
@@ -564,18 +543,6 @@ max-width: min(68vw, 800px); overflow: hidden; text-overflow: ellipsis; white-sp
 }
 .git-detail-title .muted {
 font-size: var(--font-meta);
-}
-.diff-stat {
-display: inline-flex; overflow: hidden; border: 1px solid var(--hair-strong); border-radius: 999px; font: 600 11px var(--mono);
-}
-.diff-stat span {
-padding: 3px 7px;
-}
-.diff-stat span:first-child {
-color: var(--green-on-wash); background: var(--green-wash);
-}
-.diff-stat span:last-child {
-color: var(--red); background: var(--red-wash);
 }
 .git-mobile-detail-head {
 display: none;
@@ -1085,9 +1052,6 @@ flex: 1 1 calc(100% - 44px);
 .git-persona-row > button {
 min-height: var(--tap); flex: 1 1 88px;
 }
-}
-.git-diff {
-max-width: 100%; overscroll-behavior-inline: contain;
 }
 .git-page .copy-wrap,
 .git-page .git-diff,
