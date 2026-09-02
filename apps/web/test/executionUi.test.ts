@@ -357,16 +357,23 @@ test("edit rows show added/removed counts and a git-like file changes view", asy
     assert.equal(container.querySelector(".execution-details"), null);
 
     await act(async () => disclosure.click());
-    const fileHead = container.querySelector(".execution-file-head");
-    assert.ok(fileHead);
-    assert.match(fileHead.textContent ?? "", /Composer\.tsx/);
-    assert.equal(container.querySelector(".execution-file-letter")?.textContent, "M");
-    assert.equal(container.querySelectorAll(".execution-diff-line").length, 5);
-    assert.match(container.querySelector(".execution-diff-line.hunk code")?.textContent ?? "", /@@ -1,2 \+1,3 @@/);
-    const added = [...container.querySelectorAll(".execution-diff-line.add")];
+    assert.equal(container.querySelector(".execution-file-toggle"), null,
+      "a single-file edit does not repeat the path in a nested file header");
+    assert.equal(container.querySelector(".execution-input"), null,
+      "the file path is not repeated in the details list");
+    assert.equal(container.querySelector(".execution-result"), null,
+      "trivial ok output stays hidden when the diff is shown");
+    const pathMentions = [...container.querySelectorAll(".execution-summary .tool-preview, .execution-file-path")]
+      .map((el) => el.textContent ?? "")
+      .filter((text) => text.includes("Composer.tsx"));
+    assert.equal(pathMentions.length, 1);
+    assert.equal(container.querySelectorAll(".execution-diff-stat").length, 1);
+    assert.equal(container.querySelectorAll(".git-diff-line").length, 5);
+    assert.match(container.querySelector(".git-diff-line.diff-hunk")?.textContent ?? "", /@@ -1,2 \+1,3 @@/);
+    const added = [...container.querySelectorAll(".git-diff-line.diff-add")];
     assert.equal(added.length, 2);
-    assert.equal(added[0]?.querySelector(".execution-diff-ln i:last-child")?.textContent, "2");
-    assert.equal(added[0]?.querySelector(".execution-diff-marker")?.textContent, "+");
+    assert.equal(added[0]?.querySelector(".git-diff-ln")?.textContent, "2");
+    assert.match(added[0]?.textContent ?? "", /\+three/);
     assert.equal(container.querySelectorAll(".execution-output-actions button").length, 0,
       "short edits stay inline instead of opening a separate viewer");
   } finally {
@@ -400,12 +407,11 @@ test("multi-file patches list each file with its own line counts", async () => {
     const disclosure = container.querySelector<HTMLButtonElement>(".execution-summary")!;
     assert.match(disclosure.getAttribute("aria-label") ?? "", /2 files, 2 added, 1 removed/);
     await act(async () => disclosure.click());
-    const cards = container.querySelectorAll(".execution-file-card");
-    assert.equal(cards.length, 2);
-    assert.match(cards[0]?.textContent ?? "", /src\/a\.ts/);
-    assert.match(cards[1]?.textContent ?? "", /src\/b\.ts/);
-    assert.equal(container.querySelectorAll(".execution-file-letter.added").length, 1);
-    assert.ok(container.querySelector(".execution-diff-line.add"));
+    const files = container.querySelectorAll(".execution-file-toggle");
+    assert.equal(files.length, 2);
+    assert.match(files[0]?.textContent ?? "", /src\/a\.ts/);
+    assert.match(files[1]?.textContent ?? "", /src\/b\.ts/);
+    assert.ok(container.querySelector(".git-diff-line.diff-add"));
   } finally {
     await act(async () => root.unmount());
     container.remove();
@@ -425,16 +431,16 @@ test("long edit previews provide a full diff viewer", async () => {
       }),
     })));
     await act(async () => container.querySelector<HTMLButtonElement>(".execution-summary")!.click());
-    assert.equal(container.querySelector(".execution-file-letter")?.textContent, "A");
-    assert.equal(container.querySelectorAll(".execution-diff-line").length, 120);
-    assert.equal(container.querySelectorAll(".execution-diff-line.add").length, 119);
+    assert.equal(container.querySelector(".execution-file-toggle"), null);
+    assert.equal(container.querySelectorAll(".git-diff-line").length, 120);
+    assert.equal(container.querySelectorAll(".git-diff-line.diff-add").length, 119);
     const fullDiff = [...container.querySelectorAll<HTMLButtonElement>("button")]
       .find((button) => button.textContent === "View full diff");
     assert.ok(fullDiff);
     await act(async () => fullDiff.click());
     const viewer = document.body.querySelector<HTMLElement>(".execution-viewer");
     assert.match(viewer?.textContent ?? "", /Create .*generated\.ts/);
-    assert.match(viewer?.querySelector(".execution-diff-line.add:last-child")?.textContent ?? "", /line 130/);
+    assert.match(viewer?.querySelector(".git-diff-line.diff-add:last-child")?.textContent ?? "", /line 130/);
     await act(async () => viewer?.querySelector<HTMLButtonElement>(".execution-viewer-close")?.click());
   } finally {
     await act(async () => root.unmount());

@@ -157,17 +157,17 @@ export function DiffStat({ add, del }: { add: number; del: number }) {
   }`;
   return (
     <span className="execution-diff-stat" aria-label={label}>
-      <span className="add">+{add}</span>
-      <span className="del">−{del}</span>
+      {add > 0 && <span className="positive">+{add}</span>}
+      {del > 0 && <span className="negative">−{del}</span>}
     </span>
   );
 }
 
-function fileLetter(status: FileDiff["status"]): string {
-  if (status === "added") return "A";
-  if (status === "deleted") return "D";
-  if (status === "renamed") return "R";
-  return "M";
+function diffLineClass(kind: string): string {
+  if (kind === "add") return "diff-add";
+  if (kind === "del") return "diff-del";
+  if (kind === "hunk") return "diff-hunk";
+  return "";
 }
 
 function DiffLines({ diff, path, limit }: { diff: string; path: string; limit?: number }) {
@@ -175,22 +175,16 @@ function DiffLines({ diff, path, limit }: { diff: string; path: string; limit?: 
   const shown = limit === undefined ? rows : rows.slice(0, limit);
   const lang = langOf(path);
   return (
-    <div className="execution-diff" role="table" aria-label={`Changes in ${path}`}>
+    <div className="git-diff" role="table" aria-label={`Changes in ${path}`}>
       {shown.map((row, index) => {
-        const oldShown = row.oldLine === undefined ? "" : String(row.oldLine);
-        const newShown = row.newLine === undefined ? "" : String(row.newLine);
-        const lineLabel = oldShown && newShown
-          ? `line ${oldShown} → ${newShown}`
-          : oldShown ? `removed line ${oldShown}` : newShown ? `added line ${newShown}` : "diff metadata";
-const marker = row.kind === "add" ? "+" : row.kind === "del" ? "-" : row.kind === "hunk" ? "" : " ";
-        const body = row.kind === "hunk" || row.kind === "meta" ? row.text : row.text.slice(1);
+        const shownLn = row.kind === "del" ? row.oldLine : row.newLine;
+        const lineLabel = row.kind === "del" && row.oldLine !== undefined
+          ? `removed line ${row.oldLine}`
+          : row.newLine !== undefined ? `line ${row.newLine}` : "diff metadata";
         return (
-          <div key={`${index}:${row.text}`} className={`execution-diff-line ${row.kind}`} role="row" aria-label={lineLabel}>
-            <span className="execution-diff-ln" aria-hidden="true"><i>{oldShown}</i><i>{newShown}</i></span>
-            <span className="execution-diff-marker" aria-hidden="true">{marker}</span>
-            {row.kind === "hunk"
-              ? <code>{row.text}</code>
-              : <code dangerouslySetInnerHTML={{ __html: highlight(body, lang) }} />}
+          <div key={`${index}:${row.text}`} className={`git-diff-line ${diffLineClass(row.kind)}`} role="row" aria-label={lineLabel}>
+            <span className="git-diff-ln" aria-hidden="true">{shownLn ?? ""}</span>
+            <span dangerouslySetInnerHTML={{ __html: highlight(row.text, lang) }} />
           </div>
         );
       })}
@@ -198,13 +192,40 @@ const marker = row.kind === "add" ? "+" : row.kind === "del" ? "-" : row.kind ==
   );
 }
 
-function FileChangeCard({
+function FileDiffActions({
   file,
+  long,
+  rows,
+  onOpenFile,
+  onOpenFull,
+}: {
+  file: FileDiff;
+  long: boolean;
+  rows: number;
+  onOpenFile: (path: string) => void;
+  onOpenFull: () => void;
+}) {
+  return (
+    <div className="execution-inline-actions">
+      {file.status !== "deleted" && (
+        <button type="button" onClick={() => onOpenFile(file.path)}>Open in Files</button>
+      )}
+      <CopyButton text={file.diff} label="Copy diff" />
+      {long && <button type="button" onClick={onOpenFull}>View full diff</button>}
+      {long && <span>{rows} lines</span>}
+    </div>
+  );
+}
+
+function FileDiffBody({
+  file,
+  labeled,
   defaultOpen,
   onOpenFile,
   onOpenFull,
 }: {
   file: FileDiff;
+  labeled: boolean;
   defaultOpen: boolean;
   onOpenFile: (path: string) => void;
   onOpenFull: () => void;
@@ -212,37 +233,32 @@ function FileChangeCard({
   const [open, setOpen] = useState(defaultOpen);
   const rows = parseDiffRows(file.diff).filter((row) => row.kind !== "meta");
   const long = rows.length > 120;
+  const showDiff = !labeled || open;
   return (
-    <article className={`execution-file-card${open ? " open" : ""}`}>
-      <button
-        type="button"
-        className="execution-file-head"
-        aria-expanded={open}
-        aria-label={`${open ? "Collapse" : "Expand"} ${file.path}, ${file.stats.add} added, ${file.stats.del} removed`}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span className={`execution-file-letter ${file.status}`} aria-hidden="true">{fileLetter(file.status)}</span>
-        <span className="execution-file-path" title={file.path}>
-          {file.previousPath && <span className="execution-file-renamed">{file.previousPath} → </span>}
-          {file.path}
-        </span>
-        {hasLineChanges(file.stats) ? <DiffStat add={file.stats.add} del={file.stats.del} /> : null}
-        <span className="tool-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
-      </button>
-      {open && (
-        <div className="execution-file-body">
+    <article className="execution-file-change">
+      {labeled && (
+        <button
+          type="button"
+          className="execution-file-toggle"
+          aria-expanded={open}
+          aria-label={`${open ? "Collapse" : "Expand"} ${file.path}, ${file.stats.add} added, ${file.stats.del} removed`}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <span className="execution-file-path" title={file.path}>
+            {file.previousPath && <span className="muted">{file.previousPath} → </span>}
+            {file.path}
+          </span>
+          {hasLineChanges(file.stats) ? <DiffStat add={file.stats.add} del={file.stats.del} /> : null}
+          <span className="tool-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
+        </button>
+      )}
+      {showDiff && (
+        <>
           {rows.length === 0
-            ? <p className="execution-file-empty">No textual changes</p>
+            ? <p className="muted">No textual changes</p>
             : <DiffLines diff={file.diff} path={file.path} limit={long ? 120 : undefined} />}
-          <div className="execution-inline-actions">
-            {file.status !== "deleted" && (
-              <button type="button" onClick={() => onOpenFile(file.path)}>Open in Files</button>
-            )}
-            <CopyButton text={file.diff} label="Copy diff" />
-            {long && <button type="button" onClick={onOpenFull}>View full diff</button>}
-            {long && <span>{rows.length} lines</span>}
-          </div>
-        </div>
+          <FileDiffActions file={file} long={long} rows={rows.length} onOpenFile={onOpenFile} onOpenFull={onOpenFull} />
+        </>
       )}
     </article>
   );
@@ -257,13 +273,15 @@ function FileChangesView({
   onOpenFile: (path: string) => void;
   onOpenFull: (file: FileDiff) => void;
 }) {
+  const labeled = files.length > 1;
   const expandByDefault = files.length <= 4;
   return (
     <section className="execution-detail-section execution-file-changes" aria-label="File changes">
       {files.map((file, index) => (
-        <FileChangeCard
+        <FileDiffBody
           key={`${file.path}:${index}`}
           file={file}
+          labeled={labeled}
           defaultOpen={expandByDefault}
           onOpenFile={onOpenFile}
           onOpenFull={() => onOpenFull(file)}
@@ -536,6 +554,20 @@ function metadataValue(metadata: JsonObject | undefined, keys: readonly string[]
   return undefined;
 }
 
+const PATH_DETAIL_KEYS = new Set(["filepath", "file path", "path", "file", "target"]);
+
+function isPathDetailKey(key: string): boolean {
+  return PATH_DETAIL_KEYS.has(key.replace(/_/g, " ").toLowerCase());
+}
+
+function isTrivialFileEditOutput(output: string | undefined, hasDiff: boolean): boolean {
+  if (!hasDiff) return false;
+  const text = (output ?? "").trim();
+  if (text === "") return true;
+  if (/[\r\n]/.test(text) || text.length > 48) return false;
+  return !/error|fail|denied/i.test(text);
+}
+
 export function ExecutionRow({
   message,
   subagent,
@@ -562,7 +594,12 @@ export function ExecutionRow({
   // derivations (JSON.stringify of potentially large outputs) run once per
   // actual change instead of on every parent render.
   const presentation = useMemo(() => executionPresentation(message), [message, message.rev]);
-  const inputEntries = useMemo(() => normalizedInputEntries(message.input), [message, message.rev]);
+  const inputEntries = useMemo(() => {
+    const entries = normalizedInputEntries(message.input);
+    return presentation.files?.length
+      ? entries.filter((entry) => !isPathDetailKey(entry.key))
+      : entries;
+  }, [message, message.rev, presentation.files]);
   const inputJson = useMemo(() => JSON.stringify(message.input, null, 2), [message, message.rev]);
   const raw = useMemo(() => JSON.stringify({
     tool: message.tool,
@@ -669,7 +706,7 @@ export function ExecutionRow({
               {message.error !== undefined && (
                 <OutputPreview text={message.error} error onOpenFull={() => openViewer(`${presentation.label} error`, message.error ?? "")} />
               )}
-              {message.output !== undefined && (
+              {message.output !== undefined && !isTrivialFileEditOutput(message.output, Boolean(presentation.files?.length)) && (
                 presentation.kind === "search"
                   ? <SearchResults text={message.output} onOpenFull={() => openViewer(`${presentation.label} results`, message.output ?? "")} />
                   : presentation.kind === "mcp"
