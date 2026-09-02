@@ -368,8 +368,9 @@ test("edit rows show added/removed counts and a git-like file changes view", asy
       .filter((text) => text.includes("Composer.tsx"));
     assert.equal(pathMentions.length, 1);
     assert.equal(container.querySelectorAll(".execution-diff-stat").length, 1);
-    assert.equal(container.querySelectorAll(".git-diff-line").length, 5);
-    assert.match(container.querySelector(".git-diff-line.diff-hunk")?.textContent ?? "", /@@ -1,2 \+1,3 @@/);
+    assert.equal(container.querySelectorAll(".git-diff-line").length, 4);
+    assert.equal(container.querySelector(".git-diff-line.diff-hunk"), null,
+      "hunk headers stay out of the inline change list");
     const added = [...container.querySelectorAll(".git-diff-line.diff-add")];
     assert.equal(added.length, 2);
     assert.equal(added[0]?.querySelector(".git-diff-ln")?.textContent, "2");
@@ -377,7 +378,11 @@ test("edit rows show added/removed counts and a git-like file changes view", asy
     assert.equal(container.querySelector(".execution-metadata"), null,
       "file diffs do not repeat elapsed time, raw result, or a second copy");
     const actions = container.querySelector(".execution-file-actions")!;
+    assert.match(actions.textContent ?? "", /Revert changes/);
     assert.match(actions.textContent ?? "", /Open in Files/);
+    const diffEl = container.querySelector(".git-diff");
+    assert.equal(diffEl?.nextElementSibling, actions,
+      "Open in Files / copy sit below the change lines");
     assert.equal(container.querySelectorAll(".execution-details .copy-btn").length, 1);
     assert.equal(actions.querySelector(".copy-btn")?.getAttribute("aria-label"), "Copy diff");
     assert.equal(container.querySelectorAll(".execution-output-actions button").length, 0,
@@ -440,7 +445,8 @@ test("long edit previews provide a full diff viewer", async () => {
     assert.equal(container.querySelector(".execution-file-toggle"), null);
     assert.equal(container.querySelector(".execution-metadata"), null);
     assert.equal(container.querySelectorAll(".git-diff-line").length, 120);
-    assert.equal(container.querySelectorAll(".git-diff-line.diff-add").length, 119);
+    assert.equal(container.querySelectorAll(".git-diff-line.diff-add").length, 120);
+    assert.equal(container.querySelector(".git-diff-line.diff-hunk"), null);
     const fullDiff = [...container.querySelectorAll<HTMLButtonElement>("button")]
       .find((button) => button.textContent === "View full diff");
     assert.ok(fullDiff);

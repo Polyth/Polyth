@@ -342,3 +342,134 @@ export function parseDiffRows(diff: string): DiffRow[] {
     return { text, kind: "meta" as const };
   });
 }
+
+/** Content rows shown in the execution-row diff (no file headers or @@ hunks). */
+export function visibleDiffRows(diff: string): DiffRow[] {
+  return parseDiffRows(diff).filter((row) => row.kind !== "meta" && row.kind !== "hunk");
+}
+
+export interface DiffHunk {
+  oldStart: number;
+  newStart: number;
+  oldLines: string[];
+  newLines: string[];
+}
+
+const payloadLine = (text: string): string =>
+  text.length > 0 && (text[0] === " " || text[0] === "+" || text[0] === "-")
+    ? text.slice(1)
+    : text;
+
+/** Hunks with old/new line bodies, used to reverse an agent file edit. */
+export function parseDiffHunks(diff: string): DiffHunk[] {
+  const hunks: DiffHunk[] = [];
+  let current: DiffHunk | null = null;
+  const ensure = (): DiffHunk => {
+    if (!current) current = { oldStart: 0, newStart: 1, oldLines: [], newLines: [] };
+    return current;
+  };
+  for (const row of parseDiffRows(diff)) {
+    if (row.kind === "hunk") {
+      if (current) hunks.push(current);
+      const parsed = /^@@(?: -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)?)?/.exec(row.text);
+      current = {
+        oldStart: parsed?.[1] !== undefined ? Number(parsed[1]) : 0,
+        newStart: parsed?.[2] !== undefined ? Number(parsed[2]) : 0,
+        oldLines: [],
+        newLines: [],
+      };
+      continue;
+    }
+    if (row.kind === "meta") continue;
+    const hunk = ensure();
+    const line = payloadLine(row.text);
+    if (row.kind === "ctx") {
+      hunk.oldLines.push(line);
+      hunk.newLines.push(line);
+    } else if (row.kind === "add") hunk.newLines.push(line);
+    else if (row.kind === "del") hunk.oldLines.push(line);
+  }
+  if (current) hunks.push(current);
+  return hunks;
+}
+
+function findBlock(lines: readonly string[], block: readonly string[], hint: number): number {
+  if (block.length === 0) return Math.min(Math.max(0, hint), lines.length);
+  let best = -1;
+  let bestDist = Infinity;
+  const last = lines.length - block.length;
+  for (let i = 0; i <= last; i++) {
+    if (!block.every((line, index) => lines[i + index] === line)) continue;
+    const dist = Math.abs(i - hint);
+    if (dist < bestDist) {
+      best = i;
+      bestDist = dist;
+    }
+  }
+  return best;
+}
+
+function applyReverse(lines: readonly string[], hunks: readonly DiffHunk[]): string[] | "already-reverted" | "conflict" {
+  if (hunks.length === 0) return "conflict";
+  const next = [...lines];
+  let applied = 0;
+  let already = 0;
+  for (let index = hunks.length - 1; index >= 0; index--) {
+    const hunk = hunks[index]!;
+    const newHint = Math.max(0, hunk.newStart > 0 ? hunk.newStart - 1 : 0);
+    const oldHint = Math.max(0, hunk.oldStart > 0 ? hunk.oldStart - 1 : 0);
+    if (hunk.newLines.length === 0) {
+      if (hunk.oldLines.length === 0) continue;
+      if (findBlock(next, hunk.oldLines, oldHint) >= 0) {
+        already += 1;
+        continue;
+      }
+      next.splice(Math.min(newHint, next.length), 0, ...hunk.oldLines);
+      applied += 1;
+      continue;
+    }
+    const at = findBlock(next, hunk.newLines, newHint);
+    if (at >= 0) {
+      next.splice(at, hunk.newLines.length, ...hunk.oldLines);
+      applied += 1;
+      continue;
+    }
+    if (hunk.oldLines.length === 0 || findBlock(next, hunk.oldLines, oldHint) >= 0) {
+      already += 1;
+      continue;
+    }
+    return "conflict";
+  }
+  if (applied === 0) return already > 0 ? "already-reverted" : "conflict";
+  return next;
+}
+
+function joinLines(lines: readonly string[], trailingNl: boolean): string {
+  if (lines.length === 0) return "";
+  return `${lines.join("\n")}${trailingNl ? "\n" : ""}`;
+}
+
+export type RevertFileResult =
+  | { ok: true; action: "write"; content: string }
+  | { ok: true; action: "delete" }
+  | { ok: false; reason: "already-reverted" | "conflict" | "empty" };
+
+/** Reverse `diff` against the current file contents (or `null` if the file is gone). */
+export function revertUnifiedDiff(current: string | null, diff: string): RevertFileResult {
+  const hunks = parseDiffHunks(diff);
+  if (hunks.length === 0) return { ok: false, reason: "empty" };
+  const wasAdd = hunks.every((hunk) => hunk.oldLines.length === 0);
+  if (current === null) {
+    if (wasAdd) return { ok: false, reason: "already-reverted" };
+    const applied = applyReverse([], hunks);
+    if (applied === "already-reverted") return { ok: false, reason: "already-reverted" };
+    if (applied === "conflict") return { ok: false, reason: "conflict" };
+    return { ok: true, action: "write", content: joinLines(applied, true) };
+  }
+  const trailing = current.endsWith("\n");
+  const applied = applyReverse(toDiffLines(current), hunks);
+  if (applied === "already-reverted") return { ok: false, reason: "already-reverted" };
+  if (applied === "conflict") return { ok: false, reason: "conflict" };
+  if (wasAdd && applied.length === 0) return { ok: true, action: "delete" };
+  return { ok: true, action: "write", content: joinLines(applied, trailing) };
+}

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { JsonObject } from "@polyth/contracts";
-import { api } from "@polyth/session/web-api";
+import { api, errorCodeOf, httpStatusOf } from "@polyth/session/web-api";
 import { fmtMs } from "../format.ts";
 import {
   executionPresentation,
@@ -10,14 +10,15 @@ import {
   outputLineCount,
   type ExecutionKind,
 } from "../execution.ts";
-import { parseDiffRows, type FileDiff } from "../diff.ts";
+import { revertUnifiedDiff, visibleDiffRows, type FileDiff } from "../diff.ts";
 import { highlight, langOf } from "../highlight.ts";
 import { Icon } from "../icons.tsx";
 import { openSession } from "../init.ts";
-import { openEditorFile, setUiError, useStore } from "../store.ts";
+import { getState, openEditorFile, setUiError, useStore } from "../store.ts";
 import type { SubagentState, ToolMsg } from "../reduce.ts";
 import CopyButton from "./CopyButton.tsx";
 import Dialog from "./a11y/Dialog.tsx";
+import { Icon as ActionIcon, UndoIcon } from "./ui/index.ts";
 
 function ExecutionIcon({ kind }: { kind: ExecutionKind }) {
   const Glyph = kind === "shell" ? Icon.term
@@ -171,7 +172,7 @@ function diffLineClass(kind: string): string {
 }
 
 function DiffLines({ diff, path, limit }: { diff: string; path: string; limit?: number }) {
-  const rows = parseDiffRows(diff).filter((row) => row.kind !== "meta");
+  const rows = visibleDiffRows(diff);
   const shown = limit === undefined ? rows : rows.slice(0, limit);
   const lang = langOf(path);
   return (
@@ -192,6 +193,38 @@ function DiffLines({ diff, path, limit }: { diff: string; path: string; limit?: 
   );
 }
 
+async function revertFileOnDisk(file: FileDiff): Promise<void> {
+  const projectId = getState().activeProjectId;
+  const sessionId = getState().activeSessionId ?? undefined;
+  if (!projectId) throw new Error("No project is active");
+  let current: string | null = null;
+  let revision: string | undefined;
+  try {
+    const read = await api.filesRead(projectId, file.path, sessionId);
+    if (read.tooLarge || read.truncated) throw new Error("File is too large to revert safely");
+    current = read.content;
+    revision = read.revision;
+  } catch (error) {
+    const missing = httpStatusOf(error) === 404
+      || errorCodeOf(error) === "not-found"
+      || /ENOENT|no such file/i.test(error instanceof Error ? error.message : "");
+    if (!missing) throw error;
+  }
+  const result = revertUnifiedDiff(current, file.diff);
+  if (!result.ok) {
+    throw new Error(result.reason === "already-reverted"
+      ? "These changes are already reverted"
+      : result.reason === "empty"
+        ? "This change has no file content to revert"
+        : "The file has changed; these edits can no longer be reverted");
+  }
+  if (result.action === "delete") {
+    await api.filesDelete(projectId, file.path, sessionId);
+    return;
+  }
+  await api.filesWrite(projectId, file.path, result.content, revision, sessionId);
+}
+
 function FileDiffActions({
   file,
   long,
@@ -203,13 +236,29 @@ function FileDiffActions({
   onOpenFile: (path: string) => void;
   onOpenFull: () => void;
 }) {
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const revert = () => {
+    if (busy || done) return;
+    setBusy(true);
+    void revertFileOnDisk(file)
+      .then(() => setDone(true))
+      .catch((error) => setUiError(error instanceof Error ? error.message : String(error)))
+      .finally(() => setBusy(false));
+  };
   return (
     <div className="execution-file-actions">
-      {file.status !== "deleted" && (
-        <button type="button" onClick={() => onOpenFile(file.path)}>Open in Files</button>
-      )}
-      {long && <button type="button" onClick={onOpenFull}>View full diff</button>}
-      <CopyButton text={file.diff} label="Copy diff" />
+      <button type="button" onClick={revert} disabled={busy || done} aria-busy={busy || undefined}>
+        <ActionIcon icon={UndoIcon} size="sm" />
+        {done ? "Reverted" : busy ? "Reverting…" : "Revert changes"}
+      </button>
+      <div className="execution-file-actions-end">
+        {file.status !== "deleted" && (
+          <button type="button" onClick={() => onOpenFile(file.path)}>Open in Files</button>
+        )}
+        {long && <button type="button" onClick={onOpenFull}>View full diff</button>}
+        <CopyButton text={file.diff} label="Copy diff" />
+      </div>
     </div>
   );
 }
@@ -228,37 +277,33 @@ function FileDiffBody({
   onOpenFull: () => void;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const rows = parseDiffRows(file.diff).filter((row) => row.kind !== "meta");
+  const rows = visibleDiffRows(file.diff);
   const long = rows.length > 120;
   const showDiff = !labeled || open;
   return (
     <article className="execution-file-change">
-      {(labeled || showDiff) && (
-        <div className="execution-file-head">
-          {labeled && (
-            <button
-              type="button"
-              className="execution-file-toggle"
-              aria-expanded={open}
-              aria-label={`${open ? "Collapse" : "Expand"} ${file.path}, ${file.stats.add} added, ${file.stats.del} removed`}
-              onClick={() => setOpen((value) => !value)}
-            >
-              <span className="execution-file-path" title={file.path}>
-                {file.previousPath && <span className="muted">{file.previousPath} → </span>}
-                {file.path}
-              </span>
-              {hasLineChanges(file.stats) ? <DiffStat add={file.stats.add} del={file.stats.del} /> : null}
-              <span className="tool-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
-            </button>
-          )}
-          {showDiff && (
-            <FileDiffActions file={file} long={long} onOpenFile={onOpenFile} onOpenFull={onOpenFull} />
-          )}
-        </div>
+      {labeled && (
+        <button
+          type="button"
+          className="execution-file-toggle"
+          aria-expanded={open}
+          aria-label={`${open ? "Collapse" : "Expand"} ${file.path}, ${file.stats.add} added, ${file.stats.del} removed`}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <span className="execution-file-path" title={file.path}>
+            {file.previousPath && <span className="muted">{file.previousPath} → </span>}
+            {file.path}
+          </span>
+          {hasLineChanges(file.stats) ? <DiffStat add={file.stats.add} del={file.stats.del} /> : null}
+          <span className="tool-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
+        </button>
       )}
       {showDiff && (rows.length === 0
         ? <p className="muted">No textual changes</p>
         : <DiffLines diff={file.diff} path={file.path} limit={long ? 120 : undefined} />)}
+      {showDiff && (
+        <FileDiffActions file={file} long={long} onOpenFile={onOpenFile} onOpenFull={onOpenFull} />
+      )}
     </article>
   );
 }

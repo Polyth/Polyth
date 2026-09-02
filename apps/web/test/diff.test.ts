@@ -5,6 +5,7 @@ import {
   fileDiffStat,
   normalizePatch,
   parseDiffRows,
+  revertUnifiedDiff,
   splitFileDiffs,
   unifiedDiff,
 } from "../src/diff.ts";
@@ -112,4 +113,22 @@ test("fileDiffsFromInput reads patchText, old/new strings, and edits arrays", ()
     edits: [{ old_string: "a", new_string: "b" }],
   });
   assert.deepEqual(fromEdits[0]?.stats, { add: 1, del: 1 });
+});
+
+test("revertUnifiedDiff restores the old side of an in-file edit", () => {
+  const diff = unifiedDiff("one\ntwo\n", "one\nthree\nfour\n", "f.ts");
+  const reverted = revertUnifiedDiff("one\nthree\nfour\n", diff);
+  assert.deepEqual(reverted, { ok: true, action: "write", content: "one\ntwo\n" });
+  assert.equal(revertUnifiedDiff("one\ntwo\n", diff).ok, false);
+  assert.equal(revertUnifiedDiff("unrelated\n", diff).ok, false);
+});
+
+test("revertUnifiedDiff deletes a created file and restores a deleted one", () => {
+  const created = unifiedDiff("", "hello\nworld\n", "new.txt");
+  assert.deepEqual(revertUnifiedDiff("hello\nworld\n", created), { ok: true, action: "delete" });
+  assert.equal(revertUnifiedDiff(null, created).ok, false);
+  const removed = unifiedDiff("hello\nworld\n", "", "old.txt");
+  const restored = revertUnifiedDiff(null, removed);
+  assert.deepEqual(restored, { ok: true, action: "write", content: "hello\nworld\n" });
+  assert.equal(revertUnifiedDiff("hello\nworld\n", removed).ok, false);
 });
