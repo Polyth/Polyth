@@ -11239,7 +11239,7 @@ html[data-font] body :is(
    one edge-to-edge dashboard slab. Content remains on the plain canvas. */
 @media (min-width: 821px) {
   .app {
-    gap: 0;
+    gap: var(--space-2);
     padding: 0;
     background:
       radial-gradient(circle at 12% -8%, var(--accent-wash), transparent 28rem),

@@ -1,7 +1,13 @@
 /* Package-owned workflow web styles. The core ModuleView owns window chrome. */
 
 .workflow-run-indicator {
-color: var(--accent);
+  min-width: 0; max-width: 28rem; color: var(--accent);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.workflow-run-indicator-idle {
+  display: inline-flex; align-items: center; min-height: var(--control-h);
+  padding-inline: var(--control-pad-x); color: var(--text-dim);
+  font-size: var(--font-label); font-weight: 650;
 }
 .workflow-run-indicator.waiting {
 border-color: color-mix(in srgb, var(--amber) 40%, var(--border));

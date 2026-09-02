@@ -242,11 +242,12 @@ background: var(--surface-overlay);
 .model-picker-grip {
   width: 8px; color: var(--faint); font-size: 12px; cursor: grab; opacity: .62;
 }
+.model-picker-grip.spacer { cursor: default; opacity: 0; }
 .model-picker-copy {
   min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 0;
 }
 .model-picker-copy strong {
-   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-label); font-weight: 580;
+   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-label); font-weight: 400;
 }
 .model-picker-copy small {
   overflow: hidden; color: var(--muted); font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap;
@@ -278,9 +279,11 @@ flex: none;
 .model-picker-row.active .model-row-info,
 .model-picker-row:hover .model-star-btn,
 .model-picker-row.active .model-star-btn,
-.model-picker-row .model-star-btn.on {
-opacity: 1;
+.model-picker-row .model-star-btn {
+  opacity: 1;
+  color: var(--amber);
 }
+.model-picker-row .model-star-btn.on svg { fill: currentColor; }
 .model-row-info:hover,
 .model-picker-row .model-star-btn:hover {
 color: var(--text); background: var(--surface-overlay);
@@ -291,20 +294,29 @@ width: 14px; height: 14px;
 /* One details surface only: desktop keeps it adjacent to the active row;
    phones use the sheet's explicit details route. */
 .model-hover-card {
-  position: absolute; z-index: 1; top: var(--space-5); left: calc(100% + var(--space-2));
+  position: fixed; z-index: var(--z-tooltip); top: 0; left: 0;
   width: min(272px, calc(100vw - var(--space-6))); max-height: min(430px, 56vh); overflow-y: auto;
-  padding: var(--space-2); border: 1px solid var(--material-glass-border); border-radius: var(--radius-card);
+  padding: var(--space-3); border: 1px solid var(--material-glass-border); border-radius: var(--radius-surface);
   background: var(--material-glass); box-shadow: var(--material-glass-shadow); animation: model-details-in var(--motion-fast) var(--motion-ease);
 }
-.model-hover-card .model-details { padding: 0; }
-.model-hover-card .model-details-back,
-.model-hover-card .model-details-actions { display: none; }
-.model-hover-card .model-details-grid { padding: 0; gap: var(--space-1); }
-.model-hover-card .model-details-grid > div { grid-template-columns: minmax(74px, 38%) minmax(0, 1fr); }
+.model-hover-details { display: flex; flex-direction: column; gap: var(--space-3); }
+.model-hover-details header { display: flex; align-items: flex-start; gap: var(--space-2); }
+.model-hover-details header > div { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.model-hover-details header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-label); font-weight: 680; }
+.model-hover-details header small { color: var(--muted); font-size: var(--font-meta); }
+.model-hover-star { width: var(--icon-lg); height: var(--icon-lg); color: var(--amber); flex: none; }
+.model-hover-star.on { fill: currentColor; }
+.model-hover-capabilities { display: flex; gap: var(--space-2); color: var(--text-dim); }
+.model-hover-capabilities span { width: 22px; height: 22px; display: grid; place-items: center; border-radius: var(--radius-control); background: var(--surface-overlay); }
+.model-hover-capabilities svg { width: 14px; height: 14px; }
+.model-hover-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.model-hover-tags span { padding: 3px 6px; border-radius: var(--radius-control); background: var(--surface-overlay); color: var(--text-dim); font-size: 10px; }
+.model-hover-context { margin: 0; color: var(--text-dim); font-size: var(--font-meta); }
+.model-hover-pricing { display: grid; gap: 6px; padding: var(--space-2); border: 1px solid var(--border-soft); border-radius: var(--radius-card); background: var(--surface-overlay); font-size: var(--font-meta); }
+.model-hover-pricing span { display: flex; justify-content: space-between; gap: var(--space-2); }
+.model-hover-pricing b { font-weight: 620; white-space: nowrap; }
+.model-hover-pricing i { color: var(--muted); font-style: normal; font-weight: 400; }
 @keyframes model-details-in { from { opacity: 0; transform: translateX(-2px); } to { opacity: 1; transform: none; } }
-@media (max-width: 860px) and (min-width: 701px) {
-  .model-hover-card { left: auto; right: calc(100% + var(--space-2)); }
-}
 /* ---- model details card (shared by popover and sheet) -------------------- */
 .model-details {
 display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-1);
@@ -482,6 +494,7 @@ transition: none;
 .set-provider-no-matches { padding: 4px 8px; font-size: var(--font-meta); }
 .model-star-btn.on,
 .model-star-btn[aria-pressed="true"] { color: var(--amber); }
+.model-sheet .sheet-row-star { color: var(--amber); }
 .models-page { min-width: 0; container: models-page / inline-size; }
 .models-toolbar { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-3) 0 var(--space-2); }
 .models-toolbar .models-search { flex: 1; margin: 0; min-width: 0; }

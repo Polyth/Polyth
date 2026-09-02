@@ -23,6 +23,17 @@ const write = (v: string): void => {
 let prefs: ModelPrefs = parseModelPrefs(read());
 const listeners = new Set<() => void>();
 
+// localStorage is the existing preference store. The storage event keeps open
+// pickers in other tabs/windows in sync without adding a second persistence
+// layer or polling.
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    if (event.key !== MODEL_PREFS_KEY) return;
+    prefs = parseModelPrefs(event.newValue);
+    for (const listener of [...listeners]) listener();
+  });
+}
+
 const commit = (next: ModelPrefs): void => {
   prefs = next;
   write(serializeModelPrefs(prefs));

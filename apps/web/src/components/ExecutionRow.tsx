@@ -678,6 +678,7 @@ function isTrivialFileEditOutput(output: string | undefined, hasDiff: boolean): 
   if (!hasDiff) return false;
   const text = (output ?? "").trim();
   if (text === "") return true;
+  if (/success\.?\s*(?:updated|modified)\s+the following files?:/i.test(text.replace(/^>\s*/gm, ""))) return true;
   if (/[\r\n]/.test(text) || text.length > 48) return false;
   return !/error|fail|denied/i.test(text);
 }

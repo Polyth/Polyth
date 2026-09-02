@@ -18,6 +18,10 @@ import { Button, Spinner } from "../../../apps/web/src/components/ui/index.ts";
 
 function WorkflowRunIndicator() {
   const projectId = useStore((state) => state.activeProjectId);
+  const sessionId = useStore((state) => state.activeSessionId);
+  const sessionName = useStore((state) =>
+    state.sessions.find((session) => session.id === state.activeSessionId)?.title ?? "",
+  );
   const [workflowState, setWorkflowState] = useState<{
     projectId: string;
     runs: WorkflowRunDto[];
@@ -75,7 +79,14 @@ function WorkflowRunIndicator() {
     };
   }, [projectId]);
 
-  if (!run || !projectId) return null;
+  if (!projectId || !sessionId) return null;
+  if (!run) {
+    return createElement("span", {
+      className: "workflow-run-indicator workflow-run-indicator-idle",
+      title: sessionName || "Session",
+      "aria-label": sessionName || "Session",
+    }, sessionName || "Session");
+  }
   const done = workflowFinishedCount(run);
   const waits = run.nodes.map(workflowHumanWait);
   const actionLabel = waits.includes("permission")
@@ -136,14 +147,16 @@ export const WORKFLOW_WIDGET_PLUGIN: WidgetPlugin = {
     }),
   }, {
     id: "workflow.active-run",
-    title: "Active workflow",
-    description: "Show active workflow progress in the session header.",
-    kind: "mini-widget",
+    title: "Workflow status",
+    description: "Show workflow progress and the current session in the top rail.",
+    kind: "widget",
     defaultSlot: "session.header.actions",
-    supportedSlots: ["session.header.actions", "app.header.actions"],
+    supportedSlots: ["session.header.actions", "app.header.actions", "workspace.header"],
     defaultVisible: true,
-    defaultSize: { w: 1, h: 1 },
-    resizable: false,
+    defaultSize: { w: 3, h: 2 },
+    minSize: { w: 2, h: 1 },
+    maxSize: { w: 6, h: 3 },
+    resizable: true,
     audience: "simple",
     order: 45,
     render: () => createElement(WorkflowRunIndicator),

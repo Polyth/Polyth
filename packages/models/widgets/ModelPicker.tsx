@@ -12,6 +12,7 @@ import {
   useState,
   type DragEvent,
   type KeyboardEvent,
+  type MouseEvent,
   type ReactNode,
 } from "react";
 import type { ModelDescriptor, ModelRef } from "@polyth/contracts";
@@ -46,7 +47,6 @@ import ProviderLogo from "./ProviderLogo.tsx";
 import { getLocale, tr } from "@polyth/web/i18n";
 import {
   modelDetailsPresentation,
-  modelMetaLine,
   modelSupportsThinking,
 } from "./modelPresentation.ts";
 import {
@@ -60,8 +60,7 @@ const MODEL_PICKER_DRAG_TYPE = "application/x-polyth-model-picker";
 type ModelPickerDragKind = "favorite" | "provider";
 type ModelPickerDrag = { kind: ModelPickerDragKind; id: string };
 
-/** The compact technical card behind the per-row details affordance. Shared
- *  verbatim by the desktop popover and the phone sheet. */
+/** Explicit phone details route. Desktop uses the compact hover card below. */
 function ModelDetails({
   model,
   selected,
@@ -141,6 +140,40 @@ function ModelDetails({
   );
 }
 
+function ModelHoverDetails({ model, favorite }: { model: ModelDescriptor; favorite: boolean }) {
+  const capabilities = new Set((model.capabilities ?? []).map((capability) => capability.toLowerCase()));
+  const icon = (label: string, node: ReactNode) => <span title={label} aria-label={label}>{node}</span>;
+  const prices = model.cost && (
+    <div className="model-hover-pricing">
+      <span>Input <b>${model.cost.input.toLocaleString(getLocale())} <i>/ 1M tokens</i></b></span>
+      <span>Output <b>${model.cost.output.toLocaleString(getLocale())} <i>/ 1M tokens</i></b></span>
+    </div>
+  );
+  return (
+    <div className="model-hover-details">
+      <header>
+        <ProviderLogo providerID={model.providerID} providerName={model.providerName} className="model-row-provider-logo" />
+        <div><strong>{model.name}</strong><small>{model.providerName ?? model.providerID}</small></div>
+        <FavoriteIcon className={`model-hover-star${favorite ? " on" : ""}`} aria-label={favorite ? tr("modelpicker.removeFavorite") : tr("modelpicker.addFavorite")} />
+      </header>
+      <div className="model-hover-capabilities" aria-label={tr("modelpicker.modalities")}>
+        {icon(tr("modelpicker.text"), <Icon.text />)}
+        {[...capabilities].some((capability) => capability.endsWith(":image")) && icon(tr("modelpicker.image"), <Icon.image />)}
+        {[...capabilities].some((capability) => capability.endsWith(":audio")) && icon(tr("modelpicker.audio"), <Icon.speaker />)}
+        {[...capabilities].some((capability) => capability.endsWith(":video")) && icon(tr("modelpicker.video"), <Icon.video />)}
+        {capabilities.has("toolcall") && icon(tr("modelpicker.toolCalls"), <Icon.workflow />)}
+      </div>
+      <div className="model-hover-tags">
+        {capabilities.has("toolcall") && <span>{tr("modelpicker.toolCalls")}</span>}
+        {modelSupportsThinking(model) && <span>{tr("modelpicker.reasoning")}</span>}
+        {capabilities.size > 0 && <span>{tr("modelpicker.modalities")}</span>}
+      </div>
+      <p className="model-hover-context">◉ {model.context ? `${model.context.toLocaleString(getLocale())} ${tr("modelpicker.contextWindow").toLowerCase()}` : tr("modelpicker.contextUnknown")}</p>
+      {prices}
+    </div>
+  );
+}
+
 interface ModelPickerProps {
   models: ModelDescriptor[];
   value?: ModelRef;
@@ -174,6 +207,7 @@ export default function ModelPicker({
   const [detail, setDetail] = useState<ModelDescriptor | null>(null);
   const [active, setActive] = useState(0);
   const [showDetails, setShowDetails] = useState(false);
+  const [detailPosition, setDetailPosition] = useState<{ left: number; top: number } | null>(null);
   const [dragging, setDragging] = useState<ModelPickerDrag | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -283,6 +317,24 @@ export default function ModelPicker({
       ?.querySelector(".model-picker-row.active")
       ?.scrollIntoView({ block: "nearest" });
   }, [open, phone, activeKey]);
+
+  const placeDetails = (element: HTMLElement) => {
+    const rect = element.getBoundingClientRect();
+    const width = 272;
+    const left = rect.right + 8 + width <= window.innerWidth - 12
+      ? rect.right + 8
+      : Math.max(12, rect.left - width - 8);
+    setDetailPosition({ left, top: Math.min(Math.max(12, rect.top - 8), window.innerHeight - 260) });
+  };
+
+  useEffect(() => {
+    if (!showDetails || !activeKey || phone) return;
+    const element = document.getElementById(`model-option-${activeKey}`);
+    if (element) placeDetails(element);
+    // `placeDetails` is intentionally not a dependency: it is a local layout
+    // helper and including it would re-position on every state update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showDetails, activeKey, phone]);
 
   // Keep the familiar command-palette slash shortcut local to this open
   // picker; never steal text typed into another control.
@@ -409,15 +461,6 @@ export default function ModelPicker({
     />
   );
 
-  /** Row meta: modality/context, plus provider identity in the favorites
-   *  group where rows from different providers sit side by side. */
-  const rowMeta = (model: ModelDescriptor, group: "favorites" | "recent" | "provider") => {
-    const meta = modelMetaLine(model);
-    return group === "favorites"
-      ? [model.providerName ?? model.providerID, meta].filter(Boolean).join(" · ")
-      : meta;
-  };
-
   const capabilityIcons = (model: ModelDescriptor) => {
     const modalities = new Set((model.capabilities ?? []).map((capability) => capability.toLowerCase()));
     const icons: Array<[string, ReactNode]> = [["Text", <Icon.text />]];
@@ -441,9 +484,9 @@ export default function ModelPicker({
         aria-selected={selected}
         tabIndex={-1}
         onClick={() => choose(model)}
-          onMouseEnter={() => {
+          onMouseEnter={(event: MouseEvent<HTMLDivElement>) => {
             const index = flatRowIndex.get(key);
-            if (index !== undefined) { setActive(index); setShowDetails(true); }
+            if (index !== undefined) { setActive(index); setShowDetails(true); placeDetails(event.currentTarget); }
         }}
         {...(favoriteDrag ? {
           draggable: !phone && !q,
@@ -462,7 +505,7 @@ export default function ModelPicker({
           onDragEnd: () => { setDragging(null); setDropTarget(null); },
         } : {})}
       >
-        {favoriteDrag && <span className="model-picker-grip" aria-hidden="true">⠿</span>}
+        <span className={`model-picker-grip${favoriteDrag ? "" : " spacer"}`} aria-hidden="true">{favoriteDrag ? "⠿" : ""}</span>
         <ProviderLogo providerID={model.providerID} providerName={model.providerName} className="model-row-provider-logo" />
         <span className="model-picker-copy">
           <strong>
@@ -471,7 +514,6 @@ export default function ModelPicker({
               <em className="model-row-offline">{tr("modelpicker.notConnected")}</em>
             )}
           </strong>
-          <small>{rowMeta(model, group)}</small>
         </span>
         {capabilityIcons(model)}
         {star(model)}
@@ -490,7 +532,6 @@ export default function ModelPicker({
     <SheetRow
       key={`${group}:${modelKey(model)}`}
       title={model.name}
-      meta={rowMeta(model, group)}
       icon={(
         <>{editing && group === "favorites" && <span className="model-sheet-grip" aria-hidden="true">⠿</span>}<ProviderLogo providerID={model.providerID} providerName={model.providerName} className="model-row-provider-logo" /></>
       )}
@@ -738,8 +779,8 @@ export default function ModelPicker({
                 <span>↑↓ Navigate</span><span>Enter Select</span><span>/ Search</span>
               </footer>
               {showDetails && activeIndex >= 0 && flatRows[activeIndex] && (
-                <aside className="model-hover-card" aria-live="polite" onMouseEnter={() => setActive(activeIndex)}>
-                  <ModelDetails model={flatRows[activeIndex]!} selected={isSelected(flatRows[activeIndex]!)} {...(usage !== undefined ? { usage } : {})} onUse={() => choose(flatRows[activeIndex]!)} onBack={() => undefined} />
+                <aside className="model-hover-card" aria-live="polite" style={detailPosition ?? undefined} onMouseEnter={() => setActive(activeIndex)}>
+                  <ModelHoverDetails model={flatRows[activeIndex]!} favorite={isFavorite(prefs, modelKey(flatRows[activeIndex]!))} />
                 </aside>
               )}
             </div>
