@@ -34,9 +34,7 @@ export default function PromptBubble({
     timer.current = setTimeout(() => { timer.current = null; setShown(false); }, AUTO_DISMISS_MS);
   };
 
-  // Scroll-spy mirrors PromptNavigator: the active prompt is the last one at
-  // or above the viewport midline; a row hidden by L13 windowing (null top)
-  // counts as above. When every prompt is windowed out, the newest wins.
+  // Only show the bubble for a prompt that is currently rendered and above the viewport.
   useEffect(() => {
     const el = containerRef.current;
     if (el === null) return;
@@ -49,12 +47,10 @@ export default function PromptBubble({
         const node = el.querySelector(`[data-msg-id="${p.id}"]`);
         return node === null ? null : node.getBoundingClientRect().top;
       });
-      const index = tops.every((t) => t === null)
-        ? prompts.length - 1
-        : activePromptIndex(tops, line);
+      const index = activePromptIndex(tops, line);
       const top = index >= 0 ? (tops[index] ?? null) : null;
       setActive(Math.max(0, index));
-      const offScreen = index >= 0 && (top === null || top < box.top);
+      const offScreen = index >= 0 && top !== null && top < box.top;
       if (offScreen) { setShown(true); startTimer(); }
       else { setShown(false); clearTimer(); }
     };

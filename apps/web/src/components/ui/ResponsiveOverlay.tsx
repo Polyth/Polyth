@@ -29,6 +29,8 @@ export interface ResponsiveOverlayProps {
   side?: AnchoredSide;
   className?: string;
   initialFocus?: string;
+  /** Desktop popover overflow policy. */
+  popoverOverflow?: "auto" | "visible";
   /** Explicit focus destination after either presentation closes. */
   restoreFocusRef?: RefObject<HTMLElement | null>;
   /** Sheet options (phone only). */
@@ -52,6 +54,7 @@ export default function ResponsiveOverlay({
   side = "down",
   className,
   initialFocus,
+  popoverOverflow,
   restoreFocusRef,
   sheetSize = "auto",
   sheetSearch,
@@ -91,6 +94,7 @@ export default function ResponsiveOverlay({
         side={side}
         ariaLabel={title}
         {...(initialFocus !== undefined ? { initialFocus } : {})}
+        {...(popoverOverflow !== undefined ? { overflow: popoverOverflow } : {})}
         {...(className !== undefined ? { className } : {})}
       >
         {children}

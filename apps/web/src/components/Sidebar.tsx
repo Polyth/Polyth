@@ -174,7 +174,6 @@ export default function Sidebar() {
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const width = dragWidth ?? layout.width;
   const navRef = useRef<HTMLElement>(null);
-  const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectionTriggerRef = useRef<HTMLButtonElement>(null);
   const sideScrollRef = useRef<HTMLDivElement>(null);
   const pullStartRef = useRef<GesturePoint | null>(null);
@@ -185,21 +184,6 @@ export default function Sidebar() {
     if (!prevCompact.current && compact) closeDrawer();
     prevCompact.current = compact;
   }, [compact]);
-  useEffect(() => () => {
-    if (revealTimer.current !== null) clearTimeout(revealTimer.current);
-  }, []);
-  const revealFromEdge = () => {
-    if (!collapsed || revealTimer.current !== null) return;
-    revealTimer.current = setTimeout(() => {
-      revealTimer.current = null;
-      setSidebarLayout({ collapsed: false });
-    }, 500);
-  };
-  const cancelEdgeReveal = () => {
-    if (revealTimer.current === null) return;
-    clearTimeout(revealTimer.current);
-    revealTimer.current = null;
-  };
   useModalSurface({
     enabled: compact,
     open: compact && drawerOpen,
@@ -432,7 +416,7 @@ export default function Sidebar() {
       >
         <h2 className="sr-only">{tr("sidebar.projectsAndSessions")}</h2>
         {collapsed && (
-          <div className="sidebar-collapsed-rail" onPointerEnter={revealFromEdge} onPointerLeave={cancelEdgeReveal}>
+          <div className="sidebar-collapsed-rail">
             <IconButton
               icon={SidebarIcon}
               className="sidebar-expand"

@@ -66,11 +66,11 @@ test("sidebar geometry scales type from ui font size and density controls rows",
   for (const density of ["compact", "balanced", "comfortable"]) {
     assert.match(css, new RegExp(`(?:html|body)\\[data-density="${density}"\\] \\.sidebar`));
   }
-  assert.match(css, /html\[data-density="compact"\] \.sidebar,[\s\S]*?--nav-row-project:\s*40px;[\s\S]*?--nav-row-branch:\s*36px;[\s\S]*?--nav-row-session:\s*34px;/,
+  assert.match(css, /html\[data-density="compact"\] \.sidebar,[\s\S]*?--nav-row-project:\s*36px;[\s\S]*?--nav-row-branch:\s*32px;[\s\S]*?--nav-row-session:\s*30px;/,
     "compact density substantially tightens every row in the project tree");
-  assert.match(css, /html\[data-density="balanced"\] \.sidebar,[\s\S]*?--nav-row-project:\s*42px;[\s\S]*?--nav-row-branch:\s*38px;[\s\S]*?--nav-row-session:\s*36px;/,
+  assert.match(css, /html\[data-density="balanced"\] \.sidebar,[\s\S]*?--nav-row-project:\s*38px;[\s\S]*?--nav-row-branch:\s*34px;[\s\S]*?--nav-row-session:\s*32px;/,
     "balanced density remains compact");
-  assert.match(css, /html\[data-density="comfortable"\] \.sidebar,[\s\S]*?--nav-row-project:\s*44px;[\s\S]*?--nav-row-branch:\s*40px;[\s\S]*?--nav-row-session:\s*38px;/,
+  assert.match(css, /html\[data-density="comfortable"\] \.sidebar,[\s\S]*?--nav-row-project:\s*40px;[\s\S]*?--nav-row-branch:\s*36px;[\s\S]*?--nav-row-session:\s*34px;/,
     "comfortable density adds only a small amount of breathing room");
   assert.match(css, /\.session-btn\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\) fit-content\(var\(--nav-status-width\)\)/,
     "the status column only takes the width its content needs");

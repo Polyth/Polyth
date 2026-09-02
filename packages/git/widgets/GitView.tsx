@@ -130,6 +130,16 @@ function GitFileRow({ file, selected, busy, onOpen, onStage, onDiscard }: {
   const { letter, cls, label } = fileLetter(file);
   return (
     <div className={`git-file-row ${selected ? "selected" : ""}`}>
+      {onDiscard && (
+        <IconButton
+          icon={RefreshIcon}
+          size="sm"
+          title={tr("gitview.revert")}
+          label={tr("gitview.revertValue", { path: file.path })}
+          disabled={busy}
+          onClick={onDiscard}
+        />
+      )}
       <button type="button" className="git-file-main" aria-current={selected ? "true" : undefined} onClick={onOpen}>
         <span className={`git-file-letter ${cls}`} title={label} aria-label={label}>{letter}</span>
         <span className="git-file-path" title={file.origPath ? `${file.origPath} → ${file.path}` : file.path}>
@@ -145,17 +155,6 @@ function GitFileRow({ file, selected, busy, onOpen, onStage, onDiscard }: {
           disabled={busy}
           onClick={onStage}
         />
-        {onDiscard && (
-          <IconButton
-            icon={DeleteIcon}
-            size="sm"
-            variant="danger"
-            title={tr("gitview.revert")}
-            label={tr("gitview.revertValue", { path: file.path })}
-            disabled={busy}
-            onClick={onDiscard}
-          />
-        )}
       </span>
     </div>
   );

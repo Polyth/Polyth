@@ -1168,16 +1168,20 @@ export const createLegacyProtocolAdapter = (
       let snapshotState = status.ok
         ? statusFor(status.value, backendSessionId)
         : { value: "unknown" as const };
-      if (
-        snapshotState.value === "unknown"
-        && status.ok
-        && messages.ok
-        && statusAllowsHistoryTerminal(status.value, backendSessionId)
-      ) {
-        // `/session/status` omits idle sessions in real 1.18.18. Absence by
-        // itself remains unknown; a durable latest assistant completion gives
-        // the missing comparable terminal watermark.
-        snapshotState = completedHistoryTerminalState(messages.value) ?? snapshotState;
+      if (messages.ok) {
+        const historyTerminal = completedHistoryTerminalState(messages.value);
+        if (historyTerminal && (snapshotState.value === "unknown" || snapshotState.value === "running")) {
+          // Legacy status may remain "running" after the latest assistant
+          // message completed. A newer user message would be the latest entry,
+          // so the completed assistant is the terminal boundary here.
+          snapshotState = historyTerminal;
+        } else if (
+          snapshotState.value === "unknown"
+          && status.ok
+          && statusAllowsHistoryTerminal(status.value, backendSessionId)
+        ) {
+          snapshotState = historyTerminal ?? snapshotState;
+        }
       }
       const createOperationId = freshSessionEvidence.get(backendSessionId);
       if (snapshotState.value === "unknown" && createOperationId) {

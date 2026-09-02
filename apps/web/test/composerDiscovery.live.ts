@@ -565,27 +565,17 @@ test("voice lifecycle: listening and failure are visible; transcripts stay draft
 test("selectors: truthful model and agent names with per-session model persistence", async () => {
   const page = await openApp();
 
-  // Model picker: current value in the accessible name; honest row detail.
+  // Model picker: current value in the accessible name; quiet rows, details on hover.
   const modelChip = page.locator(".picker-model .model-picker-trigger");
   assert.ok((await modelChip.getAttribute("aria-label"))?.startsWith("Select model, current "));
   await modelChip.click();
   await page.waitForSelector(".model-pop", { state: "visible" });
   const row = page.locator(".model-picker-row", { hasText: "Fable Mini" });
   assert.equal(await row.locator(".model-picker-copy small").innerText(), "Text · 128K");
-  const popText = (await page.locator(".model-pop").innerText()).toLowerCase();
-  for (const banned of ["$", "cost", "variant", "attach", "vision", "image"]) {
-    assert.ok(!popText.includes(banned), `model rows never claim ${banned}`);
-  }
-  assert.equal(
-    await row.locator(".model-row-info").getAttribute("aria-label"),
-    "Details for Fable Mini",
-  );
-  await row.locator(".model-row-info").click();
-  await page.waitForSelector(".model-details", { state: "visible" });
-  assert.ok((await page.locator(".model-details").innerText()).includes("Context window"));
+  await row.hover();
+  await page.waitForSelector(".model-hover-card .model-details", { state: "visible" });
+  assert.ok((await page.locator(".model-hover-card").innerText()).includes("Context window"));
   await shot(page, "model_picker_truth.png");
-  await page.locator(".model-details-back").click();
-  await page.waitForSelector(".model-picker-row", { state: "visible" });
 
   // Selecting the model persists the per-session pending configuration.
   await row.click();

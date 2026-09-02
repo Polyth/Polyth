@@ -22,6 +22,8 @@ export interface PopoverProps {
   initialFocus?: string;
   /** Restore focus to the anchor on close (default true). */
   restoreFocus?: boolean;
+  /** Allow an attached surface to extend beyond a self-scrolling popover. */
+  overflow?: "auto" | "visible";
 }
 
 export default function Popover({
@@ -36,6 +38,7 @@ export default function Popover({
   role = "dialog",
   initialFocus,
   restoreFocus = true,
+  overflow = "auto",
 }: PopoverProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const position = useAnchoredPosition(open, anchorRef, surfaceRef, { align, side });
@@ -71,6 +74,7 @@ export default function Popover({
         className={`ui-popover${className ? ` ${className}` : ""}`}
         style={style}
         data-side={position.side}
+        data-overflow={overflow}
       >
         {children}
       </div>

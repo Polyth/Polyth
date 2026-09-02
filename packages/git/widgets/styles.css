@@ -243,7 +243,7 @@ display: flex; flex-direction: column; gap: 4px;
 }
 .git-file-row {
 display: flex; align-items: center; gap: 6px;
-  padding: 3px 6px; border-radius: var(--radius-control); font-size: var(--font-meta); font-family: var(--mono);
+  padding: 2px 4px; border-radius: var(--radius-control); font-size: var(--font-meta); font-family: var(--font-sans);
   transition: background var(--motion-fast) var(--motion-ease);
 }
 .git-file-row:hover,
@@ -517,7 +517,7 @@ padding: 1px 6px 7px;
 padding: 10px 14px; color: var(--faint); font-size: var(--font-meta);
 }
 .git-page .git-file-row {
-min-height: 44px; padding: 2px 3px 2px 9px; border-radius: var(--radius-control); gap: 4px;
+min-height: 32px; padding: 1px 3px 1px 5px; border-radius: var(--radius-control); gap: 4px;
 }
 .git-page .git-file-row.selected {
 background: var(--accent-wash); box-shadow: inset 2px 0 0 var(--accent);

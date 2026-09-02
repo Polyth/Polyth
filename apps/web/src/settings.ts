@@ -195,8 +195,9 @@ export function applySettingsToDom(s: PolythSettings): void {
   const font = interfaceFont(s.fontFamily);
   html.dataset.fontKind = font.mono ? "mono" : "prose";
   html.style.setProperty("--ui-font-family", font.stack);
-  html.style.setProperty("--ui-font-size", `${s.fontSize}px`);
-  html.style.setProperty("--ui-font-scale", String(s.fontSize / DEFAULT_SETTINGS.fontSize));
+  const effectiveSize = Math.max(11, s.fontSize - 1);
+  html.style.setProperty("--ui-font-size", `${effectiveSize}px`);
+  html.style.setProperty("--ui-font-scale", String(effectiveSize / DEFAULT_SETTINGS.fontSize));
   document.title = s.productName;
 }
 

@@ -149,13 +149,18 @@ width: 16px; height: 16px; flex: none; color: var(--text-dim);
 }
 /* Desktop popover (chrome from .ui-popover): search on top, one scroll list. */
 .model-pop {
-  width: min(400px, calc(100vw - var(--space-6))); padding: 4px; display: flex; flex-direction: column;
+  width: min(360px, calc(100vw - var(--space-6))); padding: var(--space-1); display: flex; flex-direction: column;
 }
+.model-pop-content { position: relative; }
 .model-pop-search {
 padding: 2px 2px 6px;
 }
 .model-picker-list {
-max-height: min(440px, 56vh); overflow-y: auto; min-height: 0;
+  max-height: min(440px, 56vh); overflow-y: auto; min-height: 0;
+}
+.model-picker-shortcuts {
+  display: flex; gap: var(--space-2); padding: var(--space-2) var(--space-2) var(--space-1);
+  border-top: 1px solid var(--border-soft); color: var(--faint); font-size: 10px; white-space: nowrap;
 }
 .model-provider-section {
 border-top: 1px solid var(--border-soft);
@@ -219,7 +224,7 @@ width: 18px; height: 18px;
   min-height: var(--control-h-sm);
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+   gap: 6px;
   padding: 0 var(--space-2);
   border-radius: var(--radius-control);
   cursor: pointer;
@@ -228,13 +233,14 @@ width: 18px; height: 18px;
 background: var(--surface-overlay);
 }
 .model-picker-row.current {
-background: var(--accent-wash);
+  background: var(--accent-wash);
 }
-.model-picker-check {
-width: 14px; flex: none; color: var(--accent);
+.model-picker-row.drop-target::before {
+  content: ""; position: absolute; inset: -1px var(--space-2) auto; height: 1px; background: var(--accent);
 }
+.model-picker-row { position: relative; }
 .model-picker-grip {
-color: var(--faint); font-size: 14px; cursor: grab;
+  width: 8px; color: var(--faint); font-size: 12px; cursor: grab; opacity: .62;
 }
 .model-picker-copy {
   min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 0;
@@ -245,6 +251,11 @@ color: var(--faint); font-size: 14px; cursor: grab;
 .model-picker-copy small {
   overflow: hidden; color: var(--muted); font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap;
 }
+.model-capability-icons {
+  display: none; align-items: center; gap: 3px; flex: none; color: var(--faint);
+}
+.model-capability-icons > span { display: inline-flex; }
+.model-capability-icons svg { width: 12px; height: 12px; }
 .model-row-offline {
 margin-inline-start: 6px; color: var(--amber); font-size: var(--font-meta); font-style: normal; font-weight: 520;
 }
@@ -276,6 +287,23 @@ color: var(--text); background: var(--surface-overlay);
 }
 .model-row-info svg {
 width: 14px; height: 14px;
+}
+/* One details surface only: desktop keeps it adjacent to the active row;
+   phones use the sheet's explicit details route. */
+.model-hover-card {
+  position: absolute; z-index: 1; top: var(--space-5); left: calc(100% + var(--space-2));
+  width: min(272px, calc(100vw - var(--space-6))); max-height: min(430px, 56vh); overflow-y: auto;
+  padding: var(--space-2); border: 1px solid var(--material-glass-border); border-radius: var(--radius-card);
+  background: var(--material-glass); box-shadow: var(--material-glass-shadow); animation: model-details-in var(--motion-fast) var(--motion-ease);
+}
+.model-hover-card .model-details { padding: 0; }
+.model-hover-card .model-details-back,
+.model-hover-card .model-details-actions { display: none; }
+.model-hover-card .model-details-grid { padding: 0; gap: var(--space-1); }
+.model-hover-card .model-details-grid > div { grid-template-columns: minmax(74px, 38%) minmax(0, 1fr); }
+@keyframes model-details-in { from { opacity: 0; transform: translateX(-2px); } to { opacity: 1; transform: none; } }
+@media (max-width: 860px) and (min-width: 701px) {
+  .model-hover-card { left: auto; right: calc(100% + var(--space-2)); }
 }
 /* ---- model details card (shared by popover and sheet) -------------------- */
 .model-details {
@@ -395,8 +423,8 @@ width: 100%;
 font-size: var(--font-meta);
 }
 .model-row-provider-logo {
-width: 24px;
-  height: 24px;
+width: 16px;
+  height: 16px;
   color: var(--text-dim);
 }
 .model-sheet .sheet-row-icon {
@@ -408,6 +436,9 @@ width: 28px;
   border-radius: var(--radius-control);
   background: var(--panel);
 }
+.model-sheet .sheet-row-icon { gap: 2px; }
+.model-sheet .model-sheet-grip { color: var(--faint); font-size: var(--font-meta); }
+.model-sheet .model-capability-icons { display: inline-flex; }
 @container feature-panel (max-width: 700px) {
 .model-chip {
 flex: 1 1 min(100%, 180px); justify-content: flex-start; overflow-wrap: anywhere;
