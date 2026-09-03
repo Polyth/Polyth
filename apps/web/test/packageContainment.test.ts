@@ -40,11 +40,11 @@ function featureManifests(): Array<{ id: string; dir: string; manifest: PackageM
     .sort((left, right) => left.id.localeCompare(right.id));
 }
 
-test("all 23 browser feature packages own a canonical web entry", () => {
+test("all 24 browser feature packages own a canonical web entry", () => {
   const browserFeatures = featureManifests()
     .filter(({ manifest }) => manifest.polyth?.webEntry !== undefined);
 
-  assert.equal(browserFeatures.length, 23);
+  assert.equal(browserFeatures.length, 24);
   for (const { id, dir, manifest } of browserFeatures) {
     assert.equal(
       manifest.polyth?.webEntry,
