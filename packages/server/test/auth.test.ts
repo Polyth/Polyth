@@ -14,7 +14,7 @@ import { WebSocket } from "ws";
 import type { SessionService } from "@polyth/contracts";
 import {
   createAuthService, createLoginRateLimiter, hashPassword, parseCookieToken,
-  rateKeyFor, verifyPassword, type AuthRequestLike,
+  publicHttpIngress, rateKeyFor, verifyPassword, type AuthRequestLike,
 } from "../src/auth.ts";
 import { authRoutes } from "../src/routes/auth.ts";
 import { createHttpServer, type RouteRequest } from "../src/http.ts";
@@ -26,6 +26,10 @@ const reqOf = (cookie?: string, remoteAddress?: string): AuthRequestLike => ({
   headers: { ...(cookie ? { cookie } : {}) },
   socket: { ...(remoteAddress ? { remoteAddress } : {}) },
 });
+
+const pub = (req: AuthRequestLike) => publicHttpIngress(req);
+const gateOf = (auth: ReturnType<typeof createAuthService>, req: AuthRequestLike) => auth.gate(req, pub(req));
+const resolved = (auth: ReturnType<typeof createAuthService>, req: AuthRequestLike) => auth.resolve(req, pub(req));
 
 // ---- password hashing --------------------------------------------------------
 
@@ -110,7 +114,7 @@ test("gate allow/deny: disabled, cookie, localhost bypass, revoked, expired", ()
 
   // no password at all → everything passes
   const off = createAuthService({ file: join(dir, "off.json"), now: () => clock });
-  assert.equal(off.gate(reqOf()), null);
+  assert.equal(gateOf(off, reqOf()), null);
   assert.equal(off.enabled(), false);
 
   const auth = createAuthService({
@@ -119,40 +123,42 @@ test("gate allow/deny: disabled, cookie, localhost bypass, revoked, expired", ()
   assert.equal(auth.enabled(), true);
 
   // no cookie → 401
-  const denied = auth.gate(reqOf(undefined, "203.0.113.7"));
+  const denied = gateOf(auth, reqOf(undefined, "203.0.113.7"));
   assert.equal(denied?.status, 401);
   assert.equal(denied?.body.error, "unauthorized");
 
   // garbage cookie → 401
-  assert.equal(auth.gate(reqOf(`polyth_auth=${"f".repeat(64)}`))?.status, 401);
+  assert.equal(gateOf(auth, reqOf(`polyth_auth=${"f".repeat(64)}`))?.status, 401);
 
   // valid login mints a token the gate accepts
   const login = auth.login("pw", "203.0.113.7", "TestUA");
   assert.ok(login.ok);
   const cookie = `polyth_auth=${login.ok ? login.token : ""}`;
-  assert.equal(auth.gate(reqOf(cookie, "203.0.113.7")), null);
-  assert.equal(auth.authorized(reqOf(cookie)), true);
+  assert.equal(gateOf(auth, reqOf(cookie, "203.0.113.7")), null);
+  assert.equal(resolved(auth, reqOf(cookie)).authenticated, true);
+  assert.equal(resolved(auth, reqOf(cookie)).principal.kind, "ui-session");
 
   // logout-all revokes it
   auth.logoutAll();
-  assert.equal(auth.gate(reqOf(cookie))?.status, 401);
+  assert.equal(gateOf(auth, reqOf(cookie))?.status, 401);
 
   // fresh session expires after 30 idle days
   const again = auth.login("pw", "203.0.113.7");
   assert.ok(again.ok);
   const cookie2 = `polyth_auth=${again.ok ? again.token : ""}`;
   clock += 31 * 24 * 60 * 60_000;
-  assert.equal(auth.gate(reqOf(cookie2))?.status, 401);
+  assert.equal(gateOf(auth, reqOf(cookie2))?.status, 401);
 
   // localhost bypass only with the explicit flag, and only for loopback
   const lax = createAuthService({
     file: join(dir, "lax.json"), envPassword: "pw", localhostOptional: true, now: () => clock,
   });
-  assert.equal(lax.gate(reqOf(undefined, "127.0.0.1")), null);
-  assert.equal(lax.gate(reqOf(undefined, "::1")), null);
-  assert.equal(lax.gate(reqOf(undefined, "::ffff:127.0.0.1")), null);
-  assert.equal(lax.gate(reqOf(undefined, "192.168.1.20"))?.status, 401);
-  assert.equal(lax.gate(reqOf(undefined))?.status, 401); // no address ≠ local
+  assert.equal(gateOf(lax, reqOf(undefined, "127.0.0.1")), null);
+  assert.equal(resolved(lax, reqOf(undefined, "127.0.0.1")).principal.kind, "local-user");
+  assert.equal(gateOf(lax, reqOf(undefined, "::1")), null);
+  assert.equal(gateOf(lax, reqOf(undefined, "::ffff:127.0.0.1")), null);
+  assert.equal(gateOf(lax, reqOf(undefined, "192.168.1.20"))?.status, 401);
+  assert.equal(gateOf(lax, reqOf(undefined))?.status, 401); // no address ≠ local
 });
 
 test("sessions survive restart; the file stores hashes, never tokens or passwords", () => {
@@ -169,14 +175,14 @@ test("sessions survive restart; the file stores hashes, never tokens or password
 
   // restart: same file, same env password → old cookie still valid
   const a2 = createAuthService({ file, envPassword: "pw" });
-  assert.equal(a2.gate(reqOf(`polyth_auth=${token}`)), null);
+  assert.equal(gateOf(a2, reqOf(`polyth_auth=${token}`)), null);
   const devices = a2.listSessions(token);
   assert.equal(devices.length, 1);
   assert.equal(devices[0]!.current, true);
 
   // revoke by id → gate denies
   assert.equal(a2.revoke(devices[0]!.id), true);
-  assert.equal(a2.gate(reqOf(`polyth_auth=${token}`))?.status, 401);
+  assert.equal(gateOf(a2, reqOf(`polyth_auth=${token}`))?.status, 401);
   assert.equal(a2.revoke("nope"), false);
 });
 
@@ -213,14 +219,20 @@ function routeHarness(auth: ReturnType<typeof createAuthService>) {
     let status = 0;
     let payload: unknown;
     const headers: Record<string, string> = {};
+    const reqLike: AuthRequestLike = {
+      headers: { ...(opts.cookie ? { cookie: opts.cookie } : {}), "user-agent": "TestUA" },
+      socket: { remoteAddress: opts.remoteAddress ?? "198.51.100.9" },
+    };
+    const ingress = publicHttpIngress(reqLike);
+    const resolution = auth.resolve(reqLike, ingress);
     const rc = {
-      req: {
-        headers: { ...(opts.cookie ? { cookie: opts.cookie } : {}), "user-agent": "TestUA" },
-        socket: { remoteAddress: opts.remoteAddress ?? "198.51.100.9" },
-      },
+      req: reqLike,
       res: { setHeader: (k: string, v: string) => { headers[k.toLowerCase()] = v; } },
       url: new URL(`http://x${path}`),
       path, method,
+      ingress,
+      principal: resolution.principal,
+      requireCapability: (capability: string) => auth.requireCapability(resolution.principal, capability),
       body: async () => opts.body ?? {},
       json: (code: number, b: unknown) => { status = code; payload = b; },
     } as unknown as RouteRequest;
@@ -236,7 +248,7 @@ test("login route: 10 wrong passwords → 429 with Retry-After; unlock after loc
   const call = routeHarness(auth);
 
   const status0 = await call("GET", "/api/auth/status");
-  assert.deepEqual(status0.payload, { required: true, authorized: false });
+  assert.deepEqual(status0.payload, { required: true, authorized: false, scope: "anonymous" });
 
   for (let i = 0; i < 10; i++) {
     const r = await call("POST", "/api/auth/login", { body: { password: "wrong" } });
@@ -264,7 +276,7 @@ test("login route: 10 wrong passwords → 429 with Retry-After; unlock after loc
   // the cookie authorizes status + the device list; logout-all clears it
   const cookie = setCookie.split(";")[0]!;
   const status1 = await call("GET", "/api/auth/status", { cookie });
-  assert.deepEqual(status1.payload, { required: true, authorized: true });
+  assert.deepEqual(status1.payload, { required: true, authorized: true, scope: "ui-session" });
   const list = await call("GET", "/api/auth/sessions", { cookie });
   assert.equal((list.payload as unknown as Array<{ current: boolean }>).filter((d) => d.current).length, 1);
 
@@ -272,7 +284,7 @@ test("login route: 10 wrong passwords → 429 with Retry-After; unlock after loc
   assert.equal(out.status, 200);
   assert.match(out.headers["set-cookie"], /Max-Age=0/);
   const status2 = await call("GET", "/api/auth/status", { cookie });
-  assert.deepEqual(status2.payload, { required: true, authorized: false });
+  assert.deepEqual(status2.payload, { required: true, authorized: false, scope: "anonymous" });
 });
 
 // ---- http gate integration ------------------------------------------------------
@@ -341,7 +353,8 @@ test("ws upgrade without a valid cookie is rejected with 401", async () => {
 
   const sessionsDouble = { events: async () => [], list: async () => [] } as unknown as SessionService;
   const server = createServer((_req, res) => { res.statusCode = 404; res.end(); });
-  attachWs(server, sessionsDouble, undefined, undefined, (req) => auth.authorized(req));
+  attachWs(server, sessionsDouble, undefined, undefined, (req) =>
+    auth.resolve(req, publicHttpIngress(req)).authenticated);
   server.listen(0);
   await once(server, "listening");
   const port = (server.address() as { port: number }).port;

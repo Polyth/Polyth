@@ -60,7 +60,7 @@ export function attachWs(
   sessions: SessionService,
   browser?: BrowserService,
   dictation?: DictationService,
-  /** F16: when provided, upgrades without a valid auth cookie are rejected. */
+  /** When provided, upgrades without an authenticated principal are rejected. */
   authorize?: (req: IncomingMessage) => boolean,
 ): Broadcaster {
   // noServer + manual upgrade matcher: a WSS bound with {server, path} aborts

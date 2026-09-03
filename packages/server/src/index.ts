@@ -59,7 +59,7 @@ import { createPackageRegistry } from "./packages.ts";
 import { createSessionService, type Broadcaster, type RuntimePool } from "./sessions.ts";
 import { resolveSessionRuntimeBinding } from "./sessionRuntime.ts";
 import { createRuntimeCatalog } from "./runtimeCatalog.ts";
-import { createHttpServer, type RouteHandler } from "./http.ts";
+import { createHttpHandler, createPublicHttpServer, type RouteHandler } from "./http.ts";
 import { packageRoutes } from "./routes/packages.ts";
 import { contextRoutes } from "./routes/context.ts";
 import { orgRoutes } from "./routes/org.ts";
@@ -68,7 +68,7 @@ import { controlRoutes } from "./routes/control.ts";
 import { settingsRoutes } from "./routes/settings.ts";
 import { opencodePendingRoutes } from "./routes/opencodePending.ts";
 import { browseRoutes } from "./routes/browse.ts";
-import { createAuthService } from "./auth.ts";
+import { createAuthService, publicHttpIngress } from "./auth.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { createPushNotifier, createPushService } from "./push.ts";
 import { pushRoutes } from "./routes/push.ts";
@@ -1309,12 +1309,21 @@ export async function boot(opts: BootOptions = {}) {
   // core session gateway, which aborts upgrades whose path it does not match.
   const httpServerCallbacks: Array<(ctx: HttpServerContext) => void> = [];
   let httpServerContext: HttpServerContext | null = null;
+  const attachHttpChannels = (ctx: HttpServerContext): void => {
+    for (const cb of httpServerCallbacks) cb(ctx);
+  };
   const onHttpServer = (cb: (ctx: HttpServerContext) => void): void => {
-    if (httpServerContext) {
-      cb(httpServerContext);
-      return;
-    }
     httpServerCallbacks.push(cb);
+    if (httpServerContext) cb(httpServerContext);
+  };
+  const queuedPairedResolvers: Array<(ingress: Extract<import("@polyth/contracts").RequestIngress, { kind: "polyth-link" }>) => import("@polyth/contracts").AuthPrincipal | null> = [];
+  type PairedDeviceResolverFn = typeof queuedPairedResolvers[number];
+  let attachLivePairedResolver: ((resolver: PairedDeviceResolverFn) => void) | null = null;
+  const attachPairedDeviceResolver = (
+    resolver: (ingress: Extract<import("@polyth/contracts").RequestIngress, { kind: "polyth-link" }>) => import("@polyth/contracts").AuthPrincipal | null,
+  ): void => {
+    queuedPairedResolvers.push(resolver);
+    attachLivePairedResolver?.(resolver);
   };
 
   const smallModels = createSmallModelService(store);
@@ -1360,6 +1369,9 @@ export async function boot(opts: BootOptions = {}) {
     resolveSessionRuntime,
     loadPlugin: (plugin) => loadPlugin(root, plugin, {}),
     onHttpServer,
+    attachHttpChannels,
+    remotePolicies: () => routeRegistry.policies(),
+    attachPairedDeviceResolver,
   };
   const discoveredPackages = await (bundledServerPackages
     ? (async () => {
@@ -1575,7 +1587,10 @@ export async function boot(opts: BootOptions = {}) {
     file: `${dataDir}/auth.json`,
     envPassword: process.env.POLYTH_UI_PASSWORD,
     localhostOptional: process.env.POLYTH_UI_PASSWORD_LOCALHOST === "optional",
+    cookieName: `polyth_auth_p${port}`,
   });
+  attachLivePairedResolver = (resolver) => auth.attachPairedDeviceResolver(resolver);
+  for (const resolver of queuedPairedResolvers) auth.attachPairedDeviceResolver(resolver);
 
   const registerPackageRoute = (
     id: string,
@@ -1699,19 +1714,29 @@ export async function boot(opts: BootOptions = {}) {
 
   await packageLifecycle.startEnabled(packageRegistry);
 
-  const server = createHttpServer({
+  const httpHandler = createHttpHandler({
     sessions, projects, runtimes, routes, visibility, auth, catalog: runtimeCatalog,
     capabilities: allCapabilities,
     webDist: resolve(opts.webDist ?? resolve(__dirname, "../../../apps/web/dist")),
     packagesDir: resolve(opts.webPackagesDir ?? packagesDir),
     version: "0.1.0",
+    remotePolicies: () => routeRegistry.policies(),
+    listenerId: "public",
   });
+  const server = createPublicHttpServer(httpHandler, "public");
   // order matters: /ws (session gateway) aborts upgrades whose path it does
   // not match, so package channels (terminal: /ws/terminal/:id) claim their
   // upgrades first through the onHttpServer seam.
-  const wsAuthorize = (req: import("node:http").IncomingMessage) => auth.authorized(req);
-  httpServerContext = { server, authorize: wsAuthorize };
-  for (const cb of httpServerCallbacks.splice(0)) cb(httpServerContext);
+  const wsAuthorize = (req: import("node:http").IncomingMessage) =>
+    auth.resolve(req, publicHttpIngress(req, { listenerId: "public" })).authenticated;
+  httpServerContext = {
+    server,
+    listenerId: "public",
+    dispatch: httpHandler,
+    resolve: (request, ingress) => auth.resolve(request, ingress),
+    authorize: wsAuthorize,
+  };
+  attachHttpChannels(httpServerContext);
   live = attachWs(server, sessions, svc<BrowserForWs>("browser"), svc<DictationForWs>("dictation"), wsAuthorize);
 
   await new Promise<void>((res) => opts.hostname

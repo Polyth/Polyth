@@ -6,8 +6,10 @@ import { constants as zlibConstants, gzip, gzipSync } from "node:zlib";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import type {
   AgentRuntime,
+  AuthResolution,
   JsonObject,
   ModelDescriptor,
+  RequestIngress,
   RouteHandler,
   RouteRequest,
   SessionService,
@@ -17,6 +19,19 @@ import type { RuntimePool } from "./sessions.ts";
 import { aggregateRuntimes } from "./runtimeAggregate.ts";
 import type { ModelVisibilityService } from "./modelVisibility.ts";
 import type { RuntimeCatalog } from "./runtimeCatalog.ts";
+import {
+  AuthorizationError,
+  publicHttpIngress,
+  requirePrincipalCapability,
+  UNTRUSTED_INGRESS_HEADERS,
+  type AuthRequestLike,
+  type GateDenial,
+} from "./auth.ts";
+import {
+  assertPairedHttpAllowed,
+  CORE_REMOTE_ACCESS,
+  type OwnedRemotePolicy,
+} from "./remotePolicy.ts";
 
 const MIME: Record<string, string> = {
   ".html": "text/html", ".js": "text/javascript", ".css": "text/css",
@@ -49,7 +64,7 @@ const JSON_GZIP_MIN_BYTES = 1024;
 // a full-log export (100MB+) must never block the event loop for seconds.
 const JSON_GZIP_SYNC_MAX_BYTES = 256 * 1024;
 
-const writeJson = (req: IncomingMessage, res: ServerResponse, code: number, body: unknown) => {
+const writeJson = (req: IncomingMessage, res: ServerResponse, code: number, body: unknown): void => {
   const payload = JSON.stringify(body);
   if (
     payload.length > JSON_GZIP_MIN_BYTES
@@ -153,6 +168,17 @@ const readBody = async (req: IncomingMessage): Promise<Record<string, unknown>> 
 /** The gateway's route contract is public so trusted plugins can contribute it. */
 export type { RouteHandler, RouteRequest } from "@polyth/contracts";
 
+export type HttpHandler = (
+  req: IncomingMessage,
+  res: ServerResponse,
+  ingress: RequestIngress,
+) => Promise<void>;
+
+export interface HttpAuth {
+  resolve(req: AuthRequestLike, ingress: RequestIngress): AuthResolution;
+  gate(req: AuthRequestLike, ingress: RequestIngress): GateDenial | null;
+}
+
 export interface HttpDeps {
   sessions: SessionService;
   projects: ProjectService;
@@ -169,14 +195,74 @@ export interface HttpDeps {
   catalog?: RuntimeCatalog;
   /** F16 gate: null = proceed, otherwise the denial to answer with. Applied
    *  to every /api path except the two the lock screen itself needs. */
-  auth?: { gate(req: IncomingMessage): { status: number; body: unknown } | null };
+  auth?: HttpAuth;
+  /** Extra remote-access policies (package-owned). Core policy is always included. */
+  remotePolicies?: () => readonly OwnedRemotePolicy[];
+  /** Public listener id recorded on RequestIngress. */
+  listenerId?: string;
 }
 
 // Public even when a password is set: the SPA lock screen must be able to
 // learn that auth is required and then mint a session.
 const AUTH_PUBLIC = new Set(["/api/auth/status", "/api/auth/login"]);
 
-export function createHttpServer(deps: HttpDeps): Server {
+const headerValue = (req: IncomingMessage, name: string): string | undefined => {
+  const raw = req.headers[name];
+  return Array.isArray(raw) ? raw[0] : raw;
+};
+
+const stripUntrustedHeaders = (req: IncomingMessage, ingress: RequestIngress): void => {
+  const stripInternal = () => {
+    for (const key of Object.keys(req.headers)) {
+      if (key.toLowerCase().startsWith("x-polyth-link-") || key.toLowerCase().startsWith("x-polyth-internal-")) {
+        delete req.headers[key];
+      }
+    }
+  };
+  if (ingress.kind === "polyth-link") {
+    for (const name of UNTRUSTED_INGRESS_HEADERS) delete req.headers[name];
+    delete req.headers.cookie;
+    delete req.headers.authorization;
+    stripInternal();
+    return;
+  }
+  if (ingress.kind !== "public-http") return;
+  for (const name of UNTRUSTED_INGRESS_HEADERS) {
+    if (name === "cookie" || name === "authorization") continue;
+    delete req.headers[name];
+  }
+  stripInternal();
+};
+
+export const TUNNEL_INTERNAL_TOKEN_HEADER = "x-polyth-internal-token";
+export const TUNNEL_INTERNAL_CONNECTION_HEADER = "x-polyth-internal-connection";
+
+export interface TunnelIngressBinding {
+  secret: string;
+  lookup(connectionId: string): Extract<RequestIngress, { kind: "polyth-link" }> | null;
+}
+
+/** Dedicated unix/loopback ingress. The public listener never accepts these tokens. */
+export function createTunnelIngressServer(handler: HttpHandler, binding: TunnelIngressBinding): Server {
+  return createServer((req, res) => {
+    const secret = headerValue(req, TUNNEL_INTERNAL_TOKEN_HEADER);
+    const connectionId = headerValue(req, TUNNEL_INTERNAL_CONNECTION_HEADER);
+    if (!secret || secret !== binding.secret || !connectionId) {
+      res.writeHead(403, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "forbidden", message: "not allowed" }));
+      return;
+    }
+    const ingress = binding.lookup(connectionId);
+    if (!ingress) {
+      res.writeHead(403, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "forbidden", message: "not allowed" }));
+      return;
+    }
+    void handler(req, res, ingress);
+  });
+}
+
+export function createHttpHandler(deps: HttpDeps): HttpHandler {
   const { sessions, projects } = deps;
 
   // Aggregate across live runtimes (per-project pools may differ).
@@ -185,21 +271,46 @@ export function createHttpServer(deps: HttpDeps): Server {
       .then((result) => result.items);
   const models = () => deps.catalog?.models() ?? aggregate<ModelDescriptor>((runtime) => runtime.models());
 
-  return createServer(async (req, res) => {
+  return async (req, res, ingress) => {
     const url = new URL(req.url ?? "/", "http://x");
     const path = url.pathname;
     const method = req.method ?? "GET";
-    // Request-bound so every JSON answer (feature routes included) can honor
-    // the client's accept-encoding.
-    const json = (target: ServerResponse, code: number, body: unknown) =>
+    const json = (target: ServerResponse, code: number, body: unknown): void => {
       writeJson(req, target, code, body);
+    };
     try {
-      // F16: one gate before all routing. Static assets stay public (the SPA
-      // shell renders the lock screen); every /api answer needs a session.
+      stripUntrustedHeaders(req, ingress);
+      const reqLike: AuthRequestLike = {
+        headers: { cookie: req.headers.cookie, "user-agent": Array.isArray(req.headers["user-agent"]) ? req.headers["user-agent"][0] : req.headers["user-agent"] },
+        socket: { remoteAddress: req.socket?.remoteAddress },
+      };
+      const resolution = deps.auth?.resolve(reqLike, ingress) ?? {
+        principal: { kind: "local-user", trustedLoopback: true } as const,
+        authenticated: true,
+      };
+      const principal = resolution.principal;
+
       if (deps.auth && path.startsWith("/api/") && !AUTH_PUBLIC.has(path)) {
-        const denial = deps.auth.gate(req);
+        const denial = deps.auth.gate(reqLike, ingress);
         if (denial) return json(res, denial.status, denial.body);
       }
+
+      if (principal.kind === "paired-device") {
+        if (path.startsWith("/internal/") || path === "/metrics" || path.startsWith("/debug")) {
+          throw new AuthorizationError("forbidden", "not allowed");
+        }
+        if (!path.startsWith("/api/")) {
+          throw new AuthorizationError("forbidden", "not allowed");
+        }
+        const policies: OwnedRemotePolicy[] = [
+          { owner: "core", policy: CORE_REMOTE_ACCESS },
+          ...(deps.remotePolicies?.() ?? []),
+        ];
+        assertPairedHttpAllowed(principal, method, path, policies);
+      }
+
+      const requireCapability = (capability: string) => requirePrincipalCapability(principal, capability);
+
       if (path === "/api/health" && method === "GET") {
         return json(res, 200, { ok: true, version: deps.version, capabilities: deps.capabilities() });
       }
@@ -413,7 +524,7 @@ export function createHttpServer(deps: HttpDeps): Server {
       if (deps.routes?.length) {
         let bodyCache: Record<string, unknown> | undefined;
         const rc: RouteRequest = {
-          req, res, url, path, method,
+          req, res, url, path, method, ingress, principal, requireCapability,
           body: async () => (bodyCache ??= await readBody(req)),
           json: (code, body) => json(res, code, body),
         };
@@ -424,13 +535,14 @@ export function createHttpServer(deps: HttpDeps): Server {
 
       if (path.startsWith("/packages/")) {
         const asset = path.match(/^\/packages\/([a-z0-9][a-z0-9-]*)\/(.+)$/);
-        if (!asset) { res.writeHead(404); return res.end(); }
+        if (!asset) { res.writeHead(404); res.end(); return; }
         let relativeAsset: string;
         try {
           relativeAsset = decodeURIComponent(asset[2]!);
         } catch {
           res.writeHead(400);
-          return res.end();
+          res.end();
+          return;
         }
         const packageRoot = resolve(
           deps.packagesDir ?? resolve(import.meta.dirname, "../.."),
@@ -445,11 +557,13 @@ export function createHttpServer(deps: HttpDeps): Server {
           || !inside(packageRoot, filePath)
         ) {
           res.writeHead(403);
-          return res.end();
+          res.end();
+          return;
         }
         if (!existsSync(filePath) || !statSync(filePath).isFile()) {
           res.writeHead(404, { "content-type": "text/plain" });
-          return res.end("not found");
+          res.end("not found");
+          return;
         }
         await sendStaticFile(req, res, filePath);
         return;
@@ -457,18 +571,24 @@ export function createHttpServer(deps: HttpDeps): Server {
 
       // static web bundle
       let filePath = normalize(join(deps.webDist, path === "/" ? "index.html" : path));
-      if (!filePath.startsWith(normalize(deps.webDist))) { res.writeHead(403); return res.end(); }
+      if (!filePath.startsWith(normalize(deps.webDist))) { res.writeHead(403); res.end(); return; }
       if (!existsSync(filePath)) {
         // SPA fallback is for navigations only. A missing asset-like path
         // (anything with a file extension) must fail honestly: serving
         // index.html as e.g. a JS module response breaks refresh replay on
         // nested routes with an unhelpful MIME error (EXT-SEAMS-V3).
-        if (extname(path) !== "") { res.writeHead(404, { "content-type": "text/plain" }); return res.end("not found"); }
+        if (extname(path) !== "") { res.writeHead(404, { "content-type": "text/plain" }); res.end("not found"); return; }
         filePath = join(deps.webDist, "index.html");
       }
       await sendStaticFile(req, res, filePath);
     } catch (err) {
-      const e = err as Error & { code?: string; cause?: unknown; field?: unknown };
+      const e = err as Error & { code?: string; cause?: unknown; field?: unknown; status?: number };
+      if (e instanceof AuthorizationError || e.code === "unauthorized" || e.code === "forbidden") {
+        return json(res, e.status === 401 || e.code === "unauthorized" ? 401 : 403, {
+          error: e.code ?? "forbidden",
+          message: e.code === "unauthorized" ? "authentication required" : "not allowed",
+        });
+      }
       // A dead OpenCode transport is transient: the runtime pool respawns on
       // the next call, so give clients a retryable status and useful message.
       if (/fetch failed|terminated|ECONNREFUSED/i.test(`${e.message ?? ""} ${String(e.cause ?? "")}`)) {
@@ -498,5 +618,17 @@ export function createHttpServer(deps: HttpDeps): Server {
         ...(e.code === "invalid-input" && typeof e.field === "string" ? { field: e.field } : {}),
       });
     }
+  };
+}
+
+export function createPublicHttpServer(handler: HttpHandler, listenerId = "public"): Server {
+  return createServer((req, res) => {
+    const encrypted = Boolean((req.socket as { encrypted?: boolean }).encrypted);
+    const ingress = publicHttpIngress(req, { listenerId, secure: encrypted });
+    void handler(req, res, ingress);
   });
+}
+
+export function createHttpServer(deps: HttpDeps): Server {
+  return createPublicHttpServer(createHttpHandler(deps), deps.listenerId ?? "public");
 }
