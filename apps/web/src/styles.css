@@ -11085,7 +11085,7 @@ html[data-font] body :is(
 .ui-glass-island,
 .ui-glass-dock {
   border: 1px solid var(--material-glass-border);
-  background: var(--surface);
+  background: var(--material-glass);
   box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
 }
 .ui-glass-island { display: inline-flex; align-items: center; border-radius: var(--radius-island); }
@@ -11094,7 +11094,7 @@ html[data-font] body :is(
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .ui-glass-island,
   .ui-glass-dock {
-    background: color-mix(in srgb, var(--material-glass) 80%, transparent);
+    background: color-mix(in srgb, var(--material-glass) 60%, transparent);
     backdrop-filter: blur(var(--material-glass-blur)) saturate(135%);
     -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(135%);
   }
@@ -11532,6 +11532,9 @@ html[data-font] body :is(
     -webkit-backdrop-filter: blur(var(--material-glass-blur));
     backdrop-filter: blur(var(--material-glass-blur));
   }
+  .composer-mobile .composer-card {
+    background: color-mix(in srgb, var(--material-glass-strong) 68%, transparent);
+  }
   .mobile-island-sheet.sheet {
     background: color-mix(in srgb, var(--panel) 96%, transparent);
     -webkit-backdrop-filter: blur(var(--material-glass-blur));
@@ -11564,7 +11567,7 @@ html[data-font] body :is(
   }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-popover, .picker-pop, .app > .header, .sidebar, .railbar) { background: var(--material-glass); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.dialog-panel, .sheet, .composer-card) { background: var(--material-glass-strong); }
-  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-glass-island, .ui-glass-dock) { background: var(--surface); }
+  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-glass-island, .ui-glass-dock) { background: var(--material-glass); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) .msg.user .bubble { background: var(--bubble-user-bg); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) .mobile-island-sheet.sheet { background: var(--panel); }
 }
@@ -11577,8 +11580,9 @@ html[data-font] body :is(
     backdrop-filter: none;
   }
   :is(.app > .header, .sidebar, .railbar) { background: var(--material-glass); }
-  .composer-card { background: var(--material-glass-strong); }
-  :is(.ui-glass-island, .ui-glass-dock) { background: var(--surface); }
+  .composer-card,
+  .composer-mobile .composer-card { background: var(--material-glass-strong); }
+  :is(.ui-glass-island, .ui-glass-dock) { background: var(--material-glass); }
   .msg.user .bubble { background: var(--bubble-user-bg); }
   .mobile-island-sheet.sheet { background: var(--panel); }
 }
@@ -11910,6 +11914,25 @@ html[data-font] body :is(
 
 .timeline-latest-reveal-anchor > .timeline-reveal { bottom: var(--space-2); }
 .jump-latest { width: var(--tap); min-width: var(--tap); height: var(--tap); min-height: var(--tap); border: 1px solid var(--material-glass-border); background: var(--material-glass); color: var(--text); box-shadow: var(--shadow-sm); }
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .jump-latest {
+    background: color-mix(in srgb, var(--material-glass) 60%, transparent);
+    -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(135%);
+    backdrop-filter: blur(var(--material-glass-blur)) saturate(135%);
+  }
+}
+:is(body[data-desktop-low-resource="true"] .jump-latest, html[data-reduce-animations="true"] .jump-latest) {
+  background: var(--material-glass);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .jump-latest {
+    background: var(--material-glass);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
 .jump-latest:hover,
 .jump-latest:focus-visible { background: var(--elevated); color: var(--text); filter: none; }
 
