@@ -40,7 +40,8 @@ test("global CSS provides mobile-first sizing, touch, overflow, and focus contra
   );
   assert.match(foundation, /touch-action:\s*manipulation/);
   assert.match(css, /font-size:\s*max\(var\(--font-input\), 1em\)/);
-  assert.match(foundation, /--font-title:\s*clamp\(/);
+  assert.match(foundation, /--header-font-size:\s*24px/);
+  assert.match(foundation, /--font-title:\s*24px/);
   assert.match(css, /:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)[^}]*box-shadow:/s);
   assert.match(css, /\.app\s*\{[^}]*height:\s*100dvh/s);
 });

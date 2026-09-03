@@ -154,9 +154,11 @@ the composer 16.
 
 | Token | Purpose |
 | --- | --- |
-| `--ui-font-size` | User-selected base UI size. |
+| `--ui-font-size` | User-selected general text size for chat, inputs, session titles, and settings. |
 | `--ui-font-scale` | Reserved UI type multiplier. |
-| `--font-input` | 16px editable-control floor that prevents mobile zoom. |
+| `--header-font-size` | User-selected page, section, and surface heading size. |
+| `--subheader-font-size` | User-selected subheading and navigator project/worktree size. |
+| `--font-input` | Editable-control size; coarse pointers floor it at 16px to prevent mobile zoom. |
 | `--font-body` | Responsive body role. |
 | `--font-title` | Page/title role. |
 | `--font-title-lh` | Title line height. |
@@ -164,8 +166,9 @@ the composer 16.
 | `--font-label` | Control and emphasized label role. |
 | `--font-meta` | Readable metadata role. |
 | `--font-meta-lh` | Metadata line height. |
-| `--font-code` | Inline code / code-in-UI role (pairs with `--mono`). |
-| `--editor-font-size` | User-selected editor/composer size. |
+| `--font-code` | Inline code / code-surface role (follows the editor size and pairs with `--mono`). |
+| `--terminal-font-size` | User-selected terminal input/output size. |
+| `--editor-font-size` | User-selected editor/composer/code-surface size. |
 | `--mono` | Monospace stack. |
 | `--ui-font-family` | Active application font stack. |
 

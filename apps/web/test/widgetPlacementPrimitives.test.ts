@@ -34,6 +34,6 @@ test("widget placement and settings shell typography use canonical roles", async
 
   assert.match(styles, /\.set-row-label\s*\{[^}]*font-size:\s*var\(--font-label\)/s);
   assert.match(styles, /\.set-row-hint\s*\{[^}]*font-size:\s*var\(--font-meta\)/s);
-  assert.match(styles, /\.settings-pane-title\s*\{[^}]*font-size:\s*var\(--font-label\)/s);
+  assert.match(styles, /\.settings-pane-title\s*\{[^}]*font-size:\s*var\(--font-heading\)/s);
   assert.match(styles, /\.settings-nav-group\s*\{[^}]*font-size:\s*var\(--font-meta\)/s);
 });

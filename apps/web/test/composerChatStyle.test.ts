@@ -13,6 +13,12 @@ test("timeline does not claim repository indexing or hide a second working row",
   assert.doesNotMatch(timeline, /function WorkingIndicator/);
 });
 
+test("composer and above-composer widgets sit directly on the workspace", () => {
+  const css = read("../src/styles.css");
+
+  assert.doesNotMatch(css, /\.focus-conversation\s*\{[^}]*background:/s);
+});
+
 test("composer radius uses the shared corner setting", () => {
   const css = read("../src/styles.css");
 

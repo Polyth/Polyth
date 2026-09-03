@@ -43,6 +43,44 @@ test("interface font catalog accepts programmer fonts and rejects unknown values
   assert.ok(product.INTERFACE_FONTS.filter((font) => font.mono).length >= 15);
 });
 
+test("font size preferences are independent, bounded, and publish their roles", () => {
+  assert.equal(product.DEFAULT_SETTINGS.fontSize, 15);
+  assert.deepEqual(ui.parseUiSettings(null), ui.UI_DEFAULTS);
+  const parsed = ui.parseUiSettings(JSON.stringify({
+    headerFontSize: 40.6,
+    subheaderFontSize: 12,
+    terminalFontSize: 18,
+    editorFontSize: 20,
+  }));
+  assert.deepEqual(
+    {
+      header: parsed.headerFontSize,
+      subheader: parsed.subheaderFontSize,
+      terminal: parsed.terminalFontSize,
+      editor: parsed.editorFontSize,
+    },
+    { header: 41, subheader: 12, terminal: 18, editor: 20 },
+  );
+  assert.equal(ui.parseUiSettings(JSON.stringify({ headerFontSize: 100 })).headerFontSize, 24);
+
+  const properties = new Map<string, string>();
+  const documentBefore = (globalThis as { document?: unknown }).document;
+  (globalThis as { document?: unknown }).document = {
+    documentElement: { style: { setProperty() {} } },
+    body: { dataset: {}, style: { setProperty: (name: string, value: string) => properties.set(name, value) } },
+  };
+  try {
+    ui.applyUiSettings(parsed);
+  } finally {
+    if (documentBefore === undefined) delete (globalThis as { document?: unknown }).document;
+    else (globalThis as { document?: unknown }).document = documentBefore;
+  }
+  assert.equal(properties.get("--header-font-size"), "41px");
+  assert.equal(properties.get("--subheader-font-size"), "12px");
+  assert.equal(properties.get("--terminal-font-size"), "18px");
+  assert.equal(properties.get("--editor-font-size"), "20px");
+});
+
 test("merge conflict agent settings default safely and accept supported targets", () => {
   const defaults = product.normalizeSettings({});
   assert.match(defaults.conflictAgentPrompt, /resolve them, explaining each decision/);

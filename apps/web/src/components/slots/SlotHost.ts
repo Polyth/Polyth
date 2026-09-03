@@ -10,7 +10,7 @@
 import { Component, createElement, Fragment, useSyncExternalStore, type ReactNode } from "react";
 import type { UiSlot } from "@polyth/contracts";
 import { listSlots, slotVersion, subscribeSlots, type SlotItem } from "../../slots.ts";
-import { getDragWidget, setDragWidget } from "../../dnd.ts";
+import { getDragWidget, setDragWidget, WIDGET_MIME } from "../../dnd.ts";
 import { tr } from "../../i18n/index.ts";
 import { useWidgetCatalog, type WidgetDef } from "../../widgets/catalog.ts";
 import {
@@ -130,7 +130,7 @@ export function placedWidgetItems(
               }
             },
             onDragOver: (event: DragEvent) => {
-              if (getDragWidget(event.dataTransfer)) event.preventDefault();
+              if (event.dataTransfer?.types.includes(WIDGET_MIME)) event.preventDefault();
             },
             onDrop: (event: DragEvent) => {
               const draggedId = event.dataTransfer ? getDragWidget(event.dataTransfer) ?? "" : "";

@@ -306,16 +306,49 @@ function ThemeSection() {
   );
 }
 
+function FontSizeRange({
+  value,
+  label,
+  min = 10,
+  max = 32,
+  onChange,
+}: {
+  value: number;
+  label: string;
+  min?: number;
+  max?: number;
+  onChange: (value: number) => void;
+}) {
+  const percentage = ((value - min) / (max - min)) * 100;
+  return (
+    <div className="rng">
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={1}
+        value={value}
+        aria-label={label}
+        style={{ "--p": `${percentage}%` } as CSSProperties}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
+      <span className="rng-val">{value}{tr("settings.pages.px")}</span>
+    </div>
+  );
+}
+
 export function AppearancePage() {
   const ui = useUiSettings();
   const settings = useStore((s) => s.settings);
-  const editorFontPct = ((ui.editorFontSize - 11) / 13) * 100;
   const resetFontSizes = () => {
     updateSettings({ fontSize: DEFAULT_SETTINGS.fontSize });
-    // `fontSize` is retained in the older UI-preferences record for
-    // backwards compatibility, so restore it alongside the active editor
-    // setting as well.
-    setUiSettings({ fontSize: UI_DEFAULTS.fontSize, editorFontSize: UI_DEFAULTS.editorFontSize });
+    setUiSettings({
+      fontSize: UI_DEFAULTS.fontSize,
+      headerFontSize: UI_DEFAULTS.headerFontSize,
+      subheaderFontSize: UI_DEFAULTS.subheaderFontSize,
+      terminalFontSize: UI_DEFAULTS.terminalFontSize,
+      editorFontSize: UI_DEFAULTS.editorFontSize,
+    });
   };
   return (
     <>
@@ -360,31 +393,22 @@ export function AppearancePage() {
           ["compact", tr("settings.pages.compact")],
         ]} onChange={(density) => { setUiSettings({ density }); updateSettings({ density }); }} />
       </Row>
-      <Row label={tr("settings.pages.interfaceScale")} hint={tr("settings.pages.increaseOrDecreaseTextThroughoutPolythCode")} itemId="appearance.fontSize">
-        <Seg
-          value={settings.fontSize}
-          options={[
-            [12, tr("settings.widgetlibraryoverlay.small")],
-            [13, tr("settings.pages.smaller")],
-            [14, tr("settings.widgetlibraryoverlay.medium")],
-            [16, tr("settings.widgetlibraryoverlay.large")],
-            [18, tr("settings.pages.extraLarge")],
-          ]}
-          onChange={(fontSize) => updateSettings({ fontSize })}
-        />
+      <Row label="General text size" hint="Chat messages, inputs, session titles, and settings text." itemId="appearance.fontSize">
+        <FontSizeRange value={settings.fontSize} label="General text size" onChange={(fontSize) => updateSettings({ fontSize })} />
       </Row>
-      <Row label={tr("settings.pages.terminalFontSize")} hint={tr("settings.pages.setTheFontSizeUsed")} itemId="appearance.editorFontSize">
-        <div className="rng">
-          <input
-            type="range" min={11} max={24} value={ui.editorFontSize}
-            aria-label={tr("settings.pages.terminalFontSizeInPixels")}
-            style={{ "--p": `${editorFontPct}%` } as CSSProperties}
-            onChange={(e) => setUiSettings({ editorFontSize: Number(e.target.value) })}
-          />
-          <span className="rng-val">{ui.editorFontSize}{tr("settings.pages.px")}</span>
-        </div>
+      <Row label="Header size" hint="Page, section, and surface headings." itemId="appearance.headerFontSize">
+        <FontSizeRange value={ui.headerFontSize} min={14} max={48} label="Header size" onChange={(headerFontSize) => setUiSettings({ headerFontSize })} />
       </Row>
-      <Row label={tr("settings.pages.resetFontSizes")} hint={tr("settings.pages.restoreTheInterfaceAndTerminal")}>
+      <Row label="Subheader size" hint="Subheadings, project names, and worktree names in the navigator." itemId="appearance.subheaderFontSize">
+        <FontSizeRange value={ui.subheaderFontSize} label="Subheader size" onChange={(subheaderFontSize) => setUiSettings({ subheaderFontSize })} />
+      </Row>
+      <Row label={tr("settings.pages.terminalFontSize")} hint="Terminal input and output." itemId="appearance.terminalFontSize">
+        <FontSizeRange value={ui.terminalFontSize} label={tr("settings.pages.terminalFontSizeInPixels")} onChange={(terminalFontSize) => setUiSettings({ terminalFontSize })} />
+      </Row>
+      <Row label={tr("settings.pages.editorFontSize")} hint={tr("settings.pages.editorFontSizeInPixels")} itemId="appearance.editorFontSize">
+        <FontSizeRange value={ui.editorFontSize} label={tr("settings.pages.editorFontSizeInPixels")} onChange={(editorFontSize) => setUiSettings({ editorFontSize })} />
+      </Row>
+      <Row label={tr("settings.pages.resetFontSizes")} hint="Restore all five font sizes to their defaults.">
         <Button size="sm" onClick={resetFontSizes}>{tr("settings.pages.resetToDefaults")}</Button>
       </Row>
       <Row label={tr("settings.pages.cornerRounding")} hint={tr("settings.pages.applySquareCompactOrGenerouslyRoundedCorners")} itemId="appearance.rounding">

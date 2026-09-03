@@ -20,8 +20,11 @@ test("fold strips diacritics and case", () => {
 
 test("search matches label, description, and keywords; groups carry page labels", () => {
   const byLabel = searchSettingsItems("terminal font", PAGES);
-  assert.ok(byLabel.some((h) => h.item.id === "appearance.editorFontSize"));
-  assert.equal(byLabel.find((h) => h.item.id === "appearance.editorFontSize")!.pageLabel, "Appearance");
+  assert.ok(byLabel.some((h) => h.item.id === "appearance.terminalFontSize"));
+  assert.equal(byLabel.find((h) => h.item.id === "appearance.terminalFontSize")!.pageLabel, "Appearance");
+
+  const editor = searchSettingsItems("editor font", PAGES);
+  assert.ok(editor.some((h) => h.item.id === "appearance.editorFontSize"));
 
   const byKeyword = searchSettingsItems("radius", PAGES);
   assert.ok(byKeyword.some((h) => h.item.id === "appearance.rounding"));

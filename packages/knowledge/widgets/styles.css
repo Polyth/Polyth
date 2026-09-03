@@ -44,7 +44,7 @@ display: flex; gap: 6px;
 width: 100%;
 }
 .knowledge-editor .ui-textarea {
-font-family: var(--mono); font-size: var(--editor-font-size, 13px); resize: vertical;
+font-family: var(--mono); font-size: var(--editor-font-size, 14px); resize: vertical;
 }
 .track-create-form,
 .track-card {

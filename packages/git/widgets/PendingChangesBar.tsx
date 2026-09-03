@@ -6,6 +6,7 @@ import { friendlyError } from "../../../apps/web/src/settings.ts";
 import { fmtDuration } from "../../../apps/web/src/format.ts";
 import { api } from "@polyth/session/web-api";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import ProviderLogo from "../../models/widgets/ProviderLogo.tsx";
 import {
   BranchIcon,
   Button,
@@ -207,7 +208,6 @@ export default function PendingChangesBar() {
           candidate.providerID === modelRef.providerID && candidate.modelID === modelRef.modelID)
       : undefined;
     const modelName = descriptor?.name ?? modelRef?.modelID ?? tr("providerlogo.polyth");
-    const avatar = modelName.trim().charAt(0).toUpperCase() || "P";
     const activeTask = model.tasks?.items.find((item) => item.status === "active");
     const activeSubagent = model.subagents?.agents.find((agent) => /^(?:working|running|active)$/i.test(agent.status));
     const activeTool = [...model.messages].reverse().find((message) =>
@@ -235,7 +235,10 @@ export default function PendingChangesBar() {
     return (
       <section className="pending-agent-status" role="status" aria-busy="true" aria-live="polite">
         <span className="pending-agent-avatar" aria-hidden="true">
-          <span>{avatar}</span>
+          <ProviderLogo
+            providerID={descriptor?.providerID ?? modelRef?.providerID}
+            providerName={descriptor?.providerName}
+          />
           <i />
         </span>
         <div className="pending-agent-copy">

@@ -94,7 +94,7 @@ display: none;
 }
 .term-body {
 flex: 1; margin: 0; border: 0; border-radius: 0; background: var(--term-bg);
-  font-family: var(--mono); font-size: var(--editor-font-size, 12.5px);
+  font-family: var(--mono); font-size: var(--terminal-font-size, 14px);
   line-height: 1.4; color: var(--term-fg);
   padding: 8px 0 8px 12px; overflow-y: auto; overflow-x: hidden;
   overscroll-behavior: contain; outline: none; cursor: text;

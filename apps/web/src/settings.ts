@@ -47,7 +47,8 @@ export interface PolythSettings {
   /** Light/dark rendering is independent from the selected palette. */
   appearanceMode: AppearanceMode;
   density: "comfortable" | "balanced" | "compact";
-  fontSize: number; // px, 12–18; scales interface text, not code blocks
+  /** General text size in px: chat, inputs, session titles, and settings. */
+  fontSize: number;
   fontFamily: InterfaceFont;
   productName: string; // brand label in the sidebar + document title
   relativeTime: boolean; // "2m ago" vs absolute times in the session list
@@ -70,7 +71,7 @@ export const DEFAULT_SETTINGS: PolythSettings = {
   theme: "dark",
   appearanceMode: "system",
   density: "comfortable",
-  fontSize: 14,
+  fontSize: 15,
   fontFamily: "sans",
   productName: "Polyth",
   relativeTime: true,
@@ -113,7 +114,7 @@ export function normalizeSettings(raw: unknown): PolythSettings {
     theme: legacySystemTheme ? "dark" : oldTheme,
     appearanceMode,
     density: r.density === "compact" || r.density === "balanced" ? r.density : "comfortable",
-    fontSize: pickNumber(r.fontSize, d.fontSize, 12, 18),
+    fontSize: pickNumber(r.fontSize, d.fontSize, 10, 32),
     fontFamily: isInterfaceFont(r.fontFamily) ? r.fontFamily : d.fontFamily,
     productName: pickString(r.productName, d.productName).trim() || d.productName,
     relativeTime: pickBool(r.relativeTime, d.relativeTime),
@@ -135,9 +136,8 @@ export function normalizeSettings(raw: unknown): PolythSettings {
   };
 }
 
-/** Coarse bucket for the discrete Interface scale segment (12–18px). CSS keys
- *  off `html[data-interface-size]` when a rule must target one step — e.g. the
- *  compact-shell nav that reads a touch small at the default (medium) size. */
+/** Compatibility bucket for older CSS consumers. Typography itself is now
+ *  continuous; new styles should consume the font-size variables directly. */
 export function interfaceSizeBucket(px: number): "small" | "medium" | "large" {
   if (px <= 13) return "small";
   if (px >= 16) return "large";
@@ -184,7 +184,7 @@ export function saveSettings(s: PolythSettings): void {
   }
 }
 
-// Theme tokens, density attribute, UI font size, and title on <html>/<title>.
+// Theme tokens, density metadata, continuous UI font size, and title on <html>/<title>.
 export function applySettingsToDom(s: PolythSettings): void {
   if (typeof document === "undefined") return;
   const html = document.documentElement;
@@ -195,9 +195,8 @@ export function applySettingsToDom(s: PolythSettings): void {
   const font = interfaceFont(s.fontFamily);
   html.dataset.fontKind = font.mono ? "mono" : "prose";
   html.style.setProperty("--ui-font-family", font.stack);
-  const effectiveSize = Math.max(11, s.fontSize - 1);
-  html.style.setProperty("--ui-font-size", `${effectiveSize}px`);
-  html.style.setProperty("--ui-font-scale", String(effectiveSize / DEFAULT_SETTINGS.fontSize));
+  html.style.setProperty("--ui-font-size", `${s.fontSize}px`);
+  html.style.setProperty("--ui-font-scale", String(s.fontSize / DEFAULT_SETTINGS.fontSize));
 }
 
 // ---- model ref preference ---------------------------------------------------

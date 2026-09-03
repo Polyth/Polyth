@@ -75,7 +75,7 @@ import {
 } from "../composer/discovery.ts";
 import {
   loadComposerConfig, saveComposerConfig, consumeComposerConfig, wireProfileId,
-  withExplicitAgent, withExplicitThinking, withModelForNextTurn,
+  withAutoThinking, withExplicitAgent, withExplicitThinking, withModelForNextTurn,
   type ComposerConfig,
 } from "../composerConfig.ts";
 import {
@@ -880,10 +880,11 @@ export default function Composer({
       ? chatModels.find((candidate) =>
           candidate.providerID === selected.providerID && candidate.modelID === selected.modelID)
       : undefined;
-    const requestedThinking = cfgSent.thinking
-      ?? getModelThinking(selected)
-      ?? sessionDefaults.defaultThinking;
-    const sentThinking = requestedThinking && selectedDescriptor?.variants?.includes(requestedThinking)
+    const requestedThinking = cfgSent.thinking !== undefined
+      ? cfgSent.thinking
+      : getModelThinking(selected) ?? sessionDefaults.defaultThinking;
+    const sentThinking = typeof requestedThinking === "string"
+      && selectedDescriptor?.variants?.includes(requestedThinking)
       ? requestedThinking
       : undefined;
     const sentModel = selected
@@ -1239,10 +1240,11 @@ export default function Composer({
       ? chatModels.find((candidate) =>
           candidate.providerID === recommendedModel.providerID && candidate.modelID === recommendedModel.modelID)
       : undefined;
-  const requestedSelectedThinking = cfg.thinking
-    ?? getModelThinking(selectedModel)
-    ?? sessionDefaults.defaultThinking;
-  const selectedThinking = requestedSelectedThinking && selectedModel?.variants?.includes(requestedSelectedThinking)
+  const requestedSelectedThinking = cfg.thinking !== undefined
+    ? cfg.thinking
+    : getModelThinking(selectedModel) ?? sessionDefaults.defaultThinking;
+  const selectedThinking = typeof requestedSelectedThinking === "string"
+    && selectedModel?.variants?.includes(requestedSelectedThinking)
     ? requestedSelectedThinking
     : undefined;
   // Honest attachment note from the next-turn model's normalized capabilities:
@@ -1262,7 +1264,7 @@ export default function Composer({
   })();
   const pickThinking = (thinking: string | undefined) => {
     if (selectedModel) setModelThinking(selectedModel, thinking);
-    updateCfg(withExplicitThinking(cfg, thinking));
+    updateCfg(thinking === undefined ? withAutoThinking(cfg) : withExplicitThinking(cfg, thinking));
   };
   const preserveKeyboard = isPhone && keyboardOpen
     ? () => inputRef.current?.focus()
@@ -1387,7 +1389,7 @@ export default function Composer({
       .finally(() => setSuggestionBusy(false));
   }, [activeSessionSeq, canGenerateNextAction, text]);
   // Composer controls are ordinary mini-widgets: one placement/visibility
-  // system owns Workflow, effort, and agent without duplicating toggle state.
+  // system owns next action, Workflow, effort, and agent.
   const slotContext = {
     sessionId: session?.id,
     projectId: activeProjectId ?? undefined,

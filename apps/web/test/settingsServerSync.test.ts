@@ -1,6 +1,6 @@
-// The Appearance drawer nav must track the interface-size and density settings
-// on phones, and every client setting must round-trip through the server so a
-// change on one device reaches the others.
+// The Appearance drawer nav must track independent typography and density
+// settings on phones, and every client setting must round-trip through the
+// server so a change on one device reaches the others.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -43,18 +43,19 @@ test("applySettingsToDom publishes the interface-size bucket for CSS", async () 
   assert.equal(document.documentElement.dataset.interfaceSize, "large");
 });
 
-test("the compact-shell drawer nav reacts to interface size and density", async () => {
+test("the compact-shell drawer nav reacts to typography and density", async () => {
   const css = await readWebStyles();
 
-  // Medium (the default) interface scale nudges every nav role up on phones.
+  // Project/worktree names and sessions use their independent type roles.
   assert.match(
     css,
-    /:is\(html, body\)\[data-interface-size="medium"\] \.sidebar \{[^}]*--nav-session-size:\s*calc\(var\(--ui-font-size[^}]*\}/s,
-    "the drawer nav bumps its type at the medium interface size",
+    /\.sidebar \{[^}]*--nav-session-size:\s*var\(--ui-font-size, 15px\)/s,
+    "the drawer nav uses the general text size for sessions",
   );
   assert.match(
     css,
-    /:is\(html, body\)\[data-interface-size="medium"\] \.sidebar \{[^}]*--nav-project-size:\s*calc\(var\(--ui-font-size[^}]*\}/s,
+    /\.sidebar \{[^}]*--nav-project-size:\s*var\(--subheader-font-size, 16px\)/s,
+    "the drawer nav uses the subheader size for projects",
   );
 
   // Balanced density tightens the drawer rhythm (rows + scroll padding).

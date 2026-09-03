@@ -13,7 +13,7 @@
   flex-direction: column;
   gap: var(--space-2);
   min-width: 0;
-  width: min(calc(100% - (var(--screen-gutter) * 2)), var(--chat-measure));
+  width: min(100%, var(--chat-measure));
   margin-inline: auto;
   padding: var(--space-3);
   border: 1px solid var(--border-soft);
@@ -74,7 +74,8 @@
 .pending-changes-bar .pending-change-stats .deletions { color: var(--red); }
 .pending-agent-status {
   container: pending-agent-status / inline-size;
-  width: min(100%, var(--chat-measure));
+  box-sizing: border-box;
+  width: min(calc(100% - (var(--screen-gutter) * 2)), var(--chat-measure));
   min-height: calc(var(--control-h-lg) * 2);
   margin: 0 auto var(--space-3);
   display: grid;
@@ -85,7 +86,7 @@
   overflow: hidden;
   border: 1px solid var(--material-glass-border);
   border-radius: var(--radius-sheet);
-  background: var(--material-glass);
+  background: color-mix(in srgb, var(--material-glass) 86%, var(--panel));
   box-shadow: var(--material-glass-highlight), var(--shadow-sm);
   color: var(--text);
 }
@@ -97,11 +98,7 @@
   height: var(--control-h);
   color: var(--accent);
 }
-.pending-agent-avatar > span {
-  font-size: var(--font-heading);
-  font-weight: 700;
-  line-height: 1;
-}
+.pending-agent-avatar .provider-logo { width: var(--icon-xl); height: var(--icon-xl); color: var(--accent); }
 .pending-agent-avatar > i {
   position: absolute;
   inset-inline-end: 0;
@@ -179,7 +176,7 @@
 .pending-agent-branch svg { flex: none; }
 @container pending-agent-status (max-width: 480px) {
   .pending-agent-avatar { width: var(--control-h-sm); height: var(--control-h-sm); }
-  .pending-agent-avatar > span { font-size: var(--font-label); }
+  .pending-agent-avatar .provider-logo { width: var(--icon-lg); height: var(--icon-lg); }
   .pending-agent-branch { max-width: 16ch; }
   .pending-agent-branch svg { display: none; }
 }

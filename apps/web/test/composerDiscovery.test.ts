@@ -25,7 +25,7 @@ const { activeToken, composerMode } = await import("../src/composer/language.ts"
 const {
   configEquals, consumeComposerConfig, emptyComposerConfig, isDefaultComposerConfig,
   loadComposerConfig, parseComposerConfig, saveComposerConfig, serializeComposerConfig,
-  wireProfileId, withExplicitAgent, withExplicitModel, withExplicitThinking,
+  wireProfileId, withAutoThinking, withExplicitAgent, withExplicitModel, withExplicitThinking,
   withModelForNextTurn, withProfile, withProfileNone,
 } = await import("../src/composerConfig.ts");
 
@@ -325,6 +325,17 @@ test("agent switches preserve effort; model switches clear only the pending effo
   const nextModel = withModelForNextTurn(nextAgent, { providerID: "p", modelID: "plain" });
   assert.equal(nextModel.thinking, undefined, "a model switch cannot carry an incompatible pending effort");
   assert.equal(nextModel.agent, "review", "model and agent choices stay independent");
+});
+
+test("Auto is explicit and survives persistence as a distinct choice", () => {
+  const configured = withExplicitThinking(
+    withExplicitModel(emptyComposerConfig(), { providerID: "p", modelID: "reasoning" }),
+    "high",
+  );
+  const auto = withAutoThinking(configured);
+  assert.equal(auto.thinking, null);
+  assert.ok(!isDefaultComposerConfig(auto));
+  assert.equal(parseComposerConfig(serializeComposerConfig(auto)).thinking, null);
 });
 
 test("wire profile id: selected, explicit None, and inherited never conflate", () => {

@@ -418,6 +418,7 @@ test("model leads the phone composer while effort stays a configurable draggable
   assert.ok(composer.includes("{!phoneLayout && modelControl}"), "the desktop rail keeps the model control");
   assert.ok(composer.includes("const effortControl"), "composer derives one effort control");
   assert.ok(composer.includes("modelSupportsThinking(selectedModel)"), "it only exists for models that report variants");
+  assert.ok(composer.includes("cfg.thinking !== undefined"), "Auto suppresses saved and session thinking fallbacks");
   assert.ok(composer.includes("onCommit={preserveKeyboard}"), "the keyboard reopens once the drag ends");
   assert.ok(composer.includes("pickThinking(thinking || undefined)"), "picking saves the effort and updates the composer config");
   assert.ok(composer.includes("composerEffortControl: effortControl"), "the slot context owns the rendered control");
@@ -505,7 +506,7 @@ test("touch targets and design tokens are centralized", async () => {
   for (const token of [
     "--space-4: 16px", "--tap: 44px",
     "--radius-sheet: calc(16px * var(--corner-radius-scale))",
-    "--font-input: 16px",
+    "--font-input: var(--ui-font-size, 15px)",
     "--safe-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px))",
     "--safe-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px))",
     "--safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))",
