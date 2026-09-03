@@ -4,9 +4,11 @@ import type {
   BrowserAction,
   BrowserTarget,
   JsonObject,
+  RemoteAccessPolicy,
   RouteHandler,
   SessionEvent,
 } from "@polyth/contracts";
+import { REMOTE_CAPABILITY } from "@polyth/contracts";
 import {
   serverServiceKey,
   type ServerPackage,
@@ -344,6 +346,25 @@ export function browserRoutes(deps: {
   };
 }
 
+export const BROWSER_REMOTE_ACCESS: RemoteAccessPolicy = {
+  routeScopes: ["browser"],
+  http: [
+    { methods: ["GET"], path: "/api/browser/capability", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
+    { methods: ["GET"], path: "/api/browser/approvals", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
+    { methods: ["POST"], path: "/api/browser/approvals", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
+    { methods: ["GET"], path: "/api/browser/sessions", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
+    { methods: ["POST"], path: "/api/browser/sessions", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
+    { methods: ["GET"], path: "/api/browser/sessions/:id", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
+    { methods: ["DELETE"], path: "/api/browser/sessions/:id", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
+    { methods: ["POST"], path: "/api/browser/sessions/:id/navigate", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
+    { methods: ["POST"], path: "/api/browser/sessions/:id/actions", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
+    { methods: ["POST"], path: "/api/browser/sessions/:id/observe", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
+    { methods: ["POST"], path: "/api/browser/sessions/:id/pause-agent", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
+    { methods: ["GET"], path: "/api/browser/sessions/:id/console", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
+    { methods: ["GET"], path: "/api/browser/sessions/:id/frame", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
+  ],
+};
+
 export default async function registerPackage(host: ServerPackageHost): Promise<ServerPackage> {
   // Internal browser: Chromium if configured/found, fake driver behind
   // POLYTH_FAKE_BROWSER=1, otherwise an honest unavailable state. Created at
@@ -362,6 +383,7 @@ export default async function registerPackage(host: ServerPackageHost): Promise<
   host.services.provide(serverServiceKey<BrowserService>("browser"), browser);
   let routes: RouteHandler | null = null;
   return {
+    remoteAccess: BROWSER_REMOTE_ACCESS,
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
       // The bridge is composition-root-owned (only backend-opencode may talk

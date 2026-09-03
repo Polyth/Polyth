@@ -4,11 +4,13 @@ import { WebSocket, WebSocketServer } from "ws";
 import type {
   JsonObject,
   ProjectService,
+  RemoteAccessPolicy,
   RemoteHost,
   RouteHandler,
   SessionEvent,
   SessionService,
 } from "@polyth/contracts";
+import { REMOTE_CAPABILITY } from "@polyth/contracts";
 import {
   serverServiceKey,
   type ServerPackage,
@@ -219,6 +221,20 @@ export function attachTerminalWs(server: Server, deps: {
   });
 }
 
+export const TERMINAL_REMOTE_ACCESS: RemoteAccessPolicy = {
+  routeScopes: ["terminal"],
+  http: [
+    { methods: ["GET"], path: "/api/terminals", capability: REMOTE_CAPABILITY.terminalOpen, mutation: false },
+    { methods: ["POST"], path: "/api/terminals", capability: REMOTE_CAPABILITY.terminalOpen, mutation: true },
+    { methods: ["POST"], path: "/api/terminals/:id", capability: REMOTE_CAPABILITY.terminalInput, mutation: true },
+    { methods: ["PATCH"], path: "/api/terminals/:id", capability: REMOTE_CAPABILITY.terminalOpen, mutation: true },
+    { methods: ["DELETE"], path: "/api/terminals/:id", capability: REMOTE_CAPABILITY.terminalOpen, mutation: true },
+  ],
+  websocket: [
+    { path: "/ws/terminal/:id", capability: REMOTE_CAPABILITY.terminalOpen },
+  ],
+};
+
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   // POLYTH_TERM_REPLAY_BYTES caps per-PTY scrollback replay (default 200 KB).
   // POLYTH_MAX_TERMINALS optionally bounds concurrent terminal processes.
@@ -254,6 +270,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   });
   let routes: RouteHandler | null = null;
   return {
+    remoteAccess: TERMINAL_REMOTE_ACCESS,
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
       routes ??= terminalRoutes({

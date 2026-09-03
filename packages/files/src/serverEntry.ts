@@ -1,4 +1,5 @@
-import type { ProjectService, RemoteHost, RouteHandler, SessionService } from "@polyth/contracts";
+import type { ProjectService, RemoteAccessPolicy, RemoteHost, RouteHandler, SessionService } from "@polyth/contracts";
+import { REMOTE_CAPABILITY } from "@polyth/contracts";
 import {
   serverServiceKey,
   type ServerPackage,
@@ -172,6 +173,22 @@ export function workspaceRoutes(deps: {
   };
 }
 
+export const FILES_REMOTE_ACCESS: RemoteAccessPolicy = {
+  routeScopes: ["files"],
+  http: [
+    { methods: ["GET"], path: "/api/files/stat", capability: REMOTE_CAPABILITY.filesRead, mutation: false },
+    { methods: ["GET"], path: "/api/files/raw", capability: REMOTE_CAPABILITY.filesRead, mutation: false },
+    { methods: ["GET"], path: "/api/files/tree", capability: REMOTE_CAPABILITY.filesRead, mutation: false },
+    { methods: ["GET"], path: "/api/files/read", capability: REMOTE_CAPABILITY.filesRead, mutation: false },
+    { methods: ["GET"], path: "/api/files/search", capability: REMOTE_CAPABILITY.filesRead, mutation: false },
+    { methods: ["POST"], path: "/api/files/write", capability: REMOTE_CAPABILITY.filesWrite, mutation: true },
+    { methods: ["POST"], path: "/api/files/upload", capability: REMOTE_CAPABILITY.filesWrite, mutation: true },
+    { methods: ["POST"], path: "/api/files/mkdir", capability: REMOTE_CAPABILITY.filesWrite, mutation: true },
+    { methods: ["POST"], path: "/api/files/delete", capability: REMOTE_CAPABILITY.filesWrite, mutation: true },
+    { methods: ["POST"], path: "/api/files/rename", capability: REMOTE_CAPABILITY.filesWrite, mutation: true },
+  ],
+};
+
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   const files = createFileService();
   host.services.provide(serverServiceKey<FileService>("files"), files);
@@ -187,6 +204,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   );
   let routes: RouteHandler | null = null;
   return {
+    remoteAccess: FILES_REMOTE_ACCESS,
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
       routes ??= workspaceRoutes({

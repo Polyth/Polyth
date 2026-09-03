@@ -4,7 +4,7 @@ import type {
   ModelDescriptor,
   RouteHandler,
 } from "@polyth/contracts";
-import type { ServerPackage, ServerPackageHost } from "@polyth/plugins";
+import { localOnlyRemoteAccess, type ServerPackage, type ServerPackageHost } from "@polyth/plugins";
 import { validateProfile } from "./index.ts";
 
 interface ProfileStore {
@@ -137,6 +137,7 @@ const aggregate = async <T>(
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   return {
+    remoteAccess: localOnlyRemoteAccess(["models"]),
     routes: profileRoutes({
       store: host.store as unknown as ProfileStore,
       listModels: () => aggregate(

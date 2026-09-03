@@ -1,29 +1,45 @@
-import type { Disposable } from "@polyth/contracts";
-import type { RouteHandler } from "./http.ts";
+import type { Disposable, RemoteAccessPolicy, RouteHandler } from "@polyth/contracts";
+import type { OwnedRemotePolicy } from "./remotePolicy.ts";
+import { validateRemoteAccessPolicy } from "./remotePolicy.ts";
 
 export interface RouteRegistry {
   add(handler: RouteHandler): Disposable;
-  add(id: string, handler: RouteHandler): Disposable;
+  add(id: string, handler: RouteHandler, remoteAccess?: RemoteAccessPolicy): Disposable;
   handler: RouteHandler;
+  policies(): OwnedRemotePolicy[];
 }
 
 export function createRouteRegistry(): RouteRegistry {
-  const handlers = new Map<string | symbol, RouteHandler>();
+  const handlers = new Map<string | symbol, {
+    handler: RouteHandler;
+    remoteAccess?: RemoteAccessPolicy;
+    owner: string;
+  }>();
 
   return {
-    add(idOrHandler: string | RouteHandler, maybeHandler?: RouteHandler) {
+    add(idOrHandler: string | RouteHandler, maybeHandler?: RouteHandler, remoteAccess?: RemoteAccessPolicy) {
       const id = typeof idOrHandler === "string" ? idOrHandler : Symbol("plugin-route");
       const handler = typeof idOrHandler === "string" ? maybeHandler! : idOrHandler;
-      handlers.set(id, handler);
+      const owner = typeof idOrHandler === "string" ? idOrHandler : "anonymous";
+      if (remoteAccess) validateRemoteAccessPolicy(owner, remoteAccess);
+      handlers.set(id, { handler, remoteAccess, owner });
       return {
         dispose() {
-          if (handlers.get(id) === handler) handlers.delete(id);
+          const current = handlers.get(id);
+          if (current?.handler === handler) handlers.delete(id);
         },
       };
     },
+    policies() {
+      const out: OwnedRemotePolicy[] = [];
+      for (const entry of handlers.values()) {
+        if (entry.remoteAccess) out.push({ owner: entry.owner, policy: entry.remoteAccess });
+      }
+      return out;
+    },
     async handler(request) {
-      for (const handler of handlers.values()) {
-        if (await handler(request)) return true;
+      for (const entry of handlers.values()) {
+        if (await entry.handler(request)) return true;
       }
       return false;
     },

@@ -1,7 +1,8 @@
 import { posix } from "node:path";
 import { createHash } from "node:crypto";
-import type { AgentRuntime, JsonObject, ModelRef, SessionProjection } from "@polyth/contracts";
+import type { AgentRuntime, JsonObject, ModelRef, RemoteAccessPolicy, SessionProjection } from "@polyth/contracts";
 import type { ProjectService, RouteHandler, SessionService } from "@polyth/contracts";
+import { REMOTE_CAPABILITY } from "@polyth/contracts";
 import {
   serverServiceKey,
   type ServerPackage,
@@ -355,6 +356,39 @@ export function gitRoutes(deps: {
   };
 }
 
+export const GIT_REMOTE_ACCESS: RemoteAccessPolicy = {
+  routeScopes: ["git"],
+  http: [
+    { methods: ["GET"], path: "/api/git/status", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
+    { methods: ["GET"], path: "/api/git/diff", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
+    { methods: ["GET"], path: "/api/git/show", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
+    { methods: ["GET"], path: "/api/git/log", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
+    { methods: ["GET"], path: "/api/git/graph", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
+    { methods: ["GET"], path: "/api/git/branches", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
+    { methods: ["GET"], path: "/api/git/stashes", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
+    { methods: ["GET"], path: "/api/git/identity", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
+    { methods: ["GET"], path: "/api/worktrees", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
+    { methods: ["POST"], path: "/api/git/resolve-conflict-agent", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/stage", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/unstage", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/discard", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/folder", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/commit", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/commit-message", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/branch", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/checkout", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/stash", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/stash/apply", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/stash/drop", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/fetch", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/pull", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/push", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/identity", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/worktrees", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/worktrees/remove", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+  ],
+};
+
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   // Shared with the session service (worktree validation), tracks, github, and
   // walkthrough capture — published at load time under the well-known key.
@@ -362,6 +396,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   host.services.provide(serverServiceKey<GitService>("git"), git);
   let routes: RouteHandler | null = null;
   return {
+    remoteAccess: GIT_REMOTE_ACCESS,
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
       const commitMessage = createCommitMessageGenerator({

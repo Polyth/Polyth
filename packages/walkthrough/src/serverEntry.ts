@@ -10,6 +10,7 @@ import type {
   WalkthroughSource,
 } from "@polyth/contracts";
 import {
+  localOnlyRemoteAccess,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
@@ -278,6 +279,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   });
   let flowTimer: ReturnType<typeof setInterval> | null = null;
   return {
+    remoteAccess: localOnlyRemoteAccess(["walkthrough"]),
     routes,
     onEnable() {
       flowTimer = setInterval(() => void flow.tick(), 4_000);

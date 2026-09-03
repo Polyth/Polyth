@@ -6,6 +6,7 @@ import type {
   SecureSafeService,
 } from "@polyth/contracts";
 import {
+  localOnlyRemoteAccess,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
@@ -80,6 +81,7 @@ export function secureSafeRoutes(safe: SecureSafeService): RouteHandler {
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   let routes: RouteHandler | null = null;
   return {
+    remoteAccess: localOnlyRemoteAccess(["secure-safe"]),
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
       routes ??= secureSafeRoutes(host.services.require(

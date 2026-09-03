@@ -9,6 +9,7 @@ import type {
   UserTurnInput,
 } from "@polyth/contracts";
 import {
+  localOnlyRemoteAccess,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
@@ -355,6 +356,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   host.services.provide(serverServiceKey<GithubService>("github"), github);
   let routes: RouteHandler | null = null;
   return {
+    remoteAccess: localOnlyRemoteAccess(["github"]),
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
       const git = host.services.require(serverServiceKey<GitService>("git"));

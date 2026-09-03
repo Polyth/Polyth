@@ -40,6 +40,7 @@ export {
   discoverServerPackages,
   INFRASTRUCTURE_PACKAGE_DIRS,
   loadServerPackage,
+  localOnlyRemoteAccess,
   serverServiceKey,
   type AppendEventOptions,
   type DiscoveredServerPackage,

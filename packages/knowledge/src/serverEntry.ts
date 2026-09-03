@@ -7,6 +7,7 @@ import type {
   TrackStepInput,
 } from "@polyth/contracts";
 import {
+  localOnlyRemoteAccess,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
@@ -209,6 +210,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   host.services.provide(serverServiceKey<TrackStore>("tracks.store"), trackStore);
   let routes: RouteHandler | null = null;
   return {
+    remoteAccess: localOnlyRemoteAccess(["knowledge"]),
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
       // The track workflow is composed by the server AFTER package load (it

@@ -11,6 +11,7 @@ import {
   type UserTurnInput,
 } from "@polyth/contracts";
 import {
+  localOnlyRemoteAccess,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
@@ -207,5 +208,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     ),
     send: (sessionId, input) => host.sessions.send(sessionId, input),
   });
-  return { routes };
+  return {
+    remoteAccess: localOnlyRemoteAccess(["task-trackers"]),
+    routes,
+  };
 }

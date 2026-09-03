@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RouteHandler } from "@polyth/contracts";
 import {
+  localOnlyRemoteAccess,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
@@ -66,6 +67,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   host.services.provide(serverServiceKey<UsageService>("usage"), usage);
   const routes = usageRoutes(usage);
   return {
+    remoteAccess: localOnlyRemoteAccess(["usage"]),
     routes,
     onEnable() {
       usage.start();

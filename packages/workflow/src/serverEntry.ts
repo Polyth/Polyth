@@ -7,6 +7,7 @@ import type {
   WorkflowRunOptionsDto,
 } from "@polyth/contracts";
 import {
+  localOnlyRemoteAccess,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
@@ -180,5 +181,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     runNode: createWorkflowRunNode(host.sessions),
   });
   host.services.provide(serverServiceKey<WorkflowService>("workflow"), workflow);
-  return { routes: workflowRoutes(workflow) };
+  return {
+    remoteAccess: localOnlyRemoteAccess(["workflow"]),
+    routes: workflowRoutes(workflow),
+  };
 }

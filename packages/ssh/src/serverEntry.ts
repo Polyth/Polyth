@@ -6,6 +6,7 @@ import type {
   SshConnectionInput,
 } from "@polyth/contracts";
 import {
+  localOnlyRemoteAccess,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
@@ -162,6 +163,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   host.services.provide(serverServiceKey<SshService>("ssh"), ssh);
   let routes: RouteHandler | null = null;
   return {
+    remoteAccess: localOnlyRemoteAccess(["ssh"]),
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
       // The probe stays bound in the composition root so no feature package

@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type { ProjectService, RouteHandler } from "@polyth/contracts";
 import {
+  localOnlyRemoteAccess,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
@@ -217,6 +218,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     }
   };
   return {
+    remoteAccess: localOnlyRemoteAccess(["schedule"]),
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
       routes ??= scheduleRoutes({ schedule, projects: host.projects });

@@ -11,6 +11,7 @@ import type {
 } from "@polyth/contracts";
 import {
   createPluginRegistry,
+  localOnlyRemoteAccess,
   serverServiceKey,
   type PluginRegistry,
   type ServerPackage,
@@ -169,6 +170,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   let routes: RouteHandler | null = null;
   let registry: PluginRegistry | null = null;
   return {
+    remoteAccess: localOnlyRemoteAccess(["plugins"]),
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
       const pluginsDir = join(host.storageDir, "plugins");

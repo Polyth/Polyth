@@ -11,6 +11,8 @@ import { pathToFileURL } from "node:url";
 import { cap } from "@polyth/contracts";
 import type {
   AgentRuntime,
+  AuthPrincipal,
+  AuthResolution,
   CapabilityKey,
   Disposable,
   InstalledPluginDto,
@@ -20,6 +22,8 @@ import type {
   PackageDescriptorDto,
   Plugin,
   ProjectService,
+  RemoteAccessPolicy,
+  RequestIngress,
   RouteHandler,
   SessionEvent,
   SessionPersistence,
@@ -36,8 +40,15 @@ const err = (code: string, message: string) => Object.assign(new Error(message),
 /** What a feature package's serverEntry returns; mirrors the server's
  *  packageLifecycle contract. `routes` is added to the route registry while the
  *  package is enabled and removed when it is disabled. */
+export function localOnlyRemoteAccess(routeScopes: readonly string[]): RemoteAccessPolicy {
+  return { routeScopes, http: [] };
+}
+
+/** What a feature package's serverEntry returns. Remote access is default-deny:
+ *  omit `remoteAccess` and paired devices cannot reach the package. */
 export interface ServerPackage {
   routes?: RouteHandler;
+  remoteAccess?: RemoteAccessPolicy;
   onEnable?: () => void | Promise<void>;
   onDisable?: () => void | Promise<void>;
 }
@@ -111,7 +122,19 @@ export type AppendEventOptions = Partial<
 /** Handed to `onHttpServer` callbacks once the gateway's HTTP server exists. */
 export interface HttpServerContext {
   server: import("node:http").Server;
-  /** Gateway auth check for WS upgrade requests (F16 cookie sessions). */
+  /** Public listener id, or `polyth-link` for the internal tunnel ingress. */
+  listenerId: string;
+  /** Canonical HTTP handler shared by the public listener and tunnel ingress. */
+  dispatch(
+    request: import("node:http").IncomingMessage,
+    response: import("node:http").ServerResponse,
+    ingress: RequestIngress,
+  ): Promise<void>;
+  resolve(
+    request: import("node:http").IncomingMessage,
+    ingress: RequestIngress,
+  ): AuthResolution;
+  /** True when the upgrade may proceed. Uses the listener's trusted ingress. */
   authorize(request: import("node:http").IncomingMessage): boolean;
 }
 
@@ -194,6 +217,14 @@ export interface ServerPackageHost extends TrustedServerPluginHost {
    *  upgrade channel). Callbacks registered during package load run before the
    *  core session gateway claims `/ws` upgrades, preserving upgrade priority. */
   onHttpServer(cb: (ctx: HttpServerContext) => void): void;
+  /** Re-run HTTP-server callbacks against an additional listener (tunnel ingress). */
+  attachHttpChannels(ctx: HttpServerContext): void;
+  /** Enabled package remote-access policies plus whatever the registry currently holds. */
+  remotePolicies(): ReadonlyArray<{ owner: string; policy: RemoteAccessPolicy }>;
+  /** Tunnel ingress supplies the live paired-device principal. Never reads headers. */
+  attachPairedDeviceResolver(
+    resolver: (ingress: Extract<RequestIngress, { kind: "polyth-link" }>) => AuthPrincipal | null,
+  ): void;
 }
 
 // ---- discovery --------------------------------------------------------------------
@@ -371,6 +402,11 @@ export async function loadServerPackage(
         "invalid-input",
         `registerPackage for "${discovered.id}" returned a non-function "${field}"`,
       );
+    }
+  }
+  if (pkg.remoteAccess !== undefined) {
+    if (!pkg.remoteAccess || typeof pkg.remoteAccess !== "object" || Array.isArray(pkg.remoteAccess)) {
+      throw err("invalid-input", `registerPackage for "${discovered.id}" returned invalid remoteAccess`);
     }
   }
   return pkg;
