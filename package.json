@@ -23,6 +23,7 @@
     "dev": "npm run build:web && node --experimental-strip-types packages/server/src/index.ts",
     "prewatch": "node scripts/check-node.mjs",
     "watch": "node --experimental-strip-types scripts/supervisor.ts",
+    "build:link": "cargo build -p polyth-link-host -p polyth-link-client -p polyth-link-relay",
     "desktop:download-opencode": "npm --workspace @polyth/desktop run download:opencode",
     "desktop:dev": "npm run build:desktop && npm run desktop:download-opencode && npm --workspace @polyth/desktop start",
     "desktop:dist:linux": "npm run build:web && npm run desktop:download-opencode && npm --workspace @polyth/desktop run dist:linux",

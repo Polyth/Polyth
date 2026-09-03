@@ -1,0 +1,14 @@
+[package]
+name = "polyth-link-uniffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Thin UniFFI surface over polyth-link-core. No protocol logic lives here."
+
+[lib]
+name = "polyth_link_uniffi"
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+polyth-link-core = { path = "../polyth-link-core" }

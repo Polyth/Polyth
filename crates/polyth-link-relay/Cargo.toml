@@ -1,0 +1,17 @@
+[package]
+name = "polyth-link-relay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Packaging wrapper around upstream iroh-relay 1.1.0. Not an application proxy."
+
+[[bin]]
+name = "polyth-link-relay"
+path = "src/main.rs"
+
+[dependencies]
+iroh-relay = { version = "=1.1.0", features = ["server"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
