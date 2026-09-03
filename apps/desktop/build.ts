@@ -1,5 +1,6 @@
 import { build } from "esbuild";
 import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 const here = import.meta.dirname;
@@ -10,6 +11,14 @@ await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 await mkdir(join(here, "build"), { recursive: true });
 await copyFile(join(here, "..", "web", "icon-512.png"), join(here, "build", "icon.png"));
+
+const linkHostName = process.platform === "win32" ? "polyth-link-host.exe" : "polyth-link-host";
+const linkHostSrc = join(here, "..", "..", "target", "release", linkHostName);
+const linkHostDir = join(here, "resources", "polyth-link");
+await mkdir(linkHostDir, { recursive: true });
+if (existsSync(linkHostSrc)) {
+  await copyFile(linkHostSrc, join(linkHostDir, linkHostName));
+}
 
 await Promise.all([
   build({

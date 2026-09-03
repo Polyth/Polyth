@@ -40,7 +40,8 @@ test("pairing and identity rotation stay local-admin; paired devices only reach 
     events,
     host: () => null,
     connections: new Map(),
-    status: async () => ({ hostFingerprint: "abcd", identityAvailable: false }),
+    status: async () => ({ hostFingerprint: "abcd", identityAvailable: false, pairingAvailable: false }),
+    diagnostics: async () => ({ packageStatus: "host-binary-missing", recentErrors: [] }),
   });
 
   const paired: AuthPrincipal = {

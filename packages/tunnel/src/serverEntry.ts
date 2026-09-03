@@ -21,6 +21,7 @@ import {
 import { createTunnelStore, grantsForProfile, type TunnelStore } from "./index.ts";
 import { startLinkHost, randomIngressSecret, type LinkHostClient } from "./host.ts";
 import { attachTunnelEventsWs, TunnelEventBus } from "./events.ts";
+import { buildTunnelDiagnostics, buildTunnelStatus } from "./status.ts";
 
 export const TUNNEL_REMOTE_ACCESS: RemoteAccessPolicy = {
   routeScopes: ["tunnel"],
@@ -48,6 +49,7 @@ export function tunnelRoutes(deps: {
   host: () => LinkHostClient | null;
   connections: Map<string, AuthPrincipal>;
   status: () => Promise<Record<string, unknown>>;
+  diagnostics: () => Promise<Record<string, unknown>>;
 }): RouteHandler {
   return async (request) => {
     const { path, method, json, principal } = request;
@@ -57,14 +59,7 @@ export function tunnelRoutes(deps: {
       return true;
     }
     if (path === "/api/tunnel/diagnostics" && method === "GET") {
-      json(200, {
-        appVersion: "0.1.0",
-        irohVersion: "1.1.0",
-        hostFingerprint: (await deps.status()).hostFingerprint ?? null,
-        relayUrls: [],
-        recentErrors: [],
-        packageStatus: deps.host()?.available ? "running" : "host-binary-missing",
-      });
+      json(200, await deps.diagnostics());
       return true;
     }
     requireLocalAdmin(principal);
@@ -230,6 +225,9 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   const connections = new Map<string, AuthPrincipal>();
   let linkHost: LinkHostClient | null = null;
   let ingress: Server | null = null;
+  let endpointBound = false;
+  let ingressReady = false;
+  let lastErrorCode: string | undefined;
   const ingressSecret = randomIngressSecret();
   const socketDir = join(host.storageDir, "tunnel");
   mkdirSync(socketDir, { recursive: true });
@@ -285,6 +283,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       ingress!.listen(ingressSocket, () => resolve());
       ingress!.on("error", reject);
     });
+    ingressReady = true;
     host.attachHttpChannels({
       server: ingress,
       listenerId: "polyth-link",
@@ -332,6 +331,49 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
 
   host.attachPairedDeviceResolver(resolvePaired);
 
+  const liveSnapshot = async () => {
+    let fingerprint: string | null = null;
+    let identityError: string | undefined;
+    let identityAvailable = false;
+    try {
+      if (linkHost?.available) {
+        const identity = await linkHost.request("identity.status");
+        fingerprint = typeof identity.fingerprint === "string" && identity.fingerprint
+          ? identity.fingerprint
+          : null;
+        identityAvailable = Boolean(fingerprint);
+      }
+    } catch (error) {
+      identityError = error instanceof Error ? error.message : "host-identity-unavailable";
+      lastErrorCode = "host-identity-unavailable";
+    }
+    const platformSupported = linkHost ? linkHost.platformSupported : process.platform !== "win32";
+    let directConnections = 0;
+    let relayConnections = 0;
+    for (const principal of connections.values()) {
+      if (principal.kind !== "paired-device") continue;
+      if (principal.transport === "relay") relayConnections += 1;
+      else directConnections += 1;
+    }
+    return {
+      platformSupported,
+      hostBinaryFound: Boolean(linkHost?.binaryFound),
+      hostProcessReady: Boolean(linkHost?.processReady && linkHost.available),
+      endpointBound,
+      ingressReady,
+      identityAvailable,
+      hostFingerprint: fingerprint,
+      ...(identityError ? { identityError } : {}),
+      lastErrorCode: lastErrorCode ?? linkHost?.lastErrorCode,
+      activePolicy: endpointBound ? "direct-preferred" as const : null,
+      relayConfigured: false,
+      activeConnections: connections.size,
+      activeDevices: store.list().filter((device) => !device.revokedAt).length,
+      directConnections,
+      relayConnections,
+    };
+  };
+
   return {
     remoteAccess: TUNNEL_REMOTE_ACCESS,
     routes: tunnelRoutes({
@@ -339,102 +381,97 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       events,
       host: () => linkHost,
       connections,
-      status: async () => {
-        let fingerprint: string | null = null;
-        let identityError: string | undefined;
-        let identityAvailable = false;
-        try {
-          if (linkHost?.available) {
-            const identity = await linkHost.request("identity.status");
-            fingerprint = String(identity.fingerprint ?? "");
-            identityAvailable = true;
-          }
-        } catch (error) {
-          identityError = error instanceof Error ? error.message : "host-identity-unavailable";
-        }
-        return {
-          enabled: true,
-          mode: "direct-preferred",
-          hostFingerprint: fingerprint,
-          relayConfigured: false,
-          identityAvailable,
-          ...(identityError ? { identityError } : {}),
-          activeConnections: connections.size,
-          activeDevices: store.list().filter((device) => !device.revokedAt).length,
-        };
-      },
+      status: async () => buildTunnelStatus(await liveSnapshot()),
+      diagnostics: async () => buildTunnelDiagnostics(await liveSnapshot()),
     }),
     async onEnable() {
+      endpointBound = false;
+      lastErrorCode = undefined;
       try {
         linkHost = await startLinkHost({ dataDir: host.storageDir, socketPath: controlSocket });
-        if (linkHost.available) {
-          linkHost.onEvent((event) => {
-            events.emit(event.type, event);
-            if (event.type === "tunnel/pairing-committing") {
-              const endpointId = String(event.endpointId ?? "");
-              if (!endpointId) return;
-              try {
-                const device = store.commitDevice({
-                  endpointId,
-                  label: String(event.label ?? "Mobile device"),
-                  platform: event.platform ? String(event.platform) : undefined,
-                  grants: Array.isArray(event.grants) ? event.grants.map(String) : [],
-                  pairedVia: "polyth-link",
-                });
-                void linkHost?.request("pairing.finish", { id: String(event.pairingId ?? "") });
-                void syncTrust();
-                events.emit("tunnel/device-added", { id: device.id });
-              } catch {
-                void linkHost?.request("pairing.storage_failed", { id: String(event.pairingId ?? "") });
-              }
-            }
-            if (event.type === "tunnel/pairing-storage-failed") {
-              const endpointId = String(event.endpointId ?? "");
-              const device = endpointId ? store.deviceByEndpoint(endpointId) : undefined;
-              if (device) {
-                store.revoke(device.id);
-                for (const [connectionId, principal] of connections) {
-                  if (principal.kind === "paired-device" && principal.deviceId === device.id) {
-                    connections.delete(connectionId);
-                  }
-                }
-                void linkHost?.request("connection.close_device", { deviceId: device.id }).catch(() => {});
-              }
-            }
-            if (event.type === "tunnel/connection-opened") {
-              const connectionId = String(event.connectionId ?? "");
-              const deviceId = String(event.deviceId ?? "");
-              const device = store.device(deviceId);
-              if (!connectionId || !device || device.revokedAt) return;
-              connections.set(connectionId, {
-                kind: "paired-device",
-                deviceId: device.id,
-                deviceEndpointId: device.endpointId,
-                connectionId,
-                transport: event.transport === "relay" ? "relay" : "direct",
-                grants: device.grants,
-                grantRevision: device.grantRevision,
+        if (!linkHost.available) {
+          lastErrorCode = linkHost.lastErrorCode ?? "host-binary-missing";
+          return;
+        }
+        linkHost.onEvent((event) => {
+          events.emit(event.type, event);
+          if (event.type === "tunnel/pairing-committing") {
+            const endpointId = String(event.endpointId ?? "");
+            if (!endpointId) return;
+            try {
+              const device = store.commitDevice({
+                endpointId,
+                label: String(event.label ?? "Mobile device"),
+                platform: event.platform ? String(event.platform) : undefined,
+                grants: Array.isArray(event.grants) ? event.grants.map(String) : [],
+                pairedVia: "polyth-link",
               });
-              store.touch(device.id, event.transport === "relay" ? "relay" : "direct");
+              void linkHost?.request("pairing.finish", { id: String(event.pairingId ?? "") });
+              void syncTrust();
+              events.emit("tunnel/device-added", { id: device.id });
+            } catch {
+              void linkHost?.request("pairing.storage_failed", { id: String(event.pairingId ?? "") });
             }
-            if (event.type === "tunnel/connection-closed") {
-              connections.delete(String(event.connectionId ?? ""));
+          }
+          if (event.type === "tunnel/pairing-storage-failed") {
+            const endpointId = String(event.endpointId ?? "");
+            const device = endpointId ? store.deviceByEndpoint(endpointId) : undefined;
+            if (device) {
+              store.revoke(device.id);
+              for (const [connectionId, principal] of connections) {
+                if (principal.kind === "paired-device" && principal.deviceId === device.id) {
+                  connections.delete(connectionId);
+                }
+              }
+              void linkHost?.request("connection.close_device", { deviceId: device.id }).catch(() => {});
             }
-          });
+          }
+          if (event.type === "tunnel/connection-opened") {
+            const connectionId = String(event.connectionId ?? "");
+            const deviceId = String(event.deviceId ?? "");
+            const device = store.device(deviceId);
+            if (!connectionId || !device || device.revokedAt) return;
+            connections.set(connectionId, {
+              kind: "paired-device",
+              deviceId: device.id,
+              deviceEndpointId: device.endpointId,
+              connectionId,
+              transport: event.transport === "relay" ? "relay" : "direct",
+              grants: device.grants,
+              grantRevision: device.grantRevision,
+            });
+            store.touch(device.id, event.transport === "relay" ? "relay" : "direct");
+          }
+          if (event.type === "tunnel/connection-closed") {
+            connections.delete(String(event.connectionId ?? ""));
+          }
+        });
+        try {
           await linkHost.request("ingress.configure", {
             socket: ingressSocket,
             secret: ingressSecret,
-          }).catch(() => {});
-          await syncTrust();
-          await linkHost.request("endpoint.start").catch(() => {
-            // Endpoint bind can fail without network/relay; pairing identity still works.
           });
+        } catch (error) {
+          lastErrorCode = "ingress-configure-failed";
+          console.error("[polyth-link] ingress configure failed", error instanceof Error ? error.message : error);
+        }
+        await syncTrust();
+        try {
+          await linkHost.request("endpoint.start");
+          endpointBound = true;
+        } catch (error) {
+          endpointBound = false;
+          lastErrorCode = "endpoint-bind-failed";
+          console.error("[polyth-link] endpoint did not bind", error instanceof Error ? error.message : error);
         }
       } catch (error) {
+        lastErrorCode = "host-start-failed";
         console.error("[polyth-link] host failed to start", error instanceof Error ? error.message : error);
       }
     },
     async onDisable() {
+      endpointBound = false;
+      ingressReady = false;
       await linkHost?.close();
       linkHost = null;
       connections.clear();

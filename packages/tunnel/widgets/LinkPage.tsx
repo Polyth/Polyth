@@ -3,7 +3,6 @@ import type {
   GrantProfileId,
   PairingOfferDto,
   PairingStateDto,
-  PolythLinkPathPolicy,
   TunnelDeviceDto,
   TunnelStatusDto,
 } from "@polyth/contracts";
@@ -13,6 +12,7 @@ import { EmptyState, PageHead } from "../../../apps/web/src/components/settings/
 import { Button, Dialog, Select, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 import CopyButton from "../../../apps/web/src/components/CopyButton.tsx";
 import { confirmAlert } from "../../../apps/web/src/alerts.ts";
+import { applyTunnelStatusToCapability } from "./availability.ts";
 
 const api = createApiTransport({
   fetch: (url, init) => fetch(url, { credentials: "include", ...init }),
@@ -28,11 +28,24 @@ const PROFILE_OPTIONS: Array<{ value: GrantProfileId; label: string }> = [
   { value: "full-remote", label: "Full remote control" },
 ];
 
-const MODE_OPTIONS: Array<{ value: PolythLinkPathPolicy; label: string }> = [
-  { value: "direct-preferred", label: "Direct preferred" },
-  { value: "relay-only", label: "Encrypted relay only" },
-  { value: "air-gapped", label: "Air-gapped" },
-];
+function hostReadiness(status: TunnelStatusDto | null): string {
+  if (!status) return "Checking host status…";
+  if (status.unsupportedPlatform) return "Polyth Link is not supported on this platform.";
+  if (!status.hostBinaryFound) return "Host binary not found. Pairing is disabled.";
+  if (!status.hostProcessReady) return "Host process is not connected.";
+  if (!status.endpointBound) return "Host is running, but no endpoint is bound yet.";
+  if (!status.ingressReady) return "Endpoint is bound, but local ingress is not ready.";
+  if (!status.identityAvailable) return "Host identity is unavailable.";
+  return "Host is ready for pairing.";
+}
+
+function policyLabel(status: TunnelStatusDto | null): string {
+  const policy = status?.activePolicy ?? null;
+  if (policy === "direct-preferred") return "Active policy: direct preferred";
+  if (policy === "relay-only") return "Active policy: relay only";
+  if (policy === "air-gapped") return "Active policy: air-gapped";
+  return "Active policy: none (endpoint not bound)";
+}
 
 function transportLabel(value?: string): string {
   if (value === "direct") return "Connected directly";
@@ -61,7 +74,6 @@ export default function LinkPage() {
   const [pairingOpen, setPairingOpen] = useState(false);
   const [label, setLabel] = useState("");
   const [profile, setProfile] = useState<GrantProfileId>("interact");
-  const [mode, setMode] = useState<PolythLinkPathPolicy>("direct-preferred");
   const [offer, setOffer] = useState<(PairingOfferDto & { qrModules?: boolean[][] }) | null>(null);
   const [pairing, setPairing] = useState<PairingStateDto | null>(null);
   const pairingIdRef = useRef<string | null>(null);
@@ -74,6 +86,7 @@ export default function LinkPage() {
         api.get<TunnelDeviceDto[]>("/api/tunnel/devices").catch(() => [] as TunnelDeviceDto[]),
       ]);
       setStatus(nextStatus);
+      applyTunnelStatusToCapability(nextStatus);
       setDevices(nextDevices);
       setError("");
     } catch (cause) {
@@ -141,7 +154,7 @@ export default function LinkPage() {
     setError("");
     try {
       const created = await api.post<PairingOfferDto & { qrModules?: boolean[][] }>("/api/tunnel/pairing", {
-        label, profile, mode,
+        label, profile,
       });
       setOffer(created);
       setPairing(created.pairing as unknown as PairingStateDto);
@@ -200,19 +213,27 @@ export default function LinkPage() {
 
   return (
     <div className="pkg-tunnel">
-      <PageHead title="Polyth Link" blurb="Pair a phone with a short-lived QR code. Remote access uses authenticated Iroh, never a password in the QR." />
+      <PageHead title="Polyth Link" blurb="Pair a phone with a short-lived QR code when the host binary is installed and the endpoint is bound. The QR never contains a password." />
       {error && <div className="pkg-tunnel-error" role="alert">{error}</div>}
       <section className="pkg-tunnel-status">
         <div>
           <strong>This computer</strong>
+          <span>{hostReadiness(status)}</span>
+          <span>{policyLabel(status)}</span>
           <span>{status?.identityAvailable ? `Fingerprint ${status.hostFingerprint}` : status?.identityError ?? "Host identity unavailable"}</span>
-          <span>{status?.mode === "relay-only" ? "Encrypted relay only" : status?.mode === "air-gapped" ? "Air-gapped" : "Direct preferred, relay fallback"}</span>
+          {status?.lastErrorCode && <span>Last error: {status.lastErrorCode}</span>}
         </div>
         {status?.hostFingerprint && <CopyButton text={status.hostFingerprint} label="Copy fingerprint" />}
       </section>
       <div className="pkg-tunnel-actions">
-        <Button variant="primary" onClick={() => { setPairingOpen(true); setOffer(null); setPairing(null); }}>Pair device</Button>
-        <Button onClick={() => void rotate()}>Rotate host identity</Button>
+        <Button
+          variant="primary"
+          disabled={!status?.pairingAvailable}
+          onClick={() => { setPairingOpen(true); setOffer(null); setPairing(null); }}
+        >
+          Pair device
+        </Button>
+        <Button disabled={!status?.hostProcessReady} onClick={() => void rotate()}>Rotate host identity</Button>
       </div>
       {devices.length === 0 ? (
         <EmptyState title="No paired devices" body="Create a QR code, scan it from the Polyth mobile app, then compare the four words on both screens." />
@@ -257,8 +278,7 @@ export default function LinkPage() {
                 <TextInput value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Optional" />
               </label>
               <Select label="Access profile" value={profile} options={PROFILE_OPTIONS} onChange={(value) => setProfile(value as GrantProfileId)} />
-              <Select label="Connection policy" value={mode} options={MODE_OPTIONS} onChange={(value) => setMode(value as PolythLinkPathPolicy)} />
-              <p>Default access is Interact. Full remote control still cannot manage pairing, grants, or host identity.</p>
+              <p>Tickets use the host’s currently bound transport policy. Default access is Interact. Full remote control still cannot manage pairing, grants, or host identity.</p>
             </div>
           )}
           {offer && (

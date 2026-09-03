@@ -1,42 +1,48 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createConnection, type Socket } from "node:net";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { randomBytes } from "node:crypto";
+import { resolveHostBinary, type HostBinaryResolution } from "./hostBinary.ts";
+
+export { findHostBinary, resolveHostBinary, hostExecutableName } from "./hostBinary.ts";
+export type { HostBinaryResolution, HostBinaryLookup } from "./hostBinary.ts";
 
 export interface LinkHostClient {
   request(method: string, params?: Record<string, unknown>): Promise<Record<string, unknown>>;
   close(): Promise<void>;
   available: boolean;
+  binaryFound: boolean;
+  processReady: boolean;
+  platformSupported: boolean;
+  lastErrorCode?: string;
   onEvent(listener: (event: { type: string } & Record<string, unknown>) => void): () => void;
 }
 
-const repoRoot = join(import.meta.dirname, "../../..");
-
-export function findHostBinary(): string | null {
-  const env = process.env.POLYTH_LINK_HOST;
-  if (env && existsSync(env)) return env;
-  for (const candidate of [
-    join(repoRoot, "target/release/polyth-link-host"),
-    join(repoRoot, "target/debug/polyth-link-host"),
-  ]) {
-    if (existsSync(candidate)) return candidate;
-  }
-  return null;
+function unavailableHost(resolution: HostBinaryResolution): LinkHostClient {
+  const lastErrorCode = resolution.ok ? "host-binary-missing" : resolution.reason === "unsupported-platform"
+    ? "unsupported-platform"
+    : "host-binary-missing";
+  const message = lastErrorCode === "unsupported-platform"
+    ? "Polyth Link is not supported on this platform"
+    : "Polyth Link host binary is not installed";
+  return {
+    available: false,
+    binaryFound: false,
+    processReady: false,
+    platformSupported: lastErrorCode !== "unsupported-platform",
+    lastErrorCode,
+    onEvent() { return () => {}; },
+    async request() {
+      throw Object.assign(new Error(message), { code: lastErrorCode });
+    },
+    async close() {},
+  };
 }
 
 export async function startLinkHost(opts: { dataDir: string; socketPath: string }): Promise<LinkHostClient> {
-  const binary = findHostBinary();
-  if (!binary) {
-    return {
-      available: false,
-      onEvent() { return () => {}; },
-      async request() {
-        throw Object.assign(new Error("Polyth Link host binary is not installed"), { code: "unavailable" });
-      },
-      async close() {},
-    };
-  }
+  const resolved = resolveHostBinary();
+  if (!resolved.ok) return unavailableHost(resolved);
+  const binary = resolved.path;
   const child: ChildProcess = spawn(binary, ["serve", opts.dataDir, opts.socketPath], {
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -45,7 +51,26 @@ export async function startLinkHost(opts: { dataDir: string; socketPath: string 
     if (/secret|invite|hmac|private|token/i.test(text)) return;
     console.error("[polyth-link-host]", text.trim());
   });
-  await waitForSocket(opts.socketPath, 12_000);
+  try {
+    await waitForSocket(opts.socketPath, 12_000);
+  } catch (error) {
+    child.kill("SIGKILL");
+    return {
+      available: false,
+      binaryFound: true,
+      processReady: false,
+      platformSupported: true,
+      lastErrorCode: "host-start-failed",
+      onEvent() { return () => {}; },
+      async request() {
+        throw Object.assign(
+          new Error(error instanceof Error ? error.message : "Polyth Link host failed to start"),
+          { code: "host-start-failed" },
+        );
+      },
+      async close() {},
+    };
+  }
   const socket: Socket = await connectSocket(opts.socketPath);
   let nextId = 1;
   const pending = new Map<number, { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void }>();
@@ -98,6 +123,9 @@ export async function startLinkHost(opts: { dataDir: string; socketPath: string 
     });
   return {
     available: true,
+    binaryFound: true,
+    processReady: true,
+    platformSupported: true,
     request,
     onEvent(listener) {
       listeners.add(listener);

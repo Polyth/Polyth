@@ -3268,13 +3268,25 @@ export interface TunnelDeviceDto {
 
 export interface TunnelStatusDto {
   enabled: boolean;
+  available: boolean;
+  pairingAvailable: boolean;
+  hostBinaryFound: boolean;
+  hostProcessReady: boolean;
+  endpointBound: boolean;
+  ingressReady: boolean;
+  activePolicy: PolythLinkPathPolicy | null;
   mode: PolythLinkPathPolicy;
   hostFingerprint: string | null;
+  fingerprint: string | null;
   relayConfigured: boolean;
   identityAvailable: boolean;
   identityError?: string;
+  lastErrorCode?: string;
+  unsupportedPlatform?: boolean;
   activeConnections: number;
   activeDevices: number;
+  directConnections: number;
+  relayConnections: number;
 }
 
 export interface TunnelDiagnosticsDto {

@@ -131,6 +131,14 @@ const webPackagesPath = (): string => app.isPackaged
   ? packagedResource("packages")
   : resolve(app.getAppPath(), "../../packages");
 
+const linkHostPath = (): string | undefined => {
+  if (process.env.POLYTH_LINK_HOST) return process.env.POLYTH_LINK_HOST;
+  const executable = process.platform === "win32" ? "polyth-link-host.exe" : "polyth-link-host";
+  return app.isPackaged
+    ? packagedResource(join("polyth-link", executable))
+    : undefined;
+};
+
 const readSavedWindowState = (): SavedWindowState => {
   try {
     const raw = JSON.parse(readFileSync(windowStatePath, "utf8")) as SavedWindowState;
@@ -665,6 +673,9 @@ const startServer = async (): Promise<void> => {
   const port = await reservePort();
   baseUrl = `http://127.0.0.1:${port}`;
   process.env.POLYTH_DESKTOP = "1";
+  const linkHost = linkHostPath();
+  if (linkHost && existsSync(linkHost)) process.env.POLYTH_LINK_HOST = linkHost;
+  if (app.isPackaged) process.env.POLYTH_RESOURCES_DIR ??= process.resourcesPath;
   serverLifecycle = await boot({
     port,
     hostname: "127.0.0.1",

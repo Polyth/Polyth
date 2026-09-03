@@ -66,6 +66,14 @@
         ]
       },
       {
+        "from": "resources/polyth-link",
+        "to": "polyth-link",
+        "filter": [
+          "polyth-link-host",
+          "polyth-link-host.exe"
+        ]
+      },
+      {
         "from": "build/icon.png",
         "to": "icon.png"
       }
