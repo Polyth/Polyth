@@ -11,6 +11,7 @@ import { Component, createElement, Fragment, useSyncExternalStore, type ReactNod
 import type { UiSlot } from "@polyth/contracts";
 import { listSlots, slotVersion, subscribeSlots, type SlotItem } from "../../slots.ts";
 import { getDragWidget, setDragWidget } from "../../dnd.ts";
+import { tr } from "../../i18n/index.ts";
 import { useWidgetCatalog, type WidgetDef } from "../../widgets/catalog.ts";
 import {
   setWidgetConfig,
@@ -107,6 +108,7 @@ export function placedWidgetItems(
     const updateConfig = (config: Parameters<typeof setWidgetConfig>[2]) => {
       updateWidgetLayout((current) => setWidgetConfig(current, instanceId, config));
     };
+    const editable = context.editing === true;
     return [{
       id: `widget:${instanceId}`,
       // The persisted placement array is user ordered. Definition order only
@@ -117,17 +119,24 @@ export function placedWidgetItems(
         {
           className: widget.kind === "mini-widget" ? "placed-mini-widget" : "placed-slot-widget",
           "data-widget-id": instanceId,
-          ...(widget.kind === "mini-widget" && hostContext.editing === true ? {
+          ...(editable ? {
             draggable: true,
+            "data-widget-editing": "true",
+            title: tr("widgets.widgetcanvas.moveValue", { value: widget.title }),
             onDragStart: (event: DragEvent) => {
-              if (event.dataTransfer) setDragWidget(event.dataTransfer, instanceId);
+              if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = "move";
+                setDragWidget(event.dataTransfer, instanceId);
+              }
             },
-            onDragOver: (event: DragEvent) => event.preventDefault(),
+            onDragOver: (event: DragEvent) => {
+              if (getDragWidget(event.dataTransfer)) event.preventDefault();
+            },
             onDrop: (event: DragEvent) => {
-              event.preventDefault();
               const draggedId = event.dataTransfer ? getDragWidget(event.dataTransfer) ?? "" : "";
               const targetIndex = layout.slotPlacements[slot]?.indexOf(instanceId) ?? -1;
               if (!draggedId || targetIndex < 0) return;
+              event.preventDefault();
               updateWidgetLayout((current) => moveWidgetToSlot(current, draggedId, slot, targetIndex));
             },
           } : {}),
@@ -163,7 +172,7 @@ export interface SlotHostProps {
   slot: UiSlot;
   /** Host-owned bounded context passed to every contribution. */
   context?: SlotContext;
-  /** Enables Shift/edit-mode drag reordering for placed mini-widgets. */
+  /** Enables Shift/edit-mode drag reordering for placed widgets. */
   customizable?: boolean;
 }
 

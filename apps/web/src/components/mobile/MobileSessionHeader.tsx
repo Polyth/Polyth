@@ -23,6 +23,7 @@ import { useResolvedCapabilities } from "../../capabilities.ts";
 import { toggleCapability } from "../../builtinCapabilities.ts";
 import { ComposeIcon, IconButton, LayersIcon, MenuIcon } from "../ui/index.ts";
 import Sheet, { SheetRow, SheetSection } from "./Sheet.tsx";
+import { PROMPT_VISIBILITY_EVENT, promptIsVisible } from "../../promptVisibility.ts";
 
 function motionOff(): boolean {
   if (typeof document !== "undefined") {
@@ -192,10 +193,16 @@ export default function MobileSessionHeader() {
   const session = useStore((state) => state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null);
   const model = useActiveModel();
   const [surface, setSurface] = useState<"island" | "tools" | null>(null);
+  const [promptVisible, setPromptVisible] = useState(promptIsVisible);
   const title = session
     ? displaySessionTitle(session.title, session.id, firstUserTextCached(events[session.id]))
     : tr("mobile.island.newChat");
   const prompt = lastUserTextCached(session ? events[session.id] : undefined);
+  useEffect(() => {
+    const update = (event: Event) => setPromptVisible((event as CustomEvent<boolean>).detail);
+    window.addEventListener(PROMPT_VISIBILITY_EVENT, update);
+    return () => window.removeEventListener(PROMPT_VISIBILITY_EVENT, update);
+  }, []);
   const labels = useMemo(() => ({
     task: tr("mobile.island.kindTask"),
     request: tr("mobile.island.kindRequest"),
@@ -271,7 +278,7 @@ export default function MobileSessionHeader() {
     {surface === "island" && (
       <IslandOverview
         title={title}
-        prompt={prompt}
+        prompt={promptVisible ? undefined : prompt}
         tasks={model.tasks?.items ?? []}
         recent={recent}
         events={events}

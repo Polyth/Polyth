@@ -88,6 +88,7 @@ function SessionHero({ starterContext }: { starterContext: StarterContext }) {
                 runStarter,
                 starterPickerTrigger,
               }}
+              customizable
             />
           </div>
           {/* Shift-key customization mode: on desktop the customize entry
@@ -296,10 +297,12 @@ function SessionSurface() {
       <SlotHost
         slot="session.composer.before"
         context={{ projectId, sessionId, editing: false }}
+        customizable
       />
       <SlotHost
         slot="session.footer"
         context={{ projectId, sessionId, editing: false }}
+        customizable
       />
       <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
       {archived && sessionId ? <ArchivedComposerGuard sessionId={sessionId} /> : <Composer />}

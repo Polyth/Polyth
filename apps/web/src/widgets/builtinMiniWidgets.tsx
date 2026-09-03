@@ -2,7 +2,9 @@ import type { ReactNode } from "react";
 import { setOverlay } from "../store.ts";
 import { defineWidgetPlugin, registerWidgetPlugin } from "./catalog.ts";
 import { tr } from "../i18n/index.ts";
-import { ClockIcon, IconButton, SearchIcon, SettingsIcon } from "../components/ui/index.ts";
+import {
+  AssistIcon, ClockIcon, IconButton, SearchIcon, SettingsIcon, Tooltip,
+} from "../components/ui/index.ts";
 
 const SHELL_ACTION_SLOTS = [
   "app.header.actions", "session.header.actions", "app.nav",
@@ -92,6 +94,37 @@ const COMPOSER_CONTROLS_PLUGIN = defineWidgetPlugin({
   id: "composer-controls",
   name: tr("widgets.builtinminiwidgets.applicationShell"),
   widgets: [
+    {
+      id: "composer.next-action",
+      title: tr("composer.generateNextAction"),
+      description: tr("composer.generateNextAction"),
+      kind: "mini-widget",
+      defaultSlot: "composer.trailing",
+      supportedSlots: ["composer.leading", "composer.trailing"],
+      defaultVisible: true,
+      defaultSize: { w: 1, h: 1 },
+      resizable: false,
+      audience: "simple",
+      order: 50,
+      render: (context) => {
+        const canGenerate = context.canGenerateNextAction === true;
+        const busy = context.suggestionBusy === true;
+        const generate = context.generateNextAction;
+        if ((!canGenerate && !busy) || typeof generate !== "function") return null;
+        return (
+          <Tooltip content={tr("composer.generateNextAction")}>
+            <IconButton
+              className="composer-next-action"
+              icon={AssistIcon}
+              label={tr("composer.generateNextAction")}
+              size="sm"
+              busy={busy}
+              onClick={generate as () => void}
+            />
+          </Tooltip>
+        );
+      },
+    },
     {
       id: "composer.effort",
       title: tr("composer.thinking"),

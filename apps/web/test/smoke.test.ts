@@ -574,9 +574,6 @@ test("parseUiSettings defaults invalid values and sanitizes MCP servers", () => 
   assert.equal(parseUiSettings(JSON.stringify({ rounding: "rounded" })).rounding, 10);
   assert.equal(parseUiSettings(JSON.stringify({ rounding: 11 })).rounding, UI_DEFAULTS.rounding);
   assert.equal(parseUiSettings(JSON.stringify({ messageCopyFormat: "xml" })).messageCopyFormat, "markdown");
-  assert.equal(parseUiSettings(JSON.stringify({ workingIndicator: "cat" })).workingIndicator, "cat");
-  assert.equal(parseUiSettings(JSON.stringify({ workingIndicator: "keyboard" })).workingIndicator, "cursor");
-  assert.equal(parseUiSettings(JSON.stringify({ workingIndicator: "dog" })).workingIndicator, "pulse");
 });
 
 test("setUiSettings persists and applies visual data attributes", () => {

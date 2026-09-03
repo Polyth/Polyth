@@ -2029,8 +2029,6 @@ export const bg: AppMessages = {
   "timeline.output": "Изход",
   "timeline.pinIntoContext": "Закачи в контекста",
   "timeline.plan2": "План",
-  "timeline.promptBubble.collapse": "Свиване на подканата",
-  "timeline.promptBubble.expand": "Разгъване на подканата",
   "timeline.regenerate": "Регенериране",
   "timeline.regenerateThisAssistantAnswer": "Регенериране на този помощен отговор",
   "timeline.restoreAndDiscardTheEditedDraft": "Възстановяване и отхвърляне на редактираната чернова",

@@ -31,7 +31,7 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { activateProject, activateSession, applyEvents, applyProjectAdded, getState, seedSessionCache } = await import("../../../apps/web/src/store.ts");
+const { activateProject, activateSession, applyEvents, applyProjectAdded, getState, seedSessionCache, setGitBranch, setModels } = await import("../../../apps/web/src/store.ts");
 const { default: GitView, DiffContent } = await import("../widgets/GitView.tsx");
 const { api } = await import("@polyth/session/web-api");
 const { refreshGitStatus } = await import("../widgets/gitStatusStore.ts");
@@ -379,7 +379,7 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
   const view = await mounted(createElement(PendingChangesBar));
   try {
     await act(async () => { await delay(40); });
-    const bubble = view.container.querySelector<HTMLButtonElement>(".pending-changes-bubble");
+    let bubble = view.container.querySelector<HTMLButtonElement>(".pending-changes-bubble");
     assert.ok(bubble, "collapsed bubble is the default");
     assert.equal(bubble.getAttribute("aria-expanded"), "false");
     assert.equal(bubble.getAttribute("aria-label"), "Edited 4 files");
@@ -390,6 +390,35 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
     assert.equal(labeledButton(view.container, "Undo"), undefined);
     assert.equal(labeledButton(view.container, "Review"), undefined);
     assert.equal(view.container.textContent?.includes(leftover), false);
+
+    await act(async () => {
+      setModels([{ providerID: "openai", modelID: "luna", name: "Luna", providerName: "OpenAI" }]);
+      setGitBranch("feature/glass-ui");
+      applyEvents([
+        ev("turn/started", { turnId: "turn-active", model: { providerID: "openai", modelID: "luna" } }),
+        ev("task/snapshot", {
+          listId: "work",
+          revision: 1,
+          items: [{ id: "verify", text: "Run focused checks and review the diff", status: "active" }],
+        }),
+      ]);
+      await delay(20);
+    });
+    const agentStatus = view.container.querySelector(".pending-agent-status");
+    assert.ok(agentStatus, "active work replaces the compact change bubble");
+    assert.match(agentStatus.textContent ?? "", /Luna\s*·\s*Working/);
+    assert.match(agentStatus.textContent ?? "", /Run focused checks and review the diff/);
+    assert.match(agentStatus.textContent ?? "", /4 files.*\+10.*-4/s);
+    assert.match(agentStatus.textContent ?? "", /feature\/glass-ui/);
+    assert.equal(agentStatus.textContent?.includes("Context"), false);
+    assert.equal(agentStatus.textContent?.includes("Agent"), false);
+
+    await act(async () => {
+      applyEvents([ev("turn/stopped", { turnId: "turn-active", reason: "completed" })]);
+      await delay(20);
+    });
+    bubble = view.container.querySelector<HTMLButtonElement>(".pending-changes-bubble");
+    assert.ok(bubble, "the compact change bubble returns when work settles");
 
     await act(async () => { bubble.click(); });
     assert.equal(view.container.querySelector(".pending-changes-bubble"), null);
@@ -472,6 +501,8 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
     );
   } finally {
     await view.unmount();
+    setModels([]);
+    setGitBranch("");
     activateSession(null);
     activateProject(null);
   }

@@ -361,7 +361,7 @@ export default function Header() {
     <>
       <header
         className={`header${compact ? " header-compact" : ""}${chatSurface ? " header-chat" : ""}`}
-        style={{ "--chat-center-offset": compact ? "0px" : `${(sidebarLayout.collapsed ? 46 : sidebarLayout.width) / 2}px` } as React.CSSProperties}
+        style={{ "--sidebar-inline-size": compact ? "0px" : `${sidebarLayout.collapsed ? 46 : sidebarLayout.width}px` } as React.CSSProperties}
       >
         {compact && <DrawerTrigger />}
         {compact && chatSurface && (

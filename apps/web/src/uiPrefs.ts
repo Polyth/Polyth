@@ -11,7 +11,6 @@ export type HeaderMetricId = "tokens" | "messages" | "duration" | "cost";
 export type ResponseActionId = "copy" | "image" | "plan" | "pin" | "session" | "multirun";
 export type TopRailAlignment = "center" | "left";
 export type RailIconSize = "sm" | "md" | "lg";
-export type WorkingIndicator = "pulse" | "cursor" | "cat" | "activity";
 
 export const HEADER_METRIC_IDS: readonly HeaderMetricId[] = ["tokens", "messages", "duration", "cost"];
 export const RESPONSE_ACTION_IDS: readonly ResponseActionId[] = ["copy", "image", "plan", "pin", "session", "multirun"];
@@ -50,8 +49,6 @@ export interface UiSettings {
   /** Merged thinking display (WP4). */
   collapsibleThinkingBlocks: boolean;
   thinkingDefaultExpanded: boolean;
-  /** Visual shown below the timeline during an active turn. */
-  workingIndicator: WorkingIndicator;
   /** Prompt navigator rail (WP4). */
   promptNavigator: "auto" | "on" | "off";
   /** Hover/focus controls below user and assistant messages. */
@@ -109,7 +106,6 @@ export const UI_DEFAULTS: UiSettings = {
   followUpBehavior: "queue",
   collapsibleThinkingBlocks: true,
   thinkingDefaultExpanded: false,
-  workingIndicator: "pulse",
   promptNavigator: "auto",
   showMessageActions: true,
   messageCopyFormat: "markdown",
@@ -171,7 +167,6 @@ export function parseUiSettings(raw: string | null): UiSettings {
   try {
     const data = JSON.parse(raw ?? "") as Partial<UiSettings>;
     const fontPx = Number(data.editorFontSize);
-    const workingIndicator = data.workingIndicator as string | undefined;
     return {
       density: data.density === "compact" || data.density === "balanced" ? data.density : "comfortable",
       fontSize: data.fontSize === "s" || data.fontSize === "l" ? data.fontSize : "m",
@@ -193,9 +188,6 @@ export function parseUiSettings(raw: string | null): UiSettings {
       followUpBehavior: data.followUpBehavior === "steer" || data.followUpBehavior === "interrupt" ? data.followUpBehavior : "queue",
       collapsibleThinkingBlocks: data.collapsibleThinkingBlocks !== false,
       thinkingDefaultExpanded: data.thinkingDefaultExpanded === true,
-      workingIndicator: workingIndicator === "keyboard" || workingIndicator === "cursor"
-        ? "cursor"
-        : workingIndicator === "cat" || workingIndicator === "activity" ? workingIndicator : "pulse",
       promptNavigator: data.promptNavigator === "on" || data.promptNavigator === "off" ? data.promptNavigator : "auto",
       showMessageActions: data.showMessageActions !== false,
       messageCopyFormat: data.messageCopyFormat === "json" ? "json" : "markdown",
@@ -285,7 +277,7 @@ export function applyUiSettings(s: UiSettings = settings): void {
   b.style?.setProperty("--rail-strip-width-top", "calc(var(--rail-icon-size-top) + var(--space-2))");
   b.style?.setProperty("--rail-icon-size-right", rightRail.box);
   b.style?.setProperty("--rail-icon-glyph-right", rightRail.glyph);
-  b.style?.setProperty("--rail-strip-width-right", "calc(var(--rail-icon-size-right) + var(--space-2))");
+  b.style?.setProperty("--rail-strip-width-right", "calc(var(--rail-icon-size-right) + var(--space-3))");
   // Every radius token derives from the one scale in tokens.css. Tokens are
   // declared on :root, so their var(--corner-radius-scale) resolves there too —
   // a scale set on <body> would never reach them. Do not publish a second

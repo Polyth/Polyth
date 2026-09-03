@@ -121,6 +121,13 @@ test("buttons stay on shell surfaces while the canvas accepts only full widgets"
   assert.match(slots, /getDragWidget/);
 });
 
+test("all placed widgets can be reordered while a panel is being customized", async () => {
+  const slots = await readFile(new URL("../src/components/slots/SlotHost.ts", import.meta.url), "utf8");
+  assert.match(slots, /const editable = context\.editing === true/);
+  assert.match(slots, /draggable: true/);
+  assert.doesNotMatch(slots, /widget\.kind === "mini-widget" && hostContext\.editing/);
+});
+
 test("critic-reported mobile controls use 44px hit boxes", async () => {
   const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   for (const [name, pattern] of [

@@ -442,14 +442,6 @@ export function ChatPage() {
       <Row label={tr("settings.pages.thinkingBlocks")} hint={tr("settings.pages.collapseMergedReasoningIntoAnExpandableBlock")} itemId="chat.thinking">
         <Toggle on={ui.collapsibleThinkingBlocks} onChange={(v) => setUiSettings({ collapsibleThinkingBlocks: v })} label={tr("settings.pages.collapsibleThinking")} />
       </Row>
-      <Row label={tr("settings.pages.workingIndicator")} hint={tr("settings.pages.workingIndicatorHint")} itemId="chat.workingIndicator">
-        <Seg value={ui.workingIndicator} options={[
-          ["pulse", tr("settings.pages.workingIndicatorPulse")],
-          ["cursor", tr("settings.pages.workingIndicatorKeyboard")],
-          ["cat", tr("settings.pages.workingIndicatorCat")],
-          ["activity", tr("settings.pages.workingIndicatorActivity")],
-        ]} onChange={(workingIndicator) => setUiSettings({ workingIndicator })} />
-      </Row>
       <Row label={tr("settings.pages.messageActions")} hint={tr("settings.pages.showLightweightCopyRevertAndForkControls")} itemId="chat.messageActions">
         <Toggle on={ui.showMessageActions} onChange={(showMessageActions) => setUiSettings({ showMessageActions })} label={tr("settings.pages.messageActions")} />
       </Row>

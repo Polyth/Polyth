@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { announce } from "../../../../apps/web/src/components/a11y/live.tsx";
 import { api, type SshConnectionWithStatus } from "@polyth/session/web-api";
 import type { SshBrowseDto } from "@polyth/contracts";
-import { addSshProject } from "../../../../apps/web/src/init.ts";
+import { addSshProject, cloneProject } from "../../../../apps/web/src/init.ts";
 import { connectionTarget, remoteBasename, stateBadge } from "./sshUi.ts";
 import { tr } from "../../../../apps/web/src/i18n/index.ts";
 import {
@@ -62,6 +62,7 @@ function SshInlinePanel({ ctx, onCancel }: { ctx: HostContext; onCancel: () => v
   const [selected, setSelected] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [nameTouched, setNameTouched] = useState(false);
+  const [repository, setRepository] = useState("");
   const [createDirectory, setCreateDirectory] = useState(false);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -102,6 +103,7 @@ function SshInlinePanel({ ctx, onCancel }: { ctx: HostContext; onCancel: () => v
   }, [connectionId, loadDir]);
 
   const target = selected ?? pathInput.trim();
+  const cloning = repository.trim() !== "";
   const suggestedName = nameTouched ? name : remoteBasename(target);
 
   const create = async () => {
@@ -109,12 +111,22 @@ function SshInlinePanel({ ctx, onCancel }: { ctx: HostContext; onCancel: () => v
     setSubmitting(true);
     setError("");
     try {
-      const project = await addSshProject({
-        connectionId,
-        path: target,
-        ...(name.trim() ? { name: name.trim() } : {}),
-        ...(createDirectory ? { createDirectory: true } : {}),
-      });
+      // With a repository URL the chosen remote folder is the clone
+      // destination; otherwise it is opened as-is. Same server picker and
+      // remote browser either way.
+      const project = cloning
+        ? await cloneProject({
+          repository: repository.trim(),
+          parentPath: target,
+          remote: { kind: "ssh", connectionId },
+          ...(name.trim() ? { name: name.trim() } : {}),
+        })
+        : await addSshProject({
+          connectionId,
+          path: target,
+          ...(name.trim() ? { name: name.trim() } : {}),
+          ...(createDirectory ? { createDirectory: true } : {}),
+        });
       announce(tr("ssh.sshprojectsource.openedValueOnValue", {
         name: project.name,
         value: connections?.find((c) => c.id === connectionId)?.name
@@ -159,6 +171,17 @@ function SshInlinePanel({ ctx, onCancel }: { ctx: HostContext; onCancel: () => v
                 value: conn.id,
                 label: `${conn.name} (${connectionTarget(conn)}) — ${stateBadge(conn.status?.state).text}`,
               }))}
+            />
+          </label>
+
+          <label className="folder-source-field">
+            <span>{tr("gitprojectsource.repositoryUrl")} <em>{tr("worktreesessiondialog.optional")}</em></span>
+            <TextInput
+              value={repository}
+              placeholder="https://github.com/org/repo.git"
+              spellCheck={false}
+              disabled={busy}
+              onChange={(e) => setRepository(e.target.value)}
             />
           </label>
 
@@ -264,13 +287,15 @@ function SshInlinePanel({ ctx, onCancel }: { ctx: HostContext; onCancel: () => v
                 onChange={(e) => { setNameTouched(true); setName(e.target.value); }}
               />
             </label>
-            <Checkbox
-              className="ssh-dialog-create"
-              checked={createDirectory}
-              disabled={busy}
-              onChange={setCreateDirectory}
-              label={tr("ssh.sshprojectsource.createTheFolderIfItDoesnT")}
-            />
+            {!cloning && (
+              <Checkbox
+                className="ssh-dialog-create"
+                checked={createDirectory}
+                disabled={busy}
+                onChange={setCreateDirectory}
+                label={tr("ssh.sshprojectsource.createTheFolderIfItDoesnT")}
+              />
+            )}
           </div>
 
           {error && <div className="form-error folder-error" role="alert">{error}</div>}
@@ -285,7 +310,9 @@ function SshInlinePanel({ ctx, onCancel }: { ctx: HostContext; onCancel: () => v
               disabled={busy || loading || !connectionId || !target}
               onClick={() => void create()}
             >
-              {tr("ssh.sshprojectsource.openRemoteProject")}
+              {cloning
+                ? tr("gitprojectsource.cloneRepository")
+                : tr("ssh.sshprojectsource.openRemoteProject")}
             </Button>
           </div>
         </>
@@ -318,8 +345,6 @@ export default function SshProjectSource(props: Record<string, unknown>) {
     setOpen(false);
     chipRef.current?.focus();
   };
-  const otherArmed = ctx.armedId !== null && ctx.armedId !== SOURCE_ID;
-
   return (
     <>
       <Button
@@ -328,7 +353,7 @@ export default function SshProjectSource(props: Record<string, unknown>) {
         variant="ghost"
         className="ghost-link ssh-open-remote folder-source-chip"
         aria-expanded={open}
-        disabled={ctx.busy || otherArmed}
+        disabled={ctx.busy}
         onClick={() => (open ? close() : setOpen(true))}
       >
         {tr("ssh.sshprojectsource.openOnAServer")}

@@ -2032,8 +2032,6 @@ export const en = {
   "timeline.output": "Output",
   "timeline.pinIntoContext": "Pin into context",
   "timeline.plan2": "Plan",
-  "timeline.promptBubble.collapse": "Collapse prompt",
-  "timeline.promptBubble.expand": "Expand prompt",
   "timeline.regenerate": "Regenerate",
   "timeline.regenerateThisAssistantAnswer": "Regenerate this assistant answer",
   "timeline.restoreAndDiscardTheEditedDraft": "Restore and discard the edited draft",

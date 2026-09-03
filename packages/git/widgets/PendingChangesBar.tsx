@@ -3,9 +3,11 @@ import { useGitStatus, refreshGitStatus } from "./gitStatusStore.ts";
 import { selectPendingChanges, sessionEditedPaths } from "../../../apps/web/src/pendingChanges.ts";
 import { openChanges, setUiError, useActiveModel, useStore } from "../../../apps/web/src/store.ts";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
+import { fmtDuration } from "../../../apps/web/src/format.ts";
 import { api } from "@polyth/session/web-api";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import {
+  BranchIcon,
   Button,
   ChevronDownIcon,
   ChevronUpIcon,
@@ -84,6 +86,10 @@ function DiffTotals({ stats }: { stats: DiffLineStats }) {
 
 export default function PendingChangesBar() {
   const model = useActiveModel();
+  const session = useStore((state) =>
+    state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null);
+  const models = useStore((state) => state.models);
+  const branch = useStore((state) => state.gitBranch);
   const projectId = useStore((state) => state.activeProjectId);
   const repoRoot = useStore((state) => {
     const id = state.activeProjectId;
@@ -108,6 +114,14 @@ export default function PendingChangesBar() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [filesExpanded, setFilesExpanded] = useState(false);
   const [undoing, setUndoing] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!working) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [working, model.turn?.startedAt]);
 
   useEffect(() => {
     setFilesExpanded(false);
@@ -168,7 +182,6 @@ export default function PendingChangesBar() {
     return () => { cancelled = true; };
   }, [changeKey, projectId, selected.dirtyPaths, selected.paths, sessionId, status]);
 
-  if (selected.paths.length === 0) return null;
   const count = selected.paths.length;
   const title = count === 1
     ? tr("pendingchangesbar.editedOneFile")
@@ -186,6 +199,73 @@ export default function PendingChangesBar() {
     : overflow === 1
       ? tr("pendingchangesbar.showMoreFile")
       : tr("pendingchangesbar.showMoreFilesValue", { count: overflow });
+
+  if (working) {
+    const modelRef = model.turn?.model ?? session?.model;
+    const descriptor = modelRef
+      ? models.find((candidate) =>
+          candidate.providerID === modelRef.providerID && candidate.modelID === modelRef.modelID)
+      : undefined;
+    const modelName = descriptor?.name ?? modelRef?.modelID ?? tr("providerlogo.polyth");
+    const avatar = modelName.trim().charAt(0).toUpperCase() || "P";
+    const activeTask = model.tasks?.items.find((item) => item.status === "active");
+    const activeSubagent = model.subagents?.agents.find((agent) => /^(?:working|running|active)$/i.test(agent.status));
+    const activeTool = [...model.messages].reverse().find((message) =>
+      message.kind === "tool" && (message.status === "pending" || message.status === "running"));
+    const latestAssistant = [...model.messages].reverse().find((message) => message.kind === "assistant");
+    const activityLabels = tr("workspace.builtinsurfaces.activityItems").split("|");
+    const toolDetail = activeTool?.kind === "tool"
+      ? ["description", "command", "filePath", "path", "query", "pattern", "url"]
+          .map((key) => activeTool.input[key])
+          .find((value): value is string => typeof value === "string" && value.trim() !== "")
+      : undefined;
+    const toolName = activeTool?.kind === "tool"
+      ? activeTool.title ?? activeTool.tool.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
+      : undefined;
+    const action = activeTask?.text
+      ?? activeSubagent?.currentTask
+      ?? (toolName
+        ? `${toolName}${toolDetail ? ` · ${toolDetail}` : ""}`
+        : latestAssistant?.kind === "assistant" && latestAssistant.reasoning && !latestAssistant.text
+          ? tr("timeline.thinking")
+          : activityLabels[latestAssistant?.kind === "assistant" && latestAssistant.text ? 2 : 0]
+            ?? tr("workspace.builtinsurfaces.working"));
+    const elapsed = model.turn?.startedAt === undefined ? null : fmtDuration(now - model.turn.startedAt);
+    const branchName = branch || session?.branch || "";
+    return (
+      <section className="pending-agent-status" role="status" aria-busy="true" aria-live="polite">
+        <span className="pending-agent-avatar" aria-hidden="true">
+          <span>{avatar}</span>
+          <i />
+        </span>
+        <div className="pending-agent-copy">
+          <div className="pending-agent-heading">
+            <strong>{modelName}</strong>
+            <span aria-hidden="true">·</span>
+            <span>{tr("timeline.working")}</span>
+          </div>
+          <span className="pending-agent-action" title={action}>{action}</span>
+          {count > 0 && (
+            <span className="pending-agent-changes">
+              <span>{bubbleCount}</span>
+              {totals && <DiffTotals stats={totals} />}
+            </span>
+          )}
+        </div>
+        <div className="pending-agent-side">
+          {elapsed && <time aria-hidden="true">{elapsed}</time>}
+          {branchName && (
+            <span className="pending-agent-branch" title={branchName}>
+              <Icon icon={BranchIcon} size="sm" />
+              <span>{branchName}</span>
+            </span>
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  if (selected.paths.length === 0) return null;
 
   const undoAll = async () => {
     if (!projectId || !canUndo || undoing) return;

@@ -20,7 +20,7 @@ function ChatWidget() {
   return <div className="widget-chat">
     <Timeline model={model} />
     {questions.length > 0 && <QuestionCards questions={questions} />}
-    <SlotHost slot="session.timeline.after" context={{ permissions, secrets, sessionId: session.id, projectId: session.projectId }} />
+    <SlotHost slot="session.timeline.after" context={{ permissions, secrets, sessionId: session.id, projectId: session.projectId }} customizable />
     {session.status === "archived" ? <div className="archived-guard">{tr("widgets.builtinwidgets.thisSessionIsArchivedAndReadOnly")}</div> : <Composer variant="widget" />}
   </div>;
 }

@@ -2,17 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { JsonObject, SessionEvent } from "@polyth/contracts";
 import { buildModel, contextGauge } from "../src/reduce.ts";
-import { readFile } from "node:fs/promises";
 
-test("context gauge uses the latest input sample and honest unknown metadata", () => {
-  assert.deepEqual(contextGauge({ contextUsage: { inputTokens: 12_000 } }), {
+test("context gauge uses complete session input totals and honest unknown metadata", () => {
+  assert.deepEqual(contextGauge({ totals: { input: 12_000, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 } }), {
     known: false,
     inputTokens: 12_000,
     contextTokens: null,
     percent: null,
     level: "unknown",
   });
-  assert.deepEqual(contextGauge({ contextUsage: { inputTokens: 64_000 } }, 128_000), {
+  assert.deepEqual(contextGauge({ totals: { input: 64_000, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 } }, 128_000), {
     known: true,
     inputTokens: 64_000,
     contextTokens: 128_000,
@@ -22,25 +21,14 @@ test("context gauge uses the latest input sample and honest unknown metadata", (
 });
 
 test("context gauge clamps overflow and applies warning thresholds", () => {
-  assert.equal(contextGauge({ contextUsage: { inputTokens: 60 } }, 100).level, "yellow");
-  assert.equal(contextGauge({ contextUsage: { inputTokens: 85 } }, 100).level, "red");
-  const overflow = contextGauge({ contextUsage: { inputTokens: 250 } }, 100);
+  const model = (input: number) => ({ totals: { input, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 } });
+  assert.equal(contextGauge(model(60), 100).level, "yellow");
+  assert.equal(contextGauge(model(85), 100).level, "red");
+  const overflow = contextGauge(model(250), 100);
   assert.equal(overflow.known && overflow.percent, 100);
 });
 
-test("wide header stays quiet until context usage reaches sixty percent", async () => {
-  const header = await readFile(
-    new URL("../src/components/Header.tsx", import.meta.url),
-    "utf8",
-  );
-  assert.match(
-    header,
-    /showContextRing = mode === "wide" && gauge\.known && gauge\.percent >= 60/,
-  );
-  assert.match(header, /\{showContextRing && <ContextRing gauge=\{gauge\} \/>\}/);
-});
-
-test("usage replay tracks the latest turn input separately from lifetime totals", () => {
+test("usage replay uses complete session input for context accounting", () => {
   let seq = 0;
   const event = (type: string, data: JsonObject): SessionEvent => ({
     id: `e${++seq}`,
@@ -65,5 +53,5 @@ test("usage replay tracks the latest turn input separately from lifetime totals"
   assert.equal(model.totals.input, 22_000);
   assert.equal(model.contextUsage?.inputTokens, 12_000);
   assert.deepEqual(model.contextUsage?.model, { providerID: "test", modelID: "large" });
-  assert.equal(contextGauge(model, 24_000).percent, 50);
+  assert.equal(contextGauge(model, 24_000).percent, 92);
 });

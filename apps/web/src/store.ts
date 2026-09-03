@@ -534,7 +534,7 @@ export function openWorkspacePane(surfaceId: string, resource?: string): boolean
   // race and hide a pane that the command path has just opened.
   setWorkspaceMode("chat");
   const projectId = state.activeProjectId;
-  const selectedResource = resource ?? (projectId !== null
+  const selectedResource = resource ?? (surfaceId === "git" ? undefined : projectId !== null
     ? getWorkspacePanePrefs(projectId).lastResource[surfaceId]
     : undefined);
   if (projectId !== null) {

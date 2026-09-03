@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import type { AttachmentRef } from "@polyth/contracts";
-import { Dialog } from "./ui/index.ts";
-import { formatNumber, tr } from "../i18n/index.ts";
+import { CloseIcon, Dialog, IconButton } from "./ui/index.ts";
+import { tr } from "../i18n/index.ts";
 
 const TEXT_EXTENSIONS = /\.(?:c|cc|cpp|css|csv|go|h|hpp|html?|java|js|jsx|json|log|md|mjs|py|rb|rs|scss|sh|sql|svg|toml|ts|tsx|txt|vue|xml|yaml|yml)$/i;
 const VIDEO_EXTENSIONS = /\.(?:m4v|mov|mp4|ogv|webm)$/i;
@@ -18,13 +19,6 @@ function previewKind(attachment: AttachmentRef): PreviewKind {
   if (attachment.mime === "application/pdf") return "pdf";
   if (attachment.mime.startsWith("text/") || TEXT_EXTENSIONS.test(attachment.name)) return "text";
   return "unsupported";
-}
-
-function formatSize(size: number): string {
-  if (size <= 0) return "";
-  if (size < 1024) return `${formatNumber(size)} B`;
-  if (size < 1048576) return `${formatNumber(size / 1024, { maximumFractionDigits: 1 })} KB`;
-  return `${formatNumber(size / 1048576, { maximumFractionDigits: 1 })} MB`;
 }
 
 function TextPreview({ attachment }: { attachment: AttachmentRef }) {
@@ -98,11 +92,11 @@ export default function AttachmentPreview({ attachments, start, onClose }: {
   const previous = () => setIndex((current) => (current - 1 + attachments.length) % attachments.length);
   const next = () => setIndex((current) => (current + 1) % attachments.length);
 
-  return (
+  const dialog = (
     <Dialog
       title={attachment.name}
       size="full"
-      className="attachment-preview-dialog"
+      className={`attachment-preview-dialog attachment-preview-dialog--${kind}`}
       onClose={onClose}
       initialFocus=".attachment-preview-stage"
       hideHeader
@@ -117,11 +111,7 @@ export default function AttachmentPreview({ attachments, start, onClose }: {
       >
         <div className="attachment-preview-toolbar">
           <strong className="attachment-preview-title" title={attachment.name}>{attachment.name}</strong>
-          <div className="attachment-preview-details">
-            <span>{attachment.mime}</span>
-            {attachment.path && <span className="attachment-preview-path" title={attachment.path}>{attachment.path}</span>}
-            {formatSize(attachment.size) && <span>{formatSize(attachment.size)}</span>}
-          </div>
+          {attachment.path && <span className="attachment-preview-path" title={attachment.path}>{attachment.path}</span>}
           {hasNavigation && (
             <div className="attachment-preview-navigation">
               <button type="button" className="attachment-preview-nav" onClick={previous} aria-label={tr("attachmentpills.previousAttachment")} title={tr("attachmentpills.previousAttachment")}>‹</button>
@@ -129,6 +119,7 @@ export default function AttachmentPreview({ attachments, start, onClose }: {
               <button type="button" className="attachment-preview-nav" onClick={next} aria-label={tr("attachmentpills.nextAttachment")} title={tr("attachmentpills.nextAttachment")}>›</button>
             </div>
           )}
+          <IconButton icon={CloseIcon} label={tr("common.close")} onClick={onClose} size="sm" />
         </div>
         <div className="attachment-preview-stage" tabIndex={-1}>
           <AttachmentContent attachment={attachment} kind={kind} />
@@ -136,4 +127,7 @@ export default function AttachmentPreview({ attachments, start, onClose }: {
       </div>
     </Dialog>
   );
+  // The opener lives in the scrolling chat timeline. Keep the fixed scrim and
+  // glass blur attached to the document viewport instead of that chat region.
+  return typeof document === "undefined" ? null : createPortal(dialog, document.body);
 }

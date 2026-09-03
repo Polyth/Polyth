@@ -70,15 +70,12 @@ function sidebarElapsed(ms: number): string {
     : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-function AttentionBadges({ status, sessionStatus }: { status: SessionRowStatus; sessionStatus: SessionProjection["status"] }) {
+function AttentionBadges({ status }: { status: SessionRowStatus }) {
   if (status.kind === "needs-approval") {
     return <span className="session-status-indicator approval" title={status.label} aria-label={status.label}><span aria-hidden>{status.glyph}</span></span>;
   }
   if (status.kind === "needs-reply") {
     return <span className="session-status-indicator reply" title={status.label} aria-label={status.label}><span className="session-question-icon" aria-hidden><Icon.question /></span></span>;
-  }
-  if (status.kind === "unread" && sessionStatus !== "finished") {
-    return <span className="session-status-indicator unread" title={status.label} aria-label={status.label}><span aria-hidden>{status.glyph}</span></span>;
   }
   return null;
 }
@@ -380,7 +377,7 @@ function SessionRow({
 
   return (
     <div
-      className={`session-row ${rowStatus.kind}${contextLabel ? " search-result" : ""} ${s.id === activeSessionId ? "active" : ""} ${s.status === "archived" ? "archived" : ""} ${s.status === "finished" ? "finished" : ""}${menuOpen ? " menu-open" : ""}${shiftQuick && !renaming ? " shift-quick" : ""}`}
+      className={`session-row ${rowStatus.kind}${contextLabel ? " search-result" : ""} ${s.id === activeSessionId ? "active" : ""} ${s.status === "archived" ? "archived" : ""}${menuOpen ? " menu-open" : ""}${shiftQuick && !renaming ? " shift-quick" : ""}`}
       style={swipeX === null ? undefined : { "--session-swipe-x": `${swipeX}px` } as CSSProperties}
       data-swipe={swipeX !== null ? "dragging" : swipeRevealed ? "revealed" : "closed"}
        draggable={reorderable}
@@ -480,7 +477,7 @@ function SessionRow({
               </span>
             ) : (
               <>
-                <AttentionBadges status={rowStatus} sessionStatus={s.status} />
+                <AttentionBadges status={rowStatus} />
                 <StatusBadge status={rowStatus} />
               </>
             )}

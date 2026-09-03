@@ -1,13 +1,13 @@
 // "Clone repository" — a project-create source contributed to the folder
 // picker's `project.create.options` slot. It is disclosed *inline* inside the
 // picker (no nested dialog): the picker's own folder browser is the clone
-// destination, so the only extra fields are the repository URL and an optional
-// name. A rarely-used "on a server" switch keeps the SSH-clone path.
+// destination, so the only field is the repository URL (plus an optional
+// name). Cloning onto an SSH host lives in the SSH source, whose server picker
+// and remote browser already point at the destination.
 import { useEffect, useRef, useState } from "react";
-import { api, type SshConnectionWithStatus } from "@polyth/session/web-api";
 import { cloneProject } from "../../../apps/web/src/init.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
-import { Button, Select, TextInput } from "../../../apps/web/src/components/ui/index.ts";
+import { Button, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 
 const SOURCE_ID = "git-clone-project";
 
@@ -47,30 +47,14 @@ function readContext(props: Record<string, unknown>): HostContext {
 function CloneInlinePanel({ ctx, onCancel }: { ctx: HostContext; onCancel: () => void }) {
   const [repository, setRepository] = useState("");
   const [name, setName] = useState("");
-  const [target, setTarget] = useState<"local" | "ssh">("local");
-  const [connections, setConnections] = useState<SshConnectionWithStatus[]>([]);
-  const [connectionId, setConnectionId] = useState("");
-  const [sshParent, setSshParent] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
   const busy = submitting || ctx.busy;
 
-  useEffect(() => {
-    void api.sshConnections().then((result) => {
-      setConnections(result.items);
-      if (result.items[0]) setConnectionId(result.items[0].id);
-    }).catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    if (target !== "ssh" || !connectionId) return;
-    void api.sshBrowse(connectionId).then((result) => setSshParent(result.path)).catch(() => undefined);
-  }, [connectionId, target]);
-
-  const parentPath = target === "ssh" ? sshParent.trim() : ctx.browsedPath;
-  const canSubmit = !busy && repository.trim() !== "" && parentPath !== ""
-    && (target !== "ssh" || connectionId !== "");
+  // The picker's own folder browser is the destination — no extra path field.
+  const parentPath = ctx.browsedPath;
+  const canSubmit = !busy && repository.trim() !== "" && parentPath !== "";
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -81,7 +65,6 @@ function CloneInlinePanel({ ctx, onCancel }: { ctx: HostContext; onCancel: () =>
         repository: repository.trim(),
         parentPath,
         ...(name.trim() ? { name: name.trim() } : {}),
-        ...(target === "ssh" ? { remote: { kind: "ssh", connectionId } } : {}),
       });
       ctx.onProjectOpened?.();
     } catch (cause) {
@@ -113,48 +96,6 @@ function CloneInlinePanel({ ctx, onCancel }: { ctx: HostContext; onCancel: () =>
         />
       </label>
 
-      {connections.length > 0 && (
-        <label className="folder-source-field">
-          <span>{tr("gitprojectsource.target")}</span>
-          <Select
-            label={tr("gitprojectsource.target")}
-            value={target}
-            disabled={busy}
-            onChange={(value) => setTarget(value as "local" | "ssh")}
-            options={[
-              { value: "local", label: tr("gitview.local") },
-              { value: "ssh", label: tr("gitprojectsource.sshServer") },
-            ]}
-          />
-        </label>
-      )}
-
-      {target === "ssh" && (
-        <>
-          <label className="folder-source-field">
-            <span>{tr("gitprojectsource.sshServer")}</span>
-            <Select
-              label={tr("gitprojectsource.sshServer")}
-              value={connectionId}
-              disabled={busy || connections.length === 0}
-              onChange={setConnectionId}
-              options={connections.map((connection) => ({ value: connection.id, label: connection.name }))}
-            />
-          </label>
-          <label className="folder-source-field">
-            <span>{tr("gitprojectsource.destinationParentFolder")}</span>
-            <TextInput
-              className="mono"
-              value={sshParent}
-              placeholder="/home/user/projects"
-              spellCheck={false}
-              disabled={busy}
-              onChange={(event) => setSshParent(event.target.value)}
-            />
-          </label>
-        </>
-      )}
-
       <label className="folder-source-field">
         <span>{tr("gitprojectsource.projectName")} <em>{tr("worktreesessiondialog.optional")}</em></span>
         <TextInput
@@ -166,12 +107,10 @@ function CloneInlinePanel({ ctx, onCancel }: { ctx: HostContext; onCancel: () =>
         />
       </label>
 
-      {target === "local" && (
-        <p className="folder-source-hint">
-          {tr("gitprojectsource.cloneDestinationHint")}
-          <code className="mono">{ctx.browsedPath || "…"}</code>
-        </p>
-      )}
+      <p className="folder-source-hint">
+        {tr("gitprojectsource.cloneDestinationHint")}
+        <code className="mono">{ctx.browsedPath || "…"}</code>
+      </p>
 
       {error && <div className="form-error folder-error" role="alert">{error}</div>}
 
@@ -211,8 +150,6 @@ export default function GitProjectSource(props: Record<string, unknown>) {
     setOpen(false);
     chipRef.current?.focus();
   };
-  const otherArmed = ctx.armedId !== null && ctx.armedId !== SOURCE_ID;
-
   return (
     <>
       <Button
@@ -221,7 +158,7 @@ export default function GitProjectSource(props: Record<string, unknown>) {
         variant="ghost"
         className="ghost-link git-clone-source folder-source-chip"
         aria-expanded={open}
-        disabled={ctx.busy || otherArmed}
+        disabled={ctx.busy}
         onClick={() => (open ? close() : setOpen(true))}
       >
         {tr("gitprojectsource.cloneRepository")}

@@ -11,7 +11,6 @@ const { SessionUsageStats } = await import("../widgets/usagePlugin.tsx");
 
 test("session usage renderer shows context percentage and all default metrics", () => {
   const model = emptyModel();
-  model.contextUsage = { inputTokens: 250 };
   model.totals = {
     input: 1_000,
     output: 250,
@@ -27,7 +26,7 @@ test("session usage renderer shows context percentage and all default metrics", 
   }));
 
   assert.match(html, /data-usage-metric="context"/);
-  assert.match(html, />25%</);
+  assert.match(html, />100%</);
   for (const metric of ["input", "output", "total", "cost"]) {
     assert.match(html, new RegExp(`data-usage-metric="${metric}"`));
   }
@@ -35,7 +34,6 @@ test("session usage renderer shows context percentage and all default metrics", 
 
 test("session usage renderer honors per-instance metric visibility", () => {
   const model = emptyModel();
-  model.contextUsage = { inputTokens: 500 };
   model.totals.input = 900;
   model.totals.output = 100;
   model.totals.cost = 2;
@@ -51,7 +49,7 @@ test("session usage renderer honors per-instance metric visibility", () => {
     },
   }));
 
-  assert.match(html, />25%</);
+  assert.match(html, />45%</);
   assert.match(html, /data-usage-metric="cost"/);
   assert.doesNotMatch(html, /data-usage-metric="input"/);
   assert.doesNotMatch(html, /data-usage-metric="output"/);

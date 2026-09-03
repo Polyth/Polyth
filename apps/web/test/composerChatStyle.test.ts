@@ -5,18 +5,12 @@ import { resolve } from "node:path";
 
 const read = (path: string) => readFileSync(resolve(import.meta.dirname, path), "utf8");
 
-test("working status stays visible, reports live work, and does not claim repository indexing", () => {
+test("timeline does not claim repository indexing or hide a second working row", () => {
   const timeline = read("../src/components/Timeline.tsx");
-  const css = read("../src/styles.css");
 
   assert.doesNotMatch(timeline, /Scanning repositories|indexing|usually takes a few seconds/i);
   assert.doesNotMatch(timeline, /turnWorking && !hasRunningAction/);
-  assert.match(timeline, /turnWorking && <WorkingIndicator model=\{model\} \/>/);
-  assert.match(timeline, /message\.status === "pending" \|\| message\.status === "running"/);
-  assert.match(timeline, /<time className="focus-working-elapsed"/);
-  assert.match(timeline, /<span className="focus-working-context-label">\{tr\("capabilities\.context"\)\}<\/span>/);
-  assert.match(css, /\.working-status-dock\s*\{[^}]*grid-template-columns:[^}]*border-inline-start:\s*2px solid var\(--accent\)/s);
-  assert.match(css, /\.focus-working-spinner\s*\{[^}]*animation:\s*focus-working-pulse/s);
+  assert.doesNotMatch(timeline, /function WorkingIndicator/);
 });
 
 test("composer radius uses the shared corner setting", () => {
@@ -102,15 +96,22 @@ test("thinking, tasks, and every execution share the compact activity-card treat
   assert.match(css, /\.task-list\s*\{[^}]*margin:\s*var\(--space-1\) 0 0;/s);
 });
 
-test("task plans expand as a styled list instead of opening raw task activity", () => {
+test("task plans collapse like other agent actions", () => {
   const timeline = read("../src/components/Timeline.tsx");
   const css = read("../src/styles.css");
 
   assert.match(timeline, /className="task-list-expand-shell"/);
   assert.match(timeline, /className="task-list-item-mark"/);
   assert.doesNotMatch(timeline, /const revealTask|onClick=\{\(\) => revealTask/);
+  assert.match(timeline, /const \[open, setOpen\] = useState\(false\);/);
   assert.match(css, /\.task-list\.open > \.task-list-expand-shell\s*\{[^}]*grid-template-rows:\s*1fr;/s);
   assert.match(css, /\.task-list li\.active\s*\{[^}]*background:\s*var\(--accent-wash\)/s);
+});
+
+test("task plans remain represented by the status surfaces", () => {
+  const pendingChanges = read("../../../packages/git/widgets/PendingChangesBar.tsx");
+  assert.match(pendingChanges, /const activeTask = model\.tasks\?\.items\.find/);
+  assert.match(pendingChanges, /activeTask\?\.text/);
 });
 
 test("todowrite details use the same task presentation instead of raw input", () => {

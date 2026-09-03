@@ -116,9 +116,7 @@ import SessionContextBar, {
   type ContextChoice,
   type SessionContextBarProps,
 } from "./mobile/SessionContextBar.tsx";
-import {
-  AssistIcon, Button, IconButton, Menu, Notice, SendIcon, StopIcon, Tooltip,
-} from "./ui/index.ts";
+import { Button, IconButton, Menu, Notice, SendIcon, StopIcon } from "./ui/index.ts";
 import { getSendFailure, subscribeSendFailures } from "../sendFailure.ts";
 import { isNativeMobile } from "@polyth/mobile/runtime";
 import { pickNativeFiles } from "@polyth/mobile/native";
@@ -1358,35 +1356,6 @@ export default function Composer({
       ariaLabel={tr("composer.selectAgentModeCurrentValue", { value: activeAgentLabel })}
     />
   ) : <span className="agent-type-badge">{activeAgentLabel}</span>;
-  // Composer controls are ordinary mini-widgets: one placement/visibility
-  // system owns Workflow, effort, and agent without duplicating toggle state.
-  const slotContext = {
-    sessionId: session?.id,
-    projectId: activeProjectId ?? undefined,
-    variant,
-    working,
-    autoApproveOn,
-    autoApproveBusy,
-    toggleAutoApprove,
-    goalOn: newSessionGoal,
-    goalBusy: goalAttachBusy,
-    toggleGoal,
-    workflowDraftText: text,
-    workflowAttachmentCount: attachments.length,
-    consumeWorkflowDraft,
-    composerEffortControl: effortControl,
-    composerAgentControl: agentControl,
-  };
-
-  const followUp = getUiSettings().followUpBehavior;
-  const borrowedEpochPending = session?.status === "epoch-pending"
-    && session.runtimeControl === "borrowed";
-  const sendDisabled = creatingSession
-    || queueEditSaving
-    || borrowedEpochPending
-    || (queueEdit ? !text.trim() : (!text.trim() && attachments.length === 0))
-    || (!queueEdit && !shellMode && (noModels || profileMissing));
-  const phoneLayout = isPhone;
   const canGenerateNextAction = !!session?.id && !working && hasCompletedExchange && !suggestionBusy;
   const generateNextAction = useCallback(() => {
     const target = sessionIdRef.current;
@@ -1417,6 +1386,38 @@ export default function Composer({
       })
       .finally(() => setSuggestionBusy(false));
   }, [activeSessionSeq, canGenerateNextAction, text]);
+  // Composer controls are ordinary mini-widgets: one placement/visibility
+  // system owns Workflow, effort, and agent without duplicating toggle state.
+  const slotContext = {
+    sessionId: session?.id,
+    projectId: activeProjectId ?? undefined,
+    variant,
+    working,
+    autoApproveOn,
+    autoApproveBusy,
+    toggleAutoApprove,
+    goalOn: newSessionGoal,
+    goalBusy: goalAttachBusy,
+    toggleGoal,
+    workflowDraftText: text,
+    workflowAttachmentCount: attachments.length,
+    consumeWorkflowDraft,
+    composerEffortControl: effortControl,
+    composerAgentControl: agentControl,
+    canGenerateNextAction,
+    suggestionBusy,
+    generateNextAction,
+  };
+
+  const followUp = getUiSettings().followUpBehavior;
+  const borrowedEpochPending = session?.status === "epoch-pending"
+    && session.runtimeControl === "borrowed";
+  const sendDisabled = creatingSession
+    || queueEditSaving
+    || borrowedEpochPending
+    || (queueEdit ? !text.trim() : (!text.trim() && attachments.length === 0))
+    || (!queueEdit && !shellMode && (noModels || profileMissing));
+  const phoneLayout = isPhone;
   const hasDraft = text.trim() !== "" || attachments.length > 0;
   // On phones the composer only unfolds when it is actually being used: focus,
   // a shell command, or a draft in progress. A working turn alone keeps it in
@@ -1458,7 +1459,7 @@ export default function Composer({
           switched project or spawned a new session instead of retargeting. */}
       {!session && <SessionContextBar {...contextBar} />}
       {/* Widget-areas (WA4): the project/branch meta row is a widget area. */}
-      <SlotHost slot="composer.meta" context={slotContext} />
+      <SlotHost slot="composer.meta" context={slotContext} customizable />
       {failedSend && (
         <Notice
           tone="warning"
@@ -1468,7 +1469,7 @@ export default function Composer({
         >{tr("composer.sendUnavailableDraftPreserved")}</Notice>
       )}
       {/* Widget-areas (WA4): the uncommitted-changes bar area, above the box. */}
-      <SlotHost slot="composer.pending" context={slotContext} />
+      <SlotHost slot="composer.pending" context={slotContext} customizable />
       {session?.id && (
         <QueuedMessageList
           sessionId={session.id}
@@ -1656,18 +1657,6 @@ export default function Composer({
           {!phoneLayout && <CustomizeZoneButton slot="composer.leading" align="start" />}
         </span>
         <div className="composer-actions customize-zone">
-          {(canGenerateNextAction || suggestionBusy) && (
-            <Tooltip content={tr("composer.generateNextAction")}>
-              <IconButton
-                className="composer-next-action"
-                icon={AssistIcon}
-                label={tr("composer.generateNextAction")}
-                size="sm"
-                busy={suggestionBusy}
-                onClick={generateNextAction}
-              />
-            </Tooltip>
-          )}
           <span className="composer-extensions">
             <SlotHost slot="composer.trailing" context={slotContext} customizable />
           </span>

@@ -442,7 +442,7 @@ export default function ProjectFolderDialog({
                 size="sm"
                 className="ghost-link folder-source-chip"
                 iconStart={AddIcon}
-                disabled={busy || armedSource !== null}
+                disabled={busy}
                 onClick={() => { setArmedSource(null); setCreating(true); }}
               >
                 {tr("projectfolderdialog.newFolder")}
