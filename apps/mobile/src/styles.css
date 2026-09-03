@@ -94,6 +94,36 @@
   box-shadow: var(--focus-ring);
 }
 
+.mobile-connect .mobile-connect-field textarea {
+  min-height: 5.5rem;
+  box-sizing: border-box;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
+  padding: var(--space-3);
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-input);
+  resize: vertical;
+}
+
+.mobile-connect .mobile-connect-phrase {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mobile-connect .mobile-connect-phrase li {
+  padding: var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  text-align: center;
+  font-size: var(--font-title);
+}
+
 .mobile-connect .mobile-connect-field small {
   color: var(--muted);
   font-size: var(--font-meta);

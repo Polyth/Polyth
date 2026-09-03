@@ -146,6 +146,7 @@ export function installNativeMobileIntegration(callbacks: NativeMobileCallbacks)
   }).then((handle) => disposers.push(() => void handle.remove()));
 
   void App.addListener("appUrlOpen", ({ url }) => {
+    if (url.trim().startsWith("polyth://pair")) return;
     const path = mobileDeepLinkPath(url);
     if (path) callbacks.openDeepLink(path);
   }).then((handle) => disposers.push(() => void handle.remove()));

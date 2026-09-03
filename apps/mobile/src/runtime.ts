@@ -29,6 +29,8 @@ export type MobileLaunch =
       preferred?: string;
       error?: string;
       deepLinkPath?: string;
+      pendingPair?: string;
+      developerUnlocked?: boolean;
     };
 
 export function isNativeMobile(): boolean {
@@ -162,7 +164,13 @@ function canonicalProjectPath(pathname: string): string | undefined {
   return `/p/${encodeURIComponent(projectId)}${sessionId ? `/s/${encodeURIComponent(sessionId)}` : ""}`;
 }
 
+export function isPairingDeepLink(raw: string): boolean {
+  const value = raw.trim();
+  return value.startsWith("polyth://pair?") || value.startsWith("polyth://pair/?");
+}
+
 export function mobileDeepLinkPath(raw: string): string | undefined {
+  if (isPairingDeepLink(raw)) return undefined;
   let url: URL;
   try {
     url = new URL(raw);
@@ -222,23 +230,22 @@ export async function prepareMobileLaunch(): Promise<MobileLaunch> {
     return { kind: "app", ...(deepLinkPath ? { deepLinkPath } : {}) };
   }
 
-  if (hosts.active) {
-    const checked = await checkPolythHost(hosts.active);
-    if (checked.ok) {
-      navigateToMobileHost(hosts.active, deepLinkPath);
-      return { kind: "navigating" };
-    }
+  const launchPair = launchUrl?.url && isPairingDeepLink(launchUrl.url) ? launchUrl.url : undefined;
+  if (launchPair) {
     return {
       kind: "connect",
       recent: hosts.recent,
-      preferred: hosts.active,
-      error: checked.message,
+      pendingPair: launchPair,
       ...(deepLinkPath ? { deepLinkPath } : {}),
     };
   }
+
+  // Production launches stay on the bundled origin. Raw URL auto-connect is
+  // developer-only and never happens here.
   return {
     kind: "connect",
     recent: hosts.recent,
+    ...(hosts.active ? { preferred: hosts.active } : {}),
     ...(deepLinkPath ? { deepLinkPath } : {}),
   };
 }
