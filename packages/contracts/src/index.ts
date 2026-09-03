@@ -99,24 +99,57 @@ export function isRemotePathPattern(pattern: string): boolean {
   return pattern.length > 0 && pattern.length <= 256 && REMOTE_PATH_PATTERN.test(pattern);
 }
 
+/** Reject encoded dots, backslashes, NUL, duplicate separators, and any
+ *  percent-encoding that would change route interpretation. */
+export function canonicalizeRemotePath(path: string): string | null {
+  if (typeof path !== "string" || path.length === 0 || path.length > 2048) return null;
+  if (!path.startsWith("/") || path.includes("//") || path.includes("\\") || path.includes("\0")) return null;
+  if (path.includes("%")) {
+    const parts = path.split("/").slice(1);
+    for (const part of parts) {
+      if (!/^(?:%[0-9A-Fa-f]{2}|[^%])*$/.test(part)) return null;
+      try {
+        const decoded = decodeURIComponent(part);
+        if (decoded !== part) return null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+  const parts = path.split("/").slice(1);
+  for (const part of parts) {
+    if (!part || part === "." || part === "..") return null;
+    if (!/^[A-Za-z0-9._-]+$/.test(part)) return null;
+  }
+  return path;
+}
+
+export function remotePathPatternsOverlap(left: string, right: string): boolean {
+  if (!isRemotePathPattern(left) || !isRemotePathPattern(right)) return false;
+  const leftParts = left.split("/").slice(1);
+  const rightParts = right.split("/").slice(1);
+  if (leftParts.length !== rightParts.length) return false;
+  for (let i = 0; i < leftParts.length; i++) {
+    const a = leftParts[i]!;
+    const b = rightParts[i]!;
+    if (a.startsWith(":") || b.startsWith(":")) continue;
+    if (a !== b) return false;
+  }
+  return true;
+}
+
 /** Match a declared remote path pattern against a request pathname. */
 export function matchRemotePath(pattern: string, path: string): boolean {
   if (!isRemotePathPattern(pattern)) return false;
-  if (!path.startsWith("/") || path.includes("//") || path.includes("\\") || path.includes("\0")) {
-    return false;
-  }
+  const canonical = canonicalizeRemotePath(path);
+  if (!canonical) return false;
   const patternParts = pattern.split("/").slice(1);
-  const pathParts = path.split("/").slice(1);
+  const pathParts = canonical.split("/").slice(1);
   if (patternParts.length !== pathParts.length) return false;
   for (let i = 0; i < patternParts.length; i++) {
     const expected = patternParts[i]!;
     const actual = pathParts[i]!;
-    if (actual === "" || actual === "." || actual === "..") return false;
-    try {
-      if (decodeURIComponent(actual) !== actual && actual.includes("%2e")) return false;
-    } catch {
-      return false;
-    }
     if (expected.startsWith(":")) {
       if (!/^[A-Za-z0-9._-]+$/.test(actual)) return false;
       continue;
@@ -3133,6 +3166,23 @@ export const REMOTE_CAPABILITY = {
 
 export type RemoteCapability = (typeof REMOTE_CAPABILITY)[keyof typeof REMOTE_CAPABILITY];
 
+export const REMOTE_CAPABILITY_VALUES: readonly RemoteCapability[] = Object.values(REMOTE_CAPABILITY);
+
+export function isRemoteCapability(value: string): value is RemoteCapability {
+  return (REMOTE_CAPABILITY_VALUES as readonly string[]).includes(value);
+}
+
+export function normalizeRemoteGrants(grants: readonly string[]): string[] {
+  const unique = new Set<string>();
+  for (const capability of grants) {
+    if (!isRemoteCapability(capability)) {
+      throw Object.assign(new Error(`unknown remote capability: ${capability}`), { code: "invalid-input" });
+    }
+    unique.add(capability);
+  }
+  return [...unique].sort();
+}
+
 export type GrantProfileId = "observe" | "interact" | "developer" | "full-remote";
 
 export const GRANT_PROFILE_PRESETS: Record<GrantProfileId, readonly string[]> = {
@@ -3211,6 +3261,16 @@ export const PRIVILEGED_REMOTE_CAPABILITIES: readonly string[] = [
   REMOTE_CAPABILITY.serverShutdown,
   REMOTE_CAPABILITY.serverIdentityRotate,
 ];
+
+export function normalizeDeviceGrants(grants: readonly string[]): string[] {
+  const normalized = normalizeRemoteGrants(grants);
+  for (const capability of normalized) {
+    if ((PRIVILEGED_REMOTE_CAPABILITIES as readonly string[]).includes(capability)) {
+      throw Object.assign(new Error(`privileged capability cannot be granted: ${capability}`), { code: "invalid-input" });
+    }
+  }
+  return normalized;
+}
 
 export type PolythLinkTransport = "direct" | "relay";
 export type PolythLinkPathPolicy = "direct-preferred" | "relay-only" | "air-gapped";

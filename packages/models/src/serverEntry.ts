@@ -137,7 +137,7 @@ const aggregate = async <T>(
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   return {
-    remoteAccess: localOnlyRemoteAccess(["models"]),
+    remoteAccess: localOnlyRemoteAccess(["agent-profiles"]),
     routes: profileRoutes({
       store: host.store as unknown as ProfileStore,
       listModels: () => aggregate(

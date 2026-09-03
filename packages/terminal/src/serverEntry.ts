@@ -222,7 +222,7 @@ export function attachTerminalWs(server: Server, deps: {
 }
 
 export const TERMINAL_REMOTE_ACCESS: RemoteAccessPolicy = {
-  routeScopes: ["terminal"],
+  routeScopes: ["terminals", "terminal"],
   http: [
     { methods: ["GET"], path: "/api/terminals", capability: REMOTE_CAPABILITY.terminalOpen, mutation: false },
     { methods: ["POST"], path: "/api/terminals", capability: REMOTE_CAPABILITY.terminalOpen, mutation: true },

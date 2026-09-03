@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { TunnelDeviceDto } from "@polyth/contracts";
-import { GRANT_PROFILE_PRESETS, type GrantProfileId } from "@polyth/contracts";
+import { GRANT_PROFILE_PRESETS, normalizeDeviceGrants, type GrantProfileId } from "@polyth/contracts";
 
 export interface TunnelDeviceRecord {
   id: string;
@@ -23,7 +23,7 @@ export interface TunnelDeviceRecord {
 }
 
 export function grantsForProfile(profile: GrantProfileId): string[] {
-  return [...GRANT_PROFILE_PRESETS[profile]];
+  return normalizeDeviceGrants(GRANT_PROFILE_PRESETS[profile]);
 }
 
 export function fingerprintEndpoint(endpointId: string): string {
@@ -140,7 +140,7 @@ export class TunnelStore {
       const insertGrant = this.db.prepare(
         "INSERT INTO tunnel_device_grant(device_id, capability, granted_at, granted_by) VALUES (?, ?, ?, ?)",
       );
-      for (const capability of input.grants) {
+      for (const capability of normalizeDeviceGrants(input.grants)) {
         insertGrant.run(id, capability, now, "local-admin");
       }
       this.db.prepare(
@@ -187,7 +187,7 @@ export class TunnelStore {
       const insertGrant = this.db.prepare(
         "INSERT INTO tunnel_device_grant(device_id, capability, granted_at, granted_by) VALUES (?, ?, ?, ?)",
       );
-      for (const capability of grants) insertGrant.run(id, capability, now, "local-admin");
+      for (const capability of normalizeDeviceGrants(grants)) insertGrant.run(id, capability, now, "local-admin");
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");

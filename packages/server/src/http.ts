@@ -4,15 +4,16 @@ import { readFile } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
 import { constants as zlibConstants, gzip, gzipSync } from "node:zlib";
 import { extname, join, normalize, resolve, sep } from "node:path";
-import type {
-  AgentRuntime,
-  AuthResolution,
-  JsonObject,
-  ModelDescriptor,
-  RequestIngress,
-  RouteHandler,
-  RouteRequest,
-  SessionService,
+import {
+  canonicalizeRemotePath,
+  type AgentRuntime,
+  type AuthResolution,
+  type JsonObject,
+  type ModelDescriptor,
+  type RequestIngress,
+  type RouteHandler,
+  type RouteRequest,
+  type SessionService,
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
 import type { RuntimePool } from "./sessions.ts";
@@ -135,22 +136,43 @@ const sendStaticFile = async (
 // runaway client can no longer grow the heap without bound.
 export const MAX_BODY_BYTES = 25 * 1024 * 1024;
 
-const readBody = async (req: IncomingMessage): Promise<Record<string, unknown>> => {
+export function contentLengthOf(req: IncomingMessage): number | undefined {
+  const raw = req.headers["content-length"];
+  if (raw === undefined) return undefined;
+  const value = Array.isArray(raw) ? raw : [raw];
+  if (value.length !== 1 || !/^\d+$/.test(value[0]!)) {
+    throw Object.assign(new Error("invalid Content-Length"), { code: "invalid-input" });
+  }
+  return Number(value[0]);
+}
+
+const readBody = async (req: IncomingMessage, limit = MAX_BODY_BYTES): Promise<Record<string, unknown>> => {
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw Object.assign(new Error("invalid body limit"), { code: "invalid-input" });
+  }
+  const declared = contentLengthOf(req);
+  if (declared !== undefined && declared > limit) {
+    throw Object.assign(
+      new Error(`request body too large (max ${limit} bytes)`),
+      { code: "payload-too-large" },
+    );
+  }
   const chunks: Buffer[] = [];
   let size = 0;
   let overflow = false;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    // On overflow keep draining without buffering: memory stays bounded and
-    // the connection ends cleanly so the 413 reliably reaches the client.
-    if (size > MAX_BODY_BYTES) { overflow = true; chunks.length = 0; }
+    if (size > limit) { overflow = true; chunks.length = 0; }
     if (!overflow) chunks.push(chunk as Buffer);
   }
   if (overflow) {
     throw Object.assign(
-      new Error(`request body too large (max ${MAX_BODY_BYTES} bytes)`),
+      new Error(`request body too large (max ${limit} bytes)`),
       { code: "payload-too-large" },
     );
+  }
+  if (declared !== undefined && size !== declared) {
+    throw Object.assign(new Error("Content-Length does not match the request body"), { code: "invalid-input" });
   }
   const raw = Buffer.concat(chunks).toString("utf8");
   if (!raw) return {};
@@ -280,13 +302,20 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
   const models = () => deps.catalog?.models() ?? aggregate<ModelDescriptor>((runtime) => runtime.models());
 
   return async (req, res, ingress) => {
-    const url = new URL(req.url ?? "/", "http://x");
-    const path = url.pathname;
-    const method = req.method ?? "GET";
     const json = (target: ServerResponse, code: number, body: unknown): void => {
       writeJson(req, target, code, body);
     };
     try {
+      const rawUrl = req.url ?? "/";
+      const rawPath = rawUrl.split("?")[0] || "/";
+      let url: URL;
+      try {
+        url = new URL(rawUrl, "http://x");
+      } catch {
+        throw Object.assign(new Error("The requested path is invalid."), { code: "invalid-path" });
+      }
+      const path = url.pathname;
+      const method = req.method ?? "GET";
       stripUntrustedHeaders(req, ingress);
       const reqLike: AuthRequestLike = {
         headers: { cookie: req.headers.cookie, "user-agent": Array.isArray(req.headers["user-agent"]) ? req.headers["user-agent"][0] : req.headers["user-agent"] },
@@ -300,7 +329,14 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
         if (denial) return json(res, denial.status, denial.body);
       }
 
+      let bodyLimit = MAX_BODY_BYTES;
+      let bodyCache: Record<string, unknown> | undefined;
+      const loadBody = async () => (bodyCache ??= await readBody(req, bodyLimit));
+
       if (principal.kind === "paired-device") {
+        if (!canonicalizeRemotePath(rawPath) || path !== rawPath) {
+          throw Object.assign(new Error("The requested path is invalid."), { code: "invalid-path" });
+        }
         if (path.startsWith("/internal/") || path === "/metrics" || path.startsWith("/debug")) {
           throw new AuthorizationError("forbidden", "not allowed");
         }
@@ -311,7 +347,11 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
           { owner: "core", policy: CORE_REMOTE_ACCESS },
           ...(deps.remotePolicies?.() ?? []),
         ];
-        assertPairedHttpAllowed(principal, method, path, policies);
+        const match = assertPairedHttpAllowed(principal, method, path, policies, contentLengthOf(req));
+        bodyLimit = match.rule.maxBodyBytes ?? MAX_BODY_BYTES;
+        if (match.rule.mutation) {
+          await loadBody();
+        }
       }
 
       const requireCapability = (capability: string) => requirePrincipalCapability(principal, capability);
@@ -321,11 +361,11 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
       }
       if (path === "/api/projects" && method === "GET") return json(res, 200, await projects.list());
       if (path === "/api/projects" && method === "POST") {
-        const b = await readBody(req);
+        const b = await loadBody();
         return json(res, 200, await projects.add(String(b.path), b.name ? String(b.name) : undefined));
       }
       if (path === "/api/projects/create" && method === "POST") {
-        const b = await readBody(req);
+        const b = await loadBody();
         return json(res, 200, await projects.create(String(b.path), b.name ? String(b.name) : undefined));
       }
       let m = path.match(/^\/api\/projects\/([^/]+)$/);
@@ -339,7 +379,7 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
         return json(res, 200, await sessions.list(projectId));
       }
       if (path === "/api/sessions" && method === "POST") {
-        const b = await readBody(req);
+        const b = await loadBody();
         const ref = await sessions.create({
           projectId: String(b.projectId),
           ...(b.title ? { title: String(b.title) } : {}),
@@ -379,7 +419,7 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/message$/);
       if (m && method === "POST") {
-        const b = await readBody(req);
+        const b = await loadBody();
         const delivery = b.delivery;
         return json(res, 200, await sessions.send(m[1]!, {
           text: String(b.text ?? ""),
@@ -402,13 +442,13 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
       if (m && method === "GET") return json(res, 200, await sessions.queueList?.(m[1]!) ?? []);
       m = path.match(/^\/api\/sessions\/([^/]+)\/queue\/order$/);
       if (m && method === "PATCH") {
-        const b = await readBody(req);
+        const b = await loadBody();
         const ids = Array.isArray(b.ids) ? b.ids.map(String) : [];
         return json(res, 200, await sessions.queueReorder?.(m[1]!, ids) ?? []);
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/queue\/([^/]+)$/);
       if (m && method === "PATCH") {
-        const b = await readBody(req);
+        const b = await loadBody();
         return json(res, 200, await sessions.queueEdit?.(m[1]!, m[2]!, String(b.text ?? "")));
       }
       if (m && method === "DELETE") {
@@ -429,7 +469,7 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
         if (!sessions.resumeNow) {
           throw Object.assign(new Error("rate-limit resume unavailable"), { code: "unsupported" });
         }
-        const b = await readBody(req);
+        const b = await loadBody();
         const model = b.model && typeof b.model === "object" && !Array.isArray(b.model)
           ? (b.model as { providerID: string; modelID: string })
           : undefined;
@@ -437,13 +477,13 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/fork$/);
       if (m && method === "POST") {
-        const b = await readBody(req);
+        const b = await loadBody();
         return json(res, 200, await sessions.fork(m[1]!, b.atSeq === undefined ? undefined : Number(b.atSeq)));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/rewind$/);
       if (m && method === "POST") {
         if (!sessions.rewind) throw Object.assign(new Error("session rewind unavailable"), { code: "unsupported" });
-        const b = await readBody(req);
+        const b = await loadBody();
         if (b.atSeq === undefined) throw Object.assign(new Error("atSeq required"), { code: "invalid-input" });
         return json(res, 200, await sessions.rewind(m[1]!, Number(b.atSeq)));
       }
@@ -455,13 +495,13 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
       m = path.match(/^\/api\/sessions\/([^/]+)\/shell$/);
       if (m && method === "POST") {
         if (!sessions.runShell) throw Object.assign(new Error("composer shell unavailable"), { code: "unsupported" });
-        const b = await readBody(req);
+        const b = await loadBody();
         if (typeof b.command !== "string") throw Object.assign(new Error("command required"), { code: "invalid-input" });
         return json(res, 200, await sessions.runShell(m[1]!, b.command));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/permission\/([^/]+)$/);
       if (m && method === "POST") {
-        const b = await readBody(req);
+        const b = await loadBody();
         const scope = b.scope === "session" || b.scope === "project" ? b.scope : undefined;
         await sessions.replyPermission(m[1]!, m[2]!, b.reply as "once" | "always" | "reject", scope);
         return json(res, 200, { ok: true });
@@ -469,7 +509,7 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
       m = path.match(/^\/api\/sessions\/([^/]+)\/secrets\/([^/]+)$/);
       if (m && method === "POST") {
         if (!sessions.replySecret) throw Object.assign(new Error("Secure Safe unavailable"), { code: "unsupported" });
-        const b = await readBody(req);
+        const b = await loadBody();
         if (b.action === "save") {
           if (typeof b.value !== "string" || !b.value.trim()) {
             throw Object.assign(new Error("value is required"), { code: "invalid-input" });
@@ -489,7 +529,7 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/question\/([^/]+)$/);
       if (m && method === "POST") {
-        const b = await readBody(req);
+        const b = await loadBody();
         await sessions.replyQuestion(m[1]!, m[2]!, (b.answers ?? b) as JsonObject);
         return json(res, 200, { ok: true });
       }
@@ -507,12 +547,12 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
         }
         m = path.match(/^\/api\/providers\/([^/]+)\/enabled$/);
         if (m && method === "POST") {
-          const b = await readBody(req);
+          const b = await loadBody();
           const state = await vis.setProviderEnabled(decodeURIComponent(m[1]!), b.enabled !== false);
           return json(res, 200, { ok: true, ...state });
         }
         if (path === "/api/models/enabled" && method === "POST") {
-          const b = await readBody(req);
+          const b = await loadBody();
           const state = await vis.setModelEnabled(String(b.key ?? ""), b.enabled !== false);
           return json(res, 200, { ok: true, ...state });
         }
@@ -527,10 +567,9 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
       }
 
       if (deps.routes?.length) {
-        let bodyCache: Record<string, unknown> | undefined;
         const rc: RouteRequest = {
           req, res, url, path, method, ingress, principal, requireCapability,
-          body: async () => (bodyCache ??= await readBody(req)),
+          body: async () => loadBody(),
           json: (code, body) => json(res, code, body),
         };
         for (const route of deps.routes) if (await route(rc)) return;

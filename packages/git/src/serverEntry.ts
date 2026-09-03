@@ -394,7 +394,7 @@ export function gitRoutes(deps: {
 }
 
 export const GIT_REMOTE_ACCESS: RemoteAccessPolicy = {
-  routeScopes: ["git"],
+  routeScopes: ["git", "worktrees"],
   http: [
     { methods: ["GET"], path: "/api/git/status", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
     { methods: ["GET"], path: "/api/git/diff", capability: REMOTE_CAPABILITY.gitRead, mutation: false },

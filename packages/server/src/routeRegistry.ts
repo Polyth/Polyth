@@ -1,6 +1,5 @@
 import type { Disposable, RemoteAccessPolicy, RouteHandler } from "@polyth/contracts";
-import type { OwnedRemotePolicy } from "./remotePolicy.ts";
-import { validateRemoteAccessPolicy } from "./remotePolicy.ts";
+import { CORE_REMOTE_ACCESS, validateRemoteAccessPolicy, type OwnedRemotePolicy } from "./remotePolicy.ts";
 
 export interface RouteRegistry {
   add(handler: RouteHandler): Disposable;
@@ -16,12 +15,25 @@ export function createRouteRegistry(): RouteRegistry {
     owner: string;
   }>();
 
+  const policies = (): OwnedRemotePolicy[] => {
+    const out: OwnedRemotePolicy[] = [];
+    for (const entry of handlers.values()) {
+      if (entry.remoteAccess) out.push({ owner: entry.owner, policy: entry.remoteAccess });
+    }
+    return out;
+  };
+
   return {
     add(idOrHandler: string | RouteHandler, maybeHandler?: RouteHandler, remoteAccess?: RemoteAccessPolicy) {
       const id = typeof idOrHandler === "string" ? idOrHandler : Symbol("plugin-route");
       const handler = typeof idOrHandler === "string" ? maybeHandler! : idOrHandler;
       const owner = typeof idOrHandler === "string" ? idOrHandler : "anonymous";
-      if (remoteAccess) validateRemoteAccessPolicy(owner, remoteAccess);
+      if (remoteAccess) {
+        validateRemoteAccessPolicy(owner, remoteAccess, [
+          { owner: "core", policy: CORE_REMOTE_ACCESS },
+          ...policies().filter((entry) => entry.owner !== owner),
+        ]);
+      }
       handlers.set(id, { handler, remoteAccess, owner });
       return {
         dispose() {
@@ -30,13 +42,7 @@ export function createRouteRegistry(): RouteRegistry {
         },
       };
     },
-    policies() {
-      const out: OwnedRemotePolicy[] = [];
-      for (const entry of handlers.values()) {
-        if (entry.remoteAccess) out.push({ owner: entry.owner, policy: entry.remoteAccess });
-      }
-      return out;
-    },
+    policies,
     async handler(request) {
       for (const entry of handlers.values()) {
         if (await entry.handler(request)) return true;
