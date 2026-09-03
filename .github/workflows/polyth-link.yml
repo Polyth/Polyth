@@ -1,0 +1,55 @@
+name: Polyth Link
+
+on:
+  pull_request:
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "packages/tunnel/**"
+      - "packages/pairing-qr/**"
+      - "packages/tunnel-relay/**"
+      - "packages/server/**"
+      - "packages/contracts/**"
+      - "apps/mobile/**"
+      - ".github/workflows/polyth-link.yml"
+  push:
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "packages/tunnel/**"
+      - "packages/pairing-qr/**"
+      - "packages/tunnel-relay/**"
+      - "packages/server/**"
+      - "packages/contracts/**"
+      - "apps/mobile/**"
+      - ".github/workflows/polyth-link.yml"
+
+jobs:
+  rust:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy -p polyth-link-core -- -D warnings
+      - run: cargo test -p polyth-link-core --tests
+      - run: cargo test -p polyth-link-host --tests
+      - run: cargo build -p polyth-link-host -p polyth-link-client
+      - run: cargo build -p polyth-link-relay
+
+  node:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+          cache: npm
+      - run: npm install
+      - run: node --experimental-strip-types --test packages/server/test/authIngress.test.ts packages/server/test/httpTunnel.test.ts packages/server/test/remotePolicyCoverage.test.ts packages/tunnel/test/*.test.ts packages/pairing-qr/test/*.test.ts packages/tunnel-relay/test/*.test.ts apps/mobile/test/runtime.test.ts
