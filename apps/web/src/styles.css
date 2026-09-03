@@ -1370,7 +1370,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--bubble-user-line);
   border-radius: var(--radius-card);
-  background: var(--material-glass-medium);
+  background: var(--bubble-user-bg);
   color: var(--text);
   font-size: var(--font-body);
   line-height: 1.5;
@@ -7682,8 +7682,10 @@ display: none;
   .composer-mobile .composer-config-top .composer-effort-track input { min-width: 0; }
   .composer-mobile .composer-card textarea {
     min-height: 26px;
-    /* §20: grows with the text, then scrolls internally. */
-    max-height: var(--composer-max-input-height);
+    /* §20: grows with the text, then scrolls internally. The font-scaled token
+       sets the normal ceiling; the viewport share keeps a short landscape or
+       keyboard-squeezed band from handing the input the whole screen. */
+    max-height: min(var(--composer-max-input-height), 18dvh);
     padding: var(--space-2) var(--space-3) 0;
     font-size: var(--font-input);
     line-height: 1.45;
@@ -7790,10 +7792,11 @@ width: var(--tap);
   /* Fresh and in-conversation chats use this same composer gutter. */
   .composer-chat.composer-mobile {
     /* The surrounding dock/nav owns the safe area. Keeping it here too put
-       both resting and expanded composers needlessly high. */
+       both resting and expanded composers needlessly high, so only the
+       side gutters read the horizontal insets. */
     padding: var(--space-1)
       max(var(--conversation-chrome-inset), var(--safe-right))
-      max(var(--space-1), var(--safe-bottom))
+      0
       max(var(--conversation-chrome-inset), var(--safe-left));
   }
 
@@ -9079,7 +9082,9 @@ color: var(--muted);
   .mobile-session-floats {
     position: fixed;
     inset-block-start: calc(var(--safe-top) + var(--conversation-chrome-inset));
-    inset-inline: var(--mobile-chrome-inset);
+    inset-inline:
+      max(var(--conversation-chrome-inset), var(--safe-left))
+      max(var(--conversation-chrome-inset), var(--safe-right));
     z-index: var(--z-shell);
     display: grid;
     grid-template-columns: max(var(--tap), var(--mobile-island-height)) minmax(0, 1fr) auto;
@@ -9097,7 +9102,9 @@ color: var(--muted);
     min-height: max(var(--tap), var(--mobile-island-height));
   }
   .mobile-float-navigation, .mobile-float-actions { display: inline-grid; grid-auto-flow: column; padding: 0; overflow: hidden; }
-  .mobile-float-navigation { border-radius: var(--radius-round); }
+  /* Scoped past the shared .ui-glass-island radius so the single-button
+     navigation island stays a circle. */
+  .mobile-session-floats > .mobile-float-navigation { border-radius: var(--radius-round); }
   .mobile-float-navigation button, .mobile-float-actions button { width: var(--tap); display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--text-dim); }
   .mobile-float-navigation svg, .mobile-float-actions svg { width: var(--icon-lg); height: var(--icon-lg); }
   .mobile-session-title-island,
@@ -11084,17 +11091,6 @@ html[data-font] body :is(
 .ui-glass-island { display: inline-flex; align-items: center; border-radius: var(--radius-island); }
 .ui-glass-dock { border-radius: var(--radius-dock); }
 
-.ui-run-summary {
-  width: 100%;
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-activity);
-  background: var(--surface-activity);
-  box-shadow: var(--shadow-sm);
-}
-.agent-status-dock { width: min(calc(100% - (2 * var(--conversation-chrome-inset))), var(--chat-measure)); margin-inline: auto; }
-
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .ui-glass-island,
   .ui-glass-dock {
@@ -11102,8 +11098,9 @@ html[data-font] body :is(
     backdrop-filter: blur(var(--material-glass-blur)) saturate(135%);
     -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(135%);
   }
+  /* User turns keep the theme's accent tint; glass only thins it. */
   .msg.user .bubble {
-    background: color-mix(in srgb, var(--material-glass-medium) 90%, transparent);
+    background: color-mix(in srgb, var(--bubble-user-bg) 90%, transparent);
     backdrop-filter: blur(10px) saturate(125%);
     -webkit-backdrop-filter: blur(10px) saturate(125%);
   }
@@ -11567,7 +11564,8 @@ html[data-font] body :is(
   }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-popover, .picker-pop, .app > .header, .sidebar, .railbar) { background: var(--material-glass); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.dialog-panel, .sheet, .composer-card) { background: var(--material-glass-strong); }
-  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-glass-island, .ui-glass-dock, .msg.user .bubble) { background: var(--surface); }
+  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-glass-island, .ui-glass-dock) { background: var(--surface); }
+  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) .msg.user .bubble { background: var(--bubble-user-bg); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) .mobile-island-sheet.sheet { background: var(--panel); }
 }
 
@@ -11580,7 +11578,8 @@ html[data-font] body :is(
   }
   :is(.app > .header, .sidebar, .railbar) { background: var(--material-glass); }
   .composer-card { background: var(--material-glass-strong); }
-  :is(.ui-glass-island, .ui-glass-dock, .msg.user .bubble) { background: var(--surface); }
+  :is(.ui-glass-island, .ui-glass-dock) { background: var(--surface); }
+  .msg.user .bubble { background: var(--bubble-user-bg); }
   .mobile-island-sheet.sheet { background: var(--panel); }
 }
 
@@ -11694,13 +11693,22 @@ html[data-font] body :is(
 .ui-scroll { overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; min-height: 0; }
 
 /* ---- conversation hierarchy ------------------------------------------------ */
+/* Standalone run summaries own their surface; nested ones inherit the
+   container's chrome via the reset below. */
 .ui-run-summary {
+  width: 100%;
+  min-width: 0;
   min-height: var(--tap);
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: var(--conversation-row-gap);
+  overflow: hidden;
   padding: var(--conversation-related-gap) var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-activity);
+  background: var(--run-summary-surface, var(--surface-activity));
+  box-shadow: var(--shadow-sm);
   color: var(--text-dim);
   text-align: start;
   cursor: pointer;
@@ -11719,7 +11727,9 @@ html[data-font] body :is(
 .ui-run-summary-diff { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--font-response-meta); white-space: nowrap; }
 
 .agent-status-dock {
+  width: min(calc(100% - (2 * var(--conversation-chrome-inset))), var(--chat-measure));
   min-height: var(--agent-dock-height);
+  margin-inline: auto;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -11759,11 +11769,13 @@ html[data-font] body :is(
   box-shadow: var(--shadow-sm);
 }
 .activity-group.current { border-color: color-mix(in srgb, var(--accent-line) 58%, var(--border-soft)); }
+/* Nested summaries inherit the container's chrome. The surface is handed over
+   through a variable so the shared hover state still wins the cascade. */
 .activity-group > .ui-run-summary,
 .task-list > .ui-run-summary {
+  --run-summary-surface: transparent;
   border: 0;
   border-radius: 0;
-  background: transparent;
   box-shadow: none;
 }
 .activity-group-expand-shell,

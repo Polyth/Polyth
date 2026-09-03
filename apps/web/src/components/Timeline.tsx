@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import type { SessionEvent } from "@polyth/contracts";
 import { renderMarkdown } from "../markdown.tsx";
 import { fmtCost, fmtDuration, fmtTokens } from "../format.ts";
-import { groupActivity, mergeThinking, promptIndex, copyText, loadDraft, type ActivityGroup, type WorkGroup } from "../utils.ts";
+import { groupActivity, mergeThinking, promptIndex, copyText, loadDraft, type ActivityGroup } from "../utils.ts";
 import { executionPresentation, reasoningHead, reasoningTail } from "../execution.ts";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { cancelResume, forkSession, loadOlderEvents, resumeNow } from "../init.ts";
@@ -266,7 +266,7 @@ function Thinking({ m, live }: { m: AssistantMsg; live: boolean }) {
       >
         {mark}
         <span className="reasoning-main">
-          <strong>{head || (active ? "Working through the request…" : "Activity detail")}</strong>
+          <strong>{head || (active ? tr("timeline.workingThroughTheRequest") : tr("timeline.activityDetail"))}</strong>
         </span>
         <span className="reasoning-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
       </button>
@@ -743,13 +743,13 @@ function AssistantAgentHeader({
         <span className="response-footer-model">{modelName}</span>
         {duration && <span className="response-footer-duration">{duration}</span>}
         <details className="response-footer-metadata">
-          <summary aria-label="Show response metadata" title="Response metadata"><Icon.chevronDown /></summary>
+          <summary aria-label={tr("timeline.showResponseMetadata")} title={tr("timeline.responseMetadata")}><Icon.chevronDown /></summary>
           <div className="response-footer-metadata-grid">
-            <span>Agent</span><strong>{agentName}</strong>
-            <span>Completed</span><time dateTime={timeIso(assistantTime(m))}>{timeShort(assistantTime(m))}</time>
-            {hasUsage && <><span>Input</span><strong>{fmtTokens(usage.input)}</strong><span>Output</span><strong>{fmtTokens(usage.output)}</strong></>}
-            {usage?.cacheRead ? <><span>Cached</span><strong>{fmtTokens(usage.cacheRead)}</strong></> : null}
-            {cost ? <><span>Cost</span><strong>{fmtCost(cost)}</strong></> : null}
+            <span>{tr("timeline.agent")}</span><strong>{agentName}</strong>
+            <span>{tr("timeline.completed")}</span><time dateTime={timeIso(assistantTime(m))}>{timeShort(assistantTime(m))}</time>
+            {hasUsage && <><span>{tr("timeline.input")}</span><strong>{fmtTokens(usage.input)}</strong><span>{tr("timeline.output")}</span><strong>{fmtTokens(usage.output)}</strong></>}
+            {usage?.cacheRead ? <><span>{tr("timeline.cached")}</span><strong>{fmtTokens(usage.cacheRead)}</strong></> : null}
+            {cost ? <><span>{tr("timeline.cost")}</span><strong>{fmtCost(cost)}</strong></> : null}
             {turn?.turnId ? <><span>Run</span><code>{turn.turnId}</code></> : null}
           </div>
         </details>
@@ -778,7 +778,7 @@ function AssistantAgentHeader({
           )}
           {overflowActions.length > 0 && (
             <Menu
-              label="More response actions"
+              label={tr("timeline.moreResponseActions")}
               align="end"
               entries={overflowActions.map((id) => ({
                 id,
@@ -787,7 +787,7 @@ function AssistantAgentHeader({
                 onSelect: () => runAction(id),
               }))}
             >
-              {(trigger) => <button className="response-footer-more" aria-label="More response actions" title="More response actions" {...trigger}><Icon.more /></button>}
+              {(trigger) => <button className="response-footer-more" aria-label={tr("timeline.moreResponseActions")} title={tr("timeline.moreResponseActions")} {...trigger}><Icon.more /></button>}
             </Menu>
           )}
         </span>
@@ -823,8 +823,8 @@ function TaskList({ plan }: { plan: NonNullable<RenderModel["tasks"]> }) {
     if (settled) setOpen(false);
   }, [settled]);
   const detail = [
-    `${completed}/${plan.items.length} complete`,
-    ...(failed > 0 ? [`${failed} failed`] : []),
+    tr("timeline.valueCompleteOfValue", { completed, total: plan.items.length }),
+    ...(failed > 0 ? [tr("timeline.valueFailedCount", { count: failed })] : []),
     ...(active && !settled ? [active.text] : []),
   ].join(" · ");
   const state: RunSummaryState = failed > 0 && settled ? "failed"
@@ -834,10 +834,11 @@ function TaskList({ plan }: { plan: NonNullable<RenderModel["tasks"]> }) {
   return (
     <section className={`task-list${open ? " open" : ""}`} aria-label={tr("timeline.currentTaskPlan")}>
       <RunSummary
-        title="Tasks"
+        title={tr("timeline.tasks")}
         meta={detail}
         state={state}
         expanded={open}
+        label={`${open ? tr("timeline.collapse") : tr("timeline.expand")} ${tr("timeline.tasks")}, ${detail}`}
         onToggle={() => setOpen((value) => !value)}
       />
       <div className="task-list-expand-shell" aria-hidden={!open}>
@@ -1026,20 +1027,23 @@ export function ActivityGroupView({
   }, { add: 0, del: 0 });
   const stepCount = g.items.length;
   const meta = [
-    `${stepCount} ${stepCount === 1 ? "step" : "steps"}`,
-    ...(files > 0 ? [`${files} ${files === 1 ? "file" : "files"}`] : []),
+    stepCount === 1 ? tr("timeline.valueStepCount", { count: stepCount }) : tr("timeline.valueStepsCount", { count: stepCount }),
+    ...(files > 0 ? [files === 1 ? tr("timeline.valueFileCount", { count: files }) : tr("timeline.valueFilesCount", { count: files })] : []),
     fmtDuration(g.ms),
   ].join(" · ");
   return (
-    <section className={`msg assistant activity-group${open ? " open" : ""}${active ? " current" : ""}`} aria-label="Agent activity">
+    <section className={`msg assistant activity-group${open ? " open" : ""}${active ? " current" : ""}`} aria-label={tr("timeline.agentActivity")}>
       <RunSummary
-        title="Activity"
+        title={tr("timeline.activity")}
         meta={meta}
         state={state}
         expanded={open}
         additions={lineStats.add}
         deletions={lineStats.del}
-        label={`${open ? "Collapse" : "Expand"} activity, ${meta}`}
+        label={open
+          ? tr("timeline.collapseActivityValue", { value: meta })
+          : tr("timeline.expandActivityValue", { value: meta })}
+        diffLabel={tr("timeline.valueAdditionsValueDeletions", { additions: lineStats.add, deletions: lineStats.del })}
         onToggle={() => {
           userToggled.current = true;
           setOpen((value) => !value);
@@ -1062,22 +1066,6 @@ export function ActivityGroupView({
       </div>
     </section>
   );
-}
-
-/** Compatibility export for callers that still supply the former tool-only
- * group shape; new timeline rendering uses ActivityGroupView directly. */
-export function WorkedGroup({ g, subagents }: { g: WorkGroup; subagents: SubagentState | null }) {
-  const activity: ActivityGroup = {
-    kind: "activity",
-    id: g.id,
-    items: g.items,
-    tools: g.tools,
-    tasks: g.tasks,
-    thoughts: [],
-    ms: g.ms,
-    settled: !g.tools.some((tool) => tool.status === "pending" || tool.status === "running"),
-  };
-  return <ActivityGroupView g={activity} subagents={subagents} />;
 }
 
 function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segmentStartedAt, live, onRevert, onFork, revert, fork }: {

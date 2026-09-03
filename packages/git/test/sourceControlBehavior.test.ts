@@ -385,7 +385,8 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
     assert.equal(bubble.getAttribute("aria-label"), "Edited 4 files");
     assert.match(view.container.textContent ?? "", /4 files/);
     assert.match(view.container.textContent ?? "", /\+10/);
-    assert.match(view.container.textContent ?? "", /-4/);
+    // Deleted-line counts use the typographic minus, matching GitView.
+    assert.match(view.container.textContent ?? "", /−4/);
     assert.equal(view.container.querySelector(".pending-changes-file"), null);
     assert.equal(labeledButton(view.container, "Undo"), undefined);
     assert.equal(labeledButton(view.container, "Review"), undefined);
@@ -408,7 +409,7 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
     assert.ok(agentStatus, "active work replaces the compact change summary");
     assert.match(agentStatus.textContent ?? "", /Luna/);
     assert.match(agentStatus.textContent ?? "", /Run focused checks and review the diff/);
-    assert.match(agentStatus.textContent ?? "", /4 files.*\+10.*-4/s);
+    assert.match(agentStatus.textContent ?? "", /4 files.*\+10.*−4/s);
     assert.match(agentStatus.textContent ?? "", /feature\/glass-ui/);
     assert.equal(agentStatus.textContent?.includes("Context"), false);
     assert.equal(agentStatus.textContent?.includes("Agent"), false);

@@ -120,15 +120,6 @@ export function toolSummary(input: JsonObject): string {
   return "";
 }
 
-export interface WorkGroup {
-  kind: "work";
-  id: string;
-  items: Array<ToolMsg | TaskActivityMsg>;
-  tools: ToolMsg[];
-  tasks: TaskActivityMsg[];
-  ms: number;
-}
-
 export type ActivityItem = AssistantMsg | ToolMsg | TaskActivityMsg;
 
 export interface ActivityGroup {
@@ -293,34 +284,6 @@ export function promptIndex(messages: RenderMessage[]): Array<{ id: string; prev
         text: m.text.length > 1200 ? `${m.text.slice(0, 1200)}…` : m.text,
       };
     });
-}
-
-/** Collapse tool calls and semantic task deltas into one "Worked for …" group. */
-export function groupWork(messages: RenderMessage[]): Array<RenderMessage | WorkGroup> {
-  const out: Array<RenderMessage | WorkGroup> = [];
-  let run: Array<ToolMsg | TaskActivityMsg> = [];
-  const flush = () => {
-    const tools = run.filter((item): item is ToolMsg => item.kind === "tool");
-    const tasks = run.filter((item): item is TaskActivityMsg => item.kind === "task");
-    if (run.length >= 2 || tasks.length > 0) {
-      const first = run[0]!;
-      const last = run[run.length - 1]!;
-      const end = last.kind === "tool" ? (last.finishTime ?? last.time) : last.time;
-      out.push({ kind: "work", id: `work-${first.id}`, items: run, tools, tasks, ms: Math.max(0, end - first.time) });
-    } else {
-      out.push(...run);
-    }
-    run = [];
-  };
-  for (const m of messages) {
-    if (m.kind === "tool" || m.kind === "task") run.push(m);
-    else {
-      flush();
-      out.push(m);
-    }
-  }
-  flush();
-  return out;
 }
 
 /** Project one turn into an activity stream followed by its final reading

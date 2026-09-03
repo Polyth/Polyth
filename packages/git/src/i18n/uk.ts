@@ -223,6 +223,7 @@ export const uk: GitMessages = {
   "pendingchangesbar.files": "файли",
   "pendingchangesbar.listChangedFiles": "Список змінених файлів",
   "pendingchangesbar.message": "×",
+  "pendingchangesbar.openActiveRunDetailsValue": "Відкрити деталі активного запуску: {action}",
   "pendingchangesbar.review": "Переглянути",
   "pendingchangesbar.showLess": "Показати менше",
   "pendingchangesbar.showMoreFile": "Показати ще 1 файл",

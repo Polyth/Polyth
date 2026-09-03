@@ -15,7 +15,7 @@ import {
   reasoningHead,
   reasoningTail,
 } from "../src/execution.ts";
-import type { ToolMsg } from "../src/reduce.ts";
+import type { TaskActivityMsg, ToolMsg } from "../src/reduce.ts";
 
 const tool = (patch: Partial<ToolMsg> = {}): ToolMsg => ({
   kind: "tool",
@@ -267,7 +267,23 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { default: ExecutionRow } = await import("../src/components/ExecutionRow.tsx");
-const { WorkedGroup } = await import("../src/components/Timeline.tsx");
+const { ActivityGroupView } = await import("../src/components/Timeline.tsx");
+
+/** Build the derived activity projection the timeline hands to the group view. */
+const activityGroup = (
+  id: string,
+  items: Array<ToolMsg | TaskActivityMsg>,
+  ms = 420,
+) => ({
+  kind: "activity" as const,
+  id,
+  items,
+  tools: items.filter((item): item is ToolMsg => item.kind === "tool"),
+  tasks: items.filter((item): item is TaskActivityMsg => item.kind === "task"),
+  thoughts: [],
+  ms,
+  settled: !items.some((item) => item.kind === "tool" && (item.status === "pending" || item.status === "running")),
+});
 const { default: PermissionBanner } = await import("../../../packages/permissions/widgets/PermissionBanner.tsx");
 const { activateSession, getState, setSessions } = await import("../src/store.ts");
 
@@ -428,18 +444,17 @@ test("execution summary columns stay aligned whether or not a row has line count
       newString: "one\nthree\nfour",
     },
   });
-  const group = {
-    kind: "work" as const,
-    id: "work-align",
-    items: [shell, edit],
-    tools: [shell, edit],
-    tasks: [],
-    ms: 420,
-  };
+  const group = activityGroup("activity-align", [shell, edit]);
   try {
-    await act(async () => root.render(createElement(WorkedGroup, { g: group, subagents: null })));
+    await act(async () => root.render(createElement(ActivityGroupView, { g: group, subagents: null })));
     const toggle = container.querySelector<HTMLButtonElement>(".ui-run-summary")!;
-    assert.equal(toggle.children.length, 3);
+    assert.deepEqual(
+      [...toggle.children].map((child) =>
+        ["ui-run-summary-mark", "ui-run-summary-copy", "ui-run-summary-diff", "ui-run-summary-chevron"]
+          .find((track) => child.classList.contains(track))),
+      ["ui-run-summary-mark", "ui-run-summary-copy", "ui-run-summary-diff", "ui-run-summary-chevron"],
+      "state, copy, aggregate line counts, and chevron stay in fixed tracks",
+    );
     await act(async () => toggle.click());
     const summaries = [...container.querySelectorAll(".execution-summary")];
     assert.equal(summaries.length, 2);
@@ -577,22 +592,15 @@ test("working groups open while running and preserve a reader toggle", async () 
   document.body.appendChild(container);
   const root = createRoot(container);
   const running = tool({ status: "running", output: undefined, finishTime: undefined });
-  const group = (message: ToolMsg) => ({
-    kind: "work" as const,
-    id: "work-1",
-    items: [message],
-    tools: [message],
-    tasks: [],
-    ms: 420,
-  });
+  const group = (message: ToolMsg) => activityGroup("activity-1", [message]);
   try {
-    await act(async () => root.render(createElement(WorkedGroup, { g: group(running), subagents: null })));
+    await act(async () => root.render(createElement(ActivityGroupView, { g: group(running), subagents: null })));
     const toggle = container.querySelector<HTMLButtonElement>(".ui-run-summary")!;
     assert.equal(toggle.getAttribute("aria-expanded"), "true", "the current batch exposes its live tool");
 
     await act(async () => toggle.click());
     assert.equal(toggle.getAttribute("aria-expanded"), "false");
-    await act(async () => root.render(createElement(WorkedGroup, {
+    await act(async () => root.render(createElement(ActivityGroupView, {
       g: group(tool()),
       subagents: null,
     })));
@@ -610,9 +618,9 @@ test("an action batch stays closed by default and opens on hand toggle", async (
   document.body.appendChild(container);
   const root = createRoot(container);
   const message = tool();
-  const group = { kind: "work" as const, id: "work-batch", items: [message], tools: [message], tasks: [], ms: 420 };
+  const group = activityGroup("activity-batch", [message]);
   try {
-    await act(async () => root.render(createElement(WorkedGroup, { g: group, subagents: null })));
+    await act(async () => root.render(createElement(ActivityGroupView, { g: group, subagents: null })));
     const toggle = container.querySelector<HTMLButtonElement>(".ui-run-summary")!;
     assert.equal(toggle.getAttribute("aria-expanded"), "false", "the batch is folded by default");
     await act(async () => toggle.click());
@@ -638,9 +646,9 @@ test("implementation groups show combined added and removed line counts", async 
     tool: "write",
     input: { filePath: "src/b.ts", content: "hi" },
   });
-  const group = { kind: "work" as const, id: "work-edits", items: [edit, write], tools: [edit, write], tasks: [], ms: 420 };
+  const group = activityGroup("activity-edits", [edit, write]);
   try {
-    await act(async () => root.render(createElement(WorkedGroup, { g: group, subagents: null })));
+    await act(async () => root.render(createElement(ActivityGroupView, { g: group, subagents: null })));
     assert.match(container.querySelector(".ui-run-summary-diff")?.textContent ?? "", /\+2/);
     assert.match(container.querySelector(".ui-run-summary-diff")?.textContent ?? "", /−1/);
   } finally {

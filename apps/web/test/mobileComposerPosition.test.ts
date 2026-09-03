@@ -5,9 +5,14 @@ import { readFile } from "node:fs/promises";
 test("the phone composer stays in visual-viewport flow and expands inside the visible band", async () => {
   const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 
-  assert.match(
-    css,
-    /\.composer-chat\.composer-mobile \{\s*\/\*[^]*?padding: var\(--space-1\) var\(--screen-gutter\) 0;/,
+  // The side gutters may read the horizontal insets, but the block-end inset
+  // belongs to the surrounding dock/nav alone.
+  const phoneComposer = css.match(/\.composer-chat\.composer-mobile \{[^}]*\}/)?.[0] ?? "";
+  assert.match(phoneComposer, /padding: var\(--space-1\)/,
+    "the phone composer owns its own compact block padding");
+  assert.doesNotMatch(
+    phoneComposer,
+    /--safe-bottom/,
     "the composer does not duplicate the dock or navigator safe-area inset",
   );
   assert.match(

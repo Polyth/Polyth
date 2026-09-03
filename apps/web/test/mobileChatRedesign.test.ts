@@ -362,6 +362,10 @@ test("the composer is adaptive, with one primary action at a time", async () => 
     composer.includes("Math.max(44, Math.min(visible * 0.42, visible - 240))"),
     "the input never grows past the room its own chrome needs",
   );
+  assert.ok(
+    composer.includes("Math.max(44, visible * 0.42)"),
+    "wider layouts keep the plain proportional cap",
+  );
   assert.ok(!composer.includes("STARTER_SUGGESTIONS"), "starters come from the starter system, not hardcoded chips");
   assert.ok(composer.includes("mobileSheet"), "the mode selector opens as a sheet on phones");
   assert.ok(
@@ -492,7 +496,13 @@ test("phone CSS keeps the layout inside the visible viewport", async () => {
     /composer-mobile\.composer-has-draft \.composer-workflow\s*\{\s*display:\s*inline-flex;/,
     "a draft keeps Run workflow visible during narrow-layout transitions",
   );
-  assert.match(phone, /max-height: 18dvh/, "§20: the expanded phone input stays compact and scrolls");
+  // The font-scaled token sets the normal ceiling; the viewport share keeps a
+  // short band from handing the input the whole screen.
+  assert.match(
+    phone,
+    /max-height: min\(var\(--composer-max-input-height\), 18dvh\)/,
+    "§20: the expanded phone input stays compact and scrolls",
+  );
   assert.match(section, /margin-bottom: var\(--keyboard-inset, 0px\)/, "§21: sheets sit above the keyboard");
   assert.match(section, /max-height: calc\(var\(--visual-vh, 100dvh\)/, "§29: sheets are sized by the visible band");
   assert.match(section, /html\[data-sheet="open"\], html\[data-sheet="open"\] body \{ overflow: hidden; \}/);
@@ -551,7 +561,13 @@ test("phone views expose only floating power-on-demand controls", async () => {
   assert.doesNotMatch(mobileHeader, /Icon\.plus/);
   assert.match(css, /\.mobile-session-floats\s*\{[^}]*position:\s*fixed/s);
   assert.match(css, /\.mobile-tools-sheet\.sheet\s*\{[^}]*width:\s*calc\(100vw/s);
-  assert.match(css, /\.app-shell\s*\{[^}]*padding-top:\s*calc\(var\(--safe-top\) \+ var\(--tap\) \+ var\(--space-6\)\)/s, "non-chat phone views clear the floating shell");
+  // The reserved band clears the floating island: safe area, the island's own
+  // height (never below the tap floor), and the chrome inset around it.
+  assert.match(
+    css,
+    /\.app-shell\s*\{[^}]*padding-top:\s*calc\(var\(--safe-top\) \+ var\(--conversation-chrome-inset\) \+ max\(var\(--tap\), var\(--mobile-island-height\)\) \+ var\(--space-4\)\)/s,
+    "non-chat phone views clear the floating shell",
+  );
   assert.ok(navigation.includes("useResolvedCapabilities()"), "the rail follows configured capabilities");
   assert.ok(navigation.includes("useRailSurfaceModel()"), "notification and plugin surfaces stay reachable");
   assert.ok(navigation.includes("ui.mobileShortcuts"), "the rail follows the ordered Settings preference");

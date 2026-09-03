@@ -20,7 +20,10 @@ export interface RunSummaryProps {
   onToggle: () => void;
   additions?: number;
   deletions?: number;
-  label?: string;
+  /** Localized accessible name for the toggle; the primitive owns no copy. */
+  label: string;
+  /** Localized accessible name for the added/removed line counts. */
+  diffLabel?: string;
   className?: string;
 }
 
@@ -42,6 +45,7 @@ export default function RunSummary({
   additions = 0,
   deletions = 0,
   label,
+  diffLabel,
   className,
 }: RunSummaryProps) {
   const Chevron = expanded ? ChevronUpIcon : ChevronDownIcon;
@@ -50,7 +54,7 @@ export default function RunSummary({
       type="button"
       className={`ui-run-summary${className ? ` ${className}` : ""}`}
       data-state={state}
-      aria-label={label ?? `${expanded ? "Collapse" : "Expand"} ${title}`}
+      aria-label={label}
       aria-expanded={expanded}
       onClick={onToggle}
     >
@@ -60,7 +64,7 @@ export default function RunSummary({
         {meta && <small>{meta}</small>}
       </span>
       {(additions > 0 || deletions > 0) && (
-        <span className="ui-run-summary-diff" aria-label={`${additions} additions, ${deletions} deletions`}>
+        <span className="ui-run-summary-diff" aria-label={diffLabel}>
           {additions > 0 && <span className="positive">+{additions}</span>}
           {deletions > 0 && <span className="negative">−{deletions}</span>}
         </span>

@@ -4,10 +4,13 @@ import { ago, displaySessionTitle } from "../../format.ts";
 import { Icon } from "../../icons.tsx";
 import { tr } from "../../i18n/index.ts";
 import {
+  buildIslandItems,
   eventsHaveCodeChanges,
+  notablePeers,
   promptExcerpt,
   recentSessionsForIsland,
   sessionTitleOf,
+  type IslandItem,
   type IslandTask,
 } from "../../mobileIsland.ts";
 import { railIconFor } from "../../railIcons.ts";
@@ -76,6 +79,7 @@ function IslandOverview({
   title,
   prompt,
   tasks,
+  requests,
   recent,
   events,
   onClose,
@@ -83,6 +87,7 @@ function IslandOverview({
   title: string;
   prompt: string | undefined;
   tasks: IslandTask[];
+  requests: IslandItem[];
   recent: SessionProjection[];
   events: Record<string, readonly SessionEvent[] | undefined>;
   onClose: () => void;
@@ -100,6 +105,18 @@ function IslandOverview({
           ? <PromptExcerpt text={prompt} />
           : <p className="mobile-island-empty">{tr("mobile.island.noPrompt")}</p>}
       </div>
+      {requests.length > 0 && (
+        <SheetSection title={tr("mobile.island.requests")}>
+          <ul className="mobile-task-list">
+            {requests.map((request) => (
+              <li key={request.id} className="request">
+                <span className={`mobile-island-dot ${request.tone ?? request.kind}`} aria-hidden="true" />
+                <span className="mobile-task-text">{request.text}</span>
+              </li>
+            ))}
+          </ul>
+        </SheetSection>
+      )}
       <SheetSection title={tr("mobile.island.tasks")}>
         {tasks.length > 0 ? (
           <ul className="mobile-task-list">
@@ -182,9 +199,36 @@ export default function MobileSessionHeader() {
     () => recentSessionsForIsland(sessions, session?.id),
     [sessions, session?.id],
   );
+  const peers = useMemo(
+    () => notablePeers(sessions, session?.id, events),
+    [sessions, session?.id, events],
+  );
   useEffect(() => {
+    for (const peer of peers) prefetchSessionTail(peer.id);
     for (const item of recent) prefetchSessionTail(item.id);
-  }, [recent]);
+  }, [peers, recent]);
+  const labels = useMemo(() => ({
+    task: tr("mobile.island.kindTask"),
+    request: tr("mobile.island.kindRequest"),
+    session: tr("mobile.island.kindSession"),
+    peer: tr("mobile.island.kindPeer"),
+    working: tr("mobile.island.working"),
+    newChat: tr("mobile.island.newChat"),
+  }), []);
+  // The pill title stays put; the derived items only feed the status glyph and
+  // the overview's request list, so nothing rotates under the reader.
+  const items = useMemo(() => buildIslandItems({
+    sessionTitle: title,
+    hasSession: session !== null,
+    tasks: model.tasks?.items,
+    permissions: model.permissions,
+    questions: model.questions,
+    secrets: model.secrets,
+    peers,
+    labels,
+  }), [title, session, model.tasks, model.permissions, model.questions, model.secrets, peers, labels]);
+  const requests = useMemo(() => items.filter((item) => item.kind === "request"), [items]);
+  const sessionStatus = session ? resolveSessionStatus(session) : null;
 
   return <>
     <div className="mobile-session-floats" aria-label="Workspace navigation">
@@ -202,6 +246,13 @@ export default function MobileSessionHeader() {
           aria-expanded={surface === "island"}
           onClick={() => setSurface("island")}
         >
+          {sessionStatus?.kind === "working"
+            ? <span className="ui-spinner ui-spinner--sm mobile-island-spinner" aria-hidden="true" />
+            : requests[0]
+              ? <span className={`mobile-island-dot ${requests[0].tone ?? "request"}`} aria-hidden="true" />
+              : session?.status === "finished"
+                ? <span className="mobile-island-dot done" aria-hidden="true" />
+                : null}
           <span className="mobile-island-text">{title}</span>
           <Icon.chevronDown />
         </button>
@@ -216,6 +267,7 @@ export default function MobileSessionHeader() {
         title={title}
         prompt={promptVisible ? undefined : prompt}
         tasks={model.tasks?.items ?? []}
+        requests={requests}
         recent={recent}
         events={events}
         onClose={() => setSurface(null)}

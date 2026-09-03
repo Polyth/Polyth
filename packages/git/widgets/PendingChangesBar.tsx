@@ -245,11 +245,15 @@ export default function PendingChangesBar() {
         model={modelName}
         status={action}
         elapsed={elapsed}
-        fileCount={count}
+        files={count > 0 ? bubbleCount : null}
         additions={totals?.additions}
         deletions={totals?.deletions}
         branch={branchName}
-        label={`Open active run details: ${action}`}
+        label={tr("pendingchangesbar.openActiveRunDetailsValue", { action })}
+        diffLabel={tr("pendingchangesbar.valueAdditionsValueDeletions", {
+          additions: totals?.additions ?? 0,
+          deletions: totals?.deletions ?? 0,
+        })}
         onClick={() => openWorkspacePane("events")}
       />
     );
@@ -289,6 +293,10 @@ export default function PendingChangesBar() {
           additions={totals?.additions}
           deletions={totals?.deletions}
           label={title}
+          diffLabel={tr("pendingchangesbar.valueAdditionsValueDeletions", {
+            additions: totals?.additions ?? 0,
+            deletions: totals?.deletions ?? 0,
+          })}
           onToggle={() => setDetailsOpen(true)}
         />
       </section>

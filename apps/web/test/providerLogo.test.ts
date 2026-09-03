@@ -165,7 +165,6 @@ test("provider surfaces use ProviderLogo without brand palette rules", () => {
   }
   assert.match(css, /\.provider-logo > svg\s*\{[^}]*width:\s*100%;[^}]*height:\s*100%/s);
   const expectedLogoClasses = [
-    "agent-reply-mark",
     "fusion-provider-logo",
     "model-provider-logo",
     "model-row-provider-logo",
@@ -174,6 +173,7 @@ test("provider surfaces use ProviderLogo without brand palette rules", () => {
     "provider-logo",
     "provider-share-logo",
     "quota-provider-logo",
+    "response-footer-mark",
     "set-provider-logo",
     "usage-legend-logo",
     "usage-model-logo",

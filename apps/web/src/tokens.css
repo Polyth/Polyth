@@ -123,6 +123,8 @@
   --radius-island: calc(23px * var(--corner-radius-scale));
   --radius-dock: calc(23px * var(--corner-radius-scale));
   --radius-composer: calc(28px * var(--corner-radius-scale));
+  /* Fully rounded. A pill stays a pill at every corner-radius setting. */
+  --radius-round: 999px;
 
   /* Deprecated radius aliases. Do not use in new CSS. */
   --radius: var(--radius-control);

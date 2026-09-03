@@ -158,6 +158,7 @@ UI action glyphs use the icon scale; never hardcode svg dimensions in new CSS.
 | `--radius-island` | Floating navigation islands. |
 | `--radius-dock` | Active status docks and floating persistent layers. |
 | `--radius-composer` | Composer-specific radius when its geometry needs an independent role. |
+| `--radius-round` | Fully rounded pill; stays circular at every corner-radius setting. |
 | `--radius` | Deprecated alias of `--radius-control`. |
 | `--radius-sm` | Deprecated alias of `--radius-control`. |
 | `--radius-md` | Deprecated alias of `--radius-card`. |

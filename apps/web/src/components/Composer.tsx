@@ -725,7 +725,11 @@ export default function Composer({
     el.style.height = phone ? "0px" : "auto";
     // The visible viewport supplies the emergency cap; the shared
     // --composer-max-input-height token supplies the normal five-line cap.
-    const cap = Math.max(44, visible * 0.42);
+    // On phones the input never grows past the room its own chrome (model
+    // header, actions, context bar) needs on a keyboard-squeezed viewport.
+    const cap = phone
+      ? Math.max(44, Math.min(visible * 0.42, visible - 240))
+      : Math.max(44, visible * 0.42);
     el.style.height = `${Math.min(el.scrollHeight + 2, cap)}px`;
   }, [text, inputFocused, isPhone, bandHeight]);
 
