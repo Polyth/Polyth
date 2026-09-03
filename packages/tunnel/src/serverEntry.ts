@@ -12,6 +12,7 @@ import {
   matchRemotePath,
   PRIVILEGED_REMOTE_CAPABILITIES,
   REMOTE_CAPABILITY,
+  requireLocalTunnelAdmin,
 } from "@polyth/contracts";
 import {
   type HttpServerContext,
@@ -34,15 +35,6 @@ export const TUNNEL_REMOTE_ACCESS: RemoteAccessPolicy = {
   ],
 };
 
-const requireLocalAdmin = (principal: AuthPrincipal): void => {
-  if (principal.kind === "paired-device") {
-    throw Object.assign(new Error("not allowed"), { code: "forbidden" });
-  }
-  if (principal.kind === "anonymous") {
-    throw Object.assign(new Error("authentication required"), { code: "unauthorized" });
-  }
-};
-
 export function tunnelRoutes(deps: {
   store: TunnelStore;
   events: TunnelEventBus;
@@ -62,7 +54,7 @@ export function tunnelRoutes(deps: {
       json(200, await deps.diagnostics());
       return true;
     }
-    requireLocalAdmin(principal);
+    requireLocalTunnelAdmin(request);
     if (path === "/api/tunnel/pairing" && method === "POST") {
       request.requireCapability(REMOTE_CAPABILITY.tunnelPairingManage);
       const body = await request.body();

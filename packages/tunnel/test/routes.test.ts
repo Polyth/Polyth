@@ -15,15 +15,23 @@ const request = (opts: {
   method?: string;
   principal: AuthPrincipal;
   body?: Record<string, unknown>;
+  loopback?: boolean;
+  ingressKind?: "public-http" | "polyth-link" | "internal";
 }): { rc: RouteRequest; codes: number[] } => {
   const codes: number[] = [];
+  const loopback = opts.loopback ?? true;
+  const ingress = opts.ingressKind === "polyth-link"
+    ? { kind: "polyth-link" as const, connectionId: "c1", transport: "direct" as const }
+    : opts.ingressKind === "internal"
+      ? { kind: "internal" as const, serviceId: "other" }
+      : { kind: "public-http" as const, listenerId: "public", loopback, secure: false };
   const rc: RouteRequest = {
     req: {} as never,
     res: {} as never,
     url: new URL(`http://polyth.test${opts.path}`),
     path: opts.path.split("?")[0]!,
     method: opts.method ?? "GET",
-    ingress: { kind: "public-http", listenerId: "public", loopback: true, secure: false },
+    ingress,
     principal: opts.principal,
     requireCapability() {},
     body: async () => opts.body ?? {},
@@ -88,6 +96,65 @@ test("pairing and identity rotation stay local-admin; paired devices only reach 
   });
   assert.equal(await routes(local.rc), true);
   assert.deepEqual(local.codes, [503]);
+  store.close();
+});
+
+test("non-loopback UI sessions and fully granted paired devices cannot administer the tunnel", async () => {
+  const store = createTunnelStore(join(tmp(), "tunnel.db"));
+  const events = new TunnelEventBus();
+  const routes = tunnelRoutes({
+    store,
+    events,
+    host: () => null,
+    connections: new Map(),
+    status: async () => ({ pairingAvailable: false }),
+    diagnostics: async () => ({ packageStatus: "host-binary-missing" }),
+  });
+  const session: AuthPrincipal = { kind: "ui-session", sessionId: "s1", rememberedDeviceId: "s1" };
+  await assert.rejects(
+    () => routes(request({
+      path: "/api/tunnel/pairing",
+      method: "POST",
+      principal: session,
+      loopback: false,
+      body: { profile: "interact" },
+    }).rc),
+    (error: Error & { code?: string }) => error.code === "forbidden",
+  );
+  const paired: AuthPrincipal = {
+    kind: "paired-device",
+    deviceId: "dev-1",
+    deviceEndpointId: "ep",
+    connectionId: "c1",
+    transport: "direct",
+    grants: [
+      "tunnel.status.read",
+      "tunnel.pairing.manage",
+      "tunnel.devices.manage",
+      "tunnel.grants.manage",
+      "server.identity.rotate",
+    ],
+    grantRevision: 1,
+  };
+  for (const path of [
+    "/api/tunnel/pairing",
+    "/api/tunnel/devices",
+    "/api/tunnel/identity/rotate",
+  ]) {
+    await assert.rejects(
+      () => routes(request({ path, method: "POST", principal: paired }).rc),
+      (error: Error & { code?: string }) => error.code === "forbidden",
+    );
+  }
+  await assert.rejects(
+    () => routes(request({
+      path: "/api/tunnel/pairing",
+      method: "POST",
+      principal: { kind: "internal-service", serviceId: "not-allowlisted" },
+      ingressKind: "internal",
+    }).rc),
+    (error: Error & { code?: string }) => error.code === "forbidden",
+  );
   store.close();
 });
 

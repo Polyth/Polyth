@@ -140,6 +140,37 @@ export interface RouteRequest {
   json(code: number, body: unknown): void;
 }
 
+/** Internal services that may administer Polyth Link. Empty by default. */
+export const LOCAL_TUNNEL_ADMIN_SERVICES: readonly string[] = [];
+
+/** Local loopback administration of pairing, devices, grants, and identity.
+ *  Paired devices and anonymous callers are always denied. Internal services
+ *  are denied unless their serviceId is explicitly allowlisted. */
+export function requireLocalTunnelAdmin(
+  request: Pick<RouteRequest, "ingress" | "principal">,
+  opts?: { allowInternalServices?: readonly string[] },
+): void {
+  const principal = request.principal;
+  if (principal.kind === "paired-device") {
+    throw Object.assign(new Error("not allowed"), { code: "forbidden" });
+  }
+  if (principal.kind === "anonymous") {
+    throw Object.assign(new Error("authentication required"), { code: "unauthorized" });
+  }
+  if (principal.kind === "internal-service") {
+    const allowed = opts?.allowInternalServices ?? LOCAL_TUNNEL_ADMIN_SERVICES;
+    if (!allowed.includes(principal.serviceId)) {
+      throw Object.assign(new Error("not allowed"), { code: "forbidden" });
+    }
+    return;
+  }
+  if (request.ingress.kind !== "public-http" || request.ingress.loopback !== true) {
+    throw Object.assign(new Error("not allowed"), { code: "forbidden" });
+  }
+  if (principal.kind === "local-user" || principal.kind === "ui-session") return;
+  throw Object.assign(new Error("not allowed"), { code: "forbidden" });
+}
+
 // ---------------------------------------------------------------- capabilities
 
 export interface CapabilityKey<T> {

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { GRANT_PROFILE_PRESETS, matchRemotePath, REMOTE_CAPABILITY } from "@polyth/contracts";
+import { GRANT_PROFILE_PRESETS, matchRemotePath, REMOTE_CAPABILITY, requireLocalTunnelAdmin } from "@polyth/contracts";
 import {
   createAuthService,
   publicHttpIngress,
@@ -110,3 +110,85 @@ test("remote path matcher rejects traversal and accepts :param segments", () => 
   assert.equal(matchRemotePath("/api/health", "/api/health"), true);
   assert.equal(matchRemotePath("/api/health", "/api/Health"), false);
 });
+
+test("auth disabled: loopback is local-user; non-loopback is not", () => {
+  const auth = createAuthService({ file: join(tmp(), "off.json") });
+  const loop = auth.resolve(reqOf("127.0.0.1"), publicHttpIngress(reqOf("127.0.0.1")));
+  assert.equal(loop.principal.kind, "local-user");
+  assert.equal(loop.authenticated, true);
+  if (loop.principal.kind === "local-user") assert.equal(loop.principal.trustedLoopback, true);
+
+  const remote = auth.resolve(reqOf("203.0.113.9"), publicHttpIngress(reqOf("203.0.113.9")));
+  assert.equal(remote.principal.kind, "anonymous");
+  assert.equal(remote.authenticated, false);
+});
+
+test("spoofed forwarded and internal headers do not change ingress or principal", () => {
+  const auth = createAuthService({ file: join(tmp(), "off.json") });
+  const spoofed: AuthRequestLike = {
+    headers: {
+      cookie: "polyth_auth=" + "a".repeat(64),
+      "user-agent": "spoof",
+    },
+    socket: { remoteAddress: "203.0.113.9" },
+  };
+  const ingress = publicHttpIngress(spoofed);
+  assert.equal(ingress.kind, "public-http");
+  assert.equal(ingress.loopback, false);
+  const resolution = auth.resolve(spoofed, ingress);
+  assert.equal(resolution.principal.kind, "anonymous");
+});
+
+test("requireLocalTunnelAdmin denies paired, anonymous, non-loopback, and unknown internals", () => {
+  const loop = { kind: "public-http" as const, listenerId: "public", loopback: true, secure: false };
+  const remote = { kind: "public-http" as const, listenerId: "public", loopback: false, secure: false };
+  const grants = [
+    ...GRANT_PROFILE_PRESETS["full-remote"],
+    REMOTE_CAPABILITY.tunnelPairingManage,
+    REMOTE_CAPABILITY.tunnelDevicesManage,
+    REMOTE_CAPABILITY.tunnelGrantsManage,
+    REMOTE_CAPABILITY.serverIdentityRotate,
+  ];
+
+  requireLocalTunnelAdmin({ ingress: loop, principal: { kind: "local-user", trustedLoopback: true } });
+  requireLocalTunnelAdmin({
+    ingress: loop,
+    principal: { kind: "ui-session", sessionId: "s", rememberedDeviceId: "s" },
+  });
+
+  assert.throws(
+    () => requireLocalTunnelAdmin({ ingress: remote, principal: { kind: "ui-session", sessionId: "s", rememberedDeviceId: "s" } }),
+    (error: Error & { code?: string }) => error.code === "forbidden",
+  );
+  assert.throws(
+    () => requireLocalTunnelAdmin({ ingress: loop, principal: { kind: "anonymous" } }),
+    (error: Error & { code?: string }) => error.code === "unauthorized",
+  );
+  assert.throws(
+    () => requireLocalTunnelAdmin({
+      ingress: loop,
+      principal: {
+        kind: "paired-device",
+        deviceId: "d",
+        deviceEndpointId: "e",
+        connectionId: "c",
+        transport: "direct",
+        grants,
+        grantRevision: 1,
+      },
+    }),
+    (error: Error & { code?: string }) => error.code === "forbidden",
+  );
+  assert.throws(
+    () => requireLocalTunnelAdmin({
+      ingress: loop,
+      principal: { kind: "internal-service", serviceId: "not-allowlisted" },
+    }),
+    (error: Error & { code?: string }) => error.code === "forbidden",
+  );
+  requireLocalTunnelAdmin(
+    { ingress: loop, principal: { kind: "internal-service", serviceId: "link-admin" } },
+    { allowInternalServices: ["link-admin"] },
+  );
+});
+

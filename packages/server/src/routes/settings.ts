@@ -88,8 +88,15 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
 
     // ---- system info ------------------------------------------------------------
     if (path === "/api/system/info" && method === "GET") {
-      const revealLocal = rc.principal.kind === "local-user"
-        || (rc.principal.kind === "ui-session" && rc.ingress.kind === "public-http" && rc.ingress.loopback);
+      if (rc.principal.kind === "anonymous") {
+        throw Object.assign(new Error("authentication required"), { code: "unauthorized" });
+      }
+      if (rc.principal.kind === "paired-device") {
+        throw Object.assign(new Error("not allowed"), { code: "forbidden" });
+      }
+      const revealLocal = (rc.principal.kind === "local-user" || rc.principal.kind === "ui-session")
+        && rc.ingress.kind === "public-http"
+        && rc.ingress.loopback;
       rc.json(200, deps.systemInfo(revealLocal));
       return true;
     }

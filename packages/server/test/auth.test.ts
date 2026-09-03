@@ -112,10 +112,14 @@ test("gate allow/deny: disabled, cookie, localhost bypass, revoked, expired", ()
   let clock = 1_700_000_000_000;
   const dir = tmp();
 
-  // no password at all → everything passes
+  // no password: loopback may be local-user; missing/non-loopback is not
   const off = createAuthService({ file: join(dir, "off.json"), now: () => clock });
-  assert.equal(gateOf(off, reqOf()), null);
   assert.equal(off.enabled(), false);
+  assert.equal(gateOf(off, reqOf(undefined, "127.0.0.1")), null);
+  assert.equal(resolved(off, reqOf(undefined, "127.0.0.1")).principal.kind, "local-user");
+  assert.equal(gateOf(off, reqOf())?.status, 401);
+  assert.equal(gateOf(off, reqOf(undefined, "203.0.113.7"))?.status, 401);
+  assert.equal(resolved(off, reqOf(undefined, "203.0.113.7")).principal.kind, "anonymous");
 
   const auth = createAuthService({
     file: join(dir, "auth.json"), envPassword: "pw", now: () => clock,

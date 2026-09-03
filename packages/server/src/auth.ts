@@ -340,7 +340,10 @@ export function createAuthService(opts: AuthServiceOptions): AuthService {
       return { principal, authenticated: true };
     }
     if (!effectiveHash()) {
-      return { principal: LOCAL_USER, authenticated: true };
+      if (ingress.loopback) {
+        return { principal: LOCAL_USER, authenticated: true };
+      }
+      return { principal: ANONYMOUS, authenticated: false };
     }
     if (opts.localhostOptional && ingress.loopback) {
       return { principal: LOCAL_USER, authenticated: true };

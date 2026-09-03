@@ -21,6 +21,7 @@ import type { ModelVisibilityService } from "./modelVisibility.ts";
 import type { RuntimeCatalog } from "./runtimeCatalog.ts";
 import {
   AuthorizationError,
+  isLoopbackAddress,
   publicHttpIngress,
   requirePrincipalCapability,
   UNTRUSTED_INGRESS_HEADERS,
@@ -206,6 +207,13 @@ export interface HttpDeps {
 // learn that auth is required and then mint a session.
 const AUTH_PUBLIC = new Set(["/api/auth/status", "/api/auth/login"]);
 
+function fallbackResolution(ingress: RequestIngress, req: AuthRequestLike): AuthResolution {
+  if (ingress.kind === "public-http" && ingress.loopback && isLoopbackAddress(req.socket.remoteAddress)) {
+    return { principal: { kind: "local-user", trustedLoopback: true }, authenticated: true };
+  }
+  return { principal: { kind: "anonymous" }, authenticated: false };
+}
+
 const headerValue = (req: IncomingMessage, name: string): string | undefined => {
   const raw = req.headers[name];
   return Array.isArray(raw) ? raw[0] : raw;
@@ -284,10 +292,7 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
         headers: { cookie: req.headers.cookie, "user-agent": Array.isArray(req.headers["user-agent"]) ? req.headers["user-agent"][0] : req.headers["user-agent"] },
         socket: { remoteAddress: req.socket?.remoteAddress },
       };
-      const resolution = deps.auth?.resolve(reqLike, ingress) ?? {
-        principal: { kind: "local-user", trustedLoopback: true } as const,
-        authenticated: true,
-      };
+      const resolution = deps.auth?.resolve(reqLike, ingress) ?? fallbackResolution(ingress, reqLike);
       const principal = resolution.principal;
 
       if (deps.auth && path.startsWith("/api/") && !AUTH_PUBLIC.has(path)) {
