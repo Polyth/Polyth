@@ -77,9 +77,6 @@ function AttentionBadges({ status }: { status: SessionRowStatus }) {
   if (status.kind === "needs-reply") {
     return <span className="session-status-indicator reply" title={status.label} aria-label={status.label}><span className="session-question-icon" aria-hidden><Icon.question /></span></span>;
   }
-  if (status.kind === "unread") {
-    return <span className="session-status-indicator unread" title={status.label} aria-label={status.label}><span aria-hidden>{status.glyph}</span></span>;
-  }
   return null;
 }
 
@@ -646,6 +643,7 @@ export default function SessionList({
   const [labels, setLabels] = useState<WorkspaceLabel[]>([]);
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [expandedSubagents, setExpandedSubagents] = useState<ReadonlySet<string>>(new Set());
   const [showArchived, setShowArchived] = useState(expandArchived);
   const [draggedPin, setDraggedPin] = useState<string | null>(null);
   const [draggedSession, setDraggedSession] = useState<string | null>(null);
@@ -878,6 +876,7 @@ export default function SessionList({
     const roots = items.filter((item) => !item.parentId || !ids.has(item.parentId));
     return roots.map((item) => {
       const children = byParent.get(item.id) ?? [];
+      const expanded = expandedSubagents.has(item.id);
       return (
         <div className="session-subagent-parent" key={item.id}>
           {row(item)}
@@ -885,12 +884,17 @@ export default function SessionList({
             <button
               type="button"
               className="session-subagent-toggle"
-              aria-expanded="true"
-              aria-label={`${children.length} subagents`}
-              disabled
-            ><Icon.chevronDown /></button>
+              aria-expanded={expanded}
+              aria-label={`${expanded ? "Collapse" : "Expand"} ${children.length} subagents`}
+              onClick={() => setExpandedSubagents((previous) => {
+                const next = new Set(previous);
+                if (next.has(item.id)) next.delete(item.id);
+                else next.add(item.id);
+                return next;
+              })}
+            >{expanded ? <Icon.chevronDown /> : <Icon.chevronRight />}</button>
           )}
-          {children.length > 0 && <div className="session-subagent-children">{sessionTree(children)}</div>}
+          {expanded && <div className="session-subagent-children">{sessionTree(children)}</div>}
         </div>
       );
     });

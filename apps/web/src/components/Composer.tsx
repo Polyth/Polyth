@@ -18,6 +18,7 @@ import {
   sendMessage,
   abortSession,
   createSession,
+  createDefaultWorktree,
   rememberProjectModelSelection,
   reconnectSync,
   recheckRuntimeCatalog,
@@ -115,9 +116,7 @@ import SessionContextBar, {
   type ContextChoice,
   type SessionContextBarProps,
 } from "./mobile/SessionContextBar.tsx";
-import {
-  AssistIcon, Button, IconButton, Menu, Notice, SendIcon, StopIcon, Tooltip,
-} from "./ui/index.ts";
+import { Button, IconButton, Menu, Notice, SendIcon, StopIcon } from "./ui/index.ts";
 import { getSendFailure, subscribeSendFailures } from "../sendFailure.ts";
 import { isNativeMobile } from "@polyth/mobile/runtime";
 import { pickNativeFiles } from "@polyth/mobile/native";
@@ -147,7 +146,10 @@ const MODEL_WARNING_DELAY_MS = 8_000;
 type NewSessionTarget =
   | { kind: "main" }
   | { kind: "worktree"; path: string }
-  | { kind: "branch"; branch: string };
+  | { kind: "branch"; branch: string }
+  /** Fork a brand-new linked worktree from `base` (any branch, including the
+   *  current one) — the "New worktree" checkbox inside the branch picker. */
+  | { kind: "new-worktree"; base: string };
 
 type LocationChoice = ContextChoice & {
   target: NewSessionTarget;
@@ -172,10 +174,14 @@ function useComposerLocation(session: SessionProjection | null): {
   const [selectedBranchId, setSelectedBranchId] = useState(
     intendedWorktree ? `worktree:${intendedWorktree}` : "main",
   );
+  // "New worktree" mode: a checkbox in the branch picker that turns every
+  // branch row into a fork point for a fresh linked worktree.
+  const [newWorktreeMode, setNewWorktreeMode] = useState(false);
 
   useEffect(() => {
     let active = true;
     setSelectedBranchId(intendedWorktree ? `worktree:${intendedWorktree}` : "main");
+    setNewWorktreeMode(false);
     const sessionId = session?.id;
     const sessionBranch = session?.branch;
     // The context bar is hidden while a session is open, so its data is unused.
@@ -211,12 +217,45 @@ function useComposerLocation(session: SessionProjection | null): {
     return () => { active = false; };
   }, [projectId, session?.id, session?.worktreePath, session?.branch, newSessionIntent?.worktreePath, branch]);
 
+  const currentBranchName = worktrees.find((worktree) => worktree.isMain)?.branch
+    || branches.current
+    || branch
+    || "";
+
   const branchChoices = useMemo<LocationChoice[]>(() => {
     const linkedBranches = new Set(worktrees.map((worktree) => worktree.branch).filter(Boolean));
-    const main = worktrees.find((worktree) => worktree.isMain);
+    const localBranches = branches.branches.filter((candidate) => !candidate.remote);
+
+    if (newWorktreeMode) {
+      // Every local branch — including the current one and ones already checked
+      // out elsewhere — is a valid fork point, because a fresh branch is cut
+      // from it rather than moved into the new worktree.
+      const seen = new Set<string>();
+      const choices: LocationChoice[] = [];
+      if (currentBranchName) {
+        seen.add(currentBranchName);
+        choices.push({
+          id: `branch:${currentBranchName}`,
+          label: currentBranchName,
+          detail: tr("gitview.current"),
+          target: { kind: "new-worktree", base: currentBranchName },
+        });
+      }
+      for (const candidate of localBranches) {
+        if (seen.has(candidate.name)) continue;
+        seen.add(candidate.name);
+        choices.push({
+          id: `branch:${candidate.name}`,
+          label: candidate.name,
+          target: { kind: "new-worktree", base: candidate.name },
+        });
+      }
+      return choices;
+    }
+
     const choices: LocationChoice[] = [{
       id: "main",
-      label: main?.branch || branches.current || branch || tr("composer.mainWorkspace"),
+      label: currentBranchName || tr("composer.mainWorkspace"),
       detail: tr("composer.mainWorkspace"),
       target: { kind: "main" },
     }];
@@ -228,8 +267,8 @@ function useComposerLocation(session: SessionProjection | null): {
         target: { kind: "worktree", path: worktree.path },
       });
     }
-    for (const candidate of branches.branches) {
-      if (candidate.remote || linkedBranches.has(candidate.name)) continue;
+    for (const candidate of localBranches) {
+      if (linkedBranches.has(candidate.name)) continue;
       choices.push({
         id: `branch:${candidate.name}`,
         label: candidate.name,
@@ -238,18 +277,21 @@ function useComposerLocation(session: SessionProjection | null): {
       });
     }
     return choices;
-  }, [worktrees, branches, branch]);
+  }, [worktrees, branches, branch, newWorktreeMode, currentBranchName]);
 
   const selectedChoice = branchChoices.find((choice) => choice.id === selectedBranchId);
-  const newSessionTarget = selectedChoice?.target
+  const newSessionTarget: NewSessionTarget = selectedChoice?.target
     ?? (intendedWorktree
-      ? { kind: "worktree" as const, path: intendedWorktree }
-      : { kind: "main" as const });
-  const branchName = selectedChoice?.label
+      ? { kind: "worktree", path: intendedWorktree }
+      : { kind: "main" });
+  const rawBranchLabel = selectedChoice?.label
     || session?.branch
     || branch
     || intendedWorktree?.split("/").pop()
     || tr("composer.mainWorkspace");
+  const branchName = newSessionTarget.kind === "new-worktree"
+    ? `${rawBranchLabel} · ${tr("worktreesessiondialog.newWorktree")}`
+    : rawBranchLabel;
   const projectName = project?.name || project?.path || tr("composer.noProject");
   const projectChoices: ContextChoice[] = projects.map((candidate) => ({
     id: candidate.id,
@@ -267,13 +309,35 @@ function useComposerLocation(session: SessionProjection | null): {
       startNewSession(projectId);
     } else if (choice.target.kind === "worktree") {
       startNewSession(projectId, { worktreePath: choice.target.path });
-    } else {
+    } else if (choice.target.kind === "branch") {
       setBranchLoading(true);
       void api.createWorktree(projectId, choice.target.branch)
         .then((worktree) => startNewSession(projectId, { worktreePath: worktree.path }))
         .catch((error) => setUiError(friendlyError(tr("composer.couldnTCreateTheWorktree"), error)))
         .finally(() => setBranchLoading(false));
+    } else {
+      const base = choice.target.base;
+      setBranchLoading(true);
+      void createDefaultWorktree(projectId, newSessionIntent?.title, base)
+        .then((path) => startNewSession(projectId, { worktreePath: path }))
+        .catch((error) => setUiError(friendlyError(tr("composer.couldnTCreateTheWorktree"), error)))
+        .finally(() => setBranchLoading(false));
     }
+  };
+
+  // Toggling the mode keeps the selection meaningful: the current branch and
+  // the "main workspace" row are two views of the same checkout.
+  const toggleNewWorktree = (on: boolean) => {
+    setNewWorktreeMode(on);
+    setSelectedBranchId((prev) => {
+      if (on && prev === "main") {
+        return currentBranchName ? `branch:${currentBranchName}` : prev;
+      }
+      if (!on && currentBranchName && prev === `branch:${currentBranchName}`) {
+        return "main";
+      }
+      return prev;
+    });
   };
 
   return {
@@ -288,6 +352,8 @@ function useComposerLocation(session: SessionProjection | null): {
       branches: branchChoices,
       ...(branchLoading ? { branchLoading: true } : {}),
       onPickBranch: pickBranch,
+      newWorktreeMode,
+      onToggleNewWorktree: toggleNewWorktree,
     },
   };
 }
@@ -876,6 +942,12 @@ export default function Composer({
           worktreePath = newSessionTarget.path;
         } else if (newSessionTarget.kind === "branch") {
           worktreePath = (await api.createWorktree(activeProjectId, newSessionTarget.branch)).path;
+        } else if (newSessionTarget.kind === "new-worktree") {
+          worktreePath = await createDefaultWorktree(
+            activeProjectId,
+            newSessionIntent?.title,
+            newSessionTarget.base,
+          );
         }
         const created = await createSession(activeProjectId, {
           ...(newSessionIntent?.title ? { title: newSessionIntent.title } : {}),
@@ -1284,35 +1356,6 @@ export default function Composer({
       ariaLabel={tr("composer.selectAgentModeCurrentValue", { value: activeAgentLabel })}
     />
   ) : <span className="agent-type-badge">{activeAgentLabel}</span>;
-  // Composer controls are ordinary mini-widgets: one placement/visibility
-  // system owns Workflow, effort, and agent without duplicating toggle state.
-  const slotContext = {
-    sessionId: session?.id,
-    projectId: activeProjectId ?? undefined,
-    variant,
-    working,
-    autoApproveOn,
-    autoApproveBusy,
-    toggleAutoApprove,
-    goalOn: newSessionGoal,
-    goalBusy: goalAttachBusy,
-    toggleGoal,
-    workflowDraftText: text,
-    workflowAttachmentCount: attachments.length,
-    consumeWorkflowDraft,
-    composerEffortControl: effortControl,
-    composerAgentControl: agentControl,
-  };
-
-  const followUp = getUiSettings().followUpBehavior;
-  const borrowedEpochPending = session?.status === "epoch-pending"
-    && session.runtimeControl === "borrowed";
-  const sendDisabled = creatingSession
-    || queueEditSaving
-    || borrowedEpochPending
-    || (queueEdit ? !text.trim() : (!text.trim() && attachments.length === 0))
-    || (!queueEdit && !shellMode && (noModels || profileMissing));
-  const phoneLayout = isPhone;
   const canGenerateNextAction = !!session?.id && !working && hasCompletedExchange && !suggestionBusy;
   const generateNextAction = useCallback(() => {
     const target = sessionIdRef.current;
@@ -1343,6 +1386,38 @@ export default function Composer({
       })
       .finally(() => setSuggestionBusy(false));
   }, [activeSessionSeq, canGenerateNextAction, text]);
+  // Composer controls are ordinary mini-widgets: one placement/visibility
+  // system owns Workflow, effort, and agent without duplicating toggle state.
+  const slotContext = {
+    sessionId: session?.id,
+    projectId: activeProjectId ?? undefined,
+    variant,
+    working,
+    autoApproveOn,
+    autoApproveBusy,
+    toggleAutoApprove,
+    goalOn: newSessionGoal,
+    goalBusy: goalAttachBusy,
+    toggleGoal,
+    workflowDraftText: text,
+    workflowAttachmentCount: attachments.length,
+    consumeWorkflowDraft,
+    composerEffortControl: effortControl,
+    composerAgentControl: agentControl,
+    canGenerateNextAction,
+    suggestionBusy,
+    generateNextAction,
+  };
+
+  const followUp = getUiSettings().followUpBehavior;
+  const borrowedEpochPending = session?.status === "epoch-pending"
+    && session.runtimeControl === "borrowed";
+  const sendDisabled = creatingSession
+    || queueEditSaving
+    || borrowedEpochPending
+    || (queueEdit ? !text.trim() : (!text.trim() && attachments.length === 0))
+    || (!queueEdit && !shellMode && (noModels || profileMissing));
+  const phoneLayout = isPhone;
   const hasDraft = text.trim() !== "" || attachments.length > 0;
   // On phones the composer only unfolds when it is actually being used: focus,
   // a shell command, or a draft in progress. A working turn alone keeps it in
@@ -1384,7 +1459,7 @@ export default function Composer({
           switched project or spawned a new session instead of retargeting. */}
       {!session && <SessionContextBar {...contextBar} />}
       {/* Widget-areas (WA4): the project/branch meta row is a widget area. */}
-      <SlotHost slot="composer.meta" context={slotContext} />
+      <SlotHost slot="composer.meta" context={slotContext} customizable />
       {failedSend && (
         <Notice
           tone="warning"
@@ -1394,7 +1469,7 @@ export default function Composer({
         >{tr("composer.sendUnavailableDraftPreserved")}</Notice>
       )}
       {/* Widget-areas (WA4): the uncommitted-changes bar area, above the box. */}
-      <SlotHost slot="composer.pending" context={slotContext} />
+      <SlotHost slot="composer.pending" context={slotContext} customizable />
       {session?.id && (
         <QueuedMessageList
           sessionId={session.id}
@@ -1577,21 +1652,11 @@ export default function Composer({
           <span className="composer-extensions composer-mobile-extensions">
             <SlotHost slot="composer.leading" context={slotContext} customizable />
           </span>
-          <CustomizeZoneButton slot="composer.leading" align="start" />
+          {/* Phones cannot hover to arm a zone; inline edit pencils are just
+              clutter there, so composer customization stays in Settings. */}
+          {!phoneLayout && <CustomizeZoneButton slot="composer.leading" align="start" />}
         </span>
         <div className="composer-actions customize-zone">
-          {(canGenerateNextAction || suggestionBusy) && (
-            <Tooltip content={tr("composer.generateNextAction")}>
-              <IconButton
-                className="composer-next-action"
-                icon={AssistIcon}
-                label={tr("composer.generateNextAction")}
-                size="sm"
-                busy={suggestionBusy}
-                onClick={generateNextAction}
-              />
-            </Tooltip>
-          )}
           <span className="composer-extensions">
             <SlotHost slot="composer.trailing" context={slotContext} customizable />
           </span>
@@ -1665,7 +1730,7 @@ export default function Composer({
               </button>
             )}
           </span>
-          <CustomizeZoneButton slot="composer.trailing" />
+          {!phoneLayout && <CustomizeZoneButton slot="composer.trailing" />}
         </div>
       </div>
       {focusMode && (

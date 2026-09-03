@@ -8,6 +8,7 @@ import {
   acquireRemoteRuntimeLock,
   createRemoteOpenCodeRuntime,
   DEFAULT_REMOTE_RUNTIME_ROOT_EXPR,
+  installRemoteOpenCode,
   OPENCODE_UPDATE_DISABLE_ENV,
   ownedSshRuntimeIdentityKey,
   parseOpenCodeRuntimeMetadata,
@@ -389,7 +390,14 @@ test("probeRemoteOpenCode reports the installed version honestly", async () => {
   const missing = createFakeHost({ stubPort: 1, missingBinary: true });
   const bad = await probeRemoteOpenCode(missing.host);
   assert.equal(bad.ok, false);
+  assert.equal(bad.installable, true);
   assert.match(bad.message ?? "", /not installed/);
+});
+
+test("installRemoteOpenCode runs the fixed vendor installer on the remote host", async () => {
+  const fake = createFakeHost({ stubPort: 1 });
+  await installRemoteOpenCode(fake.host);
+  assert.ok(fake.execCalls.some((command) => command.includes("curl -fsSL https://opencode.ai/install | bash")));
 });
 
 const STORAGE_ID_RE =
@@ -1002,4 +1010,3 @@ test("dispose releases lock, owner, and STARTING so the next create succeeds", a
     await rm(directory, { recursive: true, force: true });
   }
 });
-

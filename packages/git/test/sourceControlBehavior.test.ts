@@ -31,9 +31,10 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { activateProject, activateSession, applyEvents, applyProjectAdded, getState, seedSessionCache } = await import("../../../apps/web/src/store.ts");
+const { activateProject, activateSession, applyEvents, applyProjectAdded, getState, seedSessionCache, setGitBranch, setModels } = await import("../../../apps/web/src/store.ts");
 const { default: GitView, DiffContent } = await import("../widgets/GitView.tsx");
 const { api } = await import("@polyth/session/web-api");
+const { refreshGitStatus } = await import("../widgets/gitStatusStore.ts");
 const {
   addDiffStats,
   hiddenEditedCount,
@@ -208,6 +209,45 @@ test("GitView keeps staged-file and disclosure taps available without a detail c
   }
 });
 
+test("GitView does not reopen a file after returning to the change list", async () => {
+  const projectId = "git-back-to-list-project";
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith("/api/git/status")) {
+      return response({
+        branch: "main", ahead: 0, behind: 0, conflicted: [], staged: [], untracked: [],
+        unstaged: [{ path: "src/app.ts", status: "modified", staged: false }],
+        isRepo: true,
+      });
+    }
+    if (url.startsWith("/api/git/branches")) return response({ current: "main", branches: [{ name: "main", current: true }] });
+    if (url.startsWith("/api/worktrees") || url.startsWith("/api/git/graph") || url.startsWith("/api/git/stashes")) return response([]);
+    if (url.startsWith("/api/git/diff")) return response({ path: "src/app.ts", diff: "@@ -1 +1 @@\n-old\n+new" });
+    throw new Error(`Unexpected request: ${url}`);
+  };
+
+  activateProject(projectId);
+  const view = await mounted(createElement(GitView));
+  try {
+    const file = view.container.querySelector<HTMLButtonElement>(".git-file-main");
+    assert.ok(file);
+    await act(async () => { file.click(); await delay(20); });
+    assert.ok(view.container.querySelector(".git-master-detail.detail-open"));
+
+    const back = view.container.querySelector<HTMLButtonElement>(".git-mobile-detail-head button");
+    assert.ok(back);
+    await act(async () => { back.click(); });
+    assert.equal(view.container.querySelector(".git-master-detail.detail-open"), null);
+
+    await act(async () => { await refreshGitStatus(projectId); await delay(20); });
+    assert.equal(view.container.querySelector(".git-master-detail.detail-open"), null);
+    assert.equal(getState().gitDiffPath, null);
+  } finally {
+    await view.unmount();
+    activateProject(null);
+  }
+});
+
 test("GitView reports branch/graph/stash/worktree load failures with Retry", async () => {
   const projectId = "git-resource-error-project";
   globalThis.fetch = async (input) => {
@@ -339,7 +379,7 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
   const view = await mounted(createElement(PendingChangesBar));
   try {
     await act(async () => { await delay(40); });
-    const bubble = view.container.querySelector<HTMLButtonElement>(".pending-changes-bubble");
+    let bubble = view.container.querySelector<HTMLButtonElement>(".pending-changes-bubble");
     assert.ok(bubble, "collapsed bubble is the default");
     assert.equal(bubble.getAttribute("aria-expanded"), "false");
     assert.equal(bubble.getAttribute("aria-label"), "Edited 4 files");
@@ -350,6 +390,35 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
     assert.equal(labeledButton(view.container, "Undo"), undefined);
     assert.equal(labeledButton(view.container, "Review"), undefined);
     assert.equal(view.container.textContent?.includes(leftover), false);
+
+    await act(async () => {
+      setModels([{ providerID: "openai", modelID: "luna", name: "Luna", providerName: "OpenAI" }]);
+      setGitBranch("feature/glass-ui");
+      applyEvents([
+        ev("turn/started", { turnId: "turn-active", model: { providerID: "openai", modelID: "luna" } }),
+        ev("task/snapshot", {
+          listId: "work",
+          revision: 1,
+          items: [{ id: "verify", text: "Run focused checks and review the diff", status: "active" }],
+        }),
+      ]);
+      await delay(20);
+    });
+    const agentStatus = view.container.querySelector(".pending-agent-status");
+    assert.ok(agentStatus, "active work replaces the compact change bubble");
+    assert.match(agentStatus.textContent ?? "", /Luna\s*·\s*Working/);
+    assert.match(agentStatus.textContent ?? "", /Run focused checks and review the diff/);
+    assert.match(agentStatus.textContent ?? "", /4 files.*\+10.*-4/s);
+    assert.match(agentStatus.textContent ?? "", /feature\/glass-ui/);
+    assert.equal(agentStatus.textContent?.includes("Context"), false);
+    assert.equal(agentStatus.textContent?.includes("Agent"), false);
+
+    await act(async () => {
+      applyEvents([ev("turn/stopped", { turnId: "turn-active", reason: "completed" })]);
+      await delay(20);
+    });
+    bubble = view.container.querySelector<HTMLButtonElement>(".pending-changes-bubble");
+    assert.ok(bubble, "the compact change bubble returns when work settles");
 
     await act(async () => { bubble.click(); });
     assert.equal(view.container.querySelector(".pending-changes-bubble"), null);
@@ -432,6 +501,8 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
     );
   } finally {
     await view.unmount();
+    setModels([]);
+    setGitBranch("");
     activateSession(null);
     activateProject(null);
   }

@@ -334,6 +334,25 @@ export default function ContextRail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geometryKey, presentation]);
 
+  useLayoutEffect(() => {
+    const header = railbarRef.current?.closest(".app")?.querySelector<HTMLElement>(":scope > .header");
+    if (!header) return;
+    const publish = () => {
+      const width = paneRef.current?.classList.contains("rail-pinned")
+        && !paneRef.current.classList.contains("rail-pinned-narrow")
+        ? paneRef.current.getBoundingClientRect().width : 0;
+      header.style.setProperty("--workspace-pane-inline-size", `${Math.round(width)}px`);
+    };
+    publish();
+    if (typeof ResizeObserver !== "function") return () => header.style.removeProperty("--workspace-pane-inline-size");
+    const ro = new ResizeObserver(publish);
+    if (paneRef.current) ro.observe(paneRef.current);
+    return () => {
+      ro.disconnect();
+      header.style.removeProperty("--workspace-pane-inline-size");
+    };
+  }, [geometryKey]);
+
   const chrome = (separatorRef.current?.getBoundingClientRect().width ?? SEPARATOR_FALLBACK) || SEPARATOR_FALLBACK;
   const geo: DockGeometry = { workspaceWidth, chrome };
 

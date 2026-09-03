@@ -81,6 +81,7 @@ export interface RemoteOpenCodeProbe {
   ok: boolean;
   version?: string;
   message?: string;
+  installable?: boolean;
 }
 
 const invalid = (message: string): Error =>
@@ -193,6 +194,7 @@ export const probeRemoteOpenCode = async (
   if (out.includes("POLYTH_OC_MISSING")) {
     return {
       ok: false,
+      installable: true,
       message: `opencode is not installed on ${host.label} — install it there first (curl -fsSL https://opencode.ai/install | bash)`,
     };
   }
@@ -219,6 +221,21 @@ export const probeRemoteOpenCode = async (
     }
   }
   return { ok: true, ...(version ? { version } : {}) };
+};
+
+/** Install OpenCode using the vendor-provided remote installer. The command is
+ * intentionally fixed: no user input is interpolated into it. */
+export const installRemoteOpenCode = async (host: RemoteHost): Promise<void> => {
+  const result = await host.exec(
+    `${REMOTE_PATH}; export PATH; curl -fsSL https://opencode.ai/install | bash && command -v opencode >/dev/null 2>&1`,
+    { timeoutMs: 120_000 },
+  );
+  if (result.code !== 0) {
+    const detail = (result.stderr.trim() || result.stdout.trim()).slice(-300);
+    throw unavailable(
+      `could not install opencode on ${host.label}: ${detail || `installer exited ${result.code}`}`,
+    );
+  }
 };
 
 interface StartedServe {

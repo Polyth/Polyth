@@ -18,7 +18,9 @@ import {
   type RailSurfaceComponentProps,
 } from "../surfaces.ts";
 import EmptyState from "./EmptyState.tsx";
+import { Button } from "./ui/index.ts";
 import { getLocale, tr } from "../i18n/index.ts";
+import { loadOlderEvents } from "../init.ts";
 
 const NO_EVENTS: SessionEvent[] = [];
 
@@ -111,6 +113,7 @@ function ContextView() {
 }
 
 function ActiveEventsView() {
+  const sessionId = useStore((s) => s.activeSessionId);
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? NO_EVENTS);
   if (events.length === 0) {
     return (
@@ -122,6 +125,11 @@ function ActiveEventsView() {
   }
   return (
     <div className="event-list">
+      {sessionId && events[0]?.seq !== 1 && (
+        <Button type="button" size="sm" variant="ghost" onClick={() => { void loadOlderEvents(sessionId); }}>
+          Load older session events
+        </Button>
+      )}
       {[...events].reverse().map((e) => (
         <details key={e.id} className="event-row">
           <summary>

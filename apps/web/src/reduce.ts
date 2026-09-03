@@ -266,7 +266,7 @@ export interface RenderModel {
   questions: PendingQuestion[];
   secrets: PendingSecret[];
   totals: Totals;
-  /** Latest usage sample for the active/last turn (not lifetime totals). */
+  /** Latest usage sample for the active/last turn; model selection metadata. */
   contextUsage: ContextUsageState | null;
   turn: TurnState | null;
   goal: GoalState | null;
@@ -315,8 +315,8 @@ export function emptyModel(): RenderModel {
   };
 }
 
-export function contextGauge(model: Pick<RenderModel, "contextUsage">, contextTokens?: number): ContextGauge {
-  const inputTokens = Math.max(0, model.contextUsage?.inputTokens ?? 0);
+export function contextGauge(model: Pick<RenderModel, "totals">, contextTokens?: number): ContextGauge {
+  const inputTokens = Math.max(0, model.totals.input);
   if (!Number.isFinite(contextTokens) || !contextTokens || contextTokens <= 0) {
     return { known: false, inputTokens, contextTokens: null, percent: null, level: "unknown" };
   }

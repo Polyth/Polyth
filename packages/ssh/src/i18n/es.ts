@@ -33,6 +33,7 @@ export const es: SshMessages = {
   "ssh.sshsettings.host": "Servidor",
   "ssh.sshsettings.hostOrSshConfigAlias": "Host o alias de ssh_config",
   "ssh.sshsettings.identityFile": "Expediente de identidad",
+  "ssh.sshsettings.installOpenCode": "Instalar OpenCode",
   "ssh.sshsettings.keyValue": "clave: {identityFile}",
   "ssh.sshsettings.nameEGBuildBox": "Nombre (por ejemplo, caja de construcción)",
   "ssh.sshsettings.noServersYet": "Aún no hay servidores",

@@ -2029,8 +2029,6 @@ export const de: AppMessages = {
   "timeline.output": "Ausgabe",
   "timeline.pinIntoContext": "In den Kontext einordnen",
   "timeline.plan2": "Planen",
-  "timeline.promptBubble.collapse": "Prompt einklappen",
-  "timeline.promptBubble.expand": "Prompt erweitern",
   "timeline.regenerate": "Erneut generieren",
   "timeline.regenerateThisAssistantAnswer": "Diese Assistentenantwort neu generieren",
   "timeline.restoreAndDiscardTheEditedDraft": "Den bearbeiteten Entwurf wiederherstellen und verwerfen.",

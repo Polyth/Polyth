@@ -28,6 +28,7 @@ test("search matches label, description, and keywords; groups carry page labels"
 
   const byDescription = searchSettingsItems("agents.md", PAGES);
   assert.ok(byDescription.some((h) => h.item.id === "behavior.instructions"));
+  assert.ok(searchSettingsItems("delegate", PAGES).some((h) => h.item.id === "behavior.favoriteSubagents"));
 });
 
 test("diacritic query matches plain text", () => {

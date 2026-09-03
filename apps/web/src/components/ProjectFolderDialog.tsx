@@ -85,6 +85,11 @@ export default function ProjectFolderDialog({
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
+  /** An alternative project source (SSH, clone…) contributed to
+   *  `project.create.options` is disclosed inline. `solo` sources drive their
+   *  own browser and hide the shared local one. Only one is open at a time and
+   *  it, not the local flow, owns the primary action while open. */
+  const [armedSource, setArmedSource] = useState<{ id: string; solo: boolean } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const pathInputRef = useRef<HTMLInputElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
@@ -262,6 +267,8 @@ export default function ProjectFolderDialog({
   // Mod+Enter (Ctrl+Enter / ⌘Enter) is an additive direct-confirm shortcut —
   // it never replaces the primary button, which stays in normal Tab order.
   const onDialogKeyDown = (e: React.KeyboardEvent) => {
+    // While an alternative source owns the flow, its own panel confirms.
+    if (armedSource) return;
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       e.stopPropagation();
@@ -278,7 +285,11 @@ export default function ProjectFolderDialog({
       initialFocus=".folder-path"
       resolveRestoreFocus={resolveRestoreFocus}
     >
-      <div className="folder-dialog-body" onKeyDown={onDialogKeyDown}>
+      <div
+        className="folder-dialog-body"
+        data-source-armed={armedSource?.id}
+        onKeyDown={onDialogKeyDown}
+      >
         <div className="folder-dialog-head">
           <div>
             <div className="folder-dialog-title">{title}</div>
@@ -287,161 +298,194 @@ export default function ProjectFolderDialog({
           <IconButton icon={CloseIcon} label={tr("common.close")} disabled={busy} onClick={requestClose} />
         </div>
 
-        <div className="folder-toolbar">
-          <IconButton
-            icon={HomeIcon}
-            variant="quiet"
-            label={tr("projectfolderdialog.goToHomeDirectory")}
-            title={tr("projectfolderdialog.homeDirectory")}
-            disabled={busy}
-            onClick={() => void load(home || "~")}
-          />
-          <IconButton
-            icon={ParentFolderIcon}
-            variant="quiet"
-            label={tr("projectfolderdialog.goToParentFolder")}
-            title={tr("projectfolderdialog.parentFolder")}
-            disabled={busy || !parent}
-            onClick={() => parent && void load(parent)}
-          />
-          <TextInput
-            ref={pathInputRef}
-            uiSize="sm"
-            className="folder-path mono"
-            value={pathInput}
-            aria-label={tr("projectfolderdialog.currentPath")}
-            spellCheck={false}
-            disabled={busy}
-            onChange={(e) => setPathInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) void load(pathInput.trim() || "~");
-            }}
-            onBlur={() => setPathInput(path)}
-          />
-          <span className="folder-hidden-toggle">
-            <span>{tr("projectfolderdialog.hidden")}</span>
-            <Switch
-              checked={hidden}
-              label={tr("projectfolderdialog.hidden")}
-              disabled={busy}
-              onChange={toggleHidden}
-            />
-          </span>
-        </div>
+        {/* A `solo` alternative source (e.g. SSH) drives its own browser, so
+            the shared local file manager steps aside while it is open. */}
+        {!armedSource?.solo && (
+          <>
+            <div className="folder-toolbar">
+              <IconButton
+                icon={HomeIcon}
+                variant="quiet"
+                label={tr("projectfolderdialog.goToHomeDirectory")}
+                title={tr("projectfolderdialog.homeDirectory")}
+                disabled={busy}
+                onClick={() => void load(home || "~")}
+              />
+              <IconButton
+                icon={ParentFolderIcon}
+                variant="quiet"
+                label={tr("projectfolderdialog.goToParentFolder")}
+                title={tr("projectfolderdialog.parentFolder")}
+                disabled={busy || !parent}
+                onClick={() => parent && void load(parent)}
+              />
+              <TextInput
+                ref={pathInputRef}
+                uiSize="sm"
+                className="folder-path mono"
+                value={pathInput}
+                aria-label={tr("projectfolderdialog.currentPath")}
+                spellCheck={false}
+                disabled={busy}
+                onChange={(e) => setPathInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) void load(pathInput.trim() || "~");
+                }}
+                onBlur={() => setPathInput(path)}
+              />
+              <span className="folder-hidden-toggle">
+                <span>{tr("projectfolderdialog.hidden")}</span>
+                <Switch
+                  checked={hidden}
+                  label={tr("projectfolderdialog.hidden")}
+                  disabled={busy}
+                  onChange={toggleHidden}
+                />
+              </span>
+            </div>
 
-        <div className="folder-cols" aria-hidden="true"><span>{tr("projectfolderdialog.name")}</span><span>{tr("projectfolderdialog.modified")}</span></div>
+            <div className="folder-cols" aria-hidden="true"><span>{tr("projectfolderdialog.name")}</span><span>{tr("projectfolderdialog.modified")}</span></div>
 
-        {/* The Parent row is a named navigation action, not a false listbox option. */}
-        {parent && (
-          <button
-            type="button"
-            className="folder-row folder-up folder-up-action"
-            aria-label={tr("projectfolderdialog.openParentFolder")}
-            disabled={busy}
-            onClick={() => void load(parent)}
-          >
-            <span className="folder-row-icon">{folderIcon}</span>
-            <span className="folder-row-name mono">..</span>
-            <span className="folder-row-meta" />
-          </button>
+            {/* The Parent row is a named navigation action, not a false listbox option. */}
+            {parent && (
+              <button
+                type="button"
+                className="folder-row folder-up folder-up-action"
+                aria-label={tr("projectfolderdialog.openParentFolder")}
+                disabled={busy}
+                onClick={() => void load(parent)}
+              >
+                <span className="folder-row-icon">{folderIcon}</span>
+                <span className="folder-row-name mono">..</span>
+                <span className="folder-row-meta" />
+              </button>
+            )}
+
+            <div
+              ref={listRef}
+              className="folder-list"
+              role="listbox"
+              aria-label={tr("projectfolderdialog.folders")}
+              tabIndex={0}
+              aria-activedescendant={activeDescendant}
+              aria-busy={busy || undefined}
+              onKeyDown={onListKeyDown}
+            >
+              {entries.map((entry, index) => (
+                <div
+                  key={entry.path}
+                  id={optionId(index)}
+                  data-path={entry.path}
+                  className={`folder-row ${selected === entry.path ? "selected" : ""}`}
+                  role="option"
+                  aria-selected={selected === entry.path}
+                  onClick={() => {
+                    if (busy) return;
+                    if (window.matchMedia?.("(pointer: coarse)").matches) {
+                      enter(entry);
+                      return;
+                    }
+                    setSelected(entry.path);
+                    listRef.current?.focus();
+                  }}
+                  onDoubleClick={() => enter(entry)}
+                >
+                  <span className="folder-row-icon">{folderIcon}</span>
+                  <span className="folder-row-name">{entry.name}</span>
+                  <span className="folder-row-meta mono">{entry.modifiedAt ? tr("projectfolderdialog.valueAgo", { value: ago(entry.modifiedAt) }) : ""}</span>
+                  <span className="folder-row-enter" aria-hidden="true">{tr("projectfolderdialog.enterFolder")} <span>›</span></span>
+                </div>
+              ))}
+              {entries.length === 0 && !error && <div className="folder-empty">{tr("projectfolderdialog.noSubFoldersHereOpenThisFolder")}</div>}
+            </div>
+          </>
         )}
 
-        <div
-          ref={listRef}
-          className="folder-list"
-          role="listbox"
-          aria-label={tr("projectfolderdialog.folders")}
-          tabIndex={0}
-          aria-activedescendant={activeDescendant}
-          aria-busy={busy || undefined}
-          onKeyDown={onListKeyDown}
-        >
-          {entries.map((entry, index) => (
-            <div
-              key={entry.path}
-              id={optionId(index)}
-              data-path={entry.path}
-              className={`folder-row ${selected === entry.path ? "selected" : ""}`}
-              role="option"
-              aria-selected={selected === entry.path}
-              onClick={() => {
-                if (busy) return;
-                if (window.matchMedia?.("(pointer: coarse)").matches) {
-                  enter(entry);
-                  return;
-                }
-                setSelected(entry.path);
-                listRef.current?.focus();
-              }}
-              onDoubleClick={() => enter(entry)}
-            >
-              <span className="folder-row-icon">{folderIcon}</span>
-              <span className="folder-row-name">{entry.name}</span>
-              <span className="folder-row-meta mono">{entry.modifiedAt ? tr("projectfolderdialog.valueAgo", { value: ago(entry.modifiedAt) }) : ""}</span>
-              <span className="folder-row-enter" aria-hidden="true">{tr("projectfolderdialog.enterFolder")} <span>›</span></span>
-            </div>
-          ))}
-          {entries.length === 0 && !error && <div className="folder-empty">{tr("projectfolderdialog.noSubFoldersHereOpenThisFolder")}</div>}
-        </div>
+        {!armedSource?.solo && (
+          <div className="folder-legend">
+            <span className="legend-item"><span className="kbd">↑</span><span className="kbd">↓</span> {tr("projectfolderdialog.navigate")}</span>
+            <span className="legend-item"><span className="kbd">↵</span> {tr("projectfolderdialog.enterFolder")}</span>
+            {!armedSource && <span className="legend-item"><span className="kbd">{MOD} ↵</span> {tr("projectfolderdialog.openProject2")}</span>}
+            <span className="legend-item"><span className="kbd">{tr("projectfolderdialog.esc")}</span> {tr("projectfolderdialog.close")}</span>
+          </div>
+        )}
 
-        <div className="folder-legend">
-          <span className="legend-item"><span className="kbd">↑</span><span className="kbd">↓</span> {tr("projectfolderdialog.navigate")}</span>
-          <span className="legend-item"><span className="kbd">↵</span> {tr("projectfolderdialog.enterFolder")}</span>
-          <span className="legend-item"><span className="kbd">{MOD} ↵</span> {tr("projectfolderdialog.openProject2")}</span>
-          <span className="legend-item"><span className="kbd">{tr("projectfolderdialog.esc")}</span> {tr("projectfolderdialog.close")}</span>
-        </div>
+        {!armedSource && error && <div ref={errorRef} tabIndex={-1} className="form-error folder-error" role="alert">{error}</div>}
 
-        {error && <div ref={errorRef} tabIndex={-1} className="form-error folder-error" role="alert">{error}</div>}
-
-        <div className="folder-foot">
-          <SlotHost
-            slot="project.create.options"
-            context={{ busy, onProjectOpened: completeExternally }}
-          />
-          {creating ? (
-            <span className="folder-newname">
-              <TextInput
-                autoFocus
-                uiSize="sm"
-                value={newName}
-                placeholder={tr("projectfolderdialog.newFolderName2")}
-                aria-label={tr("projectfolderdialog.newFolderName")}
+        {/* "Ways to add" — New folder plus every contributed alternative source
+            (SSH, clone…). Each reveals its extra fields inline; only one is
+            open at a time and it owns the primary action while open. */}
+        <div className="folder-sources">
+          <div className="folder-source-row">
+            {creating ? (
+              <span className="folder-newname">
+                <TextInput
+                  autoFocus
+                  uiSize="sm"
+                  value={newName}
+                  placeholder={tr("projectfolderdialog.newFolderName2")}
+                  aria-label={tr("projectfolderdialog.newFolderName")}
+                  disabled={busy}
+                  onChange={(e) => setNewName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) void createFolder();
+                    // Escape cancels only this sub-operation, not the dialog.
+                    else if (e.key === "Escape") { e.stopPropagation(); setCreating(false); }
+                  }}
+                />
+                <Button size="sm" disabled={busy || !newName.trim()} onClick={() => void createFolder()}>
+                  {tr("common.create")}
+                </Button>
+              </span>
+            ) : (
+              <Button
+                size="sm"
+                className="ghost-link folder-source-chip"
+                iconStart={AddIcon}
                 disabled={busy}
-                onChange={(e) => setNewName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) void createFolder();
-                  // Escape cancels only this sub-operation, not the dialog.
-                  else if (e.key === "Escape") { e.stopPropagation(); setCreating(false); }
-                }}
-              />
-              <Button size="sm" disabled={busy || !newName.trim()} onClick={() => void createFolder()}>
-                {tr("common.create")}
+                onClick={() => { setArmedSource(null); setCreating(true); }}
+              >
+                {tr("projectfolderdialog.newFolder")}
               </Button>
-            </span>
-          ) : (
+            )}
+            <SlotHost
+              slot="project.create.options"
+              context={{
+                busy,
+                browsedPath: selected ?? path,
+                armedId: armedSource?.id ?? null,
+                arm: (id: string, opts?: { soloBrowser?: boolean }) => {
+                  setCreating(false);
+                  setError("");
+                  setArmedSource({ id, solo: opts?.soloBrowser === true });
+                },
+                // Guarded: a source releasing on unmount/collapse must not
+                // clear a *different* source that armed itself in between.
+                disarm: (id: string) => setArmedSource((cur) => (cur && cur.id === id ? null : cur)),
+                onProjectOpened: completeExternally,
+              }}
+            />
+          </div>
+        </div>
+
+        {/* The local primary action steps aside while an alternative source is
+            open — that panel carries its own confirm button in the same spot. */}
+        {!armedSource && (
+          <div className="folder-foot">
+            <span className="header-spacer" />
+            <span className="folder-selected mono" title={selected ?? path}>{selected ?? path}</span>
             <Button
               size="sm"
-              className="ghost-link"
-              iconStart={AddIcon}
-              disabled={busy}
-              onClick={() => setCreating(true)}
+              variant="primary"
+              className="folder-open-btn"
+              disabled={busy || (!selected && !path)}
+              aria-busy={busy || undefined}
+              onClick={() => void openProject()}
             >
-              {tr("projectfolderdialog.newFolder")}
+              {busy ? tr("projectfolderdialog.opening") : tr("projectfolderdialog.openProject")}
             </Button>
-          )}
-          <span className="header-spacer" />
-          <span className="folder-selected mono" title={selected ?? path}>{selected ?? path}</span>
-          <Button
-            size="sm"
-            variant="primary"
-            className="folder-open-btn"
-            disabled={busy || (!selected && !path)}
-            aria-busy={busy || undefined}
-            onClick={() => void openProject()}
-          >
-            {busy ? tr("projectfolderdialog.opening") : tr("projectfolderdialog.openProject")}
-          </Button>
-        </div>
+          </div>
+        )}
       </div>
     </Dialog>
   );

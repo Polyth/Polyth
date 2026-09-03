@@ -33,6 +33,7 @@ import { useCustomizeActive } from "../useShiftArmed.ts";
 import { useSidebarLayout } from "../sidebarLayout.ts";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import DesktopSessionStatus from "./DesktopSessionStatus.tsx";
+import { railIconFor } from "../railIcons.ts";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -360,7 +361,7 @@ export default function Header() {
     <>
       <header
         className={`header${compact ? " header-compact" : ""}${chatSurface ? " header-chat" : ""}`}
-        style={{ "--chat-center-offset": compact ? "0px" : `${(sidebarLayout.collapsed ? 46 : sidebarLayout.width) / 2}px` } as React.CSSProperties}
+        style={{ "--sidebar-inline-size": compact ? "0px" : `${sidebarLayout.collapsed ? 46 : sidebarLayout.width}px` } as React.CSSProperties}
       >
         {compact && <DrawerTrigger />}
         {compact && chatSurface && (

@@ -7,7 +7,7 @@ import { friendlyError } from "./settings.ts";
 import { formatAppUrl, parseAppUrl } from "./router.ts";
 import * as store from "./store.ts";
 import { resolveActiveProjectId } from "./projectRegistry.ts";
-import type { AttachmentRef, JsonObject, ModelRef, Project, ProjectPatch, SessionEvent, SessionProjection } from "@polyth/contracts";
+import type { AttachmentRef, JsonObject, ModelRef, Project, ProjectCloneInput, ProjectPatch, SessionEvent, SessionProjection } from "@polyth/contracts";
 import { suggestWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks, registerServiceWorker } from "./push.ts";
 import { notificationCentre } from "./notificationCentre.ts";
@@ -815,6 +815,14 @@ export async function createProject(path: string, name?: string): Promise<Projec
   return p;
 }
 
+/** Clone a repository, then activate the server-authoritative project record. */
+export async function cloneProject(input: ProjectCloneInput): Promise<Project> {
+  const p = await api.cloneProject(input);
+  store.applyProjectAdded(p);
+  void refreshProjects("reconcile");
+  return p;
+}
+
 /** SSH-remote project: same atomic upsert-and-activate transition as
  *  addProject — the POST response is authoritative and already carries the
  *  remote binding validated on the server. */
@@ -870,7 +878,14 @@ export interface CreateSessionOptions {
   precache?: boolean;
 }
 
-async function createDefaultWorktree(projectId: string, title?: string): Promise<string> {
+/** Create a linked worktree on a fresh, template-named branch and return its
+ *  path. `base` picks the ref the new branch starts from (a branch name, tag,
+ *  or SHA); omitted, it forks from the project checkout's current HEAD. */
+export async function createDefaultWorktree(
+  projectId: string,
+  title?: string,
+  base?: string,
+): Promise<string> {
   const [worktrees, branches] = await Promise.all([
     api.listWorktrees(projectId),
     api.gitBranches(projectId),
@@ -881,10 +896,10 @@ async function createDefaultWorktree(projectId: string, title?: string): Promise
   ];
   const branch = suggestWorktreeBranch(
     store.getState().settings.branchTemplate,
-    title || "session",
+    title || base || "session",
     taken,
   );
-  return (await api.createWorktree(projectId, branch)).path;
+  return (await api.createWorktree(projectId, branch, undefined, base || undefined)).path;
 }
 
 export async function createSession(projectId: string, opts: CreateSessionOptions = {}): Promise<string> {

@@ -8,6 +8,7 @@ import { firstUserTextCached, lastUserTextCached } from "../utils.ts";
 import { Icon } from "../icons.tsx";
 import { nextSessionSwitcherIndex } from "../sessionSwitcher.ts";
 import { Popover } from "./ui/index.ts";
+import { PROMPT_VISIBILITY_EVENT, promptIsVisible } from "../promptVisibility.ts";
 
 const CYCLE_MS = 4000;
 
@@ -26,6 +27,7 @@ export default function DesktopSessionStatus() {
   const [open, setOpen] = useState(false);
   const [paused, setPaused] = useState(false);
   const [index, setIndex] = useState(0);
+  const [promptVisible, setPromptVisible] = useState(promptIsVisible);
   const sessions = useStore((state) => state.sessions);
   const events = useStore((state) => state.events);
   const activeSessionId = useStore((state) => state.activeSessionId);
@@ -41,11 +43,16 @@ export default function DesktopSessionStatus() {
   const items: SwitcherItem[] = [
     { id: "session", text: title },
     ...(showContext && activeTask ? [{ id: "task" as const, text: activeTask.text }] : []),
-    ...(showContext && intent ? [{ id: "intent" as const, text: intent }] : []),
+    ...(showContext && intent && !promptVisible ? [{ id: "intent" as const, text: intent }] : []),
   ];
   const key = items.map((item) => item.id).join(":");
   const visible = items[index] ?? items[0]!;
 
+  useEffect(() => {
+    const update = (event: Event) => setPromptVisible((event as CustomEvent<boolean>).detail);
+    window.addEventListener(PROMPT_VISIBILITY_EVENT, update);
+    return () => window.removeEventListener(PROMPT_VISIBILITY_EVENT, update);
+  }, []);
   useEffect(() => {
     direction.current = 1;
     setIndex(0);

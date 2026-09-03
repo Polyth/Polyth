@@ -5,12 +5,12 @@ import { renderMarkdown } from "../markdown.tsx";
 import { fmtDuration, fmtTokens } from "../format.ts";
 import { groupWork, mergeThinking, promptIndex, copyText, loadDraft, type WorkGroup } from "../utils.ts";
 import { executionGroupLabel, executionPresentation, reasoningHead } from "../execution.ts";
-import { nextWorkingActivity, setUiSettings, useUiSettings } from "../uiPrefs.ts";
+import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { cancelResume, forkSession, loadOlderEvents, resumeNow } from "../init.ts";
 import { markSessionPerformance } from "../sessionPerformance.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
 import {
-  applyEvent, openWorkspacePane, setRailPlugin, setUiError, startNewSession, useStore,
+  applyEvent, openWorkspacePane, setUiError, startNewSession, useStore,
 } from "../store.ts";
 import { api } from "@polyth/session/web-api";
 import {
@@ -61,6 +61,7 @@ import {
   tickWidth,
 } from "../promptRail.ts";
 import { captureTimelineAnchor, loadTimelineAnchor, restoreScrollDelta, saveTimelineAnchor, type TimelineAnchor } from "../timelineAnchor.ts";
+import { publishPromptVisibility } from "../promptVisibility.ts";
 import AttachmentPills from "./AttachmentPills.tsx";
 import CopyButton from "./CopyButton.tsx";
 import SelectionMenu from "./SelectionMenu.tsx";
@@ -83,7 +84,6 @@ import WorkflowTimelineCard from "../../../../packages/workflow/widgets/Workflow
 import { tr } from "../i18n/index.ts";
 import ExecutionRow, { DiffStat, useCollapsePresence } from "./ExecutionRow.tsx";
 import Picker from "./Picker.tsx";
-import PromptBubble from "./PromptBubble.tsx";
 import type { PickerItem } from "../picker.ts";
 import { Button, Notice } from "./ui/index.ts";
 import type { TurnLimitState } from "../reduce.ts";
@@ -783,7 +783,7 @@ function TaskList({ plan }: { plan: NonNullable<RenderModel["tasks"]> }) {
   const allDone = completed === plan.items.length;
   const settled = plan.items.every((item) => item.status === "done" || item.status === "failed");
   const active = plan.items.find((item) => item.status === "active");
-  const [open, setOpen] = useState(!settled);
+  const [open, setOpen] = useState(false);
   const itemsPresent = useCollapsePresence(open);
   useEffect(() => {
     if (settled) setOpen(false);
@@ -871,11 +871,6 @@ function AssistantView({
         <div className="bubble" dir="auto">
           {renderMarkdown(answer || "", m.id)}
           {!m.finalized && <span className="caret" />}
-          {announce && (
-            <span className="bubble-copy">
-              <CopyButton text={m.text} label={tr("timeline.copyAnswer")} />
-            </span>
-          )}
         </div>
       )}
       {plan && plan.items.length > 0 && <TaskList plan={plan} />}
@@ -1010,40 +1005,6 @@ export function WorkedGroup({
         </div>
       </div>
     </div>
-  );
-}
-
-// The single turn-level working indicator. Sits as the timeline's last row
-// (moved from below the timeline — it used to double up with a spinner row
-// here) and keeps the accessible live announcement of the row it replaced.
-function WorkingIndicator() {
-  const { workingIndicator } = useUiSettings();
-  const [activityStep, setActivityStep] = useState(0);
-  const activityLabels = tr("workspace.builtinsurfaces.activityItems").split("|");
-  useEffect(() => {
-    if (workingIndicator !== "activity") return;
-    setActivityStep((step) => nextWorkingActivity(step, activityLabels.length));
-    const timer = window.setInterval(
-      () => setActivityStep((step) => nextWorkingActivity(step, activityLabels.length)),
-      2400,
-    );
-    return () => window.clearInterval(timer);
-  }, [activityLabels.length, workingIndicator]);
-  const activityLabel = activityLabels[activityStep] ?? tr("workspace.builtinsurfaces.working");
-  return (
-    <button className={`focus-working focus-working--${workingIndicator}`} type="button" onClick={() => setRailPlugin("context")}>
-      {workingIndicator === "pulse" && <span className="focus-working-spinner" aria-hidden="true" />}
-      {workingIndicator === "cursor" && <span className="focus-working-cursor" aria-hidden="true" />}
-      {workingIndicator === "cat" && (
-        <svg className="focus-working-cat" viewBox="0 0 32 16" aria-hidden="true">
-          <path d="M4 10V5l3 2 3-3 3 3 4 1c3 0 5 2 5 4v1H7c-2 0-3-1-3-3Z" />
-          <path d="M22 9c4-4 6 1 3 3M9 13v2M17 13v2" />
-          <circle cx="11" cy="9" r=".7" fill="currentColor" stroke="none" />
-        </svg>
-      )}
-      {workingIndicator === "activity" && <span className="focus-working-activity" aria-hidden="true"><i /><i /><i /></span>}
-      <span>{workingIndicator === "activity" ? activityLabel : tr("workspace.builtinsurfaces.working")}</span>
-    </button>
   );
 }
 
@@ -1779,10 +1740,6 @@ export default function Timeline({
     if (lastAssistant !== null) terminal.set(lastAssistant.eventSeq, openAt);
     return terminal;
   }, [visibleMessages]);
-  const hasRunningAction = rows.some((row) => row.kind === "work" && (
-    row.tools.some((tool) => tool.status === "pending" || tool.status === "running")
-    || row.tasks.some((task) => task.action === "started")
-  ));
   const prompts = useMemo(() => promptIndex(visibleMessages), [visibleMessages]);
   // An unloaded older tail is enough reason to mount the navigator: the rail's
   // load arrow is the only discoverable way to reach prompts outside the
@@ -1807,6 +1764,24 @@ export default function Timeline({
   const lastPromptBoundary = [...model.messages].reverse()
     .find((message) => message.kind === "user" || message.kind === "github-conflict");
   const lastUser = lastPromptBoundary?.kind === "user" ? lastPromptBoundary : undefined;
+  useEffect(() => {
+    const el = ref.current;
+    const update = () => {
+      const prompt = el?.querySelector<HTMLElement>(`.msg.user[data-msg-id="${lastUser?.id ?? ""}"]`);
+      if (!el || !prompt) return publishPromptVisibility(false);
+      const viewport = el.getBoundingClientRect();
+      const row = prompt.getBoundingClientRect();
+      publishPromptVisibility(row.bottom > viewport.top && row.top < viewport.bottom);
+    };
+    update();
+    el?.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    return () => {
+      el?.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+      publishPromptVisibility(false);
+    };
+  }, [sessionId, lastUser?.id, limit]);
 
   // L13 windowing: rows render as a suffix; revealing earlier rows keeps the
   // viewport anchored (scrollTop compensates for the height that appeared
@@ -2040,7 +2015,7 @@ export default function Timeline({
         }}
         onTouchEndCapture={() => { touchY.current = null; }}
       >
-        <SlotHost slot="session.timeline.before" context={slotSummary} />
+        <SlotHost slot="session.timeline.before" context={slotSummary} customizable />
         {model.messages.length === 0 && !model.workflowRun && (
           <div className="empty">
             <div>{emptyCopy}</div>
@@ -2084,11 +2059,6 @@ export default function Timeline({
               />
             )
         ))}
-        {turnWorking && !hasRunningAction && (
-          <div role="status" aria-live="polite">
-            <WorkingIndicator />
-          </div>
-        )}
         {model.workflowRun && <WorkflowTimelineCard run={model.workflowRun} />}
         {/* The dock confirmation sits OUTSIDE the collapsible tail: it must be
             visible even while the reverted items stay folded away. */}
@@ -2157,7 +2127,7 @@ export default function Timeline({
           </Notice>
         )}
         <div className="msg-live" role="status" aria-live="polite">{liveText}</div>
-        <SlotHost slot="session.timeline.after" context={slotSummary} />
+        <SlotHost slot="session.timeline.after" context={slotSummary} customizable />
       </div>
       {showNav && (
         <PromptNavigator
@@ -2168,11 +2138,6 @@ export default function Timeline({
           olderBusy={olderBusy}
           onLoadOlder={() => void loadOlder()}
         />
-      )}
-      {/* Fewer than three prompts → no rail: a transient bubble tops the
-          viewport while the current prompt is scrolled out of view. */}
-      {!showNav && prompts.length > 0 && prompts.length < 3 && (
-        <PromptBubble prompts={prompts} containerRef={ref} onJump={jump} />
       )}
       {latestReveal && (latestRevealTarget ? createPortal(latestReveal, latestRevealTarget) : latestReveal)}
       </div>

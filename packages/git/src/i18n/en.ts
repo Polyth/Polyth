@@ -412,6 +412,15 @@ export const en = {
   "gitview.resolveConflictWithAgent": "Resolve this conflict with an agent",
   "gitview.resolveInNewSession": "In a new session",
   "gitview.resolveInThisSession": "In this session",
+  "gitprojectsource.cloneRepository": "Clone repository",
+  "gitprojectsource.description": "Clone a GitHub or GitLab repository on the current or an SSH server.",
+  "gitprojectsource.repositoryUrl": "Repository URL",
+  "gitprojectsource.target": "Target",
+  "gitprojectsource.sshServer": "SSH server",
+  "gitprojectsource.destinationParentFolder": "Destination parent folder",
+  "gitprojectsource.projectName": "Project name",
+  "gitprojectsource.noSshServers": "No SSH servers are configured.",
+  "gitprojectsource.cloneDestinationHint": "Clones into the folder shown above. Browse to change it.",
 } as const;
 
 export type GitMessageKey = keyof typeof en;

@@ -21,7 +21,7 @@ import { useAnchoredPosition, type AnchoredAlign } from "./useAnchoredPosition.t
 export interface MenuAction {
   id: string;
   label: string;
-  icon?: LucideIcon;
+  icon?: LucideIcon | (() => ReactNode);
   detail?: string;
   danger?: boolean;
   disabled?: boolean;
@@ -138,7 +138,7 @@ export default function Menu({
         </span>
       )}
       {entry.swatch && <span className="ui-menu-item-swatch" style={{ background: entry.swatch }} aria-hidden="true" />}
-      {entry.icon && <Icon icon={entry.icon} size={iconSize} />}
+      {entry.icon && <Icon icon={entry.icon as LucideIcon} size={iconSize} />}
       <span className="ui-menu-item-copy">
         <span className="ui-menu-item-label">{entry.label}</span>
         {entry.detail && <span className="ui-menu-item-detail">{entry.detail}</span>}

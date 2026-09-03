@@ -65,6 +65,10 @@ export function connectionTarget(conn: Pick<SshConnectionDto, "host" | "user" | 
 
 export interface StateBadge { text: string; tone: "ok" | "muted" | "err" }
 
+export function runtimeNeedsInstall(runtime?: { ok: boolean; installable?: boolean }): boolean {
+  return runtime?.ok === false && runtime.installable === true;
+}
+
 export function stateBadge(state: SshConnectionState | undefined): StateBadge {
   if (state === "connected") return { text: tr("ssh.sshui.connected"), tone: "ok" };
   if (state === "auth-failed") return { text: tr("ssh.sshui.authFailed"), tone: "err" };

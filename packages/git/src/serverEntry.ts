@@ -1,6 +1,14 @@
 import { posix } from "node:path";
 import { createHash } from "node:crypto";
-import type { AgentRuntime, JsonObject, ModelRef, RemoteAccessPolicy, SessionProjection } from "@polyth/contracts";
+import type {
+  AgentRuntime,
+  JsonObject,
+  ModelRef,
+  ProjectCloneInput,
+  RemoteAccessPolicy,
+  RemoteHost,
+  SessionProjection,
+} from "@polyth/contracts";
 import type { ProjectService, RouteHandler, SessionService } from "@polyth/contracts";
 import { REMOTE_CAPABILITY } from "@polyth/contracts";
 import {
@@ -11,6 +19,7 @@ import {
 import {
   buildLocalConflictResolutionPrompt,
   createGitService,
+  cloneRepository,
   pathsUnder,
   type GitService,
 } from "./index.ts";
@@ -121,6 +130,7 @@ export function gitRoutes(deps: {
    *  minimal deployments and existing test fakes stay valid; when absent the
    *  handoff still sends the prompt, it just skips the marker event. */
   append?: (sessionId: string, type: string, data: JsonObject) => Promise<unknown>;
+  remote?: { host(connectionId: string): RemoteHost };
 }): RouteHandler {
   const { git } = deps;
   const projectRootOf = async (projectId: string | null | undefined): Promise<string> => {
@@ -148,8 +158,35 @@ export function gitRoutes(deps: {
     Array.isArray(body.paths) ? body.paths.map((path) => assertGitRelativePath(String(path))) : [];
 
   return async ({ path, method, url, body, json }) => {
-    if (!path.startsWith("/api/git") && !path.startsWith("/api/worktrees")) return false;
     const query = (key: string) => url.searchParams.get(key);
+
+    if (path === "/api/projects/clone" && method === "POST") {
+      const input = await body() as Partial<ProjectCloneInput>;
+      if (typeof input.repository !== "string" || typeof input.parentPath !== "string") {
+        throw Object.assign(new Error("repository and parentPath are required"), { code: "invalid-input" });
+      }
+      const remote = input.remote;
+      if (remote && (remote.kind !== "ssh" || typeof remote.connectionId !== "string" || !remote.connectionId)) {
+        throw Object.assign(new Error("remote must contain an SSH connectionId"), { code: "invalid-input" });
+      }
+      const host = remote ? deps.remote?.host(remote.connectionId) : undefined;
+      if (remote && !host) {
+        throw Object.assign(new Error("SSH support unavailable"), { code: "unavailable" });
+      }
+      const result = await cloneRepository(
+        { repository: input.repository, parentPath: input.parentPath, ...(typeof input.name === "string" ? { name: input.name } : {}), ...(remote ? { remote } : {}) },
+        host,
+      );
+      if (remote) {
+        if (!deps.projects.addRemote) throw Object.assign(new Error("remote projects are not supported"), { code: "unsupported" });
+        json(200, await deps.projects.addRemote(result.path, remote, result.name));
+      } else {
+        json(200, await deps.projects.add(result.path, result.name));
+      }
+      return true;
+    }
+
+    if (!path.startsWith("/api/git") && !path.startsWith("/api/worktrees")) return false;
 
     if (path === "/api/git/status" && method === "GET") {
       const root = await rootOf(query("projectId"), query("sessionId"));
@@ -421,6 +458,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         projects: host.projects,
         sessions: host.sessions,
         git,
+        remote: { host: (connectionId) => host.services.require<{ host(id: string): RemoteHost }>(serverServiceKey("ssh")).host(connectionId) },
         commitMessage,
         append: (sessionId, type, data) => host.events.append(
           sessionId,

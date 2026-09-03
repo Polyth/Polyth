@@ -190,8 +190,14 @@ export function subscribeStore(cb: () => void): () => void {
   };
 }
 
+function refreshTitle(): void {
+  const project = state.projectRegistry.projects.find((p) => p.id === state.activeProjectId);
+  document.title = project?.name ? `${project.name} — ${state.settings.productName}` : state.settings.productName;
+}
+
 function set(patch: Partial<AppState>): void {
   state = { ...state, ...patch };
+  refreshTitle();
   for (const l of [...listeners]) l();
 }
 
@@ -528,7 +534,7 @@ export function openWorkspacePane(surfaceId: string, resource?: string): boolean
   // race and hide a pane that the command path has just opened.
   setWorkspaceMode("chat");
   const projectId = state.activeProjectId;
-  const selectedResource = resource ?? (projectId !== null
+  const selectedResource = resource ?? (surfaceId === "git" ? undefined : projectId !== null
     ? getWorkspacePanePrefs(projectId).lastResource[surfaceId]
     : undefined);
   if (projectId !== null) {

@@ -26,16 +26,20 @@ test("next-action insertion replaces only an empty composer and never implies se
   assert.equal(nextActionInsertMode(request, " "), null);
 });
 
-test("Composer uses the small native action, loading primitive, replacement bus, and mobile-safe icon button", async () => {
-  const [composer, css] = await Promise.all([
+test("next action is a toggleable composer widget using the existing action flow", async () => {
+  const [composer, miniWidgets, css] = await Promise.all([
     readFile(new URL("../src/components/Composer.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/widgets/builtinMiniWidgets.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/styles.css", import.meta.url), "utf8"),
   ]);
   assert.match(composer, /api\.assistSuggestion\(target\)/);
   assert.match(composer, /requestComposerReplace\(result\.suggestion\)/);
   assert.match(composer, /requestComposerInsert\(result\.suggestion\)/);
   assert.doesNotMatch(composer, /send\(result\.suggestion\)/);
-  assert.match(composer, /<IconButton[\s\S]*?icon=\{AssistIcon\}[\s\S]*?busy=\{suggestionBusy\}/);
-  assert.match(composer, /<Tooltip content=\{tr\("composer\.generateNextAction"\)\}>/);
+  assert.match(composer, /canGenerateNextAction,[\s\S]*suggestionBusy,[\s\S]*generateNextAction/);
+  assert.match(miniWidgets, /id: "composer\.next-action"/);
+  assert.match(miniWidgets, /defaultVisible: true/);
+  assert.match(miniWidgets, /icon=\{AssistIcon\}/);
+  assert.match(miniWidgets, /busy=\{busy\}/);
   assert.match(css, /\.ui-icon-btn::after\s*\{[^}]*width:\s*max\(100%, var\(--hit-min\)\)/s);
 });

@@ -1834,6 +1834,14 @@ export interface ProjectPatch {
   defaults?: ProjectDefaults;
 }
 
+/** Clone a GitHub/GitLab repository on the current Polyth host or an SSH host. */
+export interface ProjectCloneInput {
+  repository: string;
+  parentPath: string;
+  name?: string;
+  remote?: ProjectRemote;
+}
+
 export interface ProjectService {
   list(): Promise<Project[]>;
   add(path: string, name?: string): Promise<Project>;

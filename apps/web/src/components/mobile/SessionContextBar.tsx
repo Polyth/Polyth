@@ -6,6 +6,7 @@
 import { useState } from "react";
 import Sheet, { SheetRow } from "./Sheet.tsx";
 import Picker from "../Picker.tsx";
+import Checkbox from "../ui/Checkbox.tsx";
 import { Icon } from "../../icons.tsx";
 import { dismissKeyboard } from "../../mobileViewport.ts";
 import { useSheetTrigger } from "./sheetTrigger.ts";
@@ -18,6 +19,13 @@ export interface ContextChoice {
   detail?: string;
 }
 
+export interface ContextToggle {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  hint?: string;
+}
+
 function ContextSelector({
   kind,
   value,
@@ -27,6 +35,7 @@ function ContextSelector({
   sheetTitle,
   ariaLabel,
   onPick,
+  popoverToggle,
 }: {
   kind: "project" | "branch";
   value: string;
@@ -36,6 +45,7 @@ function ContextSelector({
   sheetTitle: string;
   ariaLabel: string;
   onPick: (id: string) => void;
+  popoverToggle?: ContextToggle;
 }) {
   const phone = useShellMode() === "phone";
   const [open, setOpen] = useState(false);
@@ -60,6 +70,7 @@ function ContextSelector({
         ariaLabel={ariaLabel}
         disabled={disabled}
         triggerIcon={kind === "project" ? <Icon.files /> : <Icon.branch />}
+        {...(popoverToggle ? { popoverToggle } : {})}
       />
     );
   }
@@ -83,6 +94,15 @@ function ContextSelector({
       </button>
       {open && (
         <Sheet title={sheetTitle} className="context-sheet" onClose={() => setOpen(false)}>
+          {popoverToggle && (
+            <Checkbox
+              className="picker-toggle context-sheet-toggle"
+              checked={popoverToggle.checked}
+              onChange={popoverToggle.onChange}
+              label={popoverToggle.label}
+              {...(popoverToggle.hint ? { description: popoverToggle.hint } : {})}
+            />
+          )}
           <div role="listbox" aria-label={sheetTitle}>
             {choices.map((choice) => (
               <SheetRow
@@ -115,6 +135,10 @@ export interface SessionContextBarProps {
   branches: ContextChoice[];
   branchLoading?: boolean;
   onPickBranch: (id: string) => void;
+  /** "New worktree" mode: a checkbox inside the branch list. When on, picking
+   *  any branch forks a fresh linked worktree from it instead of switching. */
+  newWorktreeMode?: boolean;
+  onToggleNewWorktree?: (on: boolean) => void;
 }
 
 export default function SessionContextBar({
@@ -127,6 +151,8 @@ export default function SessionContextBar({
   branches,
   branchLoading,
   onPickBranch,
+  newWorktreeMode,
+  onToggleNewWorktree,
 }: SessionContextBarProps) {
   return (
     <div className="session-context-bar" aria-label={tr("mobile.sessioncontextbar.chatLocation")}>
@@ -149,6 +175,14 @@ export default function SessionContextBar({
         sheetTitle={tr("mobile.sessioncontextbar.branchOrWorktree")}
         ariaLabel={tr("mobile.sessioncontextbar.worktreeCurrentValue", { branchName })}
         onPick={onPickBranch}
+        {...(onToggleNewWorktree ? {
+          popoverToggle: {
+            label: tr("worktreesessiondialog.newWorktree"),
+            checked: newWorktreeMode ?? false,
+            onChange: onToggleNewWorktree,
+            hint: tr("composer.openInANewWorktree"),
+          },
+        } : {})}
       />
     </div>
   );

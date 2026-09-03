@@ -2029,8 +2029,6 @@ export const es: AppMessages = {
   "timeline.output": "Salida",
   "timeline.pinIntoContext": "Fijar en contexto",
   "timeline.plan2": "Plan",
-  "timeline.promptBubble.collapse": "Contraer el prompt",
-  "timeline.promptBubble.expand": "Expandir el prompt",
   "timeline.regenerate": "Regenerar",
   "timeline.regenerateThisAssistantAnswer": "Regenerar esta respuesta de asistente",
   "timeline.restoreAndDiscardTheEditedDraft": "Restaurar y descartar el borrador editado",

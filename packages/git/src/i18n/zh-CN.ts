@@ -410,4 +410,13 @@ export const zhCN: GitMessages = {
   "gitview.resolveConflictWithAgent": "用智能体解决此冲突",
   "gitview.resolveInNewSession": "在新会话中",
   "gitview.resolveInThisSession": "在此会话中",
+  "gitprojectsource.cloneRepository": "Clone repository",
+  "gitprojectsource.description": "Clone a GitHub or GitLab repository on the current or an SSH server.",
+  "gitprojectsource.repositoryUrl": "Repository URL",
+  "gitprojectsource.target": "Target",
+  "gitprojectsource.sshServer": "SSH server",
+  "gitprojectsource.destinationParentFolder": "Destination parent folder",
+  "gitprojectsource.projectName": "Project name",
+  "gitprojectsource.noSshServers": "No SSH servers are configured.",
+  "gitprojectsource.cloneDestinationHint": "Clones into the folder shown above. Browse to change it.",
 };

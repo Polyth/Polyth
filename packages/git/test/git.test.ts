@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createGitService, pathsUnder } from "../src/index.ts";
+import { cloneRepository, createGitService, normalizeRepositoryUrl, pathsUnder } from "../src/index.ts";
 
 const git = createGitService();
 const dirs: string[] = [];
@@ -27,6 +27,38 @@ const repo = (withCommit = true): string => {
 
 process.on("exit", () => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
+});
+
+test("repository clone URLs accept GitHub/GitLab HTTP and SSH forms only", async () => {
+  for (const value of [
+    "https://github.com/acme/app.git",
+    "http://gitlab.com/acme/app.git",
+    "git@github.com:acme/app.git",
+    "ssh://git@gitlab.com/acme/app.git",
+  ]) assert.equal(normalizeRepositoryUrl(value), value);
+  assert.throws(() => normalizeRepositoryUrl("https://github.com/acme/app.git?token=secret"), /URL/);
+  assert.throws(() => normalizeRepositoryUrl("https://user:secret@github.com/acme/app.git"), /without credentials/);
+  assert.throws(() => normalizeRepositoryUrl("https://example.com/acme/app.git"), /GitHub or GitLab/);
+});
+
+test("remote clone quotes the URL and registers the repository folder", async () => {
+  const commands: string[] = [];
+  const remote = {
+    label: "dev@host",
+    exec: async (command: string) => {
+      commands.push(command);
+      if (command.startsWith("test -d")) return { code: 0, stdout: "", stderr: "" };
+      if (command.startsWith("test -e")) return { code: 1, stdout: "", stderr: "" };
+      return { code: 0, stdout: "", stderr: "" };
+    },
+    start: async () => { throw new Error("unused"); },
+    forward: async () => { throw new Error("unused"); },
+  };
+  assert.deepEqual(
+    await cloneRepository({ repository: "git@github.com:acme/app.git", parentPath: "/srv/projects" }, remote),
+    { path: "/srv/projects/app", name: "app" },
+  );
+  assert.match(commands[2]!, /git clone -- 'git@github\.com:acme\/app\.git' '\/srv\/projects\/app'/);
 });
 
 test("isRepo distinguishes a repo from a plain directory", async () => {

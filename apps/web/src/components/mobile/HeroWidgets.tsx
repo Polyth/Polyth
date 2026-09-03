@@ -112,7 +112,7 @@ export function HeroWidgetMenu() {
         <button
           {...trigger}
           type="button"
-          className="hero-widget-settings zone-customize-trigger"
+          className="hero-widget-settings zone-customize-trigger zone-edit-button"
           aria-label={tr("workspace.builtinsurfaces.customizeNewChatWidgets")}
           title={tr("workspace.builtinsurfaces.customizeNewChatWidgets")}
         ><Icon.sliders /></button>

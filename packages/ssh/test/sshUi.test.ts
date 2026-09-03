@@ -7,6 +7,7 @@ import {
   formFromConnection,
   formToInput,
   remoteBasename,
+  runtimeNeedsInstall,
   stateBadge,
   validateSshForm,
 } from "../widgets/ssh/sshUi.ts";
@@ -77,6 +78,12 @@ test("stateBadge maps connection states to text and tone", () => {
   assert.deepEqual(stateBadge("unreachable"), { text: tr("ssh.sshui.unreachable"), tone: "err" });
   assert.deepEqual(stateBadge("disconnected"), { text: tr("ssh.sshui.disconnected"), tone: "muted" });
   assert.deepEqual(stateBadge(undefined), { text: tr("ssh.sshui.unknown"), tone: "muted" });
+});
+
+test("runtimeNeedsInstall only enables the installer for a missing runtime", () => {
+  assert.equal(runtimeNeedsInstall({ ok: false, installable: true }), true);
+  assert.equal(runtimeNeedsInstall({ ok: false }), false);
+  assert.equal(runtimeNeedsInstall({ ok: true, installable: true }), false);
 });
 
 test("remoteBasename suggests a project name from a POSIX path", () => {

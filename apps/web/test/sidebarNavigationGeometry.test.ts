@@ -80,6 +80,8 @@ test("sidebar geometry scales type from ui font size and density controls rows",
     "session and project action columns share a clean edge without a button outline");
   assert.match(css, /@media \(max-width:\s*820px\)[\s\S]*?\.project-new-session,\s*\.project-menu-btn\s*\{\s*width:\s*var\(--tap\);\s*height:\s*var\(--tap\);/,
     "mobile project actions grow to the session menu touch target");
+  assert.match(css, /\.sidebar \.project-card-shell,\s*\.sidebar \.project-card,\s*\.sidebar \.session-row,[\s\S]*?min-height:\s*var\(--tap\);/,
+    "mobile project rows cannot be shorter than their touch controls");
   assert.doesNotMatch(css, /\.session-actions\b/);
   assert.doesNotMatch(css, /\.session-sync-icon\b/);
 });

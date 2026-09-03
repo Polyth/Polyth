@@ -14,8 +14,8 @@ let openModalSurfaces = 0;
 
 /**
  * Prevent the document behind a modal surface from moving while preserving
- * scroll inside the surface itself. The counter keeps nested dialogs (for
- * example the SSH picker over the project picker) locked until the final
+ * scroll inside the surface itself. The counter keeps genuinely nested
+ * dialogs (e.g. a confirm over a settings dialog) locked until the final
  * surface closes.
  */
 export function useModalScrollLock(active: boolean): void {

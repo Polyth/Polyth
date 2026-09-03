@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { behaviorRevision, createBehaviorService } from "../src/behavior.ts";
+import { behaviorRevision, createBehaviorService, favoriteSubagentRoutingSection } from "../src/behavior.ts";
 import { createClientSettings } from "../src/clientSettings.ts";
 import { createMcpConfigService, mcpEntriesFromBackendConfig } from "../src/mcp.ts";
 
@@ -92,6 +92,36 @@ test("behavior: size limit enforced; failed backend apply rolls the file back", 
   // Canonical copy still matches what the backend actually runs with.
   assert.equal(readFileSync(file, "utf8"), "keep me\n");
   assert.equal((await svc.get()).revision, good.revision);
+});
+
+test("behavior: favorite subagent policy is enabled by default, applied, and rolled back on failure", async () => {
+  const dir = tmp();
+  const applied: string[] = [];
+  let fail = false;
+  const svc = createBehaviorService({
+    file: join(dir, "behavior.md"),
+    policyFile: join(dir, "behavior-policy.json"),
+    applier: {
+      behaviorPath: () => "/nowhere/AGENTS.md",
+      applyBehavior: async (text) => {
+        if (fail) throw new Error("nope");
+        applied.push(text);
+        return text.length;
+      },
+    },
+  });
+
+  assert.deepEqual(await svc.subagentPolicy(), { enabled: true });
+  await svc.refresh();
+  assert.match(applied.at(-1)!, /Never spawn a subagent that merely inherits/);
+  assert.ok(applied.at(-1)!.includes(favoriteSubagentRoutingSection));
+
+  assert.deepEqual(await svc.putSubagentPolicy(false), { enabled: false });
+  assert.doesNotMatch(applied.at(-1)!, /Favorite subagent routing/);
+
+  fail = true;
+  await assert.rejects(() => svc.putSubagentPolicy(true), /rolled back/);
+  assert.deepEqual(await svc.subagentPolicy(), { enabled: false });
 });
 
 test("mcp: CRUD with revisions; secrets stored but never returned", async () => {

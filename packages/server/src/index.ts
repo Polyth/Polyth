@@ -39,6 +39,7 @@ import {
   createConfigApplier,
   createOpenCodeRuntime,
   createRemoteOpenCodeRuntime,
+  installRemoteOpenCode,
   inspectOpenCodeEngine,
   probeRemoteOpenCode,
   resolveOpenCodeBinary,
@@ -1196,13 +1197,14 @@ export async function boot(opts: BootOptions = {}) {
   };
   const behavior = createBehaviorService({
     file: `${dataDir}/behavior.md`,
+    policyFile: `${dataDir}/behavior-policy.json`,
     applier: configApplier,
     decorate: decorateBehavior,
   });
   refreshSafeBehavior = async () => {
     if (configApplier.configAuthority?.().kind === "read-only") return;
     try {
-      await configApplier.applyBehavior(decorateBehavior((await behavior.get()).text));
+      await behavior.refresh();
     } catch (err) {
       console.warn("[polyth] Secure Safe behavior refresh skipped", err);
     }
@@ -1243,6 +1245,13 @@ export async function boot(opts: BootOptions = {}) {
       throw Object.assign(new Error("SSH support unavailable: the ssh package did not load"), { code: "unavailable" });
     }
     return probeRemoteOpenCode(ssh.host(connectionId));
+  });
+  provideService("ssh.install-runtime", async (connectionId: string) => {
+    const ssh = svc<SshTransportService>("ssh");
+    if (!ssh) {
+      throw Object.assign(new Error("SSH support unavailable: the ssh package did not load"), { code: "unavailable" });
+    }
+    await installRemoteOpenCode(ssh.host(connectionId));
   });
 
   // --- F18: web push (VAPID keys minted once into the data dir) + the

@@ -33,6 +33,7 @@ export const bg: SshMessages = {
   "ssh.sshsettings.host": "Домакин",
   "ssh.sshsettings.hostOrSshConfigAlias": "Псевдоним на хост или ssh_config",
   "ssh.sshsettings.identityFile": "Файл за самоличност",
+  "ssh.sshsettings.installOpenCode": "Инсталиране на OpenCode",
   "ssh.sshsettings.keyValue": "ключ: {identityFile}",
   "ssh.sshsettings.nameEGBuildBox": "Име (напр. кутия за изграждане)",
   "ssh.sshsettings.noServersYet": "Все още няма сървъри",

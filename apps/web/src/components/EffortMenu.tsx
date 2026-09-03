@@ -13,7 +13,7 @@ export interface EffortMenuProps {
 /**
  * Discrete reasoning effort with one native range stop per backend variant.
  * One draggable track serves every layout; on touch the drag selects the
- * nearest stop while the tooltip names the live value. "Auto" stays a real
+ * nearest stop while a transient hint names the live value. "Auto" stays a real
  * reset choice instead of pretending the model default is another variant.
  */
 export default function EffortMenu({
@@ -27,11 +27,6 @@ export default function EffortMenu({
   const selected = Math.max(0, options.indexOf(value ?? ""));
   const selectedOption = options[selected] ?? "";
   const label = selectedOption ? thinkingVariantLabel(selectedOption) : tr("composer.auto");
-  const endAdjust = () => {
-    setAdjusting(false);
-    onCommit?.();
-  };
-
   return (
     <label
       className="composer-effort-control"
@@ -48,8 +43,8 @@ export default function EffortMenu({
           aria-valuetext={label}
           onChange={(event) => onPick(options[Number(event.target.value)] || undefined)}
           onPointerDown={() => setAdjusting(true)}
-          onPointerUp={endAdjust}
-          onPointerCancel={endAdjust}
+          onPointerUp={() => { setAdjusting(false); onCommit?.(); }}
+          onPointerCancel={() => { setAdjusting(false); onCommit?.(); }}
           onBlur={() => setAdjusting(false)}
         />
         <span className="composer-effort-stops" aria-hidden="true">

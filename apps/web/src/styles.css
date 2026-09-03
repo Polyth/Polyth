@@ -246,9 +246,7 @@ input, select, textarea {
 select { background-color: var(--elevated); }
 /* UX-A390 a11y contract: focus is visible with at least a 2px outline and
    2px offset on every surface. */
-/* Focus ring in the text token: --text is contrast-validated against every
-   bundled surface (accent falls under 3:1 on the light themes) and it stays
-   identifiable in monochrome capture. */
+/* Keep focus indication on the accent instead of the text/black ink. */
 :focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 3px;
@@ -265,9 +263,17 @@ body[data-shift-held] :focus-visible {
   box-shadow: none;
 }
 
-/* Desktop customization zones stay geometrically stable: edit triggers keep
-   their place but are painted only for the zone under the pointer while a bare
-   Shift is held. Explicit Edit mode exposes and outlines every zone. */
+/* Edit triggers float over their zone: hidden controls never consume layout. */
+.customize-zone { position: relative; }
+.zone-edit-button {
+  position: absolute;
+  z-index: var(--z-popover);
+  inset-block-start: var(--space-1);
+  inset-inline-end: var(--space-1);
+  background: var(--material-glass);
+  border-color: var(--material-glass-border);
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+}
 @media (hover: hover) and (pointer: fine) {
   .zone-customize-trigger {
     visibility: hidden;
@@ -856,7 +862,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .session-subagent-toggle {
   position: absolute;
   z-index: 2;
-  left: calc(var(--nav-session-row-indent, var(--nav-indent-session)) - var(--space-5));
+  left: calc(var(--nav-session-row-indent, var(--nav-indent-session)) - var(--space-4));
   top: calc((var(--nav-row-session) - var(--icon-sm)) / 2);
   display: grid;
   width: var(--icon-sm);
@@ -954,9 +960,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 }
 .session-worktree-label svg { width: 10px; height: 10px; flex: none; }
 .session-row.active .session-title { color: var(--text); }
-.session-row.unread .session-title,
-.session-row.needs-reply .session-title,
-.session-row.needs-approval .session-title { font-weight: 600; }
+.session-row.unread .session-title { font-weight: 600; }
 .session-status-zone {
   grid-column: 2;
   width: auto;
@@ -1764,9 +1768,8 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   background: var(--border);
 }
 .composer-effort-stops i.active { background: var(--accent); }
-.composer-effort-control:focus-within .composer-effort-track::before {
-  background: color-mix(in srgb, var(--accent) 45%, var(--border-soft));
-}
+.composer-actions:has(.composer-effort-tooltip) { overflow: visible; }
+.composer .composer-rail:has(.composer-effort-tooltip) { overflow: visible; }
 .composer-effort-tooltip {
   position: absolute;
   z-index: var(--z-tooltip);
@@ -1777,7 +1780,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   background: var(--material-glass);
-  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
   color: var(--text);
   font-size: var(--font-meta);
   font-weight: 600;
@@ -2750,6 +2752,21 @@ html[data-density="compact"] .set-row { padding: 6px 0; }
   background: transparent; border: none; border-bottom: 1px solid var(--border-soft); border-radius: 0;
 }
 .picker-pop input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+/* A mode switch pinned above the list (e.g. "New worktree" in the branch
+   picker): it reshapes what picking a row does, so it reads as chrome, not
+   as one of the options. */
+.picker-toggle {
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.picker-toggle .ui-checkbox-label { font-size: var(--font-meta); font-weight: 600; }
+.sheet-body > .picker-toggle {
+  min-height: var(--tap);
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 4px;
+}
 .picker-list { max-height: 300px; overflow-y: auto; padding: 4px; }
 .picker-group { padding: 6px 10px 2px; font-size: var(--font-meta); font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
 .picker-item {
@@ -2862,11 +2879,8 @@ body[data-density="compact"] .composer { padding-block: 4px; }
 body[data-density="comfortable"] .composer textarea { min-height: 52px; }
 body[data-density="balanced"] .composer textarea { min-height: 44px; }
 body[data-density="compact"] .composer textarea { min-height: 40px; }
-body[data-chatwidth="wide"] .timeline { padding-inline: max(24px, calc((100% - 1240px) / 2)); }
-body[data-chatwidth="wide"] .timeline-utility,
-body[data-chatwidth="wide"] .timeline-reveal { padding-inline: max(24px, calc((100% - 1240px) / 2)); }
-body[data-chatwidth="wide"] .composer { padding-inline: max(20px, calc((100% - 1240px) / 2)); }
-body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, body[data-chatwidth="wide"] .tool-card { max-width: 1180px; }
+body[data-chatwidth="wide"] { --chat-measure: 1180px; }
+body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, body[data-chatwidth="wide"] .tool-card { max-width: 100%; }
 
 /* ---------- WP2: a11y primitives + IME-safe composer ---------- */
 .sr-only {
@@ -2916,7 +2930,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .folder-dialog { width: min(720px, calc(100vw - 48px)); gap: 0; }
 /* UX-ONBOARDING: one keyboard-owning wrapper (Mod+Enter direct confirm)
    preserving the panel's column layout. */
-.folder-dialog-body { display: flex; flex-direction: column; gap: 10px; min-height: 0; flex: 1; }
+.folder-dialog-body { display: flex; flex-direction: column; gap: 10px; min-height: 0; flex: 1; container-type: inline-size; }
 .folder-up-action {
   background: none; border: 0; font: inherit; color: inherit; text-align: left;
   width: auto; margin: 0 18px;
@@ -2984,6 +2998,39 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 }
 .folder-newname { display: inline-flex; align-items: center; gap: 6px; }
 .folder-newname .ui-input { min-width: 0; flex: 1; }
+
+/* "Ways to add" band + inline alternative-source disclosure (SSH, clone).
+   Replaces the stacked child dialogs: extra fields are revealed in place. */
+.folder-sources { padding: var(--space-2) 18px var(--space-4); }
+.folder-source-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-height: var(--control-h-sm); }
+.folder-source-row .ghost-link { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+.folder-source-row > .ssh-open-remote { order: 1; }
+.folder-source-row > .git-clone-source { order: 2; }
+.folder-source-row > :not(.ssh-open-remote):not(.git-clone-source):not(.folder-source-panel) { order: 3; }
+.folder-source-chip[aria-expanded="true"] {
+  background: var(--accent-wash); border-color: var(--accent-line); color: var(--text);
+}
+.folder-source-panel {
+  order: 4; flex: 1 0 100%; min-width: 100%;
+  display: flex; flex-direction: column; gap: var(--space-3);
+  margin-top: var(--space-1); padding: var(--space-4) 0 0;
+  border-top: 1px solid var(--hair); animation: rise var(--motion-surface) var(--motion-ease);
+}
+.folder-source-field { display: flex; flex-direction: column; gap: 4px; }
+.folder-source-field > span {
+  color: var(--muted); font-size: var(--font-meta); font-weight: 600;
+}
+.folder-source-field > span > em { color: var(--faint); font-style: normal; font-weight: 400; }
+.folder-source-field .ui-input, .folder-source-field .ui-select { width: 100%; }
+.folder-source-hint { margin: 0; color: var(--muted); font-size: var(--font-meta); }
+.folder-source-hint code { color: var(--text-dim); word-break: break-all; }
+.folder-source-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.folder-source-actions .folder-selected { margin-right: auto; max-width: 52%; }
+.folder-source-panel .folder-toolbar { padding: 0; }
+.folder-source-panel .folder-list { height: min(30vh, 220px); margin: 0; }
+/* Clone keeps the shared browser as its destination — trim it so the revealed
+   fields stay in view without the dialog outgrowing the viewport. */
+.folder-dialog-body[data-source-armed="git-clone-project"] .folder-list { height: min(28vh, 200px); }
 .composer-editor { font-size: var(--editor-font-size, 14px); }
 .composer-editor.is-composing { /* test/debug hook only — must not animate */ }
 .composer-focus-editor {
@@ -3111,54 +3158,128 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .gallery-nav.prev { left: 10px; }
 .gallery-nav.next { right: 10px; }
 
-/* Finder-like Quick Look for composer and timeline attachments. The scrim and
-   scale entrance make the preview feel like a surface lifted from the pill,
-   while the content remains native to the browser. */
+/* Finder-like Quick Look for composer and timeline attachments. Portaled to
+   <body> (AttachmentPreview.tsx) so the glass scrim covers the whole window,
+   not just the chat column. The panel shrink-wraps the file and clamps to the
+   viewport; chrome is just a filename + optional path. */
 @keyframes attachment-preview-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes attachment-preview-in { from { opacity: 0; transform: scale(.94) translateY(10px); } to { opacity: 1; transform: none; } }
 .dialog-backdrop:has(.attachment-preview-dialog) { animation: attachment-preview-backdrop-in var(--motion-surface) var(--motion-ease); }
-.attachment-preview-dialog {
-  width: min(980px, calc(100vw - var(--space-6)));
-  height: min(780px, calc(100vh - var(--space-6)));
-  max-height: calc(var(--visual-vh, 100dvh) - var(--space-6));
+/* The host makes EVERY .dialog-panel a size container (`container: dialog-panel
+   / inline-size`, ~line 9764) and floors its `min-width` at 0 (~line 8090).
+   Both defeat an intrinsically-sized panel: inline-size containment means the
+   panel is laid out without measuring its contents, so `width: max-content`
+   collapses to `min-width` — i.e. 0. This compound selector opts back out and
+   lets the file drive the panel width. Plain block boxes the whole way down so
+   the intrinsic size propagates (a flex/scroll ancestor would zero it again). */
+.attachment-preview-dialog.dialog-panel {
+  container-type: normal;
+  display: block;
+  width: max-content;
+  min-width: min(360px, calc(100vw - (2 * var(--space-5))));
+  max-width: calc(100vw - (2 * var(--space-5)));
+  height: auto;
+  max-height: calc(var(--visual-vh, 100dvh) - (2 * var(--space-5)));
+  padding: 0;
+  overflow: hidden;
   background: var(--sunken);
   animation: attachment-preview-in var(--motion-surface) var(--motion-ease);
 }
-.attachment-preview-dialog .ui-dialog-body { display: flex; padding: 0; overflow: hidden; }
-.attachment-preview-content { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+.attachment-preview-dialog .ui-dialog-body { display: block; min-height: 0; padding: 0; overflow: hidden; }
+.attachment-preview-content { position: relative; display: block; }
+
+/* Minimal header: filename, optional path, page nav, close — nothing else. */
 .attachment-preview-toolbar {
-  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
-  flex: none; min-height: 48px; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--material-glass-border);
-  position: relative; z-index: 2; background: color-mix(in srgb, var(--material-glass) 86%, transparent);
+  display: flex; align-items: center; gap: var(--space-2);
+  min-height: var(--control-h);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--material-glass-border);
+  background: color-mix(in srgb, var(--material-glass-strong) 90%, transparent);
   -webkit-backdrop-filter: blur(var(--material-glass-blur)); backdrop-filter: blur(var(--material-glass-blur));
   color: var(--muted); font-size: var(--font-meta);
-  box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
 }
-.attachment-preview-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: var(--font-body); font-weight: 600; }
-.attachment-preview-details { display: flex; min-width: 0; align-items: center; gap: var(--space-2); }
-.attachment-preview-details > span { white-space: nowrap; }
-.attachment-preview-path { max-width: min(48vw, 520px); overflow: hidden; text-overflow: ellipsis; }
-.attachment-preview-navigation { display: flex; flex: none; align-items: center; gap: var(--space-2); }
+.attachment-preview-title {
+  flex: 0 1 auto; min-width: 2ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text); font-size: var(--font-body); font-weight: 600;
+}
+.attachment-preview-path {
+  flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--muted);
+}
+.attachment-preview-navigation { flex: none; display: flex; align-items: center; gap: var(--space-2); margin-inline-start: auto; }
+.attachment-preview-navigation span { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.attachment-preview-toolbar > .ui-icon-btn { flex: none; margin-inline-start: auto; }
+.attachment-preview-navigation ~ .ui-icon-btn { margin-inline-start: 0; }
 .attachment-preview-nav {
-  width: var(--control-h-sm); height: var(--control-h-sm); padding: 0; border: 1px solid var(--hair-strong);
-  color: var(--text); font-size: 22px; line-height: 1;
+  width: var(--control-h-sm); height: var(--control-h-sm); padding: 0;
+  display: inline-grid; place-items: center;
+  border: 1px solid var(--hair-strong); border-radius: var(--radius-control);
+  background: transparent; color: var(--text); font-size: 18px; line-height: 1;
 }
+.attachment-preview-nav:hover { background: var(--raised); }
+
+/* The stage owns the scroll only when the file exceeds the viewport clamp. */
 .attachment-preview-stage {
-  display: flex; flex: 1; min-height: 0; align-items: center; justify-content: center;
-  overflow: auto; padding: var(--space-5); background: var(--sunken); outline: none;
+  display: block; overflow: auto; outline: none;
+  padding: var(--space-4);
+  max-height: calc(var(--visual-vh, 100dvh) - (2 * var(--space-5)));
+  text-align: center; background: var(--sunken);
 }
-.attachment-preview-media { display: block; max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--radius-control); box-shadow: var(--shadow-md); }
-.attachment-preview-pdf { width: 100%; height: 100%; min-height: 0; border: 0; border-radius: var(--radius-control); background: var(--panel); }
-.attachment-preview-audio { width: min(460px, 100%); }
+.attachment-preview-media {
+  display: block; margin-inline: auto;
+  width: auto; height: auto; max-width: 100%;
+  max-height: calc(var(--visual-vh, 100dvh) - var(--control-h-lg) - (4 * var(--space-5)));
+  object-fit: contain;
+}
+
+/* image / video: the panel hugs the media, so the header floats above it
+   (absolute → contributes nothing to the panel width). */
+.attachment-preview-dialog--image .attachment-preview-toolbar,
+.attachment-preview-dialog--video .attachment-preview-toolbar {
+  position: absolute; inset: 0 0 auto 0; z-index: 2; border-bottom: 0;
+  background: linear-gradient(to bottom,
+    color-mix(in srgb, var(--material-glass-strong) 92%, transparent),
+    color-mix(in srgb, var(--material-glass-strong) 26%, transparent) 62%,
+    transparent);
+}
+.attachment-preview-dialog--image .attachment-preview-stage,
+.attachment-preview-dialog--video .attachment-preview-stage { padding-top: calc(var(--control-h) + var(--space-3)); }
+.attachment-preview-dialog--video .attachment-preview-media { border-radius: var(--radius-control); }
+
+/* audio / link / unsupported: no intrinsic size — compact fixed panel. */
+.attachment-preview-dialog--audio.dialog-panel,
+.attachment-preview-dialog--link.dialog-panel,
+.attachment-preview-dialog--unsupported.dialog-panel { width: min(520px, calc(100vw - (2 * var(--space-5)))); }
+.attachment-preview-dialog--audio .attachment-preview-stage,
+.attachment-preview-dialog--link .attachment-preview-stage,
+.attachment-preview-dialog--unsupported .attachment-preview-stage { padding: var(--space-5); }
+.attachment-preview-audio { width: 100%; }
+
+/* text / pdf: a comfortable scrollable document panel. */
+.attachment-preview-dialog--text.dialog-panel,
+.attachment-preview-dialog--pdf.dialog-panel {
+  display: flex; flex-direction: column;
+  width: min(900px, calc(100vw - (2 * var(--space-5))));
+  height: min(820px, calc(var(--visual-vh, 100dvh) - (2 * var(--space-5))));
+}
+.attachment-preview-dialog--text .ui-dialog-body,
+.attachment-preview-dialog--pdf .ui-dialog-body { flex: 1; display: flex; min-height: 0; }
+.attachment-preview-dialog--text .attachment-preview-content,
+.attachment-preview-dialog--pdf .attachment-preview-content { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.attachment-preview-dialog--text .attachment-preview-stage,
+.attachment-preview-dialog--pdf .attachment-preview-stage { flex: 1; min-height: 0; padding: 0; max-height: none; text-align: start; }
 .attachment-preview-text {
-  width: 100%; height: 100%; margin: 0; padding: var(--space-4); overflow: auto;
-  border: 1px solid var(--border-soft); border-radius: var(--radius-card); background: var(--panel);
+  flex: 1; min-height: 0; width: 100%; margin: 0; padding: var(--space-4); overflow: auto;
+  border: 0; background: var(--panel);
   color: var(--text-dim); font: var(--font-code) / 1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere;
 }
-.attachment-preview-state { color: var(--muted); text-align: center; }
-.attachment-preview-state a { display: block; margin-top: var(--space-3); color: var(--accent); overflow-wrap: anywhere; }
-.attachment-preview-link-url { display: block; max-width: min(680px, 100%); margin-bottom: var(--space-3); color: var(--text-dim); overflow-wrap: anywhere; }
-.attachment-preview-download { max-width: 420px; }
+.attachment-preview-pdf { flex: 1; width: 100%; min-height: 0; border: 0; background: var(--panel); }
+
+.attachment-preview-state { display: block; padding: var(--space-5); color: var(--muted); text-align: center; }
+.attachment-preview-state a { display: inline-block; margin-top: var(--space-3); color: var(--accent); overflow-wrap: anywhere; }
+.attachment-preview-link { display: flex; flex-direction: column; gap: var(--space-2); }
+.attachment-preview-link-url { color: var(--text-dim); font-size: var(--font-meta); overflow-wrap: anywhere; }
+.attachment-preview-download { gap: var(--space-2); }
 .editor-file-download { margin-top: var(--space-3); color: var(--accent); }
 .attachment-open {
   display: inline-flex; min-width: 0; align-items: center; gap: 6px; padding: 0; border: 0;
@@ -3169,11 +3290,20 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .attachment-pill:has(.attachment-open) { padding-block: 2px; }
 .attachment-pill .attachment-open .att-name { text-decoration: none; }
 .attachment-pill .attachment-open:hover .att-name { text-decoration: underline; }
-@media (max-width: 640px) {
-  .attachment-preview-toolbar { align-items: flex-start; }
-  .attachment-preview-details { flex-wrap: wrap; }
-  .attachment-preview-path { max-width: 100%; flex-basis: 100%; }
-  .attachment-preview-stage { padding: var(--space-3); }
+@media (max-width: 700px) {
+  /* Match sibling dialogs: full-bleed bottom sheet on phones. */
+  .attachment-preview-dialog.dialog-panel {
+    width: 100%; min-width: 0; max-width: 100%;
+    border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+  }
+  .attachment-preview-dialog--text.dialog-panel,
+  .attachment-preview-dialog--pdf.dialog-panel,
+  .attachment-preview-dialog--audio.dialog-panel,
+  .attachment-preview-dialog--link.dialog-panel,
+  .attachment-preview-dialog--unsupported.dialog-panel { width: 100%; }
+}
+@media (max-width: 420px) {
+  .attachment-preview-path { display: none; }
 }
 
 /* message actions + prompt navigator (UX-MSG-ACTIONS / UX-TIMELINE-LAYOUT-01) */
@@ -3449,41 +3579,13 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .prompt-nav { display: none; }
 }
 
-/* Transient prompt bubble: shown at the top of the viewport while the active
-   prompt is scrolled out of view and no prompt rail exists (<3 prompts).
-   Auto-dismisses 5s after the last scroll; hover pauses the timer. */
-.prompt-bubble {
-  position: absolute; top: 12px; left: 50%; translate: -50% 0; z-index: 5;
-  display: flex; align-items: stretch; gap: 2px; padding: 4px;
-  max-width: min(440px, 82%);
-  background: var(--material-glass); border: 1px solid var(--material-glass-border);
-  border-radius: var(--radius-card); box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
-  animation: rise var(--motion-normal) var(--motion-ease);
-}
-.prompt-bubble-main {
-  flex: 1; min-width: 0; display: flex; align-items: center;
-  border: 0; background: none; color: var(--text); cursor: pointer;
-  font-size: 12.5px; line-height: 1.45; text-align: left;
-  padding: 4px 6px; border-radius: calc(var(--radius-card) - 2px);
-}
-.prompt-bubble-main:hover, .prompt-bubble-main:focus-visible { background: var(--panel); color: var(--accent); }
-.prompt-bubble-text {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  word-break: break-word;
-}
-.prompt-bubble[data-expanded] .prompt-bubble-text {
-  white-space: pre-wrap; max-height: min(280px, 45vh); overflow-y: auto;
-}
-.prompt-bubble-toggle { flex: 0 0 auto; align-self: center; }
-
-
 /* L13: selection quick actions + windowed-timeline reveal bar */
 .selection-menu {
-  position: fixed; z-index: 70; display: flex; align-items: center; gap: 3px;
-  padding: 4px; background: var(--material-glass); border: 1px solid var(--material-glass-border);
+  position: fixed; z-index: var(--z-popover); display: flex; align-items: center; gap: 2px;
+  max-width: calc(100vw - var(--space-4)); padding: var(--space-1); background: var(--material-glass); border: 1px solid var(--material-glass-border);
   border-radius: var(--radius-control); box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
 }
-.selection-menu-flash { font-size: 12px; color: var(--muted); padding: 2px 8px; white-space: nowrap; }
+.selection-menu-flash { font-size: var(--font-meta); color: var(--muted); padding: 2px var(--control-pad-x-sm); white-space: nowrap; }
 .timeline-earlier {
   display: flex; gap: 8px; justify-content: center; align-items: center;
   padding: 4px 0 8px; border-bottom: 1px dashed var(--border-soft); margin-bottom: 4px;
@@ -3578,7 +3680,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 
 /* ---- WP8: work status, tracker pills, agent profiles ---------------------- */
 .work-status {
-  margin: 6px auto 2px; max-width: 860px; width: 100%;
+  margin: 6px auto 2px; max-width: var(--chat-measure); width: 100%;
   border: 1px solid var(--hair-strong); border-radius: var(--radius-card);
   background: var(--elevated); padding: 8px 12px; font-size: 12px; box-shadow: var(--inset-hi);
 }
@@ -3609,7 +3711,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .ws-restore { font-size: var(--font-meta); }
 .tracker-pills {
   display: flex; gap: 6px; flex-wrap: wrap; padding: 2px 14px;
-  max-width: 860px; margin: 0 auto; width: 100%;
+  max-width: var(--chat-measure); margin: 0 auto; width: 100%;
 }
 .tracker-pill {
   display: inline-flex; align-items: center; gap: 6px; font-size: var(--font-meta);
@@ -3629,7 +3731,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 }
 .desktop-session-status-trigger:hover { background: color-mix(in srgb, var(--material-glass) 88%, var(--surface-overlay-hover)); }
 .desktop-session-status-trigger svg { width: var(--icon-sm); height: var(--icon-sm); }
-.desktop-session-status-mask { min-width: 0; max-width: min(32vw, 320px); height: 18px; overflow: hidden; display: block; }
+.desktop-session-status-mask { min-width: 0; flex: 1 1 auto; height: 18px; overflow: hidden; display: block; }
 .desktop-session-status-copy { min-width: 0; height: 18px; display: flex; align-items: center; gap: var(--space-2); overflow: hidden; white-space: nowrap; }
 .desktop-session-status-copy > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .desktop-session-status-copy > span:first-child svg { display: block; width: var(--icon-sm); height: var(--icon-sm); color: var(--muted); }
@@ -4467,7 +4569,13 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 /* Header actions are compact controls regardless of viewport width. Their
    accessible names remain on the button; labels belong in tooltips and menus. */
 .placed-mini-widget { display: contents; }
+.placed-mini-widget[data-widget-editing="true"] {
+  display: inline-flex; align-items: center; cursor: grab;
+}
 .placed-slot-widget { min-width: 0; }
+.placed-slot-widget[data-widget-editing="true"] { cursor: grab; }
+.placed-mini-widget[data-widget-editing="true"]:active,
+.placed-slot-widget[data-widget-editing="true"]:active { cursor: grabbing; }
 .focus-conversation > .placed-slot-widget {
   flex: none; width: min(var(--chat-measure), calc(100% - 72px)); margin: 8px auto 0;
   border: 1px solid var(--border-soft); border-radius: var(--radius-surface); background: var(--sunken);
@@ -4716,28 +4824,6 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .message-plan-card li span { color: var(--faint); }
 .message-plan-card li.done { color: var(--muted); text-decoration: line-through; }
 .message-plan-card li.done span, .message-plan-card li.active span { color: var(--accent); }
-.focus-working {
-  width: min(var(--chat-measure), calc(100% - 48px)); margin: 0 auto 8px; display: flex; align-items: center; gap: 7px;
-  padding: 0; border: 0; background: transparent; color: var(--faint); font-size: var(--font-meta);
-}
-.focus-working-spinner {
-  width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 9%, transparent);
-  animation: focus-working-pulse 1.5s ease-in-out infinite;
-}
-.focus-working-cursor { width: 7px; height: 13px; background: var(--accent); animation: focus-working-cursor 1s steps(2, start) infinite; }
-.focus-working-cat { width: 25px; height: 14px; overflow: visible; fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; animation: focus-working-run .55s ease-in-out infinite alternate; }
-.focus-working-activity { display: flex; gap: 3px; width: 11px; }
-.focus-working-activity i { width: 3px; height: 3px; border-radius: 50%; background: var(--accent); animation: focus-working-dot 1.1s ease-in-out infinite; }
-.focus-working-activity i:nth-child(2) { animation-delay: .15s; }.focus-working-activity i:nth-child(3) { animation-delay: .3s; }
-@keyframes focus-working-pulse { 0%, 100% { opacity: .35; transform: scale(.85); } 50% { opacity: .9; transform: scale(1); } }
-@keyframes focus-working-cursor { 50% { opacity: 0; } }
-@keyframes focus-working-run { to { transform: translateX(2px) translateY(-1px); } }
-@keyframes focus-working-dot { 50% { opacity: .25; transform: translateY(-2px); } }
-@media (prefers-reduced-motion: reduce) {
-.focus-working-spinner, .focus-working-cursor, .focus-working-cat, .focus-working-activity i { animation: none; }
-}
-
 .composer-chat { border: 0; padding: 12px max(var(--gutter), calc((100% - var(--chat-measure)) / 2)) 24px; background: transparent; }
 .focus-conversation > .archived-guard { padding-inline: max(var(--gutter), calc((100% - var(--chat-measure)) / 2)); }
 /* Add stays a quiet 34px icon control beside the config chips. */
@@ -5337,7 +5423,7 @@ html[dir="rtl"] input[type="number"] {
 .widget-library-card {
   min-width: 0;
   display: grid;
-  grid-template-columns: 35px minmax(0, 1fr) auto;
+  grid-template-columns: var(--control-h) minmax(0, 1fr) auto;
   align-items: start;
   gap: 9px;
   min-height: 124px;
@@ -5350,7 +5436,8 @@ html[dir="rtl"] input[type="number"] {
 }
 .widget-library-card:active { cursor: grabbing; }
 .widget-library-card.on-canvas { background: var(--raised); }
-.widget-library-glyph { display: grid; place-items: center; width: 35px; height: 35px; border: 1px solid var(--accent-line); border-radius: var(--radius-card); background: var(--accent-wash); color: var(--accent); font-size: var(--font-label); font-weight: 700; }
+.widget-choice-glyph { display: grid; place-items: center; width: var(--control-h); height: var(--control-h); flex: none; border: 1px solid var(--material-glass-border); border-radius: var(--radius-card); background: var(--material-glass); color: var(--accent); box-shadow: var(--material-glass-highlight), var(--shadow-sm); }
+.widget-choice-glyph svg { width: var(--icon-lg); height: var(--icon-lg); }
 .widget-library-card-copy { min-width: 0; }
 .widget-library-card-title { display: flex; align-items: center; gap: var(--space-2); }
 .widget-library-card-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-meta); }
@@ -5399,7 +5486,7 @@ html[dir="rtl"] input[type="number"] {
 .widget-preview-zone > b { margin: auto; color: var(--accent); font-size: 8px; }
 .widget-preview-zone > em { margin: auto; color: var(--muted); font-size: 6.5px; line-height: 1.3; text-align: center; }
 .widget-preview-status { min-height: 46px; display: flex; align-items: center; gap: 8px; margin: 0 14px 11px; padding: 7px 9px; border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: var(--elevated); color: var(--muted); font-size: 8.5px; }
-.widget-preview-status .widget-library-glyph { width: 29px; height: 29px; border-radius: var(--radius-control); font-size: 12px; }
+.widget-preview-status .widget-choice-glyph { width: var(--control-h-sm); height: var(--control-h-sm); border-radius: var(--radius-control); }
 .widget-preview-status > span { display: flex; flex-direction: column; }
 .widget-preview-status small { color: var(--faint); font-size: 7px; }
 .widget-preview-status strong { color: var(--text); font-size: 9px; }
@@ -5472,9 +5559,9 @@ html[dir="rtl"] input[type="number"] {
 .guided-workflow-grid,
 .guided-widget-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .guided-workflow-grid .setup-choice,
-.guided-widget-grid .setup-choice { min-height: 76px; display: grid; grid-template-columns: 38px 1fr 22px; align-items: center; gap: 9px; padding: 10px; border-color: var(--border-soft); background: var(--bg); text-align: left; }
+.guided-widget-grid .setup-choice { min-height: 76px; display: grid; grid-template-columns: var(--control-h) 1fr 22px; align-items: center; gap: 9px; padding: 10px; border-color: var(--border-soft); background: var(--bg); text-align: left; }
 .guided-workflow-grid .setup-choice > i,
-.guided-widget-grid .setup-choice > i { display: grid; place-items: center; width: 38px; height: 38px; border-radius: var(--radius-card); background: var(--accent-wash); color: var(--accent); font-style: normal; font-size: 16px; }
+.guided-widget-grid .setup-choice > i { display: grid; place-items: center; width: var(--control-h); height: var(--control-h); border-radius: var(--radius-card); background: var(--accent-wash); color: var(--accent); font-style: normal; font-size: var(--icon-sm); }
 .setup-choice > span { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .setup-choice strong { font-size: var(--font-meta); }
 .setup-choice small { color: var(--muted); font-size: 8.5px; line-height: 1.4; }
@@ -5756,13 +5843,19 @@ grid-template-columns: 1fr !important;
 }
 .widget-menu-single { top: 52px; }
 .widget-menu-search { width: 100%; min-height: 34px; padding: 0 9px; }
-.widget-menu-list { padding-bottom: 8px; }
+.widget-menu-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); padding-bottom: var(--space-2); }
+.widget-menu-list section { display: contents; }
+.widget-menu-list section > h4 { grid-column: 1 / -1; }
 .widget-menu-list section > button {
-  min-height: 47px;
+  min-height: calc(var(--control-h-lg) + var(--space-3));
   flex-direction: row;
   align-items: center;
-  gap: 8px;
-  border-color: transparent;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-card);
+  background: var(--material-glass);
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
 }
 .widget-menu-list section > button > span:first-child {
   min-width: 0;
@@ -6186,6 +6279,7 @@ min-height: var(--tap);
     min-height: 68px;
     gap: 3px;
     padding: 0 7px;
+    background: color-mix(in srgb, var(--chat-surface) 88%, transparent);
   }
 .header-chat .header-drawer-btn,
 .header-chat .header-project-btn {
@@ -6476,7 +6570,7 @@ color: var(--green);
 }
 .composer-send-options svg { width: 12px; height: 12px; }
 .composer-send-split > button:hover:not(:disabled) { background: color-mix(in srgb, white 12%, transparent); }
-.composer-send-split > button:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--accent-ink); outline-offset: -2px; }
+.composer-send-split > button:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--accent); outline-offset: -2px; }
 /* Delivery split menu now renders through ui/Menu (.ui-menu). */
 .composer-rail .composer-stop-primary {
   min-width: 78px;
@@ -6675,7 +6769,7 @@ color: var(--green);
 .view-icon { width: 28px; height: 28px; border-radius: calc(var(--radius-control) - 2px); }
 .view-icon.active { color: var(--accent); background: var(--surface-overlay-strong); box-shadow: none; }
 .header-rail-overflow { display: none; }
-.desktop-session-status { position: absolute; left: calc(50% + var(--chat-center-offset, 0px)); width: min(var(--chat-measure), calc(100% - (2 * var(--gutter)))); max-width: min(var(--chat-measure), calc(100% - (2 * var(--gutter)))); min-width: 0; transform: translateX(-50%); z-index: 2; }
+.desktop-session-status { position: absolute; left: calc(var(--sidebar-inline-size, 0px) + max(var(--gutter), calc((100% - var(--sidebar-inline-size, 0px) - var(--workspace-pane-inline-size, 0px) - var(--chat-measure)) / 2))); width: min(var(--chat-measure), calc(100% - var(--sidebar-inline-size, 0px) - var(--workspace-pane-inline-size, 0px) - (2 * var(--gutter)))); max-width: none; min-width: 0; z-index: 2; }
 .desktop-session-status-trigger { width: 100%; height: var(--control-h); max-width: 100%; padding-inline: var(--space-4); }
 .header-actions,
 .header-user-menu { flex: none; }
@@ -7483,8 +7577,10 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
     padding: 0 var(--space-2);
   }
   .composer-mobile.composer-collapsed .composer-rail { display: contents; }
+  .composer-mobile.composer-collapsed .composer-leading-zone { display: contents; }
   .composer-mobile.composer-collapsed .composer-config { display: none; }
   .composer-mobile.composer-collapsed .composer-actions { display: contents; }
+  .composer-mobile.composer-collapsed .composer-actions > :is(.composer-extensions, .composer-next-action) { display: none; }
   .composer-mobile.composer-collapsed .composer-add { order: 1; }
   .composer-mobile.composer-collapsed .composer-input { order: 2; flex: 1 1 auto; min-width: 0; }
   .composer-mobile.composer-collapsed .composer-mobile-extensions { order: 3; }
@@ -7811,8 +7907,8 @@ body[data-density="comfortable"] .header { min-height: 60px; }
 .workspace-library-kinds { display: flex; gap: var(--space-1); }
 .workspace-library-kinds .ui-btn { flex: 1; }
 .workspace-button-surface { display: flex; flex-direction: column; gap: var(--space-1); color: var(--text-dim); font-size: var(--font-meta); }
-.workspace-library-results { display: flex; flex-direction: column; gap: var(--space-1); }
-.workspace-library-item { min-height: var(--tap); display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); border-bottom: 1px solid var(--border-soft); cursor: grab; }
+.workspace-library-results { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
+.workspace-library-item { min-height: calc(var(--control-h-lg) + var(--space-4)); display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); border: 1px solid var(--material-glass-border); border-radius: var(--radius-card); background: var(--material-glass); box-shadow: var(--material-glass-highlight), var(--shadow-sm); cursor: grab; }
 .workspace-library-item:active { cursor: grabbing; }
 .workspace-library-item > div { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: var(--space-1); }
 .workspace-library-item strong { overflow: hidden; font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap; }
@@ -8343,6 +8439,16 @@ width: 100%; min-height: var(--tap);
   .folder-newname input { min-width: 0; flex: 1; }
   .folder-foot :is(button, .ghost-link) { min-height: var(--tap); }
   .folder-open-btn { margin-left: auto; }
+  .folder-sources {
+    flex: none;
+    padding: 8px 12px max(10px, env(safe-area-inset-bottom, 0px));
+  }
+  .folder-source-row :is(button, .ghost-link) { min-height: var(--tap); }
+  .folder-source-panel { padding: var(--space-3) 0 0; overflow-y: auto; }
+  .folder-source-field :is(input, .ui-input, .ui-select, select) { min-height: var(--tap); }
+  .folder-source-actions { flex-wrap: wrap; }
+  .folder-source-actions .folder-selected { width: 100%; max-width: none; order: -1; }
+  .folder-source-actions :is(button, .ghost-link) { min-height: var(--tap); }
 
   .project-icon-options {
     grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
@@ -8638,15 +8744,15 @@ opacity: 1;
 
 /* No pointer or trackpad has to acquire a 7px/12px/32px target. */
 .sidebar-resize { right: -6px; width: 12px; }
-/* The right strip is only its configured button plus one spacing token of
-   inline padding. Touch input expands a transparent hit area, not the strip. */
+/* Keep matching inline gutters so icons center and badges clear the edge.
+   Touch input expands a transparent hit area, not the strip. */
 .rail-icon-col.plugin-strip {
   box-sizing: border-box;
   width: var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-4)));
   min-width: var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-4)));
   gap: var(--space-2);
   padding-block: var(--space-3);
-  padding-inline: var(--space-1) 0;
+  padding-inline: var(--space-1);
 }
 .rail-icon-col.plugin-strip .strip-btn,
 .rail-icon-col.plugin-strip .capability-launcher {
@@ -9016,25 +9122,6 @@ color: var(--muted);
   .mobile-session-selector[data-live="true"] {
     border-color: color-mix(in srgb, var(--accent-line) 70%, var(--border-soft));
   }
-  .mobile-island-kind {
-    flex: none;
-    color: var(--muted);
-    font-size: var(--font-meta);
-    font-weight: 650;
-    letter-spacing: .04em;
-    text-transform: uppercase;
-  }
-  .mobile-island-kind::after {
-    content: "·";
-    margin-left: var(--space-1);
-    color: var(--faint);
-    font-weight: 500;
-    letter-spacing: 0;
-    text-transform: none;
-  }
-  .mobile-session-selector[data-kind="task"] .mobile-island-kind { color: var(--accent); }
-  .mobile-session-selector[data-kind="request"] .mobile-island-kind { color: var(--amber); }
-  .mobile-session-selector[data-kind="peer"] .mobile-island-kind { color: var(--blue); }
   .mobile-island-text {
     min-width: 0;
     overflow: hidden;
@@ -9173,7 +9260,6 @@ color: var(--muted);
   .mobile-surface-chevron svg { width: var(--icon-sm); height: var(--icon-sm); }
   .mobile-surface-footer { width: 100%; min-height: var(--tap); display: flex; align-items: center; justify-content: center; gap: var(--space-2); border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: transparent; color: var(--text-dim); font-size: var(--font-label); }
   .mobile-surface-footer svg { width: var(--icon-sm); height: var(--icon-sm); }
-  .focus-working { width: max-content; max-width: calc(100% - (var(--screen-gutter) * 2)); min-height: var(--control-h-sm); margin: var(--space-2) auto; padding: 0 var(--space-3); border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: color-mix(in srgb, var(--elevated) 92%, transparent); box-shadow: var(--shadow-sm); }
   .mobile-task-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
   .mobile-task-list li {
     position: relative;
@@ -9305,6 +9391,8 @@ color: var(--muted);
   .pane-back { min-height: var(--tap); padding-inline: 12px; }
   body[data-keyboard="open"] :is(.rail-fullscreen, .panel-sheet) { bottom: 0; }
 
+  .sidebar .project-card-shell,
+  .sidebar .project-card,
   .sidebar .session-row,
   .sidebar .session-btn {
     min-height: var(--tap);
@@ -11284,6 +11372,17 @@ html[data-font] body :is(
 @keyframes ui-pop-in-up { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
 
 .ui-menu { min-width: 200px; }
+.widget-choice-menu { width: min(430px, calc(100vw - 2 * var(--screen-gutter))); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-1); padding: var(--space-2); }
+.widget-choice-menu > :is(.ui-menu-heading, .ui-separator) { grid-column: 1 / -1; }
+.widget-choice-menu .ui-menu-item {
+  min-height: calc(var(--control-h-lg) + var(--space-3));
+  padding: var(--space-2);
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-card);
+  background: var(--material-glass);
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+}
+.widget-choice-menu .ui-menu-item > .ui-icon { width: var(--control-h); height: var(--control-h); padding: var(--space-2); border: 1px solid var(--material-glass-border); border-radius: var(--radius-card); background: var(--surface-overlay); color: var(--accent); }
 .ui-menu-item {
   display: flex;
   align-items: center;
@@ -11482,16 +11581,6 @@ html[data-font] body :is(
     box-shadow: var(--material-glass-highlight), var(--shadow-sm);
   }
    .app-shell { position: relative; gap: var(--space-2); }
-   /* The desktop rail is layered over the shell edge, so the transcript must
-      reserve that width instead of letting its right edge disappear beneath
-      the launcher strip. */
-   .timeline {
-     padding-inline-end: calc(
-       max(var(--gutter), calc((100% - var(--chat-measure)) / 2))
-       + var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-4)))
-       + var(--space-2)
-     );
-   }
   .sidebar {
     border: 1px solid var(--hair);
     border-radius: var(--radius-surface);

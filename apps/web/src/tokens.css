@@ -163,7 +163,7 @@
   --z-tooltip: 370;
 
   /* focus, elevation, and motion */
-  --focus-ring: var(--text);
+  --focus-ring: var(--accent);
   --scrim: rgba(9, 8, 7, 0.62);
   --shadow-sm: 0 4px 14px -10px rgba(0, 0, 0, 0.55);
   --shadow-md: 0 14px 36px -22px rgba(0, 0, 0, 0.66);

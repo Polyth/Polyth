@@ -2029,8 +2029,6 @@ export const uk: AppMessages = {
   "timeline.output": "Вивід",
   "timeline.pinIntoContext": "Закріпити в контексті",
   "timeline.plan2": "План",
-  "timeline.promptBubble.collapse": "Згорнути промпт",
-  "timeline.promptBubble.expand": "Розгорнути промпт",
   "timeline.regenerate": "Створити заново",
   "timeline.regenerateThisAssistantAnswer": "Повторно сформувати цю відповідь помічника",
   "timeline.restoreAndDiscardTheEditedDraft": "Відновити та скасувати відредагований чернетку",

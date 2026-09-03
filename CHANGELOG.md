@@ -17,6 +17,27 @@ Companion docs: `docs/dev/architecture.md` (the system as built),
 
 ---
 
+## Unreleased — project picker: inline "add project" sources
+
+### Changed — alternative project sources are disclosed in place, not stacked dialogs
+
+- The "Open a project" folder picker no longer opens a second modal for
+  **Clone repository** or **Open on a server**. Each is now an inline
+  disclosure inside the picker: the footer links expand a fields panel, only
+  one is open at a time, and Escape collapses that panel before it closes the
+  dialog. The panel owns the primary action (`Clone repository` /
+  `Open remote project`) in the same place the local `Open project` button sat.
+- **Clone** drops its redundant "destination parent folder" field for local
+  clones — the picker's own folder browser is the destination, shown live as
+  "Clones into …" and changed by browsing. The SSH-clone path keeps a single
+  remote parent-path field.
+- **Open on a server** is a "solo" source: while open it hides the local file
+  manager and its own remote browser takes that space, instead of drawing a
+  second file manager on top of the first.
+- The `project.create.options` slot contract gains an inline context
+  (`browsedPath`, `armedId`, `arm`/`disarm`) so contributed sources render as
+  panels in the shared dialog frame rather than as `Dialog`s of their own.
+
 ## Unreleased — branch `feat/ssh-connection-plugin-dcfd` (2026-08-23)
 
 Commits `92b11d2`, `e47c6c1` and the docs/parity follow-up.

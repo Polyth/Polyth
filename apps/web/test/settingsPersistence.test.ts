@@ -143,7 +143,7 @@ test("rail icon sizes default safely, validate values, and publish token geometr
   assert.equal(properties.get("--rail-icon-glyph-right"), "var(--icon-lg)");
   assert.equal(
     properties.get("--rail-strip-width-right"),
-    "calc(var(--rail-icon-size-right) + var(--space-2))",
+    "calc(var(--rail-icon-size-right) + var(--space-3))",
   );
 });
 

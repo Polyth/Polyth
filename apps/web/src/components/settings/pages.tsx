@@ -442,14 +442,6 @@ export function ChatPage() {
       <Row label={tr("settings.pages.thinkingBlocks")} hint={tr("settings.pages.collapseMergedReasoningIntoAnExpandableBlock")} itemId="chat.thinking">
         <Toggle on={ui.collapsibleThinkingBlocks} onChange={(v) => setUiSettings({ collapsibleThinkingBlocks: v })} label={tr("settings.pages.collapsibleThinking")} />
       </Row>
-      <Row label={tr("settings.pages.workingIndicator")} hint={tr("settings.pages.workingIndicatorHint")} itemId="chat.workingIndicator">
-        <Seg value={ui.workingIndicator} options={[
-          ["pulse", tr("settings.pages.workingIndicatorPulse")],
-          ["cursor", tr("settings.pages.workingIndicatorKeyboard")],
-          ["cat", tr("settings.pages.workingIndicatorCat")],
-          ["activity", tr("settings.pages.workingIndicatorActivity")],
-        ]} onChange={(workingIndicator) => setUiSettings({ workingIndicator })} />
-      </Row>
       <Row label={tr("settings.pages.messageActions")} hint={tr("settings.pages.showLightweightCopyRevertAndForkControls")} itemId="chat.messageActions">
         <Toggle on={ui.showMessageActions} onChange={(showMessageActions) => setUiSettings({ showMessageActions })} label={tr("settings.pages.messageActions")} />
       </Row>
@@ -710,6 +702,25 @@ function BehaviorInstructionsEditor() {
 
 export function BehaviorPage() {
   const ui = useUiSettings();
+  const [favoriteSubagents, setFavoriteSubagents] = useState(true);
+  const [savingFavoriteSubagents, setSavingFavoriteSubagents] = useState(false);
+  useEffect(() => {
+    void api.subagentPolicyGet()
+      .then((policy) => setFavoriteSubagents(policy.enabled))
+      .catch((error) => setUiError(friendlyError("Couldn’t load subagent policy", error)));
+  }, []);
+  const changeFavoriteSubagents = async (enabled: boolean) => {
+    if (savingFavoriteSubagents) return;
+    setSavingFavoriteSubagents(true);
+    try {
+      const policy = await api.subagentPolicyPut(enabled);
+      setFavoriteSubagents(policy.enabled);
+    } catch (error) {
+      setUiError(friendlyError("Couldn’t save subagent policy", error));
+    } finally {
+      setSavingFavoriteSubagents(false);
+    }
+  };
   return (
     <>
       <PageHead title={tr("settings.pages.behavior")} blurb={tr("settings.pages.workspaceSafetyFlowAndGlobalAgentInstructions")} />
@@ -718,6 +729,9 @@ export function BehaviorPage() {
       </Row>
       <Row label={tr("settings.pages.editorAutosave")} hint={tr("settings.pages.savesEditsAfterAShortPauseRevision")} itemId="behavior.autosave">
         <Toggle on={ui.editorAutosave} onChange={(v) => setUiSettings({ editorAutosave: v })} label={tr("settings.pages.editorAutosave")} />
+      </Row>
+      <Row label="Require favorite subagents" hint="Agents must choose the best favorite for each delegated task, then switch favorites if it fails." itemId="behavior.favoriteSubagents">
+        <Toggle on={favoriteSubagents} onChange={(value) => void changeFavoriteSubagents(value)} label="Require favorite subagents" />
       </Row>
       <BehaviorInstructionsEditor />
       <Row label={tr("settings.pages.slashCommandsSnippets")} hint={tr("settings.pages.manageReusablePromptsUnderCommands")}>

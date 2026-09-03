@@ -33,6 +33,7 @@ export const uk: SshMessages = {
   "ssh.sshsettings.host": "Хост",
   "ssh.sshsettings.hostOrSshConfigAlias": "Псевдонім хоста або ssh_config",
   "ssh.sshsettings.identityFile": "Файл ідентифікації",
+  "ssh.sshsettings.installOpenCode": "Встановити OpenCode",
   "ssh.sshsettings.keyValue": "ключ: {identityFile}",
   "ssh.sshsettings.nameEGBuildBox": "Назва (наприклад, коробка для складання)",
   "ssh.sshsettings.noServersYet": "Поки що немає серверів",

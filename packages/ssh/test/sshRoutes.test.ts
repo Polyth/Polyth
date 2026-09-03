@@ -53,12 +53,14 @@ function harness(dial: (command: string, dest: string) => SshExecResult) {
   });
   const projects = fakeProjects();
   const probes: string[] = [];
+  const installations: string[] = [];
   const routes = sshRoutes({
     ssh, projects,
     probeRuntime: async (connectionId) => {
       probes.push(connectionId);
       return { ok: true, version: "1.18.18" };
     },
+    installRuntime: async (connectionId) => { installations.push(connectionId); },
   });
 
   const call = async (method: string, path: string, body: Record<string, unknown> = {}) => {
@@ -77,7 +79,7 @@ function harness(dial: (command: string, dest: string) => SshExecResult) {
       return { handled: true, status: 0, payload: null, error: { code: e.code, message: e.message } };
     }
   };
-  return { call, ssh, projects, probes };
+  return { call, ssh, projects, probes, installations };
 }
 
 const okDial = (command: string): SshExecResult => {
@@ -118,6 +120,17 @@ test("connection CRUD over routes never exposes secret material", async () => {
   assert.equal(removed.status, 200);
   const after = await call("GET", "/api/ssh/connections");
   assert.equal((after.payload as { items: unknown[] }).items.length, 0);
+});
+
+test("remote OpenCode installation is exposed as an SSH action", async () => {
+  const { call, installations } = harness(okDial);
+  const created = await call("POST", "/api/ssh/connections", { host: "up.example" });
+  const id = (created.payload as { id: string }).id;
+
+  const installed = await call("POST", `/api/ssh/connections/${id}/install`);
+  assert.equal(installed.status, 200);
+  assert.deepEqual(installed.payload, { ok: true });
+  assert.deepEqual(installations, [id]);
 });
 
 test("connect/status/test lifecycle and the injected runtime probe", async () => {

@@ -815,6 +815,39 @@ export function createSessionService(deps: {
     await applyProjection(sessionId, (current) => ({ ...current, ...patch }));
   };
 
+  // A delegated (subagent) child session never streams its own turn
+  // lifecycle: OpenCode runs it inside the parent's turn and garbage-collects
+  // its ephemeral backend session soon after. Without an explicit retirement
+  // the child stays pinned at working/reconciling/unknown forever and the UI
+  // can never open it as a finished transcript. The parent's task snapshot
+  // (`outcome` set) is the authoritative end signal; a plain read (`outcome`
+  // omitted) retires the child only when its transcript is demonstrably not
+  // mid-exchange. An open turn or an already-terminal status is left alone.
+  const settleDelegatedChild = async (
+    childSessionId: string,
+    outcome?: "done" | "failed",
+  ): Promise<void> => {
+    const projection = await store.projection(childSessionId);
+    if (!projection?.parentId) return;
+    if (
+      projection.status !== "working"
+      && projection.status !== "reconciling"
+      && projection.status !== "unknown"
+    ) return;
+    const events = await store.events(childSessionId);
+    if (openTurnFromEvents(events)) return;
+    if (outcome === undefined) {
+      const lastTurnEvent = [...events].reverse().find((event) =>
+        event.type === "user/message" || event.type === "assistant/message");
+      if (lastTurnEvent?.type === "user/message") return;
+    }
+    // The guards above already proved the status is non-terminal, so this
+    // always moves the child forward to a terminal state.
+    await updateProjectionQuietly(childSessionId, {
+      status: outcome === "failed" ? "failed" : "idle",
+    });
+  };
+
   const applyRuntimeProjection = async (
     sessionId: string,
     runtimeEventSeq: number | undefined,
@@ -1546,19 +1579,35 @@ export function createSessionService(deps: {
           await terminalizeReconciledTurn(sessionId, authoritativeState.value);
         }
         if (historyBaseline) {
-          await applyProjection(sessionId, (current) => {
-            if (!current.runtimeBinding) return current;
-            const runtimeBinding = { ...current.runtimeBinding };
-            delete runtimeBinding.historyBaseline;
-            return { ...current, runtimeBinding };
-          });
-          if (historyBaseline === "import") {
-            await appendAndBroadcast(
-              sessionId,
-              "session/history-imported",
-              {},
-              { ignorable: true },
-            );
+          // A delegated child is reconciled the instant its parent spawns it —
+          // before the backend subagent session has produced any messages.
+          // Emitting session/history-imported then would permanently disable
+          // the lazy re-import in events() and strand the child with an empty
+          // transcript. For a child on the "import" baseline, defer the
+          // finalize until real history has actually landed; every other case
+          // (fork "copied", non-child adoption) finalizes exactly as before.
+          const importFinalized = historyBaseline !== "import"
+            || !currentProjection?.parentId
+            || (store.hasEventOfType
+              ? (await store.hasEventOfType(sessionId, "user/message"))
+                || (await store.hasEventOfType(sessionId, "assistant/message"))
+              : (await store.events(sessionId)).some((event) =>
+                  event.type === "user/message" || event.type === "assistant/message"));
+          if (importFinalized) {
+            await applyProjection(sessionId, (current) => {
+              if (!current.runtimeBinding) return current;
+              const runtimeBinding = { ...current.runtimeBinding };
+              delete runtimeBinding.historyBaseline;
+              return { ...current, runtimeBinding };
+            });
+            if (historyBaseline === "import") {
+              await appendAndBroadcast(
+                sessionId,
+                "session/history-imported",
+                {},
+                { ignorable: true },
+              );
+            }
           }
         }
 
@@ -1937,6 +1986,28 @@ export function createSessionService(deps: {
             broadcast.projection(projection);
             await ensureWired(childId, projection);
             canonicalByBackend.set(child.id, childId);
+          }
+          // The parent's task snapshot is the only authoritative signal that a
+          // delegated run ended — the child itself never streams a terminal
+          // turn event. Pull its now-complete transcript while the ephemeral
+          // backend session is still guaranteed to exist, then retire it so it
+          // can never linger as an unopenable `working` session.
+          if (agent.status === "done" || agent.status === "failed") {
+            const childProjection = await store.projection(childId);
+            const childRuntime = sessionRuntime.get(childId);
+            const historyPending = Boolean(childProjection?.backendSessionId)
+              && childRuntime !== undefined
+              && !(store.hasEventOfType
+                ? await store.hasEventOfType(childId, "session/history-imported")
+                : (await store.events(childId)).some((e) => e.type === "session/history-imported"));
+            if (historyPending) {
+              try {
+                await reconcileSession(childId, childProjection!, childRuntime!, "subagent-completed");
+              } catch (error) {
+                console.warn(`[polyth] delegated history import failed for ${childId}`, error);
+              }
+            }
+            await settleDelegatedChild(childId, agent.status === "failed" ? "failed" : "done");
           }
           agents.push({ ...agent, sessionId: childId });
         }
@@ -5057,14 +5128,14 @@ export function createSessionService(deps: {
     async list(projectId) {
       const projections = await store.projections(projectId);
       const settled = await Promise.all(projections.map(async (projection) => {
-        if (projection.status !== "working" || !projection.parentId) return projection;
-        const events = await store.events(projection.id);
-        if (openTurnFromEvents(events)) return projection;
-        const latestTurnEvent = [...events].reverse().find((event) =>
-          event.type === "user/message" || event.type === "assistant/message");
-        if (latestTurnEvent?.type !== "assistant/message") return projection;
-        await updateProjectionQuietly(projection.id, { status: "idle" });
-        return (await store.projection(projection.id)) ?? { ...projection, status: "idle" };
+        if (
+          !projection.parentId
+          || (projection.status !== "working"
+            && projection.status !== "reconciling"
+            && projection.status !== "unknown")
+        ) return projection;
+        await settleDelegatedChild(projection.id);
+        return (await store.projection(projection.id)) ?? projection;
       }));
       if (!deps.org || settled.length === 0) return settled;
       // Attention badges derive from durable events on every read (WP5).
@@ -5118,14 +5189,12 @@ export function createSessionService(deps: {
     async snapshot(sessionId) {
       let p = await store.projection(sessionId);
       if (!p) throw Object.assign(new Error("session not found"), { code: "not-found" });
-      if (p.status === "working" && p.parentId) {
-        const events = await store.events(sessionId);
-        if (openTurnFromEvents(events)) return p;
-        const latestTurnEvent = [...events].reverse().find((event) =>
-          event.type === "user/message" || event.type === "assistant/message");
-        if (latestTurnEvent?.type === "assistant/message") {
-          p = (await updateProjectionQuietly(sessionId, { status: "idle" })) ?? { ...p, status: "idle" };
-        }
+      if (
+        p.parentId
+        && (p.status === "working" || p.status === "reconciling" || p.status === "unknown")
+      ) {
+        await settleDelegatedChild(sessionId);
+        p = (await store.projection(sessionId)) ?? p;
       }
       return p;
     },
