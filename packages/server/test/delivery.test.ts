@@ -472,6 +472,7 @@ test("rewind rejects running turns, supports redo, and branches backend before r
     { role: "assistant", parts: [{ type: "text", text: "one" }] },
   ]);
   assert.equal((await store.projection(id))?.backendSessionId, "branch_1");
+  assert.equal((await store.projection(id))?.runtimeBinding?.historyBaseline, "copied");
   const after = await store.events(id);
   const replacement = after.findLast(
     (event) => event.type === "user/message" && (event.data as { text?: string }).text === "replacement",
