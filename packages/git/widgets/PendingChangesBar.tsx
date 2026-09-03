@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useGitStatus, refreshGitStatus } from "./gitStatusStore.ts";
 import { selectPendingChanges, sessionEditedPaths } from "../../../apps/web/src/pendingChanges.ts";
-import { openChanges, setUiError, useActiveModel, useStore } from "../../../apps/web/src/store.ts";
+import { openChanges, openWorkspacePane, setUiError, useActiveModel, useStore } from "../../../apps/web/src/store.ts";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
 import { fmtDuration } from "../../../apps/web/src/format.ts";
 import { api } from "@polyth/session/web-api";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import ProviderLogo from "../../models/widgets/ProviderLogo.tsx";
 import {
-  BranchIcon,
+  AgentStatusDock,
   Button,
   ChevronDownIcon,
   ChevronUpIcon,
@@ -16,6 +16,7 @@ import {
   FileDiffIcon,
   Icon,
   IconButton,
+  RunSummary,
   UndoIcon,
 } from "../../../apps/web/src/components/ui/index.ts";
 
@@ -219,13 +220,16 @@ export default function PendingChangesBar() {
           .map((key) => activeTool.input[key])
           .find((value): value is string => typeof value === "string" && value.trim() !== "")
       : undefined;
+    const conciseToolDetail = toolDetail && /[\\/]/.test(toolDetail)
+      ? toolDetail.replaceAll("\\", "/").split("/").filter(Boolean).at(-1)
+      : toolDetail;
     const toolName = activeTool?.kind === "tool"
       ? activeTool.title ?? activeTool.tool.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
       : undefined;
     const action = activeTask?.text
       ?? activeSubagent?.currentTask
       ?? (toolName
-        ? `${toolName}${toolDetail ? ` · ${toolDetail}` : ""}`
+        ? `${toolName}${conciseToolDetail ? ` · ${conciseToolDetail}` : ""}`
         : latestAssistant?.kind === "assistant" && latestAssistant.reasoning && !latestAssistant.text
           ? tr("timeline.thinking")
           : activityLabels[latestAssistant?.kind === "assistant" && latestAssistant.text ? 2 : 0]
@@ -233,38 +237,21 @@ export default function PendingChangesBar() {
     const elapsed = model.turn?.startedAt === undefined ? null : fmtDuration(now - model.turn.startedAt);
     const branchName = branch || session?.branch || "";
     return (
-      <section className="pending-agent-status" role="status" aria-busy="true" aria-live="polite">
-        <span className="pending-agent-avatar" aria-hidden="true">
-          <ProviderLogo
-            providerID={descriptor?.providerID ?? modelRef?.providerID}
-            providerName={descriptor?.providerName}
-          />
-          <i />
-        </span>
-        <div className="pending-agent-copy">
-          <div className="pending-agent-heading">
-            <strong>{modelName}</strong>
-            <span aria-hidden="true">·</span>
-            <span>{tr("timeline.working")}</span>
-          </div>
-          <span className="pending-agent-action" title={action}>{action}</span>
-          {count > 0 && (
-            <span className="pending-agent-changes">
-              <span>{bubbleCount}</span>
-              {totals && <DiffTotals stats={totals} />}
-            </span>
-          )}
-        </div>
-        <div className="pending-agent-side">
-          {elapsed && <time aria-hidden="true">{elapsed}</time>}
-          {branchName && (
-            <span className="pending-agent-branch" title={branchName}>
-              <Icon icon={BranchIcon} size="sm" />
-              <span>{branchName}</span>
-            </span>
-          )}
-        </div>
-      </section>
+      <AgentStatusDock
+        icon={<ProviderLogo
+          providerID={descriptor?.providerID ?? modelRef?.providerID}
+          providerName={descriptor?.providerName}
+        />}
+        model={modelName}
+        status={action}
+        elapsed={elapsed}
+        fileCount={count}
+        additions={totals?.additions}
+        deletions={totals?.deletions}
+        branch={branchName}
+        label={`Open active run details: ${action}`}
+        onClick={() => openWorkspacePane("events")}
+      />
     );
   }
 
@@ -294,19 +281,16 @@ export default function PendingChangesBar() {
   if (!detailsOpen) {
     return (
       <section className="pending-changes-bar pending-changes-bar--collapsed">
-        <button
-          type="button"
-          className="pending-changes-bubble"
-          aria-expanded={false}
-          aria-label={title}
-          onClick={() => setDetailsOpen(true)}
-        >
-          <span className="pending-changes-bubble-icon" aria-hidden="true">
-            <Icon icon={FileDiffIcon} size="sm" />
-          </span>
-          <span className="pending-changes-bubble-count">{bubbleCount}</span>
-          {totals && <DiffTotals stats={totals} />}
-        </button>
+        <RunSummary
+          title={title}
+          meta={bubbleCount}
+          state="completed"
+          expanded={false}
+          additions={totals?.additions}
+          deletions={totals?.deletions}
+          label={title}
+          onToggle={() => setDetailsOpen(true)}
+        />
       </section>
     );
   }

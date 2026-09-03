@@ -2,9 +2,9 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { createPortal } from "react-dom";
 import type { SessionEvent } from "@polyth/contracts";
 import { renderMarkdown } from "../markdown.tsx";
-import { fmtDuration, fmtTokens } from "../format.ts";
-import { groupWork, mergeThinking, promptIndex, copyText, loadDraft, type WorkGroup } from "../utils.ts";
-import { executionGroupLabel, executionPresentation, reasoningHead } from "../execution.ts";
+import { fmtCost, fmtDuration, fmtTokens } from "../format.ts";
+import { groupActivity, mergeThinking, promptIndex, copyText, loadDraft, type ActivityGroup, type WorkGroup } from "../utils.ts";
+import { executionPresentation, reasoningHead, reasoningTail } from "../execution.ts";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { cancelResume, forkSession, loadOlderEvents, resumeNow } from "../init.ts";
 import { markSessionPerformance } from "../sessionPerformance.ts";
@@ -85,7 +85,7 @@ import { tr } from "../i18n/index.ts";
 import ExecutionRow, { DiffStat, useCollapsePresence } from "./ExecutionRow.tsx";
 import Picker from "./Picker.tsx";
 import type { PickerItem } from "../picker.ts";
-import { Button, Notice } from "./ui/index.ts";
+import { Button, Menu, Notice, RunSummary, type RunSummaryState } from "./ui/index.ts";
 import type { TurnLimitState } from "../reduce.ts";
 
 /** One announcement per copy/mutation outcome; text is the accessible record,
@@ -177,11 +177,12 @@ function reasoningSeen(text: string): boolean {
 
 function Thinking({ m, live }: { m: AssistantMsg; live: boolean }) {
   const prefs = useUiSettings();
+  const source = m.reasoning || m.text;
   // Fresh live thought: its row is the turn's live latest, the answer has not
   // started, and this reasoning never revealed before → type out from empty.
-  const fresh = live && m.text === "" && !reasoningSeen(m.reasoning);
-  const reasoning = useSmoothText(m.reasoning, fresh);
-  const typing = reasoning.length < m.reasoning.length;
+  const fresh = live && m.text === "" && !reasoningSeen(source);
+  const reasoning = useSmoothText(source, fresh);
+  const typing = reasoning.length < source.length;
   // Block stays expanded while the thought is forming: either the reveal is
   // still typing, or the reasoning part has not finalized yet (turn working,
   // latest row). Pauses in the stream do NOT collapse — only a real
@@ -192,7 +193,7 @@ function Thinking({ m, live }: { m: AssistantMsg; live: boolean }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const reasoningAtBottom = useRef(true);
   const bodyPresent = useCollapsePresence(open);
-  const head = reasoningHead(m.reasoning);
+  const head = active ? reasoningTail(reasoning) : reasoningHead(reasoning);
   // Expanded while forming; auto-folds when the thought is formed unless the
   // reader pinned it by hand.
   useEffect(() => {
@@ -205,8 +206,8 @@ function Thinking({ m, live }: { m: AssistantMsg; live: boolean }) {
   }, [active, prefs.thinkingDefaultExpanded]);
   // A played reveal registers its reasoning so any remount shows it formed.
   useEffect(() => {
-    if (fresh && !typing) revealedReasoning.add(m.reasoning);
-  }, [fresh, typing, m.reasoning]);
+    if (fresh && !typing) revealedReasoning.add(source);
+  }, [fresh, typing, source]);
   // Streaming follow mirrors the conversation reader contract: follow while
   // the well is at its tail, but preserve an intentional scroll-up position.
   // Deps track the SMOOTHED text so the well follows the per-frame reveal.
@@ -236,7 +237,7 @@ function Thinking({ m, live }: { m: AssistantMsg; live: boolean }) {
         {renderMarkdown(reasoning, `${m.id}-reasoning`)}
       </div>
       <div className="reasoning-foot">
-        <CopyButton text={m.reasoning} label={COPY_REASONING_NAME} />
+        <CopyButton text={source} label={COPY_REASONING_NAME} />
       </div>
     </div>
   );
@@ -265,8 +266,7 @@ function Thinking({ m, live }: { m: AssistantMsg; live: boolean }) {
       >
         {mark}
         <span className="reasoning-main">
-          <strong>Thinking</strong>
-          {!open && head !== "" && <span className="reasoning-preview">{head}</span>}
+          <strong>{head || (active ? "Working through the request…" : "Activity detail")}</strong>
         </span>
         <span className="reasoning-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
       </button>
@@ -651,6 +651,7 @@ function AssistantAgentHeader({
   announce,
   turn,
   segmentStartedAt,
+  regeneratePrompt,
 }: {
   m: AssistantMsg;
   announce?: Announce;
@@ -659,6 +660,7 @@ function AssistantAgentHeader({
   /** Opening prompt time of the answer's turn — the fallback duration source
    *  for terminal answers whose turn state is no longer in the store. */
   segmentStartedAt?: number;
+  regeneratePrompt?: string;
 }) {
   const session = useStore((state) =>
     state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null);
@@ -684,7 +686,8 @@ function AssistantAgentHeader({
     : m.completedAt !== undefined
       ? normalizedDuration(Math.max(0, m.completedAt - fallbackStart))
       : null;
-  const usage = turn?.usage?.tokens;
+  const usage = turn?.usage?.tokens ?? m.tokens;
+  const cost = turn?.usage?.cost ?? m.cost;
   const hasUsage = usage !== undefined && (usage.input > 0 || usage.output > 0);
   const runAction = (id: (typeof prefs.responseActions)[number]) => {
     if (id === "copy") {
@@ -723,42 +726,73 @@ function AssistantAgentHeader({
     seedMultiRunPrompt(m.text);
     openWorkspacePane("multirun");
   };
+  const directActions = prefs.responseActions.filter((id) => id === "copy" || id === "pin");
+  const overflowActions = prefs.responseActions.filter((id) => id !== "copy" && id !== "pin");
+  const actionLabel = (id: (typeof prefs.responseActions)[number]) =>
+    id === "pin" && pinned ? tr("timeline.unpinFromContext") : RESPONSE_ACTION_LABEL[id];
+  const actionDisabled = (id: (typeof prefs.responseActions)[number]) =>
+    (id === "pin" && pinBusy) || ((id === "plan" || id === "session") && !projectId);
   return (
-    <header className="agent-reply-header">
-      <ProviderLogo
-        providerID={descriptor?.providerID ?? modelRef?.providerID}
-        providerName={descriptor?.providerName}
-        className="agent-reply-mark"
-      />
-      <span className="agent-reply-item agent-reply-model">{modelName}</span>
-      <span className="agent-reply-item agent-reply-mode">{agentName}</span>
-      {duration && <span className="agent-reply-item agent-reply-duration">{duration}</span>}
-      {hasUsage && (
-        <span
-          className="agent-reply-item agent-reply-usage"
-          aria-label={tr("timeline.valueInputTokensAndValue", { input: usage.input, output: usage.output })}
-        >
-          {fmtTokens(usage.input)} <span aria-hidden="true">↓</span>{"\u00a0"}{fmtTokens(usage.output)} <span aria-hidden="true">↑</span>
-        </span>
-      )}
-      <time className="agent-reply-item" dateTime={timeIso(assistantTime(m))}>{timeShort(assistantTime(m))}</time>
-      <span className="agent-reply-actions" aria-label={tr("timeline.answerActions")}>
-        {prefs.responseActions.map((id) => {
-          const Glyph = RESPONSE_ACTION_ICON[id];
-          const label = id === "pin" && pinned ? tr("timeline.unpinFromContext") : RESPONSE_ACTION_LABEL[id];
-          return (
+    <footer className="response-footer">
+      <div className="response-footer-row">
+        <ProviderLogo
+          providerID={descriptor?.providerID ?? modelRef?.providerID}
+          providerName={descriptor?.providerName}
+          className="response-footer-mark"
+        />
+        <span className="response-footer-model">{modelName}</span>
+        {duration && <span className="response-footer-duration">{duration}</span>}
+        <details className="response-footer-metadata">
+          <summary aria-label="Show response metadata" title="Response metadata"><Icon.chevronDown /></summary>
+          <div className="response-footer-metadata-grid">
+            <span>Agent</span><strong>{agentName}</strong>
+            <span>Completed</span><time dateTime={timeIso(assistantTime(m))}>{timeShort(assistantTime(m))}</time>
+            {hasUsage && <><span>Input</span><strong>{fmtTokens(usage.input)}</strong><span>Output</span><strong>{fmtTokens(usage.output)}</strong></>}
+            {usage?.cacheRead ? <><span>Cached</span><strong>{fmtTokens(usage.cacheRead)}</strong></> : null}
+            {cost ? <><span>Cost</span><strong>{fmtCost(cost)}</strong></> : null}
+            {turn?.turnId ? <><span>Run</span><code>{turn.turnId}</code></> : null}
+          </div>
+        </details>
+        <span className="response-footer-actions" aria-label={tr("timeline.answerActions")}>
+          {directActions.map((id) => {
+            const Glyph = RESPONSE_ACTION_ICON[id];
+            const label = actionLabel(id);
+            return (
+              <button
+                key={id}
+                className={id === "pin" && pinned ? "active" : ""}
+                aria-label={label}
+                title={label}
+                aria-pressed={id === "pin" ? pinned : undefined}
+                disabled={actionDisabled(id)}
+                onClick={() => runAction(id)}
+              ><Glyph /></button>
+            );
+          })}
+          {regeneratePrompt && (
             <button
-              key={id}
-              className={id === "pin" && pinned ? "active" : ""}
-              aria-label={label}
-              title={label}
-              disabled={(id === "pin" && pinBusy) || ((id === "plan" || id === "session") && !projectId)}
-              onClick={() => runAction(id)}
-            ><Glyph /></button>
-          );
-        })}
-      </span>
-    </header>
+              aria-label={tr("timeline.regenerateThisAssistantAnswer")}
+              title={tr("timeline.regenerateThisAssistantAnswer")}
+              onClick={() => requestComposerReplace(regeneratePrompt)}
+            ><Icon.regenerate /></button>
+          )}
+          {overflowActions.length > 0 && (
+            <Menu
+              label="More response actions"
+              align="end"
+              entries={overflowActions.map((id) => ({
+                id,
+                label: actionLabel(id),
+                disabled: actionDisabled(id),
+                onSelect: () => runAction(id),
+              }))}
+            >
+              {(trigger) => <button className="response-footer-more" aria-label="More response actions" title="More response actions" {...trigger}><Icon.more /></button>}
+            </Menu>
+          )}
+        </span>
+      </div>
+    </footer>
   );
 }
 
@@ -793,18 +827,19 @@ function TaskList({ plan }: { plan: NonNullable<RenderModel["tasks"]> }) {
     ...(failed > 0 ? [`${failed} failed`] : []),
     ...(active && !settled ? [active.text] : []),
   ].join(" · ");
+  const state: RunSummaryState = failed > 0 && settled ? "failed"
+    : active ? "active"
+      : allDone ? "completed"
+        : "waiting";
   return (
     <section className={`task-list${open ? " open" : ""}`} aria-label={tr("timeline.currentTaskPlan")}>
-      <button type="button" className="task-list-summary" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-        <span className={allDone ? "task-list-mark done" : failed > 0 ? "task-list-mark failed" : "task-list-mark"} aria-hidden="true">
-          {allDone ? "✓" : failed > 0 && settled ? "×" : <Icon.plan />}
-        </span>
-        <span className="task-list-title">
-          <strong>Tasks</strong>
-          <small>{detail}</small>
-        </span>
-        <span className="task-list-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronDown />}</span>
-      </button>
+      <RunSummary
+        title="Tasks"
+        meta={detail}
+        state={state}
+        expanded={open}
+        onToggle={() => setOpen((value) => !value)}
+      />
       <div className="task-list-expand-shell" aria-hidden={!open}>
         <div className="task-list-collapse-content">
           {itemsPresent && (
@@ -873,13 +908,13 @@ function AssistantView({
           {!m.finalized && <span className="caret" />}
         </div>
       )}
-      {plan && plan.items.length > 0 && <TaskList plan={plan} />}
+      {m.finalized && hasAnswer && terminal && (
+        <AssistantAgentHeader m={m} announce={announce} turn={turn} segmentStartedAt={segmentStartedAt} regeneratePrompt={regeneratePrompt} />
+      )}
       {m.finalized && m.text !== "" && announce && galleryAvailable && (
         <button className="assistant-gallery-shortcut" onClick={openGallery}><Icon.image /> {tr("timeline.openAnswerImages")}</button>
       )}
-      {m.finalized && hasAnswer && terminal && (
-        <AssistantAgentHeader m={m} announce={announce} turn={turn} segmentStartedAt={segmentStartedAt} />
-      )}
+      {plan && plan.items.length > 0 && <TaskList plan={plan} />}
     </div>
   );
 }
@@ -936,9 +971,9 @@ function GithubConflictCard({ message }: { message: GithubConflictMsg }) {
   );
 }
 
-// Consecutive tool calls share one lightweight execution milestone. Every
-// milestone — running or settled — folds by default; the reader opens it by
-// hand.
+// Technical work is projected into one run-level activity group. Settled runs
+// collapse to a summary; the current run opens without promoting every tool to
+// a separate card.
 function childForTool(tool: ToolMsg, subagents: SubagentState | null): SubagentState["agents"][number] | undefined {
   if (!subagents || executionPresentation(tool).kind !== "subagent") return undefined;
   const metadataId = ["sessionId", "sessionID", "childSessionId", "child_session_id"]
@@ -950,62 +985,99 @@ function childForTool(tool: ToolMsg, subagents: SubagentState | null): SubagentS
     agent.label === description || agent.currentTask === tool.input.prompt);
 }
 
-export function WorkedGroup({
+function derivedActivityState(g: ActivityGroup): RunSummaryState {
+  const latestTasks = new Map(g.tasks.map((task) => [task.taskId, task]));
+  if (g.tools.some((tool) => tool.status === "error" && /cancel(?:led|ed)|aborted|stopped/i.test(tool.error ?? ""))) return "cancelled";
+  if (g.tools.some((tool) => tool.status === "error") || [...latestTasks.values()].some((task) => task.action === "failed")) return "failed";
+  if (g.tools.some((tool) => tool.status === "pending" || tool.status === "running") || [...latestTasks.values()].some((task) => task.action === "started")) return "active";
+  return g.settled ? "completed" : "waiting";
+}
+
+export function ActivityGroupView({
   g,
   subagents,
+  state: stateOverride,
 }: {
-  g: WorkGroup;
+  g: ActivityGroup;
   subagents: SubagentState | null;
+  state?: RunSummaryState;
 }) {
-  const failed = g.tools.some((t) => t.status === "error") || g.tasks.some((task) => task.action === "failed");
-  const running = g.tools.some((t) => t.status === "pending" || t.status === "running") || g.tasks.some((task) => task.action === "started");
-  // Closed by default; the reader opens it by hand. No auto-open/auto-close.
-  const [open, setOpen] = useState(false);
+  const state = stateOverride ?? derivedActivityState(g);
+  const active = state === "active" || state === "waiting";
+  const [open, setOpen] = useState(active);
+  const userToggled = useRef(false);
   const itemsPresent = useCollapsePresence(open);
-  const label = executionGroupLabel(g.tools);
-  const files = new Set(g.tools.flatMap((tool) => tool.changedFiles ?? [])).size;
+  useEffect(() => {
+    if (userToggled.current) return;
+    setOpen(active);
+  }, [active]);
+  const files = new Set(g.tools.flatMap((tool) => {
+    const presentation = executionPresentation(tool);
+    return [
+      ...(tool.changedFiles ?? []),
+      ...(presentation.files?.map((file) => file.path) ?? []),
+      ...(presentation.path ? [presentation.path] : []),
+    ];
+  })).size;
   const lineStats = g.tools.reduce((acc, tool) => {
     const stats = executionPresentation(tool).stats;
     if (!stats) return acc;
     return { add: acc.add + stats.add, del: acc.del + stats.del };
   }, { add: 0, del: 0 });
-  const actionCount = g.tools.length + g.tasks.length;
+  const stepCount = g.items.length;
+  const meta = [
+    `${stepCount} ${stepCount === 1 ? "step" : "steps"}`,
+    ...(files > 0 ? [`${files} ${files === 1 ? "file" : "files"}`] : []),
+    fmtDuration(g.ms),
+  ].join(" · ");
   return (
-    <div className={`msg assistant execution-group${open ? " open" : ""}${running ? " current" : ""}`}>
-      <button
-        className="execution-group-toggle"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span className={`execution-group-mark ${running ? "running" : failed ? "error" : "done"}`} aria-hidden="true">
-          {running ? <span className="ui-spinner ui-spinner--sm" /> : failed ? "×" : <span className="execution-group-check" />}
-        </span>
-        <span className="execution-group-copy">
-          <strong>{running ? `Working · ${label}` : label}</strong>
-          <small>
-            {actionCount} {actionCount === 1 ? "action" : "actions"}
-            {files > 0 ? ` · ${files} ${files === 1 ? "file" : "files"} changed` : ""}
-            {" · "}{fmtDuration(g.ms)}
-          </small>
-        </span>
-        <span className="execution-diff-stat-slot">{(lineStats.add > 0 || lineStats.del > 0) ? <DiffStat add={lineStats.add} del={lineStats.del} /> : null}</span>
-        <span className="execution-group-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
-      </button>
-      <div className="execution-group-expand-shell" aria-hidden={!open}>
-        <div className="execution-group-collapse-content">
+    <section className={`msg assistant activity-group${open ? " open" : ""}${active ? " current" : ""}`} aria-label="Agent activity">
+      <RunSummary
+        title="Activity"
+        meta={meta}
+        state={state}
+        expanded={open}
+        additions={lineStats.add}
+        deletions={lineStats.del}
+        label={`${open ? "Collapse" : "Expand"} activity, ${meta}`}
+        onToggle={() => {
+          userToggled.current = true;
+          setOpen((value) => !value);
+        }}
+      />
+      <div className="activity-group-expand-shell" aria-hidden={!open}>
+        <div className="activity-group-collapse-content">
           {itemsPresent && (
-            <div className="execution-group-items">
-              {g.items.map((item) => (
-                item.kind === "tool"
-                  ? <ExecutionRow key={item.id} message={item} subagent={childForTool(item, subagents)} />
-                  : <TaskActivityRow key={item.id} activity={item} />
+            <div className="activity-group-items">
+              {g.items.map((item, index) => (
+                 item.kind === "tool"
+                  ? <ExecutionRow key={item.id} message={item} subagent={childForTool(item, subagents)} defaultOpen={active && (item.status === "pending" || item.status === "running")} />
+                  : item.kind === "assistant"
+                    ? <Thinking key={item.id} m={item} live={active && index === g.items.length - 1} />
+                    : <TaskActivityRow key={item.id} activity={item} />
               ))}
             </div>
           )}
         </div>
       </div>
-    </div>
+    </section>
   );
+}
+
+/** Compatibility export for callers that still supply the former tool-only
+ * group shape; new timeline rendering uses ActivityGroupView directly. */
+export function WorkedGroup({ g, subagents }: { g: WorkGroup; subagents: SubagentState | null }) {
+  const activity: ActivityGroup = {
+    kind: "activity",
+    id: g.id,
+    items: g.items,
+    tools: g.tools,
+    tasks: g.tasks,
+    thoughts: [],
+    ms: g.ms,
+    settled: !g.tools.some((tool) => tool.status === "pending" || tool.status === "running"),
+  };
+  return <ActivityGroupView g={activity} subagents={subagents} />;
 }
 
 function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segmentStartedAt, live, onRevert, onFork, revert, fork }: {
@@ -1112,31 +1184,33 @@ const MessageRow = memo(function MessageRow(props: Parameters<typeof MessageView
   && availabilityEqual(prev.fork, next.fork));
 
 /** Sum of item revs + count: strictly grows on any member mutation/addition. */
-function workRev(g: WorkGroup): number {
+function activityRev(g: ActivityGroup): number {
   let rev = g.items.length;
   for (const item of g.items) rev += item.rev ?? 0;
   return rev;
 }
 
-function sameGroup(a: WorkGroup, b: WorkGroup): boolean {
-  if (a.id !== b.id || a.ms !== b.ms || a.items.length !== b.items.length) return false;
+function sameActivity(a: ActivityGroup, b: ActivityGroup): boolean {
+  if (a.id !== b.id || a.ms !== b.ms || a.settled !== b.settled || a.items.length !== b.items.length) return false;
   for (let i = 0; i < a.items.length; i += 1) {
     if (!sameMessage(a.items[i]!, b.items[i]!)) return false;
   }
   return true;
 }
 
-const WorkRow = memo(function WorkRow({
+const ActivityRow = memo(function ActivityRow({
   g,
   subagents,
+  state,
 }: {
   rev: number;
-  g: WorkGroup;
+  g: ActivityGroup;
   subagents: SubagentState | null;
+  state?: RunSummaryState;
 }) {
-  return <WorkedGroup g={g} subagents={subagents} />;
-}, (prev, next) => prev.rev === next.rev && sameGroup(prev.g, next.g)
-  && prev.subagents === next.subagents);
+  return <ActivityGroupView g={g} subagents={subagents} state={state} />;
+}, (prev, next) => prev.rev === next.rev && sameActivity(prev.g, next.g)
+  && prev.subagents === next.subagents && prev.state === next.state);
 
 // Right-edge prompt rail (WP4, restyled after polyth PromptNavigatorRail):
 // a thin vertical tape of ticks in a 28px gutter hugging the right edge of the
@@ -1716,8 +1790,8 @@ export default function Timeline({
 
   const visibleMessages = useMemo(() => model.messages.filter((message) => !message.undone && !blankAssistant(message)), [model]);
   const undoneMessages = useMemo(() => model.messages.filter((message) => message.undone && !blankAssistant(message)), [model]);
-  const rows = useMemo(() => groupWork(mergeThinking(visibleMessages)), [visibleMessages]);
-  const undoneRows = useMemo(() => groupWork(mergeThinking(undoneMessages)), [undoneMessages]);
+  const rows = useMemo(() => groupActivity(mergeThinking(visibleMessages)), [visibleMessages]);
+  const undoneRows = useMemo(() => groupActivity(mergeThinking(undoneMessages)), [undoneMessages]);
   // One identity panel per completed turn, on the turn's terminal answer only.
   // The terminal answer is the last assistant message before the next prompt
   // (or the log tail); the map also records the opening prompt time so the
@@ -1789,6 +1863,14 @@ export default function Timeline({
   const start = windowStart(rows.length, limit);
   const shownRows = start > 0 ? rows.slice(start) : rows;
   const latestAssistantId = [...shownRows].reverse().find((row) => row.kind === "assistant")?.id;
+  const latestActivityId = [...shownRows].reverse().find((row) => row.kind === "activity")?.id;
+  const currentActivityState: RunSummaryState | undefined = pendingQuestion || pendingPermission || pendingSecret
+    ? "waiting"
+    : turn?.status === "working" ? "active"
+      : turn?.status === "failed" ? "failed"
+        : turn?.status === "aborted" ? "cancelled"
+          : turn?.status === "stopped" ? "completed"
+          : undefined;
   // A reveal activated from the keyboard can unmount its own control (the
   // final Show earlier chunk, or Show all): focus must then hand off to the
   // named timeline region — never fall to BODY (a11y criteria 6–7).
@@ -1861,7 +1943,7 @@ export default function Timeline({
     if (a === null || a.id === null || el === null) return;
     const node = el.querySelector(`[data-msg-id="${a.id}"]`);
     if (node === null) {
-      const index = rows.findIndex((r) => r.kind !== "work" && r.id === a.id);
+      const index = rows.findIndex((r) => r.kind !== "activity" && r.id === a.id);
       if (index >= 0) {
         const next = limitToInclude(rows.length, limit, index);
         if (next !== limit) {
@@ -1876,7 +1958,7 @@ export default function Timeline({
     el.scrollTop += restoreScrollDelta(el, node, a);
   });
   const jump = (id: string, opts?: { focus?: boolean }) => {
-    const index = rows.findIndex((r) => r.kind !== "work" && r.id === id);
+    const index = rows.findIndex((r) => r.kind !== "activity" && r.id === id);
     const next = limitToInclude(rows.length, limit, index);
     if (next !== limit) {
       pendingJump.current = id;
@@ -2036,8 +2118,14 @@ export default function Timeline({
           </div>
         )}
         {shownRows.map((r) => (
-          r.kind === "work"
-            ? <WorkRow key={r.id} rev={workRev(r)} g={r} subagents={model.subagents} />
+          r.kind === "activity"
+            ? <ActivityRow
+                key={r.id}
+                rev={activityRev(r)}
+                g={r}
+                subagents={model.subagents}
+                state={r.id === latestActivityId ? currentActivityState : undefined}
+              />
             : (
               <MessageRow
                 key={r.id}
@@ -2092,8 +2180,8 @@ export default function Timeline({
             </summary>
             <div className="rewound-tail-body">
               {undoneRows.map((row) => (
-                row.kind === "work"
-                  ? <WorkRow key={row.id} rev={workRev(row)} g={row} subagents={model.subagents} />
+                row.kind === "activity"
+                  ? <ActivityRow key={row.id} rev={activityRev(row)} g={row} subagents={model.subagents} />
                   : <MessageRow key={row.id} rev={row.rev ?? 0} m={row} announce={announce} />
               ))}
             </div>

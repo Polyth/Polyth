@@ -5,6 +5,7 @@ import { api, errorCodeOf, httpStatusOf } from "@polyth/session/web-api";
 import { fmtMs } from "../format.ts";
 import {
   executionPresentation,
+  executionPathParts,
   normalizedMcpResult,
   normalizedInputEntries,
   outputLineCount,
@@ -693,15 +694,22 @@ function isTrivialFileEditOutput(output: string | undefined, hasDiff: boolean): 
 export function ExecutionRow({
   message,
   subagent,
+  defaultOpen = false,
 }: {
   message: ToolMsg;
   subagent?: Subagent;
+  defaultOpen?: boolean;
 }) {
   const status = displayStatus(message, subagent?.status);
-  // Always folded by default — even while running or in the active turn. The
-  // reader opens a row by hand; nothing auto-expands (same contract as
-  // WorkedGroup).
-  const [open, setOpen] = useState(false);
+  const projectRoot = useStore((state) => {
+    const id = state.activeProjectId;
+    return id ? state.projectRegistry.projects.find((project) => project.id === id)?.path ?? null : null;
+  });
+  const [open, setOpen] = useState(defaultOpen);
+  const userToggled = useRef(false);
+  useEffect(() => {
+    if (!userToggled.current) setOpen(defaultOpen);
+  }, [defaultOpen]);
   const [revertedPaths, setRevertedPaths] = useState<ReadonlySet<string>>(() => new Set());
   const detailsPresent = useCollapsePresence(open);
   const rowRef = useRef<HTMLDivElement>(null);
@@ -717,6 +725,10 @@ export function ExecutionRow({
   // derivations (JSON.stringify of potentially large outputs) run once per
   // actual change instead of on every parent render.
   const presentation = useMemo(() => executionPresentation(message), [message, message.rev]);
+  const pathParts = useMemo(
+    () => presentation.path ? executionPathParts(presentation.path, projectRoot) : undefined,
+    [presentation.path, projectRoot],
+  );
   const todoItems = useMemo(() => {
     if (!/^(?:todowrite|todo)$/i.test(message.tool)) return undefined;
     const value = message.input.todos;
@@ -749,7 +761,11 @@ export function ExecutionRow({
   const webUrl = typeof message.input.url === "string" ? message.input.url : undefined;
   // The collapsed summary prints out on appearance (and types new arrivals
   // while a call streams) — same fast catch-up type-out the output uses.
-  const typedPreview = usePrintText(presentation.preview);
+  const summaryTitle = pathParts?.filename ?? presentation.label;
+  const summaryPreview = pathParts
+    ? [presentation.label, pathParts.directory].filter(Boolean).join(" · ")
+    : presentation.preview;
+  const typedPreview = usePrintText(summaryPreview);
 
   const openFile = () => {
     if (presentation.path) openEditorFile(presentation.path);
@@ -791,14 +807,19 @@ export function ExecutionRow({
           type="button"
           className="tool-disclosure execution-summary"
           aria-expanded={open}
-          aria-label={`${open ? "Collapse" : "Expand"} ${presentation.label}: ${presentation.preview}${
+          aria-label={`${open ? "Collapse" : "Expand"} ${summaryTitle}: ${summaryPreview}${
             hasLineChanges(stats) ? `, ${stats.add} added, ${stats.del} removed` : ""
           }`}
-          onClick={() => setOpen((value) => !value)}
+          onClick={() => {
+            userToggled.current = true;
+            setOpen((value) => !value);
+          }}
         >
           <span className="tool-icon execution-icon" aria-hidden="true"><ExecutionIcon kind={presentation.kind} /></span>
-          <span className="execution-main">
-            <span className="tool-name">{presentation.label}</span>
+          <span className="execution-main" title={presentation.path}>
+            <span className="tool-name">
+              {summaryTitle}
+            </span>
             <span className={`tool-preview${presentation.kind === "shell" || presentation.kind === "test" ? " command" : ""}`}>{typedPreview}</span>
           </span>
           <span className="execution-diff-stat-slot">{hasLineChanges(stats) ? <DiffStat add={stats.add} del={stats.del} /> : null}</span>

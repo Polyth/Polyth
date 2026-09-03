@@ -31,6 +31,12 @@ export interface ExecutionPresentation {
   files?: FileDiff[];
 }
 
+export interface ExecutionPathParts {
+  filename: string;
+  directory: string;
+  relativePath: string;
+}
+
 const firstString = (input: JsonObject, keys: readonly string[]): string | undefined => {
   for (const key of keys) {
     const value = input[key];
@@ -122,6 +128,23 @@ export function middleTruncatePath(path: string, max = 58): string {
   if (candidate.length <= max) return candidate;
   const tailRoom = Math.max(4, max - head.length - 3);
   return `${head}/…/${tail.slice(-tailRoom)}`;
+}
+
+/** Filename-first mobile projection. The full path remains available to the
+ * disclosure while the collapsed row drops a known project-root prefix. */
+export function executionPathParts(path: string, projectRoot?: string | null): ExecutionPathParts {
+  const normalized = path.replaceAll("\\", "/").replace(/\/{2,}/g, "/");
+  const root = projectRoot?.replaceAll("\\", "/").replace(/\/+$/, "");
+  const relativePath = root && (normalized === root || normalized.startsWith(`${root}/`))
+    ? normalized.slice(root.length).replace(/^\/+/, "")
+    : normalized.replace(/^\.\//, "");
+  const parts = relativePath.split("/").filter(Boolean);
+  const filename = parts.at(-1) ?? relativePath;
+  return {
+    filename,
+    directory: parts.slice(0, -1).join("/"),
+    relativePath,
+  };
 }
 
 export function compactUrl(raw: string, max = 62): string {

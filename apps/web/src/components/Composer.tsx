@@ -116,7 +116,7 @@ import SessionContextBar, {
   type ContextChoice,
   type SessionContextBarProps,
 } from "./mobile/SessionContextBar.tsx";
-import { Button, IconButton, Menu, Notice, SendIcon, StopIcon } from "./ui/index.ts";
+import { Button, GlassDock, IconButton, Menu, Notice, SendIcon, StopIcon } from "./ui/index.ts";
 import { getSendFailure, subscribeSendFailures } from "../sendFailure.ts";
 import { isNativeMobile } from "@polyth/mobile/runtime";
 import { pickNativeFiles } from "@polyth/mobile/native";
@@ -723,12 +723,9 @@ export default function Composer({
     // keep the roomier three-row resting size.
     const phone = isPhone;
     el.style.height = phone ? "0px" : "auto";
-    // 42% of the visible band, but never so much that the composer's own
-    // chrome (model header, actions, context bar) is pushed off a short
-    // keyboard-squeezed viewport.
-    const cap = phone
-      ? Math.max(44, Math.min(visible * 0.42, visible - 240))
-      : visible * 0.42;
+    // The visible viewport supplies the emergency cap; the shared
+    // --composer-max-input-height token supplies the normal five-line cap.
+    const cap = Math.max(44, visible * 0.42);
     el.style.height = `${Math.min(el.scrollHeight + 2, cap)}px`;
   }, [text, inputFocused, isPhone, bandHeight]);
 
@@ -1441,12 +1438,12 @@ export default function Composer({
         className={`composer ${widgetMode ? "composer-widget" : "composer-chat"} composer-simple${widgetMode ? "" : " composer-focus-light"}${stateClass}`}
         aria-busy="true"
       >
-        <div className="composer-card">
+        <GlassDock className="composer-card">
           <div className="session-loading" role="status">
             <span className="ui-spinner ui-spinner--sm" aria-hidden="true" />
             <span>{tr("workspace.builtinsurfaces.loadingSession")}</span>
           </div>
-        </div>
+        </GlassDock>
       </div>
     );
   }
@@ -1491,7 +1488,7 @@ export default function Composer({
           }}
         />
       )}
-      <div
+      <GlassDock
         className="composer-card"
         onDragOver={(e) => { const k = dragKind(e.dataTransfer); if (k) { e.preventDefault(); setDropHint(k); } }}
         onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropHint(null); }}
@@ -1544,7 +1541,7 @@ export default function Composer({
           placeholder={shellMode
             ? tr("composer.enterAWorkspaceShellCommand")
             : shellLayout === "phone"
-              ? tr("composer.useForHelpers")
+              ? `${tr("composer.message")} Polyth…`
               : tr("composer.messageTheAgentTagFilesOrUse")}
           {...(acView ? {
             role: "combobox",
@@ -1747,7 +1744,7 @@ export default function Composer({
         />
       )}
       {goalFormOpen && <GoalAttachForm onDone={() => setGoalFormOpen(false)} />}
-      </div>
+      </GlassDock>
     </div>
   );
 }

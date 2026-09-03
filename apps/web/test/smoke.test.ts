@@ -13,6 +13,7 @@ import {
   firstUserText,
   lastUserText,
   goalChecklist,
+  groupActivity,
   groupWork,
   loadDraft,
   parseDiffLines,
@@ -902,6 +903,32 @@ test("groupWork groups consecutive tools and computes elapsed time", () => {
   assert.ok(taskGroup && taskGroup.kind === "work");
   assert.equal(taskGroup.tools.length, 1);
   assert.equal(taskGroup.tasks[0]?.action, "started");
+});
+
+test("groupActivity keeps technical work together and the terminal answer separate", () => {
+  const thought = {
+    kind: "assistant" as const, id: "thought", partId: "thought", eventSeq: 1,
+    text: "", reasoning: "Inspecting", finalized: true, time: 100, rev: 0,
+  };
+  const tool = {
+    kind: "tool" as const, id: "tool", callId: "tool", eventSeq: 2,
+    tool: "read", input: {}, status: "done" as const, time: 120, finishTime: 180,
+  };
+  const answer = {
+    kind: "assistant" as const, id: "answer", partId: "answer", eventSeq: 3,
+    text: "Done", reasoning: "", finalized: true, time: 200, rev: 0,
+  };
+  const grouped = groupActivity([thought, tool, answer]);
+  assert.equal(grouped.length, 2);
+  const activity = grouped[0];
+  assert.ok(activity && activity.kind === "activity");
+  assert.deepEqual(activity.items, [thought, tool]);
+  assert.equal(activity.settled, true);
+  assert.equal(grouped[1], answer);
+
+  const stillWorking = groupActivity([{ ...answer, id: "progress", text: "Checking" }, tool]);
+  assert.equal(stillWorking.length, 1);
+  assert.equal(stillWorking[0]?.kind, "activity", "assistant prose before a trailing tool is activity, not a final answer");
 });
 
 test("draft helpers persist per session and remove empty drafts", () => {

@@ -1,7 +1,7 @@
 // DOM-free pure helpers extracted from components for testability.
 import type { SlashCommand, SnippetDef } from "@polyth/session/web-api";
 import type { JsonObject, SessionEvent } from "@polyth/contracts";
-import type { RenderMessage, TaskActivityMsg, ToolMsg, UserMsg } from "./reduce.ts";
+import type { AssistantMsg, RenderMessage, TaskActivityMsg, ToolMsg, UserMsg } from "./reduce.ts";
 import { tr } from "./i18n/index.ts";
 import { isNativeMobile } from "@polyth/mobile/runtime";
 import { writeNativeClipboard } from "@polyth/mobile/native";
@@ -127,6 +127,19 @@ export interface WorkGroup {
   tools: ToolMsg[];
   tasks: TaskActivityMsg[];
   ms: number;
+}
+
+export type ActivityItem = AssistantMsg | ToolMsg | TaskActivityMsg;
+
+export interface ActivityGroup {
+  kind: "activity";
+  id: string;
+  items: ActivityItem[];
+  tools: ToolMsg[];
+  tasks: TaskActivityMsg[];
+  thoughts: AssistantMsg[];
+  ms: number;
+  settled: boolean;
 }
 
 /** Merge runs of reasoning-only assistant parts into the next answer part so
@@ -304,6 +317,70 @@ export function groupWork(messages: RenderMessage[]): Array<RenderMessage | Work
     else {
       flush();
       out.push(m);
+    }
+  }
+  flush();
+  return out;
+}
+
+/** Project one turn into an activity stream followed by its final reading
+ * surface. Interim assistant prose, reasoning, tools, and task deltas become
+ * one expandable group; the last textual assistant message remains the final
+ * response. This is display-only derivation over already-recorded events. */
+export function groupActivity(messages: RenderMessage[]): Array<RenderMessage | ActivityGroup> {
+  const out: Array<RenderMessage | ActivityGroup> = [];
+  let segment: ActivityItem[] = [];
+
+  const flush = () => {
+    if (segment.length === 0) return;
+    const last = segment.at(-1)!;
+    const finalIndex = last.kind === "assistant" && last.text.trim() !== "" ? segment.length - 1 : -1;
+    const final = finalIndex >= 0 ? segment[finalIndex] as AssistantMsg : undefined;
+    const activity: ActivityItem[] = [];
+    for (let index = 0; index < segment.length; index++) {
+      const item = segment[index]!;
+      if (index !== finalIndex) {
+        activity.push(item);
+        continue;
+      }
+      if (item.kind === "assistant" && item.reasoning.trim() !== "") {
+        activity.push({ ...item, text: "" });
+      }
+    }
+    if (activity.length > 0) {
+      const first = activity[0]!;
+      const end = Math.max(...activity.map((item) => item.kind === "tool"
+        ? item.finishTime ?? item.time
+        : item.kind === "assistant" ? item.completedAt ?? item.time : item.time));
+      const latestTasks = new Map(
+        activity.filter((item): item is TaskActivityMsg => item.kind === "task")
+          .map((task) => [task.taskId, task]),
+      );
+      out.push({
+        kind: "activity",
+        id: `activity-${first.id}`,
+        items: activity,
+        tools: activity.filter((item): item is ToolMsg => item.kind === "tool"),
+        tasks: activity.filter((item): item is TaskActivityMsg => item.kind === "task"),
+        thoughts: activity.filter((item): item is AssistantMsg => item.kind === "assistant"),
+        ms: Math.max(0, end - first.time),
+        settled: final?.finalized === true || (
+          activity.every((item) => item.kind !== "tool" || (item.status !== "pending" && item.status !== "running")) &&
+          activity.every((item) => item.kind !== "assistant" || item.finalized) &&
+          [...latestTasks.values()].every((task) => task.action !== "started")
+        ),
+      });
+    }
+    if (final) out.push(final.reasoning ? { ...final, reasoning: "" } : final);
+    segment = [];
+  };
+
+  for (const message of messages) {
+    if (message.kind === "user" || message.kind === "github-conflict") {
+      flush();
+      out.push(message);
+    } else {
+      segment.push(message);
     }
   }
   flush();
