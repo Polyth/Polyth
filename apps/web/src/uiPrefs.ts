@@ -23,11 +23,6 @@ export const MOBILE_SHORTCUT_IDS = [
 ] as const;
 export type MobileShortcutId = typeof MOBILE_SHORTCUT_IDS[number];
 
-/** Pick a random list item without immediately repeating the previous one. */
-export function nextWorkingActivity(previous: number, count: number, random = Math.random): number {
-  return count < 2 ? 0 : (previous + 1 + Math.floor(random() * (count - 1))) % count;
-}
-
 export interface UiSettings {
   density: "comfortable" | "balanced" | "compact";
   fontSize: "s" | "m" | "l";

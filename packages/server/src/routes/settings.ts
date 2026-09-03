@@ -61,6 +61,18 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
       rc.json(200, await deps.behavior.put(String(b.text ?? ""), String(b.expectedRevision ?? "")));
       return true;
     }
+    if (path === "/api/settings/behavior/subagents" && method === "GET") {
+      rc.json(200, await deps.behavior.subagentPolicy());
+      return true;
+    }
+    if (path === "/api/settings/behavior/subagents" && method === "PUT") {
+      const b = await rc.body();
+      if (typeof b.enabled !== "boolean") {
+        throw Object.assign(new Error("enabled must be a boolean"), { code: "invalid-input" });
+      }
+      rc.json(200, await deps.behavior.putSubagentPolicy(b.enabled));
+      return true;
+    }
 
     // ---- shared client preferences -----------------------------------------
     if (path === "/api/settings/client" && deps.clientSettings) {

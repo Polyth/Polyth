@@ -54,7 +54,7 @@ test("coarse pointers, focus, motion, radii, and empty states share polish token
   assert.match(css, /--radius-control:\s*calc\(8px \* var\(--corner-radius-scale\)\)/);
   assert.match(css, /--radius:\s*var\(--radius-control\)/);
   assert.match(css, /--motion-surface:\s*240ms/);
-  assert.match(css, /--focus-ring:\s*var\(--text\)/);
+  assert.match(css, /--focus-ring:\s*var\(--accent\)/);
   assert.match(css, /:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/s);
   assert.match(css, /\.modal\s*\{[^}]*animation:\s*rise var\(--motion-surface\) var\(--motion-ease\)/s);
   assert.match(css, /\.empty-state\s*\{[^}]*animation:\s*empty-state-enter var\(--motion-surface\)/s);

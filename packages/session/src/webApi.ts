@@ -33,6 +33,7 @@ import type {
   TrackCreateInput,
   TrackDto,
   Project,
+  ProjectCloneInput,
   ProjectPatch,
   QueueItemDto,
   RuntimeSession,
@@ -558,8 +559,10 @@ export const api = {
     jfetch<Project>("/api/projects", json("POST", { path, name })),
   createProject: (path: string, name?: string) =>
     jfetch<Project>("/api/projects/create", json("POST", { path, name })),
-  cloneProject: (repository: string, parentPath: string) =>
-    jfetch<Project>("/api/projects/clone", json("POST", { repository, parentPath })),
+  cloneProject: (input: ProjectCloneInput | string, parentPath?: string) =>
+    jfetch<Project>("/api/projects/clone", json("POST", typeof input === "string"
+      ? { repository: input, parentPath: parentPath ?? "" }
+      : input)),
   deleteProject: (id: string) => jfetch<void>(`/api/projects/${id}`, { method: "DELETE" }),
   patchProject: (id: string, patch: ProjectPatch) =>
     jfetch<Project>(`/api/projects/${id}`, json("PATCH", patch)),
@@ -680,6 +683,9 @@ export const api = {
   behaviorGet: () => jfetch<{ text: string; revision: string; pathLabel: string }>("/api/settings/behavior"),
   behaviorPut: (text: string, expectedRevision: string) =>
     jfetch<{ text: string; revision: string; pathLabel: string }>("/api/settings/behavior", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, expectedRevision }) }),
+  subagentPolicyGet: () => jfetch<{ enabled: boolean }>("/api/settings/behavior/subagents"),
+  subagentPolicyPut: (enabled: boolean) =>
+    jfetch<{ enabled: boolean }>("/api/settings/behavior/subagents", json("PUT", { enabled })),
   systemInfo: () => jfetch<SystemInfoDto>("/api/system/info"),
   mcpList: () => jfetch<McpServerDto[]>("/api/mcp/servers").catch((): McpServerDto[] => []),
   mcpCreate: (input: { name: string; transport: McpTransport; secrets?: Record<string, string>; enabled?: boolean }) =>
@@ -1331,6 +1337,8 @@ export const api = {
     jfetch<SshConnectionStatusDto>(`/api/ssh/connections/${encodeURIComponent(id)}/status`),
   sshTest: (id: string) =>
     jfetch<SshTestResultDto>(`/api/ssh/connections/${encodeURIComponent(id)}/test`, json("POST", {})),
+  sshInstallOpenCode: (id: string) =>
+    jfetch<{ ok: boolean }>(`/api/ssh/connections/${encodeURIComponent(id)}/install`, json("POST", {})),
   sshBrowse: (connectionId: string, path?: string) =>
     jfetch<SshBrowseDto>(
       `/api/ssh/browse?connectionId=${encodeURIComponent(connectionId)}${path ? `&path=${encodeURIComponent(path)}` : ""}`,
@@ -1416,7 +1424,7 @@ export const api = {
 export type SshConnectionWithStatus = SshConnectionDto & { status?: SshConnectionStatusDto };
 export type SshTestResultDto = SshConnectionStatusDto & {
   /** Agent-runtime availability on the remote (probed only on success). */
-  runtime?: { ok: boolean; version?: string; message?: string };
+  runtime?: { ok: boolean; version?: string; message?: string; installable?: boolean };
 };
 
 // ---- access control DTOs (F16) ------------------------------------------------------

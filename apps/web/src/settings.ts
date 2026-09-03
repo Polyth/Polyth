@@ -198,7 +198,6 @@ export function applySettingsToDom(s: PolythSettings): void {
   const effectiveSize = Math.max(11, s.fontSize - 1);
   html.style.setProperty("--ui-font-size", `${effectiveSize}px`);
   html.style.setProperty("--ui-font-scale", String(effectiveSize / DEFAULT_SETTINGS.fontSize));
-  document.title = s.productName;
 }
 
 // ---- model ref preference ---------------------------------------------------

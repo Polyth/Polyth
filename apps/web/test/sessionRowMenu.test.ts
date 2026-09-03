@@ -160,6 +160,9 @@ test("subagent sessions stay collapsed under their parent until expanded", async
     await act(async () => toggle?.click());
     assert.match(container.textContent ?? "", /Delegated review/);
     assert.equal(toggle?.getAttribute("aria-expanded"), "true");
+    await act(async () => toggle?.click());
+    assert.doesNotMatch(container.textContent ?? "", /Delegated review/);
+    assert.equal(toggle?.getAttribute("aria-expanded"), "false");
   } finally {
     await act(async () => root.unmount());
     container.remove();

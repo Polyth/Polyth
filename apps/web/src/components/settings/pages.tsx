@@ -710,6 +710,25 @@ function BehaviorInstructionsEditor() {
 
 export function BehaviorPage() {
   const ui = useUiSettings();
+  const [favoriteSubagents, setFavoriteSubagents] = useState(true);
+  const [savingFavoriteSubagents, setSavingFavoriteSubagents] = useState(false);
+  useEffect(() => {
+    void api.subagentPolicyGet()
+      .then((policy) => setFavoriteSubagents(policy.enabled))
+      .catch((error) => setUiError(friendlyError("Couldn’t load subagent policy", error)));
+  }, []);
+  const changeFavoriteSubagents = async (enabled: boolean) => {
+    if (savingFavoriteSubagents) return;
+    setSavingFavoriteSubagents(true);
+    try {
+      const policy = await api.subagentPolicyPut(enabled);
+      setFavoriteSubagents(policy.enabled);
+    } catch (error) {
+      setUiError(friendlyError("Couldn’t save subagent policy", error));
+    } finally {
+      setSavingFavoriteSubagents(false);
+    }
+  };
   return (
     <>
       <PageHead title={tr("settings.pages.behavior")} blurb={tr("settings.pages.workspaceSafetyFlowAndGlobalAgentInstructions")} />
@@ -718,6 +737,9 @@ export function BehaviorPage() {
       </Row>
       <Row label={tr("settings.pages.editorAutosave")} hint={tr("settings.pages.savesEditsAfterAShortPauseRevision")} itemId="behavior.autosave">
         <Toggle on={ui.editorAutosave} onChange={(v) => setUiSettings({ editorAutosave: v })} label={tr("settings.pages.editorAutosave")} />
+      </Row>
+      <Row label="Require favorite subagents" hint="Agents must choose the best favorite for each delegated task, then switch favorites if it fails." itemId="behavior.favoriteSubagents">
+        <Toggle on={favoriteSubagents} onChange={(value) => void changeFavoriteSubagents(value)} label="Require favorite subagents" />
       </Row>
       <BehaviorInstructionsEditor />
       <Row label={tr("settings.pages.slashCommandsSnippets")} hint={tr("settings.pages.manageReusablePromptsUnderCommands")}>

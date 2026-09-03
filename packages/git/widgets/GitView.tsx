@@ -13,7 +13,7 @@ import {
   type DiffHunk, type ReviewComment,
 } from "../../../apps/web/src/review/anchors.ts";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
-import { openWorktreeSessionDialog, setGitBranch, setUiError, useStore } from "../../../apps/web/src/store.ts";
+import { openWorktreeSessionDialog, setGitBranch, setGitDiffPath, setUiError, useStore } from "../../../apps/web/src/store.ts";
 import { diffStat } from "../../../apps/web/src/utils.ts";
 import { setPaneLastResource } from "../../../apps/web/src/workspace/panePrefs.ts";
 import CopyButton from "../../../apps/web/src/components/CopyButton.tsx";
@@ -353,6 +353,10 @@ export default function GitView() {
   useEffect(() => {
     if (!diffPath || !status) return;
     const file = [...status.staged, ...status.unstaged, ...status.untracked, ...status.conflicted].find((candidate) => candidate.path === diffPath);
+    // The resource is a navigation request, not a standing selection. Keeping
+    // it set makes every polled status refresh reopen the old file after the
+    // user returns to the change list.
+    setGitDiffPath(null);
     setTab("changes");
     setCommitSel(null);
     setSelected({ path: diffPath, staged: file?.staged ?? false });

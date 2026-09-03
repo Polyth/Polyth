@@ -34,6 +34,7 @@ const { renderToStaticMarkup } = await import("react-dom/server");
 const { activateProject, activateSession, applyEvents, applyProjectAdded, getState, seedSessionCache } = await import("../../../apps/web/src/store.ts");
 const { default: GitView, DiffContent } = await import("../widgets/GitView.tsx");
 const { api } = await import("@polyth/session/web-api");
+const { refreshGitStatus } = await import("../widgets/gitStatusStore.ts");
 const {
   addDiffStats,
   hiddenEditedCount,
@@ -202,6 +203,45 @@ test("GitView keeps staged-file and disclosure taps available without a detail c
     assert.ok(back);
     await act(async () => { back.click(); });
     assert.ok(view.container.querySelector(".git-commit-composer"), "composer returns after navigating back");
+  } finally {
+    await view.unmount();
+    activateProject(null);
+  }
+});
+
+test("GitView does not reopen a file after returning to the change list", async () => {
+  const projectId = "git-back-to-list-project";
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith("/api/git/status")) {
+      return response({
+        branch: "main", ahead: 0, behind: 0, conflicted: [], staged: [], untracked: [],
+        unstaged: [{ path: "src/app.ts", status: "modified", staged: false }],
+        isRepo: true,
+      });
+    }
+    if (url.startsWith("/api/git/branches")) return response({ current: "main", branches: [{ name: "main", current: true }] });
+    if (url.startsWith("/api/worktrees") || url.startsWith("/api/git/graph") || url.startsWith("/api/git/stashes")) return response([]);
+    if (url.startsWith("/api/git/diff")) return response({ path: "src/app.ts", diff: "@@ -1 +1 @@\n-old\n+new" });
+    throw new Error(`Unexpected request: ${url}`);
+  };
+
+  activateProject(projectId);
+  const view = await mounted(createElement(GitView));
+  try {
+    const file = view.container.querySelector<HTMLButtonElement>(".git-file-main");
+    assert.ok(file);
+    await act(async () => { file.click(); await delay(20); });
+    assert.ok(view.container.querySelector(".git-master-detail.detail-open"));
+
+    const back = view.container.querySelector<HTMLButtonElement>(".git-mobile-detail-head button");
+    assert.ok(back);
+    await act(async () => { back.click(); });
+    assert.equal(view.container.querySelector(".git-master-detail.detail-open"), null);
+
+    await act(async () => { await refreshGitStatus(projectId); await delay(20); });
+    assert.equal(view.container.querySelector(".git-master-detail.detail-open"), null);
+    assert.equal(getState().gitDiffPath, null);
   } finally {
     await view.unmount();
     activateProject(null);

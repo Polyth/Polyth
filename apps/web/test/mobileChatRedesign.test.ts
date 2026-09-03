@@ -393,32 +393,42 @@ test("the composer is adaptive, with one primary action at a time", async () => 
     /\.composer-card textarea:focus-visible \{ outline: none; box-shadow: none; \}/,
     "the textarea itself cannot reintroduce the global focus shadow",
   );
+  assert.match(
+    css,
+    /\.composer-mobile\.composer-collapsed \.composer-leading-zone\s*\{\s*display:\s*contents;/,
+    "collapsed composer actions participate in the single resting row",
+  );
+  assert.match(
+    css,
+    /\.composer-mobile\.composer-collapsed \.composer-actions > :is\(\.composer-extensions, \.composer-next-action\)\s*\{\s*display:\s*none;/,
+    "trailing controls stay out of the collapsed phone composer",
+  );
 });
 
-test("model and reasoning effort lead the phone composer; effort stays a draggable slider", async () => {
+test("model leads the phone composer while effort stays a configurable draggable slider", async () => {
   const composer = await read("../src/components/Composer.tsx");
   const effortMenu = await read("../src/components/EffortMenu.tsx");
+  const miniWidgets = await read("../src/widgets/builtinMiniWidgets.tsx");
+  const styles = await read("../src/styles.css");
 
-  // The phone header row renders above the editor; the desktop rail keeps
-  // the same controls under the text. One shared element, two placements.
+  // Model remains above the phone editor. Effort is an ordinary composer
+  // mini-widget, so it can be hidden or moved without another preference.
   assert.ok(composer.includes('className="composer-config-top"'), "phones get a config header above the editor");
-  assert.ok(composer.includes("{phoneLayout && executionControls"), "the header row is phone-only");
-  assert.ok(composer.includes("{!phoneLayout && executionControls}"), "the desktop rail keeps the same controls");
-  const controls = composer.slice(composer.indexOf("const executionControls = "));
-  const controlsBlock = controls.slice(0, controls.indexOf("const followUp"));
-  assert.ok(controlsBlock.includes("<EffortMenu"), "the header carries the effort control beside the model");
-  assert.ok(
-    controlsBlock.indexOf("<ModelPicker") < controlsBlock.indexOf("<EffortMenu"),
-    "effort follows the model it belongs to",
-  );
-  assert.ok(controlsBlock.includes("modelSupportsThinking(selectedModel)"), "it only exists for models that report variants");
-  assert.ok(controlsBlock.includes("onCommit={preserveKeyboard}"), "the keyboard reopens once the drag ends");
-  assert.ok(controlsBlock.includes("pickThinking(thinking || undefined)"), "picking saves the effort and updates the composer config");
+  assert.ok(composer.includes("{phoneLayout && modelControl"), "the model header is phone-only");
+  assert.ok(composer.includes("{!phoneLayout && modelControl}"), "the desktop rail keeps the model control");
+  assert.ok(composer.includes("const effortControl"), "composer derives one effort control");
+  assert.ok(composer.includes("modelSupportsThinking(selectedModel)"), "it only exists for models that report variants");
+  assert.ok(composer.includes("onCommit={preserveKeyboard}"), "the keyboard reopens once the drag ends");
+  assert.ok(composer.includes("pickThinking(thinking || undefined)"), "picking saves the effort and updates the composer config");
+  assert.ok(composer.includes("composerEffortControl: effortControl"), "the slot context owns the rendered control");
+  assert.ok(miniWidgets.includes('id: "composer.effort"'), "effort is registered in the shared widget layout");
   assert.ok(effortMenu.includes('type="range"'), "effort uses a direct discrete slider on every layout");
   assert.ok(!effortMenu.includes("<select"), "the phone select variant is gone — dragging works on touch");
   assert.ok(effortMenu.includes('const options = ["", ...new Set(variants)]'), "Auto and each backend variant get a fixed stop");
   assert.ok(effortMenu.includes("thinkingVariantLabel"), "backend variant strings get display labels");
+  assert.ok(effortMenu.includes("{adjusting && ("), "the selected effort appears only while adjusting the slider");
   assert.ok(effortMenu.includes("aria-valuetext={label}"), "the selected effort remains available to assistive technology");
+  assert.ok(styles.includes("background: var(--border-soft);"), "the effort track remains neutral");
 
   // A tap on any rail control blurs the input; collapsing on that blur would
   // unmount the control before its click lands (the tap would be swallowed).

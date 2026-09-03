@@ -5,17 +5,18 @@ import { resolve } from "node:path";
 
 const read = (path: string) => readFileSync(resolve(import.meta.dirname, path), "utf8");
 
-test("working status is compact and does not claim repository indexing", () => {
+test("working status stays visible, reports live work, and does not claim repository indexing", () => {
   const timeline = read("../src/components/Timeline.tsx");
   const css = read("../src/styles.css");
 
   assert.doesNotMatch(timeline, /Scanning repositories|indexing|usually takes a few seconds/i);
-  assert.match(
-    timeline,
-    /workingIndicator === "activity" \? activityLabel : tr\("workspace\.builtinsurfaces\.working"\)/,
-    "the configured activity indicator may use a specific step while compact modes say Working",
-  );
-  assert.match(css, /\.focus-working-spinner\s*\{[^}]*width:\s*7px;[^}]*animation:\s*focus-working-pulse/s);
+  assert.doesNotMatch(timeline, /turnWorking && !hasRunningAction/);
+  assert.match(timeline, /turnWorking && <WorkingIndicator model=\{model\} \/>/);
+  assert.match(timeline, /message\.status === "pending" \|\| message\.status === "running"/);
+  assert.match(timeline, /<time className="focus-working-elapsed"/);
+  assert.match(timeline, /<span className="focus-working-context-label">\{tr\("capabilities\.context"\)\}<\/span>/);
+  assert.match(css, /\.working-status-dock\s*\{[^}]*grid-template-columns:[^}]*border-inline-start:\s*2px solid var\(--accent\)/s);
+  assert.match(css, /\.focus-working-spinner\s*\{[^}]*animation:\s*focus-working-pulse/s);
 });
 
 test("composer radius uses the shared corner setting", () => {

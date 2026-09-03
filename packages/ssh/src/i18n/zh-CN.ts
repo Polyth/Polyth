@@ -33,6 +33,7 @@ export const zhCN: SshMessages = {
   "ssh.sshsettings.host": "主持人",
   "ssh.sshsettings.hostOrSshConfigAlias": "主机或 ssh_config 别名",
   "ssh.sshsettings.identityFile": "身份文件",
+  "ssh.sshsettings.installOpenCode": "安装 OpenCode",
   "ssh.sshsettings.keyValue": "键： {identityFile}",
   "ssh.sshsettings.nameEGBuildBox": "名称（例如：构建盒）",
   "ssh.sshsettings.noServersYet": "目前还没有服务器",

@@ -115,6 +115,7 @@ export type {
 
 export {
   createRemoteOpenCodeRuntime,
+  installRemoteOpenCode,
   probeRemoteOpenCode,
 } from "./remote.ts";
 export type { RemoteOpenCodeOptions, RemoteOpenCodeProbe } from "./remote.ts";

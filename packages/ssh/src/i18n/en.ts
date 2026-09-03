@@ -35,6 +35,7 @@ export const en = {
   "ssh.sshsettings.host": "Host",
   "ssh.sshsettings.hostOrSshConfigAlias": "Host or ssh_config alias",
   "ssh.sshsettings.identityFile": "Identity file",
+  "ssh.sshsettings.installOpenCode": "Install OpenCode",
   "ssh.sshsettings.keyValue": "key: {identityFile}",
   "ssh.sshsettings.nameEGBuildBox": "Name (e.g. build box)",
   "ssh.sshsettings.noServersYet": "No servers yet",

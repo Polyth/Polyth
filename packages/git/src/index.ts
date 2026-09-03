@@ -3,8 +3,10 @@
 // Pure host logic: no HTTP, no session knowledge — the server maps projectId to
 // a repo root and calls these.
 import { execFile } from "node:child_process";
+import { existsSync, rmSync, statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, posix, resolve } from "node:path";
+import type { ProjectCloneInput, RemoteHost } from "@polyth/contracts";
 
 export type GitFileStatus =
   | "added" | "modified" | "deleted" | "renamed" | "copied" | "typechange" | "untracked" | "conflicted";
@@ -169,6 +171,109 @@ export interface GitServiceOptions {
   /** Configurable git binary (OC-13-011). */
   bin?: string;
   timeoutMs?: number;
+}
+
+const cloneError = (message: string) => Object.assign(new Error(message), { code: "git-failed" });
+
+/** Accepted public repository forms are deliberately narrow: only GitHub and
+ * GitLab clone URLs, with no credentials embedded in the URL. */
+export function normalizeRepositoryUrl(value: string): string {
+  const repository = value.trim();
+  if (!repository || repository.length > 2_048 || /[\s\0\p{Cc}]/u.test(repository)) {
+    throw Object.assign(new Error("repository must be a valid GitHub or GitLab URL"), { code: "invalid-input" });
+  }
+  const scp = repository.match(/^git@(github\.com|gitlab\.com):(.+)$/i);
+  if (scp) {
+    if (!validRepositoryPath(scp[2]!)) throw Object.assign(new Error("repository path is invalid"), { code: "invalid-input" });
+    return repository;
+  }
+  let parsed: URL;
+  try { parsed = new URL(repository); } catch {
+    throw Object.assign(new Error("repository must be a valid GitHub or GitLab URL"), { code: "invalid-input" });
+  }
+  if (!(parsed.protocol === "http:" || parsed.protocol === "https:" || parsed.protocol === "ssh:")
+    || !/^(github\.com|gitlab\.com)$/i.test(parsed.hostname)
+    || parsed.password
+    || parsed.search
+    || parsed.hash
+    || (parsed.protocol !== "ssh:" && parsed.username)
+    || !validRepositoryPath(parsed.pathname.slice(1))) {
+    throw Object.assign(new Error("repository must be a GitHub or GitLab HTTP(S)/SSH URL without credentials"), { code: "invalid-input" });
+  }
+  return repository;
+}
+
+const validRepositoryPath = (path: string): boolean => {
+  const clean = path.replace(/\/$/, "");
+  return clean.length > 0
+    && !/[?#]/.test(clean)
+    && !clean.split("/").includes("..")
+    && clean.split("/").length >= 2
+    && /^[^/]+(?:\/[^/]+)+$/.test(clean);
+};
+
+const safeName = (value: string | undefined, repository: string): string => {
+  const fromUrl = repository.includes(":") && !repository.includes("//")
+    ? repository.slice(repository.lastIndexOf(":") + 1).split("/").at(-1)
+    : new URL(repository).pathname.split("/").filter(Boolean).at(-1);
+  const fallback = (fromUrl ?? "repository").replace(/\.git$/i, "");
+  const name = (value ?? fallback).trim();
+  if (!name || name === "." || name === ".." || name.startsWith("-") || name.length > 120 || /[\\/\0\p{Cc}]/u.test(name)) {
+    throw Object.assign(new Error("project name must be a safe folder name"), { code: "invalid-input" });
+  }
+  return name;
+};
+
+const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+const isDirectory = (path: string): boolean => {
+  try { return statSync(path).isDirectory(); } catch { return false; }
+};
+
+export interface CloneRepositoryResult { path: string; name: string }
+
+/** Clone on the current host, or through the supplied RemoteHost. */
+export async function cloneRepository(
+  input: ProjectCloneInput,
+  remote?: RemoteHost,
+  timeoutMs = 120_000,
+): Promise<CloneRepositoryResult> {
+  const repository = normalizeRepositoryUrl(input.repository);
+  const name = safeName(input.name, repository);
+  const rawParentPath = typeof input.parentPath === "string" ? input.parentPath.trim() : "";
+  const parentPath = remote ? rawParentPath : resolve(rawParentPath);
+  if (!rawParentPath || (remote ? !parentPath.startsWith("/") : !isDirectory(parentPath))) {
+    throw Object.assign(new Error("destination parent folder does not exist"), { code: "invalid-path" });
+  }
+  const target = remote ? posix.join(parentPath, name) : join(parentPath, name);
+  if (remote) {
+    const parent = await remote.exec(`test -d -- ${shellQuote(parentPath)}`);
+    if (parent.code !== 0) throw Object.assign(new Error("destination parent folder does not exist on the remote host"), { code: "invalid-path" });
+    const existing = await remote.exec(`test -e -- ${shellQuote(target)}`);
+    if (existing.code === 0) throw Object.assign(new Error(`destination already exists: ${target}`), { code: "conflict" });
+    const result = await remote.exec(
+      `git clone -- ${shellQuote(repository)} ${shellQuote(target)}`,
+      { timeoutMs, maxOutputBytes: 32 * 1024 * 1024 },
+    );
+    if (result.code !== 0) {
+      await remote.exec(`rm -rf -- ${shellQuote(target)}`).catch(() => undefined);
+      throw cloneError((result.stderr || result.stdout).trim().split("\n")[0] || "git clone failed");
+    }
+    return { path: target, name };
+  }
+  if (existsSync(target)) throw Object.assign(new Error(`destination already exists: ${target}`), { code: "conflict" });
+  await new Promise<void>((resolvePromise, reject) => {
+    execFile(process.env.POLYTH_GIT_BIN ?? "git", ["clone", "--", repository, target], {
+      cwd: parentPath,
+      timeout: timeoutMs,
+      maxBuffer: 32 * 1024 * 1024,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    }, (error, stdout, stderr) => {
+      if (!error) { resolvePromise(); return; }
+      rmSync(target, { recursive: true, force: true });
+      reject(cloneError((String(stderr) || String(stdout) || error.message).trim().split("\n")[0] || "git clone failed"));
+    });
+  });
+  return { path: target, name };
 }
 
 interface RunResult { stdout: string; stderr: string; code: number }

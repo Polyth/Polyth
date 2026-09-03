@@ -21,6 +21,9 @@ export interface BehaviorApplier {
 export interface BehaviorService {
   get(): Promise<BehaviorState>;
   put(text: string, expectedRevision: string): Promise<BehaviorState>;
+  subagentPolicy(): Promise<{ enabled: boolean }>;
+  putSubagentPolicy(enabled: boolean): Promise<{ enabled: boolean }>;
+  refresh(): Promise<void>;
   /** Current revision+digest for the model-visible instructions-applied event. */
   current(): Promise<{ revision: string; digest: string } | null>;
 }
@@ -29,6 +32,10 @@ const MAX_BYTES = 256 * 1024;
 
 export const behaviorRevision = (text: string): string =>
   createHash("sha256").update(text, "utf8").digest("hex").slice(0, 12);
+
+export const favoriteSubagentRoutingSection = `## Favorite subagent routing (mandatory)
+
+Before delegating work, evaluate the task and explicitly choose the best-fit agent from the user's favorites. Never spawn a subagent that merely inherits the parent or default model. If no suitable favorite is available, do the work directly. If the chosen agent stalls, errors, or returns unusable work, switch to a different favorite; do not repeatedly retry the same failed choice.`;
 
 async function atomicWrite(path: string, data: string): Promise<void> {
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
@@ -43,6 +50,7 @@ async function atomicWrite(path: string, data: string): Promise<void> {
 
 export function createBehaviorService(opts: {
   file: string;
+  policyFile?: string;
   applier?: BehaviorApplier;
   /** Server-owned instructions appended at apply/digest time but not exposed
    *  as editable behavior text. */
@@ -60,7 +68,29 @@ export function createBehaviorService(opts: {
   };
 
   const pathLabel = opts.applier ? "global AGENTS.md" : "global AGENTS.md (backend not attached)";
-  const effective = (text: string): string => opts.decorate?.(text) ?? text;
+  const readPolicy = async (): Promise<{ enabled: boolean }> => {
+    if (!opts.policyFile) return { enabled: false };
+    try {
+      const value = JSON.parse(await readFile(opts.policyFile, "utf8")) as { enabled?: unknown };
+      return { enabled: value.enabled !== false };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return { enabled: true };
+      throw err;
+    }
+  };
+  const writePolicy = async (policy: { enabled: boolean }): Promise<void> => {
+    if (!opts.policyFile) return;
+    await atomicWrite(opts.policyFile, `${JSON.stringify(policy, null, 2)}\n`);
+  };
+  const effective = async (text: string): Promise<string> => {
+    const decorated = opts.decorate?.(text) ?? text;
+    if (!(await readPolicy()).enabled) return decorated;
+    const base = decorated.trimEnd();
+    return `${base}${base ? "\n\n" : ""}${favoriteSubagentRoutingSection}\n`;
+  };
+  const apply = async (): Promise<void> => {
+    if (opts.applier) await opts.applier.applyBehavior(await effective(await readText()));
+  };
 
   return {
     async get(): Promise<BehaviorState> {
@@ -83,7 +113,7 @@ export function createBehaviorService(opts: {
       await atomicWrite(opts.file, text);
       if (opts.applier) {
         try {
-          await opts.applier.applyBehavior(effective(text));
+          await opts.applier.applyBehavior(await effective(text));
         } catch (err) {
           // Canonical copy must match what the backend actually runs with.
           await atomicWrite(opts.file, before);
@@ -96,8 +126,28 @@ export function createBehaviorService(opts: {
       return { text, revision: behaviorRevision(text), pathLabel };
     },
 
+    subagentPolicy: readPolicy,
+
+    async putSubagentPolicy(enabled: boolean): Promise<{ enabled: boolean }> {
+      const before = await readPolicy();
+      const next = { enabled };
+      await writePolicy(next);
+      try {
+        await apply();
+      } catch (err) {
+        await writePolicy(before);
+        throw Object.assign(
+          new Error(`backend apply failed, change rolled back: ${(err as Error).message}`),
+          { code: "conflict" },
+        );
+      }
+      return next;
+    },
+
+    refresh: apply,
+
     async current(): Promise<{ revision: string; digest: string } | null> {
-      const text = effective(await readText());
+      const text = await effective(await readText());
       if (!text.trim()) return null;
       const digest = createHash("sha256").update(text, "utf8").digest("hex");
       return { revision: digest.slice(0, 12), digest };

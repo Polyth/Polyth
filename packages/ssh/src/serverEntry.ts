@@ -16,12 +16,14 @@ export interface SshRuntimeProbe {
   ok: boolean;
   version?: string;
   message?: string;
+  installable?: boolean;
 }
 
 export function sshRoutes(deps: {
   ssh: SshService;
   projects: ProjectService;
   probeRuntime?: (connectionId: string) => Promise<SshRuntimeProbe>;
+  installRuntime?: (connectionId: string) => Promise<void>;
 }): RouteHandler {
   const boundProjects = async (connectionId: string): Promise<Project[]> =>
     (await deps.projects.list()).filter(
@@ -65,7 +67,7 @@ export function sshRoutes(deps: {
       return true;
     }
     const action = path.match(
-      /^\/api\/ssh\/connections\/([^/]+)\/(connect|disconnect|status|test)$/,
+      /^\/api\/ssh\/connections\/([^/]+)\/(connect|disconnect|status|test|install)$/,
     );
     if (action) {
       const [, id, operation] = action;
@@ -93,6 +95,16 @@ export function sshRoutes(deps: {
           message: error instanceof Error ? error.message : String(error),
         }));
         json(200, { ...status, runtime });
+        return true;
+      }
+      if (operation === "install") {
+        if (!deps.installRuntime) {
+          throw Object.assign(new Error("remote OpenCode installation is unavailable"), {
+            code: "unsupported",
+          });
+        }
+        await deps.installRuntime(id!);
+        json(200, { ok: true });
         return true;
       }
     }
@@ -172,6 +184,11 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         probeRuntime: host.services.require(
           serverServiceKey<(connectionId: string) => Promise<SshRuntimeProbe>>(
             "ssh.probe-runtime",
+          ),
+        ),
+        installRuntime: host.services.require(
+          serverServiceKey<(connectionId: string) => Promise<void>>(
+            "ssh.install-runtime",
           ),
         ),
       });

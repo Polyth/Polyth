@@ -33,6 +33,7 @@ export const ptBR: SshMessages = {
   "ssh.sshsettings.host": "Servidor",
   "ssh.sshsettings.hostOrSshConfigAlias": "Alias ​​de host ou ssh_config",
   "ssh.sshsettings.identityFile": "Arquivo de identidade",
+  "ssh.sshsettings.installOpenCode": "Instalar o OpenCode",
   "ssh.sshsettings.keyValue": "chave: {identityFile}",
   "ssh.sshsettings.nameEGBuildBox": "Nome (ex: caixa de construção)",
   "ssh.sshsettings.noServersYet": "Ainda não há servidores.",

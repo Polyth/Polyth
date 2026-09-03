@@ -410,4 +410,13 @@ export const uk: GitMessages = {
   "gitview.resolveConflictWithAgent": "Вирішити цей конфлікт за допомогою агента",
   "gitview.resolveInNewSession": "У новій сесії",
   "gitview.resolveInThisSession": "У цій сесії",
+  "gitprojectsource.cloneRepository": "Клонувати репозиторій",
+  "gitprojectsource.description": "Клонуйте репозиторій GitHub або GitLab на поточний чи SSH-сервер.",
+  "gitprojectsource.repositoryUrl": "URL репозиторію",
+  "gitprojectsource.target": "Сервер призначення",
+  "gitprojectsource.sshServer": "SSH-сервер",
+  "gitprojectsource.destinationParentFolder": "Батьківська папка призначення",
+  "gitprojectsource.projectName": "Назва проєкту",
+  "gitprojectsource.noSshServers": "SSH-сервери ще не налаштовані.",
+  "gitprojectsource.cloneDestinationHint": "Клонує в папку, показану вище. Перейдіть до іншої, щоб змінити.",
 };

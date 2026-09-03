@@ -190,8 +190,14 @@ export function subscribeStore(cb: () => void): () => void {
   };
 }
 
+function refreshTitle(): void {
+  const project = state.projectRegistry.projects.find((p) => p.id === state.activeProjectId);
+  document.title = project?.name ? `${project.name} — ${state.settings.productName}` : state.settings.productName;
+}
+
 function set(patch: Partial<AppState>): void {
   state = { ...state, ...patch };
+  refreshTitle();
   for (const l of [...listeners]) l();
 }
 

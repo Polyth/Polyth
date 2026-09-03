@@ -15,6 +15,7 @@ import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
 import { tr } from "../i18n/index.ts";
 import { usePopoverPlacement } from "../usePopoverPlacement.ts";
 import Button from "./ui/Button.tsx";
+import Checkbox from "./ui/Checkbox.tsx";
 
 const MAX_SHOWN = 200;
 
@@ -46,6 +47,15 @@ export interface PickerProps {
   };
   /** Set false to hide the filter input (short lists that don't need it). */
   searchable?: boolean;
+  /** Persistent checkbox pinned at the top of the open list — a mode switch
+   *  that reshapes what picking a row means (e.g. "create a new worktree from
+   *  the branch I select"). Toggling it never closes the list. */
+  popoverToggle?: {
+    label: string;
+    checked: boolean;
+    onChange: (checked: boolean) => void;
+    hint?: string;
+  };
   /** Extra class on the root (responsive layout hooks, e.g. picker-profile). */
   className?: string;
   /** Accessible trigger name; keeps the full label when text is condensed. */
@@ -74,6 +84,7 @@ export default function Picker({
   triggerIcon,
   mobileSheet,
   searchable = true,
+  popoverToggle,
 }: PickerProps) {
   const multi = values !== undefined;
   const asSheet = useShellMode() === "phone" && mobileSheet === true;
@@ -189,6 +200,15 @@ export default function Picker({
             },
           } : {})}
         >
+          {popoverToggle && (
+            <Checkbox
+              className="picker-toggle"
+              checked={popoverToggle.checked}
+              onChange={popoverToggle.onChange}
+              label={popoverToggle.label}
+              {...(popoverToggle.hint ? { description: popoverToggle.hint } : {})}
+            />
+          )}
           <div role="listbox" aria-label={label}>
             {shown.map((it) => (
               <SheetRow
@@ -219,6 +239,15 @@ export default function Picker({
         <>
           <div className="menu-backdrop" onClick={close} />
           <div ref={popoverRef} className={`picker-pop ${direction}`}>
+            {popoverToggle && (
+              <Checkbox
+                className="picker-toggle"
+                checked={popoverToggle.checked}
+                onChange={popoverToggle.onChange}
+                label={popoverToggle.label}
+                {...(popoverToggle.hint ? { description: popoverToggle.hint } : {})}
+              />
+            )}
             {searchable && (
             <input
               autoFocus

@@ -5,7 +5,7 @@ import { renderMarkdown } from "../markdown.tsx";
 import { fmtDuration, fmtTokens } from "../format.ts";
 import { groupWork, mergeThinking, promptIndex, copyText, loadDraft, type WorkGroup } from "../utils.ts";
 import { executionGroupLabel, executionPresentation, reasoningHead } from "../execution.ts";
-import { nextWorkingActivity, setUiSettings, useUiSettings } from "../uiPrefs.ts";
+import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { cancelResume, forkSession, loadOlderEvents, resumeNow } from "../init.ts";
 import { markSessionPerformance } from "../sessionPerformance.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
@@ -1013,37 +1013,67 @@ export function WorkedGroup({
   );
 }
 
-// The single turn-level working indicator. Sits as the timeline's last row
-// (moved from below the timeline — it used to double up with a spinner row
-// here) and keeps the accessible live announcement of the row it replaced.
-function WorkingIndicator() {
+// Persistent turn telemetry below the scrollport. Unlike a timeline row it
+// cannot disappear behind a running tool card or when the reader scrolls up.
+function WorkingIndicator({ model }: { model: RenderModel }) {
   const { workingIndicator } = useUiSettings();
-  const [activityStep, setActivityStep] = useState(0);
+  const turn = model.turn!;
+  const [now, setNow] = useState(() => Date.now());
   const activityLabels = tr("workspace.builtinsurfaces.activityItems").split("|");
   useEffect(() => {
-    if (workingIndicator !== "activity") return;
-    setActivityStep((step) => nextWorkingActivity(step, activityLabels.length));
-    const timer = window.setInterval(
-      () => setActivityStep((step) => nextWorkingActivity(step, activityLabels.length)),
-      2400,
-    );
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [activityLabels.length, workingIndicator]);
-  const activityLabel = activityLabels[activityStep] ?? tr("workspace.builtinsurfaces.working");
+  }, [turn.startedAt]);
+  const activeTool = [...model.messages].reverse().find((message): message is ToolMsg =>
+    message.kind === "tool" && (message.status === "pending" || message.status === "running"));
+  const activeTask = model.tasks?.items.find((item) => item.status === "active");
+  const activeSubagent = model.subagents?.agents.find((agent) => /^(?:working|running|active)$/i.test(agent.status));
+  const latestAssistant = [...model.messages].reverse().find((message): message is AssistantMsg => message.kind === "assistant");
+  const tool = activeTool ? executionPresentation(activeTool) : null;
+  const activity = tool
+    ? `${tool.label}${tool.preview ? ` · ${tool.preview}` : ""}`
+    : activeTask?.text
+      ?? activeSubagent?.currentTask
+      ?? (latestAssistant?.reasoning && !latestAssistant.text
+        ? tr("timeline.thinking")
+        : activityLabels[latestAssistant?.text ? 2 : 0] ?? tr("workspace.builtinsurfaces.working"));
+  const identity = [turn.agent, turn.model?.modelID].filter(Boolean).join(" · ");
+  const elapsed = turn.startedAt === undefined ? null : fmtDuration(now - turn.startedAt);
   return (
-    <button className={`focus-working focus-working--${workingIndicator}`} type="button" onClick={() => setRailPlugin("context")}>
-      {workingIndicator === "pulse" && <span className="focus-working-spinner" aria-hidden="true" />}
-      {workingIndicator === "cursor" && <span className="focus-working-cursor" aria-hidden="true" />}
-      {workingIndicator === "cat" && (
-        <svg className="focus-working-cat" viewBox="0 0 32 16" aria-hidden="true">
-          <path d="M4 10V5l3 2 3-3 3 3 4 1c3 0 5 2 5 4v1H7c-2 0-3-1-3-3Z" />
-          <path d="M22 9c4-4 6 1 3 3M9 13v2M17 13v2" />
-          <circle cx="11" cy="9" r=".7" fill="currentColor" stroke="none" />
-        </svg>
-      )}
-      {workingIndicator === "activity" && <span className="focus-working-activity" aria-hidden="true"><i /><i /><i /></span>}
-      <span>{workingIndicator === "activity" ? activityLabel : tr("workspace.builtinsurfaces.working")}</span>
-    </button>
+    <div className={`working-status-dock focus-working--${workingIndicator}`} aria-busy="true">
+      <div className="focus-working-beacon" aria-hidden="true">
+        {workingIndicator === "pulse" && <span className="focus-working-spinner" />}
+        {workingIndicator === "cursor" && <span className="focus-working-cursor" />}
+        {workingIndicator === "cat" && (
+          <svg className="focus-working-cat" viewBox="0 0 32 16">
+            <path d="M4 10V5l3 2 3-3 3 3 4 1c3 0 5 2 5 4v1H7c-2 0-3-1-3-3Z" />
+            <path d="M22 9c4-4 6 1 3 3M9 13v2M17 13v2" />
+            <circle cx="11" cy="9" r=".7" fill="currentColor" stroke="none" />
+          </svg>
+        )}
+        {workingIndicator === "activity" && <span className="focus-working-activity"><i /><i /><i /></span>}
+      </div>
+      <div className="focus-working-copy" role="status" aria-live="polite">
+        <strong>{tr("composer.agent")} · {tr("timeline.working")}</strong>
+        <span title={activity}>{activity}</span>
+        {identity && <small>{identity}</small>}
+      </div>
+      {elapsed && <time className="focus-working-elapsed" aria-hidden="true">{elapsed}</time>}
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="focus-working-context"
+        aria-label={tr("capabilities.context")}
+        title={tr("capabilities.context")}
+        onClick={() => setRailPlugin("context")}
+      >
+        <Icon.context />
+        <span className="focus-working-context-label">{tr("capabilities.context")}</span>
+        <span className="focus-working-context-chevron" aria-hidden="true"><Icon.chevronRight /></span>
+      </Button>
+    </div>
   );
 }
 
@@ -1779,10 +1809,6 @@ export default function Timeline({
     if (lastAssistant !== null) terminal.set(lastAssistant.eventSeq, openAt);
     return terminal;
   }, [visibleMessages]);
-  const hasRunningAction = rows.some((row) => row.kind === "work" && (
-    row.tools.some((tool) => tool.status === "pending" || tool.status === "running")
-    || row.tasks.some((task) => task.action === "started")
-  ));
   const prompts = useMemo(() => promptIndex(visibleMessages), [visibleMessages]);
   // An unloaded older tail is enough reason to mount the navigator: the rail's
   // load arrow is the only discoverable way to reach prompts outside the
@@ -2084,11 +2110,6 @@ export default function Timeline({
               />
             )
         ))}
-        {turnWorking && !hasRunningAction && (
-          <div role="status" aria-live="polite">
-            <WorkingIndicator />
-          </div>
-        )}
         {model.workflowRun && <WorkflowTimelineCard run={model.workflowRun} />}
         {/* The dock confirmation sits OUTSIDE the collapsible tail: it must be
             visible even while the reverted items stay folded away. */}
@@ -2176,6 +2197,7 @@ export default function Timeline({
       )}
       {latestReveal && (latestRevealTarget ? createPortal(latestReveal, latestRevealTarget) : latestReveal)}
       </div>
+      {turnWorking && <WorkingIndicator model={model} />}
       <SelectionMenu container={ref} />
     </div>
   );

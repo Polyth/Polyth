@@ -16,6 +16,7 @@ import {
   emptySshForm,
   formFromConnection,
   formToInput,
+  runtimeNeedsInstall,
   stateBadge,
   validateSshForm,
   type SshFormValues,
@@ -149,6 +150,23 @@ export default function SshSettings() {
               >
                 {tr("ssh.sshsettings.test")}
               </Button>
+              {runtimeNeedsInstall(test?.runtime) && (
+                <Button
+                  size="sm"
+                  variant="primary"
+                  disabled={busy}
+                  busy={busy}
+                  title={tr("ssh.sshsettings.installOpenCode")}
+                  onClick={() => void withBusy(conn.id, async () => {
+                    await api.sshInstallOpenCode(conn.id);
+                    const result = await api.sshTest(conn.id);
+                    setTests((current) => ({ ...current, [conn.id]: result }));
+                    await reload();
+                  })}
+                >
+                  {tr("ssh.sshsettings.installOpenCode")}
+                </Button>
+              )}
               {conn.status?.state === "connected" ? (
                 <Button
                   size="sm"

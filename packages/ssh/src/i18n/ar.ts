@@ -33,6 +33,7 @@ export const ar: SshMessages = {
   "ssh.sshsettings.host": "يستضيف",
   "ssh.sshsettings.hostOrSshConfigAlias": "اسم المضيف أو اسم مستعار لملف ssh_config",
   "ssh.sshsettings.identityFile": "ملف الهوية",
+  "ssh.sshsettings.installOpenCode": "تثبيت OpenCode",
   "ssh.sshsettings.keyValue": "المفتاح: {identityFile}",
   "ssh.sshsettings.nameEGBuildBox": "الاسم (مثلاً: صندوق البناء)",
   "ssh.sshsettings.noServersYet": "لا توجد خوادم حتى الآن",

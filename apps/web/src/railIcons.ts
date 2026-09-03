@@ -41,6 +41,8 @@ export function railIconFor(id: string): RailIcon {
 
 /** Widget pickers use the same domain mark as panels and launchers. */
 export function widgetIconFor(widget: Pick<WidgetDef, "id" | "pluginId" | "capabilities">): RailIcon {
-  const candidates = [...(widget.capabilities ?? []), widget.pluginId, widget.id.split(".")[0] ?? ""];
+  if (widget.id === "composer.agent") return Icon.session;
+  if (widget.id === "composer.effort") return Icon.brain;
+  const candidates = [...(widget.capabilities ?? []), widget.id, widget.pluginId, widget.id.split(".")[0] ?? ""];
   return candidates.map((id) => RAIL_ICONS[id as keyof typeof RAIL_ICONS]).find(Boolean) ?? Icon.widgets;
 }

@@ -1,4 +1,11 @@
 /* Package-owned git web styles. */
+.git-clone-dialog { gap: 0; }
+.git-clone-form { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); }
+.git-clone-form > label { display: flex; flex-direction: column; gap: var(--space-2); color: var(--text-dim); font-size: var(--font-meta); font-weight: 600; }
+.git-clone-form > label span { color: var(--muted); font-weight: 400; }
+.git-clone-form .ui-input, .git-clone-form .picker { width: 100%; }
+.git-clone-muted { margin: 0; color: var(--muted); font-size: var(--font-meta); }
+.git-clone-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-2); }
 .pending-changes-bar {
   --git-edited-icon-well: var(--sunken);
   container: pending-changes / inline-size;

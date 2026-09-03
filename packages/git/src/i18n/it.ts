@@ -410,4 +410,13 @@ export const it: GitMessages = {
   "gitview.resolveConflictWithAgent": "Risolvi questo conflitto con un agente",
   "gitview.resolveInNewSession": "In una nuova sessione",
   "gitview.resolveInThisSession": "In questa sessione",
+  "gitprojectsource.cloneRepository": "Clone repository",
+  "gitprojectsource.description": "Clone a GitHub or GitLab repository on the current or an SSH server.",
+  "gitprojectsource.repositoryUrl": "Repository URL",
+  "gitprojectsource.target": "Target",
+  "gitprojectsource.sshServer": "SSH server",
+  "gitprojectsource.destinationParentFolder": "Destination parent folder",
+  "gitprojectsource.projectName": "Project name",
+  "gitprojectsource.noSshServers": "No SSH servers are configured.",
+  "gitprojectsource.cloneDestinationHint": "Clones into the folder shown above. Browse to change it.",
 };

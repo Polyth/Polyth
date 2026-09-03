@@ -228,8 +228,10 @@ export default function MobileSessionHeader() {
     for (const item of recent) prefetchSessionTail(item.id);
   }, [peers, recent]);
   const islandLabel = visible ? `${visible.mark} · ${visible.text}` : title;
-  // The resting "SESSION ·" marker is replaced by a live status glyph: a
-  // spinner while the agent works, a green dot once the session has finished.
+  // The pill shows the item text alone — no "SESSION ·" / "TASK ·" prefix. A
+  // live status glyph carries the state instead: a spinner while the agent
+  // works, a green dot once the session has finished, and a tone dot for
+  // pending tasks, requests, and notable peers.
   const sessionStatus = session ? resolveSessionStatus(session) : null;
   const sessionComplete = session?.status === "finished";
 
@@ -243,7 +245,6 @@ export default function MobileSessionHeader() {
       </div>
       <button
         className="mobile-session-selector"
-        data-kind={visible?.kind}
         data-live={visible?.live ? "true" : undefined}
         aria-label={tr("mobile.island.openOverview", { label: islandLabel })}
         aria-haspopup="dialog"
@@ -257,10 +258,7 @@ export default function MobileSessionHeader() {
               ? <span className="mobile-island-dot done" aria-hidden="true" />
               : null
         ) : (
-          <>
-            {visible?.live && <span className={`mobile-island-dot ${visible.tone ?? visible.kind}`} aria-hidden="true" />}
-            {visible && <span className="mobile-island-kind">{visible.mark}</span>}
-          </>
+          visible?.live && <span className={`mobile-island-dot ${visible.tone ?? visible.kind}`} aria-hidden="true" />
         )}
         <span className="mobile-island-text" key={visible?.id}>{visible?.text ?? title}</span>
         <Icon.chevronDown />
