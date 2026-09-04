@@ -6,6 +6,7 @@
 
 pub mod diagnostics;
 pub mod errors;
+pub mod http_io;
 pub mod identity;
 pub mod limits;
 pub mod local_proxy;
@@ -15,9 +16,11 @@ pub mod protocol;
 pub mod proxy;
 pub mod qr;
 pub mod ticket;
+pub mod timefmt;
 pub mod transport;
 pub mod wire;
 pub mod words;
+pub mod ws_local;
 
 pub use errors::{ErrorClass, LinkError};
 pub use identity::{HostIdentity, IdentityError};

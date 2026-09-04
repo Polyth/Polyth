@@ -2,25 +2,28 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use iroh::endpoint::{Connection, RecvStream, SendStream};
 use polyth_link_core::errors::LinkError;
+use polyth_link_core::http_io::{copy_exact, pump_local_http_response, read_http_head, PrefixedIo};
 use polyth_link_core::limits::Limits;
 use polyth_link_core::net::path_transport;
 use polyth_link_core::protocol::{
-    decode_head, encode_head, encode_ws_frame, mutation_method, ControlMessage, HttpRequestHeadV1,
-    HttpResponseHeadV1, WebSocketOpenV1, WsFrameType, PRI_API, PRI_CONTROL, PRI_FILE,
-    STREAM_CONTROL, STREAM_HTTP, STREAM_WEBSOCKET,
+    decode_head, encode_head, mutation_method, ControlMessage, HttpRequestHeadV1,
+    HttpResponseHeadV1, WebSocketOpenV1, PRI_API, PRI_CONTROL, PRI_FILE, STREAM_CONTROL,
+    STREAM_HTTP, STREAM_WEBSOCKET,
 };
 use polyth_link_core::proxy::{allowed_http_path, sanitize_headers};
 use polyth_link_core::wire::{
-    copy_limited, encode_ws_client_frame, open_control, read_control, read_len_prefixed,
-    read_stream_kind, write_all, write_control, ws_opcode_from_link,
+    open_control, read_control, read_len_prefixed, read_stream_kind, write_all, write_control,
+};
+use polyth_link_core::ws_local::{
+    client_from_upgraded, proxy_tungstenite_to_link, verify_upstream_switch,
 };
 use rand::RngCore;
 use serde_json::{json, Value};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 use tokio::sync::{broadcast, Mutex};
 
@@ -126,12 +129,11 @@ async fn serve_pairing(
         server_nonce = guard
             .pairing
             .challenge(&pairing_id, &peer, client_nonce, Instant::now())
-            .map_err(|e| {
+            .inspect_err(|_| {
                 let _ = guard.events.send(json!({
                     "type": "tunnel/pairing-proof-failed",
                     "pairingId": pairing_id,
                 }));
-                e
             })?;
         let _ =
             guard
@@ -325,6 +327,7 @@ async fn serve_trusted(
         send,
         recv,
         connection_id.clone(),
+        device.device_id.clone(),
         http_count,
         ws_count,
     )
@@ -335,17 +338,20 @@ async fn serve_trusted(
         let _ = guard.events.send(json!({
             "type": "tunnel/connection-closed",
             "connectionId": connection_id,
+            "deviceId": device.device_id,
         }));
     }
     result
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn trusted_loop(
     state: Arc<Mutex<HostState>>,
     connection: Connection,
     mut send: SendStream,
     mut recv: RecvStream,
     connection_id: String,
+    device_id: String,
     http_count: Arc<AtomicUsize>,
     ws_count: Arc<AtomicUsize>,
 ) -> Result<(), LinkError> {
@@ -380,9 +386,7 @@ async fn trusted_loop(
             }
             event = events.recv() => {
                 if let Ok(params) = event {
-                    if let Err(err) = handle_control_event(&mut send, &connection_id, params).await {
-                        return Err(err);
-                    }
+                    handle_control_event(&mut send, &device_id, params).await?;
                 }
             }
             reason = connection.closed() => {
@@ -396,31 +400,34 @@ async fn trusted_loop(
 
 async fn handle_control_event(
     send: &mut SendStream,
-    connection_id: &str,
+    device_id: &str,
     params: Value,
 ) -> Result<(), LinkError> {
     let event_type = params.get("type").and_then(Value::as_str).unwrap_or("");
+    let event_device = params.get("deviceId").and_then(Value::as_str);
     match event_type {
         "tunnel/device-revoked" => {
+            if event_device != Some(device_id) {
+                return Ok(());
+            }
             write_control(send, &ControlMessage::DeviceRevoked).await?;
             Err(LinkError::DeviceRevoked)
         }
         "tunnel/grants-updated" => {
-            if params.get("connectionId").and_then(Value::as_str) == Some(connection_id)
-                || params.get("all").and_then(Value::as_bool) == Some(true)
-            {
-                let revision = params
-                    .get("grantRevision")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0) as u32;
-                write_control(
-                    send,
-                    &ControlMessage::GrantRevisionChanged {
-                        grant_revision: revision,
-                    },
-                )
-                .await?;
+            if event_device != Some(device_id) {
+                return Ok(());
             }
+            let revision = params
+                .get("grantRevision")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as u32;
+            write_control(
+                send,
+                &ControlMessage::GrantRevisionChanged {
+                    grant_revision: revision,
+                },
+            )
+            .await?;
             Ok(())
         }
         _ => Ok(()),
@@ -499,26 +506,26 @@ async fn proxy_http_stream(
                 .ok_or(LinkError::TransportUnavailable)?,
         )
     };
-    let mut unix = UnixStream::connect(&socket_path)
-        .await
-        .map_err(|_| LinkError::TransportUnavailable)?;
-    let body_len = head.body_length.unwrap_or(0);
-    if mutation_method(&head.method) && body_len > 0 {
-        // Body follows on the stream. If the stream resets before we copy it,
-        // callers must treat the result as transport-outcome-unknown.
+    let mut unix = tokio::time::timeout(
+        Duration::from_millis(Limits::v1().header_read_timeout_ms),
+        UnixStream::connect(&socket_path),
+    )
+    .await
+    .map_err(|_| LinkError::TransportUnavailable)?
+    .map_err(|_| LinkError::TransportUnavailable)?;
+    let Some(body_len) = head.body_length else {
+        return Err(LinkError::RequestHeaderInvalid);
+    };
+    if body_len > Limits::v1().http_body_bytes {
+        return Err(LinkError::RequestTooLarge);
     }
     let mut req = format!(
-        "{} {} HTTP/1.1\r\nHost: polyth.local\r\nX-Polyth-Internal-Token: {}\r\nX-Polyth-Internal-Connection: {}\r\nConnection: close\r\n",
+        "{} {} HTTP/1.1\r\nHost: polyth.local\r\nX-Polyth-Internal-Token: {}\r\nX-Polyth-Internal-Connection: {}\r\nConnection: close\r\nContent-Length: {body_len}\r\n",
         head.method,
         head.path_and_query,
         secret,
         connection_id,
     );
-    if head.body_length.is_some() {
-        req.push_str(&format!("Content-Length: {body_len}\r\n"));
-    } else {
-        req.push_str("Transfer-Encoding: chunked\r\n");
-    }
     for (name, value) in headers {
         req.push_str(&format!("{name}: {value}\r\n"));
     }
@@ -526,89 +533,27 @@ async fn proxy_http_stream(
     unix.write_all(req.as_bytes())
         .await
         .map_err(|_| LinkError::TransportUnavailable)?;
-    if let Some(len) = head.body_length {
-        copy_limited(recv, &mut unix, len)
-            .await
-            .map_err(|_| LinkError::TransportOutcomeUnknown)?;
-    } else {
-        let mut buf = vec![0u8; 16 * 1024];
-        loop {
-            let n = recv
-                .read(&mut buf)
-                .await
-                .map_err(|_| LinkError::TransportOutcomeUnknown)?;
-            let Some(n) = n else {
-                unix.write_all(b"0\r\n\r\n")
-                    .await
-                    .map_err(|_| LinkError::TransportOutcomeUnknown)?;
-                break;
-            };
-            let header = format!("{:x}\r\n", n);
-            unix.write_all(header.as_bytes())
-                .await
-                .map_err(|_| LinkError::TransportOutcomeUnknown)?;
-            unix.write_all(&buf[..n])
-                .await
-                .map_err(|_| LinkError::TransportOutcomeUnknown)?;
-            unix.write_all(b"\r\n")
-                .await
-                .map_err(|_| LinkError::TransportOutcomeUnknown)?;
+    copy_exact(
+        recv,
+        &mut unix,
+        body_len,
+        if mutation_method(&head.method) {
+            LinkError::TransportOutcomeUnknown
+        } else {
+            LinkError::TransportProtocolError
+        },
+    )
+    .await?;
+    let _ = unix.shutdown().await;
+    pump_local_http_response(&mut unix, send, head.request_id, &head.method).await?;
+    send.finish().map_err(|_| {
+        if mutation_method(&head.method) {
+            LinkError::TransportOutcomeUnknown
+        } else {
+            LinkError::TransportProtocolError
         }
-    }
-    let mut response = Vec::new();
-    let mut tmp = [0u8; 16 * 1024];
-    loop {
-        let n = unix
-            .read(&mut tmp)
-            .await
-            .map_err(|_| LinkError::TransportUnavailable)?;
-        if n == 0 {
-            break;
-        }
-        response.extend_from_slice(&tmp[..n]);
-        if response.len() > Limits::v1().aggregate_buffered_bytes {
-            return Err(LinkError::RequestTooLarge);
-        }
-        if let Some(header_end) = find_header_end(&response) {
-            let mut headers_buf = [httparse::EMPTY_HEADER; 128];
-            let mut parsed = httparse::Response::new(&mut headers_buf);
-            match parsed.parse(&response) {
-                Ok(httparse::Status::Complete(len)) if len <= header_end => {
-                    let status = parsed.code.unwrap_or(502);
-                    let mut out_headers = Vec::new();
-                    for header in parsed.headers {
-                        out_headers.push((
-                            header.name.to_string(),
-                            String::from_utf8_lossy(header.value).into_owned(),
-                        ));
-                    }
-                    let body = response.split_off(len);
-                    let head = HttpResponseHeadV1 {
-                        version: 1,
-                        request_id: head.request_id,
-                        status,
-                        headers: out_headers,
-                        body_length: Some(body.len() as u64),
-                    };
-                    let encoded = encode_head(&head)?;
-                    write_all(send, &encoded).await?;
-                    write_all(send, &body).await?;
-                    send.finish()
-                        .map_err(|_| LinkError::TransportProtocolError)?;
-                    return Ok(());
-                }
-                _ => {}
-            }
-        }
-    }
-    Err(LinkError::TransportProtocolError)
-}
-
-fn find_header_end(bytes: &[u8]) -> Option<usize> {
-    bytes
-        .windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .map(|i| i + 4)
+    })?;
+    Ok(())
 }
 
 async fn proxy_ws_stream(
@@ -639,96 +584,46 @@ async fn proxy_ws_stream(
                 .ok_or(LinkError::TransportUnavailable)?,
         )
     };
-    let mut unix = UnixStream::connect(&socket_path)
-        .await
-        .map_err(|_| LinkError::TransportUnavailable)?;
-    let key = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &{
+    let mut unix = tokio::time::timeout(
+        Duration::from_millis(Limits::v1().header_read_timeout_ms),
+        UnixStream::connect(&socket_path),
+    )
+    .await
+    .map_err(|_| LinkError::TransportUnavailable)?
+    .map_err(|_| LinkError::TransportUnavailable)?;
+    let key = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, {
         let mut bytes = [0u8; 16];
         rand::thread_rng().fill_bytes(&mut bytes);
         bytes
     });
+    let protocol_header = if open.protocols.is_empty() {
+        String::new()
+    } else {
+        format!("Sec-WebSocket-Protocol: {}\r\n", open.protocols.join(", "))
+    };
     let req = format!(
-        "GET {} HTTP/1.1\r\nHost: polyth.local\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: {}\r\nX-Polyth-Internal-Token: {}\r\nX-Polyth-Internal-Connection: {}\r\n\r\n",
+        "GET {} HTTP/1.1\r\nHost: polyth.local\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: {}\r\nX-Polyth-Internal-Token: {}\r\nX-Polyth-Internal-Connection: {}\r\n{protocol_header}\r\n",
         open.path_and_query, key, secret, connection_id
     );
     unix.write_all(req.as_bytes())
         .await
         .map_err(|_| LinkError::TransportUnavailable)?;
-    let mut header = Vec::new();
-    let mut tmp = [0u8; 1024];
-    loop {
-        let n = unix
-            .read(&mut tmp)
-            .await
-            .map_err(|_| LinkError::TransportUnavailable)?;
-        if n == 0 {
-            return Err(LinkError::TransportProtocolError);
-        }
-        header.extend_from_slice(&tmp[..n]);
-        if find_header_end(&header).is_some() {
-            break;
-        }
-        if header.len() > 16 * 1024 {
-            return Err(LinkError::RequestTooLarge);
-        }
-    }
-    if !header.starts_with(b"HTTP/1.1 101") {
-        return Err(LinkError::Forbidden);
-    }
+    let parsed = read_http_head(&mut unix, Limits::v1().http_head_bytes).await?;
+    let selected = verify_upstream_switch(&parsed, &key)?;
     let accept = HttpResponseHeadV1 {
         version: 1,
         request_id: open.request_id,
         status: 101,
-        headers: vec![("upgrade".into(), "websocket".into())],
+        headers: selected
+            .into_iter()
+            .map(|protocol| ("sec-websocket-protocol".into(), protocol))
+            .collect(),
         body_length: Some(0),
     };
     write_all(&mut send, &encode_head(&accept)?).await?;
-
-    let (mut unix_read, mut unix_write) = unix.into_split();
-    proxy_ws_upgraded(&mut send, &mut recv, &mut unix_read, &mut unix_write).await
-}
-
-async fn proxy_ws_upgraded(
-    send: &mut SendStream,
-    recv: &mut RecvStream,
-    unix_read: &mut tokio::net::unix::OwnedReadHalf,
-    unix_write: &mut tokio::net::unix::OwnedWriteHalf,
-) -> Result<(), LinkError> {
-    loop {
-        tokio::select! {
-            frame = read_ws_link_frame(recv) => {
-                let (kind, payload) = frame?;
-                let opcode = ws_opcode_from_link(kind);
-                let encoded = encode_ws_client_frame(opcode, &payload)?;
-                unix_write
-                    .write_all(&encoded)
-                    .await
-                    .map_err(|_| LinkError::TransportProtocolError)?;
-                if kind == WsFrameType::Close {
-                    break;
-                }
-            }
-            frame = read_ws_server_frame(unix_read) => {
-                let (kind, payload) = frame?;
-                let encoded = encode_ws_frame(kind, &payload)?;
-                write_all(send, &encoded).await?;
-                if kind == WsFrameType::Close {
-                    break;
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-async fn read_ws_link_frame(recv: &mut RecvStream) -> Result<(WsFrameType, Vec<u8>), LinkError> {
-    polyth_link_core::wire::read_link_ws_frame(recv).await
-}
-
-async fn read_ws_server_frame(
-    read: &mut tokio::net::unix::OwnedReadHalf,
-) -> Result<(WsFrameType, Vec<u8>), LinkError> {
-    polyth_link_core::wire::read_rfc6455_frame(read).await
+    let unix = PrefixedIo::new(parsed.leftover, unix);
+    let ws = client_from_upgraded(unix).await;
+    proxy_tungstenite_to_link(ws, send, recv).await
 }
 
 pub async fn close_device_connections(state: &mut HostState, device_id: &str) {
@@ -745,6 +640,7 @@ pub async fn close_device_connections(state: &mut HostState, device_id: &str) {
             let _ = state.events.send(json!({
                 "type": "tunnel/connection-closed",
                 "connectionId": id,
+                "deviceId": device_id,
             }));
         }
     }

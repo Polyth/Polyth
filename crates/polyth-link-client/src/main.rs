@@ -4,34 +4,42 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use iroh::endpoint::{Connection, RecvStream, SendStream};
+use polyth_link_core::http_io::{
+    copy_exact, pump_remote_http_to_client, read_http_head, request_headers_from_parsed,
+    resolve_static_path, PrefixedIo,
+};
 use polyth_link_core::identity::{self, HostIdentity};
+use polyth_link_core::limits::Limits;
 use polyth_link_core::local_proxy::{
-    origin_allowed, ProxyBootstrap, BOOTSTRAP_COOKIE, BOOTSTRAP_PATH_PREFIX,
+    origin_allowed, validate_redirect_target, OwnedLoopback, ProxyBootstrap, BOOTSTRAP_COOKIE,
+    BOOTSTRAP_PATH_PREFIX,
 };
 use polyth_link_core::net::{bind_link_endpoint, endpoint_addr_from_ticket, path_transport};
 use polyth_link_core::pairing::client_proof;
 use polyth_link_core::protocol::{
-    decode_head, encode_head, encode_ws_frame, is_idempotent_method, mutation_method,
-    ControlMessage, HttpRequestHeadV1, HttpResponseHeadV1, WebSocketOpenV1, WsFrameType, PRI_API,
-    PRI_CONTROL, STREAM_HTTP, STREAM_WEBSOCKET,
+    decode_head, encode_head, mutation_method, ControlMessage, HttpRequestHeadV1, WebSocketOpenV1,
+    PRI_API, PRI_CONTROL, STREAM_HTTP, STREAM_WEBSOCKET,
 };
 use polyth_link_core::ticket::{
     decode_invite_secret, parse_pairing_ticket, PairingTicket, POLYTH_LINK_ALPN,
 };
 use polyth_link_core::transport::TransportPolicy;
 use polyth_link_core::wire::{
-    copy_limited, encode_ws_server_frame, open_control, read_control, read_len_prefixed,
-    read_link_ws_frame, read_rfc6455_frame, write_all, write_control, write_stream_kind,
-    ws_opcode_from_link,
+    open_control, read_control, write_all, write_control, write_stream_kind,
+};
+use polyth_link_core::ws_local::{
+    accept_browser_ws, proxy_tungstenite_to_link, validate_browser_websocket,
 };
 use polyth_link_core::LinkError;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{TcpListener, TcpStream, UnixListener};
+use tokio::net::{TcpStream, UnixListener};
 use tokio::sync::{broadcast, Mutex};
+use tokio::time::Duration;
 
+#[allow(dead_code)]
 struct PairingAttempt {
     id: String,
     ticket: PairingTicket,
@@ -55,6 +63,8 @@ struct LiveSession {
 struct ProxyHandle {
     origin: String,
     bootstrap: String,
+    boot: Arc<Mutex<ProxyBootstrap>>,
+    listener: OwnedLoopback,
 }
 
 #[derive(Deserialize)]
@@ -243,6 +253,9 @@ async fn dispatch(
             let mut guard = state.lock().await;
             if let Some(session) = guard.sessions.remove(id) {
                 session.connection.close(0u32.into(), b"disconnect");
+                if let Some(proxy) = session.proxy {
+                    proxy.listener.close();
+                }
             }
             Ok(json!({ "ok": true }))
         }
@@ -254,6 +267,9 @@ async fn dispatch(
             let mut guard = state.lock().await;
             if let Some(session) = guard.sessions.remove(id) {
                 session.connection.close(0u32.into(), b"forget");
+                if let Some(proxy) = session.proxy {
+                    proxy.listener.close();
+                }
             }
             forget_metadata(&guard.data_dir, id);
             let dir = guard.data_dir.join("hosts").join(id);
@@ -271,6 +287,9 @@ async fn dispatch(
                     "state": "connected",
                     "transport": path_transport(&session.connection),
                     "origin": session.proxy.as_ref().map(|p| p.origin.clone()),
+                    "connectionId": session.connection_id,
+                    "hostEndpointId": session.host_endpoint_id,
+                    "hostLabel": session.host_label,
                 }))
             } else {
                 Ok(json!({ "state": "disconnected" }))
@@ -445,6 +464,8 @@ async fn confirm_pairing(
                     start_proxy(attempt.connection.clone(), web_dist, connection_id.clone())
                         .await
                         .map_err(|_| "proxy-bootstrap-invalid")?;
+                let origin = proxy.origin.clone();
+                let bootstrap = proxy.bootstrap.clone();
                 {
                     let mut guard = state.lock().await;
                     guard.sessions.insert(
@@ -454,17 +475,15 @@ async fn confirm_pairing(
                             host_endpoint_id: attempt.ticket.host.endpoint_id.clone(),
                             host_label: attempt.ticket.host.label.clone().unwrap_or_default(),
                             connection: attempt.connection,
-                            proxy: Some(ProxyHandle {
-                                origin: proxy.origin.clone(),
-                                bootstrap: proxy.bootstrap.clone(),
-                            }),
+                            proxy: Some(proxy),
                         },
                     );
                 }
                 return Ok(json!({
                     "connectionId": connection_id,
-                    "origin": proxy.origin,
-                    "bootstrap": proxy.bootstrap,
+                    "origin": origin,
+                    "bootstrap": bootstrap,
+                    "bootstrapUrl": bootstrap,
                     "deviceId": device_id,
                 }));
             }
@@ -486,12 +505,27 @@ async fn connect_existing(
         .get("connectionId")
         .and_then(Value::as_str)
         .ok_or("device-unknown")?;
-    if let Some(session) = state.lock().await.sessions.get(id) {
-        if let Some(proxy) = &session.proxy {
-            return Ok(
-                json!({ "origin": proxy.origin, "bootstrap": proxy.bootstrap, "connectionId": id }),
-            );
-        }
+    let live = {
+        let guard = state.lock().await;
+        guard.sessions.get(id).and_then(|session| {
+            session
+                .proxy
+                .as_ref()
+                .map(|proxy| (proxy.origin.clone(), proxy.boot.clone()))
+        })
+    };
+    if let Some((origin, boot)) = live {
+        let bootstrap = {
+            let mut boot = boot.lock().await;
+            boot.mint_fresh_nonce();
+            boot.bootstrap_url()
+        };
+        return Ok(json!({
+            "origin": origin,
+            "bootstrap": bootstrap,
+            "bootstrapUrl": bootstrap,
+            "connectionId": id
+        }));
     }
     let (data_dir, web_dist) = {
         let guard = state.lock().await;
@@ -499,6 +533,10 @@ async fn connect_existing(
     };
     let identity_path = data_dir.join("hosts").join(id).join("identity");
     let identity = identity::load_existing(&identity_path).map_err(|_| "pairing-storage-failed")?;
+    let saved_policy = current_saved_policy(&data_dir, id);
+    if saved_policy != "direct-preferred" && !saved_policy.is_empty() {
+        return Err("pairing-invalid");
+    }
     let endpoint = bind_link_endpoint(identity.secret_key(), TransportPolicy::DirectPreferred)
         .await
         .map_err(|_| "transport-unavailable")?;
@@ -507,6 +545,11 @@ async fn connect_existing(
     for item in current_saved_direct(&data_dir, id) {
         if let Ok(socket) = item.parse() {
             addr = addr.with_ip_addr(socket);
+        }
+    }
+    for relay in current_saved_relays(&data_dir, id) {
+        if let Ok(url) = relay.parse::<iroh::RelayUrl>() {
+            addr = addr.with_relay_url(url);
         }
     }
     let connection = endpoint
@@ -545,6 +588,8 @@ async fn connect_existing(
     let proxy = start_proxy(connection.clone(), web_dist, id.to_string())
         .await
         .map_err(|_| "proxy-bootstrap-invalid")?;
+    let origin = proxy.origin.clone();
+    let bootstrap = proxy.bootstrap.clone();
     {
         let mut guard = state.lock().await;
         guard.endpoint = Some(endpoint);
@@ -555,54 +600,56 @@ async fn connect_existing(
                 host_endpoint_id: id.to_string(),
                 host_label: String::new(),
                 connection,
-                proxy: Some(ProxyHandle {
-                    origin: proxy.origin.clone(),
-                    bootstrap: proxy.bootstrap.clone(),
-                }),
+                proxy: Some(proxy),
             },
         );
     }
-    Ok(json!({ "origin": proxy.origin, "bootstrap": proxy.bootstrap, "connectionId": id }))
-}
-
-struct ProxyInfo {
-    origin: String,
-    bootstrap: String,
+    Ok(json!({
+        "origin": origin,
+        "bootstrap": bootstrap,
+        "bootstrapUrl": bootstrap,
+        "connectionId": id
+    }))
 }
 
 async fn start_proxy(
     connection: Connection,
     web_dist: Option<PathBuf>,
     connection_id: String,
-) -> Result<ProxyInfo, LinkError> {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .map_err(|_| LinkError::TransportUnavailable)?;
-    let port = listener
-        .local_addr()
-        .map_err(|_| LinkError::TransportUnavailable)?
-        .port();
+) -> Result<ProxyHandle, LinkError> {
+    let (listener, owned) = polyth_link_core::local_proxy::bind_owned_loopback().await?;
+    let port = owned.port;
     let boot = Arc::new(Mutex::new(ProxyBootstrap::new(port)));
     let bootstrap = {
         let guard = boot.lock().await;
         guard.bootstrap_url()
     };
     let origin = format!("http://127.0.0.1:{port}");
+    let mut shutdown_rx = owned.subscribe();
+    let boot_handle = boot.clone();
     tokio::spawn(async move {
         loop {
-            let Ok((stream, _)) = listener.accept().await else {
-                break;
-            };
-            let connection = connection.clone();
-            let web_dist = web_dist.clone();
-            let boot = boot.clone();
-            let connection_id = connection_id.clone();
-            tokio::spawn(async move {
-                let _ = handle_proxy_conn(stream, connection, web_dist, boot, connection_id).await;
-            });
+            tokio::select! {
+                _ = shutdown_rx.changed() => break,
+                accepted = listener.accept() => {
+                    let Ok((stream, _)) = accepted else { break };
+                    let connection = connection.clone();
+                    let web_dist = web_dist.clone();
+                    let boot = boot.clone();
+                    let connection_id = connection_id.clone();
+                    tokio::spawn(async move {
+                        let _ = handle_proxy_conn(stream, connection, web_dist, boot, connection_id).await;
+                    });
+                }
+            }
         }
     });
-    Ok(ProxyInfo { origin, bootstrap })
+    Ok(ProxyHandle {
+        origin,
+        bootstrap,
+        boot: boot_handle,
+        listener: owned,
+    })
 }
 
 async fn handle_proxy_conn(
@@ -612,38 +659,12 @@ async fn handle_proxy_conn(
     boot: Arc<Mutex<ProxyBootstrap>>,
     _connection_id: String,
 ) -> Result<(), LinkError> {
-    let mut buf = vec![0u8; 16 * 1024];
-    let n = stream
-        .read(&mut buf)
-        .await
-        .map_err(|_| LinkError::TransportProtocolError)?;
-    buf.truncate(n);
-    let mut headers = [httparse::EMPTY_HEADER; 64];
-    let mut req = httparse::Request::new(&mut headers);
-    let header_len = match req.parse(&buf) {
-        Ok(httparse::Status::Complete(len)) => len,
-        _ => return Err(LinkError::TransportProtocolError),
-    };
-    let method = req.method.unwrap_or("GET").to_string();
-    let path = req.path.unwrap_or("/").to_string();
-    let mut origin = None;
-    let mut cookie = None;
-    let mut upgrade = false;
-    let mut content_length = None;
-    for header in req.headers.iter() {
-        let name = header.name.to_ascii_lowercase();
-        if name == "origin" {
-            origin = Some(String::from_utf8_lossy(header.value).into_owned());
-        } else if name == "cookie" {
-            cookie = Some(String::from_utf8_lossy(header.value).into_owned());
-        } else if name == "upgrade" && header.value.eq_ignore_ascii_case(b"websocket") {
-            upgrade = true;
-        } else if name == "content-length" {
-            content_length = std::str::from_utf8(header.value)
-                .ok()
-                .and_then(|value| value.trim().parse::<u64>().ok());
-        }
-    }
+    let parsed = read_http_head(&mut stream, Limits::v1().http_head_bytes).await?;
+    let method = parsed.method.clone().unwrap_or_else(|| "GET".into());
+    let raw_path = parsed.path.clone().unwrap_or_else(|| "/".into());
+    let (path, query) = split_path_query(&raw_path);
+    let origin = parsed.header("origin").map(str::to_string);
+    let cookie = parsed.header("cookie").map(str::to_string);
     let port = stream.local_addr().map(|addr| addr.port()).unwrap_or(0);
     if let Some(origin) = &origin {
         if !origin_allowed(origin, port) {
@@ -652,16 +673,40 @@ async fn handle_proxy_conn(
         }
     }
     if let Some(rest) = path.strip_prefix(BOOTSTRAP_PATH_PREFIX) {
-        let session = boot.lock().await.consume_nonce(rest)?;
-        let body = b"";
+        if rest.ends_with('/') || rest.is_empty() {
+            write_http(&mut stream, 400, "invalid bootstrap").await?;
+            return Err(LinkError::ProxyBootstrapInvalid);
+        }
+        let nonce = rest.split('?').next().unwrap_or(rest);
+        let next = query
+            .as_deref()
+            .and_then(|query| {
+                query
+                    .split('&')
+                    .find_map(|part| part.strip_prefix("next=").map(|value| value.to_string()))
+            })
+            .unwrap_or_else(|| "/".into());
+        let location = match validate_redirect_target(&next) {
+            Ok(value) => value,
+            Err(error) => {
+                write_http(&mut stream, 400, "invalid redirect").await?;
+                return Err(error);
+            }
+        };
+        let session = match boot.lock().await.consume_nonce(nonce) {
+            Ok(session) => session,
+            Err(error) => {
+                write_http(&mut stream, 400, "invalid bootstrap").await?;
+                return Err(error);
+            }
+        };
         let headers = format!(
-            "HTTP/1.1 302 Found\r\nLocation: /\r\nSet-Cookie: {BOOTSTRAP_COOKIE}={session}; Path=/; HttpOnly; SameSite=Strict\r\nContent-Length: 0\r\n\r\n"
+            "HTTP/1.1 302 Found\r\nLocation: {location}\r\nSet-Cookie: {BOOTSTRAP_COOKIE}={session}; Path=/; HttpOnly; SameSite=Strict\r\nContent-Length: 0\r\n\r\n"
         );
         stream
             .write_all(headers.as_bytes())
             .await
             .map_err(|_| LinkError::TransportProtocolError)?;
-        let _ = body;
         return Ok(());
     }
     let session_ok = {
@@ -682,20 +727,19 @@ async fn handle_proxy_conn(
         return Err(LinkError::ProxySessionInvalid);
     }
     if path.starts_with("/api/") || path.starts_with("/ws") {
-        if upgrade || path.starts_with("/ws") {
-            return proxy_ws(&mut stream, &connection, &path).await;
+        if parsed.is_websocket_upgrade() || path.starts_with("/ws") {
+            return proxy_ws(stream, parsed, &connection, &raw_path).await;
         }
-        return proxy_http(
-            &mut stream,
-            &connection,
-            &method,
-            &path,
-            &buf[header_len..],
-            content_length,
-        )
-        .await;
+        return proxy_http(stream, parsed, &connection, &method, &raw_path).await;
     }
     serve_static(&mut stream, web_dist.as_deref(), &path).await
+}
+
+fn split_path_query(raw: &str) -> (String, Option<String>) {
+    match raw.split_once('?') {
+        Some((path, query)) => (path.to_string(), Some(query.to_string())),
+        None => (raw.to_string(), None),
+    }
 }
 
 fn spawn_control_loop(mut send: SendStream, mut recv: RecvStream, connection: Connection) {
@@ -721,17 +765,37 @@ fn spawn_control_loop(mut send: SendStream, mut recv: RecvStream, connection: Co
 }
 
 async fn proxy_http(
-    stream: &mut TcpStream,
+    mut stream: TcpStream,
+    parsed: polyth_link_core::http_io::ParsedHttpHead,
     connection: &Connection,
     method: &str,
     path: &str,
-    extra_body: &[u8],
-    content_length: Option<u64>,
 ) -> Result<(), LinkError> {
-    let (mut send, mut recv) = connection
-        .open_bi()
-        .await
-        .map_err(|_| LinkError::TransportProtocolError)?;
+    if parsed.transfer_encoding_chunked()? {
+        write_http(&mut stream, 400, "chunked requests are not forwarded").await?;
+        return Err(LinkError::RequestHeaderInvalid);
+    }
+    let content_length = parsed.content_length()?;
+    if mutation_method(method) && content_length.is_none() {
+        write_http(&mut stream, 411, "content-length required").await?;
+        return Err(LinkError::RequestHeaderInvalid);
+    }
+    let body_length = content_length.or(Some(0));
+    if let Some(len) = body_length {
+        if len > Limits::v1().http_body_bytes {
+            write_http(&mut stream, 413, "too large").await?;
+            return Err(LinkError::RequestTooLarge);
+        }
+    }
+    let headers = request_headers_from_parsed(&parsed)?;
+    let leftover = parsed.leftover;
+    let (mut send, mut recv) = tokio::time::timeout(
+        Duration::from_millis(Limits::v1().iroh_open_timeout_ms),
+        connection.open_bi(),
+    )
+    .await
+    .map_err(|_| LinkError::TransportUnavailable)?
+    .map_err(|_| LinkError::TransportProtocolError)?;
     if recv.is_0rtt() {
         return Err(LinkError::TransportProtocolError);
     }
@@ -739,30 +803,28 @@ async fn proxy_http(
     write_stream_kind(&mut send, STREAM_HTTP).await?;
     let mut request_id = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut request_id);
-    let body_length = content_length.or(Some(extra_body.len() as u64));
     let head = HttpRequestHeadV1 {
         version: 1,
         request_id,
         method: method.into(),
         path_and_query: path.into(),
-        headers: vec![],
+        headers,
         body_length,
     };
     write_all(&mut send, &encode_head(&head)?).await?;
-    write_all(&mut send, extra_body).await?;
-    if let Some(len) = content_length {
-        let remaining = len.saturating_sub(extra_body.len() as u64);
-        if remaining > 0 {
-            copy_limited(stream, &mut send, remaining)
-                .await
-                .map_err(|_| {
-                    if mutation_method(method) {
-                        LinkError::TransportOutcomeUnknown
-                    } else {
-                        LinkError::TransportProtocolError
-                    }
-                })?;
-        }
+    let mut chained = std::io::Cursor::new(leftover).chain(&mut stream);
+    if let Some(len) = body_length {
+        copy_exact(
+            &mut chained,
+            &mut send,
+            len,
+            if mutation_method(method) {
+                LinkError::TransportOutcomeUnknown
+            } else {
+                LinkError::TransportProtocolError
+            },
+        )
+        .await?;
     }
     send.finish().map_err(|_| {
         if mutation_method(method) {
@@ -771,68 +833,29 @@ async fn proxy_http(
             LinkError::TransportProtocolError
         }
     })?;
-    let payload =
-        read_len_prefixed(&mut recv, polyth_link_core::Limits::v1().http_head_bytes).await?;
-    let mut framed = Vec::with_capacity(4 + payload.len());
-    framed.extend_from_slice(&(payload.len() as u32).to_be_bytes());
-    framed.extend_from_slice(&payload);
-    let (response, _) = decode_head::<HttpResponseHeadV1>(&framed)?;
-    let mut out = format!("HTTP/1.1 {} \r\nConnection: close\r\n", response.status);
-    let mut has_length = false;
-    for (name, value) in &response.headers {
-        if name.eq_ignore_ascii_case("content-length") {
-            has_length = true;
-        }
-        if name.eq_ignore_ascii_case("connection") || name.eq_ignore_ascii_case("transfer-encoding")
-        {
-            continue;
-        }
-        out.push_str(&format!("{name}: {value}\r\n"));
-    }
-    if !has_length {
-        if let Some(len) = response.body_length {
-            out.push_str(&format!("Content-Length: {len}\r\n"));
-        }
-    }
-    out.push_str("\r\n");
-    stream
-        .write_all(out.as_bytes())
-        .await
-        .map_err(|_| LinkError::TransportProtocolError)?;
-    if let Some(len) = response.body_length {
-        copy_limited(&mut recv, stream, len).await.map_err(|_| {
-            if is_idempotent_method(method) {
-                LinkError::TransportUnavailable
-            } else {
-                LinkError::TransportOutcomeUnknown
-            }
-        })?;
-    } else {
-        let mut buf = vec![0u8; 16 * 1024];
-        loop {
-            let n = recv
-                .read(&mut buf)
-                .await
-                .map_err(|_| LinkError::TransportOutcomeUnknown)?;
-            let Some(n) = n else { break };
-            stream
-                .write_all(&buf[..n])
-                .await
-                .map_err(|_| LinkError::TransportProtocolError)?;
-        }
-    }
-    Ok(())
+    pump_remote_http_to_client(&mut recv, &mut stream, request_id, method).await
 }
 
 async fn proxy_ws(
-    stream: &mut TcpStream,
+    mut stream: TcpStream,
+    parsed: polyth_link_core::http_io::ParsedHttpHead,
     connection: &Connection,
     path: &str,
 ) -> Result<(), LinkError> {
-    let (mut send, mut recv) = connection
-        .open_bi()
-        .await
-        .map_err(|_| LinkError::TransportProtocolError)?;
+    let browser = match validate_browser_websocket(&parsed) {
+        Ok(browser) => browser,
+        Err(error) => {
+            write_http(&mut stream, 400, "invalid websocket").await?;
+            return Err(error);
+        }
+    };
+    let (mut send, mut recv) = tokio::time::timeout(
+        Duration::from_millis(Limits::v1().iroh_open_timeout_ms),
+        connection.open_bi(),
+    )
+    .await
+    .map_err(|_| LinkError::TransportUnavailable)?
+    .map_err(|_| LinkError::TransportProtocolError)?;
     if recv.is_0rtt() {
         return Err(LinkError::TransportProtocolError);
     }
@@ -845,48 +868,31 @@ async fn proxy_ws(
             version: 1,
             request_id,
             path_and_query: path.into(),
-            protocols: vec![],
+            protocols: browser.protocols.clone(),
         })?,
     )
     .await?;
     let payload =
-        read_len_prefixed(&mut recv, polyth_link_core::Limits::v1().http_head_bytes).await?;
+        polyth_link_core::wire::read_len_prefixed(&mut recv, Limits::v1().http_head_bytes).await?;
     let mut framed = Vec::with_capacity(4 + payload.len());
     framed.extend_from_slice(&(payload.len() as u32).to_be_bytes());
     framed.extend_from_slice(&payload);
-    let (response, _) = decode_head::<HttpResponseHeadV1>(&framed)?;
+    let (response, _) = decode_head::<polyth_link_core::protocol::HttpResponseHeadV1>(&framed)?;
     if response.status != 101 {
-        write_http(stream, response.status, "upgrade failed").await?;
+        write_http(&mut stream, response.status, "upgrade failed").await?;
         return Err(LinkError::Forbidden);
     }
-    stream
-        .write_all(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
-        .await
-        .map_err(|_| LinkError::TransportProtocolError)?;
-    let (mut tcp_read, mut tcp_write) = stream.split();
-    loop {
-        tokio::select! {
-            frame = read_rfc6455_frame(&mut tcp_read) => {
-                let (kind, payload) = frame?;
-                write_all(&mut send, &encode_ws_frame(kind, &payload)?).await?;
-                if kind == WsFrameType::Close {
-                    break;
-                }
-            }
-            frame = read_link_ws_frame(&mut recv) => {
-                let (kind, payload) = frame?;
-                let encoded = encode_ws_server_frame(ws_opcode_from_link(kind), &payload)?;
-                tcp_write
-                    .write_all(&encoded)
-                    .await
-                    .map_err(|_| LinkError::TransportProtocolError)?;
-                if kind == WsFrameType::Close {
-                    break;
-                }
-            }
-        }
-    }
-    Ok(())
+    let selected = response
+        .headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("sec-websocket-protocol"))
+        .map(|(_, value)| value.clone())
+        .or_else(|| browser.protocols.first().cloned());
+    let mut replay = parsed.header_block.clone();
+    replay.extend_from_slice(&parsed.leftover);
+    let prefixed = PrefixedIo::new(replay, stream);
+    let ws = accept_browser_ws(prefixed, selected).await?;
+    proxy_tungstenite_to_link(ws, send, recv).await
 }
 
 async fn serve_static(
@@ -897,16 +903,9 @@ async fn serve_static(
     let Some(root) = web_dist else {
         return write_http(stream, 404, "not found").await;
     };
-    let rel = if path == "/" {
-        "index.html"
-    } else {
-        path.trim_start_matches('/')
-    };
-    let candidate = root.join(rel);
-    let file = if candidate.is_file() {
-        candidate
-    } else {
-        root.join("index.html")
+    let file = match resolve_static_path(root, path) {
+        Ok(file) => file,
+        Err(_) => return write_http(stream, 404, "not found").await,
     };
     let bytes = tokio::fs::read(&file)
         .await
@@ -994,6 +993,7 @@ fn persist_metadata(
             "hostLabel": label,
             "lastUsedAt": now_ms(),
             "hasSecureIdentity": true,
+            "activePolicy": candidate.map(|item| item.policy.clone()).unwrap_or_else(|| "direct-preferred".into()),
             "directAddresses": candidate.and_then(|item| item.direct_addresses.clone()).unwrap_or_default(),
             "relayUrls": candidate.map(|item| item.relay_urls.clone()).unwrap_or_default(),
         }),
@@ -1022,16 +1022,31 @@ fn forget_metadata(data_dir: &Path, host_endpoint_id: &str) {
 }
 
 fn current_saved_direct(data_dir: &Path, id: &str) -> Vec<String> {
+    saved_string_list(data_dir, id, "directAddresses")
+}
+
+fn current_saved_relays(data_dir: &Path, id: &str) -> Vec<String> {
+    saved_string_list(data_dir, id, "relayUrls")
+}
+
+fn current_saved_policy(data_dir: &Path, id: &str) -> String {
     let list = list_metadata(data_dir);
     list.as_array()
         .into_iter()
         .flatten()
         .find(|item| item.get("id").and_then(Value::as_str) == Some(id))
-        .and_then(|item| {
-            item.get("directAddresses")
-                .and_then(Value::as_array)
-                .cloned()
-        })
+        .and_then(|item| item.get("activePolicy").and_then(Value::as_str))
+        .unwrap_or("direct-preferred")
+        .to_string()
+}
+
+fn saved_string_list(data_dir: &Path, id: &str, field: &str) -> Vec<String> {
+    let list = list_metadata(data_dir);
+    list.as_array()
+        .into_iter()
+        .flatten()
+        .find(|item| item.get("id").and_then(Value::as_str) == Some(id))
+        .and_then(|item| item.get(field).and_then(Value::as_array).cloned())
         .map(|items| {
             items
                 .iter()

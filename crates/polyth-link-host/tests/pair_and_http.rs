@@ -56,6 +56,27 @@ async fn rpc(stream: &mut UnixStream, id: u64, method: &str, params: Value) -> V
     }
 }
 
+async fn rpc_try(stream: &mut UnixStream, id: u64, method: &str, params: Value) -> Value {
+    let line = json!({"id": id, "method": method, "params": params});
+    stream
+        .write_all(format!("{line}\n").as_bytes())
+        .await
+        .unwrap();
+    let mut reader = BufReader::new(&mut *stream);
+    let mut response = String::new();
+    loop {
+        response.clear();
+        reader.read_line(&mut response).await.unwrap();
+        let parsed: Value = serde_json::from_str(response.trim()).unwrap();
+        if parsed.get("method").and_then(Value::as_str) == Some("event") {
+            continue;
+        }
+        if parsed.get("id").and_then(Value::as_u64) == Some(id) {
+            return parsed;
+        }
+    }
+}
+
 async fn serve_ingress(socket: PathBuf) {
     let _ = std::fs::remove_file(&socket);
     let listener = UnixListener::bind(&socket).unwrap();
@@ -120,6 +141,31 @@ async fn host_binary_pairs_and_proxies_http() {
     );
 
     rpc(&mut rpc_stream, 2, "endpoint.start", json!({})).await;
+    let status = rpc(&mut rpc_stream, 20, "status", json!({})).await;
+    assert_eq!(
+        status.get("activePolicy").and_then(Value::as_str),
+        Some("direct-preferred")
+    );
+    assert_eq!(
+        status.get("endpointBound").and_then(Value::as_bool),
+        Some(true)
+    );
+    let rejected = rpc_try(
+        &mut rpc_stream,
+        21,
+        "pairing.create",
+        json!({ "profile": "interact", "mode": "relay-only" }),
+    )
+    .await;
+    assert!(rejected.get("error").is_some());
+    let policy_rejected = rpc_try(
+        &mut rpc_stream,
+        22,
+        "endpoint.set_policy",
+        json!({ "policy": "air-gapped" }),
+    )
+    .await;
+    assert!(policy_rejected.get("error").is_some());
     rpc(
         &mut rpc_stream,
         3,
@@ -138,7 +184,7 @@ async fn host_binary_pairs_and_proxies_http() {
         "pairing.create",
         json!({
             "profile": "interact",
-            "mode": "air-gapped",
+            "mode": "direct-preferred",
             "label": "Desk",
             "grants": ["core.sessions.read"],
         }),
@@ -156,12 +202,16 @@ async fn host_binary_pairs_and_proxies_http() {
         .unwrap()
         .to_string();
     let ticket = parse_pairing_ticket(&ticket_text).unwrap();
-    assert!(ticket.candidates[0].relay_urls.is_empty());
-    assert_eq!(ticket.candidates[0].policy, "air-gapped");
+    assert_eq!(ticket.candidates[0].policy, "direct-preferred");
+    let status = rpc(&mut rpc_stream, 23, "status", json!({})).await;
+    assert_eq!(
+        status.get("activePolicy").and_then(Value::as_str),
+        Some(ticket.candidates[0].policy.as_str())
+    );
 
     let device_dir = dir.path().join("device");
     let device_id = identity::load_or_create(device_dir.join("identity")).unwrap();
-    let device_ep = bind_link_endpoint(device_id.secret_key(), TransportPolicy::AirGapped)
+    let device_ep = bind_link_endpoint(device_id.secret_key(), TransportPolicy::DirectPreferred)
         .await
         .unwrap();
     let secret = decode_invite_secret(&ticket).unwrap();

@@ -1,5 +1,5 @@
-//! Thin mobile FFI. Pairing, ticket validation, and stream framing stay in
-//! `polyth-link-core`. Private keys are never returned.
+//! Ticket parsing FFI only. This crate is not a functional native pairing,
+//! reconnect, Keychain/Keystore, or local-proxy core.
 
 pub use polyth_link_core::{
     parse_pairing_ticket, LinkError, PairingTicket, POLYTH_LINK_ALPN, PROTOCOL_VERSION,

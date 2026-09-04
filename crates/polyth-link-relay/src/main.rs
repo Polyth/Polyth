@@ -54,7 +54,11 @@ async fn run(config: FileConfig) -> Result<(), String> {
         .map_err(|e: std::net::AddrParseError| e.to_string())?;
     let mut server_config = ServerConfig::default();
     server_config.relay = Some(RelayConfig::new(http_bind));
-    let _ = config.metrics_bind;
+    if config.metrics_bind.is_some() {
+        return Err(
+            "metrics_bind is not implemented; omit it from the experimental relay config".into(),
+        );
+    }
     let server = Server::spawn(server_config)
         .await
         .map_err(|e| e.to_string())?;

@@ -20,6 +20,13 @@ pub struct Limits {
     pub pairing_ttl_ms: u64,
     pub active_invitations: usize,
     pub proof_attempts: usize,
+    pub header_read_timeout_ms: u64,
+    pub iroh_open_timeout_ms: u64,
+    pub response_head_timeout_ms: u64,
+    pub idle_body_timeout_ms: u64,
+    pub local_write_timeout_ms: u64,
+    pub http_body_bytes: u64,
+    pub pending_nonces_per_invitation: usize,
 }
 
 impl Limits {
@@ -45,6 +52,13 @@ impl Limits {
             pairing_ttl_ms: 120_000,
             active_invitations: 3,
             proof_attempts: 5,
+            header_read_timeout_ms: 10_000,
+            iroh_open_timeout_ms: 10_000,
+            response_head_timeout_ms: 30_000,
+            idle_body_timeout_ms: 60_000,
+            local_write_timeout_ms: 30_000,
+            http_body_bytes: 64 * 1024 * 1024,
+            pending_nonces_per_invitation: 4,
         }
     }
 }

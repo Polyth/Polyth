@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -55,6 +55,7 @@ pub(crate) struct HostState {
     pub(crate) identity: HostIdentity,
     pub(crate) pairing: HostPairing,
     pub(crate) policy: TransportPolicy,
+    pub(crate) policy_path: PathBuf,
     pub(crate) endpoint: Option<Endpoint>,
     pub(crate) trust: HashMap<String, TrustedDevice>,
     pub(crate) connections: HashMap<String, LiveConnection>,
@@ -95,11 +96,15 @@ async fn serve(data_dir: PathBuf, socket: PathBuf) -> Result<(), String> {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600));
     }
+    let policy_path = data_dir.join("tunnel").join("policy.json");
+    let policy = load_host_policy(&policy_path);
+    save_host_policy(&policy_path, policy);
     let (events, _) = broadcast::channel(128);
     let state = Arc::new(Mutex::new(HostState {
         identity,
         pairing: HostPairing::new(),
-        policy: TransportPolicy::DirectPreferred,
+        policy,
+        policy_path,
         endpoint: None,
         trust: HashMap::new(),
         connections: HashMap::new(),
@@ -178,22 +183,57 @@ async fn dispatch(
             Ok(json!({
                 "endpointId": state.identity.endpoint_id(),
                 "fingerprint": state.identity.fingerprint(),
+                "endpointBound": state.endpoint.is_some(),
+                "activePolicy": state.policy.as_str(),
+                "irohVersion": polyth_link_core::IROH_CRATE_VERSION,
             }))
         }
         "identity.rotate" => {
-            let mut state = state.lock().await;
-            let path = state.identity.path().to_path_buf();
-            state.identity = identity::rotate(&path).map_err(|_| "host-identity-corrupt")?;
-            state.pairing.invalidate_all();
-            state.trust.clear();
-            state.connections.clear();
-            if let Some(endpoint) = state.endpoint.take() {
+            let shared = state.clone();
+            let (path, policy, live, old_endpoint) = {
+                let mut guard = state.lock().await;
+                let live: Vec<_> = std::mem::take(&mut guard.connections)
+                    .into_values()
+                    .collect();
+                let old_endpoint = guard.endpoint.take();
+                (
+                    guard.identity.path().to_path_buf(),
+                    guard.policy,
+                    live,
+                    old_endpoint,
+                )
+            };
+            for connection in live {
+                connection.connection.close(0u32.into(), b"rotated");
+            }
+            if let Some(endpoint) = old_endpoint {
                 endpoint.close().await;
             }
-            let _ = state.events.send(json!({"type":"tunnel/identity-rotated"}));
+            let identity = identity::rotate(&path).map_err(|_| "host-identity-corrupt")?;
+            let secret = identity.secret_key();
+            let endpoint = polyth_link_core::net::bind_link_endpoint(secret, policy)
+                .await
+                .map_err(|_| "transport-unavailable")?;
+            let accept = endpoint.clone();
+            let endpoint_id = identity.endpoint_id();
+            let fingerprint = identity.fingerprint();
+            {
+                let mut guard = state.lock().await;
+                guard.identity = identity;
+                guard.pairing.invalidate_all();
+                for trusted in guard.trust.values_mut() {
+                    trusted.revoked = true;
+                }
+                guard.endpoint = Some(endpoint);
+                let _ = guard
+                    .events
+                    .send(json!({"type": "tunnel/identity-rotated"}));
+            }
+            tokio::spawn(conn::accept_loop(shared, accept));
             Ok(json!({
-                "endpointId": state.identity.endpoint_id(),
-                "fingerprint": state.identity.fingerprint(),
+                "endpointId": endpoint_id,
+                "fingerprint": fingerprint,
+                "endpointBound": true,
             }))
         }
         "trust.sync" => {
@@ -241,6 +281,125 @@ async fn dispatch(
             }
             Ok(json!({ "ok": true, "count": state.trust.len() }))
         }
+        "trust.upsert" => {
+            let mut state = state.lock().await;
+            let endpoint_id = params
+                .get("endpointId")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or("pairing-invalid")?;
+            let device_id = params
+                .get("deviceId")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or("pairing-invalid")?;
+            state.trust.insert(
+                endpoint_id.to_string(),
+                TrustedDevice {
+                    device_id: device_id.to_string(),
+                    grants: params
+                        .get("grants")
+                        .and_then(Value::as_array)
+                        .map(|items| {
+                            items
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .map(str::to_string)
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    grant_revision: params
+                        .get("grantRevision")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0) as u32,
+                    revoked: params
+                        .get("revoked")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                },
+            );
+            Ok(json!({ "ok": true }))
+        }
+        "trust.revoke" => {
+            let mut state = state.lock().await;
+            let device_id = params
+                .get("deviceId")
+                .and_then(Value::as_str)
+                .ok_or("device-unknown")?;
+            let mut found = false;
+            for trusted in state.trust.values_mut() {
+                if trusted.device_id == device_id {
+                    trusted.revoked = true;
+                    found = true;
+                }
+            }
+            if !found {
+                return Err("device-unknown");
+            }
+            conn::close_device_connections(&mut state, device_id).await;
+            let _ = state.events.send(json!({
+                "type": "tunnel/device-revoked",
+                "deviceId": device_id,
+            }));
+            Ok(json!({ "ok": true }))
+        }
+        "trust.restore" => {
+            let mut state = state.lock().await;
+            let device_id = params
+                .get("deviceId")
+                .and_then(Value::as_str)
+                .ok_or("device-unknown")?;
+            let mut found = false;
+            for trusted in state.trust.values_mut() {
+                if trusted.device_id == device_id {
+                    trusted.revoked = false;
+                    found = true;
+                }
+            }
+            if !found {
+                return Err("device-unknown");
+            }
+            Ok(json!({ "ok": true }))
+        }
+        "trust.update_grants" => {
+            let mut state = state.lock().await;
+            let device_id = params
+                .get("deviceId")
+                .and_then(Value::as_str)
+                .ok_or("device-unknown")?;
+            let grants: Vec<String> = params
+                .get("grants")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let revision = params
+                .get("grantRevision")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as u32;
+            let mut found = false;
+            for trusted in state.trust.values_mut() {
+                if trusted.device_id == device_id {
+                    trusted.grants = grants.clone();
+                    trusted.grant_revision = revision;
+                    found = true;
+                }
+            }
+            if !found {
+                return Err("device-unknown");
+            }
+            let _ = state.events.send(json!({
+                "type": "tunnel/grants-updated",
+                "deviceId": device_id,
+                "grantRevision": revision,
+            }));
+            Ok(json!({ "ok": true }))
+        }
         "ingress.configure" => {
             let mut state = state.lock().await;
             let socket = params
@@ -261,10 +420,14 @@ async fn dispatch(
                 .get("profile")
                 .and_then(Value::as_str)
                 .unwrap_or("interact");
-            let policy = params
+            let requested = params
                 .get("mode")
                 .and_then(Value::as_str)
                 .unwrap_or("direct-preferred");
+            if requested != "direct-preferred" {
+                return Err("pairing-invalid");
+            }
+            let policy = "direct-preferred";
             let label = params.get("label").and_then(Value::as_str);
             let grants: Vec<String> = params
                 .get("grants")
@@ -288,24 +451,15 @@ async fn dispatch(
                         .collect()
                 })
                 .unwrap_or_default();
-            state.policy = match policy {
-                "relay-only" => TransportPolicy::RelayOnly,
-                "air-gapped" => TransportPolicy::AirGapped,
-                _ => TransportPolicy::DirectPreferred,
-            };
             if let Some(endpoint) = &state.endpoint {
                 if relays.is_empty() && state.policy.allow_public_relays() {
                     relays = polyth_link_core::net::current_relay_urls(endpoint);
                 }
             }
-            let direct = if policy == "relay-only" {
-                None
-            } else {
-                state
-                    .endpoint
-                    .as_ref()
-                    .map(|endpoint| polyth_link_core::net::current_direct_addresses(endpoint))
-            };
+            let direct = state
+                .endpoint
+                .as_ref()
+                .map(polyth_link_core::net::current_direct_addresses);
             let host_endpoint = state.identity.endpoint_id();
             let invitation = state
                 .pairing
@@ -327,7 +481,7 @@ async fn dispatch(
             Ok(json!({
                 "pairing": {
                     "id": invitation.pairing_id,
-                    "expiresAt": iso_plus(120),
+                    "expiresAt": invitation.expires_at,
                     "safetyPhrase": null,
                     "state": "created",
                 },
@@ -347,7 +501,8 @@ async fn dispatch(
             Ok(json!({
                 "id": invitation.pairing_id,
                 "state": invitation.state.as_str(),
-                "expiresAt": iso_plus(120),
+                "issuedAt": invitation.issued_at,
+                "expiresAt": invitation.expires_at,
                 "endpointId": invitation.claimant,
                 "deviceConfirmed": invitation.device_confirmed,
                 "hostConfirmed": invitation.host_confirmed,
@@ -431,7 +586,10 @@ async fn dispatch(
         }
         "connection.notify_grants" => {
             let state = state.lock().await;
-            let device_id = params.get("deviceId").and_then(Value::as_str).unwrap_or("");
+            let device_id = params
+                .get("deviceId")
+                .and_then(Value::as_str)
+                .ok_or("device-unknown")?;
             let revision = params
                 .get("grantRevision")
                 .and_then(Value::as_u64)
@@ -440,9 +598,54 @@ async fn dispatch(
                 "type": "tunnel/grants-updated",
                 "deviceId": device_id,
                 "grantRevision": revision,
-                "all": true,
             }));
             Ok(json!({ "ok": true }))
+        }
+        "endpoint.set_policy" => {
+            let requested = params
+                .get("policy")
+                .and_then(Value::as_str)
+                .unwrap_or("direct-preferred");
+            if requested != "direct-preferred" {
+                return Err("pairing-invalid");
+            }
+            let shared = state.clone();
+            let (secret, old_endpoint, live, policy_path) = {
+                let mut guard = state.lock().await;
+                let live: Vec<_> = std::mem::take(&mut guard.connections)
+                    .into_values()
+                    .collect();
+                let old_endpoint = guard.endpoint.take();
+                guard.policy = TransportPolicy::DirectPreferred;
+                (
+                    guard.identity.secret_key(),
+                    old_endpoint,
+                    live,
+                    guard.policy_path.clone(),
+                )
+            };
+            for connection in live {
+                connection.connection.close(0u32.into(), b"policy");
+            }
+            if let Some(endpoint) = old_endpoint {
+                endpoint.close().await;
+            }
+            let endpoint =
+                polyth_link_core::net::bind_link_endpoint(secret, TransportPolicy::DirectPreferred)
+                    .await
+                    .map_err(|_| "transport-unavailable")?;
+            let accept = endpoint.clone();
+            {
+                let mut guard = state.lock().await;
+                guard.endpoint = Some(endpoint);
+            }
+            save_host_policy(&policy_path, TransportPolicy::DirectPreferred);
+            tokio::spawn(conn::accept_loop(shared, accept));
+            Ok(json!({
+                "ok": true,
+                "activePolicy": "direct-preferred",
+                "endpointBound": true,
+            }))
         }
         "endpoint.start" => {
             let shared = state.clone();
@@ -466,13 +669,27 @@ async fn dispatch(
         }
         "status" => {
             let state = state.lock().await;
+            let relay_urls = state
+                .endpoint
+                .as_ref()
+                .map(polyth_link_core::net::current_relay_urls)
+                .unwrap_or_default();
+            let direct_addresses = state
+                .endpoint
+                .as_ref()
+                .map(polyth_link_core::net::current_direct_addresses)
+                .unwrap_or_default();
             Ok(json!({
                 "fingerprint": state.identity.fingerprint(),
+                "endpointId": state.identity.endpoint_id(),
                 "mode": state.policy.as_str(),
+                "activePolicy": state.policy.as_str(),
                 "endpointBound": state.endpoint.is_some(),
                 "irohVersion": polyth_link_core::IROH_CRATE_VERSION,
                 "zeroRttDisabled": DISABLE_0RTT,
                 "activeConnections": state.connections.len(),
+                "relayUrls": relay_urls,
+                "directAddresses": direct_addresses,
                 "transports": state.connections.values().map(|live| live.transport).collect::<Vec<_>>(),
                 "peers": state.connections.values().map(|live| {
                     format!("{}…{}", &live.endpoint_id[..live.endpoint_id.len().min(4)], &live.endpoint_id[live.endpoint_id.len().saturating_sub(4)..])
@@ -484,30 +701,51 @@ async fn dispatch(
 }
 
 pub(crate) fn maybe_emit_committing(state: &HostState, pairing_id: &str) {
-    if let Some(invitation) = state.pairing.get(pairing_id) {
-        if invitation.state.as_str() == "committing" {
-            let _ = state.events.send(json!({
-                "type": "tunnel/pairing-committing",
-                "pairingId": pairing_id,
-                "endpointId": invitation.claimant,
-                "label": invitation.device_label,
-                "platform": invitation.device_platform,
-                "grants": invitation.grants,
-            }));
-        }
+    let Some(invitation) = state.pairing.get(pairing_id) else {
+        return;
+    };
+    if invitation.state.as_str() == "committing" {
         let _ = state.events.send(json!({
-            "type": "tunnel/pairing-updated",
+            "type": "tunnel/pairing-committing",
             "pairingId": pairing_id,
-            "state": invitation.state.as_str(),
+            "endpointId": invitation.claimant,
+            "label": invitation.device_label,
+            "platform": invitation.device_platform,
+            "grants": invitation.grants,
         }));
+    }
+    let _ = state.events.send(json!({
+        "type": "tunnel/pairing-updated",
+        "pairingId": pairing_id,
+        "state": invitation.state.as_str(),
+    }));
+}
+
+fn load_host_policy(path: &Path) -> TransportPolicy {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return TransportPolicy::DirectPreferred;
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&text) else {
+        return TransportPolicy::DirectPreferred;
+    };
+    match value.get("policy").and_then(Value::as_str) {
+        Some("direct-preferred") => TransportPolicy::DirectPreferred,
+        Some("relay-only") | Some("air-gapped") => {
+            eprintln!(
+                "polyth-link-host: stored policy is not available in this build; using direct-preferred"
+            );
+            TransportPolicy::DirectPreferred
+        }
+        _ => TransportPolicy::DirectPreferred,
     }
 }
 
-fn iso_plus(seconds: u64) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-        + seconds;
-    format!("{now}")
+fn save_host_policy(path: &Path, policy: TransportPolicy) {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(
+        path,
+        serde_json::to_vec(&json!({ "policy": policy.as_str() })).unwrap_or_default(),
+    );
 }

@@ -14,6 +14,7 @@ use crate::ticket::{
     encode_pairing_ticket, PairingCandidate, PairingTicket, TicketHost, TicketProtocol,
     POLYTH_LINK_ALPN,
 };
+use crate::timefmt::{constant_eq, now_unix_ms, unix_ms_to_rfc3339};
 use crate::words::safety_phrase;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -70,6 +71,8 @@ pub struct Invitation {
     pub device_app_version: Option<String>,
     pub proof_attempts: u32,
     pub expires_at_ms: u64,
+    pub issued_at: String,
+    pub expires_at: String,
     pending_nonces: HashMap<String, ([u8; 32], [u8; 32])>,
     invite_secret: [u8; 32],
 }
@@ -95,8 +98,8 @@ pub enum PairingEvent {
 pub struct HostPairing {
     limits: Limits,
     invitations: HashMap<String, Invitation>,
-    claims_by_endpoint: HashMap<String, u32>,
-    global_claims: u32,
+    claims_by_endpoint: HashMap<String, Vec<Instant>>,
+    global_claims: Vec<Instant>,
 }
 
 impl HostPairing {
@@ -105,7 +108,7 @@ impl HostPairing {
             limits: Limits::v1(),
             invitations: HashMap::new(),
             claims_by_endpoint: HashMap::new(),
-            global_claims: 0,
+            global_claims: Vec::new(),
         }
     }
 
@@ -135,6 +138,10 @@ impl HostPairing {
         let mut invite_secret = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut pairing_id);
         rand::thread_rng().fill_bytes(&mut invite_secret);
+        let issued_ms = now_unix_ms();
+        let expires_ms = issued_ms.saturating_add(self.limits.pairing_ttl_ms);
+        let issued_at = unix_ms_to_rfc3339(issued_ms).map_err(|_| LinkError::PairingInvalid)?;
+        let expires_at = unix_ms_to_rfc3339(expires_ms).map_err(|_| LinkError::PairingInvalid)?;
         let ticket = PairingTicket {
             version: 1,
             kind: "polyth-link-pair".into(),
@@ -144,8 +151,8 @@ impl HostPairing {
                 endpoint_id: host_endpoint.to_string(),
                 label: host_label.map(str::to_string),
             },
-            issued_at: "now".into(),
-            expires_at: "now+120s".into(),
+            issued_at: issued_at.clone(),
+            expires_at: expires_at.clone(),
             protocol: TicketProtocol {
                 alpn: POLYTH_LINK_ALPN.into(),
                 min_version: 1,
@@ -187,7 +194,9 @@ impl HostPairing {
             device_platform: None,
             device_app_version: None,
             proof_attempts: 0,
-            expires_at_ms: self.limits.pairing_ttl_ms,
+            expires_at_ms: expires_ms,
+            issued_at,
+            expires_at,
             pending_nonces: HashMap::new(),
             invite_secret,
         };
@@ -219,6 +228,11 @@ impl HostPairing {
             if claimant != device_endpoint {
                 return Err(LinkError::PairingClaimed);
             }
+        }
+        if invitation.pending_nonces.len() >= self.limits.pending_nonces_per_invitation
+            && !invitation.pending_nonces.contains_key(device_endpoint)
+        {
+            return Err(LinkError::RequestRateLimited);
         }
         let mut server_nonce = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut server_nonce);
@@ -275,18 +289,19 @@ impl HostPairing {
         now: Instant,
     ) -> Result<[String; 4], LinkError> {
         self.expire(now);
-        if self.global_claims >= 100 {
+        self.prune_rate_limits(now);
+        if self.global_claims.len() >= 100 {
             return Err(LinkError::RequestRateLimited);
         }
         let endpoint_claims = self
             .claims_by_endpoint
             .entry(device_endpoint.to_string())
-            .or_insert(0);
-        if *endpoint_claims >= 10 {
+            .or_default();
+        if endpoint_claims.len() >= 10 {
             return Err(LinkError::RequestRateLimited);
         }
-        *endpoint_claims += 1;
-        self.global_claims += 1;
+        endpoint_claims.push(now);
+        self.global_claims.push(now);
 
         let invitation = self
             .invitations
@@ -326,7 +341,7 @@ impl HostPairing {
             &invitation.profile,
         );
         let expected = hmac_proof(&invitation.invite_secret, &transcript);
-        if expected != *proof {
+        if !constant_eq(&expected, proof) {
             return Err(LinkError::PairingInvalid);
         }
         invitation.claimant = Some(device_endpoint.to_string());
@@ -352,6 +367,12 @@ impl HostPairing {
             .invitations
             .get_mut(pairing_id)
             .ok_or(LinkError::PairingInvalid)?;
+        if invitation.device_confirmed {
+            return Ok(());
+        }
+        if is_terminal(invitation.state) {
+            return Err(LinkError::PairingInvalid);
+        }
         if invitation.claimant.as_deref() != Some(device_endpoint) {
             return Err(LinkError::PairingInvalid);
         }
@@ -368,6 +389,12 @@ impl HostPairing {
             .invitations
             .get_mut(pairing_id)
             .ok_or(LinkError::PairingInvalid)?;
+        if invitation.host_confirmed {
+            return Ok(());
+        }
+        if is_terminal(invitation.state) {
+            return Err(LinkError::PairingInvalid);
+        }
         if invitation.transcript_hash.is_none() {
             return Err(LinkError::PairingConfirmationRequired);
         }
@@ -380,6 +407,9 @@ impl HostPairing {
             .invitations
             .get_mut(pairing_id)
             .ok_or(LinkError::PairingInvalid)?;
+        if is_terminal(invitation.state) {
+            return Err(LinkError::PairingInvalid);
+        }
         invitation.state = HostPairingState::Rejected;
         invitation.invite_secret.zeroize();
         Ok(())
@@ -390,6 +420,9 @@ impl HostPairing {
             .invitations
             .get_mut(pairing_id)
             .ok_or(LinkError::PairingInvalid)?;
+        if is_terminal(invitation.state) {
+            return Err(LinkError::PairingInvalid);
+        }
         invitation.state = HostPairingState::Cancelled;
         invitation.invite_secret.zeroize();
         Ok(())
@@ -400,6 +433,9 @@ impl HostPairing {
             .invitations
             .get_mut(pairing_id)
             .ok_or(LinkError::PairingInvalid)?;
+        if invitation.state == HostPairingState::Committed {
+            return Ok(());
+        }
         if invitation.state != HostPairingState::Committing {
             return Err(LinkError::PairingInvalid);
         }
@@ -413,6 +449,9 @@ impl HostPairing {
             .invitations
             .get_mut(pairing_id)
             .ok_or(LinkError::PairingInvalid)?;
+        if invitation.state == HostPairingState::Committed {
+            return Err(LinkError::PairingInvalid);
+        }
         invitation.state = HostPairingState::Failed;
         invitation.invite_secret.zeroize();
         Err(LinkError::PairingStorageFailed)
@@ -428,11 +467,27 @@ impl HostPairing {
         self.invitations.clear();
     }
 
+    fn prune_rate_limits(&mut self, now: Instant) {
+        let window = std::time::Duration::from_secs(60);
+        self.global_claims
+            .retain(|stamp| now.duration_since(*stamp) < window);
+        self.claims_by_endpoint.retain(|_, stamps| {
+            stamps.retain(|stamp| now.duration_since(*stamp) < window);
+            !stamps.is_empty()
+        });
+    }
+
     fn advance(&mut self, pairing_id: &str) -> Result<(), LinkError> {
         let invitation = self
             .invitations
             .get_mut(pairing_id)
             .ok_or(LinkError::PairingInvalid)?;
+        if is_terminal(invitation.state) && invitation.state != HostPairingState::Committing {
+            return Err(LinkError::PairingInvalid);
+        }
+        if invitation.state == HostPairingState::Committing {
+            return Ok(());
+        }
         if invitation.device_confirmed && invitation.host_confirmed {
             invitation.state = HostPairingState::Committing;
         } else if invitation.device_confirmed {
@@ -687,5 +742,128 @@ mod tests {
             .unwrap_err(),
             LinkError::PairingExpired
         );
+    }
+
+    #[test]
+    fn duplicate_confirmations_and_committed_finish_are_idempotent() {
+        let now = Instant::now();
+        let (mut host, invitation, device) = ready(now);
+        let client_nonce = [3u8; 32];
+        let secret = decode_secret(&invitation.ticket);
+        let server_nonce = host
+            .challenge(&invitation.pairing_id, &device, client_nonce, now)
+            .unwrap();
+        let proof = client_proof(
+            &secret,
+            &invitation.pairing_id,
+            &"aa".repeat(32),
+            &device,
+            &client_nonce,
+            &server_nonce,
+            "interact",
+        );
+        host.verify_proof(
+            &invitation.pairing_id,
+            &"aa".repeat(32),
+            &device,
+            &client_nonce,
+            &server_nonce,
+            &proof,
+            now,
+        )
+        .unwrap();
+        host.confirm_host(&invitation.pairing_id, now).unwrap();
+        host.confirm_device(&invitation.pairing_id, &device, now)
+            .unwrap();
+        host.confirm_device(&invitation.pairing_id, &device, now)
+            .unwrap();
+        host.confirm_host(&invitation.pairing_id, now).unwrap();
+        assert_eq!(
+            host.get(&invitation.pairing_id).unwrap().state,
+            HostPairingState::Committing
+        );
+        host.mark_committed(&invitation.pairing_id).unwrap();
+        host.mark_committed(&invitation.pairing_id).unwrap();
+        assert_eq!(
+            host.get(&invitation.pairing_id).unwrap().state,
+            HostPairingState::Committed
+        );
+        assert!(host.mark_storage_failed(&invitation.pairing_id).is_err());
+        assert_eq!(
+            host.get(&invitation.pairing_id).unwrap().state,
+            HostPairingState::Committed
+        );
+    }
+
+    #[test]
+    fn pairing_get_keeps_original_expiration() {
+        let now = Instant::now();
+        let (host, invitation, _) = ready(now);
+        let first = host.get(&invitation.pairing_id).unwrap();
+        let issued = first.issued_at.clone();
+        let expires = first.expires_at.clone();
+        let again = host.get(&invitation.pairing_id).unwrap();
+        assert_eq!(again.issued_at, issued);
+        assert_eq!(again.expires_at, expires);
+        assert_ne!(issued, expires);
+    }
+
+    #[test]
+    fn rate_limit_clears_after_its_window() {
+        let now = Instant::now();
+        let (mut host, invitation, device) = ready(now);
+        for _ in 0..10 {
+            host.global_claims.push(now);
+            host.claims_by_endpoint
+                .entry(device.clone())
+                .or_default()
+                .push(now);
+        }
+        assert_eq!(
+            host.verify_proof(
+                &invitation.pairing_id,
+                &"aa".repeat(32),
+                &device,
+                &[1u8; 32],
+                &[2u8; 32],
+                &[3u8; 32],
+                now
+            )
+            .unwrap_err(),
+            LinkError::RequestRateLimited
+        );
+        let later = now + std::time::Duration::from_secs(61);
+        let err = host
+            .verify_proof(
+                &invitation.pairing_id,
+                &"aa".repeat(32),
+                &device,
+                &[1u8; 32],
+                &[2u8; 32],
+                &[3u8; 32],
+                later,
+            )
+            .unwrap_err();
+        assert_ne!(err, LinkError::RequestRateLimited);
+    }
+
+    #[test]
+    fn reject_and_cancel_are_terminal() {
+        let now = Instant::now();
+        let (mut host, invitation, _) = ready(now);
+        host.reject(&invitation.pairing_id).unwrap();
+        assert_eq!(
+            host.get(&invitation.pairing_id).unwrap().state,
+            HostPairingState::Rejected
+        );
+        assert!(host.cancel(&invitation.pairing_id).is_err());
+        assert!(host.confirm_host(&invitation.pairing_id, now).is_err());
+        let (mut host, invitation, _) = ready(now);
+        host.cancel(&invitation.pairing_id).unwrap();
+        assert_eq!(
+            host.get(&invitation.pairing_id).unwrap().state,
+            HostPairingState::Cancelled
+        );
+        assert!(host.reject(&invitation.pairing_id).is_err());
     }
 }

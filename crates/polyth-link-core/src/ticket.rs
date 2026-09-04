@@ -230,6 +230,48 @@ fn validate_ticket(ticket: &PairingTicket, raw: &Value, limits: Limits) -> Resul
     if raw.get("inviteSecret").is_none() {
         return Err(LinkError::PairingInvalid);
     }
+    validate_ticket_time(ticket, limits)?;
+    validate_ticket_candidates(ticket)?;
+    match ticket.profile.as_str() {
+        "observe" | "interact" | "developer" | "full-remote" => {}
+        _ => return Err(LinkError::PairingInvalid),
+    }
+    Ok(())
+}
+
+fn validate_ticket_time(ticket: &PairingTicket, limits: Limits) -> Result<(), LinkError> {
+    let issued = crate::timefmt::parse_rfc3339_to_unix_ms(&ticket.issued_at)?;
+    let expires = crate::timefmt::parse_rfc3339_to_unix_ms(&ticket.expires_at)?;
+    if expires <= issued {
+        return Err(LinkError::PairingInvalid);
+    }
+    if expires - issued > limits.pairing_ttl_ms {
+        return Err(LinkError::PairingInvalid);
+    }
+    if crate::timefmt::now_unix_ms() >= expires {
+        return Err(LinkError::PairingExpired);
+    }
+    Ok(())
+}
+
+fn validate_ticket_candidates(ticket: &PairingTicket) -> Result<(), LinkError> {
+    let mut seen = std::collections::HashSet::new();
+    for candidate in &ticket.candidates {
+        if !seen.insert((
+            candidate.kind.clone(),
+            candidate.endpoint_id.clone(),
+            candidate.policy.clone(),
+        )) {
+            return Err(LinkError::PairingInvalid);
+        }
+        if let Some(addrs) = &candidate.direct_addresses {
+            for addr in addrs {
+                if addr.parse::<std::net::SocketAddr>().is_err() {
+                    return Err(LinkError::PairingInvalid);
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -285,8 +327,8 @@ mod tests {
                 endpoint_id: "ab".repeat(32),
                 label: Some("Desk".into()),
             },
-            issued_at: "2026-09-03T00:00:00Z".into(),
-            expires_at: "2026-09-03T00:02:00Z".into(),
+            issued_at: "2099-01-01T00:00:00Z".into(),
+            expires_at: "2099-01-01T00:02:00Z".into(),
             protocol: TicketProtocol {
                 alpn: POLYTH_LINK_ALPN.into(),
                 min_version: 1,
@@ -347,6 +389,17 @@ mod tests {
         ticket = sample();
         ticket.candidates[0].endpoint_id = "cd".repeat(32);
         assert!(parse_pairing_ticket(&encode_pairing_ticket(&ticket).unwrap()).is_err());
+    }
+
+    #[test]
+    fn expired_ticket_is_rejected() {
+        let mut ticket = sample();
+        ticket.issued_at = "2020-01-01T00:00:00Z".into();
+        ticket.expires_at = "2020-01-01T00:02:00Z".into();
+        assert_eq!(
+            parse_pairing_ticket(&encode_pairing_ticket(&ticket).unwrap()).unwrap_err(),
+            LinkError::PairingExpired
+        );
     }
 
     #[test]

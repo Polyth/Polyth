@@ -97,7 +97,7 @@ where
             .await
             .map_err(|_| LinkError::TransportOutcomeUnknown)?;
         if n == 0 {
-            break;
+            return Err(LinkError::TransportProtocolError);
         }
         writer
             .write_all(&buf[..n])
