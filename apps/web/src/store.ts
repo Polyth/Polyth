@@ -148,6 +148,8 @@ export interface AppState {
   editorLocation: EditorLocation | null;
   /** File requested by a changed-file jump into the Changes rail. */
   gitDiffPath: string | null;
+  /** Per-session dismissed edit-loop warning signatures (local UI only). */
+  dismissedEditLoops: Record<string, string>;
 }
 
 let state: AppState = {
@@ -175,6 +177,7 @@ let state: AppState = {
   editorFile: null,
   editorLocation: null,
   gitDiffPath: null,
+  dismissedEditLoops: {},
 };
 
 const listeners = new Set<() => void>();
@@ -752,6 +755,13 @@ export function setUiError(message: string): void {
 export function clearUiError(): void {
   if (uiErrorTimer !== undefined) clearTimeout(uiErrorTimer);
   set({ uiError: null });
+}
+
+/** Local-only dismiss for the edit-loop observer banner (Continue). */
+export function dismissEditLoopWarning(sessionId: string, signature: string): void {
+  set({
+    dismissedEditLoops: { ...state.dismissedEditLoops, [sessionId]: signature },
+  });
 }
 
 /** A server placeholder title must not clobber a title the client already

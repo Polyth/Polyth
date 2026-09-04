@@ -31,6 +31,12 @@ import { buildPermissionPreview, PERMISSION_ALLOWED_SCOPES } from "./permissionP
 import { sanitizeAttachments } from "./attachments.ts";
 import { settleAllOrThrow } from "./settle.ts";
 import { createResumeScheduler, planResume } from "./resume.ts";
+import {
+  detectEditLoop,
+  recentToolRecords,
+  shouldEmitEditLoop,
+  type EditLoopDedupeState,
+} from "./editLoop.ts";
 
 export interface Broadcaster {
   event(ev: SessionEvent): void;
@@ -375,6 +381,8 @@ export function createSessionService(deps: {
   // until an explicit rename supersedes it.
   const autoTitleRequested = new Set<string>();
   const titleRefreshInFlight = new Set<string>();
+  /** Per-session dedupe for `runtime/edit-loop-detected` observer signals. */
+  const editLoopDedupe = new Map<string, EditLoopDedupeState>();
 
   const broadcastTail = async <T>(
     sessionId: string,
@@ -1920,6 +1928,31 @@ export function createSessionService(deps: {
     }
   };
 
+  const maybeEmitEditLoop = async (sessionId: string): Promise<void> => {
+    const events = await store.events(sessionId);
+    const detection = detectEditLoop(recentToolRecords(events));
+    const decision = shouldEmitEditLoop(detection, editLoopDedupe.get(sessionId));
+    if (!decision.next) editLoopDedupe.delete(sessionId);
+    else editLoopDedupe.set(sessionId, decision.next);
+    if (!decision.emit || !detection) return;
+    console.warn(`[polyth] edit-loop detected for ${sessionId}`, {
+      kind: detection.kind,
+      paths: detection.paths,
+      signature: detection.signature,
+    });
+    await appendAndBroadcast(
+      sessionId,
+      "runtime/edit-loop-detected",
+      {
+        kind: detection.kind,
+        paths: detection.paths,
+        signature: detection.signature,
+        evidence: detection.evidence,
+      } as unknown as JsonObject,
+      { ignorable: true },
+    );
+  };
+
   const onRuntimeEvent = async (
     sessionId: string,
     ev: RuntimeEvent,
@@ -2296,6 +2329,15 @@ export function createSessionService(deps: {
         }
         await persist(sessionId, ev.type, rest as unknown as JsonObject);
       }
+    }
+    // Live path only: observation replay must not invent extra canonical events
+    // through a batch-bound persist, and must not duplicate a prior live signal.
+    if (
+      sideEffects
+      && options.persist === undefined
+      && (ev.type === "tool/result" || ev.type === "tool/error")
+    ) {
+      await maybeEmitEditLoop(sessionId);
     }
   };
 

@@ -348,6 +348,17 @@ export interface RuntimeRestartRecoveredData {
   reconciliationOrdinal: number;
   recoveredOperationIds: string[];
 }
+
+/** Ignorable runtime observer signal: the agent appears stuck rewriting the
+ *  same file(s). Never model-visible; never auto-stops a turn. */
+export type EditLoopKind = "repeated-edit-with-failing-checks" | "file-oscillation";
+export interface EditLoopDetectedData {
+  kind: EditLoopKind;
+  paths: string[];
+  signature: string;
+  evidence: Array<{ tool: string; path?: string; failed?: boolean; role: "edit" | "check" | "other" }>;
+}
+
 export interface TurnStartedData { turnId: string; model?: ModelRef; agent?: string }
 
 /** Provider capacity failure classification for an error turn/stopped. */
