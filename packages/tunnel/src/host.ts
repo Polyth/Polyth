@@ -1,11 +1,15 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createConnection, type Socket } from "node:net";
-import { existsSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { resolveHostBinary, type HostBinaryResolution } from "./hostBinary.ts";
 
 export { findHostBinary, resolveHostBinary, hostExecutableName } from "./hostBinary.ts";
 export type { HostBinaryResolution, HostBinaryLookup } from "./hostBinary.ts";
+
+const RPC_TIMEOUT_MS = 15_000;
+const CHILD_EXIT_TIMEOUT_MS = 5_000;
+const MAX_MALFORMED_FRAMES = 32;
 
 export interface LinkHostClient {
   request(method: string, params?: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -39,10 +43,26 @@ function unavailableHost(resolution: HostBinaryResolution): LinkHostClient {
   };
 }
 
+function unlinkSocket(path: string): void {
+  try { unlinkSync(path); } catch { /* stale or missing */ }
+}
+
+function waitForExit(child: ChildProcess, timeoutMs: number): Promise<void> {
+  if (child.exitCode != null || child.signalCode) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(), timeoutMs);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
 export async function startLinkHost(opts: { dataDir: string; socketPath: string }): Promise<LinkHostClient> {
   const resolved = resolveHostBinary();
   if (!resolved.ok) return unavailableHost(resolved);
   const binary = resolved.path;
+  unlinkSocket(opts.socketPath);
   const child: ChildProcess = spawn(binary, ["serve", opts.dataDir, opts.socketPath], {
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -51,30 +71,48 @@ export async function startLinkHost(opts: { dataDir: string; socketPath: string 
     if (/secret|invite|hmac|private|token/i.test(text)) return;
     console.error("[polyth-link-host]", text.trim());
   });
-  try {
-    await waitForSocket(opts.socketPath, 12_000);
-  } catch (error) {
+  const failedStart = async (code: string, error: unknown): Promise<LinkHostClient> => {
     child.kill("SIGKILL");
+    await waitForExit(child, 1_000);
+    unlinkSocket(opts.socketPath);
     return {
       available: false,
       binaryFound: true,
       processReady: false,
       platformSupported: true,
-      lastErrorCode: "host-start-failed",
+      lastErrorCode: code,
       onEvent() { return () => {}; },
       async request() {
         throw Object.assign(
           new Error(error instanceof Error ? error.message : "Polyth Link host failed to start"),
-          { code: "host-start-failed" },
+          { code },
         );
       },
       async close() {},
     };
+  };
+  try {
+    await connectWhenReady(opts.socketPath, child, 12_000);
+  } catch (error) {
+    return failedStart("host-start-failed", error);
   }
   const socket: Socket = await connectSocket(opts.socketPath);
   let nextId = 1;
-  const pending = new Map<number, { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void }>();
+  let closed = false;
+  let malformed = 0;
+  const pending = new Map<number, {
+    resolve: (value: Record<string, unknown>) => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
   const listeners = new Set<(event: { type: string } & Record<string, unknown>) => void>();
+  const rejectPending = (error: Error): void => {
+    for (const waiter of pending.values()) {
+      clearTimeout(waiter.timer);
+      waiter.reject(error);
+    }
+    pending.clear();
+  };
   let buf = "";
   socket.on("data", (chunk) => {
     buf += chunk.toString("utf8");
@@ -92,6 +130,7 @@ export async function startLinkHost(opts: { dataDir: string; socketPath: string 
           result?: Record<string, unknown>;
           error?: { code?: string };
         };
+        malformed = 0;
         if (parsed.method === "event" && parsed.params && typeof parsed.params.type === "string") {
           for (const listener of listeners) listener(parsed.params as { type: string } & Record<string, unknown>);
           continue;
@@ -100,6 +139,7 @@ export async function startLinkHost(opts: { dataDir: string; socketPath: string 
           const waiter = pending.get(parsed.id);
           if (!waiter) continue;
           pending.delete(parsed.id);
+          clearTimeout(waiter.timer);
           if (parsed.error) {
             waiter.reject(Object.assign(new Error(parsed.error.code ?? "unavailable"), { code: parsed.error.code ?? "unavailable" }));
           } else {
@@ -107,20 +147,44 @@ export async function startLinkHost(opts: { dataDir: string; socketPath: string 
           }
         }
       } catch {
-        // ignore malformed control lines
+        malformed += 1;
+        if (malformed >= MAX_MALFORMED_FRAMES) {
+          socket.destroy(Object.assign(new Error("malformed control frame"), { code: "unavailable" }));
+        }
       }
     }
   });
-  socket.on("error", (error) => {
-    for (const waiter of pending.values()) waiter.reject(error);
-    pending.clear();
-  });
+  const onDead = (error: Error) => {
+    if (closed) {
+      rejectPending(error);
+      return;
+    }
+    rejectPending(error);
+  };
+  socket.on("error", (error) => onDead(error));
+  socket.on("end", () => onDead(Object.assign(new Error("host control socket ended"), { code: "unavailable" })));
+  socket.on("close", () => onDead(Object.assign(new Error("host control socket closed"), { code: "unavailable" })));
+  child.on("exit", () => onDead(Object.assign(new Error("polyth-link-host exited"), { code: "unavailable" })));
   const request = (method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> =>
     new Promise((resolve, reject) => {
+      if (closed) {
+        reject(Object.assign(new Error("host control is closed"), { code: "unavailable" }));
+        return;
+      }
       const id = nextId++;
-      pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(Object.assign(new Error(`host RPC timed out: ${method}`), { code: "unavailable" }));
+      }, RPC_TIMEOUT_MS);
+      pending.set(id, { resolve, reject, timer });
       socket.write(`${JSON.stringify({ id, method, params })}\n`);
     });
+  try {
+    await request("identity.status");
+  } catch (error) {
+    socket.destroy();
+    return failedStart("host-start-failed", error);
+  }
   return {
     available: true,
     binaryFound: true,
@@ -132,8 +196,16 @@ export async function startLinkHost(opts: { dataDir: string; socketPath: string 
       return () => { listeners.delete(listener); };
     },
     async close() {
+      if (closed) return;
+      closed = true;
+      rejectPending(Object.assign(new Error("host control is closed"), { code: "unavailable" }));
       socket.end();
+      socket.destroy();
       child.kill("SIGTERM");
+      await waitForExit(child, CHILD_EXIT_TIMEOUT_MS);
+      if (child.exitCode == null && !child.signalCode) child.kill("SIGKILL");
+      await waitForExit(child, 1_000);
+      unlinkSocket(opts.socketPath);
     },
   };
 }
@@ -142,16 +214,15 @@ export function randomIngressSecret(): string {
   return randomBytes(32).toString("hex");
 }
 
-function waitForSocket(path: string, timeoutMs: number): Promise<void> {
+async function connectWhenReady(path: string, child: ChildProcess, timeoutMs: number): Promise<void> {
   const started = Date.now();
-  return new Promise((resolve, reject) => {
-    const tick = () => {
-      if (existsSync(path)) return resolve();
-      if (Date.now() - started > timeoutMs) return reject(new Error("polyth-link-host did not start"));
-      setTimeout(tick, 50);
-    };
-    tick();
-  });
+  while (!existsSync(path)) {
+    if (child.exitCode != null || child.signalCode) {
+      throw new Error("polyth-link-host exited before the control socket was ready");
+    }
+    if (Date.now() - started > timeoutMs) throw new Error("polyth-link-host did not start");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 }
 
 function connectSocket(path: string): Promise<Socket> {

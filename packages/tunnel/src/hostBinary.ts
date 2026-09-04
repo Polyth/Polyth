@@ -27,22 +27,22 @@ function resourcesPathFromProcess(): string | undefined {
   return typeof value === "string" && value ? value : undefined;
 }
 
-/** Resolve the Polyth Link host executable. Windows is fail-closed unless
- *  `POLYTH_LINK_HOST` names an existing file. Packaged desktop builds look
- *  under `<resources>/polyth-link/`. */
+/** Resolve the Polyth Link host executable. Windows is fail-closed even when
+ *  `POLYTH_LINK_HOST` is set, until named-pipe IPC exists. Packaged desktop
+ *  builds look under `<resources>/polyth-link/`. */
 export function resolveHostBinary(opts: HostBinaryLookup = {}): HostBinaryResolution {
   const platform = opts.platform ?? process.platform;
   const env = opts.env ?? process.env;
   const exists = opts.exists ?? existsSync;
   const name = hostExecutableName(platform);
 
+  if (platform === "win32") {
+    return { ok: false, reason: "unsupported-platform" };
+  }
+
   const override = env.POLYTH_LINK_HOST?.trim();
   if (override && exists(override)) {
     return { ok: true, path: override, source: "env" };
-  }
-
-  if (platform === "win32") {
-    return { ok: false, reason: "unsupported-platform" };
   }
 
   const resourcesDir = opts.resourcesDir

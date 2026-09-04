@@ -107,6 +107,9 @@ export class TunnelStore {
     const now = Date.now();
     const existing = this.db.prepare("SELECT * FROM tunnel_device WHERE endpoint_id = ?").get(input.endpointId) as
       | { id: string; revoked_at: number | null; grant_revision: number; created_at: number } | undefined;
+    if (existing && existing.revoked_at == null) {
+      return this.device(existing.id)!;
+    }
     const id = existing?.id ?? randomBytes(16).toString("hex");
     const grantRevision = (existing?.grant_revision ?? 0) + 1;
     this.db.exec("BEGIN");
@@ -229,7 +232,7 @@ export class TunnelStore {
       .run(Date.now(), transport ?? null, Date.now(), id);
   }
 
-  toDto(record: TunnelDeviceRecord, online: boolean): TunnelDeviceDto {
+  toDto(record: TunnelDeviceRecord, online: boolean, activeConnectionCount = online ? 1 : 0): TunnelDeviceDto {
     return {
       id: record.id,
       label: record.label,
@@ -247,6 +250,7 @@ export class TunnelStore {
         ? { lastTransport: record.lastTransport }
         : {}),
       online,
+      activeConnectionCount,
     };
   }
 

@@ -14,6 +14,7 @@ import {
   createServerServiceRegistry,
   discoverServerPackages,
   loadServerPackage,
+  PairedSocketRegistry,
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { createRouteRegistry } from "../src/routeRegistry.ts";
@@ -69,8 +70,11 @@ function stubHost(storageDir: string): ServerPackageHost {
     loadPlugin: async () => ({ dispose() {} }),
     onHttpServer() {},
     attachHttpChannels() {},
+    startTunnelIngress: async () => ({ close: async () => {} }),
     remotePolicies: () => [],
     attachPairedDeviceResolver() {},
+    closePairedDevice() {},
+    pairedSockets: new PairedSocketRegistry(),
   };
 }
 

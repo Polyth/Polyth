@@ -25,7 +25,7 @@ test("commitDevice is atomic, unique on endpoint, and revoke does not resurrect 
     pairedVia: "polyth-link",
   });
   assert.equal(again.id, first.id);
-  assert.equal(again.grantRevision, first.grantRevision + 1);
+  assert.equal(again.grantRevision, first.grantRevision);
   const revoked = store.revoke(first.id)!;
   assert.ok(revoked.revokedAt);
   assert.equal(store.forget(first.id), true);

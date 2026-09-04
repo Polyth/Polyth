@@ -17,7 +17,8 @@ export interface TunnelLiveSnapshot {
   directConnections: number;
   relayConnections: number;
   appVersion?: string;
-  irohVersion?: string;
+  irohVersion?: string | null;
+  relayUrls?: string[] | null;
   recentErrors?: TunnelDiagnosticsDto["recentErrors"];
 }
 
@@ -64,7 +65,7 @@ export function buildTunnelDiagnostics(snapshot: TunnelLiveSnapshot): TunnelDiag
     appVersion: snapshot.appVersion ?? "unknown",
     irohVersion: snapshot.irohVersion ?? "unknown",
     hostFingerprint: status.hostFingerprint,
-    relayUrls: [],
+    relayUrls: snapshot.relayUrls ?? [],
     recentErrors: snapshot.recentErrors ?? [],
     packageStatus: !snapshot.platformSupported
       ? "unsupported-platform"

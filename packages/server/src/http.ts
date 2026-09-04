@@ -1,9 +1,10 @@
 // REST per docs/PLAN.md §5 + static web bundle serving. node:http only.
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { readFile } from "node:fs/promises";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, statSync, unlinkSync, mkdirSync } from "node:fs";
+import { timingSafeEqual } from "node:crypto";
 import { constants as zlibConstants, gzip, gzipSync } from "node:zlib";
-import { extname, join, normalize, resolve, sep } from "node:path";
+import { extname, join, normalize, resolve, sep, dirname } from "node:path";
 import {
   canonicalizeRemotePath,
   type AgentRuntime,
@@ -20,6 +21,8 @@ import type { RuntimePool } from "./sessions.ts";
 import { aggregateRuntimes } from "./runtimeAggregate.ts";
 import type { ModelVisibilityService } from "./modelVisibility.ts";
 import type { RuntimeCatalog } from "./runtimeCatalog.ts";
+import type { HttpServerContext } from "@polyth/plugins";
+import { PairedSocketRegistry } from "@polyth/plugins";
 import {
   AuthorizationError,
   isLoopbackAddress,
@@ -267,6 +270,14 @@ const stripUntrustedHeaders = (req: IncomingMessage, ingress: RequestIngress): v
 export const TUNNEL_INTERNAL_TOKEN_HEADER = "x-polyth-internal-token";
 export const TUNNEL_INTERNAL_CONNECTION_HEADER = "x-polyth-internal-connection";
 
+export function internalTokenEquals(provided: string | undefined, expected: string): boolean {
+  if (!provided || !expected) return false;
+  const left = Buffer.from(provided);
+  const right = Buffer.from(expected);
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
+}
+
 export interface TunnelIngressBinding {
   secret: string;
   lookup(connectionId: string): Extract<RequestIngress, { kind: "polyth-link" }> | null;
@@ -277,7 +288,7 @@ export function createTunnelIngressServer(handler: HttpHandler, binding: TunnelI
   return createServer((req, res) => {
     const secret = headerValue(req, TUNNEL_INTERNAL_TOKEN_HEADER);
     const connectionId = headerValue(req, TUNNEL_INTERNAL_CONNECTION_HEADER);
-    if (!secret || secret !== binding.secret || !connectionId) {
+    if (!internalTokenEquals(secret, binding.secret) || !connectionId) {
       res.writeHead(403, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: "forbidden", message: "not allowed" }));
       return;
@@ -290,6 +301,99 @@ export function createTunnelIngressServer(handler: HttpHandler, binding: TunnelI
     }
     void handler(req, res, ingress);
   });
+}
+
+export interface TunnelIngressHandle {
+  secret: string;
+  socketPath: string;
+  server: Server;
+  listen(): Promise<void>;
+  close(): Promise<void>;
+}
+
+export function createTunnelIngress(opts: {
+  handler: HttpHandler;
+  secret: string;
+  socketPath: string;
+  lookup(connectionId: string): Extract<RequestIngress, { kind: "polyth-link" }> | null;
+  resolve: HttpServerContext["resolve"];
+  attachChannels(ctx: HttpServerContext): void;
+  pairedSockets?: PairedSocketRegistry;
+}): TunnelIngressHandle {
+  const pairedSockets = opts.pairedSockets ?? new PairedSocketRegistry();
+  const server = createTunnelIngressServer(opts.handler, {
+    secret: opts.secret,
+    lookup: opts.lookup,
+  });
+  const sockets = new Set<import("node:net").Socket>();
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+  });
+  const identity: HttpServerContext["identity"] = (request) => {
+    const secret = headerValue(request, TUNNEL_INTERNAL_TOKEN_HEADER);
+    const connectionId = headerValue(request, TUNNEL_INTERNAL_CONNECTION_HEADER);
+    if (!internalTokenEquals(secret, opts.secret) || !connectionId) {
+      return { principal: { kind: "anonymous" }, authenticated: false };
+    }
+    const ingress = opts.lookup(connectionId);
+    if (!ingress) return { principal: { kind: "anonymous" }, authenticated: false };
+    return opts.resolve(request, ingress);
+  };
+  const authorize: HttpServerContext["authorize"] = (request) => identity(request).authenticated;
+  const refreshPrincipal: HttpServerContext["refreshPrincipal"] = (principal) => {
+    if (principal.kind !== "paired-device") return principal;
+    const ingress = opts.lookup(principal.connectionId);
+    if (!ingress) return null;
+    const resolution = opts.resolve(
+      { headers: {}, socket: { remoteAddress: undefined } } as never,
+      ingress,
+    );
+    return resolution.principal.kind === "paired-device" ? resolution.principal : null;
+  };
+  let closed = false;
+  return {
+    secret: opts.secret,
+    socketPath: opts.socketPath,
+    server,
+    async listen() {
+      mkdirSync(dirname(opts.socketPath), { recursive: true });
+      try { unlinkSync(opts.socketPath); } catch { /* first boot or stale socket */ }
+      await new Promise<void>((resolve, reject) => {
+        const onError = (error: Error) => reject(error);
+        server.once("error", onError);
+        server.listen(opts.socketPath, () => {
+          server.off("error", onError);
+          resolve();
+        });
+      });
+      opts.attachChannels({
+        server,
+        listenerId: "polyth-link",
+        dispatch: opts.handler,
+        resolve: opts.resolve,
+        authorize,
+        identity,
+        refreshPrincipal,
+        pairedSockets,
+      });
+    },
+    async close() {
+      if (closed) return;
+      closed = true;
+      for (const socket of sockets) socket.destroy();
+      sockets.clear();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 500);
+        server.close(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+      try { unlinkSync(opts.socketPath); } catch { /* already removed */ }
+    },
+  };
 }
 
 export function createHttpHandler(deps: HttpDeps): HttpHandler {

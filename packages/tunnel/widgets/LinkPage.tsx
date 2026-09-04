@@ -42,8 +42,7 @@ function hostReadiness(status: TunnelStatusDto | null): string {
 function policyLabel(status: TunnelStatusDto | null): string {
   const policy = status?.activePolicy ?? null;
   if (policy === "direct-preferred") return "Active policy: direct preferred";
-  if (policy === "relay-only") return "Active policy: relay only";
-  if (policy === "air-gapped") return "Active policy: air-gapped";
+  if (policy) return `Policy ${policy} is not available in this build`;
   return "Active policy: none (endpoint not bound)";
 }
 

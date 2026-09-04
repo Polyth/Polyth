@@ -50,6 +50,7 @@ test("pairing and identity rotation stay local-admin; paired devices only reach 
     connections: new Map(),
     status: async () => ({ hostFingerprint: "abcd", identityAvailable: false, pairingAvailable: false }),
     diagnostics: async () => ({ packageStatus: "host-binary-missing", recentErrors: [] }),
+    closeDeviceSockets() {},
   });
 
   const paired: AuthPrincipal = {
@@ -109,6 +110,7 @@ test("non-loopback UI sessions and fully granted paired devices cannot administe
     connections: new Map(),
     status: async () => ({ pairingAvailable: false }),
     diagnostics: async () => ({ packageStatus: "host-binary-missing" }),
+    closeDeviceSockets() {},
   });
   const session: AuthPrincipal = { kind: "ui-session", sessionId: "s1", rememberedDeviceId: "s1" };
   await assert.rejects(

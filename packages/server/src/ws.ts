@@ -2,8 +2,8 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "node:http";
 import type { IncomingMessage } from "node:http";
-import type { Socket } from "node:net";
 import type {
+  AuthPrincipal,
   ClientSettingsDto,
   InstalledPluginDto,
   NotificationRecord,
@@ -12,9 +12,21 @@ import type {
   SessionProjection,
   SessionService,
 } from "@polyth/contracts";
+import { REMOTE_CAPABILITY, isLocalUiPrincipal } from "@polyth/contracts";
 import type { BrowserFrame, BrowserService } from "@polyth/browser";
 import type { DictationService } from "@polyth/dictation";
 import type { Broadcaster } from "./sessions.ts";
+import {
+  allowWsCapability,
+  claimWsUpgrade,
+  closeWs,
+  defaultWsIdentity,
+  denyUpgrade,
+  liveWsPrincipal,
+  normalizeWsAttachAuth,
+  type WsAttachAuth,
+  type WsAuthorize,
+} from "./wsAuth.ts";
 
 interface Sub {
   sessionId: string | null;
@@ -41,6 +53,8 @@ interface Sub {
   pendingFrame: BrowserFrame | null;
   // WP15: dictation audio gets its own rate window (higher than control msgs).
   audioCount: number;
+  principal: AuthPrincipal;
+  refreshPrincipal?: (principal: AuthPrincipal) => AuthPrincipal | null;
 }
 
 // A client re-subscribing faster than this is either buggy or hostile — either
@@ -55,33 +69,44 @@ const FRAME_HIGH_WATER = 1_000_000;
 // write per chunk instead of one per event.
 const GAP_FILL_CHUNK = 500;
 
-export function attachWs(
-  server: Server,
+export interface WsGateway extends Broadcaster {
+  attach(server: Server, auth?: WsAuthorize | WsAttachAuth): void;
+}
+
+export function createWsGateway(
   sessions: SessionService,
   browser?: BrowserService,
   dictation?: DictationService,
-  /** When provided, upgrades without an authenticated principal are rejected. */
-  authorize?: (req: IncomingMessage) => boolean,
-): Broadcaster {
+): WsGateway {
   // noServer + manual upgrade matcher: a WSS bound with {server, path} aborts
   // *every* unmatched upgrade with 400, which would kill the terminal channel's
   // /ws/terminal/:id handshakes. Pass-through matching keeps both channels live.
   const wss = new WebSocketServer({ noServer: true });
   const clients = new Map<WebSocket, Sub>();
-
-  const upgrade = (req: IncomingMessage, socket: Socket, head: Buffer) => {
-    if (new URL(req.url ?? "/", "http://x").pathname !== "/ws") return;
-    if (authorize && !authorize(req)) {
-      socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
-      socket.destroy();
-      return;
-    }
-    wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
-  };
-  server.on("upgrade", upgrade);
+  const attached = new WeakSet<Server>();
 
   const send = (ws: WebSocket, msg: unknown) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  };
+
+  const currentPrincipal = (ws: WebSocket, sub: Sub): AuthPrincipal | null => {
+    const live = liveWsPrincipal(sub.principal, sub.refreshPrincipal);
+    if (!live) {
+      closeWs(ws);
+      clients.delete(ws);
+      return null;
+    }
+    sub.principal = live;
+    return live;
+  };
+
+  const requireCap = (ws: WebSocket, sub: Sub, capability: string): boolean => {
+    const live = currentPrincipal(ws, sub);
+    if (!allowWsCapability(live, capability)) {
+      send(ws, { type: "error", code: "forbidden", message: "missing capability" });
+      return false;
+    }
+    return true;
   };
 
   const frameMsg = (f: BrowserFrame) => ({
@@ -93,6 +118,8 @@ export function attachWs(
   });
 
   const deliverFrame = (ws: WebSocket, sub: Sub, frame: BrowserFrame): void => {
+    const live = currentPrincipal(ws, sub);
+    if (!allowWsCapability(live, REMOTE_CAPABILITY.browserUse)) return;
     if (frame.revision <= sub.browserAfterRevision) return; // already seen
     if (ws.readyState !== WebSocket.OPEN) return;
     if (ws.bufferedAmount > FRAME_HIGH_WATER) {
@@ -123,21 +150,32 @@ export function attachWs(
     browser.onEvent((event) => {
       for (const [ws, sub] of clients) {
         if (sub.browserSessionId === event.browserSessionId) {
+          const live = currentPrincipal(ws, sub);
+          if (!allowWsCapability(live, REMOTE_CAPABILITY.browserUse)) continue;
           send(ws, { type: "browser/event", browserSessionId: event.browserSessionId, event });
         }
       }
     });
   }
 
-  wss.on("connection", (ws) => {
+  wss.on("connection", (ws, req: IncomingMessage) => {
+    const attachAuth = (ws as WebSocket & { _polythAuth?: WsAttachAuth })._polythAuth ?? {};
+    const resolution = defaultWsIdentity(attachAuth, req);
     const sub: Sub = {
       sessionId: null, afterSeq: 0, caughtUp: true,
       busy: false, pendingSubscribe: null, snapshotScope: null, liveBuffer: [],
       windowStart: Date.now(), windowCount: 0,
       browserSessionId: null, browserAfterRevision: 0, pendingFrame: null,
       audioCount: 0,
+      principal: resolution.principal,
+      refreshPrincipal: attachAuth.refreshPrincipal,
     };
     clients.set(ws, sub);
+    attachAuth.pairedSockets?.bind(ws, resolution.principal, () => closeWs(ws));
+    ws.on("close", () => {
+      attachAuth.pairedSockets?.unbind(ws);
+      clients.delete(ws);
+    });
     ws.on("message", async (raw) => {
       let msg: {
         type?: string; sessionId?: string; afterSeq?: number; projectId?: string;
@@ -169,12 +207,14 @@ export function attachWs(
         }
       }
       if (msg.type === "dictation/start" && dictation) {
+        if (!requireCap(ws, sub, REMOTE_CAPABILITY.dictationUse)) return;
         const dto = msg.dictationId ? dictation.get(msg.dictationId) : null;
         if (!dto) send(ws, { type: "dictation/error", dictationId: msg.dictationId, code: "not-found" });
         else send(ws, { type: "dictation/state", dictationId: dto.id, session: dto });
         return;
       }
       if (isAudio && dictation) {
+        if (!requireCap(ws, sub, REMOTE_CAPABILITY.dictationUse)) return;
         const id = msg.dictationId ?? "";
         try {
           const pcm = new Uint8Array(Buffer.from(String(msg.pcm ?? ""), "base64"));
@@ -193,6 +233,7 @@ export function attachWs(
         return;
       }
       if (msg.type === "browser/subscribe" && browser) {
+        if (!requireCap(ws, sub, REMOTE_CAPABILITY.browserUse)) return;
         sub.browserSessionId = msg.browserSessionId ?? null;
         sub.browserAfterRevision = Number(msg.afterRevision ?? 0);
         sub.pendingFrame = null;
@@ -204,6 +245,7 @@ export function attachWs(
         return;
       }
       if (msg.type !== "subscribe") return;
+      if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) return;
       // One gap-fill + fan-out at a time per socket: a burst of subscribes
       // (buggy client, rapid session switches) must not spawn overlapping
       // DB reads that pile up faster than they can complete. Requests that
@@ -268,12 +310,34 @@ export function attachWs(
         sub.busy = false;
       }
     });
-    ws.on("close", () => clients.delete(ws));
   });
 
   return {
+    attach(server, authArg) {
+      if (attached.has(server)) return;
+      attached.add(server);
+      const auth = normalizeWsAttachAuth(authArg);
+      const stopClaim = claimWsUpgrade(server, (req, socket, head) => {
+        if (new URL(req.url ?? "/", "http://x").pathname !== "/ws") return false;
+        const resolution = defaultWsIdentity(auth, req);
+        if (auth.authorize ? !auth.authorize(req) : !resolution.authenticated) {
+          denyUpgrade(socket, 401);
+          return true;
+        }
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          (ws as WebSocket & { _polythAuth?: WsAttachAuth })._polythAuth = auth;
+          wss.emit("connection", ws, req);
+        });
+        return true;
+      });
+      server.on("close", () => {
+        stopClaim();
+      });
+    },
     event(ev: SessionEvent) {
       for (const [ws, sub] of clients) {
+        const live = currentPrincipal(ws, sub);
+        if (!allowWsCapability(live, REMOTE_CAPABILITY.coreSessionsRead)) continue;
         if (sub.sessionId && ev.sessionId !== sub.sessionId) continue;
         if (!sub.caughtUp) {
           // Gap-fill in flight: buffer instead of dropping. These seqs are
@@ -287,25 +351,57 @@ export function attachWs(
       }
     },
     projection(p: SessionProjection) {
-      for (const [ws] of clients) send(ws, { type: "projection", session: p });
+      for (const [ws, sub] of clients) {
+        const live = currentPrincipal(ws, sub);
+        if (!allowWsCapability(live, REMOTE_CAPABILITY.coreSessionsRead)) continue;
+        send(ws, { type: "projection", session: p });
+      }
     },
     notification(record: NotificationRecord) {
       // NTF-01: global inbox fan-out — every authenticated socket receives it
       // regardless of its active-session subscription. Never buffered into
       // liveBuffer, never counted against afterSeq, never part of gap-fill;
       // REST `after=<ts>` catch-up owns reconnect delivery.
-      for (const [ws] of clients) send(ws, { type: "notification/added", notification: record });
+      for (const [ws, sub] of clients) {
+        const live = currentPrincipal(ws, sub);
+        if (!allowWsCapability(live, REMOTE_CAPABILITY.coreNotificationsRead)) continue;
+        send(ws, { type: "notification/added", notification: record });
+      }
     },
     pluginChanged(plugin: InstalledPluginDto) {
-      for (const [ws] of clients) send(ws, { type: "plugin/changed", plugin });
+      for (const [ws, sub] of clients) {
+        const live = currentPrincipal(ws, sub);
+        if (!live || !isLocalUiPrincipal(live)) continue;
+        send(ws, { type: "plugin/changed", plugin });
+      }
     },
     packageChanged(pkg: PackageDescriptorDto) {
-      for (const [ws] of clients) send(ws, { type: "package/changed", package: pkg });
+      for (const [ws, sub] of clients) {
+        const live = currentPrincipal(ws, sub);
+        if (!live || !isLocalUiPrincipal(live)) continue;
+        send(ws, { type: "package/changed", package: pkg });
+      }
     },
     clientSettingsChanged(settings: ClientSettingsDto) {
       // Every socket hears it, including the author's — the client drops the
       // echo by revision. Never buffered, never part of gap-fill.
-      for (const [ws] of clients) send(ws, { type: "client-settings/changed", settings });
+      for (const [ws, sub] of clients) {
+        const live = currentPrincipal(ws, sub);
+        if (!live || !isLocalUiPrincipal(live)) continue;
+        send(ws, { type: "client-settings/changed", settings });
+      }
     },
   };
+}
+
+export function attachWs(
+  server: Server,
+  sessions: SessionService,
+  browser?: BrowserService,
+  dictation?: DictationService,
+  authorize?: WsAuthorize | WsAttachAuth,
+): WsGateway {
+  const gateway = createWsGateway(sessions, browser, dictation);
+  gateway.attach(server, authorize);
+  return gateway;
 }

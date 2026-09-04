@@ -1,28 +1,27 @@
-import { createServer, type IncomingMessage, type Server } from "node:http";
 import { join } from "node:path";
-import { mkdirSync, unlinkSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import type {
   AuthPrincipal,
   GrantProfileId,
   RemoteAccessPolicy,
   RequestIngress,
   RouteHandler,
+  TunnelDiagnosticsDto,
+  TunnelStatusDto,
 } from "@polyth/contracts";
 import {
-  matchRemotePath,
   PRIVILEGED_REMOTE_CAPABILITIES,
   REMOTE_CAPABILITY,
   requireLocalTunnelAdmin,
 } from "@polyth/contracts";
 import {
-  type HttpServerContext,
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { createTunnelStore, grantsForProfile, type TunnelStore } from "./index.ts";
 import { startLinkHost, randomIngressSecret, type LinkHostClient } from "./host.ts";
 import { attachTunnelEventsWs, TunnelEventBus } from "./events.ts";
-import { buildTunnelDiagnostics, buildTunnelStatus } from "./status.ts";
+import { buildTunnelDiagnostics, buildTunnelStatus, type TunnelLiveSnapshot } from "./status.ts";
 
 export const TUNNEL_REMOTE_ACCESS: RemoteAccessPolicy = {
   routeScopes: ["tunnel"],
@@ -40,9 +39,30 @@ export function tunnelRoutes(deps: {
   events: TunnelEventBus;
   host: () => LinkHostClient | null;
   connections: Map<string, AuthPrincipal>;
-  status: () => Promise<Record<string, unknown>>;
-  diagnostics: () => Promise<Record<string, unknown>>;
+  status: () => Promise<TunnelStatusDto | Record<string, unknown>>;
+  diagnostics: () => Promise<TunnelDiagnosticsDto | Record<string, unknown>>;
+  closeDeviceSockets: (deviceId: string) => void;
 }): RouteHandler {
+  const connectionCount = (deviceId: string): number => {
+    let count = 0;
+    for (const principal of deps.connections.values()) {
+      if (principal.kind === "paired-device" && principal.deviceId === deviceId) count += 1;
+    }
+    return count;
+  };
+  const dto = (device: ReturnType<TunnelStore["device"]>) => {
+    if (!device) return null;
+    const count = connectionCount(device.id);
+    return deps.store.toDto(device, count > 0, count);
+  };
+  const dropDevicePrincipals = (deviceId: string): void => {
+    for (const [connectionId, principal] of deps.connections) {
+      if (principal.kind === "paired-device" && principal.deviceId === deviceId) {
+        deps.connections.delete(connectionId);
+      }
+    }
+    deps.closeDeviceSockets(deviceId);
+  };
   return async (request) => {
     const { path, method, json, principal } = request;
     if (!path.startsWith("/api/tunnel")) return false;
@@ -61,7 +81,10 @@ export function tunnelRoutes(deps: {
       const profile = (body.profile === "observe" || body.profile === "developer" || body.profile === "full-remote"
         ? body.profile
         : "interact") as GrantProfileId;
-      const mode = body.mode === "relay-only" || body.mode === "air-gapped" ? body.mode : "direct-preferred";
+      if (body.mode && body.mode !== "direct-preferred") {
+        json(400, { error: "invalid-input", message: "only direct-preferred pairing is available" });
+        return true;
+      }
       const grants = grantsForProfile(profile).filter((cap) => !PRIVILEGED_REMOTE_CAPABILITIES.includes(cap));
       const host = deps.host();
       if (!host?.available) {
@@ -70,7 +93,7 @@ export function tunnelRoutes(deps: {
       }
       const result = await host.request("pairing.create", {
         profile,
-        mode,
+        mode: "direct-preferred",
         label: typeof body.label === "string" ? body.label : "",
         grants,
       });
@@ -108,7 +131,7 @@ export function tunnelRoutes(deps: {
 
     if (path === "/api/tunnel/devices" && method === "GET") {
       request.requireCapability(REMOTE_CAPABILITY.tunnelDevicesManage);
-      json(200, deps.store.list().map((device) => deps.store.toDto(device, deps.connections.has(device.id))));
+      json(200, deps.store.list().map((device) => dto(device)));
       return true;
     }
 
@@ -120,7 +143,7 @@ export function tunnelRoutes(deps: {
         request.requireCapability(REMOTE_CAPABILITY.tunnelDevicesManage);
         const device = deps.store.device(id);
         if (!device) throw Object.assign(new Error("unknown device"), { code: "not-found" });
-        json(200, deps.store.toDto(device, deps.connections.has(device.id)));
+        json(200, dto(device));
         return true;
       }
       if (method === "PATCH" && !action) {
@@ -128,29 +151,60 @@ export function tunnelRoutes(deps: {
         const body = await request.body();
         const device = deps.store.rename(id, String(body.label ?? ""));
         if (!device) throw Object.assign(new Error("unknown device"), { code: "not-found" });
-        deps.events.emit("tunnel/device-updated", { id });
-        json(200, deps.store.toDto(device, false));
+        deps.events.emit("tunnel/device-updated", { id, deviceId: id });
+        json(200, dto(device));
         return true;
       }
       if (method === "POST" && action === "revoke") {
         request.requireCapability(REMOTE_CAPABILITY.tunnelDevicesManage);
         const device = deps.store.revoke(id);
         if (!device) throw Object.assign(new Error("unknown device"), { code: "not-found" });
-        for (const [connectionId, principal] of deps.connections) {
-          if (principal.kind === "paired-device" && principal.deviceId === id) {
-            deps.connections.delete(connectionId);
+        const host = deps.host();
+        if (host?.available) {
+          try {
+            await host.request("trust.revoke", { deviceId: id, endpointId: device.endpointId });
+          } catch (error) {
+            json(503, {
+              error: "unavailable",
+              message: error instanceof Error ? error.message : "host trust revoke failed",
+              state: "partial",
+              deviceId: id,
+            });
+            return true;
           }
         }
-        void deps.host()?.request("connection.close_device", { deviceId: id }).catch(() => {});
-        deps.events.emit("tunnel/device-revoked", { id });
-        json(200, deps.store.toDto(device, false));
+        dropDevicePrincipals(id);
+        deps.events.emit("tunnel/device-revoked", { id, deviceId: id });
+        json(200, dto(device));
         return true;
       }
       if (method === "POST" && action === "restore") {
         request.requireCapability(REMOTE_CAPABILITY.tunnelDevicesManage);
         const device = deps.store.restore(id);
         if (!device) throw Object.assign(new Error("unknown device"), { code: "not-found" });
-        json(200, deps.store.toDto(device, false));
+        const host = deps.host();
+        if (host?.available) {
+          try {
+            await host.request("trust.restore", { deviceId: id, endpointId: device.endpointId });
+            await host.request("trust.upsert", {
+              deviceId: device.id,
+              endpointId: device.endpointId,
+              grants: device.grants,
+              grantRevision: device.grantRevision,
+              revoked: false,
+            });
+          } catch (error) {
+            json(503, {
+              error: "unavailable",
+              message: error instanceof Error ? error.message : "host trust restore failed",
+              state: "partial",
+              deviceId: id,
+            });
+            return true;
+          }
+        }
+        deps.events.emit("tunnel/device-updated", { id, deviceId: id });
+        json(200, dto(device));
         return true;
       }
       if (method === "PUT" && action === "grants") {
@@ -164,12 +218,27 @@ export function tunnelRoutes(deps: {
             deps.connections.set(connectionId, { ...live, grants: device.grants, grantRevision: device.grantRevision });
           }
         }
-        deps.events.emit("tunnel/device-updated", { id });
-        void deps.host()?.request("connection.notify_grants", {
-          deviceId: id,
-          grantRevision: device.grantRevision,
-        }).catch(() => {});
-        json(200, deps.store.toDto(device, false));
+        const host = deps.host();
+        if (host?.available) {
+          try {
+            await host.request("trust.update_grants", {
+              deviceId: id,
+              endpointId: device.endpointId,
+              grants: device.grants,
+              grantRevision: device.grantRevision,
+            });
+          } catch (error) {
+            json(503, {
+              error: "unavailable",
+              message: error instanceof Error ? error.message : "host grant update failed",
+              state: "partial",
+              deviceId: id,
+            });
+            return true;
+          }
+        }
+        deps.events.emit("tunnel/grants-updated", { id, deviceId: id, grantRevision: device.grantRevision });
+        json(200, dto(device));
         return true;
       }
       if (method === "DELETE" && !action) {
@@ -195,15 +264,19 @@ export function tunnelRoutes(deps: {
         return true;
       }
       const revokedIds = deps.store.revokeAll();
-      for (const id of revokedIds) {
-        void host.request("connection.close_device", { deviceId: id }).catch(() => {});
+      for (const id of revokedIds) dropDevicePrincipals(id);
+      try {
+        const result = await host.request("identity.rotate");
+        deps.events.emit("tunnel/identity-rotated", { revoked: revokedIds.length });
+        json(200, result);
+      } catch (error) {
+        json(503, {
+          error: "unavailable",
+          message: error instanceof Error ? error.message : "host identity rotate failed",
+          state: "partial",
+          revoked: revokedIds.length,
+        });
       }
-      for (const [connectionId, live] of [...deps.connections]) {
-        if (live.kind === "paired-device") deps.connections.delete(connectionId);
-      }
-      const result = await host.request("identity.rotate");
-      deps.events.emit("tunnel/identity-rotated", { revoked: revokedIds.length });
-      json(200, result);
       return true;
     }
 
@@ -216,11 +289,11 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   const events = new TunnelEventBus();
   const connections = new Map<string, AuthPrincipal>();
   let linkHost: LinkHostClient | null = null;
-  let ingress: Server | null = null;
+  let ingressHandle: { close(): Promise<void> } | null = null;
   let endpointBound = false;
   let ingressReady = false;
   let lastErrorCode: string | undefined;
-  const ingressSecret = randomIngressSecret();
+  let ingressSecret = randomIngressSecret();
   const socketDir = join(host.storageDir, "tunnel");
   mkdirSync(socketDir, { recursive: true });
   const controlSocket = join(socketDir, "host.sock");
@@ -236,12 +309,30 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         grantRevision: device.grantRevision,
         revoked: Boolean(device.revokedAt),
       })),
-    }).catch(() => {});
+    });
   };
 
+  let eventsEnabled = false;
+  const httpContexts = new Set<import("@polyth/plugins").HttpServerContext>();
+  const detachers = new Map<import("node:http").Server, () => void>();
+  const attachEvents = (ctx: import("@polyth/plugins").HttpServerContext) => {
+    detachers.get(ctx.server)?.();
+    detachers.set(ctx.server, attachTunnelEventsWs(ctx.server, {
+      events,
+      authorize: ctx.authorize,
+      identity: ctx.identity,
+      refreshPrincipal: ctx.refreshPrincipal,
+      pairedSockets: ctx.pairedSockets,
+    }));
+  };
   host.onHttpServer((ctx) => {
-    attachTunnelEventsWs(ctx.server, { events, authorize: ctx.authorize });
-    if (ctx.listenerId === "public") void startIngress(ctx);
+    httpContexts.add(ctx);
+    ctx.server.on("close", () => {
+      httpContexts.delete(ctx);
+      detachers.get(ctx.server)?.();
+      detachers.delete(ctx.server);
+    });
+    if (eventsEnabled) attachEvents(ctx);
   });
 
   const resolvePaired = (ingress: Extract<RequestIngress, { kind: "polyth-link" }>): AuthPrincipal | null => {
@@ -257,56 +348,16 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     };
   };
 
-  const startIngress = async (ctx: HttpServerContext): Promise<void> => {
-    try { unlinkSync(ingressSocket); } catch { /* first boot */ }
-    ingress = createServer((req, res) => {
-      const token = header(req, "x-polyth-internal-token");
-      const connectionId = header(req, "x-polyth-internal-connection");
-      if (token !== ingressSecret || !connectionId) {
-        res.writeHead(403); res.end(); return;
-      }
-      const ingressKind = lookup(connectionId);
-      if (!ingressKind) {
-        res.writeHead(403); res.end(); return;
-      }
-      void ctx.dispatch(req, res, ingressKind);
-    });
-    await new Promise<void>((resolve, reject) => {
-      ingress!.listen(ingressSocket, () => resolve());
-      ingress!.on("error", reject);
+  const startIngress = async (): Promise<void> => {
+    if (ingressHandle) await ingressHandle.close();
+    ingressReady = false;
+    ingressSecret = randomIngressSecret();
+    ingressHandle = await host.startTunnelIngress({
+      socketPath: ingressSocket,
+      secret: ingressSecret,
+      lookup,
     });
     ingressReady = true;
-    host.attachHttpChannels({
-      server: ingress,
-      listenerId: "polyth-link",
-      dispatch: ctx.dispatch,
-      resolve: ctx.resolve,
-      authorize: (req) => {
-        const token = header(req, "x-polyth-internal-token");
-        const connectionId = header(req, "x-polyth-internal-connection");
-        if (token !== ingressSecret || !connectionId) return false;
-        const kind = lookup(connectionId);
-        if (!kind) return false;
-        const resolution = ctx.resolve(req, kind);
-        if (!resolution.authenticated || resolution.principal.kind !== "paired-device") return false;
-        const url = new URL(req.url ?? "/", "http://x");
-        const policies = [
-          { owner: "core", policy: { routeScopes: ["core"], http: [], websocket: [
-            { path: "/ws", capability: REMOTE_CAPABILITY.coreSessionsRead },
-            { path: "/ws/tunnel", capability: REMOTE_CAPABILITY.tunnelStatusRead },
-          ] } },
-          ...host.remotePolicies(),
-        ];
-        for (const owned of policies) {
-          for (const rule of owned.policy.websocket ?? []) {
-            if (matchRemotePath(rule.path, url.pathname) && resolution.principal.grants.includes(rule.capability)) {
-              return true;
-            }
-          }
-        }
-        return false;
-      },
-    });
   };
 
   const lookup = (connectionId: string): Extract<RequestIngress, { kind: "polyth-link" }> | null => {
@@ -323,10 +374,14 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
 
   host.attachPairedDeviceResolver(resolvePaired);
 
-  const liveSnapshot = async () => {
+  const liveSnapshot = async (): Promise<TunnelLiveSnapshot> => {
     let fingerprint: string | null = null;
     let identityError: string | undefined;
     let identityAvailable = false;
+    let hostPolicy: string | null = null;
+    let hostBound: boolean | null = null;
+    let relayUrls: string[] | null = null;
+    let irohVersion: string | null = null;
     try {
       if (linkHost?.available) {
         const identity = await linkHost.request("identity.status");
@@ -334,6 +389,14 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           ? identity.fingerprint
           : null;
         identityAvailable = Boolean(fingerprint);
+        const status = await linkHost.request("status");
+        hostBound = Boolean(status.endpointBound);
+        hostPolicy = typeof status.activePolicy === "string"
+          ? status.activePolicy
+          : typeof status.mode === "string" ? status.mode : null;
+        relayUrls = Array.isArray(status.relayUrls) ? status.relayUrls.map(String) : [];
+        irohVersion = typeof status.irohVersion === "string" ? status.irohVersion : null;
+        endpointBound = hostBound;
       }
     } catch (error) {
       identityError = error instanceof Error ? error.message : "host-identity-unavailable";
@@ -347,18 +410,23 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       if (principal.transport === "relay") relayConnections += 1;
       else directConnections += 1;
     }
+    const policy = hostPolicy === "direct-preferred" || hostPolicy === "relay-only" || hostPolicy === "air-gapped"
+      ? hostPolicy
+      : null;
     return {
       platformSupported,
       hostBinaryFound: Boolean(linkHost?.binaryFound),
       hostProcessReady: Boolean(linkHost?.processReady && linkHost.available),
-      endpointBound,
+      endpointBound: hostBound ?? endpointBound,
       ingressReady,
       identityAvailable,
       hostFingerprint: fingerprint,
       ...(identityError ? { identityError } : {}),
       lastErrorCode: lastErrorCode ?? linkHost?.lastErrorCode,
-      activePolicy: endpointBound ? "direct-preferred" as const : null,
-      relayConfigured: false,
+      activePolicy: policy,
+      relayConfigured: Array.isArray(relayUrls) ? relayUrls.length > 0 : false,
+      relayUrls,
+      irohVersion,
       activeConnections: connections.size,
       activeDevices: store.list().filter((device) => !device.revokedAt).length,
       directConnections,
@@ -375,8 +443,11 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       connections,
       status: async () => buildTunnelStatus(await liveSnapshot()),
       diagnostics: async () => buildTunnelDiagnostics(await liveSnapshot()),
+      closeDeviceSockets: (deviceId) => host.closePairedDevice(deviceId),
     }),
     async onEnable() {
+      eventsEnabled = true;
+      for (const ctx of httpContexts) attachEvents(ctx);
       endpointBound = false;
       lastErrorCode = undefined;
       try {
@@ -386,36 +457,77 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           return;
         }
         linkHost.onEvent((event) => {
-          events.emit(event.type, event);
+          events.emit(event.type, { ...event, ...(typeof event.deviceId === "string" ? { deviceId: event.deviceId } : {}) });
           if (event.type === "tunnel/pairing-committing") {
+            const pairingId = String(event.pairingId ?? "");
             const endpointId = String(event.endpointId ?? "");
-            if (!endpointId) return;
-            try {
-              const device = store.commitDevice({
-                endpointId,
-                label: String(event.label ?? "Mobile device"),
-                platform: event.platform ? String(event.platform) : undefined,
-                grants: Array.isArray(event.grants) ? event.grants.map(String) : [],
-                pairedVia: "polyth-link",
-              });
-              void linkHost?.request("pairing.finish", { id: String(event.pairingId ?? "") });
-              void syncTrust();
-              events.emit("tunnel/device-added", { id: device.id });
-            } catch {
-              void linkHost?.request("pairing.storage_failed", { id: String(event.pairingId ?? "") });
-            }
+            if (!endpointId || !pairingId) return;
+            void (async () => {
+              try {
+                const existing = store.deviceByEndpoint(endpointId);
+                const device = store.commitDevice({
+                  endpointId,
+                  label: String(event.label ?? "Mobile device"),
+                  platform: event.platform ? String(event.platform) : undefined,
+                  grants: Array.isArray(event.grants) ? event.grants.map(String) : [],
+                  pairedVia: "polyth-link",
+                });
+                if (existing && !existing.revokedAt && existing.grantRevision === device.grantRevision) {
+                  await linkHost?.request("pairing.finish", { id: pairingId });
+                  return;
+                }
+                await linkHost?.request("trust.upsert", {
+                  deviceId: device.id,
+                  endpointId: device.endpointId,
+                  grants: device.grants,
+                  grantRevision: device.grantRevision,
+                  revoked: false,
+                });
+                await linkHost?.request("pairing.finish", { id: pairingId });
+                events.emit("tunnel/device-added", { id: device.id, deviceId: device.id });
+              } catch (error) {
+                try {
+                  await linkHost?.request("pairing.storage_failed", { id: pairingId });
+                } catch (finishError) {
+                  console.error("[polyth-link] pairing.storage_failed failed", finishError instanceof Error ? finishError.message : finishError);
+                }
+                const device = store.deviceByEndpoint(endpointId);
+                if (device) {
+                  store.revoke(device.id);
+                  for (const [connectionId, principal] of connections) {
+                    if (principal.kind === "paired-device" && principal.deviceId === device.id) {
+                      connections.delete(connectionId);
+                    }
+                  }
+                  host.closePairedDevice(device.id);
+                  try {
+                    await linkHost?.request("trust.revoke", { deviceId: device.id, endpointId });
+                  } catch (revokeError) {
+                    console.error("[polyth-link] trust.revoke after storage failure failed", revokeError instanceof Error ? revokeError.message : revokeError);
+                  }
+                }
+                console.error("[polyth-link] pairing commit failed", error instanceof Error ? error.message : error);
+              }
+            })();
           }
           if (event.type === "tunnel/pairing-storage-failed") {
             const endpointId = String(event.endpointId ?? "");
             const device = endpointId ? store.deviceByEndpoint(endpointId) : undefined;
             if (device) {
-              store.revoke(device.id);
-              for (const [connectionId, principal] of connections) {
-                if (principal.kind === "paired-device" && principal.deviceId === device.id) {
-                  connections.delete(connectionId);
+              void (async () => {
+                store.revoke(device.id);
+                for (const [connectionId, principal] of connections) {
+                  if (principal.kind === "paired-device" && principal.deviceId === device.id) {
+                    connections.delete(connectionId);
+                  }
                 }
-              }
-              void linkHost?.request("connection.close_device", { deviceId: device.id }).catch(() => {});
+                host.closePairedDevice(device.id);
+                try {
+                  await linkHost?.request("trust.revoke", { deviceId: device.id });
+                } catch (error) {
+                  console.error("[polyth-link] close after storage-failed event failed", error instanceof Error ? error.message : error);
+                }
+              })();
             }
           }
           if (event.type === "tunnel/connection-opened") {
@@ -439,12 +551,14 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           }
         });
         try {
+          await startIngress();
           await linkHost.request("ingress.configure", {
             socket: ingressSocket,
             secret: ingressSecret,
           });
         } catch (error) {
           lastErrorCode = "ingress-configure-failed";
+          ingressReady = false;
           console.error("[polyth-link] ingress configure failed", error instanceof Error ? error.message : error);
         }
         await syncTrust();
@@ -462,18 +576,16 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       }
     },
     async onDisable() {
+      eventsEnabled = false;
+      for (const stop of detachers.values()) stop();
+      detachers.clear();
       endpointBound = false;
       ingressReady = false;
+      await ingressHandle?.close();
+      ingressHandle = null;
       await linkHost?.close();
       linkHost = null;
       connections.clear();
-      await new Promise<void>((resolve) => ingress?.close(() => resolve()) ?? resolve());
-      ingress = null;
     },
   };
 }
-
-const header = (req: IncomingMessage, name: string): string | undefined => {
-  const raw = req.headers[name];
-  return Array.isArray(raw) ? raw[0] : raw;
-};

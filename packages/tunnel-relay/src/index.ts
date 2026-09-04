@@ -1,31 +1,20 @@
-/** Upstream Iroh relay operations helpers. This package does not see Polyth routes, grants, or pairing secrets. */
+/** Experimental packaging helpers for upstream iroh-relay 1.1.0.
+ *  This is not a production TLS/443 product and does not reconnect devices. */
 
 export const IROH_RELAY_VERSION = "1.1.0";
-export const RELAY_LISTEN_PORT = 443;
-export const RELAY_HEALTH_PATH = "/health";
+export const EXPERIMENTAL_RELAY_BIND = "127.0.0.1:3340";
 
 export interface RelayConfig {
-  domain: string;
-  listenPort: number;
-  tlsCertPath: string;
-  tlsKeyPath: string;
-  maxConnections: number;
+  httpBind: string;
 }
 
-export function defaultRelayConfig(domain: string): RelayConfig {
-  return {
-    domain,
-    listenPort: RELAY_LISTEN_PORT,
-    tlsCertPath: "/etc/polyth-link-relay/tls.crt",
-    tlsKeyPath: "/etc/polyth-link-relay/tls.key",
-    maxConnections: 10_000,
-  };
+export function defaultRelayConfig(): RelayConfig {
+  return { httpBind: EXPERIMENTAL_RELAY_BIND };
 }
 
 export function validateRelayConfig(config: RelayConfig): string[] {
   const errors: string[] = [];
-  if (!config.domain.includes(".")) errors.push("domain");
-  if (config.listenPort !== 443 && config.listenPort !== 8443) errors.push("listenPort");
-  if (!config.tlsCertPath || !config.tlsKeyPath) errors.push("tls");
+  const parsed = config.httpBind.split(":");
+  if (parsed.length < 2 || !parsed[0] || !parsed[1]) errors.push("httpBind");
   return errors;
 }

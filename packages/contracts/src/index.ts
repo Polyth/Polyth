@@ -3149,6 +3149,7 @@ export const REMOTE_CAPABILITY = {
   gitRead: "git.read",
   gitWrite: "git.write",
   browserUse: "browser.use",
+  dictationUse: "dictation.use",
   tunnelStatusRead: "tunnel.status.read",
   tunnelDevicesManage: "tunnel.devices.manage",
   tunnelPairingManage: "tunnel.pairing.manage",
@@ -3272,6 +3273,18 @@ export function normalizeDeviceGrants(grants: readonly string[]): string[] {
   return normalized;
 }
 
+/** Local web UI principals keep existing unrestricted WS/HTTP behavior. */
+export function isLocalUiPrincipal(principal: AuthPrincipal): boolean {
+  return principal.kind === "local-user" || principal.kind === "ui-session";
+}
+
+/** Capability check for paired devices. Local UI principals are unrestricted. */
+export function principalAllowsRemoteCapability(principal: AuthPrincipal, capability: string): boolean {
+  if (isLocalUiPrincipal(principal)) return true;
+  if (principal.kind === "paired-device") return principal.grants.includes(capability);
+  return false;
+}
+
 export type PolythLinkTransport = "direct" | "relay";
 export type PolythLinkPathPolicy = "direct-preferred" | "relay-only" | "air-gapped";
 
@@ -3355,6 +3368,7 @@ export interface TunnelDeviceDto {
   grants: string[];
   lastTransport?: PolythLinkTransport;
   online: boolean;
+  activeConnectionCount: number;
 }
 
 export interface TunnelStatusDto {

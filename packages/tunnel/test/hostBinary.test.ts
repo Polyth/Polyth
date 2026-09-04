@@ -60,7 +60,7 @@ test("Windows is fail-closed and does not search Unix paths", () => {
   assert.equal(hostExecutableName("win32"), "polyth-link-host.exe");
 });
 
-test("Windows still honors an explicit POLYTH_LINK_HOST override", () => {
+test("Windows remains unavailable even with POLYTH_LINK_HOST set", () => {
   const override = "C:\\polyth\\polyth-link-host.exe";
   const resolved = resolveHostBinary({
     platform: "win32",
@@ -68,7 +68,7 @@ test("Windows still honors an explicit POLYTH_LINK_HOST override", () => {
     exists: (path) => path === override,
     repoRoot: "/repo",
   });
-  assert.deepEqual(resolved, { ok: true, path: override, source: "env" });
+  assert.deepEqual(resolved, { ok: false, reason: "unsupported-platform" });
 });
 
 test("missing host binary is reported as missing, not ready", () => {
