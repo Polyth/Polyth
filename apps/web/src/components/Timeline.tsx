@@ -988,7 +988,7 @@ function childForTool(tool: ToolMsg, subagents: SubagentState | null): SubagentS
 
 function derivedActivityState(g: ActivityGroup): RunSummaryState {
   const latestTasks = new Map(g.tasks.map((task) => [task.taskId, task]));
-  if (g.tools.some((tool) => tool.status === "error" && /cancel(?:led|ed)|aborted|stopped/i.test(tool.error ?? ""))) return "cancelled";
+  if (g.tools.some((tool) => tool.status === "error" && /cancel(?:led|ed)|aborted|stopped|interrupted/i.test(tool.error ?? ""))) return "cancelled";
   if (g.tools.some((tool) => tool.status === "error") || [...latestTasks.values()].some((task) => task.action === "failed")) return "failed";
   if (g.tools.some((tool) => tool.status === "pending" || tool.status === "running") || [...latestTasks.values()].some((task) => task.action === "started")) return "active";
   return g.settled ? "completed" : "waiting";
