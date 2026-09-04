@@ -9,18 +9,18 @@ function SecretRequest({ secret }: { secret: PendingSecret }) {
   const [submitted, setSubmitted] = useState(false);
 
   const save = () => {
-    if (!value || submitted) return;
+    if (!value || submitted || !secret.sessionId) return;
     const writeOnlyValue = value;
     setValue("");
     setSubmitted(true);
-    void replySecret(secret.requestId, "save", writeOnlyValue).catch(() => setSubmitted(false));
+    void replySecret(secret.sessionId, secret.requestId, "save", writeOnlyValue).catch(() => setSubmitted(false));
   };
 
   const dismiss = () => {
-    if (submitted) return;
+    if (submitted || !secret.sessionId) return;
     setValue("");
     setSubmitted(true);
-    void replySecret(secret.requestId, "dismiss").catch(() => setSubmitted(false));
+    void replySecret(secret.sessionId, secret.requestId, "dismiss").catch(() => setSubmitted(false));
   };
 
   return (

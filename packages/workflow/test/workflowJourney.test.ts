@@ -215,6 +215,12 @@ test("workflow journey surfaces expose task launch, chat progress, HITL, stop, a
     "the accepted workflow consumes the draft before global indicators can remount Composer",
   );
   assert.match(launcher, /await openSession\(parentSessionId\)/);
+  assert.match(launcher, /parentSessionId = await createSession\(projectId/);
+  assert.doesNotMatch(
+    launcher,
+    /getState\(\)\.activeSessionId/,
+    "workflow run must not race against a concurrent activeSessionId switch",
+  );
   const runStart = launcher.indexOf("const run = async");
   const directRun = launcher.slice(runStart, launcher.indexOf("\n  return (", runStart));
   assert.doesNotMatch(

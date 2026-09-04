@@ -394,9 +394,11 @@ test("permission requested → resolved (and question asked → answered)", () =
   ]);
   assert.equal(m.permissions.length, 1);
   assert.equal(m.permissions[0]?.status, "pending");
+  assert.equal(m.permissions[0]?.sessionId, "s1");
   assert.deepEqual(m.permissions[0]?.patterns, ["ls *"]);
   assert.equal(m.questions.length, 1);
   assert.equal(m.questions[0]?.status, "pending");
+  assert.equal(m.questions[0]?.sessionId, "s1");
 
   const m2 = reduceEvent(m, ev("permission/resolved", { requestId: "r1", reply: "once" }));
   assert.equal(m2.permissions[0]?.status, "resolved");
@@ -419,6 +421,7 @@ test("secret/requested adds a pending credential handle and secret/resolved clea
   const model = buildModel([requested]);
 
   assert.deepEqual(model.secrets, [{
+    sessionId: "s1",
     requestId: "secret-1",
     handle: "deploy-token",
     label: "Deployment token",

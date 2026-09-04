@@ -4,7 +4,7 @@ import type { WorkflowDto } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 import { createSession, openSession } from "../../../apps/web/src/init.ts";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
-import { getState, openWorkspacePane, setUiError } from "../../../apps/web/src/store.ts";
+import { openWorkspacePane, setUiError } from "../../../apps/web/src/store.ts";
 import { handOffWorkflowLaunch } from "./workflowLaunch.ts";
 import { publishWorkflowRun } from "./workflowMonitor.ts";
 import { requestComposerReplace } from "../../../apps/web/src/composerInsert.ts";
@@ -114,8 +114,10 @@ export default function WorkflowLauncher({
     try {
       let parentSessionId = sessionId;
       if (!parentSessionId) {
-        await createSession(projectId, { title: tr("workflowlauncher.sessionTitleValue", { name: workflow.name }) });
-        parentSessionId = getState().activeSessionId ?? undefined;
+        // Use the returned id — never race against a concurrent activeSessionId switch.
+        parentSessionId = await createSession(projectId, {
+          title: tr("workflowlauncher.sessionTitleValue", { name: workflow.name }),
+        });
       }
       if (!parentSessionId) throw new Error(tr("workflowlauncher.parentCouldNotBeCreated"));
       // The server logs and broadcasts workflow/run-started before its HTTP

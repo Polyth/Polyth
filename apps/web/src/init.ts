@@ -995,7 +995,9 @@ export async function deleteSession(sessionId: string): Promise<void> {
 }
 
 export interface SendOptions {
-  /** Captured at click time — project/session switches must never reroute a send. */
+  /** Origin session for this send. Optional for back-compat (falls back to
+   *  `activeSessionId`), but Composer and other interactive call sites MUST
+   *  pass the captured session id so a concurrent switch cannot reroute. */
   targetSessionId?: string | null;
   delivery?: "normal" | "steer" | "queue" | "interrupt";
   /** Atomically reject open questions / deny open permissions before admission. */
@@ -1011,6 +1013,7 @@ export interface SendOptions {
 /** Returns true when the server accepted the message (callers that persist
  *  pending composer configuration consume it only on success). */
 export async function sendMessage(text: string, model?: JsonObject, agent?: string, opts?: SendOptions): Promise<boolean> {
+  // Prefer opts.targetSessionId; activeSessionId is only a legacy fallback.
   const id = opts?.targetSessionId ?? store.getState().activeSessionId;
   if (!id) return false;
   // The server records an auto title with the first admitted user message.
@@ -1071,29 +1074,37 @@ export async function resumeNow(sessionId: string, model?: JsonObject): Promise<
   }
 }
 
-export function replyPermission(requestId: string, reply: "once" | "always" | "reject", scope?: "session" | "project"): void {
-  const id = store.getState().activeSessionId;
-  if (!id) return;
-  void api.replyPermission(id, requestId, reply, scope).catch((err) => console.error("permission reply failed", err));
+/** Interactive replies MUST target the originating session — never live
+ *  `activeSessionId`, which can change after the user opened the card. */
+export function replyPermission(
+  sessionId: string,
+  requestId: string,
+  reply: "once" | "always" | "reject",
+  scope?: "session" | "project",
+): void {
+  if (!sessionId) return;
+  void api.replyPermission(sessionId, requestId, reply, scope).catch((err) => console.error("permission reply failed", err));
 }
 
-export function answerQuestion(requestId: string, answers: JsonObject): void {
-  const id = store.getState().activeSessionId;
-  if (!id) return;
-  void api.answerQuestion(id, requestId, answers).catch((err) => console.error("question reply failed", err));
+export function answerQuestion(sessionId: string, requestId: string, answers: JsonObject): void {
+  if (!sessionId) return;
+  void api.answerQuestion(sessionId, requestId, answers).catch((err) => console.error("question reply failed", err));
 }
 
-export function rejectQuestion(requestId: string): void {
-  const id = store.getState().activeSessionId;
-  if (!id) return;
-  void api.rejectQuestion(id, requestId).catch((err) => console.error("question reject failed", err));
+export function rejectQuestion(sessionId: string, requestId: string): void {
+  if (!sessionId) return;
+  void api.rejectQuestion(sessionId, requestId).catch((err) => console.error("question reject failed", err));
 }
 
-export async function replySecret(requestId: string, action: "save" | "dismiss", value?: string): Promise<void> {
-  const id = store.getState().activeSessionId;
-  if (!id) return;
+export async function replySecret(
+  sessionId: string,
+  requestId: string,
+  action: "save" | "dismiss",
+  value?: string,
+): Promise<void> {
+  if (!sessionId) return;
   try {
-    await api.replySecret(id, requestId, action, value);
+    await api.replySecret(sessionId, requestId, action, value);
   } catch (err) {
     console.error("secret reply failed", err);
     store.setUiError(friendlyError(tr("common.error"), err));

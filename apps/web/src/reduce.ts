@@ -120,6 +120,8 @@ export interface GithubConflictMsg {
 export type RenderMessage = UserMsg | AssistantMsg | ToolMsg | TaskActivityMsg | GithubConflictMsg;
 
 export interface PendingPermission {
+  /** Origin session stamped from the event — replies must use this, not live activeSessionId. */
+  sessionId: string;
   requestId: string;
   permission: string;
   patterns: string[];
@@ -135,6 +137,8 @@ export interface PendingPermission {
 }
 
 export interface PendingQuestion {
+  /** Origin session stamped from the event — replies must use this, not live activeSessionId. */
+  sessionId: string;
   requestId: string;
   questions: JsonObject[];
   status: "pending" | "answered" | "rejected";
@@ -143,6 +147,8 @@ export interface PendingQuestion {
 }
 
 export interface PendingSecret {
+  /** Origin session stamped from the event — replies must use this, not live activeSessionId. */
+  sessionId: string;
   requestId: string;
   handle: string;
   label: string;
@@ -755,6 +761,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           (s): s is "once" | "session" | "project" => s === "once" || s === "session" || s === "project",
         );
         model.permissions.push({
+          sessionId: ev.sessionId,
           requestId,
           permission: str(d, "permission") ?? "",
           patterns: strArr(d, "patterns"),
@@ -782,6 +789,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const requestId = str(d, "requestId") ?? "";
       if (!model.questions.some((q) => q.requestId === requestId)) {
         model.questions.push({
+          sessionId: ev.sessionId,
           requestId,
           questions: Array.isArray(d.questions) ? (d.questions as JsonObject[]) : [],
           status: "pending",
@@ -804,6 +812,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const requestId = str(d, "requestId") ?? "";
       if (!model.secrets.some((secret) => secret.requestId === requestId)) {
         model.secrets.push({
+          sessionId: ev.sessionId,
           requestId,
           handle: str(d, "handle") ?? "",
           label: str(d, "label") ?? "",
