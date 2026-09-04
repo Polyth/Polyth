@@ -44,6 +44,7 @@ const run = (file, args, options = {}) => new Promise((resolveRun, reject) => {
   child.once("error", reject);
   child.once("exit", (code, signal) => resolveRun({ code, signal, stdout, stderr }));
 });
+const delay = (ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 
 const extracted = await run(appImage, ["--appimage-extract"], { cwd: work });
 assert.equal(extracted.code, 0, `AppImage extraction failed:\n${extracted.stderr}`);
@@ -66,37 +67,50 @@ const hostData = join(work, "link-host");
 const hostSocket = join(work, "link-host.sock");
 await mkdir(hostData, { recursive: true });
 const hostProc = spawn(packagedHost, ["serve", hostData, hostSocket], { stdio: ["ignore", "pipe", "pipe"] });
-const hostReady = Date.now();
-while (!existsSync(hostSocket)) {
-  if (Date.now() - hostReady > 12_000) {
-    hostProc.kill("SIGKILL");
-    throw new Error("packaged polyth-link-host did not create a control socket");
-  }
-  await delay(50);
-}
-const identityRpc = await new Promise((resolve, reject) => {
-  const socket = createConnection(hostSocket);
-  socket.once("error", reject);
-  socket.once("connect", () => {
-    socket.write(`${JSON.stringify({ id: 1, method: "identity.status", params: {} })}\n`);
-  });
-  let buf = "";
-  socket.on("data", (chunk) => {
-    buf += String(chunk);
-    if (!buf.includes("\n")) return;
-    try {
-      resolve(JSON.parse(buf.slice(0, buf.indexOf("\n"))));
-    } catch (error) {
-      reject(error);
-    } finally {
-      socket.end();
+try {
+  const hostReady = Date.now();
+  while (!existsSync(hostSocket)) {
+    if (Date.now() - hostReady > 12_000) {
+      throw new Error("packaged polyth-link-host did not create a control socket");
     }
+    await delay(50);
+  }
+  const identityRpc = await new Promise((resolve, reject) => {
+    const socket = createConnection(hostSocket);
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("identity.status timed out"));
+    }, 8_000);
+    socket.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    socket.once("connect", () => {
+      socket.write(`${JSON.stringify({ id: 1, method: "identity.status", params: {} })}\n`);
+    });
+    let buf = "";
+    socket.on("data", (chunk) => {
+      buf += String(chunk);
+      if (!buf.includes("\n")) return;
+      clearTimeout(timer);
+      try {
+        resolve(JSON.parse(buf.slice(0, buf.indexOf("\n"))));
+      } catch (error) {
+        reject(error);
+      } finally {
+        socket.end();
+      }
+    });
   });
-});
-assert.equal(identityRpc.id, 1);
-assert.equal(typeof identityRpc.result?.fingerprint, "string");
-assert.ok(identityRpc.result.fingerprint.length >= 8);
-hostProc.kill("SIGTERM");
+  assert.equal(identityRpc.id, 1);
+  assert.equal(typeof identityRpc.result?.fingerprint, "string");
+  assert.ok(identityRpc.result.fingerprint.length >= 8);
+} finally {
+  hostProc.kill("SIGTERM");
+  const hostDeadline = Date.now() + 3_000;
+  while (hostProc.exitCode === null && Date.now() < hostDeadline) await delay(50);
+  if (hostProc.exitCode === null) hostProc.kill("SIGKILL");
+}
 const appRun = join(work, "squashfs-root", "AppRun");
 const cdpPort = await freePort();
 const appOutput = [];
@@ -118,7 +132,6 @@ const child = spawn(appRun, [
 child.stdout.on("data", (chunk) => appOutput.push(String(chunk)));
 child.stderr.on("data", (chunk) => appOutput.push(String(chunk)));
 
-const delay = (ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 const waitForTarget = async () => {
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
