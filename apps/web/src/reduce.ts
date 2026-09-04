@@ -3,6 +3,7 @@
 // reconstructs an identical model (session log invariant).
 import type {
   AttachmentRef,
+  EditLoopKind,
   FusionDto,
   FusionWeightDto,
   JsonObject,
@@ -120,6 +121,8 @@ export interface GithubConflictMsg {
 export type RenderMessage = UserMsg | AssistantMsg | ToolMsg | TaskActivityMsg | GithubConflictMsg;
 
 export interface PendingPermission {
+  /** Origin session stamped from the event — replies must use this, not live activeSessionId. */
+  sessionId: string;
   requestId: string;
   permission: string;
   patterns: string[];
@@ -135,6 +138,8 @@ export interface PendingPermission {
 }
 
 export interface PendingQuestion {
+  /** Origin session stamped from the event — replies must use this, not live activeSessionId. */
+  sessionId: string;
   requestId: string;
   questions: JsonObject[];
   status: "pending" | "answered" | "rejected";
@@ -143,6 +148,8 @@ export interface PendingQuestion {
 }
 
 export interface PendingSecret {
+  /** Origin session stamped from the event — replies must use this, not live activeSessionId. */
+  sessionId: string;
   requestId: string;
   handle: string;
   label: string;
@@ -260,6 +267,15 @@ export interface SubagentState {
   agents: Array<{ sessionId: string; label: string; status: string; currentTask?: string }>;
 }
 
+/** Latest ignorable `runtime/edit-loop-detected` signal for the session. */
+export interface EditLoopWarning {
+  kind: EditLoopKind;
+  paths: string[];
+  signature: string;
+  eventSeq: number;
+  time: number;
+}
+
 export interface RenderModel {
   messages: RenderMessage[];
   permissions: PendingPermission[];
@@ -279,6 +295,8 @@ export interface RenderModel {
   subagents: SubagentState | null;
   /** Edit-tool paths from the current/last turn; cleared by the next prompt. */
   changedFiles: string[];
+  /** Observer warning: agent may be stuck in a repeated edit cycle. */
+  editLoopWarning: EditLoopWarning | null;
   /** Active rewind marker. `draft` is replay-derived from the target
    *  `user/message` (raw ?? text + attachments); `restoredText` only appears
    *  when an old marker carried it (compat). */
@@ -308,6 +326,7 @@ export function emptyModel(): RenderModel {
     tasks: null,
     subagents: null,
     changedFiles: [],
+    editLoopWarning: null,
     rewind: null,
     fork: null,
     version: 0,
@@ -397,6 +416,28 @@ function touch(m: RenderMessage): void {
   m.rev = (m.rev ?? 0) + 1;
 }
 
+/** Display-only settle for tools still open when a turn ends. The event log
+ *  correctly leaves incomplete tools incomplete (no invented completion);
+ *  the UI model must not keep spinners forever. Reasons stay short and do
+ *  not invent tool output. */
+function orphanToolReason(status: TurnState["status"]): string {
+  if (status === "aborted") return "Interrupted";
+  if (status === "failed") return "Turn ended before tool completed";
+  return "Stopped";
+}
+
+function finalizeOrphanedTools(model: RenderModel, status: TurnState["status"], stopTime: number): void {
+  const reason = orphanToolReason(status);
+  for (const message of model.messages) {
+    if (message.kind !== "tool") continue;
+    if (message.status !== "pending" && message.status !== "running") continue;
+    message.status = "error";
+    message.error = reason;
+    message.finishTime = stopTime;
+    touch(message);
+  }
+}
+
 export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
   const d = ev.data;
   // Queue events carry no message payload (the durable queue is REST-read);
@@ -452,6 +493,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         model.messages.push(msg);
       }
       model.changedFiles = [];
+      model.editLoopWarning = null;
       // A child-origin prompt after the fork marker proves the seed was sent
       // (or replaced) — reload must not re-seed the composer.
       if (model.fork && !model.fork.seedConsumed && ev.seq > model.fork.markerSeq) {
@@ -581,8 +623,11 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
     case "tool/result": {
       const t = findTool(model, str(d, "callId") ?? "");
       if (t) {
+        // Late results after turn/stopped interrupt still win — clear any
+        // display-only orphan reason so the real output is what the UI shows.
         t.status = "done";
         t.output = str(d, "output") ?? "";
+        delete t.error;
         const title = str(d, tr("reduce.title"));
         if (title !== undefined) t.title = title;
         const metadata = obj(d, "metadata");
@@ -755,6 +800,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           (s): s is "once" | "session" | "project" => s === "once" || s === "session" || s === "project",
         );
         model.permissions.push({
+          sessionId: ev.sessionId,
           requestId,
           permission: str(d, "permission") ?? "",
           patterns: strArr(d, "patterns"),
@@ -782,6 +828,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const requestId = str(d, "requestId") ?? "";
       if (!model.questions.some((q) => q.requestId === requestId)) {
         model.questions.push({
+          sessionId: ev.sessionId,
           requestId,
           questions: Array.isArray(d.questions) ? (d.questions as JsonObject[]) : [],
           status: "pending",
@@ -804,6 +851,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const requestId = str(d, "requestId") ?? "";
       if (!model.secrets.some((secret) => secret.requestId === requestId)) {
         model.secrets.push({
+          sessionId: ev.sessionId,
           requestId,
           handle: str(d, "handle") ?? "",
           label: str(d, "label") ?? "",
@@ -872,6 +920,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           ...(limit ? { limit } : {}),
         };
       }
+      finalizeOrphanedTools(model, status, ev.time);
       break;
     }
     case "turn/resume-cancelled": {
@@ -1103,6 +1152,25 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       };
       break;
     }
+    case "runtime/edit-loop-detected": {
+      const kind = str(d, "kind");
+      const signature = str(d, "signature");
+      const paths = strArr(d, "paths");
+      if (
+        (kind !== "repeated-edit-with-failing-checks" && kind !== "file-oscillation")
+        || !signature
+      ) {
+        break;
+      }
+      model.editLoopWarning = {
+        kind,
+        paths,
+        signature,
+        eventSeq: ev.seq,
+        time: ev.time,
+      };
+      break;
+    }
     default:
       runWebReducers(model, ev);
       break; // Unregistered session/*, context/*, compaction/*, etc. are ignored.
@@ -1135,6 +1203,7 @@ export function cloneModel(src: RenderModel): RenderModel {
       ? { ...src.workflowRun, layers: src.workflowRun.layers.map((layer) => layer.slice()), nodes: src.workflowRun.nodes.map((node) => ({ ...node })) }
       : null,
     changedFiles: src.changedFiles.slice(),
+    editLoopWarning: src.editLoopWarning ? { ...src.editLoopWarning, paths: src.editLoopWarning.paths.slice() } : null,
   };
   const idx = messageIndexes.get(src);
   if (idx) messageIndexes.set(model, { assistants: new Map(idx.assistants), tools: new Map(idx.tools) });

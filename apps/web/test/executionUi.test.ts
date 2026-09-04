@@ -563,6 +563,31 @@ test("pending and running execution states stay visually and accessibly distinct
   }
 });
 
+test("orphaned-tool interrupt reasons map to cancelled vs failed display status", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(createElement(ExecutionRow, {
+      message: tool({ status: "error", error: "Interrupted", output: undefined }),
+    })));
+    assert.match(container.querySelector(".execution-status")?.getAttribute("aria-label") ?? "", /^Cancelled in /);
+
+    await act(async () => root.render(createElement(ExecutionRow, {
+      message: tool({ status: "error", error: "Stopped", output: undefined }),
+    })));
+    assert.match(container.querySelector(".execution-status")?.getAttribute("aria-label") ?? "", /^Cancelled in /);
+
+    await act(async () => root.render(createElement(ExecutionRow, {
+      message: tool({ status: "error", error: "Turn ended before tool completed", output: undefined }),
+    })));
+    assert.match(container.querySelector(".execution-status")?.getAttribute("aria-label") ?? "", /^Failed in /);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
 test("execution rows stay folded by default while running and after settling", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
