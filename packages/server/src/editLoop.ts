@@ -8,7 +8,7 @@ export const EDIT_LOOP_SAME_FILE_EDITS = 3;
 /** Strict A↔B alternation must complete at least this many A→B→A cycles. */
 export const EDIT_LOOP_OSCILLATION_CYCLES = 3;
 /** Suppress re-emitting the same signature for this long even if the loop continues. */
-export const EDIT_LOOP_COOLDOWN_MS = 60_000;
+const EDIT_LOOP_COOLDOWN_MS = 60_000;
 
 const WRITE_TOOL =
   /(^|[./:_-])(apply[_-]?patch|create[_-]?file|delete[_-]?file|edit|multiedit|patch|write)([./:_-]|$)/i;
@@ -18,8 +18,6 @@ const TEST_BUILD_COMMAND =
   /\b(test|spec|build|compile|typecheck|lint|ci|check|vitest|jest|pytest|mocha|cargo\s+test|go\s+test|npm\s+(?:run\s+)?(?:test|build)|pnpm\s+(?:run\s+)?(?:test|build)|yarn\s+(?:run\s+)?(?:test|build))\b/i;
 const PATH_KEY = /^(changedFiles|file|filePath|filename|files|path|paths|target)$/i;
 const PATCH_FILE = /^\*{3} (?:Add|Delete|Update) File:\s*(.+)$/gm;
-
-export type { EditLoopKind };
 
 export interface ToolCallRecord {
   tool: string;
@@ -79,11 +77,11 @@ function collectPathFields(value: JsonObject, out: Set<string>): void {
   }
 }
 
-export function isEditTool(tool: string): boolean {
+function isEditTool(tool: string): boolean {
   return WRITE_TOOL.test(tool);
 }
 
-export function isCheckTool(tool: string, input?: JsonObject): boolean {
+function isCheckTool(tool: string, input?: JsonObject): boolean {
   if (TEST_BUILD_TOOL.test(tool)) {
     const command = typeof input?.command === "string"
       ? input.command
@@ -104,7 +102,7 @@ export function isCheckTool(tool: string, input?: JsonObject): boolean {
   return command.length > 0 && TEST_BUILD_COMMAND.test(command);
 }
 
-export function extractEditPath(tool: string, input?: JsonObject, metadata?: JsonObject): string | undefined {
+function extractEditPath(tool: string, input?: JsonObject, metadata?: JsonObject): string | undefined {
   if (!isEditTool(tool) || !input) return undefined;
   const paths = new Set<string>();
   collectPathFields(input, paths);
@@ -113,7 +111,7 @@ export function extractEditPath(tool: string, input?: JsonObject, metadata?: Jso
   return first;
 }
 
-export function isFailedToolResult(
+function isFailedToolResult(
   kind: "result" | "error",
   tool: string,
   outputOrError: string,
@@ -129,7 +127,7 @@ export function isFailedToolResult(
     && !/\b0 failing\b/i.test(outputOrError);
 }
 
-export function toolRecordFromEvent(ev: SessionEvent): ToolCallRecord | null {
+function toolRecordFromEvent(ev: SessionEvent): ToolCallRecord | null {
   if (ev.type !== "tool/result" && ev.type !== "tool/error") return null;
   const data = ev.data as JsonObject;
   const tool = typeof data.tool === "string" ? data.tool : "";
@@ -187,7 +185,7 @@ function evidenceFrom(records: readonly ToolCallRecord[], indexes: readonly numb
   });
 }
 
-export function editLoopSignature(kind: EditLoopKind, paths: readonly string[]): string {
+function editLoopSignature(kind: EditLoopKind, paths: readonly string[]): string {
   return `${kind}:${[...paths].sort().join("|")}`;
 }
 
