@@ -1,5 +1,5 @@
 // UX-COMPOSER-DISC: one versioned browser-local record for the composer's
-// pending execution configuration (profile / model / agent), keyed per
+// pending execution configuration (profile / model / agent / thinking), keyed per
 // canonical session with "" for the no-session hero composer. Profile and
 // explicit overrides clear each other so the visible Profile value never
 // claims an unmodified bundle. The record survives reload and never crosses
@@ -19,7 +19,8 @@ export interface ComposerConfig {
   profile: ProfileChoice;
   model?: ModelRef;
   agent?: string;
-  thinking?: string;
+  /** A null value is an explicit Auto choice; undefined inherits defaults. */
+  thinking?: string | null;
 }
 
 const KEY_PREFIX = "polyth.composer.config.v1.";
@@ -51,7 +52,8 @@ export function parseComposerConfig(raw: string | null): ComposerConfig {
       cfg.model = { providerID: m.providerID, modelID: m.modelID };
     }
     if (typeof v.agent === "string" && v.agent) cfg.agent = v.agent;
-    if (typeof v.thinking === "string" && v.thinking) cfg.thinking = v.thinking;
+    if (v.thinking === null) cfg.thinking = null;
+    else if (typeof v.thinking === "string" && v.thinking) cfg.thinking = v.thinking;
     return cfg;
   } catch {
     return emptyComposerConfig();
@@ -64,7 +66,7 @@ export function serializeComposerConfig(cfg: ComposerConfig): string {
     profile: cfg.profile.kind === "id" ? cfg.profile.id : cfg.profile.kind === "none" ? "none" : null,
     ...(cfg.model ? { model: { providerID: cfg.model.providerID, modelID: cfg.model.modelID } } : {}),
     ...(cfg.agent ? { agent: cfg.agent } : {}),
-    ...(cfg.thinking ? { thinking: cfg.thinking } : {}),
+    ...(cfg.thinking !== undefined ? { thinking: cfg.thinking } : {}),
   });
 }
 
@@ -140,6 +142,11 @@ export function withExplicitThinking(cfg: ComposerConfig, thinking: string | und
   if (cfg.agent !== undefined) next.agent = cfg.agent;
   if (thinking) next.thinking = thinking;
   return next;
+}
+
+/** Explicit Auto suppresses saved and session-level thinking fallbacks. */
+export function withAutoThinking(cfg: ComposerConfig): ComposerConfig {
+  return { ...cfg, thinking: null };
 }
 
 export function configEquals(a: ComposerConfig, b: ComposerConfig): boolean {

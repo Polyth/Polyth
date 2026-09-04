@@ -223,6 +223,7 @@ export const ptBR: GitMessages = {
   "pendingchangesbar.files": "arquivos",
   "pendingchangesbar.listChangedFiles": "Listar arquivos alterados",
   "pendingchangesbar.message": "×",
+  "pendingchangesbar.openActiveRunDetailsValue": "Abrir detalhes da execução ativa: {action}",
   "pendingchangesbar.review": "Revisar",
   "pendingchangesbar.showLess": "Mostrar menos",
   "pendingchangesbar.showMoreFile": "Mostrar mais 1 arquivo",

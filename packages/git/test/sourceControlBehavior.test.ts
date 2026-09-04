@@ -379,13 +379,14 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
   const view = await mounted(createElement(PendingChangesBar));
   try {
     await act(async () => { await delay(40); });
-    let bubble = view.container.querySelector<HTMLButtonElement>(".pending-changes-bubble");
-    assert.ok(bubble, "collapsed bubble is the default");
+    let bubble = view.container.querySelector<HTMLButtonElement>(".pending-changes-bar--collapsed .ui-run-summary");
+    assert.ok(bubble, "collapsed run summary is the default");
     assert.equal(bubble.getAttribute("aria-expanded"), "false");
     assert.equal(bubble.getAttribute("aria-label"), "Edited 4 files");
     assert.match(view.container.textContent ?? "", /4 files/);
     assert.match(view.container.textContent ?? "", /\+10/);
-    assert.match(view.container.textContent ?? "", /-4/);
+    // Deleted-line counts use the typographic minus, matching GitView.
+    assert.match(view.container.textContent ?? "", /−4/);
     assert.equal(view.container.querySelector(".pending-changes-file"), null);
     assert.equal(labeledButton(view.container, "Undo"), undefined);
     assert.equal(labeledButton(view.container, "Review"), undefined);
@@ -404,11 +405,11 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
       ]);
       await delay(20);
     });
-    const agentStatus = view.container.querySelector(".pending-agent-status");
-    assert.ok(agentStatus, "active work replaces the compact change bubble");
-    assert.match(agentStatus.textContent ?? "", /Luna\s*·\s*Working/);
+    const agentStatus = view.container.querySelector(".agent-status-dock");
+    assert.ok(agentStatus, "active work replaces the compact change summary");
+    assert.match(agentStatus.textContent ?? "", /Luna/);
     assert.match(agentStatus.textContent ?? "", /Run focused checks and review the diff/);
-    assert.match(agentStatus.textContent ?? "", /4 files.*\+10.*-4/s);
+    assert.match(agentStatus.textContent ?? "", /4 files.*\+10.*−4/s);
     assert.match(agentStatus.textContent ?? "", /feature\/glass-ui/);
     assert.equal(agentStatus.textContent?.includes("Context"), false);
     assert.equal(agentStatus.textContent?.includes("Agent"), false);
@@ -417,11 +418,11 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
       applyEvents([ev("turn/stopped", { turnId: "turn-active", reason: "completed" })]);
       await delay(20);
     });
-    bubble = view.container.querySelector<HTMLButtonElement>(".pending-changes-bubble");
-    assert.ok(bubble, "the compact change bubble returns when work settles");
+    bubble = view.container.querySelector<HTMLButtonElement>(".pending-changes-bar--collapsed .ui-run-summary");
+    assert.ok(bubble, "the compact change summary returns when work settles");
 
     await act(async () => { bubble.click(); });
-    assert.equal(view.container.querySelector(".pending-changes-bubble"), null);
+    assert.equal(view.container.querySelector(".pending-changes-bar--collapsed"), null);
     assert.match(view.container.textContent ?? "", /Edited 4 files/);
     assert.equal(
       view.container.querySelector(".pending-changes-bar")?.getAttribute("aria-label"),
@@ -466,7 +467,7 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
     const actions = [...view.container.querySelectorAll(".pending-changes-actions button")];
     assert.equal(actions.at(-1), collapse, "Collapse is the rightmost header action");
     await act(async () => { collapse.click(); });
-    const collapsed = view.container.querySelector<HTMLButtonElement>(".pending-changes-bubble");
+    const collapsed = view.container.querySelector<HTMLButtonElement>(".pending-changes-bar--collapsed .ui-run-summary");
     assert.ok(collapsed);
     assert.equal(collapsed.getAttribute("aria-expanded"), "false");
     assert.equal(view.container.querySelector(".pending-changes-file"), null);

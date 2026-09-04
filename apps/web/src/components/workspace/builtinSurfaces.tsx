@@ -299,12 +299,12 @@ function SessionSurface() {
         context={{ projectId, sessionId, editing: false }}
         customizable
       />
+      <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
       <SlotHost
         slot="session.footer"
         context={{ projectId, sessionId, editing: false }}
         customizable
       />
-      <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
       {archived && sessionId ? <ArchivedComposerGuard sessionId={sessionId} /> : <Composer />}
     </div>
     {picker}

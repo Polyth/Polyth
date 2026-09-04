@@ -225,6 +225,7 @@ export const en = {
   "pendingchangesbar.files": "files",
   "pendingchangesbar.listChangedFiles": "List changed files",
   "pendingchangesbar.message": "×",
+  "pendingchangesbar.openActiveRunDetailsValue": "Open active run details: {action}",
   "pendingchangesbar.review": "Review",
   "pendingchangesbar.showLess": "Show less",
   "pendingchangesbar.showMoreFile": "Show 1 more file",

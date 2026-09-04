@@ -40,7 +40,8 @@ test("global CSS provides mobile-first sizing, touch, overflow, and focus contra
   );
   assert.match(foundation, /touch-action:\s*manipulation/);
   assert.match(css, /font-size:\s*max\(var\(--font-input\), 1em\)/);
-  assert.match(foundation, /--font-title:\s*clamp\(/);
+  assert.match(foundation, /--header-font-size:\s*24px/);
+  assert.match(foundation, /--font-title:\s*24px/);
   assert.match(css, /:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)[^}]*box-shadow:/s);
   assert.match(css, /\.app\s*\{[^}]*height:\s*100dvh/s);
 });
@@ -122,12 +123,13 @@ test("375px chat keeps a safe-area-aware floating shell and docked composer", as
   const css = await readWebStyles();
   const contract = css;
 
-  // The shell is one edge-to-edge glass panel: pinned to the very top with the
-  // safe-area inset absorbed as padding rather than an offset.
+  // Three independent islands float below the safe area; the wrapper itself
+  // stays transparent and non-interactive.
   assert.match(
     contract,
-    /\.mobile-session-floats\s*\{[^}]*top:\s*0[^}]*padding:\s*max\(var\(--safe-top\)/s,
+    /\.mobile-session-floats\s*\{[^}]*inset-block-start:\s*calc\(var\(--safe-top\) \+ var\(--conversation-chrome-inset\)\)[^}]*pointer-events:\s*none/s,
   );
+  assert.match(contract, /\.ui-glass-island\s*\{[^}]*display:\s*inline-flex/s);
   assert.match(
     contract,
     /\.app\.mode-chat\.view-session \.workspace\s*\{[^}]*padding-bottom:\s*0/s,

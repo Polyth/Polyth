@@ -22,7 +22,9 @@ test("every phone view uses the same three-segment shell bar", async () => {
   assert.match(mobileHeader, /origin="top"/);
   assert.match(mobileHeader, /title="Tools"/);
   assert.doesNotMatch(mobileHeader, /Icon\.plus/);
-  assert.match(css, /\.app-shell\s*\{[^}]*padding-top:\s*calc\(var\(--safe-top\) \+ var\(--tap\) \+ var\(--space-6\)\)/s);
+  // The reserved band clears the floating island: safe area, the island's own
+  // height (never below the tap floor), and the chrome inset around it.
+  assert.match(css, /\.app-shell\s*\{[^}]*padding-top:\s*calc\(var\(--safe-top\) \+ var\(--conversation-chrome-inset\) \+ max\(var\(--tap\), var\(--mobile-island-height\)\) \+ var\(--space-4\)\)/s);
   assert.match(prefs, /mobileShortcuts:\s*\[[\s\S]*"notification-centre"/);
   assert.match(shell, /hint:\s*hintOf\("notificationCentre"\)/);
   assert.match(shell, /notificationCentre:\s*\(\) => toggleRailPlugin\("slot:notification-centre"\)/);

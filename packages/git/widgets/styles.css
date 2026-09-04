@@ -13,7 +13,7 @@
   flex-direction: column;
   gap: var(--space-2);
   min-width: 0;
-  width: min(calc(100% - (var(--screen-gutter) * 2)), var(--chat-measure));
+  width: min(100%, var(--chat-measure));
   margin-inline: auto;
   padding: var(--space-3);
   border: 1px solid var(--border-soft);
@@ -72,135 +72,6 @@
 }
 .pending-changes-bar .pending-change-stats .additions { color: var(--green); }
 .pending-changes-bar .pending-change-stats .deletions { color: var(--red); }
-.pending-agent-status {
-  container: pending-agent-status / inline-size;
-  width: min(100%, var(--chat-measure));
-  min-height: calc(var(--control-h-lg) * 2);
-  margin: 0 auto var(--space-3);
-  display: grid;
-  grid-template-columns: var(--control-h) minmax(0, 1fr) minmax(0, auto);
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  overflow: hidden;
-  border: 1px solid var(--material-glass-border);
-  border-radius: var(--radius-sheet);
-  background: var(--material-glass);
-  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
-  color: var(--text);
-}
-.pending-agent-avatar {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: var(--control-h);
-  height: var(--control-h);
-  color: var(--accent);
-}
-.pending-agent-avatar > span {
-  font-size: var(--font-heading);
-  font-weight: 700;
-  line-height: 1;
-}
-.pending-agent-avatar > i {
-  position: absolute;
-  inset-inline-end: 0;
-  inset-block-end: var(--space-1);
-  width: var(--space-2);
-  height: var(--space-2);
-  border: 2px solid var(--material-glass);
-  border-radius: 50%;
-  background: var(--green);
-}
-.pending-agent-avatar > i::after {
-  position: absolute;
-  inset: -3px;
-  border: 1px solid color-mix(in srgb, var(--green) 45%, transparent);
-  border-radius: inherit;
-  content: "";
-}
-.pending-agent-copy { min-width: 0; display: grid; align-content: center; gap: var(--space-1); }
-.pending-agent-heading { min-width: 0; display: flex; align-items: baseline; gap: var(--space-2); }
-.pending-agent-heading strong {
-  overflow: hidden;
-  color: var(--text);
-  font-size: var(--font-label);
-  font-weight: 650;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.pending-agent-heading > span { flex: none; color: var(--muted); font-size: var(--font-meta); }
-.pending-agent-action {
-  overflow: hidden;
-  color: var(--text-dim);
-  font-size: var(--font-meta);
-  line-height: var(--font-meta-lh);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.pending-agent-changes { display: inline-flex; align-items: center; gap: var(--space-3); color: var(--muted); font-size: var(--font-meta); }
-.pending-agent-status .pending-change-stats {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-3);
-  font: 650 var(--font-meta) var(--mono);
-}
-.pending-agent-status .pending-change-stats .additions { color: var(--green); }
-.pending-agent-status .pending-change-stats .deletions { color: var(--red); }
-.pending-agent-side {
-  align-self: stretch;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-.pending-agent-side > time {
-  padding: var(--space-1) var(--space-2);
-  border-radius: 999px;
-  background: var(--surface-overlay);
-  color: var(--text-dim);
-  font-family: var(--mono);
-  font-size: var(--font-meta);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.pending-agent-branch {
-  max-width: min(24ch, 32cqi);
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  color: var(--faint);
-  font: var(--font-meta) var(--mono);
-}
-.pending-agent-branch > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pending-agent-branch svg { flex: none; }
-@container pending-agent-status (max-width: 480px) {
-  .pending-agent-avatar { width: var(--control-h-sm); height: var(--control-h-sm); }
-  .pending-agent-avatar > span { font-size: var(--font-label); }
-  .pending-agent-branch { max-width: 16ch; }
-  .pending-agent-branch svg { display: none; }
-}
-@media (prefers-reduced-motion: no-preference) {
-  .pending-agent-status { animation: pending-agent-arrive var(--motion-surface) var(--motion-ease); }
-  .pending-agent-avatar > i::after { animation: pending-agent-signal 2.4s var(--motion-ease) infinite; }
-  .pending-changes-bar--collapsed { animation: pending-changes-return var(--motion-surface) var(--motion-ease); }
-  @keyframes pending-agent-arrive {
-    from { opacity: 0; transform: translateY(var(--space-2)) scale(.985); }
-    to { opacity: 1; transform: none; }
-  }
-  @keyframes pending-agent-signal {
-    0%, 45% { opacity: 0; transform: scale(.65); }
-    70% { opacity: .8; }
-    100% { opacity: 0; transform: scale(1.65); }
-  }
-  @keyframes pending-changes-return {
-    from { opacity: 0; transform: translateY(calc(var(--space-2) * -1)) scale(.96); }
-    to { opacity: 1; transform: none; }
-  }
-}
 .pending-changes-bar .pending-changes-file .pending-change-stats {
   flex: none;
 }
@@ -212,7 +83,7 @@
   margin-inline-start: auto;
 }
 .pending-changes-bar .pending-changes-review {
-  border-radius: 999px;
+  border-radius: var(--radius-round);
 }
 .pending-changes-list {
   display: flex;
@@ -255,12 +126,9 @@
   width: max-content;
 }
 .pending-changes-bar--collapsed {
-  width: max-content;
-  min-width: max-content;
-  max-width: 100%;
-  margin-inline: max(var(--screen-gutter), calc((100% - var(--chat-measure)) / 2)) 0;
-  align-self: start;
-  align-items: flex-start;
+  width: min(calc(100% - (2 * var(--conversation-chrome-inset))), var(--chat-measure));
+  min-width: 0;
+  margin-inline: auto;
   gap: 0;
   padding: 0;
   border: 0;
@@ -268,63 +136,6 @@
   background: transparent;
   box-shadow: none;
   color: var(--text-dim);
-}
-body[data-rounding] button.pending-changes-bubble,
-button.pending-changes-bubble {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--control-gap);
-  box-sizing: border-box;
-  width: max-content;
-  min-width: max-content;
-  max-width: 100%;
-  height: auto;
-  min-height: max(var(--control-h-sm), var(--hit-min));
-  padding: 0 var(--control-pad-x-sm);
-  border: 1px solid var(--hair);
-  border-radius: 999px;
-  background: transparent;
-  box-shadow: none;
-  transform: none;
-  overflow: visible;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: var(--font-meta);
-  line-height: var(--font-meta-lh);
-  text-align: start;
-  white-space: nowrap;
-  cursor: pointer;
-  transition:
-    background var(--motion-fast) var(--motion-ease),
-    color var(--motion-fast) var(--motion-ease),
-    border-color var(--motion-fast) var(--motion-ease);
-}
-body[data-rounding] button.pending-changes-bubble:hover,
-body[data-rounding] button.pending-changes-bubble:focus-visible,
-button.pending-changes-bubble:hover,
-button.pending-changes-bubble:focus-visible {
-  background: var(--surface-overlay);
-  color: var(--text);
-  transform: none;
-  box-shadow: none;
-}
-body[data-rounding] button.pending-changes-bubble:active,
-body[data-rounding] button.pending-changes-bubble:active:not(:disabled),
-button.pending-changes-bubble:active,
-button.pending-changes-bubble:active:not(:disabled),
-button.pending-changes-bubble:not(:disabled):active {
-  background: var(--surface-overlay);
-  transform: none;
-  box-shadow: none;
-}
-.pending-changes-bubble-icon {
-  display: inline-flex;
-  flex: none;
-  color: inherit;
-}
-.pending-changes-bubble-count {
-  font-size: var(--font-meta);
-  line-height: var(--font-meta-lh);
 }
 @container pending-changes (max-width: 360px) {
   .pending-changes-head {
@@ -638,7 +449,7 @@ background: var(--raised); border-color: transparent; color: var(--text);
 }
 .git-count {
 display: inline-grid; place-items: center; min-width: 21px; height: 20px; padding: 0 5px;
-  border-radius: 999px; background: var(--surface-overlay-strong); color: var(--muted); font-size: var(--font-meta);
+  border-radius: var(--radius-round); background: var(--surface-overlay-strong); color: var(--muted); font-size: var(--font-meta);
 }
 .git-change-group-body {
 padding: 1px 6px 7px;
@@ -860,7 +671,7 @@ overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 display: flex; flex-direction: column; gap: var(--space-2); margin-top: 10px; padding: 13px; border: 1px solid var(--hair); border-radius: var(--radius-card);
 }
 .diff-skeleton span {
-display: block; border-radius: 5px;
+display: block; border-radius: calc(5px * var(--corner-radius-scale));
   background: var(--surface-overlay-strong);
 }
 .diff-skeleton span {

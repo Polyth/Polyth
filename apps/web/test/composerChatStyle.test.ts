@@ -13,6 +13,12 @@ test("timeline does not claim repository indexing or hide a second working row",
   assert.doesNotMatch(timeline, /function WorkingIndicator/);
 });
 
+test("composer and above-composer widgets sit directly on the workspace", () => {
+  const css = read("../src/styles.css");
+
+  assert.doesNotMatch(css, /\.focus-conversation\s*\{[^}]*background:/s);
+});
+
 test("composer radius uses the shared corner setting", () => {
   const css = read("../src/styles.css");
 
@@ -53,8 +59,11 @@ test("message actions use one lightweight copy control and local hover zones", (
   assert.match(css, /@media \(max-width:\s*480px\)[\s\S]*\.msg\.assistant \.msg-actions\s*\{\s*display:\s*flex;/);
   assert.match(timeline, /key: "gallery"/);
   assert.match(timeline, /key: "regenerate"/);
-  assert.match(timeline, /<AssistantAgentHeader m=\{m\} announce=\{announce\} turn=\{turn\} segmentStartedAt=\{segmentStartedAt\} \/>/);
-  assert.match(timeline, /prefs\.responseActions\.map/);
+  assert.match(timeline, /<AssistantAgentHeader m=\{m\} announce=\{announce\} turn=\{turn\} segmentStartedAt=\{segmentStartedAt\}[^/]*\/>/);
+  // Configured response actions still drive the footer; copy and pin stay
+  // direct while everything else folds into the overflow menu.
+  assert.match(timeline, /const directActions = prefs\.responseActions\.filter/);
+  assert.match(timeline, /const overflowActions = prefs\.responseActions\.filter/);
   assert.match(timeline, /tr\("timeline\.startNewMultiRunFromThisAnswer"\)/);
 });
 
@@ -89,7 +98,9 @@ test("thinking, tasks, and every execution share the compact activity-card treat
   const css = read("../src/styles.css");
 
   assert.match(timeline, /className=\{`reasoning\$\{open \? " open" : ""\}`\}>/);
-  assert.match(timeline, /<strong>Thinking<\/strong>/);
+  // The thought header names the work in progress instead of a fixed "Thinking"
+  // label: the first line of reasoning when there is one, otherwise run state.
+  assert.match(timeline, /<strong>\{head \|\| \(active \? tr\("timeline\.workingThroughTheRequest"\) : tr\("timeline\.activityDetail"\)\)\}<\/strong>/);
   assert.match(execution, /<div className=\{`tool-card execution-row/);
   assert.match(css, /\.reasoning,\s*\.task-list\s*\{[^}]*border:\s*0;/s);
   assert.match(css, /\.tool-card\.execution-row\s*\{[^}]*border:\s*0;/s);
@@ -129,8 +140,8 @@ test("a live thought reveals expanded, types out, then folds when formed", () =>
   // The latest assistant row of a working turn owns the live reveal.
   assert.match(timeline, /live=\{r\.kind === "assistant" && turnWorking && r\.id === latestAssistantId\}/);
   // Fresh live thought types from empty instead of popping in fully formed.
-  assert.match(timeline, /const fresh = live && m\.text === "" && !reasoningSeen\(m\.reasoning\);/);
-  assert.match(timeline, /const reasoning = useSmoothText\(m\.reasoning, fresh\);/);
+  assert.match(timeline, /const fresh = live && m\.text === "" && !reasoningSeen\(source\);/);
+  assert.match(timeline, /const reasoning = useSmoothText\(source, fresh\);/);
   // Block stays expanded while forming: typing OR the reasoning part has not
   // finalized yet (turn working, latest row, no answer). Pauses do not fold.
   assert.match(timeline, /const active = typing \|\| \(!m\.finalized && live && m\.text === ""\);/);
@@ -140,5 +151,5 @@ test("a live thought reveals expanded, types out, then folds when formed", () =>
   // A played reveal never re-types: remounts (reasoning→answer merge, session
   // switch-back) show the thought formed.
   assert.match(timeline, /function reasoningSeen\(text: string\): boolean/);
-  assert.match(timeline, /if \(fresh && !typing\) revealedReasoning\.add\(m\.reasoning\);/);
+  assert.match(timeline, /if \(fresh && !typing\) revealedReasoning\.add\(source\);/);
 });

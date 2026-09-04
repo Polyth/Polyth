@@ -6,7 +6,6 @@ import { tr } from "../../i18n/index.ts";
 import {
   buildIslandItems,
   eventsHaveCodeChanges,
-  ISLAND_CYCLE_MS,
   notablePeers,
   promptExcerpt,
   recentSessionsForIsland,
@@ -21,30 +20,9 @@ import { setOverlay, setRailPlugin, setSidebarOpen, startNewSession, useActiveMo
 import { firstUserTextCached, lastUserTextCached } from "../../utils.ts";
 import { useResolvedCapabilities } from "../../capabilities.ts";
 import { toggleCapability } from "../../builtinCapabilities.ts";
-import { ComposeIcon, IconButton, LayersIcon, MenuIcon } from "../ui/index.ts";
+import { ComposeIcon, GlassIsland, IconButton, LayersIcon, MenuIcon } from "../ui/index.ts";
 import Sheet, { SheetRow, SheetSection } from "./Sheet.tsx";
 import { PROMPT_VISIBILITY_EVENT, promptIsVisible } from "../../promptVisibility.ts";
-
-function motionOff(): boolean {
-  if (typeof document !== "undefined") {
-    if (document.body.dataset.desktopLowResource === "true") return true;
-    if (document.documentElement.dataset.reduceAnimations === "true") return true;
-  }
-  return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
-
-function useCyclingItem(items: IslandItem[]): IslandItem | undefined {
-  const [index, setIndex] = useState(0);
-  const key = items.map((item) => item.id).join("\0");
-  useEffect(() => { setIndex(0); }, [key]);
-  useEffect(() => {
-    if (items.length <= 1 || motionOff()) return;
-    const timer = window.setInterval(() => setIndex((current) => (current + 1) % items.length), ISLAND_CYCLE_MS);
-    return () => window.clearInterval(timer);
-  }, [items.length, key]);
-  if (items.length === 0) return undefined;
-  return items[index % items.length];
-}
 
 function SessionLiveIcon({ status }: { status: SessionRowStatus }) {
   if (status.kind === "working") {
@@ -101,6 +79,7 @@ function IslandOverview({
   title,
   prompt,
   tasks,
+  requests,
   recent,
   events,
   onClose,
@@ -108,6 +87,7 @@ function IslandOverview({
   title: string;
   prompt: string | undefined;
   tasks: IslandTask[];
+  requests: IslandItem[];
   recent: SessionProjection[];
   events: Record<string, readonly SessionEvent[] | undefined>;
   onClose: () => void;
@@ -125,6 +105,18 @@ function IslandOverview({
           ? <PromptExcerpt text={prompt} />
           : <p className="mobile-island-empty">{tr("mobile.island.noPrompt")}</p>}
       </div>
+      {requests.length > 0 && (
+        <SheetSection title={tr("mobile.island.requests")}>
+          <ul className="mobile-task-list">
+            {requests.map((request) => (
+              <li key={request.id} className="request">
+                <span className={`mobile-island-dot ${request.tone ?? request.kind}`} aria-hidden="true" />
+                <span className="mobile-task-text">{request.text}</span>
+              </li>
+            ))}
+          </ul>
+        </SheetSection>
+      )}
       <SheetSection title={tr("mobile.island.tasks")}>
         {tasks.length > 0 ? (
           <ul className="mobile-task-list">
@@ -203,6 +195,18 @@ export default function MobileSessionHeader() {
     window.addEventListener(PROMPT_VISIBILITY_EVENT, update);
     return () => window.removeEventListener(PROMPT_VISIBILITY_EVENT, update);
   }, []);
+  const recent = useMemo(
+    () => recentSessionsForIsland(sessions, session?.id),
+    [sessions, session?.id],
+  );
+  const peers = useMemo(
+    () => notablePeers(sessions, session?.id, events),
+    [sessions, session?.id, events],
+  );
+  useEffect(() => {
+    for (const peer of peers) prefetchSessionTail(peer.id);
+    for (const item of recent) prefetchSessionTail(item.id);
+  }, [peers, recent]);
   const labels = useMemo(() => ({
     task: tr("mobile.island.kindTask"),
     request: tr("mobile.island.kindRequest"),
@@ -211,10 +215,8 @@ export default function MobileSessionHeader() {
     working: tr("mobile.island.working"),
     newChat: tr("mobile.island.newChat"),
   }), []);
-  const peers = useMemo(
-    () => notablePeers(sessions, session?.id, events),
-    [sessions, session?.id, events],
-  );
+  // The pill title stays put; the derived items only feed the status glyph and
+  // the overview's request list, so nothing rotates under the reader.
   const items = useMemo(() => buildIslandItems({
     sessionTitle: title,
     hasSession: session !== null,
@@ -225,61 +227,47 @@ export default function MobileSessionHeader() {
     peers,
     labels,
   }), [title, session, model.tasks, model.permissions, model.questions, model.secrets, peers, labels]);
-  const visible = useCyclingItem(items);
-  const recent = useMemo(
-    () => recentSessionsForIsland(sessions, session?.id),
-    [sessions, session?.id],
-  );
-  useEffect(() => {
-    for (const peer of peers) prefetchSessionTail(peer.id);
-    for (const item of recent) prefetchSessionTail(item.id);
-  }, [peers, recent]);
-  const islandLabel = visible ? `${visible.mark} · ${visible.text}` : title;
-  // The pill shows the item text alone — no "SESSION ·" / "TASK ·" prefix. A
-  // live status glyph carries the state instead: a spinner while the agent
-  // works, a green dot once the session has finished, and a tone dot for
-  // pending tasks, requests, and notable peers.
+  const requests = useMemo(() => items.filter((item) => item.kind === "request"), [items]);
   const sessionStatus = session ? resolveSessionStatus(session) : null;
-  const sessionComplete = session?.status === "finished";
 
   return <>
     <div className="mobile-session-floats" aria-label="Workspace navigation">
-      <div className="mobile-float-navigation">
+      <GlassIsland className="mobile-float-navigation">
         <IconButton icon={MenuIcon} label="Open navigation" size="lg" variant="quiet" aria-expanded={sidebarOpen} onClick={() => {
           setRailPlugin(null);
           setSidebarOpen(true);
         }} />
-      </div>
-      <button
-        className="mobile-session-selector"
-        data-live={visible?.live ? "true" : undefined}
-        aria-label={tr("mobile.island.openOverview", { label: islandLabel })}
-        aria-haspopup="dialog"
-        aria-expanded={surface === "island"}
-        onClick={() => setSurface("island")}
-      >
-        {visible?.kind === "session" ? (
-          sessionStatus?.kind === "working"
+      </GlassIsland>
+      <GlassIsland className="mobile-session-title-island">
+        <button
+          className="mobile-session-selector"
+          aria-label={tr("mobile.island.openOverview", { label: title })}
+          aria-haspopup="dialog"
+          aria-expanded={surface === "island"}
+          onClick={() => setSurface("island")}
+        >
+          {sessionStatus?.kind === "working"
             ? <span className="ui-spinner ui-spinner--sm mobile-island-spinner" aria-hidden="true" />
-            : sessionComplete
-              ? <span className="mobile-island-dot done" aria-hidden="true" />
-              : null
-        ) : (
-          visible?.live && <span className={`mobile-island-dot ${visible.tone ?? visible.kind}`} aria-hidden="true" />
-        )}
-        <span className="mobile-island-text" key={visible?.id}>{visible?.text ?? title}</span>
-        <Icon.chevronDown />
-      </button>
-      <div className="mobile-float-actions">
+            : requests[0]
+              ? <span className={`mobile-island-dot ${requests[0].tone ?? "request"}`} aria-hidden="true" />
+              : session?.status === "finished"
+                ? <span className="mobile-island-dot done" aria-hidden="true" />
+                : null}
+          <span className="mobile-island-text">{title}</span>
+          <Icon.chevronDown />
+        </button>
+      </GlassIsland>
+      <GlassIsland className="mobile-float-actions">
         <IconButton icon={ComposeIcon} label="New session" size="lg" variant="ghost" disabled={!projectId} onClick={() => projectId && startNewSession(projectId)} />
         <IconButton icon={LayersIcon} label="Open tools" size="lg" variant="ghost" aria-expanded={surface === "tools"} onClick={() => setSurface("tools")} />
-      </div>
+      </GlassIsland>
     </div>
     {surface === "island" && (
       <IslandOverview
         title={title}
         prompt={promptVisible ? undefined : prompt}
         tasks={model.tasks?.items ?? []}
+        requests={requests}
         recent={recent}
         events={events}
         onClose={() => setSurface(null)}

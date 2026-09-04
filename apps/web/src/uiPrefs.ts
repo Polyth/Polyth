@@ -24,7 +24,14 @@ export type MobileShortcutId = typeof MOBILE_SHORTCUT_IDS[number];
 
 export interface UiSettings {
   density: "comfortable" | "balanced" | "compact";
+  /** Retained for compatibility with older UI-preference records. */
   fontSize: "s" | "m" | "l";
+  /** Header sizes include page, section, and surface titles. */
+  headerFontSize: number;
+  /** Subheaders include project and worktree names in the navigator. */
+  subheaderFontSize: number;
+  /** Terminal output and terminal input size in px. */
+  terminalFontSize: number;
   /** Editor/composer font size in px (WP2/WP9 font tokens). */
   editorFontSize: number;
   /** Shared corner treatment for controls, panels, and overlays (0 = square, 10 = rounded). */
@@ -92,6 +99,9 @@ export const LEGACY_UI_SETTINGS_KEY = "polyth.settings";
 export const UI_DEFAULTS: UiSettings = {
   density: "comfortable",
   fontSize: "m",
+  headerFontSize: 24,
+  subheaderFontSize: 16,
+  terminalFontSize: 14,
   editorFontSize: 14,
   rounding: 5,
   chatWidth: "normal",
@@ -156,6 +166,11 @@ function parseRailIconSize(value: unknown): RailIconSize {
   return value === "sm" || value === "lg" ? value : "md";
 }
 
+function parseFontSize(value: unknown, fallback: number, min = 10, max = 32): number {
+  const px = Number(value);
+  return Number.isFinite(px) && px >= min && px <= max ? Math.round(px) : fallback;
+}
+
 export function parseUiSettings(raw: string | null): UiSettings {
   const d: UiSettings = {
     ...UI_DEFAULTS,
@@ -166,11 +181,15 @@ export function parseUiSettings(raw: string | null): UiSettings {
   };
   try {
     const data = JSON.parse(raw ?? "") as Partial<UiSettings>;
-    const fontPx = Number(data.editorFontSize);
+    const editorFontSize = parseFontSize(data.editorFontSize, UI_DEFAULTS.editorFontSize);
     return {
       density: data.density === "compact" || data.density === "balanced" ? data.density : "comfortable",
       fontSize: data.fontSize === "s" || data.fontSize === "l" ? data.fontSize : "m",
-      editorFontSize: Number.isFinite(fontPx) && fontPx >= 11 && fontPx <= 24 ? Math.round(fontPx) : 14,
+      headerFontSize: parseFontSize(data.headerFontSize, UI_DEFAULTS.headerFontSize, 14, 48),
+      subheaderFontSize: parseFontSize(data.subheaderFontSize, UI_DEFAULTS.subheaderFontSize),
+      // Older records used editorFontSize for both terminal and editor text.
+      terminalFontSize: parseFontSize(data.terminalFontSize, editorFontSize),
+      editorFontSize,
       rounding: parseRounding(data.rounding),
       chatWidth: data.chatWidth === "wide" ? "wide" : "normal",
       notifyOnComplete: data.notifyOnComplete === true,
@@ -269,6 +288,14 @@ export function applyUiSettings(s: UiSettings = settings): void {
   b.dataset.autoApprove = String(s.showAutoApprove);
   b.dataset.goals = String(s.showGoals);
   b.dataset.quickActions = String(s.showQuickActions);
+  b.style?.setProperty("--header-font-size", `${s.headerFontSize}px`);
+  b.style?.setProperty("--subheader-font-size", `${s.subheaderFontSize}px`);
+  b.style?.setProperty("--terminal-font-size", `${s.terminalFontSize}px`);
+  // Existing role tokens are consumed by package CSS too. Publish their
+  // computed values on body so independently bundled styles follow the same
+  // setting without importing shell state.
+  b.style?.setProperty("--font-title", `${s.headerFontSize}px`);
+  b.style?.setProperty("--font-heading", `${s.headerFontSize}px`);
   b.style?.setProperty("--editor-font-size", `${s.editorFontSize}px`);
   const topRail = RAIL_ICON_GEOMETRY[s.topRailIconSize];
   const rightRail = RAIL_ICON_GEOMETRY[s.rightRailIconSize];

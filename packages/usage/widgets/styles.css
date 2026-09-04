@@ -595,7 +595,7 @@ display: grid;
   font-size: var(--font-meta);
 }
 .usage-spend-legend i {
-width: 6px; height: 6px; border-radius: 2px;
+width: 6px; height: 6px; border-radius: calc(2px * var(--corner-radius-scale));
 }
 .usage-spend-legend span {
 overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap;
@@ -651,7 +651,7 @@ color: var(--text-dim); font: 600 10px var(--mono);
 grid-column: 2 / 4;
   height: 4px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   background: var(--sunken);
 }
 .usage-model-track i {
@@ -731,7 +731,7 @@ max-width: 66px; overflow: hidden; color: var(--muted); font-size: var(--font-me
 }
 .usage-limit-track,
 .usage-provider-window-track {
-height: 5px; overflow: hidden; border-radius: 999px; background: var(--sunken);
+height: 5px; overflow: hidden; border-radius: var(--radius-round); background: var(--sunken);
 }
 .usage-limit-track i,
 .usage-provider-window-track i {
@@ -753,7 +753,7 @@ display: inline-flex;
   gap: 5px;
   padding: 4px 7px;
   border: 1px solid color-mix(in srgb, var(--green) 28%, var(--border-soft));
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   background: var(--green-wash);
   color: var(--text);
   font-size: var(--font-meta);
@@ -784,7 +784,7 @@ display: inline-flex;
   align-items: center;
   padding: 4px 7px;
   border: 1px solid var(--border-soft);
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   background: var(--sunken);
   color: var(--muted);
   font-size: var(--font-meta);

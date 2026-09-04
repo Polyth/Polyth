@@ -4276,7 +4276,7 @@ export function createSessionService(deps: {
           // runtime binding must follow, or the observation fence rejects
           // every event from the new session as stale-evidence forever.
           const rewoundBinding = current.runtimeBinding
-            ? { ...current.runtimeBinding, backendSessionId }
+            ? { ...current.runtimeBinding, backendSessionId, historyBaseline: "copied" as const }
             : undefined;
           await updateProjection(sessionId, {
             backendSessionId,

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Icon } from "../../icons.tsx";
 import { setRailPlugin, setSidebarOpen, useStore } from "../../store.ts";
-import { IconButton, LayersIcon, MenuIcon } from "../ui/index.ts";
+import { GlassIsland, IconButton, LayersIcon, MenuIcon } from "../ui/index.ts";
 import { tr } from "../../i18n/index.ts";
 import type { TranslationKey } from "../../i18n/types.ts";
 import { Tools } from "./MobileSessionHeader.tsx";
@@ -26,16 +26,16 @@ export default function MobileViewHeader() {
   const label = tr(VIEW_LABEL[view] ?? "statusbar.chat");
   return <>
     <div className="mobile-session-floats" aria-label="View navigation">
-      <IconButton icon={MenuIcon} label="Open navigation" size="lg" variant="quiet" className="mobile-float-button" aria-expanded={sidebarOpen} onClick={() => {
-        setRailPlugin(null);
-        setSidebarOpen(true);
-      }} />
-      <div className="mobile-view-title" aria-label={label}>
-        <span>{label}</span>
-      </div>
-      <div className="mobile-float-actions">
+      <GlassIsland className="mobile-float-navigation">
+        <IconButton icon={MenuIcon} label="Open navigation" size="lg" variant="quiet" className="mobile-float-button" aria-expanded={sidebarOpen} onClick={() => {
+          setRailPlugin(null);
+          setSidebarOpen(true);
+        }} />
+      </GlassIsland>
+      <GlassIsland className="mobile-view-title" aria-label={label}><span>{label}</span></GlassIsland>
+      <GlassIsland className="mobile-float-actions">
         <IconButton icon={LayersIcon} label="Open tools" size="lg" variant="ghost" aria-expanded={surface} onClick={() => setSurface((v) => !v)} />
-      </div>
+      </GlassIsland>
     </div>
     {surface && <Tools onClose={() => setSurface(false)} />}
   </>;

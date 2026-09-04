@@ -144,7 +144,7 @@ width: 45%;
 .workflow-skeleton-block,
 .workflow-skeleton-line,
 .workflow-builder-skeleton :is(i, b) {
-display: block; min-height: 8px; border-radius: 999px;
+display: block; min-height: 8px; border-radius: var(--radius-round);
   background: var(--sunken);
   animation: workflow-skeleton-pulse var(--motion-surface) var(--motion-ease) infinite alternate;
 }
@@ -245,7 +245,7 @@ min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
 }
 .workflow-layer-chip {
 min-width: 0; display: inline-flex; align-items: center; gap: var(--space-2); min-height: 28px;
-  padding: 4px 9px; border: 1px solid var(--hair); border-radius: 999px;
+  padding: 4px 9px; border: 1px solid var(--hair); border-radius: var(--radius-round);
   background: var(--bg); color: var(--text-dim); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere;
 }
 .workflow-layer-chip b {
@@ -317,7 +317,7 @@ min-width: 0; display: flex; flex-wrap: wrap; gap: 5px; padding-top: 8px;
 }
 .workflow-dependency-selected > span {
 min-width: 0; max-width: 100%; padding: 3px 8px; overflow: hidden;
-  border: 1px solid var(--accent-line); border-radius: 999px;
+  border: 1px solid var(--accent-line); border-radius: var(--radius-round);
   background: var(--accent-wash); color: var(--accent); font-size: var(--font-meta);
   line-height: var(--font-meta-lh); text-overflow: ellipsis; white-space: nowrap;
 }
@@ -381,7 +381,7 @@ margin: 2px 0 0; color: var(--text); font-size: 15px; overflow-wrap: anywhere;
 color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); white-space: nowrap;
 }
 .workflow-run-progress {
-height: 4px; overflow: hidden; border-radius: 999px; background: var(--sunken);
+height: 4px; overflow: hidden; border-radius: var(--radius-round); background: var(--sunken);
 }
 .workflow-run-progress span {
 display: block; height: 100%; border-radius: inherit; background: var(--green);
@@ -596,7 +596,7 @@ width: 15px; height: 15px;
 max-height: 4.2em; margin: 0; overflow: hidden; color: var(--text-dim); font-size: var(--font-label); line-height: 1.4;
 }
 .workflow-timeline-progress {
-height: 4px; overflow: hidden; border-radius: 999px; background: var(--sunken);
+height: 4px; overflow: hidden; border-radius: var(--radius-round); background: var(--sunken);
 }
 .workflow-timeline-progress i {
 display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width var(--motion-normal) var(--motion-ease);

@@ -223,6 +223,7 @@ export const ar: GitMessages = {
   "pendingchangesbar.files": "ملفات",
   "pendingchangesbar.listChangedFiles": "قائمة الملفات المتغيرة",
   "pendingchangesbar.message": "×",
+  "pendingchangesbar.openActiveRunDetailsValue": "فتح تفاصيل التشغيل النشط: {action}",
   "pendingchangesbar.review": "مراجعة",
   "pendingchangesbar.showLess": "عرض أقل",
   "pendingchangesbar.showMoreFile": "عرض ملف إضافي واحد",

@@ -83,10 +83,13 @@ list — other docs link here instead of restating it.
 | `--surface-overlay-strong` | Selected/pressed theme-aware overlay. |
 | `--material-glass` | Readable opaque fallback material for popovers, menus, and pickers; enhanced to translucent glass when backdrop blur is supported. |
 | `--material-glass-strong` | More opaque glass material for dialogs and sheets. |
+| `--material-glass-medium` | Theme-derived medium glass material for bubbles and compact summaries. |
+| `--material-glass-chrome` | Theme-derived strong chrome material for persistent floating controls. |
 | `--material-glass-border` | Theme-derived glass edge. |
 | `--material-glass-highlight` | Inset highlight shared by glass surfaces. |
 | `--material-glass-shadow` | Shared floating-surface elevation. |
 | `--material-glass-blur` | Backdrop blur strength for capable, full-resource clients. |
+| `--surface-activity` | Lightweight theme surface for repeated activity and tool rows. |
 
 ### Spacing and control geometry
 
@@ -98,9 +101,16 @@ list — other docs link here instead of restating it.
 | `--space-4` | 16px spacing step. |
 | `--space-5` | 24px spacing step. |
 | `--space-6` | 32px spacing step. |
+| `--density-scale` | Active interface-density multiplier used by conversation geometry. |
 | `--gutter` | Standard desktop content gutter; aliases `--space-5`. |
 | `--screen-gutter` | Compact/phone screen gutter; aliases `--space-4`. |
 | `--chat-measure` | Shared reading measure for the chat timeline, composer, and inline conversation widgets. |
+| `--conversation-inset` | Density-scaled conversation gutter. |
+| `--conversation-chrome-inset` | Density-scaled viewport inset for floating conversation chrome. |
+| `--conversation-related-gap` | Gap between tightly related conversation content. |
+| `--conversation-row-gap` | Gap between repeated activity rows. |
+| `--conversation-group-gap` | Gap between activity or response groups. |
+| `--conversation-message-gap` | Gap between separate conversation messages. |
 | `--tap` | Minimum 44px interactive hit dimension. |
 | `--control-h-sm` | Compact 32px control visual. |
 | `--control-h` | Standard 40px control visual. |
@@ -108,6 +118,12 @@ list — other docs link here instead of restating it.
 | `--control-pad-x-sm` | Horizontal padding for compact controls. |
 | `--control-pad-x` | Horizontal padding for standard controls. |
 | `--control-gap` | Gap between a control's glyph and its label. |
+| `--mobile-island-height` | Density-scaled floating mobile navigation height. |
+| `--activity-row-height` | Density-scaled compact activity/tool row height. |
+| `--agent-dock-height` | Density-scaled expanded active-agent dock height. |
+| `--composer-height` | Density-scaled resting conversation composer height. |
+| `--composer-action-size` | Density-scaled visible send/stop action size. |
+| `--composer-max-input-height` | Font-scaled five-line composer input ceiling. |
 | `--package-window-header-h` | Shared compact package-window header height. |
 | `--package-window-resize-hit` | In-frame resize hit area; host-owned, never package-overridden. |
 | `--hit-min` | Density seam: extra hit-area floor. 0px on fine pointers; core raises it to `--tap` under coarse pointers. Use in `max()` with the control's visual size. |
@@ -138,7 +154,11 @@ UI action glyphs use the icon scale; never hardcode svg dimensions in new CSS.
 | `--radius-card` | Cards and bounded empty states. |
 | `--radius-surface` | Panels and substantial surfaces. |
 | `--radius-sheet` | Sheets and modal shells. |
+| `--radius-activity` | Compact activity and tool rows. |
+| `--radius-island` | Floating navigation islands. |
+| `--radius-dock` | Active status docks and floating persistent layers. |
 | `--radius-composer` | Composer-specific radius when its geometry needs an independent role. |
+| `--radius-round` | Fully rounded pill; stays circular at every corner-radius setting. |
 | `--radius` | Deprecated alias of `--radius-control`. |
 | `--radius-sm` | Deprecated alias of `--radius-control`. |
 | `--radius-md` | Deprecated alias of `--radius-card`. |
@@ -146,17 +166,19 @@ UI action glyphs use the icon scale; never hardcode svg dimensions in new CSS.
 | `--radius-xl` | Deprecated alias of `--radius-surface`. |
 
 Use only the semantic radius roles in new CSS. `50%` and `999px` are reserved
-for circles and pills. The Phase 1 calm scale is 8/10/12/16px before the user
-multiplier: controls 8, cards 10, substantial surfaces 12, sheets/dialogs and
-the composer 16.
+for circles and pills. General controls retain the 8/10/12/16px calm scale;
+conversation activity, floating islands/docks, and the composer use their
+dedicated semantic roles. Every scalable radius follows the user multiplier.
 
 ### Typography
 
 | Token | Purpose |
 | --- | --- |
-| `--ui-font-size` | User-selected base UI size. |
+| `--ui-font-size` | User-selected general text size for chat, inputs, session titles, and settings. |
 | `--ui-font-scale` | Reserved UI type multiplier. |
-| `--font-input` | 16px editable-control floor that prevents mobile zoom. |
+| `--header-font-size` | User-selected page, section, and surface heading size. |
+| `--subheader-font-size` | User-selected subheading and navigator project/worktree size. |
+| `--font-input` | Editable-control size; coarse pointers floor it at 16px to prevent mobile zoom. |
 | `--font-body` | Responsive body role. |
 | `--font-title` | Page/title role. |
 | `--font-title-lh` | Title line height. |
@@ -164,8 +186,23 @@ the composer 16.
 | `--font-label` | Control and emphasized label role. |
 | `--font-meta` | Readable metadata role. |
 | `--font-meta-lh` | Metadata line height. |
-| `--font-code` | Inline code / code-in-UI role (pairs with `--mono`). |
-| `--editor-font-size` | User-selected editor/composer size. |
+| `--font-response` | Final assistant response body role. |
+| `--font-response-lh` | Final assistant response line height. |
+| `--font-response-heading` | Mobile conversation heading role. |
+| `--font-response-heading-lh` | Mobile conversation heading line height. |
+| `--font-session-title` | Floating session-title role. |
+| `--font-session-title-lh` | Floating session-title line height. |
+| `--font-activity-title` | Activity group/step title role. |
+| `--font-activity-title-lh` | Activity title line height. |
+| `--font-tool-label` | Compact tool action label role. |
+| `--font-tool-label-lh` | Compact tool label line height. |
+| `--font-technical` | File path, command, and technical value role. |
+| `--font-technical-lh` | Technical value line height. |
+| `--font-response-meta` | Response and activity metadata role. |
+| `--font-response-meta-lh` | Response metadata line height. |
+| `--font-code` | Inline code / code-surface role (follows the editor size and pairs with `--mono`). |
+| `--terminal-font-size` | User-selected terminal input/output size. |
+| `--editor-font-size` | User-selected editor/composer/code-surface size. |
 | `--mono` | Monospace stack. |
 | `--ui-font-family` | Active application font stack. |
 

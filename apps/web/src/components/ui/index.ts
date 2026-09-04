@@ -24,6 +24,9 @@ export { default as Popover, type PopoverProps } from "./Popover.tsx";
 export { default as Menu, type MenuProps, type MenuEntry, type MenuAction, type MenuHeading, type MenuTriggerProps } from "./Menu.tsx";
 export { default as Dialog, type DialogProps, type DialogSize } from "./Dialog.tsx";
 export { default as ResponsiveOverlay, type ResponsiveOverlayProps } from "./ResponsiveOverlay.tsx";
+export { GlassDock, GlassIsland, type GlassProps, type GlassStrength } from "./Glass.tsx";
+export { default as RunSummary, type RunSummaryProps, type RunSummaryState } from "./RunSummary.tsx";
+export { default as AgentStatusDock, type AgentStatusDockProps } from "./AgentStatusDock.tsx";
 export {
   useAnchoredPosition,
   type AnchoredPosition,

@@ -223,6 +223,7 @@ export const pl: GitMessages = {
   "pendingchangesbar.files": "akta",
   "pendingchangesbar.listChangedFiles": "Wyświetl listę zmienionych plików",
   "pendingchangesbar.message": "×",
+  "pendingchangesbar.openActiveRunDetailsValue": "Otwórz szczegóły aktywnego uruchomienia: {action}",
   "pendingchangesbar.review": "Przejrzyj",
   "pendingchangesbar.showLess": "Pokaż mniej",
   "pendingchangesbar.showMoreFile": "Pokaż 1 plik więcej",

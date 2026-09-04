@@ -223,6 +223,7 @@ export const it: GitMessages = {
   "pendingchangesbar.files": "file",
   "pendingchangesbar.listChangedFiles": "Elenco dei file modificati",
   "pendingchangesbar.message": "×",
+  "pendingchangesbar.openActiveRunDetailsValue": "Apri i dettagli dell’esecuzione attiva: {action}",
   "pendingchangesbar.review": "Rivedi",
   "pendingchangesbar.showLess": "Mostra meno",
   "pendingchangesbar.showMoreFile": "Mostra 1 altro file",

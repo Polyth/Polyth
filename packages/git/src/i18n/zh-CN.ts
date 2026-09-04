@@ -223,6 +223,7 @@ export const zhCN: GitMessages = {
   "pendingchangesbar.files": "文件",
   "pendingchangesbar.listChangedFiles": "列出已更改的文件",
   "pendingchangesbar.message": "×",
+  "pendingchangesbar.openActiveRunDetailsValue": "打开当前运行详情：{action}",
   "pendingchangesbar.review": "查看",
   "pendingchangesbar.showLess": "收起",
   "pendingchangesbar.showMoreFile": "显示另外 1 个文件",

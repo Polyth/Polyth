@@ -25,7 +25,7 @@ test("session rows reserve one status zone and expose an aligned action menu", a
   assert.match(row, /onTouchStart=\{startLongPress\}/);
 });
 
-test("sidebar geometry scales type from ui font size and density controls rows", async () => {
+test("sidebar geometry uses independent type roles and density controls rows", async () => {
   const [tokens, styles] = await Promise.all([
     source("../src/tokens.css"),
     source("../src/styles.css"),
@@ -42,11 +42,11 @@ test("sidebar geometry scales type from ui font size and density controls rows",
     "--nav-status-width: 56px",
   ]) assert.ok(css.includes(variable), `${variable} is part of the sidebar geometry contract`);
 
-  assert.match(css, /--nav-project-size:\s*calc\(var\(--ui-font-size,\s*14px\)\s*\*\s*1\.143\)/);
-  assert.match(css, /--nav-branch-size:\s*calc\(var\(--ui-font-size,\s*14px\)\s*\*\s*1\.071\)/);
-  assert.match(css, /--nav-session-size:\s*var\(--ui-font-size,\s*14px\)/,
-    "session titles respect the selected interface size without inflation");
-  assert.match(css, /--nav-meta-size:\s*calc\(var\(--ui-font-size,\s*14px\)\s*\*\s*1\.071\)/);
+  assert.match(css, /--nav-project-size:\s*var\(--subheader-font-size,\s*16px\)/);
+  assert.match(css, /--nav-branch-size:\s*var\(--subheader-font-size,\s*16px\)/);
+  assert.match(css, /--nav-session-size:\s*var\(--ui-font-size,\s*15px\)/,
+    "session titles respect the selected general text size");
+  assert.match(css, /--nav-meta-size:\s*var\(--font-meta\)/);
   assert.match(css, /\.session-status-zone\s*\{[\s\S]*?font-size:\s*calc\(var\(--nav-session-size\) \* \.86\)/,
     "session counters scale proportionally with the title size");
   assert.doesNotMatch(css, /\.project-card\.active::before/,

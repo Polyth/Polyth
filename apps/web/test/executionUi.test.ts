@@ -7,6 +7,7 @@ import {
   cleanShellCommand,
   compactUrl,
   executionGroupLabel,
+  executionPathParts,
   executionPresentation,
   middleTruncatePath,
   normalizedMcpResult,
@@ -14,7 +15,7 @@ import {
   reasoningHead,
   reasoningTail,
 } from "../src/execution.ts";
-import type { ToolMsg } from "../src/reduce.ts";
+import type { TaskActivityMsg, ToolMsg } from "../src/reduce.ts";
 
 const tool = (patch: Partial<ToolMsg> = {}): ToolMsg => ({
   kind: "tool",
@@ -29,6 +30,17 @@ const tool = (patch: Partial<ToolMsg> = {}): ToolMsg => ({
   time: 1_000,
   finishTime: 1_420,
   ...patch,
+});
+
+test("file summaries keep the filename primary and make project paths relative", () => {
+  assert.deepEqual(
+    executionPathParts("/workspace/apps/web/src/Timeline.tsx", "/workspace"),
+    { filename: "Timeline.tsx", directory: "apps/web/src", relativePath: "apps/web/src/Timeline.tsx" },
+  );
+  assert.deepEqual(
+    executionPathParts("src/components/Composer.tsx", "/workspace"),
+    { filename: "Composer.tsx", directory: "src/components", relativePath: "src/components/Composer.tsx" },
+  );
 });
 
 test("shell previews remove setup noise without losing the useful command", () => {
@@ -220,6 +232,8 @@ test("execution code surfaces override the global prose font preference", async 
   const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   const override = css.match(/html\[data-font\] body :is\([\s\S]*?execution-viewer > pre[\s\S]*?\)\s*\{\s*font-family:\s*var\(--mono\);\s*\}/);
   assert.ok(override, "commands, output, diffs, and the full viewer retain the monospace font");
+  assert.match(css, /\.activity-group-expand-shell,\s*\.task-list-expand-shell\s*\{[\s\S]*?width:\s*100%;[\s\S]*?align-self:\s*stretch;/,
+    "activity details stretch with the chat column instead of using content width");
   assert.match(css, /\.execution-group-items\s*\{[\s\S]*?width:\s*100%;[\s\S]*?justify-self:\s*stretch;/);
   assert.match(css, /\.execution-group-items > \*\s*\{[\s\S]*?min-width:\s*0;/);
   assert.match(css, /\.execution-details \.git-diff\s*\{[\s\S]*?min-width:\s*0;[\s\S]*?overflow:\s*auto;/);
@@ -255,7 +269,23 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { default: ExecutionRow } = await import("../src/components/ExecutionRow.tsx");
-const { WorkedGroup } = await import("../src/components/Timeline.tsx");
+const { ActivityGroupView } = await import("../src/components/Timeline.tsx");
+
+/** Build the derived activity projection the timeline hands to the group view. */
+const activityGroup = (
+  id: string,
+  items: Array<ToolMsg | TaskActivityMsg>,
+  ms = 420,
+) => ({
+  kind: "activity" as const,
+  id,
+  items,
+  tools: items.filter((item): item is ToolMsg => item.kind === "tool"),
+  tasks: items.filter((item): item is TaskActivityMsg => item.kind === "task"),
+  thoughts: [],
+  ms,
+  settled: !items.some((item) => item.kind === "tool" && (item.status === "pending" || item.status === "running")),
+});
 const { default: PermissionBanner } = await import("../../../packages/permissions/widgets/PermissionBanner.tsx");
 const { activateSession, getState, setSessions } = await import("../src/store.ts");
 
@@ -370,7 +400,7 @@ test("edit rows show added/removed counts and a git-like file changes view", asy
       "the file path is not repeated in the details list");
     assert.equal(container.querySelector(".execution-result"), null,
       "trivial ok output stays hidden when the diff is shown");
-    const pathMentions = [...container.querySelectorAll(".execution-summary .tool-preview, .execution-file-path")]
+    const pathMentions = [...container.querySelectorAll(".execution-summary .tool-name, .execution-file-path")]
       .map((el) => el.textContent ?? "")
       .filter((text) => text.includes("Composer.tsx"));
     assert.equal(pathMentions.length, 1);
@@ -416,20 +446,17 @@ test("execution summary columns stay aligned whether or not a row has line count
       newString: "one\nthree\nfour",
     },
   });
-  const group = {
-    kind: "work" as const,
-    id: "work-align",
-    items: [shell, edit],
-    tools: [shell, edit],
-    tasks: [],
-    ms: 420,
-  };
+  const group = activityGroup("activity-align", [shell, edit]);
   try {
-    await act(async () => root.render(createElement(WorkedGroup, { g: group, subagents: null })));
-    const toggle = container.querySelector<HTMLButtonElement>(".execution-group-toggle")!;
-    assert.equal(toggle.children.length, 4);
-    assert.ok(toggle.children[2]?.classList.contains("execution-diff-stat-slot"));
-    assert.ok(toggle.children[3]?.classList.contains("execution-group-chevron"));
+    await act(async () => root.render(createElement(ActivityGroupView, { g: group, subagents: null })));
+    const toggle = container.querySelector<HTMLButtonElement>(".ui-run-summary")!;
+    assert.deepEqual(
+      [...toggle.children].map((child) =>
+        ["ui-run-summary-mark", "ui-run-summary-copy", "ui-run-summary-diff", "ui-run-summary-chevron"]
+          .find((track) => child.classList.contains(track))),
+      ["ui-run-summary-mark", "ui-run-summary-copy", "ui-run-summary-diff", "ui-run-summary-chevron"],
+      "state, copy, aggregate line counts, and chevron stay in fixed tracks",
+    );
     await act(async () => toggle.click());
     const summaries = [...container.querySelectorAll(".execution-summary")];
     assert.equal(summaries.length, 2);
@@ -562,33 +589,26 @@ test("execution rows stay folded by default while running and after settling", a
   }
 });
 
-test("working groups stay folded even while running until the reader toggles", async () => {
+test("working groups open while running and preserve a reader toggle", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   const running = tool({ status: "running", output: undefined, finishTime: undefined });
-  const group = (message: ToolMsg) => ({
-    kind: "work" as const,
-    id: "work-1",
-    items: [message],
-    tools: [message],
-    tasks: [],
-    ms: 420,
-  });
+  const group = (message: ToolMsg) => activityGroup("activity-1", [message]);
   try {
-    await act(async () => root.render(createElement(WorkedGroup, { g: group(running), subagents: null })));
-    const toggle = container.querySelector<HTMLButtonElement>(".execution-group-toggle")!;
-    assert.equal(toggle.getAttribute("aria-expanded"), "false", "a running batch is folded too");
+    await act(async () => root.render(createElement(ActivityGroupView, { g: group(running), subagents: null })));
+    const toggle = container.querySelector<HTMLButtonElement>(".ui-run-summary")!;
+    assert.equal(toggle.getAttribute("aria-expanded"), "true", "the current batch exposes its live tool");
 
     await act(async () => toggle.click());
-    assert.equal(toggle.getAttribute("aria-expanded"), "true");
-    await act(async () => root.render(createElement(WorkedGroup, {
+    assert.equal(toggle.getAttribute("aria-expanded"), "false");
+    await act(async () => root.render(createElement(ActivityGroupView, {
       g: group(tool()),
       subagents: null,
     })));
-    assert.equal(toggle.getAttribute("aria-expanded"), "true", "a hand toggle is preserved across settle");
+    assert.equal(toggle.getAttribute("aria-expanded"), "false", "a hand toggle is preserved across settle");
     await act(async () => toggle.click());
-    assert.equal(toggle.getAttribute("aria-expanded"), "false");
+    assert.equal(toggle.getAttribute("aria-expanded"), "true");
   } finally {
     await act(async () => root.unmount());
     container.remove();
@@ -600,10 +620,10 @@ test("an action batch stays closed by default and opens on hand toggle", async (
   document.body.appendChild(container);
   const root = createRoot(container);
   const message = tool();
-  const group = { kind: "work" as const, id: "work-batch", items: [message], tools: [message], tasks: [], ms: 420 };
+  const group = activityGroup("activity-batch", [message]);
   try {
-    await act(async () => root.render(createElement(WorkedGroup, { g: group, subagents: null })));
-    const toggle = container.querySelector<HTMLButtonElement>(".execution-group-toggle")!;
+    await act(async () => root.render(createElement(ActivityGroupView, { g: group, subagents: null })));
+    const toggle = container.querySelector<HTMLButtonElement>(".ui-run-summary")!;
     assert.equal(toggle.getAttribute("aria-expanded"), "false", "the batch is folded by default");
     await act(async () => toggle.click());
     assert.equal(toggle.getAttribute("aria-expanded"), "true", "hand toggle opens it");
@@ -628,11 +648,11 @@ test("implementation groups show combined added and removed line counts", async 
     tool: "write",
     input: { filePath: "src/b.ts", content: "hi" },
   });
-  const group = { kind: "work" as const, id: "work-edits", items: [edit, write], tools: [edit, write], tasks: [], ms: 420 };
+  const group = activityGroup("activity-edits", [edit, write]);
   try {
-    await act(async () => root.render(createElement(WorkedGroup, { g: group, subagents: null })));
-    assert.match(container.querySelector(".execution-group-toggle .execution-diff-stat")?.textContent ?? "", /\+2/);
-    assert.match(container.querySelector(".execution-group-toggle .execution-diff-stat")?.textContent ?? "", /−1/);
+    await act(async () => root.render(createElement(ActivityGroupView, { g: group, subagents: null })));
+    assert.match(container.querySelector(".ui-run-summary-diff")?.textContent ?? "", /\+2/);
+    assert.match(container.querySelector(".ui-run-summary-diff")?.textContent ?? "", /−1/);
   } finally {
     await act(async () => root.unmount());
     container.remove();

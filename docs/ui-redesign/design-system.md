@@ -41,7 +41,7 @@ Full catalog in `docs/dev/styles.md`. The roles new UI reaches for:
 | Spacing | `--space-1..6` (4/8/12/16/24/32), `--gutter`, `--screen-gutter` |
 | Control geometry | `--control-h-sm/-h/-h-lg` (32/40/48), `--control-pad-x(-sm)`, `--control-gap`, `--tap`, `--hit-min` |
 | Radius | `--radius-control/card/surface/sheet` (+ `--radius-composer`), all × `--corner-radius-scale` |
-| Type | `--font-title/heading/body/label/meta/code`, `--font-input` (16px mobile floor), `--editor-font-size`, `--mono` |
+| Type | `--ui-font-size`, `--header-font-size`, `--subheader-font-size`, `--terminal-font-size`, `--editor-font-size`, semantic `--font-*` roles, `--font-input` (16px coarse-pointer floor), `--mono` |
 | Icons | `--icon-sm/md/lg/xl` (16/18/20/24) |
 | Elevation | `--shadow-sm/md/lg`, `--inset-hi`, `--scrim` |
 | Motion | `--motion-fast/normal/surface` + `--motion-ease` |

@@ -1,7 +1,7 @@
 // DOM-free pure helpers extracted from components for testability.
 import type { SlashCommand, SnippetDef } from "@polyth/session/web-api";
 import type { JsonObject, SessionEvent } from "@polyth/contracts";
-import type { RenderMessage, TaskActivityMsg, ToolMsg, UserMsg } from "./reduce.ts";
+import type { AssistantMsg, RenderMessage, TaskActivityMsg, ToolMsg, UserMsg } from "./reduce.ts";
 import { tr } from "./i18n/index.ts";
 import { isNativeMobile } from "@polyth/mobile/runtime";
 import { writeNativeClipboard } from "@polyth/mobile/native";
@@ -120,13 +120,17 @@ export function toolSummary(input: JsonObject): string {
   return "";
 }
 
-export interface WorkGroup {
-  kind: "work";
+export type ActivityItem = AssistantMsg | ToolMsg | TaskActivityMsg;
+
+export interface ActivityGroup {
+  kind: "activity";
   id: string;
-  items: Array<ToolMsg | TaskActivityMsg>;
+  items: ActivityItem[];
   tools: ToolMsg[];
   tasks: TaskActivityMsg[];
+  thoughts: AssistantMsg[];
   ms: number;
+  settled: boolean;
 }
 
 /** Merge runs of reasoning-only assistant parts into the next answer part so
@@ -282,28 +286,64 @@ export function promptIndex(messages: RenderMessage[]): Array<{ id: string; prev
     });
 }
 
-/** Collapse tool calls and semantic task deltas into one "Worked for …" group. */
-export function groupWork(messages: RenderMessage[]): Array<RenderMessage | WorkGroup> {
-  const out: Array<RenderMessage | WorkGroup> = [];
-  let run: Array<ToolMsg | TaskActivityMsg> = [];
+/** Project one turn into an activity stream followed by its final reading
+ * surface. Interim assistant prose, reasoning, tools, and task deltas become
+ * one expandable group; the last textual assistant message remains the final
+ * response. This is display-only derivation over already-recorded events. */
+export function groupActivity(messages: RenderMessage[]): Array<RenderMessage | ActivityGroup> {
+  const out: Array<RenderMessage | ActivityGroup> = [];
+  let segment: ActivityItem[] = [];
+
   const flush = () => {
-    const tools = run.filter((item): item is ToolMsg => item.kind === "tool");
-    const tasks = run.filter((item): item is TaskActivityMsg => item.kind === "task");
-    if (run.length >= 2 || tasks.length > 0) {
-      const first = run[0]!;
-      const last = run[run.length - 1]!;
-      const end = last.kind === "tool" ? (last.finishTime ?? last.time) : last.time;
-      out.push({ kind: "work", id: `work-${first.id}`, items: run, tools, tasks, ms: Math.max(0, end - first.time) });
-    } else {
-      out.push(...run);
+    if (segment.length === 0) return;
+    const last = segment.at(-1)!;
+    const finalIndex = last.kind === "assistant" && last.text.trim() !== "" ? segment.length - 1 : -1;
+    const final = finalIndex >= 0 ? segment[finalIndex] as AssistantMsg : undefined;
+    const activity: ActivityItem[] = [];
+    for (let index = 0; index < segment.length; index++) {
+      const item = segment[index]!;
+      if (index !== finalIndex) {
+        activity.push(item);
+        continue;
+      }
+      if (item.kind === "assistant" && item.reasoning.trim() !== "") {
+        activity.push({ ...item, text: "" });
+      }
     }
-    run = [];
+    if (activity.length > 0) {
+      const first = activity[0]!;
+      const end = Math.max(...activity.map((item) => item.kind === "tool"
+        ? item.finishTime ?? item.time
+        : item.kind === "assistant" ? item.completedAt ?? item.time : item.time));
+      const latestTasks = new Map(
+        activity.filter((item): item is TaskActivityMsg => item.kind === "task")
+          .map((task) => [task.taskId, task]),
+      );
+      out.push({
+        kind: "activity",
+        id: `activity-${first.id}`,
+        items: activity,
+        tools: activity.filter((item): item is ToolMsg => item.kind === "tool"),
+        tasks: activity.filter((item): item is TaskActivityMsg => item.kind === "task"),
+        thoughts: activity.filter((item): item is AssistantMsg => item.kind === "assistant"),
+        ms: Math.max(0, end - first.time),
+        settled: final?.finalized === true || (
+          activity.every((item) => item.kind !== "tool" || (item.status !== "pending" && item.status !== "running")) &&
+          activity.every((item) => item.kind !== "assistant" || item.finalized) &&
+          [...latestTasks.values()].every((task) => task.action !== "started")
+        ),
+      });
+    }
+    if (final) out.push(final.reasoning ? { ...final, reasoning: "" } : final);
+    segment = [];
   };
-  for (const m of messages) {
-    if (m.kind === "tool" || m.kind === "task") run.push(m);
-    else {
+
+  for (const message of messages) {
+    if (message.kind === "user" || message.kind === "github-conflict") {
       flush();
-      out.push(m);
+      out.push(message);
+    } else {
+      segment.push(message);
     }
   }
   flush();

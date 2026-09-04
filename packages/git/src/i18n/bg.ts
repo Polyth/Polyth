@@ -223,6 +223,7 @@ export const bg: GitMessages = {
   "pendingchangesbar.files": "файлове",
   "pendingchangesbar.listChangedFiles": "Списък на променените файлове",
   "pendingchangesbar.message": "×",
+  "pendingchangesbar.openActiveRunDetailsValue": "Отваряне на подробности за активното изпълнение: {action}",
   "pendingchangesbar.review": "Преглед",
   "pendingchangesbar.showLess": "Покажи по-малко",
   "pendingchangesbar.showMoreFile": "Покажи още 1 файл",

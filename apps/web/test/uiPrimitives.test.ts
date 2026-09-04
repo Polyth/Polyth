@@ -110,7 +110,12 @@ test("token contract: calm radius scale, overlay/icon/z/density tokens exist onc
   assert.match(tokens, /--radius-card:\s*calc\(10px \* var\(--corner-radius-scale\)\)/);
   assert.match(tokens, /--radius-surface:\s*calc\(12px \* var\(--corner-radius-scale\)\)/);
   assert.match(tokens, /--radius-sheet:\s*calc\(16px \* var\(--corner-radius-scale\)\)/);
-  assert.match(tokens, /--radius-composer:\s*calc\(16px \* var\(--corner-radius-scale\)\)/);
+  // Conversation chrome adds rounder roles on top of the base scale: compact
+  // activity rows, floating glass islands/docks, and the composer pill.
+  assert.match(tokens, /--radius-activity:\s*calc\(15px \* var\(--corner-radius-scale\)\)/);
+  assert.match(tokens, /--radius-island:\s*calc\(23px \* var\(--corner-radius-scale\)\)/);
+  assert.match(tokens, /--radius-dock:\s*calc\(23px \* var\(--corner-radius-scale\)\)/);
+  assert.match(tokens, /--radius-composer:\s*calc\(28px \* var\(--corner-radius-scale\)\)/);
 
   for (const token of [
     "--overlay-bg", "--overlay-border", "--overlay-shadow",

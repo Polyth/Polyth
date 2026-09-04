@@ -65,6 +65,7 @@ test("Shift highlights only the hovered zone while Edit exposes every zone", asy
   assert.match(styles, /body\[data-ui-editing\] \.customize-zone/);
   assert.match(styles, /body\[data-shift-held\] \.customize-zone:hover \.zone-customize-trigger/);
   assert.match(styles, /body\[data-ui-editing\] \.zone-customize-trigger/);
+  assert.match(styles, /\.customize-zone > \.zone-edit-button\s*\{[^}]*position:\s*absolute;/s);
 
   const actions = composer.indexOf('className="composer-actions customize-zone"');
   const trailing = composer.indexOf('slot="composer.trailing"');
