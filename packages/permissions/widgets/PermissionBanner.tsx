@@ -21,14 +21,7 @@ function modeIcon(permission: string) {
   return <Icon.shield />;
 }
 
-function originSessionId(p: PendingPermission, fallback?: string): string | undefined {
-  // Prefer the event-stamped origin. Fallback is only for pre-stamp events
-  // still in memory; never invent a live selection when the stamp exists.
-  if (p.sessionId) return p.sessionId;
-  return fallback || undefined;
-}
-
-function PermissionRow({ p, sessionId }: { p: PendingPermission; sessionId?: string }) {
+function PermissionRow({ p }: { p: PendingPermission }) {
   const [scope, setScope] = useState<AlwaysScope>("session");
   const scopes = p.allowedScopes ?? ["once", "session", "project"];
   const canAlways = scopes.includes("session") || scopes.includes("project");
@@ -38,9 +31,7 @@ function PermissionRow({ p, sessionId }: { p: PendingPermission; sessionId?: str
   // fallback for old events. Either way the target is visible pre-decision.
   const lines = p.preview !== undefined && p.preview.lines.length > 0 ? p.preview.lines : p.patterns;
   const reply = (decision: "once" | "always" | "reject", alwaysScope?: AlwaysScope) => {
-    const origin = originSessionId(p, sessionId);
-    if (!origin) return;
-    replyPermission(origin, p.requestId, decision, alwaysScope);
+    replyPermission(p.sessionId, p.requestId, decision, alwaysScope);
   };
   return (
     <div className="perm-row permission-request">
@@ -91,11 +82,8 @@ function PermissionRow({ p, sessionId }: { p: PendingPermission; sessionId?: str
 
 export default function PermissionBanner({
   permissions,
-  sessionId,
 }: {
   permissions: PendingPermission[];
-  /** Slot/context session; each row prefers its stamped `p.sessionId`. */
-  sessionId?: string;
 }) {
   if (permissions.length === 0) return null;
   return (
@@ -110,7 +98,7 @@ export default function PermissionBanner({
         {tr("permissionbanner.permissionRequested")}
       </div>
       {permissions.map((p) => (
-        <PermissionRow key={p.requestId} p={p} sessionId={sessionId} />
+        <PermissionRow key={p.requestId} p={p} />
       ))}
     </div>
   );

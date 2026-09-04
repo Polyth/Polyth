@@ -4,20 +4,15 @@ import { defineWebPackage, type WidgetRenderContext } from "@polyth/web-sdk";
 import { api } from "@polyth/session/web-api";
 import PermissionBanner from "./PermissionBanner.tsx";
 import { IconButton, ShieldIcon } from "../../../apps/web/src/components/ui/index.ts";
-import { useActiveModel, useStore } from "../../../apps/web/src/store.ts";
+import { useActiveModel } from "../../../apps/web/src/store.ts";
 
 /** Widget-areas (WA4): the pending-approval banner as a placeable widget, so
  * it can sit in the composer area (or anywhere) instead of only inline in the
  * timeline. Renders nothing when no approval is pending. */
-function PendingPermissionsWidget({ context }: { context: WidgetRenderContext }) {
+function PendingPermissionsWidget({ context: _context }: { context: WidgetRenderContext }) {
   const model = useActiveModel();
-  const activeSessionId = useStore((state) => state.activeSessionId);
-  const contextSessionId = typeof context.sessionId === "string" ? context.sessionId : null;
-  // Prefer the widget slot's session, then the active model session. Each
-  // pending row still stamps its own origin from the event for replies.
-  const sessionId = contextSessionId ?? activeSessionId ?? undefined;
   const pending = model.permissions.filter((request) => request.status === "pending");
-  return createElement(PermissionBanner, { permissions: pending, sessionId });
+  return createElement(PermissionBanner, { permissions: pending });
 }
 
 function AutoApproveAction({ context }: { context: WidgetRenderContext }) {
@@ -54,7 +49,6 @@ export default defineWebPackage((host) => () => {
       order: 20,
       render: (context) => createElement(PermissionBanner, {
         permissions: Array.isArray(context.permissions) ? context.permissions : [],
-        sessionId: typeof context.sessionId === "string" ? context.sessionId : undefined,
       }),
     }),
     host.widgets.registerPlugin({

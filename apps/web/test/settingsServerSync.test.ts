@@ -107,23 +107,10 @@ test("client settings round-trip through the server and apply on inbound frames"
   assert.match(settingsSync, /sessionDefaults:\s*getSessionDefaults\(\)/);
   assert.match(settingsSync, /setSessionDefaults\(parseSessionDefaults\(JSON\.stringify\(incoming\.sessionDefaults\)\)\)/);
 
-  // Unload flush: clear the debounce timer and push with keepalive so a
-  // mid-debounce change can complete during pagehide / beforeunload.
+  // Unload flush: clear the debounce timer and push with keepalive on pagehide.
   assert.match(settingsSync, /export function flushSettingsSync\(\)/);
   assert.match(settingsSync, /clearTimeout\(timer\)/);
   assert.match(settingsSync, /addEventListener\("pagehide",\s*flushSettingsSync\)/);
-  assert.match(settingsSync, /addEventListener\("beforeunload",\s*flushSettingsSync\)/);
+  assert.doesNotMatch(settingsSync, /addEventListener\("beforeunload"/);
   assert.match(settingsSync, /keepalive:\s*true/);
-});
-
-test("flushSettingsSync clears a pending debounce and pushes with keepalive", async () => {
-  const settingsSync = await read("../src/settingsSync.ts");
-  const flushBody = settingsSync.match(
-    /export function flushSettingsSync\(\): void \{([\s\S]*?)\n\}/,
-  );
-  assert.ok(flushBody, "flushSettingsSync is exported");
-  assert.match(flushBody![1]!, /if \(timer !== undefined\)/);
-  assert.match(flushBody![1]!, /clearTimeout\(timer\)/);
-  assert.match(flushBody![1]!, /timer = undefined/);
-  assert.match(flushBody![1]!, /push\(\{\s*keepalive:\s*true\s*\}\)/);
 });

@@ -14,11 +14,7 @@ import JsonTree, { tryParseJson } from "../../../../apps/web/src/markdown/JsonTr
 import { highlight, highlightLines, langOf } from "../../../../apps/web/src/highlight.ts";
 import { formatFileChat, formatSelectionChat, lineRangeOf } from "../../../../apps/web/src/chatclip.ts";
 import { requestComposerInsert } from "../../../../apps/web/src/composerInsert.ts";
-import { attachProjectFile, attachUpload } from "../../../../apps/web/src/attachments.ts";
-import {
-  attachText,
-  isLargeTextPaste,
-} from "../../../../apps/web/src/pasteAttach.ts";
+import { attachProjectFile, attachText, attachUpload, isLargeTextPaste } from "../../../../apps/web/src/attachments.ts";
 import { MOD } from "../../../../apps/web/src/format.ts";
 import { clampMenuPosition } from "../../../../apps/web/src/selectionActions.ts";
 import { copyText } from "../../../../apps/web/src/utils.ts";
@@ -234,8 +230,6 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
     setFlash("Added to chat ✓");
   };
 
-  const pasteAttachSeq = useRef(0);
-
   const attachSelection = async (text: string, startLine: number, endLine: number) => {
     if (!doc) return;
     if (!dirty) {
@@ -248,8 +242,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
       return;
     }
     // Dirty buffer: upload the selected bytes (saved path would be stale).
-    const index = ++pasteAttachSeq.current;
-    const r = await attachText(projectId, sessionId, text, index, attachUpload);
+    const r = await attachText(projectId, sessionId, text);
     if (!r.ok) {
       setFlash(r.reason);
       return;

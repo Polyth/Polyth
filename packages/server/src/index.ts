@@ -41,7 +41,6 @@ import {
   createRemoteOpenCodeRuntime,
   installRemoteOpenCode,
   inspectOpenCodeEngine,
-  listMcpServerToolsFromEndpoint,
   probeRemoteOpenCode,
   resolveOpenCodeBinary,
   sweepOpenCodeRuntimes,
@@ -1222,37 +1221,6 @@ export async function boot(opts: BootOptions = {}) {
   const mcp = createMcpConfigService({
     file: `${dataDir}/mcp.json`,
     applier: configApplier,
-    listTools: async (serverName, projectId) => {
-      try {
-        const project = await projects.get(projectId);
-        if (!project) {
-          return {
-            tools: [],
-            source: "unavailable" as const,
-            message: "project not found",
-          };
-        }
-        const runtime = await runtimes.forProject(project.id);
-        const endpoint = await runtime.endpoint?.();
-        if (!endpoint) {
-          return {
-            tools: [],
-            source: "unavailable" as const,
-            message: "OpenCode runtime endpoint is unavailable",
-          };
-        }
-        return listMcpServerToolsFromEndpoint({
-          endpoint,
-          serverName,
-        });
-      } catch (error) {
-        return {
-          tools: [],
-          source: "unavailable" as const,
-          message: error instanceof Error ? error.message : String(error),
-        };
-      }
-    },
   });
 
   // Provider/model visibility: seeds from opencode.json (disabled_providers +

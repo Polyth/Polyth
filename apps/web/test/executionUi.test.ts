@@ -804,7 +804,6 @@ test("approval is always action-required: intent, target, risk, and decisions vi
         time: 1,
         preview: { title: "Delete build artifacts", lines: ["apps/web/dist"], risk: "medium" },
       }],
-      sessionId: "session-1",
     })));
     const banner = container.querySelector(".perm-banner");
     assert.ok(banner);

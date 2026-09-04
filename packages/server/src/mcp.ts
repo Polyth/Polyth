@@ -16,12 +16,8 @@ import { randomUUID } from "node:crypto";
 import type {
   McpServerDto,
   McpStatus,
-  McpToolsResponseDto,
   McpTransport,
 } from "@polyth/contracts";
-
-/** Injected by the composition root; talks to OpenCode only via backend-opencode. */
-export type McpToolLister = (serverName: string, projectId: string) => Promise<McpToolsResponseDto>;
 
 export interface McpApplier {
   applyMcp(entries: Array<{
@@ -67,8 +63,6 @@ export interface McpConfigService {
   remove(id: string): Promise<boolean>;
   /** Reachability probe; never launches anything through a shell. */
   test(id: string): Promise<{ ok: boolean; message: string }>;
-  /** List tools for one stored server via the OpenCode runtime (soft-fail). */
-  listTools(id: string, projectId: string): Promise<McpToolsResponseDto>;
 }
 
 /** MCP entry fields Polyth owns; every other field of an imported entry is
@@ -178,7 +172,6 @@ async function commandExists(command: string): Promise<boolean> {
 export function createMcpConfigService(opts: {
   file: string;
   applier?: McpApplier;
-  listTools?: McpToolLister;
 }): McpConfigService {
   mkdirSync(dirname(opts.file), { recursive: true });
   const secretsFile = opts.file.replace(/\.json$/, "-secrets.json");
@@ -360,32 +353,5 @@ export function createMcpConfigService(opts: {
       }
     },
 
-    async listTools(id: string, projectId: string): Promise<McpToolsResponseDto> {
-      const row = servers.find((s) => s.id === id);
-      if (!row) throw err("not-found", "mcp server not found");
-      if (!projectId) {
-        return {
-          tools: [],
-          source: "unavailable",
-          message: "select a project to inspect MCP tools",
-        };
-      }
-      if (!opts.listTools) {
-        return {
-          tools: [],
-          source: "unavailable",
-          message: "runtime tool listing is not configured",
-        };
-      }
-      try {
-        return await opts.listTools(row.name, projectId);
-      } catch (e) {
-        return {
-          tools: [],
-          source: "unavailable",
-          message: e instanceof Error ? e.message : String(e),
-        };
-      }
-    },
   };
 }

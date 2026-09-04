@@ -158,20 +158,6 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
       rc.json(200, await deps.mcp.test(m[1]!));
       return true;
     }
-    m = path.match(/^\/api\/mcp\/servers\/([^/]+)\/tools$/);
-    if (m && method === "GET") {
-      const projectId = (rc.url.searchParams.get("projectId") ?? "").trim();
-      if (!projectId) {
-        rc.json(200, {
-          tools: [],
-          source: "unavailable",
-          message: "select a project to inspect MCP tools",
-        });
-        return true;
-      }
-      rc.json(200, await deps.mcp.listTools(m[1]!, projectId));
-      return true;
-    }
     m = path.match(/^\/api\/mcp\/servers\/([^/]+)\/authorize$/);
     if (m && method === "POST") {
       // Honest state: interactive MCP authorization needs the backend bridge,

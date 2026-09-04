@@ -39,7 +39,7 @@ import SlotHost from "./slots/SlotHost.ts";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import { dragKind, dropIntoSession } from "../dnd.ts";
 import {
-  addAttachment, attachUpload, removeAttachment, takeAttachments, usePendingAttachments,
+  addAttachment, attachText, attachUpload, isLargeTextPaste, removeAttachment, takeAttachments, usePendingAttachments,
 } from "../attachments.ts";
 import {
   attachGithubLink,
@@ -86,7 +86,7 @@ import {
 } from "../composer/history.ts";
 import type { PickerItem } from "../picker.ts";
 import Picker from "./Picker.tsx";
-import AdaptiveTextInput, { type TextInputHandle } from "./input/AdaptiveTextInput.tsx";
+import AdaptiveTextInput, type { TextInputHandle } from "./input/AdaptiveTextInput.tsx";
 import ComposerAddMenu from "./ComposerAddMenu.tsx";
 import EffortMenu from "./EffortMenu.tsx";
 import ComposerFocusDialog from "./ComposerFocusDialog.tsx";
@@ -95,12 +95,6 @@ import { GoalAttachForm } from "../../../../packages/goals/widgets/GoalStrip.tsx
 import { announce } from "./a11y/live.tsx";
 import { noteModelUsed } from "@polyth/models/web-prefs";
 import { getUiSettings, setUiSettings } from "../uiPrefs.ts";
-import {
-  attachText,
-  formatPasteSize,
-  isLargeTextPaste,
-  pasteByteLength,
-} from "../pasteAttach.ts";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
 import type {
   ModelRef,
@@ -622,10 +616,8 @@ export default function Composer({
   // Pending attachment pills live in the per-session draft store (F2).
   const attachments = usePendingAttachments(session?.id ?? null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const pasteIndexRef = useRef(0);
   const [pendingLargePaste, setPendingLargePaste] = useState<{
     text: string;
-    sizeLabel: string;
     projectId: string;
     sessionId: string | null;
   } | null>(null);
@@ -645,11 +637,10 @@ export default function Composer({
     }
   }, []);
   const attachPastedText = useCallback((pasted: string, projectId: string, sessionId: string | null) => {
-    const index = ++pasteIndexRef.current;
-    void attachText(projectId, sessionId, pasted, index, attachUpload).then((r) => {
+    void attachText(projectId, sessionId, pasted).then((r) => {
       if (!r.ok) {
         setUiError(tr("composer.couldNotAttachValue", {
-          name: r.name,
+          name: "pasted-context.txt",
           reason: r.reason,
         }));
       }
@@ -704,7 +695,6 @@ export default function Composer({
       }
       setPendingLargePaste({
         text: pasted,
-        sizeLabel: formatPasteSize(pasteByteLength(pasted)),
         projectId,
         sessionId: target,
       });
@@ -1576,7 +1566,7 @@ export default function Composer({
       )}
       {pendingLargePaste && (
         <div className="composer-note composer-large-paste" role="status">
-          <span>{tr("composer.largePasteBanner", { size: pendingLargePaste.sizeLabel })}</span>
+          <span>{tr("composer.largePasteBanner")}</span>
           <span className="composer-large-paste-actions">
             <button type="button" className="composer-large-paste-action" onClick={() => resolveLargePaste("attach")}>
               {tr("composer.largePasteAttach")}

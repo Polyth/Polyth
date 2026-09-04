@@ -31,11 +31,6 @@ import { buildPermissionPreview, PERMISSION_ALLOWED_SCOPES } from "./permissionP
 import { sanitizeAttachments } from "./attachments.ts";
 import { settleAllOrThrow } from "./settle.ts";
 import { createResumeScheduler, planResume } from "./resume.ts";
-import {
-  observeToolEvent,
-  shouldEmitEditLoop,
-  type EditLoopDedupeState,
-} from "./editLoop.ts";
 
 export interface Broadcaster {
   event(ev: SessionEvent): void;
@@ -380,9 +375,6 @@ export function createSessionService(deps: {
   // until an explicit rename supersedes it.
   const autoTitleRequested = new Set<string>();
   const titleRefreshInFlight = new Set<string>();
-  /** Per-session dedupe for `runtime/edit-loop-detected` observer signals. */
-  const editLoopDedupe = new Map<string, EditLoopDedupeState>();
-
   const broadcastTail = async <T>(
     sessionId: string,
     action: () => Promise<T>,
@@ -642,6 +634,8 @@ export function createSessionService(deps: {
     openSecrets: Map<string, SessionEvent>;
     rewind: { markerSeq: number; atSeq: number } | null;
     recentErrors: SessionDebugDto["recentErrors"];
+    /** Last durable turn/stopped reason — used when leaving waiting with no open turn. */
+    lastStopReason: "completed" | "aborted" | "error" | null;
   }
 
   const FACTS_CACHE_MAX = 256;
@@ -658,6 +652,7 @@ export function createSessionService(deps: {
     openSecrets: new Map(),
     rewind: null,
     recentErrors: [],
+    lastStopReason: null,
   });
 
   const foldFacts = (facts: LogFacts, events: readonly SessionEvent[]): void => {
@@ -690,6 +685,15 @@ export function createSessionService(deps: {
         case "secret/expired":
           if (rid) facts.openSecrets.delete(rid);
           break;
+        case "turn/started":
+          facts.lastStopReason = null;
+          break;
+        case "turn/stopped": {
+          const reason = data.reason;
+          facts.lastStopReason =
+            reason === "completed" || reason === "aborted" || reason === "error" ? reason : null;
+          break;
+        }
         case "session/rewound": {
           const atSeq = Number(data.atSeq);
           if (Number.isSafeInteger(atSeq) && atSeq > 0) facts.rewind = { markerSeq: ev.seq, atSeq };
@@ -1927,37 +1931,21 @@ export function createSessionService(deps: {
     }
   };
 
-  const maybeEmitEditLoop = async (sessionId: string, ev: RuntimeEvent): Promise<void> => {
-    const detection = observeToolEvent(sessionId, ev);
-    const decision = shouldEmitEditLoop(detection, editLoopDedupe.get(sessionId));
-    if (!decision.next) editLoopDedupe.delete(sessionId);
-    else editLoopDedupe.set(sessionId, decision.next);
-    if (!decision.emit || !detection) return;
-    console.warn(`[polyth] edit-loop detected for ${sessionId}`, {
-      kind: detection.kind,
-      paths: detection.paths,
-      signature: detection.signature,
-    });
-    await appendAndBroadcast(
-      sessionId,
-      "runtime/edit-loop-detected",
-      {
-        kind: detection.kind,
-        paths: detection.paths,
-        signature: detection.signature,
-        evidence: detection.evidence,
-      } as unknown as JsonObject,
-      { ignorable: true },
-    );
-  };
-
   /** When the last open request clears, leave waiting for an authoritative
-   *  idle/working state and kick the durable queue if truly idle. */
+   *  idle/working/failed state and kick the durable queue only when idle. */
   const settleAfterLastRequest = async (sessionId: string): Promise<void> => {
     const current = await store.projection(sessionId);
     if (!current || current.status !== "waiting") return;
-    if (openRequestTotal(await logFacts(sessionId)) > 0) return;
-    const next = turnActive(sessionId) ? "working" : "idle";
+    const facts = await logFacts(sessionId);
+    if (openRequestTotal(facts) > 0) return;
+    if (turnActive(sessionId)) {
+      await updateProjection(sessionId, { status: "working" });
+      return;
+    }
+    const interruptQueued = deps.queue
+      ? (await deps.queue.queueList(sessionId))[0]?.delivery === "interrupt"
+      : false;
+    const next = facts.lastStopReason === "error" && !interruptQueued ? "failed" : "idle";
     await updateProjection(sessionId, { status: next });
     if (next === "idle") void dispatchQueue(sessionId);
   };
@@ -2352,15 +2340,6 @@ export function createSessionService(deps: {
         }
         await persist(sessionId, ev.type, rest as unknown as JsonObject);
       }
-    }
-    // Live path only: observation replay must not invent extra canonical events
-    // through a batch-bound persist, and must not duplicate a prior live signal.
-    if (
-      sideEffects
-      && options.persist === undefined
-      && (ev.type === "tool/result" || ev.type === "tool/error")
-    ) {
-      await maybeEmitEditLoop(sessionId, ev);
     }
   };
 
@@ -2931,8 +2910,7 @@ export function createSessionService(deps: {
       { requestId, ...payload },
       { ignorable: true },
     );
-    const parent = await store.projection(parentId);
-    if (parent?.status === "waiting") await settleAfterLastRequest(parentId);
+    await settleAfterLastRequest(parentId);
   };
 
   const replyPermissionCore = async (
@@ -3014,9 +2992,7 @@ export function createSessionService(deps: {
         }
       }
     }
-    if (proj.status === "waiting" && openRequestTotal(await logFacts(sessionId)) === 0) {
-      await settleAfterLastRequest(sessionId);
-    }
+    await settleAfterLastRequest(sessionId);
     await closeParentRequestMirror(sessionId, requestId, "permission", {
       reply,
       ...(auto ? { auto: true } : {}),
@@ -3075,9 +3051,7 @@ export function createSessionService(deps: {
       }
       throw outcomeError(outcome);
     }
-    if (proj.status === "waiting" && openRequestTotal(await logFacts(sessionId)) === 0) {
-      await settleAfterLastRequest(sessionId);
-    }
+    await settleAfterLastRequest(sessionId);
     await closeParentRequestMirror(sessionId, requestId, "question", {
       ...(reject ? { rejected: true } : { answers }),
     });
@@ -5556,9 +5530,7 @@ export function createSessionService(deps: {
           }
           throw outcomeError(outcome);
         }
-        if (proj.status === "waiting" && openRequestTotal(await logFacts(sessionId)) === 0) {
-          await settleAfterLastRequest(sessionId);
-        }
+        await settleAfterLastRequest(sessionId);
       });
     },
 

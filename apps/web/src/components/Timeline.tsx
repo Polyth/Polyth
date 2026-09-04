@@ -10,7 +10,7 @@ import { cancelResume, forkSession, loadOlderEvents, resumeNow } from "../init.t
 import { markSessionPerformance } from "../sessionPerformance.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
 import {
-  applyEvent, dismissEditLoopWarning, openWorkspacePane, setUiError, startNewSession, useStore,
+  applyEvent, openWorkspacePane, setUiError, startNewSession, useStore,
 } from "../store.ts";
 import { api } from "@polyth/session/web-api";
 import {
@@ -68,7 +68,6 @@ import SelectionMenu from "./SelectionMenu.tsx";
 import SlotHost from "./slots/SlotHost.ts";
 import type {
   AssistantMsg,
-  EditLoopWarning,
   GithubConflictMsg,
   RenderMessage,
   RenderModel,
@@ -1512,35 +1511,6 @@ function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnL
   );
 }
 
-function EditLoopNotice({
-  sessionId,
-  warning,
-}: {
-  sessionId: string;
-  warning: EditLoopWarning;
-}) {
-  const paths = warning.paths.slice(0, 3).join(", ");
-  return (
-    <Notice
-      tone="warning"
-      className="edit-loop-warning"
-      role="status"
-      aria-live="polite"
-      heading={tr("timeline.editLoop.heading")}
-      actions={
-        <Button
-          size="sm"
-          onClick={() => dismissEditLoopWarning(sessionId, warning.signature)}
-        >{tr("timeline.editLoop.continue")}</Button>
-      }
-    >
-      {paths
-        ? tr("timeline.editLoop.bodyWithPaths", { paths })
-        : tr("timeline.editLoop.body")}
-    </Notice>
-  );
-}
-
 // Footer under the last message once the turn ended: exactly one terminal
 // turn's own start/stop and usage (UX-MSG-ACTIONS) — see turnFooterLine().
 
@@ -1564,9 +1534,6 @@ export default function Timeline({
   const atBottom = useRef(true);
   const prefs = useUiSettings();
   const sessionId = useStore((s) => s.activeSessionId);
-  const dismissedEditLoop = useStore((s) =>
-    (sessionId ? s.dismissedEditLoops[sessionId] : undefined)
-  );
   // L13 windowing: only the last `limit` rows render (see timelineWindow.ts).
   const initialLimit = initialTimelineWindow(
     typeof document !== "undefined" && document.body.dataset.desktopLowResource === "true",
@@ -2210,11 +2177,6 @@ export default function Timeline({
         )}
         {turnBroken && turn.status === "failed" && turn.limit && sessionId && (
           <RateLimitNotice sessionId={sessionId} limit={turn.limit} />
-        )}
-        {sessionId
-          && model.editLoopWarning
-          && model.editLoopWarning.signature !== dismissedEditLoop && (
-          <EditLoopNotice sessionId={sessionId} warning={model.editLoopWarning} />
         )}
         {turnBroken && !(turn.status === "failed" && turn.limit) && (
           <Notice

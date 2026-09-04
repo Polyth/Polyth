@@ -3,8 +3,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Window } from "happy-dom";
-import type { JsonObject, SessionEvent } from "@polyth/contracts";
-import { buildModel } from "../src/reduce.ts";
 
 const dom = new Window({ url: "http://localhost:3000/" });
 Object.assign(globalThis, {
@@ -58,31 +56,6 @@ const {
   replySecret,
 } = await import("../src/init.ts");
 
-let seq = 0;
-function ev(type: string, data: JsonObject, sessionId = "origin-session"): SessionEvent {
-  seq += 1;
-  return {
-    id: `e${seq}`,
-    sessionId,
-    seq,
-    time: 1_700_000_000_000 + seq,
-    type,
-    data,
-    v: 1,
-  };
-}
-
-test("reduce stamps sessionId onto pending permission, question, and secret rows", () => {
-  const model = buildModel([
-    ev("permission/requested", { requestId: "p1", permission: "bash", patterns: ["*"] }, "sess-a"),
-    ev("question/asked", { requestId: "q1", questions: [{ prompt: "Continue?" }] }, "sess-a"),
-    ev("secret/requested", { requestId: "s1", handle: "token", label: "Token" }, "sess-a"),
-  ]);
-  assert.equal(model.permissions[0]?.sessionId, "sess-a");
-  assert.equal(model.questions[0]?.sessionId, "sess-a");
-  assert.equal(model.secrets[0]?.sessionId, "sess-a");
-});
-
 test("reply helpers call the API for the origin session even when another session is active", async () => {
   posted.length = 0;
   store.activateSession("active-other");
@@ -117,9 +90,6 @@ test("reply helpers call the API for the origin session even when another sessio
 test("createSession returns the API id rather than reading activeSessionId", async () => {
   store.activateSession("stale-active");
   const id = await createSession("p1", { title: "workflow parent" });
-  assert.equal(id, "created-session");
-  // createSession may activate the new id; the point is the return value comes
-  // from the API response, not from whatever was already active.
   assert.equal(id, "created-session");
   assert.notEqual("stale-active", id);
 });

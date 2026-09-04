@@ -3,7 +3,6 @@
 // reconstructs an identical model (session log invariant).
 import type {
   AttachmentRef,
-  EditLoopKind,
   FusionDto,
   FusionWeightDto,
   JsonObject,
@@ -267,14 +266,6 @@ export interface SubagentState {
   agents: Array<{ sessionId: string; label: string; status: string; currentTask?: string }>;
 }
 
-/** Latest ignorable `runtime/edit-loop-detected` signal for the session. */
-export interface EditLoopWarning {
-  kind: EditLoopKind;
-  paths: string[];
-  signature: string;
-  eventSeq: number;
-  time: number;
-}
 
 export interface RenderModel {
   messages: RenderMessage[];
@@ -296,7 +287,6 @@ export interface RenderModel {
   /** Edit-tool paths from the current/last turn; cleared by the next prompt. */
   changedFiles: string[];
   /** Observer warning: agent may be stuck in a repeated edit cycle. */
-  editLoopWarning: EditLoopWarning | null;
   /** Active rewind marker. `draft` is replay-derived from the target
    *  `user/message` (raw ?? text + attachments); `restoredText` only appears
    *  when an old marker carried it (compat). */
@@ -326,7 +316,6 @@ export function emptyModel(): RenderModel {
     tasks: null,
     subagents: null,
     changedFiles: [],
-    editLoopWarning: null,
     rewind: null,
     fork: null,
     version: 0,
@@ -493,7 +482,6 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         model.messages.push(msg);
       }
       model.changedFiles = [];
-      model.editLoopWarning = null;
       // A child-origin prompt after the fork marker proves the seed was sent
       // (or replaced) — reload must not re-seed the composer.
       if (model.fork && !model.fork.seedConsumed && ev.seq > model.fork.markerSeq) {
@@ -1152,25 +1140,6 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       };
       break;
     }
-    case "runtime/edit-loop-detected": {
-      const kind = str(d, "kind");
-      const signature = str(d, "signature");
-      const paths = strArr(d, "paths");
-      if (
-        (kind !== "repeated-edit-with-failing-checks")
-        || !signature
-      ) {
-        break;
-      }
-      model.editLoopWarning = {
-        kind,
-        paths,
-        signature,
-        eventSeq: ev.seq,
-        time: ev.time,
-      };
-      break;
-    }
     default:
       runWebReducers(model, ev);
       break; // Unregistered session/*, context/*, compaction/*, etc. are ignored.
@@ -1203,7 +1172,6 @@ export function cloneModel(src: RenderModel): RenderModel {
       ? { ...src.workflowRun, layers: src.workflowRun.layers.map((layer) => layer.slice()), nodes: src.workflowRun.nodes.map((node) => ({ ...node })) }
       : null,
     changedFiles: src.changedFiles.slice(),
-    editLoopWarning: src.editLoopWarning ? { ...src.editLoopWarning, paths: src.editLoopWarning.paths.slice() } : null,
   };
   const idx = messageIndexes.get(src);
   if (idx) messageIndexes.set(model, { assistants: new Map(idx.assistants), tools: new Map(idx.tools) });

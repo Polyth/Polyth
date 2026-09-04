@@ -31,8 +31,6 @@ import type {
   AgentDescriptor,
   AgentProfile,
   McpServerDto,
-  McpToolDto,
-  McpToolsResponseDto,
   McpTransport,
   ModelRef,
   SystemInfoDto,
@@ -780,7 +778,6 @@ export function BehaviorPage() {
 
 export function ProjectsPage() {
   const projects = useStore((s) => s.projectRegistry.projects);
-  const activeProjectId = useStore((s) => s.activeProjectId);
   const models = useStore((s) => s.models).filter(modelSupportsTextWorkflow);
   const sessionDefaults = useSessionDefaults();
   const [picking, setPicking] = useState(false);
@@ -1211,15 +1208,11 @@ function McpImportForm({ existingNames, onDone }: { existingNames: string[]; onD
 }
 
 export function McpPage() {
-  const activeProjectId = useStore((s) => s.activeProjectId);
   const [servers, setServers] = useState<McpServerDto[]>([]);
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [testMsg, setTestMsg] = useState<Record<string, string>>({});
-  const [toolsOpen, setToolsOpen] = useState<Record<string, boolean>>({});
-  const [toolsLoading, setToolsLoading] = useState<Record<string, boolean>>({});
-  const [toolsById, setToolsById] = useState<Record<string, McpToolsResponseDto>>({});
   const refresh = () => void api.mcpList().then(setServers);
   useEffect(() => { refresh(); }, []);
 
@@ -1229,25 +1222,6 @@ export function McpPage() {
     refresh();
   };
 
-  const toggleTools = async (s: McpServerDto) => {
-    const open = !toolsOpen[s.id];
-    setToolsOpen((m) => ({ ...m, [s.id]: open }));
-    if (!open || toolsById[s.id]) return;
-    setToolsLoading((m) => ({ ...m, [s.id]: true }));
-    const result = !activeProjectId
-      ? {
-          tools: [],
-          source: "unavailable" as const,
-          message: "select a project to inspect MCP tools",
-        }
-      : await api.mcpTools(s.id, activeProjectId).catch((e): McpToolsResponseDto => ({
-          tools: [],
-          source: "unavailable",
-          message: e instanceof Error ? e.message : String(e),
-        }));
-    setToolsById((m) => ({ ...m, [s.id]: result }));
-    setToolsLoading((m) => ({ ...m, [s.id]: false }));
-  };
 
   return (
     <>
@@ -1279,9 +1253,6 @@ export function McpPage() {
               <div className="set-row-control">
                 <span className={`tag mcp-status ${s.status}`}>{s.status}</span>
                 <Button size="sm" title={tr("settings.pages.checkReachabilityAndStoreTheResult")} onClick={() => void probe(s)}>{tr("settings.pages.probe")}</Button>
-                <Button size="sm" onClick={() => void toggleTools(s)}>
-                  {toolsOpen[s.id] ? tr("settings.pages.hideTools") : tr("settings.pages.showTools")}
-                </Button>
                 <Button size="sm" onClick={() => setEditingId(s.id)}>{tr("common.edit")}</Button>
                 <Button size="sm" onClick={() => void api.mcpUpdate(s.id, { enabled: !s.enabled }, s.revision).then(refresh)}>
                   {s.enabled ? tr("settings.pages.disable") : tr("settings.pages.enable")}
@@ -1290,12 +1261,6 @@ export function McpPage() {
                   {tr("common.remove")}</Button>
               </div>
             </div>
-            {toolsOpen[s.id] && (
-              <McpToolsPanel
-                loading={!!toolsLoading[s.id]}
-                response={toolsById[s.id]}
-              />
-            )}
           </div>
         ))}
       </div>
@@ -1311,47 +1276,6 @@ export function McpPage() {
   );
 }
 
-function McpToolsPanel({
-  loading,
-  response,
-}: {
-  loading: boolean;
-  response?: McpToolsResponseDto;
-}) {
-  if (loading) {
-    return <div className="mcp-tools-panel muted" role="status">{tr("settings.pages.loadingTools")}</div>;
-  }
-  if (!response) return null;
-  if (response.source === "unavailable") {
-    return (
-      <div className="mcp-tools-panel" role="status">
-        <div className="set-row-hint">{tr("settings.pages.mcpToolsUnavailable")}{response.message ? `: ${response.message}` : ""}</div>
-      </div>
-    );
-  }
-  if (response.tools.length === 0) {
-    return (
-      <div className="mcp-tools-panel" role="status">
-        <div className="set-row-hint">{tr("settings.pages.mcpToolsEmpty")}</div>
-      </div>
-    );
-  }
-  return (
-    <ul className="mcp-tools-panel" aria-label={tr("settings.pages.showTools")}>
-      {response.tools.map((tool: McpToolDto) => (
-        <li key={`${tool.server}:${tool.name}`} className="mcp-tool-row">
-          <div className="mcp-tool-text">
-            <div className="mcp-tool-name mono">{tool.name}</div>
-            {tool.description && <div className="set-row-hint">{tool.description}</div>}
-          </div>
-          <span className={`tag mcp-tool-availability ${tool.available ? "available" : "unavailable"}`}>
-            {tool.available ? tr("settings.pages.mcpToolAvailable") : tr("settings.pages.mcpToolUnavailable")}
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
-}
 
 export function AboutPage() {
   const [info, setInfo] = useState<SystemInfoDto | null>(null);

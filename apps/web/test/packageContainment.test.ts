@@ -94,7 +94,6 @@ const GENERIC_SHELL_IMPORTS = new Set([
   "markdown/JsonTree.tsx",
   "markdown.tsx",
   "mobileViewport.ts",
-  "pasteAttach.ts",
   "pendingChanges.ts",
   "reduce.ts",
   "responsiveShell.ts",

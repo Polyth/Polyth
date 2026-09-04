@@ -349,16 +349,6 @@ export interface RuntimeRestartRecoveredData {
   recoveredOperationIds: string[];
 }
 
-/** Ignorable runtime observer signal: the agent appears stuck rewriting the
- *  same file(s). Never model-visible; never auto-stops a turn. */
-export type EditLoopKind = "repeated-edit-with-failing-checks";
-export interface EditLoopDetectedData {
-  kind: EditLoopKind;
-  paths: string[];
-  signature: string;
-  evidence: Array<{ tool: string; path?: string; failed?: boolean; role: "edit" | "check" | "other" }>;
-}
-
 export interface TurnStartedData { turnId: string; model?: ModelRef; agent?: string }
 
 /** Provider capacity failure classification for an error turn/stopped. */
@@ -2821,21 +2811,6 @@ export interface McpServerDto {
   status: McpStatus;
   lastError?: string;
   revision: number;
-}
-
-/** One MCP tool discovered from the OpenCode runtime for a configured server. */
-export interface McpToolDto {
-  name: string;
-  server: string;
-  description?: string;
-  available: boolean;
-}
-
-/** Runtime tool listing for one MCP server. Soft-fails when OpenCode is down. */
-export interface McpToolsResponseDto {
-  tools: McpToolDto[];
-  source: "runtime" | "unavailable";
-  message?: string;
 }
 
 /** One entry in OpenCode's `plugin` config array. Tuple entries carry the

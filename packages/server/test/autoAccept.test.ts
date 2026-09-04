@@ -218,3 +218,30 @@ test("turn lifecycle reaches the notify seam once per terminal turn", async () =
     { sessionId: id, reason: "completed" },
   ], "a later terminal stop for the same turn is deduplicated");
 });
+
+test("error stop + open permission → waiting → resolve → failed; queue stays", async () => {
+  const { sessions, store, fake } = harness();
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await store.enqueue(id, "queued after fail", "follow-up");
+  fake.emit(id, { type: "turn/started", turnId: "t-err" });
+  fake.emit(id, {
+    type: "permission/requested",
+    requestId: "per_err",
+    permission: "bash",
+    patterns: ["ls"],
+  });
+  await flush();
+  assert.equal((await store.projection(id))?.status, "waiting");
+
+  fake.emit(id, { type: "turn/stopped", reason: "error", error: "boom" });
+  await flush();
+  assert.equal((await store.projection(id))?.status, "waiting");
+
+  await sessions.replyPermission(id, "per_err", "once");
+  await flush();
+  assert.equal((await store.projection(id))?.status, "failed");
+  await flush();
+  assert.equal((await store.projection(id))?.status, "failed");
+  assert.equal((await store.queueList(id)).length, 1);
+  await store.close();
+});

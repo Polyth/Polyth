@@ -314,9 +314,8 @@ export function createTerminalService(opts: {
     },
 
     async run(input, opts = {}) {
-      // Default stays short for bounded helpers; callers (e.g. composer shell)
-      // may raise up to 30 minutes for long interactive builds.
-      const timeoutMs = Math.max(100, Math.min(opts.timeoutMs ?? 30_000, 30 * 60_000));
+      // Default stays short for bounded helpers; callers may raise up to 2 minutes.
+      const timeoutMs = Math.max(100, Math.min(opts.timeoutMs ?? 30_000, 120_000));
       const maxOutputBytes = Math.max(1_024, Math.min(opts.maxOutputBytes ?? 64 * 1_024, 1024 * 1024));
       let terminalId = "";
       let output = "";

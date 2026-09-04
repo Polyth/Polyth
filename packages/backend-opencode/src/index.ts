@@ -163,9 +163,6 @@ export {
   waitForRuntimeReady,
 } from "./runtime.ts";
 export {
-  listMcpServerToolsFromEndpoint,
-} from "./mcpDiagnostics.ts";
-export {
   inspectOpenCodeEngine,
   OPEN_CODE_QUARANTINE_TTL_MS,
   OPEN_CODE_RUNTIME_STALE_TTL_MS,
