@@ -2211,6 +2211,11 @@ export default function Timeline({
         {turnBroken && turn.status === "failed" && turn.limit && sessionId && (
           <RateLimitNotice sessionId={sessionId} limit={turn.limit} />
         )}
+        {sessionId
+          && model.editLoopWarning
+          && model.editLoopWarning.signature !== dismissedEditLoop && (
+          <EditLoopNotice sessionId={sessionId} warning={model.editLoopWarning} />
+        )}
         {turnBroken && !(turn.status === "failed" && turn.limit) && (
           <Notice
             tone="error"
