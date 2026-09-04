@@ -70,6 +70,34 @@ test("active multirun and fusion work resolve as working outside their view", ()
   }), NOW).kind, "needs-reply");
 });
 
+test("pending permissions and questions resolve as waiting-for-user chrome", () => {
+  assert.deepEqual(resolveSessionStatus(session({
+    status: "waiting",
+    attention: { questions: 0, permissions: 1, unread: 0 },
+  }), NOW), {
+    kind: "needs-approval",
+    glyph: "✓",
+    label: "Approval required",
+  });
+  assert.deepEqual(resolveSessionStatus(session({
+    status: "idle",
+    attention: { questions: 2, permissions: 0, unread: 0 },
+  }), NOW), {
+    kind: "needs-reply",
+    glyph: "?",
+    label: "Reply needed",
+  });
+  assert.deepEqual(resolveSessionStatus(session({ status: "waiting" }), NOW), {
+    kind: "needs-reply",
+    glyph: "?",
+    label: "Waiting for you",
+  });
+  assert.equal(resolveSessionStatus(session({
+    status: "idle",
+    attention: { questions: 0, permissions: 0, unread: 0 },
+  }), NOW).kind, "regular");
+});
+
 test("epoch-pending is Runtime changed after failed and before reconciling", () => {
   assert.deepEqual(resolveSessionStatus(session({ status: "epoch-pending" }), NOW), {
     kind: "epoch-pending",
@@ -86,7 +114,7 @@ test("epoch-pending is Runtime changed after failed and before reconciling", () 
 
 test("resolver covers the shared continuity taxonomy", () => {
   const fixtures: Array<[Partial<SessionProjection>, string, string]> = [
-    [{ status: "waiting" }, "needs-reply", "Reply needed"],
+    [{ status: "waiting" }, "needs-reply", "Waiting for you"],
     [{ status: "failed" }, "failed", "Failed"],
     [{ status: "epoch-pending" }, "epoch-pending", "Runtime changed"],
     [{ attention: { questions: 0, permissions: 0, unread: 2 } }, "unread", "Unread activity"],

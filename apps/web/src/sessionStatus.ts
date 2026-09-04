@@ -30,8 +30,11 @@ export function resolveSessionStatus(
   if (permissions > 0) {
     return { kind: "needs-approval", glyph: "✓", label: "Approval required" };
   }
-  if (questions > 0 || session.status === "waiting") {
+  if (questions > 0) {
     return { kind: "needs-reply", glyph: "?", label: "Reply needed" };
+  }
+  if (session.status === "waiting") {
+    return { kind: "needs-reply", glyph: "?", label: "Waiting for you" };
   }
   const backgroundRuns =
     (session.backgroundWork?.multirun ?? 0)

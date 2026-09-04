@@ -31,12 +31,6 @@ import { buildPermissionPreview, PERMISSION_ALLOWED_SCOPES } from "./permissionP
 import { sanitizeAttachments } from "./attachments.ts";
 import { settleAllOrThrow } from "./settle.ts";
 import { createResumeScheduler, planResume } from "./resume.ts";
-import {
-  detectEditLoop,
-  recentToolRecords,
-  shouldEmitEditLoop,
-  type EditLoopDedupeState,
-} from "./editLoop.ts";
 
 export interface Broadcaster {
   event(ev: SessionEvent): void;
@@ -381,8 +375,6 @@ export function createSessionService(deps: {
   // until an explicit rename supersedes it.
   const autoTitleRequested = new Set<string>();
   const titleRefreshInFlight = new Set<string>();
-  /** Per-session dedupe for `runtime/edit-loop-detected` observer signals. */
-  const editLoopDedupe = new Map<string, EditLoopDedupeState>();
 
   const broadcastTail = async <T>(
     sessionId: string,
@@ -1928,31 +1920,6 @@ export function createSessionService(deps: {
     }
   };
 
-  const maybeEmitEditLoop = async (sessionId: string): Promise<void> => {
-    const events = await store.events(sessionId);
-    const detection = detectEditLoop(recentToolRecords(events));
-    const decision = shouldEmitEditLoop(detection, editLoopDedupe.get(sessionId));
-    if (!decision.next) editLoopDedupe.delete(sessionId);
-    else editLoopDedupe.set(sessionId, decision.next);
-    if (!decision.emit || !detection) return;
-    console.warn(`[polyth] edit-loop detected for ${sessionId}`, {
-      kind: detection.kind,
-      paths: detection.paths,
-      signature: detection.signature,
-    });
-    await appendAndBroadcast(
-      sessionId,
-      "runtime/edit-loop-detected",
-      {
-        kind: detection.kind,
-        paths: detection.paths,
-        signature: detection.signature,
-        evidence: detection.evidence,
-      } as unknown as JsonObject,
-      { ignorable: true },
-    );
-  };
-
   const onRuntimeEvent = async (
     sessionId: string,
     ev: RuntimeEvent,
@@ -2067,6 +2034,9 @@ export function createSessionService(deps: {
     }
     switch (ev.type) {
       case "turn/started":
+        // `ev.model` is turn-scoped evidence for the log/UI only. Never copy it
+        // onto projection.model — that field is the user/session choice and must
+        // survive subagent turns that run under a different temporary model.
         await persist(sessionId, "turn/started", { turnId: ev.turnId, ...(ev.model ? { model: ev.model } : {}) } as unknown as JsonObject, { ignorable: true });
         if (sideEffects) {
           const applied = await applyRuntimeProjection(
@@ -2147,12 +2117,19 @@ export function createSessionService(deps: {
           const interruptQueued = deps.queue
             ? (await deps.queue.queueList(sessionId))[0]?.delivery === "interrupt"
             : false;
+          // Match reconcile: open permissions/questions/secrets keep the
+          // session waiting even after the turn ends (e.g. mirrored child
+          // requests on the parent, or a stop that races a pending card).
+          const requestsOpen = openRequestTotal(await logFacts(sessionId)) > 0;
+          const nextStatus = requestsOpen
+            ? "waiting"
+            : ev.reason === "error" && !interruptQueued ? "failed" : "idle";
           const applied = await applyRuntimeProjection(
             sessionId,
             runtimeEventSeq,
             (current) => ({
               ...current,
-              status: ev.reason === "error" && !interruptQueued ? "failed" : "idle",
+              status: nextStatus,
               updatedAt: Date.now(),
             }),
           );
@@ -2172,7 +2149,11 @@ export function createSessionService(deps: {
             // failing session would silently burn the whole queue otherwise).
             // An interrupt that caused the stop is exactly the "cut in" the
             // user asked for, so it dispatches even over an error stop.
-            if (ev.reason !== "error" || interruptQueued) void dispatchQueue(sessionId);
+            // Do not dispatch while a human request is still open — admission
+            // would only re-queue behind the waiting barrier.
+            if (!requestsOpen && (ev.reason !== "error" || interruptQueued)) {
+              void dispatchQueue(sessionId);
+            }
           }
         }
         break;
@@ -2329,15 +2310,6 @@ export function createSessionService(deps: {
         }
         await persist(sessionId, ev.type, rest as unknown as JsonObject);
       }
-    }
-    // Live path only: observation replay must not invent extra canonical events
-    // through a batch-bound persist, and must not duplicate a prior live signal.
-    if (
-      sideEffects
-      && options.persist === undefined
-      && (ev.type === "tool/result" || ev.type === "tool/error")
-    ) {
-      await maybeEmitEditLoop(sessionId);
     }
   };
 
@@ -2882,6 +2854,38 @@ export function createSessionService(deps: {
     }
   };
 
+  /** When a child request is resolved (auto-accept, policy, or direct reply),
+   *  close the parent's replyable mirror and drop waiting if nothing else is
+   *  open. Parent answering through the mirror uses the same path once the
+   *  child resolve lands. */
+  const closeParentRequestMirror = async (
+    childSessionId: string,
+    requestId: string,
+    kind: "permission" | "question",
+    payload: JsonObject,
+  ): Promise<void> => {
+    const child = await store.projection(childSessionId);
+    if (!child?.parentId) return;
+    const parentId = child.parentId;
+    const parentFacts = await logFacts(parentId);
+    const stillOpen = kind === "permission"
+      ? parentFacts.openPermissions.has(requestId)
+      : parentFacts.openQuestions.has(requestId);
+    if (!stillOpen) return;
+    await appendAndBroadcast(
+      parentId,
+      kind === "permission" ? "permission/resolved" : "question/answered",
+      { requestId, ...payload },
+      { ignorable: true },
+    );
+    const parent = await store.projection(parentId);
+    if (parent?.status === "waiting" && openRequestTotal(await logFacts(parentId)) === 0) {
+      await updateProjection(parentId, {
+        status: turnActive(parentId) ? "working" : "idle",
+      });
+    }
+  };
+
   const replyPermissionCore = async (
     sessionId: string,
     requestId: string,
@@ -2964,6 +2968,11 @@ export function createSessionService(deps: {
     if (proj.status === "waiting" && openRequestTotal(await logFacts(sessionId)) === 0) {
       await updateProjection(sessionId, { status: shellRequest ? "idle" : "working" });
     }
+    await closeParentRequestMirror(sessionId, requestId, "permission", {
+      reply,
+      ...(auto ? { auto: true } : {}),
+      ...(scope ? { scope } : {}),
+    });
   };
 
   const replyQuestionCore = async (
@@ -3020,6 +3029,9 @@ export function createSessionService(deps: {
     if (proj.status === "waiting" && openRequestTotal(await logFacts(sessionId)) === 0) {
       await updateProjection(sessionId, { status: "working" });
     }
+    await closeParentRequestMirror(sessionId, requestId, "question", {
+      ...(reject ? { rejected: true } : { answers }),
+    });
   };
 
   /** F2: shape-check + existence-check attachments before anything is logged
@@ -3170,12 +3182,11 @@ export function createSessionService(deps: {
         console.error("[polyth] command expansion failed", err);
       }
     }
-    if (input.model || input.agent) {
-      await updateProjection(sessionId, {
-        ...(input.model ? { model: input.model } : {}),
-        ...(input.agent ? { agent: input.agent } : {}),
-      });
-    }
+    // projection.model / projection.agent are the user/session choice. They
+    // stick only when send() (or resumeNow) persisted an explicit selection
+    // before admission. Profile bundles, /command overrides, and runtime
+    // turn models apply to THIS turn via `input` / cmd* and must never rewrite
+    // the session projection here — subagent activity shares this path.
     const model = input.model ?? cmdModel ?? proj.model;
     const agent = input.agent ?? cmdAgent ?? proj.agent;
     // Model-visible behavior instructions are logged BEFORE the turn that
@@ -4339,6 +4350,13 @@ export function createSessionService(deps: {
         });
       }
 
+      // Capture the caller-provided model/agent before profile resolution fills
+      // temporary turn defaults. Only an explicit send model/agent (or an
+      // explicit profile pick below) may rewrite projection.model — inherited
+      // profile bundles and runtime/subagent models must not (WS22).
+      const userSelectedModel = input.model;
+      const userSelectedAgent = input.agent;
+
       // Atomic profile application: resolve to explicit model/agent up front so
       // no intermediate invalid combination can reach the runtime. Explicit
       // per-send model/agent still win over the profile's bundle.
@@ -4348,6 +4366,8 @@ export function createSessionService(deps: {
       const effectiveProfileId = requestedProfile === undefined
         ? proj.agentProfileId
         : requestedProfile ?? undefined;
+      let profileModel: { providerID: string; modelID: string } | undefined;
+      let profileAgent: string | undefined;
       if (effectiveProfileId && deps.profiles) {
         const profile = await deps.profiles.profileGet(effectiveProfileId);
         // An explicitly requested profile must exist; a stored (inherited)
@@ -4357,11 +4377,13 @@ export function createSessionService(deps: {
           throw Object.assign(new Error("agent profile not found"), { code: "not-found" });
         }
         if (profile) {
+          profileModel = { providerID: profile.providerID, modelID: profile.modelID };
+          profileAgent = profile.agent;
           input = {
             ...input,
             // the durable user/message records the actually applied profile id
             agentProfileId: effectiveProfileId,
-            model: input.model ?? { providerID: profile.providerID, modelID: profile.modelID },
+            model: input.model ?? profileModel,
             ...(input.agent ?? profile.agent ? { agent: input.agent ?? profile.agent } : {}),
           };
         }
@@ -4370,6 +4392,21 @@ export function createSessionService(deps: {
       // an unknown profile id can never be recorded.
       if (requestedProfile !== undefined && (proj.agentProfileId ?? undefined) !== (requestedProfile ?? undefined)) {
         await setProjectionProfile(sessionId, requestedProfile ?? undefined);
+      }
+      // Stick session model/agent only for user-authored choices: an explicit
+      // per-send model/agent, or a newly selected profile (when this send did
+      // not override those fields). Inherited profile resolution applies to
+      // the turn via `input` above and must leave projection.model alone.
+      const stickModel = userSelectedModel
+        ?? (typeof requestedProfile === "string" ? profileModel : undefined);
+      const stickAgent = userSelectedAgent
+        ?? (typeof requestedProfile === "string" ? profileAgent : undefined);
+      if (stickModel || stickAgent) {
+        await updateProjection(sessionId, {
+          ...(stickModel ? { model: stickModel } : {}),
+          ...(stickAgent ? { agent: stickAgent } : {}),
+        });
+        proj = (await store.projection(sessionId)) ?? proj;
       }
       // Send-time arbitration first: resolution events precede queue/user events.
       if (input.dismissPending) await dismissPendingRequests(sessionId, rt);
@@ -5361,8 +5398,16 @@ export function createSessionService(deps: {
           { sourceSessionId?: unknown } | undefined;
         const target = typeof forwarded?.sourceSessionId === "string" ? forwarded.sourceSessionId : sessionId;
         await replyPermissionCore(target, requestId, reply, scope);
+        // Child resolve closes the parent mirror via closeParentRequestMirror.
+        // When the mirror was answered here, settle this session if nothing
+        // else is still waiting (mirror close is a no-op when already closed).
         if (target !== sessionId) {
-          await appendAndBroadcast(sessionId, "permission/resolved", { requestId, reply }, { ignorable: true });
+          const parent = await store.projection(sessionId);
+          if (parent?.status === "waiting" && openRequestTotal(await logFacts(sessionId)) === 0) {
+            await updateProjection(sessionId, {
+              status: turnActive(sessionId) ? "working" : "idle",
+            });
+          }
         }
       });
     },
@@ -5374,7 +5419,12 @@ export function createSessionService(deps: {
         const target = typeof forwarded?.sourceSessionId === "string" ? forwarded.sourceSessionId : sessionId;
         await replyQuestionCore(target, requestId, answers);
         if (target !== sessionId) {
-          await appendAndBroadcast(sessionId, "question/answered", { requestId, answers }, { ignorable: true });
+          const parent = await store.projection(sessionId);
+          if (parent?.status === "waiting" && openRequestTotal(await logFacts(sessionId)) === 0) {
+            await updateProjection(sessionId, {
+              status: turnActive(sessionId) ? "working" : "idle",
+            });
+          }
         }
       });
     },
@@ -5467,7 +5517,9 @@ export function createSessionService(deps: {
           }
           throw outcomeError(outcome);
         }
-        if (proj.status === "waiting") await updateProjection(sessionId, { status: "working" });
+        if (proj.status === "waiting" && openRequestTotal(await logFacts(sessionId)) === 0) {
+          await updateProjection(sessionId, { status: "working" });
+        }
       });
     },
 
