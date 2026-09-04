@@ -103,6 +103,8 @@ import { createPackageLifecycle } from "./packageLifecycle.ts";
 import { createDeferredConfigApplier, createOpenCodePendingService } from "./opencodePending.ts";
 import { agentSessionRoutes, type AgentGoalService } from "./routes/agentSessions.ts";
 import { runtimeEpochRoutes } from "./routes/runtimeEpoch.ts";
+import { runtimeDiagnosticsRoutes } from "./routes/runtimeDiagnostics.ts";
+import { createRuntimeDiagnostics } from "./runtimeDiagnostics.ts";
 import { settleAllOrThrow } from "./settle.ts";
 import {
   createRuntimeIdleController,
@@ -442,6 +444,7 @@ export async function boot(opts: BootOptions = {}) {
   const requireSvc = <T,>(name: string): T => services.require(serverServiceKey<T>(name));
 
   // --- per-project opencode runtime pool (lazy spawn, one serve process per project)
+  const runtimeDiagnostics = createRuntimeDiagnostics();
   const runtimesByProject = new Map<string, Promise<AgentRuntime>>();
   const runtimeEvictions = new Map<string, Promise<void>>();
   const runtimeRestarters = new Map<string, {
@@ -1081,7 +1084,10 @@ export async function boot(opts: BootOptions = {}) {
             { code: "restart-deferred" },
           );
         }
-        p = (async () => {
+        // Every catalog read fans out with `allSettled`, so a spawn that never
+        // succeeds is otherwise swallowed here and surfaces only as an empty
+        // model list. Record it so the log and the UI can name the cause.
+        p = runtimeDiagnostics.observe(key, { projectId, cwd: dir }, async () => {
           const configRestartable = !(await projects.get(projectId))?.remote;
           try {
             const facade = facadeFor(
@@ -1105,7 +1111,7 @@ export async function boot(opts: BootOptions = {}) {
             if (configRestartable) await refreshSafeBehavior();
             return facade;
           }
-        })();
+        });
         runtimesByProject.set(key, p);
         p.catch(() => runtimesByProject.delete(key)); // allow retry
       }
@@ -1779,6 +1785,7 @@ export async function boot(opts: BootOptions = {}) {
     }),
     queueRoutes(sessions),
     runtimeEpochRoutes(sessions),
+    runtimeDiagnosticsRoutes(runtimeDiagnostics),
     pushRoutes(push),
     notificationRoutes(notifications),
     browseRoutes(),

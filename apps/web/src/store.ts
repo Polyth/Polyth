@@ -6,6 +6,7 @@ import type {
   EditorLocation,
   ModelDescriptor,
   Project,
+  RuntimeUnavailableReport,
   SessionEvent,
   SessionProjection,
 } from "@polyth/contracts";
@@ -119,6 +120,9 @@ export interface AppState {
   events: Record<string, SessionEvent[]>;
   models: ModelDescriptor[];
   agents: AgentDescriptor[];
+  /** Why the model catalog is empty, when the server knows. Set only while
+   *  `models` is empty; a usable catalog clears it. */
+  runtimeUnavailable: RuntimeUnavailableReport | null;
   activeProjectId: string | null;
   activeSessionId: string | null;
   /** Session whose canonical event load (openSession) is in flight. While
@@ -158,6 +162,7 @@ let state: AppState = {
   events: {},
   models: [],
   agents: [],
+  runtimeUnavailable: null,
   activeProjectId: null,
   activeSessionId: null,
   openingSessionId: null,
@@ -349,7 +354,12 @@ export function setSessions(projectId: string, sessions: SessionProjection[]): v
   set({ sessions: others.length === 0 ? merged : [...others, ...merged] });
 }
 export function setModels(models: ModelDescriptor[]): void {
-  set({ models });
+  // A usable catalog is proof the runtime came back; a stale reason next to a
+  // working composer would be worse than none.
+  set(models.length > 0 ? { models, runtimeUnavailable: null } : { models });
+}
+export function setRuntimeUnavailable(report: RuntimeUnavailableReport | null): void {
+  set({ runtimeUnavailable: report });
 }
 export function setAgents(agents: AgentDescriptor[]): void {
   set({ agents });

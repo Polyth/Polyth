@@ -124,7 +124,7 @@ export function validateRemoteAccessPolicy(
 export const CORE_REMOTE_ACCESS: RemoteAccessPolicy = {
   routeScopes: [
     "agents", "auth", "core", "folders", "health", "labels", "models", "notifications",
-    "packages", "projects", "providers", "search", "sessions", "settings",
+    "packages", "projects", "providers", "runtime", "search", "sessions", "settings",
   ],
   http: [
     { methods: ["GET"], path: "/api/health", capability: REMOTE_CAPABILITY.coreHealthRead, mutation: false },
@@ -158,6 +158,9 @@ export const CORE_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["GET"], path: "/api/models", capability: REMOTE_CAPABILITY.coreSessionsRead, mutation: false },
     { methods: ["GET"], path: "/api/providers", capability: REMOTE_CAPABILITY.coreSessionsRead, mutation: false },
     { methods: ["GET"], path: "/api/agents", capability: REMOTE_CAPABILITY.coreSessionsRead, mutation: false },
+    // A paired device sees the same empty catalog and needs the same reason;
+    // it already reads project paths through /api/projects.
+    { methods: ["GET"], path: "/api/runtime/diagnostics", capability: REMOTE_CAPABILITY.coreSessionsRead, mutation: false },
     { methods: ["GET"], path: "/api/notifications", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: false },
     { methods: ["POST"], path: "/api/notifications/read", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: true },
     { methods: ["POST"], path: "/api/notifications/read-all", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: true },

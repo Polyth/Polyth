@@ -1,6 +1,6 @@
 import { useSyncExternalStore, type ReactNode } from "react";
 import { listSlots, slotVersion, subscribeSlots } from "../slots.ts";
-import { isUiSlot, type JsonObject, type UiSlot, type WidgetKind } from "@polyth/contracts";
+import { isUiSlot, type JsonObject, type PanelItemSize, type UiSlot, type WidgetKind } from "@polyth/contracts";
 import {
   ensureWidgets,
   widgetSlotFromZone,
@@ -55,6 +55,9 @@ export interface WidgetDef {
   duplicatable?: boolean;
   floating?: boolean;
   recommended?: boolean;
+  panelSizes?: readonly PanelItemSize[];
+  panelDefaultSize?: PanelItemSize;
+  panelTitle?: string;
   settingsSchema?: Readonly<Record<string, unknown>>;
   render: (context: WidgetRenderContext) => ReactNode;
   settingsRender?: (context: WidgetSettingsContext) => ReactNode;
@@ -184,6 +187,13 @@ function slotWidgets(): WidgetDef[] {
       ...(typeof meta.duplicatable === "boolean" ? { duplicatable: meta.duplicatable } : {}),
       ...(typeof meta.floating === "boolean" ? { floating: meta.floating } : {}),
       ...(typeof meta.recommended === "boolean" ? { recommended: meta.recommended } : {}),
+      ...(Array.isArray(meta.panelSizes)
+        ? { panelSizes: meta.panelSizes.filter((value): value is PanelItemSize => value === "compact" || value === "standard" || value === "wide" || value === "large") }
+        : {}),
+      ...(meta.panelDefaultSize === "compact" || meta.panelDefaultSize === "standard" || meta.panelDefaultSize === "wide" || meta.panelDefaultSize === "large"
+        ? { panelDefaultSize: meta.panelDefaultSize }
+        : {}),
+      ...(typeof meta.panelTitle === "string" ? { panelTitle: meta.panelTitle } : {}),
       ...(meta.settingsSchema && typeof meta.settingsSchema === "object"
         ? { settingsSchema: meta.settingsSchema as Readonly<Record<string, unknown>> }
         : {}),

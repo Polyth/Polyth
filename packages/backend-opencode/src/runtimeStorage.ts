@@ -17,6 +17,10 @@ import {
 } from "node:fs/promises";
 import { delimiter, extname, isAbsolute, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import {
+  discoverOpenCodeBinary,
+  type OpenCodeSearchReport,
+} from "./binaryDiscovery.ts";
 import type { OwnedRuntimeIncarnation } from "./ownedRuntimeState.ts";
 
 export const OPENCODE_PROTOCOL_GENERATION = 1;
@@ -37,12 +41,34 @@ export interface OpenCodeEngineIdentity {
   protocolGeneration: number;
 }
 
-export type OpenCodeBinarySource = "bundled" | "override" | "configured" | "path";
+export type OpenCodeBinarySource =
+  | "bundled"
+  | "override"
+  | "configured"
+  /** Found on the PATH this process inherited. */
+  | "path"
+  /** Found in a documented install location the inherited PATH did not list. */
+  | "well-known"
+  /** Found on the PATH a login shell would have produced. */
+  | "login-shell";
+
+export const OPEN_CODE_BINARY_SOURCES: readonly OpenCodeBinarySource[] = [
+  "bundled",
+  "override",
+  "configured",
+  "path",
+  "well-known",
+  "login-shell",
+];
 
 export interface ResolvedOpenCodeBinary {
   executablePath: string;
   binarySource: OpenCodeBinarySource;
   binaryOverrideEnv?: typeof POLYTH_OPENCODE_BIN_ENV;
+  /** Set when resolution succeeded but not the way it was configured to — a
+   * missing bundle that fell back to an installed CLI. Surfaced, not thrown:
+   * the runtime works, the packaging does not. */
+  diagnostic?: string;
 }
 
 export interface OpenCodeRuntimeMetadata extends OpenCodeEngineIdentity {
@@ -135,12 +161,66 @@ const resolveExecutable = async (
   throw unavailable(`OpenCode binary is not executable or was not found on PATH: ${bin}`);
 };
 
+/** How many searched locations a failure names before it summarizes. Enough to
+ * recognize the machine's real install layout, short enough to read. */
+const REPORTED_SEARCH_LOCATIONS = 12;
+
+const notFoundError = (
+  binary: string,
+  report: OpenCodeSearchReport,
+): Error => {
+  const shown = report.searched.slice(0, REPORTED_SEARCH_LOCATIONS);
+  const rest = report.searched.length - shown.length;
+  const where = shown.length === 0
+    ? "nowhere — PATH was empty and no install location is readable"
+    : `${shown.join(", ")}${rest > 0 ? `, and ${rest} more` : ""}`;
+  return Object.assign(
+    unavailable(
+      `OpenCode CLI "${binary}" was not found. Searched ${where}.`
+      + (report.loginShell ? ` A ${report.loginShell} login shell was consulted too.` : "")
+      + ` Install OpenCode (https://opencode.ai) or set ${POLYTH_OPENCODE_BIN_ENV}`
+      + " to the CLI path.",
+    ),
+    {
+      binary,
+      searched: report.searched,
+      ...(report.loginShell ? { loginShell: report.loginShell } : {}),
+    },
+  );
+};
+
+/**
+ * Resolve the OpenCode executable Polyth will own.
+ *
+ * `POLYTH_OPENCODE_BIN` is an instruction from the user and stays exact: it
+ * either resolves or fails loudly, because silently running a *different*
+ * OpenCode than the one that was named is worse than not starting.
+ *
+ * A `bundled` path is different — it is Polyth's own packaging detail, not a
+ * user decision. When our bundle is absent (a dev build that skipped the
+ * download, a pruned resources dir, a quarantined file) refusing to start left
+ * a user who has a perfectly good `opencode` on their machine with a dead app.
+ * A missing bundle therefore degrades to discovery and reports that it did.
+ *
+ * Everything else goes through {@link discoverOpenCodeBinary}, which widens
+ * past the inherited PATH into the documented install locations and, as a last
+ * resort, a login shell's PATH — the difference between "works in a terminal,
+ * empty catalog in the app" and just working.
+ */
 export const resolveOpenCodeBinary = async (options: {
   bin?: string;
   binarySource?: Extract<OpenCodeBinarySource, "bundled" | "configured">;
   env?: NodeJS.ProcessEnv;
+  /** `false` skips the login-shell PATH probe (hermetic tests, CI). */
+  loginShellProbe?: boolean;
 } = {}): Promise<ResolvedOpenCodeBinary> => {
   const env = options.env ?? process.env;
+  const discovery = {
+    env,
+    ...(options.loginShellProbe === undefined
+      ? {}
+      : { loginShellProbe: options.loginShellProbe }),
+  };
   const configured = options.bin?.trim();
   if (options.binarySource === "bundled" && (!configured || !isAbsolute(configured))) {
     throw unavailable("bundled OpenCode binary must be provided as an absolute path");
@@ -148,11 +228,19 @@ export const resolveOpenCodeBinary = async (options: {
 
   // Desktop supplies a trusted absolute resources path. It must not be
   // shadowed by a developer's ambient override.
+  let bundleMissing: string | undefined;
   if (configured && isAbsolute(configured)) {
-    return {
-      executablePath: await resolveExecutable(configured, env),
-      binarySource: options.binarySource ?? "configured",
-    };
+    try {
+      return {
+        executablePath: await resolveExecutable(configured, env),
+        binarySource: options.binarySource ?? "configured",
+      };
+    } catch (error) {
+      // Only *our* bundle degrades. An operator-configured path is a decision
+      // and keeps failing loudly, exactly like the env override below.
+      if (options.binarySource !== "bundled") throw error;
+      bundleMissing = configured;
+    }
   }
 
   const override = env[POLYTH_OPENCODE_BIN_ENV]?.trim();
@@ -171,15 +259,43 @@ export const resolveOpenCodeBinary = async (options: {
     }
   }
 
-  if (configured) {
+  // A configured *path* stays exact; a configured *name* is discovered like
+  // the default one, so `bin: "opencode"` behaves the same as no setting.
+  if (!bundleMissing && configured && (configured.includes("/") || configured.includes("\\"))) {
     return {
       executablePath: await resolveExecutable(configured, env),
       binarySource: options.binarySource ?? "configured",
     };
   }
+
+  const binary = bundleMissing ? "opencode" : configured || "opencode";
+  const report = await discoverOpenCodeBinary(binary, discovery);
+  if (!report.hit) {
+    const error = notFoundError(binary, report);
+    if (!bundleMissing) throw error;
+    throw Object.assign(
+      unavailable(
+        `bundled OpenCode is missing at ${bundleMissing} and no installed OpenCode could be`
+        + ` used instead. ${error.message}`,
+        error,
+      ),
+      { binary, searched: report.searched },
+    );
+  }
   return {
-    executablePath: await resolveExecutable("opencode", env),
-    binarySource: "path",
+    executablePath: report.hit.executablePath,
+    binarySource: bundleMissing
+      ? report.hit.stage
+      : configured
+        ? options.binarySource ?? "configured"
+        : report.hit.stage,
+    ...(bundleMissing
+      ? {
+        diagnostic:
+          `bundled OpenCode is missing at ${bundleMissing}; falling back to the`
+          + ` OpenCode found at ${report.hit.executablePath}`,
+      }
+      : {}),
   };
 };
 
@@ -334,7 +450,7 @@ export const parseOpenCodeRuntimeMetadata = (
       || !OPENCODE_STORAGE_ID_RE.test(value.storageId)
       || (
         value.binarySource !== undefined
-        && !["bundled", "override", "configured", "path"].includes(value.binarySource)
+        && !(OPEN_CODE_BINARY_SOURCES as readonly string[]).includes(value.binarySource)
       )
       || (value.binaryPath !== undefined && (
         typeof value.binaryPath !== "string"

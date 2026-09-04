@@ -37,6 +37,7 @@ import type {
   ProjectCloneInput,
   ProjectPatch,
   QueueItemDto,
+  RuntimeDiagnosticsDto,
   RuntimeSession,
   SecureSafeCreateInput,
   SecureSafeEntryDto,
@@ -734,6 +735,9 @@ export const api = {
 
   listModels: (signal?: AbortSignal) => jfetch<ModelDescriptor[]>("/api/models", { signal }),
   listAgents: () => jfetch<AgentDescriptor[]>("/api/agents"),
+  /** Why the catalog is empty. Asked only when it is. */
+  runtimeDiagnostics: (signal?: AbortSignal) =>
+    jfetch<RuntimeDiagnosticsDto>("/api/runtime/diagnostics", { signal }),
 
   // ---- provider/model visibility (Providers & Models settings) --------------
   listProviders: () => jfetch<ProviderCatalogDto[]>("/api/providers"),

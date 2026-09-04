@@ -81,7 +81,7 @@ Every browser feature package declares `"polyth": { "webEntry": "./widgets/index
 
 - Install: `npm install`
 - Build: `npm run build` (web packages → `packages/*/dist/web`, shell → `apps/web/dist`)
-- Start: `npm start` → `http://127.0.0.1:4400` (env: `PORT`, `POLYTH_DATA_DIR`; needs `opencode` on PATH)
+- Start: `npm start` → `http://127.0.0.1:4400` (env: `PORT`, `POLYTH_DATA_DIR`; needs an installed `opencode` — found on PATH, in a documented install location such as `~/.opencode/bin`, or via a login-shell PATH probe. `POLYTH_OPENCODE_BIN` pins an exact binary; `POLYTH_OPENCODE_SHELL_PROBE=0` disables the shell probe. When none is found the reason and every location tried are logged and served from `/api/runtime/diagnostics`.)
 - Dev: `npm run dev` = build once + start. No HMR.
 - Watch: `npm run watch` (`scripts/supervisor.ts`) = build, start, then rebuild/restart on change and keep the server alive across crashes. `packages/*/src` changes restart only; `packages/*/widgets` and `apps/web/src` changes rebuild (reload the browser). Flags: `--watch=fs|git|both`, `--restart=auto|always`, `--pull`, `npm run watch -- --help`.
 - Test: `npm test` (all) or `node --test <file>`; plain `node:assert`.

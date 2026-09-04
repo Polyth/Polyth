@@ -439,6 +439,9 @@ export default function Composer({
     }
   }, [canStop]);
   const noModels = chatModels.length === 0;
+  // The server-known cause, when there is one. "Check that the backend is
+  // running" is a guess; this is what actually went wrong.
+  const runtimeUnavailable = useStore((s) => s.runtimeUnavailable);
   const [showModelWarning, setShowModelWarning] = useState(false);
   useEffect(() => {
     if (!noModels) {
@@ -921,7 +924,10 @@ export default function Composer({
       // Never a silent no-op: pressing Enter while the model catalog is empty
       // (backend still starting / restarting) surfaces the same guidance as
       // the composer banner instead of appearing to swallow the message.
-      setUiError(tr("composer.noModelsAvailableCheckThatTheBackend"));
+      setUiError(
+        runtimeUnavailable?.message
+          ?? tr("composer.noModelsAvailableCheckThatTheBackend"),
+      );
       return;
     }
     if (command === null && profileMissing) return;
@@ -1045,7 +1051,7 @@ export default function Composer({
     setAcToken(null);
     acTokenRef.current = null;
   }, [
-    text, attachments, cfg, profileMissing, noModels, working, activeProjectId, queueEdit, queueEditSaving,
+    text, attachments, cfg, profileMissing, noModels, runtimeUnavailable, working, activeProjectId, queueEdit, queueEditSaving,
     session?.model, session?.status, session?.runtimeControl, preferredModel,
     sessionDefaults.defaultThinking, chatModels, creatingSession, newSessionTarget,
     newSessionAutoApprove, newSessionGoal, newSessionIntent,
@@ -1586,7 +1592,10 @@ export default function Composer({
       )}
       {showModelWarning && (
         <div className="composer-note composer-runtime-unavailable" role="status">
-          <span>{tr("composer.noModelsAvailableCheckThatTheBackend")}</span>
+          <span>
+            {runtimeUnavailable?.message
+              ?? tr("composer.noModelsAvailableCheckThatTheBackend")}
+          </span>
           <Button size="sm" onClick={retryModelConnection}>{tr("sidebar.reconnect")}</Button>
         </div>
       )}

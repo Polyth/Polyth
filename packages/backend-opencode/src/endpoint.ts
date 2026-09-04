@@ -20,6 +20,7 @@ import type {
   RuntimeEndpointLease,
   RuntimeLocation,
 } from "@polyth/contracts";
+import { openCodeChildSearchPath } from "./binaryDiscovery.ts";
 import {
   prepareBrowserToolEnvironment,
   type OpenCodeBrowserToolConfig,
@@ -466,6 +467,11 @@ const startLocalChildOnce = async (
   runtime: PreparedOpenCodeRuntime,
 ): Promise<StartedLocalChild> => {
   let env = { ...process.env };
+  // OpenCode shells out constantly (git, ripgrep, LSP servers, bun/node for
+  // plugins). A server launched from a desktop/systemd/launchd context inherits
+  // the same truncated PATH that hid the CLI itself, so the child would start
+  // and then fail every tool call. Hand it the widened PATH discovery built.
+  env.PATH = await openCodeChildSearchPath(runtime.binary.executablePath);
   const configDir = options.configDir ?? options.dataDir;
   if (configDir) env.OPENCODE_CONFIG_DIR = configDir;
   env.OPENCODE_DB = runtime.dbPath;
@@ -594,6 +600,10 @@ export const createOwnedLocalEndpointLease = async (
         bin: options.bin,
         binarySource: options.binarySource,
       });
+      if (binary.diagnostic) {
+        (options.onRuntimeDiagnostic
+          ?? ((message: string) => console.warn(`[polyth] ${message}`)))(binary.diagnostic);
+      }
       preparedRuntime = await prepareOpenCodeRuntime({
         runtimeDir: options.runtimeDir!,
         projectId: options.projectId!,

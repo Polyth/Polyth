@@ -668,7 +668,15 @@ const configureUpdater = (): void => {
 const startServer = async (): Promise<void> => {
   const binary = opencodePath();
   const webDist = webDistPath();
-  if (!existsSync(binary)) throw new Error(`Bundled OpenCode ${__POLYTH_OPENCODE_VERSION__} is missing at ${binary}`);
+  // A missing bundle used to be fatal, so a dev build that skipped the OpenCode
+  // download — or a pruned/quarantined resources dir — killed the whole app for
+  // a user whose own `opencode` works fine. Boot without the bundle instead and
+  // let the server discover an installed CLI; only a total miss fails, and it
+  // fails with the list of places it looked.
+  const bundledOpenCode = existsSync(binary);
+  if (!bundledOpenCode) {
+    log(`Bundled OpenCode ${__POLYTH_OPENCODE_VERSION__} is missing at ${binary}; looking for an installed OpenCode instead`);
+  }
   if (!existsSync(join(webDist, "index.html"))) throw new Error(`Polyth web bundle is missing at ${webDist}`);
   const port = await reservePort();
   baseUrl = `http://127.0.0.1:${port}`;
@@ -683,10 +691,10 @@ const startServer = async (): Promise<void> => {
     webDist,
     webPackagesDir: webPackagesPath(),
     serverPackages: desktopServerPackages,
-    opencode: { bin: binary, binarySource: "bundled" },
+    ...(bundledOpenCode ? { opencode: { bin: binary, binarySource: "bundled" as const } } : {}),
   });
   log(`Polyth server started at ${baseUrl}`);
-  log(`Bundled OpenCode ${__POLYTH_OPENCODE_VERSION__}: ${binary}`);
+  if (bundledOpenCode) log(`Bundled OpenCode ${__POLYTH_OPENCODE_VERSION__}: ${binary}`);
 };
 
 const showFatalStartupError = (error: unknown): void => {

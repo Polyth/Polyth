@@ -4,6 +4,7 @@ import type {
   SessionEvent,
   UiSlot,
   WidgetKind,
+  PanelItemSize,
 } from "@polyth/contracts";
 
 export type Unregister = () => void;
@@ -38,6 +39,7 @@ export interface WidgetSize {
 export type WidgetAudience = "simple" | "standard" | "power";
 export type WidgetScope = "global" | "workspace" | "plugin";
 export type WidgetZone = "header" | "left" | "main" | "right" | "bottom" | "floating";
+export type { PanelItemSize } from "@polyth/contracts";
 
 export interface WidgetDefinition {
   id: string;
@@ -64,6 +66,10 @@ export interface WidgetDefinition {
   duplicatable?: boolean;
   floating?: boolean;
   recommended?: boolean;
+  /** Semantic sizes supported when this widget is rendered in Workspace panel chrome. */
+  panelSizes?: readonly PanelItemSize[];
+  panelDefaultSize?: PanelItemSize;
+  panelTitle?: string;
   settingsSchema?: Readonly<Record<string, unknown>>;
   render: (context: WidgetRenderContext) => ReactNode;
   settingsRender?: (context: WidgetSettingsContext) => ReactNode;
