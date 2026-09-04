@@ -42,10 +42,10 @@ test("setPolythLinkNative flips nativeLinkAvailable", async () => {
   setPolythLinkNative({
     parsePairingTicket: async () => ({ hostLabel: "x", hostFingerprint: "abcd", expiresAt: "1" }),
     beginPairing: async () => ({ attemptId: "a", state: "created" }),
-    confirmPairing: async () => ({ origin: "http://127.0.0.1:9", connectionId: "c1" }),
+    confirmPairing: async () => ({ origin: "http://127.0.0.1:9", bootstrapUrl: "http://127.0.0.1:9/__polyth_boot/abc", connectionId: "c1" }),
     cancelPairing: async () => {},
     listConnections: async () => [],
-    connect: async () => ({ origin: "http://127.0.0.1:9", connectionId: "c1" }),
+    connect: async () => ({ origin: "http://127.0.0.1:9", bootstrapUrl: "http://127.0.0.1:9/__polyth_boot/abc", connectionId: "c1" }),
     disconnect: async () => {},
     forgetConnection: async () => {},
     getStatus: async () => ({ state: "connected" }),
@@ -53,4 +53,24 @@ test("setPolythLinkNative flips nativeLinkAvailable", async () => {
   assert.equal(nativeLinkAvailable(), true);
   setPolythLinkNative(previous);
   assert.equal(nativeLinkAvailable(), false);
+});
+
+test("ProxyLaunch keeps origin and bootstrapUrl separate", () => {
+  const launched = {
+    origin: "http://127.0.0.1:9",
+    bootstrapUrl: "http://127.0.0.1:9/__polyth_boot/abc",
+    connectionId: "c1",
+  };
+  assert.equal(launched.origin.endsWith("/"), false);
+  assert.equal(launched.bootstrapUrl.includes("/__polyth_boot/"), true);
+  assert.equal(new URL(launched.bootstrapUrl).origin, launched.origin);
+  assert.notEqual(`${launched.bootstrapUrl}/`, launched.bootstrapUrl);
+});
+
+test("pending pairing tickets stay in process memory", () => {
+  clearPendingPairingLink();
+  rememberPendingPairingLink("polyth://pair?v=1&t=abc");
+  assert.equal(peekPendingPairingLink(), "polyth://pair?v=1&t=abc");
+  clearPendingPairingLink();
+  assert.equal(peekPendingPairingLink(), undefined);
 });

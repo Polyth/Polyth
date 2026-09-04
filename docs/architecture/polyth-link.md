@@ -14,16 +14,19 @@ or unauthenticated share link.
    HMAC-SHA-256 bound to the handshake transcript after the Iroh
    connection exists.
 3. **Device grants.** Persistent trust is SQLite in
-   `<dataDir>/tunnel/tunnel.db`. Revoke is immediate.
+   `<dataDir>/tunnel/tunnel.db`. Revoke is targeted per `deviceId` and awaited
+   through host RPC; a host failure returns HTTP 503 `state: "partial"`.
 4. **Ingress.** Tunnel requests do not enter the public HTTP listener.
    They use a unix-domain internal listener plus a per-boot secret. Loopback
    is not an identity. `RequestIngress.kind = "polyth-link"` is built by
-   the server, never by headers.
+   the server, never by headers. Canonical `/ws`, terminal, and package WS
+   channels attach to this ingress as well as the public listener.
 5. **Remote policy.** Paired devices are default-deny. Packages declare
    `remoteAccess` manifests. Unknown routes are rejected before handlers.
-6. **Mobile proxy.** The WebView loads `http://127.0.0.1:<port>` after a
-   single-use bootstrap nonce sets an HttpOnly session cookie. Private
-   keys never enter JavaScript.
+6. **Mobile proxy.** When a native adapter exists, the WebView loads a
+   one-time `bootstrapUrl` on loopback. `origin` is the bare loopback origin.
+   Private keys never enter JavaScript. Production Android/iOS native pairing
+   is not included yet.
 
 ## Packages
 
@@ -32,7 +35,7 @@ or unauthenticated share link.
 - `@polyth/tunnel-relay` — operations around upstream `iroh-relay = 1.1.0`.
 - `crates/polyth-link-core` — protocol owner.
 - `crates/polyth-link-host` — Node/desktop host process.
-- `crates/polyth-link-uniffi` — thin mobile FFI.
+- `crates/polyth-link-uniffi` — ticket-parse FFI only, not a native pairing core.
 
 ## Canonical API
 

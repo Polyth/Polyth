@@ -1,27 +1,30 @@
 # Polyth Link relay operations
 
-Polyth Link v1 uses upstream `iroh-relay = 1.1.0`. Do not run a custom
-WebSocket application relay.
+The `polyth-link-relay` binary is an **experimental** packaging wrapper around
+upstream `iroh-relay = 1.1.0`. It is not a production TLS/443 product and it
+does not reconnect paired devices.
+
+Default listen address is `127.0.0.1:3340`. `metrics_bind` is rejected until
+it is implemented. Do not run this as a custom WebSocket application relay.
 
 ## What the relay sees
 
 Endpoint identifiers, timing, packet sizes, and connection duration. It
 cannot read pairing secrets, HTTP bodies, grants, or session text.
 
-## Deployment
+## Current product scope
 
-- DNS A/AAAA for the relay hostname
-- TLS certificate for that name
-- Listen on 443 (or 8443 behind a TCP passthrough)
-- Reverse proxies must not terminate QUIC/HTTP upgrade in a way that
-  rewrites the Iroh handshake. TCP passthrough is required.
-- Health: process liveness plus TLS accept. No application token check.
-- systemd: run `iroh-relay` 1.1.0 with a config that binds 443
-- Backup: none for application secrets. Relay has no Polyth keys.
-- Upgrade: pin client, host, and relay to the same supported Iroh version.
-  There is no silent fallback to an older relay protocol.
+Polyth Link pairing in this build is **direct-preferred** only. Relay-only
+and air-gapped are protocol values in the core library; they are not product
+controls, and pairing creation rejects them.
 
-## Managed mode
+`relayConfigured` / `relayUrls` on host status are taken from the running
+Iroh endpoint when bound. They are not hard-coded diagnostics.
 
-Hosts set `relay-only`. Direct addresses are not placed on the QR.
-Authorization still happens on the Polyth host.
+## Experimental local run
+
+- Bind `127.0.0.1:3340` (override with `POLYTH_LINK_RELAY_BIND` or a JSON
+  `{ "http_bind": "127.0.0.1:3340" }` file)
+- No production certificate/key handling
+- Health is process liveness of this experimental binary
+- Pin client, host, and relay to Iroh 1.1.0 if you experiment with relays

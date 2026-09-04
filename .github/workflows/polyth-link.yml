@@ -12,7 +12,15 @@ on:
       - "packages/tunnel-relay/**"
       - "packages/server/**"
       - "packages/contracts/**"
+      - "packages/plugins/**"
+      - "packages/terminal/**"
       - "apps/mobile/**"
+      - "apps/desktop/**"
+      - "docs/architecture/polyth-link.md"
+      - "docs/protocols/polyth-link-v1.md"
+      - "docs/security/polyth-link-threat-model.md"
+      - "docs/mobile/polyth-link.md"
+      - "docs/operations/polyth-link-relay.md"
       - ".github/workflows/polyth-link.yml"
   push:
     paths:
@@ -25,7 +33,15 @@ on:
       - "packages/tunnel-relay/**"
       - "packages/server/**"
       - "packages/contracts/**"
+      - "packages/plugins/**"
+      - "packages/terminal/**"
       - "apps/mobile/**"
+      - "apps/desktop/**"
+      - "docs/architecture/polyth-link.md"
+      - "docs/protocols/polyth-link-v1.md"
+      - "docs/security/polyth-link-threat-model.md"
+      - "docs/mobile/polyth-link.md"
+      - "docs/operations/polyth-link-relay.md"
       - ".github/workflows/polyth-link.yml"
 
 jobs:
@@ -37,19 +53,29 @@ jobs:
         with:
           components: rustfmt, clippy
       - run: cargo fmt --all -- --check
-      - run: cargo clippy -p polyth-link-core -- -D warnings
-      - run: cargo test -p polyth-link-core --tests
-      - run: cargo test -p polyth-link-host --tests
-      - run: cargo build -p polyth-link-host -p polyth-link-client
-      - run: cargo build -p polyth-link-relay
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo test --workspace --all-targets
+      - run: cargo build --release -p polyth-link-host -p polyth-link-client -p polyth-link-relay
 
   node:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
       - uses: actions/setup-node@v4
         with:
           node-version: 22.22.0
           cache: npm
       - run: npm install
-      - run: node --experimental-strip-types --test packages/server/test/authIngress.test.ts packages/server/test/httpTunnel.test.ts packages/server/test/remotePolicyCoverage.test.ts packages/tunnel/test/*.test.ts packages/pairing-qr/test/*.test.ts packages/tunnel-relay/test/*.test.ts apps/mobile/test/runtime.test.ts
+      - run: cargo build -p polyth-link-core --bin polyth-link-ws-echo
+      - run: node --experimental-strip-types --test packages/contracts/test/remoteAccess.test.ts packages/server/test/localAdmin.test.ts packages/server/test/remotePolicy.test.ts packages/server/test/remotePolicyHttp.test.ts packages/server/test/authIngress.test.ts packages/server/test/httpTunnel.test.ts packages/server/test/remotePolicyCoverage.test.ts packages/server/test/wsRemoteAuth.test.ts packages/terminal/test/wsCapability.test.ts packages/tunnel/test/*.test.ts packages/pairing-qr/test/*.test.ts packages/tunnel-relay/test/*.test.ts apps/mobile/test/runtime.test.ts apps/mobile/test/connectionUi.test.ts
+      - run: npm test
+      - run: npm run build
+      - run: npx tsc --noEmit -p packages/contracts
+      - run: npx tsc --noEmit -p packages/plugins
+      - run: npx tsc --noEmit -p packages/server
+      - run: npx tsc --noEmit -p packages/tunnel
+      - run: npx tsc --noEmit -p packages/terminal
+      - run: npx tsc --noEmit -p packages/tunnel-relay
+      - run: npx tsc --noEmit -p apps/mobile
+      - run: npx tsc --noEmit -p apps/desktop

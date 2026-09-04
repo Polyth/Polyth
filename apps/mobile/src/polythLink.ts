@@ -24,6 +24,7 @@ export interface ConnectionMetadata {
 
 export interface ProxyLaunch {
   origin: string;
+  bootstrapUrl: string;
   connectionId: string;
 }
 

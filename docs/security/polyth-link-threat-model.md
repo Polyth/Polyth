@@ -40,9 +40,9 @@ Format: asset · attacker · entry · impact · mitigation · test · remaining 
 
 | Threat | Asset | Attacker | Entry | Impact | Mitigation | Test | Remaining limitation |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| XSS / JS dep | Device key | WebView | Renderer | Key theft | Keys never in JS/Preferences | native API surface | Renderer still sees session UI |
+| XSS / JS dep | Device key | WebView | Renderer | Key theft | Keys never in JS; tickets stay in memory this session | native API surface | Production native core is not shipped |
 | Local app on proxy | API | Other app | localhost | Session steal | 256-bit bootstrap nonce + cookie | `local_proxy` tests | Same-user local attackers |
-| Backup clone | Device key | Cloud backup | Restore | Identity copy | OS secure store; no Auto Backup for keys | documented | Hardware non-export not claimed |
+| Backup clone | Device key | Cloud backup | Restore | Identity copy | Not implemented in this build | documented gap | Hardware non-export not claimed |
 
 ## API / mutations
 
@@ -51,4 +51,4 @@ Format: asset · attacker · entry · impact · mitigation · test · remaining 
 | SSRF / CONNECT | LAN | Paired device | Path | Other services | Fixed target, relative paths only | `absolute_urls_are_denied` | Canonical Polyth APIs remain |
 | Grant bypass | Routes | Paired device | Unknown path | Extra API | Default deny + manifests | remote policy coverage | New packages must declare policy |
 | Blind POST retry | Mutations | Transport | Drop | Duplicate | Mutations return outcome-unknown | protocol retry helpers | UI must reconcile |
-| Stale grants | Terminal | Revoked cap | Open WS | Continued use | Grant revision + connection close | revoke closes map | In-flight streams need host reset |
+| Stale grants | Terminal | Revoked cap | Open WS | Continued use | Grant revision + per-message revalidation + targeted connection close | ws capability tests | In-flight HTTP streams still need host reset |

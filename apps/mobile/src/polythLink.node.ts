@@ -70,8 +70,11 @@ export async function attachLinkClientBinary(binary: string, dataDir: string, so
     },
     async confirmPairing(attemptId) {
       const result = await request("pairing.confirm", { attemptId });
+      const origin = String(result.origin ?? "");
+      const bootstrapUrl = String(result.bootstrapUrl ?? result.bootstrap ?? "");
       return {
-        origin: String(result.bootstrap ?? result.origin ?? ""),
+        origin,
+        bootstrapUrl,
         connectionId: String(result.connectionId ?? ""),
       };
     },
@@ -82,7 +85,11 @@ export async function attachLinkClientBinary(binary: string, dataDir: string, so
     },
     async connect(connectionId) {
       const result = await request("connect", { connectionId });
-      return { origin: String(result.bootstrap ?? result.origin ?? ""), connectionId: String(result.connectionId ?? connectionId) };
+      return {
+        origin: String(result.origin ?? ""),
+        bootstrapUrl: String(result.bootstrapUrl ?? result.bootstrap ?? ""),
+        connectionId: String(result.connectionId ?? connectionId),
+      };
     },
     async disconnect(connectionId) { await request("disconnect", { connectionId }); },
     async forgetConnection(connectionId) { await request("forget", { connectionId }); },

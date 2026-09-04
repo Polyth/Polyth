@@ -25,6 +25,7 @@ import secureSafe from "../../../packages/secure-safe/src/serverEntry.ts";
 import ssh from "../../../packages/ssh/src/serverEntry.ts";
 import taskTrackers from "../../../packages/task-trackers/src/serverEntry.ts";
 import terminal from "../../../packages/terminal/src/serverEntry.ts";
+import tunnel from "../../../packages/tunnel/src/serverEntry.ts";
 import usage from "../../../packages/usage/src/serverEntry.ts";
 import walkthrough from "../../../packages/walkthrough/src/serverEntry.ts";
 import workflow from "../../../packages/workflow/src/serverEntry.ts";
@@ -59,6 +60,7 @@ export const desktopServerPackages = [
   entry("ssh", { name: "SSH Remotes", description: "SSH connections and remote projects whose agent runs on the host.", core: false, enabled: true, settingsGroup: "Engineering", icon: "🖧", hasSettings: true }, ssh),
   entry("task-trackers", { name: "Jira & Trello", description: "Jira and Trello boards, tasks, agent handoffs, and status updates.", core: false, enabled: true, settingsGroup: "Engineering", icon: "▦", hasSettings: false }, taskTrackers),
   entry("terminal", { name: "Terminal", description: "Project-scoped terminal sessions.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⌨", hasSettings: false }, terminal),
+  entry("tunnel", { name: "Polyth Link", description: "QR pairing, authenticated remote access, and device grants.", core: true, enabled: true, hasSettings: true, settingsGroup: "System", icon: "🔗" }, tunnel),
   entry("usage", { name: "Usage", description: "Model quota and usage reporting.", core: false, enabled: true, settingsGroup: "Workspace", icon: "📊", hasSettings: true }, usage),
   entry("walkthrough", { name: "Walkthrough", description: "Generate and review code walkthroughs.", core: false, enabled: true, settingsGroup: "Engineering", icon: "→", hasSettings: false }, walkthrough),
   entry("workflow", { name: "Workflows", description: "Orchestrate multi-agent DAG pipelines.", core: false, enabled: true, settingsGroup: "Engineering", icon: "◇", hasSettings: false }, workflow),

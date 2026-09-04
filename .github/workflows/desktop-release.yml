@@ -61,6 +61,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: dtolnay/rust-toolchain@1.91.0
+        if: matrix.platform != 'win32' && matrix.arch != 'universal'
+
+      - uses: dtolnay/rust-toolchain@1.91.0
+        if: matrix.arch == 'universal'
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22.22.0
@@ -112,6 +120,8 @@ jobs:
 
       - name: Build web and desktop bundles
         run: npm run build:desktop
+        env:
+          POLYTH_MAC_UNIVERSAL: ${{ matrix.arch == 'universal' && '1' || '' }}
 
       - name: Download pinned OpenCode
         if: matrix.arch != 'universal'

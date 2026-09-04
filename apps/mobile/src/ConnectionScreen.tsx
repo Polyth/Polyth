@@ -46,10 +46,15 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
   const [recent, setRecent] = useState(launch.recent);
   const [error, setError] = useState(launch.error ?? "");
   const [busy, setBusy] = useState(false);
-  const [developer, setDeveloper] = useState(!nativeAvailable);
+  const [scanning, setScanning] = useState(false);
+  const [cameraPermission, setCameraPermission] = useState<"unknown" | "prompt" | "granted" | "denied">("unknown");
+  const [developer, setDeveloper] = useState(false);
 
   useEffect(() => {
     void SplashScreen.hide();
+    return () => {
+      (scanQr as { cleanup?: () => void }).cleanup?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -91,39 +96,58 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
       return;
     }
     let stream: MediaStream | undefined;
+    let cancelled = false;
     const video = document.createElement("video");
     video.setAttribute("playsinline", "true");
     video.setAttribute("aria-label", "Camera preview for pairing QR");
     video.muted = true;
+    video.className = "mobile-connect-scan-video";
+    const mount = document.getElementById("mobile-connect-scan-preview");
+    if (!mount) {
+      setError("Camera preview is unavailable.");
+      return;
+    }
+    mount.replaceChildren(video);
+    setScanning(true);
+    const cleanup = () => {
+      cancelled = true;
+      stream?.getTracks().forEach((item) => item.stop());
+      video.remove();
+      mount.replaceChildren();
+      setScanning(false);
+    };
+    (scanQr as { cleanup?: () => void }).cleanup = cleanup;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
         audio: false,
       });
+      setCameraPermission("granted");
       video.srcObject = stream;
       await video.play();
       const detector = new Detector({ formats: ["qr_code"] });
       const started = Date.now();
-      while (Date.now() - started < 20_000) {
+      while (!cancelled && Date.now() - started < 20_000) {
         const codes = await detector.detect(video);
         const raw = codes.find((code) => code.rawValue && isPairingLink(code.rawValue))?.rawValue;
         if (raw) {
           rememberPendingPairingLink(raw);
           setTicket(raw);
+          cleanup();
           await startPair(raw);
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, 250));
       }
-      setError("No pairing QR was found. Paste the pairing code instead.");
+      if (!cancelled) setError("No pairing QR was found. Paste the pairing code instead.");
     } catch (cause) {
       const denied = cause instanceof Error && /denied|permission|notallowed/i.test(cause.message);
+      setCameraPermission(denied ? "denied" : "prompt");
       setError(denied
         ? "Camera permission is required to scan. You can also paste the pairing code."
         : "Camera scanning failed. Paste the pairing code instead.");
     } finally {
-      stream?.getTracks().forEach((item) => item.stop());
-      video.remove();
+      cleanup();
     }
   };
 
@@ -162,7 +186,11 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
     try {
       const launched = await polythLink().confirmPairing(attemptId);
       setStage("Connected");
-      location.replace(`${launched.origin}${launch.deepLinkPath ?? "/"}`);
+      const target = new URL(launched.bootstrapUrl);
+      if (launch.deepLinkPath && launch.deepLinkPath !== "/") {
+        target.searchParams.set("next", launch.deepLinkPath);
+      }
+      location.replace(target.toString());
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -192,16 +220,34 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
           <h1 id="mobile-connect-title">{stage}</h1>
           {ui.showUnavailableBanner ? (
             <p>
-              This build does not include the native Polyth Link core, so QR pairing cannot run.
-              You can still use an insecure development URL below. The pending pairing code stays
-              saved until a native build is installed.
+              This build does not include a native Polyth Link adapter, so QR pairing cannot run.
+              You can still use an insecure development URL below. A pairing code kept in memory
+              can be retried during this app session; after expiration or restart you will need a
+              new QR.
             </p>
           ) : (
-            <p>Scan a QR from Settings → Polyth Link. Compare the four words, then allow the device on your computer.</p>
+            <p>
+              Scan a QR from Settings → Polyth Link. Compare the four words, then allow the device
+              on your computer. The current pairing code stays in memory for this app session only.
+              After it expires or the app restarts, scan a new QR.
+            </p>
           )}
         </div>
 
         {ui.showSecurePairing && !phrase && (
+          <>
+            <div className="mobile-connect-scan" hidden={!scanning}>
+              <div id="mobile-connect-scan-preview" className="mobile-connect-scan-preview" />
+              <div className="mobile-connect-scan-frame" aria-hidden="true" />
+              {cameraPermission === "denied" && (
+                <p className="mobile-connect-message">Camera permission is denied.</p>
+              )}
+              <button type="button" className="mobile-connect-test" onClick={() => {
+                (scanQr as { cleanup?: () => void }).cleanup?.();
+              }}>
+                Cancel scan
+              </button>
+            </div>
           <label className="mobile-connect-field">
             <span>Pairing code</span>
             <textarea
@@ -216,6 +262,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
               }}
             />
           </label>
+          </>
         )}
 
         {!ui.showSecurePairing && ui.preservePendingPair && (

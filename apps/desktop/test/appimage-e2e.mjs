@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:net";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { createServer, createConnection } from "node:net";
+import { mkdtemp, mkdir, readFile, writeFile, readdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
@@ -46,6 +47,56 @@ const run = (file, args, options = {}) => new Promise((resolveRun, reject) => {
 
 const extracted = await run(appImage, ["--appimage-extract"], { cwd: work });
 assert.equal(extracted.code, 0, `AppImage extraction failed:\n${extracted.stderr}`);
+const findHostBinary = async (root) => {
+  const entries = await readdir(root, { withFileTypes: true });
+  for (const entry of entries) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) {
+      const nested = await findHostBinary(path);
+      if (nested) return nested;
+    } else if (entry.name === "polyth-link-host") {
+      return path;
+    }
+  }
+  return null;
+};
+const packagedHost = await findHostBinary(join(work, "squashfs-root"));
+assert.ok(packagedHost, "packaged AppImage is missing polyth-link-host");
+const hostData = join(work, "link-host");
+const hostSocket = join(work, "link-host.sock");
+await mkdir(hostData, { recursive: true });
+const hostProc = spawn(packagedHost, ["serve", hostData, hostSocket], { stdio: ["ignore", "pipe", "pipe"] });
+const hostReady = Date.now();
+while (!existsSync(hostSocket)) {
+  if (Date.now() - hostReady > 12_000) {
+    hostProc.kill("SIGKILL");
+    throw new Error("packaged polyth-link-host did not create a control socket");
+  }
+  await delay(50);
+}
+const identityRpc = await new Promise((resolve, reject) => {
+  const socket = createConnection(hostSocket);
+  socket.once("error", reject);
+  socket.once("connect", () => {
+    socket.write(`${JSON.stringify({ id: 1, method: "identity.status", params: {} })}\n`);
+  });
+  let buf = "";
+  socket.on("data", (chunk) => {
+    buf += String(chunk);
+    if (!buf.includes("\n")) return;
+    try {
+      resolve(JSON.parse(buf.slice(0, buf.indexOf("\n"))));
+    } catch (error) {
+      reject(error);
+    } finally {
+      socket.end();
+    }
+  });
+});
+assert.equal(identityRpc.id, 1);
+assert.equal(typeof identityRpc.result?.fingerprint, "string");
+assert.ok(identityRpc.result.fingerprint.length >= 8);
+hostProc.kill("SIGTERM");
 const appRun = join(work, "squashfs-root", "AppRun");
 const cdpPort = await freePort();
 const appOutput = [];

@@ -37,9 +37,9 @@ QUIC streams, not a custom mux over one TCP socket:
 
 | Kind byte | Use |
 | --- | --- |
-| 0 | Control |
-| 1 | One HTTP request |
-| 2 | One WebSocket |
+| 1 | Control |
+| 2 | One HTTP request |
+| 3 | One WebSocket |
 
 HTTP/WS heads are `u32 BE length || CBOR`. No 0-RTT application data.
 Mutations are not retried after an ambiguous disconnect
@@ -49,5 +49,7 @@ the stream was not admitted.
 ## Identities
 
 Host secret: `<dataDir>/tunnel/identity` (mode 0600, fail closed).
-Mobile: one device keypair per host, native secure storage only.
 Persistent bearer tokens are not used.
+- Mobile: UniFFI currently parses pairing tickets only. Production Android/iOS
+  native pairing, Keychain/Keystore storage, native reconnect, and local proxy
+  restore are not included yet.
