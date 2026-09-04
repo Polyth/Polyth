@@ -76,6 +76,7 @@ const BUILTIN_ITEMS: SettingsSearchItem[] = [
   { id: "appearance.menuItems", pageId: "appearance", label: tr("settings.registry.menuItems"), description: tr("settings.registry.optionalComposerAndWorkspaceActions"), keywords: ["technical", "dictation", "quick actions", "toolbar"], focusTarget: "appearance.menuItems" },
   { id: "chat.width", pageId: "chat", label: tr("settings.registry.conversationWidth"), keywords: ["wide", "layout"], focusTarget: "chat.width" },
   { id: "chat.followUp", pageId: "chat", label: tr("settings.registry.whileTheAgentIsWorking"), description: tr("settings.registry.steerQueueOrInterrupt"), keywords: ["delivery", "steer", "queue", "interrupt"], focusTarget: "chat.followUp" },
+  { id: "chat.largePaste", pageId: "chat", label: tr("settings.registry.largePaste"), description: tr("settings.pages.largePasteHint"), keywords: ["paste", "clipboard", "attach", "inline", "large"], focusTarget: "chat.largePaste" },
   { id: "chat.thinking", pageId: "chat", label: tr("settings.registry.thinkingBlocks"), keywords: ["reasoning", "collapse"], focusTarget: "chat.thinking" },
   { id: "chat.messageActions", pageId: "chat", label: tr("settings.registry.messageActions"), description: tr("settings.registry.showOrHideCopyRevertAndFork"), keywords: ["hover", "quick actions", "buttons"], focusTarget: "chat.messageActions" },
   { id: "chat.headerMetrics", pageId: "chat", label: "Chat metrics", description: "Choose metrics shown in the chat header", keywords: ["tokens", "duration", "cost", "header"], focusTarget: "chat.headerMetrics" },

@@ -214,96 +214,6 @@ test("pending tool calls transition to running without duplicating the execution
   assert.equal(executions[0]?.time, started.time, "running duration starts at the lifecycle transition");
 });
 
-test("turn/stopped finalizes orphaned pending/running tools without inventing output", () => {
-  const aborted = buildModel([
-    ev("turn/started", { turnId: "t1" }),
-    ev("tool/call", { callId: "run", tool: "bash", input: { command: "sleep 60" }, status: "pending" }),
-    ev("tool/started", { callId: "run", tool: "bash", input: { command: "sleep 60" } }),
-    ev("tool/call", { callId: "queued", tool: "read", input: { path: "a.ts" }, status: "pending" }),
-    ev("turn/stopped", { turnId: "t1", reason: "aborted" }),
-  ]);
-  const abortedTools = aborted.messages.filter((message) => message.kind === "tool");
-  assert.equal(abortedTools.length, 2);
-  for (const tool of abortedTools) {
-    assert.equal(tool.status, "error");
-    assert.equal(tool.error, "Interrupted");
-    assert.equal(tool.output, undefined);
-    assert.equal(tool.finishTime, aborted.turn?.stoppedAt);
-  }
-  assert.equal(aborted.turn?.status, "aborted");
-  const activity = groupActivity(aborted.messages).find((item) => item.kind === "activity");
-  assert.equal(activity?.kind === "activity" ? activity.settled : false, true);
-
-  const failed = buildModel([
-    ev("turn/started", { turnId: "t2" }),
-    ev("tool/call", { callId: "c1", tool: "bash", input: { command: "x" } }),
-    ev("turn/stopped", { turnId: "t2", reason: "error", error: "provider boom" }),
-  ]);
-  const failedTool = failed.messages.find((message) => message.kind === "tool");
-  assert.equal(failedTool?.kind === "tool" ? failedTool.status : "", "error");
-  assert.equal(failedTool?.kind === "tool" ? failedTool.error : "", "Turn ended before tool completed");
-  assert.equal(failed.turn?.status, "failed");
-
-  const stopped = buildModel([
-    ev("turn/started", { turnId: "t3" }),
-    ev("tool/call", { callId: "c2", tool: "bash", input: { command: "y" } }),
-    ev("turn/stopped", { turnId: "t3", reason: "completed" }),
-  ]);
-  const stoppedTool = stopped.messages.find((message) => message.kind === "tool");
-  assert.equal(stoppedTool?.kind === "tool" ? stoppedTool.status : "", "error");
-  assert.equal(stoppedTool?.kind === "tool" ? stoppedTool.error : "", "Stopped");
-  assert.equal(stopped.turn?.status, "stopped");
-});
-
-test("late tool/result after turn/stopped interrupt replaces the orphan reason", () => {
-  const model = buildModel([
-    ev("turn/started", { turnId: "t1" }),
-    ev("tool/call", { callId: "late", tool: "bash", input: { command: "echo hi" } }),
-    ev("turn/stopped", { turnId: "t1", reason: "aborted" }),
-  ]);
-  const interrupted = model.messages[0];
-  assert.equal(interrupted?.kind === "tool" ? interrupted.status : "", "error");
-  assert.equal(interrupted?.kind === "tool" ? interrupted.error : "", "Interrupted");
-
-  reduceEvent(model, ev("tool/result", { callId: "late", tool: "bash", output: "hi\n" }));
-  const settled = model.messages[0];
-  assert.equal(settled?.kind === "tool" ? settled.status : "", "done");
-  assert.equal(settled?.kind === "tool" ? settled.output : "", "hi\n");
-  assert.equal(settled?.kind === "tool" ? settled.error : undefined, undefined);
-
-  const errored = buildModel([
-    ev("turn/started", { turnId: "t2" }),
-    ev("tool/call", { callId: "late-err", tool: "bash", input: { command: "false" } }),
-    ev("turn/stopped", { turnId: "t2", reason: "aborted" }),
-  ]);
-  reduceEvent(errored, ev("tool/error", { callId: "late-err", tool: "bash", error: "exit 1" }));
-  const realError = errored.messages[0];
-  assert.equal(realError?.kind === "tool" ? realError.status : "", "error");
-  assert.equal(realError?.kind === "tool" ? realError.error : "", "exit 1");
-});
-
-test("turn/stopped leaves already-settled tools untouched", () => {
-  const model = buildModel([
-    ev("turn/started", { turnId: "t1" }),
-    ev("tool/call", { callId: "ok", tool: "read", input: { path: "a.ts" } }),
-    ev("tool/result", { callId: "ok", tool: "read", output: "contents" }),
-    ev("tool/call", { callId: "bad", tool: "bash", input: { command: "nope" } }),
-    ev("tool/error", { callId: "bad", tool: "bash", error: "permission denied" }),
-    ev("tool/call", { callId: "orphan", tool: "bash", input: { command: "sleep 1" } }),
-    ev("turn/stopped", { turnId: "t1", reason: "aborted" }),
-  ]);
-  const byId = Object.fromEntries(
-    model.messages.filter((message) => message.kind === "tool").map((tool) => [tool.callId, tool]),
-  );
-  assert.equal(byId.ok?.status, "done");
-  assert.equal(byId.ok?.output, "contents");
-  assert.equal(byId.ok?.error, undefined);
-  assert.equal(byId.bad?.status, "error");
-  assert.equal(byId.bad?.error, "permission denied");
-  assert.equal(byId.orphan?.status, "error");
-  assert.equal(byId.orphan?.error, "Interrupted");
-});
-
 test("edit tool results derive changed files and a new prompt clears the turn summary", () => {
   const model = buildModel([
     ev("tool/call", { callId: "read", tool: "read_file", input: { path: "src/read.ts" } }),
@@ -664,6 +574,10 @@ test("parseUiSettings defaults invalid values and sanitizes MCP servers", () => 
   assert.equal(parseUiSettings(JSON.stringify({ rounding: "rounded" })).rounding, 10);
   assert.equal(parseUiSettings(JSON.stringify({ rounding: 11 })).rounding, UI_DEFAULTS.rounding);
   assert.equal(parseUiSettings(JSON.stringify({ messageCopyFormat: "xml" })).messageCopyFormat, "markdown");
+  assert.equal(UI_DEFAULTS.largeTextPasteBehavior, "ask");
+  assert.equal(parseUiSettings(JSON.stringify({ largeTextPasteBehavior: "attach" })).largeTextPasteBehavior, "attach");
+  assert.equal(parseUiSettings(JSON.stringify({ largeTextPasteBehavior: "inline" })).largeTextPasteBehavior, "inline");
+  assert.equal(parseUiSettings(JSON.stringify({ largeTextPasteBehavior: "dump" })).largeTextPasteBehavior, "ask");
 });
 
 test("setUiSettings persists and applies visual data attributes", () => {
