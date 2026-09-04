@@ -1,5 +1,5 @@
 // Lightweight edit-loop observer: structured signal only, never terminates a turn.
-import type { JsonObject, SessionEvent } from "@polyth/contracts";
+import type { EditLoopKind, JsonObject, SessionEvent } from "@polyth/contracts";
 
 /** How many recent tool terminal events (result/error) to inspect. */
 export const EDIT_LOOP_WINDOW = 20;
@@ -19,7 +19,7 @@ const TEST_BUILD_COMMAND =
 const PATH_KEY = /^(changedFiles|file|filePath|filename|files|path|paths|target)$/i;
 const PATCH_FILE = /^\*{3} (?:Add|Delete|Update) File:\s*(.+)$/gm;
 
-export type EditLoopKind = "repeated-edit-with-failing-checks" | "file-oscillation";
+export type { EditLoopKind };
 
 export interface ToolCallRecord {
   tool: string;
