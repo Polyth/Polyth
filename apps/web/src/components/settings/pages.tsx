@@ -31,6 +31,8 @@ import type {
   AgentDescriptor,
   AgentProfile,
   McpServerDto,
+  McpToolDto,
+  McpToolsResponseDto,
   McpTransport,
   ModelRef,
   SystemInfoDto,
@@ -1214,6 +1216,9 @@ export function McpPage() {
   const [importing, setImporting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [testMsg, setTestMsg] = useState<Record<string, string>>({});
+  const [toolsOpen, setToolsOpen] = useState<Record<string, boolean>>({});
+  const [toolsLoading, setToolsLoading] = useState<Record<string, boolean>>({});
+  const [toolsById, setToolsById] = useState<Record<string, McpToolsResponseDto>>({});
   const refresh = () => void api.mcpList().then(setServers);
   useEffect(() => { refresh(); }, []);
 
@@ -1221,6 +1226,20 @@ export function McpPage() {
     const r = await api.mcpProbe(s.id).catch((e) => ({ ok: false, message: e instanceof Error ? e.message : String(e) }));
     setTestMsg((m) => ({ ...m, [s.id]: `${r.ok ? "✓" : "✗"} ${r.message}` }));
     refresh();
+  };
+
+  const toggleTools = async (s: McpServerDto) => {
+    const open = !toolsOpen[s.id];
+    setToolsOpen((m) => ({ ...m, [s.id]: open }));
+    if (!open || toolsById[s.id]) return;
+    setToolsLoading((m) => ({ ...m, [s.id]: true }));
+    const result = await api.mcpTools(s.id).catch((e): McpToolsResponseDto => ({
+      tools: [],
+      source: "unavailable",
+      message: e instanceof Error ? e.message : String(e),
+    }));
+    setToolsById((m) => ({ ...m, [s.id]: result }));
+    setToolsLoading((m) => ({ ...m, [s.id]: false }));
   };
 
   return (
@@ -1233,32 +1252,43 @@ export function McpPage() {
         {servers.map((s) => editingId === s.id ? (
           <McpServerForm key={s.id} existing={s} onDone={() => { setEditingId(null); refresh(); }} />
         ) : (
-          <div key={s.id} className="set-row">
-            <div className="set-row-text">
-              <div className="set-row-label">{s.name}</div>
-              <div className="set-row-hint mono">
-                {s.transport.kind === "stdio"
-                  ? `${s.transport.command} ${s.transport.args.join(" ")}`.trim()
-                  : s.transport.url}
-                {s.transport.kind === "stdio" && s.transport.envKeys.length > 0 && (
-                  <span className="secret-redacted"> {tr("settings.pages.env")}{" "}{s.transport.envKeys.join(", ")}</span>
-                )}
-                {s.transport.kind === "http" && s.transport.headersSecretRefs.length > 0 && (
-                  <span className="secret-redacted"> {tr("settings.pages.headers")}{" "}{s.transport.headersSecretRefs.join(", ")}</span>
-                )}
+          <div key={s.id} className="mcp-server-block">
+            <div className="set-row">
+              <div className="set-row-text">
+                <div className="set-row-label">{s.name}</div>
+                <div className="set-row-hint mono">
+                  {s.transport.kind === "stdio"
+                    ? `${s.transport.command} ${s.transport.args.join(" ")}`.trim()
+                    : s.transport.url}
+                  {s.transport.kind === "stdio" && s.transport.envKeys.length > 0 && (
+                    <span className="secret-redacted"> {tr("settings.pages.env")}{" "}{s.transport.envKeys.join(", ")}</span>
+                  )}
+                  {s.transport.kind === "http" && s.transport.headersSecretRefs.length > 0 && (
+                    <span className="secret-redacted"> {tr("settings.pages.headers")}{" "}{s.transport.headersSecretRefs.join(", ")}</span>
+                  )}
+                </div>
+                {(testMsg[s.id] || s.lastError) && <div className="set-row-hint">{testMsg[s.id] ?? s.lastError}</div>}
               </div>
-              {(testMsg[s.id] || s.lastError) && <div className="set-row-hint">{testMsg[s.id] ?? s.lastError}</div>}
+              <div className="set-row-control">
+                <span className={`tag mcp-status ${s.status}`}>{s.status}</span>
+                <Button size="sm" title={tr("settings.pages.checkReachabilityAndStoreTheResult")} onClick={() => void probe(s)}>{tr("settings.pages.probe")}</Button>
+                <Button size="sm" onClick={() => void toggleTools(s)}>
+                  {toolsOpen[s.id] ? tr("settings.pages.hideTools") : tr("settings.pages.showTools")}
+                </Button>
+                <Button size="sm" onClick={() => setEditingId(s.id)}>{tr("common.edit")}</Button>
+                <Button size="sm" onClick={() => void api.mcpUpdate(s.id, { enabled: !s.enabled }, s.revision).then(refresh)}>
+                  {s.enabled ? tr("settings.pages.disable") : tr("settings.pages.enable")}
+                </Button>
+                <Button size="sm" variant="danger" onClick={() => { void confirmAlert(tr("settings.pages.removeMcpServerValue", { name: s.name }), { title: tr("settings.pages.removeMcpServer"), confirmLabel: tr("common.remove") }).then((ok) => { if (ok) void api.mcpRemove(s.id).then(refresh); }); }}>
+                  {tr("common.remove")}</Button>
+              </div>
             </div>
-            <div className="set-row-control">
-              <span className={`tag mcp-status ${s.status}`}>{s.status}</span>
-              <Button size="sm" title={tr("settings.pages.checkReachabilityAndStoreTheResult")} onClick={() => void probe(s)}>{tr("settings.pages.probe")}</Button>
-              <Button size="sm" onClick={() => setEditingId(s.id)}>{tr("common.edit")}</Button>
-              <Button size="sm" onClick={() => void api.mcpUpdate(s.id, { enabled: !s.enabled }, s.revision).then(refresh)}>
-                {s.enabled ? tr("settings.pages.disable") : tr("settings.pages.enable")}
-              </Button>
-              <Button size="sm" variant="danger" onClick={() => { void confirmAlert(tr("settings.pages.removeMcpServerValue", { name: s.name }), { title: tr("settings.pages.removeMcpServer"), confirmLabel: tr("common.remove") }).then((ok) => { if (ok) void api.mcpRemove(s.id).then(refresh); }); }}>
-                {tr("common.remove")}</Button>
-            </div>
+            {toolsOpen[s.id] && (
+              <McpToolsPanel
+                loading={!!toolsLoading[s.id]}
+                response={toolsById[s.id]}
+              />
+            )}
           </div>
         ))}
       </div>
@@ -1271,6 +1301,48 @@ export function McpPage() {
         </div>
       )}
     </>
+  );
+}
+
+function McpToolsPanel({
+  loading,
+  response,
+}: {
+  loading: boolean;
+  response?: McpToolsResponseDto;
+}) {
+  if (loading) {
+    return <div className="mcp-tools-panel muted" role="status">{tr("settings.pages.loadingTools")}</div>;
+  }
+  if (!response) return null;
+  if (response.source === "unavailable") {
+    return (
+      <div className="mcp-tools-panel" role="status">
+        <div className="set-row-hint">{tr("settings.pages.mcpToolsUnavailable")}{response.message ? `: ${response.message}` : ""}</div>
+      </div>
+    );
+  }
+  if (response.tools.length === 0) {
+    return (
+      <div className="mcp-tools-panel" role="status">
+        <div className="set-row-hint">{tr("settings.pages.mcpToolsEmpty")}</div>
+      </div>
+    );
+  }
+  return (
+    <ul className="mcp-tools-panel" aria-label={tr("settings.pages.showTools")}>
+      {response.tools.map((tool: McpToolDto) => (
+        <li key={`${tool.server}:${tool.name}`} className="mcp-tool-row">
+          <div className="mcp-tool-text">
+            <div className="mcp-tool-name mono">{tool.name}</div>
+            {tool.description && <div className="set-row-hint">{tool.description}</div>}
+          </div>
+          <span className={`tag mcp-tool-availability ${tool.available ? "available" : "unavailable"}`}>
+            {tool.available ? tr("settings.pages.mcpToolAvailable") : tr("settings.pages.mcpToolUnavailable")}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

@@ -13,7 +13,15 @@ import { access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { McpServerDto, McpStatus, McpTransport } from "@polyth/contracts";
+import type {
+  McpServerDto,
+  McpStatus,
+  McpToolsResponseDto,
+  McpTransport,
+} from "@polyth/contracts";
+
+/** Injected by the composition root; talks to OpenCode only via backend-opencode. */
+export type McpToolLister = (serverName: string) => Promise<McpToolsResponseDto>;
 
 export interface McpApplier {
   applyMcp(entries: Array<{
@@ -59,6 +67,8 @@ export interface McpConfigService {
   remove(id: string): Promise<boolean>;
   /** Reachability probe; never launches anything through a shell. */
   test(id: string): Promise<{ ok: boolean; message: string }>;
+  /** List tools for one stored server via the OpenCode runtime (soft-fail). */
+  listTools(id: string): Promise<McpToolsResponseDto>;
 }
 
 /** MCP entry fields Polyth owns; every other field of an imported entry is
@@ -176,7 +186,11 @@ function atomicWriteSync(path: string, data: string): void {
   }
 }
 
-export function createMcpConfigService(opts: { file: string; applier?: McpApplier }): McpConfigService {
+export function createMcpConfigService(opts: {
+  file: string;
+  applier?: McpApplier;
+  listTools?: McpToolLister;
+}): McpConfigService {
   mkdirSync(dirname(opts.file), { recursive: true });
   const secretsFile = opts.file.replace(/\.json$/, "-secrets.json");
 
@@ -354,6 +368,27 @@ export function createMcpConfigService(opts: { file: string; applier?: McpApplie
         const message = e instanceof Error ? e.message : String(e);
         set("error", message);
         return { ok: false, message };
+      }
+    },
+
+    async listTools(id: string): Promise<McpToolsResponseDto> {
+      const row = servers.find((s) => s.id === id);
+      if (!row) throw err("not-found", "mcp server not found");
+      if (!opts.listTools) {
+        return {
+          tools: [],
+          source: "unavailable",
+          message: "runtime tool listing is not configured",
+        };
+      }
+      try {
+        return await opts.listTools(row.name);
+      } catch (e) {
+        return {
+          tools: [],
+          source: "unavailable",
+          message: e instanceof Error ? e.message : String(e),
+        };
       }
     },
   };

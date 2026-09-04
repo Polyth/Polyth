@@ -160,8 +160,18 @@ export type {
 export {
   createRuntimeLifecycle,
   DEFAULT_RUNTIME_READY_PATHS,
+  resolveRuntimeEndpointHeaders,
   waitForRuntimeReady,
 } from "./runtime.ts";
+export {
+  displayToolName,
+  listMcpServerTools,
+  listMcpServerToolsFromEndpoint,
+  mapToolsForServer,
+  mcpToolId,
+  sanitizeMcpSegment,
+  toolIdBelongsToServer,
+} from "./mcpDiagnostics.ts";
 export {
   inspectOpenCodeEngine,
   OPEN_CODE_QUARANTINE_TTL_MS,

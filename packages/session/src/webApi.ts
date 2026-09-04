@@ -17,6 +17,7 @@ import type {
   InstalledPluginDto,
   JsonObject,
   McpServerDto,
+  McpToolsResponseDto,
   McpTransport,
   ModelDescriptor,
   ModelRef,
@@ -696,6 +697,12 @@ export const api = {
   mcpTest: (id: string) => jfetch<{ ok: boolean; message: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/test`, json("POST", {})),
   /** F10: spec-named probe — same reachability check, stores status/lastError. */
   mcpProbe: (id: string) => jfetch<{ ok: boolean; message: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/probe`, json("POST", {})),
+  mcpTools: (id: string) =>
+    jfetch<McpToolsResponseDto>(`/api/mcp/servers/${encodeURIComponent(id)}/tools`).catch((): McpToolsResponseDto => ({
+      tools: [],
+      source: "unavailable",
+      message: "unable to reach the server",
+    })),
   pluginsList: () => jfetch<InstalledPluginDto[]>("/api/plugins").catch((): InstalledPluginDto[] => []),
   pluginsInstall: (source: string) => jfetch<InstalledPluginDto>("/api/plugins/install", json("POST", { source })),
   pluginsOp: (id: string, op: "enable" | "disable" | "reload") =>

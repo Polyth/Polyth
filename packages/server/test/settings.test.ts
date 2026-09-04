@@ -272,3 +272,35 @@ test("mcp: stdio test reports command reachability honestly", async () => {
   const row = svc.list().find((s) => s.id === gone.id)!;
   assert.equal(row.status, "error");
 });
+
+test("mcp: listTools uses the injected runtime lister and soft-fails without one", async () => {
+  const bare = createMcpConfigService({ file: join(tmp(), "mcp.json") });
+  const orphan = await bare.create({
+    name: "docs",
+    transport: { kind: "http", url: "https://docs.example/mcp", headersSecretRefs: [] },
+  });
+  const missing = await bare.listTools(orphan.id);
+  assert.equal(missing.source, "unavailable");
+  assert.match(missing.message ?? "", /not configured/);
+
+  const seen: string[] = [];
+  const svc = createMcpConfigService({
+    file: join(tmp(), "mcp-tools.json"),
+    listTools: async (serverName) => {
+      seen.push(serverName);
+      return {
+        tools: [{ name: "search", server: serverName, description: "Search docs", available: true }],
+        source: "runtime",
+      };
+    },
+  });
+  const row = await svc.create({
+    name: "docs",
+    transport: { kind: "http", url: "https://docs.example/mcp", headersSecretRefs: [] },
+  });
+  const listed = await svc.listTools(row.id);
+  assert.deepEqual(seen, ["docs"]);
+  assert.equal(listed.source, "runtime");
+  assert.equal(listed.tools[0]?.name, "search");
+  await assert.rejects(() => svc.listTools("missing"), (e: Error & { code?: string }) => e.code === "not-found");
+});

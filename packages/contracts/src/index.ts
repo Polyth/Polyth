@@ -2797,6 +2797,21 @@ export interface McpServerDto {
   revision: number;
 }
 
+/** One MCP tool discovered from the OpenCode runtime for a configured server. */
+export interface McpToolDto {
+  name: string;
+  server: string;
+  description?: string;
+  available: boolean;
+}
+
+/** Runtime tool listing for one MCP server. Soft-fails when OpenCode is down. */
+export interface McpToolsResponseDto {
+  tools: McpToolDto[];
+  source: "runtime" | "unavailable";
+  message?: string;
+}
+
 /** One entry in OpenCode's `plugin` config array. Tuple entries carry the
  * plugin's JSON-serializable options without exposing Polyth's managed-plugin
  * installation surface. */

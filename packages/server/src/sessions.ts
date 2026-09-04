@@ -2688,11 +2688,13 @@ export function createSessionService(deps: {
     const project = await projects.get(proj.projectId);
     if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
     try {
+      // Composer !shell is user-initiated; allow long builds (2 minutes here).
+      // TerminalService.run may be raised further by callers up to 30 minutes.
       const result = await deps.shell.run({
         projectId: proj.projectId,
         cwd: proj.worktreePath ?? project.path,
         cmd: command,
-      }, { timeoutMs: 30_000, maxOutputBytes: 64 * 1_024 });
+      }, { timeoutMs: 120_000, maxOutputBytes: 64 * 1_024 });
       const suffix = result.timedOut
         ? "\n[command timed out]"
         : result.truncated

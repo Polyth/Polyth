@@ -41,6 +41,7 @@ import {
   createRemoteOpenCodeRuntime,
   installRemoteOpenCode,
   inspectOpenCodeEngine,
+  listMcpServerToolsFromEndpoint,
   probeRemoteOpenCode,
   resolveOpenCodeBinary,
   sweepOpenCodeRuntimes,
@@ -1212,7 +1213,56 @@ export async function boot(opts: BootOptions = {}) {
   };
   await secureSafe.syncForbiddenConfig();
   await refreshSafeBehavior();
-  const mcp = createMcpConfigService({ file: `${dataDir}/mcp.json`, applier: configApplier });
+  const mcp = createMcpConfigService({
+    file: `${dataDir}/mcp.json`,
+    applier: configApplier,
+    listTools: async (serverName) => {
+      try {
+        const all = await projects.list();
+        const project = all.find((p) => !p.remote) ?? all[0];
+        if (!project) {
+          return {
+            tools: [],
+            source: "unavailable" as const,
+            message: "no project available to query the OpenCode runtime",
+          };
+        }
+        const runtime = await runtimes.forProject(project.id);
+        const endpoint = await runtime.endpoint?.();
+        if (!endpoint) {
+          return {
+            tools: [],
+            source: "unavailable" as const,
+            message: "OpenCode runtime endpoint is unavailable",
+          };
+        }
+        let provider: string | undefined;
+        let model: string | undefined;
+        try {
+          const models = await runtime.models();
+          const first = models.find((m) => m.connected !== false) ?? models[0];
+          if (first) {
+            provider = first.providerID;
+            model = first.modelID;
+          }
+        } catch {
+          // Tool schemas are optional enrichment.
+        }
+        return listMcpServerToolsFromEndpoint({
+          endpoint,
+          serverName,
+          ...(provider ? { provider } : {}),
+          ...(model ? { model } : {}),
+        });
+      } catch (error) {
+        return {
+          tools: [],
+          source: "unavailable" as const,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+  });
 
   // Provider/model visibility: seeds from opencode.json (disabled_providers +
   // provider blacklists), then mirrors every toggle back to it.
