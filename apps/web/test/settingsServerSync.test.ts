@@ -89,7 +89,7 @@ test("client settings round-trip through the server and apply on inbound frames"
   assert.match(sync, /type:\s*"client-settings\/changed";\s*settings:\s*ClientSettingsDto/);
   assert.match(sync, /m\.type === "client-settings\/changed"/);
   assert.match(apiSrc, /clientSettings:\s*\(\)\s*=>\s*jfetch<ClientSettingsDto>\(`\/api\/settings\/client`\)/);
-  assert.match(apiSrc, /clientSettingsSave:\s*\(settings: Record<string, unknown>\)/);
+  assert.match(apiSrc, /clientSettingsSave:\s*\(settings: Record<string, unknown>/);
 
   // Boot + live wiring.
   assert.match(initSrc, /initSettingsSync\(\)/);
@@ -107,17 +107,16 @@ test("client settings round-trip through the server and apply on inbound frames"
   assert.match(settingsSync, /sessionDefaults:\s*getSessionDefaults\(\)/);
   assert.match(settingsSync, /setSessionDefaults\(parseSessionDefaults\(JSON\.stringify\(incoming\.sessionDefaults\)\)\)/);
 
-  // Unload flush: clear the debounce timer and push immediately so a
-  // mid-debounce change is not dropped on pagehide / beforeunload.
+  // Unload flush: clear the debounce timer and push with keepalive so a
+  // mid-debounce change can complete during pagehide / beforeunload.
   assert.match(settingsSync, /export function flushSettingsSync\(\)/);
   assert.match(settingsSync, /clearTimeout\(timer\)/);
   assert.match(settingsSync, /addEventListener\("pagehide",\s*flushSettingsSync\)/);
   assert.match(settingsSync, /addEventListener\("beforeunload",\s*flushSettingsSync\)/);
+  assert.match(settingsSync, /keepalive:\s*true/);
 });
 
-test("flushSettingsSync clears a pending debounce and invokes push immediately", async () => {
-  // Lightweight module-level contract: schedulePush arms a timer; flush must
-  // clear it before calling push so unload never races the debounce.
+test("flushSettingsSync clears a pending debounce and pushes with keepalive", async () => {
   const settingsSync = await read("../src/settingsSync.ts");
   const flushBody = settingsSync.match(
     /export function flushSettingsSync\(\): void \{([\s\S]*?)\n\}/,
@@ -126,5 +125,5 @@ test("flushSettingsSync clears a pending debounce and invokes push immediately",
   assert.match(flushBody![1]!, /if \(timer !== undefined\)/);
   assert.match(flushBody![1]!, /clearTimeout\(timer\)/);
   assert.match(flushBody![1]!, /timer = undefined/);
-  assert.match(flushBody![1]!, /push\(\)/);
+  assert.match(flushBody![1]!, /push\(\{\s*keepalive:\s*true\s*\}\)/);
 });

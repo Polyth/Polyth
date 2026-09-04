@@ -147,7 +147,7 @@ test("subagent inherits the nearest parent's policy; child opt-out wins", async 
   assert.deepEqual(attention, [{ sessionId: child, kind: "permission" }]);
 });
 
-test("enabling reconciles pending requests and returns the session to working", async () => {
+test("enabling reconciles pending requests and leaves idle when no turn is active", async () => {
   const { sessions, store, fake, attention } = harness();
   const { id } = await sessions.create({ projectId: "p1", title: "T" });
 
@@ -168,11 +168,28 @@ test("enabling reconciles pending requests and returns the session to working", 
     fake.permissionReplies.map((p) => p.requestId).sort(),
     ["per_1", "per_2"],
   );
-  assert.equal((await store.projection(id))?.status, "working");
+  assert.equal(
+    (await store.projection(id))?.status,
+    "idle",
+    "no active turn → resolving the last open request returns idle",
+  );
 
   // disabling flips the flag back and new requests wait again
   await sessions.autoAcceptSet!(id, "off");
   assert.equal((await store.projection(id))?.autoAccept, false);
+});
+
+test("enabling reconciles pending requests back to working while a turn is active", async () => {
+  const { sessions, store, fake } = harness();
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  fake.emit(id, { type: "turn/started", turnId: "t1" });
+  fake.emit(id, { type: "permission/requested", requestId: "per_w", permission: "edit", patterns: ["a"] });
+  await flush();
+  assert.equal((await store.projection(id))?.status, "waiting");
+
+  await sessions.autoAcceptSet!(id, "on");
+  await flush();
+  assert.equal((await store.projection(id))?.status, "working");
 });
 
 test("composer-shell confirmations are never auto-reconciled", async () => {
