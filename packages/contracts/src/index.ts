@@ -9,14 +9,199 @@ export interface Disposable { dispose(): void | Promise<void> }
 
 /** Server route contribution shared by trusted server plugins and the gateway. */
 export type RouteHandler = (request: RouteRequest) => Promise<boolean>;
+
+/** How this process accepted a request. Built by the listener or internal
+ *  dispatcher — never parsed from client headers. */
+export type RequestIngress =
+  | {
+      kind: "public-http";
+      listenerId: string;
+      loopback: boolean;
+      secure: boolean;
+    }
+  | {
+      kind: "polyth-link";
+      connectionId: string;
+      transport: "direct" | "relay";
+    }
+  | {
+      kind: "internal";
+      serviceId: string;
+    };
+
+/** Immutable caller identity for one request. Private keys and raw secrets
+ *  never appear here. */
+export type AuthPrincipal =
+  | { readonly kind: "anonymous" }
+  | {
+      readonly kind: "local-user";
+      readonly sessionId?: string;
+      readonly trustedLoopback: true;
+    }
+  | {
+      readonly kind: "ui-session";
+      readonly sessionId: string;
+      readonly rememberedDeviceId: string;
+    }
+  | {
+      readonly kind: "paired-device";
+      readonly deviceId: string;
+      readonly deviceEndpointId: string;
+      readonly connectionId: string;
+      readonly transport: "direct" | "relay";
+      readonly grants: readonly string[];
+      readonly grantRevision: number;
+    }
+  | {
+      readonly kind: "internal-service";
+      readonly serviceId: string;
+    };
+
+export interface AuthResolution {
+  readonly principal: AuthPrincipal;
+  readonly authenticated: boolean;
+}
+
+export type AuthScope = AuthPrincipal["kind"];
+
+export interface AuthStatusDto {
+  required: boolean;
+  authorized: boolean;
+  scope: AuthScope;
+}
+
+export type HttpMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
+
+/** Package-owned remote HTTP rule. `path` is a deterministic pattern with
+ *  optional `:param` segments — not an executable regular expression. */
+export interface RemoteHttpRule {
+  methods: readonly HttpMethod[];
+  path: string;
+  capability: string;
+  mutation: boolean;
+  maxBodyBytes?: number;
+}
+
+export interface RemoteWebSocketRule {
+  path: string;
+  capability: string;
+}
+
+export interface RemoteAccessPolicy {
+  routeScopes: readonly string[];
+  http: readonly RemoteHttpRule[];
+  websocket?: readonly RemoteWebSocketRule[];
+}
+
+export const REMOTE_PATH_PATTERN = /^(?:\/[A-Za-z0-9._-]+|\/:[A-Za-z][A-Za-z0-9_]*)+$/;
+
+export function isRemotePathPattern(pattern: string): boolean {
+  return pattern.length > 0 && pattern.length <= 256 && REMOTE_PATH_PATTERN.test(pattern);
+}
+
+/** Reject encoded dots, backslashes, NUL, duplicate separators, and any
+ *  percent-encoding that would change route interpretation. */
+export function canonicalizeRemotePath(path: string): string | null {
+  if (typeof path !== "string" || path.length === 0 || path.length > 2048) return null;
+  if (!path.startsWith("/") || path.includes("//") || path.includes("\\") || path.includes("\0")) return null;
+  if (path.includes("%")) {
+    const parts = path.split("/").slice(1);
+    for (const part of parts) {
+      if (!/^(?:%[0-9A-Fa-f]{2}|[^%])*$/.test(part)) return null;
+      try {
+        const decoded = decodeURIComponent(part);
+        if (decoded !== part) return null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+  const parts = path.split("/").slice(1);
+  for (const part of parts) {
+    if (!part || part === "." || part === "..") return null;
+    if (!/^[A-Za-z0-9._-]+$/.test(part)) return null;
+  }
+  return path;
+}
+
+export function remotePathPatternsOverlap(left: string, right: string): boolean {
+  if (!isRemotePathPattern(left) || !isRemotePathPattern(right)) return false;
+  const leftParts = left.split("/").slice(1);
+  const rightParts = right.split("/").slice(1);
+  if (leftParts.length !== rightParts.length) return false;
+  for (let i = 0; i < leftParts.length; i++) {
+    const a = leftParts[i]!;
+    const b = rightParts[i]!;
+    if (a.startsWith(":") || b.startsWith(":")) continue;
+    if (a !== b) return false;
+  }
+  return true;
+}
+
+/** Match a declared remote path pattern against a request pathname. */
+export function matchRemotePath(pattern: string, path: string): boolean {
+  if (!isRemotePathPattern(pattern)) return false;
+  const canonical = canonicalizeRemotePath(path);
+  if (!canonical) return false;
+  const patternParts = pattern.split("/").slice(1);
+  const pathParts = canonical.split("/").slice(1);
+  if (patternParts.length !== pathParts.length) return false;
+  for (let i = 0; i < patternParts.length; i++) {
+    const expected = patternParts[i]!;
+    const actual = pathParts[i]!;
+    if (expected.startsWith(":")) {
+      if (!/^[A-Za-z0-9._-]+$/.test(actual)) return false;
+      continue;
+    }
+    if (expected !== actual) return false;
+  }
+  return true;
+}
+
 export interface RouteRequest {
   req: IncomingMessage;
   res: ServerResponse;
   url: URL;
   path: string;
   method: string;
+  ingress: RequestIngress;
+  principal: AuthPrincipal;
+  /** Throws and maps to 401/403. Handlers must not continue after this. */
+  requireCapability(capability: string): void;
   body(): Promise<Record<string, unknown>>;
   json(code: number, body: unknown): void;
+}
+
+/** Internal services that may administer Polyth Link. Empty by default. */
+export const LOCAL_TUNNEL_ADMIN_SERVICES: readonly string[] = [];
+
+/** Local loopback administration of pairing, devices, grants, and identity.
+ *  Paired devices and anonymous callers are always denied. Internal services
+ *  are denied unless their serviceId is explicitly allowlisted. */
+export function requireLocalTunnelAdmin(
+  request: Pick<RouteRequest, "ingress" | "principal">,
+  opts?: { allowInternalServices?: readonly string[] },
+): void {
+  const principal = request.principal;
+  if (principal.kind === "paired-device") {
+    throw Object.assign(new Error("not allowed"), { code: "forbidden" });
+  }
+  if (principal.kind === "anonymous") {
+    throw Object.assign(new Error("authentication required"), { code: "unauthorized" });
+  }
+  if (principal.kind === "internal-service") {
+    const allowed = opts?.allowInternalServices ?? LOCAL_TUNNEL_ADMIN_SERVICES;
+    if (!allowed.includes(principal.serviceId)) {
+      throw Object.assign(new Error("not allowed"), { code: "forbidden" });
+    }
+    return;
+  }
+  if (request.ingress.kind !== "public-http" || request.ingress.loopback !== true) {
+    throw Object.assign(new Error("not allowed"), { code: "forbidden" });
+  }
+  if (principal.kind === "local-user" || principal.kind === "ui-session") return;
+  throw Object.assign(new Error("not allowed"), { code: "forbidden" });
 }
 
 // ---------------------------------------------------------------- capabilities
@@ -2935,4 +3120,334 @@ export const SERVER_CAPABILITY_IDS = [
   "polyth.homeAssistant",
   "polyth.secureSafe",
   "polyth.ssh",
+  "polyth.tunnel",
 ] as const;
+
+// ---------------------------------------------------------------- Polyth Link (remote access)
+
+export const POLYTH_LINK_ALPN = "polyth-link/1";
+export const POLYTH_LINK_TICKET_VERSION = 1 as const;
+export const POLYTH_PAIRING_TTL_MS = 120_000;
+export const POLYTH_LINK_WORDLIST_VERSION = "polyth-link-words-v1";
+
+export const REMOTE_CAPABILITY = {
+  coreProjectsRead: "core.projects.read",
+  coreProjectsWrite: "core.projects.write",
+  coreSessionsRead: "core.sessions.read",
+  coreSessionsCreate: "core.sessions.create",
+  coreSessionsMessage: "core.sessions.message",
+  coreSessionsControl: "core.sessions.control",
+  coreSessionsDelete: "core.sessions.delete",
+  coreNotificationsRead: "core.notifications.read",
+  coreRequestsRespond: "core.requests.respond",
+  coreHealthRead: "core.health.read",
+  filesRead: "files.read",
+  filesWrite: "files.write",
+  terminalOpen: "terminal.open",
+  terminalInput: "terminal.input",
+  terminalResize: "terminal.resize",
+  gitRead: "git.read",
+  gitWrite: "git.write",
+  browserUse: "browser.use",
+  dictationUse: "dictation.use",
+  tunnelStatusRead: "tunnel.status.read",
+  tunnelDevicesManage: "tunnel.devices.manage",
+  tunnelPairingManage: "tunnel.pairing.manage",
+  tunnelGrantsManage: "tunnel.grants.manage",
+  authPasswordManage: "auth.password.manage",
+  authSessionsManage: "auth.sessions.manage",
+  packagesInstall: "packages.install",
+  packagesEnable: "packages.enable",
+  packagesDisable: "packages.disable",
+  secureSafeSecretsRead: "secure-safe.secrets.read",
+  secureSafeSecretsExport: "secure-safe.secrets.export",
+  serverShutdown: "server.shutdown",
+  serverIdentityRotate: "server.identity.rotate",
+} as const;
+
+export type RemoteCapability = (typeof REMOTE_CAPABILITY)[keyof typeof REMOTE_CAPABILITY];
+
+export const REMOTE_CAPABILITY_VALUES: readonly RemoteCapability[] = Object.values(REMOTE_CAPABILITY);
+
+export function isRemoteCapability(value: string): value is RemoteCapability {
+  return (REMOTE_CAPABILITY_VALUES as readonly string[]).includes(value);
+}
+
+export function normalizeRemoteGrants(grants: readonly string[]): string[] {
+  const unique = new Set<string>();
+  for (const capability of grants) {
+    if (!isRemoteCapability(capability)) {
+      throw Object.assign(new Error(`unknown remote capability: ${capability}`), { code: "invalid-input" });
+    }
+    unique.add(capability);
+  }
+  return [...unique].sort();
+}
+
+export type GrantProfileId = "observe" | "interact" | "developer" | "full-remote";
+
+export const GRANT_PROFILE_PRESETS: Record<GrantProfileId, readonly string[]> = {
+  observe: [
+    REMOTE_CAPABILITY.coreProjectsRead,
+    REMOTE_CAPABILITY.coreSessionsRead,
+    REMOTE_CAPABILITY.coreNotificationsRead,
+    REMOTE_CAPABILITY.coreHealthRead,
+    REMOTE_CAPABILITY.tunnelStatusRead,
+  ],
+  interact: [
+    REMOTE_CAPABILITY.coreProjectsRead,
+    REMOTE_CAPABILITY.coreSessionsRead,
+    REMOTE_CAPABILITY.coreNotificationsRead,
+    REMOTE_CAPABILITY.coreHealthRead,
+    REMOTE_CAPABILITY.tunnelStatusRead,
+    REMOTE_CAPABILITY.coreSessionsCreate,
+    REMOTE_CAPABILITY.coreSessionsMessage,
+    REMOTE_CAPABILITY.coreSessionsControl,
+    REMOTE_CAPABILITY.coreRequestsRespond,
+  ],
+  developer: [
+    REMOTE_CAPABILITY.coreProjectsRead,
+    REMOTE_CAPABILITY.coreSessionsRead,
+    REMOTE_CAPABILITY.coreNotificationsRead,
+    REMOTE_CAPABILITY.coreHealthRead,
+    REMOTE_CAPABILITY.tunnelStatusRead,
+    REMOTE_CAPABILITY.coreSessionsCreate,
+    REMOTE_CAPABILITY.coreSessionsMessage,
+    REMOTE_CAPABILITY.coreSessionsControl,
+    REMOTE_CAPABILITY.coreRequestsRespond,
+    REMOTE_CAPABILITY.filesRead,
+    REMOTE_CAPABILITY.filesWrite,
+    REMOTE_CAPABILITY.terminalOpen,
+    REMOTE_CAPABILITY.terminalInput,
+    REMOTE_CAPABILITY.terminalResize,
+    REMOTE_CAPABILITY.gitRead,
+    REMOTE_CAPABILITY.gitWrite,
+    REMOTE_CAPABILITY.browserUse,
+  ],
+  "full-remote": [
+    REMOTE_CAPABILITY.coreProjectsRead,
+    REMOTE_CAPABILITY.coreProjectsWrite,
+    REMOTE_CAPABILITY.coreSessionsRead,
+    REMOTE_CAPABILITY.coreSessionsCreate,
+    REMOTE_CAPABILITY.coreSessionsMessage,
+    REMOTE_CAPABILITY.coreSessionsControl,
+    REMOTE_CAPABILITY.coreSessionsDelete,
+    REMOTE_CAPABILITY.coreNotificationsRead,
+    REMOTE_CAPABILITY.coreRequestsRespond,
+    REMOTE_CAPABILITY.coreHealthRead,
+    REMOTE_CAPABILITY.filesRead,
+    REMOTE_CAPABILITY.filesWrite,
+    REMOTE_CAPABILITY.terminalOpen,
+    REMOTE_CAPABILITY.terminalInput,
+    REMOTE_CAPABILITY.terminalResize,
+    REMOTE_CAPABILITY.gitRead,
+    REMOTE_CAPABILITY.gitWrite,
+    REMOTE_CAPABILITY.browserUse,
+    REMOTE_CAPABILITY.tunnelStatusRead,
+  ],
+};
+
+/** Privileges that never ride along with Full remote control. */
+export const PRIVILEGED_REMOTE_CAPABILITIES: readonly string[] = [
+  REMOTE_CAPABILITY.tunnelPairingManage,
+  REMOTE_CAPABILITY.tunnelDevicesManage,
+  REMOTE_CAPABILITY.tunnelGrantsManage,
+  REMOTE_CAPABILITY.authPasswordManage,
+  REMOTE_CAPABILITY.authSessionsManage,
+  REMOTE_CAPABILITY.packagesInstall,
+  REMOTE_CAPABILITY.packagesEnable,
+  REMOTE_CAPABILITY.packagesDisable,
+  REMOTE_CAPABILITY.secureSafeSecretsRead,
+  REMOTE_CAPABILITY.secureSafeSecretsExport,
+  REMOTE_CAPABILITY.serverShutdown,
+  REMOTE_CAPABILITY.serverIdentityRotate,
+];
+
+export function normalizeDeviceGrants(grants: readonly string[]): string[] {
+  const normalized = normalizeRemoteGrants(grants);
+  for (const capability of normalized) {
+    if ((PRIVILEGED_REMOTE_CAPABILITIES as readonly string[]).includes(capability)) {
+      throw Object.assign(new Error(`privileged capability cannot be granted: ${capability}`), { code: "invalid-input" });
+    }
+  }
+  return normalized;
+}
+
+/** Local web UI principals keep existing unrestricted WS/HTTP behavior. */
+export function isLocalUiPrincipal(principal: AuthPrincipal): boolean {
+  return principal.kind === "local-user" || principal.kind === "ui-session";
+}
+
+/** Capability check for paired devices. Local UI principals are unrestricted. */
+export function principalAllowsRemoteCapability(principal: AuthPrincipal, capability: string): boolean {
+  if (isLocalUiPrincipal(principal)) return true;
+  if (principal.kind === "paired-device") return principal.grants.includes(capability);
+  return false;
+}
+
+export type PolythLinkTransport = "direct" | "relay";
+export type PolythLinkPathPolicy = "direct-preferred" | "relay-only" | "air-gapped";
+
+export interface PolythLinkCandidate {
+  kind: "iroh";
+  endpointId: string;
+  relayUrls: string[];
+  directAddresses?: string[];
+  priority: number;
+  policy: "direct-preferred" | "relay-only";
+}
+
+export interface PolythPairingTicketV1 {
+  version: 1;
+  kind: "polyth-link-pair";
+  pairingId: string;
+  inviteSecret: string;
+  host: { endpointId: string; label?: string };
+  issuedAt: string;
+  expiresAt: string;
+  protocol: { alpn: typeof POLYTH_LINK_ALPN; minVersion: 1; maxVersion: 1 };
+  candidates: PolythLinkCandidate[];
+}
+
+export type PairingHostState =
+  | "created"
+  | "claimed"
+  | "proof-verified"
+  | "waiting-device-confirmation"
+  | "waiting-host-confirmation"
+  | "committing"
+  | "committed"
+  | "expired"
+  | "cancelled"
+  | "rejected"
+  | "failed";
+
+export interface PairingDevicePreview {
+  label: string;
+  platform?: string;
+  model?: string;
+  appVersion?: string;
+  endpointFingerprint: string;
+}
+
+export interface PairingOfferDto {
+  pairing: {
+    id: string;
+    expiresAt: string;
+    safetyPhrase: string[] | null;
+    state: PairingHostState;
+  };
+  ticket: string;
+  qrPayload: string;
+}
+
+export interface PairingStateDto {
+  id: string;
+  state: PairingHostState;
+  expiresAt: string;
+  device?: PairingDevicePreview;
+  safetyPhrase: string[] | null;
+  requestedGrants: string[];
+  deviceConfirmed: boolean;
+  hostConfirmed: boolean;
+  transport?: PolythLinkTransport;
+}
+
+export interface TunnelDeviceDto {
+  id: string;
+  label: string;
+  platform?: string;
+  model?: string;
+  appVersion?: string;
+  endpointFingerprint: string;
+  createdAt: number;
+  updatedAt: number;
+  lastSeenAt?: number;
+  revokedAt?: number;
+  grantRevision: number;
+  grants: string[];
+  lastTransport?: PolythLinkTransport;
+  online: boolean;
+  activeConnectionCount: number;
+}
+
+export interface TunnelStatusDto {
+  enabled: boolean;
+  available: boolean;
+  pairingAvailable: boolean;
+  hostBinaryFound: boolean;
+  hostProcessReady: boolean;
+  endpointBound: boolean;
+  ingressReady: boolean;
+  activePolicy: PolythLinkPathPolicy | null;
+  mode: PolythLinkPathPolicy;
+  hostFingerprint: string | null;
+  fingerprint: string | null;
+  relayConfigured: boolean;
+  identityAvailable: boolean;
+  identityError?: string;
+  lastErrorCode?: string;
+  unsupportedPlatform?: boolean;
+  activeConnections: number;
+  activeDevices: number;
+  directConnections: number;
+  relayConnections: number;
+}
+
+export interface TunnelDiagnosticsDto {
+  appVersion: string;
+  irohVersion: string;
+  hostFingerprint: string | null;
+  relayUrls: string[];
+  path?: PolythLinkTransport;
+  rttMs?: number;
+  recentErrors: string[];
+  grantRevision?: number;
+  packageStatus: string;
+}
+
+export interface PackageEvent {
+  packageId: string;
+  type: string;
+  revision: number;
+  data: JsonObject;
+}
+
+export type PolythLinkErrorCode =
+  | "pairing-invalid"
+  | "pairing-expired"
+  | "pairing-claimed"
+  | "pairing-cancelled"
+  | "pairing-rejected"
+  | "pairing-confirmation-required"
+  | "pairing-storage-failed"
+  | "host-identity-mismatch"
+  | "host-identity-corrupt"
+  | "host-identity-rotated"
+  | "device-unknown"
+  | "device-revoked"
+  | "device-grant-denied"
+  | "device-grant-stale"
+  | "relay-unreachable"
+  | "direct-unreachable"
+  | "transport-unavailable"
+  | "transport-outcome-unknown"
+  | "transport-protocol-error"
+  | "transport-version-unsupported"
+  | "proxy-bootstrap-invalid"
+  | "proxy-session-invalid"
+  | "proxy-origin-denied"
+  | "request-path-denied"
+  | "request-header-invalid"
+  | "request-too-large"
+  | "request-rate-limited"
+  | "stream-limit-exceeded"
+  | "forbidden"
+  | "unauthorized";
+
+export interface PolythLinkErrorDto {
+  error: PolythLinkErrorCode;
+  message: string;
+  retryable: boolean;
+  detail?: string;
+}

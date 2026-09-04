@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mobileDeepLinkPath, normalizePolythHost } from "../src/runtime.ts";
+import { mobileDeepLinkPath, normalizePolythHost, isPairingDeepLink } from "../src/runtime.ts";
 
 test("normalizes a Polyth host without retaining paths or credentials", () => {
   assert.equal(normalizePolythHost("polyth.example.test:4400/path?x=1"), "http://polyth.example.test:4400");
@@ -20,7 +20,8 @@ test("maps native session and project links to canonical app paths", () => {
     mobileDeepLinkPath("https://polyth.example.test/?session=session-1"),
     "/?session=session-1",
   );
-  assert.equal(mobileDeepLinkPath("mailto:person@example.test"), undefined);
+  assert.equal(mobileDeepLinkPath("polyth://pair?v=1&t=abc"), undefined);
+  assert.equal(isPairingDeepLink("polyth://pair?v=1&t=abc"), true);
 });
 
 test("deep links discard unsupported query data and malformed path ids", () => {

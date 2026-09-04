@@ -40,6 +40,7 @@ export {
   discoverServerPackages,
   INFRASTRUCTURE_PACKAGE_DIRS,
   loadServerPackage,
+  localOnlyRemoteAccess,
   serverServiceKey,
   type AppendEventOptions,
   type DiscoveredServerPackage,
@@ -53,6 +54,19 @@ export {
   type ServerServiceRegistry,
   type SessionRuntimeBinding,
 } from "./serverPackage.ts";
+export { PairedSocketRegistry } from "./pairedSockets.ts";
+export {
+  allowWsCapability,
+  claimWsUpgrade,
+  closeWs,
+  defaultWsIdentity,
+  denyUpgrade,
+  liveWsPrincipal,
+  normalizeWsAttachAuth,
+  type WsAttachAuth,
+  type WsAuthorize,
+  type WsUpgradeClaim,
+} from "./wsAttach.ts";
 export {
   publishBackgroundWork,
   transitionBackgroundWork,

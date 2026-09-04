@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import type { Disposable } from "@polyth/contracts";
-import type { ServerPackage, ServerPackageHost } from "@polyth/plugins";
+import { localOnlyRemoteAccess, type ServerPackage, type ServerPackageHost } from "@polyth/plugins";
 import {
   createHomeAssistantPlugin,
   createHomeAssistantService,
@@ -16,6 +16,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   });
   let plugin: Disposable | null = null;
   return {
+    remoteAccess: localOnlyRemoteAccess(["home-assistant"]),
     routes: homeAssistantRoutes(service),
     async onEnable() {
       plugin = await host.loadPlugin(createHomeAssistantPlugin(service));

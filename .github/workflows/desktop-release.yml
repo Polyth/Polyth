@@ -61,6 +61,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: dtolnay/rust-toolchain@1.91.0
+        if: matrix.platform != 'win32' && matrix.arch != 'universal'
+
+      - uses: dtolnay/rust-toolchain@1.91.0
+        if: matrix.arch == 'universal'
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22.22.0
@@ -112,6 +120,8 @@ jobs:
 
       - name: Build web and desktop bundles
         run: npm run build:desktop
+        env:
+          POLYTH_MAC_UNIVERSAL: ${{ matrix.arch == 'universal' && '1' || '' }}
 
       - name: Download pinned OpenCode
         if: matrix.arch != 'universal'
@@ -146,7 +156,46 @@ jobs:
             "apps/desktop/release/appimage-e2e.log" \
             "$GITHUB_WORKSPACE"
 
+      - name: Verify packaged artifacts exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          ls -la apps/desktop/release
+          case "${{ matrix.platform }}" in
+            linux)
+              artifacts=(apps/desktop/release/*.AppImage)
+              ;;
+            darwin)
+              dmgs=(apps/desktop/release/*.dmg)
+              zips=(apps/desktop/release/*.zip)
+              if [ ${#dmgs[@]} -eq 0 ] || [ ${#zips[@]} -eq 0 ]; then
+                echo "macOS packaging must emit both a DMG and a ZIP" >&2
+                exit 1
+              fi
+              artifacts=("${dmgs[@]}" "${zips[@]}")
+              ;;
+            win32)
+              artifacts=(apps/desktop/release/*.exe)
+              ;;
+            *)
+              echo "unknown platform ${{ matrix.platform }}" >&2
+              exit 1
+              ;;
+          esac
+          if [ ${#artifacts[@]} -eq 0 ]; then
+            echo "no packaged artifacts for ${{ matrix.platform }}/${{ matrix.arch }}" >&2
+            exit 1
+          fi
+          printf 'packaged %s\n' "${artifacts[@]}"
+
+      # Pull-request packaging already validates the binaries. Uploading the
+      # installers currently fails the job with GitHub's artifact storage quota
+      # even when the files exist (Windows/macOS both found files then failed
+      # CreateArtifact). Keep the glob list for tag uploads and for the
+      # desktop configuration contract.
       - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v')
         with:
           name: polyth-desktop-${{ matrix.platform }}-${{ matrix.arch }}
           path: |

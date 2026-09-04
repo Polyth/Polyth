@@ -49,6 +49,7 @@ import {
 import {
   createServerServiceRegistry,
   discoverServerPackages,
+  PairedSocketRegistry,
   serverServiceKey,
   type HttpServerContext,
   type ServerPackageFactory,
@@ -60,7 +61,7 @@ import { createPackageRegistry } from "./packages.ts";
 import { createSessionService, type Broadcaster, type RuntimePool } from "./sessions.ts";
 import { resolveSessionRuntimeBinding } from "./sessionRuntime.ts";
 import { createRuntimeCatalog } from "./runtimeCatalog.ts";
-import { createHttpServer, type RouteHandler } from "./http.ts";
+import { createHttpHandler, createPublicHttpServer, createTunnelIngress, type RouteHandler } from "./http.ts";
 import { packageRoutes } from "./routes/packages.ts";
 import { contextRoutes } from "./routes/context.ts";
 import { orgRoutes } from "./routes/org.ts";
@@ -69,7 +70,7 @@ import { controlRoutes } from "./routes/control.ts";
 import { settingsRoutes } from "./routes/settings.ts";
 import { opencodePendingRoutes } from "./routes/opencodePending.ts";
 import { browseRoutes } from "./routes/browse.ts";
-import { createAuthService } from "./auth.ts";
+import { createAuthService, publicHttpIngress } from "./auth.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { createPushNotifier, createPushService } from "./push.ts";
 import { pushRoutes } from "./routes/push.ts";
@@ -94,7 +95,7 @@ import {
 import { assistRoutes } from "./routes/assist.ts";
 import { oneShot } from "./oneshot.ts";
 import { createSmallModelService } from "./smallModel.ts";
-import { attachWs } from "./ws.ts";
+import { createWsGateway, type WsGateway } from "./ws.ts";
 import { createTrackWorkflow, type TrackWorkflow, type TrackWorkflowDeps } from "./tracks.ts";
 import { createRouteRegistry } from "./routeRegistry.ts";
 import { createPackageLifecycle } from "./packageLifecycle.ts";
@@ -358,8 +359,8 @@ interface CommandExpandService {
   expand(root: string, text: string): Promise<{ text: string; raw: string; agent?: string; model?: string }>;
 }
 
-type BrowserForWs = NonNullable<Parameters<typeof attachWs>[2]>;
-type DictationForWs = NonNullable<Parameters<typeof attachWs>[3]>;
+type BrowserForWs = NonNullable<Parameters<typeof createWsGateway>[1]>;
+type DictationForWs = NonNullable<Parameters<typeof createWsGateway>[2]>;
 
 export async function boot(opts: BootOptions = {}) {
   const port = opts.port ?? Number(process.env.PORT ?? 4400);
@@ -393,7 +394,7 @@ export async function boot(opts: BootOptions = {}) {
 
   // Sessions and package transitions can emit before WS attaches. This box
   // starts forwarding as soon as the live broadcaster is installed.
-  let live: Broadcaster | null = null;
+  let live: WsGateway | null = null;
   const broadcast: Broadcaster = {
     event: (e: SessionEvent) => live?.event(e),
     projection: (p: SessionProjection) => live?.projection(p),
@@ -1318,12 +1319,52 @@ export async function boot(opts: BootOptions = {}) {
   // core session gateway, which aborts upgrades whose path it does not match.
   const httpServerCallbacks: Array<(ctx: HttpServerContext) => void> = [];
   let httpServerContext: HttpServerContext | null = null;
+  const attachedHttpServers = new WeakSet<import("node:http").Server>();
+  let httpHandlerRef: import("./http.ts").HttpHandler | null = null;
+  const pairedSockets = new PairedSocketRegistry();
+  const attachHttpChannels = (ctx: HttpServerContext): void => {
+    if (attachedHttpServers.has(ctx.server)) return;
+    attachedHttpServers.add(ctx.server);
+    for (const cb of httpServerCallbacks) cb(ctx);
+    live?.attach(ctx.server, {
+      authorize: ctx.authorize,
+      identity: ctx.identity,
+      refreshPrincipal: ctx.refreshPrincipal,
+      pairedSockets: ctx.pairedSockets,
+    });
+  };
   const onHttpServer = (cb: (ctx: HttpServerContext) => void): void => {
-    if (httpServerContext) {
-      cb(httpServerContext);
-      return;
-    }
     httpServerCallbacks.push(cb);
+    if (httpServerContext) cb(httpServerContext);
+  };
+  const startTunnelIngress = async (opts: {
+    socketPath: string;
+    secret: string;
+    lookup(connectionId: string): Extract<import("@polyth/contracts").RequestIngress, { kind: "polyth-link" }> | null;
+  }) => {
+    if (!httpHandlerRef) {
+      throw Object.assign(new Error("HTTP handler not ready"), { code: "unavailable" });
+    }
+    const handle = createTunnelIngress({
+      handler: httpHandlerRef,
+      secret: opts.secret,
+      socketPath: opts.socketPath,
+      lookup: opts.lookup,
+      resolve: (request, ingress) => auth.resolve(request, ingress),
+      attachChannels: attachHttpChannels,
+      pairedSockets,
+    });
+    await handle.listen();
+    return { close: () => handle.close() };
+  };
+  const queuedPairedResolvers: Array<(ingress: Extract<import("@polyth/contracts").RequestIngress, { kind: "polyth-link" }>) => import("@polyth/contracts").AuthPrincipal | null> = [];
+  type PairedDeviceResolverFn = typeof queuedPairedResolvers[number];
+  let attachLivePairedResolver: ((resolver: PairedDeviceResolverFn) => void) | null = null;
+  const attachPairedDeviceResolver = (
+    resolver: (ingress: Extract<import("@polyth/contracts").RequestIngress, { kind: "polyth-link" }>) => import("@polyth/contracts").AuthPrincipal | null,
+  ): void => {
+    queuedPairedResolvers.push(resolver);
+    attachLivePairedResolver?.(resolver);
   };
 
   const smallModels = createSmallModelService(store);
@@ -1369,6 +1410,12 @@ export async function boot(opts: BootOptions = {}) {
     resolveSessionRuntime,
     loadPlugin: (plugin) => loadPlugin(root, plugin, {}),
     onHttpServer,
+    attachHttpChannels,
+    startTunnelIngress,
+    remotePolicies: () => routeRegistry.policies(),
+    attachPairedDeviceResolver,
+    closePairedDevice: (deviceId: string) => pairedSockets.closeDevice(deviceId),
+    pairedSockets,
   };
   const discoveredPackages = await (bundledServerPackages
     ? (async () => {
@@ -1584,7 +1631,10 @@ export async function boot(opts: BootOptions = {}) {
     file: `${dataDir}/auth.json`,
     envPassword: process.env.POLYTH_UI_PASSWORD,
     localhostOptional: process.env.POLYTH_UI_PASSWORD_LOCALHOST === "optional",
+    cookieName: `polyth_auth_p${port}`,
   });
+  attachLivePairedResolver = (resolver) => auth.attachPairedDeviceResolver(resolver);
+  for (const resolver of queuedPairedResolvers) auth.attachPairedDeviceResolver(resolver);
 
   const registerPackageRoute = (
     id: string,
@@ -1706,22 +1756,36 @@ export async function boot(opts: BootOptions = {}) {
 
   const allCapabilities = () => [...SERVER_CAPABILITY_IDS];
 
-  await packageLifecycle.startEnabled(packageRegistry);
-
-  const server = createHttpServer({
+  const httpHandler = createHttpHandler({
     sessions, projects, runtimes, routes, visibility, auth, catalog: runtimeCatalog,
     capabilities: allCapabilities,
     webDist: resolve(opts.webDist ?? resolve(__dirname, "../../../apps/web/dist")),
     packagesDir: resolve(opts.webPackagesDir ?? packagesDir),
     version: "0.1.0",
+    remotePolicies: () => routeRegistry.policies(),
+    listenerId: "public",
   });
-  // order matters: /ws (session gateway) aborts upgrades whose path it does
-  // not match, so package channels (terminal: /ws/terminal/:id) claim their
-  // upgrades first through the onHttpServer seam.
-  const wsAuthorize = (req: import("node:http").IncomingMessage) => auth.authorized(req);
-  httpServerContext = { server, authorize: wsAuthorize };
-  for (const cb of httpServerCallbacks.splice(0)) cb(httpServerContext);
-  live = attachWs(server, sessions, svc<BrowserForWs>("browser"), svc<DictationForWs>("dictation"), wsAuthorize);
+  httpHandlerRef = httpHandler;
+  const server = createPublicHttpServer(httpHandler, "public");
+  live = createWsGateway(sessions, svc<BrowserForWs>("browser"), svc<DictationForWs>("dictation"));
+  const publicIngress = (req: import("node:http").IncomingMessage) =>
+    publicHttpIngress(req, { listenerId: "public" });
+  const wsAuthorize = (req: import("node:http").IncomingMessage) =>
+    auth.resolve(req, publicIngress(req)).authenticated;
+  const wsIdentity = (req: import("node:http").IncomingMessage) =>
+    auth.resolve(req, publicIngress(req));
+  httpServerContext = {
+    server,
+    listenerId: "public",
+    dispatch: httpHandler,
+    resolve: (request, ingress) => auth.resolve(request, ingress),
+    authorize: wsAuthorize,
+    identity: wsIdentity,
+    refreshPrincipal: (principal) => principal.kind === "paired-device" ? null : principal,
+    pairedSockets,
+  };
+  attachHttpChannels(httpServerContext);
+  await packageLifecycle.startEnabled(packageRegistry);
 
   await new Promise<void>((res) => opts.hostname
     ? server.listen(port, opts.hostname, res)

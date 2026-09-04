@@ -4,15 +4,24 @@ import { WebSocket, WebSocketServer } from "ws";
 import type {
   JsonObject,
   ProjectService,
+  RemoteAccessPolicy,
   RemoteHost,
   RouteHandler,
   SessionEvent,
   SessionService,
 } from "@polyth/contracts";
+import { REMOTE_CAPABILITY } from "@polyth/contracts";
 import {
+  allowWsCapability,
+  claimWsUpgrade,
+  closeWs,
+  defaultWsIdentity,
+  denyUpgrade,
+  liveWsPrincipal,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
+  type WsAttachAuth,
 } from "@polyth/plugins";
 import { createTerminalService, type TerminalService } from "./index.ts";
 
@@ -140,25 +149,26 @@ export function terminalRoutes(deps: {
   };
 }
 
-export function attachTerminalWs(server: Server, deps: {
+export function attachTerminalWs(server: Server, deps: WsAttachAuth & {
   terminals: TerminalService;
-  authorize?: (request: IncomingMessage) => boolean;
-}): void {
+}): () => void {
   const wss = new WebSocketServer({ noServer: true });
-  const sockets = new Map<WebSocket, string>();
+  const sockets = new Map<WebSocket, { id: string; principal: import("@polyth/contracts").AuthPrincipal }>();
   const send = (socket: WebSocket, message: unknown) => {
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
   };
 
-  wss.on("connection", (socket, request) => {
-    const id = (request.url ?? "").split("/").pop() ?? "";
+  wss.on("connection", (socket, request: IncomingMessage) => {
+    const id = (request.url ?? "").split("/").pop()?.split("?")[0] ?? "";
+    const resolution = defaultWsIdentity(deps, request);
     const info = deps.terminals.get(id);
     if (!info) {
       send(socket, { type: "error", terminalId: id, code: "not-found" });
       socket.close();
       return;
     }
-    sockets.set(socket, id);
+    sockets.set(socket, { id, principal: resolution.principal });
+    deps.pairedSockets?.bind(socket, resolution.principal, () => closeWs(socket));
     send(socket, { type: "attached", terminalId: id });
     const replay = deps.terminals.replay(id);
     if (replay) send(socket, { type: "replay", terminalId: id, data: replay });
@@ -166,6 +176,14 @@ export function attachTerminalWs(server: Server, deps: {
       send(socket, { type: "exit", terminalId: id, exitCode: info.exitCode ?? null });
     }
     socket.on("message", (raw) => {
+      const bound = sockets.get(socket);
+      if (!bound) return;
+      const live = liveWsPrincipal(bound.principal, deps.refreshPrincipal);
+      if (!live) {
+        closeWs(socket);
+        return;
+      }
+      bound.principal = live;
       let message: { type?: string; data?: string; cols?: number; rows?: number };
       try {
         message = JSON.parse(String(raw)) as typeof message;
@@ -173,51 +191,103 @@ export function attachTerminalWs(server: Server, deps: {
         return;
       }
       if (message.type === "data" && typeof message.data === "string") {
+        if (!allowWsCapability(live, REMOTE_CAPABILITY.terminalInput)) {
+          send(socket, { type: "error", terminalId: id, code: "forbidden", message: "missing terminal.input" });
+          return;
+        }
         deps.terminals.write(id, message.data);
       }
       if (message.type === "resize") {
+        if (!allowWsCapability(live, REMOTE_CAPABILITY.terminalResize)) {
+          send(socket, { type: "error", terminalId: id, code: "forbidden", message: "missing terminal.resize" });
+          return;
+        }
         deps.terminals.resize(id, Number(message.cols ?? 80), Number(message.rows ?? 24));
       }
     });
-    socket.on("close", () => sockets.delete(socket));
-    socket.on("error", () => sockets.delete(socket));
+    socket.on("close", () => {
+      deps.pairedSockets?.unbind(socket);
+      sockets.delete(socket);
+    });
+    socket.on("error", () => {
+      deps.pairedSockets?.unbind(socket);
+      sockets.delete(socket);
+    });
   });
 
   const dataSubscription = deps.terminals.onData((id, data) => {
-    for (const [socket, terminalId] of sockets) {
-      if (terminalId === id) send(socket, { type: "data", terminalId: id, data });
+    for (const [socket, bound] of sockets) {
+      if (bound.id !== id) continue;
+      const live = liveWsPrincipal(bound.principal, deps.refreshPrincipal);
+      if (!live) {
+        closeWs(socket);
+        continue;
+      }
+      if (!allowWsCapability(live, REMOTE_CAPABILITY.terminalOpen)) continue;
+      send(socket, { type: "data", terminalId: id, data });
     }
   });
   const exitSubscription = deps.terminals.onExit((id, exitCode) => {
-    for (const [socket, terminalId] of sockets) {
-      if (terminalId === id) send(socket, { type: "exit", terminalId: id, exitCode });
+    for (const [socket, bound] of sockets) {
+      if (bound.id !== id) continue;
+      const live = liveWsPrincipal(bound.principal, deps.refreshPrincipal);
+      if (!live) {
+        closeWs(socket);
+        continue;
+      }
+      bound.principal = live;
+      if (allowWsCapability(live, REMOTE_CAPABILITY.terminalOpen)) {
+        send(socket, { type: "exit", terminalId: id, exitCode });
+      }
     }
   });
 
-  const upgrade = (
-    request: IncomingMessage,
-    socket: import("node:net").Socket,
-    head: Buffer,
-  ) => {
+  const stopClaim = claimWsUpgrade(server, (request, socket, head) => {
     const url = new URL(request.url ?? "/", "http://x");
-    if (!url.pathname.match(/^\/ws\/terminal\/([^/]+)$/)) return;
-    if (deps.authorize && !deps.authorize(request)) {
-      socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
-      socket.destroy();
-      return;
+    if (!url.pathname.match(/^\/ws\/terminal\/([^/]+)$/)) return false;
+    const resolution = defaultWsIdentity(deps, request);
+    if (deps.authorize ? !deps.authorize(request) : !resolution.authenticated) {
+      denyUpgrade(socket, 401);
+      return true;
+    }
+    if (!allowWsCapability(resolution.principal, REMOTE_CAPABILITY.terminalOpen)) {
+      denyUpgrade(socket, 403);
+      return true;
     }
     wss.handleUpgrade(request, socket, head, (webSocket) => {
       wss.emit("connection", webSocket, request);
     });
-  };
-  server.on("upgrade", upgrade);
-  server.on("close", () => {
-    server.off("upgrade", upgrade);
+    return true;
+  });
+  let stopped = false;
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    server.off("close", stop);
+    stopClaim();
     dataSubscription.dispose();
     exitSubscription.dispose();
+    for (const [socket] of sockets) closeWs(socket);
+    sockets.clear();
     wss.close();
-  });
+  };
+  server.on("close", stop);
+  return stop;
 }
+
+export const TERMINAL_REMOTE_ACCESS: RemoteAccessPolicy = {
+  routeScopes: ["terminals", "terminal"],
+  http: [
+    { methods: ["GET"], path: "/api/terminals", capability: REMOTE_CAPABILITY.terminalOpen, mutation: false },
+    { methods: ["POST"], path: "/api/terminals", capability: REMOTE_CAPABILITY.terminalOpen, mutation: true },
+    { methods: ["POST"], path: "/api/terminals/:id", capability: REMOTE_CAPABILITY.terminalInput, mutation: true },
+    { methods: ["PATCH"], path: "/api/terminals/:id", capability: REMOTE_CAPABILITY.terminalOpen, mutation: true },
+    { methods: ["DELETE"], path: "/api/terminals/:id", capability: REMOTE_CAPABILITY.terminalOpen, mutation: true },
+  ],
+  websocket: [
+    { path: "/ws/terminal/:id", capability: REMOTE_CAPABILITY.terminalOpen },
+  ],
+};
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   // POLYTH_TERM_REPLAY_BYTES caps per-PTY scrollback replay (default 200 KB).
@@ -246,16 +316,34 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     },
   });
   host.services.provide(serverServiceKey<TerminalService>("terminal"), terminals);
-  // Order matters at the gateway: the session gateway aborts /ws upgrades it
-  // does not match, so this channel must claim /ws/terminal/:id first — the
-  // host runs these callbacks before attaching the core session WS.
-  host.onHttpServer(({ server, authorize }) => {
-    attachTerminalWs(server, { terminals, authorize });
+  const httpContexts = new Set<import("@polyth/plugins").HttpServerContext>();
+  const detachers = new Map<Server, () => void>();
+  let wsEnabled = false;
+  const attachTo = (ctx: import("@polyth/plugins").HttpServerContext) => {
+    detachers.get(ctx.server)?.();
+    detachers.set(ctx.server, attachTerminalWs(ctx.server, {
+      terminals,
+      authorize: ctx.authorize,
+      identity: ctx.identity,
+      refreshPrincipal: ctx.refreshPrincipal,
+      pairedSockets: ctx.pairedSockets,
+    }));
+  };
+  host.onHttpServer((ctx) => {
+    httpContexts.add(ctx);
+    ctx.server.on("close", () => {
+      httpContexts.delete(ctx);
+      detachers.get(ctx.server)?.();
+      detachers.delete(ctx.server);
+    });
+    if (wsEnabled) attachTo(ctx);
   });
   let routes: RouteHandler | null = null;
   return {
+    remoteAccess: TERMINAL_REMOTE_ACCESS,
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
+      wsEnabled = true;
       routes ??= terminalRoutes({
         projects: host.projects,
         sessions: host.sessions,
@@ -269,8 +357,12 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           ),
         },
       });
+      for (const ctx of httpContexts) attachTo(ctx);
     },
     async onDisable() {
+      wsEnabled = false;
+      for (const stop of detachers.values()) stop();
+      detachers.clear();
       await terminals.closeAll();
     },
   };

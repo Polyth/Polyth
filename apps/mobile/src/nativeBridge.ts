@@ -11,10 +11,12 @@ import { SplashScreen } from "@capacitor/splash-screen";
 import { SafeArea, SystemBarsStyle } from "@capacitor-community/safe-area";
 import { FilePicker } from "@capawesome/capacitor-file-picker";
 import { mobileDeepLinkPath, isNativeMobile } from "./runtime.ts";
+import { rememberPendingPairingLink } from "./pendingPair.ts";
 
 export interface NativeMobileCallbacks {
   handleBack(): boolean;
   openDeepLink(path: string): void;
+  openPairingLink?(url: string): void;
   reconnect(): void;
   setKeyboardInset(height: number): void;
 }
@@ -146,6 +148,11 @@ export function installNativeMobileIntegration(callbacks: NativeMobileCallbacks)
   }).then((handle) => disposers.push(() => void handle.remove()));
 
   void App.addListener("appUrlOpen", ({ url }) => {
+    if (url.trim().startsWith("polyth://pair")) {
+      rememberPendingPairingLink(url);
+      callbacks.openPairingLink?.(url);
+      return;
+    }
     const path = mobileDeepLinkPath(url);
     if (path) callbacks.openDeepLink(path);
   }).then((handle) => disposers.push(() => void handle.remove()));

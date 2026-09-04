@@ -1,11 +1,20 @@
-// F16 access control: optional UI password gating /api + /ws. Sessions are
+// Access control: optional UI password gating /api + /ws. Sessions are
 // remembered devices — an httpOnly cookie holds a random token whose SHA-256
 // lives in data/auth.json, so a leaked file never yields a usable credential.
 // Password hashing is crypto.scrypt (no novel crypto), login is rate-limited
-// per client IP per OC#269, and everything is OFF unless a password is set.
+// per client IP, and everything is OFF unless a password is set.
+//
+// Canonical API is ingress-aware `resolve()`. Loopback optional never applies
+// to Polyth Link ingress, even when the tunnel physically connects via 127.0.0.1.
 import { randomBytes, scryptSync, timingSafeEqual, createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import type {
+  AuthPrincipal,
+  AuthResolution,
+  AuthStatusDto,
+  RequestIngress,
+} from "@polyth/contracts";
 
 // ---- password hashing (scrypt, self-describing storage format) -------------
 
@@ -82,12 +91,12 @@ export function createLoginRateLimiter(opts: RateLimiterOptions = {}): LoginRate
 }
 
 /** Unidentified clients (no socket address) share one budget instead of each
- *  getting a fresh window — OC#269's "separate budget" requirement. */
+ *  getting a fresh window. */
 export const rateKeyFor = (remoteAddr: string | undefined): string => remoteAddr || "anon";
 
 // ---- auth service ------------------------------------------------------------
 
-/** The subset of IncomingMessage the gate reads — fully fakeable in tests. */
+/** The subset of IncomingMessage the resolver reads — fully fakeable in tests. */
 export interface AuthRequestLike {
   headers: { cookie?: string; "user-agent"?: string };
   socket: { remoteAddress?: string };
@@ -107,37 +116,71 @@ export type LoginResult =
   | { ok: true; token: string }
   | { ok: false; status: number; error: string; message: string; retryAfterSec?: number };
 
+export type PairedDeviceResolver = (
+  ingress: Extract<RequestIngress, { kind: "polyth-link" }>,
+) => AuthPrincipal | null;
+
 export interface AuthServiceOptions {
   /** Persistence file (data/auth.json): password hash + remembered sessions. */
   file: string;
   /** Plaintext password from POLYTH_UI_PASSWORD — hashed at boot, never stored. */
   envPassword?: string | undefined;
-  /** POLYTH_UI_PASSWORD_LOCALHOST=optional — loopback connections skip auth. */
+  /** POLYTH_UI_PASSWORD_LOCALHOST=optional — public-http loopback skips auth. */
   localhostOptional?: boolean;
   now?: () => number;
   limiter?: LoginRateLimiter;
   /** Session idle expiry in ms (default 30 days). */
   sessionTtlMs?: number;
+  /** Cookie name. Include the listen port so instances on one host do not collide. */
+  cookieName?: string;
+  /** Look up the live paired-device principal. Never reads client headers. */
+  resolvePairedDevice?: PairedDeviceResolver;
+}
+
+export class AuthorizationError extends Error {
+  readonly code: "unauthorized" | "forbidden";
+  readonly status: number;
+  constructor(code: "unauthorized" | "forbidden", message: string) {
+    super(message);
+    this.name = "AuthorizationError";
+    this.code = code;
+    this.status = code === "unauthorized" ? 401 : 403;
+  }
 }
 
 export interface AuthService {
-  /** True when a password is configured (env or stored hash). */
   enabled(): boolean;
+  cookieName(): string;
+  resolve(request: AuthRequestLike, ingress: RequestIngress): AuthResolution;
+  requireAuthenticated(request: AuthRequestLike, ingress: RequestIngress): AuthPrincipal;
+  requireCapability(principal: AuthPrincipal, capability: string): void;
   /** null = request may proceed; otherwise the 401 to answer with. */
-  gate(req: AuthRequestLike): GateDenial | null;
-  /** WS upgrade + status checks share the gate's allow logic. */
-  authorized(req: AuthRequestLike): boolean;
+  gate(request: AuthRequestLike, ingress: RequestIngress): GateDenial | null;
   login(password: string, remoteAddr: string | undefined, userAgent?: string): LoginResult;
-  /** Revoke the session behind this cookie token (single-device logout). */
   logout(token: string | null): void;
   logoutAll(): void;
   listSessions(currentToken: string | null): AuthDeviceDto[];
   revoke(id: string): boolean;
-  /** Cookie token from a request, or null. */
   tokenOf(req: AuthRequestLike): string | null;
+  attachPairedDeviceResolver(resolver: PairedDeviceResolver): void;
+  statusDto(resolution: AuthResolution): AuthStatusDto;
 }
 
 export const AUTH_COOKIE = "polyth_auth";
+
+export const UNTRUSTED_INGRESS_HEADERS = [
+  "authorization",
+  "cookie",
+  "forwarded",
+  "x-forwarded-for",
+  "x-forwarded-host",
+  "x-forwarded-proto",
+  "x-real-ip",
+  "x-polyth-internal-token",
+  "x-polyth-link-token",
+  "x-polyth-link-connection",
+  "x-polyth-link-device",
+] as const;
 
 interface StoredSession {
   id: string;
@@ -152,17 +195,17 @@ interface AuthFile {
   sessions: StoredSession[];
 }
 
-const isLocal = (addr: string | undefined): boolean =>
+export const isLoopbackAddress = (addr: string | undefined): boolean =>
   !!addr && (addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1");
 
 const sha256 = (s: string): string => createHash("sha256").update(s).digest("hex");
 
-export function parseCookieToken(cookieHeader: string | undefined): string | null {
+export function parseCookieToken(cookieHeader: string | undefined, cookieName = AUTH_COOKIE): string | null {
   if (!cookieHeader) return null;
   for (const part of cookieHeader.split(";")) {
     const eq = part.indexOf("=");
     if (eq === -1) continue;
-    if (part.slice(0, eq).trim() === AUTH_COOKIE) {
+    if (part.slice(0, eq).trim() === cookieName) {
       const v = part.slice(eq + 1).trim();
       return /^[0-9a-f]{64}$/.test(v) ? v : null;
     }
@@ -170,10 +213,70 @@ export function parseCookieToken(cookieHeader: string | undefined): string | nul
   return null;
 }
 
+export function publicHttpIngress(
+  req: AuthRequestLike,
+  opts: { listenerId?: string; secure?: boolean } = {},
+): RequestIngress {
+  return {
+    kind: "public-http",
+    listenerId: opts.listenerId ?? "public",
+    loopback: isLoopbackAddress(req.socket.remoteAddress),
+    secure: opts.secure === true,
+  };
+}
+
+export function principalScope(principal: AuthPrincipal): AuthStatusDto["scope"] {
+  return principal.kind;
+}
+
+export function principalHasCapability(principal: AuthPrincipal, capability: string): boolean {
+  if (!capability) return false;
+  switch (principal.kind) {
+    case "anonymous":
+      return false;
+    case "local-user":
+    case "ui-session":
+    case "internal-service":
+      return true;
+    case "paired-device":
+      return principal.grants.includes(capability);
+  }
+}
+
+export function requirePrincipalCapability(principal: AuthPrincipal, capability: string): void {
+  if (principal.kind === "anonymous") {
+    throw new AuthorizationError("unauthorized", "authentication required");
+  }
+  if (!principalHasCapability(principal, capability)) {
+    console.warn(`[polyth] authorization denied capability=${capability} principal=${principal.kind}`);
+    throw new AuthorizationError("forbidden", "not allowed");
+  }
+}
+
+export function authCookieHeader(opts: {
+  name: string;
+  token: string;
+  maxAgeSec: number;
+  secure: boolean;
+}): string {
+  const secure = opts.secure ? "; Secure" : "";
+  return `${opts.name}=${opts.token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${opts.maxAgeSec}${secure}`;
+}
+
+export function clearAuthCookieHeader(opts: { name: string; secure: boolean }): string {
+  const secure = opts.secure ? "; Secure" : "";
+  return `${opts.name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure}`;
+}
+
+const ANONYMOUS: AuthPrincipal = { kind: "anonymous" };
+const LOCAL_USER: AuthPrincipal = { kind: "local-user", trustedLoopback: true };
+
 export function createAuthService(opts: AuthServiceOptions): AuthService {
   const now = opts.now ?? Date.now;
   const ttl = opts.sessionTtlMs ?? 30 * 24 * 60 * 60_000;
   const limiter = opts.limiter ?? createLoginRateLimiter({ now });
+  const cookieName = opts.cookieName ?? AUTH_COOKIE;
+  let pairedResolver: PairedDeviceResolver | undefined = opts.resolvePairedDevice;
 
   let stored: AuthFile = { passwordHash: null, sessions: [] };
   try {
@@ -224,23 +327,82 @@ export function createAuthService(opts: AuthServiceOptions): AuthService {
     save();
   };
 
+  const resolvePublicHttp = (req: AuthRequestLike, ingress: Extract<RequestIngress, { kind: "public-http" }>): AuthResolution => {
+    const token = parseCookieToken(req.headers.cookie, cookieName);
+    const session = sessionFor(token);
+    if (session) {
+      touch(session);
+      const principal: AuthPrincipal = {
+        kind: "ui-session",
+        sessionId: session.id,
+        rememberedDeviceId: session.id,
+      };
+      return { principal, authenticated: true };
+    }
+    if (!effectiveHash()) {
+      if (ingress.loopback) {
+        return { principal: LOCAL_USER, authenticated: true };
+      }
+      return { principal: ANONYMOUS, authenticated: false };
+    }
+    if (opts.localhostOptional && ingress.loopback) {
+      return { principal: LOCAL_USER, authenticated: true };
+    }
+    return { principal: ANONYMOUS, authenticated: false };
+  };
+
   const svc: AuthService = {
     enabled: () => effectiveHash() !== null,
+    cookieName: () => cookieName,
 
-    tokenOf: (req) => parseCookieToken(req.headers.cookie),
+    attachPairedDeviceResolver(resolver) {
+      pairedResolver = resolver;
+    },
 
-    gate(req) {
-      if (!svc.enabled()) return null;
-      if (opts.localhostOptional && isLocal(req.socket.remoteAddress)) return null;
-      const s = sessionFor(svc.tokenOf(req));
-      if (s) {
-        touch(s);
-        return null;
+    resolve(request, ingress) {
+      if (ingress.kind === "polyth-link") {
+        const paired = pairedResolver?.(ingress) ?? null;
+        if (paired && paired.kind === "paired-device" && paired.connectionId === ingress.connectionId) {
+          return { principal: paired, authenticated: true };
+        }
+        return { principal: ANONYMOUS, authenticated: false };
       }
+      if (ingress.kind === "internal") {
+        return {
+          principal: { kind: "internal-service", serviceId: ingress.serviceId },
+          authenticated: true,
+        };
+      }
+      return resolvePublicHttp(request, ingress);
+    },
+
+    requireAuthenticated(request, ingress) {
+      const resolution = svc.resolve(request, ingress);
+      if (!resolution.authenticated) {
+        throw new AuthorizationError("unauthorized", "authentication required");
+      }
+      return resolution.principal;
+    },
+
+    requireCapability(principal, capability) {
+      requirePrincipalCapability(principal, capability);
+    },
+
+    gate(request, ingress) {
+      const resolution = svc.resolve(request, ingress);
+      if (resolution.authenticated) return null;
       return { status: 401, body: { error: "unauthorized", message: "authentication required" } };
     },
 
-    authorized: (req) => svc.gate(req) === null,
+    statusDto(resolution) {
+      return {
+        required: resolution.principal.kind === "paired-device" ? false : svc.enabled(),
+        authorized: resolution.authenticated,
+        scope: principalScope(resolution.principal),
+      };
+    },
+
+    tokenOf: (req) => parseCookieToken(req.headers.cookie, cookieName),
 
     login(password, remoteAddr, userAgent) {
       const hash = effectiveHash();

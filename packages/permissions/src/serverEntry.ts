@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type { RouteHandler, SessionService } from "@polyth/contracts";
 import {
+  localOnlyRemoteAccess,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
@@ -61,5 +62,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     serverServiceKey<AutoAcceptStore>("permissions.auto-accept"),
     createAutoAcceptStore(join(host.storageDir, "auto-accept.json")),
   );
-  return { routes: autoAcceptRoutes(host.sessions) };
+  return {
+    remoteAccess: localOnlyRemoteAccess(["permissions"]),
+    routes: autoAcceptRoutes(host.sessions),
+  };
 }

@@ -44,9 +44,6 @@ const parseSecrets = (raw: unknown): Record<string, string> | undefined => {
   return Object.keys(out).length ? out : undefined;
 };
 
-const isLocal = (addr: string | undefined): boolean =>
-  !!addr && (addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1");
-
 export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
   return async (rc) => {
     const { path, method } = rc;
@@ -91,7 +88,16 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
 
     // ---- system info ------------------------------------------------------------
     if (path === "/api/system/info" && method === "GET") {
-      rc.json(200, deps.systemInfo(isLocal(rc.req.socket.remoteAddress)));
+      if (rc.principal.kind === "anonymous") {
+        throw Object.assign(new Error("authentication required"), { code: "unauthorized" });
+      }
+      if (rc.principal.kind === "paired-device") {
+        throw Object.assign(new Error("not allowed"), { code: "forbidden" });
+      }
+      const revealLocal = (rc.principal.kind === "local-user" || rc.principal.kind === "ui-session")
+        && rc.ingress.kind === "public-http"
+        && rc.ingress.loopback;
+      rc.json(200, deps.systemInfo(revealLocal));
       return true;
     }
 

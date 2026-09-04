@@ -1,5 +1,6 @@
 import type { ProjectService, RouteHandler } from "@polyth/contracts";
 import {
+  localOnlyRemoteAccess,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
@@ -92,6 +93,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   host.services.provide(serverServiceKey<CommandService>("commands"), commands);
   let routes: RouteHandler | null = null;
   return {
+    remoteAccess: localOnlyRemoteAccess(["commands"]),
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
       routes ??= snippetRoutes({

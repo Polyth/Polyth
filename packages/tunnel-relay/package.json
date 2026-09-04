@@ -1,0 +1,9 @@
+{
+  "name": "@polyth/tunnel-relay",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Packaging and operations for the upstream Iroh relay. Not an application proxy.",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

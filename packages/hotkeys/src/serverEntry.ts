@@ -1,5 +1,5 @@
-import type { ServerPackage, ServerPackageHost } from "@polyth/plugins";
+import { localOnlyRemoteAccess, type ServerPackage, type ServerPackageHost } from "@polyth/plugins";
 
 export default function registerPackage(_host: ServerPackageHost): ServerPackage {
-  return {};
+  return { remoteAccess: localOnlyRemoteAccess(["hotkeys"]) };
 }

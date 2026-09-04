@@ -1,22 +1,42 @@
 // REST per docs/PLAN.md §5 + static web bundle serving. node:http only.
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { readFile } from "node:fs/promises";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, statSync, unlinkSync, mkdirSync } from "node:fs";
+import { timingSafeEqual } from "node:crypto";
 import { constants as zlibConstants, gzip, gzipSync } from "node:zlib";
-import { extname, join, normalize, resolve, sep } from "node:path";
-import type {
-  AgentRuntime,
-  JsonObject,
-  ModelDescriptor,
-  RouteHandler,
-  RouteRequest,
-  SessionService,
+import { extname, join, normalize, resolve, sep, dirname } from "node:path";
+import {
+  canonicalizeRemotePath,
+  type AgentRuntime,
+  type AuthResolution,
+  type JsonObject,
+  type ModelDescriptor,
+  type RequestIngress,
+  type RouteHandler,
+  type RouteRequest,
+  type SessionService,
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
 import type { RuntimePool } from "./sessions.ts";
 import { aggregateRuntimes } from "./runtimeAggregate.ts";
 import type { ModelVisibilityService } from "./modelVisibility.ts";
 import type { RuntimeCatalog } from "./runtimeCatalog.ts";
+import type { HttpServerContext } from "@polyth/plugins";
+import { PairedSocketRegistry } from "@polyth/plugins";
+import {
+  AuthorizationError,
+  isLoopbackAddress,
+  publicHttpIngress,
+  requirePrincipalCapability,
+  UNTRUSTED_INGRESS_HEADERS,
+  type AuthRequestLike,
+  type GateDenial,
+} from "./auth.ts";
+import {
+  assertPairedHttpAllowed,
+  CORE_REMOTE_ACCESS,
+  type OwnedRemotePolicy,
+} from "./remotePolicy.ts";
 
 const MIME: Record<string, string> = {
   ".html": "text/html", ".js": "text/javascript", ".css": "text/css",
@@ -49,7 +69,7 @@ const JSON_GZIP_MIN_BYTES = 1024;
 // a full-log export (100MB+) must never block the event loop for seconds.
 const JSON_GZIP_SYNC_MAX_BYTES = 256 * 1024;
 
-const writeJson = (req: IncomingMessage, res: ServerResponse, code: number, body: unknown) => {
+const writeJson = (req: IncomingMessage, res: ServerResponse, code: number, body: unknown): void => {
   const payload = JSON.stringify(body);
   if (
     payload.length > JSON_GZIP_MIN_BYTES
@@ -119,22 +139,43 @@ const sendStaticFile = async (
 // runaway client can no longer grow the heap without bound.
 export const MAX_BODY_BYTES = 25 * 1024 * 1024;
 
-const readBody = async (req: IncomingMessage): Promise<Record<string, unknown>> => {
+export function contentLengthOf(req: IncomingMessage): number | undefined {
+  const raw = req.headers["content-length"];
+  if (raw === undefined) return undefined;
+  const value = Array.isArray(raw) ? raw : [raw];
+  if (value.length !== 1 || !/^\d+$/.test(value[0]!)) {
+    throw Object.assign(new Error("invalid Content-Length"), { code: "invalid-input" });
+  }
+  return Number(value[0]);
+}
+
+const readBody = async (req: IncomingMessage, limit = MAX_BODY_BYTES): Promise<Record<string, unknown>> => {
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw Object.assign(new Error("invalid body limit"), { code: "invalid-input" });
+  }
+  const declared = contentLengthOf(req);
+  if (declared !== undefined && declared > limit) {
+    throw Object.assign(
+      new Error(`request body too large (max ${limit} bytes)`),
+      { code: "payload-too-large" },
+    );
+  }
   const chunks: Buffer[] = [];
   let size = 0;
   let overflow = false;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    // On overflow keep draining without buffering: memory stays bounded and
-    // the connection ends cleanly so the 413 reliably reaches the client.
-    if (size > MAX_BODY_BYTES) { overflow = true; chunks.length = 0; }
+    if (size > limit) { overflow = true; chunks.length = 0; }
     if (!overflow) chunks.push(chunk as Buffer);
   }
   if (overflow) {
     throw Object.assign(
-      new Error(`request body too large (max ${MAX_BODY_BYTES} bytes)`),
+      new Error(`request body too large (max ${limit} bytes)`),
       { code: "payload-too-large" },
     );
+  }
+  if (declared !== undefined && size !== declared) {
+    throw Object.assign(new Error("Content-Length does not match the request body"), { code: "invalid-input" });
   }
   const raw = Buffer.concat(chunks).toString("utf8");
   if (!raw) return {};
@@ -153,6 +194,17 @@ const readBody = async (req: IncomingMessage): Promise<Record<string, unknown>> 
 /** The gateway's route contract is public so trusted plugins can contribute it. */
 export type { RouteHandler, RouteRequest } from "@polyth/contracts";
 
+export type HttpHandler = (
+  req: IncomingMessage,
+  res: ServerResponse,
+  ingress: RequestIngress,
+) => Promise<void>;
+
+export interface HttpAuth {
+  resolve(req: AuthRequestLike, ingress: RequestIngress): AuthResolution;
+  gate(req: AuthRequestLike, ingress: RequestIngress): GateDenial | null;
+}
+
 export interface HttpDeps {
   sessions: SessionService;
   projects: ProjectService;
@@ -169,14 +221,182 @@ export interface HttpDeps {
   catalog?: RuntimeCatalog;
   /** F16 gate: null = proceed, otherwise the denial to answer with. Applied
    *  to every /api path except the two the lock screen itself needs. */
-  auth?: { gate(req: IncomingMessage): { status: number; body: unknown } | null };
+  auth?: HttpAuth;
+  /** Extra remote-access policies (package-owned). Core policy is always included. */
+  remotePolicies?: () => readonly OwnedRemotePolicy[];
+  /** Public listener id recorded on RequestIngress. */
+  listenerId?: string;
 }
 
 // Public even when a password is set: the SPA lock screen must be able to
 // learn that auth is required and then mint a session.
 const AUTH_PUBLIC = new Set(["/api/auth/status", "/api/auth/login"]);
 
-export function createHttpServer(deps: HttpDeps): Server {
+function fallbackResolution(ingress: RequestIngress, req: AuthRequestLike): AuthResolution {
+  if (ingress.kind === "public-http" && ingress.loopback && isLoopbackAddress(req.socket.remoteAddress)) {
+    return { principal: { kind: "local-user", trustedLoopback: true }, authenticated: true };
+  }
+  return { principal: { kind: "anonymous" }, authenticated: false };
+}
+
+const headerValue = (req: IncomingMessage, name: string): string | undefined => {
+  const raw = req.headers[name];
+  return Array.isArray(raw) ? raw[0] : raw;
+};
+
+const stripUntrustedHeaders = (req: IncomingMessage, ingress: RequestIngress): void => {
+  const stripInternal = () => {
+    for (const key of Object.keys(req.headers)) {
+      if (key.toLowerCase().startsWith("x-polyth-link-") || key.toLowerCase().startsWith("x-polyth-internal-")) {
+        delete req.headers[key];
+      }
+    }
+  };
+  if (ingress.kind === "polyth-link") {
+    for (const name of UNTRUSTED_INGRESS_HEADERS) delete req.headers[name];
+    delete req.headers.cookie;
+    delete req.headers.authorization;
+    stripInternal();
+    return;
+  }
+  if (ingress.kind !== "public-http") return;
+  for (const name of UNTRUSTED_INGRESS_HEADERS) {
+    if (name === "cookie" || name === "authorization") continue;
+    delete req.headers[name];
+  }
+  stripInternal();
+};
+
+export const TUNNEL_INTERNAL_TOKEN_HEADER = "x-polyth-internal-token";
+export const TUNNEL_INTERNAL_CONNECTION_HEADER = "x-polyth-internal-connection";
+
+export function internalTokenEquals(provided: string | undefined, expected: string): boolean {
+  if (!provided || !expected) return false;
+  const left = Buffer.from(provided);
+  const right = Buffer.from(expected);
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
+}
+
+export interface TunnelIngressBinding {
+  secret: string;
+  lookup(connectionId: string): Extract<RequestIngress, { kind: "polyth-link" }> | null;
+}
+
+/** Dedicated unix/loopback ingress. The public listener never accepts these tokens. */
+export function createTunnelIngressServer(handler: HttpHandler, binding: TunnelIngressBinding): Server {
+  return createServer((req, res) => {
+    const secret = headerValue(req, TUNNEL_INTERNAL_TOKEN_HEADER);
+    const connectionId = headerValue(req, TUNNEL_INTERNAL_CONNECTION_HEADER);
+    if (!internalTokenEquals(secret, binding.secret) || !connectionId) {
+      res.writeHead(403, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "forbidden", message: "not allowed" }));
+      return;
+    }
+    const ingress = binding.lookup(connectionId);
+    if (!ingress) {
+      res.writeHead(403, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "forbidden", message: "not allowed" }));
+      return;
+    }
+    void handler(req, res, ingress);
+  });
+}
+
+export interface TunnelIngressHandle {
+  secret: string;
+  socketPath: string;
+  server: Server;
+  listen(): Promise<void>;
+  close(): Promise<void>;
+}
+
+export function createTunnelIngress(opts: {
+  handler: HttpHandler;
+  secret: string;
+  socketPath: string;
+  lookup(connectionId: string): Extract<RequestIngress, { kind: "polyth-link" }> | null;
+  resolve: HttpServerContext["resolve"];
+  attachChannels(ctx: HttpServerContext): void;
+  pairedSockets?: PairedSocketRegistry;
+}): TunnelIngressHandle {
+  const pairedSockets = opts.pairedSockets ?? new PairedSocketRegistry();
+  const server = createTunnelIngressServer(opts.handler, {
+    secret: opts.secret,
+    lookup: opts.lookup,
+  });
+  const sockets = new Set<import("node:net").Socket>();
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+  });
+  const identity: HttpServerContext["identity"] = (request) => {
+    const secret = headerValue(request, TUNNEL_INTERNAL_TOKEN_HEADER);
+    const connectionId = headerValue(request, TUNNEL_INTERNAL_CONNECTION_HEADER);
+    if (!internalTokenEquals(secret, opts.secret) || !connectionId) {
+      return { principal: { kind: "anonymous" }, authenticated: false };
+    }
+    const ingress = opts.lookup(connectionId);
+    if (!ingress) return { principal: { kind: "anonymous" }, authenticated: false };
+    return opts.resolve(request, ingress);
+  };
+  const authorize: HttpServerContext["authorize"] = (request) => identity(request).authenticated;
+  const refreshPrincipal: HttpServerContext["refreshPrincipal"] = (principal) => {
+    if (principal.kind !== "paired-device") return principal;
+    const ingress = opts.lookup(principal.connectionId);
+    if (!ingress) return null;
+    const resolution = opts.resolve(
+      { headers: {}, socket: { remoteAddress: undefined } } as never,
+      ingress,
+    );
+    return resolution.principal.kind === "paired-device" ? resolution.principal : null;
+  };
+  let closed = false;
+  return {
+    secret: opts.secret,
+    socketPath: opts.socketPath,
+    server,
+    async listen() {
+      mkdirSync(dirname(opts.socketPath), { recursive: true });
+      try { unlinkSync(opts.socketPath); } catch { /* first boot or stale socket */ }
+      await new Promise<void>((resolve, reject) => {
+        const onError = (error: Error) => reject(error);
+        server.once("error", onError);
+        server.listen(opts.socketPath, () => {
+          server.off("error", onError);
+          resolve();
+        });
+      });
+      opts.attachChannels({
+        server,
+        listenerId: "polyth-link",
+        dispatch: opts.handler,
+        resolve: opts.resolve,
+        authorize,
+        identity,
+        refreshPrincipal,
+        pairedSockets,
+      });
+    },
+    async close() {
+      if (closed) return;
+      closed = true;
+      for (const socket of sockets) socket.destroy();
+      sockets.clear();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 500);
+        server.close(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+      try { unlinkSync(opts.socketPath); } catch { /* already removed */ }
+    },
+  };
+}
+
+export function createHttpHandler(deps: HttpDeps): HttpHandler {
   const { sessions, projects } = deps;
 
   // Aggregate across live runtimes (per-project pools may differ).
@@ -185,31 +405,71 @@ export function createHttpServer(deps: HttpDeps): Server {
       .then((result) => result.items);
   const models = () => deps.catalog?.models() ?? aggregate<ModelDescriptor>((runtime) => runtime.models());
 
-  return createServer(async (req, res) => {
-    const url = new URL(req.url ?? "/", "http://x");
-    const path = url.pathname;
-    const method = req.method ?? "GET";
-    // Request-bound so every JSON answer (feature routes included) can honor
-    // the client's accept-encoding.
-    const json = (target: ServerResponse, code: number, body: unknown) =>
+  return async (req, res, ingress) => {
+    const json = (target: ServerResponse, code: number, body: unknown): void => {
       writeJson(req, target, code, body);
+    };
     try {
-      // F16: one gate before all routing. Static assets stay public (the SPA
-      // shell renders the lock screen); every /api answer needs a session.
+      const rawUrl = req.url ?? "/";
+      const rawPath = rawUrl.split("?")[0] || "/";
+      let url: URL;
+      try {
+        url = new URL(rawUrl, "http://x");
+      } catch {
+        throw Object.assign(new Error("The requested path is invalid."), { code: "invalid-path" });
+      }
+      const path = url.pathname;
+      const method = req.method ?? "GET";
+      stripUntrustedHeaders(req, ingress);
+      const reqLike: AuthRequestLike = {
+        headers: { cookie: req.headers.cookie, "user-agent": Array.isArray(req.headers["user-agent"]) ? req.headers["user-agent"][0] : req.headers["user-agent"] },
+        socket: { remoteAddress: req.socket?.remoteAddress },
+      };
+      const resolution = deps.auth?.resolve(reqLike, ingress) ?? fallbackResolution(ingress, reqLike);
+      const principal = resolution.principal;
+
       if (deps.auth && path.startsWith("/api/") && !AUTH_PUBLIC.has(path)) {
-        const denial = deps.auth.gate(req);
+        const denial = deps.auth.gate(reqLike, ingress);
         if (denial) return json(res, denial.status, denial.body);
       }
+
+      let bodyLimit = MAX_BODY_BYTES;
+      let bodyCache: Record<string, unknown> | undefined;
+      const loadBody = async () => (bodyCache ??= await readBody(req, bodyLimit));
+
+      if (principal.kind === "paired-device") {
+        if (!canonicalizeRemotePath(rawPath) || path !== rawPath) {
+          throw Object.assign(new Error("The requested path is invalid."), { code: "invalid-path" });
+        }
+        if (path.startsWith("/internal/") || path === "/metrics" || path.startsWith("/debug")) {
+          throw new AuthorizationError("forbidden", "not allowed");
+        }
+        if (!path.startsWith("/api/")) {
+          throw new AuthorizationError("forbidden", "not allowed");
+        }
+        const policies: OwnedRemotePolicy[] = [
+          { owner: "core", policy: CORE_REMOTE_ACCESS },
+          ...(deps.remotePolicies?.() ?? []),
+        ];
+        const match = assertPairedHttpAllowed(principal, method, path, policies, contentLengthOf(req));
+        bodyLimit = match.rule.maxBodyBytes ?? MAX_BODY_BYTES;
+        if (match.rule.mutation) {
+          await loadBody();
+        }
+      }
+
+      const requireCapability = (capability: string) => requirePrincipalCapability(principal, capability);
+
       if (path === "/api/health" && method === "GET") {
         return json(res, 200, { ok: true, version: deps.version, capabilities: deps.capabilities() });
       }
       if (path === "/api/projects" && method === "GET") return json(res, 200, await projects.list());
       if (path === "/api/projects" && method === "POST") {
-        const b = await readBody(req);
+        const b = await loadBody();
         return json(res, 200, await projects.add(String(b.path), b.name ? String(b.name) : undefined));
       }
       if (path === "/api/projects/create" && method === "POST") {
-        const b = await readBody(req);
+        const b = await loadBody();
         return json(res, 200, await projects.create(String(b.path), b.name ? String(b.name) : undefined));
       }
       let m = path.match(/^\/api\/projects\/([^/]+)$/);
@@ -223,7 +483,7 @@ export function createHttpServer(deps: HttpDeps): Server {
         return json(res, 200, await sessions.list(projectId));
       }
       if (path === "/api/sessions" && method === "POST") {
-        const b = await readBody(req);
+        const b = await loadBody();
         const ref = await sessions.create({
           projectId: String(b.projectId),
           ...(b.title ? { title: String(b.title) } : {}),
@@ -263,7 +523,7 @@ export function createHttpServer(deps: HttpDeps): Server {
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/message$/);
       if (m && method === "POST") {
-        const b = await readBody(req);
+        const b = await loadBody();
         const delivery = b.delivery;
         return json(res, 200, await sessions.send(m[1]!, {
           text: String(b.text ?? ""),
@@ -286,13 +546,13 @@ export function createHttpServer(deps: HttpDeps): Server {
       if (m && method === "GET") return json(res, 200, await sessions.queueList?.(m[1]!) ?? []);
       m = path.match(/^\/api\/sessions\/([^/]+)\/queue\/order$/);
       if (m && method === "PATCH") {
-        const b = await readBody(req);
+        const b = await loadBody();
         const ids = Array.isArray(b.ids) ? b.ids.map(String) : [];
         return json(res, 200, await sessions.queueReorder?.(m[1]!, ids) ?? []);
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/queue\/([^/]+)$/);
       if (m && method === "PATCH") {
-        const b = await readBody(req);
+        const b = await loadBody();
         return json(res, 200, await sessions.queueEdit?.(m[1]!, m[2]!, String(b.text ?? "")));
       }
       if (m && method === "DELETE") {
@@ -313,7 +573,7 @@ export function createHttpServer(deps: HttpDeps): Server {
         if (!sessions.resumeNow) {
           throw Object.assign(new Error("rate-limit resume unavailable"), { code: "unsupported" });
         }
-        const b = await readBody(req);
+        const b = await loadBody();
         const model = b.model && typeof b.model === "object" && !Array.isArray(b.model)
           ? (b.model as { providerID: string; modelID: string })
           : undefined;
@@ -321,13 +581,13 @@ export function createHttpServer(deps: HttpDeps): Server {
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/fork$/);
       if (m && method === "POST") {
-        const b = await readBody(req);
+        const b = await loadBody();
         return json(res, 200, await sessions.fork(m[1]!, b.atSeq === undefined ? undefined : Number(b.atSeq)));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/rewind$/);
       if (m && method === "POST") {
         if (!sessions.rewind) throw Object.assign(new Error("session rewind unavailable"), { code: "unsupported" });
-        const b = await readBody(req);
+        const b = await loadBody();
         if (b.atSeq === undefined) throw Object.assign(new Error("atSeq required"), { code: "invalid-input" });
         return json(res, 200, await sessions.rewind(m[1]!, Number(b.atSeq)));
       }
@@ -339,13 +599,13 @@ export function createHttpServer(deps: HttpDeps): Server {
       m = path.match(/^\/api\/sessions\/([^/]+)\/shell$/);
       if (m && method === "POST") {
         if (!sessions.runShell) throw Object.assign(new Error("composer shell unavailable"), { code: "unsupported" });
-        const b = await readBody(req);
+        const b = await loadBody();
         if (typeof b.command !== "string") throw Object.assign(new Error("command required"), { code: "invalid-input" });
         return json(res, 200, await sessions.runShell(m[1]!, b.command));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/permission\/([^/]+)$/);
       if (m && method === "POST") {
-        const b = await readBody(req);
+        const b = await loadBody();
         const scope = b.scope === "session" || b.scope === "project" ? b.scope : undefined;
         await sessions.replyPermission(m[1]!, m[2]!, b.reply as "once" | "always" | "reject", scope);
         return json(res, 200, { ok: true });
@@ -353,7 +613,7 @@ export function createHttpServer(deps: HttpDeps): Server {
       m = path.match(/^\/api\/sessions\/([^/]+)\/secrets\/([^/]+)$/);
       if (m && method === "POST") {
         if (!sessions.replySecret) throw Object.assign(new Error("Secure Safe unavailable"), { code: "unsupported" });
-        const b = await readBody(req);
+        const b = await loadBody();
         if (b.action === "save") {
           if (typeof b.value !== "string" || !b.value.trim()) {
             throw Object.assign(new Error("value is required"), { code: "invalid-input" });
@@ -373,7 +633,7 @@ export function createHttpServer(deps: HttpDeps): Server {
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/question\/([^/]+)$/);
       if (m && method === "POST") {
-        const b = await readBody(req);
+        const b = await loadBody();
         await sessions.replyQuestion(m[1]!, m[2]!, (b.answers ?? b) as JsonObject);
         return json(res, 200, { ok: true });
       }
@@ -391,12 +651,12 @@ export function createHttpServer(deps: HttpDeps): Server {
         }
         m = path.match(/^\/api\/providers\/([^/]+)\/enabled$/);
         if (m && method === "POST") {
-          const b = await readBody(req);
+          const b = await loadBody();
           const state = await vis.setProviderEnabled(decodeURIComponent(m[1]!), b.enabled !== false);
           return json(res, 200, { ok: true, ...state });
         }
         if (path === "/api/models/enabled" && method === "POST") {
-          const b = await readBody(req);
+          const b = await loadBody();
           const state = await vis.setModelEnabled(String(b.key ?? ""), b.enabled !== false);
           return json(res, 200, { ok: true, ...state });
         }
@@ -411,10 +671,9 @@ export function createHttpServer(deps: HttpDeps): Server {
       }
 
       if (deps.routes?.length) {
-        let bodyCache: Record<string, unknown> | undefined;
         const rc: RouteRequest = {
-          req, res, url, path, method,
-          body: async () => (bodyCache ??= await readBody(req)),
+          req, res, url, path, method, ingress, principal, requireCapability,
+          body: async () => loadBody(),
           json: (code, body) => json(res, code, body),
         };
         for (const route of deps.routes) if (await route(rc)) return;
@@ -424,13 +683,14 @@ export function createHttpServer(deps: HttpDeps): Server {
 
       if (path.startsWith("/packages/")) {
         const asset = path.match(/^\/packages\/([a-z0-9][a-z0-9-]*)\/(.+)$/);
-        if (!asset) { res.writeHead(404); return res.end(); }
+        if (!asset) { res.writeHead(404); res.end(); return; }
         let relativeAsset: string;
         try {
           relativeAsset = decodeURIComponent(asset[2]!);
         } catch {
           res.writeHead(400);
-          return res.end();
+          res.end();
+          return;
         }
         const packageRoot = resolve(
           deps.packagesDir ?? resolve(import.meta.dirname, "../.."),
@@ -445,11 +705,13 @@ export function createHttpServer(deps: HttpDeps): Server {
           || !inside(packageRoot, filePath)
         ) {
           res.writeHead(403);
-          return res.end();
+          res.end();
+          return;
         }
         if (!existsSync(filePath) || !statSync(filePath).isFile()) {
           res.writeHead(404, { "content-type": "text/plain" });
-          return res.end("not found");
+          res.end("not found");
+          return;
         }
         await sendStaticFile(req, res, filePath);
         return;
@@ -457,18 +719,24 @@ export function createHttpServer(deps: HttpDeps): Server {
 
       // static web bundle
       let filePath = normalize(join(deps.webDist, path === "/" ? "index.html" : path));
-      if (!filePath.startsWith(normalize(deps.webDist))) { res.writeHead(403); return res.end(); }
+      if (!filePath.startsWith(normalize(deps.webDist))) { res.writeHead(403); res.end(); return; }
       if (!existsSync(filePath)) {
         // SPA fallback is for navigations only. A missing asset-like path
         // (anything with a file extension) must fail honestly: serving
         // index.html as e.g. a JS module response breaks refresh replay on
         // nested routes with an unhelpful MIME error (EXT-SEAMS-V3).
-        if (extname(path) !== "") { res.writeHead(404, { "content-type": "text/plain" }); return res.end("not found"); }
+        if (extname(path) !== "") { res.writeHead(404, { "content-type": "text/plain" }); res.end("not found"); return; }
         filePath = join(deps.webDist, "index.html");
       }
       await sendStaticFile(req, res, filePath);
     } catch (err) {
-      const e = err as Error & { code?: string; cause?: unknown; field?: unknown };
+      const e = err as Error & { code?: string; cause?: unknown; field?: unknown; status?: number };
+      if (e instanceof AuthorizationError || e.code === "unauthorized" || e.code === "forbidden") {
+        return json(res, e.status === 401 || e.code === "unauthorized" ? 401 : 403, {
+          error: e.code ?? "forbidden",
+          message: e.code === "unauthorized" ? "authentication required" : "not allowed",
+        });
+      }
       // A dead OpenCode transport is transient: the runtime pool respawns on
       // the next call, so give clients a retryable status and useful message.
       if (/fetch failed|terminated|ECONNREFUSED/i.test(`${e.message ?? ""} ${String(e.cause ?? "")}`)) {
@@ -498,5 +766,17 @@ export function createHttpServer(deps: HttpDeps): Server {
         ...(e.code === "invalid-input" && typeof e.field === "string" ? { field: e.field } : {}),
       });
     }
+  };
+}
+
+export function createPublicHttpServer(handler: HttpHandler, listenerId = "public"): Server {
+  return createServer((req, res) => {
+    const encrypted = Boolean((req.socket as { encrypted?: boolean }).encrypted);
+    const ingress = publicHttpIngress(req, { listenerId, secure: encrypted });
+    void handler(req, res, ingress);
   });
+}
+
+export function createHttpServer(deps: HttpDeps): Server {
+  return createPublicHttpServer(createHttpHandler(deps), deps.listenerId ?? "public");
 }

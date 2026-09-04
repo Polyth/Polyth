@@ -1,5 +1,6 @@
 import type { ModelRef, RouteHandler } from "@polyth/contracts";
 import {
+  localOnlyRemoteAccess,
   publishBackgroundWork,
   serverServiceKey,
   type ServerPackage,
@@ -76,5 +77,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     },
   });
   host.services.provide(serverServiceKey<FusionService>("fusion"), fusion);
-  return { routes: fusionRoutes(fusion) };
+  return {
+    remoteAccess: localOnlyRemoteAccess(["fusion"]),
+    routes: fusionRoutes(fusion),
+  };
 }

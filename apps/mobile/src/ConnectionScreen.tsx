@@ -1,16 +1,25 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { App } from "@capacitor/app";
 import { Haptics, ImpactStyle } from "@capacitor/haptics";
 import { SplashScreen } from "@capacitor/splash-screen";
 import {
   checkPolythHost,
   forgetMobileHost,
+  isPairingDeepLink,
   navigateToMobileHost,
-  normalizePolythHost,
   rememberMobileHost,
   type MobileHost,
   type MobileLaunch,
 } from "./runtime.ts";
+import { nativeLinkAvailable, polythLink } from "./polythLink.ts";
+import { isPairingLink, previewPairingLink } from "@polyth/pairing-qr";
+import { bootstrapUrlWithNext, connectionUiState } from "./connectionUi.ts";
+import {
+  peekPendingPairingLink,
+  rememberPendingPairingLink,
+  subscribePendingPairingLink,
+} from "./pendingPair.ts";
 import "./styles.css";
 
 type ConnectLaunch = Extract<MobileLaunch, { kind: "connect" }>;
@@ -24,43 +33,173 @@ function connectionLabel(host: MobileHost): string {
 }
 
 function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
+  const nativeAvailable = nativeLinkAvailable();
+  const initialPending = launch.pendingPair ?? peekPendingPairingLink();
+  const ui = connectionUiState({ nativeAvailable, pendingPair: initialPending });
+  const [ticket, setTicket] = useState(initialPending ?? "");
+  const [phrase, setPhrase] = useState<string[] | null>(null);
+  const [attemptId, setAttemptId] = useState<string | null>(null);
+  const [stage, setStage] = useState(ui.showUnavailableBanner
+    ? "Polyth Link is unavailable in this build"
+    : "Connect to your Polyth");
   const [url, setUrl] = useState(launch.preferred ?? launch.recent[0]?.url ?? "");
   const [recent, setRecent] = useState(launch.recent);
   const [error, setError] = useState(launch.error ?? "");
-  const [result, setResult] = useState("");
-  const [busy, setBusy] = useState<"test" | "connect" | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [cameraPermission, setCameraPermission] = useState<"unknown" | "prompt" | "granted" | "denied">("unknown");
+  const [developer, setDeveloper] = useState(false);
 
   useEffect(() => {
     void SplashScreen.hide();
+    return () => {
+      (scanQr as { cleanup?: () => void }).cleanup?.();
+    };
   }, []);
 
-  const validate = async () => {
+  useEffect(() => {
+    if (launch.pendingPair) rememberPendingPairingLink(launch.pendingPair);
+    const off = subscribePendingPairingLink((value) => {
+      setTicket(value);
+    });
+    return off;
+  }, [launch.pendingPair]);
+
+  useEffect(() => {
+    let handle: { remove: () => Promise<void> } | undefined;
+    void App.addListener("appUrlOpen", ({ url: opened }) => {
+      if (!isPairingDeepLink(opened)) return;
+      rememberPendingPairingLink(opened);
+      setTicket(opened);
+    }).then((next) => { handle = next; });
+    return () => { void handle?.remove(); };
+  }, []);
+
+  useEffect(() => {
+    if (!ui.autoStartPairing || !initialPending) return;
+    void startPair(initialPending);
+  }, []);
+
+  const scanQr = async () => {
+    if (!nativeLinkAvailable()) {
+      setError("Secure pairing is unavailable in this build.");
+      return;
+    }
     setError("");
-    setResult("");
+    const Detector = (globalThis as {
+      BarcodeDetector?: new (opts: { formats: string[] }) => {
+        detect(source: HTMLVideoElement): Promise<Array<{ rawValue?: string }>>;
+      };
+    }).BarcodeDetector;
+    if (!Detector) {
+      setError("Camera scanning is unavailable here. Paste the pairing code instead.");
+      return;
+    }
+    let stream: MediaStream | undefined;
+    let cancelled = false;
+    const video = document.createElement("video");
+    video.setAttribute("playsinline", "true");
+    video.setAttribute("aria-label", "Camera preview for pairing QR");
+    video.muted = true;
+    video.className = "mobile-connect-scan-video";
+    const mount = document.getElementById("mobile-connect-scan-preview");
+    if (!mount) {
+      setError("Camera preview is unavailable.");
+      return;
+    }
+    mount.replaceChildren(video);
+    setScanning(true);
+    const cleanup = () => {
+      cancelled = true;
+      stream?.getTracks().forEach((item) => item.stop());
+      video.remove();
+      mount.replaceChildren();
+      setScanning(false);
+    };
+    (scanQr as { cleanup?: () => void }).cleanup = cleanup;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+        audio: false,
+      });
+      setCameraPermission("granted");
+      video.srcObject = stream;
+      await video.play();
+      const detector = new Detector({ formats: ["qr_code"] });
+      const started = Date.now();
+      while (!cancelled && Date.now() - started < 20_000) {
+        const codes = await detector.detect(video);
+        const raw = codes.find((code) => code.rawValue && isPairingLink(code.rawValue))?.rawValue;
+        if (raw) {
+          rememberPendingPairingLink(raw);
+          setTicket(raw);
+          cleanup();
+          await startPair(raw);
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      if (!cancelled) setError("No pairing QR was found. Paste the pairing code instead.");
+    } catch (cause) {
+      const denied = cause instanceof Error && /denied|permission|notallowed/i.test(cause.message);
+      setCameraPermission(denied ? "denied" : "prompt");
+      setError(denied
+        ? "Camera permission is required to scan. You can also paste the pairing code."
+        : "Camera scanning failed. Paste the pairing code instead.");
+    } finally {
+      cleanup();
+    }
+  };
+
+  const startPair = async (raw: string) => {
+    setError("");
+    rememberPendingPairingLink(raw);
+    if (!nativeLinkAvailable()) {
+      setError("Secure pairing needs the native Polyth Link core. The pairing code is saved for retry.");
+      setStage("Polyth Link is unavailable in this build");
+      return;
+    }
+    const preview = previewPairingLink(raw);
+    if (!preview.ok) {
+      setError("This pairing code is not valid.");
+      return;
+    }
+    setBusy(true);
+    setStage("Connecting securely…");
+    try {
+      const attempt = await polythLink().beginPairing(raw, "This phone");
+      setAttemptId(attempt.attemptId);
+      setPhrase(attempt.safetyPhrase ?? null);
+      setStage(attempt.safetyPhrase ? "Compare these words…" : "Verifying your Polyth…");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      setStage("Connect to your Polyth");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirm = async () => {
+    if (!attemptId) return;
+    setBusy(true);
+    setStage("Waiting for approval on your computer…");
+    try {
+      const launched = await polythLink().confirmPairing(attemptId);
+      setStage("Connected");
+      location.replace(bootstrapUrlWithNext(launched.bootstrapUrl, launch.deepLinkPath));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const legacyConnect = async () => {
+    setBusy(true);
     const checked = await checkPolythHost(url);
     if (!checked.ok) {
       setError(checked.message);
-      return checked;
-    }
-    setResult(checked.authRequired
-      ? "Server found. You’ll enter its Polyth password next."
-      : "Server found and ready.");
-    return checked;
-  };
-
-  const test = async () => {
-    if (busy) return;
-    setBusy("test");
-    await validate();
-    setBusy(null);
-  };
-
-  const connect = async () => {
-    if (busy) return;
-    setBusy("connect");
-    const checked = await validate();
-    if (!checked.ok) {
-      setBusy(null);
+      setBusy(false);
       return;
     }
     const host = await rememberMobileHost(url);
@@ -68,96 +207,143 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
     navigateToMobileHost(host, launch.deepLinkPath);
   };
 
-  const remove = async (host: MobileHost) => {
-    const state = await forgetMobileHost(host.url);
-    setRecent(state.recent);
-    if (url === host.url) setUrl(state.recent[0]?.url ?? "");
-  };
-
-  const valid = (() => {
-    try {
-      normalizePolythHost(url);
-      return true;
-    } catch {
-      return false;
-    }
-  })();
-
   return (
     <main className="mobile-connect">
       <section className="mobile-connect-card" aria-labelledby="mobile-connect-title">
         <div className="mobile-connect-brand" aria-hidden="true">P</div>
         <div className="mobile-connect-copy">
-          <span className="mobile-connect-eyebrow">Polyth mobile</span>
-          <h1 id="mobile-connect-title">Connect to your Polyth</h1>
-          <p>
-            Agents and projects stay on your computer or server. This app is a
-            secure client for that existing runtime.
-          </p>
+          <span className="mobile-connect-eyebrow">Polyth Link</span>
+          <h1 id="mobile-connect-title">{stage}</h1>
+          {ui.showUnavailableBanner ? (
+            <p>
+              This build does not include a native Polyth Link adapter, so QR pairing cannot run.
+              You can still use an insecure development URL below. A pairing code kept in memory
+              can be retried during this app session; after expiration or restart you will need a
+              new QR.
+            </p>
+          ) : (
+            <p>
+              Scan a QR from Settings → Polyth Link. Compare the four words, then allow the device
+              on your computer. The current pairing code stays in memory for this app session only.
+              After it expires or the app restarts, scan a new QR.
+            </p>
+          )}
         </div>
 
-        <label className="mobile-connect-field">
-          <span>Server address</span>
-          <input
-            type="url"
-            inputMode="url"
-            autoCapitalize="none"
-            autoCorrect="off"
-            placeholder="https://polyth.example.com"
-            value={url}
-            onChange={(event) => {
-              setUrl(event.target.value);
-              setError("");
-              setResult("");
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && valid) void connect();
-            }}
-          />
-          <small>Use HTTPS outside a trusted local network.</small>
-        </label>
+        {ui.showSecurePairing && !phrase && (
+          <>
+            <div className="mobile-connect-scan" hidden={!scanning}>
+              <div id="mobile-connect-scan-preview" className="mobile-connect-scan-preview" />
+              <div className="mobile-connect-scan-frame" aria-hidden="true" />
+              {cameraPermission === "denied" && (
+                <p className="mobile-connect-message">Camera permission is denied.</p>
+              )}
+              <button type="button" className="mobile-connect-test" onClick={() => {
+                (scanQr as { cleanup?: () => void }).cleanup?.();
+              }}>
+                Cancel scan
+              </button>
+            </div>
+          <label className="mobile-connect-field">
+            <span>Pairing code</span>
+            <textarea
+              rows={3}
+              autoCapitalize="none"
+              autoCorrect="off"
+              placeholder="polyth://pair?v=1&t=…"
+              value={ticket}
+              onChange={(event) => {
+                setTicket(event.target.value);
+                if (isPairingDeepLink(event.target.value)) rememberPendingPairingLink(event.target.value);
+              }}
+            />
+          </label>
+          </>
+        )}
+
+        {!ui.showSecurePairing && ui.preservePendingPair && (
+          <p className="mobile-connect-message">Saved pairing code: {ticket || initialPending}</p>
+        )}
+
+        {phrase && (
+          <ol className="mobile-connect-phrase">
+            {phrase.map((word) => <li key={word}>{word}</li>)}
+          </ol>
+        )}
 
         {error && <div className="mobile-connect-message is-error" role="alert">{error}</div>}
-        {result && <div className="mobile-connect-message is-success" role="status">{result}</div>}
 
-        <div className="mobile-connect-actions">
-          <button type="button" className="mobile-connect-test" disabled={!valid || busy !== null} onClick={() => void test()}>
-            {busy === "test" ? "Testing…" : "Test connection"}
-          </button>
-          <button type="button" className="mobile-connect-primary" disabled={!valid || busy !== null} onClick={() => void connect()}>
-            {busy === "connect" ? "Connecting…" : "Connect"}
-          </button>
-        </div>
+        {ui.showSecurePairing && (
+          <div className="mobile-connect-actions">
+            {!phrase && (
+              <>
+                <button
+                  type="button"
+                  className="mobile-connect-primary"
+                  disabled={busy}
+                  onClick={() => void scanQr()}
+                >
+                  Scan QR code
+                </button>
+                <button
+                  type="button"
+                  className="mobile-connect-test"
+                  disabled={busy || !isPairingLink(ticket)}
+                  onClick={() => void startPair(ticket)}
+                >
+                  {busy ? "Connecting…" : "Paste pairing code"}
+                </button>
+              </>
+            )}
+            {phrase && (
+              <>
+                <button type="button" className="mobile-connect-primary" disabled={busy} onClick={() => void confirm()}>
+                  The words match
+                </button>
+                <button type="button" className="mobile-connect-test" disabled={busy} onClick={() => {
+                  if (attemptId) void polythLink().cancelPairing(attemptId).catch(() => undefined);
+                  setPhrase(null);
+                  setAttemptId(null);
+                  setStage("Connect to your Polyth");
+                }}>
+                  Cancel
+                </button>
+              </>
+            )}
+          </div>
+        )}
 
-        {recent.length > 0 && (
-          <section className="mobile-connect-recents" aria-labelledby="mobile-connect-recents-title">
-            <h2 id="mobile-connect-recents-title">Recent servers</h2>
-            <div>
-              {recent.map((host) => (
-                <article key={host.url}>
-                  <button
-                    type="button"
-                    className="mobile-connect-recent"
-                    onClick={() => {
-                      setUrl(host.url);
-                      setError("");
-                      setResult("");
-                    }}
-                  >
-                    <strong>{connectionLabel(host)}</strong>
-                    <span>{host.url}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="mobile-connect-forget"
-                    aria-label={`Forget ${connectionLabel(host)}`}
-                    onClick={() => void remove(host)}
-                  >
-                    Remove
-                  </button>
-                </article>
-              ))}
-            </div>
+        <button type="button" className="mobile-connect-forget" onClick={() => setDeveloper((value) => !value)}>
+          {developer ? "Hide insecure development connections" : "Advanced → Insecure development connection"}
+        </button>
+
+        {developer && (
+          <section className="mobile-connect-recents" aria-labelledby="mobile-legacy-title">
+            <h2 id="mobile-legacy-title">Insecure development connection</h2>
+            <p>Raw URL mode is not Polyth Link. It is not a paired device and is not a secure connection.</p>
+            <label className="mobile-connect-field">
+              <span>Server address</span>
+              <input
+                type="url"
+                value={url}
+                onChange={(event) => setUrl(event.target.value)}
+                placeholder="https://polyth.example.com"
+              />
+            </label>
+            <button type="button" className="mobile-connect-test" disabled={busy} onClick={() => void legacyConnect()}>
+              Connect insecurely
+            </button>
+            {recent.length > 0 && recent.map((host) => (
+              <article key={host.url}>
+                <button type="button" className="mobile-connect-recent" onClick={() => setUrl(host.url)}>
+                  <strong>{connectionLabel(host)}</strong>
+                  <span>Insecure development connection · {host.url}</span>
+                </button>
+                <button type="button" className="mobile-connect-forget" onClick={() => void forgetMobileHost(host.url).then((state) => setRecent(state.recent))}>
+                  Remove
+                </button>
+              </article>
+            ))}
           </section>
         )}
       </section>

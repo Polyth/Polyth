@@ -3,7 +3,7 @@
 // lifecycle by discovery alone — no imports or registration in the server
 // composition root.
 import type { RouteHandler } from "@polyth/contracts";
-import type { ServerPackage, ServerPackageHost } from "@polyth/plugins";
+import { localOnlyRemoteAccess, type ServerPackage, type ServerPackageHost } from "@polyth/plugins";
 
 export function exampleFeatureRoutes(host: ServerPackageHost): RouteHandler {
   return async ({ path, method, json }) => {
@@ -16,5 +16,8 @@ export function exampleFeatureRoutes(host: ServerPackageHost): RouteHandler {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
-  return { routes: exampleFeatureRoutes(host) };
+  return {
+    remoteAccess: localOnlyRemoteAccess(["example-feature"]),
+    routes: exampleFeatureRoutes(host),
+  };
 }

@@ -45,6 +45,7 @@ test("desktop packaging covers each supported updater target", async () => {
   });
   assert.equal(pkg.build.extraResources.some(({ to }) => to === "opencode"), true);
   assert.equal(pkg.build.extraResources.some(({ to }) => to === "packages"), true);
+  assert.equal(pkg.build.extraResources.some(({ to }) => to === "polyth-link"), true);
 });
 
 test("release workflow builds all platforms and uploads updater metadata", async () => {
@@ -92,4 +93,8 @@ test("pinned OpenCode lock covers packaged CPU and operating-system targets", as
     /opencode:\s*\{\s*bin:\s*binary,\s*binarySource:\s*"bundled"\s*\}/,
     "desktop must label its absolute resources executable as bundled",
   );
+  assert.match(mainSource, /packagedResource\(join\("polyth-link"/);
+  assert.match(mainSource, /POLYTH_LINK_HOST/);
+  const buildSource = await readFile(join(desktopDir, "build.ts"), "utf8");
+  assert.match(buildSource, /resources", "polyth-link"/);
 });

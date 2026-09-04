@@ -1,0 +1,116 @@
+.pkg-tunnel {
+  container: tunnel-page / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.pkg-tunnel-status,
+.pkg-tunnel-devices li,
+.pkg-tunnel-form,
+.pkg-tunnel-pair {
+  display: flex;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.pkg-tunnel-status,
+.pkg-tunnel-devices li {
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--elevated);
+}
+
+.pkg-tunnel-status > div,
+.pkg-tunnel-devices li > div:first-child,
+.pkg-tunnel-form,
+.pkg-tunnel-pair,
+.pkg-tunnel-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.pkg-tunnel-status span,
+.pkg-tunnel-devices span,
+.pkg-tunnel-grants {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.pkg-tunnel-field {
+  font-size: var(--font-label);
+}
+
+.pkg-tunnel-actions,
+.pkg-tunnel-devices li > div:last-child {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.pkg-tunnel-devices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pkg-tunnel-error {
+  padding: var(--space-3);
+  border: 1px solid var(--red);
+  border-radius: var(--radius-control);
+  background: var(--red-wash);
+  color: var(--red);
+}
+
+.pkg-tunnel-qr {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: center;
+}
+
+.pkg-tunnel-qr svg {
+  width: min(100%, 220px);
+  height: auto;
+  padding: var(--space-2);
+  background: var(--text);
+  fill: var(--bg);
+  border-radius: var(--radius-control);
+}
+
+.pkg-tunnel-qr code,
+.pkg-tunnel-code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: var(--font-meta);
+}
+
+.pkg-tunnel-phrase {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pkg-tunnel-phrase li {
+  padding: var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  font-size: var(--font-title);
+  text-align: center;
+}
+
+@container tunnel-page (max-width: 40rem) {
+  .pkg-tunnel-status,
+  .pkg-tunnel-devices li {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

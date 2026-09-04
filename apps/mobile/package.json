@@ -19,6 +19,7 @@
     "assets": "capacitor-assets generate --android && capacitor-assets generate --ios"
   },
   "dependencies": {
+    "@polyth/pairing-qr": "0.1.0",
     "@capacitor-community/safe-area": "^8.0.1",
     "@capacitor/android": "^8.5.0",
     "@capacitor/app": "^8.0.0",

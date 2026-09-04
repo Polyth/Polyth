@@ -88,6 +88,10 @@ installNativeMobileIntegration({
     );
   },
   openDeepLink: openNativeAppPath,
+  openPairingLink: () => {
+    // Pairing links are retained in the mobile pending-pair store for the
+    // connection screen. The connected app does not start pairing itself.
+  },
   reconnect: reconnectSync,
   setKeyboardInset: setNativeKeyboardInset,
 });

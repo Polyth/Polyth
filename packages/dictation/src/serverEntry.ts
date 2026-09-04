@@ -1,5 +1,6 @@
 import type { RouteHandler } from "@polyth/contracts";
 import {
+  localOnlyRemoteAccess,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
@@ -223,6 +224,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   host.services.provide(serverServiceKey<DictationService>("dictation"), dictation);
   let routes: RouteHandler | null = null;
   return {
+    remoteAccess: localOnlyRemoteAccess(["dictation"]),
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
       const dictationRoute = dictationRoutes(dictation);

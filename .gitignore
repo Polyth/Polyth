@@ -1,4 +1,5 @@
 node_modules
+/target
 apps/web/dist
 packages/*/dist
 apps/desktop/dist

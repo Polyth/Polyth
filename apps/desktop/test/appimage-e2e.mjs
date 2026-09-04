@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:net";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { createServer, createConnection } from "node:net";
+import { mkdtemp, mkdir, readFile, writeFile, readdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
@@ -12,10 +13,12 @@ const projectPath = resolve(process.argv[5] ?? process.cwd());
 const work = await mkdtemp(join(tmpdir(), "polyth-appimage-e2e-"));
 const dataDir = join(work, "data");
 const configDir = join(work, "config");
+const homeDir = join(work, "home");
 const userDataDir = join(work, "user-data");
 await mkdir(dirname(screenshotPath), { recursive: true });
 await mkdir(dirname(logArtifactPath), { recursive: true });
 await mkdir(join(userDataDir, "desktop"), { recursive: true });
+await mkdir(homeDir, { recursive: true });
 await writeFile(join(userDataDir, "desktop", "window-state.json"), `${JSON.stringify({
   bounds: { x: 24, y: 32, width: 1120, height: 720 },
   maximized: false,
@@ -43,19 +46,89 @@ const run = (file, args, options = {}) => new Promise((resolveRun, reject) => {
   child.once("error", reject);
   child.once("exit", (code, signal) => resolveRun({ code, signal, stdout, stderr }));
 });
+const delay = (ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 
 const extracted = await run(appImage, ["--appimage-extract"], { cwd: work });
 assert.equal(extracted.code, 0, `AppImage extraction failed:\n${extracted.stderr}`);
+const findHostBinary = async (root) => {
+  const entries = await readdir(root, { withFileTypes: true });
+  for (const entry of entries) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) {
+      const nested = await findHostBinary(path);
+      if (nested) return nested;
+    } else if (entry.name === "polyth-link-host") {
+      return path;
+    }
+  }
+  return null;
+};
+const packagedHost = await findHostBinary(join(work, "squashfs-root"));
+assert.ok(packagedHost, "packaged AppImage is missing polyth-link-host");
+const hostData = join(work, "link-host");
+const hostSocket = join(work, "link-host.sock");
+await mkdir(hostData, { recursive: true });
+const hostProc = spawn(packagedHost, ["serve", hostData, hostSocket], { stdio: ["ignore", "pipe", "pipe"] });
+try {
+  const hostReady = Date.now();
+  while (!existsSync(hostSocket)) {
+    if (Date.now() - hostReady > 12_000) {
+      throw new Error("packaged polyth-link-host did not create a control socket");
+    }
+    await delay(50);
+  }
+  const identityRpc = await new Promise((resolve, reject) => {
+    const socket = createConnection(hostSocket);
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("identity.status timed out"));
+    }, 8_000);
+    socket.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    socket.once("connect", () => {
+      socket.write(`${JSON.stringify({ id: 1, method: "identity.status", params: {} })}\n`);
+    });
+    let buf = "";
+    socket.on("data", (chunk) => {
+      buf += String(chunk);
+      if (!buf.includes("\n")) return;
+      clearTimeout(timer);
+      try {
+        resolve(JSON.parse(buf.slice(0, buf.indexOf("\n"))));
+      } catch (error) {
+        reject(error);
+      } finally {
+        socket.end();
+      }
+    });
+  });
+  assert.equal(identityRpc.id, 1);
+  assert.equal(typeof identityRpc.result?.fingerprint, "string");
+  assert.ok(identityRpc.result.fingerprint.length >= 8);
+} finally {
+  hostProc.kill("SIGTERM");
+  const hostDeadline = Date.now() + 3_000;
+  while (hostProc.exitCode === null && Date.now() < hostDeadline) await delay(50);
+  if (hostProc.exitCode === null) hostProc.kill("SIGKILL");
+}
 const appRun = join(work, "squashfs-root", "AppRun");
 const cdpPort = await freePort();
 const appOutput = [];
+const appEnv = { ...process.env };
+// Exercise the packaged binary, not the invoking developer's OpenCode DB or plugins.
+for (const key of Object.keys(appEnv)) {
+  if (key.startsWith("OPENCODE_")) delete appEnv[key];
+}
 const child = spawn(appRun, [
   "--no-sandbox",
   `--remote-debugging-port=${cdpPort}`,
 ], {
   cwd: projectPath,
   env: {
-    ...process.env,
+    ...appEnv,
+    HOME: homeDir,
     POLYTH_DESKTOP_E2E: "1",
     POLYTH_DESKTOP_USER_DATA: userDataDir,
     POLYTH_DATA_DIR: dataDir,
@@ -67,7 +140,6 @@ const child = spawn(appRun, [
 child.stdout.on("data", (chunk) => appOutput.push(String(chunk)));
 child.stderr.on("data", (chunk) => appOutput.push(String(chunk)));
 
-const delay = (ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 const waitForTarget = async () => {
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
@@ -117,10 +189,13 @@ class Cdp {
   }
 
   async evaluate(expression, timeoutMs = 30_000) {
+    let timer;
     const result = await Promise.race([
       this.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }),
-      delay(timeoutMs).then(() => { throw new Error(`CDP evaluation timed out after ${timeoutMs}ms`); }),
-    ]);
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`CDP evaluation timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]).finally(() => clearTimeout(timer));
     if (result.exceptionDetails) {
       throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text);
     }
@@ -172,9 +247,14 @@ try {
     const health = await healthResponse.json();
     const info = await api.getInfo();
     const initialSettings = await api.getSettings();
-    const modelsResponse = await fetch("/api/models");
-    if (!modelsResponse.ok) throw new Error("models endpoint " + modelsResponse.status + " " + await modelsResponse.text());
-    const models = await modelsResponse.json();
+    let models = [];
+    const modelsDeadline = Date.now() + 30_000;
+    while (models.length === 0 && Date.now() < modelsDeadline) {
+      const modelsResponse = await fetch("/api/models");
+      if (!modelsResponse.ok) throw new Error("models endpoint " + modelsResponse.status + " " + await modelsResponse.text());
+      models = await modelsResponse.json();
+      if (models.length === 0) await new Promise((resolve) => setTimeout(resolve, 500));
+    }
     const restoredBounds = {
       x: window.screenX,
       y: window.screenY,

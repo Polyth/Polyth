@@ -34,7 +34,7 @@ export function registerServerPackage(
   deps.lifecycle.register(id, {
     async onEnable() {
       await pkg.onEnable?.();
-      if (pkg.routes) route = deps.routes.add(id, pkg.routes);
+      if (pkg.routes) route = deps.routes.add(id, pkg.routes, pkg.remoteAccess);
     },
     async onDisable() {
       await route?.dispose();
@@ -43,7 +43,7 @@ export function registerServerPackage(
         await pkg.onDisable?.();
       } catch (error) {
         // A failed disable must not leave the package enabled but routeless.
-        if (pkg.routes) route = deps.routes.add(id, pkg.routes);
+        if (pkg.routes) route = deps.routes.add(id, pkg.routes, pkg.remoteAccess);
         throw error;
       }
     },
