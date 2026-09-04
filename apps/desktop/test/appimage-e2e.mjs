@@ -215,7 +215,7 @@ try {
     return connection;
   };
   let cdp = await connectCdp();
-  const waitForRenderer = () => cdp.evaluate(`new Promise((resolve, reject) => {
+  const rendererReadyExpression = `new Promise((resolve, reject) => {
       const deadline = Date.now() + 30000;
       const check = () => {
         if (window.polythDesktop && document.querySelector(".header")) resolve(true);
@@ -223,22 +223,22 @@ try {
         else setTimeout(check, 100);
       };
       check();
-    })`, 35_000);
+    })`;
   const evaluateAcrossRendererReload = async (expression, timeoutMs) => {
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
       try {
         return await cdp.evaluate(expression, timeoutMs);
       } catch (error) {
-        if (attempt === 3 || !String(error).includes("Execution context was destroyed")) throw error;
-        cdp.socket.close();
-        await delay(500);
+        const destroyed = String(error?.message ?? error).includes("Execution context was destroyed");
+        if (attempt === 5 || !destroyed) throw error;
+        try { cdp.socket.close(); } catch { /* already closed */ }
+        await delay(500 * attempt);
         cdp = await connectCdp();
-        await waitForRenderer();
       }
     }
     throw new Error("renderer evaluation retry exhausted");
   };
-  await waitForRenderer();
+  await evaluateAcrossRendererReload(rendererReadyExpression, 35_000);
 
   report = await evaluateAcrossRendererReload(`(async () => {
     const api = window.polythDesktop;

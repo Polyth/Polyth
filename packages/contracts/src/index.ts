@@ -351,7 +351,7 @@ export interface RuntimeRestartRecoveredData {
 
 /** Ignorable runtime observer signal: the agent appears stuck rewriting the
  *  same file(s). Never model-visible; never auto-stops a turn. */
-export type EditLoopKind = "repeated-edit-with-failing-checks" | "file-oscillation";
+export type EditLoopKind = "repeated-edit-with-failing-checks";
 export interface EditLoopDetectedData {
   kind: EditLoopKind;
   paths: string[];

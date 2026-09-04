@@ -1,4 +1,4 @@
-/** Large-paste detection and filename helpers for composer / selection attach. */
+/** Large-paste detection and attach helper for composer / selection attach. */
 
 export const LARGE_PASTE_CHAR_THRESHOLD = 2000;
 export const LARGE_PASTE_LINE_THRESHOLD = 25;
@@ -16,13 +16,10 @@ export function isLargeTextPaste(text: string): boolean {
   return false;
 }
 
-/**
- * Suggest a `_inbox` filename for pasted context. Extension inference is
- * intentionally conservative — only high-confidence shapes get a typed suffix.
- */
-export function suggestPasteFilename(text: string, index: number): string {
+/** Predictable `_inbox` filename — no language guessing. */
+export function suggestPasteFilename(index: number): string {
   const n = Number.isFinite(index) && index >= 1 ? Math.floor(index) : 1;
-  return `pasted-context-${n}${detectPasteExtension(text)}`;
+  return `pasted-context-${n}.txt`;
 }
 
 /** Human-readable size for the ask banner (bytes → B / KB). */
@@ -40,66 +37,27 @@ export function pasteByteLength(text: string): number {
   return text.length;
 }
 
-function detectPasteExtension(text: string): string {
-  const head = text.trimStart().slice(0, 4000);
-  if (!head) return ".txt";
+export type AttachTextResult = { ok: true } | { ok: false; reason: string; name: string };
 
-  // JSON object/array with quoted keys.
-  if (
-    (head.startsWith("{") || head.startsWith("["))
-    && /"[^"\\]*(?:\\.[^"\\]*)*"\s*:/.test(head)
-  ) {
-    return ".json";
-  }
-
-  // YAML: front matter or several `key: value` lines without code punctuation.
-  const yamlKeys = head.match(/^[\w.-]+:\s+\S+/gm);
-  if (
-    /^---(?:\r?\n|$)/.test(head)
-    || ((yamlKeys?.length ?? 0) >= 4 && !/[;{}]/.test(head.slice(0, 800)))
-  ) {
-    return ".yaml";
-  }
-
-  // TypeScript / TSX markers.
-  if (
-    /\b(?:export\s+)?(?:interface|type)\s+[A-Za-z_]\w*/.test(head)
-    || /\bfrom\s+["'][^"']+["']\s*;/.test(head)
-    || /:\s*(?:string|number|boolean|Promise<|React\.)/.test(head)
-  ) {
-    return ".ts";
-  }
-
-  // Python.
-  if (
-    /^(?:#!.*\bpython\b|from\s+\w[\w.]*\s+import\b|import\s+\w[\w.]*(?:\s*,\s*\w[\w.]*)*\s*$|def\s+\w+\(|class\s+\w+[:(])/m
-      .test(head)
-  ) {
-    return ".py";
-  }
-
-  // Markdown: headings or fenced code + a link.
-  if (
-    /^#{1,6}\s+\S+/m.test(head)
-    || (/^\s*```/m.test(head) && /\[[^\]]+\]\([^)]+\)/.test(head))
-  ) {
-    return ".md";
-  }
-
-  return ".txt";
-}
-
-/** MIME type for a suggested paste filename (best-effort). */
-export function mimeForPasteFilename(name: string): string {
-  const ext = name.toLowerCase().match(/\.[^.]+$/)?.[0] ?? "";
-  switch (ext) {
-    case ".json": return "application/json";
-    case ".yaml":
-    case ".yml": return "text/yaml";
-    case ".md": return "text/markdown";
-    case ".py": return "text/x-python";
-    case ".ts":
-    case ".tsx": return "text/typescript";
-    default: return "text/plain";
-  }
+/**
+ * Upload pasted/selected text as a plain `_inbox` attachment for the given
+ * origin session/project (captured by the caller so a later switch cannot
+ * retarget the write).
+ */
+export async function attachText(
+  projectId: string,
+  sessionId: string | null | undefined,
+  text: string,
+  index: number,
+  upload: (
+    projectId: string,
+    sessionId: string | null | undefined,
+    file: File,
+  ) => Promise<{ ok: true } | { ok: false; reason: string }>,
+): Promise<AttachTextResult> {
+  const name = suggestPasteFilename(index);
+  const file = new File([text], name, { type: "text/plain" });
+  const result = await upload(projectId, sessionId, file);
+  if (!result.ok) return { ok: false, reason: result.reason, name };
+  return { ok: true };
 }

@@ -32,8 +32,7 @@ import { sanitizeAttachments } from "./attachments.ts";
 import { settleAllOrThrow } from "./settle.ts";
 import { createResumeScheduler, planResume } from "./resume.ts";
 import {
-  detectEditLoop,
-  recentToolRecords,
+  observeToolEvent,
   shouldEmitEditLoop,
   type EditLoopDedupeState,
 } from "./editLoop.ts";
@@ -1928,9 +1927,8 @@ export function createSessionService(deps: {
     }
   };
 
-  const maybeEmitEditLoop = async (sessionId: string): Promise<void> => {
-    const events = await store.events(sessionId);
-    const detection = detectEditLoop(recentToolRecords(events));
+  const maybeEmitEditLoop = async (sessionId: string, ev: RuntimeEvent): Promise<void> => {
+    const detection = observeToolEvent(sessionId, ev);
     const decision = shouldEmitEditLoop(detection, editLoopDedupe.get(sessionId));
     if (!decision.next) editLoopDedupe.delete(sessionId);
     else editLoopDedupe.set(sessionId, decision.next);
@@ -2362,7 +2360,7 @@ export function createSessionService(deps: {
       && options.persist === undefined
       && (ev.type === "tool/result" || ev.type === "tool/error")
     ) {
-      await maybeEmitEditLoop(sessionId);
+      await maybeEmitEditLoop(sessionId, ev);
     }
   };
 

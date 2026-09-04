@@ -2,7 +2,8 @@
 // Writes are atomic (tmp + rename). A corrupt on-disk file is never overwritten
 // with defaults on load — boot with an empty in-memory registry and leave the
 // file untouched until a deliberate user write succeeds.
-import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync, existsSync } from "node:fs";
+import { readFileSync, mkdirSync, existsSync } from "node:fs";
+import { atomicWriteSync } from "./atomicWrite.ts";
 import { basename, dirname, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Project, ProjectPatch, ProjectRemote, ProjectService } from "@polyth/contracts";
@@ -32,17 +33,6 @@ function validProjectIcon(icon: string): boolean {
     && !/<\/?(?:script|foreignObject)\b/i.test(svg)
     && !/\son\w+\s*=/i.test(svg)
     && !/(?:javascript:|https?:|\bdata:)/i.test(svgWithoutNamespaces);
-}
-
-function atomicWriteSync(path: string, data: string): void {
-  const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync(tmp, data, "utf8");
-  try {
-    renameSync(tmp, path);
-  } catch (e) {
-    try { unlinkSync(tmp); } catch { /* already gone */ }
-    throw e;
-  }
 }
 
 export function createProjectService(dataDir: string): ProjectService {

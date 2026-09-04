@@ -1157,7 +1157,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const signature = str(d, "signature");
       const paths = strArr(d, "paths");
       if (
-        (kind !== "repeated-edit-with-failing-checks" && kind !== "file-oscillation")
+        (kind !== "repeated-edit-with-failing-checks")
         || !signature
       ) {
         break;

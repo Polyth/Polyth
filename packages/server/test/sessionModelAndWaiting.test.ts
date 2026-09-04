@@ -16,8 +16,6 @@ import type {
 import { createAutoAcceptStore, type PermissionService } from "@polyth/permissions";
 import { createSessionService, type Broadcaster } from "../src/sessions.ts";
 
-const flush = () => new Promise((r) => setTimeout(r, 25));
-
 const waitFor = async (condition: () => boolean | Promise<boolean>): Promise<void> => {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (await condition()) return;
@@ -90,7 +88,11 @@ function makeRuntime(opts: { subagents?: boolean } = {}) {
   return { rt, emit, remote, endpoint };
 }
 
-function harness(opts: { permission?: "allow" | "deny" | "ask"; subagents?: boolean } = {}) {
+function harness(opts: {
+  permission?: "allow" | "deny" | "ask";
+  subagents?: boolean;
+  profiles?: Parameters<typeof createSessionService>[0]["profiles"];
+} = {}) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-model-waiting-"));
   const store = createStore(join(dir, "s.db"));
   const project: Project = { id: "p1", path: dir, name: "p", createdAt: 1 };
@@ -106,16 +108,16 @@ function harness(opts: { permission?: "allow" | "deny" | "ask"; subagents?: bool
     addRule: () => {},
     rules: () => [],
   } as unknown as PermissionService;
-  const broadcast: Broadcaster = { event: () => {}, projection: () => {} };
   const fake = makeRuntime({ subagents: opts.subagents });
   const sessions = createSessionService({
     store,
     projects,
     permissions,
-    broadcast,
+    broadcast: { event: () => {}, projection: () => {} } satisfies Broadcaster,
     queue: store,
     runtimes: { forProject: async () => fake.rt },
     autoAccept: createAutoAcceptStore(join(dir, "auto-accept.json")),
+    ...(opts.profiles ? { profiles: opts.profiles } : {}),
   });
   return { sessions, store, fake, project };
 }
@@ -131,8 +133,7 @@ test("WS22: parent projection.model survives subagent adoption and child turn mo
   assert.deepEqual((await store.projection(parentId))?.model, modelA);
 
   await sessions.send(parentId, { text: "delegate", model: modelA });
-  await flush();
-  assert.deepEqual((await store.projection(parentId))?.model, modelA);
+  await waitFor(async () => (await store.projection(parentId))?.status === "working");
 
   const parentBe = (await store.projection(parentId))!.backendSessionId!;
   fake.remote.push({
@@ -151,33 +152,31 @@ test("WS22: parent projection.model survives subagent adoption and child turn mo
     (await store.projections("p1")).some((row) => row.parentId === parentId));
   const child = (await store.projections("p1")).find((row) => row.parentId === parentId)!;
 
-  // Child runs under a different temporary model — must not stick on parent.
   fake.emit(child.id, {
     type: "turn/started",
     turnId: "child-turn",
     model: { providerID: "acme", modelID: "subagent-temp" },
   });
-  await flush();
   fake.emit(child.id, {
     type: "permission/requested",
     requestId: "per-child",
     permission: "bash",
     patterns: ["ls"],
   });
-  await flush();
   fake.emit(parentId, {
     type: "turn/started",
     turnId: "parent-after-child",
     model: { providerID: "acme", modelID: "subagent-temp" },
   });
-  await flush();
   fake.emit(child.id, { type: "turn/stopped", reason: "completed" });
   fake.emit(parentId, {
     type: "subagent/snapshot",
     revision: 2,
     agents: [{ sessionId: "be-child-model", label: "@explore", status: "done" }],
   });
-  await flush();
+  await waitFor(async () =>
+    (await store.events(parentId)).some((e) => e.type === "subagent/snapshot"
+      && (e.data as { revision?: number }).revision === 2));
 
   assert.deepEqual(
     (await store.projection(parentId))?.model,
@@ -188,33 +187,9 @@ test("WS22: parent projection.model survives subagent adoption and child turn mo
 });
 
 test("WS22: inherited profile turn model does not overwrite an explicit session model", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "polyth-profile-model-"));
-  const store = createStore(join(dir, "s.db"));
-  const project: Project = { id: "p1", path: dir, name: "p", createdAt: 1 };
-  const fake = makeRuntime({ subagents: false });
   const started: Array<{ model?: { providerID: string; modelID: string } }> = [];
-  const baseStart = fake.rt.startTurn.bind(fake.rt);
-  fake.rt.startTurn = async (req) => {
-    started.push({ ...(req.model ? { model: req.model } : {}) });
-    return baseStart(req);
-  };
-  const sessions = createSessionService({
-    store,
-    projects: {
-      list: async () => [project],
-      get: async (id) => (id === "p1" ? project : undefined),
-      add: async () => project,
-      create: async () => project,
-      remove: async () => {},
-    },
-    permissions: {
-      evaluate: () => "ask",
-      addRule: () => {},
-      rules: () => [],
-    } as unknown as PermissionService,
-    broadcast: { event: () => {}, projection: () => {} },
-    queue: store,
-    runtimes: { forProject: async () => fake.rt },
+  const { sessions, store, fake } = harness({
+    subagents: false,
     profiles: {
       profileGet: async (id) => id === "prof-1"
         ? {
@@ -231,26 +206,27 @@ test("WS22: inherited profile turn model does not overwrite an explicit session 
         : undefined,
     },
   });
+  const baseStart = fake.rt.startTurn.bind(fake.rt);
+  fake.rt.startTurn = async (req) => {
+    started.push({ ...(req.model ? { model: req.model } : {}) });
+    return baseStart(req);
+  };
 
   const modelA = { providerID: "acme", modelID: "user-a" };
   const { id } = await sessions.create({ projectId: "p1", title: "T" });
   await sessions.send(id, { text: "pick profile", agentProfileId: "prof-1" });
-  await flush();
+  await waitFor(async () =>
+    (await store.projection(id))?.model?.modelID === "profile-b");
   fake.emit(id, { type: "turn/stopped", reason: "completed" });
-  await flush();
-  assert.deepEqual((await store.projection(id))?.model, {
-    providerID: "acme",
-    modelID: "profile-b",
-  });
+  await waitFor(async () => (await store.projection(id))?.status === "idle");
 
   await sessions.send(id, { text: "user override", model: modelA });
-  await flush();
+  await waitFor(async () => (await store.projection(id))?.model?.modelID === "user-a");
   fake.emit(id, { type: "turn/stopped", reason: "completed" });
-  await flush();
-  assert.deepEqual((await store.projection(id))?.model, modelA);
+  await waitFor(async () => (await store.projection(id))?.status === "idle");
 
   await sessions.send(id, { text: "inherit profile" });
-  await flush();
+  await waitFor(() => started.length >= 3);
   assert.deepEqual(started[2]?.model, { providerID: "acme", modelID: "profile-b" });
   assert.deepEqual(
     (await store.projection(id))?.model,
@@ -264,19 +240,16 @@ test("WS23: permission pending → waiting; resolve → working", async () => {
   const { sessions, store, fake } = harness();
   const { id } = await sessions.create({ projectId: "p1", title: "T" });
   fake.emit(id, { type: "turn/started", turnId: "t1" });
-  await flush();
   fake.emit(id, {
     type: "permission/requested",
     requestId: "per_1",
     permission: "edit",
     patterns: ["a.ts"],
   });
-  await flush();
-  assert.equal((await store.projection(id))?.status, "waiting");
+  await waitFor(async () => (await store.projection(id))?.status === "waiting");
 
   await sessions.replyPermission(id, "per_1", "once");
-  await flush();
-  assert.equal((await store.projection(id))?.status, "working");
+  await waitFor(async () => (await store.projection(id))?.status === "working");
   await store.close();
 });
 
@@ -284,22 +257,19 @@ test("WS23: question pending → waiting; resolve → working", async () => {
   const { sessions, store, fake } = harness();
   const { id } = await sessions.create({ projectId: "p1", title: "T" });
   fake.emit(id, { type: "turn/started", turnId: "t1" });
-  await flush();
   fake.emit(id, {
     type: "question/asked",
     requestId: "q_1",
     questions: [{ id: "continue", prompt: "Continue?" }],
   });
-  await flush();
-  assert.equal((await store.projection(id))?.status, "waiting");
+  await waitFor(async () => (await store.projection(id))?.status === "waiting");
 
   await sessions.replyQuestion(id, "q_1", { continue: "yes" });
-  await flush();
-  assert.equal((await store.projection(id))?.status, "working");
+  await waitFor(async () => (await store.projection(id))?.status === "working");
   await store.close();
 });
 
-test("WS23: turn/stopped with an open permission stays waiting", async () => {
+test("WS23: turn/stopped with an open permission stays waiting then idles", async () => {
   const { sessions, store, fake } = harness();
   const { id } = await sessions.create({ projectId: "p1", title: "T" });
   fake.emit(id, { type: "turn/started", turnId: "t1" });
@@ -309,24 +279,15 @@ test("WS23: turn/stopped with an open permission stays waiting", async () => {
     permission: "bash",
     patterns: ["rm"],
   });
-  await flush();
-  assert.equal((await store.projection(id))?.status, "waiting");
+  await waitFor(async () => (await store.projection(id))?.status === "waiting");
 
   fake.emit(id, { type: "turn/stopped", reason: "completed" });
-  await flush();
-  assert.equal(
-    (await store.projection(id))?.status,
-    "waiting",
-    "open requests must outrank turn completion for session status",
-  );
+  await waitFor(async () =>
+    (await store.events(id)).some((e) => e.type === "turn/stopped"));
+  assert.equal((await store.projection(id))?.status, "waiting");
 
   await sessions.replyPermission(id, "per_open", "reject");
-  await flush();
-  assert.equal(
-    (await store.projection(id))?.status,
-    "idle",
-    "resolving the last open request with no active turn must return to idle",
-  );
+  await waitFor(async () => (await store.projection(id))?.status === "idle");
   await store.close();
 });
 
@@ -346,24 +307,13 @@ test("WS23: child auto-accept closes parent mirror waiting status", async () => 
     permission: "bash",
     patterns: ["npm test"],
   });
-  await flush();
+  await waitFor(async () =>
+    (await store.events(child)).some((e) => e.type === "permission/resolved"));
 
-  assert.equal(
-    (await store.events(child)).some((e) => e.type === "permission/resolved"),
-    true,
-  );
   assert.notEqual((await store.projection(child))?.status, "waiting");
-  assert.equal(
-    (await store.events(parent)).some((e) =>
-      e.type === "permission/resolved"
-      && (e.data as { requestId?: string }).requestId === "per_mirror"),
-    true,
-    "parent mirror must close when the child auto-accepts",
-  );
-  assert.notEqual(
-    (await store.projection(parent))?.status,
-    "waiting",
-    "parent must not stay waiting after the mirrored request auto-resolves",
-  );
+  assert.ok((await store.events(parent)).some((e) =>
+    e.type === "permission/resolved"
+    && (e.data as { requestId?: string }).requestId === "per_mirror"));
+  assert.notEqual((await store.projection(parent))?.status, "waiting");
   await store.close();
 });

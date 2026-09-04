@@ -16,9 +16,8 @@ import { formatFileChat, formatSelectionChat, lineRangeOf } from "../../../../ap
 import { requestComposerInsert } from "../../../../apps/web/src/composerInsert.ts";
 import { attachProjectFile, attachUpload } from "../../../../apps/web/src/attachments.ts";
 import {
+  attachText,
   isLargeTextPaste,
-  mimeForPasteFilename,
-  suggestPasteFilename,
 } from "../../../../apps/web/src/pasteAttach.ts";
 import { MOD } from "../../../../apps/web/src/format.ts";
 import { clampMenuPosition } from "../../../../apps/web/src/selectionActions.ts";
@@ -250,9 +249,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
     }
     // Dirty buffer: upload the selected bytes (saved path would be stale).
     const index = ++pasteAttachSeq.current;
-    const name = suggestPasteFilename(text, index);
-    const file = new File([text], name, { type: mimeForPasteFilename(name) });
-    const r = await attachUpload(projectId, sessionId, file);
+    const r = await attachText(projectId, sessionId, text, index, attachUpload);
     if (!r.ok) {
       setFlash(r.reason);
       return;

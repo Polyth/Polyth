@@ -7,7 +7,8 @@
 import type { SessionAssist } from "@polyth/contracts";
 import { latestCompletedExchange } from "@polyth/session/next-action";
 import type { SessionEvent } from "@polyth/contracts";
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { atomicWriteSync } from "./atomicWrite.ts";
 import { dirname } from "node:path";
 
 export interface AssistSettings {
@@ -24,17 +25,6 @@ export const RECAP_MAX_WORDS = 20;
 export interface AssistSettingsService {
   get(): AssistSettings;
   put(patch: Record<string, unknown>): AssistSettings;
-}
-
-function atomicWriteSync(path: string, data: string): void {
-  const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync(tmp, data, "utf8");
-  try {
-    renameSync(tmp, path);
-  } catch (e) {
-    try { unlinkSync(tmp); } catch { /* already gone */ }
-    throw e;
-  }
 }
 
 /** Token-spend switch persisted server-side: `data/assist.json`.

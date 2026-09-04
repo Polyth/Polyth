@@ -20,16 +20,15 @@ function ev(type: string, data: JsonObject): SessionEvent {
 test("runtime/edit-loop-detected reduces into editLoopWarning", () => {
   const model = buildModel([
     ev("runtime/edit-loop-detected", {
-      kind: "file-oscillation",
-      paths: ["a.ts", "b.ts"],
-      signature: "file-oscillation:a.ts|b.ts",
-      evidence: [{ tool: "edit", path: "a.ts", role: "edit" }],
+      kind: "repeated-edit-with-failing-checks",
+      paths: ["src/a.ts"],
+      signature: "repeated-edit-with-failing-checks:src/a.ts",
+      evidence: [{ tool: "edit", path: "src/a.ts", role: "edit" }],
     }),
   ]);
   assert.ok(model.editLoopWarning);
-  assert.equal(model.editLoopWarning.kind, "file-oscillation");
-  assert.deepEqual(model.editLoopWarning.paths, ["a.ts", "b.ts"]);
-  assert.equal(model.editLoopWarning.signature, "file-oscillation:a.ts|b.ts");
+  assert.equal(model.editLoopWarning.kind, "repeated-edit-with-failing-checks");
+  assert.deepEqual(model.editLoopWarning.paths, ["src/a.ts"]);
 });
 
 test("user/message clears editLoopWarning", () => {

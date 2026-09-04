@@ -5,7 +5,8 @@
 // normalized values), plus what an inbox needs: unique IDs, strictly
 // increasing timestamps, read state, a 200-row FIFO cap, and atomic writes.
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+import { atomicWriteSync } from "./atomicWrite.ts";
 import { dirname } from "node:path";
 import type { NotificationKind, NotificationRecord } from "@polyth/contracts";
 
@@ -94,10 +95,8 @@ export function createNotificationStore(opts: {
   // then rename over the target — a crash mid-write never truncates the inbox.
   const persist = (nextItems: NotificationRecord[]): void => {
     mkdirSync(dirname(opts.file), { recursive: true });
-    const tmp = `${opts.file}.tmp`;
     const body: NotificationFile = { version: 1, items: nextItems };
-    writeFileSync(tmp, `${JSON.stringify(body, null, 2)}\n`);
-    renameSync(tmp, opts.file);
+    atomicWriteSync(opts.file, `${JSON.stringify(body, null, 2)}\n`);
   };
 
   // One in-process promise chain serializes every operation so concurrent

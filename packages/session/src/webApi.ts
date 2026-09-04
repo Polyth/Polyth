@@ -697,8 +697,10 @@ export const api = {
   mcpTest: (id: string) => jfetch<{ ok: boolean; message: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/test`, json("POST", {})),
   /** F10: spec-named probe — same reachability check, stores status/lastError. */
   mcpProbe: (id: string) => jfetch<{ ok: boolean; message: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/probe`, json("POST", {})),
-  mcpTools: (id: string) =>
-    jfetch<McpToolsResponseDto>(`/api/mcp/servers/${encodeURIComponent(id)}/tools`).catch((): McpToolsResponseDto => ({
+  mcpTools: (id: string, projectId: string) =>
+    jfetch<McpToolsResponseDto>(
+      `/api/mcp/servers/${encodeURIComponent(id)}/tools?projectId=${encodeURIComponent(projectId)}`,
+    ).catch((): McpToolsResponseDto => ({
       tools: [],
       source: "unavailable",
       message: "unable to reach the server",
@@ -1357,8 +1359,11 @@ export const api = {
   /** Server copy of this workspace's client settings; `revision` 0 means the
    *  server has never been written and the local record should seed it. */
   clientSettings: () => jfetch<ClientSettingsDto>(`/api/settings/client`),
-  clientSettingsSave: (settings: Record<string, unknown>) =>
-    jfetch<ClientSettingsDto>(`/api/settings/client`, json("PUT", { settings })),
+  clientSettingsSave: (settings: Record<string, unknown>, opts?: { keepalive?: boolean }) =>
+    jfetch<ClientSettingsDto>(`/api/settings/client`, {
+      ...json("PUT", { settings }),
+      ...(opts?.keepalive ? { keepalive: true } : {}),
+    }),
 
   // ---- idle assist (F9): recap + suggestion, chat→note --------------------------
   assistSettings: () => jfetch<AssistSettingsDto>(`/api/settings/assist`),

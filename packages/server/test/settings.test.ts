@@ -279,15 +279,19 @@ test("mcp: listTools uses the injected runtime lister and soft-fails without one
     name: "docs",
     transport: { kind: "http", url: "https://docs.example/mcp", headersSecretRefs: [] },
   });
-  const missing = await bare.listTools(orphan.id);
+  const missing = await bare.listTools(orphan.id, "proj-1");
   assert.equal(missing.source, "unavailable");
   assert.match(missing.message ?? "", /not configured/);
 
-  const seen: string[] = [];
+  const noProject = await bare.listTools(orphan.id, "");
+  assert.equal(noProject.source, "unavailable");
+  assert.match(noProject.message ?? "", /select a project/);
+
+  const seen: Array<{ server: string; projectId: string }> = [];
   const svc = createMcpConfigService({
     file: join(tmp(), "mcp-tools.json"),
-    listTools: async (serverName) => {
-      seen.push(serverName);
+    listTools: async (serverName, projectId) => {
+      seen.push({ server: serverName, projectId });
       return {
         tools: [{ name: "search", server: serverName, description: "Search docs", available: true }],
         source: "runtime",
@@ -298,9 +302,9 @@ test("mcp: listTools uses the injected runtime lister and soft-fails without one
     name: "docs",
     transport: { kind: "http", url: "https://docs.example/mcp", headersSecretRefs: [] },
   });
-  const listed = await svc.listTools(row.id);
-  assert.deepEqual(seen, ["docs"]);
+  const listed = await svc.listTools(row.id, "proj-1");
+  assert.deepEqual(seen, [{ server: "docs", projectId: "proj-1" }]);
   assert.equal(listed.source, "runtime");
   assert.equal(listed.tools[0]?.name, "search");
-  await assert.rejects(() => svc.listTools("missing"), (e: Error & { code?: string }) => e.code === "not-found");
+  await assert.rejects(() => svc.listTools("missing", "proj-1"), (e: Error & { code?: string }) => e.code === "not-found");
 });

@@ -63,12 +63,12 @@ function applyRemote(dto: ClientSettingsDto): void {
   lastSyncedJson = JSON.stringify(currentBlob());
 }
 
-function push(): void {
+function push(opts?: { keepalive?: boolean }): void {
   timer = undefined;
   if (applying) return;
   const json = JSON.stringify(currentBlob());
   if (json === lastSyncedJson) return;
-  void api.clientSettingsSave(currentBlob() as unknown as Record<string, unknown>)
+  void api.clientSettingsSave(currentBlob() as unknown as Record<string, unknown>, opts)
     .then((dto) => {
       lastSyncedJson = json;
       if (dto.revision > localRevision) localRevision = dto.revision;
@@ -84,14 +84,13 @@ function schedulePush(): void {
   timer = setTimeout(push, PUSH_DEBOUNCE_MS);
 }
 
-/** Cancel any pending debounce and push immediately. Used on pagehide /
- *  beforeunload so a mid-debounce settings change is not dropped on exit. */
+/** Cancel any pending debounce and push with keepalive so unload can finish the POST. */
 export function flushSettingsSync(): void {
   if (timer !== undefined) {
     clearTimeout(timer);
     timer = undefined;
   }
-  push();
+  push({ keepalive: true });
 }
 
 function installUnloadFlush(): void {

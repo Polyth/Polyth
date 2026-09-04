@@ -96,11 +96,10 @@ import { announce } from "./a11y/live.tsx";
 import { noteModelUsed } from "@polyth/models/web-prefs";
 import { getUiSettings, setUiSettings } from "../uiPrefs.ts";
 import {
+  attachText,
   formatPasteSize,
   isLargeTextPaste,
-  mimeForPasteFilename,
   pasteByteLength,
-  suggestPasteFilename,
 } from "../pasteAttach.ts";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
 import type {
@@ -627,8 +626,6 @@ export default function Composer({
     projectId: string;
     sessionId: string | null;
   } | null>(null);
-  const pendingLargePasteRef = useRef(pendingLargePaste);
-  pendingLargePasteRef.current = pendingLargePaste;
   const attachFiles = useCallback((files: File[]) => {
     const projectId = getState().activeProjectId;
     if (!projectId || files.length === 0) return;
@@ -646,29 +643,28 @@ export default function Composer({
   }, []);
   const attachPastedText = useCallback((pasted: string, projectId: string, sessionId: string | null) => {
     const index = ++pasteIndexRef.current;
-    const name = suggestPasteFilename(pasted, index);
-    const file = new File([pasted], name, { type: mimeForPasteFilename(name) });
-    void attachUpload(projectId, sessionId, file).then((r) => {
+    void attachText(projectId, sessionId, pasted, index, attachUpload).then((r) => {
       if (!r.ok) {
         setUiError(tr("composer.couldNotAttachValue", {
-          name: file.name,
+          name: r.name,
           reason: r.reason,
         }));
       }
     });
   }, []);
   const resolveLargePaste = useCallback((action: "attach" | "inline" | "always-attach") => {
-    const pending = pendingLargePasteRef.current;
-    if (!pending) return;
-    setPendingLargePaste(null);
-    if (action === "inline") {
-      inputRef.current?.insertText(pending.text);
-      return;
-    }
-    if (action === "always-attach") {
-      setUiSettings({ largeTextPasteBehavior: "attach" });
-    }
-    attachPastedText(pending.text, pending.projectId, pending.sessionId);
+    setPendingLargePaste((pending) => {
+      if (!pending) return null;
+      if (action === "inline") {
+        queueMicrotask(() => inputRef.current?.insertText(pending.text));
+        return null;
+      }
+      if (action === "always-attach") {
+        setUiSettings({ largeTextPasteBehavior: "attach" });
+      }
+      attachPastedText(pending.text, pending.projectId, pending.sessionId);
+      return null;
+    });
   }, [attachPastedText]);
   const openAttachmentPicker = useCallback(() => {
     if (!isNativeMobile()) {

@@ -1211,6 +1211,7 @@ function McpImportForm({ existingNames, onDone }: { existingNames: string[]; onD
 }
 
 export function McpPage() {
+  const activeProjectId = useStore((s) => s.activeProjectId);
   const [servers, setServers] = useState<McpServerDto[]>([]);
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -1233,11 +1234,17 @@ export function McpPage() {
     setToolsOpen((m) => ({ ...m, [s.id]: open }));
     if (!open || toolsById[s.id]) return;
     setToolsLoading((m) => ({ ...m, [s.id]: true }));
-    const result = await api.mcpTools(s.id).catch((e): McpToolsResponseDto => ({
-      tools: [],
-      source: "unavailable",
-      message: e instanceof Error ? e.message : String(e),
-    }));
+    const result = !activeProjectId
+      ? {
+          tools: [],
+          source: "unavailable" as const,
+          message: "select a project to inspect MCP tools",
+        }
+      : await api.mcpTools(s.id, activeProjectId).catch((e): McpToolsResponseDto => ({
+          tools: [],
+          source: "unavailable",
+          message: e instanceof Error ? e.message : String(e),
+        }));
     setToolsById((m) => ({ ...m, [s.id]: result }));
     setToolsLoading((m) => ({ ...m, [s.id]: false }));
   };

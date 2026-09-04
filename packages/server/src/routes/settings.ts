@@ -160,7 +160,16 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
     }
     m = path.match(/^\/api\/mcp\/servers\/([^/]+)\/tools$/);
     if (m && method === "GET") {
-      rc.json(200, await deps.mcp.listTools(m[1]!));
+      const projectId = (rc.url.searchParams.get("projectId") ?? "").trim();
+      if (!projectId) {
+        rc.json(200, {
+          tools: [],
+          source: "unavailable",
+          message: "select a project to inspect MCP tools",
+        });
+        return true;
+      }
+      rc.json(200, await deps.mcp.listTools(m[1]!, projectId));
       return true;
     }
     m = path.match(/^\/api\/mcp\/servers\/([^/]+)\/authorize$/);

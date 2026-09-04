@@ -1,33 +1,22 @@
-// Lightweight edit-loop observer: structured signal only, never terminates a turn.
-import type { EditLoopKind, JsonObject, SessionEvent } from "@polyth/contracts";
+// Advisory edit-loop observer: tiny in-memory ring per session, never scans the log.
+import type { EditLoopKind, JsonObject, RuntimeEvent } from "@polyth/contracts";
 
-/** How many recent tool terminal events (result/error) to inspect. */
-export const EDIT_LOOP_WINDOW = 20;
-/** Same file must be edited at least this many times with failing checks between. */
-export const EDIT_LOOP_SAME_FILE_EDITS = 3;
-/** Strict A↔B alternation must complete at least this many A→B→A cycles. */
-export const EDIT_LOOP_OSCILLATION_CYCLES = 3;
-/** Suppress re-emitting the same signature for this long even if the loop continues. */
-const EDIT_LOOP_COOLDOWN_MS = 60_000;
+const RING = 16;
+const NEED_EDITS = 3;
 
-const WRITE_TOOL =
+const EDIT_TOOL =
   /(^|[./:_-])(apply[_-]?patch|create[_-]?file|delete[_-]?file|edit|multiedit|patch|write)([./:_-]|$)/i;
-const TEST_BUILD_TOOL =
+const CHECK_TOOL =
   /(^|[./:_-])(bash|shell|exec|npm|pnpm|yarn|bun|cargo|make|gradle|mvn|pytest|vitest|jest|go|dotnet|cmake|tsc|eslint)([./:_-]|$)/i;
-const TEST_BUILD_COMMAND =
-  /\b(test|spec|build|compile|typecheck|lint|ci|check|vitest|jest|pytest|mocha|cargo\s+test|go\s+test|npm\s+(?:run\s+)?(?:test|build)|pnpm\s+(?:run\s+)?(?:test|build)|yarn\s+(?:run\s+)?(?:test|build))\b/i;
-const PATH_KEY = /^(changedFiles|file|filePath|filename|files|path|paths|target)$/i;
-const PATCH_FILE = /^\*{3} (?:Add|Delete|Update) File:\s*(.+)$/gm;
+const CHECK_COMMAND =
+  /\b(test|spec|build|compile|typecheck|lint|ci|check|vitest|jest|pytest|mocha|cargo\s+test|go\s+test)\b/i;
 
 export interface ToolCallRecord {
   tool: string;
   path?: string;
-  /** True when this record is an edit-like write targeting `path`. */
   edit: boolean;
-  /** True when this looks like a test/build/check invocation. */
-  check: boolean;
-  /** True for tool/error or a failed check result. */
-  failed: boolean;
+  /** Failed check/build tool (not a failed edit). */
+  failedCheck: boolean;
 }
 
 export interface EditLoopEvidence {
@@ -45,263 +34,151 @@ export interface EditLoopDetection {
   evidence: EditLoopEvidence[];
 }
 
+export interface EditLoopDedupeState {
+  signature: string;
+  at: number;
+}
+
+/** Live per-session rings — advisory only; not persisted across restarts. */
+const rings = new Map<string, ToolCallRecord[]>();
+
 function usablePath(value: string): string | null {
   const path = value.trim().replaceAll("\\", "/").replace(/^\.\//, "");
   if (!path || path.includes("\0") || path.includes("\n") || /^[a-z]+:\/\//i.test(path)) return null;
   return path;
 }
 
-function collectPathValue(value: unknown, out: Set<string>): void {
-  if (typeof value === "string") {
-    const path = usablePath(value);
-    if (path) out.add(path);
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) collectPathValue(item, out);
-    return;
-  }
-  if (value && typeof value === "object") collectPathFields(value as JsonObject, out);
-}
-
-function collectPathFields(value: JsonObject, out: Set<string>): void {
-  for (const [key, child] of Object.entries(value)) {
-    if (PATH_KEY.test(key)) collectPathValue(child, out);
-    else if (child && typeof child === "object") collectPathValue(child, out);
-    if (typeof child === "string" && /^(patch|patchText)$/i.test(key)) {
-      for (const match of child.matchAll(PATCH_FILE)) {
-        const path = usablePath(match[1] ?? "");
-        if (path) out.add(path);
-      }
+/** Only well-known top-level path fields — no recursive JSON crawl. */
+function directPath(input?: JsonObject): string | undefined {
+  if (!input) return undefined;
+  for (const key of ["path", "file", "filePath", "filename"] as const) {
+    const value = input[key];
+    if (typeof value === "string") {
+      const path = usablePath(value);
+      if (path) return path;
     }
   }
+  return undefined;
 }
 
-function isEditTool(tool: string): boolean {
-  return WRITE_TOOL.test(tool);
+function commandOf(input?: JsonObject): string {
+  if (!input) return "";
+  if (typeof input.command === "string") return input.command;
+  if (typeof input.cmd === "string") return input.cmd;
+  return "";
+}
+
+function isFailed(ev: Extract<RuntimeEvent, { type: "tool/result" | "tool/error" }>): boolean {
+  if (ev.type === "tool/error") return true;
+  const meta = ev.metadata;
+  if (meta && typeof meta === "object" && !Array.isArray(meta)) {
+    const record = meta as JsonObject;
+    if (typeof record.exitCode === "number" && record.exitCode !== 0) return true;
+    if (record.failed === true || record.rejected === true) return true;
+  }
+  return false;
 }
 
 function isCheckTool(tool: string, input?: JsonObject): boolean {
-  if (TEST_BUILD_TOOL.test(tool)) {
-    const command = typeof input?.command === "string"
-      ? input.command
-      : typeof input?.cmd === "string"
-        ? input.cmd
-        : "";
-    // Bare bash/shell without a test/build-ish command is too noisy to count.
-    if (/^(bash|shell|exec)$/i.test(tool) || /[/._-](bash|shell|exec)$/i.test(tool)) {
-      return command.length > 0 && TEST_BUILD_COMMAND.test(command);
-    }
-    return true;
+  if (!CHECK_TOOL.test(tool)) return false;
+  if (/^(bash|shell|exec)$/i.test(tool) || /[/._-](bash|shell|exec)$/i.test(tool)) {
+    return CHECK_COMMAND.test(commandOf(input));
   }
-  const command = typeof input?.command === "string"
-    ? input.command
-    : typeof input?.cmd === "string"
-      ? input.cmd
-      : "";
-  return command.length > 0 && TEST_BUILD_COMMAND.test(command);
+  return true;
 }
 
-function extractEditPath(tool: string, input?: JsonObject, metadata?: JsonObject): string | undefined {
-  if (!isEditTool(tool) || !input) return undefined;
-  const paths = new Set<string>();
-  collectPathFields(input, paths);
-  if (metadata) collectPathFields(metadata, paths);
-  const [first] = [...paths].sort((a, b) => a.localeCompare(b));
-  return first;
-}
-
-function isFailedToolResult(
-  kind: "result" | "error",
-  tool: string,
-  outputOrError: string,
-  metadata?: JsonObject,
-  input?: JsonObject,
-): boolean {
-  if (kind === "error") return true;
-  if (metadata && typeof metadata.exitCode === "number" && metadata.exitCode !== 0) return true;
-  if (metadata?.failed === true || metadata?.rejected === true) return true;
-  if (!isCheckTool(tool, input)) return false;
-  // Conservative text signals for check tools that omit exit metadata.
-  return /\b(fail(ed|ure)?|error|✖|×|ELIFECYCLE|AssertionError|FAILED)\b/i.test(outputOrError)
-    && !/\b0 failing\b/i.test(outputOrError);
-}
-
-function toolRecordFromEvent(ev: SessionEvent): ToolCallRecord | null {
+function recordFromEvent(ev: RuntimeEvent): ToolCallRecord | null {
   if (ev.type !== "tool/result" && ev.type !== "tool/error") return null;
-  const data = ev.data as JsonObject;
-  const tool = typeof data.tool === "string" ? data.tool : "";
+  const tool = typeof ev.tool === "string" ? ev.tool : "";
   if (!tool) return null;
-  const input = (data.input && typeof data.input === "object" && !Array.isArray(data.input))
-    ? data.input as JsonObject
+  const input = (ev.input && typeof ev.input === "object" && !Array.isArray(ev.input))
+    ? ev.input as JsonObject
     : undefined;
-  const metadata = (data.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata))
-    ? data.metadata as JsonObject
-    : undefined;
-  const outputOrError = ev.type === "tool/error"
-    ? (typeof data.error === "string" ? data.error : "")
-    : (typeof data.output === "string" ? data.output : "");
-  const path = extractEditPath(tool, input, metadata);
+  const path = EDIT_TOOL.test(tool) ? directPath(input) : undefined;
   const edit = Boolean(path);
-  const check = isCheckTool(tool, input);
-  const failed = isFailedToolResult(
-    ev.type === "tool/error" ? "error" : "result",
-    tool,
-    outputOrError,
-    metadata,
-    input,
-  );
-  return {
-    tool,
-    ...(path ? { path } : {}),
-    edit,
-    check,
-    failed,
-  };
+  const failedCheck = !edit && isCheckTool(tool, input) && isFailed(ev);
+  return { tool, ...(path ? { path } : {}), edit, failedCheck };
 }
 
-/** Newest-last window of terminal tool records from a session log. */
-export function recentToolRecords(
-  events: readonly SessionEvent[],
-  windowSize = EDIT_LOOP_WINDOW,
-): ToolCallRecord[] {
-  const records: ToolCallRecord[] = [];
-  for (let i = events.length - 1; i >= 0 && records.length < windowSize; i -= 1) {
-    const record = toolRecordFromEvent(events[i]!);
-    if (record) records.push(record);
-  }
-  return records.reverse();
-}
-
-function evidenceFrom(records: readonly ToolCallRecord[], indexes: readonly number[]): EditLoopEvidence[] {
-  return indexes.map((index) => {
-    const record = records[index]!;
-    return {
-      tool: record.tool,
-      ...(record.path ? { path: record.path } : {}),
-      ...(record.failed ? { failed: true } : {}),
-      role: record.edit ? "edit" : record.check ? "check" : "other",
-    };
-  });
-}
-
-function editLoopSignature(kind: EditLoopKind, paths: readonly string[]): string {
-  return `${kind}:${[...paths].sort().join("|")}`;
-}
-
-function detectRepeatedEditWithFailingChecks(
-  records: readonly ToolCallRecord[],
-): EditLoopDetection | null {
-  const editsByPath = new Map<string, number[]>();
-  for (let i = 0; i < records.length; i += 1) {
-    const record = records[i]!;
-    if (!record.edit || !record.path) continue;
-    const list = editsByPath.get(record.path) ?? [];
-    list.push(i);
-    editsByPath.set(record.path, list);
-  }
-
-  for (const [path, editIndexes] of editsByPath) {
-    if (editIndexes.length < EDIT_LOOP_SAME_FILE_EDITS) continue;
-    const first = editIndexes[0]!;
-    const last = editIndexes[editIndexes.length - 1]!;
-    const failingChecks: number[] = [];
-    for (let i = first + 1; i < last; i += 1) {
-      const record = records[i]!;
-      if (record.check && record.failed) failingChecks.push(i);
-    }
-    // Require intervening failing checks between edits — not merely adjacent
-    // rewrites of the same file (legitimate multi-hunk edits).
-    if (failingChecks.length === 0) continue;
-    const evidenceIndexes = [...editIndexes.slice(0, EDIT_LOOP_SAME_FILE_EDITS), ...failingChecks.slice(0, 3)]
-      .sort((a, b) => a - b);
-    const kind = "repeated-edit-with-failing-checks" as const;
-    const paths = [path];
-    return {
-      detected: true,
-      kind,
-      paths,
-      signature: editLoopSignature(kind, paths),
-      evidence: evidenceFrom(records, evidenceIndexes),
-    };
-  }
-  return null;
-}
-
-function detectFileOscillation(records: readonly ToolCallRecord[]): EditLoopDetection | null {
-  const editIndexes: number[] = [];
-  const editPaths: string[] = [];
-  for (let i = 0; i < records.length; i += 1) {
-    const record = records[i]!;
-    if (!record.edit || !record.path) continue;
-    // Collapse consecutive edits of the same path (multi-tool hunks).
-    if (editPaths.length > 0 && editPaths[editPaths.length - 1] === record.path) continue;
-    editIndexes.push(i);
-    editPaths.push(record.path);
-  }
-  if (editPaths.length < EDIT_LOOP_OSCILLATION_CYCLES * 2 + 1) return null;
-
-  for (let start = 0; start <= editPaths.length - (EDIT_LOOP_OSCILLATION_CYCLES * 2 + 1); start += 1) {
-    const a = editPaths[start]!;
-    const b = editPaths[start + 1]!;
-    if (a === b) continue;
+/**
+ * Strict pattern: edit A → failing check → edit A → failing check → edit A.
+ * Anything else (including A/B oscillation) is ignored.
+ */
+export function detectEditLoop(records: readonly ToolCallRecord[]): EditLoopDetection | null {
+  const relevant = records.filter((r) => r.edit || r.failedCheck);
+  for (let i = 0; i + NEED_EDITS * 2 - 2 < relevant.length; i += 1) {
+    const first = relevant[i]!;
+    if (!first.edit || !first.path) continue;
+    const path = first.path;
     let ok = true;
-    for (let i = 0; i < EDIT_LOOP_OSCILLATION_CYCLES * 2 + 1; i += 1) {
-      const expected = i % 2 === 0 ? a : b;
-      if (editPaths[start + i] !== expected) {
+    const indexes: number[] = [i];
+    for (let step = 1; step < NEED_EDITS * 2 - 1; step += 1) {
+      const row = relevant[i + step];
+      if (!row) {
         ok = false;
         break;
       }
+      if (step % 2 === 1) {
+        if (!row.failedCheck) {
+          ok = false;
+          break;
+        }
+      } else if (!row.edit || row.path !== path) {
+        ok = false;
+        break;
+      }
+      indexes.push(i + step);
     }
     if (!ok) continue;
-    const kind = "file-oscillation" as const;
-    const paths = [a, b];
-    const sliceIndexes = editIndexes.slice(start, start + EDIT_LOOP_OSCILLATION_CYCLES * 2 + 1);
+    const evidence: EditLoopEvidence[] = indexes.map((index) => {
+      const row = relevant[index]!;
+      return {
+        tool: row.tool,
+        ...(row.path ? { path: row.path } : {}),
+        ...(row.failedCheck ? { failed: true } : {}),
+        role: row.edit ? "edit" : "check",
+      };
+    });
+    const kind = "repeated-edit-with-failing-checks" as const;
     return {
       detected: true,
       kind,
-      paths,
-      signature: editLoopSignature(kind, paths),
-      evidence: evidenceFrom(records, sliceIndexes),
+      paths: [path],
+      signature: `${kind}:${path}`,
+      evidence,
     };
   }
   return null;
 }
 
-/** Inspect a bounded tool sequence. Returns a detection or null. */
-export function detectEditLoop(records: readonly ToolCallRecord[]): EditLoopDetection | null {
-  if (records.length === 0) return null;
-  return detectRepeatedEditWithFailingChecks(records) ?? detectFileOscillation(records);
+/** Push a live tool terminal event into the session ring; return detection if any. */
+export function observeToolEvent(sessionId: string, ev: RuntimeEvent): EditLoopDetection | null {
+  const record = recordFromEvent(ev);
+  if (!record) return null;
+  const ring = rings.get(sessionId) ?? [];
+  ring.push(record);
+  if (ring.length > RING) ring.splice(0, ring.length - RING);
+  rings.set(sessionId, ring);
+  return detectEditLoop(ring);
 }
 
-export interface EditLoopDedupeState {
-  signature: string;
-  at: number;
+/** Test helper: clear in-memory rings. */
+export function clearEditLoopState(sessionId?: string): void {
+  if (sessionId) rings.delete(sessionId);
+  else rings.clear();
 }
 
-/** Decide whether a fresh detection should be emitted given prior state. */
 export function shouldEmitEditLoop(
   detection: EditLoopDetection | null,
   previous: EditLoopDedupeState | undefined,
   now = Date.now(),
-  cooldownMs = EDIT_LOOP_COOLDOWN_MS,
 ): { emit: boolean; next: EditLoopDedupeState | undefined } {
-  if (!detection) {
-    // Pattern broken — allow the same signature to fire again later.
-    return { emit: false, next: undefined };
-  }
-  if (
-    previous
-    && previous.signature === detection.signature
-    && now - previous.at < cooldownMs
-  ) {
-    return { emit: false, next: previous };
-  }
+  if (!detection) return { emit: false, next: undefined };
+  // Same loop stays suppressed until the pattern breaks (next becomes undefined).
   if (previous && previous.signature === detection.signature) {
-    // Same loop still active past cooldown: keep suppressed until the pattern
-    // breaks (next === undefined) so we do not spam the log every minute.
     return { emit: false, next: previous };
   }
+  void now;
   return {
     emit: true,
     next: { signature: detection.signature, at: now },

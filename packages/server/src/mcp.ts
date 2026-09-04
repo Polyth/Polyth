@@ -7,8 +7,8 @@
 // never triggers a backend write. User mutations apply a patch batch that
 // names exactly the Polyth-managed entries, so unsupported entries and unknown
 // fields in the backend config always survive.
-import { mkdirSync } from "node:fs";
-import { readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+import { atomicWriteSync } from "./atomicWrite.ts";
 import { access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
@@ -21,7 +21,7 @@ import type {
 } from "@polyth/contracts";
 
 /** Injected by the composition root; talks to OpenCode only via backend-opencode. */
-export type McpToolLister = (serverName: string) => Promise<McpToolsResponseDto>;
+export type McpToolLister = (serverName: string, projectId: string) => Promise<McpToolsResponseDto>;
 
 export interface McpApplier {
   applyMcp(entries: Array<{
@@ -68,7 +68,7 @@ export interface McpConfigService {
   /** Reachability probe; never launches anything through a shell. */
   test(id: string): Promise<{ ok: boolean; message: string }>;
   /** List tools for one stored server via the OpenCode runtime (soft-fail). */
-  listTools(id: string): Promise<McpToolsResponseDto>;
+  listTools(id: string, projectId: string): Promise<McpToolsResponseDto>;
 }
 
 /** MCP entry fields Polyth owns; every other field of an imported entry is
@@ -173,17 +173,6 @@ async function commandExists(command: string): Promise<boolean> {
     } catch { /* keep looking */ }
   }
   return false;
-}
-
-function atomicWriteSync(path: string, data: string): void {
-  const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync(tmp, data, "utf8");
-  try {
-    renameSync(tmp, path);
-  } catch (e) {
-    try { unlinkSync(tmp); } catch { /* already gone */ }
-    throw e;
-  }
 }
 
 export function createMcpConfigService(opts: {
@@ -371,9 +360,16 @@ export function createMcpConfigService(opts: {
       }
     },
 
-    async listTools(id: string): Promise<McpToolsResponseDto> {
+    async listTools(id: string, projectId: string): Promise<McpToolsResponseDto> {
       const row = servers.find((s) => s.id === id);
       if (!row) throw err("not-found", "mcp server not found");
+      if (!projectId) {
+        return {
+          tools: [],
+          source: "unavailable",
+          message: "select a project to inspect MCP tools",
+        };
+      }
       if (!opts.listTools) {
         return {
           tools: [],
@@ -382,7 +378,7 @@ export function createMcpConfigService(opts: {
         };
       }
       try {
-        return await opts.listTools(row.name);
+        return await opts.listTools(row.name, projectId);
       } catch (e) {
         return {
           tools: [],

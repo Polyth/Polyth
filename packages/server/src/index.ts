@@ -1216,15 +1216,14 @@ export async function boot(opts: BootOptions = {}) {
   const mcp = createMcpConfigService({
     file: `${dataDir}/mcp.json`,
     applier: configApplier,
-    listTools: async (serverName) => {
+    listTools: async (serverName, projectId) => {
       try {
-        const all = await projects.list();
-        const project = all.find((p) => !p.remote) ?? all[0];
+        const project = await projects.get(projectId);
         if (!project) {
           return {
             tools: [],
             source: "unavailable" as const,
-            message: "no project available to query the OpenCode runtime",
+            message: "project not found",
           };
         }
         const runtime = await runtimes.forProject(project.id);
@@ -1236,23 +1235,9 @@ export async function boot(opts: BootOptions = {}) {
             message: "OpenCode runtime endpoint is unavailable",
           };
         }
-        let provider: string | undefined;
-        let model: string | undefined;
-        try {
-          const models = await runtime.models();
-          const first = models.find((m) => m.connected !== false) ?? models[0];
-          if (first) {
-            provider = first.providerID;
-            model = first.modelID;
-          }
-        } catch {
-          // Tool schemas are optional enrichment.
-        }
         return listMcpServerToolsFromEndpoint({
           endpoint,
           serverName,
-          ...(provider ? { provider } : {}),
-          ...(model ? { model } : {}),
         });
       } catch (error) {
         return {
