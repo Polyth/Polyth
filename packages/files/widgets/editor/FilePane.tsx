@@ -14,7 +14,7 @@ import JsonTree, { tryParseJson } from "../../../../apps/web/src/markdown/JsonTr
 import { highlight, highlightLines, langOf } from "../../../../apps/web/src/highlight.ts";
 import { formatFileChat, formatSelectionChat, lineRangeOf } from "../../../../apps/web/src/chatclip.ts";
 import { requestComposerInsert } from "../../../../apps/web/src/composerInsert.ts";
-import { attachProjectFile, attachText, attachUpload, isLargeTextPaste } from "../../../../apps/web/src/attachments.ts";
+import { attachProjectFile, attachText, isLargeTextPaste } from "../../../../apps/web/src/attachments.ts";
 import { MOD } from "../../../../apps/web/src/format.ts";
 import { clampMenuPosition } from "../../../../apps/web/src/selectionActions.ts";
 import { copyText } from "../../../../apps/web/src/utils.ts";

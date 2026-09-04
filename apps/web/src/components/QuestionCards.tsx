@@ -132,12 +132,10 @@ function QuestionStepper({ q }: { q: PendingQuestion }) {
 
   const submit = () => {
     if (!canSubmit) { setStep(invalid); return; }
-    if (!q.sessionId) return;
     drafts.delete(q.requestId);
     void answerQuestion(q.sessionId, q.requestId, answers as unknown as JsonObject);
   };
   const reject = () => {
-    if (!q.sessionId) return;
     drafts.delete(q.requestId);
     void rejectQuestion(q.sessionId, q.requestId);
   };

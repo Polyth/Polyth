@@ -86,7 +86,7 @@ import {
 } from "../composer/history.ts";
 import type { PickerItem } from "../picker.ts";
 import Picker from "./Picker.tsx";
-import AdaptiveTextInput, type { TextInputHandle } from "./input/AdaptiveTextInput.tsx";
+import AdaptiveTextInput, { type TextInputHandle } from "./input/AdaptiveTextInput.tsx";
 import ComposerAddMenu from "./ComposerAddMenu.tsx";
 import EffortMenu from "./EffortMenu.tsx";
 import ComposerFocusDialog from "./ComposerFocusDialog.tsx";

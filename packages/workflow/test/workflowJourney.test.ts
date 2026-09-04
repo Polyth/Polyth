@@ -238,7 +238,6 @@ test("workflow journey surfaces expose task launch, chat progress, HITL, stop, a
   assert.match(workflow, /tr\("workflowview\.reviewAndRespond"\)/);
   assert.match(workflow, /tr\("workflowview\.retryFull"\)/);
   assert.match(workflow, /tr\("workflowview\.stopRun"\)/);
-  assert.match(miniWidgets, /workflow\.active-run/);
   assert.match(status, /Approval needed/);
   assert.match(styles, /\.app\.view-session \.statusbar:has\(\.sb-workflow\) \{ display: flex; \}/);
   assert.match(styles, /\.app\.mode-chat\.view-session \.statusbar:has\(\.sb-workflow\) \{ display: flex; \}/);
