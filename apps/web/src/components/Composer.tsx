@@ -534,6 +534,7 @@ export default function Composer({
       if (editing?.sessionId === outgoing) void api.queueEditCancel(outgoing, editing.id).catch(() => {});
     }
     sessionIdRef.current = session?.id ?? null;
+    setPendingLargePaste(null);
     // Prefer server-synced draft from the projection (cross-client sync);
     // fall back to localStorage for offline / fast local edits.
     const serverDraft = session?.draft;

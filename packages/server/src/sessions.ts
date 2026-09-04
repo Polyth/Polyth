@@ -31,6 +31,12 @@ import { buildPermissionPreview, PERMISSION_ALLOWED_SCOPES } from "./permissionP
 import { sanitizeAttachments } from "./attachments.ts";
 import { settleAllOrThrow } from "./settle.ts";
 import { createResumeScheduler, planResume } from "./resume.ts";
+import {
+  detectEditLoop,
+  recentToolRecords,
+  shouldEmitEditLoop,
+  type EditLoopDedupeState,
+} from "./editLoop.ts";
 
 export interface Broadcaster {
   event(ev: SessionEvent): void;
@@ -375,6 +381,8 @@ export function createSessionService(deps: {
   // until an explicit rename supersedes it.
   const autoTitleRequested = new Set<string>();
   const titleRefreshInFlight = new Set<string>();
+  /** Per-session dedupe for `runtime/edit-loop-detected` observer signals. */
+  const editLoopDedupe = new Map<string, EditLoopDedupeState>();
 
   const broadcastTail = async <T>(
     sessionId: string,
@@ -1920,6 +1928,42 @@ export function createSessionService(deps: {
     }
   };
 
+  const maybeEmitEditLoop = async (sessionId: string): Promise<void> => {
+    const events = await store.events(sessionId);
+    const detection = detectEditLoop(recentToolRecords(events));
+    const decision = shouldEmitEditLoop(detection, editLoopDedupe.get(sessionId));
+    if (!decision.next) editLoopDedupe.delete(sessionId);
+    else editLoopDedupe.set(sessionId, decision.next);
+    if (!decision.emit || !detection) return;
+    console.warn(`[polyth] edit-loop detected for ${sessionId}`, {
+      kind: detection.kind,
+      paths: detection.paths,
+      signature: detection.signature,
+    });
+    await appendAndBroadcast(
+      sessionId,
+      "runtime/edit-loop-detected",
+      {
+        kind: detection.kind,
+        paths: detection.paths,
+        signature: detection.signature,
+        evidence: detection.evidence,
+      } as unknown as JsonObject,
+      { ignorable: true },
+    );
+  };
+
+  /** When the last open request clears, leave waiting for an authoritative
+   *  idle/working state and kick the durable queue if truly idle. */
+  const settleAfterLastRequest = async (sessionId: string): Promise<void> => {
+    const current = await store.projection(sessionId);
+    if (!current || current.status !== "waiting") return;
+    if (openRequestTotal(await logFacts(sessionId)) > 0) return;
+    const next = turnActive(sessionId) ? "working" : "idle";
+    await updateProjection(sessionId, { status: next });
+    if (next === "idle") void dispatchQueue(sessionId);
+  };
+
   const onRuntimeEvent = async (
     sessionId: string,
     ev: RuntimeEvent,
@@ -2310,6 +2354,15 @@ export function createSessionService(deps: {
         }
         await persist(sessionId, ev.type, rest as unknown as JsonObject);
       }
+    }
+    // Live path only: observation replay must not invent extra canonical events
+    // through a batch-bound persist, and must not duplicate a prior live signal.
+    if (
+      sideEffects
+      && options.persist === undefined
+      && (ev.type === "tool/result" || ev.type === "tool/error")
+    ) {
+      await maybeEmitEditLoop(sessionId);
     }
   };
 
@@ -2881,11 +2934,7 @@ export function createSessionService(deps: {
       { ignorable: true },
     );
     const parent = await store.projection(parentId);
-    if (parent?.status === "waiting" && openRequestTotal(await logFacts(parentId)) === 0) {
-      await updateProjection(parentId, {
-        status: turnActive(parentId) ? "working" : "idle",
-      });
-    }
+    if (parent?.status === "waiting") await settleAfterLastRequest(parentId);
   };
 
   const replyPermissionCore = async (
@@ -2968,7 +3017,7 @@ export function createSessionService(deps: {
       }
     }
     if (proj.status === "waiting" && openRequestTotal(await logFacts(sessionId)) === 0) {
-      await updateProjection(sessionId, { status: shellRequest ? "idle" : "working" });
+      await settleAfterLastRequest(sessionId);
     }
     await closeParentRequestMirror(sessionId, requestId, "permission", {
       reply,
@@ -3029,7 +3078,7 @@ export function createSessionService(deps: {
       throw outcomeError(outcome);
     }
     if (proj.status === "waiting" && openRequestTotal(await logFacts(sessionId)) === 0) {
-      await updateProjection(sessionId, { status: "working" });
+      await settleAfterLastRequest(sessionId);
     }
     await closeParentRequestMirror(sessionId, requestId, "question", {
       ...(reject ? { rejected: true } : { answers }),
@@ -5404,12 +5453,7 @@ export function createSessionService(deps: {
         // When the mirror was answered here, settle this session if nothing
         // else is still waiting (mirror close is a no-op when already closed).
         if (target !== sessionId) {
-          const parent = await store.projection(sessionId);
-          if (parent?.status === "waiting" && openRequestTotal(await logFacts(sessionId)) === 0) {
-            await updateProjection(sessionId, {
-              status: turnActive(sessionId) ? "working" : "idle",
-            });
-          }
+          await settleAfterLastRequest(sessionId);
         }
       });
     },
@@ -5421,12 +5465,7 @@ export function createSessionService(deps: {
         const target = typeof forwarded?.sourceSessionId === "string" ? forwarded.sourceSessionId : sessionId;
         await replyQuestionCore(target, requestId, answers);
         if (target !== sessionId) {
-          const parent = await store.projection(sessionId);
-          if (parent?.status === "waiting" && openRequestTotal(await logFacts(sessionId)) === 0) {
-            await updateProjection(sessionId, {
-              status: turnActive(sessionId) ? "working" : "idle",
-            });
-          }
+          await settleAfterLastRequest(sessionId);
         }
       });
     },
@@ -5520,7 +5559,7 @@ export function createSessionService(deps: {
           throw outcomeError(outcome);
         }
         if (proj.status === "waiting" && openRequestTotal(await logFacts(sessionId)) === 0) {
-          await updateProjection(sessionId, { status: "working" });
+          await settleAfterLastRequest(sessionId);
         }
       });
     },

@@ -22,7 +22,10 @@ function modeIcon(permission: string) {
 }
 
 function originSessionId(p: PendingPermission, fallback?: string): string | undefined {
-  return p.sessionId || fallback || undefined;
+  // Prefer the event-stamped origin. Fallback is only for pre-stamp events
+  // still in memory; never invent a live selection when the stamp exists.
+  if (p.sessionId) return p.sessionId;
+  return fallback || undefined;
 }
 
 function PermissionRow({ p, sessionId }: { p: PendingPermission; sessionId?: string }) {

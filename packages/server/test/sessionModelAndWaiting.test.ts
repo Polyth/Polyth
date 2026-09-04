@@ -322,10 +322,10 @@ test("WS23: turn/stopped with an open permission stays waiting", async () => {
 
   await sessions.replyPermission(id, "per_open", "reject");
   await flush();
-  assert.notEqual(
+  assert.equal(
     (await store.projection(id))?.status,
-    "waiting",
-    "resolving the last open request must leave waiting",
+    "idle",
+    "resolving the last open request with no active turn must return to idle",
   );
   await store.close();
 });
