@@ -106,4 +106,25 @@ test("client settings round-trip through the server and apply on inbound frames"
   // messages, next-action, task brief) honours the model the user picked.
   assert.match(settingsSync, /sessionDefaults:\s*getSessionDefaults\(\)/);
   assert.match(settingsSync, /setSessionDefaults\(parseSessionDefaults\(JSON\.stringify\(incoming\.sessionDefaults\)\)\)/);
+
+  // Unload flush: clear the debounce timer and push immediately so a
+  // mid-debounce change is not dropped on pagehide / beforeunload.
+  assert.match(settingsSync, /export function flushSettingsSync\(\)/);
+  assert.match(settingsSync, /clearTimeout\(timer\)/);
+  assert.match(settingsSync, /addEventListener\("pagehide",\s*flushSettingsSync\)/);
+  assert.match(settingsSync, /addEventListener\("beforeunload",\s*flushSettingsSync\)/);
+});
+
+test("flushSettingsSync clears a pending debounce and invokes push immediately", async () => {
+  // Lightweight module-level contract: schedulePush arms a timer; flush must
+  // clear it before calling push so unload never races the debounce.
+  const settingsSync = await read("../src/settingsSync.ts");
+  const flushBody = settingsSync.match(
+    /export function flushSettingsSync\(\): void \{([\s\S]*?)\n\}/,
+  );
+  assert.ok(flushBody, "flushSettingsSync is exported");
+  assert.match(flushBody![1]!, /if \(timer !== undefined\)/);
+  assert.match(flushBody![1]!, /clearTimeout\(timer\)/);
+  assert.match(flushBody![1]!, /timer = undefined/);
+  assert.match(flushBody![1]!, /push\(\)/);
 });

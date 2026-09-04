@@ -8,6 +8,7 @@ import {
   conflictLiveFile,
   dismissLiveFileNotice,
   editLiveFile,
+  failLiveFileSave,
   htmlPreviewDocument,
   initialPreviewVisible,
   loadedLiveFile,
@@ -51,6 +52,15 @@ test("live file: save transitions preserve edits made during an in-flight write"
     noticeDismissed: false,
   });
   assert.equal(completeLiveFileSave(saving, "rev-2", true).kind, "dirty");
+
+  // Mid-flight keystrokes must not demote "saving" → "dirty" (that would arm
+  // another autosave and re-enable the Save button before the write settles).
+  const midEdit = editLiveFile(saving);
+  assert.equal(midEdit.kind, "saving");
+  assert.equal(midEdit.dirty, true);
+  assert.equal(autosaveDelay(midEdit, { enabled: true, editing: true, composing: false, readOnly: false }), null);
+  assert.equal(completeLiveFileSave(midEdit, "rev-2", true).kind, "dirty");
+  assert.equal(failLiveFileSave(midEdit).kind, "dirty");
 });
 
 test("live file: deletion and check failures surface retryable, dismissible notices", () => {

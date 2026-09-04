@@ -3,7 +3,7 @@
 // it stale (the route answers 404), and disabled means NOTHING is generated.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SessionAssist, SessionProjection } from "@polyth/contracts";
@@ -33,6 +33,15 @@ test("assist settings: default off, clamped idle, persisted round-trip", () => {
   assert.match(readFileSync(file, "utf8"), /"enabled": true/);
   const reloaded = createAssistSettings({ file });
   assert.equal(reloaded.get().enabled, true);
+});
+
+test("assist settings: corrupt file is left untouched on load", () => {
+  const file = join(tmp(), "assist.json");
+  writeFileSync(file, "{{{");
+  const before = readFileSync(file, "utf8");
+  const svc = createAssistSettings({ file });
+  assert.deepEqual(svc.get(), { enabled: false, idleSeconds: 120 });
+  assert.equal(readFileSync(file, "utf8"), before, "corrupt file must not be rewritten on load");
 });
 
 test("pure helpers: word cap, freshness, reply parsing", () => {

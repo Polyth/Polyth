@@ -30,6 +30,12 @@ export function editLiveFile(state: LiveFileState): LiveFileState {
   if (state.kind === "conflict" || state.kind === "external-change" || state.kind === "deleted") {
     return { ...state, dirty: true, noticeDismissed: false };
   }
+  // Mid-flight save: keep kind "saving" so a concurrent autosave/manual save
+  // stays blocked, but mark dirty so completeLiveFileSave(stillDirty) lands
+  // back on dirty after the in-flight write settles.
+  if (state.kind === "saving") {
+    return { ...state, dirty: true, noticeDismissed: false };
+  }
   return { kind: "dirty", baseRevision: state.baseRevision, dirty: true, noticeDismissed: false };
 }
 
@@ -43,6 +49,11 @@ export function restoreLiveFileBuffer(state: LiveFileState): LiveFileState {
 
 export function beginLiveFileSave(state: LiveFileState): LiveFileState {
   return { kind: "saving", baseRevision: state.baseRevision, dirty: true, noticeDismissed: false };
+}
+
+/** Exit an in-flight save after a non-conflict failure; buffer stays dirty. */
+export function failLiveFileSave(state: LiveFileState): LiveFileState {
+  return { kind: "dirty", baseRevision: state.baseRevision, dirty: true, noticeDismissed: false };
 }
 
 export function completeLiveFileSave(

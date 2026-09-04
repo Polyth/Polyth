@@ -6,7 +6,7 @@
 // metadata-only, so an uncommitted buffer is protected by the beforeunload
 // warning rather than serialized into preferences.
 import type { FileReadResult } from "@polyth/session/web-api";
-import type { LiveFileState } from "./liveFile.ts";
+import { autosaveDelay, type LiveFileState } from "./liveFile.ts";
 import { getUiSettings } from "../../../../apps/web/src/uiPrefs.ts";
 
 export interface FileDoc {
@@ -86,10 +86,21 @@ export function isDocDirty(scope: string, path: string): boolean {
   return !!entry?.doc && entry.buf !== entry.doc.content;
 }
 
-function anyDirtyDoc(): boolean {
+/** True when at least one dirty buffer would not be flushed by autosave
+ *  (autosaveDelay would return null for its current conditions). */
+function anyUnflushedDirtyDoc(): boolean {
+  const autosaveOn = getUiSettings().editorAutosave;
   for (const docs of scopes.values()) {
     for (const entry of docs.values()) {
-      if (entry.doc && entry.buf !== entry.doc.content) return true;
+      if (!entry.doc || entry.buf === entry.doc.content) continue;
+      if (!entry.live) return true;
+      const delay = autosaveDelay(entry.live, {
+        enabled: autosaveOn,
+        editing: entry.editing,
+        composing: entry.composing,
+        readOnly: entry.doc.truncated || entry.doc.tooLarge === true,
+      });
+      if (delay === null) return true;
     }
   }
   return false;
@@ -97,7 +108,9 @@ function anyDirtyDoc(): boolean {
 
 // ---- unload guard --------------------------------------------------------------
 // While an unsaved buffer exists that autosave will not flush, closing the
-// page warns instead of silently dropping the edit.
+// page warns instead of silently dropping the edit. Warn whenever
+// autosaveDelay is null for a dirty doc (pref off, not editing, composing,
+// read-only, conflict/saving/…), not only when the autosave preference is off.
 
 let unloadGuardInstalled = false;
 
@@ -105,8 +118,7 @@ export function installDocUnloadGuard(): void {
   if (unloadGuardInstalled || typeof window === "undefined") return;
   unloadGuardInstalled = true;
   window.addEventListener("beforeunload", (e) => {
-    if (!anyDirtyDoc()) return;
-    if (getUiSettings().editorAutosave) return;
+    if (!anyUnflushedDirtyDoc()) return;
     e.preventDefault();
   });
 }

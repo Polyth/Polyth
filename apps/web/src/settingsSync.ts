@@ -84,6 +84,22 @@ function schedulePush(): void {
   timer = setTimeout(push, PUSH_DEBOUNCE_MS);
 }
 
+/** Cancel any pending debounce and push immediately. Used on pagehide /
+ *  beforeunload so a mid-debounce settings change is not dropped on exit. */
+export function flushSettingsSync(): void {
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    timer = undefined;
+  }
+  push();
+}
+
+function installUnloadFlush(): void {
+  if (typeof window === "undefined") return;
+  window.addEventListener("pagehide", flushSettingsSync);
+  window.addEventListener("beforeunload", flushSettingsSync);
+}
+
 /** WS gateway frame: another device changed the shared settings. */
 export function applyRemoteClientSettings(dto: ClientSettingsDto): void {
   applyRemote(dto);
@@ -98,6 +114,7 @@ export function initSettingsSync(): void {
     subscribeStore(schedulePush);
     subscribeUiSettings(schedulePush);
     subscribeSessionDefaults(schedulePush);
+    installUnloadFlush();
   }
   void api.clientSettings()
     .then((dto) => {
