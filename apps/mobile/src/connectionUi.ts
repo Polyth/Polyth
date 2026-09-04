@@ -26,3 +26,9 @@ export function connectionUiState(opts: {
     legacyIsSecure: false,
   };
 }
+
+export function bootstrapUrlWithNext(bootstrapUrl: string, next = "/"): string {
+  const target = new URL(bootstrapUrl);
+  if (next !== "/") target.searchParams.set("next", next);
+  return target.toString();
+}

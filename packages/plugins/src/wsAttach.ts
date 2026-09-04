@@ -45,8 +45,8 @@ export function allowWsCapability(principal: AuthPrincipal | null, capability: s
 
 export function denyUpgrade(socket: Socket, status = 401): void {
   if (socket.destroyed || socket.writableEnded) return;
-  const reason = status === 401 ? "Unauthorized" : status === 403 ? "Forbidden" : "Error";
-  socket.end(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\n\r\n`);
+  const reason = status === 401 ? "Unauthorized" : status === 403 ? "Forbidden" : status === 404 ? "Not Found" : "Error";
+  socket.end(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`, () => socket.destroy());
 }
 
 export type WsUpgradeClaim = (
@@ -63,7 +63,7 @@ interface UpgradeRouter {
 const upgradeRouters = new WeakMap<import("node:http").Server, UpgradeRouter>();
 
 /** One `upgrade` listener per HTTP server. Claims run in registration order;
- *  the first that returns true owns the socket. Unclaimed upgrades stay open. */
+ *  the first that returns true owns the socket. Unclaimed upgrades close with 404. */
 export function claimWsUpgrade(
   server: import("node:http").Server,
   claim: WsUpgradeClaim,
@@ -76,6 +76,7 @@ export function claimWsUpgrade(
       for (const next of claims) {
         if (next(req, socket, head)) return;
       }
+      denyUpgrade(socket, 404);
     };
     router = { claims, dispatch };
     upgradeRouters.set(server, router);

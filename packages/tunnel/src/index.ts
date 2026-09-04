@@ -20,6 +20,8 @@ export interface TunnelDeviceRecord {
   pairedVia: string;
   lastTransport: string | null;
   grants: string[];
+  pairingId: string | null;
+  pairingState: "pending" | "host-acknowledged" | "active" | "failed";
 }
 
 export function grantsForProfile(profile: GrantProfileId): string[] {
@@ -38,6 +40,7 @@ export class TunnelStore {
     this.db = new DatabaseSync(path);
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA foreign_keys = ON");
+    this.db.exec("PRAGMA synchronous = FULL");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS tunnel_meta (
         key TEXT PRIMARY KEY,
@@ -76,6 +79,11 @@ export class TunnelStore {
       );
     `);
     this.db.exec("INSERT OR IGNORE INTO tunnel_meta(key, value) VALUES ('schema', 1)");
+    const columns = new Set((this.db.prepare("PRAGMA table_info(tunnel_device)").all() as Array<{ name: string }>).map((row) => row.name));
+    if (!columns.has("pairing_id")) this.db.exec("ALTER TABLE tunnel_device ADD COLUMN pairing_id TEXT");
+    if (!columns.has("pairing_state")) this.db.exec("ALTER TABLE tunnel_device ADD COLUMN pairing_state TEXT NOT NULL DEFAULT 'active'");
+    this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS tunnel_device_pairing_id ON tunnel_device(pairing_id) WHERE pairing_id IS NOT NULL");
+    this.db.exec("UPDATE tunnel_meta SET value = 2 WHERE key = 'schema'");
   }
 
   close(): void {
@@ -104,19 +112,43 @@ export class TunnelStore {
     grants: readonly string[];
     pairedVia: string;
   }): TunnelDeviceRecord {
+    const device = this.prepareDevice({ ...input, pairingId: `legacy-${randomBytes(16).toString("hex")}` });
+    if (device.pairingState === "active") return device;
+    this.markHostAcknowledged(device.pairingId!);
+    return this.activatePairing(device.pairingId!);
+  }
+
+  prepareDevice(input: {
+    pairingId: string;
+    endpointId: string;
+    label: string;
+    platform?: string;
+    model?: string;
+    appVersion?: string;
+    grants: readonly string[];
+    pairedVia: string;
+  }): TunnelDeviceRecord {
+    const byPairing = this.deviceByPairing(input.pairingId);
+    if (byPairing) {
+      if (byPairing.endpointId !== input.endpointId) throw new Error("pairing endpoint mismatch");
+      return byPairing;
+    }
     const now = Date.now();
     const existing = this.db.prepare("SELECT * FROM tunnel_device WHERE endpoint_id = ?").get(input.endpointId) as
-      | { id: string; revoked_at: number | null; grant_revision: number; created_at: number } | undefined;
-    if (existing && existing.revoked_at == null) {
+      | { id: string; revoked_at: number | null; grant_revision: number; created_at: number; pairing_state: string; pairing_id: string | null } | undefined;
+    if (existing?.pairing_state === "active" && existing.revoked_at == null) {
       return this.device(existing.id)!;
+    }
+    if (existing && (existing.pairing_state === "pending" || existing.pairing_state === "host-acknowledged")) {
+      throw new Error("device already has an unfinished pairing");
     }
     const id = existing?.id ?? randomBytes(16).toString("hex");
     const grantRevision = (existing?.grant_revision ?? 0) + 1;
     this.db.exec("BEGIN");
     try {
       this.db.prepare(`
-        INSERT INTO tunnel_device(id, endpoint_id, label, platform, model, app_version, created_at, updated_at, last_seen_at, revoked_at, grant_revision, paired_via, last_transport)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL)
+        INSERT INTO tunnel_device(id, endpoint_id, label, platform, model, app_version, created_at, updated_at, last_seen_at, revoked_at, grant_revision, paired_via, last_transport, pairing_id, pairing_state)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, 'pending')
         ON CONFLICT(id) DO UPDATE SET
           label=excluded.label,
           platform=excluded.platform,
@@ -125,7 +157,9 @@ export class TunnelStore {
           updated_at=excluded.updated_at,
           revoked_at=NULL,
           grant_revision=excluded.grant_revision,
-          paired_via=excluded.paired_via
+          paired_via=excluded.paired_via,
+          pairing_id=excluded.pairing_id,
+          pairing_state='pending'
       `).run(
         id,
         input.endpointId,
@@ -138,6 +172,7 @@ export class TunnelStore {
         now,
         grantRevision,
         input.pairedVia,
+        input.pairingId,
       );
       this.db.prepare("DELETE FROM tunnel_device_grant WHERE device_id = ?").run(id);
       const insertGrant = this.db.prepare(
@@ -148,13 +183,78 @@ export class TunnelStore {
       }
       this.db.prepare(
         "INSERT INTO tunnel_audit(id, event_type, device_id, connection_id, created_at, metadata_json) VALUES (?, ?, ?, NULL, ?, ?)",
-      ).run(randomBytes(16).toString("hex"), "pairing-committed", id, now, JSON.stringify({ endpointFingerprint: fingerprintEndpoint(input.endpointId) }));
+      ).run(randomBytes(16).toString("hex"), "pairing-prepared", id, now, JSON.stringify({ pairingId: input.pairingId, endpointFingerprint: fingerprintEndpoint(input.endpointId) }));
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
     }
     return this.device(id)!;
+  }
+
+  markHostAcknowledged(pairingId: string): TunnelDeviceRecord {
+    const current = this.deviceByPairing(pairingId);
+    if (!current) throw new Error("unknown pairing");
+    if (current.pairingState === "active" || current.pairingState === "host-acknowledged") return current;
+    if (current.pairingState !== "pending") throw new Error("pairing is not pending");
+    this.db.prepare("UPDATE tunnel_device SET pairing_state = 'host-acknowledged', updated_at = ? WHERE pairing_id = ? AND pairing_state = 'pending'")
+      .run(Date.now(), pairingId);
+    return this.deviceByPairing(pairingId)!;
+  }
+
+  activatePairing(pairingId: string): TunnelDeviceRecord {
+    const current = this.deviceByPairing(pairingId);
+    if (!current) throw new Error("unknown pairing");
+    if (current.pairingState === "active") return current;
+    if (current.pairingState !== "host-acknowledged") throw new Error("host has not acknowledged pairing");
+    const now = Date.now();
+    this.db.exec("BEGIN");
+    try {
+      this.db.prepare("UPDATE tunnel_device SET pairing_state = 'active', updated_at = ? WHERE pairing_id = ? AND pairing_state = 'host-acknowledged'")
+        .run(now, pairingId);
+      this.db.prepare(
+        "INSERT INTO tunnel_audit(id, event_type, device_id, connection_id, created_at, metadata_json) VALUES (?, ?, ?, NULL, ?, ?)",
+      ).run(randomBytes(16).toString("hex"), "pairing-committed", current.id, now, JSON.stringify({ pairingId }));
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return this.deviceByPairing(pairingId)!;
+  }
+
+  failPairing(pairingId: string, includeActive = false): TunnelDeviceRecord | undefined {
+    const current = this.deviceByPairing(pairingId);
+    if (!current || current.pairingState === "failed" || (current.pairingState === "active" && !includeActive)) return undefined;
+    const now = Date.now();
+    this.db.prepare("UPDATE tunnel_device SET pairing_state = 'failed', revoked_at = ?, grant_revision = grant_revision + 1, updated_at = ? WHERE pairing_id = ?")
+      .run(now, now, pairingId);
+    this.audit("pairing-failed", { deviceId: current.id, metadata: { pairingId } });
+    return this.deviceByPairing(pairingId);
+  }
+
+  recoverIncompletePairings(): TunnelDeviceRecord[] {
+    const rows = this.db.prepare("SELECT pairing_id FROM tunnel_device WHERE pairing_state = 'pending'").all() as Array<{ pairing_id: string }>;
+    const failed = rows.map((row) => this.failPairing(row.pairing_id)!).filter(Boolean);
+    const acknowledged = this.db.prepare("SELECT id, pairing_id FROM tunnel_device WHERE pairing_state = 'host-acknowledged'").all() as Array<{ id: string; pairing_id: string }>;
+    if (acknowledged.length) {
+      const now = Date.now();
+      this.db.exec("BEGIN");
+      try {
+        this.db.prepare("UPDATE tunnel_device SET pairing_state = 'active', updated_at = ? WHERE pairing_state = 'host-acknowledged'").run(now);
+        const audit = this.db.prepare(
+          "INSERT INTO tunnel_audit(id, event_type, device_id, connection_id, created_at, metadata_json) VALUES (?, 'pairing-recovered', ?, NULL, ?, ?)",
+        );
+        for (const row of acknowledged) {
+          audit.run(randomBytes(16).toString("hex"), row.id, now, JSON.stringify({ pairingId: row.pairing_id }));
+        }
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    return failed;
   }
 
   device(id: string): TunnelDeviceRecord | undefined {
@@ -169,8 +269,18 @@ export class TunnelStore {
     return this.hydrate(row);
   }
 
+  deviceByPairing(pairingId: string): TunnelDeviceRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM tunnel_device WHERE pairing_id = ?").get(pairingId) as Record<string, unknown> | undefined;
+    return row ? this.hydrate(row) : undefined;
+  }
+
   list(): TunnelDeviceRecord[] {
-    const rows = this.db.prepare("SELECT * FROM tunnel_device ORDER BY updated_at DESC").all() as Record<string, unknown>[];
+    const rows = this.db.prepare("SELECT * FROM tunnel_device WHERE pairing_state IN ('active', 'failed') ORDER BY updated_at DESC").all() as Record<string, unknown>[];
+    return rows.map((row) => this.hydrate(row));
+  }
+
+  trustList(): TunnelDeviceRecord[] {
+    const rows = this.db.prepare("SELECT * FROM tunnel_device WHERE pairing_state = 'active' ORDER BY updated_at DESC").all() as Record<string, unknown>[];
     return rows.map((row) => this.hydrate(row));
   }
 
@@ -209,7 +319,8 @@ export class TunnelStore {
 
   restore(id: string): TunnelDeviceRecord | undefined {
     const now = Date.now();
-    this.db.prepare("UPDATE tunnel_device SET revoked_at = NULL, grant_revision = grant_revision + 1, updated_at = ? WHERE id = ?").run(now, id);
+    const result = this.db.prepare("UPDATE tunnel_device SET revoked_at = NULL, grant_revision = grant_revision + 1, updated_at = ? WHERE id = ? AND pairing_state = 'active'").run(now, id);
+    if (result.changes === 0) return undefined;
     this.audit("device-restored", { deviceId: id });
     return this.device(id);
   }
@@ -272,6 +383,10 @@ export class TunnelStore {
       pairedVia: String(row.paired_via),
       lastTransport: row.last_transport == null ? null : String(row.last_transport),
       grants: grants.map((item) => item.capability),
+      pairingId: row.pairing_id == null ? null : String(row.pairing_id),
+      pairingState: row.pairing_state === "pending" || row.pairing_state === "host-acknowledged" || row.pairing_state === "failed"
+        ? row.pairing_state
+        : "active",
     };
   }
 }

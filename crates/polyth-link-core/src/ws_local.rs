@@ -23,6 +23,36 @@ pub struct BrowserWsRequest {
     pub accept: String,
 }
 
+pub fn validate_ws_protocols(protocols: &[String]) -> Result<(), LinkError> {
+    if protocols.iter().all(|protocol| {
+        !protocol.is_empty()
+            && protocol.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric()
+                    || matches!(
+                        byte,
+                        b'!' | b'#'
+                            | b'$'
+                            | b'%'
+                            | b'&'
+                            | b'\''
+                            | b'*'
+                            | b'+'
+                            | b'-'
+                            | b'.'
+                            | b'^'
+                            | b'_'
+                            | b'`'
+                            | b'|'
+                            | b'~'
+                    )
+            })
+    }) {
+        Ok(())
+    } else {
+        Err(LinkError::RequestHeaderInvalid)
+    }
+}
+
 pub fn validate_browser_websocket(head: &ParsedHttpHead) -> Result<BrowserWsRequest, LinkError> {
     let version = head.header("sec-websocket-version").unwrap_or("");
     if version != "13" {
@@ -40,10 +70,10 @@ pub fn validate_browser_websocket(head: &ParsedHttpHead) -> Result<BrowserWsRequ
             value
                 .split(',')
                 .map(|item| item.trim().to_string())
-                .filter(|item| !item.is_empty())
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    validate_ws_protocols(&protocols)?;
     Ok(BrowserWsRequest {
         key: key.to_string(),
         origin: head.header("origin").map(str::to_string),
@@ -80,6 +110,9 @@ pub async fn accept_browser_ws<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    if let Some(protocol) = selected_protocol.as_ref() {
+        validate_ws_protocols(std::slice::from_ref(protocol))?;
+    }
     let selected = selected_protocol;
     accept_hdr_async_with_config(
         stream,
@@ -104,11 +137,15 @@ where
                             ))
                         }));
                 }
-                if let Ok(value) = protocol.parse() {
-                    response
-                        .headers_mut()
-                        .insert("Sec-WebSocket-Protocol", value);
-                }
+                let value = protocol.parse().map_err(|_| {
+                    tokio_tungstenite::tungstenite::http::Response::builder()
+                        .status(400)
+                        .body(Some("invalid websocket protocol".into()))
+                        .unwrap()
+                })?;
+                response
+                    .headers_mut()
+                    .insert("Sec-WebSocket-Protocol", value);
             }
             Ok(response)
         },
@@ -230,6 +267,24 @@ mod tests {
             sec_websocket_accept("dGhlIHNhbXBsZSBub25jZQ=="),
             "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
         );
+    }
+
+    #[test]
+    fn websocket_protocols_are_http_tokens() {
+        assert!(validate_ws_protocols(&["polyth.v1".into(), "chat+json".into()]).is_ok());
+        for invalid in [
+            "",
+            "chat protocol",
+            "chat,admin",
+            "chat\r\nX-Evil: 1",
+            "chat/1",
+            "💥",
+        ] {
+            assert!(
+                validate_ws_protocols(&[invalid.into()]).is_err(),
+                "accepted {invalid:?}"
+            );
+        }
     }
 
     #[tokio::test]

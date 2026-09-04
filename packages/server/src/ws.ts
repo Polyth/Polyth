@@ -219,6 +219,7 @@ export function createWsGateway(
         try {
           const pcm = new Uint8Array(Buffer.from(String(msg.pcm ?? ""), "base64"));
           const r = await dictation.push(id, Number(msg.seq), pcm);
+          if (!requireCap(ws, sub, REMOTE_CAPABILITY.dictationUse)) return;
           send(ws, { type: "dictation/ack", dictationId: id, seq: r.ack, duplicate: r.duplicate });
           if (r.transcript) {
             send(ws, {
@@ -227,6 +228,7 @@ export function createWsGateway(
             });
           }
         } catch (err) {
+          if (!requireCap(ws, sub, REMOTE_CAPABILITY.dictationUse)) return;
           const e = err as Error & { code?: string };
           send(ws, { type: "dictation/error", dictationId: id, code: e.code ?? "internal", message: e.message });
         }
@@ -259,7 +261,12 @@ export function createWsGateway(
       if (sub.busy) return;
       sub.busy = true;
       try {
-        while (sub.pendingSubscribe) {
+        subscriptions: while (sub.pendingSubscribe) {
+          if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) {
+            sub.pendingSubscribe = null;
+            sub.liveBuffer = [];
+            break;
+          }
           const cur = sub.pendingSubscribe;
           sub.pendingSubscribe = null;
           sub.sessionId = cur.sessionId;
@@ -269,12 +276,25 @@ export function createWsGateway(
             sub.caughtUp = false;
             try {
               const gap = await sessions.events(sub.sessionId, sub.afterSeq);
+              if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) {
+                sub.caughtUp = true;
+                sub.liveBuffer = [];
+                sub.pendingSubscribe = null;
+                break subscriptions;
+              }
               // Batched frames: one envelope per chunk, not one per event.
               for (let i = 0; i < gap.length; i += GAP_FILL_CHUNK) {
+                if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) break subscriptions;
                 send(ws, { type: "events", events: gap.slice(i, i + GAP_FILL_CHUNK) });
               }
               sub.afterSeq = gap.length ? gap[gap.length - 1]!.seq : sub.afterSeq;
             } catch (err) {
+              if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) {
+                sub.caughtUp = true;
+                sub.liveBuffer = [];
+                sub.pendingSubscribe = null;
+                break subscriptions;
+              }
               send(ws, { type: "error", code: "gap-fill", message: String(err) });
             }
             // Flip caughtUp and drain the buffer in one synchronous block:
@@ -284,6 +304,7 @@ export function createWsGateway(
             const buffered = sub.liveBuffer;
             sub.liveBuffer = [];
             for (const ev of buffered) {
+              if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) break subscriptions;
               if (ev.seq <= sub.afterSeq) continue; // already sent by gap-fill
               sub.afterSeq = ev.seq;
               send(ws, { type: "event", event: ev });
@@ -298,8 +319,11 @@ export function createWsGateway(
           const scope = cur.projectId ?? "*";
           if (sub.snapshotScope !== scope) {
             try {
+              if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) break subscriptions;
               const list = await sessions.list(cur.projectId ?? undefined);
+              if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) break subscriptions;
               for (let i = 0; i < list.length; i += GAP_FILL_CHUNK) {
+                if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) break subscriptions;
                 send(ws, { type: "projections", sessions: list.slice(i, i + GAP_FILL_CHUNK) });
               }
               sub.snapshotScope = scope;
@@ -322,6 +346,10 @@ export function createWsGateway(
         const resolution = defaultWsIdentity(auth, req);
         if (auth.authorize ? !auth.authorize(req) : !resolution.authenticated) {
           denyUpgrade(socket, 401);
+          return true;
+        }
+        if (!allowWsCapability(resolution.principal, REMOTE_CAPABILITY.coreSessionsRead)) {
+          denyUpgrade(socket, 403);
           return true;
         }
         wss.handleUpgrade(req, socket, head, (ws) => {

@@ -112,13 +112,29 @@ pub fn validate_redirect_target(raw: &str) -> Result<String, LinkError> {
         return Err(LinkError::ProxyOriginDenied);
     }
     let decoded = percent_decode_path(raw)?;
-    if decoded.starts_with("//") || decoded.contains('\\') || decoded.contains('\0') {
+    if decoded.starts_with("//")
+        || decoded.contains('\\')
+        || decoded.bytes().any(|byte| byte < b' ' || byte == 0x7f)
+    {
         return Err(LinkError::ProxyOriginDenied);
     }
     if !decoded.starts_with('/') {
         return Err(LinkError::ProxyOriginDenied);
     }
     Ok(raw.to_string())
+}
+
+pub fn bootstrap_redirect_target(query: Option<&str>) -> Result<String, LinkError> {
+    let mut next = None;
+    for (key, value) in url::form_urlencoded::parse(query.unwrap_or_default().as_bytes()) {
+        if key != "next" {
+            continue;
+        }
+        if next.replace(value.into_owned()).is_some() {
+            return Err(LinkError::ProxyOriginDenied);
+        }
+    }
+    validate_redirect_target(next.as_deref().unwrap_or("/"))
 }
 
 /// Loopback listener with an owned shutdown handle. Disconnect/forget/revoke
@@ -173,6 +189,30 @@ mod tests {
         assert!(validate_redirect_target("/x%2f../y").is_err());
         assert!(validate_redirect_target("/\\evil").is_err());
         assert!(validate_redirect_target("http://evil.test/x").is_err());
+    }
+
+    #[test]
+    fn bootstrap_next_round_trips_once_without_weakening_redirects() {
+        for target in ["/sessions/x", "/projects/x", "/sessions/x?tab=files&line=2"] {
+            let query = url::form_urlencoded::Serializer::new(String::new())
+                .append_pair("next", target)
+                .finish();
+            assert_eq!(bootstrap_redirect_target(Some(&query)).unwrap(), target);
+        }
+        for query in [
+            "next=https%3A%2F%2Fevil.test",
+            "next=%2F%2Fevil.test",
+            "next=%252F%252Fevil.test",
+            "next=%2Fsessions%2Fx%255cadmin",
+            "next=%2Fsessions%2Fx%2500",
+            "next=%2Fsessions%2Fx%250d%250aLocation%3Aevil",
+            "next=%2Fa&next=%2Fb",
+        ] {
+            assert!(
+                bootstrap_redirect_target(Some(query)).is_err(),
+                "accepted {query:?}"
+            );
+        }
     }
 
     #[tokio::test]

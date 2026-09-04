@@ -437,8 +437,9 @@ test("canonical /ws, terminal, and tunnel event channels attach to unix ingress"
     await closeWs(tunnel);
 
     const unknown = await rawUpgrade(socketPath, "/ws/unknown", headers);
-    assert.equal(unknown.kind, "unclaimed");
-    assert.equal(unknown.preview.includes("400"), false, unknown.preview);
+    assert.equal(unknown.kind, "response");
+    assert.match(unknown.preview, /^HTTP\/1\.1 404 Not Found\r\n/);
+    assert.match(unknown.preview, /Connection: close/i);
   } finally {
     await handle.close();
   }

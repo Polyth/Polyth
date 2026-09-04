@@ -58,3 +58,59 @@ test("forget requires revoke, restore is explicit, and revokeAll marks every liv
   assert.ok(store.device(device.id)?.revokedAt);
   store.close();
 });
+
+test("pairing phases recover fail-closed and only active records enter trust sync", () => {
+  const pendingDb = db();
+  let store = createTunnelStore(pendingDb);
+  const pending = store.prepareDevice({
+    pairingId: "pair-pending",
+    endpointId: "cc".repeat(32),
+    label: "Pending",
+    grants: grantsForProfile("observe"),
+    pairedVia: "polyth-link",
+  });
+  assert.equal(pending.pairingState, "pending");
+  assert.deepEqual(store.list(), []);
+  assert.deepEqual(store.trustList(), []);
+  store.close();
+  store = createTunnelStore(pendingDb);
+  assert.equal(store.recoverIncompletePairings()[0]?.pairingState, "failed");
+  assert.ok(store.deviceByPairing("pair-pending")?.revokedAt);
+  assert.equal(store.restore(pending.id), undefined);
+  assert.deepEqual(store.trustList(), []);
+  store.close();
+
+  const acknowledgedDb = db();
+  store = createTunnelStore(acknowledgedDb);
+  store.prepareDevice({
+    pairingId: "pair-acked",
+    endpointId: "dd".repeat(32),
+    label: "Acked",
+    grants: grantsForProfile("observe"),
+    pairedVia: "polyth-link",
+  });
+  assert.equal(store.markHostAcknowledged("pair-acked").pairingState, "host-acknowledged");
+  store.close();
+  store = createTunnelStore(acknowledgedDb);
+  assert.deepEqual(store.recoverIncompletePairings(), []);
+  assert.equal(store.deviceByPairing("pair-acked")?.pairingState, "active");
+  assert.equal(store.trustList().length, 1);
+  store.close();
+
+  const activeDb = db();
+  store = createTunnelStore(activeDb);
+  store.prepareDevice({
+    pairingId: "pair-active",
+    endpointId: "ee".repeat(32),
+    label: "Active",
+    grants: grantsForProfile("observe"),
+    pairedVia: "polyth-link",
+  });
+  store.markHostAcknowledged("pair-active");
+  store.activatePairing("pair-active");
+  store.close();
+  store = createTunnelStore(activeDb);
+  assert.deepEqual(store.recoverIncompletePairings(), []);
+  assert.equal(store.trustList()[0]?.pairingState, "active");
+  store.close();
+});

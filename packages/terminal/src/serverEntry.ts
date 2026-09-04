@@ -229,7 +229,16 @@ export function attachTerminalWs(server: Server, deps: WsAttachAuth & {
   });
   const exitSubscription = deps.terminals.onExit((id, exitCode) => {
     for (const [socket, bound] of sockets) {
-      if (bound.id === id) send(socket, { type: "exit", terminalId: id, exitCode });
+      if (bound.id !== id) continue;
+      const live = liveWsPrincipal(bound.principal, deps.refreshPrincipal);
+      if (!live) {
+        closeWs(socket);
+        continue;
+      }
+      bound.principal = live;
+      if (allowWsCapability(live, REMOTE_CAPABILITY.terminalOpen)) {
+        send(socket, { type: "exit", terminalId: id, exitCode });
+      }
     }
   });
 

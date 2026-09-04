@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createConnection, type Socket } from "node:net";
 import { existsSync, unlinkSync } from "node:fs";
 import { randomBytes } from "node:crypto";
+import { StringDecoder } from "node:string_decoder";
 import { resolveHostBinary, type HostBinaryResolution } from "./hostBinary.ts";
 
 export { findHostBinary, resolveHostBinary, hostExecutableName } from "./hostBinary.ts";
@@ -10,6 +11,7 @@ export type { HostBinaryResolution, HostBinaryLookup } from "./hostBinary.ts";
 const RPC_TIMEOUT_MS = 15_000;
 const CHILD_EXIT_TIMEOUT_MS = 5_000;
 const MAX_MALFORMED_FRAMES = 32;
+const MAX_CONTROL_FRAME_BYTES = 64 * 1024;
 
 export interface LinkHostClient {
   request(method: string, params?: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -66,6 +68,9 @@ export async function startLinkHost(opts: { dataDir: string; socketPath: string 
   const child: ChildProcess = spawn(binary, ["serve", opts.dataDir, opts.socketPath], {
     stdio: ["ignore", "pipe", "pipe"],
   });
+  let spawnError: Error | undefined;
+  child.once("error", (error) => { spawnError = error; });
+  child.stdout?.resume();
   child.stderr?.on("data", (chunk) => {
     const text = String(chunk);
     if (/secret|invite|hmac|private|token/i.test(text)) return;
@@ -92,13 +97,21 @@ export async function startLinkHost(opts: { dataDir: string; socketPath: string 
     };
   };
   try {
-    await connectWhenReady(opts.socketPath, child, 12_000);
+    await connectWhenReady(opts.socketPath, child, 12_000, () => spawnError);
   } catch (error) {
     return failedStart("host-start-failed", error);
   }
-  const socket: Socket = await connectSocket(opts.socketPath);
+  let socket: Socket;
+  try {
+    socket = await connectSocket(opts.socketPath);
+  } catch (error) {
+    return failedStart("host-start-failed", error);
+  }
   let nextId = 1;
   let closed = false;
+  let runtimeAvailable = true;
+  let runtimeReady = true;
+  let runtimeError: string | undefined;
   let malformed = 0;
   const pending = new Map<number, {
     resolve: (value: Record<string, unknown>) => void;
@@ -114,14 +127,19 @@ export async function startLinkHost(opts: { dataDir: string; socketPath: string 
     pending.clear();
   };
   let buf = "";
+  const decoder = new StringDecoder("utf8");
   socket.on("data", (chunk) => {
-    buf += chunk.toString("utf8");
+    buf += decoder.write(chunk);
     let nl = buf.indexOf("\n");
     while (nl !== -1) {
       const line = buf.slice(0, nl);
       buf = buf.slice(nl + 1);
       nl = buf.indexOf("\n");
       if (!line) continue;
+      if (Buffer.byteLength(line) > MAX_CONTROL_FRAME_BYTES) {
+        socket.destroy(Object.assign(new Error("control frame too large"), { code: "unavailable" }));
+        return;
+      }
       try {
         const parsed = JSON.parse(line) as {
           id?: number;
@@ -153,22 +171,33 @@ export async function startLinkHost(opts: { dataDir: string; socketPath: string 
         }
       }
     }
+    if (Buffer.byteLength(buf) > MAX_CONTROL_FRAME_BYTES) {
+      socket.destroy(Object.assign(new Error("control frame too large"), { code: "unavailable" }));
+    }
   });
   const onDead = (error: Error) => {
-    if (closed) {
-      rejectPending(error);
-      return;
+    if (!closed) {
+      runtimeAvailable = false;
+      runtimeReady = false;
+      runtimeError = "host-process-unavailable";
+      if (child.exitCode == null && !child.signalCode) child.kill("SIGTERM");
     }
     rejectPending(error);
   };
   socket.on("error", (error) => onDead(error));
   socket.on("end", () => onDead(Object.assign(new Error("host control socket ended"), { code: "unavailable" })));
   socket.on("close", () => onDead(Object.assign(new Error("host control socket closed"), { code: "unavailable" })));
+  child.on("error", onDead);
   child.on("exit", () => onDead(Object.assign(new Error("polyth-link-host exited"), { code: "unavailable" })));
   const request = (method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> =>
     new Promise((resolve, reject) => {
-      if (closed) {
+      if (closed || !runtimeAvailable || socket.destroyed) {
         reject(Object.assign(new Error("host control is closed"), { code: "unavailable" }));
+        return;
+      }
+      const frame = `${JSON.stringify({ id: nextId, method, params })}\n`;
+      if (Buffer.byteLength(frame) > MAX_CONTROL_FRAME_BYTES) {
+        reject(Object.assign(new Error("host RPC frame too large"), { code: "invalid-input" }));
         return;
       }
       const id = nextId++;
@@ -177,7 +206,7 @@ export async function startLinkHost(opts: { dataDir: string; socketPath: string 
         reject(Object.assign(new Error(`host RPC timed out: ${method}`), { code: "unavailable" }));
       }, RPC_TIMEOUT_MS);
       pending.set(id, { resolve, reject, timer });
-      socket.write(`${JSON.stringify({ id, method, params })}\n`);
+      socket.write(frame);
     });
   try {
     await request("identity.status");
@@ -186,10 +215,11 @@ export async function startLinkHost(opts: { dataDir: string; socketPath: string 
     return failedStart("host-start-failed", error);
   }
   return {
-    available: true,
+    get available() { return runtimeAvailable; },
     binaryFound: true,
-    processReady: true,
+    get processReady() { return runtimeReady; },
     platformSupported: true,
+    get lastErrorCode() { return runtimeError; },
     request,
     onEvent(listener) {
       listeners.add(listener);
@@ -198,6 +228,8 @@ export async function startLinkHost(opts: { dataDir: string; socketPath: string 
     async close() {
       if (closed) return;
       closed = true;
+      runtimeAvailable = false;
+      runtimeReady = false;
       rejectPending(Object.assign(new Error("host control is closed"), { code: "unavailable" }));
       socket.end();
       socket.destroy();
@@ -214,9 +246,16 @@ export function randomIngressSecret(): string {
   return randomBytes(32).toString("hex");
 }
 
-async function connectWhenReady(path: string, child: ChildProcess, timeoutMs: number): Promise<void> {
+async function connectWhenReady(
+  path: string,
+  child: ChildProcess,
+  timeoutMs: number,
+  childError: () => Error | undefined,
+): Promise<void> {
   const started = Date.now();
   while (!existsSync(path)) {
+    const error = childError();
+    if (error) throw error;
     if (child.exitCode != null || child.signalCode) {
       throw new Error("polyth-link-host exited before the control socket was ready");
     }

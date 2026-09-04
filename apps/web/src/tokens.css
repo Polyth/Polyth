@@ -115,7 +115,7 @@
   /* typography */
   --ui-font-size: 13px;
   --ui-font-scale: 1;
-  --font-input: 15px;
+  --font-input: 16px;
   --font-body: clamp(var(--ui-font-size, 13px), calc(var(--ui-font-size, 13px) + .15vw), calc(var(--ui-font-size, 13px) + 2px));
   --font-title: clamp(24px, calc(21px + 2vw), 32px);
   --font-title-lh: 1.18;

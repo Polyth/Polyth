@@ -62,14 +62,8 @@ fn sanitize(
     let mut total = 0usize;
     let mut out = Vec::new();
     for (name, value) in headers {
-        if name
-            .as_bytes()
-            .iter()
-            .any(|b| *b == b'\r' || *b == b'\n' || *b == 0)
-            || value
-                .as_bytes()
-                .iter()
-                .any(|b| *b == b'\r' || *b == b'\n' || *b == 0)
+        if name.as_bytes().iter().any(|b| *b < b' ' || *b == 0x7f)
+            || value.as_bytes().iter().any(|b| *b < b' ' || *b == 0x7f)
         {
             return Err(LinkError::RequestHeaderInvalid);
         }
@@ -153,6 +147,8 @@ mod tests {
     #[test]
     fn rejects_crlf_and_connect_paths() {
         assert!(sanitize_headers(&[("X-A".into(), "ok\r\nX-Injected: 1".into())]).is_err());
+        assert!(sanitize_headers(&[("Accept".into(), "text/plain\u{7f}".into())]).is_err());
+        assert!(sanitize_headers(&[("Accept".into(), "text/plain\tbad".into())]).is_err());
         assert!(!allowed_http_path("/metrics"));
         assert!(allowed_http_path("/api/health"));
     }

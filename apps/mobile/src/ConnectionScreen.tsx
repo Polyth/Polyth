@@ -14,7 +14,7 @@ import {
 } from "./runtime.ts";
 import { nativeLinkAvailable, polythLink } from "./polythLink.ts";
 import { isPairingLink, previewPairingLink } from "@polyth/pairing-qr";
-import { connectionUiState } from "./connectionUi.ts";
+import { bootstrapUrlWithNext, connectionUiState } from "./connectionUi.ts";
 import {
   peekPendingPairingLink,
   rememberPendingPairingLink,
@@ -186,11 +186,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
     try {
       const launched = await polythLink().confirmPairing(attemptId);
       setStage("Connected");
-      const target = new URL(launched.bootstrapUrl);
-      if (launch.deepLinkPath && launch.deepLinkPath !== "/") {
-        target.searchParams.set("next", launch.deepLinkPath);
-      }
-      location.replace(target.toString());
+      location.replace(bootstrapUrlWithNext(launched.bootstrapUrl, launch.deepLinkPath));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {

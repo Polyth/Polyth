@@ -218,13 +218,37 @@ pub fn load_existing(path: impl AsRef<Path>) -> Result<HostIdentity, IdentityErr
     Ok(HostIdentity { secret, path })
 }
 
-/// Rotate by writing a new identity atomically. Callers must revoke pairings first.
-pub fn rotate(path: impl AsRef<Path>) -> Result<HostIdentity, IdentityError> {
+fn staged_path(path: &Path) -> PathBuf {
+    path.with_extension("identity.next")
+}
+
+pub fn stage_rotation(path: impl AsRef<Path>) -> Result<HostIdentity, IdentityError> {
     let path = path.as_ref().to_path_buf();
     let secret = generate_secret();
-    let bytes = secret.to_bytes();
-    atomic_write(&path, &encode(&bytes))?;
+    atomic_write(&staged_path(&path), &encode(&secret.to_bytes()))?;
     Ok(HostIdentity { secret, path })
+}
+
+pub fn promote_staged_rotation(identity: &HostIdentity) -> Result<(), IdentityError> {
+    fs::rename(staged_path(&identity.path), &identity.path).map_err(io_err)?;
+    #[cfg(unix)]
+    if let Some(parent) = identity.path.parent() {
+        if let Ok(dir) = File::open(parent) {
+            let _ = dir.sync_all();
+        }
+    }
+    Ok(())
+}
+
+pub fn discard_staged_rotation(identity: &HostIdentity) {
+    let _ = fs::remove_file(staged_path(&identity.path));
+}
+
+/// Rotate by writing a new identity atomically. Callers must revoke pairings first.
+pub fn rotate(path: impl AsRef<Path>) -> Result<HostIdentity, IdentityError> {
+    let identity = stage_rotation(path)?;
+    promote_staged_rotation(&identity)?;
+    Ok(identity)
 }
 
 #[cfg(test)]
@@ -297,5 +321,20 @@ mod tests {
         let first = load_or_create(&path).unwrap().endpoint_id();
         let second = rotate(&path).unwrap().endpoint_id();
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn staged_rotation_does_not_replace_the_live_identity_before_promotion() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("identity");
+        let first = load_or_create(&path).unwrap().endpoint_id();
+        let staged = stage_rotation(&path).unwrap();
+        assert_ne!(staged.endpoint_id(), first);
+        assert_eq!(load_existing(&path).unwrap().endpoint_id(), first);
+        promote_staged_rotation(&staged).unwrap();
+        assert_eq!(
+            load_existing(&path).unwrap().endpoint_id(),
+            staged.endpoint_id()
+        );
     }
 }

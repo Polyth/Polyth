@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { nativeLinkAvailable, polythLink, setPolythLinkNative } from "../src/polythLink.ts";
-import { connectionUiState } from "../src/connectionUi.ts";
+import { bootstrapUrlWithNext, connectionUiState } from "../src/connectionUi.ts";
 import {
   clearPendingPairingLink,
   peekPendingPairingLink,
@@ -65,6 +65,15 @@ test("ProxyLaunch keeps origin and bootstrapUrl separate", () => {
   assert.equal(launched.bootstrapUrl.includes("/__polyth_boot/"), true);
   assert.equal(new URL(launched.bootstrapUrl).origin, launched.origin);
   assert.notEqual(`${launched.bootstrapUrl}/`, launched.bootstrapUrl);
+});
+
+test("bootstrap next uses one form-encoding layer for canonical paths and queries", () => {
+  const bootstrap = "http://127.0.0.1:9/__polyth_boot/abc";
+  for (const next of ["/sessions/x", "/projects/x", "/sessions/x?tab=files&line=2"]) {
+    const url = new URL(bootstrapUrlWithNext(bootstrap, next));
+    assert.equal(url.searchParams.get("next"), next);
+    assert.match(url.search, /^\?next=%2F/);
+  }
 });
 
 test("pending pairing tickets stay in process memory", () => {

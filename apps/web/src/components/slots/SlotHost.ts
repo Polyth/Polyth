@@ -130,7 +130,7 @@ export function placedWidgetItems(
               }
             },
             onDragOver: (event: DragEvent) => {
-              if (getDragWidget(event.dataTransfer)) event.preventDefault();
+              if (event.dataTransfer && getDragWidget(event.dataTransfer)) event.preventDefault();
             },
             onDrop: (event: DragEvent) => {
               const draggedId = event.dataTransfer ? getDragWidget(event.dataTransfer) ?? "" : "";

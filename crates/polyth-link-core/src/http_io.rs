@@ -197,14 +197,28 @@ where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    copy_limited_inner(
+    let copied = copy_limited_inner(
         reader,
         writer,
         max,
         false,
         LinkError::TransportProtocolError,
     )
-    .await
+    .await?;
+    if copied == max {
+        let mut probe = [0u8; 1];
+        let read = tokio::time::timeout(
+            Duration::from_millis(Limits::v1().idle_body_timeout_ms),
+            reader.read(&mut probe),
+        )
+        .await
+        .map_err(|_| LinkError::TransportUnavailable)?
+        .map_err(|_| LinkError::TransportProtocolError)?;
+        if read != 0 {
+            return Err(LinkError::RequestTooLarge);
+        }
+    }
+    Ok(copied)
 }
 
 async fn copy_limited_inner<R, W>(
@@ -753,6 +767,20 @@ mod tests {
         let mut rest = Vec::new();
         src.read_to_end(&mut rest).await.unwrap();
         assert_eq!(rest, b"ef");
+    }
+
+    #[tokio::test]
+    async fn copy_until_eof_proves_the_size_limit() {
+        for (body, expected) in [
+            (b"ab".as_slice(), Ok(2)),
+            (b"abc".as_slice(), Ok(3)),
+            (b"abcd".as_slice(), Err(LinkError::RequestTooLarge)),
+        ] {
+            let mut src = Cursor::new(body.to_vec());
+            let mut dst = Vec::new();
+            assert_eq!(copy_until_eof(&mut src, &mut dst, 3).await, expected);
+            assert_eq!(dst, &body[..body.len().min(3)]);
+        }
     }
 
     async fn roundtrip_response(status_line: &[u8], body: &[u8]) -> (HttpResponseHeadV1, Vec<u8>) {

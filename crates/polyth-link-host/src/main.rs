@@ -10,9 +10,10 @@ use polyth_link_core::protocol::DISABLE_0RTT;
 use polyth_link_core::qr::ticket_qr_modules;
 use polyth_link_core::ticket::POLYTH_LINK_ALPN;
 use polyth_link_core::transport::TransportPolicy;
+use polyth_link_core::wire::read_bounded_line;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 use tokio::sync::{broadcast, Mutex};
 
@@ -117,11 +118,12 @@ async fn serve(data_dir: PathBuf, socket: PathBuf) -> Result<(), String> {
         let state = state.clone();
         tokio::spawn(async move {
             let (reader, mut writer) = stream.into_split();
-            let mut lines = BufReader::new(reader).lines();
+            let mut reader = BufReader::new(reader);
+            let mut control_buf = Vec::new();
             let mut events = state.lock().await.events.subscribe();
             loop {
                 tokio::select! {
-                    line = lines.next_line() => {
+                    line = read_bounded_line(&mut reader, &mut control_buf, polyth_link_core::limits::Limits::v1().control_message_bytes) => {
                         match line {
                             Ok(Some(line)) => {
                                 let response = handle_line(state.clone(), &line).await;
@@ -189,52 +191,18 @@ async fn dispatch(
             }))
         }
         "identity.rotate" => {
-            let shared = state.clone();
-            let (path, policy, live, old_endpoint) = {
-                let mut guard = state.lock().await;
-                let live: Vec<_> = std::mem::take(&mut guard.connections)
-                    .into_values()
-                    .collect();
-                let old_endpoint = guard.endpoint.take();
-                (
-                    guard.identity.path().to_path_buf(),
-                    guard.policy,
-                    live,
-                    old_endpoint,
-                )
-            };
-            for connection in live {
-                connection.connection.close(0u32.into(), b"rotated");
-            }
-            if let Some(endpoint) = old_endpoint {
-                endpoint.close().await;
-            }
-            let identity = identity::rotate(&path).map_err(|_| "host-identity-corrupt")?;
-            let secret = identity.secret_key();
-            let endpoint = polyth_link_core::net::bind_link_endpoint(secret, policy)
-                .await
-                .map_err(|_| "transport-unavailable")?;
-            let accept = endpoint.clone();
-            let endpoint_id = identity.endpoint_id();
-            let fingerprint = identity.fingerprint();
-            {
-                let mut guard = state.lock().await;
-                guard.identity = identity;
-                guard.pairing.invalidate_all();
-                for trusted in guard.trust.values_mut() {
-                    trusted.revoked = true;
-                }
-                guard.endpoint = Some(endpoint);
-                let _ = guard
-                    .events
-                    .send(json!({"type": "tunnel/identity-rotated"}));
-            }
-            tokio::spawn(conn::accept_loop(shared, accept));
-            Ok(json!({
-                "endpointId": endpoint_id,
-                "fingerprint": fingerprint,
-                "endpointBound": true,
-            }))
+            rotate_identity_with(state, |secret, policy| {
+                polyth_link_core::net::bind_link_endpoint(secret, policy)
+            })
+            .await
+        }
+        "trust.sync_begin" => {
+            state.lock().await.trust.clear();
+            Ok(json!({ "ok": true }))
+        }
+        "trust.sync_finish" => {
+            let count = state.lock().await.trust.len();
+            Ok(json!({ "ok": true, "count": count }))
         }
         "trust.sync" => {
             let mut state = state.lock().await;
@@ -700,6 +668,62 @@ async fn dispatch(
     }
 }
 
+async fn rotate_identity_with<F, Fut>(
+    state: Arc<Mutex<HostState>>,
+    bind: F,
+) -> Result<Value, &'static str>
+where
+    F: FnOnce(iroh::SecretKey, TransportPolicy) -> Fut,
+    Fut: std::future::Future<Output = Result<Endpoint, polyth_link_core::LinkError>>,
+{
+    let shared = state.clone();
+    let mut guard = state.lock().await;
+    let staged =
+        identity::stage_rotation(guard.identity.path()).map_err(|_| "host-identity-corrupt")?;
+    let endpoint = match bind(staged.secret_key(), guard.policy).await {
+        Ok(endpoint) => endpoint,
+        Err(_) => {
+            identity::discard_staged_rotation(&staged);
+            return Err("transport-unavailable");
+        }
+    };
+    if identity::promote_staged_rotation(&staged).is_err() {
+        identity::discard_staged_rotation(&staged);
+        endpoint.close().await;
+        return Err("host-identity-corrupt");
+    }
+
+    let accept = endpoint.clone();
+    let endpoint_id = staged.endpoint_id();
+    let fingerprint = staged.fingerprint();
+    let old_endpoint = guard.endpoint.replace(endpoint);
+    let live: Vec<_> = std::mem::take(&mut guard.connections)
+        .into_values()
+        .collect();
+    guard.identity = staged;
+    guard.pairing.invalidate_all();
+    for trusted in guard.trust.values_mut() {
+        trusted.revoked = true;
+    }
+    let _ = guard
+        .events
+        .send(json!({"type": "tunnel/identity-rotated"}));
+    drop(guard);
+
+    for connection in live {
+        connection.connection.close(0u32.into(), b"rotated");
+    }
+    if let Some(endpoint) = old_endpoint {
+        endpoint.close().await;
+    }
+    tokio::spawn(conn::accept_loop(shared, accept));
+    Ok(json!({
+        "endpointId": endpoint_id,
+        "fingerprint": fingerprint,
+        "endpointBound": true,
+    }))
+}
+
 pub(crate) fn maybe_emit_committing(state: &HostState, pairing_id: &str) {
     let Some(invitation) = state.pairing.get(pairing_id) else {
         return;
@@ -748,4 +772,43 @@ fn save_host_policy(path: &Path, policy: TransportPolicy) {
         path,
         serde_json::to_vec(&json!({ "policy": policy.as_str() })).unwrap_or_default(),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use polyth_link_core::LinkError;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn identity_rotation_bind_failure_keeps_disk_and_live_identity_aligned() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("identity");
+        let identity = identity::load_or_create(&path).unwrap();
+        let old_id = identity.endpoint_id();
+        let (events, _) = broadcast::channel(8);
+        let state = Arc::new(Mutex::new(HostState {
+            identity,
+            pairing: HostPairing::new(),
+            policy: TransportPolicy::DirectPreferred,
+            policy_path: dir.path().join("policy.json"),
+            endpoint: None,
+            trust: HashMap::new(),
+            connections: HashMap::new(),
+            ingress_socket: None,
+            ingress_secret: None,
+            events,
+        }));
+
+        let result = rotate_identity_with(state.clone(), |_, _| async {
+            Err(LinkError::TransportUnavailable)
+        })
+        .await;
+        assert_eq!(result.unwrap_err(), "transport-unavailable");
+        assert_eq!(state.lock().await.identity.endpoint_id(), old_id);
+        assert_eq!(
+            identity::load_existing(&path).unwrap().endpoint_id(),
+            old_id
+        );
+    }
 }

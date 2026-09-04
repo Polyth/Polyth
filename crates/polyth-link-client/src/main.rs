@@ -6,12 +6,12 @@ use std::time::Instant;
 use iroh::endpoint::{Connection, RecvStream, SendStream};
 use polyth_link_core::http_io::{
     copy_exact, pump_remote_http_to_client, read_http_head, request_headers_from_parsed,
-    resolve_static_path, PrefixedIo,
+    resolve_static_path, validate_http_response_head, PrefixedIo,
 };
 use polyth_link_core::identity::{self, HostIdentity};
 use polyth_link_core::limits::Limits;
 use polyth_link_core::local_proxy::{
-    origin_allowed, validate_redirect_target, OwnedLoopback, ProxyBootstrap, BOOTSTRAP_COOKIE,
+    bootstrap_redirect_target, origin_allowed, OwnedLoopback, ProxyBootstrap, BOOTSTRAP_COOKIE,
     BOOTSTRAP_PATH_PREFIX,
 };
 use polyth_link_core::net::{bind_link_endpoint, endpoint_addr_from_ticket, path_transport};
@@ -25,16 +25,16 @@ use polyth_link_core::ticket::{
 };
 use polyth_link_core::transport::TransportPolicy;
 use polyth_link_core::wire::{
-    open_control, read_control, write_all, write_control, write_stream_kind,
+    open_control, read_bounded_line, read_control, write_all, write_control, write_stream_kind,
 };
 use polyth_link_core::ws_local::{
     accept_browser_ws, proxy_tungstenite_to_link, validate_browser_websocket,
 };
-use polyth_link_core::LinkError;
+use polyth_link_core::{LinkError, PROTOCOL_VERSION};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpStream, UnixListener};
 use tokio::sync::{broadcast, Mutex};
 use tokio::time::Duration;
@@ -86,6 +86,7 @@ struct RpcResponse {
 
 struct ClientState {
     data_dir: PathBuf,
+    metadata_lock: Arc<Mutex<()>>,
     web_dist: Option<PathBuf>,
     endpoint: Option<iroh::Endpoint>,
     pairing: HashMap<String, PairingAttempt>,
@@ -136,6 +137,7 @@ async fn serve(
     let (events, _) = broadcast::channel(128);
     let state = Arc::new(Mutex::new(ClientState {
         data_dir,
+        metadata_lock: Arc::new(Mutex::new(())),
         web_dist,
         endpoint: None,
         pairing: HashMap::new(),
@@ -147,11 +149,12 @@ async fn serve(
         let state = state.clone();
         tokio::spawn(async move {
             let (reader, mut writer) = stream.into_split();
-            let mut lines = BufReader::new(reader).lines();
+            let mut reader = BufReader::new(reader);
+            let mut control_buf = Vec::new();
             let mut events = state.lock().await.events.subscribe();
             loop {
                 tokio::select! {
-                    line = lines.next_line() => {
+                    line = read_bounded_line(&mut reader, &mut control_buf, Limits::v1().control_message_bytes) => {
                         match line {
                             Ok(Some(line)) => {
                                 let response = handle_line(state.clone(), &line).await;
@@ -241,8 +244,12 @@ async fn dispatch(
             Ok(json!({ "ok": true }))
         }
         "connections.list" => {
-            let guard = state.lock().await;
-            Ok(json!(list_metadata(&guard.data_dir)))
+            let (data_dir, lock) = {
+                let guard = state.lock().await;
+                (guard.data_dir.clone(), guard.metadata_lock.clone())
+            };
+            let _metadata = lock.lock().await;
+            list_metadata(&data_dir).map_err(|error| error.code())
         }
         "connect" => connect_existing(state, params).await,
         "disconnect" => {
@@ -264,6 +271,8 @@ async fn dispatch(
                 .get("connectionId")
                 .and_then(Value::as_str)
                 .ok_or("device-unknown")?;
+            let lock = state.lock().await.metadata_lock.clone();
+            let _metadata = lock.lock().await;
             let mut guard = state.lock().await;
             if let Some(session) = guard.sessions.remove(id) {
                 session.connection.close(0u32.into(), b"forget");
@@ -271,7 +280,7 @@ async fn dispatch(
                     proxy.listener.close();
                 }
             }
-            forget_metadata(&guard.data_dir, id);
+            forget_metadata(&guard.data_dir, id).map_err(|error| error.code())?;
             let dir = guard.data_dir.join("hosts").join(id);
             let _ = std::fs::remove_dir_all(dir);
             Ok(json!({ "ok": true }))
@@ -427,6 +436,26 @@ async fn confirm_pairing(
         let mut guard = state.lock().await;
         guard.pairing.remove(id).ok_or("pairing-invalid")?
     };
+    let (data_dir, metadata_lock) = {
+        let guard = state.lock().await;
+        (guard.data_dir.clone(), guard.metadata_lock.clone())
+    };
+    let prepared = {
+        let _metadata = metadata_lock.lock().await;
+        persist_metadata(
+            &data_dir,
+            &attempt.ticket.host.endpoint_id,
+            attempt.ticket.host.label.as_deref().unwrap_or("Polyth"),
+            attempt.ticket.candidates.first(),
+            &attempt.ticket.pairing_id,
+            "prepared",
+            None,
+        )
+    };
+    if prepared.is_err() {
+        let _ = write_control(&mut attempt.send, &ControlMessage::ClientStorageFailed).await;
+        return Err("pairing-storage-failed");
+    }
     write_control(&mut attempt.send, &ControlMessage::PairingDeviceConfirmed)
         .await
         .map_err(|e| e.code())?;
@@ -443,20 +472,18 @@ async fn confirm_pairing(
                 grant_revision: _,
                 grants: _,
             } => {
-                let data_dir = state.lock().await.data_dir.clone();
-                if persist_metadata(
-                    &data_dir,
-                    &attempt.ticket.host.endpoint_id,
-                    attempt.ticket.host.label.as_deref().unwrap_or("Polyth"),
-                    attempt.ticket.candidates.first(),
-                )
-                .is_err()
                 {
-                    let _ = write_control(&mut attempt.send, &ControlMessage::ClientStorageFailed)
-                        .await;
-                    return Err("pairing-storage-failed");
+                    let _metadata = metadata_lock.lock().await;
+                    let _ = persist_metadata(
+                        &data_dir,
+                        &attempt.ticket.host.endpoint_id,
+                        attempt.ticket.host.label.as_deref().unwrap_or("Polyth"),
+                        attempt.ticket.candidates.first(),
+                        &attempt.ticket.pairing_id,
+                        "active",
+                        Some(&device_id),
+                    );
                 }
-                let _ = device_id;
                 spawn_control_loop(attempt.send, attempt.recv, attempt.connection.clone());
                 let connection_id = attempt.ticket.host.endpoint_id.clone();
                 let web_dist = state.lock().await.web_dist.clone();
@@ -527,13 +554,36 @@ async fn connect_existing(
             "connectionId": id
         }));
     }
-    let (data_dir, web_dist) = {
+    let (data_dir, web_dist, metadata_lock) = {
         let guard = state.lock().await;
-        (guard.data_dir.clone(), guard.web_dist.clone())
+        (
+            guard.data_dir.clone(),
+            guard.web_dist.clone(),
+            guard.metadata_lock.clone(),
+        )
     };
     let identity_path = data_dir.join("hosts").join(id).join("identity");
     let identity = identity::load_existing(&identity_path).map_err(|_| "pairing-storage-failed")?;
-    let saved_policy = current_saved_policy(&data_dir, id);
+    let (saved_policy, saved_direct, saved_relays) = {
+        let _metadata = metadata_lock.lock().await;
+        let saved = read_metadata(&metadata_path(&data_dir)).map_err(|error| error.code())?;
+        let item = saved
+            .iter()
+            .find(|item| item.get("id").and_then(Value::as_str) == Some(id));
+        let strings = |field: &str| -> Vec<String> {
+            item.and_then(|item| item.get(field).and_then(Value::as_array))
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        };
+        let policy = item
+            .and_then(|item| item.get("activePolicy").and_then(Value::as_str))
+            .unwrap_or("direct-preferred")
+            .to_string();
+        (policy, strings("directAddresses"), strings("relayUrls"))
+    };
     if saved_policy != "direct-preferred" && !saved_policy.is_empty() {
         return Err("pairing-invalid");
     }
@@ -542,12 +592,12 @@ async fn connect_existing(
         .map_err(|_| "transport-unavailable")?;
     let host_id: iroh::EndpointId = id.parse().map_err(|_| "host-identity-mismatch")?;
     let mut addr = iroh::EndpointAddr::new(host_id);
-    for item in current_saved_direct(&data_dir, id) {
+    for item in saved_direct {
         if let Ok(socket) = item.parse() {
             addr = addr.with_ip_addr(socket);
         }
     }
-    for relay in current_saved_relays(&data_dir, id) {
+    for relay in saved_relays {
         if let Ok(url) = relay.parse::<iroh::RelayUrl>() {
             addr = addr.with_relay_url(url);
         }
@@ -569,21 +619,13 @@ async fn connect_existing(
     write_control(
         &mut send,
         &ControlMessage::ConnectionHello {
-            version: 1,
+            version: PROTOCOL_VERSION,
             device_endpoint: identity.endpoint_id(),
         },
     )
     .await
     .map_err(|e| e.code())?;
-    match read_control(&mut recv).await.map_err(|e| e.code())? {
-        ControlMessage::ConnectionAccepted {
-            connection_id: _, ..
-        } => {}
-        ControlMessage::DeviceRevoked | ControlMessage::ConnectionRejected { .. } => {
-            return Err("device-revoked")
-        }
-        _ => return Err("transport-protocol-error"),
-    }
+    validate_connection_response(read_control(&mut recv).await.map_err(|e| e.code())?)?;
     spawn_control_loop(send, recv, connection.clone());
     let proxy = start_proxy(connection.clone(), web_dist, id.to_string())
         .await
@@ -610,6 +652,24 @@ async fn connect_existing(
         "bootstrapUrl": bootstrap,
         "connectionId": id
     }))
+}
+
+fn validate_connection_response(message: ControlMessage) -> Result<(), &'static str> {
+    match message {
+        ControlMessage::ConnectionAccepted {
+            version,
+            connection_id: _,
+            ..
+        } if version == PROTOCOL_VERSION => {}
+        ControlMessage::ConnectionAccepted { .. } => {
+            return Err(LinkError::TransportVersionUnsupported.code())
+        }
+        ControlMessage::DeviceRevoked | ControlMessage::ConnectionRejected { .. } => {
+            return Err("device-revoked")
+        }
+        _ => return Err("transport-protocol-error"),
+    }
+    Ok(())
 }
 
 async fn start_proxy(
@@ -678,15 +738,7 @@ async fn handle_proxy_conn(
             return Err(LinkError::ProxyBootstrapInvalid);
         }
         let nonce = rest.split('?').next().unwrap_or(rest);
-        let next = query
-            .as_deref()
-            .and_then(|query| {
-                query
-                    .split('&')
-                    .find_map(|part| part.strip_prefix("next=").map(|value| value.to_string()))
-            })
-            .unwrap_or_else(|| "/".into());
-        let location = match validate_redirect_target(&next) {
+        let location = match bootstrap_redirect_target(query.as_deref()) {
             Ok(value) => value,
             Err(error) => {
                 write_http(&mut stream, 400, "invalid redirect").await?;
@@ -804,7 +856,7 @@ async fn proxy_http(
     let mut request_id = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut request_id);
     let head = HttpRequestHeadV1 {
-        version: 1,
+        version: PROTOCOL_VERSION,
         request_id,
         method: method.into(),
         path_and_query: path.into(),
@@ -865,7 +917,7 @@ async fn proxy_ws(
     write_all(
         &mut send,
         &encode_head(&WebSocketOpenV1 {
-            version: 1,
+            version: PROTOCOL_VERSION,
             request_id,
             path_and_query: path.into(),
             protocols: browser.protocols.clone(),
@@ -878,6 +930,7 @@ async fn proxy_ws(
     framed.extend_from_slice(&(payload.len() as u32).to_be_bytes());
     framed.extend_from_slice(&payload);
     let (response, _) = decode_head::<polyth_link_core::protocol::HttpResponseHeadV1>(&framed)?;
+    validate_http_response_head(&response, &request_id)?;
     if response.status != 101 {
         write_http(&mut stream, response.status, "upgrade failed").await?;
         return Err(LinkError::Forbidden);
@@ -886,8 +939,7 @@ async fn proxy_ws(
         .headers
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case("sec-websocket-protocol"))
-        .map(|(_, value)| value.clone())
-        .or_else(|| browser.protocols.first().cloned());
+        .map(|(_, value)| value.clone());
     let mut replay = parsed.header_block.clone();
     replay.extend_from_slice(&parsed.leftover);
     let prefixed = PrefixedIo::new(replay, stream);
@@ -963,12 +1015,41 @@ fn metadata_path(data_dir: &Path) -> PathBuf {
     data_dir.join("connections.json")
 }
 
-fn list_metadata(data_dir: &Path) -> Value {
-    let path = metadata_path(data_dir);
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_else(|| json!([]))
+fn list_metadata(data_dir: &Path) -> Result<Value, LinkError> {
+    Ok(json!(read_metadata(&metadata_path(data_dir))?))
+}
+
+fn read_metadata(path: &Path) -> Result<Vec<Value>, LinkError> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => serde_json::from_str(&text).map_err(|_| LinkError::PairingStorageFailed),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(_) => Err(LinkError::PairingStorageFailed),
+    }
+}
+
+fn write_metadata(path: &Path, list: &[Value]) -> Result<(), LinkError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|_| LinkError::PairingStorageFailed)?;
+    }
+    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    let bytes = serde_json::to_vec(list).map_err(|_| LinkError::PairingStorageFailed)?;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&tmp)
+        .map_err(|_| LinkError::PairingStorageFailed)?;
+    std::io::Write::write_all(&mut file, &bytes).map_err(|_| LinkError::PairingStorageFailed)?;
+    file.sync_all()
+        .map_err(|_| LinkError::PairingStorageFailed)?;
+    std::fs::rename(tmp, path).map_err(|_| LinkError::PairingStorageFailed)?;
+    #[cfg(unix)]
+    if let Some(parent) = path.parent() {
+        std::fs::File::open(parent)
+            .and_then(|dir| dir.sync_all())
+            .map_err(|_| LinkError::PairingStorageFailed)?;
+    }
+    Ok(())
 }
 
 fn persist_metadata(
@@ -976,12 +1057,12 @@ fn persist_metadata(
     host_endpoint_id: &str,
     label: &str,
     candidate: Option<&polyth_link_core::ticket::PairingCandidate>,
+    pairing_id: &str,
+    pairing_state: &str,
+    device_id: Option<&str>,
 ) -> Result<(), LinkError> {
     let path = metadata_path(data_dir);
-    let mut list: Vec<Value> = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default();
+    let mut list = read_metadata(&path)?;
     list.retain(|item| {
         item.get("hostEndpointId").and_then(Value::as_str) != Some(host_endpoint_id)
     });
@@ -991,6 +1072,9 @@ fn persist_metadata(
             "id": host_endpoint_id,
             "hostEndpointId": host_endpoint_id,
             "hostLabel": label,
+            "pairingId": pairing_id,
+            "pairingState": pairing_state,
+            "deviceId": device_id,
             "lastUsedAt": now_ms(),
             "hasSecureIdentity": true,
             "activePolicy": candidate.map(|item| item.policy.clone()).unwrap_or_else(|| "direct-preferred".into()),
@@ -998,63 +1082,14 @@ fn persist_metadata(
             "relayUrls": candidate.map(|item| item.relay_urls.clone()).unwrap_or_default(),
         }),
     );
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|_| LinkError::PairingStorageFailed)?;
-    }
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(
-        &tmp,
-        serde_json::to_vec(&list).map_err(|_| LinkError::PairingStorageFailed)?,
-    )
-    .map_err(|_| LinkError::PairingStorageFailed)?;
-    std::fs::rename(tmp, path).map_err(|_| LinkError::PairingStorageFailed)?;
-    Ok(())
+    write_metadata(&path, &list)
 }
 
-fn forget_metadata(data_dir: &Path, host_endpoint_id: &str) {
+fn forget_metadata(data_dir: &Path, host_endpoint_id: &str) -> Result<(), LinkError> {
     let path = metadata_path(data_dir);
-    let mut list: Vec<Value> = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default();
+    let mut list = read_metadata(&path)?;
     list.retain(|item| item.get("id").and_then(Value::as_str) != Some(host_endpoint_id));
-    let _ = std::fs::write(path, serde_json::to_vec(&list).unwrap_or_default());
-}
-
-fn current_saved_direct(data_dir: &Path, id: &str) -> Vec<String> {
-    saved_string_list(data_dir, id, "directAddresses")
-}
-
-fn current_saved_relays(data_dir: &Path, id: &str) -> Vec<String> {
-    saved_string_list(data_dir, id, "relayUrls")
-}
-
-fn current_saved_policy(data_dir: &Path, id: &str) -> String {
-    let list = list_metadata(data_dir);
-    list.as_array()
-        .into_iter()
-        .flatten()
-        .find(|item| item.get("id").and_then(Value::as_str) == Some(id))
-        .and_then(|item| item.get("activePolicy").and_then(Value::as_str))
-        .unwrap_or("direct-preferred")
-        .to_string()
-}
-
-fn saved_string_list(data_dir: &Path, id: &str, field: &str) -> Vec<String> {
-    let list = list_metadata(data_dir);
-    list.as_array()
-        .into_iter()
-        .flatten()
-        .find(|item| item.get("id").and_then(Value::as_str) == Some(id))
-        .and_then(|item| item.get(field).and_then(Value::as_array).cloned())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
+    write_metadata(&path, &list)
 }
 
 fn now_ms() -> u64 {
@@ -1074,5 +1109,65 @@ fn leak_code(code: String) -> &'static str {
         "device-revoked" => "device-revoked",
         "host-identity-mismatch" => "host-identity-mismatch",
         _ => "pairing-invalid",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn reconnect_metadata_can_be_durably_prepared_before_confirmation() {
+        let dir = tempdir().unwrap();
+        persist_metadata(
+            dir.path(),
+            "host-endpoint",
+            "Polyth",
+            None,
+            "pairing-id",
+            "prepared",
+            None,
+        )
+        .unwrap();
+        let saved = list_metadata(dir.path()).unwrap();
+        let item = &saved.as_array().unwrap()[0];
+        assert_eq!(item["pairingId"], "pairing-id");
+        assert_eq!(item["pairingState"], "prepared");
+        assert_eq!(item["hostEndpointId"], "host-endpoint");
+    }
+
+    #[test]
+    fn malformed_metadata_is_never_replaced() {
+        let dir = tempdir().unwrap();
+        let path = metadata_path(dir.path());
+        std::fs::write(&path, b"not json").unwrap();
+        assert_eq!(
+            persist_metadata(
+                dir.path(),
+                "host-endpoint",
+                "Polyth",
+                None,
+                "pairing-id",
+                "prepared",
+                None,
+            ),
+            Err(LinkError::PairingStorageFailed)
+        );
+        assert_eq!(std::fs::read(path).unwrap(), b"not json");
+    }
+
+    #[test]
+    fn connection_acceptance_requires_the_current_protocol() {
+        let accepted = |version| ControlMessage::ConnectionAccepted {
+            version,
+            connection_id: "connection".into(),
+            grant_revision: 1,
+        };
+        assert!(validate_connection_response(accepted(PROTOCOL_VERSION)).is_ok());
+        assert_eq!(
+            validate_connection_response(accepted(PROTOCOL_VERSION + 1)),
+            Err(LinkError::TransportVersionUnsupported.code())
+        );
     }
 }

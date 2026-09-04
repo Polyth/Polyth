@@ -13,10 +13,12 @@ const projectPath = resolve(process.argv[5] ?? process.cwd());
 const work = await mkdtemp(join(tmpdir(), "polyth-appimage-e2e-"));
 const dataDir = join(work, "data");
 const configDir = join(work, "config");
+const homeDir = join(work, "home");
 const userDataDir = join(work, "user-data");
 await mkdir(dirname(screenshotPath), { recursive: true });
 await mkdir(dirname(logArtifactPath), { recursive: true });
 await mkdir(join(userDataDir, "desktop"), { recursive: true });
+await mkdir(homeDir, { recursive: true });
 await writeFile(join(userDataDir, "desktop", "window-state.json"), `${JSON.stringify({
   bounds: { x: 24, y: 32, width: 1120, height: 720 },
   maximized: false,
@@ -114,13 +116,19 @@ try {
 const appRun = join(work, "squashfs-root", "AppRun");
 const cdpPort = await freePort();
 const appOutput = [];
+const appEnv = { ...process.env };
+// Exercise the packaged binary, not the invoking developer's OpenCode DB or plugins.
+for (const key of Object.keys(appEnv)) {
+  if (key.startsWith("OPENCODE_")) delete appEnv[key];
+}
 const child = spawn(appRun, [
   "--no-sandbox",
   `--remote-debugging-port=${cdpPort}`,
 ], {
   cwd: projectPath,
   env: {
-    ...process.env,
+    ...appEnv,
+    HOME: homeDir,
     POLYTH_DESKTOP_E2E: "1",
     POLYTH_DESKTOP_USER_DATA: userDataDir,
     POLYTH_DATA_DIR: dataDir,
@@ -181,10 +189,13 @@ class Cdp {
   }
 
   async evaluate(expression, timeoutMs = 30_000) {
+    let timer;
     const result = await Promise.race([
       this.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }),
-      delay(timeoutMs).then(() => { throw new Error(`CDP evaluation timed out after ${timeoutMs}ms`); }),
-    ]);
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`CDP evaluation timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]).finally(() => clearTimeout(timer));
     if (result.exceptionDetails) {
       throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text);
     }
@@ -236,9 +247,14 @@ try {
     const health = await healthResponse.json();
     const info = await api.getInfo();
     const initialSettings = await api.getSettings();
-    const modelsResponse = await fetch("/api/models");
-    if (!modelsResponse.ok) throw new Error("models endpoint " + modelsResponse.status + " " + await modelsResponse.text());
-    const models = await modelsResponse.json();
+    let models = [];
+    const modelsDeadline = Date.now() + 30_000;
+    while (models.length === 0 && Date.now() < modelsDeadline) {
+      const modelsResponse = await fetch("/api/models");
+      if (!modelsResponse.ok) throw new Error("models endpoint " + modelsResponse.status + " " + await modelsResponse.text());
+      models = await modelsResponse.json();
+      if (models.length === 0) await new Promise((resolve) => setTimeout(resolve, 500));
+    }
     const restoredBounds = {
       x: window.screenX,
       y: window.screenY,

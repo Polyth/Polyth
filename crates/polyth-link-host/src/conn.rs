@@ -17,10 +17,12 @@ use polyth_link_core::protocol::{
 use polyth_link_core::proxy::{allowed_http_path, sanitize_headers};
 use polyth_link_core::wire::{
     open_control, read_control, read_len_prefixed, read_stream_kind, write_all, write_control,
+    ControlReader,
 };
 use polyth_link_core::ws_local::{
     client_from_upgraded, proxy_tungstenite_to_link, verify_upstream_switch,
 };
+use polyth_link_core::PROTOCOL_VERSION;
 use rand::RngCore;
 use serde_json::{json, Value};
 use tokio::io::AsyncWriteExt;
@@ -81,10 +83,28 @@ pub async fn handle_connection(
     };
 
     if let Some(device) = trusted {
+        if let Err(error) = validate_connection_hello(read_control(&mut recv).await?, &peer) {
+            connection.close(0u32.into(), b"protocol");
+            return Err(error);
+        }
         return serve_trusted(state, connection, send, recv, peer, device).await;
     }
 
     serve_pairing(state, connection, send, recv, peer).await
+}
+
+fn validate_connection_hello(message: ControlMessage, peer: &str) -> Result<(), LinkError> {
+    match message {
+        ControlMessage::ConnectionHello {
+            version,
+            device_endpoint: _,
+        } if version != PROTOCOL_VERSION => Err(LinkError::TransportVersionUnsupported),
+        ControlMessage::ConnectionHello {
+            device_endpoint, ..
+        } if device_endpoint != peer => Err(LinkError::HostIdentityMismatch),
+        ControlMessage::ConnectionHello { .. } => Ok(()),
+        _ => Err(LinkError::TransportProtocolError),
+    }
 }
 
 async fn serve_pairing(
@@ -176,9 +196,10 @@ async fn serve_pairing(
     };
     write_control(&mut send, &ControlMessage::PairingSafety { phrase }).await?;
 
+    let mut control = ControlReader::new(recv);
     loop {
         tokio::select! {
-            message = read_control(&mut recv) => {
+            message = control.read() => {
                 match message? {
                     ControlMessage::PairingDeviceConfirmed => {
                         let mut guard = state.lock().await;
@@ -244,7 +265,7 @@ async fn serve_pairing(
                             grants: device.grants.clone(),
                         }).await?;
                         let _ = (label, platform, grants);
-                        return serve_trusted(state, connection, send, recv, peer, device).await;
+                        return serve_trusted(state, connection, send, control.into_inner(), peer, device).await;
                     }
                 }
             }
@@ -312,7 +333,7 @@ async fn serve_trusted(
     write_control(
         &mut send,
         &ControlMessage::ConnectionAccepted {
-            version: 1,
+            version: PROTOCOL_VERSION,
             connection_id: connection_id.clone(),
             grant_revision: device.grant_revision,
         },
@@ -349,7 +370,7 @@ async fn trusted_loop(
     state: Arc<Mutex<HostState>>,
     connection: Connection,
     mut send: SendStream,
-    mut recv: RecvStream,
+    recv: RecvStream,
     connection_id: String,
     device_id: String,
     http_count: Arc<AtomicUsize>,
@@ -359,6 +380,7 @@ async fn trusted_loop(
         let guard = state.lock().await;
         guard.events.subscribe()
     };
+    let mut control = ControlReader::new(recv);
     loop {
         tokio::select! {
             incoming = connection.accept_bi() => {
@@ -374,12 +396,11 @@ async fn trusted_loop(
                     let _ = handle_data_stream(state, connection_id, stream_send, stream_recv, http_count, ws_count).await;
                 });
             }
-            message = read_control(&mut recv) => {
+            message = control.read() => {
                 match message? {
                     ControlMessage::Ping { nonce } => {
                         write_control(&mut send, &ControlMessage::Pong { nonce }).await?;
                     }
-                    ControlMessage::ConnectionHello { .. } => {}
                     ControlMessage::Shutdown { .. } => break,
                     _ => return Err(LinkError::TransportProtocolError),
                 }
@@ -480,7 +501,7 @@ async fn proxy_http_stream(
     framed.extend_from_slice(&(payload.len() as u32).to_be_bytes());
     framed.extend_from_slice(&payload);
     let (head, _) = decode_head::<HttpRequestHeadV1>(&framed)?;
-    polyth_link_core::protocol::validate_http_path(&head.path_and_query)?;
+    polyth_link_core::protocol::validate_http_request_head(&head)?;
     let path = head.path_and_query.split('?').next().unwrap_or("/");
     if !allowed_http_path(path) {
         return Err(LinkError::RequestPathDenied);
@@ -493,6 +514,7 @@ async fn proxy_http_stream(
     };
     let _ = send.set_priority(priority);
 
+    let body_len = head.body_length.ok_or(LinkError::RequestHeaderInvalid)?;
     let (socket_path, secret) = {
         let guard = state.lock().await;
         (
@@ -513,12 +535,6 @@ async fn proxy_http_stream(
     .await
     .map_err(|_| LinkError::TransportUnavailable)?
     .map_err(|_| LinkError::TransportUnavailable)?;
-    let Some(body_len) = head.body_length else {
-        return Err(LinkError::RequestHeaderInvalid);
-    };
-    if body_len > Limits::v1().http_body_bytes {
-        return Err(LinkError::RequestTooLarge);
-    }
     let mut req = format!(
         "{} {} HTTP/1.1\r\nHost: polyth.local\r\nX-Polyth-Internal-Token: {}\r\nX-Polyth-Internal-Connection: {}\r\nConnection: close\r\nContent-Length: {body_len}\r\n",
         head.method,
@@ -567,7 +583,8 @@ async fn proxy_ws_stream(
     framed.extend_from_slice(&(payload.len() as u32).to_be_bytes());
     framed.extend_from_slice(&payload);
     let (open, _) = decode_head::<WebSocketOpenV1>(&framed)?;
-    polyth_link_core::protocol::validate_http_path(&open.path_and_query)?;
+    polyth_link_core::protocol::validate_websocket_open(&open)?;
+    polyth_link_core::ws_local::validate_ws_protocols(&open.protocols)?;
     if !open.path_and_query.starts_with("/ws") {
         return Err(LinkError::RequestPathDenied);
     }
@@ -610,8 +627,14 @@ async fn proxy_ws_stream(
         .map_err(|_| LinkError::TransportUnavailable)?;
     let parsed = read_http_head(&mut unix, Limits::v1().http_head_bytes).await?;
     let selected = verify_upstream_switch(&parsed, &key)?;
+    if selected
+        .as_ref()
+        .is_some_and(|protocol| !open.protocols.contains(protocol))
+    {
+        return Err(LinkError::Forbidden);
+    }
     let accept = HttpResponseHeadV1 {
-        version: 1,
+        version: PROTOCOL_VERSION,
         request_id: open.request_id,
         status: 101,
         headers: selected
@@ -674,4 +697,26 @@ pub fn _events_ok(events: &broadcast::Sender<Value>) -> bool {
 #[allow(dead_code)]
 pub fn _trust_len(map: &HashMap<String, TrustedDevice>) -> usize {
     map.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trusted_connection_hello_binds_version_and_endpoint() {
+        let hello = |version, device_endpoint: &str| ControlMessage::ConnectionHello {
+            version,
+            device_endpoint: device_endpoint.into(),
+        };
+        assert!(validate_connection_hello(hello(PROTOCOL_VERSION, "peer"), "peer").is_ok());
+        assert_eq!(
+            validate_connection_hello(hello(PROTOCOL_VERSION + 1, "peer"), "peer"),
+            Err(LinkError::TransportVersionUnsupported)
+        );
+        assert_eq!(
+            validate_connection_hello(hello(PROTOCOL_VERSION, "other"), "peer"),
+            Err(LinkError::HostIdentityMismatch)
+        );
+    }
 }

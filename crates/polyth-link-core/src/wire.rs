@@ -41,6 +41,42 @@ pub async fn read_len_prefixed<R: AsyncRead + Unpin>(
     Ok(payload)
 }
 
+pub async fn read_bounded_line<R: AsyncRead + Unpin>(
+    reader: &mut R,
+    pending: &mut Vec<u8>,
+    max: usize,
+) -> Result<Option<String>, LinkError> {
+    loop {
+        if let Some(newline) = pending.iter().position(|byte| *byte == b'\n') {
+            if newline > max {
+                return Err(LinkError::RequestTooLarge);
+            }
+            let rest = pending.split_off(newline + 1);
+            pending.truncate(newline);
+            let line = String::from_utf8(std::mem::replace(pending, rest))
+                .map_err(|_| LinkError::TransportProtocolError)?;
+            return Ok(Some(line));
+        }
+        if pending.len() > max {
+            return Err(LinkError::RequestTooLarge);
+        }
+        let mut chunk = [0u8; 8192];
+        let want = chunk.len().min(max + 1 - pending.len());
+        let read = reader
+            .read(&mut chunk[..want])
+            .await
+            .map_err(|_| LinkError::TransportProtocolError)?;
+        if read == 0 {
+            return if pending.is_empty() {
+                Ok(None)
+            } else {
+                Err(LinkError::TransportProtocolError)
+            };
+        }
+        pending.extend_from_slice(&chunk[..read]);
+    }
+}
+
 pub async fn write_control<W: AsyncWrite + Unpin>(
     writer: &mut W,
     message: &ControlMessage,
@@ -59,6 +95,73 @@ pub async fn read_control<R: AsyncRead + Unpin>(
     decode_head::<ControlMessage>(&framed)
         .map(|(msg, _)| msg)
         .map_err(|_| LinkError::TransportProtocolError)
+}
+
+pub struct ControlReader<R> {
+    inner: R,
+    header: [u8; 4],
+    header_read: usize,
+    payload: Vec<u8>,
+    payload_read: usize,
+}
+
+impl<R> ControlReader<R> {
+    pub fn new(inner: R) -> Self {
+        Self {
+            inner,
+            header: [0; 4],
+            header_read: 0,
+            payload: Vec::new(),
+            payload_read: 0,
+        }
+    }
+
+    pub fn into_inner(self) -> R {
+        self.inner
+    }
+}
+
+impl<R: AsyncRead + Unpin> ControlReader<R> {
+    pub async fn read(&mut self) -> Result<ControlMessage, LinkError> {
+        while self.header_read < self.header.len() {
+            let read = self
+                .inner
+                .read(&mut self.header[self.header_read..])
+                .await
+                .map_err(|_| LinkError::TransportProtocolError)?;
+            if read == 0 {
+                return Err(LinkError::TransportProtocolError);
+            }
+            self.header_read += read;
+        }
+        if self.payload.is_empty() {
+            let len = u32::from_be_bytes(self.header) as usize;
+            if len > Limits::v1().control_message_bytes {
+                return Err(LinkError::RequestTooLarge);
+            }
+            self.payload.resize(len, 0);
+        }
+        while self.payload_read < self.payload.len() {
+            let read = self
+                .inner
+                .read(&mut self.payload[self.payload_read..])
+                .await
+                .map_err(|_| LinkError::TransportProtocolError)?;
+            if read == 0 {
+                return Err(LinkError::TransportProtocolError);
+            }
+            self.payload_read += read;
+        }
+        let payload = std::mem::take(&mut self.payload);
+        self.header_read = 0;
+        self.payload_read = 0;
+        let mut framed = Vec::with_capacity(4 + payload.len());
+        framed.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        framed.extend_from_slice(&payload);
+        decode_head::<ControlMessage>(&framed)
+            .map(|(message, _)| message)
+            .map_err(|_| LinkError::TransportProtocolError)
+    }
 }
 
 pub async fn write_stream_kind<W: AsyncWrite + Unpin>(
@@ -233,6 +336,7 @@ pub async fn read_link_ws_frame<R: AsyncRead + Unpin>(
 mod tests {
     use super::*;
     use crate::protocol::ControlMessage;
+    use tokio::io::{duplex, AsyncWriteExt};
 
     #[tokio::test]
     async fn control_round_trip() {
@@ -258,5 +362,46 @@ mod tests {
             let err = read_len_prefixed(&mut cursor, 64).await.unwrap_err();
             assert_eq!(err, LinkError::RequestTooLarge);
         });
+    }
+
+    #[tokio::test]
+    async fn bounded_lines_keep_partial_data_when_a_read_is_cancelled() {
+        let (mut reader, mut writer) = duplex(64);
+        writer.write_all(b"{\"id\":").await.unwrap();
+        let mut pending = Vec::new();
+        assert!(tokio::time::timeout(
+            std::time::Duration::from_millis(5),
+            read_bounded_line(&mut reader, &mut pending, 64),
+        )
+        .await
+        .is_err());
+        assert_eq!(pending, b"{\"id\":");
+        writer.write_all(b"1}\n").await.unwrap();
+        assert_eq!(
+            read_bounded_line(&mut reader, &mut pending, 64)
+                .await
+                .unwrap(),
+            Some("{\"id\":1}".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn control_reader_survives_cancelled_reads() {
+        let mut encoded = Vec::new();
+        write_control(&mut encoded, &ControlMessage::Ping { nonce: [9u8; 16] })
+            .await
+            .unwrap();
+        let (reader, mut writer) = duplex(256);
+        writer.write_all(&encoded[..2]).await.unwrap();
+        let mut reader = ControlReader::new(reader);
+        tokio::select! {
+            result = reader.read() => panic!("partial frame completed: {result:?}"),
+            _ = tokio::time::sleep(std::time::Duration::from_millis(5)) => {}
+        }
+        writer.write_all(&encoded[2..]).await.unwrap();
+        assert_eq!(
+            reader.read().await.unwrap(),
+            ControlMessage::Ping { nonce: [9u8; 16] }
+        );
     }
 }

@@ -41,6 +41,7 @@ const server = net.createServer((socket) => {
       if (!line) continue;
       const req = JSON.parse(line);
       if (req.method === "crash") process.exit(1);
+      if (req.method === "disconnect") { socket.destroy(); continue; }
       socket.write(JSON.stringify({
         id: req.id,
         result: { fingerprint: "abcd1234ef", endpointId: "ep" },
@@ -58,7 +59,87 @@ test("host RPC handshake is required and child exit rejects pending requests", a
     const client = await startLinkHost({ dataDir: join(dir, "data"), socketPath: join(dir, "host.sock") });
     assert.equal(client.available, true, client.lastErrorCode ?? "host unavailable");
     assert.equal(client.processReady, true);
+    await assert.rejects(client.request("status", { value: "x".repeat(70 * 1024) }), { code: "invalid-input" });
     await assert.rejects(client.request("crash"));
+    assert.equal(client.available, false);
+    assert.equal(client.processReady, false);
+    assert.equal(client.lastErrorCode, "host-process-unavailable");
+    await assert.rejects(client.request("status"));
+    await client.close();
+  });
+});
+
+test("control socket loss marks the host dead even if the child stays alive", async () => {
+  const dir = tmp();
+  const binary = writeFakeHost(dir, READY_HOST);
+  await withHostEnv(binary, async () => {
+    const client = await startLinkHost({ dataDir: join(dir, "data"), socketPath: join(dir, "host.sock") });
+    await assert.rejects(client.request("disconnect"));
+    assert.equal(client.available, false);
+    assert.equal(client.processReady, false);
+    await client.close();
+  });
+});
+
+test("control framing preserves Unicode split across socket chunks", async () => {
+  const dir = tmp();
+  const binary = writeFakeHost(dir, `
+const net = require("node:net");
+const fs = require("node:fs");
+const socketPath = process.argv[process.argv.length - 1];
+try { fs.unlinkSync(socketPath); } catch {}
+const server = net.createServer((socket) => {
+  let calls = 0;
+  socket.on("data", (chunk) => {
+    const req = JSON.parse(String(chunk));
+    calls++;
+    if (calls === 1) {
+      socket.write(JSON.stringify({ id: req.id, result: { fingerprint: "abcd1234ef" } }) + "\\n");
+      return;
+    }
+    const event = Buffer.from(JSON.stringify({ method: "event", params: { type: "tunnel/test", label: "Телефон" } }) + "\\n");
+    const split = event.indexOf(Buffer.from("Т")) + 1;
+    socket.write(event.subarray(0, split));
+    setTimeout(() => {
+      socket.write(event.subarray(split));
+      socket.write(JSON.stringify({ id: req.id, result: { ok: true } }) + "\\n");
+    }, 5);
+  });
+});
+server.listen(socketPath);
+`);
+  await withHostEnv(binary, async () => {
+    const client = await startLinkHost({ dataDir: join(dir, "data"), socketPath: join(dir, "host.sock") });
+    const seen = new Promise<string>((resolve) => client.onEvent((event) => resolve(String(event.label))));
+    await client.request("status");
+    assert.equal(await seen, "Телефон");
+    await client.close();
+  });
+});
+
+test("unterminated control frames are byte-bounded", async () => {
+  const dir = tmp();
+  const binary = writeFakeHost(dir, `
+const net = require("node:net");
+const fs = require("node:fs");
+const socketPath = process.argv[process.argv.length - 1];
+try { fs.unlinkSync(socketPath); } catch {}
+const server = net.createServer((socket) => {
+  let calls = 0;
+  socket.on("data", (chunk) => {
+    const req = JSON.parse(String(chunk));
+    calls++;
+    if (calls === 1) socket.write(JSON.stringify({ id: req.id, result: { fingerprint: "abcd1234ef" } }) + "\\n");
+    else socket.write("x".repeat(70 * 1024));
+  });
+});
+server.listen(socketPath);
+`);
+  await withHostEnv(binary, async () => {
+    const client = await startLinkHost({ dataDir: join(dir, "data"), socketPath: join(dir, "host.sock") });
+    await assert.rejects(client.request("status"));
+    assert.equal(client.available, false);
+    assert.equal(client.processReady, false);
     await client.close();
   });
 });

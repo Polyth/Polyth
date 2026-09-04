@@ -191,3 +191,72 @@ test("revoking one device closes only that device's sockets", async () => {
     server.close();
   }
 });
+
+test("revoked session grant cannot leak a delayed gap-fill", async () => {
+  let release!: (events: SessionEvent[]) => void;
+  let started!: () => void;
+  const began = new Promise<void>((resolve) => { started = resolve; });
+  const delayed = new Promise<SessionEvent[]>((resolve) => { release = resolve; });
+  const grants = { current: [REMOTE_CAPABILITY.coreSessionsRead] };
+  const server = createServer((_req, res) => { res.statusCode = 404; res.end(); });
+  attachWs(server, {
+    events: async () => { started(); return delayed; },
+    list: async () => [proj],
+  } as unknown as SessionService, undefined, undefined, {
+    identity: () => ({ authenticated: true, principal: paired("dev-a", grants.current) }),
+    refreshPrincipal: (principal) => principal.kind === "paired-device"
+      ? { ...principal, grants: grants.current, grantRevision: principal.grantRevision + 1 }
+      : principal,
+  });
+  server.listen(0);
+  await once(server, "listening");
+  const port = (server.address() as { port: number }).port;
+  try {
+    const { ws, messages } = await connect(port);
+    ws.send(JSON.stringify({ type: "subscribe", sessionId: "s1", afterSeq: 0 }));
+    await began;
+    grants.current = [];
+    release([{ id: "secret", sessionId: "s1", seq: 1, time: 1, type: "test/secret", data: { secret: true }, v: 1 }]);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(messages.some((message) => {
+      const type = (message as { type?: string }).type;
+      return type === "event" || type === "events" || type === "projection" || type === "projections";
+    }), false, JSON.stringify(messages));
+    ws.close();
+  } finally {
+    server.close();
+  }
+});
+
+test("revoked session grant cannot leak a delayed projection snapshot", async () => {
+  let release!: (items: typeof proj[]) => void;
+  let started!: () => void;
+  const began = new Promise<void>((resolve) => { started = resolve; });
+  const delayed = new Promise<typeof proj[]>((resolve) => { release = resolve; });
+  const grants = { current: [REMOTE_CAPABILITY.coreSessionsRead] };
+  const server = createServer((_req, res) => { res.statusCode = 404; res.end(); });
+  attachWs(server, {
+    events: async () => [],
+    list: async () => { started(); return delayed; },
+  } as unknown as SessionService, undefined, undefined, {
+    identity: () => ({ authenticated: true, principal: paired("dev-a", grants.current) }),
+    refreshPrincipal: (principal) => principal.kind === "paired-device"
+      ? { ...principal, grants: grants.current, grantRevision: principal.grantRevision + 1 }
+      : principal,
+  });
+  server.listen(0);
+  await once(server, "listening");
+  const port = (server.address() as { port: number }).port;
+  try {
+    const { ws, messages } = await connect(port);
+    ws.send(JSON.stringify({ type: "subscribe", projectId: "p1", afterSeq: 0 }));
+    await began;
+    grants.current = [];
+    release([proj]);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(messages.some((message) => (message as { type?: string }).type === "projections"), false);
+    ws.close();
+  } finally {
+    server.close();
+  }
+});

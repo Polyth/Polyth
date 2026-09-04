@@ -21,3 +21,6 @@ base64.workspace = true
 rand.workspace = true
 httparse = "1.10.1"
 url = "2.5.4"
+
+[dev-dependencies]
+tempfile = "3.20.0"

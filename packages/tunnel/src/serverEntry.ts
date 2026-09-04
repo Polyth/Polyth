@@ -34,6 +34,55 @@ export const TUNNEL_REMOTE_ACCESS: RemoteAccessPolicy = {
   ],
 };
 
+export async function commitPairingDevice(input: {
+  pairingId: string;
+  endpointId: string;
+  label: string;
+  platform?: string;
+  grants: string[];
+}, deps: {
+  store: TunnelStore;
+  host: LinkHostClient;
+  events: TunnelEventBus;
+}): Promise<void> {
+  let device: ReturnType<TunnelStore["prepareDevice"]> | undefined;
+  let activated = false;
+  try {
+    device = deps.store.prepareDevice({
+      ...input,
+      pairedVia: "polyth-link",
+    });
+    await deps.host.request("trust.upsert", {
+      deviceId: device.id,
+      endpointId: device.endpointId,
+      grants: device.grants,
+      grantRevision: device.grantRevision,
+      revoked: false,
+      pairingId: input.pairingId,
+    });
+    if (device.pairingState !== "active") {
+      device = deps.store.markHostAcknowledged(input.pairingId);
+      device = deps.store.activatePairing(input.pairingId);
+      activated = true;
+    }
+    await deps.host.request("pairing.finish", { id: input.pairingId });
+  } catch (error) {
+    const failed = device?.pairingId === input.pairingId
+      ? deps.store.failPairing(input.pairingId, activated)
+      : undefined;
+    if (failed?.pairingState === "failed") {
+      try {
+        await deps.host.request("trust.revoke", { deviceId: failed.id, endpointId: failed.endpointId });
+      } catch { /* host may already be gone; startup sync excludes failed records */ }
+    }
+    try {
+      await deps.host.request("pairing.storage_failed", { id: input.pairingId });
+    } catch { /* pairing may already be gone or finalized */ }
+    throw error;
+  }
+  if (activated) deps.events.emit("tunnel/device-added", { id: device.id, deviceId: device.id });
+}
+
 export function tunnelRoutes(deps: {
   store: TunnelStore;
   events: TunnelEventBus;
@@ -293,6 +342,9 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   let endpointBound = false;
   let ingressReady = false;
   let lastErrorCode: string | undefined;
+  let acceptingCommitTasks = false;
+  let detachHostEvents: (() => void) | null = null;
+  const pairingCommits = new Map<string, Promise<void>>();
   let ingressSecret = randomIngressSecret();
   const socketDir = join(host.storageDir, "tunnel");
   mkdirSync(socketDir, { recursive: true });
@@ -301,15 +353,19 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
 
   const syncTrust = async (): Promise<void> => {
     if (!linkHost?.available) return;
-    await linkHost.request("trust.sync", {
-      devices: store.list().map((device) => ({
+    store.recoverIncompletePairings();
+    await linkHost.request("trust.sync_begin");
+    for (const device of store.trustList()) {
+      await linkHost.request("trust.upsert", {
         endpointId: device.endpointId,
         deviceId: device.id,
         grants: device.grants,
         grantRevision: device.grantRevision,
         revoked: Boolean(device.revokedAt),
-      })),
-    });
+        pairingId: device.pairingId,
+      });
+    }
+    await linkHost.request("trust.sync_finish");
   };
 
   let eventsEnabled = false;
@@ -336,10 +392,11 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   });
 
   const resolvePaired = (ingress: Extract<RequestIngress, { kind: "polyth-link" }>): AuthPrincipal | null => {
+    if (!linkHost?.available) return null;
     const live = connections.get(ingress.connectionId);
     if (!live || live.kind !== "paired-device") return null;
     const device = store.device(live.deviceId);
-    if (!device || device.revokedAt) return null;
+    if (!device || device.pairingState !== "active" || device.revokedAt) return null;
     return {
       ...live,
       grants: device.grants,
@@ -361,11 +418,12 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   };
 
   const lookup = (connectionId: string): Extract<RequestIngress, { kind: "polyth-link" }> | null => {
+    if (!linkHost?.available) return null;
     const principal = connections.get(connectionId);
     if (!principal || principal.kind !== "paired-device") return null;
     if (principal.connectionId !== connectionId) return null;
     const device = store.device(principal.deviceId);
-    if (!device || device.revokedAt) {
+    if (!device || device.pairingState !== "active" || device.revokedAt) {
       connections.delete(connectionId);
       return null;
     }
@@ -403,9 +461,10 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       lastErrorCode = "host-identity-unavailable";
     }
     const platformSupported = linkHost ? linkHost.platformSupported : process.platform !== "win32";
+    const hostAlive = Boolean(linkHost?.available);
     let directConnections = 0;
     let relayConnections = 0;
-    for (const principal of connections.values()) {
+    for (const principal of hostAlive ? connections.values() : []) {
       if (principal.kind !== "paired-device") continue;
       if (principal.transport === "relay") relayConnections += 1;
       else directConnections += 1;
@@ -417,18 +476,18 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       platformSupported,
       hostBinaryFound: Boolean(linkHost?.binaryFound),
       hostProcessReady: Boolean(linkHost?.processReady && linkHost.available),
-      endpointBound: hostBound ?? endpointBound,
-      ingressReady,
-      identityAvailable,
-      hostFingerprint: fingerprint,
+      endpointBound: hostAlive && (hostBound ?? endpointBound),
+      ingressReady: hostAlive && ingressReady,
+      identityAvailable: hostAlive && identityAvailable,
+      hostFingerprint: hostAlive ? fingerprint : null,
       ...(identityError ? { identityError } : {}),
-      lastErrorCode: lastErrorCode ?? linkHost?.lastErrorCode,
-      activePolicy: policy,
-      relayConfigured: Array.isArray(relayUrls) ? relayUrls.length > 0 : false,
-      relayUrls,
-      irohVersion,
-      activeConnections: connections.size,
-      activeDevices: store.list().filter((device) => !device.revokedAt).length,
+      lastErrorCode: linkHost?.lastErrorCode ?? lastErrorCode,
+      activePolicy: hostAlive ? policy : null,
+      relayConfigured: hostAlive && Array.isArray(relayUrls) ? relayUrls.length > 0 : false,
+      relayUrls: hostAlive ? relayUrls : null,
+      irohVersion: hostAlive ? irohVersion : null,
+      activeConnections: hostAlive ? connections.size : 0,
+      activeDevices: store.trustList().filter((device) => !device.revokedAt).length,
       directConnections,
       relayConnections,
     };
@@ -456,59 +515,28 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           lastErrorCode = linkHost.lastErrorCode ?? "host-binary-missing";
           return;
         }
-        linkHost.onEvent((event) => {
+        acceptingCommitTasks = true;
+        detachHostEvents = linkHost.onEvent((event) => {
           events.emit(event.type, { ...event, ...(typeof event.deviceId === "string" ? { deviceId: event.deviceId } : {}) });
           if (event.type === "tunnel/pairing-committing") {
             const pairingId = String(event.pairingId ?? "");
             const endpointId = String(event.endpointId ?? "");
             if (!endpointId || !pairingId) return;
-            void (async () => {
-              try {
-                const existing = store.deviceByEndpoint(endpointId);
-                const device = store.commitDevice({
-                  endpointId,
-                  label: String(event.label ?? "Mobile device"),
-                  platform: event.platform ? String(event.platform) : undefined,
-                  grants: Array.isArray(event.grants) ? event.grants.map(String) : [],
-                  pairedVia: "polyth-link",
-                });
-                if (existing && !existing.revokedAt && existing.grantRevision === device.grantRevision) {
-                  await linkHost?.request("pairing.finish", { id: pairingId });
-                  return;
-                }
-                await linkHost?.request("trust.upsert", {
-                  deviceId: device.id,
-                  endpointId: device.endpointId,
-                  grants: device.grants,
-                  grantRevision: device.grantRevision,
-                  revoked: false,
-                });
-                await linkHost?.request("pairing.finish", { id: pairingId });
-                events.emit("tunnel/device-added", { id: device.id, deviceId: device.id });
-              } catch (error) {
-                try {
-                  await linkHost?.request("pairing.storage_failed", { id: pairingId });
-                } catch (finishError) {
-                  console.error("[polyth-link] pairing.storage_failed failed", finishError instanceof Error ? finishError.message : finishError);
-                }
-                const device = store.deviceByEndpoint(endpointId);
-                if (device) {
-                  store.revoke(device.id);
-                  for (const [connectionId, principal] of connections) {
-                    if (principal.kind === "paired-device" && principal.deviceId === device.id) {
-                      connections.delete(connectionId);
-                    }
-                  }
-                  host.closePairedDevice(device.id);
-                  try {
-                    await linkHost?.request("trust.revoke", { deviceId: device.id, endpointId });
-                  } catch (revokeError) {
-                    console.error("[polyth-link] trust.revoke after storage failure failed", revokeError instanceof Error ? revokeError.message : revokeError);
-                  }
-                }
+            if (!acceptingCommitTasks || pairingCommits.has(pairingId)) return;
+            const activeHost = linkHost;
+            if (!activeHost) return;
+            const task = commitPairingDevice({
+              pairingId,
+              endpointId,
+              label: String(event.label ?? "Mobile device"),
+              platform: event.platform ? String(event.platform) : undefined,
+              grants: Array.isArray(event.grants) ? event.grants.map(String) : [],
+            }, { store, host: activeHost, events })
+              .catch((error) => {
                 console.error("[polyth-link] pairing commit failed", error instanceof Error ? error.message : error);
-              }
-            })();
+              })
+              .finally(() => pairingCommits.delete(pairingId));
+            pairingCommits.set(pairingId, task);
           }
           if (event.type === "tunnel/pairing-storage-failed") {
             const endpointId = String(event.endpointId ?? "");
@@ -534,7 +562,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
             const connectionId = String(event.connectionId ?? "");
             const deviceId = String(event.deviceId ?? "");
             const device = store.device(deviceId);
-            if (!connectionId || !device || device.revokedAt) return;
+            if (!connectionId || !device || device.pairingState !== "active" || device.revokedAt) return;
             connections.set(connectionId, {
               kind: "paired-device",
               deviceId: device.id,
@@ -577,8 +605,12 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     },
     async onDisable() {
       eventsEnabled = false;
+      acceptingCommitTasks = false;
+      detachHostEvents?.();
+      detachHostEvents = null;
       for (const stop of detachers.values()) stop();
       detachers.clear();
+      await Promise.allSettled(pairingCommits.values());
       endpointBound = false;
       ingressReady = false;
       await ingressHandle?.close();

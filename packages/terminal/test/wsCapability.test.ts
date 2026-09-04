@@ -49,6 +49,7 @@ test("terminal.open without terminal.input cannot write; resize is separate", as
   const grants = { current: [REMOTE_CAPABILITY.terminalOpen] as string[] };
   const writes: string[] = [];
   const resizes: Array<[number, number]> = [];
+  let emitExit: ((id: string, exitCode: number | null) => void) | undefined;
   const server = createServer((_req, res) => { res.statusCode = 404; res.end(); });
   attachTerminalWs(server, {
     identity: () => ({ authenticated: true, principal: paired(grants.current) }),
@@ -59,7 +60,10 @@ test("terminal.open without terminal.input cannot write; resize is separate", as
       get: (id: string) => id === "t1" ? { id: "t1", projectId: "p", cwd: "/", running: true } : undefined,
       replay: () => "",
       onData: () => ({ dispose() {} }),
-      onExit: () => ({ dispose() {} }),
+      onExit: (listener: (id: string, exitCode: number | null) => void) => {
+        emitExit = listener;
+        return { dispose() {} };
+      },
       write(_id: string, data: string) { writes.push(data); },
       resize(_id: string, cols: number, rows: number) { resizes.push([cols, rows]); },
     } as never,
@@ -91,6 +95,11 @@ test("terminal.open without terminal.input cannot write; resize is separate", as
     ws.send(JSON.stringify({ type: "resize", cols: 100, rows: 30 }));
     await new Promise((resolve) => setTimeout(resolve, 30));
     assert.deepEqual(resizes, [[100, 30]]);
+    grants.current = [];
+    emitExit?.("t1", 1);
+    grants.current = [REMOTE_CAPABILITY.terminalOpen];
+    emitExit?.("t1", 2);
+    assert.equal((await next()).exitCode, 2);
     ws.close();
   } finally {
     server.close();

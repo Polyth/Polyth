@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::errors::LinkError;
 use crate::limits::Limits;
+use crate::PROTOCOL_VERSION;
 
 pub const STREAM_CONTROL: u8 = 1;
 pub const STREAM_HTTP: u8 = 2;
@@ -23,6 +24,17 @@ pub fn is_idempotent_method(method: &str) -> bool {
 
 pub fn mutation_method(method: &str) -> bool {
     !is_idempotent_method(method)
+}
+
+pub fn validate_http_method(method: &str) -> Result<(), LinkError> {
+    if matches!(
+        method,
+        "GET" | "HEAD" | "OPTIONS" | "POST" | "PUT" | "PATCH" | "DELETE"
+    ) {
+        Ok(())
+    } else {
+        Err(LinkError::RequestHeaderInvalid)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -191,16 +203,81 @@ pub fn decode_ws_frame(bytes: &[u8]) -> Result<(WsFrameType, &[u8], usize), Link
 }
 
 pub fn validate_http_path(path_and_query: &str) -> Result<(), LinkError> {
-    if !path_and_query.starts_with('/') {
+    let bytes = path_and_query.as_bytes();
+    if !bytes.starts_with(b"/") {
         return Err(LinkError::RequestPathDenied);
     }
-    if path_and_query.len() > Limits::v1().http_path_bytes {
+    if bytes.len() > Limits::v1().http_path_bytes {
         return Err(LinkError::RequestTooLarge);
     }
-    if path_and_query.contains("://") || path_and_query.starts_with("//") {
+    if bytes.starts_with(b"//")
+        || bytes.contains(&b'#')
+        || bytes
+            .iter()
+            .any(|byte| *byte <= b' ' || *byte == 0x7f || *byte == b'\\')
+    {
         return Err(LinkError::RequestPathDenied);
     }
+    let query = bytes.iter().position(|byte| *byte == b'?');
+    let route = &path_and_query[..query.unwrap_or(bytes.len())];
+    if route.contains("//")
+        || route.contains('%')
+        || route
+            .split('/')
+            .any(|segment| matches!(segment, "." | ".."))
+    {
+        return Err(LinkError::RequestPathDenied);
+    }
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'%' {
+            index += 1;
+            continue;
+        }
+        if index + 2 >= bytes.len() {
+            return Err(LinkError::RequestPathDenied);
+        }
+        let decoded = decode_hex(bytes[index + 1], bytes[index + 2])?;
+        let in_path = query.is_none_or(|query| index < query);
+        if decoded < b' ' || decoded == 0x7f || (in_path && decoded == b' ') {
+            return Err(LinkError::RequestPathDenied);
+        }
+        index += 3;
+    }
     Ok(())
+}
+
+fn decode_hex(high: u8, low: u8) -> Result<u8, LinkError> {
+    fn nibble(byte: u8) -> Option<u8> {
+        match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            b'A'..=b'F' => Some(byte - b'A' + 10),
+            _ => None,
+        }
+    }
+    Ok((nibble(high).ok_or(LinkError::RequestPathDenied)? << 4)
+        | nibble(low).ok_or(LinkError::RequestPathDenied)?)
+}
+
+pub fn validate_http_request_head(head: &HttpRequestHeadV1) -> Result<(), LinkError> {
+    if head.version != PROTOCOL_VERSION {
+        return Err(LinkError::TransportVersionUnsupported);
+    }
+    validate_http_method(&head.method)?;
+    validate_http_path(&head.path_and_query)?;
+    let body_length = head.body_length.ok_or(LinkError::RequestHeaderInvalid)?;
+    if body_length > Limits::v1().http_body_bytes {
+        return Err(LinkError::RequestTooLarge);
+    }
+    Ok(())
+}
+
+pub fn validate_websocket_open(open: &WebSocketOpenV1) -> Result<(), LinkError> {
+    if open.version != PROTOCOL_VERSION {
+        return Err(LinkError::TransportVersionUnsupported);
+    }
+    validate_http_path(&open.path_and_query)
 }
 
 #[cfg(test)]
@@ -238,6 +315,65 @@ mod tests {
         assert!(validate_http_path("http://evil/").is_err());
         assert!(validate_http_path("//evil/").is_err());
         assert!(validate_http_path("/api/health").is_ok());
+    }
+
+    #[test]
+    fn hostile_request_lines_and_versions_are_denied() {
+        let mut head = HttpRequestHeadV1 {
+            version: PROTOCOL_VERSION,
+            request_id: [0; 16],
+            method: "GET".into(),
+            path_and_query: "/api/health?view=full".into(),
+            headers: Vec::new(),
+            body_length: Some(0),
+        };
+        assert!(validate_http_request_head(&head).is_ok());
+        head.path_and_query = "/api/search?q=hello%20world&literal=%25".into();
+        assert!(validate_http_request_head(&head).is_ok());
+        head.path_and_query = "/api/health?view=full".into();
+        for method in ["GET\r\nX-Evil: 1", "GET\nX-Evil: 1", "get", "CONNECT"] {
+            head.method = method.into();
+            assert!(
+                validate_http_request_head(&head).is_err(),
+                "accepted {method:?}"
+            );
+        }
+        head.method = "GET".into();
+        for path in [
+            "/api/health\r\nX-Evil: 1",
+            "/api/health%0d%0aX-Evil:1",
+            "/api/health?x=ok\r\nX-Evil:1",
+            "/api/health?x=%0aX-Evil:1",
+            "/api%2fadmin",
+            "/api/%2e%2e/admin",
+            "/api/../admin",
+            "/api//admin",
+            "/api\\admin",
+            "/api/%zz",
+        ] {
+            head.path_and_query = path.into();
+            assert!(
+                validate_http_request_head(&head).is_err(),
+                "accepted {path:?}"
+            );
+        }
+        head.path_and_query = "/api/health".into();
+        head.version = PROTOCOL_VERSION + 1;
+        assert!(matches!(
+            validate_http_request_head(&head),
+            Err(LinkError::TransportVersionUnsupported)
+        ));
+
+        let open = WebSocketOpenV1 {
+            version: PROTOCOL_VERSION + 1,
+            request_id: [0; 16],
+            path_and_query: "/ws".into(),
+            protocols: Vec::new(),
+        };
+        assert!(matches!(
+            validate_websocket_open(&open),
+            Err(LinkError::TransportVersionUnsupported)
+        ));
     }
 
     #[test]
