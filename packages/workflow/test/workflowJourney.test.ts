@@ -195,12 +195,11 @@ test("long workflow timelines follow the node that currently needs attention", (
 });
 
 test("workflow journey surfaces expose task launch, chat progress, HITL, stop, and retry", async () => {
-  const [launcher, composer, timeline, workflow, miniWidgets, status, styles] = await Promise.all([
+  const [launcher, composer, timeline, workflow, status, styles] = await Promise.all([
     source("../widgets/WorkflowLauncher.tsx"),
     source("../../../apps/web/src/components/Composer.tsx"),
     source("../../../apps/web/src/components/Timeline.tsx"),
     source("../widgets/WorkflowView.tsx"),
-    source("../widgets/index.tsx"),
     source("../../../apps/web/src/components/StatusBar.tsx"),
     source("../../../apps/web/src/styles.css"),
   ]);
