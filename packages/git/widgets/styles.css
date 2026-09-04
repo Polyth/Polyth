@@ -83,7 +83,7 @@
   margin-inline-start: auto;
 }
 .pending-changes-bar .pending-changes-review {
-  border-radius: 999px;
+  border-radius: var(--radius-round);
 }
 .pending-changes-list {
   display: flex;
@@ -449,7 +449,7 @@ background: var(--raised); border-color: transparent; color: var(--text);
 }
 .git-count {
 display: inline-grid; place-items: center; min-width: 21px; height: 20px; padding: 0 5px;
-  border-radius: 999px; background: var(--surface-overlay-strong); color: var(--muted); font-size: var(--font-meta);
+  border-radius: var(--radius-round); background: var(--surface-overlay-strong); color: var(--muted); font-size: var(--font-meta);
 }
 .git-change-group-body {
 padding: 1px 6px 7px;
@@ -671,7 +671,7 @@ overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 display: flex; flex-direction: column; gap: var(--space-2); margin-top: 10px; padding: 13px; border: 1px solid var(--hair); border-radius: var(--radius-card);
 }
 .diff-skeleton span {
-display: block; border-radius: 5px;
+display: block; border-radius: calc(5px * var(--corner-radius-scale));
   background: var(--surface-overlay-strong);
 }
 .diff-skeleton span {

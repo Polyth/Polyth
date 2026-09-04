@@ -18,7 +18,7 @@ border: 0; border-bottom: 1px solid var(--hair); border-radius: 0; padding: 10px
 display: flex; align-items: center; gap: 6px;
 }
 .knowledge-kind {
-padding: 1px 6px; border-radius: 999px; font-size: var(--font-meta); text-transform: uppercase;
+  padding: 1px 6px; border-radius: var(--radius-round); font-size: var(--font-meta); text-transform: uppercase;
   letter-spacing: 0.05em; border: 1px solid var(--border); color: var(--muted); flex: none;
 }
 .knowledge-kind.kind-plan {
@@ -66,7 +66,7 @@ display: flex;
 .track-status {
 padding: 2px 6px;
   border: 1px solid var(--border-soft);
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   color: var(--muted);
   font-size: var(--font-meta);
   font-weight: 700;

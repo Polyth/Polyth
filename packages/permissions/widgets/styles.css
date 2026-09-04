@@ -77,7 +77,7 @@
 .perm-banner .permission-risk {
   margin-inline-start: var(--space-2);
   padding: var(--space-1) var(--space-2);
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   font-size: var(--font-meta);
   letter-spacing: .04em;
   text-transform: uppercase;

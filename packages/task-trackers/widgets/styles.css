@@ -232,7 +232,7 @@
   min-height: 24px;
   align-items: center;
   padding: 0 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   color: color-mix(in srgb, var(--amber) 78%, var(--text));
   background: color-mix(in srgb, var(--amber) 11%, transparent);
   font-size: var(--font-meta);
@@ -453,7 +453,7 @@
   display: inline-flex;
   min-width: 0;
   align-items: center;
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   font-size: var(--font-meta);
   font-weight: 700;
   line-height: 1;

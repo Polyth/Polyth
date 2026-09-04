@@ -121,7 +121,7 @@ position: absolute; top: 0; bottom: 0; pointer-events: none;
 background: var(--term-sel);
 }
 .term-row-find {
-background: var(--term-find); border-radius: 2px;
+background: var(--term-find); border-radius: calc(2px * var(--corner-radius-scale));
 }
 .term-row-find.cur {
 background: var(--term-find-cur); outline: 1px solid var(--accent);
@@ -204,7 +204,7 @@ color: var(--accent); background: var(--accent-wash);
 }
 .term-exit-note {
 position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 3;
-  border: 1px solid var(--border); border-radius: 999px; background: var(--elevated);
+  border: 1px solid var(--border); border-radius: var(--radius-round); background: var(--elevated);
   color: var(--muted); font-size: var(--font-meta); padding: 4px 12px; pointer-events: none;
 }
 @container terminal-workspace (max-width: 520px) {

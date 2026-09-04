@@ -103,7 +103,7 @@ color: var(--red); border-color: var(--red);
 color: var(--amber); border-color: var(--amber);
 }
 .walkthrough-page .risk-badge {
-padding: 2px 8px; border-radius: 999px; font-size: var(--font-meta); font-weight: 700;
+  padding: 2px 8px; border-radius: var(--radius-round); font-size: var(--font-meta); font-weight: 700;
   border: 1px solid var(--border); color: var(--muted);
 }
 .walkthrough-page .risk-badge.risk-1,
@@ -270,7 +270,7 @@ grid-column: 1;
 }
 
 /* Rules moved from core styles.css: walkthrough context badges. */
-.walkthrough-page .ctx-badge { font-size: var(--font-meta); padding: var(--space-1) var(--space-2); border-radius: 999px; border: 1px solid var(--border); }
+.walkthrough-page .ctx-badge { font-size: var(--font-meta); padding: var(--space-1) var(--space-2); border-radius: var(--radius-round); border: 1px solid var(--border); }
 .walkthrough-page .ctx-badge.green { color: var(--green); border-color: var(--green); }
 .walkthrough-page .ctx-badge.yellow { color: var(--amber); border-color: var(--amber); }
 .walkthrough-page .ctx-badge.red { color: var(--red); border-color: var(--red); }

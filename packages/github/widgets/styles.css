@@ -171,7 +171,7 @@ width: min(100%, 700px); display: grid; grid-template-columns: 36px minmax(0, 1f
 }
 .github-conflict-icon {
 width: 36px; height: 36px; display: grid; place-items: center;
-  border-radius: 10px; background: var(--accent-wash); color: var(--accent);
+  border-radius: var(--radius-card); background: var(--accent-wash); color: var(--accent);
 }
 .github-conflict-icon svg {
 width: 18px; height: 18px;
@@ -221,7 +221,7 @@ min-height: 76px; padding: 13px 15px;
 }
 .gh-repo-icon {
 width: 42px; height: 42px; display: grid; place-items: center; flex: none;
-  border-radius: 12px; background: var(--surface-overlay-strong); color: var(--text);
+  border-radius: var(--radius-surface); background: var(--surface-overlay-strong); color: var(--text);
 }
 .gh-repo-icon svg {
 width: 21px; height: 21px;
@@ -304,7 +304,7 @@ min-height: 190px; display: flex; align-items: center; gap: 18px; padding: 22px;
   border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--elevated);
 }
 .gh-connect-icon {
-width: 54px; height: 54px; display: grid; place-items: center; flex: none; border-radius: 16px; background: var(--surface-overlay-strong);
+width: 54px; height: 54px; display: grid; place-items: center; flex: none; border-radius: var(--radius-sheet); background: var(--surface-overlay-strong);
 }
 .gh-connect-icon svg {
 width: 28px; height: 28px;
@@ -319,7 +319,7 @@ margin: 0 0 5px; font-size: 16px;
 margin: 0 0 10px; max-width: 650px; color: var(--muted); font-size: 13px;
 }
 .gh-connect-state code {
-display: inline-block; padding: 5px 8px; border-radius: 6px; background: var(--sunken); color: var(--text-dim);
+display: inline-block; padding: 5px 8px; border-radius: calc(6px * var(--corner-radius-scale)); background: var(--sunken); color: var(--text-dim);
 }
 .gh-skeleton-list {
 display: flex; flex-direction: column; gap: 8px;
@@ -352,7 +352,7 @@ color: var(--accent);
 font-size: var(--font-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .pr-check-pill {
-min-height: 42px; display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; flex: none; border: 1px solid var(--hair-strong); border-radius: 999px; background: var(--surface-overlay);
+min-height: 42px; display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; flex: none; border: 1px solid var(--hair-strong); border-radius: var(--radius-round); background: var(--surface-overlay);
 }
 /* Scroll behavior comes from the core .ui-scroll-tabs primitive. */
 .pr-tabbar {
@@ -363,7 +363,7 @@ display: flex; align-items: stretch; align-self: stretch; gap: 0; min-height: 46
 min-width: max-content; min-height: max(var(--tap), var(--hit-min)); display: inline-flex; align-items: center; gap: var(--space-2); padding: 0 16px;
 }
 .pr-tabbar .ui-tab > span {
-min-width: 20px; height: 20px; display: inline-grid; place-items: center; padding: 0 5px; border-radius: 999px; background: var(--surface-overlay-strong); font-size: var(--font-meta);
+min-width: 20px; height: 20px; display: inline-grid; place-items: center; padding: 0 5px; border-radius: var(--radius-round); background: var(--surface-overlay-strong); font-size: var(--font-meta);
 }
 .pr-overview {
 gap: 14px;
@@ -624,7 +624,7 @@ display: flex; align-items: center; gap: 10px; padding-top: 12px;
 display: flex; flex-direction: column; gap: 2px;
 }
 .gh-agent-orb {
-width: 30px; height: 30px; flex: none; border-radius: 10px;
+width: 30px; height: 30px; flex: none; border-radius: var(--radius-card);
   background: var(--accent); box-shadow: 0 0 0 1px var(--accent-line);
 }
 .gh-agent-orb.working {
@@ -978,7 +978,7 @@ position: relative;
   padding-inline: 8px;
 }
 .merge-status-badge {
-align-self: flex-start; width: auto; padding: 3px 8px; border-radius: 999px;
+  align-self: flex-start; width: auto; padding: 3px 8px; border-radius: var(--radius-round);
   font-size: var(--font-meta) !important; line-height: 1.4;
 }
 .merge-status-badge.st-mergeable {
@@ -1192,5 +1192,5 @@ width: 100%;
 }
 .checks-group-head span {
   display: inline-grid; place-items: center; min-width: 20px; height: 20px;
-  border-radius: 999px; background: var(--surface-overlay-strong); color: var(--muted); font-size: var(--font-meta);
+  border-radius: var(--radius-round); background: var(--surface-overlay-strong); color: var(--muted); font-size: var(--font-meta);
 }

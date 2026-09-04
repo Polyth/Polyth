@@ -232,6 +232,8 @@ test("execution code surfaces override the global prose font preference", async 
   const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   const override = css.match(/html\[data-font\] body :is\([\s\S]*?execution-viewer > pre[\s\S]*?\)\s*\{\s*font-family:\s*var\(--mono\);\s*\}/);
   assert.ok(override, "commands, output, diffs, and the full viewer retain the monospace font");
+  assert.match(css, /\.activity-group-expand-shell,\s*\.task-list-expand-shell\s*\{[\s\S]*?width:\s*100%;[\s\S]*?align-self:\s*stretch;/,
+    "activity details stretch with the chat column instead of using content width");
   assert.match(css, /\.execution-group-items\s*\{[\s\S]*?width:\s*100%;[\s\S]*?justify-self:\s*stretch;/);
   assert.match(css, /\.execution-group-items > \*\s*\{[\s\S]*?min-width:\s*0;/);
   assert.match(css, /\.execution-details \.git-diff\s*\{[\s\S]*?min-width:\s*0;[\s\S]*?overflow:\s*auto;/);

@@ -41,6 +41,32 @@ test("radius compatibility names only alias the canonical semantic scale", async
   }
 });
 
+test("runtime CSS does not introduce unscaled radius literals", async () => {
+  const [core, mobile, entries] = await Promise.all([
+    read("../src/styles.css"),
+    read("../../mobile/src/styles.css"),
+    readdir(new URL("../../../packages/", import.meta.url), { withFileTypes: true }),
+  ]);
+  const packages = await Promise.all(entries
+    .filter((entry) => entry.isDirectory())
+    .map(async (entry) => {
+      try {
+        return await read(`../../../packages/${entry.name}/widgets/styles.css`);
+      } catch {
+        return "";
+      }
+    }));
+  const css = [core, mobile, ...packages].join("\n");
+  for (const match of css.matchAll(/border(?:-[\w-]+)?-radius\s*:\s*([^;]+)/g)) {
+    const value = match[1]!.trim();
+    if (/^(?:0(?:\s+0)*|50%|inherit)(?:\s*!important)?$/.test(value)) continue;
+    assert.ok(
+      value.includes("var(--radius") || value.includes("var(--corner-radius-scale)"),
+      `radius must use a semantic token or the shared scale: ${value}`,
+    );
+  }
+});
+
 test("Usage layout is container-responsive in narrow docked surfaces", async () => {
   const usage = await read("../../../packages/usage/widgets/styles.css");
 
