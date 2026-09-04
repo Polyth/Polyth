@@ -6,9 +6,10 @@ import { readWebStyles } from "./webStyles.ts";
 const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
 
 test("every phone view uses the same three-segment shell bar", async () => {
-  const [header, mobileHeader, prefs, shell, css] = await Promise.all([
+  const [header, mobileHeader, workspacePanel, prefs, shell, css] = await Promise.all([
     read("../src/components/Header.tsx"),
     read("../src/components/mobile/MobileSessionHeader.tsx"),
+    read("../src/components/mobile/WorkspacePanel.tsx"),
     read("../src/uiPrefs.ts"),
     read("../src/shell.ts"),
     readWebStyles(),
@@ -20,7 +21,9 @@ test("every phone view uses the same three-segment shell bar", async () => {
   assert.match(mobileHeader, /label="New session"/);
   assert.match(mobileHeader, /label="Open tools"/);
   assert.match(mobileHeader, /origin="top"/);
-  assert.match(mobileHeader, /title="Tools"/);
+  assert.match(workspacePanel, /title="Workspace"/);
+  assert.match(workspacePanel, /Available items/);
+  assert.equal((workspacePanel.match(/<Sheet/g) ?? []).length, 1);
   assert.doesNotMatch(mobileHeader, /Icon\.plus/);
   // The reserved band clears the floating island: safe area, the island's own
   // height (never below the tap floor), and the chrome inset around it.

@@ -73,6 +73,9 @@ export const USAGE_WIDGETS: readonly WidgetContributionDescriptor[] = [
     resizable: true,
     recommended: true,
     defaultVisible: false,
+    panelSizes: ["wide", "large"],
+    panelDefaultSize: "large",
+    panelTitle: "Usage",
   },
   {
     id: "usage.sessions-table",

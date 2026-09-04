@@ -1624,6 +1624,28 @@ export interface AgentDescriptor {
   model?: ModelRef;
 }
 export interface RuntimeCapabilities { streaming: boolean; permissions: boolean; questions: boolean; compaction: boolean; subagents: boolean; steering?: boolean }
+/** Why a project's agent runtime could not be started. An empty model catalog
+ * is a symptom with many causes; this carries the cause itself so the UI can
+ * state it instead of guessing that the backend is down. */
+export interface RuntimeUnavailableReport {
+  projectId: string;
+  cwd: string;
+  /** Error `code` the failure carried (`unavailable`, `restart-deferred`, …). */
+  code: string;
+  message: string;
+  /** Locations checked while looking for the OpenCode CLI, when the failure
+   * was a lookup. Absent for every other kind of failure. */
+  searched?: string[];
+  /** Consecutive failures since this runtime was last usable. */
+  attempts: number;
+  firstFailedAt: string;
+  lastFailedAt: string;
+}
+export interface RuntimeDiagnosticsDto {
+  /** True when every known runtime is usable. */
+  ok: boolean;
+  runtimes: RuntimeUnavailableReport[];
+}
 export interface RuntimeSession {
   id: string;
   title: string;
@@ -2273,6 +2295,7 @@ export type LocaleBundle<K extends string = string> = Record<Locale, Record<K, s
 export type WidgetKind = "widget" | "mini-widget";
 export type WidgetAudience = "simple" | "standard" | "power";
 export type WidgetScope = "global" | "workspace" | "plugin";
+export type PanelItemSize = "compact" | "standard" | "wide" | "large";
 
 export interface WidgetSize {
   w: number;
@@ -2307,6 +2330,9 @@ export interface WidgetContributionDescriptor {
   duplicatable?: boolean;
   recommended?: boolean;
   defaultVisible?: boolean;
+  panelSizes?: PanelItemSize[];
+  panelDefaultSize?: PanelItemSize;
+  panelTitle?: string;
   /** JSON Schema-shaped, browser-visible per-instance settings metadata. */
   settingsSchema?: JsonObject;
 }

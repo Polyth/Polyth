@@ -13,15 +13,13 @@ import {
   type IslandItem,
   type IslandTask,
 } from "../../mobileIsland.ts";
-import { railIconFor } from "../../railIcons.ts";
 import { resolveSessionStatus, type SessionRowStatus } from "../../sessionStatus.ts";
 import { openSession, prefetchSessionTail } from "../../init.ts";
-import { setOverlay, setRailPlugin, setSidebarOpen, startNewSession, useActiveModel, useStore } from "../../store.ts";
+import { setRailPlugin, setSidebarOpen, startNewSession, useActiveModel, useStore } from "../../store.ts";
 import { firstUserTextCached, lastUserTextCached } from "../../utils.ts";
-import { useResolvedCapabilities } from "../../capabilities.ts";
-import { toggleCapability } from "../../builtinCapabilities.ts";
 import { ComposeIcon, GlassIsland, IconButton, LayersIcon, MenuIcon } from "../ui/index.ts";
 import Sheet, { SheetRow, SheetSection } from "./Sheet.tsx";
+import WorkspacePanel from "./WorkspacePanel.tsx";
 import { PROMPT_VISIBILITY_EVENT, promptIsVisible } from "../../promptVisibility.ts";
 
 function SessionLiveIcon({ status }: { status: SessionRowStatus }) {
@@ -155,25 +153,7 @@ function IslandOverview({
 }
 
 export function Tools({ onClose }: { onClose: () => void }) {
-  const capabilities = useResolvedCapabilities().filter((capability) => capability.descriptor.available());
-  const groups = [
-    ["Workspace", capabilities.filter((capability) => ["files", "git", "terminal", "browser"].includes(capability.descriptor.id))],
-    ["Agent", capabilities.filter((capability) => ["workflow", "commands", "knowledge"].includes(capability.descriptor.id))],
-    ["System", capabilities.filter((capability) => !["session", "files", "git", "terminal", "browser", "workflow", "commands", "knowledge"].includes(capability.descriptor.id))],
-  ] as const;
-  return (
-    <Sheet title="Tools" size="tall" className="mobile-tools-sheet" onClose={onClose}
-      footer={<button className="mobile-surface-footer" onClick={() => { onClose(); setOverlay("settings"); }}><Icon.sliders /> Customize tools</button>}>
-      {groups.map(([title, items]) => items.length > 0 && <SheetSection key={title} title={title}>
-        {items.map((capability) => {
-          const CapabilityIcon = railIconFor(capability.descriptor.id);
-          return <SheetRow key={capability.descriptor.id} title={capability.descriptor.label}
-          icon={<CapabilityIcon />} trailing={<span className="mobile-surface-chevron"><Icon.chevronRight /></span>}
-          onClick={() => { setSidebarOpen(false); onClose(); toggleCapability(capability.descriptor.id, capability.descriptor.open); }} />;
-        })}
-      </SheetSection>)}
-    </Sheet>
-  );
+  return <WorkspacePanel onClose={onClose} />;
 }
 
 /** Phone navigation is intentionally a small overlay, not a second application header. */

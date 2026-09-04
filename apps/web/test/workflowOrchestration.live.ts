@@ -574,7 +574,13 @@ async function openWorkflowFromSwitcher(page: Page, label = "Workflows"): Promis
     const tools = page.getByRole("button", { name: "Open tools" });
     await tools.waitFor({ state: "visible" });
     await tools.click();
-    await page.getByRole("dialog", { name: "Tools" }).getByRole("option", { name: label, exact: true }).click();
+    const workspace = page.getByRole("dialog", { name: "Workspace" });
+    await workspace.getByRole("button", { name: "Edit", exact: true }).click();
+    const libraryItem = workspace.getByRole("button", { name: new RegExp(`^(Add ${label}|${label} already added)$`) });
+    await libraryItem.waitFor({ state: "visible" });
+    if ((await libraryItem.getAttribute("aria-label")) === `Add ${label}`) await libraryItem.click();
+    await workspace.getByRole("button", { name: "Done", exact: true }).click();
+    await workspace.getByRole("button", { name: label, exact: true }).click();
   }
   await page.waitForSelector(".workflow-page", { state: "visible" });
   await waitForAnimations(page, '.module-view[data-module-id="workflow"]');

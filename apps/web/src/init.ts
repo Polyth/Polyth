@@ -415,10 +415,12 @@ async function refreshModels(): Promise<void> {
       modelRetryDelay = MODEL_RETRY_BASE_MS;
       return;
     }
+    void refreshRuntimeDiagnostics();
     scheduleModelRetry();
   } catch (err) {
     // Project onboarding continues; the composer catalog owns its own state.
     if (!controller.signal.aborted) console.error("list models failed", err);
+    void refreshRuntimeDiagnostics();
     scheduleModelRetry();
   } finally {
     clearTimeout(timeout);
@@ -429,6 +431,20 @@ async function refreshModels(): Promise<void> {
       void refreshModels();
       void refreshAgents();
     }
+  }
+}
+
+/** An empty catalog has many causes; the server knows which one. Asked only on
+ *  an empty answer so a healthy boot never pays for it, and never allowed to
+ *  fail the retry loop — a missing reason just leaves the generic guidance. */
+async function refreshRuntimeDiagnostics(): Promise<void> {
+  try {
+    const { runtimes } = await api.runtimeDiagnostics();
+    // A late answer must not contradict a catalog that already arrived.
+    if (store.getState().models.length > 0) return;
+    store.setRuntimeUnavailable(runtimes[0] ?? null);
+  } catch {
+    // Older/remote servers may not expose the route; stay on the generic note.
   }
 }
 
