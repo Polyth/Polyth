@@ -257,6 +257,27 @@ function SessionSurface() {
     [gitStatus, model],
   );
   const [latestRevealAnchor, setLatestRevealAnchor] = useState<HTMLDivElement | null>(null);
+  const [composerDock, setComposerDock] = useState<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const conversation = composerDock?.parentElement;
+    if (!composerDock || !conversation) return;
+    const publishHeight = () => {
+      const timeline = conversation.querySelector<HTMLElement>(".timeline");
+      const followTail = timeline
+        ? timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < 80
+        : false;
+      conversation.style.setProperty("--conversation-dock-height", `${composerDock.offsetHeight}px`);
+      if (timeline && followTail) timeline.scrollTop = timeline.scrollHeight;
+    };
+    publishHeight();
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(publishHeight) : null;
+    observer?.observe(composerDock);
+    return () => {
+      observer?.disconnect();
+      conversation.style.removeProperty("--conversation-dock-height");
+    };
+  }, [composerDock]);
 
   if (workspaceMode !== "chat") return <WidgetCanvas />;
 
@@ -294,18 +315,19 @@ function SessionSurface() {
         slot="session.timeline.after"
         context={{ projectId, sessionId, permissions: pendingPermissions, secrets: pendingSecrets }}
       />
-      <SlotHost
-        slot="session.composer.before"
-        context={{ projectId, sessionId, editing: false }}
-        customizable
-      />
-      <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
-      <SlotHost
-        slot="session.footer"
-        context={{ projectId, sessionId, editing: false }}
-        customizable
-      />
-      {archived && sessionId ? <ArchivedComposerGuard sessionId={sessionId} /> : <Composer />}
+      {archived && sessionId
+        ? <>
+            <SlotHost slot="session.composer.before" context={{ projectId, sessionId, editing: false }} customizable />
+            <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
+            <SlotHost slot="session.footer" context={{ projectId, sessionId, editing: false }} customizable />
+            <ArchivedComposerGuard sessionId={sessionId} />
+          </>
+        : <div ref={setComposerDock} className="conversation-composer-dock">
+            <SlotHost slot="session.composer.before" context={{ projectId, sessionId, editing: false }} customizable />
+            <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
+            <SlotHost slot="session.footer" context={{ projectId, sessionId, editing: false }} customizable />
+            <Composer />
+          </div>}
     </div>
     {picker}
     </>

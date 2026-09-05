@@ -8,10 +8,13 @@ import { join } from "node:path";
 import type { ModelDescriptor } from "@polyth/contracts";
 import {
   blacklistsOf,
+  buildAvailableProviders,
   buildProviderCatalog,
   createModelVisibilityService,
   filterVisibleModels,
+  humanizeProviderId,
   parseVisibility,
+  shownProviderIds,
   visibilityFromBackendConfig,
 } from "../src/modelVisibility.ts";
 
@@ -25,12 +28,19 @@ const MODELS: ModelDescriptor[] = [
 ];
 
 test("parseVisibility survives garbage and dedupes", () => {
-  assert.deepEqual(parseVisibility(null), { disabledProviders: [], disabledModels: [] });
-  assert.deepEqual(parseVisibility("nope"), { disabledProviders: [], disabledModels: [] });
+  assert.deepEqual(parseVisibility(null), { disabledProviders: [], disabledModels: [], addedProviders: [] });
+  assert.deepEqual(parseVisibility("nope"), { disabledProviders: [], disabledModels: [], addedProviders: [] });
   assert.deepEqual(
     parseVisibility({ disabledProviders: ["b", "a", "b", 7, ""], disabledModels: ["p/m", "p/m"] }),
-    { disabledProviders: ["a", "b"], disabledModels: ["p/m"] },
+    { disabledProviders: ["a", "b"], disabledModels: ["p/m"], addedProviders: [] },
   );
+});
+
+test("parseVisibility normalizes addedProviders (plain ids or {id,name}, deduped by id)", () => {
+  const v = parseVisibility({
+    addedProviders: ["groq", { id: "groq", name: "Groq" }, { id: "cerebras" }, { id: "" }, "bad-dup", "bad-dup"],
+  });
+  assert.deepEqual(v.addedProviders, [{ id: "bad-dup" }, { id: "cerebras" }, { id: "groq", name: "Groq" }]);
 });
 
 test("visibilityFromBackendConfig reads disabled_providers and provider blacklists", () => {
@@ -41,8 +51,8 @@ test("visibilityFromBackendConfig reads disabled_providers and provider blacklis
       anthropic: { baseURL: "https://x" },
     },
   });
-  assert.deepEqual(v, { disabledProviders: ["ollama"], disabledModels: ["openai/gpt-mini"] });
-  assert.deepEqual(visibilityFromBackendConfig({}), { disabledProviders: [], disabledModels: [] });
+  assert.deepEqual(v, { disabledProviders: ["ollama"], disabledModels: ["openai/gpt-mini"], addedProviders: [] });
+  assert.deepEqual(visibilityFromBackendConfig({}), { disabledProviders: [], disabledModels: [], addedProviders: [] });
 });
 
 test("filterVisibleModels hides disabled + disconnected by default, but never everything", () => {
@@ -61,7 +71,7 @@ test("filterVisibleModels hides disabled + disconnected by default, but never ev
 test("buildProviderCatalog groups by provider with enabled/connected flags", () => {
   const state = parseVisibility({ disabledProviders: ["ollama"], disabledModels: ["openai/gpt-mini"] });
   const catalog = buildProviderCatalog(MODELS, state);
-  assert.deepEqual(catalog.map((p) => p.id), ["anthropic", "openai", "ollama"], "connected first, then name");
+  assert.deepEqual(catalog.map((p) => p.id), ["anthropic", "openai"], "unconfigured providers stay out of the catalog");
   const openai = catalog.find((p) => p.id === "openai")!;
   assert.equal(openai.name, "OpenAI");
   assert.equal(openai.enabled, true);
@@ -70,10 +80,6 @@ test("buildProviderCatalog groups by provider with enabled/connected flags", () 
     openai.models.map((m) => [m.key, m.enabled]),
     [["openai/gpt-mini", false], ["openai/gpt-x", true]],
   );
-  const ollama = catalog.find((p) => p.id === "ollama")!;
-  assert.equal(ollama.enabled, false);
-  assert.equal(ollama.connected, false);
-  assert.equal(ollama.models[0]!.enabled, false, "models inherit a disabled provider");
 });
 
 test("buildProviderCatalog keeps configured providers with no discovered models", () => {
@@ -87,6 +93,43 @@ test("buildProviderCatalog keeps configured providers with no discovered models"
     enabled: false,
     models: [],
   }]);
+});
+
+test("buildProviderCatalog shows explicitly added providers with no config stanza and no models", () => {
+  const state = parseVisibility({ addedProviders: [{ id: "groq", name: "Groq" }] });
+  const catalog = buildProviderCatalog([], state);
+  assert.deepEqual(catalog, [{ id: "groq", name: "Groq", connected: false, enabled: true, models: [] }]);
+});
+
+test("buildProviderCatalog prefers a config stanza's name over an added-provider hint for the same id", () => {
+  const state = parseVisibility({ addedProviders: [{ id: "cursor", name: "stale hint" }] });
+  const catalog = buildProviderCatalog([], state, [{ id: "cursor", name: "Cursor" }]);
+  assert.deepEqual(catalog, [{ id: "cursor", name: "Cursor", connected: false, enabled: true, models: [] }]);
+});
+
+test("shownProviderIds unions configured, added, and model-bearing providers", () => {
+  const state = parseVisibility({ addedProviders: [{ id: "groq" }] });
+  const ids = shownProviderIds(MODELS, state, [{ id: "cursor" }]);
+  assert.deepEqual([...ids].sort(), ["anthropic", "cursor", "groq", "openai"]);
+});
+
+test("humanizeProviderId title-cases kebab/snake ids", () => {
+  assert.equal(humanizeProviderId("github-copilot"), "Github Copilot");
+  assert.equal(humanizeProviderId("zai_coding_plan"), "Zai Coding Plan");
+  assert.equal(humanizeProviderId("groq"), "Groq");
+});
+
+test("buildAvailableProviders merges live + auth-only providers and excludes anything already shown", () => {
+  const shown = new Set(["openai"]);
+  const available = buildAvailableProviders(
+    [{ id: "openai", name: "OpenAI" }, { id: "huggingface", name: "Hugging Face" }],
+    ["cursor", "huggingface"],
+    shown,
+  );
+  assert.deepEqual(available, [
+    { id: "cursor", name: "Cursor" },
+    { id: "huggingface", name: "Hugging Face" },
+  ]);
 });
 
 test("blacklistsOf splits keys per provider", () => {
@@ -109,7 +152,11 @@ test("service seeds from opencode.json when the store file is missing", async ()
   };
   const svc = createModelVisibilityService({ file: join(dir, "model-visibility.json"), applier });
   await svc.seed();
-  assert.deepEqual(svc.state(), { disabledProviders: ["ollama"], disabledModels: ["openai/gpt-mini"] });
+  assert.deepEqual(svc.state(), {
+    disabledProviders: ["ollama"],
+    disabledModels: ["openai/gpt-mini"],
+    addedProviders: [],
+  });
   assert.equal(svc.providerEnabled("ollama"), false);
   assert.equal(svc.modelEnabled({ providerID: "openai", modelID: "gpt-mini" }), false);
   assert.equal(svc.modelEnabled({ providerID: "openai", modelID: "gpt-x" }), true);
@@ -152,7 +199,7 @@ test("toggles persist and mirror into the backend config", async () => {
   await svc.setModelEnabled("openai/gpt-mini", false);
   assert.deepEqual(applied, { disabledProviders: ["ollama"], blacklists: { openai: ["gpt-mini"] } });
   const onDisk = JSON.parse(readFileSync(join(dir, "model-visibility.json"), "utf8"));
-  assert.deepEqual(onDisk, { disabledProviders: ["ollama"], disabledModels: ["openai/gpt-mini"] });
+  assert.deepEqual(onDisk, { disabledProviders: ["ollama"], disabledModels: ["openai/gpt-mini"], addedProviders: [] });
 
   await svc.setModelEnabled("openai/gpt-mini", true);
   await svc.setProviderEnabled("ollama", true);
@@ -178,4 +225,58 @@ test("invalid model keys are rejected", async () => {
   for (const bad of ["", "noSlash", "/leading", "trailing/"]) {
     await assert.rejects(async () => svc.setModelEnabled(bad, false), (e: Error & { code?: string }) => e.code === "invalid-input");
   }
+});
+
+test("addProvider shows a zero-model row and clears a stale disabled flag", async () => {
+  const dir = tmp();
+  let applied: { disabledProviders: string[]; blacklists: Record<string, string[]> } | null = null;
+  const svc = createModelVisibilityService({
+    file: join(dir, "model-visibility.json"),
+    applier: {
+      readConfig: async () => ({ disabled_providers: ["groq"] }),
+      applyProviderVisibility: async (v) => { applied = v; },
+    },
+  });
+  await svc.seed();
+  assert.equal(svc.providerEnabled("groq"), false, "seeded disabled, as it was never added");
+  assert.deepEqual(svc.catalog([]), [], "not added yet, so not shown");
+
+  await svc.addProvider("groq", "Groq");
+  assert.deepEqual(svc.catalog([]), [{ id: "groq", name: "Groq", connected: false, enabled: true, models: [] }]);
+  assert.equal(svc.providerEnabled("groq"), true, "adding clears a stale disabled flag");
+  assert.deepEqual(applied, { disabledProviders: [], blacklists: {} });
+
+  const onDisk = JSON.parse(readFileSync(join(dir, "model-visibility.json"), "utf8"));
+  assert.deepEqual(onDisk.addedProviders, [{ id: "groq", name: "Groq" }]);
+});
+
+test("addProvider rejects a missing id; removeProvider hides the row again without touching disabledProviders", async () => {
+  const svc = createModelVisibilityService({ file: join(tmp(), "v.json") });
+  await assert.rejects(async () => svc.addProvider(""), (e: Error & { code?: string }) => e.code === "invalid-input");
+  await assert.rejects(async () => svc.removeProvider(""), (e: Error & { code?: string }) => e.code === "invalid-input");
+
+  await svc.addProvider("groq", "Groq");
+  await svc.setProviderEnabled("groq", false);
+  assert.deepEqual(svc.catalog([])[0]!.enabled, false);
+
+  await svc.removeProvider("groq");
+  assert.deepEqual(svc.catalog([]), [], "removed provider is hidden again");
+  assert.deepEqual(svc.state().disabledProviders, ["groq"], "remove does not touch the disabled flag");
+});
+
+test("available() excludes catalog()-shown providers and surfaces auth-only ones by humanized name", async () => {
+  const svc = createModelVisibilityService({
+    file: join(tmp(), "v.json"),
+    applier: { readConfig: async () => ({ provider: { cursor: {} } }), applyProviderVisibility: async () => {} },
+  });
+  await svc.seed();
+  const available = svc.available(
+    MODELS, // only connected model-bearing providers are already shown
+    [{ id: "openai", name: "OpenAI" }, { id: "huggingface", name: "Hugging Face" }],
+    ["cursor", "github-copilot"],
+  );
+  assert.deepEqual(available, [
+    { id: "github-copilot", name: "Github Copilot" },
+    { id: "huggingface", name: "Hugging Face" },
+  ]);
 });

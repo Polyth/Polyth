@@ -1625,6 +1625,23 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   display: flex; align-items: center; gap: var(--space-1); min-width: 0;
   padding: 6px 10px 10px;
 }
+.composer-leading-zone,
+.composer-actions,
+.composer-primary,
+.composer-extensions {
+  align-items: center;
+}
+.composer-leading-zone {
+  display: inline-flex;
+  flex: none;
+  min-width: 0;
+  gap: var(--space-1);
+}
+.composer-leading-zone > *,
+.composer-actions > *,
+.composer-primary > * {
+  align-self: center;
+}
 /* Container on the composer element itself so the narrow-width reflow below
    fires for the chat composer too (the widget-mode class is absent there).
    The rail must never let config chips paint over the leading extension icons
@@ -4684,6 +4701,50 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 }
 .turn-rate-limit .ui-notice-body { font-variant-numeric: tabular-nums; }
 .turn-rate-limit .ui-notice-actions { flex-wrap: wrap; row-gap: var(--space-1); }
+/* The notice has one action group: keep its two Buttons and Picker trigger on
+   the same Quiet Glass control contract instead of mixing primary/ghost/chip
+   chrome. The Picker stays searchable; only its trigger is restyled here. */
+.turn-rate-limit .turn-rate-limit-action,
+.turn-rate-limit .turn-rate-limit-model .picker-chip {
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  height: auto;
+  padding: 0 var(--control-pad-x-sm);
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-control);
+  background: var(--material-glass);
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+  color: var(--text);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  transform: none;
+  transition: background var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease);
+}
+.turn-rate-limit .turn-rate-limit-action:hover:not(:disabled),
+.turn-rate-limit .turn-rate-limit-model .picker-chip:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--material-glass) 72%, var(--accent-wash));
+  border-color: var(--accent-line);
+  color: var(--text);
+  transform: none;
+}
+.turn-rate-limit .turn-rate-limit-model .chip-k {
+  color: var(--muted);
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .turn-rate-limit .turn-rate-limit-action,
+  .turn-rate-limit .turn-rate-limit-model .picker-chip {
+    background: radial-gradient(140% 140% at 50% 50%,
+      color-mix(in srgb, var(--material-glass) 90%, transparent) 0%,
+      color-mix(in srgb, var(--material-glass) 55%, transparent) 100%);
+    -webkit-backdrop-filter: blur(calc(var(--material-glass-blur) * .7));
+    backdrop-filter: blur(calc(var(--material-glass-blur) * .7));
+  }
+}
 @media (max-width: 640px) {
   .turn-rate-limit { flex-wrap: wrap; }
   .turn-rate-limit .ui-notice-actions { margin-left: 0; width: 100%; }
@@ -4772,7 +4833,14 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 }
 
 /* Focus is a conversation, not a dashboard. */
-.focus-conversation { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.focus-conversation {
+  --conversation-dock-height: calc(var(--composer-height) + var(--space-5));
+  position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column;
+}
+.conversation-composer-dock {
+  position: absolute; inset: auto 0 0; z-index: var(--z-shell); pointer-events: none;
+}
+.conversation-composer-dock > * { pointer-events: auto; }
 .focus-customize {
   position: absolute; top: 16px; right: 22px; z-index: 8; height: 34px; display: flex; align-items: center; gap: 7px;
   padding: 0 12px; border-color: var(--border-soft); background: var(--elevated); color: var(--text-dim); box-shadow: 0 4px 18px -14px rgba(0,0,0,.25);
@@ -6211,13 +6279,20 @@ min-height: var(--tap);
   box-shadow: var(--material-glass-highlight), var(--shadow-md);
 }
 .composer-simple .composer-input { order: 1; }
-.composer-simple .composer-rail { order: 2; min-height: 50px; padding: var(--space-1) var(--space-2) var(--space-2); }
+.composer-simple .composer-rail {
+  order: 2;
+  min-height: 50px;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+}
 .composer-simple .composer-card textarea {
   min-height: 74px;
   padding: 16px 16px 6px;
   font-size: 14px;
 }
 .composer-simple .composer-primary { margin-left: 2px; }
+.composer-simple .composer-actions { gap: var(--space-3); }
+.composer-simple .composer-config { gap: var(--space-2); }
 .composer-simple .composer-rail .send {
   width: 40px;
   height: 40px;
@@ -7605,8 +7680,8 @@ display: none;
     display: flex;
     align-items: center;
     flex-wrap: nowrap;
-    gap: var(--space-1);
-    padding: var(--space-1) var(--space-2) var(--space-2);
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3) var(--space-3);
   }
   /* Chips never shrink into overlapping glyphs: each keeps its truncated
      width and the config group itself scrolls sideways when space runs out.
@@ -7614,7 +7689,7 @@ display: none;
   .composer-mobile .composer-config {
     min-width: 0;
     flex: 1 1 auto;
-    gap: 2px;
+    gap: var(--space-2);
     overflow-x: auto;
     overflow-y: hidden;
     overscroll-behavior-inline: contain;
@@ -7640,9 +7715,9 @@ display: none;
   .composer-mobile .composer-config-top {
     display: flex;
     align-items: center;
-    gap: var(--space-2);
+    gap: var(--space-3);
     min-width: 0;
-    padding: var(--space-2) var(--space-2) 0;
+    padding: var(--space-3) var(--space-4) var(--space-2);
   }
   .composer-mobile.composer-collapsed .composer-config-top { display: none; }
   .composer-mobile .composer-config-top > .model-picker {
@@ -8839,18 +8914,6 @@ font-size: var(--font-label);
    Gesture feedback, honest loading, scroll discovery, and stage transitions
    share the same spacing/motion vocabulary as the mobile shell. */
 
-/* Vertical overflow reveals itself with local cover gradients and stationary
-   edge shadows. The shadows disappear naturally at each scroll boundary. */
-:is(.side-scroll, .settings-pane-body, .sheet-body, .folder-list, .rail-body) {
-  --scroll-surface: var(--bg);
-  background:
-    linear-gradient(var(--scroll-surface) 32%, transparent) center top / 100% 22px no-repeat local,
-    linear-gradient(transparent, var(--scroll-surface) 68%) center bottom / 100% 22px no-repeat local,
-    radial-gradient(farthest-side at 50% 0, color-mix(in srgb, var(--text) 18%, transparent), transparent) center top / 100% 8px no-repeat scroll,
-    radial-gradient(farthest-side at 50% 100%, color-mix(in srgb, var(--text) 16%, transparent), transparent) center bottom / 100% 8px no-repeat scroll;
-}
-:is(.side-scroll, .sheet-body, .folder-list, .rail-body) { --scroll-surface: var(--panel); }
-.settings-pane-body { --scroll-surface: var(--elevated); }
 @media (forced-colors: active) {
 :is(.side-scroll, .settings-pane-body, .sheet-body, .folder-list, .rail-body) {
     background: Canvas;
@@ -11169,13 +11232,17 @@ html[data-font] body :is(
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .ui-glass-island,
   .ui-glass-dock {
-    background: color-mix(in srgb, var(--material-glass) 60%, transparent);
+    background: radial-gradient(140% 140% at 50% 50%,
+      color-mix(in srgb, var(--material-glass) 78%, transparent) 0%,
+      color-mix(in srgb, var(--material-glass) 34%, transparent) 100%);
     backdrop-filter: blur(var(--material-glass-blur)) saturate(135%);
     -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(135%);
   }
   /* User turns keep the theme's accent tint; glass only thins it. */
   .msg.user .bubble {
-    background: color-mix(in srgb, var(--bubble-user-bg) 90%, transparent);
+    background: radial-gradient(140% 140% at 50% 50%,
+      color-mix(in srgb, var(--bubble-user-bg) 97%, transparent) 0%,
+      color-mix(in srgb, var(--bubble-user-bg) 68%, transparent) 100%);
     backdrop-filter: blur(10px) saturate(125%);
     -webkit-backdrop-filter: blur(10px) saturate(125%);
   }
@@ -11234,7 +11301,7 @@ html[data-font] body :is(
   color: var(--red);
 }
 
-.ui-btn--ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+.ui-btn--ghost { background: transparent; border-color: transparent; box-shadow: none; color: var(--text-dim); }
 .ui-btn--ghost:hover:not(:disabled) { background: var(--surface-overlay-hover); border-color: transparent; color: var(--text); }
 
 /* ---- IconButton ------------------------------------------------------------
@@ -11603,43 +11670,73 @@ html[data-font] body :is(
 /* Quiet Glass enhances only when the browser and device preference allow it;
    the declarations above remain the readable opaque fallback. */
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  /* Vignette: content stays legible over the busiest part of the surface
+     (its center) while the rim leans into the glass — more background shows
+     through at the edges. Same blur amount throughout; only the tint's
+     opacity varies, via a radial-gradient in place of a flat color-mix. */
   :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu) {
-    background: color-mix(in srgb, var(--material-glass) 76%, transparent);
+    background: radial-gradient(140% 140% at 50% 50%,
+      color-mix(in srgb, var(--material-glass) 90%, transparent) 0%,
+      color-mix(in srgb, var(--material-glass) 55%, transparent) 100%);
     -webkit-backdrop-filter: blur(var(--material-glass-blur));
     backdrop-filter: blur(var(--material-glass-blur));
   }
   /* Small, close-to-anchor overlays: lighter blur reads better at this size
      than the full sheet-grade amount. */
   :is(.ui-tooltip, .composer-effort-tooltip) {
-    background: color-mix(in srgb, var(--material-glass) 70%, transparent);
+    background: radial-gradient(140% 140% at 50% 50%,
+      color-mix(in srgb, var(--material-glass) 84%, transparent) 0%,
+      color-mix(in srgb, var(--material-glass) 50%, transparent) 100%);
     -webkit-backdrop-filter: blur(calc(var(--material-glass-blur) * .7));
     backdrop-filter: blur(calc(var(--material-glass-blur) * .7));
   }
   :is(.dialog-panel, .sheet, .response-footer-metadata-grid) {
-    background: color-mix(in srgb, var(--material-glass-strong) 88%, transparent);
+    background: radial-gradient(140% 140% at 50% 50%,
+      color-mix(in srgb, var(--material-glass-strong) 96%, transparent) 0%,
+      color-mix(in srgb, var(--material-glass-strong) 66%, transparent) 100%);
     -webkit-backdrop-filter: blur(var(--material-glass-blur));
     backdrop-filter: blur(var(--material-glass-blur));
   }
+  /* Chat-turn cards: one per assistant turn, not a repeated list row, so a
+     lighter blur is worth the cost here (unlike the excluded list surfaces
+     below). Lower opacity than chrome — these sit inside the scrolling
+     conversation, so more of the app background should read through. */
+  :is(.activity-group, .task-list) {
+    background: radial-gradient(140% 140% at 50% 50%,
+      color-mix(in srgb, var(--surface-activity) 88%, transparent) 0%,
+      color-mix(in srgb, var(--surface-activity) 52%, transparent) 100%);
+    -webkit-backdrop-filter: blur(calc(var(--material-glass-blur) * .6));
+    backdrop-filter: blur(calc(var(--material-glass-blur) * .6));
+  }
   .composer-mobile .composer-card {
-    background: color-mix(in srgb, var(--material-glass-strong) 62%, transparent);
+    background: radial-gradient(140% 140% at 50% 50%,
+      color-mix(in srgb, var(--material-glass-strong) 80%, transparent) 0%,
+      color-mix(in srgb, var(--material-glass-strong) 40%, transparent) 100%);
     -webkit-backdrop-filter: blur(var(--material-glass-blur));
     backdrop-filter: blur(var(--material-glass-blur));
   }
   .mobile-island-sheet.sheet {
-    background: color-mix(in srgb, var(--panel) 90%, transparent);
+    background: radial-gradient(140% 140% at 50% 50%,
+      color-mix(in srgb, var(--panel) 97%, transparent) 0%,
+      color-mix(in srgb, var(--panel) 68%, transparent) 100%);
     -webkit-backdrop-filter: blur(var(--material-glass-blur));
     backdrop-filter: blur(var(--material-glass-blur));
   }
   /* Compact drawer (<=820px): same glass language as the desktop dock below,
      scoped to .open so the off-screen state never pays for a blur layer. */
   @media (max-width: 820px), (max-height: 480px) and (pointer: coarse) {
+    .app > .header,
     .sidebar.open {
-      background: color-mix(in srgb, var(--material-glass) 72%, transparent);
+      background: radial-gradient(140% 140% at 50% 50%,
+        color-mix(in srgb, var(--material-glass) 86%, transparent) 0%,
+        color-mix(in srgb, var(--material-glass) 48%, transparent) 100%);
       -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(130%);
       backdrop-filter: blur(var(--material-glass-blur)) saturate(130%);
     }
     .workspace-customize-panel {
-      background: color-mix(in srgb, var(--material-glass-strong) 88%, transparent);
+      background: radial-gradient(140% 140% at 50% 50%,
+        color-mix(in srgb, var(--material-glass-strong) 96%, transparent) 0%,
+        color-mix(in srgb, var(--material-glass-strong) 62%, transparent) 100%);
       -webkit-backdrop-filter: blur(var(--material-glass-blur));
       backdrop-filter: blur(var(--material-glass-blur));
     }
@@ -11651,11 +11748,17 @@ html[data-font] body :is(
     .sidebar,
     .railbar,
     .composer-card {
-      background: color-mix(in srgb, var(--material-glass) 78%, transparent);
+      background: radial-gradient(140% 140% at 50% 50%,
+        color-mix(in srgb, var(--material-glass) 90%, transparent) 0%,
+        color-mix(in srgb, var(--material-glass) 55%, transparent) 100%);
       -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(120%);
       backdrop-filter: blur(var(--material-glass-blur)) saturate(120%);
     }
-    .composer-card { background: color-mix(in srgb, var(--material-glass-strong) 84%, transparent); }
+    .composer-card {
+      background: radial-gradient(140% 140% at 50% 50%,
+        color-mix(in srgb, var(--material-glass-strong) 94%, transparent) 0%,
+        color-mix(in srgb, var(--material-glass-strong) 60%, transparent) 100%);
+    }
   }
   /* A popover inside the persistent composer must not stack another blur. */
   .composer-card :is(.ui-popover, .picker-pop),
@@ -11664,31 +11767,35 @@ html[data-font] body :is(
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .composer-effort-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet),
-  html[data-reduce-animations="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .composer-effort-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet) {
+  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .composer-effort-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet, .activity-group, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip),
+  html[data-reduce-animations="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .composer-effort-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet, .activity-group, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip) {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .composer-effort-tooltip, .app > .header, .sidebar, .railbar) { background: var(--material-glass); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.dialog-panel, .sheet, .composer-card, .response-footer-metadata-grid, .workspace-customize-panel) { background: var(--material-glass-strong); }
+  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.activity-group, .task-list) { background: var(--surface-activity); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.ui-glass-island, .ui-glass-dock) { background: var(--material-glass); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) .msg.user .bubble { background: var(--bubble-user-bg); }
   :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) .mobile-island-sheet.sheet { background: var(--panel); }
+  :is(body[data-desktop-low-resource="true"], html[data-reduce-animations="true"] body) :is(.turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip) { background: var(--material-glass); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .composer-effort-tooltip) { background: var(--material-glass); }
   :is(.dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel) { background: var(--material-glass-strong); }
-  :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .composer-effort-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet) {
+  :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .ui-tooltip, .composer-effort-tooltip, .dialog-panel, .sheet, .response-footer-metadata-grid, .workspace-customize-panel, .app > .header, .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .mobile-island-sheet.sheet, .activity-group, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip) {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
   :is(.app > .header, .sidebar, .railbar) { background: var(--material-glass); }
   .composer-card,
   .composer-mobile .composer-card { background: var(--material-glass-strong); }
+  :is(.activity-group, .task-list) { background: var(--surface-activity); }
   :is(.ui-glass-island, .ui-glass-dock) { background: var(--material-glass); }
   .msg.user .bubble { background: var(--bubble-user-bg); }
   .mobile-island-sheet.sheet { background: var(--panel); }
+  :is(.turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip) { background: var(--material-glass); }
 }
 
 /* The desktop shell is a composition of distinct chrome surfaces rather than
@@ -11841,7 +11948,7 @@ html[data-font] body :is(
   margin-inline: auto;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
+  align-items: start;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   color: var(--text-dim);
@@ -11850,9 +11957,8 @@ html[data-font] body :is(
 }
 .agent-status-dock:hover { background: var(--elevated); color: var(--text); }
 .agent-status-dock:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
-.agent-status-dock-icon { position: relative; display: grid; place-items: center; width: var(--control-h); height: var(--control-h); }
-.agent-status-dock-icon > .provider-logo { width: var(--icon-xl); height: var(--icon-xl); }
-.agent-status-dock-icon > i { position: absolute; inset-inline-end: 0; inset-block-end: var(--space-1); width: var(--space-2); height: var(--space-2); border: 2px solid var(--surface); border-radius: 50%; background: var(--green); animation: status-pulse 1.8s ease-in-out infinite; }
+.agent-status-dock-icon { position: relative; display: grid; place-items: center; width: var(--icon-xl); height: var(--icon-xl); margin-block-start: var(--space-1); }
+.agent-status-dock-icon > i { position: absolute; inset-inline-end: 0; inset-block-end: 0; width: var(--space-2); height: var(--space-2); border: 2px solid var(--surface); border-radius: 50%; background: var(--green); animation: status-pulse 1.8s ease-in-out infinite; }
 .agent-status-dock-content { min-width: 0; display: grid; gap: var(--space-1); }
 .agent-status-dock-primary { min-width: 0; display: flex; align-items: center; gap: var(--space-2); }
 .agent-status-dock-primary strong { flex: none; max-width: 42%; overflow: hidden; color: var(--text); font-size: var(--font-label); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
@@ -12044,8 +12150,14 @@ html[data-font] body :is(
 .jump-latest:focus-visible { background: var(--elevated); color: var(--text); filter: none; }
 
 @media (max-width: 620px) {
+  .focus-conversation {
+    --conversation-chrome-inset: max(var(--conversation-inset), var(--safe-left), var(--safe-right));
+    --activity-row-height: var(--tap);
+    --radius-activity: var(--radius-card);
+    --radius-dock: var(--radius-card);
+  }
   .timeline {
-    padding-inline: max(var(--conversation-inset), var(--safe-left)) max(var(--conversation-inset), var(--safe-right));
+    padding-inline: var(--conversation-chrome-inset);
     gap: var(--conversation-message-gap);
   }
   .msg.assistant > .bubble { font-size: var(--font-response); line-height: var(--font-response-lh); }
@@ -12057,6 +12169,15 @@ html[data-font] body :is(
   .agent-status-dock-branch { display: none; }
   .agent-status-dock-primary strong { max-width: 36%; }
   .ui-run-summary-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .msg.user .bubble { max-inline-size: min(96%, 640px); }
+  .activity-group .task-activity-mark { width: var(--icon-md); flex-basis: var(--icon-md); }
+}
+
+/* Keep this after responsive timeline shorthands: the floating dock may grow
+   when a pending widget appears, and its full height must remain scrollable. */
+.focus-conversation:has(> .conversation-composer-dock) .timeline {
+  padding-bottom: calc(var(--conversation-dock-height) + var(--conversation-group-gap));
+  scroll-padding-bottom: var(--conversation-dock-height);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -12170,41 +12291,165 @@ html[data-background="none"] .app {
 }
 html[data-background]:not([data-background="none"]) .app {
   background-color: var(--bg);
-  background-image: var(--app-background-image);
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--bg) 76%, transparent), color-mix(in srgb, var(--bg) 76%, transparent)),
+    var(--app-background-image);
   background-position: center;
   background-repeat: no-repeat;
   background-size: cover;
 }
-html[data-background]:not([data-background="none"]) .workspace > .main {
-  background: color-mix(in srgb, var(--bg) 70%, transparent);
-}
 html[data-background]:not([data-background="none"]) .stage::before { background: transparent; }
 html[data-background]:not([data-background="none"]) .rail.rail-workspace:not(.rail-fullscreen) {
-  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-    html[data-background]:not([data-background="none"]):not([data-reduce-animations="true"]) body:not([data-desktop-low-resource="true"]) .workspace > .main {
-      background: color-mix(in srgb, var(--bg) 58%, transparent);
-      -webkit-backdrop-filter: blur(3px) saturate(112%);
-      backdrop-filter: blur(3px) saturate(112%);
-    }
-    html[data-background]:not([data-background="none"]):not([data-reduce-animations="true"]) body:not([data-desktop-low-resource="true"]) :is(
+body[data-glass="clear"] {
+  --material-glass-fill: 30%;
+  --material-glass-edge: 10%;
+  --material-glass-control-fill: 10%;
+  --material-glass-control-edge: 4%;
+  --material-glass-blur: 10px;
+  --material-glass-saturation: 130%;
+}
+
+/* Nested controls get a cut-glass edge without stacking another expensive
+   blur over their already-filtered shell surface. */
+body:not([data-glass="off"]) :is(
+  .header-control,
+  .header .ui-icon-btn,
+  .header-profile,
+  .workspace-mode-switch,
+  .view-switcher-pill,
+  .sidebar-search,
+  .desktop-session-status-trigger,
+  .attachment-pill,
+  .ui-glass-dock .ui-btn--quiet
+) {
+  border: 1px solid var(--material-glass-border);
+  background: linear-gradient(145deg,
+    color-mix(in srgb, var(--material-glass) var(--material-glass-control-fill), transparent),
+    color-mix(in srgb, var(--material-glass) var(--material-glass-control-edge), transparent));
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+}
+
+/* Glass is a static material choice, not motion. The explicit Appearance
+   setting stays authoritative even when motion is reduced; low-resource mode
+   remains the one performance override. */
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(
       .app > .header,
       .sidebar,
       .railbar:not(:has(.rail-fullscreen)),
       .statusbar,
-      .background-quick-trigger
+      .background-quick-trigger,
+      .ui-glass-island,
+      .ui-glass-dock,
+      .ui-popover,
+      .picker-pop,
+      .menu-popup,
+      .ac-popup,
+      .prompt-nav-panel,
+      .selection-menu,
+      .ui-tooltip,
+      .composer-effort-tooltip,
+      .turn-rate-limit .turn-rate-limit-action,
+      .turn-rate-limit .turn-rate-limit-model .picker-chip,
+      .jump-latest
     ) {
-      background: color-mix(in srgb, var(--material-glass) 62%, transparent);
-      -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(138%);
-      backdrop-filter: blur(var(--material-glass-blur)) saturate(138%);
+      background: radial-gradient(140% 140% at 50% 50%,
+        color-mix(in srgb, var(--material-glass) var(--material-glass-fill), transparent) 0%,
+        color-mix(in srgb, var(--material-glass) var(--material-glass-edge), transparent) 100%);
+      -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
+      backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
     }
-    html[data-background]:not([data-background="none"]):not([data-reduce-animations="true"]) body:not([data-desktop-low-resource="true"]) .composer-card {
-      background: color-mix(in srgb, var(--material-glass-strong) 72%, transparent);
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(
+      .composer-card,
+      .dialog-panel,
+      .sheet,
+      .settings-shell,
+      .project-setup,
+      .response-footer-metadata-grid,
+      .workspace-customize-panel,
+      .attachment-preview-toolbar
+    ) {
+      background: radial-gradient(140% 140% at 50% 50%,
+        color-mix(in srgb, var(--material-glass-strong) var(--material-glass-fill), transparent) 0%,
+        color-mix(in srgb, var(--material-glass-strong) var(--material-glass-edge), transparent) 100%);
+      -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
+      backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
+      background-clip: padding-box;
     }
-  }
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(.activity-group, .task-list) {
+      background: radial-gradient(140% 140% at 50% 50%,
+        color-mix(in srgb, var(--surface-activity) var(--material-glass-fill), transparent) 0%,
+        color-mix(in srgb, var(--surface-activity) var(--material-glass-edge), transparent) 100%);
+      border-color: var(--material-glass-border);
+      box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+      -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
+      backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
+      background-clip: padding-box;
+    }
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .msg.user .bubble {
+      background: radial-gradient(140% 140% at 50% 50%,
+        color-mix(in srgb, var(--bubble-user-bg) var(--material-glass-fill), transparent) 0%,
+        color-mix(in srgb, var(--bubble-user-bg) var(--material-glass-edge), transparent) 100%);
+      -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
+      backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
+    }
+}
+
+body[data-glass="off"] :is(
+  .app > .header,
+  .sidebar,
+  .railbar,
+  .statusbar,
+  .background-quick-trigger,
+  .ui-glass-island,
+  .ui-glass-dock,
+  .ui-popover,
+  .picker-pop,
+  .menu-popup,
+  .ac-popup,
+  .prompt-nav-panel,
+  .selection-menu,
+  .ui-tooltip,
+  .composer-effort-tooltip,
+  .turn-rate-limit .turn-rate-limit-action,
+  .turn-rate-limit .turn-rate-limit-model .picker-chip,
+  .jump-latest
+) {
+  background: var(--material-glass);
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+body[data-glass="off"] :is(
+  .composer-card,
+  .dialog-panel,
+  .sheet,
+  .settings-shell,
+  .project-setup,
+  .response-footer-metadata-grid,
+  .workspace-customize-panel,
+  .attachment-preview-toolbar
+) {
+  background: var(--material-glass-strong);
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+body[data-glass="off"] :is(.activity-group, .task-list) {
+  background: var(--surface-activity);
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+body[data-glass="off"] .msg.user .bubble {
+  background: var(--bubble-user-bg);
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+body[data-glass="off"] :is(.project-setup-scrim, .scrim, .dialog-backdrop, .sheet-backdrop) {
+  background: var(--scrim);
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }
 
 @media (max-width: 520px) {

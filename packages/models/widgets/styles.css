@@ -15,11 +15,13 @@ width: 18px; height: 18px;
 color: var(--text); background: var(--accent-wash);
 }
 .provider-logo {
-width: 24px; height: 24px; aspect-ratio: 1;
+aspect-ratio: 1;
   display: grid; place-items: center; flex: none;
   color: var(--text);
   line-height: 1;
 }
+.provider-logo--compact { width: var(--icon-sm); height: var(--icon-sm); }
+.provider-logo--regular { width: var(--icon-md); height: var(--icon-md); }
 .provider-logo > svg {
 width: 100%; height: 100%; display: block;
   /* A single square canvas keeps every provider mark the same rendered size. */
@@ -145,7 +147,7 @@ margin-left: 0;
 max-width: 310px; gap: 6px;
 }
 .model-trigger-logo {
-width: 16px; height: 16px; flex: none; color: var(--text-dim);
+flex: none; color: var(--text-dim);
 }
 /* Desktop popover (chrome from .ui-popover): search on top, one scroll list. */
 .model-pop {
@@ -498,6 +500,14 @@ transition: none;
 .models-page { min-width: 0; container: models-page / inline-size; }
 .models-toolbar { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-3) 0 var(--space-2); }
 .models-toolbar .models-search { flex: 1; margin: 0; min-width: 0; }
+.models-toolbar .models-add-provider { flex: none; }
+.provider-connect { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); padding: var(--space-2) 6px var(--space-3); }
+.provider-connect-method { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); width: 100%; }
+.provider-connect-or { align-self: stretch; padding: 2px 0; font-size: var(--font-meta); text-align: center; }
+.provider-connect-toggle { padding: 2px 6px; }
+.provider-connect-select { max-width: min(320px, 100%); }
+.provider-connect-authorization .ui-notice-body { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
+.provider-connect-authorization .ui-notice-body p { margin: 0; }
 .sheet-section-toggle {
   flex: 1;
   min-height: max(var(--control-h), var(--hit-min));
@@ -521,5 +531,6 @@ transition: none;
   .models-toolbar { align-items: stretch; flex-direction: column; }
   .models-toolbar > .seg { width: 100%; }
   .models-toolbar > .seg button { flex: 1; }
+  .models-toolbar .models-add-provider { width: 100%; }
   .model-star-btn { width: var(--tap); min-width: var(--tap); }
 }

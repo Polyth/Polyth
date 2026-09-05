@@ -1520,11 +1520,67 @@ export interface ProtocolCapabilities {
   idempotentMutations: ReadonlySet<RuntimeMutationKind>;
 }
 
+/** One provider the backend can list — id + display name only. Used for the
+ *  "add a provider" picker, never the (potentially huge) per-model payload. */
+export interface AvailableProviderDescriptor {
+  id: string;
+  name: string;
+}
+
+export interface ProviderAuthPromptOption {
+  label: string;
+  value: string;
+  hint?: string;
+}
+
+/** One extra field a provider's login flow needs before it can start (e.g.
+ *  GitLab's instance URL, GitHub Enterprise's deployment type). */
+export interface ProviderAuthPrompt {
+  type: "text" | "select";
+  key: string;
+  message: string;
+  placeholder?: string;
+  options?: ProviderAuthPromptOption[];
+  when?: { key: string; op: "eq" | "neq"; value: string };
+}
+
+/** One way to authenticate a provider. A provider absent from
+ *  `providerAuthMethods()` still takes a plain API key via `setProviderApiKey`. */
+export interface ProviderAuthMethod {
+  type: "oauth" | "api";
+  label: string;
+  prompts?: ProviderAuthPrompt[];
+}
+
+export interface ProviderAuthorization {
+  url: string;
+  method: "auto" | "code";
+  instructions: string;
+}
+
 export interface ProtocolAdapter {
   readonly protocol: "legacy" | "v2";
   capabilities(): Promise<ProtocolCapabilities>;
   models(): Promise<ModelDescriptor[]>;
   agents(): Promise<AgentDescriptor[]>;
+  /** Every provider the backend currently exposes (id + name only) — for the
+   *  "add a provider" picker. Optional: legacy backends may not support it. */
+  listAllProviders?(): Promise<AvailableProviderDescriptor[]>;
+  /** Special login flows (oauth, or api with extra prompts) registered per
+   *  provider id. */
+  providerAuthMethods?(): Promise<Record<string, ProviderAuthMethod[]>>;
+  /** Start a provider's OAuth flow; `inputs` answers that method's prompts. */
+  providerAuthorize?(
+    providerID: string,
+    method: number,
+    inputs?: Record<string, string>,
+  ): Promise<ProviderAuthorization>;
+  /** Complete a "code"-style OAuth flow (user pastes back an authorization code). */
+  providerAuthCallback?(providerID: string, method: number, code: string): Promise<boolean>;
+  /** Store a plain API key (plus any extra prompt answers) for a provider. */
+  setProviderApiKey?(providerID: string, key: string, metadata?: Record<string, string>): Promise<boolean>;
+  /** Revoke stored credentials for a provider. */
+  removeProviderAuth?(providerID: string): Promise<boolean>;
   sessions(): Promise<RuntimeSession[]>;
   history(input: RuntimeSessionBinding): Promise<RuntimeSessionMessage[]>;
   eventStreamPath(): string | undefined;
@@ -1982,6 +2038,24 @@ export interface AgentRuntime {
   capabilities(): Promise<RuntimeCapabilities>;
   models(): Promise<ModelDescriptor[]>;
   agents(): Promise<AgentDescriptor[]>;
+  /** Every provider the backend currently exposes (id + name only) — for the
+   *  "add a provider" picker. Optional: legacy backends may not support it. */
+  listAllProviders?(): Promise<AvailableProviderDescriptor[]>;
+  /** Special login flows (oauth, or api with extra prompts) registered per
+   *  provider id. A provider absent here still takes a plain API key. */
+  providerAuthMethods?(): Promise<Record<string, ProviderAuthMethod[]>>;
+  /** Start a provider's OAuth flow; `inputs` answers that method's prompts. */
+  providerAuthorize?(
+    providerID: string,
+    method: number,
+    inputs?: Record<string, string>,
+  ): Promise<ProviderAuthorization>;
+  /** Complete a "code"-style OAuth flow (user pastes back an authorization code). */
+  providerAuthCallback?(providerID: string, method: number, code: string): Promise<boolean>;
+  /** Store a plain API key (plus any extra prompt answers) for a provider. */
+  setProviderApiKey?(providerID: string, key: string, metadata?: Record<string, string>): Promise<boolean>;
+  /** Revoke stored credentials for a provider. */
+  removeProviderAuth?(providerID: string): Promise<boolean>;
   ensureSession(canonical: CreateSessionInput & { sessionId: string; cwd: string }): Promise<string>;
   /** Operation-aware create. The supplied durable ID is used for this one
    * attempt and ambiguity is returned instead of hidden replay. */

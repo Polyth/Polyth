@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
   AgentDescriptor,
+  AvailableProviderDescriptor,
   JsonObject,
   ModelDescriptor,
   MutationOutcome,
@@ -9,6 +11,8 @@ import type {
   OpenCodeTransport,
   ProtocolAdapter,
   ProtocolCapabilities,
+  ProviderAuthMethod,
+  ProviderAuthorization,
   RuntimeEndpoint,
   RuntimeLocation,
   RuntimeReconciliationBinding,
@@ -166,6 +170,29 @@ const queryRequired = async (
     );
   }
   return response.body;
+};
+
+/** One-shot provider-auth write (no session/replay semantics apply). */
+const mutateRequired = async (
+  transport: OpenCodeTransport,
+  method: "POST" | "PUT" | "DELETE",
+  path: string,
+  body: unknown,
+  deadlineMs: number,
+): Promise<unknown> => {
+  const result = await transport.mutate<unknown>({
+    method, path, body, operationId: randomUUID(), deadlineMs, replay: NEVER_REPLAY,
+  });
+  if (result.kind === "unknown") {
+    throw Object.assign(new Error(result.message), { code: "unavailable" });
+  }
+  if (result.status < 200 || result.status >= 300) {
+    throw Object.assign(
+      new Error(mutationMessage(result.body, `OpenCode ${method} ${path} returned HTTP ${result.status}`)),
+      { code: `http-${result.status}`, status: result.status },
+    );
+  }
+  return result.body;
 };
 
 const requiredData = (body: unknown, path: string): unknown => {
@@ -630,6 +657,51 @@ export const createV2ProtocolAdapter = (
     async agents(): Promise<AgentDescriptor[]> {
       const path = withLocation("/api/agent", options.endpoint.location, "deep");
       return normalizeAgents(await queryRequired(options.transport, path, deadlineMs), path);
+    },
+    async listAllProviders(): Promise<AvailableProviderDescriptor[]> {
+      const path = withLocation("/provider", options.endpoint.location);
+      const body = asRecord(await queryRequired(options.transport, path, deadlineMs));
+      const out: AvailableProviderDescriptor[] = [];
+      for (const entry of Array.isArray(body?.all) ? body.all : []) {
+        const provider = asRecord(entry);
+        if (typeof provider?.id === "string" && provider.id && typeof provider.name === "string" && provider.name) {
+          out.push({ id: provider.id, name: provider.name });
+        }
+      }
+      return out;
+    },
+    async providerAuthMethods(): Promise<Record<string, ProviderAuthMethod[]>> {
+      const path = withLocation("/provider/auth", options.endpoint.location);
+      const body = asRecord(await queryRequired(options.transport, path, deadlineMs)) ?? {};
+      const out: Record<string, ProviderAuthMethod[]> = {};
+      for (const [id, methods] of Object.entries(body)) {
+        if (Array.isArray(methods)) out[id] = methods as ProviderAuthMethod[];
+      }
+      return out;
+    },
+    async providerAuthorize(providerID, method, inputs): Promise<ProviderAuthorization> {
+      const path = withLocation(`/provider/${encodeURIComponent(providerID)}/oauth/authorize`, options.endpoint.location);
+      const body = asRecord(await mutateRequired(
+        options.transport, "POST", path, { method, ...(inputs ? { inputs } : {}) }, deadlineMs,
+      ));
+      if (typeof body?.url !== "string" || typeof body?.method !== "string" || typeof body?.instructions !== "string") {
+        throw invalidResponse(path, "url, method, and instructions");
+      }
+      return { url: body.url, method: body.method as "auto" | "code", instructions: body.instructions };
+    },
+    async providerAuthCallback(providerID, method, code): Promise<boolean> {
+      const path = withLocation(`/provider/${encodeURIComponent(providerID)}/oauth/callback`, options.endpoint.location);
+      return Boolean(await mutateRequired(options.transport, "POST", path, { method, code }, deadlineMs));
+    },
+    async setProviderApiKey(providerID, key, metadata): Promise<boolean> {
+      const path = withLocation(`/auth/${encodeURIComponent(providerID)}`, options.endpoint.location);
+      return Boolean(await mutateRequired(
+        options.transport, "PUT", path, { type: "api", key, ...(metadata ? { metadata } : {}) }, deadlineMs,
+      ));
+    },
+    async removeProviderAuth(providerID): Promise<boolean> {
+      const path = withLocation(`/auth/${encodeURIComponent(providerID)}`, options.endpoint.location);
+      return Boolean(await mutateRequired(options.transport, "DELETE", path, undefined, deadlineMs));
     },
     async sessions(): Promise<RuntimeSession[]> {
       const path = withLocation(

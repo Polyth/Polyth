@@ -219,6 +219,7 @@ export const bg: AppMessages = {
   "composer.forSnippets": "за откъси,",
   "composer.goalAttached": "Гол прикачен.",
   "composer.generateNextAction": "Генериране на следващо действие",
+  "composer.improvePrompt": "Подобряване на подканата",
   "composer.hideModelAgentAndSyntaxOptions": "Скриване на опциите за модел, агент и синтаксис",
   "composer.insert": "вложка",
   "composer.iToFocus": "Да се ​​съсредоточа",

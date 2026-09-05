@@ -198,11 +198,11 @@ function DesktopSettingsPage() {
         <Toggle on={settings.lowResourceMode} onChange={(value) => save("lowResourceMode", value)} label="Low resource mode" />
       </Row>
       <Row
-        label="Reduce animations and effects"
-        hint="Disable interface motion, haptics, and live glass blur independently of performance mode. Applies immediately."
+        label="Reduce motion and haptics"
+        hint="Disable interface motion and haptics independently of performance mode. Glass is controlled in Appearance."
         itemId="desktop.reduceAnimations"
       >
-        <Toggle on={settings.reduceAnimations} onChange={(value) => save("reduceAnimations", value)} label="Reduce animations and effects" />
+        <Toggle on={settings.reduceAnimations} onChange={(value) => save("reduceAnimations", value)} label="Reduce motion and haptics" />
       </Row>
       <Row label="Update status" hint={update.message} itemId="desktop.updates">
         <div className="desktop-update-action">
@@ -290,7 +290,7 @@ export function installDesktopIntegration(): () => void {
         { id: "desktop.launchAtLogin", pageId: "desktop", label: "Launch at login", keywords: ["startup", "autostart", "boot"], focusTarget: "desktop.launchAtLogin" },
         { id: "desktop.keepAwake", pageId: "desktop", label: "Keep awake", keywords: ["sleep", "suspend", "background"], focusTarget: "desktop.keepAwake" },
         { id: "desktop.lowResourceMode", pageId: "desktop", label: "Low resource mode", keywords: ["memory", "cpu", "gpu", "old device"], focusTarget: "desktop.lowResourceMode" },
-        { id: "desktop.reduceAnimations", pageId: "desktop", label: "Reduce animations and effects", keywords: ["motion", "glass", "gpu", "accessibility"], focusTarget: "desktop.reduceAnimations" },
+        { id: "desktop.reduceAnimations", pageId: "desktop", label: "Reduce motion and haptics", keywords: ["motion", "haptics", "accessibility"], focusTarget: "desktop.reduceAnimations" },
         { id: "desktop.updates", pageId: "desktop", label: "Desktop updates", keywords: ["github", "release", "automatic"], focusTarget: "desktop.updates" },
         { id: "desktop.data", pageId: "desktop", label: "Polyth data folder", keywords: ["native", "file manager"], focusTarget: "desktop.data" },
         { id: "desktop.quit", pageId: "desktop", label: "Quit Polyth", keywords: ["exit", "stop", "tray"], focusTarget: "desktop.quit" },

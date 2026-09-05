@@ -104,13 +104,8 @@ test("runtime recovery banner discloses technical details without App.tsx", asyn
   assert.doesNotMatch(banner, /runtimeRecovery\.keepBlocked/);
   assert.match(banner, /runtimeRecovery\.leaveBlocked/);
   assert.doesNotMatch(banner, /instanceToken|passwordEnv|recoveryContext/);
-  const owned = banner.slice(
-    banner.indexOf('session.runtimeControl === "owned"'),
-    banner.indexOf('session.runtimeControl !== "borrowed"'),
-  );
-  assert.match(owned, /runtimeRecovery\.uncertainTurn/);
-  assert.doesNotMatch(owned, /runtimeRecovery\.leaveBlocked/);
-  assert.doesNotMatch(owned, /runtimeRecovery\.keepBlocked/);
+  assert.match(banner, /session\.runtimeControl === "owned"\) return null/);
+  assert.doesNotMatch(banner, /runtimeRecovery\.ownedBody/);
 });
 
 test("uncertain recovery warning uses server debug counts when events omit the turn", () => {

@@ -10,7 +10,7 @@ import {
   updateSettings,
   useStore,
 } from "../../store.ts";
-import { HEADER_METRIC_IDS, RESPONSE_ACTION_IDS, UI_DEFAULTS, setUiSettings, useUiSettings, type HeaderMetricId, type ResponseActionId } from "../../uiPrefs.ts";
+import { HEADER_METRIC_IDS, RESPONSE_ACTION_IDS, UI_DEFAULTS, setUiSettings, useUiSettings, type GlassEffect, type HeaderMetricId, type ResponseActionId } from "../../uiPrefs.ts";
 import { DEFAULT_SETTINGS, friendlyError, INTERFACE_FONTS } from "../../settings.ts";
 import { requestNotifyPermission } from "../../notify.ts";
 import { disablePush, enablePush, pushSubscription, pushUnsupportedReason } from "../../push.ts";
@@ -372,9 +372,16 @@ export function AppearancePage() {
       <ThemeSection />
       <div className="set-sec background-settings" data-settings-item="appearance.background">
         <div className="set-sec-title">Workspace background</div>
-        <p className="background-settings-hint">Choose an atmospheric preset or add an image from this browser.</p>
+        <p className="background-settings-hint">Choose a quiet color atmosphere or add an image from this browser.</p>
         <BackgroundPicker />
       </div>
+      <Row label="Glass surfaces" hint="Control matte transparency across the whole interface." itemId="appearance.glass">
+        <Seg<GlassEffect>
+          value={ui.glassEffect}
+          options={[["off", "Off"], ["matte", "Matte"], ["clear", "Clear"]]}
+          onChange={(glassEffect) => setUiSettings({ glassEffect })}
+        />
+      </Row>
       <Row label={tr("settings.pages.interfaceFont")} hint={tr("settings.pages.chooseFromCleanUiFaces")} itemId="appearance.fontFamily">
         <Select
           label={INTERFACE_FONTS.find((font) => font.id === settings.fontFamily)?.label ?? settings.fontFamily}

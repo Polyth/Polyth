@@ -12,13 +12,21 @@ import {
   useModelPrefs,
 } from "./modelPrefs.ts";
 import { setModels, useStore } from "../../../apps/web/src/store.ts";
-import { api, type ProviderCatalogDto, type VisibilityStateDto } from "@polyth/session/web-api";
+import {
+  api,
+  type AvailableProviderDto,
+  type ProviderAuthMethodDto,
+  type ProviderCatalogDto,
+  type VisibilityStateDto,
+} from "@polyth/session/web-api";
 import { EmptyState, PageHead, Seg, Toggle } from "../../../apps/web/src/components/settings/parts.tsx";
 import { modelDisplayName } from "../../../apps/web/src/composer/discovery.ts";
+import Picker from "../../../apps/web/src/components/Picker.tsx";
+import ProviderConnect from "./ProviderConnect.tsx";
 import ProviderLogo from "./ProviderLogo.tsx";
 import MoveControls from "../../../apps/web/src/components/MoveControls.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
-import { FavoriteIcon, IconButton, Switch, TextInput } from "../../../apps/web/src/components/ui/index.ts";
+import { AddIcon, Button, FavoriteIcon, Icon, IconButton, Switch, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 
 type Scope = "connected" | "all";
 
@@ -33,10 +41,15 @@ export default function ModelsPage() {
   const [providers, setProviders] = useState<ProviderCatalogDto[] | null>(null);
   const [error, setError] = useState("");
   const [q, setQ] = useState("");
-  const [scope, setScope] = useState<Scope>("connected");
+  const [scope, setScope] = useState<Scope>("all");
   const [providerFilter, setProviderFilter] = useState<string | null>(null);
   const [draggedProvider, setDraggedProvider] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState("");
+  const [available, setAvailable] = useState<AvailableProviderDto[]>([]);
+  const [authMethods, setAuthMethods] = useState<Record<string, ProviderAuthMethodDto[]>>({});
+  const [providerOptionsLoaded, setProviderOptionsLoaded] = useState(false);
+  const [providerOptionsLoading, setProviderOptionsLoading] = useState(false);
+  const [reconfiguring, setReconfiguring] = useState<ReadonlySet<string>>(new Set());
   const catalogModels = useMemo(
     () => providers?.flatMap((provider) => provider.models) ?? [],
     [providers],
@@ -45,7 +58,64 @@ export default function ModelsPage() {
   const refreshCatalog = () =>
     api.listProviders().then(setProviders).catch((e) => setError(e instanceof Error ? e.message : String(e)));
 
+  const loadProviderOptions = async () => {
+    if (providerOptionsLoaded || providerOptionsLoading) return;
+    setProviderOptionsLoading(true);
+    setError("");
+    try {
+      const [nextAvailable, nextAuthMethods] = await Promise.all([
+        api.listAvailableProviders(),
+        api.providerAuthMethods().catch(() => ({})),
+      ]);
+      setAvailable(nextAvailable);
+      setAuthMethods(nextAuthMethods);
+      setProviderOptionsLoaded(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setProviderOptionsLoading(false);
+    }
+  };
+
   useEffect(() => { void refreshCatalog(); }, []);
+
+  const closeReconfigure = (id: string) =>
+    setReconfiguring((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  const toggleReconfigure = (id: string) =>
+    setReconfiguring((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+
+  const handleAddProvider = async (id: string) => {
+    const picked = available.find((p) => p.id === id);
+    setError("");
+    try {
+      await api.addProvider(id, picked?.name);
+      setAvailable((prev) => prev.filter((p) => p.id !== id));
+      setModelProviderExpanded(id, true);
+      await refreshCatalog();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const handleRemoveProvider = async (id: string) => {
+    setError("");
+    try {
+      await api.removeProvider(id);
+      await refreshCatalog();
+      if (providerOptionsLoaded) await api.listAvailableProviders().then(setAvailable).catch(() => {});
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   const publish = (catalog: ProviderCatalogDto[]) => {
     setProviders(catalog);
@@ -124,15 +194,6 @@ export default function ModelsPage() {
   if (providers === null && !error) {
     return <div className="models-page"><PageHead title={tr("settings.modelspage.providersModels")} /><EmptyState title={tr("settings.modelspage.loadingCatalog")} busy /></div>;
   }
-  if (providers !== null && providers.length === 0) {
-    return (
-      <div className="models-page">
-        <PageHead title={tr("settings.modelspage.providersModels")} />
-        <EmptyState title={tr("settings.modelspage.noModelsAvailable")} body={tr("settings.modelspage.checkThatTheBackendIsRunningAnd")} />
-      </div>
-    );
-  }
-
   const chipProviders = (providers ?? []).filter((p) => (scope === "connected" ? p.connected : true));
 
   return (
@@ -153,6 +214,24 @@ export default function ModelsPage() {
           ["connected", tr("sidebar.connected")],
           ["all", tr("importsessionsdialog.all")],
         ]} onChange={setScope} />
+        <Picker
+          className="models-add-provider"
+          label={tr("settings.modelspage.addProvider")}
+          ariaLabel={tr("settings.modelspage.addProvider")}
+          triggerIcon={<Icon icon={AddIcon} size="sm" />}
+          onOpen={() => void loadProviderOptions()}
+          items={available.map((p) => ({
+            id: p.id,
+            label: p.name,
+            group: "",
+            ...(authMethods[p.id]?.some((m) => m.type === "oauth") ? { detail: tr("settings.modelspage.oauthMethod") } : {}),
+          }))}
+          onPick={(id) => void handleAddProvider(id)}
+          placeholder={providerOptionsLoading
+            ? tr("settings.modelspage.loadingCatalog")
+            : available.length === 0 ? tr("settings.modelspage.noProvidersToAdd") : tr("settings.modelspage.addProvider")}
+          disabled={providerOptionsLoaded && available.length === 0}
+        />
       </div>
 
       <div className="provider-chips ui-scroll-tabs" role="group" aria-label={tr("settings.modelspage.filterByProvider")}>
@@ -203,7 +282,10 @@ export default function ModelsPage() {
                   aria-label={expanded
                     ? tr("settings.modelspage.collapseValue", { value: p.name })
                     : tr("settings.modelspage.expandValue", { value: p.name })}
-                  onClick={() => setModelProviderExpanded(p.id, !expanded)}
+                  onClick={() => {
+                    if (p.models.length === 0) void loadProviderOptions();
+                    setModelProviderExpanded(p.id, !expanded);
+                  }}
                 >
                   <span className="provider-drag" aria-hidden="true">⠿</span>
                   <span className={`provider-chevron ${expanded ? "open" : ""}`} aria-hidden="true">›</span>
@@ -240,6 +322,20 @@ export default function ModelsPage() {
               </div>
               {expanded && (
                 <div className="provider-models">
+                  {p.models.length === 0 && (
+                    <>
+                      <ProviderConnect
+                        providerId={p.id}
+                        methods={authMethods[p.id]}
+                        onConnected={() => void refreshCatalog()}
+                      />
+                      <div className="provider-connect-toggle">
+                        <Button size="sm" variant="ghost" onClick={() => void handleRemoveProvider(p.id)}>
+                          {tr("settings.modelspage.removeProvider")}
+                        </Button>
+                      </div>
+                    </>
+                  )}
                   {p.models.map((m) => {
                     const fav = isFavorite(prefs, m.key);
                     const displayName = modelDisplayName(m, catalogModels);
@@ -274,13 +370,38 @@ export default function ModelsPage() {
                       </div>
                     );
                   })}
-                  {p.models.length === 0 && <div className="muted set-provider-no-matches">{tr("settings.modelspage.noMatchesInThisProvider")}</div>}
+                  {p.models.length > 0 && (
+                    <div className="provider-connect-toggle">
+                      <Button size="sm" variant="ghost" onClick={() => {
+                        void loadProviderOptions();
+                        toggleReconfigure(p.id);
+                      }}>
+                        {tr("settings.modelspage.connectionSettings")}
+                      </Button>
+                    </div>
+                  )}
+                  {p.models.length > 0 && reconfiguring.has(p.id) && (
+                    <ProviderConnect
+                      providerId={p.id}
+                      methods={authMethods[p.id]}
+                      onConnected={() => { void refreshCatalog(); }}
+                      onDisconnect={() => { void refreshCatalog(); closeReconfigure(p.id); }}
+                    />
+                  )}
                 </div>
               )}
             </div>
           );
         })}
-        {shown.length === 0 && <EmptyState title={tr("settings.modelspage.noMatches")} body={tr("settings.modelspage.tryTheAllScopeOrClearThe")} />}
+        {providers?.length === 0 && (
+          <EmptyState
+            title={tr("settings.modelspage.noModelsAvailable")}
+            body={tr("settings.modelspage.checkThatTheBackendIsRunningAnd")}
+          />
+        )}
+        {providers && providers.length > 0 && shown.length === 0 && (
+          <EmptyState title={tr("settings.modelspage.noMatches")} body={tr("settings.modelspage.tryTheAllScopeOrClearThe")} />
+        )}
       </div>
     </div>
   );

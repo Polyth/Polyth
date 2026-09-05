@@ -22,6 +22,14 @@ import {
   type Broadcaster,
 } from "../src/sessions.ts";
 
+const waitFor = async (condition: () => boolean | Promise<boolean>): Promise<void> => {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (await condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("condition was not reached");
+};
+
 const runtimeFor = (
   endpoint: RuntimeEndpoint,
   onEnsure: () => void = () => undefined,
@@ -787,6 +795,51 @@ const borrowedConfirmRuntime = (
     dispose: async () => undefined,
   };
 };
+
+test("owned epoch mismatch recovers in the background without a user send", async () => {
+  const endpoint: RuntimeEndpoint = {
+    authorityId: "owned:replacement",
+    continuity: "verified",
+    generation: 3,
+    url: "http://runtime.invalid",
+    location: { directory: "/project" },
+    control: { kind: "owned", instanceToken: "replacement-instance" },
+    config: { kind: "read-only" },
+    authentication: { kind: "none" },
+  };
+  const submitted: string[] = [];
+  const runtime = borrowedConfirmRuntime(endpoint, submitted);
+  const { dir, store, project, sessions } = harness(runtime, "polyth-epoch-owned-auto-");
+  const sessionId = "session-owned-auto";
+  try {
+    const projection = projectionFor(
+      project,
+      endpoint,
+      sessionId,
+      "backend-old",
+      "owned:destroyed",
+    );
+    projection.status = "idle";
+    await store.upsertProjection(projection);
+
+    await sessions.events(sessionId, 0);
+    await waitFor(async () => (await store.projection(sessionId))?.status === "idle"
+      && (await store.projection(sessionId))?.runtimeBinding?.epoch === 1);
+
+    assert.equal((await store.projection(sessionId))?.backendSessionId, "backend-borrowed-new");
+    assert.equal(
+      (await store.events(sessionId)).filter((event) => event.type === "runtime/epoch-replaced").length,
+      1,
+    );
+    assert.equal(
+      (await store.events(sessionId)).some((event) => event.type === "user/message"),
+      false,
+    );
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("borrowed confirm starts a fresh epoch without fencing unknowns", async () => {
   const endpoint: RuntimeEndpoint = {

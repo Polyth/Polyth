@@ -24,6 +24,14 @@ import {
   reopenStore,
 } from "./runtimeReliabilityHelpers.ts";
 
+const waitFor = async (condition: () => boolean | Promise<boolean>): Promise<void> => {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (await condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("condition was not reached");
+};
+
 const sendAfterBreak = async (
   first: RuntimeEndpoint,
   second: RuntimeEndpoint,
@@ -443,7 +451,7 @@ test("matrix: unclaimed prepared turns do not block owned recovery forever", asy
   }
 });
 
-test("matrix: binding-mismatch marks epoch-pending without auto-replace", async () => {
+test("matrix: binding-mismatch automatically recovers an owned session", async () => {
   const endpoint: RuntimeEndpoint = {
     authorityId: "owned:replacement",
     continuity: "verified",
@@ -469,15 +477,18 @@ test("matrix: binding-mismatch marks epoch-pending without auto-replace", async 
       "owned:destroyed",
     );
     await harness.sessions.events(sessionId, 0);
+    await waitFor(async () => {
+      const current = await harness.store.projection(sessionId);
+      return current?.status === "idle" && current.runtimeBinding?.epoch === 1;
+    });
     const pending = await harness.store.projection(sessionId);
-    assert.equal(pending?.status, "epoch-pending");
+    assert.equal(pending?.status, "idle");
     assert.equal(pending?.runtimeControl, "owned");
     assert.equal(
-      (await harness.store.events(sessionId)).some((event) => event.type === "runtime/epoch-replaced"),
-      false,
+      (await harness.store.events(sessionId)).filter((event) => event.type === "runtime/epoch-replaced").length,
+      1,
     );
-    const debug = await harness.sessions.debug?.(sessionId);
-    assert.equal(debug?.status, "epoch-pending");
+    assert.equal(pending?.backendSessionId, "backend-owned:replacement");
   } finally {
     await harness.dispose();
   }

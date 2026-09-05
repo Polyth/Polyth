@@ -7,8 +7,9 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SessionAssist, SessionProjection } from "@polyth/contracts";
+import type { SpaceContext } from "@polyth/contracts";
 import {
-  buildAssistPrompt, buildNextActionPrompt, buildNotePrompt, capWords, createAssistService, createAssistSettings,
+  buildAssistPrompt, buildNextActionPrompt, buildNotePrompt, buildPromptImprovementPrompt, capWords, createAssistService, createAssistSettings,
   createManualSuggestionService, isFresh, parseAssistReply, parseNoteReply, RECAP_MAX_WORDS,
   sanitizeNextActionReply,
 } from "../src/assist.ts";
@@ -70,6 +71,10 @@ test("pure helpers: word cap, freshness, reply parsing", () => {
   assert.match(next, /LATEST ASSISTANT RESPONSE:\nI found the missing await/);
   assert.equal(sanitizeNextActionReply("```\nSuggestion: Add a regression test.\n```"), "Add a regression test.");
   assert.equal(sanitizeNextActionReply(`"${"x".repeat(900)}"`).length, 800);
+  assert.equal(sanitizeNextActionReply("Improved prompt: Fix it."), "Fix it.");
+  const improved = buildPromptImprovementPrompt("  fix retry  ");
+  assert.match(improved, /USER PROMPT:\nfix retry$/);
+  assert.match(improved, /Do not invent requirements/);
 });
 
 const completedExchangeEvents = () => [
@@ -94,6 +99,20 @@ test("manual next-action service sends only the latest completed exchange and re
   assert.match(prompts[0]!, /latest prompt/);
   assert.match(prompts[0]!, /latest answer/);
   assert.doesNotMatch(prompts[0]!, /older prompt|older answer|tool-only/);
+});
+
+test("manual suggestion improves a draft without paying to load conversation context", async () => {
+  let eventReads = 0;
+  const svc = createManualSuggestionService({
+    latestSeq: async () => 7,
+    events: async () => { eventReads += 1; return completedExchangeEvents(); },
+    complete: async (_id, prompt) => {
+      assert.match(prompt, /USER PROMPT:\nfix teh bug/);
+      return "Fix the bug.";
+    },
+  });
+  assert.deepEqual(await svc.generate("s1", "fix teh bug"), { suggestion: "Fix the bug.", atSeq: 7 });
+  assert.equal(eventReads, 0);
 });
 
 test("manual next-action service rejects no exchange, stale results, and duplicate flights", async () => {
@@ -218,7 +237,8 @@ function routeHarness(opts: {
   latestSeq?: number;
   distill?: (sessionId: string) => Promise<{ title: string; body: string }>;
   taskBrief?: (sessionId: string) => Promise<string>;
-  suggestion?: (sessionId: string) => Promise<{ suggestion: string; atSeq: number }>;
+  suggestion?: (sessionId: string, draft?: string) => Promise<{ suggestion: string; atSeq: number }>;
+  improve?: (space: SpaceContext, projectId: string, draft: string) => Promise<string>;
 }) {
   const settings = createAssistSettings({ file: join(tmp(), "assist.json") });
   const routes = assistRoutes({
@@ -228,12 +248,13 @@ function routeHarness(opts: {
     ...(opts.distill ? { distill: opts.distill } : {}),
     ...(opts.taskBrief ? { taskBrief: opts.taskBrief } : {}),
     ...(opts.suggestion ? { suggestion: opts.suggestion } : {}),
+    ...(opts.improve ? { improve: opts.improve } : {}),
   });
   const call = async (method: string, path: string, body: Record<string, unknown> = {}) => {
     let status = 0;
     let payload: unknown;
     const rc = {
-      req: {}, res: {},
+      req: {}, res: {}, space: { spaceId: "space-1", membership: { role: "owner" } },
       url: new URL(`http://x${path}`),
       path, method,
       body: async () => body,
@@ -346,4 +367,18 @@ test("POST assist/suggestion returns an ephemeral result and typed conflicts", a
     suggestion: async () => { throw new Error("small model offline"); },
   });
   assert.equal((await failure.call("POST", "/api/sessions/s1/assist/suggestion")).status, 502);
+});
+
+test("POST project assist/prompt improves a pre-session draft", async () => {
+  const unavailable = routeHarness({});
+  assert.equal((await unavailable.call("POST", "/api/projects/p1/assist/prompt", { draft: "fix teh bug" })).status, 503);
+
+  const wired = routeHarness({
+    improve: async (_space, projectId, draft) => `${projectId}: ${draft.replace("teh", "the")}`,
+  });
+  assert.deepEqual(
+    (await wired.call("POST", "/api/projects/p1/assist/prompt", { draft: "fix teh bug" })).payload,
+    { suggestion: "p1: fix the bug", atSeq: 0 },
+  );
+  assert.equal((await wired.call("POST", "/api/projects/p1/assist/prompt", { draft: " " })).status, 400);
 });

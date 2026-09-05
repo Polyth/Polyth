@@ -11,6 +11,7 @@ export type HeaderMetricId = "tokens" | "messages" | "duration" | "cost";
 export type ResponseActionId = "copy" | "image" | "plan" | "pin" | "session" | "multirun";
 export type TopRailAlignment = "center" | "left";
 export type RailIconSize = "sm" | "md" | "lg";
+export type GlassEffect = "off" | "matte" | "clear";
 
 export const HEADER_METRIC_IDS: readonly HeaderMetricId[] = ["tokens", "messages", "duration", "cost"];
 export const RESPONSE_ACTION_IDS: readonly ResponseActionId[] = ["copy", "image", "plan", "pin", "session", "multirun"];
@@ -36,6 +37,8 @@ export interface UiSettings {
   editorFontSize: number;
   /** Shared corner treatment for controls, panels, and overlays (0 = square, 10 = rounded). */
   rounding: number;
+  /** One material treatment for shell chrome, conversation blocks, and overlays. */
+  glassEffect: GlassEffect;
   chatWidth: "normal" | "wide";
   /** Browser notification when a turn finishes in a hidden tab. */
   notifyOnComplete: boolean;
@@ -104,6 +107,7 @@ export const UI_DEFAULTS: UiSettings = {
   terminalFontSize: 14,
   editorFontSize: 14,
   rounding: 5,
+  glassEffect: "matte",
   chatWidth: "normal",
   notifyOnComplete: false,
   notifySound: false,
@@ -191,6 +195,7 @@ export function parseUiSettings(raw: string | null): UiSettings {
       terminalFontSize: parseFontSize(data.terminalFontSize, editorFontSize),
       editorFontSize,
       rounding: parseRounding(data.rounding),
+      glassEffect: data.glassEffect === "off" || data.glassEffect === "clear" ? data.glassEffect : "matte",
       chatWidth: data.chatWidth === "wide" ? "wide" : "normal",
       notifyOnComplete: data.notifyOnComplete === true,
       notifySound: data.notifySound === true,
@@ -282,6 +287,7 @@ export function applyUiSettings(s: UiSettings = settings): void {
   const b = document.body;
   b.dataset.density = s.density;
   b.dataset.rounding = String(s.rounding);
+  b.dataset.glass = s.glassEffect;
   b.dataset.chatwidth = s.chatWidth;
   b.dataset.technical = String(s.showTechnicalButtons);
   b.dataset.dictate = String(s.showDictate);

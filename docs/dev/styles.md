@@ -90,6 +90,11 @@ list — other docs link here instead of restating it.
 | `--material-glass-highlight` | Inset highlight shared by glass surfaces. |
 | `--material-glass-shadow` | Shared floating-surface elevation. |
 | `--material-glass-blur` | Backdrop blur strength for capable, full-resource clients. |
+| `--material-glass-fill` | User-controlled center tint for live glass surfaces. |
+| `--material-glass-edge` | User-controlled edge tint for live glass surfaces. |
+| `--material-glass-control-fill` | Center tint for controls nested inside a glass surface. |
+| `--material-glass-control-edge` | Edge tint for controls nested inside a glass surface. |
+| `--material-glass-saturation` | User-controlled backdrop color response for live glass surfaces. |
 | `--surface-activity` | Lightweight theme surface for repeated activity and tool rows. |
 
 ### Spacing and control geometry

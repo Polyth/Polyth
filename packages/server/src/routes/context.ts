@@ -4,10 +4,11 @@ import type { SpaceServicesFor } from "../spaceScope.ts";
 /** Message-pin producer. Persistence and validation stay in SessionService so
  * every caller shares the same append-before-broadcast ordering. */
 export function contextRoutes(spaces: SpaceServicesFor): RouteHandler {
-  return async ({ path, method, json, space }) => {
-    const { sessions } = spaces(space);
+  return async (rc) => {
+    const { path, method, json } = rc;
     const match = path.match(/^\/api\/sessions\/([^/]+)\/context\/pins\/(\d+)$/);
     if (!match) return false;
+    const { sessions } = spaces(rc.space);
     const sessionId = match[1]!;
     const sourceEventSeq = Number(match[2]);
     if (method === "POST") {

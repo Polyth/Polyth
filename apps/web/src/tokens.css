@@ -60,7 +60,12 @@
   --material-glass-border: color-mix(in srgb, var(--border-soft) 88%, var(--text) 12%);
   --material-glass-highlight: var(--inset-hi);
   --material-glass-shadow: var(--shadow-lg);
-  --material-glass-blur: 18px;
+  --material-glass-blur: 20px;
+  --material-glass-fill: 52%;
+  --material-glass-edge: 28%;
+  --material-glass-control-fill: 18%;
+  --material-glass-control-edge: 8%;
+  --material-glass-saturation: 118%;
   --surface-activity: color-mix(in srgb, var(--elevated) 54%, var(--bg));
 
   /* Deprecated overlay aliases. Do not use for new glass surfaces. */

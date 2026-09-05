@@ -10,6 +10,7 @@ import { readWebStylesSync } from "./webStyles.ts";
 interface ProviderLogoProps {
   providerID?: string;
   providerName?: string;
+  size?: "compact" | "regular";
   className?: string;
 }
 
@@ -143,6 +144,14 @@ test("unknown providers retain a short theme-colored fallback", async () => {
   assert.match(html, /data-provider="other"/);
   assert.match(html, /class="provider-logo-fallback">ZE<\/span>/);
   assert.doesNotMatch(html, /<svg\b/);
+});
+
+test("provider logos own compact and regular bounding boxes", async () => {
+  assert.match(await render({ providerID: "openai", size: "compact" }), /provider-logo--compact/);
+  assert.match(await render({ providerID: "openai" }), /provider-logo--regular/);
+  const css = readWebStylesSync();
+  assert.match(css, /\.provider-logo--compact\s*\{[^}]*width:\s*var\(--icon-sm\);[^}]*height:\s*var\(--icon-sm\)/s);
+  assert.match(css, /\.provider-logo--regular\s*\{[^}]*width:\s*var\(--icon-md\);[^}]*height:\s*var\(--icon-md\)/s);
 });
 
 test("provider surfaces use ProviderLogo without brand palette rules", () => {

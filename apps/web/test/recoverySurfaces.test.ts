@@ -42,6 +42,7 @@ test("recovery surfaces preserve drafts and never auto-send a failed turn", asyn
   assert.doesNotMatch(timeline, /sendMessage\(lastUser/);
   assert.match(banner, /runtimeRecovery\.technicalDetails/);
   assert.match(banner, /uncertainRecoveryWarning/);
+  assert.doesNotMatch(banner, /runtimeRecovery\.ownedBody/);
   assert.doesNotMatch(banner, /runtimeRecovery\.keepBlocked/);
   assert.doesNotMatch(banner, /authorityId|instanceToken|recoveryContext/);
 });

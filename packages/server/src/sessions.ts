@@ -336,6 +336,10 @@ export function createSessionService(deps: {
   }
   const hooks = deps.hooks ?? {};
   const sessionRuntime = new Map<string, AgentRuntime>(); // sessionId -> runtime
+  // Owned runtime identity breaks are recoverable without user action. The
+  // implementation is assigned after the epoch helpers are declared; callers
+  // can safely request recovery during attach/reconciliation.
+  let recoverOwnedEpochIfPending: (sessionId: string) => Promise<void> = async () => {};
   // Last redacted endpoint seen during normal attach/bind. debug() reads this
   // instead of calling endpoint(), which can restart a dead owned instance.
   const attachedEndpoint = new WeakMap<AgentRuntime, SessionDebugEndpointDto>();
@@ -1434,7 +1438,7 @@ export function createSessionService(deps: {
     }
     const endpoint = await (runtime as ReliabilityRuntime).endpoint?.().catch(() => undefined);
     if (!endpoint) return false;
-    const reason = "persisted runtime authority requires a deliberate epoch transition";
+    const reason = "persisted runtime authority requires an epoch transition";
     const ordinal = reconciliationOrdinal
       ?? (await broadcastTail(
         sessionId,
@@ -1453,6 +1457,12 @@ export function createSessionService(deps: {
       status: "epoch-pending",
       runtimeControl: endpoint.control.kind === "owned" ? "owned" : "borrowed",
     });
+    if (
+      endpoint.control.kind === "owned"
+      && (runtime.resetSessionOperation || runtime.resetSession)
+    ) {
+      void recoverOwnedEpochIfPending(sessionId);
+    }
     return true;
   };
 
@@ -1801,12 +1811,15 @@ export function createSessionService(deps: {
       if (wired !== runtime) continue;
       const projection = await store.projection(sessionId);
       if (projection) {
-        reconciliations.push(reconcileUnderLock(
-          sessionId,
-          projection,
-          runtime,
-          "runtime-generation-replaced",
-        ));
+        reconciliations.push((async () => {
+          await reconcileUnderLock(
+            sessionId,
+            projection,
+            runtime,
+            "runtime-generation-replaced",
+          );
+          await recoverOwnedEpochIfPending(sessionId);
+        })());
       }
     }
     await settleAllOrThrow(reconciliations);
@@ -2628,6 +2641,7 @@ export function createSessionService(deps: {
             const projection = await store.projection(sid);
             if (!projection) return;
             await reconcileUnderLock(sid, projection, rt, notification.type);
+            await recoverOwnedEpochIfPending(sid);
           })().catch((err) => {
             console.error(`[polyth] runtime lifecycle reconciliation failed for ${sid}`, err);
           });
@@ -3904,6 +3918,31 @@ export function createSessionService(deps: {
 
     const ready = await establishFreshRuntimeEpochUnderLock(sessionId, projection, runtime);
     return { projection: ready, runtime };
+  };
+
+  const ownedEpochRecoveryFlights = new Map<string, Promise<void>>();
+  recoverOwnedEpochIfPending = (sessionId: string): Promise<void> => {
+    const existing = ownedEpochRecoveryFlights.get(sessionId);
+    if (existing) return existing;
+    const flight = withSessionLock(sessionId, async () => {
+      const projection = await store.projection(sessionId);
+      if (
+        !projection
+        || projection.status !== "epoch-pending"
+        || projection.runtimeControl !== "owned"
+      ) return;
+      await recoverFreshRuntimeEpochUnderLock(sessionId);
+    }).catch((error) => {
+      // Keep the durable pending state when a fresh runtime cannot be created;
+      // a later runtime event or send can retry the same recovery path.
+      console.error(`[polyth] automatic runtime epoch recovery failed for ${sessionId}`, error);
+    }).finally(() => {
+      if (ownedEpochRecoveryFlights.get(sessionId) === flight) {
+        ownedEpochRecoveryFlights.delete(sessionId);
+      }
+    });
+    ownedEpochRecoveryFlights.set(sessionId, flight);
+    return flight;
   };
 
   const confirmBorrowedRuntimeEpochUnderLock = async (
@@ -5431,7 +5470,9 @@ export function createSessionService(deps: {
           try {
             await ensureWired(sessionId, projection);
           } catch (error) {
-            console.warn(`[polyth] failed to materialize runtime session ${sessionId}`, error);
+            if ((error as { code?: unknown }).code !== "epoch-pending") {
+              console.warn(`[polyth] failed to materialize runtime session ${sessionId}`, error);
+            }
           }
         }
       }

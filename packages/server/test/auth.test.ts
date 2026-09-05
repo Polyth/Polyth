@@ -303,13 +303,29 @@ test("http gate: /api requires a session, auth endpoints and static stay public"
   mkdirSync(webDist, { recursive: true });
   writeFileSync(join(webDist, "index.html"), "<html>lock shell</html>");
 
+  // org + agent-session routes used to destructure `rc.space` before path
+  // matching, which threw unauthorized for every anonymous SPA request.
+  const { createStore } = await import("@polyth/session");
+  const store = createStore(join(dir, "sessions.db"));
+  const { orgRoutes } = await import("../src/routes/org.ts");
+  const { agentSessionRoutes } = await import("../src/routes/agentSessions.ts");
+
   const server = createHttpServer({
     spaces: tenancy.gateway,
     runtimes: {} as never,
     capabilities: () => [],
     webDist,
     version: "test",
-    routes: [authRoutes(auth)],
+    routes: [
+      authRoutes(auth),
+      orgRoutes({ spaces: tenancy.gateway.services, store }),
+      agentSessionRoutes({
+        spaces: tenancy.gateway.services,
+        store,
+        capabilities: () => [],
+        version: "test",
+      }),
+    ],
     auth,
   });
   server.listen(0);
@@ -322,11 +338,14 @@ test("http gate: /api requires a session, auth endpoints and static stay public"
     const html = await fetch(`${base}/`);
     assert.equal(html.status, 200);
     assert.match(await html.text(), /lock shell/);
+    assert.equal((await fetch(`${base}/index.html`)).status, 200);
+    assert.equal((await fetch(`${base}/packages-manifest.json`)).status, 404);
 
     // auth endpoints public, everything else 401
     assert.equal((await fetch(`${base}/api/auth/status`)).status, 200);
     assert.equal((await fetch(`${base}/api/projects`)).status, 401);
     assert.equal((await fetch(`${base}/api/health`)).status, 401);
+    assert.equal((await fetch(`${base}/api/agent`)).status, 401);
 
     const bad = await fetch(`${base}/api/auth/login`, {
       method: "POST", headers: { "content-type": "application/json" },
@@ -346,6 +365,7 @@ test("http gate: /api requires a session, auth endpoints and static stay public"
     assert.deepEqual(await withCookie.json(), []);
   } finally {
     server.close();
+    await store.close();
   }
 });
 

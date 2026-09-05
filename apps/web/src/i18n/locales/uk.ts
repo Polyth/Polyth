@@ -219,6 +219,7 @@ export const uk: AppMessages = {
   "composer.forSnippets": "для фрагментів,",
   "composer.goalAttached": "Мета",
   "composer.generateNextAction": "Згенерувати наступну дію",
+  "composer.improvePrompt": "Покращити запит",
   "composer.hideModelAgentAndSyntaxOptions": "Приховати параметри моделі, агента та синтаксису",
   "composer.insert": "вставка",
   "composer.iToFocus": "Мені потрібно зосередитися",

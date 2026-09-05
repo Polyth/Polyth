@@ -51,6 +51,7 @@ interface MutationCall {
   path: string;
   body?: unknown;
   operationId: string;
+  replay: { kind: "never" } | { kind: "same-operation-id"; contract: string };
 }
 
 interface QueryCall {
@@ -253,6 +254,67 @@ test("V2 model discovery distinguishes empty upstream data from failures", async
       (error: Error & { code?: string }) => error.code === "protocol-response-invalid",
     );
   });
+});
+
+test("V2 provider listing and auth methods use native endpoints", async () => {
+  const fake = transportDouble({
+    query: (path) => path.startsWith("/provider/auth?")
+      ? httpResponse({ cursor: [{ type: "oauth", label: "Sign in" }] })
+      : httpResponse({
+          all: [
+            { id: "cursor", name: "Cursor" },
+            { id: "bad", name: "" },
+          ],
+        }),
+    mutate: (call) => ({
+      kind: "response",
+      status: 200,
+      headers: {},
+      body: call.path.includes("/oauth/authorize?")
+        ? { url: "https://cursor.test/login", method: "code", instructions: "Sign in" }
+        : true,
+    }),
+  });
+  const adapter = createV2ProtocolAdapter({ transport: fake.transport, endpoint });
+
+  assert.deepEqual(await adapter.listAllProviders!(), [{ id: "cursor", name: "Cursor" }]);
+  assert.deepEqual(await adapter.providerAuthMethods!(), {
+    cursor: [{ type: "oauth", label: "Sign in" }],
+  });
+  assert.deepEqual(
+    await adapter.providerAuthorize!("cursor", 0, { instance: "cloud" }),
+    { url: "https://cursor.test/login", method: "code", instructions: "Sign in" },
+  );
+  assert.equal(await adapter.providerAuthCallback!("cursor", 0, "auth-code"), true);
+  assert.equal(await adapter.setProviderApiKey!("openai", "sk-test", { region: "us" }), true);
+  assert.equal(await adapter.removeProviderAuth!("openai"), true);
+
+  assert.deepEqual(fake.mutations.map(({ method, path, body, replay }) => ({ method, path, body, replay })), [
+    {
+      method: "POST",
+      path: "/provider/cursor/oauth/authorize?directory=%2Fworkspace%2Fproject&workspace=worktree-a",
+      body: { method: 0, inputs: { instance: "cloud" } },
+      replay: { kind: "never" },
+    },
+    {
+      method: "POST",
+      path: "/provider/cursor/oauth/callback?directory=%2Fworkspace%2Fproject&workspace=worktree-a",
+      body: { method: 0, code: "auth-code" },
+      replay: { kind: "never" },
+    },
+    {
+      method: "PUT",
+      path: "/auth/openai?directory=%2Fworkspace%2Fproject&workspace=worktree-a",
+      body: { type: "api", key: "sk-test", metadata: { region: "us" } },
+      replay: { kind: "never" },
+    },
+    {
+      method: "DELETE",
+      path: "/auth/openai?directory=%2Fworkspace%2Fproject&workspace=worktree-a",
+      body: undefined,
+      replay: { kind: "never" },
+    },
+  ]);
 });
 
 test("V2 core session methods use native paths and reconcile pending requests", async () => {

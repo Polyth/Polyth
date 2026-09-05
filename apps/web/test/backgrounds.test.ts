@@ -28,7 +28,7 @@ test("custom backgrounds accept bounded raster data only", () => {
   assert.match(validateBackgroundFile({ type: "image/png", size: 3 * 1024 * 1024 }) ?? "", /2 MB/);
 });
 
-test("background controls are wired into Appearance and the held-Shift corner", async () => {
+test("background and glass controls are wired into Appearance and the held-Shift corner", async () => {
   const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
   const [app, pages, picker, styles] = await Promise.all([
     read("../src/App.tsx"),
@@ -38,6 +38,10 @@ test("background controls are wired into Appearance and the held-Shift corner", 
   ]);
   assert.match(app, /<BackgroundQuickPicker \/>/);
   assert.match(pages, /data-settings-item="appearance\.background"[\s\S]*<BackgroundPicker \/>/);
+  assert.match(pages, /itemId="appearance\.glass"[\s\S]*ui\.glassEffect/);
   assert.match(picker, /useShiftArmed\(\)/);
   assert.match(styles, /\.background-quick-trigger\s*\{[^}]*position:\s*fixed;[^}]*inset-inline-end:/s);
+  assert.doesNotMatch(styles, /\.workspace > \.main\s*\{[^}]*background:/s);
+  assert.match(styles, /backdrop-filter:\s*blur\(var\(--material-glass-blur\)\)\s*saturate\(var\(--material-glass-saturation\)\)/);
+  assert.doesNotMatch(styles, /prefers-reduced-motion:\s*no-preference[\s\S]{0,1200}data-glass/);
 });

@@ -12,9 +12,21 @@ export function orgRoutes(deps: {
 }): RouteHandler {
   const { store } = deps;
 
-  return async ({ path, method, url, body, json, space }) => {
+  return async (rc) => {
+    const { path, method, url, body, json } = rc;
+    // Path-match BEFORE reading `rc.space`: the getter resolves tenancy and
+    // throws for anonymous callers. These handlers also see static SPA paths.
+    if (!path.startsWith("/api/")) return false;
+    if (!(
+      path.startsWith("/api/projects/")
+      || path.startsWith("/api/sessions")
+      || path.startsWith("/api/folders")
+      || path.startsWith("/api/labels")
+      || path === "/api/search"
+    )) return false;
     // Scoped services + the tenant id used for the label rows. Every read
     // below therefore starts inside the caller's Space.
+    const space = rc.space;
     const { projects, sessions, guard } = deps.spaces(space);
     const spaceId = space.spaceId;
     // A folder id carries no Space; ownership is proven through its project.

@@ -3,12 +3,13 @@ import type { RouteHandler } from "../http.ts";
 import type { SpaceServicesFor } from "../spaceScope.ts";
 
 export function sessionRetentionRoutes(spaces: SpaceServicesFor): RouteHandler {
-  return async ({ path, method, url, body, json, space }) => {
+  return async (rc) => {
+    const { path, method, url, body, json } = rc;
     if (path !== "/api/session-retention") return false;
     if (method !== "GET" && method !== "POST") return false;
     // Retention sweeps only the caller's own Space — a bulk archive must never
     // reach across tenants.
-    const { sessions } = spaces(space);
+    const { sessions } = spaces(rc.space);
     const requestedDays = method === "GET"
       ? Number(url.searchParams.get("days") ?? 30)
       : Number((await body()).days ?? 30);

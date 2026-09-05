@@ -425,7 +425,7 @@ test("model leads the phone composer while effort stays a configurable draggable
   assert.ok(composer.includes("cfg.thinking !== undefined"), "Auto suppresses saved and session thinking fallbacks");
   assert.ok(composer.includes("onCommit={preserveKeyboard}"), "the keyboard reopens once the drag ends");
   assert.ok(composer.includes("pickThinking(thinking || undefined)"), "picking saves the effort and updates the composer config");
-  assert.ok(composer.includes("composerEffortControl: effortControl"), "the slot context owns the rendered control");
+  assert.ok(composer.includes("composerEffortControl: phoneLayout ? null : effortControl"), "desktop slots own the rendered effort control");
   assert.ok(miniWidgets.includes('id: "composer.effort"'), "effort is registered in the shared widget layout");
   assert.ok(effortMenu.includes('type="range"'), "effort uses a direct discrete slider on every layout");
   assert.ok(!effortMenu.includes("<select"), "the phone select variant is gone — dragging works on touch");

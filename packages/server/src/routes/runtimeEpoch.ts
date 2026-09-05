@@ -8,10 +8,11 @@ const CONFLICT_CODES = new Set([
 ]);
 
 export function runtimeEpochRoutes(spaces: SpaceServicesFor): RouteHandler {
-  return async ({ path, method, body, json, space }) => {
+  return async (rc) => {
+    const { path, method, body, json } = rc;
     const match = path.match(/^\/api\/sessions\/([^/]+)\/runtime-epoch$/);
     if (!match || method !== "POST") return false;
-    const { sessions } = spaces(space);
+    const { sessions } = spaces(rc.space);
     const sessionId = decodeURIComponent(match[1]!);
     if (!sessions.confirmBorrowedRuntimeEpoch) {
       throw Object.assign(new Error("runtime epoch confirmation is unavailable"), {

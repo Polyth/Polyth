@@ -19,6 +19,16 @@ test("composer and above-composer widgets sit directly on the workspace", () => 
   assert.doesNotMatch(css, /\.focus-conversation\s*\{[^}]*background:/s);
 });
 
+test("the conversation fills behind the glass composer without hiding its tail", () => {
+  const surface = read("../src/components/workspace/builtinSurfaces.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(surface, /className="conversation-composer-dock"[\s\S]*slot="session\.composer\.before"[\s\S]*slot="session\.footer"[\s\S]*<Composer \/>/);
+  assert.match(surface, /new ResizeObserver\(publishHeight\)/);
+  assert.match(css, /\.conversation-composer-dock\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*auto 0 0;/s);
+  assert.match(css, /\.focus-conversation:has\(> \.conversation-composer-dock\) \.timeline\s*\{[^}]*padding-bottom:\s*calc\(var\(--conversation-dock-height\)/s);
+});
+
 test("composer radius uses the shared corner setting", () => {
   const css = read("../src/styles.css");
 

@@ -1497,6 +1497,8 @@ function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnL
         <>
           <Button
             size="sm"
+            variant="quiet"
+            className="turn-rate-limit-action"
             busy={busy === "resume"}
             disabled={busy !== null}
             onClick={() => run("resume", resumeNow(sessionId))}
@@ -1506,10 +1508,12 @@ function RateLimitNotice({ sessionId, limit }: { sessionId: string; limit: TurnL
             items={modelItems}
             onPick={pickModel}
             disabled={busy !== null || modelItems.length === 0}
+            className="turn-rate-limit-model"
           />
           <Button
             size="sm"
-            variant="ghost"
+            variant="quiet"
+            className="turn-rate-limit-action"
             busy={busy === "cancel"}
             disabled={busy !== null}
             onClick={() => run("cancel", cancelResume(sessionId))}

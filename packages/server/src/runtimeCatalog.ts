@@ -11,6 +11,10 @@ export interface RuntimeCatalog {
   models(): Promise<ModelDescriptor[]>;
   agents(): Promise<AgentDescriptor[]>;
   patchAgent(agent: AgentDescriptor): void;
+  /** Drop the cached model snapshot so the next models() call re-fans-out.
+   *  Used right after a provider connects/disconnects so Settings reflects
+   *  it immediately instead of waiting for a restart. */
+  invalidateModels(): void;
 }
 
 /**
@@ -118,6 +122,11 @@ export function createRuntimeCatalog(deps: {
   return {
     models: loadModels,
     agents: loadAgents,
+    invalidateModels() {
+      models = undefined;
+      modelsPending = undefined;
+      modelAttempts = 0;
+    },
     patchAgent(agent) {
       if (!agents) return;
       const index = agents.findIndex((candidate) => candidate.name === agent.name);

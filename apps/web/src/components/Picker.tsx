@@ -26,6 +26,8 @@ export interface PickerProps {
   /** Multi-select mode: toggles stay open, chip shows a count. */
   values?: readonly string[];
   onPick: (id: string) => void;
+  /** Called when the picker is opened, before its options are shown. */
+  onOpen?: () => void;
   placeholder?: string;
   direction?: "up" | "down";
   disabled?: boolean;
@@ -74,6 +76,7 @@ export default function Picker({
   value,
   values,
   onPick,
+  onOpen,
   placeholder = tr("picker.default"),
   direction: _direction = "down",
   disabled,
@@ -110,6 +113,7 @@ export default function Picker({
       return;
     }
     setQ("");
+    onOpen?.();
     if (asSheet) {
       // Open first, dismiss the keyboard after: see sheetTrigger.ts.
       setOpen(true);

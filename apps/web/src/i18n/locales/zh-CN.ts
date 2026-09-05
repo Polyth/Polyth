@@ -219,6 +219,7 @@ export const zhCN: AppMessages = {
   "composer.forSnippets": "对于片段，",
   "composer.goalAttached": "目标附后。",
   "composer.generateNextAction": "生成下一步操作",
+  "composer.improvePrompt": "改进提示词",
   "composer.hideModelAgentAndSyntaxOptions": "隐藏模型、代理和语法选项",
   "composer.insert": "插入",
   "composer.iToFocus": "我专注于",

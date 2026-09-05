@@ -219,6 +219,7 @@ export const pl: AppMessages = {
   "composer.forSnippets": "dla fragmentów,",
   "composer.goalAttached": "Cel przyłączony.",
   "composer.generateNextAction": "Wygeneruj następne działanie",
+  "composer.improvePrompt": "Ulepsz polecenie",
   "composer.hideModelAgentAndSyntaxOptions": "Ukryj opcje modelu, agenta i składni",
   "composer.insert": "wstawić",
   "composer.iToFocus": "Ja się skupić",

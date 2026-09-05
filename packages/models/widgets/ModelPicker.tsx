@@ -586,6 +586,7 @@ export default function ModelPicker({
         <ProviderLogo
           providerID={selectedModel.providerID}
           providerName={selectedModel.providerName}
+          size="compact"
           className="model-trigger-logo"
         />
       )}

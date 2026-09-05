@@ -92,10 +92,13 @@ import { createModelVisibilityService } from "./modelVisibility.ts";
 import { createVoiceSettings } from "./voice.ts";
 import {
   buildNotePrompt,
+  buildPromptImprovementPrompt,
   createAssistService,
   createAssistSettings,
   createManualSuggestionService,
   parseNoteReply,
+  PROMPT_IMPROVEMENT_OUTPUT_MAX_CHARS,
+  sanitizeNextActionReply,
   type AssistService,
 } from "./assist.ts";
 import { assistRoutes } from "./routes/assist.ts";
@@ -768,6 +771,33 @@ export async function boot(opts: BootOptions = {}) {
       capabilities: () => useRuntime(() => inner.capabilities()),
       models: () => useRuntime(() => inner.models()),
       agents: () => useRuntime(() => inner.agents()),
+      ...(inner.listAllProviders
+        ? { listAllProviders: () => useRuntime(() => inner.listAllProviders!()) }
+        : {}),
+      ...(inner.providerAuthMethods
+        ? { providerAuthMethods: () => useRuntime(() => inner.providerAuthMethods!()) }
+        : {}),
+      ...(inner.providerAuthorize
+        ? {
+            providerAuthorize: (providerID: string, method: number, inputs?: Record<string, string>) =>
+              useRuntime(() => inner.providerAuthorize!(providerID, method, inputs)),
+          }
+        : {}),
+      ...(inner.providerAuthCallback
+        ? {
+            providerAuthCallback: (providerID: string, method: number, code: string) =>
+              useRuntime(() => inner.providerAuthCallback!(providerID, method, code)),
+          }
+        : {}),
+      ...(inner.setProviderApiKey
+        ? {
+            setProviderApiKey: (providerID: string, key: string, metadata?: Record<string, string>) =>
+              useRuntime(() => inner.setProviderApiKey!(providerID, key, metadata)),
+          }
+        : {}),
+      ...(inner.removeProviderAuth
+        ? { removeProviderAuth: (providerID: string) => useRuntime(() => inner.removeProviderAuth!(providerID)) }
+        : {}),
       sessions: () => useRuntime(() => inner.sessions()),
       history: (sessionId) => useRuntime(() => inner.history(sessionId)),
       ensureSession: (canonical) => useRuntime(() => inner.ensureSession(canonical)),
@@ -1094,6 +1124,32 @@ export async function boot(opts: BootOptions = {}) {
     }
   };
 
+  // Cold-boot `/api/models` (and the eager catalog warm-up below) fans out to
+  // every project with Promise.allSettled. Spawning all `opencode serve`
+  // processes at once OOMs/swap-thrashes the host — the Node event loop then
+  // stalls in memory reclaim and HTTP stops answering. Cap concurrent first
+  // spawns; cached lookups still share the same Promise.
+  const maxConcurrentSpawns = Math.max(
+    1,
+    Number(process.env.POLYTH_RUNTIME_SPAWN_CONCURRENCY ?? 2) || 2,
+  );
+  let activeSpawns = 0;
+  const spawnWaiters: Array<() => void> = [];
+  const withSpawnSlot = async <T>(work: () => Promise<T>): Promise<T> => {
+    // Re-check after every wake: a single release can race with a fresh
+    // caller that saw the free slot first.
+    while (activeSpawns >= maxConcurrentSpawns) {
+      await new Promise<void>((resolve) => { spawnWaiters.push(resolve); });
+    }
+    activeSpawns += 1;
+    try {
+      return await work();
+    } finally {
+      activeSpawns -= 1;
+      spawnWaiters.shift()?.();
+    }
+  };
+
   const runtimes: RuntimePool = {
     async forProject(projectId, cwd) {
       const dir = await cwdFor(projectId, cwd);
@@ -1110,7 +1166,7 @@ export async function boot(opts: BootOptions = {}) {
         // Every catalog read fans out with `allSettled`, so a spawn that never
         // succeeds is otherwise swallowed here and surfaces only as an empty
         // model list. Record it so the log and the UI can name the cause.
-        p = runtimeDiagnostics.observe(key, { projectId, cwd: dir }, async () => {
+        p = runtimeDiagnostics.observe(key, { projectId, cwd: dir }, () => withSpawnSlot(async () => {
           const configRestartable = !(await projects.get(projectId))?.remote;
           try {
             const facade = facadeFor(
@@ -1134,7 +1190,7 @@ export async function boot(opts: BootOptions = {}) {
             if (configRestartable) await refreshSafeBehavior();
             return facade;
           }
-        });
+        }));
         runtimesByProject.set(key, p);
         p.catch(() => runtimesByProject.delete(key)); // allow retry
       }
@@ -1747,7 +1803,21 @@ export async function boot(opts: BootOptions = {}) {
       settings: assistSettings,
       projection: (sessionId) => store.projection(sessionId),
       latestSeq: (sessionId) => store.latestSeq(sessionId),
-      suggestion: (sessionId) => manualSuggestion.generate(sessionId),
+      suggestion: (sessionId, draft) => manualSuggestion.generate(sessionId, draft),
+      improve: async (space, projectId, draft) => {
+        const project = await spaceServices(space).projects.get(projectId);
+        if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
+        const runtime = await runtimes.forProject(projectId);
+        const model = resolveSmallModel();
+        const { text } = await smallModels.complete(runtime, {
+          cwd: project.path,
+          prompt: buildPromptImprovementPrompt(draft),
+          ...(model ? { model } : {}),
+          maxOutputTokens: 1_024,
+          timeoutMs: 90_000,
+        });
+        return sanitizeNextActionReply(text, PROMPT_IMPROVEMENT_OUTPUT_MAX_CHARS);
+      },
       distill: async (sessionId) => {
         const transcript = await assistTranscript(sessionId);
         if (!transcript.trim()) {

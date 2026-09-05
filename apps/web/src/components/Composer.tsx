@@ -33,7 +33,14 @@ import {
   type Worktree,
 } from "@polyth/session/web-api";
 import { loadDraft, saveDraft, syncDraftToServer, flushDraftToServer, type AutocompleteItem } from "../utils.ts";
-import { canApplyNextAction, nextActionInsertMode, type NextActionRequest } from "../nextAction.ts";
+import {
+  canApplyNextAction,
+  canRevertPromptRewrite,
+  nextActionInsertMode,
+  promptRewriteSource,
+  type NextActionRequest,
+  type PromptRewrite,
+} from "../nextAction.ts";
 import { latestCompletedExchange } from "@polyth/session/next-action";
 import SlotHost from "./slots/SlotHost.ts";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
@@ -53,7 +60,6 @@ import {
   COMPOSER_REPLACE,
   drainComposerReplacement,
   drainInserts,
-  requestComposerInsert,
   requestComposerReplace,
 } from "../composerInsert.ts";
 import { activeToken, completeToken, shellCommand, type PromptToken } from "../composer/language.ts";
@@ -466,6 +472,7 @@ export default function Composer({
   committedTextRef.current = text;
   const draftRevisionRef = useRef(0);
   const [suggestionBusy, setSuggestionBusy] = useState(false);
+  const [promptRewrite, setPromptRewrite] = useState<PromptRewrite | null>(null);
   const [focusMode, setFocusMode] = useState(false);
   // UX-MOBILE-01 §9/§10/§11/§42: on phones the composer is a compact resting
   // control that expands into the full model/mode surface once the user
@@ -556,6 +563,7 @@ export default function Composer({
     setQueueEditSaving(false);
     setQueuedItems([]);
     setSteeringQueuedId(null);
+    setPromptRewrite(null);
   }, [session?.id, newSessionIntent, flushComposerDraft]);
 
   // Disengage after an outside click has reached its target. Collapsing on
@@ -1197,6 +1205,7 @@ export default function Composer({
     (val: string) => {
       draftRevisionRef.current += 1;
       setText(val);
+      setPromptRewrite((current) => current?.generated === val ? current : null);
       if (sessionIdRef.current === null && activeProjectId) saveNewSessionDraftText(activeProjectId, val);
       if (!applyingHistory.current) historyCursor.current = emptyPromptHistoryCursor();
       applyingHistory.current = false;
@@ -1442,28 +1451,43 @@ export default function Composer({
       ariaLabel={tr("composer.selectAgentModeCurrentValue", { value: activeAgentLabel })}
     />
   ) : <span className="agent-type-badge">{activeAgentLabel}</span>;
-  const canGenerateNextAction = !!session?.id && !working && hasCompletedExchange && !suggestionBusy;
+  const suggestionScopeId = session?.id ?? activeProjectId ?? "";
+  const canGenerateNextAction = !!suggestionScopeId
+    && !working
+    && (!!text.trim() || (!!session?.id && hasCompletedExchange))
+    && !suggestionBusy;
+  const canRevertSuggestion = !!suggestionScopeId
+    && canRevertPromptRewrite(suggestionScopeId, text, promptRewrite)
+    && !suggestionBusy;
   const generateNextAction = useCallback(() => {
     const target = sessionIdRef.current;
-    if (!target || !canGenerateNextAction) return;
+    const projectId = getState().activeProjectId;
+    if (!canGenerateNextAction || (!target && !projectId)) return;
     const draft = inputRef.current?.getText() ?? text;
+    const scopeId = target ?? projectId!;
+    const source = promptRewriteSource(scopeId, draft, promptRewrite);
     const request: NextActionRequest = {
       sessionId: target,
-      atSeq: activeSessionSeq,
+      projectId,
+      atSeq: target ? activeSessionSeq : 0,
       draftRevision: draftRevisionRef.current,
       draft,
     };
     setSuggestionBusy(true);
-    void api.assistSuggestion(target)
+    const completion = target
+      ? api.assistSuggestion(target, source)
+      : api.assistPrompt(projectId!, source);
+    void completion
       .then((result) => {
-        const mode = nextActionInsertMode(request, result.suggestion);
+        const mode = nextActionInsertMode(result.suggestion);
         if (!mode || !canApplyNextAction(request, {
           activeSessionId: getState().activeSessionId,
-          latestSeq: lastSeq(target),
+          activeProjectId: getState().activeProjectId,
+          latestSeq: target ? lastSeq(target) : 0,
           draftRevision: draftRevisionRef.current,
         }, result)) return;
-        if (mode === "replace") requestComposerReplace(result.suggestion);
-        else requestComposerInsert(result.suggestion);
+        requestComposerReplace(result.suggestion);
+        setPromptRewrite({ scopeId, original: source, generated: result.suggestion });
       })
       .catch((error) => {
         const code = errorCodeOf(error);
@@ -1471,7 +1495,18 @@ export default function Composer({
         setUiError(friendlyError(tr("composer.couldNotGenerateNextAction"), error));
       })
       .finally(() => setSuggestionBusy(false));
-  }, [activeSessionSeq, canGenerateNextAction, text]);
+  }, [activeSessionSeq, canGenerateNextAction, promptRewrite, text]);
+  const revertSuggestion = useCallback(() => {
+    const target = sessionIdRef.current;
+    const projectId = getState().activeProjectId;
+    const scopeId = target ?? projectId;
+    const draft = inputRef.current?.getText() ?? text;
+    const rewrite = promptRewrite;
+    if (!scopeId || !rewrite || !canRevertPromptRewrite(scopeId, draft, rewrite)) return;
+    setPromptRewrite(null);
+    requestComposerReplace(rewrite.original);
+  }, [promptRewrite, text]);
+  const phoneLayout = isPhone;
   // Composer controls are ordinary mini-widgets: one placement/visibility
   // system owns next action, Workflow, effort, and agent.
   const slotContext = {
@@ -1488,11 +1523,21 @@ export default function Composer({
     workflowDraftText: text,
     workflowAttachmentCount: attachments.length,
     consumeWorkflowDraft,
-    composerEffortControl: effortControl,
+    // On phones effort has a dedicated slot beside the model selector above
+    // the editor. Keep the widget context empty there so the same control is
+    // not rendered a second time in the bottom rail.
+    composerEffortControl: phoneLayout ? null : effortControl,
     composerAgentControl: agentControl,
     canGenerateNextAction,
+    canRevertSuggestion,
     suggestionBusy,
+    suggestionActionLabel: canRevertSuggestion
+      ? tr("timeline.regenerate")
+      : text.trim()
+        ? tr("composer.improvePrompt")
+        : tr("composer.generateNextAction"),
     generateNextAction,
+    revertSuggestion,
   };
 
   const borrowedEpochPending = session?.status === "epoch-pending"
@@ -1502,7 +1547,6 @@ export default function Composer({
     || borrowedEpochPending
     || (queueEdit ? !text.trim() : (!text.trim() && attachments.length === 0))
     || (!queueEdit && !shellMode && (noModels || profileMissing));
-  const phoneLayout = isPhone;
   const hasDraft = text.trim() !== "" || attachments.length > 0;
   // On phones the composer only unfolds when it is actually being used: focus,
   // a shell command, or a draft in progress. A working turn alone keeps it in
@@ -1606,6 +1650,7 @@ export default function Composer({
       {phoneLayout && modelControl && (
         <div className="composer-config-top">
           {modelControl}
+          {effortControl}
         </div>
       )}
       <div className="composer-input">

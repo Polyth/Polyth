@@ -1,7 +1,7 @@
 // F9 routes: idle-assist settings (the hard token-spend switch), the freshness-
 // checked assist read, and chat→note distillation. The assist itself lives on
 // the projection; this route answers 404 the moment the log outgrows it.
-import type { SessionAssist, SessionProjection } from "@polyth/contracts";
+import type { SessionAssist, SessionProjection, SpaceContext } from "@polyth/contracts";
 import type { RouteHandler } from "../http.ts";
 import { isFresh, type AssistSettingsService } from "../assist.ts";
 
@@ -14,7 +14,9 @@ export function assistRoutes(deps: {
   /** Small-model summary of the latest user prompt for mobile task chrome. */
   taskBrief?: (sessionId: string) => Promise<string>;
   /** Explicit, ephemeral next-action suggestion for the composer. */
-  suggestion?: (sessionId: string) => Promise<{ suggestion: string; atSeq: number }>;
+  suggestion?: (sessionId: string, draft?: string) => Promise<{ suggestion: string; atSeq: number }>;
+  /** Prompt-only rewrite for a composer that has not created a session yet. */
+  improve?: (space: SpaceContext, projectId: string, draft: string) => Promise<string>;
 }): RouteHandler {
   return async (rc) => {
     const { path, method, json } = rc;
@@ -28,7 +30,23 @@ export function assistRoutes(deps: {
       return true;
     }
 
-    let m = path.match(/^\/api\/sessions\/([^/]+)\/assist$/);
+    let m = path.match(/^\/api\/projects\/([^/]+)\/assist\/prompt$/);
+    if (m && method === "POST") {
+      const projectId = decodeURIComponent(m[1]!);
+      const body = await rc.body();
+      const draft = typeof body.draft === "string" ? body.draft.trim() : "";
+      if (!draft) { json(400, { error: "invalid-input", message: "draft is required" }); return true; }
+      if (!deps.improve) { json(503, { error: "unavailable", message: "no small model configured for prompt improvement" }); return true; }
+      try {
+        json(200, { suggestion: await deps.improve(rc.space, projectId, draft), atSeq: 0 });
+      } catch (error) {
+        const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "upstream";
+        json(code === "not-found" ? 404 : 502, { error: code, message: error instanceof Error ? error.message : String(error) });
+      }
+      return true;
+    }
+
+    m = path.match(/^\/api\/sessions\/([^/]+)\/assist$/);
     if (m && method === "GET") {
       const sessionId = decodeURIComponent(m[1]!);
       const proj = await deps.projection(sessionId);
@@ -53,7 +71,9 @@ export function assistRoutes(deps: {
         return true;
       }
       try {
-        json(200, await deps.suggestion(sessionId));
+        const body = await rc.body();
+        const draft = typeof body.draft === "string" ? body.draft : undefined;
+        json(200, await deps.suggestion(sessionId, draft));
       } catch (error) {
         const code = typeof (error as { code?: unknown })?.code === "string"
           ? (error as { code: string }).code : "upstream";

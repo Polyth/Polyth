@@ -141,6 +141,26 @@ test("top rail alignment defaults to center and accepts only supported positions
   assert.equal(ui.parseUiSettings(JSON.stringify({ topRailAlignment: "floating" })).topRailAlignment, "center");
 });
 
+test("glass effect defaults to matte, validates modes, and applies globally", () => {
+  assert.equal(ui.parseUiSettings(null).glassEffect, "matte");
+  assert.equal(ui.parseUiSettings(JSON.stringify({ glassEffect: "clear" })).glassEffect, "clear");
+  assert.equal(ui.parseUiSettings(JSON.stringify({ glassEffect: "opaque" })).glassEffect, "matte");
+
+  const dataset: Record<string, string> = {};
+  const documentBefore = (globalThis as { document?: unknown }).document;
+  (globalThis as { document?: unknown }).document = {
+    documentElement: { style: { setProperty() {} } },
+    body: { dataset, style: { setProperty() {} } },
+  };
+  try {
+    ui.applyUiSettings(ui.parseUiSettings(JSON.stringify({ glassEffect: "off" })));
+  } finally {
+    if (documentBefore === undefined) delete (globalThis as { document?: unknown }).document;
+    else (globalThis as { document?: unknown }).document = documentBefore;
+  }
+  assert.equal(dataset.glass, "off");
+});
+
 test("rail icon sizes default safely, validate values, and publish token geometry", () => {
   const defaults = ui.parseUiSettings(null);
   assert.equal(defaults.topRailIconSize, "md");

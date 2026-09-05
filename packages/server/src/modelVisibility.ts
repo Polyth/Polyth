@@ -11,13 +11,25 @@
 // modalities, limits, variants, future fields) is preserved by the applier.
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { ModelDescriptor } from "@polyth/contracts";
+import type { AvailableProviderDescriptor, ModelDescriptor } from "@polyth/contracts";
+
+export type AvailableProvider = AvailableProviderDescriptor;
+
+/** A provider the user explicitly added via the "add a provider" picker.
+ *  `name` is a display-name hint captured at add time (the row has no live
+ *  model yet to source one from). */
+export interface AddedProvider {
+  id: string;
+  name?: string;
+}
 
 export interface VisibilityState {
   /** Provider ids hidden entirely. */
   disabledProviders: string[];
   /** "providerID/modelID" keys disabled inside an otherwise-enabled provider. */
   disabledModels: string[];
+  /** Providers explicitly added via the picker — shown even with zero models. */
+  addedProviders: AddedProvider[];
 }
 
 export interface ProviderCatalogModel {
@@ -60,8 +72,21 @@ export interface ModelVisibilityService {
   /** Models the pickers may show: enabled and (by default) connected. */
   filter(models: ModelDescriptor[], opts?: { includeDisconnected?: boolean }): ModelDescriptor[];
   catalog(models: ModelDescriptor[]): ProviderCatalogEntry[];
+  /** Candidates for the "add a provider" picker: `live` + `authMethodIds`
+   *  (from the backend) minus everything catalog() already shows. */
+  available(
+    models: ModelDescriptor[],
+    live: readonly AvailableProvider[],
+    authMethodIds: readonly string[],
+  ): AvailableProvider[];
   setProviderEnabled(providerID: string, enabled: boolean): Promise<VisibilityState>;
   setModelEnabled(key: string, enabled: boolean): Promise<VisibilityState>;
+  /** Explicitly add a zero-model provider so it appears in catalog(); resets
+   *  any stale disabled flag so a freshly-added row starts enabled. */
+  addProvider(providerID: string, name?: string): Promise<VisibilityState>;
+  /** Undo addProvider — hides the row again. Credentials, if any were set,
+   *  are left alone; re-adding may reconnect for free. */
+  removeProvider(providerID: string): Promise<VisibilityState>;
   /** Seed from the backend config when no local store exists yet. */
   seed(): Promise<void>;
 }
@@ -71,12 +96,38 @@ const err = (code: string, message: string) => Object.assign(new Error(message),
 export const modelVisibilityKey = (m: { providerID: string; modelID: string }): string =>
   `${m.providerID}/${m.modelID}`;
 
+/** Accepts plain id strings too (forward-compatible with a simpler shape),
+ *  always normalizing to `{id, name?}`, deduped by id. */
+function parseAddedProviders(v: unknown): AddedProvider[] {
+  if (!Array.isArray(v)) return [];
+  const byId = new Map<string, AddedProvider>();
+  for (const entry of v) {
+    if (typeof entry === "string" && entry) {
+      if (!byId.has(entry)) byId.set(entry, { id: entry });
+      continue;
+    }
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const id = (entry as Record<string, unknown>).id;
+    const name = (entry as Record<string, unknown>).name;
+    if (typeof id === "string" && id) {
+      byId.set(id, { id, ...(typeof name === "string" && name ? { name } : {}) });
+    }
+  }
+  return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+
 export function parseVisibility(raw: unknown): VisibilityState {
   const strings = (v: unknown): string[] =>
     Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === "string" && x.length > 0))].sort() : [];
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { disabledProviders: [], disabledModels: [] };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { disabledProviders: [], disabledModels: [], addedProviders: [] };
+  }
   const o = raw as Record<string, unknown>;
-  return { disabledProviders: strings(o.disabledProviders), disabledModels: strings(o.disabledModels) };
+  return {
+    disabledProviders: strings(o.disabledProviders),
+    disabledModels: strings(o.disabledModels),
+    addedProviders: parseAddedProviders(o.addedProviders),
+  };
 }
 
 /** Extract visibility from a parsed opencode.json (seeding path). */
@@ -135,19 +186,34 @@ export function buildProviderCatalog(
       models: [],
     });
   }
+  for (const added of state.addedProviders) {
+    if (byProvider.has(added.id)) continue;
+    byProvider.set(added.id, {
+      id: added.id,
+      name: added.name || added.id,
+      connected: false,
+      enabled: !state.disabledProviders.includes(added.id),
+      models: [],
+    });
+  }
   for (const m of models) {
+    // OpenCode's full model catalog also contains providers without live
+    // credentials. Keep those out of the settings list; they belong in the
+    // add-provider picker. Configured/explicitly-added providers still get a
+    // zero-model row above so they can be connected here.
+    if (m.connected === false) continue;
     let entry = byProvider.get(m.providerID);
     if (!entry) {
       entry = {
         id: m.providerID,
         name: m.providerName ?? m.providerID,
-        connected: m.connected !== false,
+        connected: true,
         enabled: !state.disabledProviders.includes(m.providerID),
         models: [],
       };
       byProvider.set(m.providerID, entry);
     }
-    if (m.connected !== false) entry.connected = true;
+    entry.connected = true;
     if (m.providerName && entry.name === entry.id) entry.name = m.providerName;
     const key = modelVisibilityKey(m);
     entry.models.push({
@@ -160,7 +226,7 @@ export function buildProviderCatalog(
       ...(m.cost ? { cost: m.cost } : {}),
       ...(m.capabilities ? { capabilities: m.capabilities } : {}),
       ...(m.variants ? { variants: m.variants } : {}),
-      connected: m.connected !== false,
+      connected: true,
       enabled: entry.enabled && !state.disabledModels.includes(key),
     });
   }
@@ -171,6 +237,49 @@ export function buildProviderCatalog(
     return a.name.localeCompare(b.name);
   });
   return out;
+}
+
+/** Ids already shown by catalog() — mirrors its inclusion rule so
+ *  buildAvailableProviders never doubles up an already-visible provider. */
+export function shownProviderIds(
+  models: readonly Pick<ModelDescriptor, "providerID" | "connected">[],
+  state: VisibilityState,
+  configuredProviders: readonly ConfiguredProvider[] = [],
+): Set<string> {
+  const ids = new Set<string>();
+  for (const p of configuredProviders) if (p.id) ids.add(p.id);
+  for (const p of state.addedProviders) ids.add(p.id);
+  for (const m of models) if (m.connected !== false) ids.add(m.providerID);
+  return ids;
+}
+
+/** Best-effort display name for a provider OpenCode currently hides (e.g.
+ *  disabled) and that has no login-flow label to borrow a name from. */
+export function humanizeProviderId(id: string): string {
+  return id
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+/** Candidates for the "add a provider" picker. `live` is OpenCode's own
+ *  provider list (already-disabled providers are absent from it);
+ *  `authMethodIds` are ids with a registered login flow, which OpenCode keeps
+ *  visible even while disabled — the only way a previously-disabled provider
+ *  (e.g. Cursor) can still be found and re-added. */
+export function buildAvailableProviders(
+  live: readonly AvailableProvider[],
+  authMethodIds: readonly string[],
+  shown: ReadonlySet<string>,
+): AvailableProvider[] {
+  const byId = new Map<string, string>();
+  for (const p of live) if (p.id && p.name) byId.set(p.id, p.name);
+  for (const id of authMethodIds) if (!byId.has(id)) byId.set(id, humanizeProviderId(id));
+  return [...byId.entries()]
+    .filter(([id]) => !shown.has(id))
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** disabledModels keys → per-provider blacklists for the backend config. */
@@ -200,7 +309,7 @@ export function createModelVisibilityService(opts: { file: string; applier?: Vis
   mkdirSync(dirname(opts.file), { recursive: true });
 
   let loaded = false;
-  let state: VisibilityState = { disabledProviders: [], disabledModels: [] };
+  let state: VisibilityState = { disabledProviders: [], disabledModels: [], addedProviders: [] };
   let configuredProviders: ConfiguredProvider[] = [];
   try {
     state = parseVisibility(JSON.parse(readFileSync(opts.file, "utf8")));
@@ -233,6 +342,8 @@ export function createModelVisibilityService(opts: { file: string; applier?: Vis
     modelEnabled: (m) => isModelVisible({ ...m, name: m.modelID }, state),
     filter: (models, o) => filterVisibleModels(models, state, o ?? {}),
     catalog: (models) => buildProviderCatalog(models, state, configuredProviders),
+    available: (models, live, authMethodIds) =>
+      buildAvailableProviders(live, authMethodIds, shownProviderIds(models, state, configuredProviders)),
 
     async seed(): Promise<void> {
       if (!opts.applier) return;
@@ -274,6 +385,22 @@ export function createModelVisibilityService(opts: { file: string; applier?: Vis
       if (enabled) set.delete(key);
       else set.add(key);
       return commit({ ...state, disabledModels: [...set] });
+    },
+
+    addProvider(providerID, name) {
+      if (!providerID) throw err("invalid-input", "provider id required");
+      const nextAdded = [
+        ...state.addedProviders.filter((p) => p.id !== providerID),
+        { id: providerID, ...(name ? { name } : {}) },
+      ].sort((a, b) => a.id.localeCompare(b.id));
+      const disabled = new Set(state.disabledProviders);
+      disabled.delete(providerID); // a freshly-added provider starts enabled
+      return commit({ ...state, addedProviders: nextAdded, disabledProviders: [...disabled] });
+    },
+
+    removeProvider(providerID) {
+      if (!providerID) throw err("invalid-input", "provider id required");
+      return commit({ ...state, addedProviders: state.addedProviders.filter((p) => p.id !== providerID) });
     },
   };
 }

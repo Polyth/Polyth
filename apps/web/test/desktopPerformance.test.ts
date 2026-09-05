@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("desktop reduced-motion and low-resource modes disable motion and expensive glass", async () => {
+test("low-resource mode disables expensive glass while the Appearance glass setting stays independent", async () => {
   const [desktop, styles, timeline] = await Promise.all([
     readFile(new URL("../src/desktop.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/styles.css", import.meta.url), "utf8"),
@@ -14,6 +14,7 @@ test("desktop reduced-motion and low-resource modes disable motion and expensive
   assert.match(desktop, /polyth:desktop-performance-changed/);
   assert.match(styles, /:is\(html\[data-reduce-animations="true"\], body\[data-desktop-low-resource="true"\]\) \*/);
   assert.match(styles, /backdrop-filter:\s*none !important/);
+  assert.match(styles, /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)/);
   assert.match(timeline, /addEventListener\("polyth:desktop-performance-changed"/);
   assert.match(timeline, /Math\.min\(current, LOW_RESOURCE_TIMELINE_WINDOW\)/);
 });

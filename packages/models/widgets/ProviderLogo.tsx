@@ -249,10 +249,12 @@ function SvgMark({ provider }: { provider: ProviderKey }) {
 export default function ProviderLogo({
   providerID,
   providerName,
+  size = "regular",
   className = "",
 }: {
   providerID?: string;
   providerName?: string;
+  size?: "compact" | "regular";
   className?: string;
 }) {
   const id = `${providerID ?? ""} ${providerName ?? ""}`.trim().toLowerCase() || "polyth";
@@ -261,7 +263,7 @@ export default function ProviderLogo({
   const label = providerName || providerID || "Polyth";
   return (
     <span
-      className={`provider-logo provider-${key ?? "other"}${className ? ` ${className}` : ""}`}
+      className={`provider-logo provider-logo--${size} provider-${key ?? "other"}${className ? ` ${className}` : ""}`}
       data-provider={key ?? "other"}
       aria-hidden="true"
       title={label}

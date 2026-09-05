@@ -219,6 +219,7 @@ export const ptBR: AppMessages = {
   "composer.forSnippets": "para trechos,",
   "composer.goalAttached": "Golo em anexo.",
   "composer.generateNextAction": "Gerar próxima ação",
+  "composer.improvePrompt": "Melhorar prompt",
   "composer.hideModelAgentAndSyntaxOptions": "Ocultar opções de modelo, agente e sintaxe",
   "composer.insert": "inserir",
   "composer.iToFocus": "Eu preciso me concentrar",

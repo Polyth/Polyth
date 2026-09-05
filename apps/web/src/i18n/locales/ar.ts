@@ -219,6 +219,7 @@ export const ar: AppMessages = {
   "composer.forSnippets": "للحصول على مقتطفات،",
   "composer.goalAttached": "الهدف المرفق.",
   "composer.generateNextAction": "إنشاء الإجراء التالي",
+  "composer.improvePrompt": "تحسين المطالبة",
   "composer.hideModelAgentAndSyntaxOptions": "إخفاء خيارات النموذج والوكيل والصياغة",
   "composer.insert": "أدخل",
   "composer.iToFocus": "أريد التركيز",

@@ -282,9 +282,13 @@ export function agentSessionRoutes(deps: AgentSessionRouteDeps): RouteHandler {
   const { store } = deps;
 
   return async (rc) => {
-    const { path, method, url, body, json, space } = rc;
+    const { path, method, url, body, json } = rc;
+    // Do not read `rc.space` until we know this is an /api/agent path — the
+    // getter throws for anonymous SPA/static requests that also hit this chain.
+    if (!path.startsWith("/api/agent")) return false;
     // Bound once per request. Every helper below closes over these scoped
     // services, so no branch of this large surface can reach another tenant.
+    const space = rc.space;
     const { sessions, projects } = deps.spaces(space);
 
   const context = async (sessionId: string) => {

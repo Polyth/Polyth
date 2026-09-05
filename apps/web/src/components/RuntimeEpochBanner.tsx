@@ -72,13 +72,13 @@ export function RuntimeEpochBanner({ sessionId }: { sessionId: string }) {
   }, [completedFor, sessionId, session?.status]);
 
   useEffect(() => {
-    if (session?.status !== "epoch-pending") return;
+    if (session?.status !== "epoch-pending" || session.runtimeControl === "owned") return;
     let cancelled = false;
     void api.sessionDebug(sessionId).then((row) => {
       if (!cancelled) setDebug(row.debug);
     }).catch(() => undefined);
     return () => { cancelled = true; };
-  }, [sessionId, session?.status]);
+  }, [sessionId, session?.status, session?.runtimeControl]);
 
   if (!session) return null;
 
@@ -94,20 +94,12 @@ export function RuntimeEpochBanner({ sessionId }: { sessionId: string }) {
     return null;
   }
 
+  // Owned runtimes recover their epoch in the background. Only borrowed
+  // runtimes need a user-facing confirmation before changing identity.
+  if (session.runtimeControl === "owned") return null;
+
   const turnActive = model.turn?.status === "working";
   const hasUncertainTurn = uncertainRecoveryWarning({ events, debug });
-
-  if (session.runtimeControl === "owned") {
-    return (
-      <div className="runtime-recovery" role="status">
-        <p className="runtime-recovery-body">{tr("runtimeRecovery.ownedBody")}</p>
-        {hasUncertainTurn && (
-          <p className="runtime-recovery-note">{tr("runtimeRecovery.uncertainTurn")}</p>
-        )}
-        <RuntimeRecoveryDetails sessionId={sessionId} session={session} events={events} />
-      </div>
-    );
-  }
 
   if (session.runtimeControl !== "borrowed") {
     return (

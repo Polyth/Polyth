@@ -168,6 +168,34 @@ export interface VisibilityStateDto {
   ok: boolean;
   disabledProviders: string[];
   disabledModels: string[];
+  addedProviders: Array<{ id: string; name?: string }>;
+}
+export interface AvailableProviderDto {
+  id: string;
+  name: string;
+}
+export interface ProviderAuthPromptOptionDto {
+  label: string;
+  value: string;
+  hint?: string;
+}
+export interface ProviderAuthPromptDto {
+  type: "text" | "select";
+  key: string;
+  message: string;
+  placeholder?: string;
+  options?: ProviderAuthPromptOptionDto[];
+  when?: { key: string; op: "eq" | "neq"; value: string };
+}
+export interface ProviderAuthMethodDto {
+  type: "oauth" | "api";
+  label: string;
+  prompts?: ProviderAuthPromptDto[];
+}
+export interface ProviderAuthorizationDto {
+  url: string;
+  method: "auto" | "code";
+  instructions: string;
 }
 
 async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -754,6 +782,32 @@ export const api = {
     pendingMutation(jfetch<VisibilityStateDto>(`/api/providers/${encodeURIComponent(id)}/enabled`, json("POST", { enabled }))),
   setModelEnabled: (key: string, enabled: boolean) =>
     pendingMutation(jfetch<VisibilityStateDto>(`/api/models/enabled`, json("POST", { key, enabled }))),
+  /** ?refresh=1 busts the server-side model cache — use while polling for a
+   *  connect/OAuth flow to finish; prefer listProviders() otherwise. */
+  refreshProviders: () => jfetch<ProviderCatalogDto[]>("/api/providers?refresh=1"),
+  listAvailableProviders: () => jfetch<AvailableProviderDto[]>("/api/providers/available"),
+  providerAuthMethods: () => jfetch<Record<string, ProviderAuthMethodDto[]>>("/api/providers/auth-methods"),
+  addProvider: (id: string, name?: string) =>
+    pendingMutation(jfetch<VisibilityStateDto>(`/api/providers/${encodeURIComponent(id)}/add`, json("POST", name ? { name } : {}))),
+  removeProvider: (id: string) =>
+    pendingMutation(jfetch<VisibilityStateDto>(`/api/providers/${encodeURIComponent(id)}/remove`, json("POST", {}))),
+  connectProviderApiKey: (id: string, key: string, metadata?: Record<string, string>) =>
+    pendingMutation(jfetch<{ ok: true }>(
+      `/api/providers/${encodeURIComponent(id)}/connect/apikey`,
+      json("POST", { key, ...(metadata ? { metadata } : {}) }),
+    )),
+  authorizeProviderOAuth: (id: string, method: number, inputs?: Record<string, string>) =>
+    pendingMutation(jfetch<ProviderAuthorizationDto>(
+      `/api/providers/${encodeURIComponent(id)}/connect/oauth/authorize`,
+      json("POST", { method, ...(inputs ? { inputs } : {}) }),
+    )),
+  completeProviderOAuth: (id: string, method: number, code: string) =>
+    pendingMutation(jfetch<{ ok: true }>(
+      `/api/providers/${encodeURIComponent(id)}/connect/oauth/callback`,
+      json("POST", { method, code }),
+    )),
+  disconnectProvider: (id: string) =>
+    pendingMutation(jfetch<{ ok: true }>(`/api/providers/${encodeURIComponent(id)}/disconnect`, json("POST", {}))),
   saveRole: (name: string, input: { prompt?: string; model?: ModelRef; mode: AgentDescriptor["mode"] }) =>
     pendingMutation(jfetch<AgentDescriptor>(`/api/settings/roles/${encodeURIComponent(name)}`, json("PUT", input))),
   opencodePluginsList: () =>
@@ -1383,8 +1437,16 @@ export const api = {
   assistGet: (sessionId: string) =>
     jfetch<AssistDto>(`/api/sessions/${encodeURIComponent(sessionId)}/assist`),
   /** Explicit ephemeral composer draft; it is never saved to the session. */
-  assistSuggestion: (sessionId: string) =>
-    jfetch<AssistSuggestionDto>(`/api/sessions/${encodeURIComponent(sessionId)}/assist/suggestion`, json("POST", {})),
+  assistSuggestion: (sessionId: string, draft?: string) =>
+    jfetch<AssistSuggestionDto>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/assist/suggestion`,
+      json("POST", draft ? { draft } : {}),
+    ),
+  assistPrompt: (projectId: string, draft: string) =>
+    jfetch<AssistSuggestionDto>(
+      `/api/projects/${encodeURIComponent(projectId)}/assist/prompt`,
+      json("POST", { draft }),
+    ),
   /** Small-model chat→note DRAFT; saving still goes through knowledgeCreate. */
   assistNote: (sessionId: string) =>
     jfetch<{ title: string; body: string }>(`/api/sessions/${encodeURIComponent(sessionId)}/assist/note`, json("POST", {})),

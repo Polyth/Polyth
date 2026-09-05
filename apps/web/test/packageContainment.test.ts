@@ -73,6 +73,7 @@ const GENERIC_SHELL_IMPORTS = new Set([
   "components/mobile/sheetTrigger.ts",
   "components/mobile/Sheet.tsx",
   "components/MoveControls.tsx",
+  "components/Picker.tsx",
   "components/settings/parts.tsx",
   "components/ui/Button.tsx",
   "components/ui/Icon.tsx",

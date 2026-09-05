@@ -3,7 +3,7 @@ import { setOverlay } from "../store.ts";
 import { defineWidgetPlugin, registerWidgetPlugin } from "./catalog.ts";
 import { tr } from "../i18n/index.ts";
 import {
-  AssistIcon, ClockIcon, IconButton, SearchIcon, SettingsIcon, Tooltip,
+  AssistIcon, ClockIcon, IconButton, SearchIcon, SettingsIcon, Tooltip, UndoIcon,
 } from "../components/ui/index.ts";
 
 const SHELL_ACTION_SLOTS = [
@@ -108,20 +108,37 @@ const COMPOSER_CONTROLS_PLUGIN = defineWidgetPlugin({
       order: 50,
       render: (context) => {
         const canGenerate = context.canGenerateNextAction === true;
+        const canRevert = context.canRevertSuggestion === true;
         const busy = context.suggestionBusy === true;
         const generate = context.generateNextAction;
-        if ((!canGenerate && !busy) || typeof generate !== "function") return null;
+        const revert = context.revertSuggestion;
+        const label = typeof context.suggestionActionLabel === "string"
+          ? context.suggestionActionLabel
+          : tr("composer.generateNextAction");
+        if (typeof generate !== "function") return null;
         return (
-          <Tooltip content={tr("composer.generateNextAction")}>
-            <IconButton
-              className="composer-next-action"
-              icon={AssistIcon}
-              label={tr("composer.generateNextAction")}
-              size="sm"
-              busy={busy}
-              onClick={generate as () => void}
-            />
-          </Tooltip>
+          <span className="composer-next-action">
+            {canRevert && typeof revert === "function" && (
+              <Tooltip content={tr("settings.widgetspage.undo")}>
+                <IconButton
+                  icon={UndoIcon}
+                  label={tr("settings.widgetspage.undo")}
+                  size="sm"
+                  onClick={revert as () => void}
+                />
+              </Tooltip>
+            )}
+            <Tooltip content={label}>
+              <IconButton
+                icon={AssistIcon}
+                label={label}
+                size="sm"
+                busy={busy}
+                disabled={!canGenerate}
+                onClick={generate as () => void}
+              />
+            </Tooltip>
+          </span>
         );
       },
     },

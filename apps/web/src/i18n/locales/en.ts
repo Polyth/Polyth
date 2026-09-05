@@ -222,6 +222,7 @@ export const en = {
   "composer.forSnippets": "for snippets,",
   "composer.goalAttached": "Goal attached.",
   "composer.generateNextAction": "Generate next action",
+  "composer.improvePrompt": "Improve prompt",
   "composer.hideModelAgentAndSyntaxOptions": "Hide model, agent, and syntax options",
   "composer.insert": "insert",
   "composer.iToFocus": "I to focus",

@@ -732,6 +732,30 @@ export const createOpenCodeRuntimeFacade = (
     models: () => lifecycle.usingProtocol((protocol) => protocol.models()),
     agents: () => lifecycle.usingProtocol((protocol) => protocol.agents()),
     sessions: () => lifecycle.usingProtocol((protocol) => protocol.sessions()),
+    listAllProviders: () => lifecycle.usingProtocol((protocol) => {
+      if (!protocol.listAllProviders) throw Object.assign(new Error("provider listing unavailable"), { code: "unsupported" });
+      return protocol.listAllProviders();
+    }),
+    providerAuthMethods: () => lifecycle.usingProtocol((protocol) => {
+      if (!protocol.providerAuthMethods) throw Object.assign(new Error("provider auth methods unavailable"), { code: "unsupported" });
+      return protocol.providerAuthMethods();
+    }),
+    providerAuthorize: (providerID, method, inputs) => lifecycle.usingProtocol((protocol) => {
+      if (!protocol.providerAuthorize) throw Object.assign(new Error("provider oauth unavailable"), { code: "unsupported" });
+      return protocol.providerAuthorize(providerID, method, inputs);
+    }),
+    providerAuthCallback: (providerID, method, code) => lifecycle.usingProtocol((protocol) => {
+      if (!protocol.providerAuthCallback) throw Object.assign(new Error("provider oauth unavailable"), { code: "unsupported" });
+      return protocol.providerAuthCallback(providerID, method, code);
+    }),
+    setProviderApiKey: (providerID, key, metadata) => lifecycle.usingProtocol((protocol) => {
+      if (!protocol.setProviderApiKey) throw Object.assign(new Error("provider auth unavailable"), { code: "unsupported" });
+      return protocol.setProviderApiKey(providerID, key, metadata);
+    }),
+    removeProviderAuth: (providerID) => lifecycle.usingProtocol((protocol) => {
+      if (!protocol.removeProviderAuth) throw Object.assign(new Error("provider auth unavailable"), { code: "unsupported" });
+      return protocol.removeProviderAuth(providerID);
+    }),
     async history(sessionId) {
       const canonicalSessionId = maps.reverse.get(sessionId) ?? sessionId;
       const backendSessionId = maps.forward.get(canonicalSessionId) ?? sessionId;

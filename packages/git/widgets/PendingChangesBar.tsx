@@ -241,6 +241,7 @@ export default function PendingChangesBar() {
         icon={<ProviderLogo
           providerID={descriptor?.providerID ?? modelRef?.providerID}
           providerName={descriptor?.providerName}
+          size="regular"
         />}
         model={modelName}
         status={action}
@@ -304,7 +305,7 @@ export default function PendingChangesBar() {
   }
 
   return (
-    <section className="pending-changes-bar" aria-label={title}>
+    <section className="ui-glass-dock ui-glass-dock--strong pending-changes-bar" aria-label={title}>
       <div className="pending-changes-head">
         <div className="pending-changes-lead">
           <span className="pending-changes-icon" aria-hidden="true">

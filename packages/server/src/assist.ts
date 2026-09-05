@@ -127,6 +127,7 @@ export function parseNoteReply(raw: string): { title: string; body: string } {
 
 export const NEXT_ACTION_CONTEXT_MAX_CHARS = 12_000;
 export const NEXT_ACTION_OUTPUT_MAX_CHARS = 800;
+export const PROMPT_IMPROVEMENT_OUTPUT_MAX_CHARS = 4_000;
 
 const capChars = (text: string, max: number): string =>
   text.length <= max ? text : text.slice(0, max).trimEnd();
@@ -165,20 +166,37 @@ export function buildNextActionPrompt(input: { user: string; assistant: string }
   ].join("\n");
 }
 
+/** Rewrite only the user's draft: this keeps input tokens (and cost) low and
+ * prevents unrelated conversation details from changing the user's intent. */
+export function buildPromptImprovementPrompt(draft: string): string {
+  return [
+    "Improve the user prompt below for a coding agent.",
+    "Return only the rewritten prompt, ready to send.",
+    "Preserve the user's intent, facts, language, and tone.",
+    "Fix unclear wording, grammar, and structure. Make requirements and the desired outcome explicit when they are already implied.",
+    "Do not invent requirements, technical details, decisions, credentials, or acceptance criteria.",
+    "Do not answer the prompt, explain your changes, add a label, or wrap the result in markdown fences.",
+    "Keep it concise; leave an already-effective prompt mostly unchanged.",
+    "",
+    "USER PROMPT:",
+    capChars(draft.trim(), NEXT_ACTION_CONTEXT_MAX_CHARS),
+  ].join("\n");
+}
+
 /** Be forgiving of common model adornments while keeping the result sendable. */
-export function sanitizeNextActionReply(raw: string): string {
+export function sanitizeNextActionReply(raw: string, maxChars = NEXT_ACTION_OUTPUT_MAX_CHARS): string {
   let text = raw.trim()
     .replace(/^```[^\n]*\n?/, "")
     .replace(/\n?```$/, "")
     .trim()
-    .replace(/^(?:suggestion|next(?:\s+(?:user\s+)?(?:message|action))?)\s*:\s*/i, "");
+    .replace(/^(?:suggestion|(?:improved\s+)?prompt|next(?:\s+(?:user\s+)?(?:message|action))?)\s*:\s*/i, "");
   const quoted = text.match(/^["“]([\s\S]*)["”]$/);
   if (quoted) text = quoted[1]!.trim();
-  return capChars(text, NEXT_ACTION_OUTPUT_MAX_CHARS);
+  return capChars(text, maxChars);
 }
 
 export interface ManualSuggestionService {
-  generate(sessionId: string): Promise<{ suggestion: string; atSeq: number }>;
+  generate(sessionId: string, draft?: string): Promise<{ suggestion: string; atSeq: number }>;
 }
 
 /** One explicit, ephemeral request per session. This never writes the session log or projection. */
@@ -193,18 +211,26 @@ export function createManualSuggestionService(deps: {
   };
 
   return {
-    async generate(sessionId) {
+    async generate(sessionId, draft = "") {
       if (inFlight.has(sessionId)) fail("in-flight");
       inFlight.add(sessionId);
       try {
         const atSeq = await deps.latestSeq(sessionId);
-        const exchange = latestCompletedExchange(await deps.events(sessionId));
-        if (exchange === null) throw Object.assign(new Error("no-completed-exchange"), { code: "no-completed-exchange" });
-        const prompt = buildNextActionPrompt(exchange);
+        let prompt: string;
+        if (draft.trim()) {
+          prompt = buildPromptImprovementPrompt(draft);
+        } else {
+          const exchange = latestCompletedExchange(await deps.events(sessionId));
+          if (exchange === null) throw Object.assign(new Error("no-completed-exchange"), { code: "no-completed-exchange" });
+          prompt = buildNextActionPrompt(exchange);
+        }
         if ((await deps.latestSeq(sessionId)) !== atSeq) fail("stale");
         const raw = await deps.complete(sessionId, prompt);
         if ((await deps.latestSeq(sessionId)) !== atSeq) fail("stale");
-        return { suggestion: sanitizeNextActionReply(raw), atSeq };
+        return {
+          suggestion: sanitizeNextActionReply(raw, draft.trim() ? PROMPT_IMPROVEMENT_OUTPUT_MAX_CHARS : undefined),
+          atSeq,
+        };
       } finally {
         inFlight.delete(sessionId);
       }
