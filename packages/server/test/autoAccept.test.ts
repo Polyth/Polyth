@@ -61,7 +61,8 @@ function harness(opts: { permission?: "allow" | "deny" | "ask" } = {}) {
   } as unknown as PermissionService;
   const attention: Array<{ sessionId: string; kind: string }> = [];
   const stopped: Array<{ sessionId: string; reason: string }> = [];
-  const broadcast: Broadcaster = { event: () => {}, projection: () => {} };
+  const statuses: string[] = [];
+  const broadcast: Broadcaster = { event: () => {}, projection: (projection) => statuses.push(projection.status) };
   const fake = fakeRuntime();
   const sessions = createSessionService({
     store, projects, permissions, broadcast, queue: store,
@@ -73,7 +74,7 @@ function harness(opts: { permission?: "allow" | "deny" | "ask" } = {}) {
     },
     shell: { run: async () => ({ output: "ok", exitCode: 0, timedOut: false, truncated: false }) },
   });
-  return { sessions, store, fake, attention, stopped };
+  return { sessions, store, fake, attention, stopped, statuses };
 }
 
 test("auto-accept on: request resolves with auto:true, runtime replied, no notify", async () => {
@@ -236,13 +237,35 @@ test("error stop + open permission → waiting → resolve → failed; queue sta
   fake.emit(id, { type: "turn/stopped", reason: "error", error: "boom" });
   await flush();
   assert.equal((await store.projection(id))?.status, "waiting");
+  const interrupt = await store.enqueue(id, "late interrupt", "interrupt");
+  const queued = await store.queueList(id);
+  await store.queueReorder(id, [interrupt.id, ...queued.filter((item) => item.id !== interrupt.id).map((item) => item.id)]);
 
   await sessions.replyPermission(id, "per_err", "once");
   await flush();
   assert.equal((await store.projection(id))?.status, "failed");
+  assert.equal((await store.queueList(id)).length, 2);
+  await store.close();
+});
+
+test("queued interrupt turns a runtime error into a durable abort", async () => {
+  const { sessions, store, fake, statuses } = harness();
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  fake.emit(id, { type: "turn/started", turnId: "t-abort" });
+  fake.emit(id, { type: "permission/requested", requestId: "per_abort", permission: "bash", patterns: ["ls"] });
+  await store.enqueue(id, "interrupt now", "interrupt");
   await flush();
-  assert.equal((await store.projection(id))?.status, "failed");
-  assert.equal((await store.queueList(id)).length, 1);
+
+  fake.emit(id, { type: "turn/stopped", reason: "error", error: "Aborted" });
+  await flush();
+  assert.equal((await store.events(id)).findLast((event) => event.type === "turn/stopped")?.data.reason, "aborted");
+  assert.equal((await store.projection(id))?.status, "waiting");
+
+  await sessions.replyPermission(id, "per_abort", "once");
+  await waitFor(async () => (await store.queueList(id)).length === 0);
+  assert.equal((await store.projection(id))?.status, "working");
+  assert.equal(statuses.includes("idle"), true);
+  assert.equal(statuses.includes("failed"), false);
   await store.close();
 });
 
@@ -306,6 +329,7 @@ test("WS23: turn/stopped with an open permission stays waiting then idles", asyn
 
   await sessions.replyPermission(id, "per_open", "reject");
   await waitFor(async () => (await store.projection(id))?.status === "idle");
+  await flush();
   await store.close();
 });
 
@@ -335,4 +359,3 @@ test("WS23: child auto-accept closes parent mirror waiting status", async () => 
   assert.notEqual((await store.projection(parent))?.status, "waiting");
   await store.close();
 });
-

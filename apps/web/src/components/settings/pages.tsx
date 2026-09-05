@@ -464,14 +464,14 @@ export function ChatPage() {
         ]} onChange={(v) => setUiSettings({ followUpBehavior: v })} />
       </Row>
       <Row
-        label={tr("settings.pages.largePaste")}
+        label={tr("composer.largePasteBanner")}
         hint={tr("settings.pages.largePasteHint")}
         itemId="chat.largePaste"
       >
         <Seg value={ui.largeTextPasteBehavior} options={[
           ["ask", tr("settings.pages.largePasteAsk")],
-          ["attach", tr("settings.pages.largePasteAttach")],
-          ["inline", tr("settings.pages.largePasteInline")],
+          ["attach", tr("composer.largePasteAttach")],
+          ["inline", tr("composer.largePasteInline")],
         ]} onChange={(largeTextPasteBehavior) => setUiSettings({ largeTextPasteBehavior })} />
       </Row>
       <Row label={tr("settings.pages.thinkingBlocks")} hint={tr("settings.pages.collapseMergedReasoningIntoAnExpandableBlock")} itemId="chat.thinking">
@@ -778,6 +778,7 @@ export function BehaviorPage() {
 
 export function ProjectsPage() {
   const projects = useStore((s) => s.projectRegistry.projects);
+  const activeProjectId = useStore((s) => s.activeProjectId);
   const models = useStore((s) => s.models).filter(modelSupportsTextWorkflow);
   const sessionDefaults = useSessionDefaults();
   const [picking, setPicking] = useState(false);
@@ -1222,7 +1223,6 @@ export function McpPage() {
     refresh();
   };
 
-
   return (
     <>
       <PageHead title={tr("settings.pages.mcp")} blurb={tr("settings.pages.modelContextProtocolServersAppliedToThe")} />
@@ -1233,33 +1233,31 @@ export function McpPage() {
         {servers.map((s) => editingId === s.id ? (
           <McpServerForm key={s.id} existing={s} onDone={() => { setEditingId(null); refresh(); }} />
         ) : (
-          <div key={s.id} className="mcp-server-block">
-            <div className="set-row">
-              <div className="set-row-text">
-                <div className="set-row-label">{s.name}</div>
-                <div className="set-row-hint mono">
-                  {s.transport.kind === "stdio"
-                    ? `${s.transport.command} ${s.transport.args.join(" ")}`.trim()
-                    : s.transport.url}
-                  {s.transport.kind === "stdio" && s.transport.envKeys.length > 0 && (
-                    <span className="secret-redacted"> {tr("settings.pages.env")}{" "}{s.transport.envKeys.join(", ")}</span>
-                  )}
-                  {s.transport.kind === "http" && s.transport.headersSecretRefs.length > 0 && (
-                    <span className="secret-redacted"> {tr("settings.pages.headers")}{" "}{s.transport.headersSecretRefs.join(", ")}</span>
-                  )}
-                </div>
-                {(testMsg[s.id] || s.lastError) && <div className="set-row-hint">{testMsg[s.id] ?? s.lastError}</div>}
+          <div key={s.id} className="set-row">
+            <div className="set-row-text">
+              <div className="set-row-label">{s.name}</div>
+              <div className="set-row-hint mono">
+                {s.transport.kind === "stdio"
+                  ? `${s.transport.command} ${s.transport.args.join(" ")}`.trim()
+                  : s.transport.url}
+                {s.transport.kind === "stdio" && s.transport.envKeys.length > 0 && (
+                  <span className="secret-redacted"> {tr("settings.pages.env")}{" "}{s.transport.envKeys.join(", ")}</span>
+                )}
+                {s.transport.kind === "http" && s.transport.headersSecretRefs.length > 0 && (
+                  <span className="secret-redacted"> {tr("settings.pages.headers")}{" "}{s.transport.headersSecretRefs.join(", ")}</span>
+                )}
               </div>
-              <div className="set-row-control">
-                <span className={`tag mcp-status ${s.status}`}>{s.status}</span>
-                <Button size="sm" title={tr("settings.pages.checkReachabilityAndStoreTheResult")} onClick={() => void probe(s)}>{tr("settings.pages.probe")}</Button>
-                <Button size="sm" onClick={() => setEditingId(s.id)}>{tr("common.edit")}</Button>
-                <Button size="sm" onClick={() => void api.mcpUpdate(s.id, { enabled: !s.enabled }, s.revision).then(refresh)}>
-                  {s.enabled ? tr("settings.pages.disable") : tr("settings.pages.enable")}
-                </Button>
-                <Button size="sm" variant="danger" onClick={() => { void confirmAlert(tr("settings.pages.removeMcpServerValue", { name: s.name }), { title: tr("settings.pages.removeMcpServer"), confirmLabel: tr("common.remove") }).then((ok) => { if (ok) void api.mcpRemove(s.id).then(refresh); }); }}>
-                  {tr("common.remove")}</Button>
-              </div>
+              {(testMsg[s.id] || s.lastError) && <div className="set-row-hint">{testMsg[s.id] ?? s.lastError}</div>}
+            </div>
+            <div className="set-row-control">
+              <span className={`tag mcp-status ${s.status}`}>{s.status}</span>
+              <Button size="sm" title={tr("settings.pages.checkReachabilityAndStoreTheResult")} onClick={() => void probe(s)}>{tr("settings.pages.probe")}</Button>
+              <Button size="sm" onClick={() => setEditingId(s.id)}>{tr("common.edit")}</Button>
+              <Button size="sm" onClick={() => void api.mcpUpdate(s.id, { enabled: !s.enabled }, s.revision).then(refresh)}>
+                {s.enabled ? tr("settings.pages.disable") : tr("settings.pages.enable")}
+              </Button>
+              <Button size="sm" variant="danger" onClick={() => { void confirmAlert(tr("settings.pages.removeMcpServerValue", { name: s.name }), { title: tr("settings.pages.removeMcpServer"), confirmLabel: tr("common.remove") }).then((ok) => { if (ok) void api.mcpRemove(s.id).then(refresh); }); }}>
+                {tr("common.remove")}</Button>
             </div>
           </div>
         ))}
@@ -1275,7 +1273,6 @@ export function McpPage() {
     </>
   );
 }
-
 
 export function AboutPage() {
   const [info, setInfo] = useState<SystemInfoDto | null>(null);

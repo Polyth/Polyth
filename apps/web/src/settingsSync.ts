@@ -85,18 +85,12 @@ function schedulePush(): void {
   timer = setTimeout(push, PUSH_DEBOUNCE_MS);
 }
 
-/** Cancel any pending debounce and push with keepalive so unload can finish the POST. */
 export function flushSettingsSync(): void {
   if (timer !== undefined) {
     clearTimeout(timer);
     timer = undefined;
   }
   push({ keepalive: true });
-}
-
-function installUnloadFlush(): void {
-  if (typeof window === "undefined") return;
-  window.addEventListener("pagehide", flushSettingsSync);
 }
 
 /** WS gateway frame: another device changed the shared settings. */
@@ -113,7 +107,7 @@ export function initSettingsSync(): void {
     subscribeStore(schedulePush);
     subscribeUiSettings(schedulePush);
     subscribeSessionDefaults(schedulePush);
-    installUnloadFlush();
+    if (typeof window !== "undefined") window.addEventListener("pagehide", flushSettingsSync);
   }
   void api.clientSettings()
     .then((dto) => {

@@ -114,7 +114,6 @@ export default function WorkflowLauncher({
     try {
       let parentSessionId = sessionId;
       if (!parentSessionId) {
-        // Use the returned id — never race against a concurrent activeSessionId switch.
         parentSessionId = await createSession(projectId, {
           title: tr("workflowlauncher.sessionTitleValue", { name: workflow.name }),
         });

@@ -646,20 +646,16 @@ export default function Composer({
       }
     });
   }, []);
-  const resolveLargePaste = useCallback((action: "attach" | "inline" | "always-attach") => {
-    setPendingLargePaste((pending) => {
-      if (!pending) return null;
-      if (action === "inline") {
-        queueMicrotask(() => inputRef.current?.insertText(pending.text));
-        return null;
-      }
-      if (action === "always-attach") {
-        setUiSettings({ largeTextPasteBehavior: "attach" });
-      }
-      attachPastedText(pending.text, pending.projectId, pending.sessionId);
-      return null;
-    });
-  }, [attachPastedText]);
+  const resolveLargePaste = (action: "attach" | "inline" | "always-attach") => {
+    if (!pendingLargePaste) return;
+    setPendingLargePaste(null);
+    if (action === "inline") {
+      inputRef.current?.insertText(pendingLargePaste.text);
+      return;
+    }
+    if (action === "always-attach") setUiSettings({ largeTextPasteBehavior: "attach" });
+    attachPastedText(pendingLargePaste.text, pendingLargePaste.projectId, pendingLargePaste.sessionId);
+  };
   const openAttachmentPicker = useCallback(() => {
     if (!isNativeMobile()) {
       fileInputRef.current?.click();
@@ -672,8 +668,6 @@ export default function Composer({
     });
   }, [attachFiles]);
 
-  // Paste: image/file clipboards become pills; large text may attach or ask;
-  // a lone GitHub PR/issue URL becomes a pill when the project's remote matches.
   const onPaste = useCallback((e: ClipboardEvent<HTMLTextAreaElement>) => {
     const projectId = getState().activeProjectId;
     if (!projectId) return;
@@ -1565,20 +1559,13 @@ export default function Composer({
         <div className="drop-hint">{dropHint === "path" ? tr("composer.attachToChat") : tr("composer.dropToAttach")}</div>
       )}
       {pendingLargePaste && (
-        <div className="composer-note composer-large-paste" role="status">
-          <span>{tr("composer.largePasteBanner")}</span>
-          <span className="composer-large-paste-actions">
-            <button type="button" className="composer-large-paste-action" onClick={() => resolveLargePaste("attach")}>
-              {tr("composer.largePasteAttach")}
-            </button>
-            <button type="button" className="composer-large-paste-action" onClick={() => resolveLargePaste("inline")}>
-              {tr("composer.largePasteInline")}
-            </button>
-            <button type="button" className="composer-large-paste-action" onClick={() => resolveLargePaste("always-attach")}>
-              {tr("composer.largePasteAlwaysAttach")}
-            </button>
-          </span>
-        </div>
+        <Notice className="composer-note composer-large-paste" role="status" actions={<>
+          <Button size="sm" onClick={() => resolveLargePaste("attach")}>{tr("composer.largePasteAttach")}</Button>
+          <Button size="sm" onClick={() => resolveLargePaste("inline")}>{tr("composer.largePasteInline")}</Button>
+          <Button size="sm" onClick={() => resolveLargePaste("always-attach")}>{tr("composer.largePasteAlwaysAttach")}</Button>
+        </>}>
+          {tr("composer.largePasteBanner")}
+        </Notice>
       )}
       {showModelWarning && (
         <div className="composer-note composer-runtime-unavailable" role="status">

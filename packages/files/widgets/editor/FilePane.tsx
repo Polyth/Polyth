@@ -14,7 +14,6 @@ import JsonTree, { tryParseJson } from "../../../../apps/web/src/markdown/JsonTr
 import { highlight, highlightLines, langOf } from "../../../../apps/web/src/highlight.ts";
 import { formatFileChat, formatSelectionChat, lineRangeOf } from "../../../../apps/web/src/chatclip.ts";
 import { requestComposerInsert } from "../../../../apps/web/src/composerInsert.ts";
-import { attachProjectFile, attachText, isLargeTextPaste } from "../../../../apps/web/src/attachments.ts";
 import { MOD } from "../../../../apps/web/src/format.ts";
 import { clampMenuPosition } from "../../../../apps/web/src/selectionActions.ts";
 import { copyText } from "../../../../apps/web/src/utils.ts";
@@ -230,26 +229,6 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
     setFlash("Added to chat ✓");
   };
 
-  const attachSelection = async (text: string, startLine: number, endLine: number) => {
-    if (!doc) return;
-    if (!dirty) {
-      const r = await attachProjectFile(projectId, sessionId, doc.path, [startLine, endLine]);
-      if (!r.ok) {
-        setFlash(r.reason);
-        return;
-      }
-      setFlash("Attached selection to chat ✓");
-      return;
-    }
-    // Dirty buffer: upload the selected bytes (saved path would be stale).
-    const r = await attachText(projectId, sessionId, text);
-    if (!r.ok) {
-      setFlash(r.reason);
-      return;
-    }
-    setFlash("Attached selection to chat ✓");
-  };
-
   const addSelection = () => {
     if (!doc) return;
     if (editing) {
@@ -260,10 +239,6 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
       }
       const text = buf.slice(el.selectionStart, el.selectionEnd);
       const { startLine, endLine } = lineRangeOf(buf, el.selectionStart, el.selectionEnd);
-      if (isLargeTextPaste(text)) {
-        void attachSelection(text, startLine, endLine);
-        return;
-      }
       insertToChat(formatSelectionChat(doc.path, text, startLine, endLine));
       return;
     }
@@ -288,13 +263,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
     if (!text) return;
     const a = lnOf(range.startContainer) ?? 1;
     const b = lnOf(range.endContainer) ?? a;
-    const startLine = Math.min(a, b);
-    const endLine = Math.max(a, b);
-    if (isLargeTextPaste(text)) {
-      void attachSelection(text, startLine, endLine);
-      return;
-    }
-    insertToChat(formatSelectionChat(doc.path, text, startLine, endLine));
+    insertToChat(formatSelectionChat(doc.path, text, Math.min(a, b), Math.max(a, b)));
   };
 
   const addFile = () => {

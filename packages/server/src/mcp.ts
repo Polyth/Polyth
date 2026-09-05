@@ -13,11 +13,7 @@ import { access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 import { randomUUID } from "node:crypto";
-import type {
-  McpServerDto,
-  McpStatus,
-  McpTransport,
-} from "@polyth/contracts";
+import type { McpServerDto, McpStatus, McpTransport } from "@polyth/contracts";
 
 export interface McpApplier {
   applyMcp(entries: Array<{
@@ -169,10 +165,7 @@ async function commandExists(command: string): Promise<boolean> {
   return false;
 }
 
-export function createMcpConfigService(opts: {
-  file: string;
-  applier?: McpApplier;
-}): McpConfigService {
+export function createMcpConfigService(opts: { file: string; applier?: McpApplier }): McpConfigService {
   mkdirSync(dirname(opts.file), { recursive: true });
   const secretsFile = opts.file.replace(/\.json$/, "-secrets.json");
 
@@ -352,6 +345,5 @@ export function createMcpConfigService(opts: {
         return { ok: false, message };
       }
     },
-
   };
 }

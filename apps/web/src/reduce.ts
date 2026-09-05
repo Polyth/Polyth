@@ -120,7 +120,6 @@ export interface GithubConflictMsg {
 export type RenderMessage = UserMsg | AssistantMsg | ToolMsg | TaskActivityMsg | GithubConflictMsg;
 
 export interface PendingPermission {
-  /** Origin session stamped from the event — replies must use this, not live activeSessionId. */
   sessionId: string;
   requestId: string;
   permission: string;
@@ -137,7 +136,6 @@ export interface PendingPermission {
 }
 
 export interface PendingQuestion {
-  /** Origin session stamped from the event — replies must use this, not live activeSessionId. */
   sessionId: string;
   requestId: string;
   questions: JsonObject[];
@@ -147,7 +145,6 @@ export interface PendingQuestion {
 }
 
 export interface PendingSecret {
-  /** Origin session stamped from the event — replies must use this, not live activeSessionId. */
   sessionId: string;
   requestId: string;
   handle: string;
@@ -266,7 +263,6 @@ export interface SubagentState {
   agents: Array<{ sessionId: string; label: string; status: string; currentTask?: string }>;
 }
 
-
 export interface RenderModel {
   messages: RenderMessage[];
   permissions: PendingPermission[];
@@ -286,7 +282,6 @@ export interface RenderModel {
   subagents: SubagentState | null;
   /** Edit-tool paths from the current/last turn; cleared by the next prompt. */
   changedFiles: string[];
-  /** Observer warning: agent may be stuck in a repeated edit cycle. */
   /** Active rewind marker. `draft` is replay-derived from the target
    *  `user/message` (raw ?? text + attachments); `restoredText` only appears
    *  when an old marker carried it (compat). */

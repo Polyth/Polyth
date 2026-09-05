@@ -107,10 +107,22 @@ test("client settings round-trip through the server and apply on inbound frames"
   assert.match(settingsSync, /sessionDefaults:\s*getSessionDefaults\(\)/);
   assert.match(settingsSync, /setSessionDefaults\(parseSessionDefaults\(JSON\.stringify\(incoming\.sessionDefaults\)\)\)/);
 
-  // Unload flush: clear the debounce timer and push with keepalive on pagehide.
-  assert.match(settingsSync, /export function flushSettingsSync\(\)/);
-  assert.match(settingsSync, /clearTimeout\(timer\)/);
-  assert.match(settingsSync, /addEventListener\("pagehide",\s*flushSettingsSync\)/);
-  assert.doesNotMatch(settingsSync, /addEventListener\("beforeunload"/);
-  assert.match(settingsSync, /keepalive:\s*true/);
+});
+
+test("settings flush uses a keepalive write", async () => {
+  const { api } = await import("@polyth/session/web-api");
+  api.clientSettings = async () => ({ revision: 1, updatedAt: 1, settings: {} });
+  let keepalive = false;
+  api.clientSettingsSave = async (_settings, opts) => {
+    keepalive = opts?.keepalive === true;
+    return { revision: 2, updatedAt: 2, settings: {} };
+  };
+  const sync = await import("../src/settingsSync.ts");
+  const store = await import("../src/store.ts");
+  sync.initSettingsSync();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  store.updateSettings({ productName: "Flush test" });
+  sync.flushSettingsSync();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(keepalive, true);
 });

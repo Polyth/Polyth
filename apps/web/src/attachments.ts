@@ -188,12 +188,10 @@ export async function attachUpload(
   return attachProjectFile(projectId, sessionId, rel);
 }
 
-/** True when pasted/selected text is long enough to prefer attach over inline. */
 export function isLargeTextPaste(text: string): boolean {
   return text.length >= 2000 || text.split("\n").length >= 25;
 }
 
-/** Upload pasted text as `_inbox/pasted-context.txt` (timestamp-prefixed by attachUpload). */
 export async function attachText(
   projectId: string,
   sessionId: string | null | undefined,

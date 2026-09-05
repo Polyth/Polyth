@@ -54,7 +54,6 @@ export interface UiSettings {
   autoScroll: boolean;
   /** Send behavior while a turn is active (WP3). */
   followUpBehavior: FollowUpBehavior;
-  /** Large clipboard text: ask, attach as file, or paste inline (WS9). */
   largeTextPasteBehavior: LargeTextPasteBehavior;
   /** Merged thinking display (WP4). */
   collapsibleThinkingBlocks: boolean;

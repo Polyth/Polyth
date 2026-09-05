@@ -634,8 +634,8 @@ export function createSessionService(deps: {
     openSecrets: Map<string, SessionEvent>;
     rewind: { markerSeq: number; atSeq: number } | null;
     recentErrors: SessionDebugDto["recentErrors"];
-    /** Last durable turn/stopped reason — used when leaving waiting with no open turn. */
     lastStopReason: "completed" | "aborted" | "error" | null;
+    turnOpen: boolean;
   }
 
   const FACTS_CACHE_MAX = 256;
@@ -653,6 +653,7 @@ export function createSessionService(deps: {
     rewind: null,
     recentErrors: [],
     lastStopReason: null,
+    turnOpen: false,
   });
 
   const foldFacts = (facts: LogFacts, events: readonly SessionEvent[]): void => {
@@ -687,11 +688,13 @@ export function createSessionService(deps: {
           break;
         case "turn/started":
           facts.lastStopReason = null;
+          facts.turnOpen = true;
           break;
         case "turn/stopped": {
           const reason = data.reason;
           facts.lastStopReason =
             reason === "completed" || reason === "aborted" || reason === "error" ? reason : null;
+          facts.turnOpen = false;
           break;
         }
         case "session/rewound": {
@@ -1931,21 +1934,16 @@ export function createSessionService(deps: {
     }
   };
 
-  /** When the last open request clears, leave waiting for an authoritative
-   *  idle/working/failed state and kick the durable queue only when idle. */
   const settleAfterLastRequest = async (sessionId: string): Promise<void> => {
     const current = await store.projection(sessionId);
     if (!current || current.status !== "waiting") return;
     const facts = await logFacts(sessionId);
     if (openRequestTotal(facts) > 0) return;
-    if (turnActive(sessionId)) {
+    if (turnActive(sessionId) || facts.turnOpen) {
       await updateProjection(sessionId, { status: "working" });
       return;
     }
-    const interruptQueued = deps.queue
-      ? (await deps.queue.queueList(sessionId))[0]?.delivery === "interrupt"
-      : false;
-    const next = facts.lastStopReason === "error" && !interruptQueued ? "failed" : "idle";
+    const next = facts.lastStopReason === "error" ? "failed" : "idle";
     await updateProjection(sessionId, { status: next });
     if (next === "idle") void dispatchQueue(sessionId);
   };
@@ -2064,9 +2062,7 @@ export function createSessionService(deps: {
     }
     switch (ev.type) {
       case "turn/started":
-        // `ev.model` is turn-scoped evidence for the log/UI only. Never copy it
-        // onto projection.model — that field is the user/session choice and must
-        // survive subagent turns that run under a different temporary model.
+        // Runtime turn models must not replace the user's session choice.
         await persist(sessionId, "turn/started", { turnId: ev.turnId, ...(ev.model ? { model: ev.model } : {}) } as unknown as JsonObject, { ignorable: true });
         if (sideEffects) {
           const applied = await applyRuntimeProjection(
@@ -2123,15 +2119,19 @@ export function createSessionService(deps: {
         break;
       }
       case "turn/stopped": {
+        const interruptQueued = ev.reason === "error" && deps.queue
+          ? (await deps.queue.queueList(sessionId))[0]?.delivery === "interrupt"
+          : false;
+        const effectiveReason = ev.reason === "error" && interruptQueued ? "aborted" : ev.reason;
         // A provider capacity stop is recoverable: plan the auto-resume before
         // persisting so its resumeAt/attempt travel with the terminal event
         // (the UI renders a countdown instead of a generic failure).
-        const retry = sideEffects && !observationReplay && ev.reason === "error" && ev.retry
+        const retry = sideEffects && !observationReplay && effectiveReason === "error" && ev.retry
           ? await scheduleResume(sessionId, ev.retry, await store.events(sessionId))
           : undefined;
         await persist(sessionId, "turn/stopped", {
           turnId: ev.turnId ?? lastTurnId.get(sessionId) ?? ev.type,
-          reason: ev.reason,
+          reason: effectiveReason,
           ...(ev.error ? { error: ev.error } : {}),
           ...(retry ? { retry: retry as unknown as JsonObject } : {}),
         }, { ignorable: true });
@@ -2139,21 +2139,10 @@ export function createSessionService(deps: {
           // Any non-limit terminal stop (completed / aborted / hard error)
           // supersedes a pending resume from an earlier limit stop.
           if (!retry) await clearResume(sessionId, "user");
-          // An interrupt abort stops the turn as reason "error" ("Aborted").
-          // Treating that as a failure would wedge the session: status
-          // "failed" blocks queue dispatch and the queued interrupt message
-          // never runs. When the interrupt is still queued at the head, the
-          // stop is the abort completing — return to idle and dispatch it.
-          const interruptQueued = deps.queue
-            ? (await deps.queue.queueList(sessionId))[0]?.delivery === "interrupt"
-            : false;
-          // Match reconcile: open permissions/questions/secrets keep the
-          // session waiting even after the turn ends (e.g. mirrored child
-          // requests on the parent, or a stop that races a pending card).
           const requestsOpen = openRequestTotal(await logFacts(sessionId)) > 0;
           const nextStatus = requestsOpen
             ? "waiting"
-            : ev.reason === "error" && !interruptQueued ? "failed" : "idle";
+            : effectiveReason === "error" ? "failed" : "idle";
           const applied = await applyRuntimeProjection(
             sessionId,
             runtimeEventSeq,
@@ -2173,15 +2162,9 @@ export function createSessionService(deps: {
             if (titleRuntime && autoTitleRequested.has(sessionId)) {
               refreshGeneratedTitle(sessionId, titleRuntime);
             }
-            deps.notify?.turnStopped(sessionId, ev.reason);
-            if (ev.reason === "completed") hooks.onTurnCompleted?.(sessionId, replyText(sessionId));
-            // FIFO dispatch of queued follow-ups; never into an error state (a
-            // failing session would silently burn the whole queue otherwise).
-            // An interrupt that caused the stop is exactly the "cut in" the
-            // user asked for, so it dispatches even over an error stop.
-            // Do not dispatch while a human request is still open — admission
-            // would only re-queue behind the waiting barrier.
-            if (!requestsOpen && (ev.reason !== "error" || interruptQueued)) {
+            deps.notify?.turnStopped(sessionId, effectiveReason);
+            if (effectiveReason === "completed") hooks.onTurnCompleted?.(sessionId, replyText(sessionId));
+            if (!requestsOpen && effectiveReason !== "error") {
               void dispatchQueue(sessionId);
             }
           }
@@ -2718,8 +2701,6 @@ export function createSessionService(deps: {
     const project = await projects.get(proj.projectId);
     if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
     try {
-      // Composer !shell is user-initiated; allow long builds (2 minutes here).
-      // TerminalService.run may be raised further by callers up to 30 minutes.
       const result = await deps.shell.run({
         projectId: proj.projectId,
         cwd: proj.worktreePath ?? project.path,
@@ -2886,10 +2867,6 @@ export function createSessionService(deps: {
     }
   };
 
-  /** When a child request is resolved (auto-accept, policy, or direct reply),
-   *  close the parent's replyable mirror and drop waiting if nothing else is
-   *  open. Parent answering through the mirror uses the same path once the
-   *  child resolve lands. */
   const closeParentRequestMirror = async (
     childSessionId: string,
     requestId: string,
@@ -3205,11 +3182,6 @@ export function createSessionService(deps: {
         console.error("[polyth] command expansion failed", err);
       }
     }
-    // projection.model / projection.agent are the user/session choice. They
-    // stick only when send() (or resumeNow) persisted an explicit selection
-    // before admission. Profile bundles, /command overrides, and runtime
-    // turn models apply to THIS turn via `input` / cmd* and must never rewrite
-    // the session projection here — subagent activity shares this path.
     const model = input.model ?? cmdModel ?? proj.model;
     const agent = input.agent ?? cmdAgent ?? proj.agent;
     // Model-visible behavior instructions are logged BEFORE the turn that
@@ -4373,10 +4345,6 @@ export function createSessionService(deps: {
         });
       }
 
-      // Capture the caller-provided model/agent before profile resolution fills
-      // temporary turn defaults. Only an explicit send model/agent (or an
-      // explicit profile pick below) may rewrite projection.model — inherited
-      // profile bundles and runtime/subagent models must not (WS22).
       const userSelectedModel = input.model;
       const userSelectedAgent = input.agent;
 
@@ -4416,10 +4384,7 @@ export function createSessionService(deps: {
       if (requestedProfile !== undefined && (proj.agentProfileId ?? undefined) !== (requestedProfile ?? undefined)) {
         await setProjectionProfile(sessionId, requestedProfile ?? undefined);
       }
-      // Stick session model/agent only for user-authored choices: an explicit
-      // per-send model/agent, or a newly selected profile (when this send did
-      // not override those fields). Inherited profile resolution applies to
-      // the turn via `input` above and must leave projection.model alone.
+      // Persist only explicit user choices, not turn-local profile defaults.
       const stickModel = userSelectedModel
         ?? (typeof requestedProfile === "string" ? profileModel : undefined);
       const stickAgent = userSelectedAgent
@@ -5421,12 +5386,7 @@ export function createSessionService(deps: {
           { sourceSessionId?: unknown } | undefined;
         const target = typeof forwarded?.sourceSessionId === "string" ? forwarded.sourceSessionId : sessionId;
         await replyPermissionCore(target, requestId, reply, scope);
-        // Child resolve closes the parent mirror via closeParentRequestMirror.
-        // When the mirror was answered here, settle this session if nothing
-        // else is still waiting (mirror close is a no-op when already closed).
-        if (target !== sessionId) {
-          await settleAfterLastRequest(sessionId);
-        }
+        if (target !== sessionId) await settleAfterLastRequest(sessionId);
       });
     },
 
@@ -5436,9 +5396,7 @@ export function createSessionService(deps: {
           { sourceSessionId?: unknown } | undefined;
         const target = typeof forwarded?.sourceSessionId === "string" ? forwarded.sourceSessionId : sessionId;
         await replyQuestionCore(target, requestId, answers);
-        if (target !== sessionId) {
-          await settleAfterLastRequest(sessionId);
-        }
+        if (target !== sessionId) await settleAfterLastRequest(sessionId);
       });
     },
 

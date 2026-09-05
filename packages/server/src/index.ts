@@ -1218,10 +1218,7 @@ export async function boot(opts: BootOptions = {}) {
   };
   await secureSafe.syncForbiddenConfig();
   await refreshSafeBehavior();
-  const mcp = createMcpConfigService({
-    file: `${dataDir}/mcp.json`,
-    applier: configApplier,
-  });
+  const mcp = createMcpConfigService({ file: `${dataDir}/mcp.json`, applier: configApplier });
 
   // Provider/model visibility: seeds from opencode.json (disabled_providers +
   // provider blacklists), then mirrors every toggle back to it.

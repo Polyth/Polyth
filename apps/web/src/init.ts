@@ -1011,9 +1011,7 @@ export async function deleteSession(sessionId: string): Promise<void> {
 }
 
 export interface SendOptions {
-  /** Origin session for this send. Optional for back-compat (falls back to
-   *  `activeSessionId`), but Composer and other interactive call sites MUST
-   *  pass the captured session id so a concurrent switch cannot reroute. */
+  /** Captured target; falls back to the active session when omitted. */
   targetSessionId?: string | null;
   delivery?: "normal" | "steer" | "queue" | "interrupt";
   /** Atomically reject open questions / deny open permissions before admission. */
@@ -1029,7 +1027,6 @@ export interface SendOptions {
 /** Returns true when the server accepted the message (callers that persist
  *  pending composer configuration consume it only on success). */
 export async function sendMessage(text: string, model?: JsonObject, agent?: string, opts?: SendOptions): Promise<boolean> {
-  // Prefer opts.targetSessionId; activeSessionId is only a legacy fallback.
   const id = opts?.targetSessionId ?? store.getState().activeSessionId;
   if (!id) return false;
   // The server records an auto title with the first admitted user message.
@@ -1098,17 +1095,14 @@ export function replyPermission(
   reply: "once" | "always" | "reject",
   scope?: "session" | "project",
 ): void {
-  if (!sessionId) return;
   void api.replyPermission(sessionId, requestId, reply, scope).catch((err) => console.error("permission reply failed", err));
 }
 
 export function answerQuestion(sessionId: string, requestId: string, answers: JsonObject): void {
-  if (!sessionId) return;
   void api.answerQuestion(sessionId, requestId, answers).catch((err) => console.error("question reply failed", err));
 }
 
 export function rejectQuestion(sessionId: string, requestId: string): void {
-  if (!sessionId) return;
   void api.rejectQuestion(sessionId, requestId).catch((err) => console.error("question reject failed", err));
 }
 
@@ -1118,7 +1112,6 @@ export async function replySecret(
   action: "save" | "dismiss",
   value?: string,
 ): Promise<void> {
-  if (!sessionId) return;
   try {
     await api.replySecret(sessionId, requestId, action, value);
   } catch (err) {
