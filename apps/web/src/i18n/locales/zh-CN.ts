@@ -1885,7 +1885,7 @@ export const zhCN: AppMessages = {
   "sidebar.sessionlist.searchLabels": "Search labels",
   "sidebar.sessionlist.noLabelsMatch": "No labels match your search.",
   "sidebar.sessionlist.main": "__主要的__",
-  "sidebar.sessionlist.mainWorktree": "主worktree",
+  "sidebar.sessionlist.mainWorktree": "主工作区",
   "sidebar.sessionlist.message": "×",
   "sidebar.sessionlist.newSession": "新建会话",
   "sidebar.sessionlist.newSessionInValue": "在{label}中开启新会话",

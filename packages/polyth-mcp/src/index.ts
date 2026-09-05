@@ -199,14 +199,14 @@ const content = (value: unknown, isError = false) => ({
   ...(isError ? { isError: true } : {}),
 });
 
-const tools = [
+export const tools = [
   {
-    name: "polyth_capabilities",
+    name: "capabilities",
     description: "Show every Polyth agent-control action and whether it is enabled.",
     inputSchema: { type: "object", properties: {} },
   },
   {
-    name: "polyth_configure",
+    name: "configure",
     description: "Enable, disable, or reset individual Polyth control actions for this MCP process.",
     inputSchema: {
       type: "object",
@@ -218,8 +218,8 @@ const tools = [
     },
   },
   {
-    name: "polyth_control",
-    description: "Fully control Polyth projects, sessions, agents, requests, queues, goals, spaces, packages, and any /api feature. Call polyth_capabilities to discover actions.",
+    name: "control",
+    description: "Fully control Polyth projects, sessions, agents, requests, queues, goals, spaces, packages, and any /api feature. Call capabilities to discover actions.",
     inputSchema: {
       type: "object",
       required: ["action"],
@@ -232,8 +232,8 @@ const tools = [
 ];
 
 async function callTool(name: string, args: Json): Promise<ReturnType<typeof content>> {
-  if (name === "polyth_capabilities") return content({ actions: catalog(), disabled: [...disabled] });
-  if (name === "polyth_configure") {
+  if (name === "capabilities") return content({ actions: catalog(), disabled: [...disabled] });
+  if (name === "configure") {
     if (args.reset === true) disabled.clear();
     for (const value of Array.isArray(args.enable) ? args.enable : []) disabled.delete(String(value));
     for (const value of Array.isArray(args.disable) ? args.disable : []) {
@@ -242,9 +242,9 @@ async function callTool(name: string, args: Json): Promise<ReturnType<typeof con
     }
     return content({ actions: catalog() });
   }
-  if (name !== "polyth_control") throw new Error(`unknown tool: ${name}`);
+  if (name !== "control") throw new Error(`unknown tool: ${name}`);
   const actionName = String(args.action ?? "");
-  if (disabled.has(actionName)) throw new Error(`${actionName} is disabled; enable it with polyth_configure`);
+  if (disabled.has(actionName)) throw new Error(`${actionName} is disabled; enable it with configure`);
   return content(await send(buildControlRequest(actionName, (args.input ?? {}) as Json)));
 }
 

@@ -46,6 +46,12 @@ const probeRoutes: RouteHandler = async ({ path, body, json }) => {
       { code: "epoch-proof-required" },
     );
   }
+  if (path === "/api/probe/git") {
+    throw Object.assign(
+      new Error("Updates were rejected because the remote contains work that you do not have locally"),
+      { code: "git-failed", cause: "hint: fetch first" },
+    );
+  }
   return false;
 };
 
@@ -142,6 +148,22 @@ test("unavailable dependencies are honest 503s that keep their actionable messag
     assert.deepEqual(await response.json(), {
       error: "unavailable",
       message: "opencode is not installed on dev@remote — install it there first",
+    });
+  } finally {
+    app.server.close();
+  }
+});
+
+test("failed git subprocesses are 422s that keep the git error, not masked 500s", async () => {
+  const app = await start();
+  try {
+    // Source Control "Sync" (pull + push) must show the real git failure —
+    // "Updates were rejected…" — instead of "An internal server error occurred."
+    const response = await fetch(`${app.base}/api/probe/git`);
+    assert.equal(response.status, 422);
+    assert.deepEqual(await response.json(), {
+      error: "git-failed",
+      message: "Updates were rejected because the remote contains work that you do not have locally",
     });
   } finally {
     app.server.close();

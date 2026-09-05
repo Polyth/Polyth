@@ -35,6 +35,19 @@ export interface WorkspacePanePresentation {
   /** "close": Escape closes the pane. "content": the surface consumes Escape
    *  (terminal) — only its visible close affordances leave it. */
   escape: "close" | "content";
+  /** UX-PANE-MODEL: which edge a PINNED pane attaches to. Optional — omitted
+   *  (or "side") keeps the classic dock beside Chat. "bottom" pins the pane
+   *  as a full-width strip under the workspace, lifting Chat's composer above
+   *  it. Only the pinned mode reads this; dynamic/fullscreen ignore it. */
+  dock?: "side" | "bottom";
+}
+
+/** The edge a pinned pane attaches to. Undefined presentation, or a
+ *  presentation without an explicit `dock`, means the classic side dock. */
+export function paneDockEdge(
+  presentation: WorkspacePanePresentation | undefined,
+): "side" | "bottom" {
+  return presentation?.dock === "bottom" ? "bottom" : "side";
 }
 
 /** Keep-alive surface components can pause background work while hidden. */

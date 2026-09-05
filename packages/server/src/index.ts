@@ -211,6 +211,8 @@ export interface RuntimeAdmissionBarrier {
   fenced(): boolean;
   admit<T>(action: () => Promise<T>): Promise<T>;
   run<T>(action: () => Promise<T>): Promise<T>;
+  trackTurn(sessionId: string, active: boolean): void;
+  drain<T>(action: () => Promise<T>): Promise<T>;
 }
 
 /** Reader/exclusive gate for turn admission versus config replacement.
@@ -222,12 +224,42 @@ export function createRuntimeAdmissionBarrier(): RuntimeAdmissionBarrier {
   let activeAdmissions = 0;
   let exclusiveTail = Promise.resolve();
   const idleWaiters = new Set<() => void>();
+  const activeTurns = new Set<string>();
+  const turnIdleWaiters = new Set<() => void>();
 
   const waitForIdle = (): Promise<void> => {
     if (activeAdmissions === 0) return Promise.resolve();
     return new Promise<void>((resolveIdle) => {
       idleWaiters.add(resolveIdle);
     });
+  };
+
+  const waitForTurnsIdle = (): Promise<void> => {
+    if (activeTurns.size === 0) return Promise.resolve();
+    return new Promise<void>((resolveIdle) => {
+      turnIdleWaiters.add(resolveIdle);
+    });
+  };
+
+  const runExclusive = async <T,>(
+    action: () => Promise<T>,
+    waitForTurns: boolean,
+  ): Promise<T> => {
+    const previous = exclusiveTail;
+    let releaseExclusive!: () => void;
+    exclusiveTail = new Promise<void>((resolveExclusive) => {
+      releaseExclusive = resolveExclusive;
+    });
+    fenceDepth += 1;
+    try {
+      await previous;
+      await waitForIdle();
+      if (waitForTurns) await waitForTurnsIdle();
+      return await action();
+    } finally {
+      fenceDepth -= 1;
+      releaseExclusive();
+    }
   };
 
   return {
@@ -250,22 +282,19 @@ export function createRuntimeAdmissionBarrier(): RuntimeAdmissionBarrier {
         }
       }
     },
-    async run<T>(action: () => Promise<T>): Promise<T> {
-      const previous = exclusiveTail;
-      let releaseExclusive!: () => void;
-      exclusiveTail = new Promise<void>((resolveExclusive) => {
-        releaseExclusive = resolveExclusive;
-      });
-      fenceDepth += 1;
-      try {
-        await previous;
-        await waitForIdle();
-        return await action();
-      } finally {
-        fenceDepth -= 1;
-        releaseExclusive();
+    run: (action) => runExclusive(action, false),
+    trackTurn(sessionId, active) {
+      if (active) {
+        activeTurns.add(sessionId);
+      } else {
+        activeTurns.delete(sessionId);
+        if (activeTurns.size === 0) {
+          for (const resolveIdle of turnIdleWaiters) resolveIdle();
+          turnIdleWaiters.clear();
+        }
       }
     },
+    drain: (action) => runExclusive(action, true),
   };
 }
 
@@ -615,6 +644,21 @@ export async function boot(opts: BootOptions = {}) {
     let inner = first;
     let idleController: RuntimeIdleController | undefined;
     const liveStreamSessionIds = new Set<string>();
+    const setTurnActive = (sessionId: string, active: boolean): void => {
+      if (active) {
+        if (liveStreamSessionIds.has(sessionId)) return;
+        liveStreamSessionIds.add(sessionId);
+      } else if (!liveStreamSessionIds.delete(sessionId)) {
+        return;
+      }
+      admissionBarrier.trackTurn(sessionId, active);
+    };
+    const clearActiveTurns = (): void => {
+      for (const sessionId of liveStreamSessionIds) {
+        admissionBarrier.trackTurn(sessionId, false);
+      }
+      liveStreamSessionIds.clear();
+    };
     const listeners = new Set<(sessionId: string, ev: RuntimeEvent) => void>();
     const observationListeners = new Set<
       Parameters<NonNullable<AgentRuntime["onObservation"]>>[0]
@@ -623,8 +667,8 @@ export async function boot(opts: BootOptions = {}) {
       Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]
     >();
     const observeRuntimeEvent = (sessionId: string, ev: RuntimeEvent): void => {
-      if (ev.type === "turn/started") liveStreamSessionIds.add(sessionId);
-      else if (ev.type === "turn/stopped") liveStreamSessionIds.delete(sessionId);
+      if (ev.type === "turn/started") setTurnActive(sessionId, true);
+      else if (ev.type === "turn/stopped") setTurnActive(sessionId, false);
       idleController?.touch();
     };
     const fanout = (sessionId: string, ev: RuntimeEvent) => {
@@ -679,21 +723,28 @@ export async function boot(opts: BootOptions = {}) {
       after?: string,
     ): Promise<RuntimeSnapshot> => {
       const direct = directReliability();
-      if (typeof direct.reconcile === "function") return direct.reconcile(binding, after);
-      const lifecycle = lifecycleReliability();
-      if (typeof lifecycle?.reconcile !== "function") {
-        throw Object.assign(new Error("runtime reconciliation is unavailable"), {
-          code: "unsupported",
-        });
+      let snapshot: RuntimeSnapshot;
+      if (typeof direct.reconcile === "function") {
+        snapshot = await direct.reconcile(binding, after);
+      } else {
+        const lifecycle = lifecycleReliability();
+        if (typeof lifecycle?.reconcile !== "function") {
+          throw Object.assign(new Error("runtime reconciliation is unavailable"), {
+            code: "unsupported",
+          });
+        }
+        snapshot = await lifecycle.reconcile({ ...binding, protocol: await protocol() }, after);
       }
-      return lifecycle.reconcile({ ...binding, protocol: await protocol() }, after);
+      if (snapshot.state.value === "running") setTurnActive(binding.canonicalSessionId, true);
+      else if (snapshot.state.value !== "unknown") setTurnActive(binding.canonicalSessionId, false);
+      return snapshot;
     };
 
     const respawnOnce = async (): Promise<void> => {
       for (const subscription of innerSubs) subscription.dispose();
       await inner.dispose().catch(() => {});
       inner = await spawnRuntime(projectId, cwd);
-      liveStreamSessionIds.clear();
+      clearActiveTurns();
       innerSubs = subscribeInner();
       runtimesByProject.set(key, Promise.resolve(facade));
       await settleAllOrThrow(
@@ -761,7 +812,7 @@ export async function boot(opts: BootOptions = {}) {
       disposal = (async () => {
         for (const subscription of innerSubs) subscription.dispose();
         innerSubs = [];
-        liveStreamSessionIds.clear();
+        clearActiveTurns();
         await inner.dispose();
       })();
       return disposal;
@@ -813,7 +864,7 @@ export async function boot(opts: BootOptions = {}) {
         return useRuntime(async () => {
           if (!inner.resetSession) throw Object.assign(new Error("runtime cannot reset session history"), { code: "unsupported" });
           const backendSessionId = await inner.resetSession(canonical);
-          liveStreamSessionIds.delete(canonical.sessionId);
+          setTurnActive(canonical.sessionId, false);
           return backendSessionId;
         });
       },
@@ -827,7 +878,7 @@ export async function boot(opts: BootOptions = {}) {
               message: "runtime lacks operation-aware session reset",
             });
           const result = await outcome;
-          if (result.kind === "confirmed") liveStreamSessionIds.delete(canonical.sessionId);
+          if (result.kind === "confirmed") setTurnActive(canonical.sessionId, false);
           return result;
         }),
       // UX-MSG-ACTIONS: exact-history branching passes through the facade so
@@ -836,7 +887,7 @@ export async function boot(opts: BootOptions = {}) {
         return useRuntime(async () => {
           if (!inner.branchSession) throw Object.assign(new Error("runtime cannot branch exact history"), { code: "unsupported" });
           const backendSessionId = await inner.branchSession(request);
-          liveStreamSessionIds.delete(request.target.sessionId);
+          setTurnActive(request.target.sessionId, false);
           return backendSessionId;
         });
       },
@@ -850,13 +901,13 @@ export async function boot(opts: BootOptions = {}) {
               message: "runtime lacks operation-aware session branching",
             });
           const result = await outcome;
-          if (result.kind === "confirmed") liveStreamSessionIds.delete(request.target.sessionId);
+          if (result.kind === "confirmed") setTurnActive(request.target.sessionId, false);
           return result;
         }),
       async discardSession(sessionId) {
         await useRuntime(async () => {
           await inner.discardSession?.(sessionId);
-          liveStreamSessionIds.delete(sessionId);
+          setTurnActive(sessionId, false);
         });
       },
       discardSessionOperation: (sessionId, operationId) =>
@@ -869,15 +920,21 @@ export async function boot(opts: BootOptions = {}) {
               message: "runtime lacks operation-aware session deletion",
             });
           const result = await outcome;
-          if (result.kind === "confirmed") liveStreamSessionIds.delete(sessionId);
+          if (result.kind === "confirmed") setTurnActive(sessionId, false);
           return result;
         }),
       startTurn: (req) => useRuntime(async () => {
-        await inner.startTurn(req);
-        liveStreamSessionIds.add(req.sessionId);
+        setTurnActive(req.sessionId, true);
+        try {
+          await inner.startTurn(req);
+        } catch (error) {
+          setTurnActive(req.sessionId, false);
+          throw error;
+        }
       }),
       startTurnOperation: (req, operationId) =>
         useRuntime(async () => {
+          setTurnActive(req.sessionId, true);
           const outcome = inner.startTurnOperation
           ? inner.startTurnOperation(req, operationId)
           : Promise.resolve({
@@ -886,7 +943,7 @@ export async function boot(opts: BootOptions = {}) {
               message: "runtime lacks operation-aware turn submission",
             });
           const result = await outcome;
-          if (result.kind === "confirmed") liveStreamSessionIds.add(req.sessionId);
+          if (result.kind === "rejected") setTurnActive(req.sessionId, false);
           return result;
         }),
       ...(inner.completeSmallModel
@@ -1928,30 +1985,38 @@ export async function boot(opts: BootOptions = {}) {
   console.log(`[polyth] server on http://${opts.hostname ?? "127.0.0.1"}:${port}  data=${dataDir}`);
   console.log(`[polyth] agent control on ${controlSocketPath}`);
 
-  const shutdown = async () => {
-    for (const descriptor of packageRegistry.list().toReversed()) {
-      await packageLifecycle.disable(descriptor.id).catch((error: unknown) => {
-        console.error(`[polyth] package "${descriptor.id}" failed to disable during shutdown`, error);
-      });
-    }
-    // Package services hold OS resources even while their routes are disabled
-    // (a disabled package's onDisable never ran), so shutdown closes them
-    // through the registry. Every call is idempotent.
-    svc<{ stop(): void }>("schedule")?.stop();
-    svc<{ stop(): void }>("usage")?.stop();
-    assist?.stop();
-    svc<{ close(): void }>("knowledge")?.close();
-    await svc<{ closeAll(): Promise<void> }>("browser")?.closeAll().catch(() => {});
-    await svc<{ closeAll(): Promise<void> }>("terminal")?.closeAll().catch(() => {});
-    await Promise.all([...runtimesByProject.values()].map(async (p) =>
-      (await p.catch(() => null))?.dispose().catch(() => {})));
-    await svc<SshTransportService>("ssh")?.disconnectAll().catch(() => {});
-    await root.dispose();
-    await store.close();
-    controlServer.close();
-    if (process.platform !== "win32") rmSync(controlSocketPath, { force: true });
-    server.close();
-    await writerLease.release();
+  let shutdownPromise: Promise<void> | undefined;
+  const shutdown = (): Promise<void> => {
+    if (shutdownPromise) return shutdownPromise;
+    // Fence new turn admission first, then let every accepted runtime turn
+    // finish before disposing its OpenCode process. This keeps watcher-driven
+    // source reloads from truncating unrelated agent sessions.
+    shutdownPromise = admissionBarrier.drain(async () => {
+      for (const descriptor of packageRegistry.list().toReversed()) {
+        await packageLifecycle.disable(descriptor.id).catch((error: unknown) => {
+          console.error(`[polyth] package "${descriptor.id}" failed to disable during shutdown`, error);
+        });
+      }
+      // Package services hold OS resources even while their routes are disabled
+      // (a disabled package's onDisable never ran), so shutdown closes them
+      // through the registry. Every call is idempotent.
+      svc<{ stop(): void }>("schedule")?.stop();
+      svc<{ stop(): void }>("usage")?.stop();
+      assist?.stop();
+      svc<{ close(): void }>("knowledge")?.close();
+      await svc<{ closeAll(): Promise<void> }>("browser")?.closeAll().catch(() => {});
+      await svc<{ closeAll(): Promise<void> }>("terminal")?.closeAll().catch(() => {});
+      await Promise.all([...runtimesByProject.values()].map(async (p) =>
+        (await p.catch(() => null))?.dispose().catch(() => {})));
+      await svc<SshTransportService>("ssh")?.disconnectAll().catch(() => {});
+      await root.dispose();
+      await store.close();
+      controlServer.close();
+      if (process.platform !== "win32") rmSync(controlSocketPath, { force: true });
+      server.close();
+      await writerLease.release();
+    });
+    return shutdownPromise;
   };
   process.on("SIGINT", () => void shutdown().then(() => process.exit(0)));
   process.on("SIGTERM", () => void shutdown().then(() => process.exit(0)));

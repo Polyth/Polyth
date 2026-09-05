@@ -1885,7 +1885,7 @@ export const bg: AppMessages = {
   "sidebar.sessionlist.searchLabels": "Search labels",
   "sidebar.sessionlist.noLabelsMatch": "No labels match your search.",
   "sidebar.sessionlist.main": "__основен__",
-  "sidebar.sessionlist.mainWorktree": "Главно worktree",
+  "sidebar.sessionlist.mainWorktree": "Главно",
   "sidebar.sessionlist.message": "×",
   "sidebar.sessionlist.newSession": "Нова сесия",
   "sidebar.sessionlist.newSessionInValue": "Нова сесия в {label}",

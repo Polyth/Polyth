@@ -215,6 +215,27 @@ test("config safety check fences a racing admission through write and restart", 
   assert.equal(barrier.fenced(), false);
 });
 
+test("shutdown drain fences new admissions until active turns stop", async () => {
+  const barrier = createRuntimeAdmissionBarrier();
+  barrier.trackTurn("session-1", true);
+  let stopped = false;
+
+  const draining = barrier.drain(async () => { stopped = true; });
+  await Promise.resolve();
+
+  assert.equal(barrier.fenced(), true);
+  assert.equal(stopped, false);
+  await assert.rejects(
+    () => barrier.admit(async () => {}),
+    (error: Error & { code?: string }) => error.code === "restart-deferred",
+  );
+
+  barrier.trackTurn("session-1", false);
+  await draining;
+  assert.equal(stopped, true);
+  assert.equal(barrier.fenced(), false);
+});
+
 test("failed restart batch waits for every owned replacement to settle", async () => {
   let releaseSlow!: () => void;
   let slowSettled = false;

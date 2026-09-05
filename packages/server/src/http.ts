@@ -915,6 +915,11 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
         // explain a failed exact-history branch, but shares 409 semantics.
         : e.code === "conflict" || e.code === "history-mismatch" || RECOVERY_CONFLICT_CODES.has(e.code ?? "") ? 409
         : e.code === "payload-too-large" ? 413
+        // A failed git subprocess (rejected push, no upstream, auth prompt
+        // disabled, diverged fetch) is the user's to fix, not a server bug.
+        // Masking it as a 500 replaces "Updates were rejected…" with a useless
+        // "internal server error" in the Source Control sync banner.
+        : e.code === "git-failed" ? 422
         // Dependency failures (unreachable SSH host, missing remote runtime,
         // dead backend) are honest 503s with their actionable message — a
         // masked 500 would hide "install opencode on <host>" from the user.

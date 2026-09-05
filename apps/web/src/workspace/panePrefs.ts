@@ -53,9 +53,9 @@ export function transitionPaneWindow(
 
 export interface WorkspacePanePrefs {
   version: typeof WORKSPACE_PANE_PREFS_VERSION;
-  /** Workspace surface open when the project was last used; null = closed. */
+  /** Pinned workspace surface restored when the project is activated; null = closed. */
   openSurface: string | null;
-  /** User-selected mode; automatic geometry fallback is not persisted. */
+  /** User-selected mode; only pinned windows are restored across sessions. */
   mode: PaneMode;
   /** Exact non-fullscreen mode restored by fullscreen toggle/Escape. */
   previousMode: PanePreviousMode;

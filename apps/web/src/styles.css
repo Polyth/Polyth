@@ -955,21 +955,21 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .session-pin-icon { display: inline-flex; flex: none; color: var(--accent); }
 .session-pin-icon svg { width: 12px; height: 12px; }
 .session-worktree-label {
-  min-width: 0;
+  flex: none;
   display: inline-flex;
   align-items: center;
   gap: 3px;
   padding: 1px 5px;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-round);
   color: var(--muted);
   font-size: var(--font-meta);
   font-weight: 500;
   line-height: 1.2;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
+.session-worktree-label-compact { padding-inline: 5px; cursor: help; }
 .session-worktree-label svg { width: 10px; height: 10px; flex: none; }
 .session-row.active .session-title { color: var(--text); }
 .session-row.unread .session-title { font-weight: 600; }
@@ -9968,6 +9968,56 @@ html[data-package-window-resizing="true"] .rail-workspace { transition: none; }
 .app-shell:has(.rail-pinned-narrow) > .workspace { grid-column: 2; grid-row: 1; }
 .railbar-pinned-narrow { position: relative; inset: auto; grid-column: 2; grid-row: 2; width: 100%; min-width: 0; }
 .rail-pinned-narrow { flex: 1 1 auto; width: 100%; min-width: 0; height: 100%; border-radius: var(--radius-surface) 0 0 0; }
+
+/* UX-PANE-MODEL: deliberate bottom dock (presentation.dock === "bottom"). The
+   pinned pane is a full-width strip under the workspace — Chat's composer
+   rides directly above it. Self-sufficient grid (does not lean on the
+   pinned-narrow fallback), with the strip row user-resizable from its top
+   edge: --workspace-dock-h is written only once the user drags, so the
+   stylesheet proportion applies until then and no measurement loop can form. */
+.app-shell:has(.rail-dock-bottom) {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  grid-template-rows: minmax(240px, 1fr) clamp(160px, var(--workspace-dock-h, 46%), 78%);
+}
+.app-shell:has(.rail-dock-bottom) > .sidebar { grid-column: 1; grid-row: 1 / 3; }
+.app-shell:has(.rail-dock-bottom) > .workspace { grid-column: 2; grid-row: 1; }
+/* Return the rail host to the grid (the wide-desktop `.railbar` rule floats it
+   against the viewport edge) and drop its floating chrome — the pane below
+   owns the visible top edge. */
+.app-shell:has(.rail-dock-bottom) > .railbar {
+  position: relative; inset: auto; z-index: auto;
+  grid-column: 2; grid-row: 2;
+  width: 100%; min-width: 0; margin: 0;
+  border: 0; border-radius: 0; box-shadow: none; overflow: visible;
+}
+.app-shell:has(.rail-dock-bottom) > .railbar > .rail-icon-col {
+  border-top: 1px solid var(--surface-divider);
+}
+.rail-dock-bottom {
+  border-top: 1px solid var(--surface-divider);
+  border-radius: var(--radius-surface) var(--radius-surface) 0 0;
+}
+/* Horizontal splitter along the strip's top edge (self-contained — NOT the
+   `.rail-resize` primitive, which RTL flips and coarse pointers hide). Clipped
+   inside the pane's own overflow, so it clears the ModuleView header row. */
+.rail-resize-bottom {
+  position: absolute; inset: 0 0 auto 0;
+  height: 6px;
+  cursor: row-resize; touch-action: none; z-index: 5;
+}
+.rail-resize-bottom::before {
+  content: ""; position: absolute; inset-inline: 0; top: 0; height: 2px;
+  background: transparent;
+}
+.rail-resize-bottom:hover::before,
+.rail-resize-bottom:focus-visible::before { background: var(--accent-line); }
+.rail-resize-bottom:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+@media (pointer: coarse) { .rail-resize-bottom { height: 12px; } }
+@media (prefers-reduced-motion: reduce) {
+  .rail-dock-bottom { transition: none; }
+}
+
 @media (max-width: 820px), (max-height: 480px) and (pointer: coarse) {
   .railbar:has(.rail-dynamic) {
     position: absolute; inset: 0; z-index: var(--z-overlay);
@@ -11984,6 +12034,7 @@ html[data-font] body :is(
   background: var(--surface-activity);
   box-shadow: var(--shadow-sm);
 }
+.activity-group { background: transparent; }
 .activity-group.current { border-color: color-mix(in srgb, var(--accent-line) 58%, var(--border-soft)); }
 /* Nested summaries inherit the container's chrome. The surface is handed over
    through a variable so the shared hover state still wins the cascade. */
@@ -12380,7 +12431,7 @@ body:not([data-glass="off"]) :is(
       backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
       background-clip: padding-box;
     }
-    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(.activity-group, .task-list) {
+    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .task-list {
       background: radial-gradient(140% 140% at 50% 50%,
         color-mix(in srgb, var(--surface-activity) var(--material-glass-fill), transparent) 0%,
         color-mix(in srgb, var(--surface-activity) var(--material-glass-edge), transparent) 100%);
@@ -12437,7 +12488,7 @@ body[data-glass="off"] :is(
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
-body[data-glass="off"] :is(.activity-group, .task-list) {
+body[data-glass="off"] .task-list {
   background: var(--surface-activity);
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;

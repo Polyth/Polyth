@@ -464,8 +464,13 @@ function SessionRow({
             {pinnedSection && <span className="session-pin-icon" title="Pinned" aria-label="Pinned"><Icon.pin /></span>}
             <span className="session-title-text">{displayTitle}</span>
             {pinnedWorktreeLabel && rowStatus.kind === "regular" && (
-              <span className="session-worktree-label" title={`Worktree: ${pinnedWorktreeLabel}`}>
-                <Icon.branch />{pinnedWorktreeLabel}
+              <span
+                className={`session-worktree-label${pinnedWorktreeLabel.length > 12 ? " session-worktree-label-compact" : ""}`}
+                title={pinnedWorktreeLabel}
+                aria-label={pinnedWorktreeLabel}
+              >
+                <Icon.branch />
+                {pinnedWorktreeLabel.length <= 12 && <span>{pinnedWorktreeLabel}</span>}
               </span>
             )}
           </span>

@@ -694,10 +694,9 @@ async function loadSessionForOpen(sessionId: string): Promise<SessionProjection>
 export async function openSession(
   sessionId: string,
   opts: {
-    /** UX-FILES-TIMELINE-03 finding 8: user-driven switches (default) always
-     *  land in the session's chat view — the open workspace pane closes and
-     *  the primary view returns to "session". Boot restoration passes false
-     *  so a reload keeps the restored pane. */
+    /** User-driven switches (default) land in the session's chat view;
+     *  non-pinned workspace windows close while pinned windows remain. Boot
+     *  restoration passes false so the pinned companion stays visible. */
     showChat?: boolean;
   } = {},
 ): Promise<void> {

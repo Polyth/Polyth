@@ -206,6 +206,12 @@ host.surfaces.register({
   minWidth, preferredMaxWidth, keepAlive, escape }` block, which makes them
   dockable beside Chat with the pane host. Contextual surfaces
   (Context/Knowledge/Usage/Events) leave `presentation` undefined.
+  - Optional `dock: "side" | "bottom"` picks the edge a **pinned** pane
+    attaches to. Omitted (or `"side"`) keeps the classic dock beside Chat with
+    a vertical resize. `"bottom"` pins the pane as a full-width strip under the
+    workspace, lifting Chat's composer above it, with a horizontal resize on
+    the strip's top edge (`minHeight` bounds it). Dynamic and fullscreen modes
+    ignore `dock`. Terminal and Schedule ship `dock: "bottom"`.
 - Every registered surface renders through the host's single `ModuleView`
   structure: header, title/description, actions, close, body, and content
   wrapper. The host chooses `page`, `panel`, or `workspace` content behavior;

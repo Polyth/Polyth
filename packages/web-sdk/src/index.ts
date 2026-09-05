@@ -100,6 +100,12 @@ export interface SurfacePresentation {
   preferredMaxWidth: number;
   keepAlive: boolean;
   escape: "close" | "content";
+  /** Which edge a PINNED pane attaches to. Optional; omitted means "side"
+   *  (docks beside Chat with a vertical resize). "bottom" makes the pinned
+   *  pane a full-width strip under the workspace, so Chat's composer sits
+   *  directly above it, with a horizontal resize on the top edge. Only the
+   *  pinned window mode is affected — dynamic and fullscreen are unchanged. */
+  dock?: "side" | "bottom";
 }
 
 export interface SurfaceDefinition {

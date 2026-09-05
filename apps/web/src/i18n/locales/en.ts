@@ -1888,7 +1888,7 @@ export const en = {
   "sidebar.sessionlist.searchLabels": "Search labels",
   "sidebar.sessionlist.noLabelsMatch": "No labels match your search.",
   "sidebar.sessionlist.main": "__main__",
-  "sidebar.sessionlist.mainWorktree": "Main worktree",
+  "sidebar.sessionlist.mainWorktree": "Main",
   "sidebar.sessionlist.message": "×",
   "sidebar.sessionlist.newSession": "New session",
   "sidebar.sessionlist.newSessionInValue": "New session in {label}",

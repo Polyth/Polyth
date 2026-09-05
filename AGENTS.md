@@ -12,6 +12,12 @@ When documents conflict, resolve in this order:
 4. `docs/dev/README.md` (feature workflow) and `docs/dev/architecture.md` (deep reference).
 5. Historical plans (`docs/dev/new-features.md`, `implementation-order.md`, `runtime-*-plan.md`, `HANDOFF.md`, `docs/PHASE-3-HANDOFF.md`) and `docs/parity/*` — never let a plan silently override an implementation doc.
 
+## Memory
+
+- Use the project memory (MemPalace) for important facts, decisions, constraints, and session outcomes: search it before recalling information about this repository or past work, and file durable updates after learning or changing something important.
+- Do not rely on chat context alone for important knowledge. Record concise, actionable notes after meaningful sessions, including what changed, what was verified, and any follow-up needed.
+- For browser verification, use the running project at `http://192.168.1.200:4400/` when it is available.
+
 ## Package map
 
 - `apps/web` — the React 19 SPA **host shell**: shell components, registries, shared UI primitives, canonical tokens. Feature UI does NOT live here (see below).

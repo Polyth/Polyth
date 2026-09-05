@@ -374,14 +374,27 @@ export function activateProject(id: string | null): void {
   localStorage.setItem("polyth.activeProjectId", id ?? "");
   // Re-activating the current project must not drop the session or branch (UX-04).
   if (id === state.activeProjectId) return;
-  // Workspace-pane state is project-scoped: restore this project's open
-  // surface/expansion, and never carry another project's pane across. An
+  // Workspace-pane state is project-scoped: only this project's pinned
+  // surface is restored. Dynamic/fullscreen windows are transient, and an
   // unavailable persisted surface must not restore as visibly open.
   const pane = id !== null ? getWorkspacePanePrefs(id) : null;
-  const restored = pane !== null ? paneSurfaceOf(pane.openSurface)?.id ?? null : null;
+  const restored = pane?.mode === "pinned" && pane.openSurface !== null
+    // Keep an as-yet-unregistered package id so late web-package loading can
+    // make the pinned window visible without another project activation.
+    ? paneSurfaceOf(pane.openSurface)?.id ?? pane.openSurface
+    : null;
+  // Older records (and a crash during a dynamic/fullscreen window) may still
+  // contain a non-pinned open surface. Scrub it so it cannot be restored by a
+  // later project activation.
+  if (id !== null && pane !== null && pane.openSurface !== null && pane.mode !== "pinned") {
+    setPaneOpenSurface(id, null);
+  }
   const restoredResource = restored !== null ? pane?.lastResource[restored] : undefined;
+  const priorRail = state.railPlugin !== null
+    ? listSurfaces().find((surface) => surface.id === state.railPlugin)
+    : undefined;
   const railPlugin = restored
-    ?? (state.railPlugin !== null && paneSurfaceOf(state.railPlugin) !== null ? null : state.railPlugin);
+    ?? (priorRail !== undefined && !isWorkspaceSurface(priorRail) ? state.railPlugin : null);
   set({
     activeProjectId: id, activeSessionId: null, gitBranch: "",
     newSessionIntent: null,
@@ -682,6 +695,10 @@ export function touchSessionCache(id: string): void {
 export function activateSession(id: string | null): void {
   localStorage.setItem("polyth.activeSessionId", id ?? "");
   if (id !== null) touchSessionCache(id);
+  // Session activation is also used by deep links and deletion. Keep the
+  // same rule as the visible session-navigation path: only pinned workspace
+  // windows may cross the session boundary.
+  if (state.paneMode !== "pinned") closeWorkspacePane();
   set({
     activeSessionId: id,
     ...(id !== null ? { newSessionIntent: null } : {}),
@@ -714,12 +731,11 @@ export function startNewSession(
   showSessionChat();
 }
 
-/** UX-FILES-TIMELINE-03 finding 8: a session switch always lands in that
- *  session's chat. The visible workspace pane closes through the command
- *  path (metadata-only — keep-alive scope caches survive per UX-PANE-MODEL)
- *  and the primary view returns to "session". */
+/** A session switch always lands in that session's chat. Non-pinned workspace
+ *  windows close through the command path; a pinned window is the shared
+ *  companion for every session. */
 export function showSessionChat(): void {
-  closeWorkspacePane();
+  if (state.paneMode !== "pinned") closeWorkspacePane();
   set({ overlay: null });
   setActiveView("session");
   setWorkspaceMode("chat");

@@ -1,8 +1,6 @@
-// UX-FILES-TIMELINE-03 finding 8: switching sessions always restores that
-// session's chat view. openSession closes the visible workspace pane through
-// the command path (metadata-only — widths and last resources survive per
-// UX-PANE-MODEL) and returns the primary view to "session". Boot restoration
-// opts out so a reload keeps the restored pane.
+// Session switches return to Chat unless the workspace window is pinned. A
+// pinned window remains the shared companion across sessions and reloads;
+// dynamic/fullscreen windows are transient.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Window } from "happy-dom";
@@ -57,7 +55,7 @@ const eventFixtures = new Map<string, unknown[]>();
 const store = await import("../src/store.ts");
 const { createSession, openSession, prefetchSessionTail } = await import("../src/init.ts");
 const { registerSurface } = await import("../src/surfaces.ts");
-const { getWorkspacePanePrefs } = await import("../src/workspace/panePrefs.ts");
+const { getWorkspacePanePrefs, workspacePaneKey } = await import("../src/workspace/panePrefs.ts");
 const { getWorkspaceMode, setWorkspaceMode } = await import("../src/widgets/workspaceMode.ts");
 
 function blockFetches(): void {
@@ -99,7 +97,7 @@ registerSurface({
   },
 });
 
-test("user session switch closes the open pane and returns to chat, keeping pane metadata", async () => {
+test("user session switch closes a dynamic pane and returns to chat, keeping pane metadata", async () => {
   store.activateProject("p1");
   assert.equal(store.openWorkspacePane("files", "file:src/app.ts"), true);
   store.setOverlay("settings");
@@ -123,11 +121,13 @@ test("user session switch closes the open pane and returns to chat, keeping pane
   assert.equal(prefs.lastResource.files, "file:src/app.ts", "pane resource memory preserved");
 });
 
-test("boot restoration keeps the restored workspace pane open", async () => {
+test("pinned workspace pane survives session switches and boot restoration", async () => {
   store.activateProject("p1");
   store.openEditorFile(null);
   assert.equal(store.openWorkspacePane("files"), true);
   assert.equal(store.getState().editorFile, "src/app.ts", "reopen reapplies the remembered resource");
+  store.togglePanePin();
+  assert.equal(store.getState().paneMode, "pinned");
   setWorkspaceMode("widgets");
 
   await openSession("s2", { showChat: false });
@@ -136,7 +136,38 @@ test("boot restoration keeps the restored workspace pane open", async () => {
   assert.equal(s.activeSessionId, "s2");
   assert.equal(s.railPlugin, "files", "boot path must not close the restored pane");
   assert.equal(s.activeView, "session");
+  assert.equal(s.paneMode, "pinned");
   assert.equal(getWorkspaceMode(), "widgets", "boot restoration preserves the saved workspace mode");
+});
+
+test("a non-pinned pane closes when reopening the current session", async () => {
+  store.togglePanePin();
+  store.openWorkspacePane("files");
+  assert.equal(store.getState().paneMode, "dynamic");
+
+  await openSession("s2");
+
+  assert.equal(store.getState().activeSessionId, "s2");
+  assert.equal(store.getState().railPlugin, null);
+  assert.equal(store.getState().paneMode, "dynamic");
+});
+
+test("non-pinned persisted windows are not restored on project activation", () => {
+  localStorage.setItem(workspacePaneKey("p2"), JSON.stringify({
+    version: 2,
+    openSurface: "files",
+    mode: "dynamic",
+    previousMode: "dynamic",
+    widths: {},
+    heights: {},
+    lastResource: {},
+  }));
+
+  store.activateProject("p2");
+
+  assert.equal(store.getState().railPlugin, null);
+  assert.equal(getWorkspacePanePrefs("p2").openSurface, null);
+  store.activateProject("p1");
 });
 
 test("session metadata and history start in parallel on a cold open", async () => {

@@ -144,7 +144,7 @@ function startServer(): void {
   });
 }
 
-async function stopServer(): Promise<void> {
+async function stopServer(forceAfterMs: number | null = options.graceMs): Promise<void> {
   if (restartTimer) {
     clearTimeout(restartTimer);
     restartTimer = null;
@@ -160,22 +160,23 @@ async function stopServer(): Promise<void> {
   }
   stopping = true;
   const exited = new Promise<void>((done) => target.once("exit", () => done()));
-  // Let the server stop its own OpenCode children cleanly. If that wedges, the
-  // timeout below still kills the complete detached process group.
+  // Planned reloads let the server drain active agent turns for as long as
+  // needed. Explicit supervisor shutdown still keeps the configured escape
+  // hatch, and a second Ctrl-C always kills the complete process group.
   target.kill("SIGTERM");
-  const force = setTimeout(() => {
+  const force = forceAfterMs === null ? null : setTimeout(() => {
     log(`server did not stop in ${options.graceMs}ms — sending SIGKILL`);
     signalGroup(target.pid!, "SIGKILL");
-  }, options.graceMs);
+  }, forceAfterMs);
   await exited;
-  clearTimeout(force);
+  if (force) clearTimeout(force);
   child = null;
   stopping = false;
   await waitForPortFree();
 }
 
 async function restartServer(): Promise<void> {
-  await stopServer();
+  await stopServer(null);
   if (shuttingDown) return;
   consecutiveCrashes = 0;
   down = false;

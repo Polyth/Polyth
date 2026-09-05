@@ -6,7 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   CHAT_FLOOR, clampDockWidth, contextSurfacesOf, decideDock, isWorkspaceSurface,
-  preferredOrDefaultWidth, workspaceSurfacesOf,
+  paneDockEdge, preferredOrDefaultWidth, workspaceSurfacesOf,
   type DockGeometry, type RailSurface, type WorkspacePanePresentation,
 } from "../src/surfaces.ts";
 import {
@@ -83,6 +83,13 @@ test("surfaces split into workspace panes and contextual panels by presentation"
   assert.deepEqual(contextSurfacesOf(all).map((x) => x.id), ["context", "usage"]);
   assert.equal(isWorkspaceSurface(s("files", pres())), true);
   assert.equal(isWorkspaceSurface(s("context")), false);
+});
+
+test("paneDockEdge: optional dock defaults to side, only explicit bottom flips", () => {
+  assert.equal(paneDockEdge(undefined), "side");
+  assert.equal(paneDockEdge(pres()), "side");
+  assert.equal(paneDockEdge(pres({ dock: "side" })), "side");
+  assert.equal(paneDockEdge(pres({ dock: "bottom" })), "bottom");
 });
 
 // ---- project-scoped persistence ----------------------------------------------

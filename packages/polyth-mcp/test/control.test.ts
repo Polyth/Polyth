@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { ACTIONS, buildControlRequest } from "../src/index.ts";
+import { ACTIONS, buildControlRequest, tools } from "../src/index.ts";
+
+test("MCP tool names do not duplicate the Polyth server prefix", () => {
+  assert.deepEqual(tools.map((tool) => tool.name), ["capabilities", "configure", "control"]);
+});
 
 test("control catalog covers the complete session lifecycle and safe API escape hatch", () => {
   assert.ok(Object.keys(ACTIONS).length >= 50);

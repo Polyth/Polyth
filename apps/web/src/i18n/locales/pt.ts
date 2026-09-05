@@ -1885,7 +1885,7 @@ export const pt: AppMessages = {
   "sidebar.sessionlist.searchLabels": "Search labels",
   "sidebar.sessionlist.noLabelsMatch": "No labels match your search.",
   "sidebar.sessionlist.main": "__principal__",
-  "sidebar.sessionlist.mainWorktree": "worktree principal",
+  "sidebar.sessionlist.mainWorktree": "Principal",
   "sidebar.sessionlist.message": "×",
   "sidebar.sessionlist.newSession": "Nova sessão",
   "sidebar.sessionlist.newSessionInValue": "Nova sessão em {label}",

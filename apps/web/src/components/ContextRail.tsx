@@ -10,8 +10,8 @@
 // Knowledge/Usage/Events) keep their simple docked panel. Visited surfaces
 // stay mounted (keep-alive, inert while hidden) so tree, editor, terminal,
 // and preview state survive switching. Widths persist per surface —
-// contextual in polyth.railPrefs, workspace panes per project in
-// polyth.workspacePane.v1.<projectId>.
+// contextual in polyth.railPrefs, workspace-pane dimensions/resources and
+// pinned open surfaces per project in polyth.workspacePane.v2.<projectId>.
 import {
   useEffect, useLayoutEffect, useRef, useState,
   type CSSProperties, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent,
@@ -27,7 +27,7 @@ import {
 import { useGitStatus } from "../../../../packages/git/widgets/gitStatusStore.ts";
 import { gitChangedFiles } from "../pendingChanges.ts";
 import {
-  CHAT_FLOOR, clampDockWidth, decideDock, listSurfaces, slotSurfaces, useSurfaceVersion, visibleSurfaces,
+  CHAT_FLOOR, clampDockWidth, decideDock, listSurfaces, paneDockEdge, slotSurfaces, useSurfaceVersion, visibleSurfaces,
   type DockGeometry, type RailSurface, type RailSurfaceContext,
 } from "../surfaces.ts";
 import { clampRailWidth, railWidthOf, setRailWidth } from "../railPrefs.ts";
@@ -56,6 +56,11 @@ const NO_EVENTS: never[] = [];
 const SEPARATOR_FALLBACK = 6;
 const RESIZE_STEP = 16;
 const RESIZE_STEP_LARGE = 64;
+/** Bottom-dock (presentation.dock === "bottom") height bounds. The floor keeps
+ *  the strip useful; the ceiling always leaves Chat + its composer this many
+ *  vertical pixels (matches the row-1 `minmax(240px, 1fr)` in styles.css). */
+const BOTTOM_DOCK_MIN = 160;
+const BOTTOM_DOCK_CHAT_FLOOR = 240;
 type ResizeEdge = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
 const RESIZE_EDGES: ResizeEdge[] = ["n", "ne", "e", "se", "s", "sw", "w", "nw"];
 
@@ -302,6 +307,8 @@ export default function ContextRail() {
   const railbarRef = useRef<HTMLElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
   const separatorRef = useRef<HTMLDivElement>(null);
+  const bottomSeparatorRef = useRef<HTMLDivElement>(null);
+  const dockEdge = paneDockEdge(presentation);
   const geometryKey = `${projectId ?? ""}:${open?.id ?? ""}:${presentation ? "workspace" : "context"}:${compact ? "compact" : "wide"}:${paneMode}`;
   const [geometry, setGeometry] = useState<{ key: string; width: number; height: number }>({ key: "", width: 0, height: 0 });
   const workspaceWidth = geometry.key === geometryKey ? geometry.width : 0;
@@ -312,14 +319,21 @@ export default function ContextRail() {
   useLayoutEffect(() => {
     const measure = () => {
       const chat = chatElOf();
-      const paneW = presentation && paneRef.current
-        && paneRef.current.classList.contains("rail-pinned")
-        && !paneRef.current.classList.contains("rail-pinned-narrow")
-        ? paneRef.current.getBoundingClientRect().width
+      const paneEl = paneRef.current;
+      const paneW = presentation && paneEl
+        && paneEl.classList.contains("rail-pinned")
+        && !paneEl.classList.contains("rail-pinned-narrow")
+        ? paneEl.getBoundingClientRect().width
         : 0;
-      const chatW = chat ? chat.getBoundingClientRect().width : 0;
+      // A bottom-docked pane grows DOWN from Chat: sum its height so the
+      // vertical geometry reflects the whole Chat + strip column.
+      const paneH = paneEl && paneEl.classList.contains("rail-dock-bottom")
+        ? paneEl.getBoundingClientRect().height
+        : 0;
+      const chatRect = chat?.getBoundingClientRect();
+      const chatW = chatRect ? chatRect.width : 0;
       const width = Math.round(chatW + paneW);
-      const height = Math.round(chat?.getBoundingClientRect().height ?? 0);
+      const height = Math.round((chatRect?.height ?? 0) + paneH);
       setGeometry((current) =>
         current.key === geometryKey && current.width === width && current.height === height
           ? current : { key: geometryKey, width, height });
@@ -361,14 +375,22 @@ export default function ContextRail() {
   const paneWidths = panePrefs?.widths ?? {};
   const remembered = open !== null && presentation ? paneWidths[open.id] ?? null : null;
   const decision = presentation ? decideDock(remembered, presentation, geo) : null;
+  const rememberedHeight = open !== null ? panePrefs?.heights[open.id] : undefined;
+  // The bottom-dock strip persists under its own key so its height never
+  // bleeds into (or from) the same surface's floating dynamic-window height.
+  const rememberedDockHeight = open !== null ? panePrefs?.heights[`${open.id}::dock`] : undefined;
 
   // Live (uncommitted) drag width; preferred width persists on commit only.
   const [liveWidth, setLiveWidth] = useState<number | null>(null);
   const [liveHeight, setLiveHeight] = useState<number | null>(null);
+  // Live bottom-dock strip height (kept apart from the dynamic-window height
+  // so a drag in one mode never leaks a stale value into the other).
+  const [liveDockHeight, setLiveDockHeight] = useState<number | null>(null);
   const [livePosition, setLivePosition] = useState({ x: 0, y: 0 });
   useEffect(() => {
     setLiveWidth(null);
     setLiveHeight(null);
+    setLiveDockHeight(null);
     setLivePosition({ x: 0, y: 0 });
   }, [open?.id, projectId]);
   useEffect(() => { setLivePosition({ x: 0, y: 0 }); }, [workspaceWidth, workspaceHeight]);
@@ -391,7 +413,13 @@ export default function ContextRail() {
   const layered = isWorkspacePane && effectivePaneMode === "fullscreen";
   const dynamic = isWorkspacePane && effectivePaneMode === "dynamic";
   const pinned = isWorkspacePane && effectivePaneMode === "pinned";
-  const pinnedNarrow = pinned && (compact || (measured && (!admits || guardPromoted)));
+  // Deliberate bottom dock: a pinned pane whose presentation asks for the
+  // bottom edge. It reuses the pinned-narrow row layout (pane under the
+  // workspace, composer lifted above) but is a stable choice, not a
+  // width-driven fallback — so the layout guard never promotes it and it
+  // carries its own horizontal resize on the top edge.
+  const bottomDock = pinned && dockEdge === "bottom";
+  const pinnedNarrow = pinned && (compact || bottomDock || (measured && (!admits || guardPromoted)));
 
   const dockWidth = decision !== null && presentation
     ? clampDockWidth(liveWidth ?? decision.width, presentation, geo)
@@ -557,12 +585,87 @@ export default function ContextRail() {
     commitWidth(committed);
   };
 
+  // ---- resize: bottom-dock strip (horizontal separator on the top edge) --------
+  // Range is derived from the measured Chat + strip column (workspaceHeight);
+  // the ceiling always keeps BOTTOM_DOCK_CHAT_FLOOR px for Chat + its composer.
+  const bottomDockMax = Math.max(BOTTOM_DOCK_MIN, Math.round((workspaceHeight || 0) - BOTTOM_DOCK_CHAT_FLOOR));
+  const bottomDockMin = Math.max(80, Math.min(presentation?.minHeight ?? BOTTOM_DOCK_MIN, bottomDockMax));
+  const clampDockHeight = (h: number) => Math.min(bottomDockMax, Math.max(bottomDockMin, Math.round(h)));
+  const explicitDockHeight = bottomDock ? liveDockHeight ?? rememberedDockHeight ?? null : null;
+  const bottomDockNow = clampDockHeight(explicitDockHeight ?? (workspaceHeight || 0) * 0.46);
+
+  const commitDockHeight = (h: number) => {
+    if (open === null || projectId === null) return;
+    setPaneDynamicHeight(projectId, `${open.id}::dock`, clampDockHeight(h));
+  };
+  const dockDragRef = useRef<{ startY: number; startH: number } | null>(null);
+  const onBottomHandleDown = (e: ReactPointerEvent) => {
+    if (open === null || !bottomDock) return;
+    e.preventDefault();
+    const startH = paneRef.current?.getBoundingClientRect().height
+      ?? explicitDockHeight ?? bottomDockNow;
+    dockDragRef.current = { startY: e.clientY, startH };
+    document.documentElement.dataset.packageWindowResizing = "true";
+    const move = (ev: PointerEvent) => {
+      const d = dockDragRef.current;
+      if (!d) return;
+      setLiveDockHeight(clampDockHeight(d.startH + (d.startY - ev.clientY)));
+    };
+    const up = (ev: PointerEvent) => {
+      const d = dockDragRef.current;
+      dockDragRef.current = null;
+      delete document.documentElement.dataset.packageWindowResizing;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      if (!d) return;
+      const h = clampDockHeight(d.startH + (d.startY - ev.clientY));
+      setLiveDockHeight(h);
+      commitDockHeight(h);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up, { once: true });
+  };
+  const onBottomHandleKey = (e: ReactKeyboardEvent) => {
+    if (open === null || !bottomDock) return;
+    const step = e.shiftKey ? RESIZE_STEP_LARGE : RESIZE_STEP;
+    let next: number | null = null;
+    if (e.key === "ArrowUp") next = bottomDockNow + step;
+    else if (e.key === "ArrowDown") next = bottomDockNow - step;
+    else if (e.key === "Home") next = bottomDockMin;
+    else if (e.key === "End") next = bottomDockMax;
+    if (next === null) return;
+    e.preventDefault();
+    const h = clampDockHeight(next);
+    setLiveDockHeight(h);
+    commitDockHeight(h);
+  };
+  // Publish the chosen strip height as a CSS custom property on .app-shell so
+  // the pane's grid row can realize it. Written ONLY when the user has an
+  // explicit height — otherwise the stylesheet proportion applies and no
+  // measurement feedback loop can form.
+  useLayoutEffect(() => {
+    const shell = railbarRef.current?.closest<HTMLElement>(".app-shell");
+    if (!shell) return;
+    if (bottomDock && explicitDockHeight !== null) {
+      shell.style.setProperty("--workspace-dock-h", `${Math.round(explicitDockHeight)}px`);
+    } else {
+      shell.style.removeProperty("--workspace-dock-h");
+    }
+    return () => { shell.style.removeProperty("--workspace-dock-h"); };
+  }, [bottomDock, explicitDockHeight]);
+
+  // Safety net: if the rail unmounts mid-drag (surface closed, project
+  // switched), the global resize flag must not stick and freeze the cursor /
+  // suppress transitions app-wide.
+  useEffect(() => () => { delete document.documentElement.dataset.packageWindowResizing; }, []);
+
   const dynamicMaxWidth = Math.max(1, workspaceWidth - 32);
   const dynamicMinWidth = Math.min(presentation?.minWidth ?? 240, dynamicMaxWidth);
   const dynamicWidth = clampPaneDimension(liveWidth ?? remembered ?? Math.min(presentation?.preferredMaxWidth ?? 640, workspaceWidth * (presentation?.defaultRatio ?? 0.55)), dynamicMinWidth, workspaceWidth);
   const dynamicMaxHeight = Math.max(1, workspaceHeight - 16);
   const dynamicMinHeight = Math.min(presentation?.minHeight ?? 240, dynamicMaxHeight);
-  const rememberedHeight = open ? panePrefs?.heights[open.id] : undefined;
   const dynamicHeight = clampPaneDimension(liveHeight ?? rememberedHeight ?? dynamicMaxHeight, dynamicMinHeight, dynamicMaxHeight);
 
   const onDynamicResizeDown = (edge: ResizeEdge, e: ReactPointerEvent) => {
@@ -699,14 +802,14 @@ export default function ContextRail() {
   return (
     <>
       {compactContext && <div className="menu-backdrop panel-sheet-backdrop" onClick={() => setRailPlugin(null)} />}
-      <aside className={`railbar${open ? " railbar-open" : ""}${pinnedNarrow ? " railbar-pinned-narrow" : ""}`} ref={railbarRef}>
+      <aside className={`railbar${open ? " railbar-open" : ""}${pinnedNarrow ? " railbar-pinned-narrow" : ""}${bottomDock ? " railbar-dock-bottom" : ""}`} ref={railbarRef}>
         {kept.length > 0 && (
         <div
           ref={paneRef}
           id={compact ? "polyth-panel-sheet" : undefined}
           className={compactContext
             ? "panel-sheet"
-            : `rail${isWorkspacePane ? " rail-workspace" : ""}${dynamic ? " rail-dynamic" : ""}${pinned ? " rail-pinned" : ""}${pinnedNarrow ? " rail-pinned-narrow" : ""}${layered ? " rail-fullscreen" : ""}`}
+            : `rail${isWorkspacePane ? " rail-workspace" : ""}${dynamic ? " rail-dynamic" : ""}${pinned ? " rail-pinned" : ""}${pinnedNarrow ? " rail-pinned-narrow" : ""}${bottomDock ? " rail-dock-bottom" : ""}${layered ? " rail-fullscreen" : ""}`}
           style={compactContext ? undefined : paneStyle}
           role={compactContext || layered || dynamic ? "dialog" : "region"}
           aria-modal={compactContext || undefined}
@@ -729,6 +832,21 @@ export default function ContextRail() {
               aria-valuemin={presentation && decision !== null ? presentation.minWidth : 240}
               aria-valuemax={presentation && decision !== null ? Math.max(decision.maxPane, presentation.minWidth) : 640}
               aria-valuenow={dockWidth}
+            />
+          )}
+          {bottomDock && !compactContext && (
+            <div
+              ref={bottomSeparatorRef}
+              className="rail-resize-bottom"
+              onPointerDown={onBottomHandleDown}
+              onKeyDown={onBottomHandleKey}
+              tabIndex={0}
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label={tr("contextrail.resizeValue", { value: open?.title ?? tr("contextrail.panel") })}
+              aria-valuemin={bottomDockMin}
+              aria-valuemax={bottomDockMax}
+              aria-valuenow={bottomDockNow}
             />
           )}
           {dynamic && RESIZE_EDGES.map((edge) => (

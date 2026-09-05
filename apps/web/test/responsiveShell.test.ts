@@ -339,7 +339,7 @@ test("pending OpenCode changes render in the pinned Settings footer with an opaq
 test("open rails remain visible in every workspace mode", async () => {
   const rail = await read("../src/components/ContextRail.tsx");
   const css = await read("../src/styles.css");
-  assert.ok(rail.includes('`railbar${open ? " railbar-open" : ""}${pinnedNarrow ? " railbar-pinned-narrow" : ""}`'), "the host marks an active surface");
+  assert.ok(rail.includes('`railbar${open ? " railbar-open" : ""}${pinnedNarrow ? " railbar-pinned-narrow" : ""}${bottomDock ? " railbar-dock-bottom" : ""}`'), "the host marks an active surface");
   assert.ok(
     !css.includes(".app.view-session.mode-chat .railbar:not(.railbar-open)"),
     "Chat keeps the inactive desktop rail available as a stable launcher",

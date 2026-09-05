@@ -311,11 +311,7 @@ function SessionSurface() {
         <Timeline model={model} latestRevealTarget={latestRevealAnchor} />
       </div>
       {pendingQuestions.length > 0 && <QuestionCards questions={pendingQuestions} />}
-      <SlotHost
-        slot="session.timeline.after"
-        context={{ projectId, sessionId, permissions: pendingPermissions, secrets: pendingSecrets }}
-      />
-      {archived && sessionId
+       {archived && sessionId
         ? <>
             <SlotHost slot="session.composer.before" context={{ projectId, sessionId, editing: false }} customizable />
             <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />

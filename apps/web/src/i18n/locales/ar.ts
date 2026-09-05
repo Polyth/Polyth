@@ -1885,7 +1885,7 @@ export const ar: AppMessages = {
   "sidebar.sessionlist.searchLabels": "Search labels",
   "sidebar.sessionlist.noLabelsMatch": "No labels match your search.",
   "sidebar.sessionlist.main": "__رئيسي__",
-  "sidebar.sessionlist.mainWorktree": "worktree الرئيسية",
+  "sidebar.sessionlist.mainWorktree": "الرئيسي",
   "sidebar.sessionlist.message": "×",
   "sidebar.sessionlist.newSession": "جلسة جديدة",
   "sidebar.sessionlist.newSessionInValue": "جلسة جديدة في {label}",

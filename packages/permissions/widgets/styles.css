@@ -5,10 +5,14 @@
   min-width: 0;
   max-width: 100%;
   flex-direction: column;
-  gap: var(--space-2);
-  padding-block: var(--space-3) var(--space-1);
+  gap: var(--space-3);
+  padding: var(--space-3);
   overflow: auto;
   overscroll-behavior: contain;
+  border: 1px solid var(--amber);
+  border-radius: var(--radius-card);
+  background: var(--amber-wash);
+  box-shadow: var(--shadow-sm);
 }
 
 .perm-banner .perm-title {
@@ -35,8 +39,11 @@
   display: grid;
   gap: var(--space-2);
   padding: var(--space-3);
-  border-inline-start: 2px solid var(--amber);
-  background: var(--panel);
+  border: 1px solid var(--border-soft);
+  border-inline-start: 3px solid var(--amber);
+  border-radius: var(--radius-control);
+  background: var(--elevated);
+  box-shadow: var(--inset-hi);
 }
 
 .perm-banner .permission-request-head {
@@ -75,7 +82,7 @@
 }
 
 .perm-banner .permission-risk {
-  margin-inline-start: var(--space-2);
+  margin-inline-start: auto;
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-round);
   font-size: var(--font-meta);

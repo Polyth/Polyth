@@ -1885,7 +1885,7 @@ export const uk: AppMessages = {
   "sidebar.sessionlist.searchLabels": "Search labels",
   "sidebar.sessionlist.noLabelsMatch": "No labels match your search.",
   "sidebar.sessionlist.main": "__головний__",
-  "sidebar.sessionlist.mainWorktree": "Головне worktree",
+  "sidebar.sessionlist.mainWorktree": "Головне",
   "sidebar.sessionlist.message": "×",
   "sidebar.sessionlist.newSession": "Нова сесія",
   "sidebar.sessionlist.newSessionInValue": "Новий сеанс у {label}",
