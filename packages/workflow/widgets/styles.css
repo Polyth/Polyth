@@ -963,7 +963,7 @@ min-height: 64px; padding-bottom: 7px;
 }
 
 .workflow-launch-footer {
-padding-block: 7px;
+padding-block: var(--space-1);
 }
 }
 html[dir="rtl"] .workflow-definition > svg {

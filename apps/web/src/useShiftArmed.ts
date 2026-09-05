@@ -18,8 +18,8 @@ export function shouldArmShift(key: string, editingText: boolean): boolean {
 }
 
 function isTextEditing(target: EventTarget | null): boolean {
-  const element = target instanceof Element ? target : document.activeElement;
-  return element instanceof Element && element.closest(
+  const element = target && "closest" in target ? target as Element : document.activeElement;
+  return element?.closest(
     "input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox'], [data-composer-input]",
   ) !== null;
 }

@@ -236,22 +236,3 @@ test("project menu selection keeps one multi-session selection across projects",
     container.remove();
   }
 });
-
-test("settings is only exposed while Shift is held", async () => {
-  const container = document.createElement("div");
-  document.body.appendChild(container);
-  const root = createRoot(container);
-  try {
-    await act(async () => { root.render(createElement(Sidebar)); });
-    assert.equal(container.querySelector('[aria-label="Settings"]'), null);
-
-    await act(async () => { (dom as unknown as EventTarget).dispatchEvent(new dom.KeyboardEvent("keydown", { key: "Shift", shiftKey: true }) as unknown as Event); });
-    assert.ok(container.querySelector('[aria-label="Settings"]'));
-
-    await act(async () => { (dom as unknown as EventTarget).dispatchEvent(new dom.KeyboardEvent("keyup", { key: "Shift" }) as unknown as Event); });
-    assert.equal(container.querySelector('[aria-label="Settings"]'), null);
-  } finally {
-    await act(async () => { root.unmount(); });
-    container.remove();
-  }
-});

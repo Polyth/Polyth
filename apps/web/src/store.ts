@@ -196,6 +196,7 @@ export function subscribeStore(cb: () => void): () => void {
 }
 
 function refreshTitle(): void {
+  if (typeof document === "undefined") return;
   const project = state.projectRegistry.projects.find((p) => p.id === state.activeProjectId);
   document.title = project?.name ? `${project.name} — ${state.settings.productName}` : state.settings.productName;
 }

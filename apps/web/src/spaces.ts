@@ -35,9 +35,9 @@ const set = (patch: Partial<SpacesState>): void => {
 
 const apply = (dto: SpacesStateDto): void => set({
   status: "ready",
-  spaces: dto.spaces,
-  activeSpaceId: dto.activeSpaceId,
-  canCreate: dto.canCreate,
+  spaces: Array.isArray(dto.spaces) ? dto.spaces : [],
+  activeSpaceId: typeof dto.activeSpaceId === "string" ? dto.activeSpaceId : null,
+  canCreate: dto.canCreate === true,
   error: undefined,
 });
 

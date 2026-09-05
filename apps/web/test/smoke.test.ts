@@ -599,6 +599,7 @@ test("setUiSettings persists and applies visual data attributes", () => {
   assert.deepEqual(dataset, {
     density: "compact",
     rounding: "10",
+    glass: "matte",
     chatwidth: "wide",
     technical: "true",
     dictate: "true",

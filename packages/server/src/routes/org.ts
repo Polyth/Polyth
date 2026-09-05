@@ -22,7 +22,7 @@ export function orgRoutes(deps: {
       || path.startsWith("/api/sessions")
       || path.startsWith("/api/folders")
       || path.startsWith("/api/labels")
-      || path === "/api/search"
+      || path.startsWith("/api/search/")
     )) return false;
     // Scoped services + the tenant id used for the label rows. Every read
     // below therefore starts inside the caller's Space.

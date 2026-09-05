@@ -394,6 +394,11 @@ export default function Header() {
         {(!compact || !chatSurface) && (
           <div className="header-actions customize-zone" aria-label={tr("header.application")}>
             <SlotHost
+              slot="session.header.actions"
+              context={{ projectId: project?.id ?? null, sessionId: session?.id ?? null, workspaceMode }}
+              customizable
+            />
+            <SlotHost
               slot="app.header.actions"
               context={{ projectId: project?.id ?? null, sessionId: session?.id ?? null, workspaceMode }}
               customizable

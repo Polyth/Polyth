@@ -90,16 +90,11 @@ test("assistant identity panel renders once per turn, after the turn completes",
   assert.doesNotMatch(timeline, /preliminary|assistant-preliminary|agent-reply-header-preliminary/);
 });
 
-test("answer text blocks expose a hover copy control at the block end", () => {
+test("answer footers expose the configured copy action", () => {
   const timeline = read("../src/components/Timeline.tsx");
-  const css = read("../src/styles.css");
-
-  assert.match(timeline, /className="bubble-copy"/);
-  assert.match(timeline, /<CopyButton text=\{m\.text\} label=\{tr\("timeline\.copyAnswer"\)\} \/>/);
-  assert.match(css, /\.bubble-copy\s*\{[^}]*position:\s*absolute;[^}]*inset-block-end:\s*4px;[^}]*inset-inline-end:\s*4px;[^}]*opacity:\s*0;/s);
-  assert.match(css, /\.msg\.assistant > \.bubble:hover \.bubble-copy,[\s\S]*?focus-within \.bubble-copy \{\s*opacity:\s*1;/);
-  assert.match(css, /\.bubble-copy \.copy-btn\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--panel\) 84%, transparent\);/s);
-  assert.match(css, /@media \(hover: none\) and \(pointer: coarse\) and \(min-width: 481px\)[\s\S]*?\.bubble-copy \{\s*opacity:\s*1;/);
+  assert.match(timeline, /copy:\s*tr\("timeline\.copyAnswer"\)/);
+  assert.match(timeline, /id === "copy"[\s\S]*?copyText\(m\.text\)/);
+  assert.match(timeline, /className="response-footer-actions"/);
 });
 
 test("thinking, tasks, and every execution share the compact activity-card treatment", () => {
@@ -107,7 +102,7 @@ test("thinking, tasks, and every execution share the compact activity-card treat
   const execution = read("../src/components/ExecutionRow.tsx");
   const css = read("../src/styles.css");
 
-  assert.match(timeline, /className=\{`reasoning\$\{open \? " open" : ""\}`\}>/);
+  assert.match(timeline, /className=\{`reasoning\$\{entering \? " timeline-row-enter" : ""\}\$\{open \? " open" : ""\}`\}>/);
   // The thought header names the work in progress instead of a fixed "Thinking"
   // label: the first line of reasoning when there is one, otherwise run state.
   assert.match(timeline, /<strong>\{head \|\| \(active \? tr\("timeline\.workingThroughTheRequest"\) : tr\("timeline\.activityDetail"\)\)\}<\/strong>/);

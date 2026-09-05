@@ -90,7 +90,7 @@ test("pinned OpenCode lock covers packaged CPU and operating-system targets", as
   }
   assert.match(
     mainSource,
-    /opencode:\s*\{\s*bin:\s*binary,\s*binarySource:\s*"bundled"\s*\}/,
+    /opencode:\s*\{\s*bin:\s*binary,\s*binarySource:\s*"bundled"\s+as const\s*\}/,
     "desktop must label its absolute resources executable as bundled",
   );
   assert.match(mainSource, /packagedResource\(join\("polyth-link"/);

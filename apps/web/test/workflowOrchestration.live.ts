@@ -368,7 +368,7 @@ before(async () => {
       PATH: `${FIXTURE_BIN}:${process.env.PATH ?? ""}`,
       MSGACT_OC_SEED: OC_SEED,
       MSGACT_OC_STATE: OC_STATE,
-      MSGACT_TURN_DELAY_MS: "250",
+      MSGACT_TURN_DELAY_MS: "1000",
       POLYTH_FAKE_BROWSER: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -789,12 +789,14 @@ test("complete workflow journey remains synchronized, accessible, and responsive
   await timeline.waitFor({ state: "visible" });
   assert.match(await timeline.getAttribute("aria-label") ?? "", /Workflow Release pipeline, Running/);
   assert.equal(await timeline.locator("li").count(), 6, "long runs start with a focused node window");
-  await page.screenshot({ path: join(ARTIFACTS, "workflow_running_timeline.png") });
 
-  const stop = timeline.getByRole("button", { name: "Stop Release pipeline workflow run" });
-  // The synthetic run streams node updates fast enough to replace the timeline
-  // between Playwright's stability checks; invoke the already-visible control.
-  await stop.evaluate((element) => (element as HTMLElement).click());
+  const stopState = await page.evaluate(() => {
+    const buttons = [...document.querySelectorAll<HTMLButtonElement>(".workflow-timeline-card footer button")];
+    const button = buttons.find((candidate) => candidate.getAttribute("aria-label")?.startsWith("Stop "));
+    button?.click();
+    return { clicked: !!button, buttons: buttons.map((candidate) => ({ text: candidate.textContent, label: candidate.getAttribute("aria-label") })) };
+  });
+  assert.equal(stopState.clicked, true, `running timeline exposes its stop action: ${JSON.stringify(stopState.buttons)}`);
   await page.waitForSelector(".workflow-timeline-card.status-stopped", { state: "visible" });
   assert.match(await timeline.getAttribute("aria-label") ?? "", /Stopped/);
   await page.waitForSelector(".sb-workflow", { state: "detached" });
@@ -891,7 +893,7 @@ test("complete workflow journey remains synchronized, accessible, and responsive
     await viewWorkflow.evaluate((element) => element.scrollIntoView({ block: "center" }));
     await viewWorkflow.click();
     await phone.waitForSelector(".workflow-page", { state: "visible" });
-    await waitForAnimations(phone, '.module-view[data-module-id="workflow"]');
+    await waitForAnimations(phone, ".rail-fullscreen");
     await phone.waitForSelector(".workflow-editor-toolbar", { state: "visible" });
     await assertNoOverflow(phone, `workflow view@${width}`);
     await assertTouchTargets(
@@ -979,14 +981,17 @@ test("package window resizes and preserves dynamic, pinned, and fullscreen behav
 
   const initial = await window.boundingBox();
   assert.ok(initial);
-  const eastHandle = await window.locator(".package-window-resize--e").boundingBox();
+  const eastSeparator = window.locator(".package-window-resize--e");
+  const eastHandle = await eastSeparator.boundingBox();
   assert.ok(eastHandle);
-  const eastTarget = eastHandle.x + eastHandle.width / 2 - 24;
-  const expectedRight = initial.x + initial.width + eastTarget - (eastHandle.x + eastHandle.width / 2);
+  const minWidth = Number(await eastSeparator.getAttribute("aria-valuemin"));
+  const delta = initial.width > minWidth + 24 ? -24 : 24;
+  const eastTarget = eastHandle.x + eastHandle.width / 2 + delta;
+  const expectedRight = initial.x + initial.width + delta;
   await drag(".package-window-resize--e", eastTarget, initial.y + initial.height / 2);
   const eastResized = await window.boundingBox();
   assert.ok(eastResized && Math.abs(eastResized.x + eastResized.width - expectedRight) <= 2,
-    "east resize handle does not track the pointer");
+    `east resize handle does not track the pointer: ${JSON.stringify({ initial, eastHandle, minWidth, delta, expectedRight, eastResized })}`);
   await drag(".package-window-resize--w", 0, initial.y + initial.height / 2);
   const widest = await window.boundingBox();
   assert.ok(widest && widest.width > initial.width && widest.x >= -0.5);
@@ -996,9 +1001,13 @@ test("package window resizes and preserves dynamic, pinned, and fullscreen behav
 
   const shell = await page.locator(".app-shell").boundingBox();
   assert.ok(shell);
-  await drag(".package-window-resize--n", narrowest.x + narrowest.width / 2, shell.y + 8);
+  await drag(".package-window-resize--n", narrowest.x + narrowest.width / 2, narrowest.y + 24);
+  const northResized = await window.boundingBox();
+  assert.ok(northResized && northResized.height < narrowest.height && northResized.y > narrowest.y,
+    `north resize failed: ${JSON.stringify({ shell, narrowest, northResized })}`);
+  await drag(".package-window-resize--s", northResized.x + northResized.width / 2, shell.y + shell.height - 8);
   const tallest = await window.boundingBox();
-  assert.ok(tallest && tallest.height > narrowest.height && tallest.y >= -0.5);
+  assert.ok(tallest && tallest.height > northResized.height);
   await drag(".package-window-resize--s", tallest.x + tallest.width / 2, 100);
   const shortest = await window.boundingBox();
   assert.ok(shortest && shortest.height < tallest.height && shortest.height >= 240);

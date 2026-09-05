@@ -16,7 +16,7 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
   assert.doesNotMatch(sidebar, /project-count/);
   assert.match(sidebar, /className="project-new-session"/);
   assert.doesNotMatch(sidebar, /className="side-foot"/);
-  assert.match(sidebar, /className="sidebar-service-bar"/);
+  assert.match(sidebar, /className="sidebar-service-bar customize-zone"/);
   assert.match(sidebar, /className="sidebar-drawer-header"/);
   // Compact drawer replaced the decorative identity block with a working
   // toolbar: search toggle, sort, filter, and close.
@@ -66,9 +66,9 @@ test("header and composer controls are configurable and purpose-specific", async
     source("../src/components/settings/WidgetsPage.tsx"),
     source("../src/components/ChatMetrics.tsx"),
   ]);
-  assert.match(header, /const eligiblePrimaries = resolved\.filter\(\(c\) =>[\s\S]*?c\.tier === "primary"[\s\S]*?c\.descriptor\.id === "workflow"/);
+  assert.match(header, /const defaultPinned = \(id: string\) => \(id === "workflow" \|\| id === "terminal"\)/);
+  assert.match(header, /capability\.tier === "primary" \|\| defaultPinned\(capability\.descriptor\.id\)/);
   assert.match(header, /topRail\.map/);
-  assert.match(header, /const terminal = resolved\.find/);
   assert.doesNotMatch(header, /const rest = /);
   assert.doesNotMatch(header, /visibleIds|rest\.length > 0/);
   assert.doesNotMatch(composer, /Modalities:/);

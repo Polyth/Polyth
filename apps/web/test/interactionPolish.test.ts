@@ -93,7 +93,7 @@ test("P1 mobile refinements remain wired to their visible surfaces", async () =>
   assert.match(folder, /className="folder-path mono"/, "the full-screen project picker keeps search/path entry");
   assert.match(empty, /aria-busy=\{busy \|\| undefined\}/, "settings empty states distinguish loading");
   assert.match(haptics, /navigator\.vibrate\(PATTERNS\[kind\]\)/, "key touch outcomes use bounded native haptics");
-  assert.match(css, /:is\(\.side-scroll, \.timeline, \.settings-pane-body, \.sheet-body, \.folder-list, \.rail-body\)/,
+  assert.match(css, /\* \{ scrollbar-width: thin; scrollbar-color: var\(--border\) transparent; \}/,
     "long mobile surfaces share scroll affordances");
   assert.match(css, /\.session-row\[data-swipe="revealed"\] \.session-quick > \.session-quick-btn\s*\{[\s\S]*?width:\s*var\(--tap\)/,
     "swiping reveals the named archive/delete pair at full touch size");

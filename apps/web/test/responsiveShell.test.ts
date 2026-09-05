@@ -290,7 +290,7 @@ test("desktop header keeps brand, workspace modes, and a named utility cluster",
   assert.ok(header.includes('className="workspace-mode-switch"'), "Focus and Canvas remain next to the brand");
   assert.ok(!header.includes("header-breadcrumbs"), "project and branch crumbs are removed");
   assert.ok(sidebar.includes('setOverlay("project-picker")'), "project switching remains available in the project sidebar");
-  assert.ok(header.includes('<div className="header-actions"'), "utilities share one right-side cluster");
+  assert.ok(header.includes('<div className="header-actions customize-zone"'), "utilities share one right-side cluster");
   assert.ok(actions.includes('label={tr("widgets.builtinminiwidgets.searchCommandsAndActions")}'), "search utility remains named");
   assert.ok(actions.includes('label={tr("widgets.builtinminiwidgets.searchSessionHistory2")}'), "history utility remains named");
   assert.ok(actions.includes('label={tr("common.settings")}'), "settings utility remains named");
@@ -339,7 +339,7 @@ test("pending OpenCode changes render in the pinned Settings footer with an opaq
 test("open rails remain visible in every workspace mode", async () => {
   const rail = await read("../src/components/ContextRail.tsx");
   const css = await read("../src/styles.css");
-  assert.ok(rail.includes('`railbar${open ? " railbar-open" : ""}`'), "the host marks an active surface");
+  assert.ok(rail.includes('`railbar${open ? " railbar-open" : ""}${pinnedNarrow ? " railbar-pinned-narrow" : ""}`'), "the host marks an active surface");
   assert.ok(
     !css.includes(".app.view-session.mode-chat .railbar:not(.railbar-open)"),
     "Chat keeps the inactive desktop rail available as a stable launcher",
@@ -351,7 +351,7 @@ test("open rails remain visible in every workspace mode", async () => {
     );
   }
   assert.ok(!/mode-chat \.railbar\s*[,{][^}]*display:\s*none/.test(css), "Chat never hides an active rail");
-  assert.match(css, /\.railbar:has\(\.rail-fullscreen\)\s*\{[^}]*position:\s*fixed[^}]*inset:\s*0[^}]*overflow:\s*visible/s,
+  assert.match(css, /\.railbar:has\(\.rail-fullscreen\)\s*\{[^}]*position:\s*absolute[^}]*inset:\s*0[^}]*overflow:\s*visible/s,
     "fullscreen package panes escape the floating rail clipping context");
   assert.match(css, /\.railbar:has\(\.rail-fullscreen\)\s*>\s*\.rail-fullscreen\s*\{[^}]*position:\s*relative[^}]*flex:\s*1/s,
     "every fullscreen package pane fills the shared viewport host");
@@ -465,17 +465,17 @@ test("header and customizer render configured capabilities and permanent Termina
   assert.ok(header.includes("function CapabilityNav"), "header owns the primary capability navigation");
   assert.ok(header.includes("useResolvedCapabilities"), "header resolves configured top-rail capabilities");
   assert.ok(header.includes("<CapabilityNav />"), "wide chat renders the primary capability navigation");
-  assert.ok(header.includes('c.tier === "primary"'), "header limits its capability rail to primary tools");
+  assert.ok(header.includes('capability.tier === "primary"'), "header limits its capability rail to primary tools");
   assert.ok(header.includes("topRail.map"), "header renders the resolved top capability rail");
   assert.ok(
-    header.includes('c.descriptor.id === "terminal" && c.descriptor.available()'),
+    header.includes('id === "workflow" || id === "terminal"'),
     "Terminal remains a permanent top-rail launcher",
   );
   assert.ok(!header.includes("CapabilityMenu"), "header creates no implicit overflow disclosure");
   assert.ok(!rail.includes("CapabilityMenu"), "rail creates no duplicate More-tools picker");
   assert.ok(rail.includes("configuredRailButtons"), "rail renders only configured tool buttons");
   assert.ok(rail.includes('capability.descriptor.id === "terminal"'), "Terminal remains a guaranteed rail launcher");
-  assert.ok(!rail.includes("draggable"), "runtime rail buttons do not expose drag-only reordering");
+  assert.ok(rail.includes("draggable={customizeActive && capabilityIds.has(s.id)}"), "runtime capability buttons reorder only while customization is active");
   assert.ok(widgets.includes('aria-label="Top toolbar"'), "the customizer previews top-rail capabilities");
   assert.ok(widgets.includes('aria-label="Right rail"'), "the customizer previews right-rail capabilities");
   assert.ok(widgets.includes('label="Placement"'), "the inspector exposes explicit placement controls");

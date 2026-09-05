@@ -572,7 +572,7 @@ export default function ContextRail() {
     const start = {
       x: e.clientX, y: e.clientY, width: dynamicWidth, height: dynamicHeight,
       position: livePosition,
-      bounds: railbarRef.current?.getBoundingClientRect() ?? null,
+      bounds: chatElOf()?.getBoundingClientRect() ?? null,
       box: paneRef.current?.getBoundingClientRect() ?? null,
     };
     document.documentElement.dataset.packageWindowResizing = "true";
@@ -592,14 +592,12 @@ export default function ContextRail() {
       if (edge.includes("e") || edge.includes("w")) setLiveWidth(width);
       if (edge.includes("n") || edge.includes("s")) setLiveHeight(height);
       const proposedX = start.position.x + (edge.includes("e") ? width - start.width : 0);
-      const proposedY = start.position.y + (edge.includes("s")
-          ? (height - start.height) / 2
-          : edge.includes("n") ? (start.height - height) / 2 : 0);
+      const proposedY = start.position.y + (edge.includes("n") ? start.height - height : 0);
       const baseLeft = start.box ? start.box.right - start.position.x - width : 0;
-      const baseTop = start.bounds ? start.bounds.top + (start.bounds.height - height) / 2 : 0;
+      const baseTop = start.box ? start.box.top - start.position.y : 0;
       setLivePosition({
         x: start.bounds
-          ? Math.min(0, Math.max(start.bounds.left - baseLeft, proposedX))
+          ? Math.min(start.bounds.right - baseLeft - width, Math.max(start.bounds.left - baseLeft, proposedX))
           : proposedX,
         y: start.bounds
           ? Math.min(start.bounds.bottom - baseTop - height, Math.max(start.bounds.top - baseTop, proposedY))

@@ -8,12 +8,14 @@ const here = dirname(fileURLToPath(import.meta.url));
 const shared = join(here, "../src/shared");
 
 test("built React import-map shims preserve every runtime ESM export", async () => {
+  const runtimeExports = async (specifier: string) =>
+    Object.keys(await import(specifier)).filter((name) => name !== "module.exports").sort();
   const expected = {
-    react: Object.keys(await import("react")).sort(),
-    "react-dom": Object.keys(await import("react-dom")).sort(),
-    "react-dom-client": Object.keys(await import("react-dom/client")).sort(),
-    "react-jsx-runtime": Object.keys(await import("react/jsx-runtime")).sort(),
-    "react-jsx-dev-runtime": Object.keys(await import("react/jsx-dev-runtime")).sort(),
+    react: await runtimeExports("react"),
+    "react-dom": await runtimeExports("react-dom"),
+    "react-dom-client": await runtimeExports("react-dom/client"),
+    "react-jsx-runtime": await runtimeExports("react/jsx-runtime"),
+    "react-jsx-dev-runtime": await runtimeExports("react/jsx-dev-runtime"),
   };
 
   const result = await build({
