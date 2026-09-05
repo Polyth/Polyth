@@ -31,6 +31,7 @@ const waitFor = async (condition: () => boolean | Promise<boolean>): Promise<voi
 const makeHarness = (
   runtime: AgentRuntime,
   projectPath?: string,
+  toolExecutionTimeoutMs?: number,
 ) => {
   const dir = projectPath ?? mkdtempSync(join(tmpdir(), "polyth-reconciliation-"));
   const store = createStore(join(dir, "sessions.db"));
@@ -66,6 +67,7 @@ const makeHarness = (
       broadcast,
       queue: store,
       runtimes: { forProject: async () => runtime },
+      ...(toolExecutionTimeoutMs === undefined ? {} : { toolExecutionTimeoutMs }),
     }),
   };
 };
@@ -1234,6 +1236,60 @@ test("runtime observation uncertainty survives the AgentRuntime ingestion seam",
     message: "recovered content diverges from the durable checkpoint",
   });
   assert.equal(uncertainty?.producerPlugin, "backend-opencode");
+  await store.close();
+});
+
+test("tool watchdog aborts a stuck execution and records the failure for the agent", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-tool-watchdog-"));
+  const endpoint = endpointFor(dir);
+  let listener: ((sessionId: string, event: RuntimeEvent) => void) | undefined;
+  let aborts = 0;
+  const runtime = runtimeWithSnapshot(endpoint, (binding) => ({
+    authorityId: binding.authorityId,
+    generation: binding.generation,
+    location: binding.location,
+    backendSessionId: binding.backendSessionId!,
+    reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+    state: { value: "running" },
+    completeness: { events: "partial", permissions: "partial", questions: "partial" },
+    events: [],
+  }));
+  runtime.onEvent = (callback) => {
+    listener = callback;
+    return { dispose: () => { listener = undefined; } };
+  };
+  runtime.abort = async () => { aborts += 1; };
+  const { sessions, store, project } = makeHarness(runtime, dir, 25);
+  await store.upsertProjection({
+    id: "session-stuck-tool",
+    projectId: project.id,
+    backendSessionId: "backend-stuck-tool",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-stuck-tool"),
+    title: "Stuck tool",
+    status: "working",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  await sessions.events("session-stuck-tool", 0);
+  assert.ok(listener);
+  listener("session-stuck-tool", { type: "turn/started", turnId: "turn-stuck" });
+  listener("session-stuck-tool", {
+    type: "tool/started",
+    callId: "call-stuck",
+    tool: "bash",
+    input: { command: "sleep forever" },
+  });
+
+  await waitFor(async () => (await store.events("session-stuck-tool"))
+    .some((event) => event.type === "tool/error"));
+  const events = await store.events("session-stuck-tool");
+  assert.equal(aborts, 1);
+  assert.match(
+    String((events.find((event) => event.type === "tool/error")?.data as { error?: unknown })?.error),
+    /stopped after exceeding the 25ms execution safety limit/,
+  );
+  assert.equal(events.at(-1)?.type, "turn/stopped");
+  assert.equal((await store.projection("session-stuck-tool"))?.status, "idle");
   await store.close();
 });
 

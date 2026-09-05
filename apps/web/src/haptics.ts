@@ -12,6 +12,8 @@ const PATTERNS: Record<HapticKind, number | number[]> = {
 
 export function hapticFeedback(kind: HapticKind = "tap"): void {
   if (typeof navigator === "undefined" || typeof navigator.vibrate !== "function") return;
+  if (typeof document !== "undefined" && document.body.dataset.desktopLowResource === "true") return;
+  if (typeof document !== "undefined" && document.documentElement.dataset.reduceAnimations === "true") return;
   if (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   try {
     navigator.vibrate(PATTERNS[kind]);

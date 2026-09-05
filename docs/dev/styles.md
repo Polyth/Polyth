@@ -42,6 +42,7 @@ list — other docs link here instead of restating it.
 | `--raised` | Active or hovered elevated surface. |
 | `--sunken` | Recessed wells, editors, and tracks. |
 | `--input-bg` | Editable field background. |
+| `--app-background-image` | Browser-local decorative workspace backdrop selected by the user. |
 | `--border` | Structural boundary. |
 | `--border-soft` | Decorative separator that does not identify a control. |
 | `--control-border` | Recognizable input, button, and interactive-card boundary; stronger on light themes. |

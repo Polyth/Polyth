@@ -10,6 +10,9 @@ import { join } from "node:path";
 import { once } from "node:events";
 import type { Project, ProjectService } from "@polyth/contracts";
 import { createHttpServer, MAX_BODY_BYTES } from "../src/http.ts";
+import { testTenancy } from "./support/spaces.ts";
+
+const tenancy = await testTenancy();
 
 test("bodies beyond MAX_BODY_BYTES answer 413; normal bodies unaffected", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-bodylimit-"));
@@ -23,7 +26,7 @@ test("bodies beyond MAX_BODY_BYTES answer 413; normal bodies unaffected", async 
   };
   const server = createHttpServer({
     sessions: {} as never,
-    projects,
+    spaces: tenancy.gateway,
     runtimes: {} as never,
     capabilities: () => [],
     webDist: dir,
@@ -51,7 +54,9 @@ test("bodies beyond MAX_BODY_BYTES answer 413; normal bodies unaffected", async 
       body: JSON.stringify({ path: dir }),
     });
     assert.equal(ok.status, 200);
-    assert.deepEqual(await ok.json(), project);
+    // The gateway serves projects through the Space-scoped registry, so the
+    // row that comes back is the real one it created for this tenant.
+    assert.equal((await ok.json() as { path: string }).path, dir);
   } finally {
     server.close();
   }

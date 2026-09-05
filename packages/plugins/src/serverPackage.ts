@@ -29,6 +29,9 @@ import type {
   SessionPersistence,
   SessionProjection,
   SessionService,
+  SpaceContext,
+  SpaceStorage,
+  DeploymentProfile,
 } from "@polyth/contracts";
 import type { RuntimeMutationStore } from "@polyth/session";
 import type { TrustedServerPluginHost } from "./trustedServerEntry.ts";
@@ -186,6 +189,26 @@ export function createServerServiceRegistry(): ServerServiceRegistry {
  *  so cross-dependent packages resolve autonomously instead of being hand-wired
  *  in `packages/server/src/index.ts`. */
 export interface ServerPackageHost extends TrustedServerPluginHost {
+  /**
+   * Tenancy seam. A package should NOT answer "who is the user / which Space /
+   * where is my data / may this be accessed" for itself — it receives an
+   * already-validated `SpaceContext` on every request (`rc.space`) and asks the
+   * host for the rest:
+   *
+   *   host.spaceStorage(rc.space).packageDir(id)  // its own dir in that Space
+   *   host.spaceStorage(rc.space).path(relative)  // validated, escape-proof
+   *   host.deployment                             // trusted vs hosted profile
+   *
+   * `storageDir` (inherited) stays the SHARED, non-tenant root. It is correct
+   * for genuinely deployment-wide state (a binary cache, a trusted registry)
+   * and wrong for anything a Space owns. Packages still holding tenant state
+   * there are being migrated; new tenant state goes through `spaceStorage`.
+   */
+  spaceStorage(ctx: SpaceContext): SpaceStorage;
+  /** Deployment/security profile. Branch on this instead of ad-hoc
+   *  `if (cloud)` checks — see `allowsHostFilesystemBrowsing` and
+   *  `allowsTenantPackagesInControlPlane` in @polyth/contracts. */
+  deployment: DeploymentProfile;
   projects: ProjectService;
   /** Canonical session service. The reference is stable, but the service is
    *  composed AFTER package load — capture it in closures freely, never invoke
@@ -250,6 +273,7 @@ export const INFRASTRUCTURE_PACKAGE_DIRS: ReadonlySet<string> = new Set([
   "contracts",
   "kernel",
   "session",
+  "tenancy",
   "backend-opencode",
   "server",
 ]);

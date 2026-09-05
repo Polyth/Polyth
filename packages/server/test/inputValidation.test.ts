@@ -10,6 +10,9 @@ import { createHttpServer, type RouteHandler } from "../src/http.ts";
 import { goalRoutes } from "../../goals/src/serverEntry.ts";
 import { assertGitRelativePath, gitRoutes } from "../../git/src/serverEntry.ts";
 import { terminalRoutes } from "../../terminal/src/serverEntry.ts";
+import { testTenancy } from "./support/spaces.ts";
+
+const tenancy = await testTenancy();
 
 const project: Project = { id: "p1", path: "/workspace/project", name: "project", createdAt: 1 };
 const projects: ProjectService = {
@@ -66,7 +69,7 @@ async function start() {
   };
   const server = createHttpServer({
     sessions: {} as never,
-    projects,
+    spaces: tenancy.gateway,
     runtimes: {} as never,
     capabilities: () => [],
     webDist: mkdtempSync(join(tmpdir(), "polyth-input-validation-")),

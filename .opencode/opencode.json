@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "polyth": {
+      "type": "local",
+      "command": [
+        "node",
+        "--experimental-strip-types",
+        "/data/projects/polyth/packages/polyth-mcp/src/index.ts"
+      ],
+      "enabled": true,
+      "environment": {
+        "POLYTH_CONTROL_SOCKET": "/data/projects/polyth/data/control.sock"
+      }
+    }
+  }
+}

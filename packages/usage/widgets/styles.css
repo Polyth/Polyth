@@ -218,11 +218,15 @@ position: sticky;
   align-items: center;
   gap: 8px;
   padding: 9px 24px;
-  border-bottom: 1px solid var(--border-soft);
-  background: var(--panel);
+  border-bottom: 1px solid var(--material-glass-border);
+  background: var(--material-glass-chrome);
+  box-shadow: var(--material-glass-highlight);
 }
 .usage-toolbar-spacer {
-flex: 1;
+  flex: 1;
+}
+.usage-toolbar-controls {
+min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2);
 }
 .usage-view-tabs svg,
 .usage-layout-control svg {
@@ -269,16 +273,20 @@ display: flex;
 display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   overflow: hidden;
-  border-block: 1px solid var(--border-soft);
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-surface);
+  background: var(--material-glass);
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
 }
 .usage-stat-card,
 .usage-dashboard-card,
 .usage-provider-detail-card,
 .usage-provider-view-intro,
 .usage-action-strip {
-border: 0;
+  border: 1px solid var(--material-glass-border);
   border-radius: var(--radius-surface);
-  background: var(--panel);
+  background: var(--material-glass);
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
   color: var(--text);
 }
 .usage-stat-card {
@@ -291,6 +299,7 @@ position: relative;
   gap: var(--space-2);
   padding: 15px;
   overflow: hidden;
+  border: 0;
   border-radius: 0;
   background: transparent;
 }
@@ -383,6 +392,42 @@ display: grid;
   grid-template-columns: minmax(0, 1.55fr) minmax(245px, .65fr);
   gap: 12px;
   align-items: stretch;
+}
+.usage-overview-blocks {
+display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px;
+}
+.usage-sortable-item {
+min-width: 0; display: flex; flex-direction: column;
+}
+.usage-sortable-item.dragging {
+opacity: .55;
+}
+.usage-sort-controls {
+height: var(--control-h-sm); display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding-inline: var(--space-1);
+}
+.usage-sort-controls .ui-icon-btn {
+background: var(--material-glass); border-color: var(--material-glass-border); box-shadow: var(--material-glass-highlight);
+}
+.usage-sort-controls .ui-icon-btn:first-child {
+cursor: grab;
+}
+.usage-sort-controls .ui-icon-btn:first-child:active {
+cursor: grabbing;
+}
+.usage-block-full { grid-column: 1 / -1; }
+.usage-block-stat { grid-column: span 3; }
+.usage-block-wide { grid-column: span 8; }
+.usage-block-narrow { grid-column: span 4; }
+.usage-block-half { grid-column: span 6; }
+.usage-provider-summary-block { grid-column: 1 / -1; }
+.usage-sortable-item > .usage-dashboard-card,
+.usage-sortable-item > .usage-action-strip,
+.usage-sortable-item > .usage-provider-detail-card,
+.usage-sortable-item > .usage-provider-view-intro {
+flex: 1;
+}
+.usage-sortable-item > .usage-stat-card {
+flex: 1; border: 1px solid var(--material-glass-border); border-radius: var(--radius-surface); background: var(--material-glass); box-shadow: var(--material-glass-highlight), var(--shadow-sm);
 }
 .usage-breakdown-grid {
 display: grid;
@@ -1003,6 +1048,16 @@ grid-template-columns: repeat(2, minmax(0, 1fr));
 grid-template-columns: 1fr;
 }
 
+.usage-block-wide,
+.usage-block-narrow,
+.usage-block-half {
+grid-column: 1 / -1;
+}
+
+.usage-block-stat {
+grid-column: span 6;
+}
+
 .usage-cost-card > p {
 margin-top: 12px;
 }
@@ -1022,6 +1077,10 @@ display: none;
 
 .usage-view-tabs {
 margin-right: auto;
+}
+
+.usage-toolbar-controls {
+flex: 1 1 auto;
 }
 
 .usage-layout-control .ui-tab span {
@@ -1052,6 +1111,10 @@ padding: 8px 14px;
 
 .usage-view-tabs {
 width: 100%; margin: 0;
+}
+
+.usage-toolbar-controls {
+width: 100%; flex: 1 0 100%; justify-content: stretch;
 }
 
 .usage-view-tabs .ui-tab {
@@ -1266,6 +1329,10 @@ width: 100%;
 grid-template-columns: 1fr;
 }
 
+.usage-block-stat {
+grid-column: 1 / -1;
+}
+
 .usage-stat-card + .usage-stat-card { border-inline-start: 0; border-top: 1px solid var(--border-soft); }
 
 .usage-stat-card {
@@ -1327,6 +1394,14 @@ align-items: stretch;
 .usage-view-tabs,
 .usage-range-control {
 width: 100%;
+}
+
+.usage-toolbar-controls {
+flex-wrap: wrap;
+}
+
+.usage-toolbar-controls .usage-layout-control {
+margin-left: 0;
 }
 
 .usage-view-tabs .ui-tab,

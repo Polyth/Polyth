@@ -167,6 +167,11 @@ export interface RouteRequest {
   method: string;
   ingress: RequestIngress;
   principal: AuthPrincipal;
+  /** Resolved tenant context: identity + Space + membership role, validated
+   *  by the gateway BEFORE any handler runs. Handlers must scope every
+   *  resource lookup through it and must never trust a client-supplied
+   *  space/tenant id. */
+  space: SpaceContext;
   /** Throws and maps to 401/403. Handlers must not continue after this. */
   requireCapability(capability: string): void;
   body(): Promise<Record<string, unknown>>;
@@ -202,6 +207,246 @@ export function requireLocalTunnelAdmin(
   }
   if (principal.kind === "local-user" || principal.kind === "ui-session") return;
   throw Object.assign(new Error("not allowed"), { code: "forbidden" });
+}
+
+// ---------------------------------------------------------------- tenancy
+
+/** Deployment/security profile. Executor selection, host-filesystem browsing,
+ *  and package trust all branch on this ONE value instead of scattered
+ *  `if (cloud)` checks. Read once at boot from POLYTH_DEPLOYMENT_PROFILE. */
+export type DeploymentProfile =
+  /** Desktop/local: one trusted operator, host execution, host browsing. */
+  | "local-trusted"
+  /** Shared server, trusted humans: spaces isolate data, host execution stays. */
+  | "server-trusted"
+  /** Hosted: tenants are untrusted, execution must be sandboxed. */
+  | "multi-tenant-sandboxed";
+
+export const DEPLOYMENT_PROFILES: readonly DeploymentProfile[] = [
+  "local-trusted",
+  "server-trusted",
+  "multi-tenant-sandboxed",
+];
+
+export const isDeploymentProfile = (value: unknown): value is DeploymentProfile =>
+  typeof value === "string" && (DEPLOYMENT_PROFILES as readonly string[]).includes(value);
+
+/** Host directory browsing (`/api/browse`) exposes the server's filesystem and
+ *  is therefore a trusted-deployment affordance only. */
+export const allowsHostFilesystemBrowsing = (profile: DeploymentProfile): boolean =>
+  profile !== "multi-tenant-sandboxed";
+
+/** Tenant-installed packages may only run in the control plane where every
+ *  tenant is already trusted with the host. */
+export const allowsTenantPackagesInControlPlane = (profile: DeploymentProfile): boolean =>
+  profile === "local-trusted";
+
+/** Membership role inside one Space. Ordered least → most privileged. */
+export type SpaceRole = "viewer" | "member" | "admin" | "owner";
+
+export const SPACE_ROLES: readonly SpaceRole[] = ["viewer", "member", "admin", "owner"];
+
+const SPACE_ROLE_RANK: Record<SpaceRole, number> = {
+  viewer: 0,
+  member: 1,
+  admin: 2,
+  owner: 3,
+};
+
+export const isSpaceRole = (value: unknown): value is SpaceRole =>
+  typeof value === "string" && (SPACE_ROLES as readonly string[]).includes(value);
+
+/** True when `role` is at least as privileged as `required`. */
+export const roleAtLeast = (role: SpaceRole, required: SpaceRole): boolean =>
+  SPACE_ROLE_RANK[role] >= SPACE_ROLE_RANK[required];
+
+/** A person (or service identity) that can hold memberships. Distinct from
+ *  AuthPrincipal: a principal is one authenticated request channel, an
+ *  identity is the durable account behind it. */
+export interface UserDto {
+  id: string;
+  /** Display name. Never a credential. */
+  name: string;
+  createdAt: number;
+}
+
+/** A Space is the tenant boundary: the unit that owns projects, sessions,
+ *  files, secrets, integrations, and executions. User-facing name is "Space";
+ *  `spaceId` is the tenant id everywhere in the server. */
+export interface SpaceDto {
+  id: string;
+  name: string;
+  /** Stable url/path-safe identifier. Also the on-disk directory name. */
+  slug: string;
+  color?: string;
+  icon?: string;
+  createdAt: number;
+  updatedAt: number;
+  /** The default space is the fallback selection and cannot be deleted. */
+  isDefault: boolean;
+}
+
+export interface SpaceMemberDto {
+  userId: string;
+  spaceId: string;
+  role: SpaceRole;
+  createdAt: number;
+}
+
+/** One Space as seen by the current user, with their own role attached. */
+export interface SpaceSummaryDto extends SpaceDto {
+  role: SpaceRole;
+  memberCount: number;
+}
+
+/** `/api/spaces` payload: what the switcher renders. */
+export interface SpacesStateDto {
+  user: UserDto;
+  spaces: SpaceSummaryDto[];
+  activeSpaceId: string;
+  deployment: DeploymentProfile;
+  /** False when the caller may not create more spaces (quota/profile). */
+  canCreate: boolean;
+}
+
+/** Resolved, validated tenant context for one request, socket, or job.
+ *
+ * It is only ever CONSTRUCTED by the server after authenticating the identity
+ * and checking membership. Receiving one is proof that the check happened —
+ * that is why services take it as their first argument instead of a bare
+ * `spaceId` string that a client could have supplied. */
+export interface SpaceContext {
+  readonly spaceId: string;
+  readonly spaceSlug: string;
+  readonly userId: string;
+  readonly role: SpaceRole;
+  readonly deployment: DeploymentProfile;
+  /** Absolute, canonical, per-space storage root. Never client-derived. */
+  readonly storageDir: string;
+}
+
+/** Per-Space storage handle handed to packages. A package never sees the
+ *  server's data directory: it sees its own directory inside ONE Space and
+ *  cannot address another tenant's. `path()` validates against traversal and
+ *  symlink escape — it is the only supported way to build a path from
+ *  user-influenced input. */
+export interface SpaceStorage {
+  readonly root: string;
+  /** `<space>/packages/<packageId>`, created on demand. */
+  packageDir(packageId: string): string;
+  /** Validated path inside this Space. Throws `invalid-path` on escape. */
+  path(relative: string): string;
+}
+
+/** Space-scoped audit record. Values of secrets are NEVER recorded — only the
+ *  handle that was resolved. */
+export interface SpaceAuditEvent {
+  time: number;
+  spaceId: string;
+  userId: string;
+  /** `space.created`, `space.switched`, `secret.resolved`, `runner.created`… */
+  action: string;
+  /** Type + id of the affected resource, when there is one. */
+  resource?: { kind: string; id: string };
+  outcome: "allowed" | "denied";
+  detail?: JsonObject;
+}
+
+// ---------------------------------------------------------------- execution plane
+
+/** What a Space's execution is permitted to do. Distinct from the UI/navigation
+ *  `capabilities` concept: this one is enforced by the executor, never the UI.
+ *  Phase 1 only records it; Phase 2+ executors enforce it. */
+export interface ExecutionPolicy {
+  /** `none` | `project-ro` | `project-rw` | `space-rw` | `host-rw`. */
+  filesystem: "none" | "project-ro" | "project-rw" | "space-rw" | "host-rw";
+  shell: boolean;
+  network: {
+    internet: boolean;
+    /** RFC1918 / link-local / metadata endpoints. Denied for hosted tenants. */
+    privateNetworks: boolean;
+  };
+  browser: boolean;
+  /** Secure-Safe handles this execution may resolve — never the values. */
+  secrets: readonly string[];
+  resources: {
+    cpuCores?: number;
+    memoryBytes?: number;
+    diskBytes?: number;
+    processes?: number;
+    wallClockMs?: number;
+  };
+}
+
+/** Where an execution runs. `host` is today's behavior; the rest are the
+ *  hardening path and must not require changes to session/project APIs. */
+export type ExecutionBackendKind =
+  | "host"
+  | "container"
+  | "sandboxed-container"
+  | "microvm"
+  | "remote-worker";
+
+/** One unit of disposable compute. A Runner is ephemeral; the Space is the
+ *  persistent state it mounts. Never assume runner lifetime == session
+ *  lifetime, and never assume the runner can reach the control plane. */
+export interface RunnerSpec {
+  spaceId: string;
+  /** Logical owner (session, workflow run, scheduled job) for recovery. */
+  ownerKind: "session" | "workflow" | "schedule" | "adhoc";
+  ownerId: string;
+  cwd: string;
+  /** Additional persistent state to mount (worktrees, project roots). */
+  mounts: readonly { source: string; target: string; mode: "ro" | "rw" }[];
+  env: Readonly<Record<string, string>>;
+  policy: ExecutionPolicy;
+}
+
+/** Durable identity of a live runner. Recovery after a server restart MUST
+ *  match on spaceId as well as runnerId — never on runnerId alone. */
+export interface RunnerHandle {
+  runnerId: string;
+  spaceId: string;
+  backend: ExecutionBackendKind;
+  ownerKind: RunnerSpec["ownerKind"];
+  ownerId: string;
+  state: "starting" | "ready" | "stopping" | "gone";
+  createdAt: number;
+}
+
+export interface ExecCommand {
+  command: string;
+  args?: readonly string[];
+  cwd?: string;
+  env?: Readonly<Record<string, string>>;
+  timeoutMs?: number;
+  maxOutputBytes?: number;
+  signal?: AbortSignal;
+}
+
+export interface ExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  truncated: boolean;
+}
+
+/** The narrow protocol between the control plane and the execution plane.
+ *  Everything Polyth wants to run against tenant state goes through this, so a
+ *  container/microVM/remote-worker backend can be substituted without touching
+ *  session or project APIs. Implementations receive an already-validated
+ *  SpaceContext; they never resolve tenancy themselves. */
+export interface ExecutionBackend {
+  readonly kind: ExecutionBackendKind;
+  /** Provision compute for `spec`. May reuse a warm runner. */
+  acquire(ctx: SpaceContext, spec: RunnerSpec): Promise<RunnerHandle>;
+  exec(ctx: SpaceContext, runner: RunnerHandle, command: ExecCommand): Promise<ExecResult>;
+  /** Destroy the runner. Persistent Space state must survive. */
+  release(ctx: SpaceContext, runner: RunnerHandle): Promise<void>;
+  /** Runners this backend believes it owns — used by restart recovery, which
+   *  must re-validate tenant ownership before adopting any of them. */
+  list(ctx: SpaceContext): Promise<RunnerHandle[]>;
 }
 
 // ---------------------------------------------------------------- capabilities
@@ -729,6 +974,9 @@ export interface SessionResumeState {
 
 export interface SessionProjection {
   id: string; projectId: string; parentId?: string;
+  /** Owning Space, denormalized from the project so listing/broadcast filters
+   *  never need a project join. Backfilled by session-store migration v10. */
+  spaceId?: string;
   title: string; status: SessionStatus;
   model?: ModelRef; agent?: string;
   createdAt: number; updatedAt: number;
@@ -1000,7 +1248,10 @@ export interface SessionPersistence {
   copyTo(srcSessionId: string, dstSessionId: string, upToSeq?: number): Promise<void>;
   upsertProjection(p: SessionProjection): Promise<void>;
   projection(sessionId: string): Promise<SessionProjection | undefined>;
-  projections(projectId?: string): Promise<SessionProjection[]>;
+  /** `opts.spaceId` restricts the listing to one tenant. Callers that hold a
+   *  SpaceContext must always pass it — it is the indexed, authoritative
+   *  filter, not a convenience. */
+  projections(projectId?: string, opts?: { spaceId?: string }): Promise<SessionProjection[]>;
   /** All-or-nothing child snapshot (per-message fork publication). Optional so
    *  existing fakes remain valid; callers must treat absence as unsupported. */
   publishChildSession?(input: ChildSnapshotInput): Promise<ChildSnapshotResult>;
@@ -1771,13 +2022,17 @@ export interface AgentRuntime {
   /** Direct stateless provider request for lightweight utility inference.
    * Implementations must not create a backend session. */
   completeSmallModel?(request: SmallModelCompletionRequest): Promise<SmallModelCompletionResult>;
-  /** Live steering of an active turn. Returns false when unsupported/rejected;
+  /** Live steering of an active turn. A supplied model/agent applies to this
+   *  steering prompt, so changing providers does not silently retain the
+   *  active turn's old selection. Returns false when unsupported/rejected;
    *  callers must fall back to queueing. Optional so old fakes remain valid. */
-  steer?(sessionId: string, text: string): Promise<boolean>;
+  steer?(sessionId: string, text: string, model?: ModelRef, agent?: string): Promise<boolean>;
   steerOperation?(
     sessionId: string,
     text: string,
     operationId: string,
+    model?: ModelRef,
+    agent?: string,
   ): Promise<MutationOutcome<Record<string, never>>>;
   abort(sessionId: string): Promise<void>;
   abortOperation?(
@@ -1865,6 +2120,9 @@ export interface ProjectRemote {
 
 export interface Project {
   id: string; path: string; name: string;
+  /** Owning Space. Absent only on records written before tenancy shipped;
+   *  the boot migration backfills them into the default Space. */
+  spaceId?: string;
   color?: string; icon?: string; createdAt: number;
   defaults?: ProjectDefaults;
   labelIds?: string[];

@@ -19,6 +19,9 @@ import {
 } from "../src/http.ts";
 import { createWsGateway } from "../src/ws.ts";
 import { attachTerminalWs } from "../../terminal/src/serverEntry.ts";
+import { testTenancy } from "./support/spaces.ts";
+
+const tenancy = await testTenancy();
 
 const tmp = () => mkdtempSync(join(tmpdir(), "polyth-http-tunnel-"));
 
@@ -42,8 +45,7 @@ test("polyth-link ingress is default-deny, ignores cookies, and never uses local
     } : null,
   });
   const handler = createHttpHandler({
-    sessions: { list: async () => [] } as never,
-    projects: { list: async () => [] } as never,
+    spaces: tenancy.gateway,
     runtimes: {} as never,
     capabilities: () => [],
     webDist,
@@ -110,8 +112,7 @@ test("tunnel unix ingress rejects missing or wrong per-boot secret", async () =>
     }),
   });
   const handler = createHttpHandler({
-    sessions: { list: async () => [] } as never,
-    projects: { list: async () => [] } as never,
+    spaces: tenancy.gateway,
     runtimes: {} as never,
     capabilities: () => [],
     webDist,
@@ -254,8 +255,7 @@ test("canonical unix ingress answers HTTP and removes the socket on close", asyn
     }),
   });
   const handler = createHttpHandler({
-    sessions: { list: async () => [] } as never,
-    projects: { list: async () => [] } as never,
+    spaces: tenancy.gateway,
     runtimes: {} as never,
     capabilities: () => [],
     webDist,
@@ -316,8 +316,7 @@ test("public listener ignores internal tunnel headers as identity", async () => 
     }),
   });
   const handler = createHttpHandler({
-    sessions: { list: async () => [] } as never,
-    projects: { list: async () => [] } as never,
+    spaces: tenancy.gateway,
     runtimes: {} as never,
     capabilities: () => [],
     webDist,
@@ -360,8 +359,7 @@ test("canonical /ws, terminal, and tunnel event channels attach to unix ingress"
     }),
   });
   const handler = createHttpHandler({
-    sessions: { list: async () => [], events: async () => [] } as never,
-    projects: { list: async () => [] } as never,
+    spaces: tenancy.gateway,
     runtimes: {} as never,
     capabilities: () => [],
     webDist,

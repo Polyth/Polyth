@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   createResumeScheduler,
   planResume,
+  rateLimitNoticeHint,
   RESUME_FALLBACK_BACKOFF_SEC,
   RESUME_MIN_WAIT_SEC,
 } from "../src/resume.ts";
@@ -57,6 +58,14 @@ test("planResume resets the attempt counter for a different message", () => {
     now: NOW,
   });
   assert.equal(state.attempt, 1);
+});
+
+test("Command Code rate-limit notices retain their provider wait", () => {
+  assert.deepEqual(
+    rateLimitNoticeHint("[rate-limit] Claude · five hour · 99% of window used · resets in 2h 53m."),
+    { scope: "rate", provider: "anthropic", retryAfterSec: 10_380 },
+  );
+  assert.equal(rateLimitNoticeHint("rate limits are worth monitoring"), null);
 });
 
 test("scheduler fires once after the delay and can be cancelled", async () => {

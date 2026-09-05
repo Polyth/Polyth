@@ -96,12 +96,16 @@ const DEFAULT_DASHBOARD_PREFS: UsageDashboardPrefs = {
   view: "overview",
   layout: "expanded",
   rangeDays: 7,
+  overviewOrder: [],
+  providerOrder: [],
 };
 
 export interface UsageDashboardPrefs {
   view: "overview" | "providers";
   layout: "expanded" | "compact";
   rangeDays: 7 | 30 | 90;
+  overviewOrder: string[];
+  providerOrder: string[];
 }
 
 const stringList = (value: unknown): string[] =>
@@ -122,6 +126,8 @@ export function parseUsagePrefs(raw: string | null): UsagePrefs {
         rangeDays: dashboard?.rangeDays === 30 || dashboard?.rangeDays === 90
           ? dashboard.rangeDays
           : 7,
+        overviewOrder: stringList(dashboard?.overviewOrder),
+        providerOrder: stringList(dashboard?.providerOrder),
       },
     };
   } catch {
@@ -163,6 +169,23 @@ export function setGroupCollapsed(key: string, collapsed: boolean): void {
 
 export function setUsageDashboardPrefs(patch: Partial<UsageDashboardPrefs>): void {
   save({ ...prefs, dashboard: { ...prefs.dashboard, ...patch } });
+}
+
+export function orderUsageBlocks<T>(items: readonly T[], order: readonly string[], id: (item: T) => string): T[] {
+  const rank = new Map(order.map((itemId, index) => [itemId, index]));
+  return [...items].sort((left, right) =>
+    (rank.get(id(left)) ?? order.length) - (rank.get(id(right)) ?? order.length));
+}
+
+export function moveUsageBlock(ids: readonly string[], id: string, to: string | number): string[] {
+  const current = ids.indexOf(id);
+  if (current < 0) return [...ids];
+  const target = typeof to === "number" ? Math.max(0, Math.min(ids.length - 1, current + to)) : ids.indexOf(to);
+  if (target < 0 || target === current) return [...ids];
+  const next = [...ids];
+  next.splice(current, 1);
+  next.splice(target, 0, id);
+  return next;
 }
 
 export function useUsagePrefs(): UsagePrefs {

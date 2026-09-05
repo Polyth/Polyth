@@ -8,6 +8,9 @@ import { createServer, request as httpRequest } from "node:http";
 import { GRANT_PROFILE_PRESETS, REMOTE_CAPABILITY, type RemoteAccessPolicy } from "@polyth/contracts";
 import { createAuthService } from "../src/auth.ts";
 import { contentLengthOf, createHttpHandler } from "../src/http.ts";
+import { testTenancy } from "./support/spaces.ts";
+
+const tenancy = await testTenancy();
 
 const tmp = () => mkdtempSync(join(tmpdir(), "polyth-remote-http-"));
 
@@ -77,8 +80,7 @@ async function withServer(
     }),
   });
   const handler = createHttpHandler({
-    sessions: { list: async () => [] } as never,
-    projects: { list: async () => [] } as never,
+    spaces: tenancy.gateway,
     runtimes: {} as never,
     capabilities: () => [],
     webDist,

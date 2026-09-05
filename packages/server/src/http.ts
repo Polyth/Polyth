@@ -18,6 +18,13 @@ import {
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
 import type { RuntimePool } from "./sessions.ts";
+import {
+  parseSpaceCookie,
+  spaceCookieHeader,
+  SPACE_HEADER,
+  type SpaceGateway,
+} from "./spaces.ts";
+import type { SpaceServices } from "./spaceScope.ts";
 import { aggregateRuntimes } from "./runtimeAggregate.ts";
 import type { ModelVisibilityService } from "./modelVisibility.ts";
 import type { RuntimeCatalog } from "./runtimeCatalog.ts";
@@ -206,8 +213,11 @@ export interface HttpAuth {
 }
 
 export interface HttpDeps {
-  sessions: SessionService;
-  projects: ProjectService;
+  /** The ONLY way this gateway reaches a session or project service. There is
+   *  deliberately no unscoped `sessions`/`projects` dependency here: a handler
+   *  cannot use what the composition root never handed it, so "forgot to scope
+   *  this route" is not an available bug. */
+  spaces: SpaceGateway;
   runtimes: RuntimePool;
   capabilities(): string[];
   webDist: string;
@@ -397,13 +407,17 @@ export function createTunnelIngress(opts: {
 }
 
 export function createHttpHandler(deps: HttpDeps): HttpHandler {
-  const { sessions, projects } = deps;
-
-  // Aggregate across live runtimes (per-project pools may differ).
-  const aggregate = <T>(fetch: (rt: AgentRuntime) => Promise<T[]>): Promise<T[]> =>
+  // Aggregate across the CURRENT SPACE's live runtimes (per-project pools may
+  // differ). Passing the scoped project service is what keeps a model/agent
+  // catalog from spanning tenants.
+  const aggregate = <T>(
+    projects: ProjectService,
+    fetch: (rt: AgentRuntime) => Promise<T[]>,
+  ): Promise<T[]> =>
     aggregateRuntimes({ projects, runtimes: deps.runtimes }, fetch)
       .then((result) => result.items);
-  const models = () => deps.catalog?.models() ?? aggregate<ModelDescriptor>((runtime) => runtime.models());
+  const models = (projects: ProjectService) =>
+    deps.catalog?.models() ?? aggregate<ModelDescriptor>(projects, (runtime) => runtime.models());
 
   return async (req, res, ingress) => {
     const json = (target: ServerResponse, code: number, body: unknown): void => {
@@ -432,6 +446,32 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
         const denial = deps.auth.gate(reqLike, ingress);
         if (denial) return json(res, denial.status, denial.body);
       }
+
+      // --- tenancy: identity -> requested Space -> membership -> context.
+      //
+      // Resolved BEFORE any handler runs and before any resource is loaded, so
+      // no code path can fetch a row first and check ownership afterwards. The
+      // explicit header is a request, not an authority: a Space the caller does
+      // not belong to answers 404 exactly like a Space that does not exist.
+      const explicitSpace = headerValue(req, SPACE_HEADER) ?? null;
+      const rememberedSpace = parseSpaceCookie(req.headers.cookie, deps.spaces.cookieName);
+      let scoped: SpaceServices | null = null;
+      const space = (): SpaceServices => {
+        if (!scoped) {
+          const ctx = principal.kind === "internal-service"
+            ? deps.spaces.resolveInternal(explicitSpace)
+            : deps.spaces.resolve(principal, {
+              explicit: explicitSpace,
+              remembered: rememberedSpace,
+            });
+          scoped = deps.spaces.services(ctx);
+        }
+        return scoped;
+      };
+      // Only /api needs a tenant; static assets and the lock screen do not.
+      // Resolving eagerly here (rather than inside each branch) means a route
+      // added later cannot forget to.
+      if (path.startsWith("/api/") && !AUTH_PUBLIC.has(path)) space();
 
       let bodyLimit = MAX_BODY_BYTES;
       let bodyCache: Record<string, unknown> | undefined;
@@ -463,28 +503,28 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
       if (path === "/api/health" && method === "GET") {
         return json(res, 200, { ok: true, version: deps.version, capabilities: deps.capabilities() });
       }
-      if (path === "/api/projects" && method === "GET") return json(res, 200, await projects.list());
+      if (path === "/api/projects" && method === "GET") return json(res, 200, await space().projects.list());
       if (path === "/api/projects" && method === "POST") {
         const b = await loadBody();
-        return json(res, 200, await projects.add(String(b.path), b.name ? String(b.name) : undefined));
+        return json(res, 200, await space().projects.add(String(b.path), b.name ? String(b.name) : undefined));
       }
       if (path === "/api/projects/create" && method === "POST") {
         const b = await loadBody();
-        return json(res, 200, await projects.create(String(b.path), b.name ? String(b.name) : undefined));
+        return json(res, 200, await space().projects.create(String(b.path), b.name ? String(b.name) : undefined));
       }
       let m = path.match(/^\/api\/projects\/([^/]+)$/);
-      if (m && method === "DELETE") { await projects.remove(m[1]!); return json(res, 200, { ok: true }); }
+      if (m && method === "DELETE") { await space().projects.remove(m[1]!); return json(res, 200, { ok: true }); }
 
       if (path === "/api/sessions" && method === "GET") {
         const projectId = url.searchParams.get("projectId") ?? undefined;
         // F14: listing no longer silently adopts every backend session — the
         // sidebar's "Import sessions…" sheet browses and adopts selectively
-        // via /api/control/backend-sessions.
-        return json(res, 200, await sessions.list(projectId));
+        // via /api/agent/backend-sessions.
+        return json(res, 200, await space().sessions.list(projectId));
       }
       if (path === "/api/sessions" && method === "POST") {
         const b = await loadBody();
-        const ref = await sessions.create({
+        const ref = await space().sessions.create({
           projectId: String(b.projectId),
           ...(b.title ? { title: String(b.title) } : {}),
           ...(b.model ? { model: b.model as { providerID: string; modelID: string } } : {}),
@@ -494,10 +534,11 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
         return json(res, 200, ref);
       }
       m = path.match(/^\/api\/sessions\/([^/]+)$/);
-      if (m && method === "GET") return json(res, 200, await sessions.snapshot(m[1]!));
+      if (m && method === "GET") return json(res, 200, await space().sessions.snapshot(m[1]!));
       if (m && method === "DELETE") {
-        if (!sessions.delete) throw Object.assign(new Error("session deletion unavailable"), { code: "unsupported" });
-        await sessions.delete(m[1]!);
+        const remove = space().sessions.delete;
+        if (!remove) throw Object.assign(new Error("session deletion unavailable"), { code: "unsupported" });
+        await remove(m[1]!);
         return json(res, 200, { ok: true });
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/events$/);
@@ -519,13 +560,13 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
               ...(prefetchRaw === "0" || prefetchRaw === "1" ? { prefetch: prefetchRaw === "1" } : {}),
             }
           : undefined;
-        return json(res, 200, await sessions.events(m[1]!, afterSeq, page));
+        return json(res, 200, await space().sessions.events(m[1]!, afterSeq, page));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/message$/);
       if (m && method === "POST") {
         const b = await loadBody();
         const delivery = b.delivery;
-        return json(res, 200, await sessions.send(m[1]!, {
+        return json(res, 200, await space().sessions.send(m[1]!, {
           text: String(b.text ?? ""),
           ...(b.autoTitle === true ? { autoTitle: true } : {}),
           // sanitized + existence-checked inside the session service (F2)
@@ -543,84 +584,89 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
         }));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/queue$/);
-      if (m && method === "GET") return json(res, 200, await sessions.queueList?.(m[1]!) ?? []);
+      if (m && method === "GET") return json(res, 200, await space().sessions.queueList?.(m[1]!) ?? []);
       m = path.match(/^\/api\/sessions\/([^/]+)\/queue\/order$/);
       if (m && method === "PATCH") {
         const b = await loadBody();
         const ids = Array.isArray(b.ids) ? b.ids.map(String) : [];
-        return json(res, 200, await sessions.queueReorder?.(m[1]!, ids) ?? []);
+        return json(res, 200, await space().sessions.queueReorder?.(m[1]!, ids) ?? []);
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/queue\/([^/]+)$/);
       if (m && method === "PATCH") {
         const b = await loadBody();
-        return json(res, 200, await sessions.queueEdit?.(m[1]!, m[2]!, String(b.text ?? "")));
+        return json(res, 200, await space().sessions.queueEdit?.(m[1]!, m[2]!, String(b.text ?? "")));
       }
       if (m && method === "DELETE") {
-        await sessions.queueRemove?.(m[1]!, m[2]!);
+        await space().sessions.queueRemove?.(m[1]!, m[2]!);
         return json(res, 200, { ok: true });
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/(abort|archive|restore)$/);
       if (m && method === "POST") {
-        await (m[2] === "abort" ? sessions.abort(m[1]!) : m[2] === "archive" ? sessions.archive(m[1]!) : sessions.restore(m[1]!));
+        await (m[2] === "abort" ? space().sessions.abort(m[1]!) : m[2] === "archive" ? space().sessions.archive(m[1]!) : space().sessions.restore(m[1]!));
         return json(res, 200, { ok: true });
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/resume\/(cancel|now)$/);
       if (m && method === "POST") {
         if (m[2] === "cancel") {
-          await sessions.cancelResume?.(m[1]!);
+          await space().sessions.cancelResume?.(m[1]!);
           return json(res, 200, { ok: true });
         }
-        if (!sessions.resumeNow) {
+        const resumeNow = space().sessions.resumeNow;
+        if (!resumeNow) {
           throw Object.assign(new Error("rate-limit resume unavailable"), { code: "unsupported" });
         }
         const b = await loadBody();
         const model = b.model && typeof b.model === "object" && !Array.isArray(b.model)
           ? (b.model as { providerID: string; modelID: string })
           : undefined;
-        return json(res, 200, await sessions.resumeNow(m[1]!, model));
+        return json(res, 200, await resumeNow(m[1]!, model));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/fork$/);
       if (m && method === "POST") {
         const b = await loadBody();
-        return json(res, 200, await sessions.fork(m[1]!, b.atSeq === undefined ? undefined : Number(b.atSeq)));
+        return json(res, 200, await space().sessions.fork(m[1]!, b.atSeq === undefined ? undefined : Number(b.atSeq)));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/rewind$/);
       if (m && method === "POST") {
-        if (!sessions.rewind) throw Object.assign(new Error("session rewind unavailable"), { code: "unsupported" });
+        const rewind = space().sessions.rewind;
+        if (!rewind) throw Object.assign(new Error("session rewind unavailable"), { code: "unsupported" });
         const b = await loadBody();
         if (b.atSeq === undefined) throw Object.assign(new Error("atSeq required"), { code: "invalid-input" });
-        return json(res, 200, await sessions.rewind(m[1]!, Number(b.atSeq)));
+        return json(res, 200, await rewind(m[1]!, Number(b.atSeq)));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/rewind\/clear$/);
       if (m && method === "POST") {
-        if (!sessions.clearRewind) throw Object.assign(new Error("session rewind unavailable"), { code: "unsupported" });
-        return json(res, 200, await sessions.clearRewind(m[1]!));
+        const clearRewind = space().sessions.clearRewind;
+        if (!clearRewind) throw Object.assign(new Error("session rewind unavailable"), { code: "unsupported" });
+        return json(res, 200, await clearRewind(m[1]!));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/shell$/);
       if (m && method === "POST") {
-        if (!sessions.runShell) throw Object.assign(new Error("composer shell unavailable"), { code: "unsupported" });
+        const runShell = space().sessions.runShell;
+        if (!runShell) throw Object.assign(new Error("composer shell unavailable"), { code: "unsupported" });
         const b = await loadBody();
         if (typeof b.command !== "string") throw Object.assign(new Error("command required"), { code: "invalid-input" });
-        return json(res, 200, await sessions.runShell(m[1]!, b.command));
+        return json(res, 200, await runShell(m[1]!, b.command));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/permission\/([^/]+)$/);
       if (m && method === "POST") {
         const b = await loadBody();
         const scope = b.scope === "session" || b.scope === "project" ? b.scope : undefined;
-        await sessions.replyPermission(m[1]!, m[2]!, b.reply as "once" | "always" | "reject", scope);
+        await space().sessions.replyPermission(m[1]!, m[2]!, b.reply as "once" | "always" | "reject", scope);
         return json(res, 200, { ok: true });
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/secrets\/([^/]+)$/);
       if (m && method === "POST") {
-        if (!sessions.replySecret) throw Object.assign(new Error("Secure Safe unavailable"), { code: "unsupported" });
+        const replySecret = space().sessions.replySecret;
+        if (!replySecret) throw Object.assign(new Error("Secure Safe unavailable"), { code: "unsupported" });
         const b = await loadBody();
         if (b.action === "save") {
           if (typeof b.value !== "string" || !b.value.trim()) {
             throw Object.assign(new Error("value is required"), { code: "invalid-input" });
           }
-          await sessions.replySecret(m[1]!, m[2]!, { action: "save", value: b.value });
+          await replySecret(m[1]!, m[2]!, { action: "save", value: b.value });
         } else if (b.action === "dismiss") {
-          await sessions.replySecret(m[1]!, m[2]!, { action: "dismiss" });
+          await replySecret(m[1]!, m[2]!, { action: "dismiss" });
         } else {
           throw Object.assign(new Error("action must be save or dismiss"), { code: "invalid-input" });
         }
@@ -628,26 +674,26 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/question\/([^/]+)\/reject$/);
       if (m && method === "POST") {
-        await sessions.replyQuestion(m[1]!, m[2]!, { __reject: true });
+        await space().sessions.replyQuestion(m[1]!, m[2]!, { __reject: true });
         return json(res, 200, { ok: true });
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/question\/([^/]+)$/);
       if (m && method === "POST") {
         const b = await loadBody();
-        await sessions.replyQuestion(m[1]!, m[2]!, (b.answers ?? b) as JsonObject);
+        await space().sessions.replyQuestion(m[1]!, m[2]!, (b.answers ?? b) as JsonObject);
         return json(res, 200, { ok: true });
       }
       // Provider/model visibility routes must win over the plain aggregate below.
       if (deps.visibility) {
         const vis = deps.visibility;
         if (path === "/api/models" && method === "GET") {
-          const allModels = await models();
+          const allModels = await models(space().projects);
           // ?all=1 → unfiltered catalog (settings); default → enabled + connected.
           if (url.searchParams.get("all") === "1") return json(res, 200, allModels);
           return json(res, 200, vis.filter(allModels));
         }
         if (path === "/api/providers" && method === "GET") {
-          return json(res, 200, vis.catalog(await models()));
+          return json(res, 200, vis.catalog(await models(space().projects)));
         }
         m = path.match(/^\/api\/providers\/([^/]+)\/enabled$/);
         if (m && method === "POST") {
@@ -665,14 +711,21 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
       m = path.match(/^\/api\/(models|agents)$/);
       if (m && method === "GET") {
         const out = m[1] === "models"
-          ? await models()
-          : deps.catalog ? await deps.catalog.agents() : await aggregate<unknown>((runtime) => runtime.agents());
+          ? await models(space().projects)
+          : deps.catalog ? await deps.catalog.agents() : await aggregate<unknown>(space().projects, (runtime) => runtime.agents());
         return json(res, 200, out);
       }
 
       if (deps.routes?.length) {
         const rc: RouteRequest = {
-          req, res, url, path, method, ingress, principal, requireCapability,
+          req, res, url, path, method, ingress, principal,
+          // A getter, not a value: contributed routes also see non-/api paths
+          // (static assets, the SPA shell), where there is no authenticated
+          // tenant to resolve. Reading `space` is what triggers resolution, so
+          // a handler that declines the path never pays for it — and a handler
+          // that does read it gets the same validated context as core routes.
+          get space() { return space().ctx; },
+          requireCapability,
           body: async () => loadBody(),
           json: (code, body) => json(res, code, body),
         };
@@ -775,6 +828,15 @@ export function createPublicHttpServer(handler: HttpHandler, listenerId = "publi
     const ingress = publicHttpIngress(req, { listenerId, secure: encrypted });
     void handler(req, res, ingress);
   });
+}
+
+/** Filesystem-protected local ingress for the Polyth control MCP. It is not
+ * exposed on the public listener and therefore never weakens UI auth. */
+export function createInternalControlServer(handler: HttpHandler): Server {
+  return createServer((req, res) => void handler(req, res, {
+    kind: "internal",
+    serviceId: "polyth-control",
+  }));
 }
 
 export function createHttpServer(deps: HttpDeps): Server {

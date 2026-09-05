@@ -12,6 +12,9 @@ import { join, resolve } from "node:path";
 import { once } from "node:events";
 import type { Server } from "node:http";
 import { createHttpServer } from "../src/http.ts";
+import { testTenancy } from "./support/spaces.ts";
+
+const tenancy = await testTenancy();
 
 const SHIPPED_WEB = resolve(import.meta.dirname, "../../../apps/web");
 const SHIPPED_INDEX = join(SHIPPED_WEB, "src/index.html");
@@ -29,8 +32,7 @@ async function startStaticServer(): Promise<{ server: Server; base: string }> {
   }
 
   const server = createHttpServer({
-    sessions: {} as never,
-    projects: { list: async () => [] } as never,
+    spaces: tenancy.gateway,
     runtimes: {} as never,
     capabilities: () => [],
     webDist,

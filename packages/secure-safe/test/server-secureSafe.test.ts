@@ -17,23 +17,15 @@ import { createSecureSafeService } from "@polyth/secure-safe";
 import { createHttpServer } from "../../server/src/http.ts";
 import { secureSafeRoutes } from "../src/serverEntry.ts";
 import { createSessionService, type Broadcaster } from "../../server/src/sessions.ts";
+import { testTenancy } from "../../server/test/support/spaces.ts";
 
 const tempDir = () => mkdtempSync(join(tmpdir(), "polyth-safe-server-"));
 
 async function startRoutes() {
   const dataDir = tempDir();
   const safe = createSecureSafeService({ dataDir });
-  const project: Project = { id: "p1", path: dataDir, name: "p", createdAt: 1 };
-  const projects: ProjectService = {
-    list: async () => [project],
-    get: async (id) => id === project.id ? project : undefined,
-    add: async () => project,
-    create: async () => project,
-    remove: async () => {},
-  };
   const server = createHttpServer({
-    sessions: {} as never,
-    projects,
+    spaces: (await testTenancy()).gateway,
     runtimes: {} as never,
     capabilities: () => ["polyth.secureSafe"],
     webDist: dataDir,

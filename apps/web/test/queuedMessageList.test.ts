@@ -81,7 +81,11 @@ register("./tsxHooks.mjs", import.meta.url);
 
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { default: QueuedMessageList, moveQueuedItem } = await import("../src/components/QueuedMessageList.tsx");
+const {
+  default: QueuedMessageList,
+  latestSteerableQueuedItem,
+  moveQueuedItem,
+} = await import("../src/components/QueuedMessageList.tsx");
 
 const click = (element: HTMLElement) =>
   element.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -97,20 +101,28 @@ test("moveQueuedItem preserves metadata while assigning the new positions", () =
   assert.deepEqual(reordered.map((item) => item.position), [0, 1, 2]);
 });
 
+test("empty composer steering selects the newest ordinary queued message", () => {
+  assert.equal(latestSteerableQueuedItem(items)?.id, "q2");
+  assert.equal(latestSteerableQueuedItem(items.filter((item) => item.heldForReview)), null);
+});
+
 test("queued messages hand editing to the composer and drag-reorder through the persisted API", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   let editing: QueueItemDto | undefined;
+  let observed: QueueItemDto[] = [];
   try {
     await act(async () => {
       root.render(createElement(QueuedMessageList, {
         sessionId: "s1",
         onEdit: (item: QueueItemDto) => { editing = item; },
+        onItemsChange: (_sessionId: string, next: QueueItemDto[]) => { observed = next; },
       }));
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     assert.equal(container.querySelectorAll(".queue-chip").length, 3);
+    assert.deepEqual(observed.map((item) => item.id), ["q1", "q2", "q3"]);
 
     const steer = container.querySelector<HTMLElement>(".queue-steer");
     assert.ok(steer, "steer is an icon control on the row");

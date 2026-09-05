@@ -180,6 +180,12 @@ export type { SessionDebugObservabilityInput } from "./sessionDebug.ts";
 
 export interface Store extends SessionPersistence {
   exportJsonl(sessionId: string): Promise<string>;
+  /** Owning Space of one session (undefined when unknown / pre-tenancy). */
+  spaceOfSession(sessionId: string): string | undefined;
+  /** Boot migration: adopt ownerless projections into the default Space. */
+  adoptSessionsIntoSpace(spaceId: string): Promise<number>;
+  /** Boot migration: adopt ownerless workspace labels into the default Space. */
+  adoptLabelsIntoSpace(spaceId: string): Promise<number>;
   // -- durable runtime operations --
   prepareOperation(input: PrepareOperationInput): Promise<PreparedOperationResult>;
   prepareSessionCreate(input: PrepareSessionCreateInput): Promise<PreparedSessionCreateResult>;
@@ -265,15 +271,20 @@ export interface Store extends SessionPersistence {
   deleteSession(sessionId: string): Promise<void>;
   // -- organization: folders + labels (WP5) --
   folderList(projectId: string): Promise<SessionFolderDto[]>;
+  /** Owning project of a folder — the tenancy guard's join point for folder
+   *  ids, which carry no Space of their own. */
+  folderProject(id: string): string | undefined;
   folderCreate(projectId: string, name: string, parentId?: string): Promise<SessionFolderDto>;
   /** Stale expectedRevision → conflict; parent move validates same-project + acyclic. */
   folderUpdate(id: string, patch: { name?: string; parentId?: string | null; position?: number }, expectedRevision: number): Promise<SessionFolderDto>;
   /** Children reparent to the removed folder's parent. Returns false when absent. */
   folderRemove(id: string): Promise<boolean>;
-  labelList(): Promise<WorkspaceLabel[]>;
-  labelCreate(name: string, color: string): Promise<WorkspaceLabel>;
-  labelUpdate(id: string, patch: { name?: string; color?: string; position?: number }, expectedRevision: number): Promise<WorkspaceLabel>;
-  labelRemove(id: string): Promise<boolean>;
+  /** `spaceId` scopes the listing to one tenant; callers holding a
+   *  SpaceContext must always pass it. */
+  labelList(spaceId?: string): Promise<WorkspaceLabel[]>;
+  labelCreate(name: string, color: string, spaceId?: string): Promise<WorkspaceLabel>;
+  labelUpdate(id: string, patch: { name?: string; color?: string; position?: number }, expectedRevision: number, spaceId?: string): Promise<WorkspaceLabel>;
+  labelRemove(id: string, spaceId?: string): Promise<boolean>;
   // -- derived counters + search (WP5) --
   attentionFor(sessionIds: string[]): Promise<Record<string, AttentionCounts>>;
   /** Advance the user's read cursor (highest event seq actually seen).
@@ -766,6 +777,27 @@ export function createStore(dbPath: string): Store {
           seq INTEGER NOT NULL
         )
       `);
+    },
+    // v10: Spaces. Sessions are tenant-owned; listing and event fan-out filter
+    // on the owning Space, so it is a generated column (like project_id)
+    // rather than a join through the project registry on every read. Rows
+    // written before tenancy have no spaceId — the server's boot migration
+    // adopts them into the default Space via adoptSessionsIntoSpace().
+    () => {
+      db.exec(
+        "ALTER TABLE projections ADD COLUMN space_id TEXT GENERATED ALWAYS AS (json_extract(data, '$.spaceId')) VIRTUAL",
+      );
+      db.exec("CREATE INDEX IF NOT EXISTS idx_projections_space ON projections (space_id)");
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_projections_space_project ON projections (space_id, project_id)",
+      );
+    },
+    // v11: workspace labels are Space-owned. Folders already scope through
+    // their project; labels were global, so their NAMES were visible to every
+    // tenant. Rows written before tenancy are adopted by the boot migration.
+    () => {
+      db.exec("ALTER TABLE labels ADD COLUMN space_id TEXT");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_labels_space ON labels (space_id, position)");
     },
   ];
   {
@@ -1831,14 +1863,62 @@ export function createStore(dbPath: string): Store {
     return Promise.resolve(row ? (JSON.parse(row.data) as SessionProjection) : undefined);
   }
 
-  function projections(projectId?: string): Promise<SessionProjection[]> {
-    // project_id is a generated column backed by idx_projections_project, so
-    // scoped listing never json_extracts every row.
-    const rows = projectId === undefined
-      ? (prep("SELECT data FROM projections").all() as { data: string }[])
-      : (prep("SELECT data FROM projections WHERE project_id = ?")
-          .all(projectId) as { data: string }[]);
-    return Promise.resolve(rows.map((r) => JSON.parse(r.data) as SessionProjection));
+  function projections(
+    projectId?: string,
+    opts?: { spaceId?: string },
+  ): Promise<SessionProjection[]> {
+    // project_id and space_id are generated columns backed by their own
+    // indexes, so scoped listing never json_extracts every row.
+    const spaceId = opts?.spaceId;
+    const rows = spaceId === undefined
+      ? (projectId === undefined
+          ? (prep("SELECT data FROM projections").all() as { data: string }[])
+          : (prep("SELECT data FROM projections WHERE project_id = ?")
+              .all(projectId) as { data: string }[]))
+      : (projectId === undefined
+          ? (prep("SELECT data FROM projections WHERE space_id = ?")
+              .all(spaceId) as { data: string }[])
+          : (prep("SELECT data FROM projections WHERE space_id = ? AND project_id = ?")
+              .all(spaceId, projectId) as { data: string }[]));
+    const list = rows.map((r) => JSON.parse(r.data) as SessionProjection);
+    // Defence in depth: the SQL filter and the row contents must agree. A row
+    // whose stored spaceId disagrees with the index is dropped rather than
+    // returned to the wrong tenant.
+    return Promise.resolve(
+      spaceId === undefined ? list : list.filter((p) => p.spaceId === spaceId),
+    );
+  }
+
+  /** Owning Space of one session, or undefined when the session is unknown or
+   *  predates tenancy. Used by event fan-out, which must not ship a session
+   *  event to a socket attached to another Space. */
+  function spaceOfSession(sessionId: string): string | undefined {
+    const row = prep("SELECT space_id AS spaceId FROM projections WHERE session_id = ?")
+      .get(sessionId) as { spaceId: string | null } | undefined;
+    return row?.spaceId ?? undefined;
+  }
+
+  /** Boot migration half: adopt ownerless workspace labels. Idempotent. */
+  function adoptLabelsIntoSpace(spaceId: string): Promise<number> {
+    const res = db.prepare("UPDATE labels SET space_id = ? WHERE space_id IS NULL").run(spaceId);
+    return Promise.resolve(Number(res.changes));
+  }
+
+  /** Boot migration half: stamp every projection that still has no owner with
+   *  `spaceId`. Returns how many rows were adopted. Idempotent. */
+  function adoptSessionsIntoSpace(spaceId: string): Promise<number> {
+    return Promise.resolve(transaction(() => {
+      const rows = prep(
+        "SELECT session_id AS sessionId, data FROM projections WHERE space_id IS NULL",
+      ).all() as { sessionId: string; data: string }[];
+      const update = prep("UPDATE projections SET data = ? WHERE session_id = ?");
+      for (const row of rows) {
+        const parsed = JSON.parse(row.data) as SessionProjection;
+        if (parsed.spaceId) continue;
+        update.run(JSON.stringify({ ...parsed, spaceId }), row.sessionId);
+      }
+      return rows.length;
+    }));
   }
 
   // ------------------------------------------------------------- export
@@ -2999,6 +3079,12 @@ export function createStore(dbPath: string): Store {
     return false;
   };
 
+  function folderProject(id: string): string | undefined {
+    const row = prep("SELECT project_id AS projectId FROM folders WHERE id = ?")
+      .get(id) as { projectId: string } | undefined;
+    return row?.projectId;
+  }
+
   async function folderList(projectId: string): Promise<SessionFolderDto[]> {
     const rows = db
       .prepare("SELECT * FROM folders WHERE project_id = ? ORDER BY position, name")
@@ -3090,24 +3176,27 @@ export function createStore(dbPath: string): Store {
     return removed;
   }
 
-  interface LabelRow { id: string; name: string; color: string; position: number; revision: number }
+  interface LabelRow { id: string; name: string; color: string; position: number; revision: number; space_id: string | null }
   const rowToLabel = (r: LabelRow): WorkspaceLabel => ({
     id: r.id, name: r.name, color: r.color, position: Number(r.position), revision: Number(r.revision),
   });
 
-  async function labelList(): Promise<WorkspaceLabel[]> {
-    const rows = db.prepare("SELECT * FROM labels ORDER BY position, name").all() as unknown as LabelRow[];
+  async function labelList(spaceId?: string): Promise<WorkspaceLabel[]> {
+    const rows = (spaceId === undefined
+      ? db.prepare("SELECT * FROM labels ORDER BY position, name").all()
+      : db.prepare("SELECT * FROM labels WHERE space_id = ? ORDER BY position, name").all(spaceId)
+    ) as unknown as LabelRow[];
     return rows.map(rowToLabel);
   }
 
-  async function labelCreate(name: string, color: string): Promise<WorkspaceLabel> {
+  async function labelCreate(name: string, color: string, spaceId?: string): Promise<WorkspaceLabel> {
     const trimmed = name.trim();
     if (!trimmed || trimmed.length > 60) throw Object.assign(new Error("label name required (≤60 chars)"), { code: "invalid-input" });
     if (!/^#[0-9a-fA-F]{3,8}$/.test(color)) throw Object.assign(new Error("label color must be a hex value"), { code: "invalid-input" });
     const id = randomUUID();
     const pos = db.prepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM labels").get() as { next: number };
-    db.prepare("INSERT INTO labels (id, name, color, position, revision) VALUES (?, ?, ?, ?, 1)")
-      .run(id, trimmed, color, Number(pos.next));
+    db.prepare("INSERT INTO labels (id, name, color, position, revision, space_id) VALUES (?, ?, ?, ?, 1, ?)")
+      .run(id, trimmed, color, Number(pos.next), spaceId ?? null);
     const row = db.prepare("SELECT * FROM labels WHERE id = ?").get(id) as unknown as LabelRow;
     return rowToLabel(row);
   }
@@ -3116,11 +3205,16 @@ export function createStore(dbPath: string): Store {
     id: string,
     patch: { name?: string; color?: string; position?: number },
     expectedRevision: number,
+    spaceId?: string,
   ): Promise<WorkspaceLabel> {
     db.exec("BEGIN IMMEDIATE");
     try {
       const row = db.prepare("SELECT * FROM labels WHERE id = ?").get(id) as LabelRow | undefined;
-      if (!row) throw Object.assign(new Error("label not found"), { code: "not-found" });
+      // A label owned by another Space is reported as missing, never as
+      // forbidden — the id must not become an existence oracle.
+      if (!row || (spaceId !== undefined && row.space_id !== spaceId)) {
+        throw Object.assign(new Error("label not found"), { code: "not-found" });
+      }
       if (Number(row.revision) !== expectedRevision) throw Object.assign(new Error("stale label revision"), { code: "conflict" });
       const name = patch.name !== undefined ? patch.name.trim() : row.name;
       if (!name || name.length > 60) throw Object.assign(new Error("label name required (≤60 chars)"), { code: "invalid-input" });
@@ -3138,8 +3232,10 @@ export function createStore(dbPath: string): Store {
     return rowToLabel(row);
   }
 
-  async function labelRemove(id: string): Promise<boolean> {
-    const res = db.prepare("DELETE FROM labels WHERE id = ?").run(id);
+  async function labelRemove(id: string, spaceId?: string): Promise<boolean> {
+    const res = spaceId === undefined
+      ? db.prepare("DELETE FROM labels WHERE id = ?").run(id)
+      : db.prepare("DELETE FROM labels WHERE id = ? AND space_id = ?").run(id, spaceId);
     return Number(res.changes) > 0;
   }
 
@@ -3355,6 +3451,9 @@ export function createStore(dbPath: string): Store {
     copyTo,
     publishChildSession,
     upsertProjection,
+    spaceOfSession,
+    adoptSessionsIntoSpace,
+    adoptLabelsIntoSpace,
     patchProjection,
     projection,
     projections,
@@ -3396,6 +3495,7 @@ export function createStore(dbPath: string): Store {
     deleteProjection,
     deleteSession,
     folderList,
+    folderProject,
     folderCreate,
     folderUpdate,
     folderRemove,

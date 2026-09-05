@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { createHttpServer } from "../src/http.ts";
 import { createProjectService } from "../src/projects.ts";
 import { projectRoutes } from "../src/routes/projects.ts";
+import { testTenancy } from "./support/spaces.ts";
 
 const pngDataUrl = `data:image/png;base64,${Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).toString("base64")}`;
 const svgDataUrl = (svg: string) => `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
@@ -45,15 +46,18 @@ test("project metadata PATCH is served by the project route", async () => {
   const root = join(dir, "workspace");
   mkdirSync(root);
   const projects = createProjectService(dir);
-  const project = await projects.add(root, "Before");
+  const tenancy = await testTenancy({ dataDir: dir, projects });
+  // Registered before tenancy existed: the boot migration adopts it, and the
+  // PATCH below therefore resolves through the caller's own Space.
+  const project = await projects.forSpace(tenancy.defaultContext).add(root, "Before");
   const server = createHttpServer({
     sessions: {} as never,
-    projects,
+    spaces: tenancy.gateway,
     runtimes: {} as never,
     capabilities: () => [],
     webDist: dir,
     version: "test",
-    routes: [projectRoutes(projects)],
+    routes: [projectRoutes(tenancy.services)],
   });
   server.listen(0);
   await once(server, "listening");

@@ -8,7 +8,7 @@
 // (session service wiring, track workflow, browser-tool bridge).
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, realpathSync } from "node:fs";
+import { chmodSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createContext, loadPlugin } from "@polyth/kernel";
@@ -56,17 +56,23 @@ import {
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { createProjectService } from "./projects.ts";
+import {
+  createSpaceGateway,
+  spaceCookieHeader,
+  type SpaceGateway,
+} from "./spaces.ts";
+import { spaceRoutes } from "./routes/spaces.ts";
+import { createSpaceStorage } from "@polyth/tenancy";
 import { projectRoutes } from "./routes/projects.ts";
 import { createPackageRegistry } from "./packages.ts";
 import { createSessionService, type Broadcaster, type RuntimePool } from "./sessions.ts";
 import { resolveSessionRuntimeBinding } from "./sessionRuntime.ts";
 import { createRuntimeCatalog } from "./runtimeCatalog.ts";
-import { createHttpHandler, createPublicHttpServer, createTunnelIngress, type RouteHandler } from "./http.ts";
+import { createHttpHandler, createInternalControlServer, createPublicHttpServer, createTunnelIngress, type RouteHandler } from "./http.ts";
 import { packageRoutes } from "./routes/packages.ts";
 import { contextRoutes } from "./routes/context.ts";
 import { orgRoutes } from "./routes/org.ts";
 import { sessionRetentionRoutes } from "./routes/sessionRetention.ts";
-import { controlRoutes } from "./routes/control.ts";
 import { settingsRoutes } from "./routes/settings.ts";
 import { opencodePendingRoutes } from "./routes/opencodePending.ts";
 import { browseRoutes } from "./routes/browse.ts";
@@ -432,6 +438,24 @@ export async function boot(opts: BootOptions = {}) {
   const admissionBarrier = createRuntimeAdmissionBarrier();
   const projects = createProjectService(dataDir);
   root.provide(CAP.projects, projects);
+
+  // --- tenancy boundary. Built as early as possible so that package hosts,
+  // route wiring, and the WS gateway can only ever be handed SCOPED services.
+  // `sessions` is captured lazily: the session service is composed further
+  // down from package-owned dependencies.
+  let sessionsRef: SessionService | null = null;
+  const { gateway: spaceGateway } = await createSpaceGateway({
+    dataDir,
+    registry: projects,
+    store,
+    sessions: () => {
+      if (!sessionsRef) throw new Error("session service is not composed yet");
+      return sessionsRef;
+    },
+  });
+  const spaceServices = (ctx: Parameters<SpaceGateway["services"]>[0]) =>
+    spaceGateway.services(ctx);
+
 
   // --- cross-package service seam. Discovered packages publish the services
   // they construct here; the composition root publishes the infrastructure
@@ -1394,6 +1418,8 @@ export async function boot(opts: BootOptions = {}) {
 
   const packageHost: Omit<ServerPackageHost, "pluginId"> = {
     storageDir: dataDir,
+    deployment: spaceGateway.deployment,
+    spaceStorage: (ctx) => createSpaceStorage(ctx.storageDir),
     routes: routeRegistry,
     root,
     projects,
@@ -1691,17 +1717,32 @@ export async function boot(opts: BootOptions = {}) {
     }),
   });
 
+  sessionsRef = sessions;
+
   // Server-internal packages (no packages/<dir> counterpart) stay hand-wired.
-  registerPackageRoute("projects", projectRoutes(projects));
+  registerPackageRoute("projects", projectRoutes(spaceServices));
   registerPackageRoute("mcp", async (request) =>
     request.path.startsWith("/api/mcp/") ? settingsRoute(request) : false);
 
   const staticCoreRoutes: RouteHandler[] = [
     authRoutes(auth),
+    spaceRoutes({
+      store: spaceGateway.store,
+      resolver: spaceGateway.resolver,
+      audit: spaceGateway.audit,
+      setActiveSpaceCookie: (rc, spaceId) => rc.res.setHeader(
+        "set-cookie",
+        spaceCookieHeader({
+          name: spaceGateway.cookieName,
+          spaceId,
+          secure: rc.ingress.kind === "public-http" ? rc.ingress.secure : true,
+        }),
+      ),
+    }),
     opencodePendingRoutes(pendingOpenCode),
     packageRoutes(packageRegistry),
-    contextRoutes(sessions),
-    orgRoutes({ projects, sessions, store }),
+    contextRoutes(spaceServices),
+    orgRoutes({ spaces: spaceServices, store }),
     assistRoutes({
       settings: assistSettings,
       projection: (sessionId) => store.projection(sessionId),
@@ -1738,18 +1779,16 @@ export async function boot(opts: BootOptions = {}) {
         return brief.trim().split(/\s+/).slice(0, 20).join(" ");
       },
     }),
-    sessionRetentionRoutes(sessions),
-    controlRoutes(sessions),
+    sessionRetentionRoutes(spaceServices),
     agentSessionRoutes({
-      sessions,
-      projects,
+      spaces: spaceServices,
       store,
       capabilities: () => allCapabilities(),
       goals: () => svc<AgentGoalService>("goals"),
       version: "0.1.0",
     }),
-    queueRoutes(sessions),
-    runtimeEpochRoutes(sessions),
+    queueRoutes(spaceServices),
+    runtimeEpochRoutes(spaceServices),
     runtimeDiagnosticsRoutes(runtimeDiagnostics),
     pushRoutes(push),
     notificationRoutes(notifications),
@@ -1764,7 +1803,7 @@ export async function boot(opts: BootOptions = {}) {
   const allCapabilities = () => [...SERVER_CAPABILITY_IDS];
 
   const httpHandler = createHttpHandler({
-    sessions, projects, runtimes, routes, visibility, auth, catalog: runtimeCatalog,
+    spaces: spaceGateway, runtimes, routes, visibility, auth, catalog: runtimeCatalog,
     capabilities: allCapabilities,
     webDist: resolve(opts.webDist ?? resolve(__dirname, "../../../apps/web/dist")),
     packagesDir: resolve(opts.webPackagesDir ?? packagesDir),
@@ -1774,7 +1813,18 @@ export async function boot(opts: BootOptions = {}) {
   });
   httpHandlerRef = httpHandler;
   const server = createPublicHttpServer(httpHandler, "public");
-  live = createWsGateway(sessions, svc<BrowserForWs>("browser"), svc<DictationForWs>("dictation"));
+  const controlSocketPath = process.env.POLYTH_CONTROL_SOCKET
+    ?? (process.platform === "win32"
+      ? `\\\\.\\pipe\\polyth-control-${createHash("sha256").update(dataDir).digest("hex").slice(0, 12)}`
+      : join(dataDir, "control.sock"));
+  if (process.platform !== "win32") rmSync(controlSocketPath, { force: true });
+  const controlServer = createInternalControlServer(httpHandler);
+  live = createWsGateway(
+    sessions,
+    svc<BrowserForWs>("browser"),
+    svc<DictationForWs>("dictation"),
+    spaceGateway,
+  );
   const publicIngress = (req: import("node:http").IncomingMessage) =>
     publicHttpIngress(req, { listenerId: "public" });
   const wsAuthorize = (req: import("node:http").IncomingMessage) =>
@@ -1797,7 +1847,16 @@ export async function boot(opts: BootOptions = {}) {
   await new Promise<void>((res) => opts.hostname
     ? server.listen(port, opts.hostname, res)
     : server.listen(port, res));
+  await new Promise<void>((res, reject) => {
+    controlServer.once("error", reject);
+    controlServer.listen(controlSocketPath, () => {
+      controlServer.off("error", reject);
+      res();
+    });
+  });
+  if (process.platform !== "win32") chmodSync(controlSocketPath, 0o600);
   console.log(`[polyth] server on http://${opts.hostname ?? "127.0.0.1"}:${port}  data=${dataDir}`);
+  console.log(`[polyth] agent control on ${controlSocketPath}`);
 
   const shutdown = async () => {
     for (const descriptor of packageRegistry.list().toReversed()) {
@@ -1819,6 +1878,8 @@ export async function boot(opts: BootOptions = {}) {
     await svc<SshTransportService>("ssh")?.disconnectAll().catch(() => {});
     await root.dispose();
     await store.close();
+    controlServer.close();
+    if (process.platform !== "win32") rmSync(controlSocketPath, { force: true });
     server.close();
     await writerLease.release();
   };

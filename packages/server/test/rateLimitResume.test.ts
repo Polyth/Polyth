@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { createStore } from "@polyth/session";
 import type {
@@ -18,7 +18,7 @@ import type { PermissionService } from "@polyth/permissions";
 
 const flush = () => new Promise((r) => setTimeout(r, 20));
 
-function harness() {
+function harness(existingDbPath?: string) {
   const listeners = new Set<(sessionId: string, ev: RuntimeEvent) => void>();
   const startedTexts: string[] = [];
   const emit = (sessionId: string, ev: RuntimeEvent) => {
@@ -70,8 +70,9 @@ function harness() {
     dispose: async () => {},
   };
 
-  const dir = mkdtempSync(join(tmpdir(), "polyth-ratelimit-"));
-  const store = createStore(join(dir, "s.db"));
+  const dir = existingDbPath ? dirname(existingDbPath) : mkdtempSync(join(tmpdir(), "polyth-ratelimit-"));
+  const dbPath = existingDbPath ?? join(dir, "s.db");
+  const store = createStore(dbPath);
   const project: Project = { id: "p1", path: dir, name: "p", createdAt: 1 };
   const projects: ProjectService = {
     list: async () => [project],
@@ -92,7 +93,7 @@ function harness() {
     store, projects, permissions, broadcast, queue: store,
     runtimes: { forProject: async () => rt },
   });
-  return { sessions, store, emit, startedTexts };
+  return { sessions, store, emit, startedTexts, dbPath };
 }
 
 const LIMIT_STOP: Extract<RuntimeEvent, { type: "turn/stopped" }> = {
@@ -185,4 +186,46 @@ test("a non-limit error stop leaves no resume plan", async () => {
   assert.equal(proj?.status, "failed");
   assert.equal(proj?.resume, undefined);
   await h.store.close();
+});
+
+test("server restart repairs a pending resume that lacks its terminal event", async () => {
+  const first = harness();
+  const { id } = await first.sessions.create({ projectId: "p1", title: "T" });
+  await first.sessions.send(id, { text: "keep going" });
+  await flush();
+
+  const events = await first.store.events(id);
+  const user = events.findLast((event) => event.type === "user/message");
+  assert.ok(user);
+  const projection = await first.store.projection(id);
+  assert.ok(projection);
+  const resumeAt = Date.now() + 50;
+  await first.store.upsertProjection({
+    ...projection,
+    status: "idle",
+    resume: {
+      scope: "rate",
+      provider: "anthropic",
+      retryAfterSec: 60,
+      resumeAt,
+      attempt: 1,
+      userMessageSeq: user.seq,
+    },
+  });
+  await first.store.close();
+
+  const second = harness(first.dbPath);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  const repaired = await second.store.events(id);
+  const stop = repaired.findLast((event) => event.type === "turn/stopped");
+  assert.ok(stop, "restart should append the missing terminal event");
+  const retry = (stop.data as { retry?: { resumeAt?: number; attempt?: number } }).retry;
+  assert.equal(retry?.attempt, 1);
+  assert.equal(retry?.resumeAt, resumeAt);
+  assert.deepEqual(second.startedTexts, ["keep going"]);
+  const messages = repaired.filter((event) => event.type === "user/message");
+  assert.equal((messages.at(-1)?.data as { autoResume?: boolean }).autoResume, true);
+  assert.equal((await second.store.projection(id))?.resume, undefined);
+  await second.store.close();
 });

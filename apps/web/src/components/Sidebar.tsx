@@ -38,6 +38,7 @@ import {
 import { api } from "@polyth/session/web-api";
 import { announce } from "./a11y/live.tsx";
 import ProjectAppearanceDialog from "./ProjectAppearanceDialog.tsx";
+import SpaceSwitcher from "./SpaceSwitcher.tsx";
 import { tr } from "../i18n/index.ts";
 import { confirmAlert } from "../alerts.ts";
 import { errorFeedback, tapFeedback } from "../haptics.ts";
@@ -452,6 +453,9 @@ export default function Sidebar() {
               </div>
             ) : (
               <div className="sidebar-drawer-tools" role="toolbar" aria-label={tr("sidebar.listOptions")}>
+                {/* Phone entry point: the header collapses on phones, so the
+                    drawer carries the Space switcher instead. */}
+                <SpaceSwitcher />
                 <IconButton
                   icon={SearchIcon}
                   label={tr("sidebar.searchProjectsWorktreesAndSessions")}

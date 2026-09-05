@@ -64,7 +64,8 @@ app-suspension blocker for long-running agents.
 ## Low-resource mode
 
 Desktop settings includes an opt-in low-resource mode for older machines. It
-takes effect after restart and:
+disables interface animations, haptics, and live backdrop blur immediately.
+After restart it also:
 
 - defers the OpenCode model/agent catalog until the first user interaction;
 - uses Electron software compositing and disables built-in spellcheck;
@@ -73,6 +74,9 @@ takes effect after restart and:
 - reduces renderer terminal scrollback from 5,000 to 1,000 rows;
 - limits concurrent terminal child processes to four; and
 - starts with a smaller 1100×720 window when no saved bounds exist.
+
+The independent **Reduce animations and effects** setting applies the same
+motion, haptic, and glass reduction without changing runtime or cache limits.
 
 OpenCode starts normally as soon as the user interacts with the application, so
 agent, model, terminal, and workflow behavior remains available. Hardware

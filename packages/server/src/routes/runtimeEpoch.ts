@@ -1,5 +1,5 @@
-import type { SessionService } from "@polyth/contracts";
 import type { RouteHandler } from "../http.ts";
+import type { SpaceServicesFor } from "../spaceScope.ts";
 
 const CONFLICT_CODES = new Set([
   "conflict",
@@ -7,10 +7,11 @@ const CONFLICT_CODES = new Set([
   "epoch-proof-required",
 ]);
 
-export function runtimeEpochRoutes(sessions: SessionService): RouteHandler {
-  return async ({ path, method, body, json }) => {
+export function runtimeEpochRoutes(spaces: SpaceServicesFor): RouteHandler {
+  return async ({ path, method, body, json, space }) => {
     const match = path.match(/^\/api\/sessions\/([^/]+)\/runtime-epoch$/);
     if (!match || method !== "POST") return false;
+    const { sessions } = spaces(space);
     const sessionId = decodeURIComponent(match[1]!);
     if (!sessions.confirmBorrowedRuntimeEpoch) {
       throw Object.assign(new Error("runtime epoch confirmation is unavailable"), {

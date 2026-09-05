@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("desktop motion remains independent from low-resource mode", async () => {
+test("desktop reduced-motion and low-resource modes disable motion and expensive glass", async () => {
   const [desktop, styles, timeline] = await Promise.all([
     readFile(new URL("../src/desktop.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/styles.css", import.meta.url), "utf8"),
@@ -12,8 +12,8 @@ test("desktop motion remains independent from low-resource mode", async () => {
   assert.match(desktop, /itemId="desktop\.reduceAnimations"/);
   assert.match(desktop, /document\.documentElement\.dataset\.reduceAnimations/);
   assert.match(desktop, /polyth:desktop-performance-changed/);
-  assert.match(styles, /html\[data-reduce-animations="true"\] \*/);
-  assert.doesNotMatch(styles, /desktopLowResource[\s\S]{0,100}animation:\s*none/);
+  assert.match(styles, /:is\(html\[data-reduce-animations="true"\], body\[data-desktop-low-resource="true"\]\) \*/);
+  assert.match(styles, /backdrop-filter:\s*none !important/);
   assert.match(timeline, /addEventListener\("polyth:desktop-performance-changed"/);
   assert.match(timeline, /Math\.min\(current, LOW_RESOURCE_TIMELINE_WINDOW\)/);
 });

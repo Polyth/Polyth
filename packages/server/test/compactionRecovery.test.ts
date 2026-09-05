@@ -22,6 +22,8 @@ import {
   unrestoredCompactionSeq,
 } from "@polyth/session";
 import { contextRoutes } from "../src/routes/context.ts";
+import type { SpaceServices } from "../src/spaceScope.ts";
+import { fakeSpaceContext } from "./support/spaces.ts";
 import { createSessionService, type Broadcaster } from "../src/sessions.ts";
 
 type Emit = (sessionId: string, event: RuntimeEvent) => void;
@@ -168,11 +170,12 @@ test("context route delegates pin and unpin by source event sequence", async () 
       return { id: "e2", sessionId: "s1", seq: 5, time: 2, type: "context/unpinned", data: { sourceEventSeq: seq }, v: 1 as const };
     },
   } as SessionService;
-  const route = contextRoutes(sessions);
+  const route = contextRoutes(() => ({ sessions } as unknown as SpaceServices));
   let response: unknown;
   const base = {
     req: {} as never,
     res: {} as never,
+    space: fakeSpaceContext(),
     url: new URL("http://local"),
     body: async () => ({}),
     json: (_code: number, value: unknown) => { response = value; },

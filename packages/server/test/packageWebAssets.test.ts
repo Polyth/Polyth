@@ -6,6 +6,9 @@ import type { Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHttpServer } from "../src/http.ts";
+import { testTenancy } from "./support/spaces.ts";
+
+const tenancy = await testTenancy();
 
 test("package web assets are isolated, typed, and traversal-safe", async () => {
   const root = mkdtempSync(join(tmpdir(), "polyth-package-web-"));
@@ -20,8 +23,7 @@ test("package web assets are isolated, typed, and traversal-safe", async () => {
   writeFileSync(join(packageDist, "chunk-ABCDEFGH.js"), "export const chunk = true;\n");
 
   const server = createHttpServer({
-    sessions: {} as never,
-    projects: { list: async () => [] } as never,
+    spaces: tenancy.gateway,
     runtimes: {} as never,
     capabilities: () => [],
     webDist,

@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { SessionProjection, SessionService } from "@polyth/contracts";
 import { sessionRetentionRoutes } from "../src/routes/sessionRetention.ts";
+import type { SpaceServices } from "../src/spaceScope.ts";
+import { fakeSpaceContext } from "./support/spaces.ts";
 
 const DAY = 24 * 60 * 60_000;
 const now = Date.now();
@@ -16,9 +18,11 @@ const service = {
 } as SessionService;
 
 test("session retention route reports and archives eligible sessions", async () => {
-  const route = sessionRetentionRoutes(service);
+  const space = fakeSpaceContext();
+  const route = sessionRetentionRoutes(() => ({ sessions: service } as unknown as SpaceServices));
   let response: unknown;
   const base = {
+    space,
     path: "/api/session-retention",
     url: new URL("http://localhost/api/session-retention?days=30"),
     body: async () => ({ days: 30 }),

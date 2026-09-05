@@ -36,9 +36,11 @@ import { dismissTopEscapeLayer } from "./useEscape.ts";
 import { isWorkspaceSurface, listSurfaces } from "./surfaces.ts";
 import { installNativeMobileIntegration } from "@polyth/mobile/native";
 import { handleNativeBack } from "./nativeMobile.ts";
+import { applyBackgroundToDom } from "./backgrounds.ts";
 
 applySettingsToDom(getState().settings);
 applyUiSettings();
+applyBackgroundToDom();
 // UX-MOBILE-01: publish visual-viewport geometry before first paint so the
 // sticky interaction zone is never laid out against a stale 100vh.
 startMobileViewport();

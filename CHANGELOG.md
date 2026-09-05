@@ -215,9 +215,9 @@ commits, and the L-queue packages started landing.
 ### Added — L7: sidebar import-browse for backend sessions (F14 import half)
 
 - `GET /api/sessions` no longer silently adopts every OpenCode session. New
-  `GET /api/control/backend-sessions?projectId=` lists unadopted backend
+  `GET /api/agent/backend-sessions?projectId=` lists unadopted backend
   sessions (deduped, most recent first) plus an honest `total`, and
-  `POST /api/control/backend-sessions/import {projectId, ids}` adopts only the
+  `POST /api/agent/backend-sessions/import {projectId, ids}` adopts only the
   selected ones through the existing `backendSessionId` seam —
   `session/imported` is logged before the projection broadcasts, and history
   still hydrates lazily on first open. `sessions.sync` remains the
@@ -555,7 +555,7 @@ matrix (both superseded on the current branch by `docs/dev/*`).
   `hotkeys` (default bindings, user overrides, conflict detection, sequence
   matching), `dictation` (initial dictation seam; the server streaming
   protocol came in PR #3).
-- New routes: control (`/api/control/sessions` list/new/fork/abort), github,
+- New routes: agent control (`/api/agent/sessions`), github,
   schedule, snippets.
 
 #### Added — web app

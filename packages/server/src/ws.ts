@@ -16,6 +16,8 @@ import { REMOTE_CAPABILITY, isLocalUiPrincipal } from "@polyth/contracts";
 import type { BrowserFrame, BrowserService } from "@polyth/browser";
 import type { DictationService } from "@polyth/dictation";
 import type { Broadcaster } from "./sessions.ts";
+import type { SpaceGateway } from "./spaces.ts";
+import { parseSpaceCookie } from "./spaces.ts";
 import {
   allowWsCapability,
   claimWsUpgrade,
@@ -55,6 +57,11 @@ interface Sub {
   audioCount: number;
   principal: AuthPrincipal;
   refreshPrincipal?: (principal: AuthPrincipal) => AuthPrincipal | null;
+  /** Tenant this socket is attached to. Null when tenancy is not composed
+   *  (bare gateways in tests) — fan-out then behaves as it did pre-tenancy. */
+  spaceId: string | null;
+  /** Tenant-scoped session service for this socket's gap-fill and snapshots. */
+  sessions: SessionService;
 }
 
 // A client re-subscribing faster than this is either buggy or hostile — either
@@ -77,6 +84,9 @@ export function createWsGateway(
   sessions: SessionService,
   browser?: BrowserService,
   dictation?: DictationService,
+  /** Tenancy boundary. When present, every socket is bound to one Space at
+   *  upgrade time and both gap-fill and live fan-out are filtered by it. */
+  spaces?: SpaceGateway,
 ): WsGateway {
   // noServer + manual upgrade matcher: a WSS bound with {server, path} aborts
   // *every* unmatched upgrade with 400, which would kill the terminal channel's
@@ -87,6 +97,15 @@ export function createWsGateway(
 
   const send = (ws: WebSocket, msg: unknown) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  };
+
+  /** True when this socket's tenant owns `sessionId`. With no tenancy
+   *  composed (`sub.spaceId === null`) every socket sees everything, which is
+   *  the pre-tenancy behavior bare gateways in tests rely on. */
+  const inSpace = (sub: Sub, sessionId: string): boolean => {
+    if (sub.spaceId === null) return true;
+    if (!spaces) return true;
+    return spaces.spaceOfSession(sessionId) === sub.spaceId;
   };
 
   const currentPrincipal = (ws: WebSocket, sub: Sub): AuthPrincipal | null => {
@@ -161,7 +180,33 @@ export function createWsGateway(
   wss.on("connection", (ws, req: IncomingMessage) => {
     const attachAuth = (ws as WebSocket & { _polythAuth?: WsAttachAuth })._polythAuth ?? {};
     const resolution = defaultWsIdentity(attachAuth, req);
+    // The socket's Space is resolved ONCE, from the authenticated principal
+    // and the remembered-space hint, exactly like an HTTP request. Switching
+    // Space reconnects the socket rather than re-scoping a live one, so a
+    // stream can never straddle two tenants.
+    let socketSpaceId: string | null = null;
+    let socketSessions = sessions;
+    if (spaces) {
+      try {
+        const ctx = spaces.resolve(resolution.principal, {
+          remembered: parseSpaceCookie(req.headers.cookie, spaces.cookieName),
+        });
+        socketSpaceId = ctx.spaceId;
+        socketSessions = spaces.services(ctx).sessions;
+      } catch {
+        // No usable tenant: the socket stays connected but subscribes to
+        // nothing. Closing here would fight the client's reconnect loop.
+        socketSpaceId = null;
+        socketSessions = {
+          ...sessions,
+          events: async () => [],
+          list: async () => [],
+        };
+      }
+    }
     const sub: Sub = {
+      spaceId: socketSpaceId,
+      sessions: socketSessions,
       sessionId: null, afterSeq: 0, caughtUp: true,
       busy: false, pendingSubscribe: null, snapshotScope: null, liveBuffer: [],
       windowStart: Date.now(), windowCount: 0,
@@ -275,7 +320,7 @@ export function createWsGateway(
           if (sub.sessionId) {
             sub.caughtUp = false;
             try {
-              const gap = await sessions.events(sub.sessionId, sub.afterSeq);
+              const gap = await sub.sessions.events(sub.sessionId, sub.afterSeq);
               if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) {
                 sub.caughtUp = true;
                 sub.liveBuffer = [];
@@ -320,7 +365,7 @@ export function createWsGateway(
           if (sub.snapshotScope !== scope) {
             try {
               if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) break subscriptions;
-              const list = await sessions.list(cur.projectId ?? undefined);
+              const list = await sub.sessions.list(cur.projectId ?? undefined);
               if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) break subscriptions;
               for (let i = 0; i < list.length; i += GAP_FILL_CHUNK) {
                 if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) break subscriptions;
@@ -366,6 +411,9 @@ export function createWsGateway(
       for (const [ws, sub] of clients) {
         const live = currentPrincipal(ws, sub);
         if (!allowWsCapability(live, REMOTE_CAPABILITY.coreSessionsRead)) continue;
+        // Tenant filter comes first: a socket must never observe even the
+        // existence of another Space's session traffic.
+        if (!inSpace(sub, ev.sessionId)) continue;
         if (sub.sessionId && ev.sessionId !== sub.sessionId) continue;
         if (!sub.caughtUp) {
           // Gap-fill in flight: buffer instead of dropping. These seqs are
@@ -382,6 +430,8 @@ export function createWsGateway(
       for (const [ws, sub] of clients) {
         const live = currentPrincipal(ws, sub);
         if (!allowWsCapability(live, REMOTE_CAPABILITY.coreSessionsRead)) continue;
+        // The projection carries its own owner, so no lookup is needed.
+        if (sub.spaceId !== null && p.spaceId !== sub.spaceId) continue;
         send(ws, { type: "projection", session: p });
       }
     },
@@ -393,6 +443,7 @@ export function createWsGateway(
       for (const [ws, sub] of clients) {
         const live = currentPrincipal(ws, sub);
         if (!allowWsCapability(live, REMOTE_CAPABILITY.coreNotificationsRead)) continue;
+        if (!inSpace(sub, record.sessionId)) continue;
         send(ws, { type: "notification/added", notification: record });
       }
     },

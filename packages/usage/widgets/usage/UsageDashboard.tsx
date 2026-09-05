@@ -4,6 +4,8 @@ import { getLocale, tr } from "../../../../apps/web/src/i18n/index.ts";
 import { Icon } from "../../../../apps/web/src/icons.tsx";
 import { useStore } from "../../../../apps/web/src/store.ts";
 import {
+  moveUsageBlock,
+  orderUsageBlocks,
   setProviderHidden,
   setUsageDashboardPrefs,
   useUsagePrefs,
@@ -13,7 +15,10 @@ import { fmtQuota, paceText, useQuotaSnapshots } from "./quotaUi.tsx";
 import {
   AddIcon,
   Button,
+  ChevronDownIcon,
   ChevronRightIcon,
+  ChevronUpIcon,
+  DragHandleIcon,
   EmptyState,
   IconButton,
   RefreshIcon,
@@ -47,6 +52,64 @@ const seriesAccent = (index = 0): string =>
 
 const providerPreferenceId = (provider: UsageProviderSummary): string =>
   provider.snapshot?.providerId ?? provider.id;
+
+interface SortableBlock {
+  id: string;
+  label: string;
+  content: ReactNode;
+  className?: string;
+}
+
+function SortableBlocks({
+  blocks,
+  order,
+  onChange,
+  className,
+}: {
+  blocks: SortableBlock[];
+  order: string[];
+  onChange: (order: string[]) => void;
+  className: string;
+}) {
+  const [dragged, setDragged] = useState<string | null>(null);
+  const sorted = orderUsageBlocks(blocks, order, (block) => block.id);
+  const ids = sorted.map((block) => block.id);
+  const move = (id: string, to: string | number) => onChange(moveUsageBlock(ids, id, to));
+  return (
+    <div className={className}>
+      {sorted.map((block, index) => (
+        <div
+          className={`usage-sortable-item${block.className ? ` ${block.className}` : ""}${dragged === block.id ? " dragging" : ""}`}
+          key={block.id}
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+            if (dragged) move(dragged, block.id);
+            setDragged(null);
+          }}
+        >
+          <div className="usage-sort-controls">
+            <IconButton
+              icon={DragHandleIcon}
+              size="sm"
+              draggable
+              label={`Reorder ${block.label}`}
+              onDragStart={(event) => {
+                setDragged(block.id);
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", block.id);
+              }}
+              onDragEnd={() => setDragged(null)}
+            />
+            <IconButton icon={ChevronUpIcon} size="sm" label={`Move ${block.label} up`} disabled={index === 0} onClick={() => move(block.id, -1)} />
+            <IconButton icon={ChevronDownIcon} size="sm" label={`Move ${block.label} down`} disabled={index === sorted.length - 1} onClick={() => move(block.id, 1)} />
+          </div>
+          {block.content}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 const formatMoney = (value: number): string => {
   if (value > 0 && value < .0001) return "<$0.0001";
@@ -718,23 +781,33 @@ function UsageActionStrip({
 function ProviderDetails({
   providers,
   hiddenProviders,
+  order,
+  onOrderChange,
   onAddProvider,
   onRefresh,
   quotaBusy,
 }: {
   providers: UsageProviderSummary[];
   hiddenProviders: string[];
+  order: string[];
+  onOrderChange: (order: string[]) => void;
   onAddProvider: () => void;
   onRefresh: (providerId: string) => void | Promise<void>;
   quotaBusy: boolean;
 }) {
   return (
     <div className="usage-provider-view" data-settings-item="usage.providers">
-      <div className="usage-provider-detail-grid">
-        {providers.map((provider, index) => {
+      <SortableBlocks
+        className="usage-provider-detail-grid"
+        order={order}
+        onChange={onOrderChange}
+        blocks={[...providers.map((provider, index) => {
           const preferenceId = providerPreferenceId(provider);
           const hidden = hiddenProviders.includes(preferenceId);
-          return (
+          return {
+            id: provider.id,
+            label: provider.label,
+            content: (
             <article className="usage-provider-detail-card" key={provider.id} style={cssVar("--provider-accent", seriesAccent(index))}>
               <header>
                 <ProviderLogo
@@ -811,24 +884,31 @@ function ProviderDetails({
                 )}
               </footer>
             </article>
-          );
-        })}
-        {providers.length === 0 && (
-          <EmptyState
-            variant="panel"
-            title={tr("usage.usagedashboard.connectYourFirstProvider")}
-            description={tr("usage.usagedashboard.polythDiscoversQuotaSources")}
-            actionLabel={tr("usage.usagedashboard.openProviderSettings")}
-            onAction={onAddProvider}
-          />
-        )}
-      </div>
-      <section className="usage-provider-view-intro">
-        <div><span>{tr("usage.usagedashboard.discovered")}</span><strong>{providers.length}</strong></div>
-        <div><span>{tr("usage.usagedashboard.freshFeeds")}</span><strong>{providers.filter((provider) => provider.snapshot && !provider.stale).length}</strong></div>
-        <div><span>{tr("usage.usagedashboard.visible")}</span><strong>{providers.filter((provider) => !hiddenProviders.includes(providerPreferenceId(provider))).length}</strong></div>
-        <Button size="sm" variant="primary" iconStart={AddIcon} onClick={onAddProvider}>{tr("usage.usagedashboard.addProvider")}</Button>
-      </section>
+            ),
+          };
+        }), {
+          id: "provider-summary",
+          label: tr("usage.usagedashboard.providerActivity"),
+          className: "usage-provider-summary-block",
+          content: (
+            <section className="usage-provider-view-intro">
+              <div><span>{tr("usage.usagedashboard.discovered")}</span><strong>{providers.length}</strong></div>
+              <div><span>{tr("usage.usagedashboard.freshFeeds")}</span><strong>{providers.filter((provider) => provider.snapshot && !provider.stale).length}</strong></div>
+              <div><span>{tr("usage.usagedashboard.visible")}</span><strong>{providers.filter((provider) => !hiddenProviders.includes(providerPreferenceId(provider))).length}</strong></div>
+              <Button size="sm" variant="primary" iconStart={AddIcon} onClick={onAddProvider}>{tr("usage.usagedashboard.addProvider")}</Button>
+            </section>
+          ),
+        }]}
+      />
+      {providers.length === 0 && (
+        <EmptyState
+          variant="panel"
+          title={tr("usage.usagedashboard.connectYourFirstProvider")}
+          description={tr("usage.usagedashboard.polythDiscoversQuotaSources")}
+          actionLabel={tr("usage.usagedashboard.openProviderSettings")}
+          onAction={onAddProvider}
+        />
+      )}
     </div>
   );
 }
@@ -888,6 +968,48 @@ export function UsageDashboard(): ReactNode {
     }
   };
   const quotaBusy = quotaLoading || refreshing;
+  const overviewBlocks: SortableBlock[] = [
+    { id: "spend", label: tr("usage.usagedashboard.spend"), className: "usage-block-stat", content: <StatCard label={tr("usage.usagedashboard.spend")} value={formatMoney(data.totals.cost)} trend={data.trends.cost} icon="usage" tone="var(--accent)" detail={tr("usage.usagedashboard.valuePerSession2", { value: formatMoney(averageSessionCost) })} series={costSeries} /> },
+    { id: "tokens", label: tr("usage.usagedashboard.tokens"), className: "usage-block-stat", content: <StatCard label={tr("usage.usagedashboard.tokens")} value={fmtTokens(data.totals.tokens)} trend={data.trends.tokens} icon="context" tone="var(--purple)" detail={data.models.length === 1 ? tr("usage.usagedashboard.oneModel") : tr("usage.usagedashboard.valueModels", { count: data.models.length })} series={tokenSeries} /> },
+    { id: "sessions", label: tr("usage.usagedashboard.sessions"), className: "usage-block-stat", content: <StatCard label={tr("usage.usagedashboard.sessions")} value={data.totals.sessions.toLocaleString(getLocale())} trend={data.trends.sessions} icon="events" tone="var(--blue)" detail={visibleProviders.length === 1 ? tr("usage.usagedashboard.oneProviderShown") : tr("usage.usagedashboard.valueProvidersShown", { count: visibleProviders.length })} series={sessionSeries} /> },
+    { id: "rate", label: tr("usage.usagedashboard.cost1kTokens"), className: "usage-block-stat", content: <StatCard label={tr("usage.usagedashboard.cost1kTokens")} value={data.totals.tokens > 0 ? formatRate(data.totals.averageCostPerThousand) : "$0.0000"} trend={data.trends.averageCostPerThousand} icon="compare" tone="var(--amber)" detail={tr("usage.usagedashboard.valueDayCohortRatio", { days: rangeDays })} series={averageSeries} /> },
+    {
+      id: "cohorts",
+      label: tr("usage.usagedashboard.sessionCohortsByLatestTurn"),
+      className: "usage-block-wide",
+      content: <SessionCohorts data={data} visibleProviderIds={visibleProviderIds} hiddenCount={hiddenCount} />,
+    },
+    {
+      id: "cost-context",
+      label: tr("usage.usagedashboard.costContext"),
+      className: "usage-block-narrow",
+      content: <CostPulse data={data} />,
+    },
+    {
+      id: "provider-spend",
+      label: tr("usage.usagedashboard.costByProvider"),
+      className: "usage-block-half",
+      content: <ProviderSpendDonut providers={visibleProviders} hiddenSpend={data.providers.some((provider) => !visibleProviderIds.has(provider.id) && provider.cost > 0)} onViewProviders={() => setView("providers")} />,
+    },
+    {
+      id: "models",
+      label: tr("usage.usagedashboard.modelBreakdown"),
+      className: "usage-block-half",
+      content: <ModelBreakdown models={data.models.filter((model) => visibleProviderIds.has(model.providerId))} hiddenActivity={data.models.some((model) => !visibleProviderIds.has(model.providerId))} />,
+    },
+    {
+      id: "provider-activity",
+      label: tr("usage.usagedashboard.providerActivity"),
+      className: "usage-block-full",
+      content: <ProviderTable providers={visibleProviders} allProvidersHidden={allProvidersHidden} />,
+    },
+    {
+      id: "actions",
+      label: tr("usage.usagedashboard.shapeThisDashboard"),
+      className: "usage-block-full",
+      content: <UsageActionStrip hiddenCount={hiddenCount} onProviders={() => setView("providers")} onAddProvider={addProvider} />,
+    },
+  ];
 
   return (
     <div
@@ -909,33 +1031,35 @@ export function UsageDashboard(): ReactNode {
           onChange={(value) => setView(value as typeof view)}
         />
         <span className="usage-toolbar-spacer" />
-        <Tabs
-          className="usage-range-control"
-          size="sm"
-          label={tr("usage.usagedashboard.usageRange")}
-          value={String(rangeDays)}
-          tabs={([7, 30, 90] as const).map((days) => ({ id: String(days), label: `${days}d` }))}
-          onChange={(value) => setRangeDays(Number(value) as UsageRangeDays)}
-        />
-        <Tabs
-          className="usage-layout-control"
-          size="sm"
-          label={tr("usage.usagedashboard.dashboardDensity")}
-          value={layout}
-          tabs={[
-            { id: "expanded", label: <><Icon.widgets /><span>{tr("usage.usagedashboard.expanded")}</span></> },
-            { id: "compact", label: <><Icon.list /><span>{tr("usage.usagedashboard.compact")}</span></> },
-          ]}
-          onChange={(value) => setLayout(value as typeof layout)}
-        />
-        <IconButton
-          icon={RefreshIcon}
-          className={quotaBusy ? "refreshing" : undefined}
-          label={quotaBusy ? tr("usage.usagedashboard.refreshingProviderQuotaFeeds") : tr("usage.usagedashboard.refreshProviderQuotaFeeds")}
-          title={quotaBusy ? tr("usage.usagedashboard.refreshingProviderQuotaFeeds") : tr("usage.usagedashboard.refreshProviderQuotaFeeds")}
-          disabled={quotaBusy}
-          onClick={() => void refreshAll()}
-        />
+        <div className="usage-toolbar-controls">
+          <Tabs
+            className="usage-range-control"
+            size="sm"
+            label={tr("usage.usagedashboard.usageRange")}
+            value={String(rangeDays)}
+            tabs={([7, 30, 90] as const).map((days) => ({ id: String(days), label: `${days}d` }))}
+            onChange={(value) => setRangeDays(Number(value) as UsageRangeDays)}
+          />
+          <Tabs
+            className="usage-layout-control"
+            size="sm"
+            label={tr("usage.usagedashboard.dashboardDensity")}
+            value={layout}
+            tabs={[
+              { id: "expanded", label: <><Icon.widgets /><span>{tr("usage.usagedashboard.expanded")}</span></> },
+              { id: "compact", label: <><Icon.list /><span>{tr("usage.usagedashboard.compact")}</span></> },
+            ]}
+            onChange={(value) => setLayout(value as typeof layout)}
+          />
+          <IconButton
+            icon={RefreshIcon}
+            className={quotaBusy ? "refreshing" : undefined}
+            label={quotaBusy ? tr("usage.usagedashboard.refreshingProviderQuotaFeeds") : tr("usage.usagedashboard.refreshProviderQuotaFeeds")}
+            title={quotaBusy ? tr("usage.usagedashboard.refreshingProviderQuotaFeeds") : tr("usage.usagedashboard.refreshProviderQuotaFeeds")}
+            disabled={quotaBusy}
+            onClick={() => void refreshAll()}
+          />
+        </div>
       </div>
 
       {quotaError && (
@@ -948,75 +1072,15 @@ export function UsageDashboard(): ReactNode {
 
       {view === "overview" ? (
         <div className="usage-dashboard-content">
-          <section className="usage-stat-grid" aria-label={tr("usage.usagedashboard.usageSummary")}>
-            <StatCard
-              label={tr("usage.usagedashboard.spend")}
-              value={formatMoney(data.totals.cost)}
-              trend={data.trends.cost}
-              icon="usage"
-              tone="var(--accent)"
-              detail={tr("usage.usagedashboard.valuePerSession2", { value: formatMoney(averageSessionCost) })}
-              series={costSeries}
-            />
-            <StatCard
-              label={tr("usage.usagedashboard.tokens")}
-              value={fmtTokens(data.totals.tokens)}
-              trend={data.trends.tokens}
-              icon="context"
-              tone="var(--purple)"
-              detail={data.models.length === 1 ? tr("usage.usagedashboard.oneModel") : tr("usage.usagedashboard.valueModels", { count: data.models.length })}
-              series={tokenSeries}
-            />
-            <StatCard
-              label={tr("usage.usagedashboard.sessions")}
-              value={data.totals.sessions.toLocaleString(getLocale())}
-              trend={data.trends.sessions}
-              icon="events"
-              tone="var(--blue)"
-              detail={visibleProviders.length === 1 ? tr("usage.usagedashboard.oneProviderShown") : tr("usage.usagedashboard.valueProvidersShown", { count: visibleProviders.length })}
-              series={sessionSeries}
-            />
-            <StatCard
-              label={tr("usage.usagedashboard.cost1kTokens")}
-              value={data.totals.tokens > 0 ? formatRate(data.totals.averageCostPerThousand) : "$0.0000"}
-              trend={data.trends.averageCostPerThousand}
-              icon="compare"
-              tone="var(--amber)"
-              detail={tr("usage.usagedashboard.valueDayCohortRatio", { days: rangeDays })}
-              series={averageSeries}
-            />
-          </section>
-
-          <section className="usage-primary-grid">
-            <SessionCohorts data={data} visibleProviderIds={visibleProviderIds} hiddenCount={hiddenCount} />
-            <CostPulse data={data} />
-          </section>
-
-          <section className="usage-breakdown-grid">
-            <ProviderSpendDonut
-              providers={visibleProviders}
-              hiddenSpend={data.providers.some((provider) =>
-                !visibleProviderIds.has(provider.id) && provider.cost > 0)}
-              onViewProviders={() => setView("providers")}
-            />
-            <ModelBreakdown
-              models={data.models.filter((model) => visibleProviderIds.has(model.providerId))}
-              hiddenActivity={data.models.some((model) => !visibleProviderIds.has(model.providerId))}
-            />
-          </section>
-
-          <ProviderTable providers={visibleProviders} allProvidersHidden={allProvidersHidden} />
-          <UsageActionStrip
-            hiddenCount={hiddenCount}
-            onProviders={() => setView("providers")}
-            onAddProvider={addProvider}
-          />
+          <SortableBlocks className="usage-overview-blocks" blocks={overviewBlocks} order={prefs.dashboard.overviewOrder} onChange={(overviewOrder) => setUsageDashboardPrefs({ overviewOrder })} />
         </div>
       ) : (
         <div className="usage-dashboard-content">
           <ProviderDetails
             providers={data.providers}
             hiddenProviders={prefs.hiddenProviders}
+            order={prefs.dashboard.providerOrder}
+            onOrderChange={(providerOrder) => setUsageDashboardPrefs({ providerOrder })}
             onAddProvider={addProvider}
             onRefresh={refresh}
             quotaBusy={quotaBusy}

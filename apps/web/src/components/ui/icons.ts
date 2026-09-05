@@ -84,6 +84,7 @@ export {
   Pin as PinIcon,
   Star as FavoriteIcon,
   Send as SendIcon,
+  ListPlus as QueueIcon,
   Mic as MicIcon,
   Play as PlayIcon,
   Square as StopIcon,

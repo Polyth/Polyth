@@ -19,6 +19,9 @@ import {
 import { authRoutes } from "../src/routes/auth.ts";
 import { createHttpServer, type RouteRequest } from "../src/http.ts";
 import { attachWs } from "../src/ws.ts";
+import { testTenancy } from "./support/spaces.ts";
+
+const tenancy = await testTenancy();
 
 const tmp = () => mkdtempSync(join(tmpdir(), "polyth-auth-"));
 
@@ -301,8 +304,7 @@ test("http gate: /api requires a session, auth endpoints and static stay public"
   writeFileSync(join(webDist, "index.html"), "<html>lock shell</html>");
 
   const server = createHttpServer({
-    sessions: {} as never,
-    projects: { list: async () => [] } as never,
+    spaces: tenancy.gateway,
     runtimes: {} as never,
     capabilities: () => [],
     webDist,

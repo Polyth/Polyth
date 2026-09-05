@@ -33,6 +33,7 @@ import { useCustomizeActive } from "../useShiftArmed.ts";
 import { useSidebarLayout } from "../sidebarLayout.ts";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import DesktopSessionStatus from "./DesktopSessionStatus.tsx";
+import SpaceSwitcher from "./SpaceSwitcher.tsx";
 import { railIconFor } from "../railIcons.ts";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -379,6 +380,9 @@ export default function Header() {
             <span className="polyth-mark">{tr("header.p")}</span>
             <strong>{tr("header.polyth")}</strong>
           </button>}
+          {/* Quiet by design: it renders only when more than one Space
+              exists, and reads as a caption beside the brand. */}
+          <SpaceSwitcher />
           {(!compact || !chatSurface) && <div className="workspace-mode-switch" role="group" aria-label={tr("header.workspaceView")}>
             <button className={workspaceMode === "chat" ? "active" : ""} aria-pressed={workspaceMode === "chat"} onClick={() => switchWorkspaceMode("chat")}>{tr("header.chat")}</button>
             <button className={workspaceMode !== "chat" ? "active" : ""} aria-pressed={workspaceMode !== "chat"} onClick={() => switchWorkspaceMode("widgets")}>{tr("header.canvas")}</button>

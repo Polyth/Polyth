@@ -22,6 +22,7 @@ import { useShellMode } from "./responsiveShell.ts";
 import { tr } from "./i18n/index.ts";
 import { IconButton, Notice } from "./components/ui/index.ts";
 import { CloseIcon } from "./components/ui/icons.ts";
+import BackgroundQuickPicker from "./components/BackgroundPicker.tsx";
 
 function ErrorBanner() {
   const message = useStore((s) => s.uiError);
@@ -100,6 +101,7 @@ export default function App() {
         </div>
         <ContextRail />
       </div>
+      <BackgroundQuickPicker />
       <ErrorBanner />
       <AlertDialog />
       {overlay === "palette" && <CommandPalette />}

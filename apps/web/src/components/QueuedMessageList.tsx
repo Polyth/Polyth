@@ -27,16 +27,23 @@ export function moveQueuedItem(
   return next.map((item, position) => ({ ...item, position }));
 }
 
+/** The newest ordinary queue item is the one an empty follow-up Send promotes. */
+export function latestSteerableQueuedItem(items: readonly QueueItemDto[]): QueueItemDto | null {
+  return items.findLast((item) => !item.heldForReview) ?? null;
+}
+
 export default function QueuedMessageList({
   sessionId,
   editingId = null,
   onEdit,
   onSteer,
+  onItemsChange,
 }: {
   sessionId: string;
   editingId?: string | null;
   onEdit?: (item: QueueItemDto) => void;
   onSteer?: (item: QueueItemDto) => void | Promise<void>;
+  onItemsChange?: (sessionId: string, items: QueueItemDto[]) => void;
 }) {
   const [items, setItems] = useState<QueueItemDto[]>([]);
   const [draggedId, setDraggedId] = useState<string | null>(null);
@@ -46,8 +53,11 @@ export default function QueuedMessageList({
   const eventCount = useStore((s) => (s.events[sessionId] ?? []).length);
 
   const refresh = useCallback(() => {
-    void api.queueList(sessionId).then(setItems);
-  }, [sessionId]);
+    void api.queueList(sessionId).then((next) => {
+      setItems(next);
+      onItemsChange?.(sessionId, next);
+    });
+  }, [sessionId, onItemsChange]);
 
   useEffect(() => { refresh(); }, [refresh, eventCount]);
 
@@ -56,9 +66,11 @@ export default function QueuedMessageList({
 
   const persistOrder = async (next: QueueItemDto[], movedId: string) => {
     setItems(next);
+    onItemsChange?.(sessionId, next);
     try {
       const updated = await api.queueReorder(sessionId, next.map((item) => item.id));
       setItems(updated);
+      onItemsChange?.(sessionId, updated);
       const position = updated.findIndex((item) => item.id === movedId);
       announce(tr("queuedmessagelist.queuedMessageMovedToPositionValueOf", { value: position + 1, length: updated.length }));
     } catch {

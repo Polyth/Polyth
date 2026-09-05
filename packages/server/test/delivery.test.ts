@@ -8,7 +8,7 @@ import { join } from "node:path";
 
 import { createStore, deriveMessages, rewindDraft } from "@polyth/session";
 import type {
-  AgentRuntime, JsonObject, ModelMessage, Project, ProjectService, RuntimeBranchRequest,
+  AgentRuntime, JsonObject, ModelMessage, ModelRef, Project, ProjectService, RuntimeBranchRequest,
   RuntimeEndpoint, RuntimeEvent, RuntimeSessionBinding, RuntimeSnapshot,
 } from "@polyth/contracts";
 import { createSessionService, type Broadcaster } from "../src/sessions.ts";
@@ -20,6 +20,7 @@ function fakeRuntime(opts: { steering?: boolean; steerResult?: boolean } = {}) {
   const listeners = new Set<Emit>();
   const startedTexts: string[] = [];
   const steeredTexts: string[] = [];
+  const steeredModels: Array<ModelRef | undefined> = [];
   const permissionReplies: Array<{ requestId: string; reply: string }> = [];
   const questionReplies: Array<{ requestId: string; answers: JsonObject }> = [];
   const resetSessions: string[] = [];
@@ -63,9 +64,10 @@ function fakeRuntime(opts: { steering?: boolean; steerResult?: boolean } = {}) {
     },
     ...(opts.steering
       ? {
-          steer: async (_sessionId: string, text: string) => {
+          steer: async (_sessionId: string, text: string, model) => {
             if (opts.steerResult === false) return false;
             steeredTexts.push(text);
+            steeredModels.push(model);
             return true;
           },
         }
@@ -113,7 +115,7 @@ function fakeRuntime(opts: { steering?: boolean; steerResult?: boolean } = {}) {
     dispose: async () => {},
   };
   return {
-    rt, emit, startedTexts, steeredTexts, permissionReplies, questionReplies, resetSessions,
+    rt, emit, startedTexts, steeredTexts, steeredModels, permissionReplies, questionReplies, resetSessions,
     branchRequests, discarded,
     get aborted() { return aborted; },
   };
@@ -238,6 +240,28 @@ test("steer persists user intent before I/O and records confirmed delivery after
   const steered = types.indexOf("delivery/steered");
   const um = types.lastIndexOf("user/message");
   assert.ok(um >= 0 && steered > um);
+  await store.close();
+});
+
+test("steer applies its selected model instead of retaining the active model", async () => {
+  const fake = fakeRuntime({ steering: true });
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.send(id, { text: "start" });
+  await flush();
+
+  await sessions.send(id, {
+    text: "continue here",
+    delivery: "steer",
+    model: { providerID: "command-code", modelID: "gpt-5.6-terra", variant: "xhigh" },
+  });
+
+  assert.deepEqual(fake.steeredModels, [{
+    providerID: "command-code", modelID: "gpt-5.6-terra", variant: "xhigh",
+  }]);
+  assert.deepEqual((await store.projection(id))?.model, {
+    providerID: "command-code", modelID: "gpt-5.6-terra", variant: "xhigh",
+  });
   await store.close();
 });
 
@@ -404,6 +428,10 @@ test("reserving a queued message keeps it from dispatching until its composer ed
 
   const reserved = await sessions.queueEditStart!(id, queued.queueId!);
   assert.equal(reserved.text, "edit me");
+  await assert.rejects(
+    () => sessions.queueEditStart!(id, queued.queueId!),
+    /already being edited/,
+  );
   fake.emit(id, { type: "turn/stopped", reason: "completed" });
   await flush();
   assert.deepEqual(fake.startedTexts, ["turn"], "the held queue head does not disappear into dispatch");

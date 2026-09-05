@@ -30,7 +30,12 @@ import {
 import { buildPermissionPreview, PERMISSION_ALLOWED_SCOPES } from "./permissionPreview.ts";
 import { sanitizeAttachments } from "./attachments.ts";
 import { settleAllOrThrow } from "./settle.ts";
-import { createResumeScheduler, planResume } from "./resume.ts";
+import {
+  createResumeScheduler,
+  planResume,
+  rateLimitNoticeHint,
+  RESUME_FALLBACK_BACKOFF_SEC,
+} from "./resume.ts";
 
 export interface Broadcaster {
   event(ev: SessionEvent): void;
@@ -293,6 +298,9 @@ export function createSessionService(deps: {
     attention(sessionId: string, kind: "permission" | "question", requestId?: string, questions?: JsonObject[]): void;
     turnStopped(sessionId: string, reason: "completed" | "aborted" | "error"): void;
   };
+  /** Hard ceiling for one runtime tool execution. A hung tool is aborted and
+   * recorded as a model-visible tool/error. Defaults to ten minutes. */
+  toolExecutionTimeoutMs?: number;
 }): RuntimeEpochSessionService {
   const { store, projects, permissions, runtimes, broadcast } = deps;
   const durable = store as SessionPersistence & RuntimeDurability;
@@ -410,6 +418,69 @@ export function createSessionService(deps: {
   // Stop is a recovery control, not a background submission: fail it promptly
   // so reconciliation can take over instead of leaving the control disabled.
   const ABORT_AWAIT_MS = 8_000;
+  const TOOL_EXECUTION_TIMEOUT_MS = deps.toolExecutionTimeoutMs ?? 10 * 60_000;
+  const toolWatchdogs = new Map<string, NodeJS.Timeout>();
+  const toolWatchdogKey = (sessionId: string, callId: string): string => `${sessionId}\0${callId}`;
+  const clearToolWatchdog = (sessionId: string, callId: string): void => {
+    const key = toolWatchdogKey(sessionId, callId);
+    const timer = toolWatchdogs.get(key);
+    if (timer) clearTimeout(timer);
+    toolWatchdogs.delete(key);
+  };
+  const clearSessionToolWatchdogs = (sessionId: string): void => {
+    for (const [key, timer] of toolWatchdogs) {
+      if (!key.startsWith(`${sessionId}\0`)) continue;
+      clearTimeout(timer);
+      toolWatchdogs.delete(key);
+    }
+  };
+  const activeToolsFromEvents = (
+    events: readonly SessionEvent[],
+  ): Map<string, { tool: string; input: JsonObject; startedAt: number }> => {
+    const active = new Map<string, { tool: string; input: JsonObject; startedAt: number }>();
+    for (const event of events) {
+      const data = event.data as Record<string, unknown>;
+      const callId = typeof data.callId === "string" ? data.callId : "";
+      if (event.type === "turn/started" || event.type === "turn/stopped") active.clear();
+      if ((event.type === "tool/started" || (event.type === "tool/call" && data.status === "running")) && callId) {
+        active.set(callId, {
+          tool: typeof data.tool === "string" ? data.tool : "tool",
+          input: data.input && typeof data.input === "object" && !Array.isArray(data.input)
+            ? data.input as JsonObject
+            : {},
+          startedAt: event.time,
+        });
+      } else if ((event.type === "tool/result" || event.type === "tool/error") && callId) {
+        active.delete(callId);
+      }
+    }
+    return active;
+  };
+  function armToolWatchdog(
+    sessionId: string,
+    callId: string,
+    startedAt = Date.now(),
+  ): void {
+    if (TOOL_EXECUTION_TIMEOUT_MS <= 0) return;
+    clearToolWatchdog(sessionId, callId);
+    const timer = setTimeout(() => {
+      toolWatchdogs.delete(toolWatchdogKey(sessionId, callId));
+      void stopTimedOutTool(sessionId, callId).catch((error) => {
+        console.error(`[polyth] failed to stop timed-out tool ${callId} in ${sessionId}`, error);
+      });
+    }, Math.max(0, TOOL_EXECUTION_TIMEOUT_MS - (Date.now() - startedAt)));
+    timer.unref?.();
+    toolWatchdogs.set(toolWatchdogKey(sessionId, callId), timer);
+  }
+  function updateToolWatchdog(sessionId: string, event: RuntimeEvent): void {
+    if (event.type === "tool/started" || (event.type === "tool/call" && event.status === "running")) {
+      armToolWatchdog(sessionId, event.callId);
+    } else if (event.type === "tool/result" || event.type === "tool/error") {
+      clearToolWatchdog(sessionId, event.callId);
+    } else if (event.type === "turn/stopped") {
+      clearSessionToolWatchdogs(sessionId);
+    }
+  }
   const boundedRuntimeAwait = async <T,>(
     promise: Promise<T>,
     operationId: string,
@@ -774,11 +845,25 @@ export function createSessionService(deps: {
     });
   };
 
-  const stopLocally = async (sessionId: string): Promise<void> => {
+  const stopLocally = async (
+    sessionId: string,
+    toolError = "Command stopped by user.",
+  ): Promise<void> => {
     const projection = await store.projection(sessionId);
     if (!projection || projection.status === "archived") return;
-    const open = openTurnFromEvents(await store.events(sessionId));
-    if (!open && projection.status === "idle") return;
+    const events = await store.events(sessionId);
+    const open = openTurnFromEvents(events);
+    const activeTools = activeToolsFromEvents(events);
+    if (!open && activeTools.size === 0 && projection.status === "idle") return;
+    for (const [callId, active] of activeTools) {
+      await onRuntimeEvent(sessionId, {
+        type: "tool/error",
+        callId,
+        tool: active.tool,
+        input: active.input,
+        error: toolError,
+      });
+    }
     await onRuntimeEvent(sessionId, {
       type: "turn/stopped",
       ...(open ? { turnId: open.turnId } : {}),
@@ -1880,7 +1965,7 @@ export function createSessionService(deps: {
   // through its own admission path.
   const runScheduledResume = async (sessionId: string): Promise<void> => {
     const plan = await withSessionLock(sessionId, async (): Promise<
-      { text: string; attachments?: AttachmentRef[]; model?: ModelRef } | null
+      { text: string; attachments?: AttachmentRef[]; model?: ModelRef; resumeAt: number; userMessageSeq: number } | null
     > => {
       const proj = await store.projection(sessionId);
       if (!proj?.resume) return null;
@@ -1892,16 +1977,41 @@ export function createSessionService(deps: {
         await clearResume(sessionId, "user");
         return null;
       }
-      await clearResume(sessionId, "resumed");
       return {
         text: last.text,
         ...(last.attachments
           ? { attachments: last.attachments as unknown as AttachmentRef[] }
           : {}),
         ...(proj.model ? { model: proj.model } : {}),
+        resumeAt: proj.resume.resumeAt,
+        userMessageSeq: proj.resume.userMessageSeq,
       };
     });
-    if (plan) await service.send(sessionId, { ...plan, autoResume: true });
+    if (!plan) return;
+    try {
+      // Keep the plan until `turn/started` is durably observed. A temporary
+      // reconciliation barrier must retry instead of losing the only prompt
+      // that was meant to be submitted automatically.
+      await service.send(sessionId, {
+        text: plan.text,
+        ...(plan.attachments ? { attachments: plan.attachments } : {}),
+        ...(plan.model ? { model: plan.model } : {}),
+        autoResume: true,
+      });
+    } catch (error) {
+      if ((error as { code?: unknown }).code === "conflict") {
+        const current = await store.projection(sessionId);
+        const last = current ? lastUserMessage(await store.events(sessionId)) : undefined;
+        if (
+          current?.resume?.resumeAt === plan.resumeAt
+          && current.resume.userMessageSeq === plan.userMessageSeq
+          && last?.seq === plan.userMessageSeq
+        ) {
+          resumeScheduler.arm(sessionId, Date.now() + RESUME_FALLBACK_BACKOFF_SEC[0]! * 1000);
+        }
+      }
+      throw error;
+    }
   };
 
   /** Boot: re-arm timers for sessions that stopped rate-limited before a
@@ -1915,8 +2025,86 @@ export function createSessionService(deps: {
     }
     for (const row of rows) {
       if (row.resume && row.status !== "archived") {
+        // The projection can be committed just before a process dies, leaving
+        // the durable retry plan without its terminal event. The UI derives
+        // the notice from that event, so repair the log before re-arming the
+        // timer. Do not duplicate a stop that already carries this plan.
+        const events = await store.events(row.id);
+        const lastTurnEvent = [...events].reverse().find(
+          (event) => event.type === "turn/started" || event.type === "turn/stopped",
+        );
+        const retry = lastTurnEvent?.type === "turn/stopped"
+          ? (lastTurnEvent.data as { retry?: unknown }).retry
+          : undefined;
+        const retryData = retry && typeof retry === "object" && !Array.isArray(retry)
+          ? retry as Record<string, unknown>
+          : undefined;
+        const hasMatchingStop = retryData?.resumeAt === row.resume.resumeAt
+          && retryData.attempt === row.resume.attempt
+          && retryData.scope === row.resume.scope
+          && retryData.provider === row.resume.provider;
+        const last = lastUserMessage(events);
+        const targetMatches = last?.seq === row.resume.userMessageSeq;
+        if (!hasMatchingStop && targetMatches) {
+          await appendAndBroadcast(row.id, "turn/stopped", {
+            turnId: openTurnFromEvents(events)?.turnId
+              ?? lastTurnId.get(row.id)
+              ?? "rate-limit-stall",
+            reason: "error",
+            error: "provider rate limit reached",
+            retry: {
+              scope: row.resume.scope,
+              ...(row.resume.provider ? { provider: row.resume.provider } : {}),
+              ...(row.resume.retryAfterSec ? { retryAfterSec: row.resume.retryAfterSec } : {}),
+              resumeAt: row.resume.resumeAt,
+              attempt: row.resume.attempt,
+            },
+          }, { ignorable: true });
+        }
+        // A newer user message means the old plan was superseded while the
+        // process was stopping; leave the normal timer guard to clear it.
+        if (targetMatches && row.status !== "failed") {
+          await updateProjection(row.id, { status: "failed" });
+        }
         resumeScheduler.arm(row.id, row.resume.resumeAt);
+        continue;
       }
+      // Command Code can leave SSE open after a `[rate-limit]` reasoning
+      // notice, without its normal terminal event. On restart the adapter has
+      // no live turn to watchdog, so recover the durable wait from a quiet log
+      // rather than leaving the session in `working` forever.
+      if (row.status !== "working") continue;
+      const events = await store.events(row.id);
+      if (Date.now() - (events.at(-1)?.time ?? Date.now()) < 15_000) continue;
+      let active = false;
+      let hint: RateLimitRetryHint | null = null;
+      for (const event of events) {
+        if (event.type === "turn/started") {
+          active = true;
+          hint = null;
+          continue;
+        }
+        if (event.type === "turn/stopped") {
+          active = false;
+          hint = null;
+          continue;
+        }
+        if (!active || (event.type !== "assistant/reasoning-chunk" && event.type !== "assistant/message")) continue;
+        const data = event.data as { text?: unknown; reasoning?: unknown };
+        hint = rateLimitNoticeHint(
+          typeof data.reasoning === "string" ? data.reasoning : typeof data.text === "string" ? data.text : "",
+        ) ?? hint;
+      }
+      if (!active || !hint) continue;
+      const retry = await scheduleResume(row.id, hint, events);
+      if (!retry) continue;
+      await appendAndBroadcast(row.id, "turn/stopped", {
+        turnId: lastTurnId.get(row.id) ?? "rate-limit-stall",
+        reason: "error",
+        error: "provider rate limit reached",
+        retry: retry as unknown as JsonObject,
+      }, { ignorable: true });
+      await updateProjection(row.id, { status: "failed" });
     }
   };
 
@@ -1973,6 +2161,8 @@ export function createSessionService(deps: {
             const projection: SessionProjection = {
               id: childId,
               projectId: parent.projectId,
+              // Delegated children live in the parent's Space, always.
+              ...(parent.spaceId ? { spaceId: parent.spaceId } : {}),
               parentId: sessionId,
               title: child.title || agent.label,
               status: "reconciling",
@@ -2297,6 +2487,7 @@ export function createSessionService(deps: {
         await persist(sessionId, ev.type, rest as unknown as JsonObject);
       }
     }
+    if (sideEffects) updateToolWatchdog(sessionId, ev);
   };
 
   const captureRuntimeEvent = async (
@@ -2450,6 +2641,7 @@ export function createSessionService(deps: {
     const rt = sessionRuntime.get(sessionId);
     if (!rt) return;
     sessionRuntime.delete(sessionId);
+    clearSessionToolWatchdogs(sessionId);
     turnReply.delete(sessionId);
     behaviorLogged.delete(sessionId);
     autoTitleRequested.delete(sessionId);
@@ -3865,6 +4057,71 @@ export function createSessionService(deps: {
     });
   };
 
+  async function abortTurnUnderLock(
+    sessionId: string,
+    reason: "user" | "tool-timeout",
+    toolError: string,
+  ): Promise<void> {
+    const projection = await store.projection(sessionId);
+    if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
+    // Stop is an unconditional intent. Whatever the session state — idle,
+    // working, failed, or `unknown` after a Polyth restart stranded an
+    // in-flight turn — the canonical turn is closed locally and controls never
+    // wedge. Backend I/O is best-effort.
+    let runtime: AgentRuntime | undefined = sessionRuntime.get(sessionId);
+    if (!runtime) {
+      try {
+        runtime = await ensureWired(sessionId, projection);
+      } catch (error) {
+        console.error(`[polyth] abort could not wire a runtime for ${sessionId}`, error);
+      }
+    }
+    if (!runtime) {
+      await stopLocally(sessionId, toolError);
+      return;
+    }
+    const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
+      sessionId,
+      mutationKind: "turn-abort",
+      intentEvent: {
+        type: "turn/abort-requested",
+        data: { reason },
+        ignorable: true,
+      },
+    }));
+    const outcome = await runPreparedOperation<Record<string, never>, void>(
+      prepared.operation,
+      (operationId) => runtime!.abortOperation
+        ? runtime!.abortOperation(sessionId, operationId)
+        : runtime!.abort(sessionId),
+      () => ({}),
+      undefined,
+      ABORT_AWAIT_MS,
+    );
+    await stopLocally(sessionId, toolError);
+    if (outcome.kind === "unknown") {
+      scheduleReconciliation(sessionId, projection, runtime, "abort-outcome-unknown");
+    }
+  }
+
+  async function stopTimedOutTool(
+    sessionId: string,
+    callId: string,
+  ): Promise<void> {
+    await withSessionLock(sessionId, async () => {
+      const active = activeToolsFromEvents(await store.events(sessionId)).get(callId);
+      if (!active) return;
+      const duration = TOOL_EXECUTION_TIMEOUT_MS >= 60_000
+        ? `${Math.round(TOOL_EXECUTION_TIMEOUT_MS / 60_000)} minutes`
+        : `${TOOL_EXECUTION_TIMEOUT_MS}ms`;
+      await abortTurnUnderLock(
+        sessionId,
+        "tool-timeout",
+        `${active.tool} was stopped after exceeding the ${duration} execution safety limit. Retry with a shorter command or an explicit timeout.`,
+      );
+    });
+  }
+
   const service: RuntimeEpochSessionService = {
     async transitionRuntimeEpoch(sessionId, runtime, options) {
       return withSessionLock(sessionId, () =>
@@ -3991,6 +4248,9 @@ export function createSessionService(deps: {
       const inheritedAutoAccept = input.parentId ? await effectiveAutoAccept(input.parentId) : false;
       const projection: SessionProjection = {
         id: sessionId, projectId: project.id,
+        // Tenancy is inherited from the owning project — the one place a
+        // session's Space is decided. No caller can pass it in.
+        ...(project.spaceId ? { spaceId: project.spaceId } : {}),
         ...(input.parentId ? { parentId: input.parentId } : {}),
         ...(inheritedAutoAccept ? { autoAccept: true } : {}),
         title: input.title || "New session",
@@ -4364,8 +4624,8 @@ export function createSessionService(deps: {
             async (operationId) => {
               try {
                 const value = await (rt.steerOperation
-                  ? rt.steerOperation(sessionId, input.text, operationId)
-                  : rt.steer!(sessionId, input.text));
+                  ? rt.steerOperation(sessionId, input.text, operationId, input.model, input.agent)
+                  : rt.steer!(sessionId, input.text, input.model, input.agent));
                 if (isMutationOutcome<Record<string, never>>(value)) return value;
                 return value
                   ? { kind: "confirmed" as const, value: {} }
@@ -4394,6 +4654,12 @@ export function createSessionService(deps: {
             await updateProjection(sessionId, { status: "unknown" });
             scheduleReconciliation(sessionId, proj!, rt, "steer-outcome-unknown");
             throw outcomeError(outcome);
+          }
+          if (input.model || input.agent) {
+            await updateProjection(sessionId, {
+              ...(input.model ? { model: input.model } : {}),
+              ...(input.agent ? { agent: input.agent } : {}),
+            });
           }
           await appendAndBroadcast(sessionId, "delivery/steered", { text: input.text }, { ignorable: true });
           return { turnId: lastTurnId.get(sessionId) ?? randomUUID() };
@@ -4473,6 +4739,9 @@ export function createSessionService(deps: {
       if (!deps.queue) throw Object.assign(new Error("delivery queue unavailable"), { code: "unsupported" });
       const item = (await deps.queue.queueList(sessionId)).find((candidate) => candidate.id === queueId);
       if (!item) throw Object.assign(new Error("queued message has already started"), { code: "conflict" });
+      if (queueEditHeld(sessionId, queueId)) {
+        throw Object.assign(new Error("queued message is already being edited"), { code: "conflict" });
+      }
       const holds = queueEditHolds.get(sessionId) ?? new Map<string, number>();
       holds.set(queueId, Date.now() + QUEUE_EDIT_HOLD_MS);
       queueEditHolds.set(sessionId, holds);
@@ -4571,55 +4840,8 @@ export function createSessionService(deps: {
     },
 
     async abort(sessionId) {
-      await withSessionLock(sessionId, async () => {
-        const projection = await store.projection(sessionId);
-        if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
-        // Stop is an unconditional intent. Whatever the session state — idle,
-        // working, failed, or `unknown` after a Polyth restart stranded an
-        // in-flight turn — the canonical turn is closed locally and the Stop
-        // button never wedges. Backend I/O is best-effort.
-        let runtime: AgentRuntime | undefined = sessionRuntime.get(sessionId);
-        if (!runtime) {
-          try {
-            runtime = await ensureWired(sessionId, projection);
-          } catch (error) {
-            console.error(`[polyth] abort could not wire a runtime for ${sessionId}`, error);
-          }
-        }
-        if (!runtime) {
-          // No reachable backend to ask; the durable aborted stop still wins.
-          await stopLocally(sessionId);
-          return;
-        }
-        const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
-          sessionId,
-          mutationKind: "turn-abort",
-          intentEvent: {
-            type: "turn/abort-requested",
-            data: { reason: "user" },
-            ignorable: true,
-          },
-        }));
-        const outcome = await runPreparedOperation<Record<string, never>, void>(
-          prepared.operation,
-          (operationId) => runtime!.abortOperation
-            ? runtime!.abortOperation(sessionId, operationId)
-            : runtime!.abort(sessionId),
-          () => ({}),
-          undefined,
-          ABORT_AWAIT_MS,
-        );
-        // OpenCode acknowledges abort before it necessarily publishes the
-        // matching idle event, and a restart-stranded turn may leave the
-        // backend outcome `unknown` or `rejected`. In every case close the
-        // canonical turn now; a late runtime terminal event is ignored by the
-        // durable turn guard. An `unknown` backend outcome still reconciles in
-        // the background to re-sync backend truth.
-        await stopLocally(sessionId);
-        if (outcome.kind === "unknown") {
-          scheduleReconciliation(sessionId, projection, runtime, "abort-outcome-unknown");
-        }
-      });
+      await withSessionLock(sessionId, () =>
+        abortTurnUnderLock(sessionId, "user", "Command stopped by user."));
     },
 
     async cancelResume(sessionId) {
@@ -5147,7 +5369,7 @@ export function createSessionService(deps: {
     },
     async sync(projectId) {
       // F14: bulk adopt-everything, kept for programmatic use. The web now
-      // browses /api/control/backend-sessions and imports selectively.
+      // browses /api/agent/backend-sessions and imports selectively.
       const { items } = await backendSessionScan(projectId);
       if (items.length > 0) {
         await this.importBackendSessions!(projectId, items.map((r) => r.id));
@@ -5168,6 +5390,7 @@ export function createSessionService(deps: {
         const projection: SessionProjection = {
           id,
           projectId,
+          ...(project.spaceId ? { spaceId: project.spaceId } : {}),
           title: remote.title,
           status: "reconciling",
           backendSessionId: remote.id,
@@ -5470,6 +5693,15 @@ export function createSessionService(deps: {
     },
   };
 
+  const rehydrateToolWatchdogs = async (): Promise<void> => {
+    for (const row of await store.projections()) {
+      if (row.status === "archived" || row.status === "idle") continue;
+      for (const [callId, active] of activeToolsFromEvents(await store.events(row.id))) {
+        armToolWatchdog(row.id, callId, active.startedAt);
+      }
+    }
+  };
+
   /** F18 reconcile-on-enable: resolve every pending runtime permission request
    *  of the session with an auto "once". Composer-shell confirmations are
    *  skipped — those confirm a command the USER typed and must stay manual. */
@@ -5488,6 +5720,9 @@ export function createSessionService(deps: {
   // resumeAt simply resends on the next tick.
   void rehydrateResume().catch(
     (err: unknown) => console.error("[polyth] rate-limit resume rehydrate failed", err),
+  );
+  void rehydrateToolWatchdogs().catch(
+    (err: unknown) => console.error("[polyth] tool watchdog rehydrate failed", err),
   );
 
   return service;

@@ -385,9 +385,12 @@ export default function ContextRail() {
   const measured = workspaceWidth > 0;
   const admits = decision !== null && decision.dock;
   const guardInputs = `${open?.id ?? ""}:${projectId ?? ""}:${remembered ?? "auto"}`;
-  const layered = isWorkspacePane && paneMode === "fullscreen";
-  const dynamic = isWorkspacePane && paneMode === "dynamic";
-  const pinned = isWorkspacePane && paneMode === "pinned";
+  // Compact shells have room for one package at a time. Preserve the user's
+  // desktop preference, but present every package as fullscreen on mobile.
+  const effectivePaneMode = compact && isWorkspacePane ? "fullscreen" : paneMode;
+  const layered = isWorkspacePane && effectivePaneMode === "fullscreen";
+  const dynamic = isWorkspacePane && effectivePaneMode === "dynamic";
+  const pinned = isWorkspacePane && effectivePaneMode === "pinned";
   const pinnedNarrow = pinned && (compact || (measured && (!admits || guardPromoted)));
 
   const dockWidth = decision !== null && presentation
@@ -667,7 +670,8 @@ export default function ContextRail() {
       if (transient && transient !== paneRef.current) return;
     }
     e.stopPropagation();
-    handlePaneEscape();
+    if (compact) closeWorkspacePane();
+    else handlePaneEscape();
   };
 
   const geometryPending = isWorkspacePane && !measured;
@@ -710,7 +714,7 @@ export default function ContextRail() {
           aria-modal={compactContext || undefined}
           aria-label={open?.title ?? tr("contextrail.panel")}
           data-package-window-owner={open?.id}
-          data-package-window-mode={isWorkspacePane ? paneMode : "context"}
+          data-package-window-mode={isWorkspacePane ? effectivePaneMode : "context"}
           data-geometry-ready={!geometryPending}
           onKeyDown={onPaneKey}
         >
@@ -756,8 +760,8 @@ export default function ContextRail() {
             icon={open?.icon ? open.icon() : undefined}
             pinned={pinned}
             fullscreen={layered}
-            onTogglePin={isWorkspacePane ? togglePanePin : undefined}
-            onToggleFullscreen={isWorkspacePane ? togglePaneFullscreen : undefined}
+            onTogglePin={isWorkspacePane && !compact ? togglePanePin : undefined}
+            onToggleFullscreen={isWorkspacePane && !compact ? togglePaneFullscreen : undefined}
             onClose={() => {
               if (isWorkspacePane) closeWorkspacePane();
               else if (compact) closeAllModules();

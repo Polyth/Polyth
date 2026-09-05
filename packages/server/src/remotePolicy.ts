@@ -125,6 +125,7 @@ export const CORE_REMOTE_ACCESS: RemoteAccessPolicy = {
   routeScopes: [
     "agents", "auth", "core", "folders", "health", "labels", "models", "notifications",
     "packages", "projects", "providers", "runtime", "search", "sessions", "settings",
+    "spaces",
   ],
   http: [
     { methods: ["GET"], path: "/api/health", capability: REMOTE_CAPABILITY.coreHealthRead, mutation: false },
@@ -170,6 +171,11 @@ export const CORE_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["GET"], path: "/api/labels", capability: REMOTE_CAPABILITY.coreProjectsRead, mutation: false },
     { methods: ["GET"], path: "/api/search/workspaces", capability: REMOTE_CAPABILITY.coreProjectsRead, mutation: false },
     { methods: ["GET"], path: "/api/search/sessions", capability: REMOTE_CAPABILITY.coreSessionsRead, mutation: false },
+    // Spaces: a paired device may see which Spaces it can enter and switch
+    // between them. Creating, renaming, deleting, and membership changes stay
+    // local-only — tenancy administration is not a remote-device affordance.
+    { methods: ["GET"], path: "/api/spaces", capability: REMOTE_CAPABILITY.coreSessionsRead, mutation: false },
+    { methods: ["POST"], path: "/api/spaces/:id/activate", capability: REMOTE_CAPABILITY.coreSessionsControl, mutation: true },
     { methods: ["GET"], path: "/api/settings/client", capability: REMOTE_CAPABILITY.coreSessionsRead, mutation: false },
     { methods: ["PUT"], path: "/api/settings/client", capability: REMOTE_CAPABILITY.coreSessionsControl, mutation: true },
   ],
@@ -188,7 +194,6 @@ export const CORE_LOCAL_ONLY_PREFIXES: readonly string[] = [
   "/api/settings/behavior",
   "/api/settings/assist",
   "/api/system",
-  "/api/control",
   "/api/agent",
   "/api/browse",
   "/api/opencode",

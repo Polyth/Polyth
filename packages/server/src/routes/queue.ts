@@ -1,9 +1,10 @@
-import type { SessionService } from "@polyth/contracts";
 import type { RouteHandler } from "../http.ts";
+import type { SpaceServicesFor } from "../spaceScope.ts";
 
 /** Keeps a queue item from dispatching while its text is open in the composer. */
-export function queueRoutes(sessions: SessionService): RouteHandler {
-  return async ({ path, method, body, json }) => {
+export function queueRoutes(spaces: SpaceServicesFor): RouteHandler {
+  return async ({ path, method, body, json, space }) => {
+    const { sessions } = spaces(space);
     const sendNow = path.match(/^\/api\/sessions\/([^/]+)\/queue\/([^/]+)\/edit\/send-now$/);
     if (sendNow && method === "POST") {
       if (!sessions.queueSendNow) throw Object.assign(new Error("queue editing unavailable"), { code: "unsupported" });

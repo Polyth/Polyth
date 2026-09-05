@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { transitionPaneWindow, type PaneWindowState } from "../src/workspace/panePrefs.ts";
 import { clampPaneDimension } from "../src/workspace/panePrefs.ts";
 import { pathBelongsToPackageWindow } from "../src/components/ui/PackageWindowContext.ts";
@@ -48,4 +49,12 @@ test("portal and launcher interaction belong to their package window", () => {
   assert.equal(pathBelongsToPackageWindow([node("data-pane-launcher", "files")], "files"), true);
   assert.equal(pathBelongsToPackageWindow([node("role", "dialog")], "files"), true);
   assert.equal(pathBelongsToPackageWindow([node("data-package-window-owner", "git")], "files"), false);
+});
+
+test("compact package windows are fullscreen-only", async () => {
+  const source = await readFile(new URL("../src/components/ContextRail.tsx", import.meta.url), "utf8");
+  assert.match(source, /effectivePaneMode = compact && isWorkspacePane \? "fullscreen" : paneMode/);
+  assert.match(source, /onTogglePin=\{isWorkspacePane && !compact \? togglePanePin : undefined\}/);
+  assert.match(source, /onToggleFullscreen=\{isWorkspacePane && !compact \? togglePaneFullscreen : undefined\}/);
+  assert.match(source, /if \(compact\) closeWorkspacePane\(\);\s*else handlePaneEscape\(\);/);
 });

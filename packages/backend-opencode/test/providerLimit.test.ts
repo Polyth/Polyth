@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classifyProviderLimit, parseRetryAfterSec } from "../src/providerLimit.ts";
+import {
+  classifyProviderLimit,
+  classifyProviderLimitNotice,
+  parseRetryAfterSec,
+} from "../src/providerLimit.ts";
 
 const NOW = 1_700_000_000_000;
 
@@ -107,4 +111,12 @@ test("'try again in 1m30s' parses compound durations", () => {
 
 test("no parseable wait returns 0", () => {
   assert.equal(parseRetryAfterSec("please slow down", undefined, NOW), 0);
+});
+
+test("Command Code rate-limit reasoning gives the normal retry hint", () => {
+  assert.deepEqual(
+    classifyProviderLimitNotice("[rate-limit] Claude · five hour · 99% of window used · resets in 2h 53m."),
+    { scope: "rate", provider: "anthropic", retryAfterSec: 10_380 },
+  );
+  assert.equal(classifyProviderLimitNotice("I mention a rate limit in passing"), null);
 });

@@ -95,6 +95,7 @@ test("known providers render decorative monochrome SVG marks", async () => {
     "kimi-for-coding",
     "codex",
     "command-code",
+    "cursor",
   ];
 
   for (const providerID of providers) {

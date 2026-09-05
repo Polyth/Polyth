@@ -9,6 +9,9 @@ import type { AuthPrincipal, RequestIngress, RouteRequest } from "@polyth/contra
 import { createAuthService } from "../src/auth.ts";
 import { createHttpHandler } from "../src/http.ts";
 import { settingsRoutes } from "../src/routes/settings.ts";
+import { testTenancy } from "./support/spaces.ts";
+
+const tenancy = await testTenancy();
 
 const tmp = () => mkdtempSync(join(tmpdir(), "polyth-local-admin-"));
 
@@ -29,8 +32,7 @@ function fakeReq(opts: {
 test("auth disabled plus spoofed forwarding headers still uses the socket address", async () => {
   const auth = createAuthService({ file: join(tmp(), "off.json") });
   const handler = createHttpHandler({
-    sessions: { list: async () => [] } as never,
-    projects: { list: async () => [] } as never,
+    spaces: tenancy.gateway,
     runtimes: {} as never,
     capabilities: () => [],
     webDist: tmp(),

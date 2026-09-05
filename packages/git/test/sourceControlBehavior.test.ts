@@ -116,7 +116,9 @@ test("GitView exposes diff Retry and refreshes an open selection after staging",
     if (url.startsWith("/api/git/stashes")) return response([]);
     if (url.startsWith("/api/git/diff")) {
       diffAttempts += 1;
-      if (diffAttempts === 1) return response({ message: "temporary diff failure" }, 500);
+      // Attempt 1 is GitView's own background line-stat prefetch for the
+      // changed file; the explicit selection request below is attempt 2.
+      if (diffAttempts === 2) return response({ message: "temporary diff failure" }, 500);
       const isStaged = url.includes("staged=true");
       return response({ path: "src/app.ts", diff: `@@ -1 +1 @@\n-old\n+${isStaged ? "staged-new" : "new"}` });
     }

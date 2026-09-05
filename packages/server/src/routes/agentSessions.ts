@@ -17,12 +17,14 @@ import type {
   UserTurnInput,
 } from "@polyth/contracts";
 import { deriveMessages, planRuntimeEpochRecovery, sessionDebugObservability } from "@polyth/session";
+import type { SpaceServicesFor } from "../spaceScope.ts";
 
 const SESSION_STATUSES = new Set([
   "idle", "working", "waiting", "finished", "failed", "archived",
   "epoch-pending",
 ]);
 const DELIVERY_MODES = new Set(["normal", "steer", "queue", "interrupt"]);
+const MAX_IMPORT_BATCH = 200;
 
 export interface AgentGoalState {
   objective: string;
@@ -54,8 +56,10 @@ export interface AgentGoalService {
 }
 
 export interface AgentSessionRouteDeps {
-  sessions: SessionService;
-  projects: ProjectService;
+  /** Tenant-scoped services. The agent API is a full session surface, so it
+   *  never receives the unscoped services — a `spaceId` is required to obtain
+   *  any of them. */
+  spaces: SpaceServicesFor;
   store: Pick<SessionPersistence, "events">;
   capabilities?: () => string[];
   goals?: () => AgentGoalService | undefined;
@@ -275,7 +279,13 @@ const sessionLinks = (sessionId: string): Record<string, string> => {
  * Existing feature routes remain available; the discovery response advertises
  * their templates so an agent can traverse the complete session system. */
 export function agentSessionRoutes(deps: AgentSessionRouteDeps): RouteHandler {
-  const { sessions, projects, store } = deps;
+  const { store } = deps;
+
+  return async (rc) => {
+    const { path, method, url, body, json, space } = rc;
+    // Bound once per request. Every helper below closes over these scoped
+    // services, so no branch of this large surface can reach another tenant.
+    const { sessions, projects } = deps.spaces(space);
 
   const context = async (sessionId: string) => {
     const session = await sessions.snapshot(sessionId);
@@ -298,7 +308,6 @@ export function agentSessionRoutes(deps: AgentSessionRouteDeps): RouteHandler {
     return service;
   };
 
-  return async ({ path, method, url, body, json }) => {
     if (path === "/api/agent" && method === "GET"
       || path === "/api/agent/sessions/capabilities" && method === "GET") {
       json(200, {
@@ -307,6 +316,7 @@ export function agentSessionRoutes(deps: AgentSessionRouteDeps): RouteHandler {
         capabilities: deps.capabilities?.() ?? [],
         endpoints: {
           projects: "GET /api/agent/projects",
+          backendSessions: "GET|POST /api/agent/backend-sessions[/import]",
           sessions: "GET|POST /api/agent/sessions",
           session: "GET|PATCH|DELETE /api/agent/sessions/{sessionId}",
           events: "GET /api/agent/sessions/{sessionId}/events?afterSeq=0&limit=200",
@@ -329,6 +339,26 @@ export function agentSessionRoutes(deps: AgentSessionRouteDeps): RouteHandler {
           git: "/api/git/*?sessionId={sessionId}",
         },
       });
+      return true;
+    }
+
+    if (path === "/api/agent/backend-sessions" && method === "GET") {
+      if (!sessions.backendSessions) return unsupported("backend session import is unavailable");
+      const projectId = url.searchParams.get("projectId") ?? "";
+      if (!projectId) return invalid("projectId is required");
+      json(200, await sessions.backendSessions(projectId));
+      return true;
+    }
+
+    if (path === "/api/agent/backend-sessions/import" && method === "POST") {
+      if (!sessions.importBackendSessions) return unsupported("backend session import is unavailable");
+      const input = await body();
+      if (typeof input.projectId !== "string" || !input.projectId) return invalid("projectId is required");
+      if (!Array.isArray(input.ids) || input.ids.length === 0 || input.ids.some((id) => typeof id !== "string" || !id)) {
+        return invalid("ids must be a non-empty array of strings");
+      }
+      if (input.ids.length > MAX_IMPORT_BATCH) return invalid(`at most ${MAX_IMPORT_BATCH} sessions per import`);
+      json(200, await sessions.importBackendSessions(input.projectId, input.ids as string[]));
       return true;
     }
 

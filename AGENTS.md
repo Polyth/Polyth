@@ -19,6 +19,7 @@ When documents conflict, resolve in this order:
 - `apps/mobile` — Capacitor shell: native client for an existing Polyth server; renders the same web build.
 - `packages/contracts` — normative surface: DTOs, `SessionEvent`, `UiSlot`/`UI_SLOTS` (types + runtime exports: `cap`, `CAP`, `isUiSlot`, `MODEL_VISIBLE_TYPES`).
 - `packages/kernel` — scoped plugin contexts: provide/inject capabilities, events/waterfalls, LIFO effect disposal, slot contributions.
+- `packages/tenancy` — the Space (tenant) boundary: identity, Spaces, memberships, request→`SpaceContext` resolution, per-Space storage roots with canonical path validation, audit. Infrastructure, never discovered as a feature.
 - `packages/session` — append-only `node:sqlite` WAL event store, projections, queue, `deriveMessages`.
 - `packages/backend-opencode` — the ONLY OpenCode integration: spawns/attaches `opencode serve`, translates SSE to runtime events.
 - `packages/server` — composition root: HTTP/WS gateway, `RouteHandler` chain, per-project runtime pool, broadcast, auth, static web.
@@ -36,6 +37,7 @@ Every browser feature package declares `"polyth": { "webEntry": "./widgets/index
 | Feature service logic + package persistence | `packages/<feature>/src/index.ts` |
 | Feature REST routes | `packages/<feature>/src/serverEntry.ts` (route handler + `routes:` on the returned `ServerPackage`); legacy routes may sit in `packages/server/src/routes/` — new feature routes belong to the package |
 | Composition-root wiring (cross-cutting) | `packages/server/src/index.ts` (`boot()`) |
+| Tenancy / Space enforcement | `packages/tenancy/src/`, `packages/server/src/{spaces,spaceScope}.ts` — never re-derived inside a feature |
 | Feature web UI (views, widgets, settings pages, surfaces, slot contributions) | `packages/<feature>/widgets/` |
 | Package web entry (registrations) | `packages/<feature>/widgets/index.tsx` — `defineWebPackage` |
 | Shared shell components / primitives / registries | `apps/web/src/components/`, `apps/web/src/components/ui/`, `apps/web/src/*.ts` |
@@ -76,6 +78,7 @@ Every browser feature package declares `"polyth": { "webEntry": "./widgets/index
 | Change host shell, registries, or primitives | `docs/dev/ui.md` (host vs package boundary) + `docs/dev/architecture.md` |
 | Change public contracts (`@polyth/contracts`, `@polyth/web-sdk`, `@polyth/plugins`) | find every consumer first (`grep -rln "@polyth/<name>" apps packages`) |
 | Touch session events / `deriveMessages` | `docs/dev/architecture.md` (event vocabulary) |
+| Store per-user data, read a resource by id, or add a route | `docs/architecture/spaces-and-tenancy.md` (the Space boundary) |
 
 ## Commands (repo root)
 
@@ -88,6 +91,23 @@ Every browser feature package declares `"polyth": { "webEntry": "./widgets/index
 - Typecheck: no root script — run `npx tsc --noEmit` inside each touched package and `apps/web` (each extends `tsconfig.base.json`).
 - Lint / format / CI: none exist in this repo. Do not invent them.
 
+## Spaces (tenancy) — non-negotiable
+
+A **Space** is Polyth's tenant: it owns projects, sessions, files, worktrees,
+knowledge, secrets, integrations, and executions. It is a server-side security
+boundary, never a client-side filter. (User-facing name is "Space" — "workspace"
+already means UI layout here.) Full design: `docs/architecture/spaces-and-tenancy.md`.
+
+- Every `/api` request resolves a `SpaceContext` in the gateway BEFORE any handler runs. Read it as `rc.space`.
+- Route factories receive `SpaceServicesFor` (`(ctx) => SpaceServices`), not services. Call `spaces(rc.space)` inside the handler — never capture a service at construction time.
+- There is no unscoped session/project service in the HTTP gateway. If you find yourself wanting one, you are about to write an IDOR.
+- Never accept a `spaceId`/`tenantId` from a request body or query. The only inputs are the `X-Polyth-Space` header and the `polyth_space` cookie, and both are re-checked against membership.
+- Cross-tenant access answers `not-found`, never `forbidden` — a distinguishable denial makes any id an existence oracle.
+- Package state that a Space owns goes in `host.spaceStorage(ctx)`, not `host.storageDir` (which is the shared, deployment-wide root). Build paths with `spaceStorage(ctx).path(relative)` — it refuses traversal and symlink escape.
+- Any cache, map, or key that can hold tenant data includes the `spaceId`.
+- Branch on `host.deployment` (or the `allows*` helpers in `@polyth/contracts`), never on ad-hoc `if (cloud)` checks.
+- New tenant-owned tables/files need a migration that adopts existing rows into the default Space, plus an isolation test using a KNOWN-VALID id from another Space.
+
 ## Never do
 
 - Call OpenCode from any package except `backend-opencode`.
@@ -99,3 +119,4 @@ Every browser feature package declares `"polyth": { "webEntry": "./widgets/index
 - Persist pure presentation preferences in the event log, or move model-visible state into transient React/browser state.
 - Claim planned/implementing parity rows as shipped, or claim complete polyth/Paseo parity.
 - Store or return secret values from any API.
+- Load a resource by id and check its Space afterwards, authorize by `userId` instead of Space, or trust a client-supplied tenant id.

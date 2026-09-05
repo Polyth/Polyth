@@ -1,10 +1,11 @@
-import type { SessionService } from "@polyth/contracts";
 import type { RouteHandler } from "../http.ts";
+import type { SpaceServicesFor } from "../spaceScope.ts";
 
 /** Message-pin producer. Persistence and validation stay in SessionService so
  * every caller shares the same append-before-broadcast ordering. */
-export function contextRoutes(sessions: SessionService): RouteHandler {
-  return async ({ path, method, json }) => {
+export function contextRoutes(spaces: SpaceServicesFor): RouteHandler {
+  return async ({ path, method, json, space }) => {
+    const { sessions } = spaces(space);
     const match = path.match(/^\/api\/sessions\/([^/]+)\/context\/pins\/(\d+)$/);
     if (!match) return false;
     const sessionId = match[1]!;

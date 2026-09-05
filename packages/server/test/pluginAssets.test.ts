@@ -9,6 +9,9 @@ import { join } from "node:path";
 import type { InstalledPluginDto } from "@polyth/contracts";
 import { createHttpServer } from "../src/http.ts";
 import { pluginAssetRoutes } from "../../plugins/src/serverEntry.ts";
+import { testTenancy } from "./support/spaces.ts";
+
+const tenancy = await testTenancy();
 
 test("plugin UI assets require enabled matching metadata and are immutable", async () => {
   const root = mkdtempSync(join(tmpdir(), "polyth-plugin-assets-"));
@@ -37,8 +40,7 @@ test("plugin UI assets require enabled matching metadata and are immutable", asy
     },
   };
   const server = createHttpServer({
-    sessions: {} as never,
-    projects: { list: async () => [] } as never,
+    spaces: tenancy.gateway,
     runtimes: {} as never,
     capabilities: () => [],
     webDist,

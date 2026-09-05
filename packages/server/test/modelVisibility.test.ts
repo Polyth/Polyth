@@ -76,6 +76,19 @@ test("buildProviderCatalog groups by provider with enabled/connected flags", () 
   assert.equal(ollama.models[0]!.enabled, false, "models inherit a disabled provider");
 });
 
+test("buildProviderCatalog keeps configured providers with no discovered models", () => {
+  const catalog = buildProviderCatalog([], parseVisibility({ disabledProviders: ["cursor"] }), [
+    { id: "cursor", name: "Cursor" },
+  ]);
+  assert.deepEqual(catalog, [{
+    id: "cursor",
+    name: "Cursor",
+    connected: false,
+    enabled: false,
+    models: [],
+  }]);
+});
+
 test("blacklistsOf splits keys per provider", () => {
   assert.deepEqual(
     blacklistsOf({ disabledProviders: [], disabledModels: ["openai/gpt-mini", "openai/gpt-x", "a/b", "broken"] }),
@@ -104,6 +117,24 @@ test("service seeds from opencode.json when the store file is missing", async ()
   const again = createModelVisibilityService({ file: join(dir, "model-visibility.json"), applier });
   await again.seed();
   assert.deepEqual(again.state().disabledProviders, ["ollama"]);
+});
+
+test("service lists configured providers even when runtime discovery has no models", async () => {
+  const svc = createModelVisibilityService({
+    file: join(tmp(), "model-visibility.json"),
+    applier: {
+      readConfig: async () => ({ provider: { cursor: { name: "Cursor" } } }),
+      applyProviderVisibility: async () => {},
+    },
+  });
+  await svc.seed();
+  assert.deepEqual(svc.catalog([]), [{
+    id: "cursor",
+    name: "Cursor",
+    connected: false,
+    enabled: true,
+    models: [],
+  }]);
 });
 
 test("toggles persist and mirror into the backend config", async () => {

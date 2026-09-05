@@ -45,6 +45,7 @@ import {
 } from "../../sessionDefaults.ts";
 import { Button, Checkbox, Dialog, IconButton, Select, Textarea, TextInput } from "../ui/index.ts";
 import { DeleteIcon } from "../ui/icons.ts";
+import { BackgroundPicker } from "../BackgroundPicker.tsx";
 
 function ThemeSwatches({ theme }: { theme: ThemeSpec }) {
   return (
@@ -369,6 +370,11 @@ export function AppearancePage() {
         />
       </Row>
       <ThemeSection />
+      <div className="set-sec background-settings" data-settings-item="appearance.background">
+        <div className="set-sec-title">Workspace background</div>
+        <p className="background-settings-hint">Choose an atmospheric preset or add an image from this browser.</p>
+        <BackgroundPicker />
+      </div>
       <Row label={tr("settings.pages.interfaceFont")} hint={tr("settings.pages.chooseFromCleanUiFaces")} itemId="appearance.fontFamily">
         <Select
           label={INTERFACE_FONTS.find((font) => font.id === settings.fontFamily)?.label ?? settings.fontFamily}

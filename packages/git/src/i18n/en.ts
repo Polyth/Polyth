@@ -169,7 +169,7 @@ export const en = {
   "gitview.stepCompletedValue": "{step} completed.",
   "gitview.stepFailedValue": "{step} failed: {error}",
   "gitview.switchContextOrStartAnIsolated": "Switch context or start an isolated workspace.",
-  "gitview.syncRepository": "Sync repository",
+  "gitview.syncRepository": "Sync",
   "gitview.tabBranches": "Branches",
   "gitview.tabChanges": "Changes",
   "gitview.tabLog": "Log",

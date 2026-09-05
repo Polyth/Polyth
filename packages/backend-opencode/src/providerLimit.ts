@@ -116,6 +116,7 @@ export const parseRetryAfterSec = (
     /"?retryDelay"?[:\s]+"?([0-9hms.]+)"?/i,
     /wait\s+([0-9]+(?:\.[0-9]+)?\s*(?:ms|s|sec|seconds|m|min|minutes))/i,
     /available again in\s+([0-9hms.\s]+?)(?:[.,)\]]|$)/i,
+    /resets?\s+in\s+([0-9hms.\s]+?)(?:[.,)\]]|$)/i,
   ];
   for (const re of patterns) {
     const m = message.match(re);
@@ -216,6 +217,22 @@ export const classifyProviderLimit = (
   return {
     scope,
     ...(provider ? { provider } : {}),
+    ...(retryAfterSec > 0 ? { retryAfterSec } : {}),
+  };
+};
+
+/** Command Code writes this reserved reasoning marker instead of a
+ * `session.error` when its provider window has closed. It still needs the
+ * normal resume path, so extract the same retry hint from the marker. */
+export const classifyProviderLimitNotice = (
+  reasoning: string,
+): RateLimitRetryHint | null => {
+  if (!/^\s*\[rate-limit\](?:\s|$)/i.test(reasoning)) return null;
+  const provider = reasoning.match(PROVIDER_RE)?.[1];
+  const retryAfterSec = parseRetryAfterSec(reasoning, undefined, Date.now());
+  return {
+    scope: "rate",
+    ...(provider ? { provider: canonicalProvider(provider) } : {}),
     ...(retryAfterSec > 0 ? { retryAfterSec } : {}),
   };
 };

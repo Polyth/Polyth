@@ -2,7 +2,7 @@
 // localStorage-persisted usage prefs parser.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { familyLabel, groupQuotaWindows, modelFamily, parseUsagePrefs } from "../widgets/usagePrefs.ts";
+import { familyLabel, groupQuotaWindows, modelFamily, moveUsageBlock, orderUsageBlocks, parseUsagePrefs } from "../widgets/usagePrefs.ts";
 
 test("modelFamily recognizes vendor lines and folds sub-brands", () => {
   assert.equal(modelFamily("claude-3-5-sonnet-latest"), "claude");
@@ -63,13 +63,13 @@ test("parseUsagePrefs round-trips and survives garbage", () => {
   const prefs = {
     hiddenProviders: ["anthropic"],
     collapsedGroups: ["openai/gpt"],
-    dashboard: { view: "providers", layout: "compact", rangeDays: 90 },
+    dashboard: { view: "providers", layout: "compact", rangeDays: 90, overviewOrder: ["models"], providerOrder: ["openai"] },
   };
   assert.deepEqual(parseUsagePrefs(JSON.stringify(prefs)), prefs);
   const defaults = {
     hiddenProviders: [],
     collapsedGroups: [],
-    dashboard: { view: "overview", layout: "expanded", rangeDays: 7 },
+    dashboard: { view: "overview", layout: "expanded", rangeDays: 7, overviewOrder: [], providerOrder: [] },
   };
   assert.deepEqual(parseUsagePrefs(null), defaults);
   assert.deepEqual(parseUsagePrefs("not json"), defaults);
@@ -82,4 +82,11 @@ test("parseUsagePrefs round-trips and survives garbage", () => {
     })),
     { ...defaults, hiddenProviders: ["a"] },
   );
+});
+
+test("dashboard block ordering preserves new blocks and supports drag or keyboard moves", () => {
+  const items = [{ id: "summary" }, { id: "models" }, { id: "providers" }];
+  assert.deepEqual(orderUsageBlocks(items, ["models", "summary"], (item) => item.id).map((item) => item.id), ["models", "summary", "providers"]);
+  assert.deepEqual(moveUsageBlock(["summary", "models", "providers"], "models", -1), ["models", "summary", "providers"]);
+  assert.deepEqual(moveUsageBlock(["summary", "models", "providers"], "summary", "providers"), ["models", "providers", "summary"]);
 });

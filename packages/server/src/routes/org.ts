@@ -1,18 +1,28 @@
 // Organization routes (WP5): project PATCH, session rename/organize, folders,
 // labels, bulk archive/restore with partial-failure reporting, richer search.
-import type { BulkSessionResult, ProjectService, SessionService } from "@polyth/contracts";
+import type { BulkSessionResult } from "@polyth/contracts";
 import type { Store } from "@polyth/session";
 import type { RouteHandler } from "../http.ts";
+import type { SpaceServicesFor } from "../spaceScope.ts";
 import { matchWorkspaces } from "../search.ts";
 
 export function orgRoutes(deps: {
-  projects: ProjectService;
-  sessions: SessionService;
+  spaces: SpaceServicesFor;
   store: Store;
 }): RouteHandler {
-  const { projects, sessions, store } = deps;
+  const { store } = deps;
 
-  return async ({ path, method, url, body, json }) => {
+  return async ({ path, method, url, body, json, space }) => {
+    // Scoped services + the tenant id used for the label rows. Every read
+    // below therefore starts inside the caller's Space.
+    const { projects, sessions, guard } = deps.spaces(space);
+    const spaceId = space.spaceId;
+    // A folder id carries no Space; ownership is proven through its project.
+    const assertFolderInSpace = (folderId: string): void => {
+      const projectId = store.folderProject(folderId);
+      if (!projectId) throw Object.assign(new Error("folder not found"), { code: "not-found" });
+      guard.assertProject(space, projectId);
+    };
     // ---- project PATCH -----------------------------------------------------
     let m = path.match(/^\/api\/projects\/([^/]+)$/);
     if (m && method === "PATCH") {
@@ -110,16 +120,20 @@ export function orgRoutes(deps: {
     if (path === "/api/folders" && method === "GET") {
       const projectId = url.searchParams.get("projectId");
       if (!projectId) { json(400, { error: "invalid-input", message: "projectId required" }); return true; }
+      guard.assertProject(space, projectId);
       json(200, await store.folderList(projectId));
       return true;
     }
     if (path === "/api/folders" && method === "POST") {
       const b = await body();
-      json(200, await store.folderCreate(String(b.projectId ?? ""), String(b.name ?? ""), b.parentId ? String(b.parentId) : undefined));
+      const projectId = String(b.projectId ?? "");
+      guard.assertProject(space, projectId);
+      json(200, await store.folderCreate(projectId, String(b.name ?? ""), b.parentId ? String(b.parentId) : undefined));
       return true;
     }
     m = path.match(/^\/api\/folders\/([^/]+)$/);
     if (m && method === "PATCH") {
+      assertFolderInSpace(m[1]!);
       const b = await body();
       json(200, await store.folderUpdate(m[1]!, {
         ...(typeof b.name === "string" ? { name: b.name } : {}),
@@ -129,6 +143,7 @@ export function orgRoutes(deps: {
       return true;
     }
     if (m && method === "DELETE") {
+      assertFolderInSpace(m[1]!);
       const removed = await store.folderRemove(m[1]!);
       json(removed ? 200 : 404, removed ? { ok: true } : { error: "not-found" });
       return true;
@@ -136,12 +151,12 @@ export function orgRoutes(deps: {
 
     // ---- labels ---------------------------------------------------------------
     if (path === "/api/labels" && method === "GET") {
-      json(200, await store.labelList());
+      json(200, await store.labelList(spaceId));
       return true;
     }
     if (path === "/api/labels" && method === "POST") {
       const b = await body();
-      json(200, await store.labelCreate(String(b.name ?? ""), String(b.color ?? "#888888")));
+      json(200, await store.labelCreate(String(b.name ?? ""), String(b.color ?? "#888888"), spaceId));
       return true;
     }
     m = path.match(/^\/api\/labels\/([^/]+)$/);
@@ -151,11 +166,11 @@ export function orgRoutes(deps: {
         ...(typeof b.name === "string" ? { name: b.name } : {}),
         ...(typeof b.color === "string" ? { color: b.color } : {}),
         ...(typeof b.position === "number" ? { position: b.position } : {}),
-      }, Number(b.revision ?? 0)));
+      }, Number(b.revision ?? 0), spaceId));
       return true;
     }
     if (m && method === "DELETE") {
-      const removed = await store.labelRemove(m[1]!);
+      const removed = await store.labelRemove(m[1]!, spaceId);
       json(removed ? 200 : 404, removed ? { ok: true } : { error: "not-found" });
       return true;
     }
@@ -168,7 +183,7 @@ export function orgRoutes(deps: {
       const [projectList, sessionList, labels] = await Promise.all([
         projects.list(),
         sessions.list(),
-        store.labelList(),
+        store.labelList(spaceId),
       ]);
       const items = matchWorkspaces({
         projects: projectList,
@@ -191,7 +206,7 @@ export function orgRoutes(deps: {
       const needle = q.toLowerCase();
       const [projections, labels, textHits] = await Promise.all([
         sessions.list(projectId),
-        store.labelList(),
+        store.labelList(spaceId),
         store.searchEventText(q, limit * 2),
       ]);
       const labelName = new Map(labels.map((l) => [l.id, l.name] as const));

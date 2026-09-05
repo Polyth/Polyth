@@ -43,6 +43,11 @@ export interface ProviderCatalogEntry {
   models: ProviderCatalogModel[];
 }
 
+export interface ConfiguredProvider {
+  id: string;
+  name?: string;
+}
+
 export interface VisibilityApplier {
   readConfig(): Promise<Record<string, unknown>>;
   applyProviderVisibility(v: { disabledProviders: string[]; blacklists: Record<string, string[]> }): Promise<void>;
@@ -114,8 +119,22 @@ export function filterVisibleModels(
   return connected.length > 0 ? connected : enabled;
 }
 
-export function buildProviderCatalog(models: ModelDescriptor[], state: VisibilityState): ProviderCatalogEntry[] {
+export function buildProviderCatalog(
+  models: ModelDescriptor[],
+  state: VisibilityState,
+  configuredProviders: readonly ConfiguredProvider[] = [],
+): ProviderCatalogEntry[] {
   const byProvider = new Map<string, ProviderCatalogEntry>();
+  for (const provider of configuredProviders) {
+    if (!provider.id) continue;
+    byProvider.set(provider.id, {
+      id: provider.id,
+      name: provider.name || provider.id,
+      connected: false,
+      enabled: !state.disabledProviders.includes(provider.id),
+      models: [],
+    });
+  }
   for (const m of models) {
     let entry = byProvider.get(m.providerID);
     if (!entry) {
@@ -182,6 +201,7 @@ export function createModelVisibilityService(opts: { file: string; applier?: Vis
 
   let loaded = false;
   let state: VisibilityState = { disabledProviders: [], disabledModels: [] };
+  let configuredProviders: ConfiguredProvider[] = [];
   try {
     state = parseVisibility(JSON.parse(readFileSync(opts.file, "utf8")));
     loaded = true;
@@ -212,14 +232,27 @@ export function createModelVisibilityService(opts: { file: string; applier?: Vis
     providerEnabled: (providerID) => !state.disabledProviders.includes(providerID),
     modelEnabled: (m) => isModelVisible({ ...m, name: m.modelID }, state),
     filter: (models, o) => filterVisibleModels(models, state, o ?? {}),
-    catalog: (models) => buildProviderCatalog(models, state),
+    catalog: (models) => buildProviderCatalog(models, state, configuredProviders),
 
     async seed(): Promise<void> {
-      if (loaded || !opts.applier) return;
+      if (!opts.applier) return;
       try {
-        state = visibilityFromBackendConfig(await opts.applier.readConfig());
-        persist();
-        loaded = true;
+        const config = await opts.applier.readConfig();
+        const provider = config.provider;
+        if (provider && typeof provider === "object" && !Array.isArray(provider)) {
+          configuredProviders = Object.entries(provider as Record<string, unknown>).map(([id, entry]) => ({
+            id,
+            ...(entry && typeof entry === "object" && !Array.isArray(entry)
+              && typeof (entry as Record<string, unknown>).name === "string"
+              ? { name: (entry as Record<string, unknown>).name as string }
+              : {}),
+          }));
+        }
+        if (!loaded) {
+          state = visibilityFromBackendConfig(config);
+          persist();
+          loaded = true;
+        }
       } catch (e) {
         // A corrupt backend config must not brick boot; start empty in memory.
         console.warn("[polyth] model visibility seed skipped:", (e as Error).message);

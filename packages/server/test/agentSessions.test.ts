@@ -22,6 +22,9 @@ import {
   type AgentGoalState,
   type AgentGoalService,
 } from "../src/routes/agentSessions.ts";
+import { passthroughSpaces, testTenancy } from "./support/spaces.ts";
+
+const tenancy = await testTenancy();
 
 type Emit = (sessionId: string, event: RuntimeEvent) => void;
 
@@ -144,15 +147,13 @@ async function makeApp() {
   });
   const goals = fakeGoals();
   const server = createHttpServer({
-    sessions,
-    projects,
+    spaces: tenancy.gateway,
     runtimes: pool,
     capabilities: () => ["polyth.sessions", "polyth.goals"],
     webDist: dir,
     version: "test",
     routes: [agentSessionRoutes({
-      sessions,
-      projects,
+      spaces: passthroughSpaces({ sessions, projects }),
       store,
       capabilities: () => ["polyth.sessions", "polyth.goals"],
       goals: () => goals,

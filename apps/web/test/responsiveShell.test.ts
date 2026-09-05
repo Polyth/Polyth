@@ -231,7 +231,16 @@ test("composer active-run controls and mobile actions stay direct", async () => 
   const timeline = await read("../src/components/Timeline.tsx");
   const goal = await read("../../../packages/goals/widgets/GoalStrip.tsx");
   const css = await read("../src/styles.css");
-  assert.ok(composer.includes("<Icon.sendClock />"), "queue mode uses the clock-send icon");
+  assert.ok(composer.includes("<QueueIcon />"), "queue mode uses the canonical queue icon");
+  assert.ok(composer.includes("<MoreIcon />"), "alternate active-run actions use the standard more icon");
+  assert.ok(
+    composer.includes("if (emptySteerItem) void steerQueuedItem(emptySteerItem)"),
+    "submitting the emptied composer promotes the newest queued follow-up",
+  );
+  assert.ok(
+    composer.includes("const current = await api.queueEditStart(target, item.id)"),
+    "queue promotion reserves the row before steering to prevent duplicate dispatch",
+  );
   assert.ok(composer.includes('tr("composer.sendNow")'), "queue options expose immediate delivery");
   assert.ok(composer.includes('tr("composer.stopWithoutSendingThisDraft")'), "queue options expose stop");
   assert.ok(composer.includes("composer-stop-primary"), "active sends become a primary stop control");

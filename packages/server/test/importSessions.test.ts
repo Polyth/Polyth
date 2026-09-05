@@ -10,9 +10,11 @@ import { join } from "node:path";
 import { createStore } from "@polyth/session";
 import type { AgentRuntime, Project, ProjectService, RuntimeEvent, RuntimeSession } from "@polyth/contracts";
 import { createSessionService, type Broadcaster } from "../src/sessions.ts";
-import { controlRoutes } from "../src/routes/control.ts";
+import { agentSessionRoutes } from "../src/routes/agentSessions.ts";
 import type { PermissionService } from "@polyth/permissions";
 import type { RouteRequest } from "../src/http.ts";
+import type { SpaceServices } from "../src/spaceScope.ts";
+import { fakeSpaceContext } from "./support/spaces.ts";
 
 function fakeRuntime(remote: RuntimeSession[]) {
   const listeners = new Set<(sessionId: string, ev: RuntimeEvent) => void>();
@@ -53,7 +55,7 @@ function makeService(remote: RuntimeSession[]) {
     store, projects, permissions, broadcast,
     runtimes: { forProject: async () => fake.rt },
   });
-  return { sessions, store, fake };
+  return { sessions, projects, store, fake };
 }
 
 const remote = (id: string, title: string, updatedAt: number): RuntimeSession =>
@@ -108,14 +110,18 @@ test("sync remains the bulk adopt-everything path", async () => {
   assert.equal((await sessions.backendSessions!("p1")).items.length, 0);
 });
 
-test("control routes: browse + import with input validation", async () => {
-  const { sessions } = makeService([remote("oc9", "via route", 50)]);
-  const routes = controlRoutes(sessions);
+test("agent routes: browse + import with input validation", async () => {
+  const { sessions, projects, store } = makeService([remote("oc9", "via route", 50)]);
+  const space = fakeSpaceContext();
+  const routes = agentSessionRoutes({
+    spaces: () => ({ sessions, projects } as unknown as SpaceServices),
+    store,
+  });
   const call = async (method: string, path: string, body: Record<string, unknown> = {}) => {
     let status = 0;
     let payload: unknown;
     const rc = {
-      req: {}, res: {},
+      req: {}, res: {}, space,
       url: new URL(`http://x${path}`),
       path: new URL(`http://x${path}`).pathname, method,
       body: async () => body,
@@ -125,18 +131,18 @@ test("control routes: browse + import with input validation", async () => {
     return { handled, status, payload };
   };
 
-  const list = await call("GET", "/api/control/backend-sessions?projectId=p1");
+  const list = await call("GET", "/api/agent/backend-sessions?projectId=p1");
   assert.equal(list.status, 200);
   assert.deepEqual((list.payload as { items: RuntimeSession[] }).items.map((s) => s.id), ["oc9"]);
 
-  await assert.rejects(call("GET", "/api/control/backend-sessions"), /projectId required/);
-  await assert.rejects(call("POST", "/api/control/backend-sessions/import", { projectId: "p1", ids: [] }), /ids required/);
+  await assert.rejects(call("GET", "/api/agent/backend-sessions"), /projectId is required/);
+  await assert.rejects(call("POST", "/api/agent/backend-sessions/import", { projectId: "p1", ids: [] }), /ids must be a non-empty array/);
   await assert.rejects(
-    call("POST", "/api/control/backend-sessions/import", { projectId: "p1", ids: Array.from({ length: 201 }, (_, i) => `x${i}`) }),
+    call("POST", "/api/agent/backend-sessions/import", { projectId: "p1", ids: Array.from({ length: 201 }, (_, i) => `x${i}`) }),
     /at most 200/,
   );
 
-  const imported = await call("POST", "/api/control/backend-sessions/import", { projectId: "p1", ids: ["oc9"] });
+  const imported = await call("POST", "/api/agent/backend-sessions/import", { projectId: "p1", ids: ["oc9"] });
   assert.equal(imported.status, 200);
   assert.equal((imported.payload as Array<{ backendSessionId: string }>)[0]!.backendSessionId, "oc9");
 });

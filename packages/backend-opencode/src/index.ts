@@ -55,6 +55,7 @@ import {
   translateOcEvent,
   type TranslateState,
 } from "./events.ts";
+import { classifyProviderLimitNotice } from "./providerLimit.ts";
 import {
   createOwnedLocalEndpointLease,
   LISTEN_RE,
@@ -242,6 +243,10 @@ export interface OpenCodeRuntimeExtras {
   /** Optional liveness policy for deployments whose endpoint promises
    * heartbeats. Disabled by default because an idle legacy SSE may be quiet. */
   sseStallMs?: number;
+  /** Command Code can report a provider-window stop as reasoning and then
+   * leave SSE live without a terminal event. After this quiet grace period,
+   * synthesize the normal retryable terminal event. Test seam only. */
+  rateLimitStallMs?: number;
 }
 
 export interface OpenCodeRuntimeLifecycleOptions {
@@ -380,6 +385,11 @@ export const createOpenCodeRuntimeFacade = (
   const lifecycleListeners = new Set<Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]>();
   const translate = new Map<string, TranslateState>();
   const activeTurn = new Map<string, { turnId: string; aborting: boolean }>();
+  const rateLimitStalls = new Map<string, {
+    turnId: string;
+    hint: NonNullable<ReturnType<typeof classifyProviderLimitNotice>>;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
   const suppressedAfterAbort = new Set<string>();
   const reconciliationOrdinals = new Map<string, number>();
   const seenEventIds = new Set<string>();
@@ -389,6 +399,42 @@ export const createOpenCodeRuntimeFacade = (
 
   let sseAbort: AbortController | undefined;
   let disposed = false;
+
+  const clearRateLimitStall = (sessionId: string): void => {
+    const stall = rateLimitStalls.get(sessionId);
+    if (!stall) return;
+    clearTimeout(stall.timer);
+    rateLimitStalls.delete(sessionId);
+  };
+
+  const armRateLimitStall = (
+    sessionId: string,
+    turn: { turnId: string; aborting: boolean },
+    hint: NonNullable<ReturnType<typeof classifyProviderLimitNotice>>,
+  ): void => {
+    clearRateLimitStall(sessionId);
+    const timer = setTimeout(() => {
+      const pending = rateLimitStalls.get(sessionId);
+      if (!pending || pending.turnId !== turn.turnId || activeTurn.get(sessionId) !== turn) return;
+      rateLimitStalls.delete(sessionId);
+      activeTurn.delete(sessionId);
+      finishTranslateTurn(stateFor(sessionId), turn.turnId);
+      emit(sessionId, {
+        type: "turn/stopped",
+        reason: "error",
+        error: "provider rate limit reached",
+        retry: hint,
+      });
+    }, extras.rateLimitStallMs ?? 15_000);
+    timer.unref?.();
+    rateLimitStalls.set(sessionId, { turnId: turn.turnId, hint, timer });
+  };
+
+  const touchRateLimitStall = (sessionId: string): void => {
+    const pending = rateLimitStalls.get(sessionId);
+    const turn = activeTurn.get(sessionId);
+    if (pending && turn && pending.turnId === turn.turnId) armRateLimitStall(sessionId, turn, pending.hint);
+  };
 
   const emit = (canonical: string, ev: RuntimeEvent) => {
     for (const cb of listeners) cb(canonical, ev);
@@ -410,6 +456,7 @@ export const createOpenCodeRuntimeFacade = (
   };
 
   const admitTurn = (sessionId: string, model?: ModelRef): void => {
+    clearRateLimitStall(sessionId);
     suppressedAfterAbort.delete(sessionId);
     if (activeTurn.has(sessionId)) return;
     const turnId = `turn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -427,6 +474,7 @@ export const createOpenCodeRuntimeFacade = (
     const turn = activeTurn.get(sessionId);
     if (!terminal || !turn) return [];
     const assistant = terminal.state === "idle" ? flushAssistantOnIdle(state) : [];
+    clearRateLimitStall(sessionId);
     activeTurn.delete(sessionId);
     finishTranslateTurn(state, turn.turnId);
     if (terminal.state === "idle") {
@@ -455,6 +503,7 @@ export const createOpenCodeRuntimeFacade = (
     turn: { turnId: string; aborting: boolean } | undefined,
   ): void => {
     if (!turn) return;
+    clearRateLimitStall(sessionId);
     activeTurn.delete(sessionId);
     finishTranslateTurn(stateFor(sessionId), turn.turnId);
     suppressedAfterAbort.add(sessionId);
@@ -498,6 +547,7 @@ export const createOpenCodeRuntimeFacade = (
       return;
     }
     const st = stateFor(canonical);
+    touchRateLimitStall(canonical);
     if (suppressedAfterAbort.has(canonical)) return;
     const observationEndpoint = streamEndpoint;
     if (observationEndpoint && observationListeners.size > 0) {
@@ -526,8 +576,9 @@ export const createOpenCodeRuntimeFacade = (
         ...(id ? { cursorAfter: id } : {}),
       });
       if (normalized.kind !== "accepted") return;
+      const translated = normalized.observation.events;
       const events = [
-        ...normalized.observation.events,
+        ...translated,
         ...terminalEvents(canonical, ev, st),
       ];
       if (
@@ -541,10 +592,19 @@ export const createOpenCodeRuntimeFacade = (
         const observation = { ...normalized.observation, events };
         for (const cb of observationListeners) cb(canonical, observation);
       }
+      const notice = translated.find((event) => event.type === "assistant/message")?.reasoning;
+      const hint = notice ? classifyProviderLimitNotice(notice) : null;
+      const turn = activeTurn.get(canonical);
+      if (hint && turn) armRateLimitStall(canonical, turn, hint);
       return;
     }
-    for (const runtimeEv of translateOcEvent(ev, st)) emit(canonical, runtimeEv);
+    const translated = translateOcEvent(ev, st);
+    for (const runtimeEv of translated) emit(canonical, runtimeEv);
     for (const runtimeEv of terminalEvents(canonical, ev, st)) emit(canonical, runtimeEv);
+    const notice = translated.find((event) => event.type === "assistant/message")?.reasoning;
+    const hint = notice ? classifyProviderLimitNotice(notice) : null;
+    const turn = activeTurn.get(canonical);
+    if (hint && turn) armRateLimitStall(canonical, turn, hint);
   };
 
   const connectSse = async () => {
@@ -808,15 +868,20 @@ export const createOpenCodeRuntimeFacade = (
       return outcome;
     },
     completeSmallModel: (request) => completeSmallModelDirect(request),
-    async steer(sessionId: string, text: string): Promise<boolean> {
+    async steer(sessionId: string, text: string, model?: ModelRef, agent?: string): Promise<boolean> {
       // Only meaningful while a turn is active; posting to an idle session
       // would start a fresh turn instead of steering.
       if (!activeTurn.has(sessionId)) return false;
       const binding = await lifecycleBinding(sessionId);
-      const outcome = await lifecycle.steer({ session: binding, text }, randomUUID());
+      const outcome = await lifecycle.steer({
+        session: binding,
+        text,
+        ...(model ? { model } : {}),
+        ...(agent ? { agent } : {}),
+      }, randomUUID());
       return outcome.kind === "confirmed";
     },
-    async steerOperation(sessionId, text, operationId) {
+    async steerOperation(sessionId, text, operationId, model, agent) {
       if (!activeTurn.has(sessionId)) {
         return {
           kind: "rejected",
@@ -825,7 +890,12 @@ export const createOpenCodeRuntimeFacade = (
         };
       }
       const binding = await lifecycleBinding(sessionId);
-      return lifecycle.steer({ session: binding, text }, operationId);
+      return lifecycle.steer({
+        session: binding,
+        text,
+        ...(model ? { model } : {}),
+        ...(agent ? { agent } : {}),
+      }, operationId);
     },
     async abort(sessionId: string) {
       const turn = activeTurn.get(sessionId);
@@ -906,6 +976,7 @@ export const createOpenCodeRuntimeFacade = (
     async dispose() {
       disposed = true;
       sseAbort?.abort();
+      for (const sessionId of rateLimitStalls.keys()) clearRateLimitStall(sessionId);
       reconciliationOrdinals.clear();
     },
   };

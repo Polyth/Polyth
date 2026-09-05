@@ -18,6 +18,30 @@ export const RESUME_MIN_WAIT_SEC = 5;
 /** setTimeout's max delay; longer waits re-arm on the way down. */
 export const MAX_TIMER_MS = 2_147_483_647;
 
+/** Command Code's reserved provider-window notice, emitted as reasoning rather
+ * than a terminal `session.error`. This runs server-side too so a restart while
+ * the stream is quiet still recovers the wait. */
+export const rateLimitNoticeHint = (text: string): RateLimitRetryHint | null => {
+  if (!/^\s*\[rate-limit\](?:\s|$)/i.test(text)) return null;
+  const provider = text.match(/\b(claude|anthropic|openai|gpt|gemini|google)\b/i)?.[1]?.toLowerCase();
+  const normalized = provider === "claude" ? "anthropic"
+    : provider === "gpt" ? "openai"
+      : provider === "gemini" ? "google"
+        : provider;
+  const duration = text.match(/resets?\s+in\s+((?:\d+\s*(?:s|m|h|sec|secs|min|mins|hour|hours)\s*)+)/i)?.[1];
+  let retryAfterSec = 0;
+  for (const match of duration?.matchAll(/(\d+)\s*(s|m|h|sec|secs|min|mins|hour|hours)/gi) ?? []) {
+    const value = Number(match[1]);
+    const unit = match[2]!.toLowerCase();
+    retryAfterSec += value * (unit.startsWith("h") ? 3600 : unit.startsWith("m") ? 60 : 1);
+  }
+  return {
+    scope: "rate",
+    ...(normalized ? { provider: normalized } : {}),
+    ...(retryAfterSec > 0 ? { retryAfterSec } : {}),
+  };
+};
+
 export interface PlanResumeInput {
   hint: RateLimitRetryHint;
   /** seq of the user/message that will be re-sent. */

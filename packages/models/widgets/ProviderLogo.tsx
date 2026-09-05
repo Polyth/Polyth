@@ -2,6 +2,7 @@ const PROVIDERS = [
   ["opencode-go", ["opencode-go", "opencode go"]],
   ["opencode-zen", ["opencode-zen", "opencode zen"]],
   ["opencode", ["opencode"]],
+  ["cursor", ["cursor"]],
   ["openrouter", ["openrouter"]],
   // The Kimi coding endpoint in this catalog is served by Z.AI.
   ["zai", ["kimi", "moonshot", "z.ai", "zai", "zhipu"]],
@@ -58,6 +59,13 @@ function SvgMark({ provider }: { provider: ProviderKey }) {
     return (
       <svg {...fillProps}>
         <path d="M16 6H8v12h8V6zm4 16H4V2h16v20z" />
+      </svg>
+    );
+  }
+  if (provider === "cursor") {
+    return (
+      <svg {...strokeProps} strokeWidth="2.1">
+        <path d="M4 5.5 12 12 4 18.5M20 5.5 12 12l8 6.5" />
       </svg>
     );
   }

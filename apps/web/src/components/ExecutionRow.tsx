@@ -13,13 +13,14 @@ import {
 } from "../execution.ts";
 import { applyUnifiedDiff, visibleDiffRows, type DiffApplyDirection, type FileDiff } from "../diff.ts";
 import { highlight, langOf } from "../highlight.ts";
+import { tr } from "../i18n/index.ts";
 import { Icon } from "../icons.tsx";
 import { openSession } from "../init.ts";
 import { getState, openEditorFile, setUiError, useStore } from "../store.ts";
 import type { SubagentState, TaskListState, ToolMsg } from "../reduce.ts";
 import CopyButton from "./CopyButton.tsx";
 import Dialog from "./a11y/Dialog.tsx";
-import { Icon as ActionIcon, RedoIcon, UndoIcon } from "./ui/index.ts";
+import { Button, Icon as ActionIcon, RedoIcon, StopIcon, UndoIcon } from "./ui/index.ts";
 
 function ExecutionIcon({ kind }: { kind: ExecutionKind }) {
   const Glyph = kind === "shell" ? Icon.term
@@ -45,8 +46,8 @@ export const EXECUTION_COLLAPSE_MS = 180;
 /** True when streamed text must not be animated: accessibility settings and
  *  the desktop low-resource mode both get the raw target directly. */
 function motionSmoothOff(): boolean {
-  if (document.body.dataset.desktopLowResource === "true") return true;
-  if (document.documentElement.dataset.reduceAnimations === "true") return true;
+  if (typeof document !== "undefined" && document.body.dataset.desktopLowResource === "true") return true;
+  if (typeof document !== "undefined" && document.documentElement.dataset.reduceAnimations === "true") return true;
   return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
@@ -55,15 +56,16 @@ function motionSmoothOff(): boolean {
  *  fixed ~300ms catch-up so live streaming reads as one continuous type-out
  *  while one-shot results print in. Shrinking targets (rewind) and reduced
  *  motion snap immediately. */
-function usePrintText(target: string): string {
-  const [shown, setShown] = useState("");
-  const shownRef = useRef("");
+function usePrintText(target: string, animate = true): string {
+  const initial = animate && !motionSmoothOff() ? "" : target;
+  const [shown, setShown] = useState(initial);
+  const shownRef = useRef(initial);
   const raf = useRef(0);
   useEffect(() => {
     cancelAnimationFrame(raf.current);
     const targetLen = target.length;
     const shownLen = shownRef.current.length;
-    if (targetLen < shownLen || motionSmoothOff()) {
+    if (!animate || targetLen < shownLen || motionSmoothOff()) {
       shownRef.current = target;
       setShown(target);
       return;
@@ -71,6 +73,11 @@ function usePrintText(target: string): string {
     if (shownLen >= targetLen) return;
     const rate = Math.max(4, Math.ceil((targetLen - shownLen) / 18));
     const step = () => {
+      if (motionSmoothOff()) {
+        shownRef.current = target;
+        setShown(target);
+        return;
+      }
       const behind = targetLen - shownRef.current.length;
       if (behind <= 0) return;
       const take = Math.min(behind, rate);
@@ -80,7 +87,7 @@ function usePrintText(target: string): string {
     };
     raf.current = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf.current);
-  }, [target]);
+  }, [target, animate]);
   return target.length < shown.length ? target : shown;
 }
 
@@ -695,12 +702,40 @@ export function ExecutionRow({
   message,
   subagent,
   defaultOpen = false,
+  entering = false,
 }: {
   message: ToolMsg;
   subagent?: Subagent;
   defaultOpen?: boolean;
+  /** Only the newest visible execution gets entrance and print-out motion. */
+  entering?: boolean;
 }) {
   const status = displayStatus(message, subagent?.status);
+  const sessionId = useStore((state) => state.activeSessionId);
+  const toolActive = useStore((state) => {
+    const events = state.activeSessionId ? state.events[state.activeSessionId] : undefined;
+    for (let index = (events?.length ?? 0) - 1; index >= 0; index -= 1) {
+      const event = events![index]!;
+      if (event.type === "turn/stopped" || event.type === "turn/started") return false;
+      const callId = (event.data as { callId?: unknown }).callId;
+      if (callId !== message.callId) continue;
+      if (event.type === "tool/result" || event.type === "tool/error") return false;
+      if (event.type === "tool/started" || (event.type === "tool/call" && event.data.status === "running")) return true;
+    }
+    return false;
+  });
+  const [stopping, setStopping] = useState(false);
+  const canStop = !!sessionId && toolActive && status === "running";
+  useEffect(() => {
+    if (!canStop) setStopping(false);
+  }, [canStop]);
+  const stop = () => {
+    if (!sessionId || !canStop || stopping) return;
+    setStopping(true);
+    void api.abort(sessionId)
+      .catch((error) => setUiError(error instanceof Error ? error.message : String(error)))
+      .finally(() => setStopping(false));
+  };
   const projectRoot = useStore((state) => {
     const id = state.activeProjectId;
     return id ? state.projectRegistry.projects.find((project) => project.id === id)?.path ?? null : null;
@@ -759,13 +794,13 @@ export function ExecutionRow({
   const stats = presentation.stats;
   const elapsed = fmtMs(Math.max(0, (message.finishTime ?? Date.now()) - message.time));
   const webUrl = typeof message.input.url === "string" ? message.input.url : undefined;
-  // The collapsed summary prints out on appearance (and types new arrivals
-  // while a call streams) — same fast catch-up type-out the output uses.
+  // Only the newest collapsed summary prints out. Historical rows render in
+  // full when session hydration remounts them.
   const summaryTitle = pathParts?.filename ?? presentation.label;
   const summaryPreview = pathParts
     ? [presentation.label, pathParts.directory].filter(Boolean).join(" · ")
     : presentation.preview;
-  const typedPreview = usePrintText(summaryPreview);
+  const typedPreview = usePrintText(summaryPreview, entering);
 
   const openFile = () => {
     if (presentation.path) openEditorFile(presentation.path);
@@ -793,7 +828,7 @@ export function ExecutionRow({
 
   return (
     <>
-      <div className={`tool-card execution-row${open ? " open" : ""}${status === "pending" || status === "running" ? " current" : ""}${status === "error" ? " error" : ""}${presentation.kind === "subagent" ? " execution-subagent" : ""}`}
+      <div className={`tool-card execution-row${entering ? " timeline-row-enter" : ""}${open ? " open" : ""}${status === "pending" || status === "running" ? " current" : ""}${status === "error" ? " error" : ""}${presentation.kind === "subagent" ? " execution-subagent" : ""}`}
         ref={rowRef}
         data-execution-kind={presentation.kind}
         onPointerDownCapture={() => {
@@ -803,29 +838,43 @@ export function ExecutionRow({
             : null;
         }}
       >
-        <button
-          type="button"
-          className="tool-disclosure execution-summary"
-          aria-expanded={open}
-          aria-label={`${open ? "Collapse" : "Expand"} ${summaryTitle}: ${summaryPreview}${
-            hasLineChanges(stats) ? `, ${stats.add} added, ${stats.del} removed` : ""
-          }`}
-          onClick={() => {
-            userToggled.current = true;
-            setOpen((value) => !value);
-          }}
-        >
-          <span className="tool-icon execution-icon" aria-hidden="true"><ExecutionIcon kind={presentation.kind} /></span>
-          <span className="execution-main" title={presentation.path}>
-            <span className="tool-name">
-              {summaryTitle}
+        <div className="execution-summary-line">
+          <button
+            type="button"
+            className="tool-disclosure execution-summary"
+            aria-expanded={open}
+            aria-label={`${open ? "Collapse" : "Expand"} ${summaryTitle}: ${summaryPreview}${
+              hasLineChanges(stats) ? `, ${stats.add} added, ${stats.del} removed` : ""
+            }`}
+            onClick={() => {
+              userToggled.current = true;
+              setOpen((value) => !value);
+            }}
+          >
+            <span className="tool-icon execution-icon" aria-hidden="true"><ExecutionIcon kind={presentation.kind} /></span>
+            <span className="execution-main" title={presentation.path}>
+              <span className="tool-name">
+                {summaryTitle}
+              </span>
+              <span className={`tool-preview${presentation.kind === "shell" || presentation.kind === "test" ? " command" : ""}`}>{typedPreview}</span>
             </span>
-            <span className={`tool-preview${presentation.kind === "shell" || presentation.kind === "test" ? " command" : ""}`}>{typedPreview}</span>
-          </span>
-          <span className="execution-diff-stat-slot">{hasLineChanges(stats) ? <DiffStat add={stats.add} del={stats.del} /> : null}</span>
-          <StatusMark message={message} childStatus={subagent?.status} />
-          <span className="tool-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
-        </button>
+            <span className="execution-diff-stat-slot">{hasLineChanges(stats) ? <DiffStat add={stats.add} del={stats.del} /> : null}</span>
+            <StatusMark message={message} childStatus={subagent?.status} />
+            <span className="tool-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
+          </button>
+          {canStop && (
+            <Button
+              className="execution-stop"
+              variant="danger"
+              size="sm"
+              iconStart={StopIcon}
+              busy={stopping}
+              onClick={stop}
+            >
+              {tr("common.stop")}
+            </Button>
+          )}
+        </div>
         <div className="execution-expand-shell" aria-hidden={!open}>
           <div className="execution-collapse-content">
           {detailsPresent && (

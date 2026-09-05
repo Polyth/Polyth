@@ -130,8 +130,8 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
 - `routes/` — one file per feature: org (folders/labels/bulk/search), workspace
   (files/commands), git, terminal (+`attachTerminalWs`), preview, browser, dictation,
   multirun, fusion, walkthrough (+review flow), schedule, usage, knowledge, github,
-  control (`/api/control/sessions` list/new/fork/abort; `/api/control/backend-sessions`
-  browse+import of unadopted OpenCode sessions), snippets, profiles
+  agent control (`/api/agent`: complete discoverable session control plus backend
+  session browse/import), snippets, profiles
   (agent profiles + model/agent aggregation), settings (behavior/MCP/plugins/system info),
   voice (engine settings + TTS proxy + summarize), assist (F9 settings + recap
   read + chat→note), auth (F16 status/login/logout/logout-all/device sessions),
@@ -181,7 +181,7 @@ log/graph/branch(es)/checkout/folder/stash/stashes/fetch/pull/push; optional own
 F7 writes: `pr/create`, `pr/update`, `pr/merge` — merge requires `confirm:true` and a
 squash/merge/rebase strategy, never deletes the branch; `pr/describe` returns a
 small-model title+body draft from `git diff base...HEAD` and never submits),
-`/api/control/sessions`, `/api/control/backend-sessions` (GET unadopted OpenCode
+`/api/agent/sessions`, `/api/agent/backend-sessions` (GET unadopted OpenCode
 sessions `{items, total}`; POST `/import {projectId, ids}` adopts selected —
 listing sessions no longer auto-adopts), `/api/agent-profiles`, `/api/settings/behavior`,
 `/api/mcp/servers` (CRUD + POST `:id/test`|`:id/probe` reachability check that

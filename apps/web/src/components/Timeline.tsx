@@ -96,8 +96,8 @@ type Announce = (text: string) => void;
 /** True when streamed text must not be smoothed: accessibility settings and
  *  the desktop low-resource mode both get the raw target directly. */
 function smoothTextOff(): boolean {
-  if (document.body.dataset.desktopLowResource === "true") return true;
-  if (document.documentElement.dataset.reduceAnimations === "true") return true;
+  if (typeof document !== "undefined" && document.body.dataset.desktopLowResource === "true") return true;
+  if (typeof document !== "undefined" && document.documentElement.dataset.reduceAnimations === "true") return true;
   return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
@@ -114,8 +114,9 @@ function smoothTextOff(): boolean {
  *  ponytail: re-parses one message's markdown per reveal frame; per-block
  *  memo caching in markdown/render.tsx is the upgrade if profiling complains. */
 function useSmoothText(target: string, fromEmpty = false): string {
-  const [shown, setShown] = useState(fromEmpty ? "" : target);
-  const shownRef = useRef(fromEmpty ? "" : target);
+  const initial = fromEmpty && !smoothTextOff() ? "" : target;
+  const [shown, setShown] = useState(initial);
+  const shownRef = useRef(initial);
   const rateRef = useRef(0);
   const revealRef = useRef(fromEmpty);
   const raf = useRef(0);
@@ -135,6 +136,11 @@ function useSmoothText(target: string, fromEmpty = false): string {
     const frames = revealRef.current ? 90 : 18;
     rateRef.current = Math.max(4, Math.ceil((target.length - shownRef.current.length) / frames));
     const step = () => {
+      if (smoothTextOff()) {
+        shownRef.current = target;
+        setShown(target);
+        return;
+      }
       const behind = target.length - shownRef.current.length;
       if (behind <= 0) return;
       const take = Math.min(behind, rateRef.current);
@@ -175,7 +181,7 @@ function reasoningSeen(text: string): boolean {
   return false;
 }
 
-function Thinking({ m, live }: { m: AssistantMsg; live: boolean }) {
+function Thinking({ m, live, entering = false }: { m: AssistantMsg; live: boolean; entering?: boolean }) {
   const prefs = useUiSettings();
   const source = m.reasoning || m.text;
   // Fresh live thought: its row is the turn's live latest, the answer has not
@@ -243,14 +249,14 @@ function Thinking({ m, live }: { m: AssistantMsg; live: boolean }) {
   );
   if (!prefs.collapsibleThinkingBlocks) {
     return (
-      <div className="reasoning reasoning-flat">
+      <div className={`reasoning reasoning-flat${entering ? " timeline-row-enter" : ""}`}>
         <div className="reasoning-heading">{mark}</div>
         {body}
       </div>
     );
   }
   return (
-    <div className={`reasoning${open ? " open" : ""}`}>
+    <div className={`reasoning${entering ? " timeline-row-enter" : ""}${open ? " open" : ""}`}>
       <button
         type="button"
         className="reasoning-toggle"
@@ -875,6 +881,7 @@ function AssistantView({
   terminal = false,
   segmentStartedAt,
   live = false,
+  entering = false,
 }: {
   m: AssistantMsg;
   announce?: Announce;
@@ -888,6 +895,7 @@ function AssistantView({
   /** True while this row is the latest assistant row of a working turn: its
    *  thinking block is the live thought and reveals with the typing effect. */
   live?: boolean;
+  entering?: boolean;
 }) {
   const hasAnswer = m.text.trim() !== "" || !m.finalized;
   const answer = m.text;
@@ -901,7 +909,7 @@ function AssistantView({
     ? ({ role: "article", "aria-label": assistantArticleName(m.finalized, assistantTime(m)) } as const)
     : undefined;
   return (
-    <div className="msg assistant" data-message-seq={m.eventSeq} {...(articleProps ?? {})}>
+    <div className={`msg assistant${entering ? " timeline-row-enter" : ""}`} data-message-seq={m.eventSeq} {...(articleProps ?? {})}>
       {m.reasoning !== "" && <Thinking m={m} live={live} />}
       {hasAnswer && (
         <div className="bubble" dir="auto">
@@ -933,7 +941,7 @@ export function shellCardCopyText(
   return [command, output, error].filter((part): part is string => typeof part === "string" && part.length > 0).join("\n\n");
 }
 
-function TaskActivityRow({ activity }: { activity: TaskActivityMsg }) {
+function TaskActivityRow({ activity, entering = false }: { activity: TaskActivityMsg; entering?: boolean }) {
   const label = activity.action === "created"
     ? tr("timeline.taskCreated")
     : activity.action === "started"
@@ -942,7 +950,7 @@ function TaskActivityRow({ activity }: { activity: TaskActivityMsg }) {
         ? tr("timeline.taskCompleted")
         : tr("timeline.taskFailed");
   return (
-    <div className={`task-activity ${activity.action}`} data-task-id={activity.taskId}>
+    <div className={`task-activity ${activity.action}${entering ? " timeline-row-enter" : ""}`} data-task-id={activity.taskId}>
       <span className="task-activity-mark" aria-hidden="true">
         {activity.action === "completed" ? "✓" : activity.action === "failed" ? "✕" : "•"}
       </span>
@@ -951,11 +959,11 @@ function TaskActivityRow({ activity }: { activity: TaskActivityMsg }) {
   );
 }
 
-function GithubConflictCard({ message }: { message: GithubConflictMsg }) {
+function GithubConflictCard({ message, entering = false }: { message: GithubConflictMsg; entering?: boolean }) {
   const label = tr("pullrequestview.fixingPullRequestConflictsValue", { number: message.prNumber });
   return (
     <article
-      className="msg github-conflict-card"
+      className={`msg github-conflict-card${entering ? " timeline-row-enter" : ""}`}
       data-msg-id={message.id}
       aria-label={label}
     >
@@ -998,10 +1006,12 @@ export function ActivityGroupView({
   g,
   subagents,
   state: stateOverride,
+  entering = false,
 }: {
   g: ActivityGroup;
   subagents: SubagentState | null;
   state?: RunSummaryState;
+  entering?: boolean;
 }) {
   const state = stateOverride ?? derivedActivityState(g);
   const active = state === "active" || state === "waiting";
@@ -1032,7 +1042,7 @@ export function ActivityGroupView({
     fmtDuration(g.ms),
   ].join(" · ");
   return (
-    <section className={`msg assistant activity-group${open ? " open" : ""}${active ? " current" : ""}`} aria-label={tr("timeline.agentActivity")}>
+    <section className={`msg assistant activity-group${entering ? " timeline-row-enter" : ""}${open ? " open" : ""}${active ? " current" : ""}`} aria-label={tr("timeline.agentActivity")}>
       <RunSummary
         title={tr("timeline.activity")}
         meta={meta}
@@ -1055,10 +1065,10 @@ export function ActivityGroupView({
             <div className="activity-group-items">
               {g.items.map((item, index) => (
                  item.kind === "tool"
-                  ? <ExecutionRow key={item.id} message={item} subagent={childForTool(item, subagents)} defaultOpen={active && (item.status === "pending" || item.status === "running")} />
+                  ? <ExecutionRow key={item.id} message={item} subagent={childForTool(item, subagents)} defaultOpen={active && (item.status === "pending" || item.status === "running")} entering={entering && active && index === g.items.length - 1} />
                   : item.kind === "assistant"
-                    ? <Thinking key={item.id} m={item} live={active && index === g.items.length - 1} />
-                    : <TaskActivityRow key={item.id} activity={item} />
+                    ? <Thinking key={item.id} m={item} live={active && index === g.items.length - 1} entering={entering && active && index === g.items.length - 1} />
+                    : <TaskActivityRow key={item.id} activity={item} entering={entering && active && index === g.items.length - 1} />
               ))}
             </div>
           )}
@@ -1068,7 +1078,7 @@ export function ActivityGroupView({
   );
 }
 
-function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segmentStartedAt, live, onRevert, onFork, revert, fork }: {
+function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segmentStartedAt, live, entering, onRevert, onFork, revert, fork }: {
   m: RenderMessage;
   announce?: Announce;
   plan?: NonNullable<RenderModel["tasks"]>;
@@ -1077,6 +1087,7 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segm
   terminal?: boolean;
   segmentStartedAt?: number;
   live?: boolean;
+  entering?: boolean;
   onRevert?: (message: UserMsg) => void;
   onFork?: (message: UserMsg) => void;
   revert?: ActionAvailability;
@@ -1084,7 +1095,7 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segm
 }) {
   if (m.kind === "user") {
     return (
-      <div className="msg user" data-msg-id={m.id} role="article" aria-label={userArticleName(m.time)}>
+      <div className={`msg user${entering ? " timeline-row-enter" : ""}`} data-msg-id={m.id} role="article" aria-label={userArticleName(m.time)}>
         <div className="bubble" dir="auto">
           {renderMarkdown(m.text, m.id)}
           {m.attachments && m.attachments.length > 0 && (
@@ -1106,11 +1117,11 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segm
     );
   }
   if (m.kind === "assistant") {
-    return <AssistantView m={m} announce={announce} plan={plan} regeneratePrompt={regeneratePrompt} turn={turn} terminal={terminal} segmentStartedAt={segmentStartedAt} live={live} />;
+    return <AssistantView m={m} announce={announce} plan={plan} regeneratePrompt={regeneratePrompt} turn={turn} terminal={terminal} segmentStartedAt={segmentStartedAt} live={live} entering={entering} />;
   }
-  if (m.kind === "github-conflict") return <GithubConflictCard message={m} />;
-  if (m.kind === "task") return <TaskActivityRow activity={m} />;
-  return <ExecutionRow message={m} />;
+  if (m.kind === "github-conflict") return <GithubConflictCard message={m} entering={entering} />;
+  if (m.kind === "task") return <TaskActivityRow activity={m} entering={entering} />;
+  return <ExecutionRow message={m} entering={entering} />;
 }
 
 // ---- memoized rows -----------------------------------------------------------
@@ -1163,6 +1174,7 @@ const MessageRow = memo(function MessageRow(props: Parameters<typeof MessageView
   && prev.turn === undefined && next.turn === undefined
   && prev.terminal === next.terminal
   && prev.live === next.live
+  && prev.entering === next.entering
   && prev.segmentStartedAt === next.segmentStartedAt
   && prev.regeneratePrompt === next.regeneratePrompt
   && prev.announce === next.announce
@@ -1190,15 +1202,17 @@ const ActivityRow = memo(function ActivityRow({
   g,
   subagents,
   state,
+  entering,
 }: {
   rev: number;
   g: ActivityGroup;
   subagents: SubagentState | null;
   state?: RunSummaryState;
+  entering?: boolean;
 }) {
-  return <ActivityGroupView g={g} subagents={subagents} state={state} />;
+  return <ActivityGroupView g={g} subagents={subagents} state={state} entering={entering} />;
 }, (prev, next) => prev.rev === next.rev && sameActivity(prev.g, next.g)
-  && prev.subagents === next.subagents && prev.state === next.state);
+  && prev.subagents === next.subagents && prev.state === next.state && prev.entering === next.entering);
 
 // Right-edge prompt rail (WP4, restyled after polyth PromptNavigatorRail):
 // a thin vertical tape of ticks in a 28px gutter hugging the right edge of the
@@ -1605,23 +1619,6 @@ export default function Timeline({
     };
   }, [sessionId, hasMessages]);
 
-  // Session-open animation: replayed per switch by re-adding the class on the
-  // next frame. The keyframes are opacity/transform only and sit behind a
-  // prefers-reduced-motion gate in styles.css; here we only toggle the class.
-  useEffect(() => {
-    const el = ref.current;
-    if (el === null || sessionId === null) return;
-    el.classList.remove("session-entering");
-    const raf = requestAnimationFrame(() => el.classList.add("session-entering"));
-    const onEnd = () => el.classList.remove("session-entering");
-    el.addEventListener("animationend", onEnd);
-    return () => {
-      cancelAnimationFrame(raf);
-      el.removeEventListener("animationend", onEnd);
-      el.classList.remove("session-entering");
-    };
-  }, [sessionId]);
-
   // Tail follow (§2.4): at/near the tail the timeline follows growth; a reader
   // who scrolled up keeps the chosen position and sees the reveal control.
   // The follow EASES instead of teleporting (exponential rAF chase, re-targeted
@@ -1850,6 +1847,7 @@ export default function Timeline({
   // above), and a jump to a hidden prompt grows the window first.
   const start = windowStart(rows.length, limit);
   const shownRows = start > 0 ? rows.slice(start) : rows;
+  const latestRowId = shownRows[shownRows.length - 1]?.id;
   const latestAssistantId = [...shownRows].reverse().find((row) => row.kind === "assistant")?.id;
   const latestActivityId = [...shownRows].reverse().find((row) => row.kind === "activity")?.id;
   const currentActivityState: RunSummaryState | undefined = pendingQuestion || pendingPermission || pendingSecret
@@ -2113,6 +2111,7 @@ export default function Timeline({
                 g={r}
                 subagents={model.subagents}
                 state={r.id === latestActivityId ? currentActivityState : undefined}
+                entering={r.id === latestRowId}
               />
             : (
               <MessageRow
@@ -2125,6 +2124,7 @@ export default function Timeline({
                 // The latest assistant row of a working turn owns the live
                 // thinking reveal; every other row shows its thought formed.
                 live={r.kind === "assistant" && turnWorking && r.id === latestAssistantId}
+                entering={r.id === latestRowId}
                 terminal={r.kind === "assistant" && !sessionActive && terminalAnswers.has(r.eventSeq)}
                 segmentStartedAt={r.kind === "assistant" ? terminalAnswers.get(r.eventSeq) : undefined}
                 announce={announce}

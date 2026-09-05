@@ -90,7 +90,7 @@ import AdaptiveTextInput, { type TextInputHandle } from "./input/AdaptiveTextInp
 import ComposerAddMenu from "./ComposerAddMenu.tsx";
 import EffortMenu from "./EffortMenu.tsx";
 import ComposerFocusDialog from "./ComposerFocusDialog.tsx";
-import QueuedMessageList from "./QueuedMessageList.tsx";
+import QueuedMessageList, { latestSteerableQueuedItem } from "./QueuedMessageList.tsx";
 import { GoalAttachForm } from "../../../../packages/goals/widgets/GoalStrip.tsx";
 import { announce } from "./a11y/live.tsx";
 import { noteModelUsed } from "@polyth/models/web-prefs";
@@ -116,7 +116,7 @@ import SessionContextBar, {
   type ContextChoice,
   type SessionContextBarProps,
 } from "./mobile/SessionContextBar.tsx";
-import { Button, GlassDock, IconButton, Menu, Notice, SendIcon, StopIcon } from "./ui/index.ts";
+import { Button, CheckIcon, GlassDock, IconButton, Menu, MoreIcon, Notice, QueueIcon, SendIcon, StopIcon } from "./ui/index.ts";
 import { getSendFailure, subscribeSendFailures } from "../sendFailure.ts";
 import { isNativeMobile } from "@polyth/mobile/runtime";
 import { pickNativeFiles } from "@polyth/mobile/native";
@@ -457,6 +457,9 @@ export default function Composer({
   const [queueEdit, setQueueEdit] = useState<QueueEdit | null>(null);
   const [queueEditStarting, setQueueEditStarting] = useState(false);
   const [queueEditSaving, setQueueEditSaving] = useState(false);
+  const [queuedItems, setQueuedItems] = useState<QueueItemDto[]>([]);
+  const [steeringQueuedId, setSteeringQueuedId] = useState<string | null>(null);
+  const steeringQueuedBySessionRef = useRef(new Map<string, string>());
   const queueEditRef = useRef<QueueEdit | null>(null);
   queueEditRef.current = queueEdit;
   const committedTextRef = useRef(text);
@@ -551,6 +554,8 @@ export default function Composer({
     setQueueEdit(null);
     setQueueEditStarting(false);
     setQueueEditSaving(false);
+    setQueuedItems([]);
+    setSteeringQueuedId(null);
   }, [session?.id, newSessionIntent, flushComposerDraft]);
 
   // Disengage after an outside click has reached its target. Collapsing on
@@ -825,6 +830,73 @@ export default function Composer({
     return true;
   }, []);
 
+  const updateQueuedItems = useCallback((sourceSessionId: string, items: QueueItemDto[]) => {
+    if (sessionIdRef.current === sourceSessionId) setQueuedItems(items);
+  }, []);
+
+  const steerQueuedItem = useCallback(async (item: QueueItemDto) => {
+    const target = item.sessionId;
+    if (sessionIdRef.current !== target || steeringQueuedBySessionRef.current.has(target)) return;
+    steeringQueuedBySessionRef.current.set(target, item.id);
+    setSteeringQueuedId(item.id);
+    let reserved = false;
+    try {
+      // Reserve before steering so turn completion cannot dispatch the same
+      // queue row while this request is promoting it.
+      const current = await api.queueEditStart(target, item.id);
+      reserved = true;
+      const cfgSent = cfg;
+      const selected = cfgSent.model ?? session?.model ?? preferredModel;
+      const descriptor = selected && chatModels.find((candidate) =>
+        candidate.providerID === selected.providerID && candidate.modelID === selected.modelID);
+      const requestedThinking = cfgSent.thinking !== undefined
+        ? cfgSent.thinking
+        : getModelThinking(selected) ?? sessionDefaults.defaultThinking;
+      const thinking = typeof requestedThinking === "string" && descriptor?.variants?.includes(requestedThinking)
+        ? requestedThinking
+        : undefined;
+      const selectedModel = selected
+        ? { providerID: selected.providerID, modelID: selected.modelID, ...(thinking ? { variant: thinking } : {}) }
+        : undefined;
+      const profile = wireProfileId(cfgSent);
+      const ok = await sendMessage(current.text, selectedModel, cfgSent.agent, {
+        targetSessionId: target,
+        delivery: "steer",
+        ...(current.attachments?.length ? { attachments: current.attachments } : {}),
+        dismissPending: true,
+        ...(profile !== undefined ? { agentProfileId: profile } : {}),
+      });
+      if (!ok) return;
+      consumeComposerConfig(target, cfgSent);
+      if (sessionIdRef.current === target) setCfg(loadComposerConfig(target));
+      await api.queueRemove(target, current.id);
+      setQueuedItems((items) => items.filter((candidate) => candidate.id !== current.id));
+    } catch (error) {
+      const code = errorCodeOf(error);
+      if (code === "not-found" || (reserved && code === "conflict")) {
+        setQueuedItems((items) => items.filter((candidate) => candidate.id !== item.id));
+      } else if (code !== "conflict") {
+        setUiError(friendlyError(tr("common.error"), error));
+      }
+    } finally {
+      // Also restarts queue dispatch if the turn ended while the row was held.
+      if (reserved) await api.queueEditCancel(target, item.id).catch(() => {});
+      if (steeringQueuedBySessionRef.current.get(target) === item.id) {
+        steeringQueuedBySessionRef.current.delete(target);
+      }
+      setSteeringQueuedId((current) => current === item.id ? null : current);
+    }
+  }, [cfg, session?.model, preferredModel, chatModels, sessionDefaults.defaultThinking]);
+
+  const followUp = getUiSettings().followUpBehavior;
+  const emptySteerItem = working
+    && followUp === "queue"
+    && !queueEdit
+    && !text.trim()
+    && attachments.length === 0
+    ? latestSteerableQueuedItem(queuedItems)
+    : null;
+
   const retryModelConnection = useCallback(() => {
     recheckRuntimeCatalog();
     reconnectSync();
@@ -863,7 +935,11 @@ export default function Composer({
     }
     const command = shellCommand(t);
     const hasPills = command === null && attachments.length > 0;
-    if ((!t && !hasPills) || command === "") return;
+    if (!t && !hasPills) {
+      if (emptySteerItem) void steerQueuedItem(emptySteerItem);
+      return;
+    }
+    if (command === "") return;
     if (command === null && noModels) {
       // Never a silent no-op: pressing Enter while the model catalog is empty
       // (backend still starting / restarting) surfaces the same guidance as
@@ -996,6 +1072,7 @@ export default function Composer({
     acTokenRef.current = null;
   }, [
     text, attachments, cfg, profileMissing, noModels, runtimeUnavailable, working, activeProjectId, queueEdit, queueEditSaving,
+    emptySteerItem, steerQueuedItem,
     session?.model, session?.status, session?.runtimeControl, preferredModel,
     sessionDefaults.defaultThinking, chatModels, creatingSession, newSessionTarget,
     newSessionAutoApprove, newSessionGoal, newSessionIntent,
@@ -1418,7 +1495,6 @@ export default function Composer({
     generateNextAction,
   };
 
-  const followUp = getUiSettings().followUpBehavior;
   const borrowedEpochPending = session?.status === "epoch-pending"
     && session.runtimeControl === "borrowed";
   const sendDisabled = creatingSession
@@ -1484,18 +1560,8 @@ export default function Composer({
           sessionId={session.id}
           editingId={queueEdit?.sessionId === session.id ? queueEdit.id : null}
           onEdit={beginQueuedEdit}
-          onSteer={async (item) => {
-            const target = sessionIdRef.current;
-            if (!target) return;
-            const ok = await sendMessage(item.text, undefined, undefined, {
-              targetSessionId: target,
-              delivery: "steer",
-              ...(item.attachments?.length ? { attachments: item.attachments } : {}),
-              dismissPending: true,
-            });
-            if (!ok) return;
-            await api.queueRemove(target, item.id);
-          }}
+          onSteer={steerQueuedItem}
+          onItemsChange={updateQueuedItems}
         />
       )}
       <GlassDock
@@ -1677,16 +1743,32 @@ export default function Composer({
           </div>
           <span className="composer-primary">
             {canStop ? (
-              (working && (queueEdit || (followUp === "queue" && !sendDisabled))) ? (
+              (working && (queueEdit || (followUp === "queue" && (!sendDisabled || emptySteerItem)))) ? (
                 <div className="composer-send-split">
                     <button
                       className="send composer-delivery composer-queue"
                       onClick={() => send()}
-                      aria-label={queueEdit ? tr("composer.saveQueuedMessageInIts") : tr("composer.queueMessageUntilTheCurrentResponseFinishes")}
-                      title={queueEdit ? tr("composer.saveQueuedMessageInIts") : tr("composer.queueMessageUntilTheCurrentResponseFinishes")}
-                      disabled={queueEdit ? queueEditSaving || !text.trim() : false}
+                      aria-label={queueEdit
+                        ? tr("composer.saveQueuedMessageInIts")
+                        : emptySteerItem
+                          ? tr("queuedmessagelist.steer")
+                          : tr("composer.queueMessageUntilTheCurrentResponseFinishes")}
+                      title={queueEdit
+                        ? tr("composer.saveQueuedMessageInIts")
+                        : emptySteerItem
+                          ? tr("queuedmessagelist.steer")
+                          : tr("composer.queueMessageUntilTheCurrentResponseFinishes")}
+                      aria-busy={!!emptySteerItem && steeringQueuedId === emptySteerItem.id}
+                      disabled={queueEdit
+                        ? queueEditSaving || !text.trim()
+                        : !!emptySteerItem && steeringQueuedId !== null}
                     >
-                      <Icon.sendClock /><span className="composer-action-label">{queueEdit ? tr("common.save") : tr("composer.queue")}</span>
+                      {emptySteerItem ? <SendIcon /> : queueEdit ? <CheckIcon /> : <QueueIcon />}
+                      <span className="composer-action-label">{queueEdit
+                        ? tr("common.save")
+                        : emptySteerItem
+                          ? tr("settings.pages.steer")
+                          : tr("composer.queue")}</span>
                   </button>
                   <Menu
                     label={tr("composer.moreActiveRunActions")}
@@ -1713,10 +1795,12 @@ export default function Composer({
                       <button
                         className="composer-send-options"
                         aria-label={tr("composer.moreActiveRunActions")}
-                        disabled={queueEdit ? queueEditSaving || !text.trim() : false}
+                        disabled={queueEdit
+                          ? queueEditSaving || !text.trim()
+                          : !!emptySteerItem && steeringQueuedId !== null}
                         {...trigger}
                       >
-                        <Icon.chevronDown />
+                        <MoreIcon />
                       </button>
                     )}
                   </Menu>

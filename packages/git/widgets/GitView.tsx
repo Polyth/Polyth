@@ -19,6 +19,7 @@ import { setPaneLastResource } from "../../../apps/web/src/workspace/panePrefs.t
 import CopyButton from "../../../apps/web/src/components/CopyButton.tsx";
 import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
 import PrCreatePanel from "../../github/widgets/PrCreatePanel.tsx";
+import { summarizeUnifiedDiff, totalDiffStats, type DiffLineStats } from "./PendingChangesBar.tsx";
 import {
   AddIcon,
   AssistIcon,
@@ -26,13 +27,11 @@ import {
   BranchIcon,
   Button,
   Checkbox,
-  ChevronDownIcon,
   CloseIcon,
   DeleteIcon,
   Dialog,
   FetchIcon,
   IconButton,
-  Menu,
   PullIcon,
   PullRequestIcon,
   PushIcon,
@@ -95,6 +94,10 @@ export function reconcileGitSelection(selection: GitSelection | null, status: Gi
   return next ? { path: next.path, staged: next.staged } : null;
 }
 
+function fileStatKey(file: GitFileEntry): string {
+  return `${file.staged ? "s" : "u"}:${file.path}`;
+}
+
 function fileLetter(file: GitFileEntry): { letter: string; cls: string; label: string } {
   const hit = STATUS_LETTER[file.status];
   const label = statusLabel(file.status);
@@ -119,10 +122,27 @@ function GraphSvg({ row }: { row: GraphRow }) {
   );
 }
 
-function GitFileRow({ file, selected, busy, onOpen, onStage, onDiscard }: {
+function FileLineStats({ stats }: { stats: DiffLineStats }) {
+  if (stats.additions === 0 && stats.deletions === 0) return null;
+  return (
+    <span
+      className="git-file-linestat"
+      aria-label={tr("pendingchangesbar.valueAdditionsValueDeletions", {
+        additions: stats.additions,
+        deletions: stats.deletions,
+      })}
+    >
+      <span className="additions" aria-hidden="true">+{stats.additions}</span>
+      <span className="deletions" aria-hidden="true">-{stats.deletions}</span>
+    </span>
+  );
+}
+
+function GitFileRow({ file, selected, busy, stats, onOpen, onStage, onDiscard }: {
   file: GitFileEntry;
   selected: boolean;
   busy: boolean;
+  stats?: DiffLineStats;
   onOpen: () => void;
   onStage: () => void;
   onDiscard?: () => void;
@@ -132,7 +152,7 @@ function GitFileRow({ file, selected, busy, onOpen, onStage, onDiscard }: {
     <div className={`git-file-row ${selected ? "selected" : ""}`}>
       {onDiscard && (
         <IconButton
-          icon={RefreshIcon}
+          icon={UndoIcon}
           size="sm"
           title={tr("gitview.revert")}
           label={tr("gitview.revertValue", { path: file.path })}
@@ -146,6 +166,7 @@ function GitFileRow({ file, selected, busy, onOpen, onStage, onDiscard }: {
           {file.origPath ? <><span className="muted">{file.origPath} → </span>{file.path}</> : file.path}
         </span>
       </button>
+      {stats && <FileLineStats stats={stats} />}
       <span className="git-file-actions">
         <IconButton
           icon={file.staged ? UndoIcon : AddIcon}
@@ -160,13 +181,14 @@ function GitFileRow({ file, selected, busy, onOpen, onStage, onDiscard }: {
   );
 }
 
-function ChangeSection({ id, title, files, closed, selected, busy, onToggle, onOpen, onStage, onDiscard }: {
+function ChangeSection({ id, title, files, closed, selected, busy, fileStats, onToggle, onOpen, onStage, onDiscard }: {
   id: string;
   title: string;
   files: GitFileEntry[];
   closed: boolean;
   selected: { path: string; staged: boolean } | null;
   busy: boolean;
+  fileStats: Record<string, DiffLineStats>;
   onToggle: (id: string) => void;
   onOpen: (file: GitFileEntry) => void;
   onStage: (file: GitFileEntry) => void;
@@ -187,6 +209,7 @@ function ChangeSection({ id, title, files, closed, selected, busy, onToggle, onO
               file={file}
               selected={selected?.path === file.path && selected.staged === file.staged}
               busy={busy}
+              stats={fileStats[fileStatKey(file)]}
               onOpen={() => onOpen(file)}
               onStage={() => onStage(file)}
               {...(file.status !== "conflicted" ? { onDiscard: () => onDiscard(file) } : {})}
@@ -303,6 +326,7 @@ export default function GitView() {
   const [closedBranchGroups, setClosedBranchGroups] = useState<ReadonlySet<BranchGroup>>(new Set(["remote"]));
   const [branchLimits, setBranchLimits] = useState<Record<BranchGroup, number>>({ local: 30, remote: 30 });
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
+  const [fileStats, setFileStats] = useState<Record<string, DiffLineStats>>({});
 
   const refresh = useCallback(async (showLoading = false): Promise<GitStatus | null> => {
     if (!projectId) return null;
@@ -397,6 +421,37 @@ export default function GitView() {
       .finally(() => { if (active) setCommitDiffLoading(false); });
     return () => { active = false; };
   }, [projectId, sessionId, commitSel, prefs.ignoreWhitespace, commitDiffRetry]);
+
+  // Only re-summarize once the set of changed paths actually shifts — the
+  // status poll below replaces `status` every 2.5s even when nothing changed.
+  const changeKey = status
+    ? [...status.conflicted, ...status.staged, ...status.unstaged, ...status.untracked]
+        .map(fileStatKey).sort().join("\0")
+    : "";
+
+  useEffect(() => {
+    if (!projectId || !status || status.isRepo === false || !changeKey) {
+      setFileStats({});
+      return;
+    }
+    const files = [...status.conflicted, ...status.staged, ...status.unstaged, ...status.untracked];
+    let cancelled = false;
+    void Promise.all(files.map(async (file) => {
+      try {
+        const result = await api.gitDiff(projectId, file.path, file.staged, false, sessionId ?? undefined);
+        return [fileStatKey(file), summarizeUnifiedDiff(result.diff)] as const;
+      } catch {
+        return [fileStatKey(file), null] as const;
+      }
+    })).then((entries) => {
+      if (cancelled) return;
+      const next: Record<string, DiffLineStats> = {};
+      for (const [key, stats] of entries) if (stats) next[key] = stats;
+      setFileStats(next);
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by changeKey, not the polled status object
+  }, [projectId, sessionId, changeKey]);
 
   useEffect(() => {
     if (!remoteStatus) return;
@@ -523,6 +578,7 @@ export default function GitView() {
   const fileComments = comments.filter((comment) => comment.path === selected?.path);
   const selectedCommit = graph.find((commit) => commit.sha === commitSel);
   const { add: addCount, del: delCount } = diffStat(diff);
+  const totalFileStats = totalDiffStats(Object.values(fileStats));
 
   const remoteLabel: Record<RemoteStep, { idle: string; busy: string }> = {
     fetch: { idle: tr("gitview.fetch"), busy: tr("gitview.fetching") },
@@ -583,11 +639,9 @@ export default function GitView() {
     setMobileDetail(false);
   };
 
-  /** Commit, then bring the branch in line with the remote. */
-  const commitAndSync = async () => {
-    await commitStaged();
-    await api.gitPush(projectId, "origin", sessionId ?? undefined);
+  const syncRepository = async () => {
     await api.gitPull(projectId, "origin", sessionId ?? undefined);
+    await api.gitPush(projectId, "origin", sessionId ?? undefined);
   };
 
   return (
@@ -731,6 +785,18 @@ export default function GitView() {
                   <strong>{tr("gitview.workingTree")}</strong>
                   <span className="muted">{all.length === 0 ? tr("gitview.clean") : all.length === 1 ? tr("gitview.oneChangedFile") : tr("gitview.changedFilesValue", { count: all.length })}</span>
                 </div>
+                {(totalFileStats.additions > 0 || totalFileStats.deletions > 0) && (
+                  <span
+                    className="diff-stat"
+                    aria-label={tr("pendingchangesbar.valueAdditionsValueDeletions", {
+                      additions: totalFileStats.additions,
+                      deletions: totalFileStats.deletions,
+                    })}
+                  >
+                    <span>+{totalFileStats.additions}</span>
+                    <span>−{totalFileStats.deletions}</span>
+                  </span>
+                )}
                 <span className="header-spacer" />
                 {(status?.unstaged.length || status?.untracked.length || status?.conflicted.length) ? (
                   <Button size="sm" iconStart={StageIcon} disabled={busy} onClick={() => void run(() => api.gitFolder(projectId, "", "stage", sessionId ?? undefined))}>
@@ -761,6 +827,7 @@ export default function GitView() {
                     closed={closedGroups.has(group.id)}
                     selected={selected}
                     busy={busy}
+                    fileStats={fileStats}
                     onToggle={toggleGroup}
                     onOpen={openFile}
                     onStage={(file) => void run(() => file.staged
@@ -879,32 +946,8 @@ export default function GitView() {
                     .then((result) => { if (result.message) setCommitMsg(result.message); })
                     .finally(() => setGenerating(false));
                 }}>{tr("gitview.generate")}</Button>
-                <div className="git-commit-split">
-                  <Button size="sm" variant="primary" busy={busy && !!commitMsg.trim()} disabled={!commitMsg.trim() || busy} onClick={() => void run(commitStaged)}>{tr("gitview.commit")}</Button>
-                  <Menu
-                    label={tr("gitview.commitStagedChanges")}
-                    align="end"
-                    entries={[
-                      {
-                        id: "sync",
-                        label: tr("gitview.syncRepository"),
-                        disabled: !commitMsg.trim() || busy,
-                        onSelect: () => void run(commitAndSync),
-                      },
-                    ]}
-                  >
-                    {(trigger) => (
-                      <IconButton
-                        {...trigger}
-                        icon={ChevronDownIcon}
-                        size="sm"
-                        variant="quiet"
-                        label={tr("gitview.syncRepository")}
-                        disabled={!commitMsg.trim() || busy}
-                      />
-                    )}
-                  </Menu>
-                </div>
+                <Button size="sm" variant="primary" busy={busy && !!commitMsg.trim()} disabled={!commitMsg.trim() || busy} onClick={() => void run(commitStaged)}>{tr("gitview.commit")}</Button>
+                <Button size="sm" iconStart={RefreshIcon} disabled={busy} onClick={() => void run(syncRepository)}>{tr("gitview.syncRepository")}</Button>
               </div>
             </section>
           )}

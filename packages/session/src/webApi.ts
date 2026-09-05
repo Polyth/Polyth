@@ -47,6 +47,8 @@ import type {
   SessionProjection,
   SessionRef,
   ShellTurnResult,
+  SpaceMemberDto,
+  SpacesStateDto,
   SshBrowseDto,
   SshConnectionDto,
   SshConnectionInput,
@@ -554,6 +556,22 @@ export const api = {
     jfetch<{ packages: PackageDescriptorDto[] }>("/api/packages"),
   packagesSetEnabled: (id: string, enabled: boolean): Promise<PackageDescriptorDto> =>
     jfetch<PackageDescriptorDto>(`/api/packages/${encodeURIComponent(id)}`, json("PATCH", { enabled })),
+
+  // ---- spaces (tenancy) --------------------------------------------------
+  // The active Space is server-side state: switching is a POST, not a query
+  // parameter, and every other call is answered inside whatever Space the
+  // server resolved for this device.
+  spaces: () => jfetch<SpacesStateDto>("/api/spaces"),
+  createSpace: (input: { name: string; color?: string; icon?: string }) =>
+    jfetch<SpacesStateDto>("/api/spaces", json("POST", input)),
+  patchSpace: (id: string, patch: { name?: string; color?: string; icon?: string }) =>
+    jfetch<SpacesStateDto>(`/api/spaces/${encodeURIComponent(id)}`, json("PATCH", patch)),
+  deleteSpace: (id: string) =>
+    jfetch<SpacesStateDto>(`/api/spaces/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  activateSpace: (id: string) =>
+    jfetch<SpacesStateDto>(`/api/spaces/${encodeURIComponent(id)}/activate`, json("POST")),
+  spaceMembers: (id: string) =>
+    jfetch<SpaceMemberDto[]>(`/api/spaces/${encodeURIComponent(id)}/members`),
 
   listProjects: () => jfetch<Project[]>("/api/projects"),
   addProject: (path: string, name?: string) =>
@@ -1200,13 +1218,13 @@ export const api = {
 
   // ---- session control ---------------------------------------------------------
   controlSessions: (projectId?: string) =>
-    jfetch<SessionProjection[]>(`/api/control/sessions${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`),
+    jfetch<SessionProjection[]>(`/api/sessions${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`),
   controlNew: (projectId: string, title?: string) =>
-    jfetch<SessionRef>(`/api/control/sessions`, json("POST", { projectId, title })),
+    jfetch<SessionRef>(`/api/sessions`, json("POST", { projectId, title })),
   controlFork: (sessionId: string, atSeq?: number) =>
-    jfetch<SessionRef>(`/api/control/sessions/${encodeURIComponent(sessionId)}/fork`, json("POST", atSeq === undefined ? {} : { atSeq })),
+    jfetch<SessionRef>(`/api/sessions/${encodeURIComponent(sessionId)}/fork`, json("POST", atSeq === undefined ? {} : { atSeq })),
   controlAbort: (sessionId: string) =>
-    jfetch<{ ok: true }>(`/api/control/sessions/${encodeURIComponent(sessionId)}/abort`, { method: "POST" }),
+    jfetch<{ ok: true }>(`/api/sessions/${encodeURIComponent(sessionId)}/abort`, { method: "POST" }),
 
   // ---- commands + snippets CRUD ------------------------------------------------
   saveCommand: (projectId: string, scope: "user" | "project", cmd: { name: string; prompt: string; description?: string; agent?: string; model?: string }) =>
@@ -1374,10 +1392,10 @@ export const api = {
   // ---- backend session import (F14 import half) ----------------------------------
   backendSessions: (projectId: string) =>
     jfetch<{ items: RuntimeSession[]; total: number }>(
-      `/api/control/backend-sessions?projectId=${encodeURIComponent(projectId)}`,
+      `/api/agent/backend-sessions?projectId=${encodeURIComponent(projectId)}`,
     ),
   importBackendSessions: (projectId: string, ids: string[]) =>
-    jfetch<SessionProjection[]>(`/api/control/backend-sessions/import`, json("POST", { projectId, ids })),
+    jfetch<SessionProjection[]>(`/api/agent/backend-sessions/import`, json("POST", { projectId, ids })),
 
   // ---- auto-accept policy (F18) ------------------------------------------------------
   autoAcceptGet: (sessionId: string) =>

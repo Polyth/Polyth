@@ -287,7 +287,7 @@ const activityGroup = (
   settled: !items.some((item) => item.kind === "tool" && (item.status === "pending" || item.status === "running")),
 });
 const { default: PermissionBanner } = await import("../../../packages/permissions/widgets/PermissionBanner.tsx");
-const { activateSession, getState, setSessions } = await import("../src/store.ts");
+const { activateSession, applyEvent, getState, setSessions } = await import("../src/store.ts");
 
 test("execution row renders collapsed value first, expands inline, and opens level three on demand", async () => {
   const timeline = document.createElement("div");
@@ -302,9 +302,8 @@ test("execution row renders collapsed value first, expands inline, and opens lev
     const disclosure = container.querySelector<HTMLButtonElement>(".execution-summary");
     assert.ok(disclosure);
     assert.equal(disclosure.getAttribute("aria-expanded"), "false");
-    // The summary prints out on appearance (typing animation), so the visible
-    // text is still typing; the accessible name always carries the full
-    // command.
+    // Historical rows render immediately; the accessible name always carries
+    // the full command independently of the latest-row entrance treatment.
     assert.ok((disclosure.getAttribute("aria-label") ?? "")
       .includes("Expand Shell: git diff -- apps/web/src/components/Timeline.tsx"));
     assert.equal(container.querySelector(".execution-details"), null, "raw details do not clutter the collapsed row");
@@ -363,12 +362,35 @@ test("execution row renders collapsed value first, expands inline, and opens lev
       await new Promise((resolve) => setTimeout(resolve, 200));
     });
     assert.equal(container.querySelector(".execution-details"), null, "details unmount after the motion-normal collapse");
-    // The appearance print-out has settled by now: the visible summary reads
-    // label + typed command + duration + check mark.
+    // The visible summary reads label + command + duration + check mark.
     assert.match(disclosure.textContent ?? "", /Shell.*git diff.*420ms.*✓/s);
   } finally {
     await act(async () => root.unmount());
     timeline.remove();
+  }
+});
+
+test("only the newest row in a live activity group receives entrance and print motion", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const first = tool({ id: "call-first", callId: "call-first", eventSeq: 1 });
+  const latest = tool({ id: "call-latest", callId: "call-latest", eventSeq: 2, input: { command: "npm test" } });
+  try {
+    await act(async () => root.render(createElement(ActivityGroupView, {
+      g: activityGroup("activity-motion", [first, latest]),
+      subagents: null,
+      state: "active",
+      entering: true,
+    })));
+    const rows = [...container.querySelectorAll(".execution-row")];
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0]?.classList.contains("timeline-row-enter"), false);
+    assert.equal(rows[1]?.classList.contains("timeline-row-enter"), true);
+    assert.notEqual(rows[0]?.querySelector(".tool-preview")?.textContent, "", "history never retypes from empty");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
   }
 });
 
@@ -546,18 +568,90 @@ test("pending and running execution states stay visually and accessibly distinct
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
+  const originalFetch = globalThis.fetch;
+  let abortRequest: { url: string; method: string } | undefined;
   try {
+    await act(async () => {
+      setSessions("execution-status-test", [{
+        id: "execution-status-session",
+        projectId: "execution-status-test",
+        title: "Running command",
+        status: "working",
+        createdAt: 1,
+        updatedAt: 1,
+      }]);
+      activateSession("execution-status-session");
+      applyEvent({
+        id: "execution-status-turn-started",
+        sessionId: "execution-status-session",
+        seq: 1,
+        time: 1,
+        type: "turn/started",
+        data: { turnId: "turn-1" },
+        v: 1,
+      });
+      applyEvent({
+        id: "execution-status-tool-started",
+        sessionId: "execution-status-session",
+        seq: 2,
+        time: 2,
+        type: "tool/started",
+        data: { callId: "call-1", tool: "bash", input: { command: "sleep 10" } },
+        v: 1,
+      });
+    });
     await act(async () => root.render(createElement(ExecutionRow, {
       message: tool({ status: "pending", output: undefined, finishTime: undefined }),
     })));
     assert.match(container.querySelector(".execution-status")?.getAttribute("aria-label") ?? "", /^Pending in /);
     assert.equal(container.querySelector(".execution-status-icon")?.textContent, "○");
+    assert.equal(container.querySelector(".execution-stop"), null, "queued commands cannot be stopped before they start");
     await act(async () => root.render(createElement(ExecutionRow, {
       message: tool({ status: "running", output: undefined, finishTime: undefined }),
     })));
     assert.match(container.querySelector(".execution-status")?.getAttribute("aria-label") ?? "", /^Running in /);
     assert.ok(container.querySelector(".execution-status-icon .ui-spinner"), "running status uses an animated spinner");
+    const stop = container.querySelector<HTMLButtonElement>(".execution-stop");
+    assert.equal(stop?.textContent, "Stop");
+    globalThis.fetch = async (input, init) => {
+      abortRequest = { url: String(input), method: String(init?.method ?? "GET") };
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    };
+    await act(async () => { stop?.click(); });
+    assert.deepEqual(abortRequest, {
+      url: "/api/sessions/execution-status-session/abort",
+      method: "POST",
+    });
+    await act(async () => {
+      applyEvent({
+        id: "execution-status-turn-stopped",
+        sessionId: "execution-status-session",
+        seq: 3,
+        time: 3,
+        type: "turn/stopped",
+        data: { turnId: "turn-1", reason: "aborted" },
+        v: 1,
+      });
+    });
+    assert.equal(container.querySelector(".execution-stop"), null, "stop disappears as soon as the turn settles");
+    await act(async () => {
+      applyEvent({
+        id: "execution-status-next-turn",
+        sessionId: "execution-status-session",
+        seq: 4,
+        time: 4,
+        type: "turn/started",
+        data: { turnId: "turn-2" },
+        v: 1,
+      });
+    });
+    assert.equal(container.querySelector(".execution-stop"), null, "a later turn cannot revive a stale stop control");
   } finally {
+    globalThis.fetch = originalFetch;
+    await act(async () => {
+      activateSession(null);
+      setSessions("execution-status-test", []);
+    });
     await act(async () => root.unmount());
     container.remove();
   }
