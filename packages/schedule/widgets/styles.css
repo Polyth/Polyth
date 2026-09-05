@@ -152,7 +152,7 @@
     align-items: stretch;
   }
 
-  .schedule-page .sched-form .view-toolbar-row > :is(.ui-text-input, .ui-picker, .ui-tabs, .ui-btn, .sched-every),
+  .schedule-page .sched-form .view-toolbar-row > :is(.ui-text-input, .picker-select, .ui-tabs, .ui-btn, .sched-every),
   .schedule-page .sched-every { width: 100%; max-width: none; }
   .schedule-page .sched-form .ui-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .schedule-page .sched-card { align-items: stretch; flex-direction: column; }

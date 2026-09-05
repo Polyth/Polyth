@@ -798,7 +798,7 @@ grid-template-columns: repeat(2, minmax(0, 1fr));
 align-items: stretch; flex-direction: column;
 }
 
-.pr-merge-controls .ui-picker,
+.pr-merge-controls .picker-select,
 .pr-merge-controls .ui-btn--primary {
 width: 100%;
 }
@@ -891,7 +891,7 @@ flex-basis: 100%; margin-left: 0;
 align-items: stretch; flex-direction: column;
 }
 
-.pr-review-actions .ui-picker,
+.pr-review-actions .picker-select,
 .pr-review-actions .ui-btn--primary {
 width: 100%;
 }

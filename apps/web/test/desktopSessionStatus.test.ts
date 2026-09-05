@@ -1,18 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { nextSessionSwitcherIndex } from "../src/sessionSwitcher.ts";
 import { readFile } from "node:fs/promises";
-
-test("session switcher cycles up then back down", () => {
-  let index = 0;
-  let direction: 1 | -1 = 1;
-  const cycle = [index];
-  for (let count = 0; count < 4; count++) {
-    [index, direction] = nextSessionSwitcherIndex(index, direction, 3);
-    cycle.push(index);
-  }
-  assert.deepEqual(cycle, [0, 1, 2, 1, 0]);
-});
 
 test("desktop status shares the live chat column geometry", async () => {
   const [header, rail, styles] = await Promise.all([
@@ -28,13 +16,15 @@ test("desktop status shares the live chat column geometry", async () => {
   assert.doesNotMatch(styles, /\.timeline\s*\{[^}]*padding-inline-end:[^}]*--rail-strip-width-right/s);
 });
 
-test("session status hides a prompt that is visible in the timeline", async () => {
+test("session status headers keep the title fixed while overviews retain detail", async () => {
   const [desktop, mobile, timeline] = await Promise.all([
     readFile(new URL("../src/components/DesktopSessionStatus.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/mobile/MobileSessionHeader.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/Timeline.tsx", import.meta.url), "utf8"),
   ]);
-  assert.match(desktop, /intent && !promptVisible/);
+  assert.match(desktop, /desktop-session-status-copy"><span>{title}<\/span>/);
+  assert.doesNotMatch(desktop, /setInterval|nextSessionSwitcherIndex/);
   assert.match(mobile, /promptVisible \? undefined : prompt/);
+  assert.match(mobile, /mobile-island-text">{title}<\/span>/);
   assert.match(timeline, /row\.bottom > viewport\.top && row\.top < viewport\.bottom/);
 });

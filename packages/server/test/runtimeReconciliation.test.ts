@@ -609,6 +609,46 @@ test("idle snapshot without a comparable watermark remains unknown and blocks ad
   await store.close();
 });
 
+test("a blocked reconciliation queues a new message instead of rejecting it", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-queue-blocked-"));
+  const endpoint = endpointFor(dir);
+  let submissions = 0;
+  const runtime = runtimeWithSnapshot(endpoint, (binding) => ({
+    authorityId: binding.authorityId,
+    generation: binding.generation,
+    location: binding.location,
+    backendSessionId: binding.backendSessionId!,
+    reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+    state: { value: "idle", watermark: "1", comparison: { domain: "test", order: 1 } },
+    completeness: { events: "partial", permissions: "partial", questions: "partial" },
+    permissions: [],
+    questions: [],
+    events: [],
+  }));
+  runtime.startTurn = async () => { submissions += 1; };
+  const { sessions, store, project } = makeHarness(runtime, dir);
+  const sessionId = "session-queue-blocked";
+  await store.upsertProjection({
+    id: sessionId,
+    projectId: project.id,
+    backendSessionId: "backend-queue-blocked",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-queue-blocked"),
+    title: "Blocked reconciliation",
+    status: "idle",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  const reconciliation = await store.startReconciliation(sessionId);
+  await store.settleReconciliation(sessionId, reconciliation.ordinal, "blocked", "unknown outcome");
+
+  const result = await sessions.send(sessionId, { text: "do not lose this" });
+
+  assert.equal(result.queued, true);
+  assert.equal(submissions, 0);
+  assert.deepEqual((await store.queueList(sessionId)).map((item) => item.text), ["do not lose this"]);
+  await store.close();
+});
+
 test("a locally stopped turn is not wedged back to unknown when the backend is unreachable", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-stopped-unknown-"));
   const endpoint = endpointFor(dir);

@@ -161,6 +161,12 @@ test("glass effect defaults to matte, validates modes, and applies globally", ()
   assert.equal(dataset.glass, "off");
 });
 
+test("context indicator defaults to a tinted logo and accepts donut mode", () => {
+  assert.equal(ui.parseUiSettings(null).contextIndicatorMode, "logo");
+  assert.equal(ui.parseUiSettings(JSON.stringify({ contextIndicatorMode: "donut" })).contextIndicatorMode, "donut");
+  assert.equal(ui.parseUiSettings(JSON.stringify({ contextIndicatorMode: "bar" })).contextIndicatorMode, "logo");
+});
+
 test("rail icon sizes default safely, validate values, and publish token geometry", () => {
   const defaults = ui.parseUiSettings(null);
   assert.equal(defaults.topRailIconSize, "md");

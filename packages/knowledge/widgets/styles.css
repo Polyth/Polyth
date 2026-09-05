@@ -160,7 +160,7 @@ align-items: stretch;
 }
 
 .knowledge-panel > .knowledge-toolbar > :is(.ui-text-input, .ui-btn),
-.knowledge-editor > .knowledge-toolbar > :is(.ui-picker, .ui-btn) {
+.knowledge-editor > .knowledge-toolbar > :is(.picker-select, .ui-btn) {
 width: 100%;
 }
 

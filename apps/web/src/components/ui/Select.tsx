@@ -12,7 +12,7 @@ export interface SelectOption {
 }
 
 export interface SelectProps {
-  /** Visible chip label + accessible name. */
+  /** Accessible name/context; the selected option is the visible trigger text. */
   label: string;
   value?: string;
   options: readonly SelectOption[];
@@ -45,13 +45,13 @@ export default function Select({
   return (
     <Picker
       label={label}
+      className={`picker-select${className ? ` ${className}` : ""}`}
       items={items}
       onPick={onChange}
       disabled={disabled}
       mobileSheet={mobileSheet}
       {...(value !== undefined ? { value } : {})}
       {...(placeholder !== undefined ? { placeholder } : {})}
-      {...(className !== undefined ? { className } : {})}
       {...(ariaLabel !== undefined ? { ariaLabel } : {})}
     />
   );

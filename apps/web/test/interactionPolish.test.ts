@@ -71,6 +71,17 @@ test("coarse pointers, focus, motion, radii, and empty states share polish token
   }
 });
 
+test("shared selects render the chosen value once and use field styling", async () => {
+  const [select, css] = await Promise.all([
+    read("../src/components/ui/Select.tsx"),
+    readWebStyles(),
+  ]);
+
+  assert.match(select, /className=\{`picker-select\$\{/);
+  assert.match(css, /\.picker-select \.chip-k\s*\{\s*display:\s*none;/);
+  assert.match(css, /\.picker-select \.picker-chip\s*\{[\s\S]*?background:\s*var\(--elevated\)/);
+});
+
 test("P1 mobile refinements remain wired to their visible surfaces", async () => {
   const [sessions, sidebar, settings, models, folder, empty, haptics, css] = await Promise.all([
     read("../src/components/sidebar/SessionList.tsx"),

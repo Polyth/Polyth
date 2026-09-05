@@ -13,6 +13,7 @@ export type ResponseActionId = "copy" | "image" | "plan" | "pin" | "session" | "
 export type TopRailAlignment = "center" | "left";
 export type RailIconSize = "sm" | "md" | "lg";
 export type GlassEffect = "off" | "matte" | "clear";
+export type ContextIndicatorMode = "logo" | "donut";
 
 export const HEADER_METRIC_IDS: readonly HeaderMetricId[] = ["tokens", "messages", "duration", "cost"];
 export const RESPONSE_ACTION_IDS: readonly ResponseActionId[] = ["copy", "image", "plan", "pin", "session", "multirun"];
@@ -40,6 +41,8 @@ export interface UiSettings {
   rounding: number;
   /** One material treatment for shell chrome, conversation blocks, and overlays. */
   glassEffect: GlassEffect;
+  /** Session-header context usage presentation. */
+  contextIndicatorMode: ContextIndicatorMode;
   chatWidth: "normal" | "wide";
   /** Browser notification when a turn finishes in a hidden tab. */
   notifyOnComplete: boolean;
@@ -110,6 +113,7 @@ export const UI_DEFAULTS: UiSettings = {
   editorFontSize: 14,
   rounding: 5,
   glassEffect: "matte",
+  contextIndicatorMode: "logo",
   chatWidth: "normal",
   notifyOnComplete: false,
   notifySound: false,
@@ -199,6 +203,7 @@ export function parseUiSettings(raw: string | null): UiSettings {
       editorFontSize,
       rounding: parseRounding(data.rounding),
       glassEffect: data.glassEffect === "off" || data.glassEffect === "clear" ? data.glassEffect : "matte",
+      contextIndicatorMode: data.contextIndicatorMode === "donut" ? "donut" : "logo",
       chatWidth: data.chatWidth === "wide" ? "wide" : "normal",
       notifyOnComplete: data.notifyOnComplete === true,
       notifySound: data.notifySound === true,

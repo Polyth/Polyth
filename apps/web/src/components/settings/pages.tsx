@@ -10,7 +10,7 @@ import {
   updateSettings,
   useStore,
 } from "../../store.ts";
-import { HEADER_METRIC_IDS, RESPONSE_ACTION_IDS, UI_DEFAULTS, setUiSettings, useUiSettings, type GlassEffect, type HeaderMetricId, type ResponseActionId } from "../../uiPrefs.ts";
+import { HEADER_METRIC_IDS, RESPONSE_ACTION_IDS, UI_DEFAULTS, setUiSettings, useUiSettings, type ContextIndicatorMode, type GlassEffect, type HeaderMetricId, type ResponseActionId } from "../../uiPrefs.ts";
 import { DEFAULT_SETTINGS, friendlyError, INTERFACE_FONTS } from "../../settings.ts";
 import { requestNotifyPermission } from "../../notify.ts";
 import { disablePush, enablePush, pushSubscription, pushUnsupportedReason } from "../../push.ts";
@@ -380,6 +380,13 @@ export function AppearancePage() {
           value={ui.glassEffect}
           options={[["off", "Off"], ["matte", "Matte"], ["clear", "Clear"]]}
           onChange={(glassEffect) => setUiSettings({ glassEffect })}
+        />
+      </Row>
+      <Row label="Context indicator" hint="Choose how context usage appears beside the session title." itemId="appearance.contextIndicator">
+        <Seg<ContextIndicatorMode>
+          value={ui.contextIndicatorMode}
+          options={[["logo", "Tinted logo"], ["donut", "Donut"]]}
+          onChange={(contextIndicatorMode) => setUiSettings({ contextIndicatorMode })}
         />
       </Row>
       <Row label={tr("settings.pages.interfaceFont")} hint={tr("settings.pages.chooseFromCleanUiFaces")} itemId="appearance.fontFamily">

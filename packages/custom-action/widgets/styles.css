@@ -1,0 +1,92 @@
+.custom-action.custom-action-trigger {
+  min-width: var(--control-h-sm);
+  padding-inline: var(--space-2);
+}
+
+.custom-action-settings {
+  display: grid;
+  gap: var(--space-4);
+  container: custom-action-settings / inline-size;
+}
+
+.custom-action-settings label,
+.custom-action-settings fieldset {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.custom-action-settings label > span,
+.custom-action-settings legend {
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  font-weight: 650;
+}
+
+.custom-action-settings small {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.custom-action-icons {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.custom-action-icons .custom-action-icon-choice {
+  min-width: 0;
+}
+
+.custom-action-output-body {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.custom-action-status {
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+}
+
+.custom-action-status.is-completed {
+  color: var(--green-on-wash);
+}
+
+.custom-action-status.is-failed {
+  color: var(--red);
+}
+
+.custom-action-command {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--font-code);
+}
+
+.custom-action-result {
+  min-height: calc(var(--space-6) * 3);
+  max-height: calc(var(--visual-vh) * 0.55);
+  margin: 0;
+  padding: var(--space-4);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--term-bg);
+  color: var(--term-fg);
+  font-family: var(--mono);
+  font-size: var(--terminal-font-size);
+  line-height: var(--font-technical-lh);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@container custom-action-settings (max-width: 360px) {
+  .custom-action-settings .custom-action-icons {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}

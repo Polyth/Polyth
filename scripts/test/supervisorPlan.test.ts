@@ -76,7 +76,9 @@ test("merging a batch takes the union of the work", () => {
   assert.equal(planForPaths(["docs/x.md", "CHANGELOG.md"]), "ignore");
 });
 
-test("--restart=always upgrades bundle-only work", () => {
+test("restart policies control change-triggered restarts", () => {
+  assert.equal(applyRestartPolicy("restart", "never"), "ignore");
+  assert.equal(applyRestartPolicy("build+restart", "never"), "build");
   assert.equal(applyRestartPolicy("build", "auto"), "build");
   assert.equal(applyRestartPolicy("build", "always"), "build+restart");
   assert.equal(applyRestartPolicy("restart", "always"), "restart");

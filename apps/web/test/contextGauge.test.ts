@@ -22,8 +22,9 @@ test("context gauge uses complete session input totals and honest unknown metada
 
 test("context gauge clamps overflow and applies warning thresholds", () => {
   const model = (input: number) => ({ totals: { input, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 } });
-  assert.equal(contextGauge(model(60), 100).level, "yellow");
-  assert.equal(contextGauge(model(85), 100).level, "red");
+  assert.equal(contextGauge(model(69), 100).level, "green");
+  assert.equal(contextGauge(model(70), 100).level, "yellow");
+  assert.equal(contextGauge(model(90), 100).level, "red");
   const overflow = contextGauge(model(250), 100);
   assert.equal(overflow.known && overflow.percent, 100);
 });

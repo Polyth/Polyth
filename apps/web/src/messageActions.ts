@@ -204,12 +204,14 @@ export interface MutationGuards {
   queuedCount: number;
   rewindActive: boolean;
   archived: boolean;
+  sessionBlocked?: boolean;
 }
 
 export type ActionAvailability = { enabled: true } | { enabled: false; reason: string };
 
 function mutationAvailability(action: "Revert" | "Fork", g: MutationGuards): ActionAvailability {
   if (g.archived) return { enabled: false, reason: `${action} unavailable in an archived session` };
+  if (g.sessionBlocked) return { enabled: false, reason: `${action} unavailable while the session is recovering` };
   // A pending request outranks the open turn it is blocking: "answer the
   // request" is the actionable reason, "a turn is running" is its symptom.
   if (g.pendingRequest) return { enabled: false, reason: `${action} unavailable while a request is waiting` };
@@ -227,7 +229,7 @@ export const forkAvailability = (g: MutationGuards): ActionAvailability => mutat
 
 export function guardsFromModel(
   model: Pick<RenderModel, "turn" | "permissions" | "questions" | "secrets" | "rewind">,
-  opts: { queuedCount?: number; archived?: boolean } = {},
+  opts: { queuedCount?: number; archived?: boolean; sessionBlocked?: boolean } = {},
 ): MutationGuards {
   return {
     turnWorking: model.turn?.status === "working",
@@ -238,6 +240,7 @@ export function guardsFromModel(
     queuedCount: opts.queuedCount ?? 0,
     rewindActive: model.rewind !== null,
     archived: opts.archived ?? false,
+    sessionBlocked: opts.sessionBlocked ?? false,
   };
 }
 

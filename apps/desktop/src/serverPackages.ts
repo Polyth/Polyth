@@ -6,6 +6,7 @@ import type { ServerPackageFactory } from "@polyth/plugins";
 import type { ServerPackageRegistration } from "@polyth/server";
 import browser from "../../../packages/browser/src/serverEntry.ts";
 import commands from "../../../packages/commands/src/serverEntry.ts";
+import customAction from "../../../packages/custom-action/src/serverEntry.ts";
 import dictation from "../../../packages/dictation/src/serverEntry.ts";
 import exampleFeature from "../../../packages/example-feature/src/serverEntry.ts";
 import files from "../../../packages/files/src/serverEntry.ts";
@@ -41,6 +42,7 @@ const entry = (
 export const desktopServerPackages = [
   entry("browser", { name: "Browser", description: "A shared internal browser for users, agents, and element context.", core: false, enabled: true, settingsGroup: "Engineering", icon: "🌐", hasSettings: false }, browser),
   entry("commands", { name: "Commands", description: "Reusable project command definitions.", core: false, enabled: true, settingsGroup: "Engineering", icon: "/", hasSettings: true }, commands),
+  entry("custom-action", { name: "Custom Action", description: "Configurable icon widgets that run project commands.", core: false, enabled: true, settingsGroup: "Customize", icon: "▶", hasSettings: false }, customAction),
   entry("dictation", { name: "Voice & Dictation", description: "Speech-to-text dictation and spoken replies.", core: false, enabled: true, settingsGroup: "Workspace", icon: "🎤", hasSettings: true }, dictation),
   entry("example-feature", { name: "Example Feature", description: "Proof-of-concept package registered via package discovery.", core: false, enabled: true, settingsGroup: "Customize", icon: "🧪", hasSettings: false }, exampleFeature),
   entry("files", { name: "Files", description: "Workspace file access and attachments.", core: true, enabled: true, hasSettings: false }, files),

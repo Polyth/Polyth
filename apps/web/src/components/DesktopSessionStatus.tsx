@@ -1,35 +1,24 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { displaySessionTitle, titleFromPrompt } from "../format.ts";
+import { useMemo, useRef, useState } from "react";
+import { displaySessionTitle, fmtTokens } from "../format.ts";
 import { openSession } from "../init.ts";
 import { recentSessionsForIsland, sessionTitleOf } from "../mobileIsland.ts";
 import { resolveSessionStatus } from "../sessionStatus.ts";
 import { useActiveModel, useStore } from "../store.ts";
 import { firstUserTextCached, lastUserTextCached } from "../utils.ts";
 import { Icon } from "../icons.tsx";
-import { nextSessionSwitcherIndex } from "../sessionSwitcher.ts";
 import { Popover } from "./ui/index.ts";
-import { PROMPT_VISIBILITY_EVENT, promptIsVisible } from "../promptVisibility.ts";
+import { contextGauge } from "../reduce.ts";
+import { useUiSettings } from "../uiPrefs.ts";
+import ContextIndicator from "./ContextIndicator.tsx";
 
-const CYCLE_MS = 4000;
-
-type SwitcherItem = { id: "session" | "task" | "intent"; text: string };
-
-function TaskMark({ status }: { status: "pending" | "active" | "done" | "failed" }) {
-  return <span className={`desktop-session-task-mark ${status}`} aria-hidden="true">
-    {status === "done" ? "✓" : status === "failed" ? "×" : status === "active" ? "◌" : "○"}
-  </span>;
-}
-
-/** The centered desktop session overview; it only rotates cached session data. */
+/** The centered desktop session overview with a stable, readable title. */
 export default function DesktopSessionStatus() {
   const anchorRef = useRef<HTMLButtonElement>(null);
-  const direction = useRef<1 | -1>(1);
   const [open, setOpen] = useState(false);
-  const [paused, setPaused] = useState(false);
-  const [index, setIndex] = useState(0);
-  const [promptVisible, setPromptVisible] = useState(promptIsVisible);
+  const ui = useUiSettings();
   const sessions = useStore((state) => state.sessions);
   const events = useStore((state) => state.events);
+  const models = useStore((state) => state.models);
   const activeSessionId = useStore((state) => state.activeSessionId);
   const session = sessions.find((item) => item.id === activeSessionId) ?? null;
   const model = useActiveModel();
@@ -38,38 +27,13 @@ export default function DesktopSessionStatus() {
   const title = session ? displaySessionTitle(session.title, session.id, firstUserTextCached(events[session.id])) : "";
   const activeTask = session ? model.tasks?.items.find((task) => task.status === "active") : undefined;
   const prompt = lastUserTextCached(session ? events[session.id] : undefined);
-  const intent = prompt ? titleFromPrompt(prompt, 120) : undefined;
-  const showContext = status?.kind !== "regular";
-  const items: SwitcherItem[] = [
-    { id: "session", text: title },
-    ...(showContext && activeTask ? [{ id: "task" as const, text: activeTask.text }] : []),
-    ...(showContext && intent && !promptVisible ? [{ id: "intent" as const, text: intent }] : []),
-  ];
-  const key = items.map((item) => item.id).join(":");
-  const visible = items[index] ?? items[0]!;
-
-  useEffect(() => {
-    const update = (event: Event) => setPromptVisible((event as CustomEvent<boolean>).detail);
-    window.addEventListener(PROMPT_VISIBILITY_EVENT, update);
-    return () => window.removeEventListener(PROMPT_VISIBILITY_EVENT, update);
-  }, []);
-  useEffect(() => {
-    direction.current = 1;
-    setIndex(0);
-  }, [key]);
-  useEffect(() => {
-    if (paused || open || items.length < 2 || typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const timer = window.setInterval(() => setIndex((current) => {
-      const [next, step] = nextSessionSwitcherIndex(current, direction.current, items.length);
-      direction.current = step;
-      return next;
-    }), CYCLE_MS);
-    return () => window.clearInterval(timer);
-  }, [paused, open, key, items.length]);
+  const activeModel = model.contextUsage?.model ?? model.turn?.model ?? session?.model;
+  const descriptor = activeModel ? models.find((item) => item.providerID === activeModel.providerID && item.modelID === activeModel.modelID) : undefined;
+  const gauge = contextGauge(model, descriptor?.context);
 
   if (!session || !status) return null;
 
-  return <div className="desktop-session-status" onPointerEnter={() => setPaused(true)} onPointerLeave={() => setPaused(false)} onFocus={() => setPaused(true)} onBlur={() => setPaused(false)}>
+  return <div className="desktop-session-status">
     <button
       ref={anchorRef}
       type="button"
@@ -80,13 +44,9 @@ export default function DesktopSessionStatus() {
       title={status.label}
       onClick={() => setOpen((value) => !value)}
     >
-      <span className={`desktop-session-status-dot ${status.kind}`} aria-hidden="true" />
+      <ContextIndicator gauge={gauge} mode={ui.contextIndicatorMode} providerID={activeModel?.providerID} providerName={descriptor?.providerName} active={status.kind === "working"} />
       <span className="desktop-session-status-mask">
-        <span className="desktop-session-status-copy" data-direction={direction.current > 0 ? "up" : "down"} key={`${visible.id}:${index}`}>
-          {visible.id === "task" && <span aria-hidden="true"><Icon.target /></span>}
-          {visible.id === "intent" && <span aria-hidden="true"><Icon.chat /></span>}
-          <span>{visible.text}</span>
-        </span>
+        <span className="desktop-session-status-copy"><span>{title}</span></span>
       </span>
       <Icon.chevronDown />
     </button>
@@ -96,6 +56,10 @@ export default function DesktopSessionStatus() {
           <span className={`desktop-session-status-dot ${status.kind}`} aria-hidden="true" />
           <div><strong>{title}</strong><small>{status.label}</small></div>
         </header>
+        <section className="session-context-details">
+          <h3>Context{gauge.known ? ` · ${gauge.percent}%` : ""}</h3>
+          <p>{gauge.known ? `${fmtTokens(gauge.inputTokens)} / ${fmtTokens(gauge.contextTokens)} tokens` : "Model context metadata is unavailable."}</p>
+        </section>
         <section>
           <h3>Active task</h3>
           {activeTask ? <p>{activeTask.text}</p> : <p>No active task.</p>}

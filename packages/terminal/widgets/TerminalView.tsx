@@ -139,8 +139,8 @@ export default function TerminalView() {
   };
 
   const attach = (id: string) => {
-    if (!mounted.current || !projectId || sockets.current.has(id) || gone.current.has(id)) return;
-    const attachedProject = projectId;
+    const attachedProject = projectRef.current;
+    if (!mounted.current || !attachedProject || sockets.current.has(id) || gone.current.has(id)) return;
     const ws = new WebSocket(wsUrl(id));
     sockets.current.set(id, ws);
     ws.onopen = () => {
@@ -292,8 +292,32 @@ export default function TerminalView() {
 
   useEffect(() => {
     mounted.current = true;
+    const created = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        terminalId?: unknown;
+        projectId?: unknown;
+        title?: unknown;
+      }>).detail;
+      if (
+        typeof detail?.terminalId !== "string"
+        || detail.projectId !== projectRef.current
+        || gone.current.has(detail.terminalId)
+      ) return;
+      const terminalId = detail.terminalId;
+      const title = typeof detail.title === "string" && detail.title.trim()
+        ? detail.title.trim()
+        : terminalId.slice(0, 8);
+      setTabs((current) => current.some((tab) => tab.id === terminalId)
+        ? current
+        : [...current, { id: terminalId, title, running: true, connection: "connecting" }]);
+      setActive(terminalId);
+      getEmu(terminalId);
+      attach(terminalId);
+    };
+    window.addEventListener("polyth:terminal-created", created);
     return () => {
       mounted.current = false;
+      window.removeEventListener("polyth:terminal-created", created);
       for (const timer of timers.current.values()) clearTimeout(timer);
       timers.current.clear();
       for (const ws of sockets.current.values()) ws.close();

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { SessionEvent, SessionProjection } from "@polyth/contracts";
-import { ago, displaySessionTitle } from "../../format.ts";
+import { ago, displaySessionTitle, fmtTokens } from "../../format.ts";
 import { Icon } from "../../icons.tsx";
 import { tr } from "../../i18n/index.ts";
 import {
@@ -21,6 +21,9 @@ import { ComposeIcon, GlassIsland, IconButton, LayersIcon, MenuIcon } from "../u
 import Sheet, { SheetRow, SheetSection } from "./Sheet.tsx";
 import WorkspacePanel from "./WorkspacePanel.tsx";
 import { PROMPT_VISIBILITY_EVENT, promptIsVisible } from "../../promptVisibility.ts";
+import { contextGauge, type ContextGauge } from "../../reduce.ts";
+import { useUiSettings } from "../../uiPrefs.ts";
+import ContextIndicator from "../ContextIndicator.tsx";
 
 function SessionLiveIcon({ status }: { status: SessionRowStatus }) {
   if (status.kind === "working") {
@@ -80,6 +83,7 @@ function IslandOverview({
   requests,
   recent,
   events,
+  gauge,
   onClose,
 }: {
   title: string;
@@ -88,6 +92,7 @@ function IslandOverview({
   requests: IslandItem[];
   recent: SessionProjection[];
   events: Record<string, readonly SessionEvent[] | undefined>;
+  gauge: ContextGauge;
   onClose: () => void;
 }) {
   return (
@@ -99,6 +104,10 @@ function IslandOverview({
     >
       <div className="mobile-island-now">
         <strong className="mobile-island-session">{title}</strong>
+        <div className="mobile-island-context">
+          <strong>Context{gauge.known ? ` · ${gauge.percent}%` : ""}</strong>
+          <span>{gauge.known ? `${fmtTokens(gauge.inputTokens)} / ${fmtTokens(gauge.contextTokens)} tokens` : "Model context metadata is unavailable."}</span>
+        </div>
         {prompt
           ? <PromptExcerpt text={prompt} />
           : <p className="mobile-island-empty">{tr("mobile.island.noPrompt")}</p>}
@@ -164,6 +173,8 @@ export default function MobileSessionHeader() {
   const sessions = useStore((state) => state.sessions);
   const session = useStore((state) => state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null);
   const model = useActiveModel();
+  const models = useStore((state) => state.models);
+  const ui = useUiSettings();
   const [surface, setSurface] = useState<"island" | "tools" | null>(null);
   const [promptVisible, setPromptVisible] = useState(promptIsVisible);
   const title = session
@@ -209,6 +220,9 @@ export default function MobileSessionHeader() {
   }), [title, session, model.tasks, model.permissions, model.questions, model.secrets, peers, labels]);
   const requests = useMemo(() => items.filter((item) => item.kind === "request"), [items]);
   const sessionStatus = session ? resolveSessionStatus(session) : null;
+  const activeModel = model.contextUsage?.model ?? model.turn?.model ?? session?.model;
+  const descriptor = activeModel ? models.find((item) => item.providerID === activeModel.providerID && item.modelID === activeModel.modelID) : undefined;
+  const gauge = contextGauge(model, descriptor?.context);
 
   return <>
     <div className="mobile-session-floats" aria-label="Workspace navigation">
@@ -226,13 +240,7 @@ export default function MobileSessionHeader() {
           aria-expanded={surface === "island"}
           onClick={() => setSurface("island")}
         >
-          {sessionStatus?.kind === "working"
-            ? <span className="ui-spinner ui-spinner--sm mobile-island-spinner" aria-hidden="true" />
-            : requests[0]
-              ? <span className={`mobile-island-dot ${requests[0].tone ?? "request"}`} aria-hidden="true" />
-              : session?.status === "finished"
-                ? <span className="mobile-island-dot done" aria-hidden="true" />
-                : null}
+          {session && <ContextIndicator gauge={gauge} mode={ui.contextIndicatorMode} providerID={activeModel?.providerID} providerName={descriptor?.providerName} active={sessionStatus?.kind === "working"} />}
           <span className="mobile-island-text">{title}</span>
           <Icon.chevronDown />
         </button>
@@ -250,6 +258,7 @@ export default function MobileSessionHeader() {
         requests={requests}
         recent={recent}
         events={events}
+        gauge={gauge}
         onClose={() => setSurface(null)}
       />
     )}

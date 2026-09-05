@@ -2012,7 +2012,10 @@ export async function boot(opts: BootOptions = {}) {
       await root.dispose();
       await store.close();
       controlServer.close();
-      if (process.platform !== "win32") rmSync(controlSocketPath, { force: true });
+      // Leave the path for the next boot to remove. An older graceful
+      // shutdown can finish after a replacement server has already claimed
+      // this path; unlinking here would silently disable the new control
+      // socket.
       server.close();
       await writerLease.release();
     });

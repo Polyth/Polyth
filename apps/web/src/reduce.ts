@@ -329,7 +329,7 @@ export function contextGauge(model: Pick<RenderModel, "totals">, contextTokens?:
     inputTokens,
     contextTokens,
     percent,
-    level: percent < 60 ? "green" : percent < 85 ? "yellow" : "red",
+    level: percent < 70 ? "green" : percent < 90 ? "yellow" : "red",
   };
 }
 

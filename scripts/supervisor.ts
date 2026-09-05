@@ -277,7 +277,7 @@ async function drain(): Promise<void> {
       queuedRestart = false;
       if (build && !(await buildWeb())) continue;
       // A bundle-only change needs no restart (the server reads dist per
-      // request) unless the server is down or --restart=always asked for one.
+      // request) unless the server is down or the policy asks for one.
       if (restart || down || child === null) {
         await restartServer();
       } else if (build) {

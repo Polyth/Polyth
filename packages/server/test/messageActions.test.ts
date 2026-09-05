@@ -317,3 +317,21 @@ test("truthful guards: a stale working projection does not block, a live turn do
   assert.ok(after.id);
   await store.close();
 });
+
+test("duplicate rewind requests are idempotent while the marker is propagating", async () => {
+  const fake = fakeRuntime();
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await seedTwoTurns(fake, sessions, id);
+  const target = (await store.events(id)).find((event) => event.type === "user/message")!;
+
+  const results = await Promise.all([
+    sessions.rewind!(id, target.seq),
+    sessions.rewind!(id, target.seq),
+  ]);
+
+  assert.equal(results[0]!.type, "session/rewound");
+  assert.equal(results[1]!.seq, results[0]!.seq);
+  assert.equal((await store.events(id)).filter((event) => event.type === "session/rewound").length, 1);
+  await store.close();
+});

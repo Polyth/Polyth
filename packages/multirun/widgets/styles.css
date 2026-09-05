@@ -46,12 +46,12 @@
   gap: var(--space-2);
 }
 
-.multirun-view .multirun-controls > .ui-picker {
+.multirun-view .multirun-controls > .picker-select {
   width: 100%;
   min-width: 0;
 }
 
-.multirun-view .multirun-controls > .ui-picker:nth-child(4) {
+.multirun-view .multirun-controls > .picker-select:nth-child(4) {
   grid-column: 1 / -1;
 }
 
@@ -271,7 +271,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .multirun-view .multirun-controls > .ui-picker:nth-child(4) {
+  .multirun-view .multirun-controls > .picker-select:nth-child(4) {
     grid-column: auto;
   }
 

@@ -1719,6 +1719,10 @@ test("truthful guards explain exactly why revert/fork are unavailable", () => {
     { enabled: false, reason: "Revert unavailable while messages are queued" },
   );
   assert.deepEqual(
+    revertAvailability({ ...idle, sessionBlocked: true }),
+    { enabled: false, reason: "Revert unavailable while the session is recovering" },
+  );
+  assert.deepEqual(
     revertAvailability({ ...idle, rewindActive: true }),
     { enabled: false, reason: "Restore or replace the current revert first" },
   );

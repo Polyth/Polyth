@@ -1,0 +1,29 @@
+{
+  "name": "@polyth/custom-action",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Custom Action",
+      "description": "Configurable icon widgets that run project commands.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Customize",
+      "icon": "▶",
+      "hasSettings": false
+    }
+  },
+  "dependencies": {
+    "@polyth/plugins": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

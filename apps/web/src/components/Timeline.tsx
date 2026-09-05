@@ -1765,6 +1765,14 @@ export default function Timeline({
       ? tr("timeline.answerPendingQuestion")
       : tr("timeline.noMessagesYet");
   const [queuedCount, setQueuedCount] = useState(0);
+  const revertPendingRef = useRef<string | null>(null);
+  const [revertPendingSession, setRevertPendingSession] = useState<string | null>(null);
+  useEffect(() => {
+    if (revertPendingRef.current !== null && revertPendingRef.current !== sessionId) {
+      revertPendingRef.current = null;
+      setRevertPendingSession(null);
+    }
+  }, [sessionId]);
   // model.queueVersion bumps only on queue-affecting events, so this REST
   // read runs per session switch / queue change — not per streamed chunk.
   useEffect(() => {
@@ -1773,8 +1781,14 @@ export default function Timeline({
     void api.queueList(sessionId).then((items) => { if (!cancelled) setQueuedCount(items.length); });
     return () => { cancelled = true; };
   }, [sessionId, model.queueVersion]);
-  const guards: MutationGuards = guardsFromModel(model, { queuedCount, archived });
-  const revertOk = revertAvailability(guards);
+  const sessionBlocked = sessionStatus === "unknown"
+    || sessionStatus === "reconciling"
+    || sessionStatus === "epoch-pending";
+  const guards: MutationGuards = guardsFromModel(model, { queuedCount, archived, sessionBlocked });
+  const revertPending = sessionId !== null && revertPendingSession === sessionId;
+  const revertOk = revertPending
+    ? { enabled: false as const, reason: "Revert unavailable while another revert is being applied" }
+    : revertAvailability(guards);
   const forkOk = forkAvailability(guards);
 
   const visibleMessages = useMemo(() => model.messages.filter((message) => !message.undone && !blankAssistant(message)), [model]);
@@ -1990,6 +2004,9 @@ export default function Timeline({
   // Stable identity (useCallback) so memoized rows don't re-render per commit.
   const revert = useCallback((message: UserMsg) => {
     if (!sessionId) return;
+    if (revertPendingRef.current === sessionId) return;
+    revertPendingRef.current = sessionId;
+    setRevertPendingSession(sessionId);
     void api.rewind(sessionId, message.eventSeq).then((marker) => {
       applyEvent(marker); // WS re-delivery dedupes by seq
       const draft = {
@@ -2004,6 +2021,11 @@ export default function Timeline({
       const text = mutationErrorMessage("revert", err);
       announce(text);
       setUiError(text);
+    }).finally(() => {
+      if (revertPendingRef.current === sessionId) {
+        revertPendingRef.current = null;
+        setRevertPendingSession(null);
+      }
     });
   }, [sessionId, announce]);
   // Fork and edit: navigation happens only after the child is published; a

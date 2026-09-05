@@ -7,7 +7,7 @@
 export type ChangeAction = "ignore" | "build" | "restart" | "build+restart";
 
 /** Whether a web-only change also restarts the server. */
-export type RestartPolicy = "auto" | "always";
+export type RestartPolicy = "never" | "auto" | "always";
 
 /** Change sources the supervisor can listen to. */
 export type WatchMode = "fs" | "git" | "both";
@@ -21,8 +21,8 @@ export interface SupervisorOptions {
    * this working copy is shared, so the supervisor never writes to git
    * unless asked. */
   pull: boolean;
-  /** `auto` restarts only for server-side changes; `always` restarts for
-   * every applied change. */
+  /** `never` restarts only after crashes; `auto` also restarts for server-side
+   * changes; `always` restarts for every applied change. */
   restart: RestartPolicy;
   /** SIGTERM → SIGKILL grace period when stopping the server. */
   graceMs: number;
@@ -174,8 +174,9 @@ export function planForPaths(paths: Iterable<string>): ChangeAction {
   return action;
 }
 
-/** `always` upgrades a bundle-only change into a restart as well. */
+/** Apply the change-triggered restart policy. Crash recovery is independent. */
 export function applyRestartPolicy(action: ChangeAction, policy: RestartPolicy): ChangeAction {
+  if (policy === "never") return needsBuild(action) ? "build" : "ignore";
   return policy === "always" && action === "build" ? "build+restart" : action;
 }
 
@@ -221,8 +222,8 @@ export function parseSupervisorArgs(argv: readonly string[]): ParseResult {
         break;
       }
       case "--restart": {
-        if (raw !== "auto" && raw !== "always") {
-          return { ok: false, error: `--restart expects auto or always (got "${raw}")` };
+        if (raw !== "never" && raw !== "auto" && raw !== "always") {
+          return { ok: false, error: `--restart expects never, auto, or always (got "${raw}")` };
         }
         options.restart = raw;
         break;
@@ -269,8 +270,10 @@ export const USAGE = `polyth supervisor — rebuild and restart the server on ch
 
 Flags
   --watch=fs|git|both     change source: working tree, new commits, or both (default: fs)
-  --restart=auto|always   auto restarts only for server changes; always restarts
-                          for bundle changes too (default: auto)
+  --restart=never|auto|always
+                          never restarts for changes (crash recovery stays on);
+                          auto restarts server changes; always restarts bundle changes too
+                          (default: auto)
   --git-interval=<sec>    HEAD poll interval in git mode (default: 10)
   --pull                  git mode only: fetch and \`git pull --ff-only\` before
                           comparing (default: off, git stays read-only)

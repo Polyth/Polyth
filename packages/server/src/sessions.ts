@@ -1778,6 +1778,7 @@ export function createSessionService(deps: {
               : undefined,
         ));
         await updateProjectionQuietly(sessionId, { status: nextStatus });
+        if (nextStatus === "idle") void dispatchQueue(sessionId);
       } catch (error) {
         if (await markOwnedEpochPending(sessionId, proj, rt, error, started.ordinal)) {
           return;
@@ -4493,6 +4494,25 @@ export function createSessionService(deps: {
         proj = (await store.projection(sessionId)) ?? proj;
         stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
       }
+      const delivery: DeliveryMode = input.delivery ?? "normal";
+      const admissionBarrier = await durable.reconciliation(sessionId);
+      // A blocked barrier means the old runtime outcome is still uncertain. Do
+      // not resend that turn, but never make the user's new message disappear:
+      // durable queueing is the safe send path until reconciliation recovers.
+      if (
+        deps.queue
+        && (delivery === "normal" || delivery === "queue")
+        && !recoverEpoch
+        && admissionBarrier?.state === "blocked"
+      ) {
+        return enqueueMessage(
+          sessionId,
+          input.text,
+          "queue",
+          delivery === "normal" ? "reconciliation-blocked" : undefined,
+          input.attachments,
+        );
+      }
       if (
         proj.status === "reconciling"
         || (proj.status === "unknown" && !recoverEpoch && !stoppedTurnRecorded)
@@ -4508,7 +4528,7 @@ export function createSessionService(deps: {
           () => recoverFreshRuntimeEpochUnderLock(sessionId),
         ));
       } else {
-        const existingReconciliation = await durable.reconciliation(sessionId);
+        const existingReconciliation = admissionBarrier;
         if (existingReconciliation?.state === "reconciling"
           || existingReconciliation?.state === "blocked"
           || (existingReconciliation?.state === "unknown" && !stoppedTurnRecorded)) {
@@ -4698,7 +4718,6 @@ export function createSessionService(deps: {
       // Send-time arbitration first: resolution events precede queue/user events.
       if (input.dismissPending) await dismissPendingRequests(sessionId, rt);
 
-      const delivery: DeliveryMode = input.delivery ?? "normal";
       const active = turnActive(sessionId);
 
       if (active && deps.queue) {
@@ -5165,6 +5184,15 @@ export function createSessionService(deps: {
         }
         const eff = effectiveHistory(events);
         if (eff.rewind) {
+          // Repeated clicks (or two browser tabs) can enqueue the same rewind
+          // before the first marker reaches the client. Reuse that committed
+          // marker instead of turning an already-successful action into a
+          // misleading conflict.
+          if (eff.rewind.atSeq === atSeq) {
+            const existing = events.find((ev) =>
+              ev.seq === eff.rewind!.markerSeq && ev.type === "session/rewound");
+            if (existing) return existing;
+          }
           throw Object.assign(new Error("restore or replace the current rewind first"), { code: "conflict" });
         }
         // Only a VISIBLE user message is a valid target — a prompt inside a
