@@ -4,7 +4,8 @@
 // to this server paints with the same look. Writes are last-write-wins with a
 // monotonic revision: clients drop the WS echo of their own change and ignore
 // any broadcast whose revision they already hold.
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+import { atomicWriteSync } from "./atomicWrite.ts";
 import { dirname } from "node:path";
 import type { ClientSettingsDto } from "@polyth/contracts";
 
@@ -24,17 +25,6 @@ const empty = (): ClientSettingsDto => ({ revision: 0, updatedAt: 0, settings: {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function atomicWriteSync(path: string, data: string): void {
-  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(tmp, data, "utf8");
-  try {
-    renameSync(tmp, path);
-  } catch (err) {
-    try { unlinkSync(tmp); } catch { /* already gone */ }
-    throw err;
-  }
 }
 
 export function createClientSettings(opts: { file: string }): ClientSettingsService {

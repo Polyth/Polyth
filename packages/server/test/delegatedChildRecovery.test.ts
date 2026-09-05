@@ -161,6 +161,7 @@ test("a delegated child adopted mid-run defers its history-import baseline", asy
     runtimeBinding: persistedBindingFor(endpoint, "be-parent"),
     title: "Redesign the workflow indicator",
     status: "idle",
+    model: { providerID: "acme", modelID: "parent" },
     createdAt: 1,
     updatedAt: 1,
   });
@@ -174,6 +175,11 @@ test("a delegated child adopted mid-run defers its history-import baseline", asy
     revision: 1,
     agents: [{ sessionId: "be-child", label: "@visual", status: "running" }],
   });
+  emit("parent-1", {
+    type: "turn/started",
+    turnId: "subagent-turn",
+    model: { providerID: "acme", modelID: "temporary" },
+  });
 
   await waitFor(async () => (await childOf(store, project.id)) !== undefined);
   const child = (await childOf(store, project.id))!;
@@ -185,6 +191,7 @@ test("a delegated child adopted mid-run defers its history-import baseline", asy
     "an empty adopted child must not record a history import it never made",
   );
   assert.equal(child.runtimeBinding?.historyBaseline, "import", "the import baseline stays pending");
+  assert.deepEqual((await store.projection("parent-1"))?.model, { providerID: "acme", modelID: "parent" });
   await store.close();
 });
 

@@ -593,6 +593,7 @@ export interface RuntimeRestartRecoveredData {
   reconciliationOrdinal: number;
   recoveredOperationIds: string[];
 }
+
 export interface TurnStartedData { turnId: string; model?: ModelRef; agent?: string }
 
 /** Provider capacity failure classification for an error turn/stopped. */

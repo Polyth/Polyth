@@ -120,6 +120,7 @@ export interface GithubConflictMsg {
 export type RenderMessage = UserMsg | AssistantMsg | ToolMsg | TaskActivityMsg | GithubConflictMsg;
 
 export interface PendingPermission {
+  sessionId: string;
   requestId: string;
   permission: string;
   patterns: string[];
@@ -135,6 +136,7 @@ export interface PendingPermission {
 }
 
 export interface PendingQuestion {
+  sessionId: string;
   requestId: string;
   questions: JsonObject[];
   status: "pending" | "answered" | "rejected";
@@ -143,6 +145,7 @@ export interface PendingQuestion {
 }
 
 export interface PendingSecret {
+  sessionId: string;
   requestId: string;
   handle: string;
   label: string;
@@ -397,6 +400,28 @@ function touch(m: RenderMessage): void {
   m.rev = (m.rev ?? 0) + 1;
 }
 
+/** Display-only settle for tools still open when a turn ends. The event log
+ *  correctly leaves incomplete tools incomplete (no invented completion);
+ *  the UI model must not keep spinners forever. Reasons stay short and do
+ *  not invent tool output. */
+function orphanToolReason(status: TurnState["status"]): string {
+  if (status === "aborted") return "Interrupted";
+  if (status === "failed") return "Turn ended before tool completed";
+  return "Stopped";
+}
+
+function finalizeOrphanedTools(model: RenderModel, status: TurnState["status"], stopTime: number): void {
+  const reason = orphanToolReason(status);
+  for (const message of model.messages) {
+    if (message.kind !== "tool") continue;
+    if (message.status !== "pending" && message.status !== "running") continue;
+    message.status = "error";
+    message.error = reason;
+    message.finishTime = stopTime;
+    touch(message);
+  }
+}
+
 export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
   const d = ev.data;
   // Queue events carry no message payload (the durable queue is REST-read);
@@ -581,8 +606,11 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
     case "tool/result": {
       const t = findTool(model, str(d, "callId") ?? "");
       if (t) {
+        // Late results after turn/stopped interrupt still win — clear any
+        // display-only orphan reason so the real output is what the UI shows.
         t.status = "done";
         t.output = str(d, "output") ?? "";
+        delete t.error;
         const title = str(d, tr("reduce.title"));
         if (title !== undefined) t.title = title;
         const metadata = obj(d, "metadata");
@@ -755,6 +783,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           (s): s is "once" | "session" | "project" => s === "once" || s === "session" || s === "project",
         );
         model.permissions.push({
+          sessionId: ev.sessionId,
           requestId,
           permission: str(d, "permission") ?? "",
           patterns: strArr(d, "patterns"),
@@ -782,6 +811,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const requestId = str(d, "requestId") ?? "";
       if (!model.questions.some((q) => q.requestId === requestId)) {
         model.questions.push({
+          sessionId: ev.sessionId,
           requestId,
           questions: Array.isArray(d.questions) ? (d.questions as JsonObject[]) : [],
           status: "pending",
@@ -804,6 +834,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const requestId = str(d, "requestId") ?? "";
       if (!model.secrets.some((secret) => secret.requestId === requestId)) {
         model.secrets.push({
+          sessionId: ev.sessionId,
           requestId,
           handle: str(d, "handle") ?? "",
           label: str(d, "label") ?? "",
@@ -872,6 +903,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           ...(limit ? { limit } : {}),
         };
       }
+      finalizeOrphanedTools(model, status, ev.time);
       break;
     }
     case "turn/resume-cancelled": {

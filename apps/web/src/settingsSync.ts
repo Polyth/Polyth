@@ -63,12 +63,13 @@ function applyRemote(dto: ClientSettingsDto): void {
   lastSyncedJson = JSON.stringify(currentBlob());
 }
 
-function push(): void {
+function push(opts?: { keepalive?: boolean }): void {
   timer = undefined;
   if (applying) return;
-  const json = JSON.stringify(currentBlob());
+  const blob = currentBlob();
+  const json = JSON.stringify(blob);
   if (json === lastSyncedJson) return;
-  void api.clientSettingsSave(currentBlob() as unknown as Record<string, unknown>)
+  void api.clientSettingsSave(blob as unknown as Record<string, unknown>, opts)
     .then((dto) => {
       lastSyncedJson = json;
       if (dto.revision > localRevision) localRevision = dto.revision;
@@ -82,6 +83,14 @@ function push(): void {
 function schedulePush(): void {
   if (applying || timer !== undefined) return;
   timer = setTimeout(push, PUSH_DEBOUNCE_MS);
+}
+
+export function flushSettingsSync(): void {
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    timer = undefined;
+  }
+  push({ keepalive: true });
 }
 
 /** WS gateway frame: another device changed the shared settings. */
@@ -98,6 +107,7 @@ export function initSettingsSync(): void {
     subscribeStore(schedulePush);
     subscribeUiSettings(schedulePush);
     subscribeSessionDefaults(schedulePush);
+    if (typeof window !== "undefined") window.addEventListener("pagehide", flushSettingsSync);
   }
   void api.clientSettings()
     .then((dto) => {

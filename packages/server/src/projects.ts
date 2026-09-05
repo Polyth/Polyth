@@ -1,6 +1,9 @@
 // JSON-file backed project registry. M1-simple; swap for sqlite projection later.
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { existsSync } from "node:fs";
+// Writes are atomic (tmp + rename). A corrupt on-disk file is never overwritten
+// with defaults on load — boot with an empty in-memory registry and leave the
+// file untouched until a deliberate user write succeeds.
+import { readFileSync, mkdirSync, existsSync } from "node:fs";
+import { atomicWriteSync } from "./atomicWrite.ts";
 import { basename, dirname, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type {
@@ -57,11 +60,17 @@ export function createProjectService(dataDir: string): ProjectRegistry {
   let items: Project[] = [];
   try {
     items = JSON.parse(readFileSync(file, "utf8"));
-  } catch { /* first run */ }
+  } catch (err) {
+    // Missing file = first run. Anything else (corrupt JSON, unreadable) keeps
+    // empty in-memory state and does NOT rewrite the file with defaults.
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT" && existsSync(file)) {
+      console.warn("[polyth] projects.json is unreadable; starting with an empty registry (file left untouched)");
+    }
+  }
 
   const persist = () => {
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, JSON.stringify(items, null, 2));
+    atomicWriteSync(file, JSON.stringify(items, null, 2));
   };
   // `spaceId` is threaded through the private helpers rather than read from a
   // caller-supplied field: a scoped view binds it, the unscoped view leaves it

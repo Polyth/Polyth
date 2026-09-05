@@ -1,4 +1,5 @@
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+import { atomicWriteSync } from "./atomicWrite.ts";
 import { dirname } from "node:path";
 import type { PackageDescriptorDto } from "@polyth/contracts";
 
@@ -27,17 +28,6 @@ export const BUILTIN_PACKAGES = [
 ] as const satisfies readonly PackageDescriptorDto[];
 
 type EnabledState = Record<string, boolean>;
-
-function atomicWriteSync(file: string, data: string): void {
-  const temporary = `${file}.tmp-${process.pid}`;
-  writeFileSync(temporary, data, "utf8");
-  try {
-    renameSync(temporary, file);
-  } catch (error) {
-    try { unlinkSync(temporary); } catch { /* already removed */ }
-    throw error;
-  }
-}
 
 export function createPackageRegistry(opts: {
   file: string;

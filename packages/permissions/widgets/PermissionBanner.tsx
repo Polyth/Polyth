@@ -30,6 +30,9 @@ function PermissionRow({ p }: { p: PendingPermission }) {
   // The preview is server-built and secret-redacted; raw patterns are the
   // fallback for old events. Either way the target is visible pre-decision.
   const lines = p.preview !== undefined && p.preview.lines.length > 0 ? p.preview.lines : p.patterns;
+  const reply = (decision: "once" | "always" | "reject", alwaysScope?: AlwaysScope) => {
+    replyPermission(p.sessionId, p.requestId, decision, alwaysScope);
+  };
   return (
     <div className="perm-row permission-request">
       <div className="permission-request-head">
@@ -48,12 +51,12 @@ function PermissionRow({ p }: { p: PendingPermission }) {
         </div>
       )}
       <div className="perm-actions">
-        <Button variant="primary" className="permission-allow" onClick={() => replyPermission(p.requestId, "once")}>
+        <Button variant="primary" className="permission-allow" onClick={() => reply("once")}>
           {tr("permissionbanner.allowOnce")}
         </Button>
         {canAlways && (
           <span className="perm-always">
-            <Button variant="quiet" onClick={() => replyPermission(p.requestId, "always", scope)}>
+            <Button variant="quiet" onClick={() => reply("always", scope)}>
               {tr("permissionbanner.always")}
             </Button>
             <Select
@@ -69,7 +72,7 @@ function PermissionRow({ p }: { p: PendingPermission }) {
             />
           </span>
         )}
-        <Button variant="danger" className="permission-deny" onClick={() => replyPermission(p.requestId, "reject")}>
+        <Button variant="danger" className="permission-deny" onClick={() => reply("reject")}>
           {tr("permissionbanner.deny")}
         </Button>
       </div>
@@ -77,7 +80,11 @@ function PermissionRow({ p }: { p: PendingPermission }) {
   );
 }
 
-export default function PermissionBanner({ permissions }: { permissions: PendingPermission[] }) {
+export default function PermissionBanner({
+  permissions,
+}: {
+  permissions: PendingPermission[];
+}) {
   if (permissions.length === 0) return null;
   return (
     <div

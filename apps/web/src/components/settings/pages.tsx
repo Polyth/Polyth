@@ -476,6 +476,17 @@ export function ChatPage() {
           ["interrupt", tr("settings.pages.interrupt")],
         ]} onChange={(v) => setUiSettings({ followUpBehavior: v })} />
       </Row>
+      <Row
+        label={tr("composer.largePasteBanner")}
+        hint={tr("settings.pages.largePasteHint")}
+        itemId="chat.largePaste"
+      >
+        <Seg value={ui.largeTextPasteBehavior} options={[
+          ["ask", tr("settings.pages.largePasteAsk")],
+          ["attach", tr("composer.largePasteAttach")],
+          ["inline", tr("composer.largePasteInline")],
+        ]} onChange={(largeTextPasteBehavior) => setUiSettings({ largeTextPasteBehavior })} />
+      </Row>
       <Row label={tr("settings.pages.thinkingBlocks")} hint={tr("settings.pages.collapseMergedReasoningIntoAnExpandableBlock")} itemId="chat.thinking">
         <Toggle on={ui.collapsibleThinkingBlocks} onChange={(v) => setUiSettings({ collapsibleThinkingBlocks: v })} label={tr("settings.pages.collapsibleThinking")} />
       </Row>

@@ -85,6 +85,7 @@ test("mobile interventions reattach, stay session-bound, and resolve each reques
   });
   await store.upsertProjection(projection("original"));
   await store.upsertProjection(projection("other"));
+  await store.append("original", "turn/started", { turnId: "turn-1" }, { ignorable: true });
   await store.append("original", "permission/requested", {
     requestId: "per_1",
     permission: "edit",

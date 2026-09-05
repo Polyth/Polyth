@@ -5,6 +5,7 @@ import { useSyncExternalStore } from "react";
 import type { NotificationKind } from "@polyth/contracts";
 
 export type FollowUpBehavior = "steer" | "queue" | "interrupt";
+export type LargeTextPasteBehavior = "ask" | "attach" | "inline";
 export type NotificationKindPref = NotificationKind;
 export type MessageCopyFormat = "markdown" | "json";
 export type HeaderMetricId = "tokens" | "messages" | "duration" | "cost";
@@ -56,6 +57,7 @@ export interface UiSettings {
   autoScroll: boolean;
   /** Send behavior while a turn is active (WP3). */
   followUpBehavior: FollowUpBehavior;
+  largeTextPasteBehavior: LargeTextPasteBehavior;
   /** Merged thinking display (WP4). */
   collapsibleThinkingBlocks: boolean;
   thinkingDefaultExpanded: boolean;
@@ -118,6 +120,7 @@ export const UI_DEFAULTS: UiSettings = {
   confirmSessionArchive: false,
   autoScroll: true,
   followUpBehavior: "queue",
+  largeTextPasteBehavior: "ask",
   collapsibleThinkingBlocks: true,
   thinkingDefaultExpanded: false,
   promptNavigator: "auto",
@@ -210,6 +213,9 @@ export function parseUiSettings(raw: string | null): UiSettings {
       confirmSessionArchive: data.confirmSessionArchive === true,
       autoScroll: data.autoScroll !== false,
       followUpBehavior: data.followUpBehavior === "steer" || data.followUpBehavior === "interrupt" ? data.followUpBehavior : "queue",
+      largeTextPasteBehavior: data.largeTextPasteBehavior === "attach" || data.largeTextPasteBehavior === "inline"
+        ? data.largeTextPasteBehavior
+        : "ask",
       collapsibleThinkingBlocks: data.collapsibleThinkingBlocks !== false,
       thinkingDefaultExpanded: data.thinkingDefaultExpanded === true,
       promptNavigator: data.promptNavigator === "on" || data.promptNavigator === "off" ? data.promptNavigator : "auto",

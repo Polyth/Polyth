@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -104,4 +104,27 @@ test("project model memory is persisted without erasing the remembered model", a
     }),
     /rememberModelSelection must be boolean/,
   );
+});
+
+test("projects.json writes are atomic and corrupt files are not overwritten on load", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-projects-"));
+  const root = join(dir, "workspace");
+  mkdirSync(root);
+  const file = join(dir, "projects.json");
+
+  // Happy path: persist via tmp+rename leaves a valid JSON array and no .tmp.
+  const projects = createProjectService(dir);
+  await projects.add(root, "Alpha");
+  assert.equal(readFileSync(file, "utf8").trim().startsWith("["), true);
+  assert.equal(
+    readdirSync(dir).some((n) => n.includes(".tmp")),
+    false,
+  );
+
+  // Corrupt on-disk file: boot with empty in-memory registry; leave file as-is.
+  writeFileSync(file, "{not-valid-json");
+  const before = readFileSync(file, "utf8");
+  const recovered = createProjectService(dir);
+  assert.deepEqual(await recovered.list(), []);
+  assert.equal(readFileSync(file, "utf8"), before, "corrupt file must not be rewritten on load");
 });

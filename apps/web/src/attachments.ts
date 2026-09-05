@@ -187,3 +187,15 @@ export async function attachUpload(
   }
   return attachProjectFile(projectId, sessionId, rel);
 }
+
+export function isLargeTextPaste(text: string): boolean {
+  return text.length >= 2000 || text.split("\n").length >= 25;
+}
+
+export async function attachText(
+  projectId: string,
+  sessionId: string | null | undefined,
+  text: string,
+): Promise<AttachResult> {
+  return attachUpload(projectId, sessionId, new File([text], "pasted-context.txt", { type: "text/plain" }));
+}

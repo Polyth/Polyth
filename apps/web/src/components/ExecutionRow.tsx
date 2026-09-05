@@ -110,7 +110,7 @@ function displayStatus(message: ToolMsg, childStatus?: string): DisplayStatus {
   if (childStatus && /^(?:running|active|working)$/i.test(childStatus)) return "running";
   if (childStatus && /^(?:done|completed|success|succeeded)$/i.test(childStatus)) return "done";
   if (childStatus && /^(?:failed|error)$/i.test(childStatus)) return "error";
-  if (message.status === "error" && /cancel(?:led|ed)|aborted|stopped/i.test(message.error ?? "")) return "cancelled";
+  if (message.status === "error" && /cancel(?:led|ed)|aborted|stopped|interrupted/i.test(message.error ?? "")) return "cancelled";
   return message.status;
 }
 

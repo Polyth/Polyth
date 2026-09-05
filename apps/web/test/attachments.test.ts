@@ -12,13 +12,56 @@ const mem = new Map<string, string>();
 };
 
 const {
-  addAttachment, clearAttachments, MAX_PENDING_ATTACHMENTS, newAttachmentId, pendingAttachments,
+  addAttachment, attachText, clearAttachments, isLargeTextPaste, MAX_PENDING_ATTACHMENTS, newAttachmentId, pendingAttachments,
   removeAttachment, takeAttachments,
 } = await import("../src/attachments.ts");
 const { buildModel } = await import("../src/reduce.ts");
 
 const ref = (over: Partial<AttachmentRef> = {}): AttachmentRef => ({
   id: crypto.randomUUID(), name: "a.txt", mime: "text/plain", size: 4, kind: "file", path: "a.txt", ...over,
+});
+
+test("isLargeTextPaste uses char or line thresholds", () => {
+  assert.equal(isLargeTextPaste("x".repeat(1999)), false);
+  assert.equal(isLargeTextPaste("x".repeat(2000)), true);
+  assert.equal(isLargeTextPaste(`${"l\n".repeat(23)}x`), false);
+  assert.equal(isLargeTextPaste(`${"l\n".repeat(24)}x`), true);
+});
+
+test("attachText uploads as pasted-context.txt for the given project/session", async () => {
+  const posts: Array<{ path: string; body?: Record<string, unknown> }> = [];
+  const prev = globalThis.fetch;
+  (globalThis as { fetch?: unknown }).fetch = async (url: string, init?: RequestInit) => {
+    const u = new URL(String(url), "http://localhost/");
+    let body: Record<string, unknown> | undefined;
+    if (init?.body && typeof init.body === "string") {
+      try { body = JSON.parse(init.body) as Record<string, unknown>; } catch { /* ignore */ }
+    }
+    posts.push({ path: u.pathname, ...(body ? { body } : {}) });
+    if (u.pathname.includes("/files/upload")) {
+      return { ok: true, status: 200, json: async () => ({ ok: true }), text: async () => "{}" };
+    }
+    if (u.pathname.includes("/files/stat")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ path: u.searchParams.get("path"), kind: "file", size: 11, mime: "text/plain" }),
+        text: async () => "",
+      };
+    }
+    return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
+  };
+  try {
+    const result = await attachText("proj-origin", "sess-origin", "hello paste");
+    assert.equal(result.ok, true);
+    const upload = posts.find((p) => p.path.includes("/files/upload"));
+    assert.ok(upload?.body);
+    assert.equal(upload!.body!.projectId, "proj-origin");
+    assert.equal(upload!.body!.sessionId, "sess-origin");
+    assert.match(String(upload!.body!.path), /pasted-context\.txt$/);
+  } finally {
+    (globalThis as { fetch?: unknown }).fetch = prev;
+  }
 });
 
 test("pending attachments: add, dedupe, remove, take clears", () => {

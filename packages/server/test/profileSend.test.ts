@@ -172,6 +172,12 @@ test("explicit per-send model/agent still win over the profile bundle", async ()
   await flush();
   assert.deepEqual(fake.started[0]!.model, { providerID: "other", modelID: "big" });
   assert.equal(fake.started[0]!.agent, "reviewer");
+  idle(id, fake);
+  await flush();
+  await sessions.send(id, { text: "inherit" });
+  await flush();
+  assert.deepEqual(fake.started[1]!.model, { providerID: "acme", modelID: "quick" });
+  assert.deepEqual((await store.projection(id))?.model, { providerID: "other", modelID: "big" });
   await store.close();
 });
 

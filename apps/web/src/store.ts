@@ -765,6 +765,7 @@ export function clearUiError(): void {
   set({ uiError: null });
 }
 
+
 /** A server placeholder title must not clobber a title the client already
  *  derived from the first user message (applyEvents persists it instantly,
  *  before OpenCode's slower semantic title lands). Keeps it durable across

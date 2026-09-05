@@ -61,7 +61,8 @@ function harness(opts: { permission?: "allow" | "deny" | "ask" } = {}) {
   } as unknown as PermissionService;
   const attention: Array<{ sessionId: string; kind: string }> = [];
   const stopped: Array<{ sessionId: string; reason: string }> = [];
-  const broadcast: Broadcaster = { event: () => {}, projection: () => {} };
+  const statuses: string[] = [];
+  const broadcast: Broadcaster = { event: () => {}, projection: (projection) => statuses.push(projection.status) };
   const fake = fakeRuntime();
   const sessions = createSessionService({
     store, projects, permissions, broadcast, queue: store,
@@ -73,7 +74,7 @@ function harness(opts: { permission?: "allow" | "deny" | "ask" } = {}) {
     },
     shell: { run: async () => ({ output: "ok", exitCode: 0, timedOut: false, truncated: false }) },
   });
-  return { sessions, store, fake, attention, stopped };
+  return { sessions, store, fake, attention, stopped, statuses };
 }
 
 test("auto-accept on: request resolves with auto:true, runtime replied, no notify", async () => {
@@ -147,7 +148,7 @@ test("subagent inherits the nearest parent's policy; child opt-out wins", async 
   assert.deepEqual(attention, [{ sessionId: child, kind: "permission" }]);
 });
 
-test("enabling reconciles pending requests and returns the session to working", async () => {
+test("enabling reconciles pending requests and leaves idle when no turn is active", async () => {
   const { sessions, store, fake, attention } = harness();
   const { id } = await sessions.create({ projectId: "p1", title: "T" });
 
@@ -168,11 +169,28 @@ test("enabling reconciles pending requests and returns the session to working", 
     fake.permissionReplies.map((p) => p.requestId).sort(),
     ["per_1", "per_2"],
   );
-  assert.equal((await store.projection(id))?.status, "working");
+  assert.equal(
+    (await store.projection(id))?.status,
+    "idle",
+    "no active turn → resolving the last open request returns idle",
+  );
 
   // disabling flips the flag back and new requests wait again
   await sessions.autoAcceptSet!(id, "off");
   assert.equal((await store.projection(id))?.autoAccept, false);
+});
+
+test("enabling reconciles pending requests back to working while a turn is active", async () => {
+  const { sessions, store, fake } = harness();
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  fake.emit(id, { type: "turn/started", turnId: "t1" });
+  fake.emit(id, { type: "permission/requested", requestId: "per_w", permission: "edit", patterns: ["a"] });
+  await flush();
+  assert.equal((await store.projection(id))?.status, "waiting");
+
+  await sessions.autoAcceptSet!(id, "on");
+  await flush();
+  assert.equal((await store.projection(id))?.status, "working");
 });
 
 test("composer-shell confirmations are never auto-reconciled", async () => {
@@ -200,4 +218,144 @@ test("turn lifecycle reaches the notify seam once per terminal turn", async () =
   assert.deepEqual(stopped, [
     { sessionId: id, reason: "completed" },
   ], "a later terminal stop for the same turn is deduplicated");
+});
+
+test("error stop + open permission → waiting → resolve → failed; queue stays", async () => {
+  const { sessions, store, fake } = harness();
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await store.enqueue(id, "queued after fail", "follow-up");
+  fake.emit(id, { type: "turn/started", turnId: "t-err" });
+  fake.emit(id, {
+    type: "permission/requested",
+    requestId: "per_err",
+    permission: "bash",
+    patterns: ["ls"],
+  });
+  await flush();
+  assert.equal((await store.projection(id))?.status, "waiting");
+
+  fake.emit(id, { type: "turn/stopped", reason: "error", error: "boom" });
+  await flush();
+  assert.equal((await store.projection(id))?.status, "waiting");
+  const interrupt = await store.enqueue(id, "late interrupt", "interrupt");
+  const queued = await store.queueList(id);
+  await store.queueReorder(id, [interrupt.id, ...queued.filter((item) => item.id !== interrupt.id).map((item) => item.id)]);
+
+  await sessions.replyPermission(id, "per_err", "once");
+  await flush();
+  assert.equal((await store.projection(id))?.status, "failed");
+  assert.equal((await store.queueList(id)).length, 2);
+  await store.close();
+});
+
+test("queued interrupt turns a runtime error into a durable abort", async () => {
+  const { sessions, store, fake, statuses } = harness();
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  fake.emit(id, { type: "turn/started", turnId: "t-abort" });
+  fake.emit(id, { type: "permission/requested", requestId: "per_abort", permission: "bash", patterns: ["ls"] });
+  await store.enqueue(id, "interrupt now", "interrupt");
+  await flush();
+
+  fake.emit(id, { type: "turn/stopped", reason: "error", error: "Aborted" });
+  await flush();
+  assert.equal((await store.events(id)).findLast((event) => event.type === "turn/stopped")?.data.reason, "aborted");
+  assert.equal((await store.projection(id))?.status, "waiting");
+
+  await sessions.replyPermission(id, "per_abort", "once");
+  await waitFor(async () => (await store.queueList(id)).length === 0);
+  assert.equal((await store.projection(id))?.status, "working");
+  assert.equal(statuses.includes("idle"), true);
+  assert.equal(statuses.includes("failed"), false);
+  await store.close();
+});
+
+const waitFor = async (condition: () => boolean | Promise<boolean>): Promise<void> => {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (await condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("condition was not reached");
+};
+
+test("WS23: permission pending → waiting; resolve → working", async () => {
+  const { sessions, store, fake } = harness();
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  fake.emit(id, { type: "turn/started", turnId: "t1" });
+  fake.emit(id, {
+    type: "permission/requested",
+    requestId: "per_1",
+    permission: "edit",
+    patterns: ["a.ts"],
+  });
+  await waitFor(async () => (await store.projection(id))?.status === "waiting");
+
+  await sessions.replyPermission(id, "per_1", "once");
+  await waitFor(async () => (await store.projection(id))?.status === "working");
+  await store.close();
+});
+
+test("WS23: question pending → waiting; resolve → working", async () => {
+  const { sessions, store, fake } = harness();
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  fake.emit(id, { type: "turn/started", turnId: "t1" });
+  fake.emit(id, {
+    type: "question/asked",
+    requestId: "q_1",
+    questions: [{ id: "continue", prompt: "Continue?" }],
+  });
+  await waitFor(async () => (await store.projection(id))?.status === "waiting");
+
+  await sessions.replyQuestion(id, "q_1", { continue: "yes" });
+  await waitFor(async () => (await store.projection(id))?.status === "working");
+  await store.close();
+});
+
+test("WS23: turn/stopped with an open permission stays waiting then idles", async () => {
+  const { sessions, store, fake } = harness();
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  fake.emit(id, { type: "turn/started", turnId: "t1" });
+  fake.emit(id, {
+    type: "permission/requested",
+    requestId: "per_open",
+    permission: "bash",
+    patterns: ["rm"],
+  });
+  await waitFor(async () => (await store.projection(id))?.status === "waiting");
+
+  fake.emit(id, { type: "turn/stopped", reason: "completed" });
+  await waitFor(async () =>
+    (await store.events(id)).some((e) => e.type === "turn/stopped"));
+  assert.equal((await store.projection(id))?.status, "waiting");
+
+  await sessions.replyPermission(id, "per_open", "reject");
+  await waitFor(async () => (await store.projection(id))?.status === "idle");
+  await flush();
+  await store.close();
+});
+
+test("WS23: child auto-accept closes parent mirror waiting status", async () => {
+  const { sessions, store, fake } = harness();
+  const { id: parent } = await sessions.create({ projectId: "p1", title: "Parent" });
+  await sessions.autoAcceptSet!(parent, "on");
+  const { id: child } = await sessions.create({
+    projectId: "p1",
+    title: "Child",
+    parentId: parent,
+  });
+
+  fake.emit(child, {
+    type: "permission/requested",
+    requestId: "per_mirror",
+    permission: "bash",
+    patterns: ["npm test"],
+  });
+  await waitFor(async () =>
+    (await store.events(child)).some((e) => e.type === "permission/resolved"));
+
+  assert.notEqual((await store.projection(child))?.status, "waiting");
+  assert.ok((await store.events(parent)).some((e) =>
+    e.type === "permission/resolved"
+    && (e.data as { requestId?: string }).requestId === "per_mirror"));
+  assert.notEqual((await store.projection(parent))?.status, "waiting");
+  await store.close();
 });

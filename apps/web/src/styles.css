@@ -1542,6 +1542,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
 }
+.composer-large-paste .ui-notice-actions { flex-wrap: wrap; }
 .composer-runtime-unavailable {
   display: flex;
   align-items: center;

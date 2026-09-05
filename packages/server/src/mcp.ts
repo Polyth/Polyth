@@ -7,8 +7,8 @@
 // never triggers a backend write. User mutations apply a patch batch that
 // names exactly the Polyth-managed entries, so unsupported entries and unknown
 // fields in the backend config always survive.
-import { mkdirSync } from "node:fs";
-import { readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+import { atomicWriteSync } from "./atomicWrite.ts";
 import { access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
@@ -163,17 +163,6 @@ async function commandExists(command: string): Promise<boolean> {
     } catch { /* keep looking */ }
   }
   return false;
-}
-
-function atomicWriteSync(path: string, data: string): void {
-  const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync(tmp, data, "utf8");
-  try {
-    renameSync(tmp, path);
-  } catch (e) {
-    try { unlinkSync(tmp); } catch { /* already gone */ }
-    throw e;
-  }
 }
 
 export function createMcpConfigService(opts: { file: string; applier?: McpApplier }): McpConfigService {

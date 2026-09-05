@@ -9,7 +9,8 @@
 // applyProviderVisibility, which owns only disabled_providers and each
 // provider's blacklist — unknown provider/model metadata (reasoning,
 // modalities, limits, variants, future fields) is preserved by the applier.
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+import { atomicWriteSync } from "./atomicWrite.ts";
 import { dirname } from "node:path";
 import type { AvailableProviderDescriptor, ModelDescriptor } from "@polyth/contracts";
 
@@ -292,17 +293,6 @@ export function blacklistsOf(state: VisibilityState): Record<string, string[]> {
     (out[provider] ??= []).push(key.slice(i + 1));
   }
   return out;
-}
-
-function atomicWriteSync(path: string, data: string): void {
-  const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync(tmp, data, "utf8");
-  try {
-    renameSync(tmp, path);
-  } catch (e) {
-    try { unlinkSync(tmp); } catch { /* already gone */ }
-    throw e;
-  }
 }
 
 export function createModelVisibilityService(opts: { file: string; applier?: VisibilityApplier }): ModelVisibilityService {

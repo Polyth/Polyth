@@ -89,7 +89,7 @@ test("client settings round-trip through the server and apply on inbound frames"
   assert.match(sync, /type:\s*"client-settings\/changed";\s*settings:\s*ClientSettingsDto/);
   assert.match(sync, /m\.type === "client-settings\/changed"/);
   assert.match(apiSrc, /clientSettings:\s*\(\)\s*=>\s*jfetch<ClientSettingsDto>\(`\/api\/settings\/client`\)/);
-  assert.match(apiSrc, /clientSettingsSave:\s*\(settings: Record<string, unknown>\)/);
+  assert.match(apiSrc, /clientSettingsSave:\s*\(settings: Record<string, unknown>/);
 
   // Boot + live wiring.
   assert.match(initSrc, /initSettingsSync\(\)/);
@@ -106,4 +106,23 @@ test("client settings round-trip through the server and apply on inbound frames"
   // messages, next-action, task brief) honours the model the user picked.
   assert.match(settingsSync, /sessionDefaults:\s*getSessionDefaults\(\)/);
   assert.match(settingsSync, /setSessionDefaults\(parseSessionDefaults\(JSON\.stringify\(incoming\.sessionDefaults\)\)\)/);
+
+});
+
+test("settings flush uses a keepalive write", async () => {
+  const { api } = await import("@polyth/session/web-api");
+  api.clientSettings = async () => ({ revision: 1, updatedAt: 1, settings: {} });
+  let keepalive = false;
+  api.clientSettingsSave = async (_settings, opts) => {
+    keepalive = opts?.keepalive === true;
+    return { revision: 2, updatedAt: 2, settings: {} };
+  };
+  const sync = await import("../src/settingsSync.ts");
+  const store = await import("../src/store.ts");
+  sync.initSettingsSync();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  store.updateSettings({ productName: "Flush test" });
+  sync.flushSettingsSync();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(keepalive, true);
 });

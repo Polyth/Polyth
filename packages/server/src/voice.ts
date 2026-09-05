@@ -2,7 +2,8 @@
 // secrets are stored — apiKeyEnv names an environment variable; the value is
 // resolved at call time and never persisted or returned. URLs are explicit
 // user input saved through PUT (egress goes only where the user pointed it).
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+import { atomicWriteSync } from "./atomicWrite.ts";
 import { dirname } from "node:path";
 
 export interface VoiceSttSettings {
@@ -57,17 +58,6 @@ const checkEnvRef = (ref: string, label: string): void => {
     throw err("invalid-input", `${label} API key must be an environment variable NAME (the value is read from the server environment)`);
   }
 };
-
-function atomicWriteSync(path: string, data: string): void {
-  const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync(tmp, data, "utf8");
-  try {
-    renameSync(tmp, path);
-  } catch (e) {
-    try { unlinkSync(tmp); } catch { /* already gone */ }
-    throw e;
-  }
-}
 
 export function createVoiceSettings(opts: { file: string; env?: Record<string, string | undefined> }): VoiceSettingsService {
   mkdirSync(dirname(opts.file), { recursive: true });

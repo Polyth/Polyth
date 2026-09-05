@@ -133,11 +133,11 @@ function QuestionStepper({ q }: { q: PendingQuestion }) {
   const submit = () => {
     if (!canSubmit) { setStep(invalid); return; }
     drafts.delete(q.requestId);
-    void answerQuestion(q.requestId, answers as unknown as JsonObject);
+    void answerQuestion(q.sessionId, q.requestId, answers as unknown as JsonObject);
   };
   const reject = () => {
     drafts.delete(q.requestId);
-    void rejectQuestion(q.requestId);
+    void rejectQuestion(q.sessionId, q.requestId);
   };
   const selectTabFromKeyboard = (index: number) => {
     const next = (index + items.length) % items.length;

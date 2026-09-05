@@ -46,7 +46,7 @@ import SlotHost from "./slots/SlotHost.ts";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import { dragKind, dropIntoSession } from "../dnd.ts";
 import {
-  addAttachment, attachUpload, removeAttachment, takeAttachments, usePendingAttachments,
+  addAttachment, attachText, attachUpload, isLargeTextPaste, removeAttachment, takeAttachments, usePendingAttachments,
 } from "../attachments.ts";
 import {
   attachGithubLink,
@@ -100,7 +100,7 @@ import QueuedMessageList, { latestSteerableQueuedItem } from "./QueuedMessageLis
 import { GoalAttachForm } from "../../../../packages/goals/widgets/GoalStrip.tsx";
 import { announce } from "./a11y/live.tsx";
 import { noteModelUsed } from "@polyth/models/web-prefs";
-import { getUiSettings } from "../uiPrefs.ts";
+import { getUiSettings, setUiSettings } from "../uiPrefs.ts";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
 import type {
   ModelRef,
@@ -540,6 +540,7 @@ export default function Composer({
       if (editing?.sessionId === outgoing) void api.queueEditCancel(outgoing, editing.id).catch(() => {});
     }
     sessionIdRef.current = session?.id ?? null;
+    setPendingLargePaste(null);
     // Prefer server-synced draft from the projection (cross-client sync);
     // fall back to localStorage for offline / fast local edits.
     const serverDraft = session?.draft;
@@ -628,6 +629,11 @@ export default function Composer({
   // Pending attachment pills live in the per-session draft store (F2).
   const attachments = usePendingAttachments(session?.id ?? null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pendingLargePaste, setPendingLargePaste] = useState<{
+    text: string;
+    projectId: string;
+    sessionId: string | null;
+  } | null>(null);
   const attachFiles = useCallback((files: File[]) => {
     const projectId = getState().activeProjectId;
     if (!projectId || files.length === 0) return;
@@ -643,6 +649,26 @@ export default function Composer({
       });
     }
   }, []);
+  const attachPastedText = useCallback((pasted: string, projectId: string, sessionId: string | null) => {
+    void attachText(projectId, sessionId, pasted).then((r) => {
+      if (!r.ok) {
+        setUiError(tr("composer.couldNotAttachValue", {
+          name: "pasted-context.txt",
+          reason: r.reason,
+        }));
+      }
+    });
+  }, []);
+  const resolveLargePaste = (action: "attach" | "inline" | "always-attach") => {
+    if (!pendingLargePaste) return;
+    setPendingLargePaste(null);
+    if (action === "inline") {
+      inputRef.current?.insertText(pendingLargePaste.text);
+      return;
+    }
+    if (action === "always-attach") setUiSettings({ largeTextPasteBehavior: "attach" });
+    attachPastedText(pendingLargePaste.text, pendingLargePaste.projectId, pendingLargePaste.sessionId);
+  };
   const openAttachmentPicker = useCallback(() => {
     if (!isNativeMobile()) {
       fileInputRef.current?.click();
@@ -655,8 +681,6 @@ export default function Composer({
     });
   }, [attachFiles]);
 
-  // Paste: image/file clipboards become pills; a lone GitHub PR/issue URL
-  // becomes a pill when the project's remote matches, else stays plain text.
   const onPaste = useCallback((e: ClipboardEvent<HTMLTextAreaElement>) => {
     const projectId = getState().activeProjectId;
     if (!projectId) return;
@@ -667,13 +691,29 @@ export default function Composer({
       return;
     }
     const pasted = e.clipboardData?.getData("text/plain") ?? "";
+    if (isLargeTextPaste(pasted)) {
+      const behavior = getUiSettings().largeTextPasteBehavior;
+      if (behavior === "inline") return; // allow default paste
+      e.preventDefault();
+      const target = sessionIdRef.current;
+      if (behavior === "attach") {
+        attachPastedText(pasted, projectId, target);
+        return;
+      }
+      setPendingLargePaste({
+        text: pasted,
+        projectId,
+        sessionId: target,
+      });
+      return;
+    }
     if (!parseGithubUrl(pasted)) return;
     e.preventDefault();
     const target = sessionIdRef.current;
     void tryAttachGithubUrl(projectId, target, pasted).then((consumed) => {
       if (!consumed) inputRef.current?.insertText(pasted);
     });
-  }, [attachFiles]);
+  }, [attachFiles, attachPastedText]);
 
   // ---- capability catalogs (UX-COMPOSER-DISC) --------------------------------
   // Strict independent command/snippet outcomes; an HTTP failure is
@@ -1387,13 +1427,17 @@ export default function Composer({
       return;
     }
     if (goalAttachBusy) return;
+    const target = sessionIdRef.current;
+    if (!target || target !== session.id) return;
     setGoalAttachBusy(true);
-    void api.goalAttach(session.id, objective)
+    void api.goalAttach(target, objective)
       .then(() => {
+        // A session switch mid-attach must not clear a different composer.
+        if (sessionIdRef.current !== target) return;
         setText("");
         inputRef.current?.replaceText("");
-        saveDraft(session.id, "");
-        syncDraftToServer(session.id, "");
+        saveDraft(target, "");
+        syncDraftToServer(target, "");
         announce(tr("composer.goalAttached"));
       })
       .catch((error) => setUiError(friendlyError(tr("composer.couldnTAttachTheGoal"), error)))
@@ -1623,6 +1667,15 @@ export default function Composer({
       >
       {dropHint && (
         <div className="drop-hint">{dropHint === "path" ? tr("composer.attachToChat") : tr("composer.dropToAttach")}</div>
+      )}
+      {pendingLargePaste && (
+        <Notice className="composer-note composer-large-paste" role="status" actions={<>
+          <Button size="sm" onClick={() => resolveLargePaste("attach")}>{tr("composer.largePasteAttach")}</Button>
+          <Button size="sm" onClick={() => resolveLargePaste("inline")}>{tr("composer.largePasteInline")}</Button>
+          <Button size="sm" onClick={() => resolveLargePaste("always-attach")}>{tr("composer.largePasteAlwaysAttach")}</Button>
+        </>}>
+          {tr("composer.largePasteBanner")}
+        </Notice>
       )}
       {showModelWarning && (
         <div className="composer-note composer-runtime-unavailable" role="status">

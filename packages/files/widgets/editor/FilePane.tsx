@@ -39,6 +39,7 @@ import {
   conflictLiveFile,
   dismissLiveFileNotice,
   editLiveFile,
+  failLiveFileSave,
   htmlPreviewDocument,
   initialPreviewVisible,
   loadedLiveFile,
@@ -323,6 +324,9 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   const save = async (opts: { force?: boolean } = {}) => {
     const e = ensureDoc(scope, path);
     if (!e.doc || e.doc.truncated || e.doc.tooLarge) return;
+    // One in-flight write at a time: mid-flight edits keep kind "saving" and
+    // must not start a second autosave/manual save until this one settles.
+    if (e.live?.kind === "saving") return;
     const content = e.buf;
     e.live = beginLiveFileSave(e.live ?? loadedLiveFile(e.doc.revision));
     bumpDocs();
@@ -341,7 +345,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
         e.live = conflictLiveFile(e.live);
       } else {
         e.error = msg(err);
-        e.live = editLiveFile(e.live);
+        e.live = failLiveFileSave(e.live);
       }
     } finally {
       bumpDocs();

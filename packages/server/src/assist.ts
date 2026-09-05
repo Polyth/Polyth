@@ -7,7 +7,8 @@
 import type { SessionAssist } from "@polyth/contracts";
 import { latestCompletedExchange } from "@polyth/session/next-action";
 import type { SessionEvent } from "@polyth/contracts";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { atomicWriteSync } from "./atomicWrite.ts";
 import { dirname } from "node:path";
 
 export interface AssistSettings {
@@ -26,13 +27,22 @@ export interface AssistSettingsService {
   put(patch: Record<string, unknown>): AssistSettings;
 }
 
-/** Token-spend switch persisted server-side: `data/assist.json`. */
+/** Token-spend switch persisted server-side: `data/assist.json`.
+ *  Writes are atomic. A corrupt on-disk file is never overwritten with
+ *  defaults on load — operate with in-memory defaults and leave the file
+ *  untouched until a deliberate `put` succeeds. */
 export function createAssistSettings(opts: { file: string }): AssistSettingsService {
   let current: AssistSettings = { ...DEFAULT_ASSIST_SETTINGS };
   try {
     const raw = JSON.parse(readFileSync(opts.file, "utf8")) as Record<string, unknown>;
     current = sanitize(raw, current);
-  } catch { /* first run */ }
+  } catch (err) {
+    // Missing file = first run. Corrupt/unreadable: keep defaults in memory
+    // and do NOT rewrite the file on load.
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT" && existsSync(opts.file)) {
+      console.warn("[polyth] assist.json is unreadable; starting with defaults (file left untouched)");
+    }
+  }
 
   function sanitize(patch: Record<string, unknown>, base: AssistSettings): AssistSettings {
     const next = { ...base };
@@ -50,7 +60,7 @@ export function createAssistSettings(opts: { file: string }): AssistSettingsServ
     put: (patch) => {
       current = sanitize(patch, current);
       mkdirSync(dirname(opts.file), { recursive: true });
-      writeFileSync(opts.file, JSON.stringify(current, null, 2));
+      atomicWriteSync(opts.file, JSON.stringify(current, null, 2));
       return { ...current };
     },
   };

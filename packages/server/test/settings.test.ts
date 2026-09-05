@@ -32,7 +32,6 @@ test("client settings: opaque blob round-trips with a monotonic revision", () =>
   assert.equal(reopened.get().revision, 2);
   assert.deepEqual(reopened.get().settings, { product: { density: "balanced" } });
 });
-
 test("client settings: non-objects and oversized payloads are rejected", () => {
   const svc = createClientSettings({ file: join(tmp(), "client-settings.json") });
   for (const bad of [null, "string", 42, ["a"], true]) {

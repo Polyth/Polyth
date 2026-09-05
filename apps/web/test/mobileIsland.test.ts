@@ -59,6 +59,7 @@ test("the island marks tasks, current requests, and notable peer sessions", () =
     hasSession: true,
     tasks: [{ id: "t1", text: "Write the pill", status: "active" }],
     permissions: [{
+      sessionId: "s",
       requestId: "p1",
       permission: "bash",
       patterns: ["ls *"],
