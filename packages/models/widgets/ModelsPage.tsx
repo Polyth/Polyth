@@ -26,7 +26,7 @@ import ProviderConnect from "./ProviderConnect.tsx";
 import ProviderLogo from "./ProviderLogo.tsx";
 import MoveControls from "../../../apps/web/src/components/MoveControls.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
-import { AddIcon, Button, FavoriteIcon, Icon, IconButton, Switch, TextInput } from "../../../apps/web/src/components/ui/index.ts";
+import { AddIcon, Button, FavoriteIcon, Icon, IconButton, RefreshIcon, Switch, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 
 type Scope = "connected" | "all";
 
@@ -49,6 +49,7 @@ export default function ModelsPage() {
   const [authMethods, setAuthMethods] = useState<Record<string, ProviderAuthMethodDto[]>>({});
   const [providerOptionsLoaded, setProviderOptionsLoaded] = useState(false);
   const [providerOptionsLoading, setProviderOptionsLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [reconfiguring, setReconfiguring] = useState<ReadonlySet<string>>(new Set());
   const catalogModels = useMemo(
     () => providers?.flatMap((provider) => provider.models) ?? [],
@@ -58,10 +59,15 @@ export default function ModelsPage() {
   const refreshCatalog = () =>
     api.listProviders().then(setProviders).catch((e) => setError(e instanceof Error ? e.message : String(e)));
 
-  const loadProviderOptions = async () => {
-    if (providerOptionsLoaded || providerOptionsLoading) return;
+  /** Available providers + per-provider auth methods (for the add-provider
+   *  picker and the connect panels). `force` re-fetches even once loaded — the
+   *  Refresh button and any flow that just changed credentials use it.
+   *  `quiet` suppresses the error banner for background/eager loads. */
+  const loadProviderOptions = async (opts: { force?: boolean; quiet?: boolean } = {}) => {
+    if (providerOptionsLoading) return;
+    if (providerOptionsLoaded && !opts.force) return;
     setProviderOptionsLoading(true);
-    setError("");
+    if (!opts.quiet) setError("");
     try {
       const [nextAvailable, nextAuthMethods] = await Promise.all([
         api.listAvailableProviders(),
@@ -71,13 +77,18 @@ export default function ModelsPage() {
       setAuthMethods(nextAuthMethods);
       setProviderOptionsLoaded(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (!opts.quiet) setError(e instanceof Error ? e.message : String(e));
     } finally {
       setProviderOptionsLoading(false);
     }
   };
 
-  useEffect(() => { void refreshCatalog(); }, []);
+  useEffect(() => {
+    void refreshCatalog();
+    // Eager, quiet: connect panels need auth methods ready before a provider
+    // row is expanded so OAuth-only providers never flash an API-key form.
+    void loadProviderOptions({ quiet: true });
+  }, []);
 
   const closeReconfigure = (id: string) =>
     setReconfiguring((prev) => {
@@ -170,6 +181,23 @@ export default function ModelsPage() {
     }
   };
 
+  /** Re-pull the OpenCode-truth catalog (busting the server-lifetime cache)
+   *  and the provider options in one go, so a model that just went live or a
+   *  provider that finished connecting shows up without reloading the app. */
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    setError("");
+    try {
+      publish(await api.refreshProviders());
+      await loadProviderOptions({ force: true });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const query = q.trim().toLowerCase();
   const shown = useMemo(() => {
     if (!providers) return [];
@@ -214,6 +242,15 @@ export default function ModelsPage() {
           ["connected", tr("sidebar.connected")],
           ["all", tr("importsessionsdialog.all")],
         ]} onChange={setScope} />
+        <IconButton
+          className="models-refresh"
+          icon={RefreshIcon}
+          size="sm"
+          label={tr("common.refresh")}
+          busy={refreshing}
+          disabled={refreshing}
+          onClick={() => void handleRefresh()}
+        />
         <Picker
           className="models-add-provider"
           label={tr("settings.modelspage.addProvider")}
