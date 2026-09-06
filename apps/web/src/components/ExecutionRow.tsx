@@ -20,7 +20,7 @@ import { getState, openEditorFile, setUiError, useStore } from "../store.ts";
 import type { SubagentState, TaskListState, ToolMsg } from "../reduce.ts";
 import CopyButton from "./CopyButton.tsx";
 import Dialog from "./a11y/Dialog.tsx";
-import { Button, Icon as ActionIcon, RedoIcon, StopIcon, UndoIcon } from "./ui/index.ts";
+import { Button, Icon as ActionIcon, RedoIcon, StopIcon, Textarea, UndoIcon } from "./ui/index.ts";
 
 function ExecutionIcon({ kind }: { kind: ExecutionKind }) {
   const Glyph = kind === "shell" ? Icon.term
@@ -488,8 +488,55 @@ function McpResult({ output }: { output: string }) {
 
 type Subagent = SubagentState["agents"][number];
 
+type SubagentEvent = { seq: number; type: string; data: Record<string, unknown> };
+type TrailEntry = { seq: number; role: "you" | "agent" | "tool"; text: string };
+
+const TRAIL_ROLE = { you: "You", agent: "Agent", tool: "Tool" } as const;
+
+/** Humanise a raw tool id ("read", "mcp__github__get_pull_request") into a
+ *  short activity label. */
+function toolLabel(tool: string): string {
+  const mcp = tool.match(/^mcp__(.+?)__(.+)$/);
+  const words = (mcp ? `${mcp[1]} ${mcp[2]}` : tool).replace(/[_-]+/g, " ").trim();
+  return words ? words.replace(/\b\w/g, (char) => char.toUpperCase()) : "Tool";
+}
+
+/** Fold the raw child event stream into a short readable trail: one row per
+ *  message or tool call, streaming chunks merged back into their message,
+ *  empty reasoning-only turns dropped, newest last. */
+function activityTrail(events: readonly SubagentEvent[]): TrailEntry[] {
+  type Row = TrailEntry & { partId?: string; callId?: string };
+  const rows: Row[] = [];
+  const str = (value: unknown) => (typeof value === "string" ? value : "");
+  for (const { seq, type, data } of events) {
+    if (type === "user/message") {
+      const text = str(data.text).trim();
+      if (text) rows.push({ seq, role: "you", text });
+    } else if (type === "assistant/chunk" || type === "assistant/message") {
+      const partId = str(data.partId) || undefined;
+      const delta = str(data.text);
+      const prior = partId ? rows.find((row) => row.partId === partId) : undefined;
+      if (prior) {
+        prior.text = type === "assistant/message" ? (delta.trim() || prior.text) : (prior.text + delta).trimStart();
+        prior.seq = seq;
+      } else {
+        rows.push({ seq, role: "agent", text: delta.trimStart(), partId });
+      }
+    } else if (type === "tool/call") {
+      const callId = str(data.callId) || undefined;
+      const prior = callId ? rows.find((row) => row.callId === callId) : undefined;
+      if (prior) prior.seq = seq;
+      else rows.push({ seq, role: "tool", text: toolLabel(str(data.tool)), callId });
+    }
+  }
+  return rows
+    .filter((row) => row.text.trim())
+    .map(({ seq, role, text }) => ({ seq, role, text: text.replace(/\s+/g, " ").trim() }))
+    .slice(-6);
+}
+
 function SubagentWork({ sessionId, status }: { sessionId: string; status: string }) {
-  const [events, setEvents] = useState<Array<{ seq: number; type: string; data: Record<string, unknown> }>>([]);
+  const [events, setEvents] = useState<SubagentEvent[]>([]);
   const [steering, setSteering] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
@@ -499,7 +546,7 @@ function SubagentWork({ sessionId, status }: { sessionId: string; status: string
     let alive = true;
     const load = () => {
       void api.getEvents(sessionId).then((next) => {
-        if (alive) setEvents(next as typeof events);
+        if (alive) setEvents(next as SubagentEvent[]);
       }).catch(() => {});
     };
     load();
@@ -507,9 +554,7 @@ function SubagentWork({ sessionId, status }: { sessionId: string; status: string
     return () => { alive = false; if (timer) clearInterval(timer); };
   }, [sessionId, running]);
 
-  const activity = events.filter((event) =>
-    event.type === "user/message" || event.type === "assistant/message" || event.type === "assistant/chunk" || event.type === "tool/call",
-  ).slice(-8);
+  const trail = useMemo(() => activityTrail(events), [events]);
   const steer = () => {
     const text = steering.trim();
     if (!text || sending) return;
@@ -522,25 +567,29 @@ function SubagentWork({ sessionId, status }: { sessionId: string; status: string
   };
   return (
     <div className="execution-subagent-work" aria-label="Subagent work and steering">
-      <div className="execution-subagent-activity">
-        {activity.length === 0 ? <span>Waiting for subagent activity…</span> : activity.map((event) => {
-          const data = event.data;
-          const text = typeof data.text === "string" ? data.text
-            : typeof data.output === "string" ? data.output
-              : typeof data.tool === "string" ? data.tool : event.type;
-          return <p key={event.seq}><b>{event.type.startsWith("assistant") ? "Agent" : event.type.startsWith("user") ? "You" : "Tool"}</b>{text}</p>;
-        })}
-      </div>
-      <div className="execution-subagent-steer">
-        <textarea
+      <ol className="execution-subagent-trail">
+        {trail.length === 0
+          ? <li className="execution-subagent-trail-empty">Waiting for subagent activity…</li>
+          : trail.map((entry) => (
+            <li key={entry.seq} data-role={entry.role}>
+              <span className="execution-subagent-trail-role">{TRAIL_ROLE[entry.role]}</span>
+              <span className="execution-subagent-trail-text">{entry.text}</span>
+            </li>
+          ))}
+      </ol>
+      <form className="execution-subagent-steer" onSubmit={(event) => { event.preventDefault(); steer(); }}>
+        <Textarea
           value={steering}
           onChange={(event) => setSteering(event.target.value)}
           placeholder="Steer this subagent…"
           aria-label="Steer subagent"
+          autoGrow
+          minRows={1}
+          maxRows={4}
           onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") steer(); }}
         />
-        <button type="button" onClick={steer} disabled={!steering.trim() || sending}>{sending ? "Sending…" : "Steer"}</button>
-      </div>
+        <Button type="submit" size="sm" variant="primary" busy={sending} disabled={!steering.trim()}>Steer</Button>
+      </form>
       {error && <p className="execution-subagent-error" role="alert">{error}</p>}
     </div>
   );

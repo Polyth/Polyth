@@ -10924,14 +10924,16 @@ color: var(--text);
 .execution-todo-list li.done .execution-todo-mark { color: var(--green-on-wash); }
 .execution-todo-list li.failed { background: var(--red-wash); }
 .execution-todo-list li.failed .execution-todo-mark { color: var(--red); }
-.execution-subagent-activity { display: grid; gap: var(--space-1); max-height: 12rem; overflow: auto; padding: var(--space-2); border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: var(--sunken); }
-.execution-subagent-activity > span { color: var(--muted); font-size: var(--font-meta); }
-.execution-subagent-activity p { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-2); margin: 0; white-space: normal; overflow-wrap: anywhere; }
-.execution-subagent-activity b { color: var(--text-dim); font-size: var(--font-meta); }
-.execution-subagent-steer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); }
-.execution-subagent-steer textarea { min-height: var(--control-h); padding: var(--space-2); border: 1px solid var(--control-border); border-radius: var(--radius-control); background: var(--input-bg); color: var(--text); font: inherit; resize: vertical; }
-.execution-subagent-steer button { min-height: var(--control-h); align-self: end; }
-.execution-subagent-error { color: var(--red); font-size: var(--font-meta); }
+.execution-subagent-trail { display: grid; margin: 0; padding: 0; max-height: clamp(7rem, 32vh, 13rem); overflow: auto; list-style: none; border-radius: var(--radius-control); background: var(--sunken); }
+.execution-subagent-trail li { display: grid; grid-template-columns: 3.25rem minmax(0, 1fr); align-items: baseline; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-block-end: 1px solid var(--border-soft); }
+.execution-subagent-trail li:last-child { border-block-end: 0; }
+.execution-subagent-trail-role { color: var(--faint); font-size: var(--font-meta); letter-spacing: .04em; text-transform: uppercase; }
+.execution-subagent-trail li[data-role="you"] .execution-subagent-trail-role { color: var(--accent); }
+.execution-subagent-trail-text { min-width: 0; overflow: hidden; color: var(--text-dim); font-size: var(--font-meta); line-height: var(--font-meta-lh); text-overflow: ellipsis; white-space: nowrap; }
+.execution-subagent-trail-empty { padding: var(--space-2) var(--space-3); color: var(--muted); font-size: var(--font-meta); }
+.execution-subagent-steer { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: var(--space-2); }
+.execution-subagent-steer .ui-textarea { min-height: var(--control-h); }
+.execution-subagent-error { margin: 0; color: var(--red); font-size: var(--font-meta); }
 
 .execution-viewer-backdrop {
   position: fixed;
@@ -11303,6 +11305,8 @@ html[data-font] body :is(
   }
   .execution-subagent-detail { grid-template-columns: 22px minmax(0, 1fr); }
   .execution-subagent-detail > button { grid-column: 2; justify-self: start; }
+  .execution-subagent-steer { grid-template-columns: minmax(0, 1fr); }
+  .execution-subagent-steer .ui-btn { justify-self: end; }
   .ws-agent { grid-template-columns: 18px minmax(0, 1fr) auto; }
   .ws-agent .tag { display: none; }
   .ws-agent-open { grid-column: 3; }
