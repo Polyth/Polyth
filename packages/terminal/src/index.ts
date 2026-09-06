@@ -10,7 +10,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import { basename } from "node:path";
+import { basename, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type {
   Disposable,
@@ -134,6 +134,8 @@ export interface TerminalService {
   resize(id: string, cols: number, rows: number): void;
   close(id: string): Promise<void>;
   closeAll(): Promise<void>;
+  /** Close every running terminal whose cwd is `path` or nested under it. */
+  closeByCwd(path: string): Promise<void>;
   list(projectId?: string): TerminalInfo[];
   get(id: string): TerminalInfo | undefined;
   /** Bounded scrollback replay for late subscribers (F12); undefined = unknown id. */
@@ -416,6 +418,17 @@ export function createTerminalService(opts: {
 
     async closeAll() {
       await Promise.all([...sessions.keys()].map((id) => service.close(id)));
+    },
+
+    async closeByCwd(path) {
+      const target = resolve(path);
+      const ids = [...sessions.values()]
+        .filter((session) => {
+          const cwd = resolve(session.cwd);
+          return cwd === target || cwd.startsWith(`${target}/`) || cwd.startsWith(`${target}\\`);
+        })
+        .map((session) => session.id);
+      await Promise.all(ids.map((id) => service.close(id)));
     },
 
     list(projectId) {

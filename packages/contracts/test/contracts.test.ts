@@ -99,13 +99,26 @@ test("session projection new fields are optional to old clients", () => {
     id: "s1", projectId: "p1", title: "T", status: "idle", createdAt: 1, updatedAt: 1,
   };
   assert.equal(oldShape.attention, undefined);
+  assert.equal(oldShape.isolation, undefined);
   const withNew: SessionProjection = {
     ...oldShape,
     attention: { questions: 1, permissions: 0, unread: 2 },
     labelIds: ["l1"], folderId: "f1", branch: "main", worktreeState: "ready", agentProfileId: "ap1",
+    isolation: {
+      kind: "git-worktree",
+      state: "active",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      worktreePath: "/tmp/wt",
+      worktreeBranch: "polyth/isolate/abc",
+      targetPath: "/tmp/repo",
+      targetBranch: "main",
+      baseCommit: "abc123",
+    },
   };
   const parsed = JSON.parse(JSON.stringify(withNew)) as SessionProjection;
   assert.equal(parsed.attention?.questions, 1);
+  assert.equal(parsed.isolation?.kind, "git-worktree");
+  assert.equal(parsed.isolation?.targetBranch, "main");
   const deliveries: DeliveryMode[] = ["normal", "steer", "queue", "interrupt"];
   assert.equal(deliveries.length, 4);
 });

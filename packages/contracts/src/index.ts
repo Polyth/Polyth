@@ -883,6 +883,8 @@ export interface CreateSessionInput {
   worktreeId?: string;
   /** absolute path of a git worktree; when set the session's runtime uses it as cwd */
   worktreePath?: string;
+  /** Immutable isolation origin; persisted on the projection through restarts. */
+  isolation?: SessionIsolation;
   /** Existing OpenCode session to adopt rather than create. Internal adapter seam. */
   backendSessionId?: string;
 }
@@ -949,6 +951,86 @@ export interface BackgroundWorkState {
 
 export type WorktreeState = "ready" | "bootstrapping" | "busy" | "missing";
 
+/** Isolation lifecycle is independent of agent runtime status (`idle`/`working`). */
+export type IsolationState =
+  | "active"
+  | "merge-ready"
+  | "merging"
+  | "conflict"
+  | "cleanup-pending"
+  | "missing";
+
+/**
+ * Session isolation origin. The current backend is a managed Git worktree;
+ * `kind` keeps the session-level concept open for later backends.
+ *
+ * `sourceSessionId` is lineage only. `targetPath` / `targetBranch` / `baseCommit`
+ * are the immutable merge origin captured at creation — never re-derived from
+ * whatever branch the source session happens to use later.
+ */
+export interface SessionIsolation {
+  kind: "git-worktree";
+  state: IsolationState;
+  createdAt: string;
+  worktreePath: string;
+  worktreeBranch: string;
+  targetPath: string;
+  targetBranch: string;
+  baseCommit: string;
+  sourceSessionId?: string;
+  /** Fingerprint of HEAD + dirty tree when the user chose Keep isolated. */
+  dismissedRevision?: string;
+  conflict?: { message: string; files: string[] };
+  /** Published commit SHA, kept through cleanup-pending for crash recovery. */
+  resultCommit?: string;
+}
+
+export interface CreateIsolatedSessionInput {
+  projectId: string;
+  title?: string;
+  model?: ModelRef;
+  agent?: string;
+  sourceSessionId?: string;
+  /** Branch (or remote ref) to isolate from and later merge back into. */
+  targetBranch?: string;
+}
+
+export interface IsolationSuggestionDto {
+  eligible: boolean;
+  hasChanges: boolean;
+  targetBranch: string;
+  targetDirty: boolean;
+  revision: string;
+  reason?:
+    | "not-isolated"
+    | "working"
+    | "no-turn"
+    | "no-changes"
+    | "dismissed"
+    | "conflict"
+    | "dirty-target"
+    | "missing"
+    | "merging";
+}
+
+export interface IsolationStatusDto {
+  isolation: SessionIsolation | null;
+  suggestion: IsolationSuggestionDto | null;
+}
+
+export interface IsolationMergeResultDto {
+  ok: true;
+  commit: string;
+  targetBranch: string;
+  session: SessionProjection;
+}
+
+export function isGitWorktreeIsolation(
+  value: SessionIsolation | null | undefined,
+): value is SessionIsolation {
+  return !!value && value.kind === "git-worktree";
+}
+
 /** F9 idle assist: recap + one suggested follow-up, keyed to the log tail.
  *  Projection-only — it is never model-visible unless the user sends it. */
 export interface SessionAssist {
@@ -983,6 +1065,8 @@ export interface SessionProjection {
   createdAt: number; updatedAt: number;
   lastTurnAt?: number; tokenTotals?: TokenUsage; costTotal?: number;
   worktreePath?: string;
+  /** Isolation lifecycle; independent of `status`. */
+  isolation?: SessionIsolation;
   backendSessionId?: string;
   /** Durable identity of the endpoint generation that owns backendSessionId.
    * A generation-only binding may not be silently carried to a replacement. */
@@ -1159,6 +1243,18 @@ export interface SessionService {
   organize?(sessionId: string, patch: SessionOrganizePatch): Promise<void>;
   /** Projection-only reconciliation after a linked worktree is removed. */
   markWorktreeMissing?(projectId: string, worktreePath: string): Promise<void>;
+  /** Persist isolation metadata without changing runtime cwd. */
+  patchIsolation?(sessionId: string, isolation: SessionIsolation | null): Promise<SessionProjection>;
+  /**
+   * Move the same session onto a different workspace (after merge/discard).
+   * Stops session-local processes tied to the previous cwd and starts a fresh
+   * backend epoch in the new cwd so history survives the transition.
+   */
+  rebindWorkspace?(sessionId: string, input: {
+    worktreePath?: string | null;
+    branch?: string | null;
+    isolation?: SessionIsolation | null;
+  }): Promise<SessionProjection>;
   queueList?(sessionId: string): Promise<QueueItemDto[]>;
   /** Temporarily holds the queue head while it is edited in the composer. */
   queueEditStart?(sessionId: string, queueId: string): Promise<QueueItemDto>;

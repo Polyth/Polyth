@@ -11,7 +11,7 @@ import type {
   RuntimeEndpoint, RuntimeLifecycleNotification, RuntimeMutationKind, RuntimeObservation,
   RuntimeSessionBinding, RuntimeSnapshot,
   SecretRequestData, SecretResolvedData, SecureSafeKind, SecureSafeService,
-  RuntimeSession, SendResult, SessionDebugDto, SessionDebugEndpointDto, SessionEvent, SessionFolderDto, SessionForkedData, SessionOrganizePatch, SessionProjection, SessionRef,
+  RuntimeSession, SendResult, SessionDebugDto, SessionDebugEndpointDto, SessionEvent, SessionFolderDto, SessionForkedData, SessionIsolation, SessionOrganizePatch, SessionProjection, SessionRef,
   SessionService, SessionPersistence, UserTurnInput,
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
@@ -76,6 +76,8 @@ export interface QueueStore {
 export interface RuntimePool {
   /** `cwd` overrides the project root — that is how worktree sessions are isolated. */
   forProject(projectId: string, cwd?: string): Promise<AgentRuntime>;
+  /** Dispose the facade for one project+cwd so the next lookup starts fresh. */
+  release?(projectId: string, cwd: string): Promise<void>;
   /** Restart all currently live runtime facades in place. */
   restartAll?(): Promise<number>;
   /** Generation replacement notification. Resolves only after every wired
@@ -285,6 +287,10 @@ export function createSessionService(deps: {
   worktrees?: {
     list(root: string): Promise<Array<{ path: string; branch: string | null }>>;
   };
+  /** Stop shells/watchers whose cwd is about to be deleted. */
+  closeWorkspaceProcesses?: (cwd: string) => Promise<void>;
+  /** Drop the OpenCode facade for a previous session cwd after rebind. */
+  releaseRuntime?: (projectId: string, cwd: string) => Promise<void>;
   /** Agent-profile lookup (WP8) — profiles resolve to explicit model/agent at send time. */
   profiles?: { profileGet(id: string): Promise<AgentProfile | undefined> };
   /** Global behavior instructions (WP9): revision+digest logged before a turn
@@ -4488,6 +4494,7 @@ export function createSessionService(deps: {
           worktreeState: "ready" as const,
           ...(worktree?.branch ? { branch: worktree.branch } : {}),
         } : {}),
+        ...(input.isolation ? { isolation: input.isolation } : {}),
         ...(input.model ? { model: input.model } : {}),
         ...(input.agent ? { agent: input.agent } : {}),
         createdAt: now, updatedAt: now,
@@ -4500,6 +4507,7 @@ export function createSessionService(deps: {
           data: {
             title: projection.title, projectId: project.id,
             ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
+            ...(input.isolation ? { isolation: input.isolation as unknown as JsonObject } : {}),
             ...(input.model ? { model: input.model as unknown as JsonObject } : {}),
             ...(input.agent ? { agent: input.agent } : {}),
           },
@@ -5629,10 +5637,89 @@ export function createSessionService(deps: {
           ...projection,
           worktreeState: "missing",
           updatedAt: Date.now(),
+          ...(projection.isolation
+            ? { isolation: { ...projection.isolation, state: "missing" as const } }
+            : {}),
         };
         await store.upsertProjection(next);
         broadcast.projection(next);
       }
+    },
+
+    async patchIsolation(sessionId, isolation) {
+      const next = await applyProjection(sessionId, (current) => {
+        const patched: SessionProjection = { ...current, updatedAt: Date.now() };
+        if (isolation) patched.isolation = isolation;
+        else delete patched.isolation;
+        return patched;
+      });
+      if (!next) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      return next;
+    },
+
+    async rebindWorkspace(sessionId, input) {
+      return withSessionLock(sessionId, async () => {
+        const projection = await store.projection(sessionId);
+        if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        if (projection.status === "archived") {
+          throw Object.assign(new Error("unavailable while the session is archived"), { code: "conflict" });
+        }
+        if (turnActive(sessionId) || projection.status === "working") {
+          throw Object.assign(new Error("cannot rebind a running session"), { code: "conflict" });
+        }
+        const project = await projects.get(projection.projectId);
+        const previousCwd = projection.worktreePath ?? project?.path;
+        if (previousCwd && deps.closeWorkspaceProcesses) {
+          await deps.closeWorkspaceProcesses(previousCwd).catch(() => undefined);
+        }
+        unwire(sessionId);
+        if (previousCwd && deps.releaseRuntime) {
+          await deps.releaseRuntime(projection.projectId, previousCwd).catch(() => undefined);
+        }
+        const next = await applyProjection(sessionId, (current) => {
+          const patched: SessionProjection = {
+            ...current,
+            updatedAt: Date.now(),
+            ...(input.branch !== undefined
+              ? (input.branch ? { branch: input.branch } : { branch: undefined })
+              : {}),
+          };
+          if (input.worktreePath === null) {
+            delete patched.worktreePath;
+            delete patched.worktreeId;
+            delete patched.worktreeState;
+          } else if (typeof input.worktreePath === "string") {
+            patched.worktreePath = input.worktreePath;
+            patched.worktreeId = input.worktreePath;
+            patched.worktreeState = "ready";
+          }
+          if (input.isolation === null) delete patched.isolation;
+          else if (input.isolation) patched.isolation = input.isolation;
+          if (input.branch === null) delete patched.branch;
+          return patched;
+        });
+        if (!next) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        const cwd = next.worktreePath ?? project?.path ?? process.cwd();
+        const runtime = await runtimes.forProject(next.projectId, cwd);
+        if (next.runtimeBinding && next.backendSessionId && (runtime.resetSessionOperation || runtime.resetSession)) {
+          try {
+            const endpoint = await (runtime as ReliabilityRuntime).endpoint?.();
+            if (endpoint) {
+              const reset = await prepareFreshEpochResetUnderLock(sessionId, next, runtime, endpoint, cwd);
+              await transitionRuntimeEpochUnderLock(sessionId, runtime, {
+                resetOperationId: reset.operationId,
+                reason: "session workspace rebound; restoring confirmed canonical history",
+                authorityDisposition: { kind: "unknown-session-replaced" },
+              });
+              const rebound = (await store.projection(sessionId))!;
+              await establishFreshRuntimeEpochUnderLock(sessionId, rebound, runtime, reset.operationId);
+            }
+          } catch (error) {
+            console.error(`[polyth] isolation session-rebind epoch failed for ${sessionId}`, error);
+          }
+        }
+        return (await store.projection(sessionId)) ?? next;
+      });
     },
 
     async markRead(sessionId, seq) {
