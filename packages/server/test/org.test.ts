@@ -17,6 +17,7 @@ function fakeRuntime(generatedTitle?: string, polledTitle?: string, polledTitleA
   let sessionId = "";
   let sessionReads = 0;
   return {
+    harnessId: "opencode",
     capabilities: async () => ({ streaming: true, permissions: true, questions: true, compaction: false, subagents: false }),
     models: async () => [],
     agents: async () => [],

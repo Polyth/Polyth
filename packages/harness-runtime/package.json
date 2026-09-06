@@ -1,0 +1,28 @@
+{
+  "name": "@polyth/harness-runtime",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@polyth/contracts": "0.1.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "Harnesses",
+      "description": "Choose the execution engine for a canonical session",
+      "core": true,
+      "enabled": true,
+      "hasSettings": true,
+      "settingsGroup": "Engineering"
+    },
+    "webEntry": "./widgets/index.tsx"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

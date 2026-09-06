@@ -1357,6 +1357,8 @@ test("worktree runtimes keep messages, attachments, attention, forks, and querie
     attachments: {
       maxBytes: 1_000,
       stat: async () => ({ kind: "file", size: 4 }),
+      // No `_inbox/*` ref in this test, so materialize is never exercised.
+      materialize: async () => ({ kind: "file", size: 4 }),
     },
     runtimes: {
       forProject: async (_projectId, cwd) =>

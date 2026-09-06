@@ -2,9 +2,10 @@
 // Runtime events -> appended to durable session log FIRST -> then broadcast/projections.
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
+import { continuityWorkspace } from "./continuityWorkspace.ts";
 import type {
   AgentProfile, AgentRuntime, AttachmentRef, AutoAcceptSetting, CanonicalEventInput, ChildSnapshotResult, ClientSettingsDto, CreateSessionInput, DeliveryMode,
-  Disposable, DurableOperation, ForkDraft, ForkResult, JsonObject, ModelRef, MutationOutcome, NotificationRecord,
+  Disposable, DurableOperation, HarnessSelection, ForkDraft, ForkResult, JsonObject, ModelRef, MutationOutcome, NotificationRecord,
   PersistedRuntimeBinding,
   InstalledPluginDto, PackageDescriptorDto, QueueItemDto, RateLimitRetry, RateLimitRetryHint, RuntimeEvent,
   RuntimeEpochTransitionResult, TurnResumeCancelledData,
@@ -23,6 +24,7 @@ import {
   effectiveHistory,
   planRuntimeEpochRecovery,
   recoveredUserText,
+  redactContinuity,
   sessionDebugObservability,
   snapshotDebugEndpoint,
   type Store as DurableSessionStore,
@@ -76,6 +78,9 @@ export interface QueueStore {
 export interface RuntimePool {
   /** `cwd` overrides the project root — that is how worktree sessions are isolated. */
   forProject(projectId: string, cwd?: string): Promise<AgentRuntime>;
+  forSession?(projection: SessionProjection, cwd: string, targetHarnessId?: string): Promise<AgentRuntime>;
+  resolve?(projection: SessionProjection, cwd: string, selection: HarnessSelection): Promise<string>;
+  forget?(runtime: AgentRuntime): void;
   /** Restart all currently live runtime facades in place. */
   restartAll?(): Promise<number>;
   /** Generation replacement notification. Resolves only after every wired
@@ -126,6 +131,7 @@ export type RuntimeEpochAuthorityDisposition =
 
 export interface RuntimeEpochTransitionOptions {
   resetOperationId: string;
+  harness?: import("@polyth/contracts").RuntimeEpochTransitionInput["harness"];
   reason: string;
   authorityDisposition: RuntimeEpochAuthorityDisposition;
 }
@@ -300,11 +306,21 @@ export function createSessionService(deps: {
       opts?: { timeoutMs?: number; maxOutputBytes?: number },
     ): Promise<{ output: string; exitCode: number | null; timedOut: boolean; truncated: boolean }>;
   };
-  /** Attachment existence/size verification against the session's file root (F2).
-   *  `stat` must reject paths escaping the root; `maxBytes` reuses the upload cap. */
+  /** Attachment preparation seam (F2). `stat` existence-checks an ordinary
+   *  project file against the session's execution root; `materialize`
+   *  guarantees a staged `_inbox/*` upload exists at the execution root,
+   *  copying from the project root when the session runs in a linked worktree
+   *  or on a remote host. Both must reject paths escaping the root; `maxBytes`
+   *  reuses the upload cap. */
   attachments?: {
-    stat(root: string, rel: string): Promise<{ kind: "file" | "dir"; size: number }>;
     maxBytes: number;
+    stat(root: string, rel: string): Promise<{ kind: "file" | "dir"; size: number }>;
+    materialize(input: {
+      projectId: string;
+      projectRoot: string;
+      execRoot: string;
+      rel: string;
+    }): Promise<{ kind: "file"; size: number }>;
   };
   /** F18: per-session auto-accept policy store (nearest-parent resolution). */
   autoAccept?: AutoAcceptStore;
@@ -2326,8 +2342,8 @@ export function createSessionService(deps: {
         await persist(
           sessionId,
           "session/metadata-changed",
-          { title, source: "opencode" },
-          { ignorable: true, producerPlugin: "backend-opencode" },
+          { title, source: sessionRuntime.get(sessionId)?.harnessId ?? "runtime" },
+          { ignorable: true, producerPlugin: sessionRuntime.get(sessionId)?.harnessId ? `backend-${sessionRuntime.get(sessionId)!.harnessId}` : "runtime" },
         );
         if (sideEffects) {
           const applied = await applyRuntimeProjection(
@@ -2364,11 +2380,13 @@ export function createSessionService(deps: {
           const nextStatus = requestsOpen
             ? "waiting"
             : effectiveReason === "error" ? "failed" : "idle";
+          const through = dialogueThrough(await store.events(sessionId));
           const applied = await applyRuntimeProjection(
             sessionId,
             runtimeEventSeq,
             (current) => ({
               ...current,
+              ...(current.runtimeLeg ? { runtimeLeg: { ...current.runtimeLeg, canonicalThroughSeq: through, bootstrap: "native-resume" as const } } : {}),
               status: nextStatus,
               updatedAt: Date.now(),
             }),
@@ -2383,6 +2401,9 @@ export function createSessionService(deps: {
             if (titleRuntime && autoTitleRequested.has(sessionId)) {
               refreshGeneratedTitle(sessionId, titleRuntime);
             }
+            const current = await store.projection(sessionId);
+            if (current?.harnessTransition) void withSessionLock(sessionId, () => finishHarnessSwitchUnderLock(sessionId))
+              .then(() => dispatchQueue(sessionId)).catch((error) => console.error("[polyth] harness switch remains pending", error));
             deps.notify?.turnStopped(sessionId, effectiveReason);
             if (effectiveReason === "completed") hooks.onTurnCompleted?.(sessionId, replyText(sessionId));
             if (!requestsOpen && effectiveReason !== "error") {
@@ -2522,7 +2543,7 @@ export function createSessionService(deps: {
           sessionId,
           "session/compacted",
           data as unknown as JsonObject,
-          { ignorable: true, producerPlugin: "backend-opencode" },
+          { ignorable: true, producerPlugin: sessionRuntime.get(sessionId)?.harnessId ? `backend-${sessionRuntime.get(sessionId)!.harnessId}` : "runtime" },
         );
         break;
       }
@@ -2532,7 +2553,7 @@ export function createSessionService(deps: {
           sessionId,
           "compaction/part-recorded",
           data as unknown as JsonObject,
-          { ignorable: true, producerPlugin: "backend-opencode" },
+          { ignorable: true, producerPlugin: sessionRuntime.get(sessionId)?.harnessId ? `backend-${sessionRuntime.get(sessionId)!.harnessId}` : "runtime" },
         );
         break;
       }
@@ -2583,7 +2604,7 @@ export function createSessionService(deps: {
           message: observation.uncertainty.message,
         },
         ignorable: true,
-        producerPlugin: "backend-opencode",
+        producerPlugin: sessionRuntime.get(sessionId)?.harnessId ? `backend-${sessionRuntime.get(sessionId)!.harnessId}` : "runtime",
       });
     }
     const ingested = await durable.ingestObservation({
@@ -2665,14 +2686,14 @@ export function createSessionService(deps: {
       if (sessionRuntime.get(sid) !== rt) return;
       // Serialize each canonical session: a terminal turn/stopped can never be
       // overwritten by an older usage or chunk projection update.
-      void withSessionLock(sid, () => onRuntimeEvent(sid, ev)).catch((err) => {
+      void withSessionLock(sid, async () => { if (sessionRuntime.get(sid) === rt) await onRuntimeEvent(sid, ev); }).catch((err) => {
         console.error(`[polyth] runtime event handling failed for ${sid}`, err);
       });
     }));
     if (rt.onObservation) {
       subscriptions.push(rt.onObservation((sid, observation) => {
         if (sessionRuntime.get(sid) !== rt) return;
-        void withSessionLock(sid, () => ingestRuntimeObservation(sid, observation)).catch((err) => {
+        void withSessionLock(sid, async () => { if (sessionRuntime.get(sid) === rt) await ingestRuntimeObservation(sid, observation); }).catch((err) => {
           console.error(`[polyth] runtime observation handling failed for ${sid}`, err);
         });
       }));
@@ -2716,6 +2737,11 @@ export function createSessionService(deps: {
     }
   });
 
+  const dialogueThrough = (events: readonly SessionEvent[]) => effectiveHistory([...events]).events.filter((event) => !event.ignorable && (event.type === "user/message" || event.type === "assistant/message")).at(-1)?.seq ?? 0;
+
+  const runtimeFor = (projection: SessionProjection, cwd: string, targetHarnessId?: string): Promise<AgentRuntime> =>
+    runtimes.forSession ? runtimes.forSession(projection, cwd, targetHarnessId) : runtimes.forProject(projection.projectId, cwd);
+
   const ensureWired = async (
     sessionId: string,
     proj: SessionProjection,
@@ -2725,8 +2751,26 @@ export function createSessionService(deps: {
     if (!rt) {
       const project = await projects.get(proj.projectId);
       const cwd = proj.worktreePath ?? project?.path ?? process.cwd();
-      rt = await runtimes.forProject(proj.projectId, cwd);
+      rt = await runtimeFor(proj, cwd);
       let attachedProjection = proj;
+      if (!proj.backendSessionId && (await store.events(sessionId)).some((event) => event.type === "session/snapshot-imported")) {
+        let operation = (await durable.operations(sessionId)).find((op) => op.mutationKind === "session-create");
+        if (!operation) operation = (await broadcastTail(sessionId, () => durable.prepareOperation({
+          sessionId, mutationKind: "session-create",
+          intentEvent: { type: "session/native-create-requested", data: {}, ignorable: true },
+        }))).operation;
+        if (rt.harnessId && !proj.resolvedHarnessId) await updateProjection(sessionId, { resolvedHarnessId: rt.harnessId });
+        if (operation.state === "prepared") {
+          const request = { sessionId, projectId: proj.projectId, title: proj.title, cwd };
+          const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(operation,
+            (id) => rt!.createSessionOperation ? rt!.createSessionOperation(request, id) : rt!.ensureSession(request),
+            (backendSessionId) => ({ backendSessionId }),
+            (result) => settleOperation(operation!, result.kind === "confirmed" ? { ...result, receipt: result.value.backendSessionId } : result));
+          if (outcome.kind !== "confirmed") throw outcomeError(outcome);
+        }
+        attachedProjection = (await store.projection(sessionId))!;
+      }
+
       // A missing binding after an unknown create is recovered only from an
       // exact protocol receipt. Listing/title similarity is deliberately not
       // enough and this path never issues another create.
@@ -2752,6 +2796,7 @@ export function createSessionService(deps: {
           attachedProjection = {
             ...attachedProjection,
             backendSessionId: recoveredBackendId,
+            runtimeBinding: attachedProjection.runtimeBinding ?? await newRuntimeBinding(rt, recoveredBackendId, cwd, "empty"),
             status: "reconciling",
           };
           await store.upsertProjection(attachedProjection);
@@ -2792,6 +2837,14 @@ export function createSessionService(deps: {
       } catch (error) {
         await updateProjectionQuietly(sessionId, { status: "unknown" });
         throw error;
+      }
+      if (rt.harnessId && !attachedProjection.runtimeLeg) {
+        const history = await store.events(sessionId);
+        const imported = history.some((event) => event.type === "session/snapshot-imported");
+        await updateProjection(sessionId, {
+          harness: attachedProjection.harness ?? { mode: "auto" }, resolvedHarnessId: rt.harnessId,
+          runtimeLeg: { id: randomUUID(), harnessId: rt.harnessId, nativeSessionId: attachedProjection.backendSessionId!, startedAt: Date.now(), canonicalThroughSeq: imported ? 0 : dialogueThrough(history), bootstrap: imported ? "continuity" : "native-resume" },
+        });
       }
       wire(sessionId, rt);
       if (typeof (rt as ReliabilityRuntime).reconcile === "function") {
@@ -3260,34 +3313,53 @@ export function createSessionService(deps: {
     });
   };
 
-  /** F2: shape-check + existence-check attachments before anything is logged
-   *  or queued. Deleted files refuse attachment with a typed error. */
-  const verifyAttachments = async (
-    proj: SessionProjection, raw: unknown,
+  /** F2: shape-check + prepare attachments before anything is logged or
+   *  queued. Ordinary project files are existence-checked against the
+   *  session's execution root; staged `_inbox/*` uploads are materialized
+   *  into that root (a linked worktree or remote host needs its own copy).
+   *  Failures raise a typed, name-only error — no path or file contents. */
+  const prepareAttachments = async (
+    proj: SessionProjection, raw: unknown, sessionId: string,
   ): Promise<AttachmentRef[] | undefined> => {
     const maxBytes = deps.attachments?.maxBytes ?? 20 * 1024 * 1024;
     const refs = sanitizeAttachments(raw, { maxBytes, projectId: proj.projectId });
     if (refs.length === 0) return undefined;
-    if (deps.attachments) {
-      const project = await projects.get(proj.projectId);
-      const root = proj.worktreePath ?? project?.path;
-      if (!root) throw Object.assign(new Error("project not found"), { code: "not-found" });
-      for (const ref of refs) {
-        if (!ref.path) continue; // url attachments have nothing on disk
-        let stat: { kind: "file" | "dir"; size: number };
-        try {
-          stat = await deps.attachments.stat(root, ref.path);
-        } catch {
-          throw Object.assign(new Error(`attachment file not found: ${ref.path}`), { code: "invalid-input" });
-        }
-        if (stat.kind !== "file") {
-          throw Object.assign(new Error(`attachment must be a file: ${ref.path}`), { code: "invalid-input" });
-        }
-        if (stat.size > deps.attachments.maxBytes) {
-          throw Object.assign(new Error(`attachment too large (max ${deps.attachments.maxBytes} bytes): ${ref.path}`), { code: "invalid-input" });
-        }
-        ref.size = stat.size; // trust disk, not the client
+    if (!deps.attachments) {
+      // The files package failed to load: ordinary refs pass through as before,
+      // but a staged upload can never be materialized — fail loudly.
+      if (refs.some((ref) => ref.path?.startsWith("_inbox/"))) {
+        throw Object.assign(new Error("attachment staging is unavailable"), { code: "unsupported" });
       }
+      return refs;
+    }
+    const project = await projects.get(proj.projectId);
+    const projectRoot = project?.path;
+    const execRoot = proj.worktreePath ?? project?.path;
+    if (!projectRoot || !execRoot) {
+      throw Object.assign(new Error("project not found"), { code: "not-found" });
+    }
+    for (const ref of refs) {
+      if (!ref.path) continue; // url attachments have nothing on disk
+      const rel = ref.path;
+      let stat: { kind: "file" | "dir"; size: number };
+      try {
+        stat = rel.startsWith("_inbox/")
+          ? await deps.attachments.materialize({ projectId: proj.projectId, projectRoot, execRoot, rel })
+          : await deps.attachments.stat(execRoot, rel);
+      } catch {
+        console.warn(
+          `[polyth] attachment prepare failed attachmentId=${ref.id} sessionId=${sessionId} `
+          + `projectId=${proj.projectId} execRoot=${execRoot} rel=${rel}`,
+        );
+        throw Object.assign(new Error(`attachment could not be prepared: ${ref.name}`), { code: "invalid-input" });
+      }
+      if (stat.kind !== "file") {
+        throw Object.assign(new Error(`attachment could not be prepared: ${ref.name}`), { code: "invalid-input" });
+      }
+      if (stat.size > deps.attachments.maxBytes) {
+        throw Object.assign(new Error(`attachment is too large: ${ref.name}`), { code: "invalid-input" });
+      }
+      ref.size = stat.size; // trust disk, not the client
     }
     return refs;
   };
@@ -3325,18 +3397,26 @@ export function createSessionService(deps: {
       ? await hooks.runtimeEpochContext?.(sessionId, events)
       : undefined;
     const proj = await store.projection(sessionId);
+    const sensitiveEnv = Object.entries(process.env).filter(([key, value]) => value && /TOKEN|SECRET|PASSWORD|API_KEY|AUTHORIZATION/i.test(key)).map(([, value]) => value!);
+    const sanitize = (value: string) => redactContinuity(deps.secureSafe?.redact?.(value) ?? value, sensitiveEnv);
+    const safeEvents = events.map((event) => ({ ...event, data: JSON.parse(JSON.stringify(event.data, (_key, value) => typeof value === "string" ? sanitize(value) : value)) as JsonObject }));
+    const project = proj ? await projects.get(proj.projectId) : undefined;
+    const workspace = proj ? await continuityWorkspace(proj.worktreePath ?? project?.path ?? process.cwd(), Boolean(project?.remote)) : undefined;
+    const safeWorkspace = workspace ? JSON.parse(JSON.stringify(workspace, (_key, value) => typeof value === "string" ? sanitize(value) : value)) as typeof workspace : undefined;
+    const safeWorkflow = workflow ? JSON.parse(JSON.stringify(workflow, (_key, value) => typeof value === "string" ? sanitize(value) : value)) as typeof workflow : undefined;
     return planRuntimeEpochRecovery({
-      events,
+      events: safeEvents,
+      ...(safeWorkspace ? { workspace: safeWorkspace } : {}),
       operations,
       heldQueueIds,
       includeWorkflow,
       includeRestored,
       workflow: {
-        ...(workflow?.objective ? { objective: workflow.objective } : {}),
-        ...(workflow?.pinned ? { pinned: workflow.pinned } : {}),
-        ...(workflow?.behavior ? { behavior: workflow.behavior } : {}),
-        ...(workflow?.agent ?? proj?.agent
-          ? { agent: workflow?.agent ?? proj?.agent }
+        ...(safeWorkflow?.objective ? { objective: safeWorkflow.objective } : {}),
+        ...(safeWorkflow?.pinned ? { pinned: safeWorkflow.pinned } : {}),
+        ...(safeWorkflow?.behavior ? { behavior: safeWorkflow.behavior } : {}),
+        ...(safeWorkflow?.agent ?? proj?.runtimeLeg?.agentIntent ?? proj?.agent
+          ? { agent: sanitize((safeWorkflow?.agent ?? proj?.runtimeLeg?.agentIntent ?? proj?.agent)!) }
           : {}),
       },
     });
@@ -3349,8 +3429,9 @@ export function createSessionService(deps: {
     try {
       await withSessionLock(sessionId, async () => {
         if (turnActive(sessionId)) return;
-        const proj = await store.projection(sessionId);
-        if (!proj || proj.status !== "idle") return;
+        let proj = await store.projection(sessionId);
+        if (proj?.harnessTransition) proj = await finishHarnessSwitchUnderLock(sessionId);
+        if (!proj || proj.harnessTransition || proj.status !== "idle") return;
         const reconciliation = await durable.reconciliation(sessionId);
         if (reconciliation?.state === "reconciling"
           || reconciliation?.state === "blocked"
@@ -3371,11 +3452,15 @@ export function createSessionService(deps: {
         );
         const current = await store.projection(sessionId);
         if (!current || current.status !== "idle" || turnActive(sessionId)) return;
+        // Re-prepare on dispatch: a queued `_inbox/*` upload was materialized at
+        // send time, but the owning worktree may have changed since, so ensure
+        // the bytes are present at the current execution root before admission.
+        const queuedAttachments = reserved.reservation.queueItem.attachments?.length
+          ? await prepareAttachments(current, reserved.reservation.queueItem.attachments, sessionId)
+          : undefined;
         await admitTurnCore(sessionId, current, rt, {
           text: reserved.reservation.queueItem.text,
-          ...(reserved.reservation.queueItem.attachments?.length
-            ? { attachments: reserved.reservation.queueItem.attachments }
-            : {}),
+          ...(queuedAttachments?.length ? { attachments: queuedAttachments } : {}),
         }, {
           operation: reserved.reservation.operation,
           queueId: reserved.reservation.queueItem.id,
@@ -3394,6 +3479,9 @@ export function createSessionService(deps: {
     sessionId: string, proj: SessionProjection, rt: AgentRuntime, input: UserTurnInput,
     reserved?: { operation: DurableOperation; queueId: string },
   ): Promise<SendResult> => {
+    if ((await store.projection(sessionId))?.harnessTransition) {
+      throw Object.assign(new Error("harness switch is pending"), { code: "conflict" });
+    }
     // /command and #snippet expansion happens before anything is logged, so the
     // durable log holds exactly what the model saw (plus `raw` for the UI).
     let text = input.text;
@@ -3606,8 +3694,13 @@ export function createSessionService(deps: {
     reserved?: { operation: DurableOperation; queueId: string },
   ): Promise<SendResult> =>
     withSessionLock(sessionId, async () => {
-      const current = (await store.projection(sessionId)) ?? proj;
+      let current = (await store.projection(sessionId)) ?? proj;
       const active = turnActive(sessionId);
+      if (current.harnessTransition) {
+        current = await finishHarnessSwitchUnderLock(sessionId);
+        if (current.harnessTransition) return enqueueMessage(sessionId, input.text, "queue", "harness-switch", input.attachments);
+        rt = await ensureWired(sessionId, current);
+      }
       let stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
       const unsafeStatus = current.status === "reconciling"
         || (current.status === "unknown" && !stoppedTurnRecorded);
@@ -3790,6 +3883,7 @@ export function createSessionService(deps: {
           replacementBinding,
           resetOperationId: reset.operationId,
           reason: options.reason,
+          ...(options.harness ? { harness: options.harness } : {}),
           ...(fence ? { fence } : {}),
         }));
         lastTurnId.delete(sessionId);
@@ -3964,6 +4058,7 @@ export function createSessionService(deps: {
     sessionId: string,
     recoveryKind: "epoch" | "unknown" = "epoch",
   ): Promise<{ projection: SessionProjection; runtime: AgentRuntime }> => {
+    if ((await store.projection(sessionId))?.harnessTransition) throw Object.assign(new Error("harness switch pending"), { code: "conflict" });
     const replacingUnknown = recoveryKind === "unknown";
     let resetOperationId: string | undefined;
     let projection = await store.projection(sessionId);
@@ -3975,7 +4070,7 @@ export function createSessionService(deps: {
     }
     const project = await projects.get(projection.projectId);
     const cwd = projection.worktreePath ?? project?.path ?? process.cwd();
-    const runtime = await runtimes.forProject(projection.projectId, cwd);
+    const runtime = await runtimeFor(projection, cwd);
     if (replacingUnknown && !runtime.resetSessionOperation && !runtime.resetSession) {
       throw Object.assign(new Error("cannot send while the session is unknown"), {
         code: "conflict",
@@ -4152,7 +4247,7 @@ export function createSessionService(deps: {
     }
     const project = await projects.get(projection.projectId);
     const cwd = projection.worktreePath ?? project?.path ?? process.cwd();
-    const runtime = await runtimes.forProject(projection.projectId, cwd);
+    const runtime = await runtimeFor(projection, cwd);
     const endpoint = await (runtime as ReliabilityRuntime).endpoint?.();
     if (!endpoint) {
       throw Object.assign(new Error("runtime epoch confirmation requires endpoint identity"), {
@@ -4345,7 +4440,138 @@ export function createSessionService(deps: {
     });
   }
 
+  /** Called under the existing session lock. Release is idempotent against an
+   * exact binding; target creation uses the existing durable mutation journal. */
+  const finishHarnessSwitchUnderLock = async (sessionId: string): Promise<SessionProjection> => {
+    let projection = await store.projection(sessionId);
+    if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
+    let transition = projection.harnessTransition;
+    if (!transition) return projection;
+    let oldBinding = projection.runtimeBinding;
+    if (!oldBinding || !runtimes.forSession) throw Object.assign(new Error("runtime binding unavailable"), { code: "unsupported" });
+    const cwd = projection.worktreePath ?? (await projects.get(projection.projectId))?.path ?? process.cwd();
+    if (transition.phase === "requested") {
+      if (transition.timing === "after-turn" && turnActive(sessionId)) return projection;
+      const old = await runtimeFor(projection, cwd);
+      if (transition.timing === "stop-now") await abortTurnUnderLock(sessionId, "user", "Stopped to change harness");
+      else {
+        await ensureWired(sessionId, projection);
+        await reconcileSession(sessionId, projection, old, "harness-switch");
+        projection = (await store.projection(sessionId))!;
+        if (turnActive(sessionId) || projection.status === "working" || projection.status === "waiting") return projection;
+        if (await blockingOperation(sessionId)) throw Object.assign(new Error("Reconcile the previous operation before switching"), { code: "outcome-unknown" });
+      }
+      oldBinding = (await store.projection(sessionId))!.runtimeBinding!;
+      if (!old.releaseExecution) throw Object.assign(new Error("This harness cannot yet prove execution has stopped"), { code: "unsupported" });
+      const released = await boundedRuntimeAwait(old.releaseExecution({
+        canonicalSessionId: sessionId,
+        backendSessionId: oldBinding.backendSessionId,
+        authorityId: oldBinding.authorityId,
+        generation: oldBinding.generation,
+        continuity: oldBinding.continuity,
+        location: oldBinding.location,
+      }, transition.id), transition.id);
+      if (released.kind !== "confirmed") throw outcomeError(released);
+      if (released.value.authorityId !== oldBinding.authorityId || released.value.generation !== oldBinding.generation) {
+        throw Object.assign(new Error("release proof does not match the old authority"), { code: "stale-evidence" });
+      }
+      transition = { ...transition, phase: "released", released: released.value };
+      await commitHarnessIntent(sessionId, { harnessTransition: transition }, "harness/execution-released", { transitionId: transition.id, ...released.value });
+      unwire(sessionId);
+      lastTurnId.delete(sessionId);
+      admitting.delete(sessionId);
+      runtimes.forget?.(old);
+      projection = (await store.projection(sessionId))!;
+    }
+    // The old authority is durably released BEFORE a target runtime can exist.
+    const target = await runtimeFor(projection, cwd, transition.targetHarnessId);
+    const events = await store.events(sessionId);
+    const intent = events.findLast((event) => event.type === "harness/native-create-requested" && event.data.transitionId === transition!.id);
+    let operation = intent ? (await durable.operations(sessionId)).find((op) => op.ownerEventSeq === intent.seq) : undefined;
+    if (!operation) {
+      operation = (await broadcastTail(sessionId, () => durable.prepareOperation({
+        sessionId,
+        mutationKind: "session-reset",
+        intentEvent: { type: "harness/native-create-requested", data: { transitionId: transition!.id, harnessId: transition!.targetHarnessId }, ignorable: true },
+      }))).operation;
+    }
+    if (operation.state === "prepared") {
+      const request = { projectId: projection.projectId, sessionId, title: projection.title, cwd };
+      const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(operation,
+        (id) => target.resetSessionOperation ? target.resetSessionOperation(request, id)
+          : target.createSessionOperation ? target.createSessionOperation(request, id)
+          : target.ensureSession(request),
+        (backendSessionId) => ({ backendSessionId }),
+        async (result) => {
+          await settleOperation(operation!, result.kind === "confirmed" ? { ...result, receipt: result.value.backendSessionId } : result);
+        });
+      if (outcome.kind !== "confirmed") throw outcomeError(outcome);
+      operation = (await durable.operation(operation.operationId))!;
+    }
+    if (operation.state !== "confirmed" || !operation.receipt) {
+      // A lost create response is recovered ONLY by a stable operation receipt.
+      const matches = (await target.sessions()).filter((item) => item.operationId === operation!.operationId);
+      if (operation.state === "unknown" && matches.length === 1) {
+        await broadcastTail(sessionId, () => durable.settleOperation(operation!.operationId, { kind: "confirmed", receipt: matches[0]!.id }));
+        operation = (await durable.operation(operation.operationId))!;
+      } else throw Object.assign(new Error("Target session creation is unresolved; no request was replayed"), { code: "outcome-unknown" });
+    }
+    const profile = projection.agentProfileId ? await deps.profiles?.profileGet(projection.agentProfileId) : undefined;
+    const agentIntent = profile ? [profile.name, profile.notes].filter(Boolean).join(": ") : projection.runtimeLeg?.agentIntent ?? projection.agent;
+    await transitionRuntimeEpochUnderLock(sessionId, target, {
+      resetOperationId: operation.operationId,
+      reason: "harness-switch",
+      authorityDisposition: { kind: "owned-authority-destroyed", ...transition.released! },
+      harness: {
+        transitionId: transition.id,
+        selection: transition.selection,
+        leg: { id: transition.id, harnessId: transition.targetHarnessId, nativeSessionId: operation.receipt!, startedAt: Date.now(), canonicalThroughSeq: 0, bootstrap: "continuity", ...(agentIntent ? { agentIntent } : {}) },
+      },
+    });
+    projection = (await store.projection(sessionId))!;
+    return establishFreshRuntimeEpochUnderLock(sessionId, projection, target, operation.operationId);
+  };
+
+  const commitHarnessIntent = async (sessionId: string, patch: Partial<SessionProjection>, type: string, data: JsonObject) => {
+    if (!store.appendBatch) throw Object.assign(new Error("atomic session publication unavailable"), { code: "unsupported" });
+    const projection = await store.projection(sessionId);
+    if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
+    const events = await store.appendBatch(sessionId, [{ type, data, ignorable: true }], {
+      projection: { ...projection, ...patch }, expectedSeq: await store.latestSeq(sessionId),
+    });
+    events.forEach((event) => broadcast.event(event));
+    broadcast.projection((await store.projection(sessionId))!);
+  };
+
   const service: RuntimeEpochSessionService = {
+    async switchHarness(sessionId, selection, timing = "after-turn") {
+      return withSessionLock(sessionId, async () => {
+        let projection = await store.projection(sessionId);
+        if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        if (!runtimes.resolve) throw Object.assign(new Error("harness selection unavailable"), { code: "unsupported" });
+        if (selection.mode !== "auto" && (selection.mode !== "pinned" || !/^[a-z][a-z0-9-]*$/.test(selection.harnessId))) throw Object.assign(new Error("invalid harness selection"), { code: "invalid-input" });
+        if (projection.harnessTransition) {
+          const pending = projection.harnessTransition;
+          if (JSON.stringify(pending.selection) !== JSON.stringify(selection)) throw Object.assign(new Error("Finish the pending harness switch first"), { code: "conflict" });
+          if (timing === "stop-now" && pending.phase === "requested" && pending.timing !== timing) {
+            await commitHarnessIntent(sessionId, { harnessTransition: { ...pending, timing } }, "harness/switch-updated", { transitionId: pending.id, timing });
+          }
+          return finishHarnessSwitchUnderLock(sessionId);
+        }
+        const cwd = projection.worktreePath ?? (await projects.get(projection.projectId))?.path ?? process.cwd();
+        const targetHarnessId = await runtimes.resolve(projection, cwd, selection);
+        if (targetHarnessId === projection.resolvedHarnessId) {
+          await commitHarnessIntent(sessionId, { harness: selection }, "harness/selection-changed", { selection: { ...selection } });
+          return (await store.projection(sessionId))!;
+        }
+        await clearResume(sessionId, "user");
+        await commitHarnessIntent(sessionId, {
+          harnessTransition: { id: randomUUID(), selection, targetHarnessId, timing, phase: "requested" },
+        }, "harness/switch-requested", { targetHarnessId, timing, selection: { ...selection } });
+        return finishHarnessSwitchUnderLock(sessionId);
+      });
+    },
+
     async transitionRuntimeEpoch(sessionId, runtime, options) {
       return withSessionLock(sessionId, () =>
         transitionRuntimeEpochUnderLock(sessionId, runtime, options));
@@ -4468,7 +4694,7 @@ export function createSessionService(deps: {
       const now = Date.now();
       let rt: AgentRuntime | undefined;
       if (input.agent && !input.model) {
-        rt = await runtimes.forProject(project.id, cwd);
+        rt = await runtimeFor({ id: sessionId, projectId: project.id, title: input.title ?? "New session", status: "idle", createdAt: now, updatedAt: now, harness: input.harness }, cwd);
         await requireLaunchModelForAutoAgent(rt, input.agent, input.model);
       }
       // F18: a subagent/fork child starts under the nearest parent's policy —
@@ -4476,6 +4702,7 @@ export function createSessionService(deps: {
       const inheritedAutoAccept = input.parentId ? await effectiveAutoAccept(input.parentId) : false;
       const projection: SessionProjection = {
         id: sessionId, projectId: project.id,
+        harness: input.harness ?? { mode: "auto" },
         // Tenancy is inherited from the owning project — the one place a
         // session's Space is decided. No caller can pass it in.
         ...(project.spaceId ? { spaceId: project.spaceId } : {}),
@@ -4508,7 +4735,7 @@ export function createSessionService(deps: {
       }));
       broadcast.projection(projection);
       try {
-        rt ??= await runtimes.forProject(project.id, cwd);
+        rt ??= await runtimeFor(projection, cwd);
       } catch (error) {
         await broadcastTail(sessionId, () => durable.settleOperation(prepared.operation.operationId, {
           kind: "rejected",
@@ -4518,6 +4745,7 @@ export function createSessionService(deps: {
         await updateProjection(sessionId, { status: "failed" });
         throw error;
       }
+      if (rt.harnessId) await updateProjection(sessionId, { resolvedHarnessId: rt.harnessId });
       const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(
         prepared.operation,
         (operationId) => {
@@ -4536,6 +4764,10 @@ export function createSessionService(deps: {
       }
       const completed: SessionProjection = {
         ...projection,
+        ...(rt.harnessId ? {
+          resolvedHarnessId: rt.harnessId,
+          runtimeLeg: { id: randomUUID(), harnessId: rt.harnessId, nativeSessionId: outcome.value.backendSessionId, startedAt: Date.now(), canonicalThroughSeq: 0, bootstrap: "empty" as const },
+        } : {}),
         backendSessionId: outcome.value.backendSessionId,
         runtimeBinding: await newRuntimeBinding(
           rt,
@@ -4574,13 +4806,27 @@ export function createSessionService(deps: {
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
       let stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
       const delivery: DeliveryMode = input.delivery ?? "normal";
-      // Attachments are verified before any state changes (rewind reset,
-      // queueing, admission) so a bad ref can never dirty the durable log.
+      // Attachments are prepared (existence-checked, `_inbox/*` materialized
+      // into the session's execution root) before any state changes (rewind
+      // reset, queueing, admission) so a bad ref can never dirty the durable
+      // log.
       if (input.attachments !== undefined) {
-        const verified = await verifyAttachments(proj, input.attachments);
+        const prepared = await prepareAttachments(proj, input.attachments, sessionId);
         input = { ...input };
-        if (verified) input.attachments = verified;
+        if (prepared) input.attachments = prepared;
         else delete input.attachments;
+      }
+      if (proj.harnessTransition) {
+        proj = await withSessionLock(sessionId, () => finishHarnessSwitchUnderLock(sessionId));
+        if (proj.harnessTransition) return enqueueMessage(sessionId, input.text, "queue", "harness-switch", input.attachments);
+      }
+      if (!proj.harnessTransition && proj.runtimeLeg && proj.status === "idle" && !turnActive(sessionId)
+        && !await blockingOperation(sessionId) && proj.runtimeLeg.bootstrap !== "continuity"
+        && proj.runtimeLeg.canonicalThroughSeq !== dialogueThrough(await store.events(sessionId))) {
+        proj = await withSessionLock(sessionId, async () => {
+          await commitHarnessIntent(sessionId, { harnessTransition: { id: randomUUID(), selection: proj!.harness ?? { mode: "auto" }, targetHarnessId: proj!.resolvedHarnessId!, timing: "after-turn", phase: "requested" } }, "harness/switch-requested", { reason: "native history is stale", targetHarnessId: proj!.resolvedHarnessId! });
+          return finishHarnessSwitchUnderLock(sessionId);
+        });
       }
       const initialBlockingOperation = await blockingOperation(sessionId);
       let recoverEpoch = proj.status === "epoch-pending";
@@ -4596,7 +4842,7 @@ export function createSessionService(deps: {
       ) {
         const project = await projects.get(proj.projectId);
         const cwd = proj.worktreePath ?? project?.path ?? process.cwd();
-        candidateRuntime = await runtimes.forProject(proj.projectId, cwd);
+        candidateRuntime = await runtimeFor(proj, cwd);
         const endpoint = await (candidateRuntime as ReliabilityRuntime).endpoint?.().catch(() => undefined);
         if (endpoint && proj.backendSessionId) {
           const protocol = await (candidateRuntime as ReliabilityRuntime).protocol?.()
@@ -5448,7 +5694,7 @@ export function createSessionService(deps: {
         const project = await projects.get(proj.projectId);
         const cwd = proj.worktreePath ?? project?.path ?? process.cwd();
         const rt = sessionRuntime.get(sessionId) ?? (proj.backendSessionId
-          ? await runtimes.forProject(proj.projectId, cwd)
+          ? await runtimeFor(proj, cwd)
           : undefined);
         // Drop callbacks before abort/delete I/O. A synchronous turn/stopped
         // emitted by abort must never be queued for the soon-tombstoned log.
@@ -5622,6 +5868,8 @@ export function createSessionService(deps: {
     },
 
     async markWorktreeMissing(projectId, worktreePath) {
+      // TODO(attachment-cleanup-ownership): _inbox staged copies are
+      // session-lifetime; remove on worktree deletion (this is the hook).
       const missingPath = resolve(worktreePath);
       for (const projection of await store.projections(projectId)) {
         if (!projection.worktreePath || resolve(projection.worktreePath) !== missingPath) continue;

@@ -31,6 +31,21 @@ import usage from "../../../packages/usage/src/serverEntry.ts";
 import walkthrough from "../../../packages/walkthrough/src/serverEntry.ts";
 import workflow from "../../../packages/workflow/src/serverEntry.ts";
 
+import backendAcp from "../../../packages/backend-acp/src/serverEntry.ts";
+
+import backendClaude from "../../../packages/backend-claude/src/serverEntry.ts";
+import backendCodex from "../../../packages/backend-codex/src/serverEntry.ts";
+
+import backendCursor from "../../../packages/backend-cursor/src/serverEntry.ts";
+
+import backendFx from "../../../packages/backend-fx/src/serverEntry.ts";
+
+import backendOpencode from "../../../packages/backend-opencode/src/serverEntry.ts";
+
+import harnessRuntime from "../../../packages/harness-runtime/src/serverEntry.ts";
+
+import sessionImport from "../../../packages/session-import/src/serverEntry.ts";
+
 type Descriptor = Omit<PackageDescriptorDto, "id">;
 
 const entry = (
@@ -40,6 +55,12 @@ const entry = (
 ): ServerPackageRegistration => ({ id, descriptor: { id, ...descriptor }, factory });
 
 export const desktopServerPackages = [
+  entry("backend-acp", {"name": "ACP harnesses", "description": "Shared Agent Client Protocol transport and runtime", "core": false, "enabled": true, "hasSettings": false}, backendAcp),
+  entry("backend-claude", {"name": "Claude Code harness", "description": "Claude Code through its Agent SDK", "core": false, "enabled": true, "hasSettings": false}, backendClaude),
+  entry("backend-codex", {"name": "Codex harness", "description": "Native Codex App Server execution", "core": false, "enabled": true, "hasSettings": false}, backendCodex),
+  entry("backend-cursor", {"name": "Cursor harness", "description": "Cursor through shared ACP", "core": false, "enabled": true, "hasSettings": false}, backendCursor),
+  entry("backend-fx", {"name": "fx harness", "description": "fx through shared ACP", "core": false, "enabled": true, "hasSettings": false}, backendFx),
+  entry("backend-opencode", {"name": "OpenCode harness", "description": "Managed OpenCode HTTP and SSE runtime", "core": true, "enabled": true, "hasSettings": false}, backendOpencode),
   entry("browser", { name: "Browser", description: "A shared internal browser for users, agents, and element context.", core: false, enabled: true, settingsGroup: "Engineering", icon: "🌐", hasSettings: false }, browser),
   entry("commands", { name: "Commands", description: "Reusable project command definitions.", core: false, enabled: true, settingsGroup: "Engineering", icon: "/", hasSettings: true }, commands),
   entry("custom-action", { name: "Custom Action", description: "Configurable icon widgets that run project commands.", core: false, enabled: true, settingsGroup: "Customize", icon: "▶", hasSettings: false }, customAction),
@@ -50,6 +71,7 @@ export const desktopServerPackages = [
   entry("git", { name: "Git", description: "Source control status, diffs, commits, and worktrees.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⎇", hasSettings: true }, git),
   entry("github", { name: "GitHub", description: "GitHub pull request and check integration.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⎇", hasSettings: false }, github),
   entry("goals", { name: "Goals", description: "Goal tracking and completion audits.", core: false, enabled: true, settingsGroup: "Workspace", icon: "◎", hasSettings: false }, goals),
+  entry("harness-runtime", {"name": "Harnesses", "description": "Choose the execution engine for a canonical session", "core": true, "enabled": true, "hasSettings": true, "settingsGroup": "Engineering"}, harnessRuntime),
   entry("home-assistant", { name: "Home Assistant", description: "Home Assistant entities and controls.", core: false, enabled: false, settingsGroup: "Customize", icon: "🏠", hasSettings: true }, homeAssistant),
   entry("hotkeys", { name: "Shortcuts", description: "Keyboard shortcut configuration and runtime registration.", core: true, enabled: true, settingsGroup: "Workspace", icon: "⌨", hasSettings: true }, hotkeys),
   entry("knowledge", { name: "Knowledge", description: "Project notes, plans, and reusable context.", core: false, enabled: true, settingsGroup: "Workspace", icon: "📚", hasSettings: false }, knowledge),
@@ -59,6 +81,7 @@ export const desktopServerPackages = [
   entry("plugins", { name: "Plugins", description: "Managed plugin installation and configuration.", core: false, enabled: true, settingsGroup: "Customize", icon: "🧩", hasSettings: true }, plugins),
   entry("schedule", { name: "Schedule", description: "Schedule recurring and one-time agent tasks.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⏱", hasSettings: false }, schedule),
   entry("secure-safe", { name: "Secure Safe", description: "Write-only credential handles and secret policy.", core: false, enabled: true, settingsGroup: "Engineering", icon: "🔒", hasSettings: true }, secureSafe),
+  entry("session-import", {"name": "Session Import", "description": "Import a native conversation as a canonical Snapshot", "core": false, "enabled": true, "hasSettings": false}, sessionImport),
   entry("ssh", { name: "SSH Remotes", description: "SSH connections and remote projects whose agent runs on the host.", core: false, enabled: true, settingsGroup: "Engineering", icon: "🖧", hasSettings: true }, ssh),
   entry("task-trackers", { name: "Jira & Trello", description: "Jira and Trello boards, tasks, agent handoffs, and status updates.", core: false, enabled: true, settingsGroup: "Engineering", icon: "▦", hasSettings: false }, taskTrackers),
   entry("terminal", { name: "Terminal", description: "Project-scoped terminal sessions.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⌨", hasSettings: false }, terminal),

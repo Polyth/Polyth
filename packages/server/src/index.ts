@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHarnessPool, createHarnessRegistry } from "@polyth/harness-runtime";
 import { createContext, loadPlugin } from "@polyth/kernel";
 import {
   activePinnedMessages,
@@ -493,6 +494,8 @@ export async function boot(opts: BootOptions = {}) {
   // they construct here; the composition root publishes the infrastructure
   // seams packages consume. Everything cross-package resolves lazily.
   const services = createServerServiceRegistry();
+  const harnesses = createHarnessRegistry();
+  services.provide(serverServiceKey("harnesses"), harnesses);
   const provideService = <T,>(name: string, service: T): void =>
     services.provide(serverServiceKey<T>(name), service);
   const svc = <T,>(name: string): T | undefined => services.get(serverServiceKey<T>(name));
@@ -1004,6 +1007,27 @@ export async function boot(opts: BootOptions = {}) {
               inner.replySecretOperation!(sessionId, requestId, result, operationId)),
           }
         : {}),
+      releaseExecution: (binding, operationId) => admissionBarrier.run(async () => {
+        // An owned process may serve several canonical sessions. Never stop a
+        // neighbour's work as a side effect of switching this session.
+        for (const row of await store.projections(projectId)) {
+          if (row.id === binding.canonicalSessionId || row.runtimeBinding?.authorityId !== binding.authorityId) continue;
+          if (!["idle", "failed", "archived"].includes(row.status) || (await store.operations(row.id)).some((op) => ["prepared", "executing", "unknown"].includes(op.state))) {
+            return { kind: "rejected", code: "conflict", message: "Another session is using this runtime; switch after it finishes" };
+          }
+        }
+        if (!inner.releaseExecution) return { kind: "rejected", code: "unsupported", message: "This runtime cannot release execution authority" };
+        const result = await inner.releaseExecution(binding, operationId);
+        if (result.kind === "confirmed") {
+          idleController?.stop();
+          runtimesByProject.delete(key);
+          runtimeRestarters.delete(key);
+          clearActiveTurns();
+          for (const subscription of innerSubs) subscription.dispose();
+          await settleAllOrThrow([...runtimeEvictionListeners].map(async (listener) => listener(facade)));
+        }
+        return result;
+      }),
       endpoint: () => useRuntime(endpoint),
       protocol: () => useRuntime(protocol),
       reconcile: (binding, after) => useRuntime(() => reconcile(binding, after)),
@@ -1207,7 +1231,7 @@ export async function boot(opts: BootOptions = {}) {
     }
   };
 
-  const runtimes: RuntimePool = {
+  const openCodePool: RuntimePool = {
     async forProject(projectId, cwd) {
       const dir = await cwdFor(projectId, cwd);
       const key = `${projectId}::${dir}`;
@@ -1265,11 +1289,25 @@ export async function boot(opts: BootOptions = {}) {
       return { dispose: () => { runtimeEvictionListeners.delete(listener); } };
     },
   };
+  services.provide(serverServiceKey("opencode.runtime"), (context: import("@polyth/contracts").HarnessContext) =>
+    openCodePool.forProject(context.projectId, context.cwd));
+  const harnessPool = createHarnessPool({
+    registry: harnesses,
+    legacyHarnessId: "opencode",
+    async context(projectId, cwd, sessionId) {
+      const project = await projects.get(projectId);
+      const space = spaceGateway.resolveInternal(project?.spaceId);
+      return { projectId, spaceId: space.spaceId, space, cwd: await cwdFor(projectId, cwd), sessionId, remote: Boolean(project?.remote) };
+    },
+  });
+  const runtimes: RuntimePool = {
+    ...harnessPool,
+    restartAll: openCodePool.restartAll,
+    onRestart: openCodePool.onRestart,
+    onEvict: openCodePool.onEvict,
+  };
+  openCodePool.onEvict?.((runtime) => harnessPool.forget(runtime));
   const runtimeCatalog = createRuntimeCatalog({ projects, runtimes });
-  // Start provider discovery while the rest of the server finishes wiring.
-  // The first browser request shares this single-flight rather than becoming
-  // the action that starts OpenCode after every server restart.
-  void runtimeCatalog.models().catch(() => {});
 
   const parseModel = (raw?: string) => {
     if (!raw || !raw.includes("/")) return undefined;
@@ -1530,6 +1568,7 @@ export async function boot(opts: BootOptions = {}) {
   };
 
   const packageHost: Omit<ServerPackageHost, "pluginId"> = {
+    forSpace: spaceServices,
     storageDir: dataDir,
     deployment: spaceGateway.deployment,
     spaceStorage: (ctx) => createSpaceStorage(ctx.storageDir),
@@ -1611,6 +1650,9 @@ export async function boot(opts: BootOptions = {}) {
   const gitService = svc<TrackWorkflowDeps["git"]>("git");
   const terminalService = svc<TrackWorkflowDeps["terminals"]>("terminal");
   const commandService = svc<CommandExpandService>("commands");
+  // Attachment preparation seam (stat + `_inbox/*` materialize). Optional: if
+  // the files package failed to load it is absent and the session service
+  // raises a typed error for any staged `_inbox/*` attachment.
   const attachmentGuard = svc<NonNullable<SessionDeps["attachments"]>>("files.attachments");
   const autoAcceptStore = svc<NonNullable<SessionDeps["autoAccept"]>>("permissions.auto-accept");
 
@@ -1970,6 +2012,8 @@ export async function boot(opts: BootOptions = {}) {
   };
   attachHttpChannels(httpServerContext);
   await packageLifecycle.startEnabled(packageRegistry);
+  // Providers register in package lifecycle hooks; warm only after discovery.
+  void runtimeCatalog.models().catch(() => {});
 
   await new Promise<void>((res) => opts.hostname
     ? server.listen(port, opts.hostname, res)
@@ -2006,6 +2050,7 @@ export async function boot(opts: BootOptions = {}) {
       svc<{ close(): void }>("knowledge")?.close();
       await svc<{ closeAll(): Promise<void> }>("browser")?.closeAll().catch(() => {});
       await svc<{ closeAll(): Promise<void> }>("terminal")?.closeAll().catch(() => {});
+      await harnessPool.dispose();
       await Promise.all([...runtimesByProject.values()].map(async (p) =>
         (await p.catch(() => null))?.dispose().catch(() => {})));
       await svc<SshTransportService>("ssh")?.disconnectAll().catch(() => {});

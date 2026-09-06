@@ -242,6 +242,9 @@ const attachmentParts = (
   input: RuntimeTurnBinding,
 ): JsonObject[] => {
   const parts: JsonObject[] = [];
+  // The server guarantees any `_inbox/*` attachment is materialized into the
+  // runtime cwd before the turn, so resolving against the session directory is
+  // always correct here — no project-root awareness needed.
   const root = resolve(input.session.location.directory);
   for (const attachment of input.attachments ?? []) {
     if (attachment.kind === "url") {

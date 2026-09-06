@@ -1051,5 +1051,20 @@ export const createOpenCodeRuntime = async (
     await disposeFacade();
     await lifecycle.dispose();
   };
+  let released: { authorityId: string; generation: number } | undefined;
+  facade.releaseExecution = async (binding, operationId) => {
+    if (released?.authorityId === binding.authorityId && released.generation === binding.generation) return { kind: "confirmed", value: released };
+    const current = await lifecycle.endpoint();
+    const priorReleased = (lease as typeof lease & { canReleaseExecution?: (proof: { authorityId: string; generation: number }) => boolean }).canReleaseExecution?.(binding);
+    if ((current.authorityId !== binding.authorityId || current.generation !== binding.generation) && !priorReleased) return { kind: "unknown", operationId, message: "Old execution authority cannot be verified" };
+    const release = (lease as typeof lease & { releaseExecution?: () => Promise<void> }).releaseExecution;
+    if (!release) return { kind: "rejected", code: "unsupported", message: "Owned process release is unavailable" };
+    try {
+      await release();
+      released = { authorityId: binding.authorityId, generation: binding.generation };
+      await facade.dispose();
+      return { kind: "confirmed", value: released };
+    } catch { return { kind: "unknown", operationId, message: "Execution authority could not be released" }; }
+  };
   return attachRuntimeLifecycle(facade, lifecycle);
 };

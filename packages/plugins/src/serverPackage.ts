@@ -77,6 +77,7 @@ export interface ServerBroadcast {
 export interface ServerRuntimePool {
   /** `cwd` overrides the project root — that is how worktree sessions are isolated. */
   forProject(projectId: string, cwd?: string): Promise<AgentRuntime>;
+  forSession?(projection: SessionProjection, cwd: string, targetHarnessId?: string): Promise<AgentRuntime>;
   restartAll?(): Promise<number>;
 }
 
@@ -205,6 +206,8 @@ export interface ServerPackageHost extends TrustedServerPluginHost {
    * there are being migrated; new tenant state goes through `spaceStorage`.
    */
   spaceStorage(ctx: SpaceContext): SpaceStorage;
+  /** Resolve tenant-scoped core services inside request handlers. */
+  forSpace(ctx: SpaceContext): { projects: ProjectService; sessions: SessionService };
   /** Deployment/security profile. Branch on this instead of ad-hoc
    *  `if (cloud)` checks — see `allowsHostFilesystemBrowsing` and
    *  `allowsTenantPackagesInControlPlane` in @polyth/contracts. */
@@ -274,7 +277,6 @@ export const INFRASTRUCTURE_PACKAGE_DIRS: ReadonlySet<string> = new Set([
   "kernel",
   "session",
   "tenancy",
-  "backend-opencode",
   "server",
 ]);
 
