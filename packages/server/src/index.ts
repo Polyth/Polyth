@@ -1280,6 +1280,19 @@ export async function boot(opts: BootOptions = {}) {
     async restartAll() {
       return restartRuntimeEntries();
     },
+    async release(projectId, cwd) {
+      const dir = await cwdFor(projectId, cwd);
+      const key = `${projectId}::${dir}`;
+      const pending = runtimesByProject.get(key);
+      if (!pending) return;
+      try {
+        const facade = await pending;
+        await facade.dispose();
+      } catch {
+        runtimesByProject.delete(key);
+        runtimeRestarters.delete(key);
+      }
+    },
     onRestart(listener) {
       runtimeRestartListeners.add(listener);
       return { dispose: () => { runtimeRestartListeners.delete(listener); } };
@@ -1305,6 +1318,7 @@ export async function boot(opts: BootOptions = {}) {
     restartAll: openCodePool.restartAll,
     onRestart: openCodePool.onRestart,
     onEvict: openCodePool.onEvict,
+    release: openCodePool.release,
   };
   openCodePool.onEvict?.((runtime) => harnessPool.forget(runtime));
   const runtimeCatalog = createRuntimeCatalog({ projects, runtimes });
@@ -1705,7 +1719,11 @@ export async function boot(opts: BootOptions = {}) {
     admission: admissionBarrier,
     permissions: requireSvc<SessionDeps["permissions"]>("permissions"),
     ...(gitService ? { worktrees: gitService.worktrees } : {}),
-    ...(terminalService ? { shell: terminalService } : {}),
+    ...(terminalService ? {
+      shell: terminalService,
+      closeWorkspaceProcesses: (cwd: string) => terminalService.closeByCwd(cwd),
+    } : {}),
+    releaseRuntime: (projectId: string, cwd: string) => runtimes.release?.(projectId, cwd) ?? Promise.resolve(),
     // F18: server-owned per-session auto-accept policy (nearest-parent
     // resolution for subagents; session-scoped only, never a global default).
     ...(autoAcceptStore ? { autoAccept: autoAcceptStore } : {}),
@@ -1758,6 +1776,12 @@ export async function boot(opts: BootOptions = {}) {
           }
         })().catch((err: unknown) => console.error("[polyth] goal/track completion failed", err));
         assist?.onTurnCompleted(sessionId);
+        const isolation = svc<{ onTurnCompleted(sessionId: string, events: readonly import("@polyth/contracts").SessionEvent[]): Promise<unknown> }>("isolation");
+        if (isolation) {
+          void store.events(sessionId)
+            .then((events) => isolation.onTurnCompleted(sessionId, events))
+            .catch((err: unknown) => console.error("[polyth] isolation turn completion failed", err));
+        }
       },
       onUsage: (sessionId, tokens) => goalService()?.recordUsage(sessionId, { ...tokens, cacheRead: 0, cacheWrite: 0 }),
     },

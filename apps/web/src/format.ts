@@ -144,6 +144,10 @@ export function modelToMarkdown(model: RenderModel): string {
     } else if (m.kind === "github-conflict") {
       lines.push(`### Fixing merge conflicts for pull request #${m.prNumber}`);
       lines.push(`\n${m.title}\n\n\`${m.baseRefName} ← ${m.headRefName}\`\n\n${m.url}`);
+    } else if (m.kind === "notice") {
+      lines.push(m.topic === "isolation-merged"
+        ? `Merged into ${m.branch ?? ""} · ${m.commit ?? ""}`
+        : "Isolated workspace discarded");
     } else {
       lines.push(`### Task ${m.action}: ${m.text}`);
     }

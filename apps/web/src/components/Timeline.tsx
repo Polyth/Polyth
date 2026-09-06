@@ -69,6 +69,7 @@ import SlotHost from "./slots/SlotHost.ts";
 import type {
   AssistantMsg,
   GithubConflictMsg,
+  NoticeMsg,
   RenderMessage,
   RenderModel,
   SubagentState,
@@ -941,6 +942,18 @@ export function shellCardCopyText(
   return [command, output, error].filter((part): part is string => typeof part === "string" && part.length > 0).join("\n\n");
 }
 
+function NoticeRow({ notice, entering = false }: { notice: NoticeMsg; entering?: boolean }) {
+  const text = notice.topic === "isolation-merged"
+    ? tr("timeline.mergedIntoValue", { branch: notice.branch ?? "", commit: notice.commit ?? "" })
+    : tr("timeline.isolatedWorkspaceDiscarded");
+  return (
+    <div className={`task-activity completed${entering ? " timeline-row-enter" : ""}`}>
+      <span className="task-activity-mark" aria-hidden="true">✓</span>
+      <span>{text}</span>
+    </div>
+  );
+}
+
 function TaskActivityRow({ activity, entering = false }: { activity: TaskActivityMsg; entering?: boolean }) {
   const label = activity.action === "created"
     ? tr("timeline.taskCreated")
@@ -1120,6 +1133,7 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, segm
     return <AssistantView m={m} announce={announce} plan={plan} regeneratePrompt={regeneratePrompt} turn={turn} terminal={terminal} segmentStartedAt={segmentStartedAt} live={live} entering={entering} />;
   }
   if (m.kind === "github-conflict") return <GithubConflictCard message={m} entering={entering} />;
+  if (m.kind === "notice") return <NoticeRow notice={m} entering={entering} />;
   if (m.kind === "task") return <TaskActivityRow activity={m} entering={entering} />;
   return <ExecutionRow message={m} entering={entering} />;
 }
@@ -1159,6 +1173,9 @@ function sameMessage(a: RenderMessage, b: RenderMessage): boolean {
   }
   if (a.kind === "task" && b.kind === "task") {
     return a.action === b.action && a.text === b.text;
+  }
+  if (a.kind === "notice" && b.kind === "notice") {
+    return a.topic === b.topic && a.branch === b.branch && a.commit === b.commit;
   }
   return true; // github-conflict: immutable after creation
 }
@@ -1806,7 +1823,7 @@ export default function Timeline({
     let openAt = 0;
     let lastAssistant: AssistantMsg | null = null;
     for (const message of visibleMessages) {
-      if (message.kind === "user" || message.kind === "github-conflict") {
+      if (message.kind === "user" || message.kind === "github-conflict" || message.kind === "notice") {
         if (lastAssistant !== null) terminal.set(lastAssistant.eventSeq, openAt);
         lastAssistant = null;
         openAt = message.time;

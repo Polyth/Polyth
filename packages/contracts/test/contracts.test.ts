@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { cap, isUiSlot, MODEL_VISIBLE_TYPES, UI_SLOTS } from "@polyth/contracts";
+import { cap, isolationBlocksUserMutation, isUiSlot, MODEL_VISIBLE_TYPES, UI_SLOTS } from "@polyth/contracts";
 import type {
   BrowserAction,
   DeliveryMode,
@@ -99,13 +99,39 @@ test("session projection new fields are optional to old clients", () => {
     id: "s1", projectId: "p1", title: "T", status: "idle", createdAt: 1, updatedAt: 1,
   };
   assert.equal(oldShape.attention, undefined);
+  assert.equal(oldShape.isolation, undefined);
   const withNew: SessionProjection = {
     ...oldShape,
     attention: { questions: 1, permissions: 0, unread: 2 },
     labelIds: ["l1"], folderId: "f1", branch: "main", worktreeState: "ready", agentProfileId: "ap1",
+    isolation: {
+      kind: "git-worktree",
+      state: "active",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      worktreePath: "/tmp/wt",
+      worktreeBranch: "polyth/isolate/abc",
+      targetPath: "/tmp/repo",
+      targetBranch: "main",
+      originPath: "/tmp/repo",
+      baseCommit: "abc123",
+    },
   };
   const parsed = JSON.parse(JSON.stringify(withNew)) as SessionProjection;
   assert.equal(parsed.attention?.questions, 1);
+  assert.equal(parsed.isolation?.kind, "git-worktree");
+  assert.equal(parsed.isolation?.targetBranch, "main");
   const deliveries: DeliveryMode[] = ["normal", "steer", "queue", "interrupt"];
   assert.equal(deliveries.length, 4);
+});
+
+test("isolationBlocksUserMutation covers runtime epoch and wait states", () => {
+  assert.equal(isolationBlocksUserMutation("idle"), false);
+  assert.equal(isolationBlocksUserMutation("failed"), false);
+  assert.equal(isolationBlocksUserMutation("finished"), false);
+  assert.equal(isolationBlocksUserMutation("unknown"), false);
+  assert.equal(isolationBlocksUserMutation("working"), true);
+  assert.equal(isolationBlocksUserMutation("waiting"), true);
+  assert.equal(isolationBlocksUserMutation("reconciling"), true);
+  assert.equal(isolationBlocksUserMutation("epoch-pending"), true);
+  assert.equal(isolationBlocksUserMutation("archived"), true);
 });

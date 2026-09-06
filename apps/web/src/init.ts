@@ -916,6 +916,64 @@ export interface CreateSessionOptions {
   precache?: boolean;
 }
 
+export interface IsolatedSessionOptions {
+  title?: string;
+  model?: ModelRef;
+  agent?: string;
+  targetBranch?: string;
+  sourceSessionId?: string;
+  precache?: boolean;
+}
+
+/** Create a session in a Polyth-managed isolated workspace and open it. */
+export async function startIsolatedSession(
+  projectId: string,
+  opts: IsolatedSessionOptions = {},
+): Promise<string> {
+  const { precache = false, ...input } = opts;
+  const project = store.getState().projectRegistry.projects.find((candidate) => candidate.id === projectId);
+  const defaults = getSessionDefaults();
+  const model = opts.model ?? resolveProjectModelDefault(
+    project?.defaults,
+    defaults.defaultModel,
+  );
+  const agent = opts.agent ?? project?.defaults?.agent ?? defaults.defaultAgent;
+  const { id: sessionId } = await api.createIsolatedSession({
+    projectId,
+    ...(input.title ? { title: input.title } : {}),
+    ...(model ? { model } : {}),
+    ...(agent ? { agent } : {}),
+    ...(input.targetBranch ? { targetBranch: input.targetBranch } : {}),
+    ...(input.sourceSessionId ? { sourceSessionId: input.sourceSessionId } : {}),
+  });
+  const now = Date.now();
+  store.seedSessionCache({
+    id: sessionId,
+    projectId,
+    title: input.title ?? "",
+    status: "idle",
+    createdAt: now,
+    updatedAt: now,
+    ...(model ? { model } : {}),
+    ...(agent ? { agent } : {}),
+  });
+  hydratedSessions.add(sessionId);
+  if (projectId !== store.getState().activeProjectId) store.activateProject(projectId);
+  store.activateSession(sessionId);
+  store.showSessionChat();
+  const opening = openSession(sessionId);
+  if (precache) {
+    void opening.catch((error) => {
+      console.error("precache session failed", error);
+      store.setUiError(friendlyError(tr("common.error"), error));
+    });
+  } else {
+    await opening;
+  }
+  void refreshSessions(projectId);
+  return sessionId;
+}
+
 /** Create a linked worktree on a fresh, template-named branch and return its
  *  path. `base` picks the ref the new branch starts from (a branch name, tag,
  *  or SHA); omitted, it forks from the project checkout's current HEAD. */
@@ -949,10 +1007,15 @@ export async function createSession(projectId: string, opts: CreateSessionOption
     defaults.defaultModel,
   );
   const agent = opts.agent ?? project?.defaults?.agent ?? defaults.defaultAgent;
-  const worktreePath = opts.worktreePath
-    ?? (project?.defaults?.worktreeBehavior === "fresh-worktree"
-      ? await createDefaultWorktree(projectId, opts.title)
-      : undefined);
+  if (!opts.worktreePath && project?.defaults?.worktreeBehavior === "fresh-worktree") {
+    return startIsolatedSession(projectId, {
+      ...(opts.title ? { title: opts.title } : {}),
+      ...(opts.model ? { model: opts.model } : {}),
+      ...(opts.agent ? { agent: opts.agent } : {}),
+      precache,
+    });
+  }
+  const worktreePath = opts.worktreePath;
   const { id: sessionId } = await api.createSession({
     projectId,
     ...input,

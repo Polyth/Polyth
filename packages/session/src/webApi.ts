@@ -59,6 +59,9 @@ import type {
   WorkflowRunDto,
   WorkflowRunOptionsDto,
   WorkspaceLabel,
+  CreateIsolatedSessionInput,
+  IsolationMergeResultDto,
+  IsolationStatusDto,
 } from "@polyth/contracts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 
@@ -909,6 +912,19 @@ export const api = {
     jfetch<Worktree>(`/api/worktrees`, json("POST", { projectId, branch, path: wtPath, base })),
   removeWorktree: (projectId: string, wtPath: string, deleteBranch?: boolean) =>
     jfetch<{ ok: true }>(`/api/worktrees/remove`, json("POST", { projectId, path: wtPath, deleteBranch })),
+
+  createIsolatedSession: (input: CreateIsolatedSessionInput) =>
+    jfetch<SessionRef>(`/api/isolation/sessions`, json("POST", input)),
+  isolationStatus: (sessionId: string) =>
+    jfetch<IsolationStatusDto>(`/api/isolation/${encodeURIComponent(sessionId)}`),
+  isolationMerge: (sessionId: string) =>
+    jfetch<IsolationMergeResultDto>(`/api/isolation/${encodeURIComponent(sessionId)}/merge`, json("POST", {})),
+  isolationKeep: (sessionId: string) =>
+    jfetch<SessionProjection>(`/api/isolation/${encodeURIComponent(sessionId)}/keep`, json("POST", {})),
+  isolationDiscard: (sessionId: string) =>
+    jfetch<SessionProjection>(`/api/isolation/${encodeURIComponent(sessionId)}/discard`, json("POST", {})),
+  isolationResolve: (sessionId: string) =>
+    jfetch<{ sessionId: string }>(`/api/isolation/${encodeURIComponent(sessionId)}/resolve`, json("POST", {})),
 
   // ---- files (§12) ---------------------------------------------------------
   // Every files call carries an optional sessionId so the server resolves the
