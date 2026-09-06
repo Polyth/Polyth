@@ -576,6 +576,18 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
 
     async push(root, remote = "origin") {
       if (!/^[\w.-]{1,120}$/.test(remote)) throw Object.assign(new Error("invalid remote"), { code: "invalid-input" });
+      // On a normal branch with no tracking ref yet, `git push` aborts with
+      // "has no upstream branch". Publish the branch and set upstream so the
+      // first push (and every sync after) just works.
+      const branchRef = await run(root, ["symbolic-ref", "--quiet", "--short", "HEAD"], true);
+      const branch = branchRef.code === 0 ? branchRef.stdout.trim() : "";
+      if (branch) {
+        const hasUpstream = (await run(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], true)).code === 0;
+        if (!hasUpstream) {
+          await run(root, ["push", "--set-upstream", remote, branch]);
+          return;
+        }
+      }
       await run(root, ["push", remote]);
     },
 

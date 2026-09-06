@@ -325,6 +325,29 @@ test("fetch, pull, and push synchronize an explicit remote", async () => {
   await assert.rejects(() => git.fetch(dir, "--upload-pack=evil"), /invalid remote/);
 });
 
+test("push publishes a branch that has no upstream and sets tracking", async () => {
+  const dir = repo();
+  const bare = mkdtempSync(join(tmpdir(), "polyth-remote-"));
+  dirs.push(bare);
+  execFileSync("git", ["init", "--bare", "-q"], { cwd: bare });
+  const g = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
+  g("remote", "add", "origin", bare);
+  g("checkout", "-q", "-b", "feature/no-upstream");
+  writeFileSync(join(dir, "feature.txt"), "new work\n");
+  g("add", ".");
+  g("commit", "-qm", "feature work");
+
+  await git.push(dir, "origin");
+
+  const tracking = execFileSync(
+    "git",
+    ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+    { cwd: dir, stdio: "pipe" },
+  ).toString().trim();
+  assert.equal(tracking, "origin/feature/no-upstream");
+  assert.equal((await git.status(dir)).ahead, 0);
+});
+
 test("pull reports divergent histories as a resolvable conflict", async () => {
   const dir = repo();
   const bare = mkdtempSync(join(tmpdir(), "polyth-remote-"));

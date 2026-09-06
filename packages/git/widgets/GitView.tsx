@@ -46,7 +46,7 @@ import {
 } from "../../../apps/web/src/components/ui/index.ts";
 
 type GitTab = "changes" | "log" | "branches" | "stashes";
-type RemoteStep = "fetch" | "pull" | "push";
+type RemoteStep = "fetch" | "pull" | "push" | "sync";
 type BranchGroup = "local" | "remote";
 interface ConfirmRequest {
   title: string;
@@ -476,13 +476,32 @@ export default function GitView() {
     }
   };
 
+  // One button: commit what's staged (when a message is present), publish the
+  // branch — creating its upstream if there is none — then fast-forward from
+  // the remote. Ordered push-before-pull so a brand-new branch syncs in one go.
+  const syncRepository = async () => {
+    if (!projectId) return;
+    if (commitMsg.trim() && (status?.staged.length ?? 0) > 0) {
+      await api.gitCommit(projectId, commitMsg.trim(), sessionId ?? undefined);
+      setCommitMsg("");
+      setSelected(null);
+      setMobileDetail(false);
+    }
+    await api.gitPush(projectId, "origin", sessionId ?? undefined);
+    await api.gitPull(projectId, "origin", sessionId ?? undefined);
+  };
+
   const runRemote = async (step: RemoteStep) => {
     if (!projectId) return;
     setBusyRemote(step);
     setRemoteStatus(null);
     try {
-      const action = step === "fetch" ? api.gitFetch : step === "pull" ? api.gitPull : api.gitPush;
-      await action(projectId, "origin", sessionId ?? undefined);
+      if (step === "sync") {
+        await syncRepository();
+      } else {
+        const action = step === "fetch" ? api.gitFetch : step === "pull" ? api.gitPull : api.gitPush;
+        await action(projectId, "origin", sessionId ?? undefined);
+      }
       setRemoteStatus({ step });
       await refresh();
     } catch (cause) {
@@ -584,6 +603,7 @@ export default function GitView() {
     fetch: { idle: tr("gitview.fetch"), busy: tr("gitview.fetching") },
     pull: { idle: tr("gitview.pull"), busy: tr("gitview.pulling") },
     push: { idle: tr("gitview.push"), busy: tr("gitview.pushing") },
+    sync: { idle: tr("gitview.syncRepository"), busy: tr("gitview.syncRepository") },
   };
 
   if (!projectId) return <EmptyState title={tr("gitview.noProjectSelected")} description={tr("gitview.openAProjectToInspectItsGit")} />;
@@ -639,11 +659,6 @@ export default function GitView() {
     setMobileDetail(false);
   };
 
-  const syncRepository = async () => {
-    await api.gitPull(projectId, "origin", sessionId ?? undefined);
-    await api.gitPush(projectId, "origin", sessionId ?? undefined);
-  };
-
   return (
     <div className="git-page">
       <header className="source-control-head">
@@ -658,6 +673,17 @@ export default function GitView() {
           )}
         </div>
         <div className="source-remote-actions" aria-label={tr("gitview.remoteRepositoryActions")}>
+          <Button
+            size="sm"
+            variant="primary"
+            className="source-action-btn source-sync-btn"
+            iconStart={RefreshIcon}
+            busy={busyRemote === "sync"}
+            disabled={busyRemote !== null || busy}
+            onClick={() => void runRemote("sync")}
+          >
+            {remoteLabel.sync.idle}
+          </Button>
           {(["fetch", "pull", "push"] as const).map((step) => (
             <Button
               key={step}
@@ -683,7 +709,7 @@ export default function GitView() {
         </div>
       )}
 
-      {remoteStatus?.error && remoteStatus.step === "pull"
+      {remoteStatus?.error && (remoteStatus.step === "pull" || remoteStatus.step === "sync")
         && /diverged|fast-forward/i.test(remoteStatus.error) && (
         <ConflictAgentBanner
           hint={tr("gitview.historyDivergedHint")}
@@ -947,7 +973,7 @@ export default function GitView() {
                     .finally(() => setGenerating(false));
                 }}>{tr("gitview.generate")}</Button>
                 <Button size="sm" variant="primary" busy={busy && !!commitMsg.trim()} disabled={!commitMsg.trim() || busy} onClick={() => void run(commitStaged)}>{tr("gitview.commit")}</Button>
-                <Button size="sm" iconStart={RefreshIcon} disabled={busy} onClick={() => void run(syncRepository)}>{tr("gitview.syncRepository")}</Button>
+                <Button size="sm" iconStart={RefreshIcon} busy={busyRemote === "sync"} disabled={busy || busyRemote !== null} onClick={() => void runRemote("sync")}>{tr("gitview.syncRepository")}</Button>
               </div>
             </section>
           )}

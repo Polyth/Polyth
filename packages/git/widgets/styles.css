@@ -1065,7 +1065,9 @@ color: var(--purple);
 .source-confirm-dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
 @container feature-panel (max-width: 700px) {
   .source-branch { order: 3; flex-basis: 100%; max-width: 100%; padding-left: 2px; }
-  .source-remote-actions { width: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) var(--tap); }
+  .source-remote-actions { width: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .source-remote-actions .source-sync-btn { grid-column: 1 / -1; }
+  .source-remote-actions .source-refresh-btn { grid-column: 1 / -1; width: 100%; }
   .source-tabs {
     position: sticky; top: 0; z-index: 8;
     background: var(--bg);
@@ -1079,7 +1081,10 @@ color: var(--purple);
 }
 @container feature-panel (min-width: 701px) {
   .source-branch { order: initial; flex-basis: auto; max-width: min(42%, 420px); }
-  .source-remote-actions { width: auto; display: flex; }
+  /* Reserve room for every remote action: let the branch label truncate
+     instead of squeezing Push onto a clipped second row. */
+  .source-remote-actions { width: auto; display: flex; flex: none; flex-wrap: nowrap; }
+  .source-remote-actions .source-action-btn { min-width: max-content; }
 }
 @container feature-panel (max-width: 430px) {
   .source-remote-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
