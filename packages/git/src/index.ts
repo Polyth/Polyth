@@ -4,8 +4,8 @@
 // a repo root and calls these.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { existsSync, rmSync, statSync } from "node:fs";
+import { mkdir, stat } from "node:fs/promises";
 import { basename, dirname, join, posix, resolve } from "node:path";
 import type { ProjectCloneInput, RemoteHost } from "@polyth/contracts";
 
@@ -123,6 +123,10 @@ export interface GitService {
   mergeFfOnly(root: string, sha: string): Promise<void>;
   /** Compare-and-swap a ref. Returns false when `expectedOldSha` no longer matches. */
   updateRef(root: string, ref: string, newSha: string, expectedOldSha: string): Promise<boolean>;
+  /** `git merge-base --is-ancestor ancestor descendant`. */
+  isAncestor(root: string, ancestor: string, descendant: string): Promise<boolean>;
+  /** Delete a local branch. Returns false when the name does not exist. */
+  deleteBranch(root: string, name: string): Promise<boolean>;
   worktrees: WorktreeService;
 }
 
@@ -676,18 +680,21 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
     async fingerprint(root) {
       const head = (await run(root, ["rev-parse", "HEAD"], true)).stdout.trim() || "unborn";
       const porcelain = (await run(root, ["status", "--porcelain=v1", "-unormal"], true)).stdout;
-      const trackedDiff = (await run(root, ["diff", "HEAD"], true)).stdout;
+      const trackedDiff = (await run(root, ["diff", "HEAD", "--stat"], true)).stdout;
       const untrackedList = (await run(root, ["ls-files", "--others", "--exclude-standard", "-z"], true)).stdout;
       const untracked = untrackedList.split("\0").filter(Boolean);
       const hash = createHash("sha256");
       hash.update(porcelain);
       hash.update("\n");
       hash.update(trackedDiff);
-      for (const path of untracked) {
-        hash.update(path);
+      for (const relative of untracked) {
+        hash.update(relative);
         hash.update("\n");
         try {
-          hash.update(readFileSync(join(root, path)));
+          const info = await stat(join(root, relative));
+          hash.update(String(info.size));
+          hash.update(":");
+          hash.update(String(Math.trunc(info.mtimeMs)));
         } catch {
           hash.update("missing");
         }
@@ -754,6 +761,20 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       assertRev(newSha, "sha");
       assertRev(expectedOldSha, "sha");
       const r = await run(root, ["update-ref", ref, newSha, expectedOldSha], true);
+      return r.code === 0;
+    },
+
+    async isAncestor(root, ancestor, descendant) {
+      assertRev(ancestor, "sha");
+      assertRev(descendant, "sha");
+      const r = await run(root, ["merge-base", "--is-ancestor", ancestor, descendant], true);
+      return r.code === 0;
+    },
+
+    async deleteBranch(root, name) {
+      const branch = name.replace(/^refs\/heads\//, "").trim();
+      if (!branch) throw Object.assign(new Error("branch name is required"), { code: "invalid-input" });
+      const r = await run(root, ["branch", "-D", branch], true);
       return r.code === 0;
     },
 

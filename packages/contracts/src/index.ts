@@ -883,6 +883,11 @@ export interface CreateSessionInput {
   worktreeId?: string;
   /** absolute path of a git worktree; when set the session's runtime uses it as cwd */
   worktreePath?: string;
+  /**
+   * Internal seam: isolation allocates this so the managed worktree marker
+   * matches the session. HTTP session-create must not accept a client id.
+   */
+  id?: string;
   /** Immutable isolation origin; persisted on the projection through restarts. */
   isolation?: SessionIsolation;
   /** Existing OpenCode session to adopt rather than create. Internal adapter seam. */
@@ -961,12 +966,24 @@ export type IsolationState =
   | "missing";
 
 /**
+ * Durable publication intent. Persisted BEFORE the irreversible target-ref
+ * update so restart can tell "not published" from "already published".
+ */
+export interface IsolationPublishIntent {
+  expectedTargetSha: string;
+  resultCommit: string;
+  snapshotSha: string;
+  targetRef: string;
+}
+
+/**
  * Session isolation origin. The current backend is a managed Git worktree;
  * `kind` keeps the session-level concept open for later backends.
  *
- * `sourceSessionId` is lineage only. `targetPath` / `targetBranch` / `baseCommit`
- * are the immutable merge origin captured at creation — never re-derived from
- * whatever branch the source session happens to use later.
+ * `sourceSessionId` is lineage only. `targetPath` is the repository root,
+ * `targetBranch` is the local branch name, and `baseCommit` is ancestry.
+ * The live checkout of `targetBranch` is resolved at publish time from
+ * `git worktree list` — never assumed to be `project.path`.
  */
 export interface SessionIsolation {
   kind: "git-worktree";
@@ -981,8 +998,12 @@ export interface SessionIsolation {
   /** Fingerprint of HEAD + dirty tree when the user chose Keep isolated. */
   dismissedRevision?: string;
   conflict?: { message: string; files: string[] };
+  /** Set immediately before CAS/ff publication. Survives a crash across that window. */
+  publish?: IsolationPublishIntent;
   /** Published commit SHA, kept through cleanup-pending for crash recovery. */
   resultCommit?: string;
+  /** True only after session cwd/runtime rebind succeeded. Required before worktree deletion. */
+  rebound?: boolean;
 }
 
 export interface CreateIsolatedSessionInput {

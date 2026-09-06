@@ -1,6 +1,7 @@
 // Polyth-owned Git worktrees. Distinct from user-created worktrees: a marker
 // in the worktree git dir plus a namespaced branch (`polyth/isolate/…`) are
 // both required before anything is deleted.
+import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import type { JsonObject } from "@polyth/contracts";
@@ -12,6 +13,7 @@ export const ISOLATE_DIR_SUFFIX = "-polyth-isolate";
 const MARKER = "polyth-managed.json";
 
 export interface ManagedWorktreeMeta {
+  kind?: "isolate";
   sessionId: string;
   createdAt: string;
   targetPath: string;
@@ -20,12 +22,25 @@ export interface ManagedWorktreeMeta {
   worktreeBranch: string;
 }
 
+export interface IntegrationMarker {
+  kind: "integration";
+  sessionId: string;
+  createdAt: string;
+}
+
+export type ManagedMarker = ManagedWorktreeMeta | IntegrationMarker;
+
 export interface ManagedWorktree {
   path: string;
   branch: string;
   head: string;
   meta: ManagedWorktreeMeta;
 }
+
+export type RemoveOwnedResult =
+  | { status: "removed" }
+  | { status: "already-gone" }
+  | { status: "unowned"; reason: "not-listed" | "marker-missing" | "marker-corrupt" | "wrong-kind" };
 
 const log = (event: string, data: JsonObject): void => {
   console.log(`[polyth] isolation ${event} ${JSON.stringify(data)}`);
@@ -51,34 +66,55 @@ export function integrationWorktreePath(repoRoot: string, sessionId: string): st
   return join(dirname(root), `${basename(root)}${INTEGRATE_DIR_SUFFIX}`, `${short}-${Date.now().toString(36)}`);
 }
 
-async function writeMarker(git: GitService, worktreePath: string, meta: ManagedWorktreeMeta): Promise<void> {
+async function writeMarker(git: GitService, worktreePath: string, meta: ManagedMarker): Promise<void> {
   const dir = await git.gitDir(worktreePath);
   await writeFile(join(dir, MARKER), JSON.stringify(meta), "utf8");
 }
 
-export async function readManagedMeta(git: GitService, worktreePath: string): Promise<ManagedWorktreeMeta | null> {
+export async function readManagedMarker(git: GitService, worktreePath: string): Promise<ManagedMarker | null | "corrupt"> {
+  let raw: string;
   try {
     const dir = await git.gitDir(worktreePath);
-    const raw = await readFile(join(dir, MARKER), "utf8");
-    const parsed = JSON.parse(raw) as Partial<ManagedWorktreeMeta>;
-    if (
-      typeof parsed.sessionId !== "string"
-      || typeof parsed.worktreeBranch !== "string"
-      || typeof parsed.targetPath !== "string"
-      || typeof parsed.targetBranch !== "string"
-      || typeof parsed.baseCommit !== "string"
-    ) return null;
-    return {
-      sessionId: parsed.sessionId,
-      createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : "",
-      targetPath: parsed.targetPath,
-      targetBranch: parsed.targetBranch,
-      baseCommit: parsed.baseCommit,
-      worktreeBranch: parsed.worktreeBranch,
-    };
+    raw = await readFile(join(dir, MARKER), "utf8");
   } catch {
     return null;
   }
+  let parsed: Partial<ManagedMarker> & Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw) as Partial<ManagedMarker> & Record<string, unknown>;
+  } catch {
+    return "corrupt";
+  }
+  if (parsed.kind === "integration") {
+    if (typeof parsed.sessionId !== "string") return "corrupt";
+    return {
+      kind: "integration",
+      sessionId: parsed.sessionId,
+      createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : "",
+    };
+  }
+  if (
+    typeof parsed.sessionId !== "string"
+    || typeof parsed.worktreeBranch !== "string"
+    || typeof parsed.targetPath !== "string"
+    || typeof parsed.targetBranch !== "string"
+    || typeof parsed.baseCommit !== "string"
+  ) return "corrupt";
+  return {
+    kind: "isolate",
+    sessionId: parsed.sessionId,
+    createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : "",
+    targetPath: parsed.targetPath,
+    targetBranch: parsed.targetBranch,
+    baseCommit: parsed.baseCommit,
+    worktreeBranch: parsed.worktreeBranch,
+  };
+}
+
+export async function readManagedMeta(git: GitService, worktreePath: string): Promise<ManagedWorktreeMeta | null> {
+  const marker = await readManagedMarker(git, worktreePath);
+  if (!marker || marker === "corrupt" || marker.kind === "integration") return null;
+  return marker;
 }
 
 export function createManagedWorktrees(git: GitService) {
@@ -110,6 +146,7 @@ export function createManagedWorktrees(git: GitService) {
       const created = await git.worktrees.create(input.root, { branch, path, base: start });
       const head = await git.revParse(created.path, "HEAD");
       const meta: ManagedWorktreeMeta = {
+        kind: "isolate",
         sessionId: input.sessionId,
         createdAt: new Date().toISOString(),
         targetPath: resolve(input.targetPath),
@@ -145,6 +182,11 @@ export function createManagedWorktrees(git: GitService) {
       const path = integrationWorktreePath(input.root, input.sessionId);
       await mkdir(dirname(path), { recursive: true });
       await git.worktrees.addDetached(input.root, path, input.startPoint);
+      await writeMarker(git, path, {
+        kind: "integration",
+        sessionId: input.sessionId,
+        createdAt: new Date().toISOString(),
+      });
       log("integration-started", {
         sessionId: input.sessionId,
         repository: input.root,
@@ -166,20 +208,78 @@ export function createManagedWorktrees(git: GitService) {
       log("cleanup", { sessionId: owned.meta.sessionId, worktreePath, branch: owned.branch });
     },
 
-    async removeIfOwned(root: string, worktreePath: string): Promise<boolean> {
-      const owned = await this.inspect(root, worktreePath).catch(() => null);
-      if (!owned) return false;
+    async removeOwned(
+      root: string,
+      worktreePath: string,
+      expectedBranch?: string,
+    ): Promise<RemoveOwnedResult> {
+      const listed = (await git.worktrees.list(root))
+        .find((item) => resolve(item.path) === resolve(worktreePath));
+      if (!listed && !existsSync(worktreePath)) {
+        if (expectedBranch && isManagedBranch(expectedBranch)) {
+          await git.deleteBranch(root, expectedBranch);
+        }
+        await git.worktrees.prune(root);
+        return { status: "already-gone" };
+      }
+      if (!listed) {
+        log("cleanup-unowned", { worktreePath, reason: "not-listed" });
+        return { status: "unowned", reason: "not-listed" };
+      }
+      const marker = await readManagedMarker(git, listed.path);
+      if (marker === "corrupt") {
+        log("cleanup-unowned", { worktreePath, reason: "marker-corrupt" });
+        return { status: "unowned", reason: "marker-corrupt" };
+      }
+      if (!marker) {
+        log("cleanup-unowned", { worktreePath, reason: "marker-missing" });
+        return { status: "unowned", reason: "marker-missing" };
+      }
+      if (marker.kind === "integration") {
+        log("cleanup-unowned", { worktreePath, reason: "wrong-kind" });
+        return { status: "unowned", reason: "wrong-kind" };
+      }
       await this.remove(root, worktreePath, { deleteBranch: true });
-      return true;
+      return { status: "removed" };
+    },
+
+    async removeIfOwned(root: string, worktreePath: string): Promise<boolean> {
+      const result = await this.removeOwned(root, worktreePath);
+      return result.status === "removed" || result.status === "already-gone";
     },
 
     async discardIntegration(root: string, integrationPath: string): Promise<void> {
       try {
         await git.worktrees.remove(root, { path: integrationPath, deleteBranch: false });
-      } catch {
-        await rm(integrationPath, { recursive: true, force: true }).catch(() => undefined);
+      } catch (error) {
+        log("cleanup-failed", {
+          worktreePath: integrationPath,
+          stage: "discard-integration",
+          message: error instanceof Error ? error.message : String(error),
+        });
+        await rm(integrationPath, { recursive: true, force: true }).catch((rmError: unknown) => {
+          log("cleanup-failed", {
+            worktreePath: integrationPath,
+            stage: "discard-integration-rm",
+            message: rmError instanceof Error ? rmError.message : String(rmError),
+          });
+        });
         await git.worktrees.prune(root);
       }
+    },
+
+    async pruneIntegrations(root: string): Promise<number> {
+      const list = await git.worktrees.list(root);
+      let removed = 0;
+      for (const wt of list) {
+        if (wt.isMain) continue;
+        const marker = await readManagedMarker(git, wt.path);
+        if (!marker || marker === "corrupt" || marker.kind !== "integration") continue;
+        await this.discardIntegration(root, wt.path);
+        removed += 1;
+        log("cleanup", { sessionId: marker.sessionId, worktreePath: wt.path, kind: "integration" });
+      }
+      return removed;
     },
 
     async prune(root: string): Promise<void> {

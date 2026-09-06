@@ -43,12 +43,15 @@ export function IsolationCard() {
   }
 
   const suggestion = status?.suggestion;
-  const targetBranch = isolation.targetBranch;
-  const conflict = isolation.state === "conflict";
-  const missing = isolation.state === "missing" || suggestion?.reason === "missing";
+  const live = status?.isolation ?? isolation;
+  const targetBranch = live.targetBranch;
+  const conflict = live.state === "conflict" && suggestion?.eligible !== true;
+  const missing = live.state === "missing" || suggestion?.reason === "missing";
   const dirty = suggestion?.reason === "dirty-target";
   const working = session.status === "working" || session.status === "waiting" || session.status === "reconciling";
-  const ready = !working && (isolation.state === "merge-ready" || suggestion?.eligible === true);
+  const ready = !working && (status
+    ? suggestion?.eligible === true
+    : isolation.state === "merge-ready");
   if (!conflict && !missing && !dirty && !ready) return null;
 
   const run = async (kind: "merge" | "keep" | "resolve", action: () => Promise<void>) => {
@@ -72,7 +75,7 @@ export function IsolationCard() {
         ? tr("isolation.mergeNeedsAttention")
         : tr("isolation.changesAreReady");
   const detail = conflict
-    ? (isolation.conflict?.message || tr("isolation.conflictDetail", { branch: targetBranch }))
+    ? (live.conflict?.message || tr("isolation.conflictDetail", { branch: targetBranch }))
     : dirty || missing
       ? null
       : tr("isolation.mergeInto", { branch: targetBranch });
@@ -112,7 +115,7 @@ export function IsolationCard() {
             {tr("isolation.resolveWithAgent")}
           </Button>
         )}
-        {!conflict && !missing && !dirty && (
+        {!conflict && !missing && !dirty && ready && (
           <Button
             size="sm"
             variant="primary"
@@ -178,7 +181,7 @@ export function IsolationBadge() {
         {
           id: "merge",
           label: tr("isolation.mergeBack"),
-          disabled: busy || merging || isolation.state === "missing" || isolation.state === "conflict",
+          disabled: busy || merging || isolation.state === "missing",
           onSelect: () => {
             void run(async () => {
               applySession((await api.isolationMerge(sessionId)).session);

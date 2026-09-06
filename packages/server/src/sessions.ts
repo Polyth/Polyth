@@ -4469,7 +4469,15 @@ export function createSessionService(deps: {
         }
         input = { ...input, worktreePath: worktree.path };
       }
-      const sessionId = randomUUID();
+      const sessionId = input.id?.trim() || randomUUID();
+      if (input.id) {
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sessionId)) {
+          throw Object.assign(new Error("session id is invalid"), { code: "invalid-input" });
+        }
+        if (await store.projection(sessionId)) {
+          throw Object.assign(new Error("session already exists"), { code: "conflict" });
+        }
+      }
       const cwd = input.worktreePath ?? project.path;
       const now = Date.now();
       let rt: AgentRuntime | undefined;
@@ -5716,6 +5724,7 @@ export function createSessionService(deps: {
             }
           } catch (error) {
             console.error(`[polyth] isolation session-rebind epoch failed for ${sessionId}`, error);
+            throw error;
           }
         }
         return (await store.projection(sessionId)) ?? next;

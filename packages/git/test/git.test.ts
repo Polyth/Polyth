@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cloneRepository, createGitService, normalizeRepositoryUrl, pathsUnder } from "../src/index.ts";
@@ -390,4 +390,30 @@ test("snapshotCommit captures untracked files and respects gitignore", async () 
   writeFileSync(join(dir, "tracked.txt"), "keep2\n");
   const fp2 = await git.fingerprint(dir);
   assert.notEqual(fp1, fp2);
+});
+
+test("fingerprint hashes untracked size/mtime instead of file bytes", async () => {
+  const dir = repo();
+  const big = join(dir, "blob.bin");
+  writeFileSync(big, Buffer.alloc(4 * 1024 * 1024, 7));
+  const started = Date.now();
+  const fp1 = await git.fingerprint(dir);
+  assert.ok(Date.now() - started < 3000);
+  writeFileSync(big, Buffer.alloc(4 * 1024 * 1024 + 64, 8));
+  const fp2 = await git.fingerprint(dir);
+  assert.notEqual(fp1, fp2);
+  const fn = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
+  assert.match(fn, /await stat\(/);
+  assert.doesNotMatch(fn, /readFileSync/);
+});
+
+test("isAncestor reports commit ancestry", async () => {
+  const dir = repo();
+  const first = await git.revParse(dir, "HEAD");
+  writeFileSync(join(dir, "next.txt"), "n\n");
+  execFileSync("git", ["add", "."], { cwd: dir, stdio: "pipe" });
+  execFileSync("git", ["commit", "-qm", "next"], { cwd: dir, stdio: "pipe" });
+  const second = await git.revParse(dir, "HEAD");
+  assert.equal(await git.isAncestor(dir, first, second), true);
+  assert.equal(await git.isAncestor(dir, second, first), false);
 });
