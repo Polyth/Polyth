@@ -375,3 +375,19 @@ test("pull reports divergent histories as a resolvable conflict", async () => {
     return true;
   });
 });
+
+test("snapshotCommit captures untracked files and respects gitignore", async () => {
+  const dir = repo();
+  writeFileSync(join(dir, "tracked.txt"), "keep\n");
+  writeFileSync(join(dir, ".gitignore"), "noise.log\n");
+  writeFileSync(join(dir, "noise.log"), "ignore-me\n");
+  const snap = await git.snapshotCommit(dir, "polyth snapshot", { name: "Test", email: "t@example.com" });
+  assert.equal(snap.created, true);
+  const show = execFileSync("git", ["show", "--stat", "--format=", snap.sha], { cwd: dir, encoding: "utf8" });
+  assert.match(show, /tracked\.txt/);
+  assert.doesNotMatch(show, /noise\.log/);
+  const fp1 = await git.fingerprint(dir);
+  writeFileSync(join(dir, "tracked.txt"), "keep2\n");
+  const fp2 = await git.fingerprint(dir);
+  assert.notEqual(fp1, fp2);
+});

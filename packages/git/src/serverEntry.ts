@@ -2,6 +2,7 @@ import { posix } from "node:path";
 import { createHash } from "node:crypto";
 import type {
   AgentRuntime,
+  CreateIsolatedSessionInput,
   JsonObject,
   ModelRef,
   ProjectCloneInput,
@@ -23,6 +24,7 @@ import {
   pathsUnder,
   type GitService,
 } from "./index.ts";
+import { createIsolationService, type IsolationService } from "./sessionIntegration.ts";
 
 const COMMIT_PROMPT_VERSION = 2;
 const COMMIT_OUTPUT_TOKENS = 120;
@@ -393,8 +395,60 @@ export function gitRoutes(deps: {
   };
 }
 
+export function isolationRoutes(deps: {
+  isolation: IsolationService;
+}): RouteHandler {
+  const { isolation } = deps;
+  return async ({ path, method, body, json }) => {
+    if (!path.startsWith("/api/isolation")) return false;
+
+    if (path === "/api/isolation/sessions" && method === "POST") {
+      const input = await body();
+      const projectId = String(input.projectId ?? "").trim();
+      if (!projectId) throw Object.assign(new Error("projectId required"), { code: "invalid-input" });
+      json(200, await isolation.createIsolatedSession({
+        projectId,
+        ...(typeof input.title === "string" ? { title: input.title } : {}),
+        ...(input.model && typeof input.model === "object" ? { model: input.model as CreateIsolatedSessionInput["model"] } : {}),
+        ...(typeof input.agent === "string" ? { agent: input.agent } : {}),
+        ...(typeof input.sourceSessionId === "string" ? { sourceSessionId: input.sourceSessionId } : {}),
+        ...(typeof input.targetBranch === "string" ? { targetBranch: input.targetBranch } : {}),
+      }));
+      return true;
+    }
+
+    const match = /^\/api\/isolation\/([^/]+)(?:\/([^/]+))?$/.exec(path);
+    if (!match) return false;
+    const sessionId = decodeURIComponent(match[1]!);
+    const action = match[2];
+
+    if (!action && method === "GET") {
+      json(200, await isolation.getStatus(sessionId));
+      return true;
+    }
+    if (method !== "POST") return false;
+    if (action === "merge") {
+      json(200, await isolation.mergeBack(sessionId));
+      return true;
+    }
+    if (action === "keep") {
+      json(200, await isolation.keepIsolated(sessionId));
+      return true;
+    }
+    if (action === "discard") {
+      json(200, await isolation.discard(sessionId));
+      return true;
+    }
+    if (action === "resolve") {
+      json(200, await isolation.resolveWithAgent(sessionId));
+      return true;
+    }
+    return false;
+  };
+}
+
 export const GIT_REMOTE_ACCESS: RemoteAccessPolicy = {
-  routeScopes: ["git", "worktrees"],
+  routeScopes: ["git", "worktrees", "isolation"],
   http: [
     { methods: ["GET"], path: "/api/git/status", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
     { methods: ["GET"], path: "/api/git/diff", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
@@ -405,6 +459,7 @@ export const GIT_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["GET"], path: "/api/git/stashes", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
     { methods: ["GET"], path: "/api/git/identity", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
     { methods: ["GET"], path: "/api/worktrees", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
+    { methods: ["GET"], path: "/api/isolation/:sessionId", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
     { methods: ["POST"], path: "/api/git/resolve-conflict-agent", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/git/stage", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/git/unstage", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
@@ -423,6 +478,11 @@ export const GIT_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["POST"], path: "/api/git/identity", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/worktrees", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/worktrees/remove", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/isolation/sessions", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/isolation/:sessionId/merge", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/isolation/:sessionId/keep", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/isolation/:sessionId/discard", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/isolation/:sessionId/resolve", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
   ],
 };
 
@@ -454,18 +514,38 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
         }).then((text) => ({ text })),
       });
-      routes ??= gitRoutes({
+      const append = (sessionId: string, type: string, data: JsonObject) => host.events.append(
+        sessionId,
+        type,
+        data,
+        { ignorable: true, producerPlugin: "git" },
+      );
+      const isolation = createIsolationService({
+        git,
+        sessions: host.sessions,
+        projects: host.projects,
+        append,
+        commitMessage,
+        closeWorkspaceProcesses: async (cwd) => {
+          const terminals = host.services.get<{ closeByCwd(path: string): Promise<void> }>(
+            serverServiceKey("terminal"),
+          );
+          await terminals?.closeByCwd(cwd);
+        },
+      });
+      host.services.provide(serverServiceKey<IsolationService>("isolation"), isolation);
+      const gitHandler = gitRoutes({
         projects: host.projects,
         sessions: host.sessions,
         git,
         remote: { host: (connectionId) => host.services.require<{ host(id: string): RemoteHost }>(serverServiceKey("ssh")).host(connectionId) },
         commitMessage,
-        append: (sessionId, type, data) => host.events.append(
-          sessionId,
-          type,
-          data,
-          { ignorable: true, producerPlugin: "git" },
-        ),
+        append,
+      });
+      const isolationHandler = isolationRoutes({ isolation });
+      routes ??= async (request) => (await isolationHandler(request)) || (await gitHandler(request));
+      void isolation.recoverAll().catch((error: unknown) => {
+        console.error("[polyth] isolation recovery failed", error);
       });
     },
   };

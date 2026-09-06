@@ -3,7 +3,8 @@
 // Pure host logic: no HTTP, no session knowledge — the server maps projectId to
 // a repo root and calls these.
 import { execFile } from "node:child_process";
-import { existsSync, rmSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { basename, dirname, join, posix, resolve } from "node:path";
 import type { ProjectCloneInput, RemoteHost } from "@polyth/contracts";
@@ -67,6 +68,9 @@ export interface WorktreeService {
   list(root: string): Promise<Worktree[]>;
   create(root: string, input: { branch: string; path?: string; base?: string }): Promise<{ path: string; branch: string }>;
   remove(root: string, input: { path: string; deleteBranch?: boolean }): Promise<void>;
+  prune(root: string): Promise<void>;
+  /** Detached checkout used as a transient integration workspace. */
+  addDetached(root: string, path: string, startPoint: string): Promise<void>;
 }
 
 export interface GitService {
@@ -97,6 +101,28 @@ export interface GitService {
   push(root: string, remote?: string): Promise<void>;
   identity(root: string): Promise<{ name: string; email: string }>;
   setIdentity(root: string, identity: { name: string; email: string }): Promise<void>;
+  /** Resolve a ref to a 40-char SHA. */
+  revParse(root: string, rev: string): Promise<string>;
+  gitDir(root: string): Promise<string>;
+  commonDir(root: string): Promise<string>;
+  /** `git add -A` — tracked mods/deletes plus untracked files, honouring gitignore. */
+  stageAll(root: string): Promise<void>;
+  /** HEAD + dirty-tree fingerprint used to suppress repeated merge suggestions. */
+  fingerprint(root: string): Promise<string>;
+  /** True when `root` has commits or a dirty tree not contained in `againstRef`. */
+  hasUniqueChanges(root: string, againstRef: string): Promise<boolean>;
+  /**
+   * Snapshot uncommitted (gitignore-respecting) work as a synthetic commit on
+   * the current branch. Returns the resulting HEAD. Identity is passed via
+   * `-c` so the user's repo config is never rewritten.
+   */
+  snapshotCommit(root: string, message: string, identity?: { name: string; email: string }): Promise<{ sha: string; created: boolean }>;
+  mergeSquash(root: string, ref: string): Promise<{ ok: true } | { ok: false; conflicted: string[] }>;
+  abortMerge(root: string): Promise<void>;
+  commitWithIdentity(root: string, message: string, identity?: { name: string; email: string }): Promise<{ sha: string }>;
+  mergeFfOnly(root: string, sha: string): Promise<void>;
+  /** Compare-and-swap a ref. Returns false when `expectedOldSha` no longer matches. */
+  updateRef(root: string, ref: string, newSha: string, expectedOldSha: string): Promise<boolean>;
   worktrees: WorktreeService;
 }
 
@@ -292,20 +318,37 @@ const shortErr = (stderr: string): string => {
 const sanitizeBranchDir = (branch: string): string =>
   branch.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "worktree";
 
+const SAFE_REV = /^[\w./~^{}@+-]{1,160}$/;
+const assertRev = (rev: string, label = "ref"): string => {
+  if (!SAFE_REV.test(rev) || rev.startsWith("-")) {
+    throw Object.assign(new Error(`invalid ${label}`), { code: "invalid-input" });
+  }
+  return rev;
+};
+
+interface GitRunOpts {
+  allowFail?: boolean;
+  timeoutMs?: number;
+  env?: Record<string, string>;
+}
+
 export function createGitService(opts: GitServiceOptions = {}): GitService {
   const bin = opts.bin ?? process.env.POLYTH_GIT_BIN ?? "git";
   const timeout = opts.timeoutMs ?? 30_000;
 
-  const run = (root: string, args: string[], allowFail = false): Promise<RunResult> =>
+  const run = (root: string, args: string[], allowFailOrOpts: boolean | GitRunOpts = false): Promise<RunResult> =>
     new Promise((res, rej) => {
+      const opts: GitRunOpts = typeof allowFailOrOpts === "boolean"
+        ? { allowFail: allowFailOrOpts }
+        : allowFailOrOpts;
       execFile(bin, args, {
         cwd: root,
-        timeout,
+        timeout: opts.timeoutMs ?? timeout,
         maxBuffer: 32 * 1024 * 1024,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...(opts.env ?? {}) },
       }, (err, stdout, stderr) => {
         const code = (err as (Error & { code?: number }) | null)?.code ?? 0;
-        if (err && !allowFail) {
+        if (err && !opts.allowFail) {
           rej(Object.assign(new Error(shortErr(String(stderr || err.message))), { cause: stderr, code: "git-failed" }));
           return;
         }
@@ -609,6 +652,111 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       await run(root, ["config", "--local", "user.email", email]);
     },
 
+    async revParse(root, rev) {
+      const r = await run(root, ["rev-parse", "--verify", `${assertRev(rev)}^{commit}`], true);
+      if (r.code !== 0 || !r.stdout.trim()) {
+        throw Object.assign(new Error(`unknown revision ${rev}`), { code: "not-found" });
+      }
+      return r.stdout.trim();
+    },
+
+    async gitDir(root) {
+      return (await run(root, ["rev-parse", "--absolute-git-dir"])).stdout.trim();
+    },
+
+    async commonDir(root) {
+      const r = await run(root, ["rev-parse", "--absolute-git-common-dir"], true);
+      return (r.code === 0 && r.stdout.trim()) || (await service.gitDir(root));
+    },
+
+    async stageAll(root) {
+      await run(root, ["add", "-A", "--"]);
+    },
+
+    async fingerprint(root) {
+      const head = (await run(root, ["rev-parse", "HEAD"], true)).stdout.trim() || "unborn";
+      const porcelain = (await run(root, ["status", "--porcelain=v1", "-unormal"], true)).stdout;
+      const trackedDiff = (await run(root, ["diff", "HEAD"], true)).stdout;
+      const untrackedList = (await run(root, ["ls-files", "--others", "--exclude-standard", "-z"], true)).stdout;
+      const untracked = untrackedList.split("\0").filter(Boolean);
+      const hash = createHash("sha256");
+      hash.update(porcelain);
+      hash.update("\n");
+      hash.update(trackedDiff);
+      for (const path of untracked) {
+        hash.update(path);
+        hash.update("\n");
+        try {
+          hash.update(readFileSync(join(root, path)));
+        } catch {
+          hash.update("missing");
+        }
+      }
+      return `${head}:${hash.digest("hex").slice(0, 16)}`;
+    },
+
+    async hasUniqueChanges(root, againstRef) {
+      assertRev(againstRef);
+      const dirty = (await run(root, ["status", "--porcelain=v1", "-unormal"], true)).stdout.trim();
+      if (dirty) return true;
+      const ahead = await run(root, ["rev-list", "--count", `${againstRef}..HEAD`], true);
+      return ahead.code === 0 && Number(ahead.stdout.trim()) > 0;
+    },
+
+    async snapshotCommit(root, message, identity) {
+      await service.stageAll(root);
+      const staged = await run(root, ["diff", "--cached", "--quiet"], true);
+      if (staged.code === 0) {
+        const sha = (await run(root, ["rev-parse", "HEAD"], true)).stdout.trim();
+        return { sha, created: false };
+      }
+      const committed = await service.commitWithIdentity(root, message, identity);
+      return { sha: committed.sha, created: true };
+    },
+
+    async mergeSquash(root, ref) {
+      assertRev(ref);
+      const r = await run(root, ["merge", "--squash", "--no-commit", ref], {
+        allowFail: true,
+        timeoutMs: Math.max(timeout, 120_000),
+      });
+      if (r.code === 0) return { ok: true };
+      const status = await service.status(root);
+      const conflicted = status.conflicted.map((file) => file.path);
+      if (conflicted.length > 0 || /conflict/i.test(`${r.stdout}\n${r.stderr}`)) {
+        return { ok: false, conflicted };
+      }
+      throw Object.assign(new Error(shortErr(r.stderr || r.stdout || "merge --squash failed")), {
+        code: "git-failed",
+      });
+    },
+
+    async abortMerge(root) {
+      await run(root, ["merge", "--abort"], true);
+    },
+
+    async commitWithIdentity(root, message, identity) {
+      if (!message.trim()) throw Object.assign(new Error("commit message is empty"), { code: "invalid-input" });
+      const name = identity?.name.trim() || (await service.identity(root)).name || "Polyth";
+      const email = identity?.email.trim() || (await service.identity(root)).email || "polyth@localhost";
+      await run(root, ["-c", `user.name=${name}`, "-c", `user.email=${email}`, "commit", "-m", message]);
+      const { stdout } = await run(root, ["rev-parse", "HEAD"]);
+      return { sha: stdout.trim() };
+    },
+
+    async mergeFfOnly(root, sha) {
+      assertRev(sha);
+      await run(root, ["merge", "--ff-only", sha], { timeoutMs: Math.max(timeout, 120_000) });
+    },
+
+    async updateRef(root, ref, newSha, expectedOldSha) {
+      assertRev(ref);
+      assertRev(newSha, "sha");
+      assertRev(expectedOldSha, "sha");
+      const r = await run(root, ["update-ref", ref, newSha, expectedOldSha], true);
+      return r.code === 0;
+    },
+
     worktrees: {
       async list(root) {
         const r = await run(root, ["worktree", "list", "--porcelain"], true);
@@ -648,6 +796,17 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
         const wt = list.find((w) => resolve(w.path) === resolve(input.path));
         await run(root, ["worktree", "remove", "--force", input.path]);
         if (input.deleteBranch && wt?.branch) await run(root, ["branch", "-D", wt.branch], true);
+      },
+
+      async prune(root) {
+        await run(root, ["worktree", "prune"], true);
+      },
+
+      async addDetached(root, path, startPoint) {
+        assertRev(startPoint);
+        const target = resolve(path);
+        await mkdir(dirname(target), { recursive: true });
+        await run(root, ["worktree", "add", "--detach", target, startPoint]);
       },
     },
   };
