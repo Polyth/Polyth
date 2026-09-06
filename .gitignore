@@ -18,3 +18,4 @@ logs/
 *.wire.ndjson
 *.sse.ndjson
 *.websocket.ndjson
+_inbox/
