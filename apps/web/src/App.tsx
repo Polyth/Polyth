@@ -3,7 +3,6 @@ import Sidebar from "./components/Sidebar.tsx";
 import Main from "./components/Main.tsx";
 import ContextRail from "./components/ContextRail.tsx";
 import StatusBar from "./components/StatusBar.tsx";
-import ProjectSetup from "./components/ProjectSetup.tsx";
 import CommandPalette from "./components/CommandPalette.tsx";
 import SessionSearch from "./components/SessionSearch.tsx";
 import SettingsModal from "./components/SettingsModal.tsx";
@@ -11,7 +10,6 @@ import ProjectFolderDialog from "./components/ProjectFolderDialog.tsx";
 import ViewErrorBoundary from "./components/ViewErrorBoundary.ts";
 import { clearUiError, setOverlay, useStore } from "./store.ts";
 import { decideFirstRunSurface, markAutoPickerOffered, wasAutoPickerOffered } from "./projectOnboarding.ts";
-import { useProjectSetupState } from "./projectSetup.ts";
 import { LiveRegion } from "./components/a11y/live.tsx";
 import WorktreeSessionDialog from "./components/WorktreeSessionDialog.tsx";
 import "./builtinCapabilities.ts";
@@ -44,12 +42,8 @@ export default function App() {
   const viewResetKey = useStore(
     (s) => `${s.activeProjectId ?? ""}:${s.activeSessionId ?? ""}:${s.activeView}`,
   );
-  const projectSetup = useProjectSetupState();
   const registryStatus = useStore((s) => s.projectRegistry.status);
   const projectCount = useStore((s) => s.projectRegistry.projects.length);
-  const hasActiveProject = useStore(
-    (s) => s.activeProjectId !== null && s.projectRegistry.projects.some((p) => p.id === s.activeProjectId),
-  );
   const paneFullscreen = useStore((s) => s.paneFullscreen);
   const activeView = useStore((s) => s.activeView);
   const workspaceMode = useWorkspaceMode();
@@ -68,9 +62,7 @@ export default function App() {
   const surface = decideFirstRunSurface({
     registryStatus,
     projectCount,
-    hasValidActiveProject: hasActiveProject,
     pickerOfferedThisDocument: wasAutoPickerOffered(),
-    projectSetup,
   });
 
   useEffect(() => {
@@ -79,11 +71,6 @@ export default function App() {
       setOverlay("project-picker");
     }
   }, [surface, overlay]);
-
-  // Project setup renders only after activeProjectId identifies a project in a
-  // ready registry, never over the picker or another dialog.
-  const showProjectSetup =
-    overlay === "onboarding" || (surface === "project-setup" && overlay === null);
 
   return (
     <div className={`app mode-${workspaceMode} view-${activeView}`}>
@@ -109,7 +96,6 @@ export default function App() {
       {overlay === "project-picker" && <ProjectFolderDialog onClose={() => setOverlay(null)} />}
       {overlay === "worktree-session" && <WorktreeSessionDialog />}
       <SettingsModal open={overlay === "settings"} onClose={() => setOverlay(null)} />
-      {showProjectSetup && <ProjectSetup />}
       <LiveRegion />
     </div>
   );

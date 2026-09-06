@@ -1,9 +1,18 @@
 import { useMemo, useState, type DragEvent } from "react";
 import type { UiSlot } from "@polyth/contracts";
 import { setDragWidget } from "../../dnd.ts";
+import { useStore } from "../../store.ts";
 import type { WidgetDef } from "../../widgets/catalog.ts";
-import { filterWidgetLibrary, noteWidgetUsed, readRecentWidgets, type WidgetLibraryTab } from "../../widgets/widgetLibrary.ts";
+import {
+  filterWidgetLibrary,
+  mergeRecommendedWidgetIds,
+  noteWidgetUsed,
+  readRecentWidgets,
+  RECOMMENDED_WIDGET_IDS,
+  type WidgetLibraryTab,
+} from "../../widgets/widgetLibrary.ts";
 import { useWidgetLayout } from "../../widgets/widgetLayout.ts";
+import { useProjectContextRecommendedWidgetIds } from "../../packages/projectContext.ts";
 import { Button, PlusIcon, Select, Tabs, TextInput } from "../ui/index.ts";
 import WidgetGlyph from "../WidgetGlyph.tsx";
 
@@ -17,6 +26,12 @@ export default function WidgetLibraryPanel({
   onAdd: (widget: WidgetDef, target?: UiSlot) => void;
 }) {
   const layout = useWidgetLayout();
+  const projectId = useStore((s) => s.activeProjectId);
+  const contextRecommended = useProjectContextRecommendedWidgetIds(projectId);
+  const recommendedIds = useMemo(
+    () => mergeRecommendedWidgetIds(RECOMMENDED_WIDGET_IDS, contextRecommended),
+    [contextRecommended],
+  );
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState<"widget" | "mini-widget">("widget");
   const [buttonSurface, setButtonSurface] = useState<UiSlot>("app.header.center");
@@ -24,7 +39,8 @@ export default function WidgetLibraryPanel({
   const [recent, setRecent] = useState(readRecentWidgets);
   const shown = useMemo(() => filterWidgetLibrary(widgets, {
     query, pluginId: "all", size: "all", zone: "all", category: "all", tab, recentlyUsed: recent,
-  }, layout.audience).filter((widget) => (widget.kind ?? "widget") === kind), [widgets, query, kind, tab, recent, layout.audience]);
+    recommendedIds,
+  }, layout.audience).filter((widget) => (widget.kind ?? "widget") === kind), [widgets, query, kind, tab, recent, layout.audience, recommendedIds]);
   const add = (widget: WidgetDef) => {
     setRecent(noteWidgetUsed(widget.id));
     onAdd(widget, kind === "mini-widget" ? buttonSurface : undefined);

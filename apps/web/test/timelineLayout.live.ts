@@ -160,10 +160,9 @@ async function openApp(opts: OpenOpts): Promise<LivePage> {
   if (opts.clipboard) {
     await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: BASE });
   }
-  await context.addInitScript(({ seed, projectId }: { seed: string; projectId: string }) => {
+  await context.addInitScript((seed: string) => {
     localStorage.setItem("polyth.prefs", seed);
-    localStorage.setItem(`polyth.projectSetup.v1.${projectId}`, "completed");
-  }, { seed: PERSONA_SEED, projectId: PROJECT_ID });
+  }, PERSONA_SEED);
   const page = await context.newPage();
   const errors: string[] = [];
   page.on("pageerror", (err) => errors.push(String(err)));

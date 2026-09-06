@@ -67,13 +67,9 @@ async function openApp(width: number, path: string, ready: string): Promise<Page
     hasTouch: width <= 480,
   });
   contexts.push(context);
-  await context.addInitScript(({ persona, setupKey }: { persona: string; setupKey: string }) => {
+  await context.addInitScript((persona: string) => {
     localStorage.setItem("polyth.prefs", persona);
-    localStorage.setItem(setupKey, "completed");
-  }, {
-    persona: PERSONA_SEED,
-    setupKey: `polyth.projectSetup.v1.${PROJECT}`,
-  });
+  }, PERSONA_SEED);
   const page = await context.newPage();
   await page.goto(`${BASE}${path}`, { waitUntil: "load" });
   await page.waitForSelector(".app", { timeout: 15_000 });

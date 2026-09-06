@@ -18,7 +18,7 @@ you are almost certainly on the wrong path — re-read this document.
   `ContextRail`, `Timeline`, `Composer`, dialogs/overlays);
 - the extension registries (`slots.ts`, `widgets/catalog.ts`, `surfaces.ts`,
   `capabilities.ts`, `settings/registry.ts`,
-  `packages/reducers.ts`) and their hosts (`components/slots/SlotHost.ts`,
+  `packages/reducers.ts`, `packages/projectContext.ts`) and their hosts (`components/slots/SlotHost.ts`,
   `components/workspace/WorkspaceHost.ts`, `components/ContextRail.tsx`,
   `widgets/WidgetCanvas.tsx`);
 - shared UI primitives (`components/ui/*`, `components/a11y/*`,
@@ -54,11 +54,13 @@ through the web-sdk seam (see §3).
    `apps/web/webPackages.ts`) bundles that entry into
    `packages/<id>/dist/web/entry.js` (+ CSS) and the shell publishes
    `/packages-manifest.json` listing every package entry.
-3. At boot, `apps/web/src/packages/webEntries.ts` fetches the manifest and
-   imports every entry; `apps/web/src/packages/registry.ts` (`bootPackages()`)
-   then calls each entry's default export — `defineWebPackage((host) => installer)`
-   — only for packages enabled via `/api/packages`, and stores the returned
-   installer.
+3. At boot, `apps/web/src/packages/webEntries.ts` loads `/packages-manifest.json`
+   as catalog metadata only. `apps/web/src/packages/registry.ts`
+   (`bootPackages()`) then fetches `/api/packages` and **activates only enabled
+   packages**: attach CSS, import the module, create an activation scope, invoke
+   the factory and installer. Disabled packages are not imported, styled, or
+   executed. Disable disposes the activation scope, package cleanup, and that
+   activation's styles.
 4. The installer runs its registrations and **must return a dispose function**;
    registry.ts calls it when the package is disabled or unloaded.
 
@@ -71,13 +73,13 @@ helpers instead of cloning them.
 
 ```tsx
 // packages/<feature>/widgets/index.tsx
-import "./styles.css";                       // package CSS loads with the entry
+import "./styles.css";                       // bundled with the entry; applied only while the package is active
 import { defineWebPackage } from "@polyth/web-sdk";
 import MyView from "./MyView.tsx";
 
 export default defineWebPackage((host) => () => {
   const off = [
-    host.settings.registerPage({ id: "myfeature", packageId: "myfeature",
+    host.settings.registerPage({ id: "myfeature",
       label: "My Feature", group: "Workspace", icon: "◈", order: 50,
       component: MyView }),
     host.capabilities.register({ id: "myfeature", label: "My feature",
@@ -85,9 +87,18 @@ export default defineWebPackage((host) => () => {
       keywords: ["my", "feature"], standardTier: "more", standardRank: 20,
       open: () => host.navigation.openSettingsPage("myfeature"),
       available: () => true }),
+    host.projectContext.register({
+      id: "myfeature.context",
+      getSnapshot: (projectId) => ({
+        title: "My feature",
+        items: [{ label: "Project", value: projectId }],
+        recommendedWidgetIds: ["myfeature.board"],
+      }),
+    }),
   ];
-  // Deterministic disposal: reverse registration order; every register*()
-  // returns an Unregister that is idempotent and identity-based.
+  // Host-owned contributions are also tracked by the activation scope, so a
+  // forgotten unregister still disappears on disable. Still return cleanup
+  // for timers, subscriptions, and non-host resources.
   return () => off.toReversed().forEach((dispose) => dispose());
 });
 ```
@@ -110,6 +121,8 @@ implementation of the same pattern.
 | Package home/window (dynamic, pinned, or fullscreen) | `host.surfaces.register(...)` with required system presentation metadata |
 | User-placeable dashboard block | widget — `host.widgets.register` / `host.widgets.registerPlugin(...)` (see `widgets.md`) |
 | Discoverable "open this feature" navigation entry | `host.capabilities.register(...)` |
+| Widget Library ranking / recommended widgets | `WidgetDefinition.recommended` plus `host.projectContext` `recommendedWidgetIds` for the active project (never identity, never a firewall) |
+| Live per-project package context | `host.projectContext.register` — a sync snapshot of package-owned state; core aggregates, packages persist |
 | Client-side handling of a package event type | `host.reducers.register(eventType, reducer)` |
 | Shared app-wide visual primitive (button, dialog, menu…) | host core UI (`apps/web/src/components/ui/` + `styles.css`) |
 | Feature-specific reusable component | package-owned component in `packages/<feature>/widgets/` |
@@ -277,7 +290,70 @@ The type must be `domain/past-tense`. Currently no in-tree package uses this
 seam — the built-in reducers in `reduce.ts` are the model to follow; keep the
 reducer DOM-free so it can be unit-tested with `node:test`.
 
-### 4.7 Store, navigation, ui, errors (`host.store`, `host.navigation`, `host.ui`, `host.errors`)
+### 4.7 Workspace layout, package lifecycle, and project context
+
+A Project is a stable container. Packages are independently enabled, activated,
+and disposed. Several packages may contribute to one Project at the same time.
+
+**Identity.** The owner package id (manifest / server descriptor, e.g.
+`dictation`) controls lifecycle and ownership. Semantic contribution ids
+(settings route `voice`, capability `voice`, widget group `voice`) are
+caller-defined routing/grouping names. Aliases such as `dictation → voice`
+affect enablement lookup (`isPackageEnabled("voice")`) — they do not rename
+user-facing routes. Do not namespace every semantic id as `packageId:id`.
+
+**Package web lifecycle.**
+
+```
+manifest discovered (metadata only)
+  → server says enabled
+  → CSS attached for this activation
+  → module loaded
+  → activation scope created
+  → factory / installer
+  → contributions live
+  → disable
+  → package cleanup + scope disposal + that activation's styles removed
+```
+
+Disabled packages do not import modules, run factories/installers, attach CSS,
+or register contributions. Dynamic `import()` is treated as activation-like
+and is not used for disabled packages. Failed activations are isolated and
+retryable on a later enable/reconcile; they leave no partial CSS or
+registrations.
+
+**Collision.** Cross-owner replacement throws. Same-owner replacement is
+allowed and identity-safe (a stale unregister cannot delete the new
+registration). Reducers compose per event type and are not exclusive.
+
+**Widget layout** is project-scoped **client-local** UI state
+(`polyth.widgetLayout.<projectId>`). Missing storage seeds
+`createDefaultWidgetLayout()` from the live catalog; existing storage is
+preserved. `defaultVisible` (and `DEFAULT_VISIBLE` / `requiredVisible`) applies
+when a widget is **first seen** by `ensureWidgets` / parse — including when a
+package activates after the workspace already hydrated. Existing known widget
+visibility is never reset. Recommendations never hide unrelated widgets.
+Explicit **Reset workspace** in Customize is the destructive path.
+
+Disabling a package unregisters live UI. Persisted layout placements remain
+until the user edits them. Package-owned server data and local preferences are
+not deleted.
+
+**Project context** is a live, composable projection — not a Project Type and
+not a persistence bag. Each package owns its functional state and may register
+`host.projectContext` snapshots (`null` = not applicable). Core aggregates
+them into the existing Context surface and merges `recommendedWidgetIds` into
+Widget Library ranking together with `WidgetDefinition.recommended` and core
+`RECOMMENDED_WIDGET_IDS`. Setup, when needed, is a non-blocking package-owned
+action (settings, surface, or dialog). Opening a folder still goes straight to
+a usable workspace and composer. The Git package is the in-tree example: it
+projects the cached branch for the active project and recommends `git.recent`
+without classifying the Project.
+
+Opening a folder adds or activates the Project and focuses the composer; there
+is no classification question.
+
+### 4.8 Store, navigation, ui, errors (`host.store`, `host.navigation`, `host.ui`, `host.errors`)
 
 - `host.store` exposes the shell's render state: `getSnapshot()`,
   `subscribe(listener)`, `select(selector)`. Prefer `select` for reactive
@@ -291,7 +367,7 @@ reducer DOM-free so it can be unit-tested with `node:test`.
 - `host.errors.friendly(action, cause)` — user-presentable error strings;
   use it for action failures instead of inventing a second phrasing.
 
-### 4.8 API transport (`createApiTransport`)
+### 4.9 API transport (`createApiTransport`)
 
 `createApiTransport({ baseUrl?, fetch?, onUnauthorized? })` gives package UI
 a typed fetch wrapper over the REST surface (`get/post/put/patch/delete`,
@@ -332,17 +408,18 @@ from the documented shell integration points.
 
 ## 7. Disposal, lifecycle, and failure isolation
 
-- Every `host.*.register*` returns an `Unregister`; collect them and return
-  a combined disposer from the installer (reverse order).
-- Registrations are replace-by-id; a superseded registration's unregister is
-  a no-op.
+- Every `host.*.register*` returns an `Unregister`. The activation scope also
+  tracks host registrations and disposes them on package disable, even if a
+  package author forgets one callback. Still return cleanup for timers and
+  other non-host resources.
+- Cross-owner collisions throw. Same-owner replacement is identity-safe; a
+  superseded unregister is a no-op.
 - Slot contributions and widget instances render inside their own error
-  boundaries — a broken contribution disappears alone.
-- Package entries load lazily per manifest; a missing/stale bundle logs and
-  is skipped without taking other packages down.
-- The installer pattern means "component implemented" ≠ "feature integrated":
-  integration is the registration in `widgets/index.tsx` plus the returned
-  disposer.
+  boundaries — a broken contribution disappears alone. A broken project-context
+  snapshot is isolated the same way.
+- Package catalog metadata loads for every installed web package; modules and
+  CSS load only for enabled packages. A failed bundle logs and retries on a
+  later enable without taking other packages down.
 
 ## 8. Tests expected for UI work
 
@@ -350,8 +427,10 @@ from the documented shell integration points.
   `surfaces.test.ts`, `workspaceSurfaces.test.ts`, `widgetCatalog.test.ts`,
   `widgetLayout.test.ts`, `settingsRegistry.test.ts`, `capabilities.test.ts`.
 - Entry loading: `apps/web/test/webEntries.test.ts`,
+  `packageActivation.test.ts`, `packageLifecycle.test.ts`,
   `webPackageDiscovery.test.ts`, `packageRegistry.test.ts`,
-  `packageContainment.test.ts` (boundaries).
+  `packageContainment.test.ts` (boundaries), `packageWorkspace.test.ts`
+  (filter/layout unit tests), `projectContext.test.ts`.
 - Mounted-slot rendering: `slotHostMounted.test.ts`,
   `workspaceHostMounted.test.ts`, `widgetWorkspaceUx.test.ts`.
 - Feature UI logic that is DOM-free lives in the package's own

@@ -5,6 +5,7 @@
 // React mount, replacement, and disposal all re-render without editing hosts.
 import type { ReactNode } from "react";
 import type { UiSlot } from "@polyth/contracts";
+import { assertOwnerCanReplace } from "./packages/ownership.ts";
 
 export type SlotRender = (props: Record<string, unknown>) => ReactNode;
 
@@ -14,6 +15,7 @@ export interface SlotItem {
   render: SlotRender;
   /** Optional descriptor payload (e.g. settingsItems for item-level search). */
   meta?: Record<string, unknown>;
+  ownerPackageId?: string;
 }
 
 const registry = new Map<UiSlot, Map<string, SlotItem>>();
@@ -25,13 +27,30 @@ function bump(): void {
   for (const l of [...listeners]) l();
 }
 
-/** Register (or replace by id within the slot). Returns an unregister function
- *  that removes only its own registration — a superseded off() is a no-op. */
+/** Register (or same-owner replace by id within the slot). Cross-owner
+ *  collisions throw. Returns an unregister that removes only its own
+ *  registration — a superseded off() is a no-op. */
 export function registerSlot(
   slot: UiSlot, id: string, render: SlotRender, order = 0, meta?: Record<string, unknown>,
+  ownerPackageId?: string,
 ): () => void {
-  const item: SlotItem = { id, order, render, ...(meta ? { meta } : {}) };
   const items = registry.get(slot) ?? new Map<string, SlotItem>();
+  const existing = items.get(id);
+  if (existing) {
+    assertOwnerCanReplace({
+      registry: `slot ${slot}`,
+      id,
+      existingOwner: existing.ownerPackageId,
+      nextOwner: ownerPackageId,
+    });
+  }
+  const item: SlotItem = {
+    id,
+    order,
+    render,
+    ...(meta ? { meta } : {}),
+    ...(ownerPackageId ? { ownerPackageId } : {}),
+  };
   items.set(id, item);
   registry.set(slot, items);
   bump();

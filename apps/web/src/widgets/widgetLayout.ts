@@ -314,6 +314,12 @@ function placementFor(
   };
 }
 
+/** Newly registered widgets may become visible when first seen by
+ *  `ensureWidgets` / layout parse if they are `requiredVisible`,
+ *  `defaultVisible`, or in `DEFAULT_VISIBLE`. Existing known widget
+ *  visibility is never reset. This is intentional: enabling a package
+ *  may reveal its default-visible widget once, independent of whether
+ *  the workspace hydrated before the package module finished loading. */
 export function createDefaultWidgetLayout(
   known: readonly (string | WidgetLayoutDefinition)[] = BUILTIN_WIDGET_IDS,
 ): WidgetLayout {
@@ -1124,6 +1130,24 @@ export function updateWidgetLayout(
   commit(typeof update === "function" ? update(state) : update, true, options.immediate === true);
 }
 
+/** Mutate a project's persisted widget layout without activating it. The
+ *  in-memory editor follows the active project; inactive projects are written
+ *  straight to storage so Settings actions do not switch the workspace. */
+export function updateWidgetLayoutForProject(
+  projectId: string,
+  update: WidgetLayout | ((current: WidgetLayout) => WidgetLayout),
+  options: { immediate?: boolean } = {},
+): WidgetLayout {
+  if (projectId === activeProjectId) {
+    updateWidgetLayout(update, options);
+    return state;
+  }
+  const current = parseWidgetLayout(read(projectId), knownWidgetDefinitions());
+  const next = typeof update === "function" ? update(current) : update;
+  write(next, projectId);
+  return next;
+}
+
 export function undoWidgetLayout(): void {
   const previous = history.at(-1);
   if (!previous) return;
@@ -1208,8 +1232,11 @@ export function ensureWidgets(definitions: readonly WidgetLayoutDefinition[]): v
     }
   }
   // Definitions can arrive after project layout hydration through a package
-  // webEntry. Persist required-visibility repairs immediately so a stale
-  // hidden control cannot return on reload before the debounce fires.
+  // webEntry. Missing ids are seeded from defaultVisible/requiredVisible
+  // (package activation may reveal a default-visible widget once). Known
+  // widget visibility is never reset here. Persist required-visibility
+  // repairs immediately so a stale hidden control cannot return on reload
+  // before the debounce fires.
   if (changed) commit({ ...state, zones, slotPlacements, widgets }, false, true);
 }
 

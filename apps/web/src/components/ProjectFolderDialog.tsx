@@ -7,9 +7,8 @@
 // selected; Mod+Enter is an additive direct-confirmation shortcut; during Add
 // the target and controls cannot change and Escape does not abandon the
 // in-flight request; success closes only after the atomic store transition is
-// observable and hands focus to project setup or the composer; cancellation
-// restores the connected invoker or the named no-project recovery action —
-// never BODY.
+// observable and hands focus to the composer; cancellation restores the
+// connected invoker or the named no-project recovery action — never BODY.
 import { useCallback, useEffect, useRef, useState } from "react";
 import Dialog from "./a11y/Dialog.tsx";
 import SlotHost from "./slots/SlotHost.ts";
@@ -17,7 +16,6 @@ import { announce } from "./a11y/live.tsx";
 import { api, type BrowseEntryDto } from "@polyth/session/web-api";
 import { addProject } from "../init.ts";
 import { COMPOSER_INPUT_SELECTOR, focusComposer, getState } from "../store.ts";
-import { getProjectSetupState } from "../projectSetup.ts";
 import { ago, MOD } from "../format.ts";
 import { tr } from "../i18n/index.ts";
 import { errorFeedback, successFeedback, tapFeedback } from "../haptics.ts";
@@ -52,14 +50,9 @@ function queueFocusHandoff(select: () => HTMLElement | null, attempts = 24): voi
   requestAnimationFrame(() => tick(attempts));
 }
 
-/** After successful activation: unseen project setup owns focus next (its own
- *  contract later hands the composer off); otherwise the composer directly. */
+/** After successful activation, hand focus to the composer immediately. */
 function focusAfterActivation(): void {
-  if (getProjectSetupState() === "unseen") {
-    queueFocusHandoff(() => document.querySelector<HTMLElement>(".project-setup"));
-  } else {
-    focusComposer();
-  }
+  focusComposer();
 }
 
 export default function ProjectFolderDialog({

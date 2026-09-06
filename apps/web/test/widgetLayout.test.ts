@@ -22,6 +22,7 @@ import {
   setWidgetPosition,
   setWidgetVisible,
   updateWidgetLayout,
+  updateWidgetLayoutForProject,
   widgetLayoutStorageKey,
   widgetZoneOf,
   widgetSlotOf,
@@ -482,6 +483,16 @@ test("layouts persist independently under project-specific keys", () => {
   activateProject("layout-project-alpha");
   assert.equal(getWidgetLayout().audience, "power", "switching back restores that project's canvas");
   assert.equal(getWidgetSaveStatus(), "saved");
+
+  updateWidgetLayoutForProject("layout-project-beta", (current) => ({
+    ...current,
+    audience: "power",
+  }), { immediate: true });
+  assert.equal(getWidgetLayout().audience, "power", "resetting another project does not switch the active layout");
+  assert.equal(
+    parseWidgetLayout(stored.get(widgetLayoutStorageKey("layout-project-beta")) ?? null).audience,
+    "power",
+  );
 });
 
 test("registered mini-widgets remain placed when the active project changes", () => {

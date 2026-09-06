@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { api, type GitStatus } from "@polyth/session/web-api";
+import type { ProjectContextSnapshot } from "@polyth/web-sdk";
 
 interface StatusEntry {
   status: GitStatus | null;
@@ -10,6 +11,7 @@ interface StatusEntry {
 }
 
 const entries = new Map<string, StatusEntry>();
+const globalListeners = new Set<() => void>();
 
 const contextKey = (projectId: string, sessionId?: string | null): string =>
   `${projectId}\0${sessionId ?? ""}`;
@@ -26,6 +28,41 @@ function entry(projectId: string, sessionId?: string | null): StatusEntry {
 
 function notify(value: StatusEntry): void {
   for (const listener of [...value.listeners]) listener();
+  for (const listener of [...globalListeners]) listener();
+}
+
+/** Sync read of already-fetched status. Does not start a network call. */
+export function peekGitStatus(projectId: string, sessionId?: string | null): GitStatus | null {
+  return entries.get(contextKey(projectId, sessionId))?.status ?? null;
+}
+
+export function subscribeGitStatus(listener: () => void): () => void {
+  globalListeners.add(listener);
+  return () => { globalListeners.delete(listener); };
+}
+
+export function cacheGitStatus(
+  projectId: string,
+  status: GitStatus | null,
+  sessionId?: string | null,
+): void {
+  const value = entry(projectId, sessionId);
+  value.status = status;
+  notify(value);
+}
+
+/** Live Context projection from cached Git status. Null = not a repo / unknown. */
+export function gitContextSnapshot(status: GitStatus | null): ProjectContextSnapshot | null {
+  if (!status || status.isRepo === false) return null;
+  const items = [{ label: "Branch", value: status.branch || "HEAD" }];
+  if (status.ahead > 0 || status.behind > 0) {
+    items.push({ label: "Sync", value: `${status.ahead} ahead · ${status.behind} behind` });
+  }
+  return {
+    title: "Git",
+    items,
+    recommendedWidgetIds: ["git.pending-changes", "git.recent"],
+  };
 }
 
 /** Shared, deduplicated status fetch used by GitView, the rail, and the composer bar. */

@@ -157,12 +157,10 @@ test("modal surfaces share the Dialog focus contract (no copied traps)", async (
   const sidebar = await read("../src/components/Sidebar.tsx");
   const rail = await read("../src/components/ContextRail.tsx");
   const css = await read("../src/styles.css");
-  const projectSetup = await read("../src/components/ProjectSetup.tsx");
   const palette = await read("../src/components/CommandPalette.tsx");
   for (const [name, src] of [
     ["Sidebar", sidebar],
     ["ContextRail", rail],
-    ["ProjectSetup", projectSetup],
   ] as const) {
     assert.ok(src.includes("useModalSurface"), `${name} consumes useModalSurface`);
     assert.ok(!src.includes("FOCUSABLE"), `${name} must not copy a focus-trap implementation`);

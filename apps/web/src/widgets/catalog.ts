@@ -10,6 +10,7 @@ import {
   type WidgetZone,
 } from "./widgetLayout.ts";
 import { tr } from "../i18n/index.ts";
+import { assertOwnerCanReplace } from "../packages/ownership.ts";
 
 export interface WidgetRenderContext extends Record<string, unknown> {
   projectId: string | null;
@@ -28,6 +29,8 @@ export interface WidgetSettingsContext extends WidgetRenderContext {
 export interface WidgetDef {
   id: string;
   pluginId: string;
+  /** Host-bound owner package. Missing means a host/core contribution. */
+  ownerPackageId?: string;
   pluginName?: string;
   title: string;
   description: string;
@@ -73,6 +76,15 @@ function bump(): void {
 }
 
 export function registerWidget(def: WidgetDef): () => void {
+  const existing = registry.get(def.id);
+  if (existing) {
+    assertOwnerCanReplace({
+      registry: "widget",
+      id: def.id,
+      existingOwner: existing.ownerPackageId,
+      nextOwner: def.ownerPackageId,
+    });
+  }
   registry.set(def.id, def);
   bump();
   return () => {
@@ -91,6 +103,7 @@ export interface WidgetPlugin {
   id: string;
   name: string;
   widgets?: readonly PluginWidgetDef[];
+  ownerPackageId?: string;
 }
 
 export function defineWidgetPlugin<T extends WidgetPlugin>(plugin: T): T {
@@ -103,8 +116,13 @@ export function registerWidgetPlugin(plugin: WidgetPlugin): () => void {
     if (ids.has(widget.id)) throw new Error(tr("widgets.catalog.pluginValueDeclaresDuplicateWidgetValue", { id: plugin.id, id2: widget.id }));
     ids.add(widget.id);
     const existing = registry.get(widget.id);
-    if (existing && existing.pluginId !== plugin.id) {
-      throw new Error(tr("widgets.catalog.widgetValueIsAlreadyOwnedByPlugin", { id: widget.id, pluginId: existing.pluginId }));
+    if (existing) {
+      assertOwnerCanReplace({
+        registry: "widget",
+        id: widget.id,
+        existingOwner: existing.ownerPackageId,
+        nextOwner: plugin.ownerPackageId ?? widget.ownerPackageId,
+      });
     }
     const defaultSlot = widget.defaultSlot ?? widgetSlotFromZone(widget.zone ?? "main");
     const supportedSlots = widget.supportedSlots
@@ -117,6 +135,9 @@ export function registerWidgetPlugin(plugin: WidgetPlugin): () => void {
       ...widget,
       pluginId: plugin.id,
       pluginName: plugin.name,
+      ...(plugin.ownerPackageId || widget.ownerPackageId
+        ? { ownerPackageId: widget.ownerPackageId ?? plugin.ownerPackageId }
+        : {}),
       kind: widget.kind ?? "widget",
       defaultSlot,
       supportedSlots,
@@ -156,6 +177,7 @@ function slotWidgets(): WidgetDef[] {
     return {
       id: item.id,
       pluginId: typeof meta.pluginId === "string" ? meta.pluginId : item.id.split(".")[0] ?? "plugin",
+      ...(typeof meta.ownerPackageId === "string" ? { ownerPackageId: meta.ownerPackageId } : {}),
       ...(typeof meta.pluginName === "string" ? { pluginName: meta.pluginName } : {}),
       title: typeof meta.title === "string" ? meta.title : item.id.replace(/[._-]+/g, " "),
       description: typeof meta.description === "string" ? meta.description : tr("widgets.catalog.pluginProvidedWorkspaceWidget"),

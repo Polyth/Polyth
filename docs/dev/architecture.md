@@ -14,7 +14,7 @@ One-minute map for a new agent; everything after this section is the deep refere
 - **Extending the UI:** feature UI lives in the feature package
   (`packages/<feature>/widgets/`) and registers through `@polyth/web-sdk`
   (`defineWebPackage` → `WebPackageHost`: slots, widgets, system package
-  windows, capabilities, settings, reducers). The host owns the
+  windows, capabilities, settings, project context, reducers). The host owns the
   registries (`apps/web/src/slots.ts`, `widgets/catalog.ts`, `surfaces.ts`,
   `capabilities.ts`, `settings/registry.ts`)
   and renders contributions through `SlotHost`/surface hosts — never edit
@@ -73,8 +73,9 @@ packages/session (node:sqlite WAL: events + projections + queue/org/profiles)
 bundled by `apps/web/build.ts` (esbuild), served statically by the server with
 SPA fallback. Feature UI is bundled separately per package
 (`apps/web/buildPackages.ts` → `packages/<id>/dist/web/`, published via
-`/packages-manifest.json`) and registered at boot through the web-sdk host
-(`apps/web/src/packages/webEntries.ts` + `registry.ts`). `apps/desktop` and
+`/packages-manifest.json`) and activated only when the server says the package
+is enabled (`apps/web/src/packages/webEntries.ts` + `registry.ts`). Disabled
+packages stay at catalog metadata. `apps/desktop` and
 `apps/mobile` are platform shells around that canonical output; mobile never
 starts Node or OpenCode. See `docs/mobile/architecture.md`.
 
@@ -297,10 +298,12 @@ ignored by the web reducer (never crash).
   `window.__polythSlots` for legacy out-of-tree plugins.
 - `packages/` — the web package loader: `webHost.ts` implements the
   `WebPackageHost` from `@polyth/web-sdk` over the host registries,
-  `webEntries.ts` loads `/packages-manifest.json` and imports each package's
-  `widgets/index.tsx` entry, `registry.ts` (`bootPackages()`) installs/
-  uninstalls entries in sync with `/api/packages` enabled state, and
-  `reducers.ts` hosts client-side event reducers.
+  `webEntries.ts` loads `/packages-manifest.json` as catalog metadata and
+  activates an enabled package (CSS, module, factory, installer),
+  `activation.ts` scopes host registrations to one owner package,
+  `projectContext.ts` aggregates live per-project package snapshots,
+  `registry.ts` (`bootPackages()`) enables/disables in sync with
+  `/api/packages`, and `reducers.ts` hosts client-side event reducers.
 - `widgets/` — widget system: `catalog.ts` (definitions + `registerWidget`/
   `registerWidgetPlugin`), `widgetLayout.ts` (zones, placement, per-instance
   config, `polyth.widgetLayout.<projectId>` localStorage persistence),

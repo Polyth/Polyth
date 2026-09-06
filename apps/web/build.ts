@@ -137,25 +137,17 @@ const shellPreloadUrls = [
 ].map(outUrl);
 const preloadUrls = [...new Set([
   ...shellPreloadUrls,
-  ...packageManifests.map((manifest) => manifest.module),
 ])].filter((url) => url !== "/main.js"); // main.js is the script tag itself
 
 const preloadTags = preloadUrls
   .map((url) => `    <link rel="modulepreload" href="${url}" />`)
   .join("\n");
-const packageStyleTags = packageManifests
-  .flatMap((manifest) => manifest.styles.map((href) =>
-    `    <link rel="stylesheet" href="${href}" data-polyth-web-package-style="polyth-web-package-style:${manifest.id}:${href}" />`))
-  .join("\n");
 const htmlSource = await readFile(join(here, "src/index.html"), "utf8");
-const mainStyleTag = '<link rel="stylesheet" href="/main.css" />';
 const mainScriptTag = '<script type="module" src="/main.js"></script>';
-if (!htmlSource.includes(mainStyleTag)) throw new Error("index.html: main.css stylesheet tag not found for package style injection");
 if (!htmlSource.includes(mainScriptTag)) throw new Error("index.html: main.js script tag not found for modulepreload injection");
 await writeFile(
   join(dist, "index.html"),
   htmlSource
-    .replace(mainStyleTag, `${mainStyleTag}\n${packageStyleTags}`)
     .replace(mainScriptTag, `${preloadTags}\n    ${mainScriptTag}`),
 );
 const projectIconNames = (await readdir(projectIcons))

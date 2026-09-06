@@ -6,6 +6,7 @@ import { useMemo, useState, type DragEvent } from "react";
 import type { UiSlot } from "@polyth/contracts";
 import { getDragWidget, setDragWidget, WIDGET_MIME } from "../../dnd.ts";
 import { useEscape } from "../../useEscape.ts";
+import { useStore } from "../../store.ts";
 import type { WidgetDef } from "../../widgets/catalog.ts";
 import {
   applyWidgetLayoutMutations,
@@ -25,12 +26,15 @@ import {
 } from "../../widgets/areaFit.ts";
 import {
   filterWidgetLibrary,
+  mergeRecommendedWidgetIds,
   noteWidgetUsed,
   pluginDisplayName,
   readRecentWidgets,
+  RECOMMENDED_WIDGET_IDS,
   widgetPluginOptions,
   type WidgetLibraryTab,
 } from "../../widgets/widgetLibrary.ts";
+import { useProjectContextRecommendedWidgetIds } from "../../packages/projectContext.ts";
 import { tr } from "../../i18n/index.ts";
 import { Badge, Button, CloseIcon, IconButton, Notice, PlusIcon, Select, Tabs, TextInput } from "../ui/index.ts";
 import WidgetGlyph from "../WidgetGlyph.tsx";
@@ -108,6 +112,12 @@ export default function WidgetLibraryOverlay({
   onClose: () => void;
 }) {
   const layout = useWidgetLayout();
+  const projectId = useStore((s) => s.activeProjectId);
+  const contextRecommended = useProjectContextRecommendedWidgetIds(projectId);
+  const recommendedIds = useMemo(
+    () => mergeRecommendedWidgetIds(RECOMMENDED_WIDGET_IDS, contextRecommended),
+    [contextRecommended],
+  );
   const areas = useAreas();
   const [query, setQuery] = useState("");
   const [pluginId, setPluginId] = useState("all");
@@ -126,10 +136,10 @@ export default function WidgetLibraryOverlay({
   const filtered = useMemo(() => {
     const base = filterWidgetLibrary(widgets, {
       query, pluginId, size: "all", zone: "all", category: "all",
-      tab, recentlyUsed: recent,
+      tab, recentlyUsed: recent, recommendedIds,
     }, layout.audience);
     return kind === "all" ? base : base.filter((widget) => (widget.kind ?? "widget") === kind);
-  }, [widgets, query, pluginId, kind, tab, recent, layout.audience]);
+  }, [widgets, query, pluginId, kind, tab, recent, layout.audience, recommendedIds]);
 
   const entries = useMemo(
     () => areaWidgetEntries(filtered, focusedArea),
@@ -241,7 +251,7 @@ export default function WidgetLibraryOverlay({
           label={tr("settings.widgetlibraryoverlay.widgetCollections")}
           tabs={[
             { id: "all", label: tr("settings.widgetlibraryoverlay.tabAll") },
-            { id: "recommended", label: tr("projectsetup.recommended") },
+            { id: "recommended", label: tr("settings.widgetlibraryoverlay.recommended") },
             { id: "recent", label: tr("settings.widgetlibraryoverlay.recentlyUsed") },
           ]}
           value={tab}
@@ -313,7 +323,7 @@ export default function WidgetLibraryOverlay({
 
         {recommendedUnplaced.length > 0 && (
           <div className="widget-inspector-recommend">
-            <h3>{tr("projectsetup.recommended")}</h3>
+            <h3>{tr("settings.widgetlibraryoverlay.recommended")}</h3>
             <div className="widget-inspector-chips">
               {recommendedUnplaced.map((widget) => (
                 <Button key={widget.id} type="button" size="sm" variant="ghost" iconStart={PlusIcon} onClick={() => add(widget)}>

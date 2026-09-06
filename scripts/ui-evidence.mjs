@@ -25,10 +25,6 @@ async function shoot({ name, width, height, mobile = false, dark = false, path =
     colorScheme: dark ? "dark" : "light",
   });
   const page = await ctx.newPage();
-  await page.addInitScript(() => {
-    const pid = location.pathname.match(/^\/p\/([^/]+)/)?.[1];
-    if (pid) localStorage.setItem(`polyth.projectSetup.v1.${decodeURIComponent(pid)}`, "completed");
-  });
   await page.goto(base + path, { waitUntil: "networkidle" }).catch(() => {});
   await page.waitForTimeout(900);
   if (act) await act(page);

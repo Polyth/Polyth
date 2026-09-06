@@ -32,10 +32,9 @@ for (const view of views) {
     reducedMotion: "reduce",
     serviceWorkers: "block",
   });
-  await context.addInitScript(({ persona, project }) => {
+  await context.addInitScript((persona) => {
     localStorage.setItem("polyth.prefs", persona);
-    localStorage.setItem(`polyth.projectSetup.v1.${project}`, "completed");
-  }, { persona, project });
+  }, persona);
   const page = await context.newPage();
   const runtimeErrors = [];
   page.on("pageerror", (error) => runtimeErrors.push(error.message));

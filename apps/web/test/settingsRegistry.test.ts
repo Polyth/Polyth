@@ -87,7 +87,7 @@ test("items on hidden/unknown pages are skipped", () => {
   }
 });
 
-test("duplicate ids overwrite; unregister removes plugin items", () => {
+test("same-owner ids replace; stale unregister keeps the newer item", () => {
   const before = listSettingsItems().length;
   const un1 = registerSettingsItems([
     { id: "dup.x", pageId: "chat", label: "First", focusTarget: "x" },
@@ -98,8 +98,9 @@ test("duplicate ids overwrite; unregister removes plugin items", () => {
   assert.equal(listSettingsItems().length, before + 1, "same id registered once");
   assert.equal(searchSettingsItems("second", PAGES)[0]?.item.label, "Second");
 
-  un2();
   un1();
+  assert.equal(searchSettingsItems("second", PAGES)[0]?.item.label, "Second");
+  un2();
   assert.equal(listSettingsItems().length, before, "disposed plugin items are gone");
   assert.deepEqual(searchSettingsItems("second", PAGES), []);
 });

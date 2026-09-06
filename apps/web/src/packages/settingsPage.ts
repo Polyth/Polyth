@@ -6,7 +6,7 @@ export type SettingsPageGroup = "Workspace" | "Engineering" | "Customize" | "Sys
 
 interface PackageSettingsPage {
   id: string;
-  packageId: string;
+  packageId?: string;
   label: string;
   group: SettingsPageGroup;
   icon?: string;
@@ -16,6 +16,7 @@ interface PackageSettingsPage {
 }
 
 export function installSettingsPage(page: PackageSettingsPage): () => void {
+  const ownerPackageId = page.packageId ?? "host";
   return registerSlot(
     "settings.pages",
     page.id,
@@ -25,10 +26,11 @@ export function installSettingsPage(page: PackageSettingsPage): () => void {
       label: page.label,
       group: page.group,
       ...(page.icon ? { icon: page.icon } : {}),
-      packageId: page.packageId,
+      packageId: ownerPackageId,
       pageId: page.id,
       ...(page.settingsItems ? { settingsItems: page.settingsItems } : {}),
     },
+    ownerPackageId,
   );
 }
 

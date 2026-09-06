@@ -6,17 +6,12 @@ import {
   parseCapabilityLayout,
   resolvePlacements,
 } from "../src/capabilityLayout.ts";
-import { projectSetupStorageKey } from "../src/projectSetup.ts";
 import { workspaceModeStorageKey } from "../src/widgets/workspaceMode.ts";
 
 test("project canvas and capability settings use project-scoped keys", () => {
   assert.equal(
     capabilityLayoutStorageKey("project-a"),
     "polyth.capabilityLayout.v1.project-a",
-  );
-  assert.equal(
-    projectSetupStorageKey("project-b"),
-    "polyth.projectSetup.v1.project-b",
   );
   assert.equal(
     workspaceModeStorageKey("project-a"),

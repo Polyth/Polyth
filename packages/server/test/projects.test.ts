@@ -69,10 +69,27 @@ test("project metadata PATCH is served by the project route", async () => {
       body: JSON.stringify({ name: "After", icon: pngDataUrl }),
     });
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { ...project, name: "After", icon: pngDataUrl });
+    assert.deepEqual(await response.json(), {
+      ...project,
+      name: "After",
+      icon: pngDataUrl,
+    });
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test("adding an already-registered path returns the existing project without rewriting it", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-projects-"));
+  const root = join(dir, "workspace");
+  mkdirSync(root);
+  const projects = createProjectService(dir);
+  const first = await projects.add(root, "Original");
+  const second = await projects.add(root, "Ignored");
+  assert.equal(second.id, first.id);
+  assert.equal(second.name, "Original");
+  assert.equal(second.createdAt, first.createdAt);
+  assert.equal("projectTypeId" in second, false);
 });
 
 test("project model memory is persisted without erasing the remembered model", async () => {

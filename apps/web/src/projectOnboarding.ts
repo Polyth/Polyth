@@ -1,7 +1,7 @@
 // UX-ONBOARDING: the first-run coordinator. One pure decision function maps
 // project-registry truth to the surface the shell shows; App executes the
-// result. Project setup is considered only after a valid project is active in
-// a ready registry.
+// result. After a valid project is active in a ready registry the workspace
+// is usable immediately — there is no blocking per-project setup wizard.
 //
 // The automatic-picker episode is in-memory, per document: it becomes true when
 // the automatic picker opens and stays true after cancellation so an effect
@@ -12,17 +12,13 @@ export type FirstRunSurface =
   | "project-loading"
   | "project-failed"
   | "project-picker"
-  | "project-setup"
   | "workspace";
 
 export interface FirstRunInput {
   registryStatus: "loading" | "failed" | "ready";
   projectCount: number;
-  /** activeProjectId names a project in the ready registry. */
-  hasValidActiveProject: boolean;
   /** The automatic picker already opened in this document. */
   pickerOfferedThisDocument: boolean;
-  projectSetup: "unseen" | "completed";
 }
 
 /** The exact decision table from the specification. `workspace` covers both
@@ -35,8 +31,7 @@ export function decideFirstRunSurface(input: FirstRunInput): FirstRunSurface {
   if (input.projectCount === 0) {
     return input.pickerOfferedThisDocument ? "workspace" : "project-picker";
   }
-  if (!input.hasValidActiveProject) return "workspace";
-  return input.projectSetup === "unseen" ? "project-setup" : "workspace";
+  return "workspace";
 }
 
 // ---- per-document automatic-picker episode -------------------------------------

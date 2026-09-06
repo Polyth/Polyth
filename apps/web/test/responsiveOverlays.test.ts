@@ -37,7 +37,6 @@ test("modal primitives lock background scroll and retain touch dismissal", async
   const dialog = await read("../src/components/a11y/Dialog.tsx");
   const settings = await read("../src/components/SettingsView.tsx");
   const palette = await read("../src/components/CommandPalette.tsx");
-  const projectSetup = await read("../src/components/ProjectSetup.tsx");
   const packageTour = await read("../src/components/PackageTourOverlay.tsx");
   const css = await read("../src/styles.css");
 
@@ -56,7 +55,6 @@ test("modal primitives lock background scroll and retain touch dismissal", async
   assert.match(palette, /sheetSize="tall"/);
   assert.match(palette, /initialFocus="\.palette-input"/);
   assert.doesNotMatch(palette, /className="scrim palette-overlay"/);
-  assert.match(projectSetup, /className="project-setup-scrim" onPointerDown=/);
   assert.match(packageTour, /useModalScrollLock\(open\)/);
   assert.match(packageTour, /className="scrim package-tour-scrim"[\s\S]*onPointerDown=/);
   assert.match(css, /html\[data-modal-surface="open"\][\s\S]*overflow:\s*hidden/);
@@ -171,45 +169,205 @@ test("390px settings fill the viewport without horizontal overflow", { skip: !CH
   assert.ok(geometry.selectHeight >= 44, "native selects retain a touch target");
 });
 
-test("390px project setup fills the viewport and keeps step scrolling internal", { skip: !CHROME }, async () => {
+test("390px folder dialog Open control stays reachable without a type picker", { skip: !CHROME }, async () => {
   assert.ok(page);
   const css = await read("../src/styles.css");
-  const choices = Array.from({ length: 18 }, (_, index) => `
-    <button class="setup-choice"><i>${index + 1}</i><span><strong>Choice ${index + 1}</strong><small>Configuration detail</small></span></button>
-  `).join("");
+  await page.setViewportSize({ width: 390, height: 720 });
   await page.setContent(`
     <style>${css}</style>
-    <div class="project-setup-scrim">
-      <section class="project-setup guided-setup">
-        <header class="guided-setup-head"><div><h1>Set up this project</h1><p>Choose a starting layout.</p></div><button>Close</button></header>
-        <ol class="guided-setup-steps"><li>1</li><li>2</li><li>3</li><li>4</li></ol>
-        <main class="guided-setup-body"><div class="guided-widget-grid">${choices}</div></main>
-        <footer class="guided-setup-foot"><button>Skip</button><span></span><button>Continue</button></footer>
-      </section>
-    </div>
+    <section class="dialog-panel folder-dialog">
+      <div class="folder-dialog-body">
+        <div class="folder-dialog-head"><div><div class="folder-dialog-title">Open a project</div></div></div>
+        <div class="folder-foot">
+          <span class="folder-selected">/Users/demo/project</span>
+          <button class="ui-btn ui-btn--primary ui-btn--sm folder-open-btn">Open project</button>
+        </div>
+      </div>
+    </section>
   `);
 
   const geometry = await page.evaluate(() => {
-    const panel = document.querySelector<HTMLElement>(".guided-setup")!;
-    const body = document.querySelector<HTMLElement>(".guided-setup-body")!;
-    const rect = panel.getBoundingClientRect();
+    const open = document.querySelector<HTMLElement>(".folder-open-btn")!;
+    const openRect = open.getBoundingClientRect();
     return {
-      left: rect.left,
-      right: rect.right,
-      top: rect.top,
-      bottom: rect.bottom,
-      bodyClientHeight: body.clientHeight,
-      bodyScrollHeight: body.scrollHeight,
+      documentScrollWidth: document.documentElement.scrollWidth,
       documentScrollHeight: document.documentElement.scrollHeight,
+      openHeight: openRect.height,
+      openBottom: openRect.bottom,
+      viewportHeight: window.innerHeight,
+      hasTypePicker: Boolean(document.querySelector(".folder-type-row, .project-type-controls, select")),
     };
   });
 
-  assert.deepEqual(
-    { left: geometry.left, right: geometry.right, top: geometry.top, bottom: geometry.bottom },
-    { left: 0, right: 390, top: 0, bottom: 720 },
-  );
-  assert.ok(geometry.bodyScrollHeight > geometry.bodyClientHeight, "only the active setup step scrolls");
-  assert.equal(geometry.documentScrollHeight, 720, "project setup does not extend the document");
+  assert.equal(geometry.hasTypePicker, false);
+  assert.ok(geometry.documentScrollWidth <= 390, "folder dialog does not create horizontal overflow");
+  assert.ok(geometry.openBottom <= geometry.viewportHeight + 1, "Open stays inside the viewport");
+  assert.ok(geometry.openHeight >= 32, "Open meets the compact control height");
+});
+
+test("folder Open and project settings stay inside representative viewports", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  const css = await read("../src/styles.css");
+  const viewports = [
+    { width: 320, height: 568, name: "320 phone" },
+    { width: 375, height: 667, name: "375 phone" },
+    { width: 390, height: 720, name: "390 phone" },
+    { width: 430, height: 932, name: "430 phone" },
+    { width: 600, height: 800, name: "600 narrow" },
+    { width: 768, height: 1024, name: "768 tablet" },
+    { width: 820, height: 1180, name: "820 tablet" },
+    { width: 1024, height: 768, name: "1024 desktop" },
+    { width: 820, height: 360, name: "short landscape" },
+  ] as const;
+
+  for (const viewport of viewports) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await page.setContent(`
+      <style>${css}</style>
+      <section class="dialog-panel folder-dialog">
+        <div class="folder-dialog-body">
+          <div class="folder-dialog-head"><div><div class="folder-dialog-title">Open a project</div></div></div>
+          <div class="folder-list" style="min-height:80px"></div>
+          <div class="folder-foot">
+            <span class="folder-selected">/Users/demo/project</span>
+            <button class="ui-btn ui-btn--primary ui-btn--sm folder-open-btn">Open project</button>
+          </div>
+        </div>
+      </section>
+    `);
+    const geometry: {
+      pageOverflowX: boolean;
+      pageOverflowYClip: boolean;
+      dialogOverflowX: boolean;
+      openHeight: number;
+    } = await page.evaluate((expectedWidth: number) => {
+      const open = document.querySelector<HTMLElement>(".folder-open-btn")!;
+      const dialog = document.querySelector<HTMLElement>(".folder-dialog")!;
+      const openRect = open.getBoundingClientRect();
+      return {
+        pageOverflowX: document.documentElement.scrollWidth > expectedWidth + 1,
+        pageOverflowYClip: openRect.bottom > window.innerHeight + 1,
+        dialogOverflowX: dialog.scrollWidth > dialog.clientWidth + 1,
+        openHeight: openRect.height,
+      };
+    }, viewport.width);
+    assert.equal(geometry.pageOverflowX, false, `${viewport.name} has no horizontal overflow`);
+    assert.equal(geometry.pageOverflowYClip, false, `${viewport.name} keeps Open reachable`);
+    assert.equal(geometry.dialogOverflowX, false, `${viewport.name} dialog does not overflow horizontally`);
+    assert.ok(geometry.openHeight >= 32, `${viewport.name} Open meets compact control height`);
+  }
+
+  await page.setViewportSize({ width: 390, height: 720 });
+});
+
+test("coarse pointer folder Open uses the Polyth tap target", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  const css = await read("../src/styles.css");
+  await page.setViewportSize({ width: 390, height: 720 });
+  await page.setContent(`
+    <style>${css}
+      html:root { --hit-min: var(--tap); }
+    </style>
+    <section class="dialog-panel folder-dialog">
+      <div class="folder-dialog-body">
+        <div class="folder-foot">
+          <button class="ui-btn ui-btn--primary ui-btn--sm folder-open-btn">Open project</button>
+        </div>
+      </div>
+    </section>
+  `);
+  const height = await page.evaluate(() =>
+    document.querySelector<HTMLElement>(".folder-open-btn")!.getBoundingClientRect().height);
+  assert.ok(height >= 44, "coarse pointer Open meets --tap");
+});
+
+test("enlarged interface font keeps folder Open inside a short landscape viewport", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  const css = await read("../src/styles.css");
+  await page.setViewportSize({ width: 667, height: 375 });
+  await page.setContent(`
+    <style>${css}
+      html { font-size: 20px; }
+      :root { --ui-font-size: 20px; --font-ui: 20px; }
+    </style>
+    <section class="dialog-panel folder-dialog">
+      <div class="folder-dialog-body">
+        <div class="folder-dialog-head"><div><div class="folder-dialog-title">Open a project</div></div></div>
+        <div class="folder-list" style="min-height:40px"></div>
+        <div class="folder-foot">
+          <span class="folder-selected">/Users/demo/project</span>
+          <button class="ui-btn ui-btn--primary ui-btn--sm folder-open-btn">Open project</button>
+        </div>
+      </div>
+    </section>
+  `);
+  const geometry = await page.evaluate(() => {
+    const open = document.querySelector<HTMLElement>(".folder-open-btn")!;
+    return {
+      overflowX: document.documentElement.scrollWidth > window.innerWidth + 1,
+      openBottom: open.getBoundingClientRect().bottom,
+      viewportHeight: window.innerHeight,
+    };
+  });
+  assert.equal(geometry.overflowX, false, "enlarged font does not overflow horizontally");
+  assert.ok(geometry.openBottom <= geometry.viewportHeight + 1, "Open stays reachable in short landscape");
+  await page.setViewportSize({ width: 390, height: 720 });
+});
+
+test("360px split pane keeps project settings controls inside the card", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  const css = await read("../src/styles.css");
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.setContent(`
+    <style>${css}
+      .split-pane { width: 360px; max-width: 360px; margin: 0; }
+    </style>
+    <main style="width:1024px">
+      <section class="project-settings-card split-pane">
+        <header>
+          <div class="set-row-text">
+            <div class="set-row-label">polyth</div>
+            <div class="set-row-hint mono">/Users/demo/polyth</div>
+          </div>
+        </header>
+        <div class="project-settings-options" data-settings-item="projects.canvas">
+          <div>
+            <strong>Canvas setup</strong>
+            <span>Customize visible widgets and layout for this project.</span>
+          </div>
+          <button class="ui-btn ui-btn--sm">Widgets &amp; Layout</button>
+        </div>
+      </section>
+    </main>
+  `);
+
+  const geometry = await page.evaluate(() => {
+    const pane = document.querySelector<HTMLElement>(".split-pane")!;
+    const row = pane.querySelector<HTMLElement>(".project-settings-options")!;
+    const label = pane.querySelector("strong")!;
+    const button = pane.querySelector<HTMLElement>(".ui-btn")!;
+    const collide = (a: DOMRect, b: DOMRect) =>
+      a.left < b.right && a.right > b.left && a.top < b.bottom && b.top < a.bottom;
+    const stacked = getComputedStyle(row).flexDirection === "column";
+    return {
+      paneWidth: pane.getBoundingClientRect().width,
+      overflow: pane.scrollWidth > pane.clientWidth + 1,
+      overlap: collide(label.getBoundingClientRect(), button.getBoundingClientRect()),
+      stacked,
+      buttonHeight: button.getBoundingClientRect().height,
+      pageOverflow: document.documentElement.scrollWidth > 1024 + 1,
+      viewportWidth: window.innerWidth,
+    };
+  });
+
+  assert.equal(geometry.viewportWidth, 1024, "split-pane test uses a wide viewport so only the container query wraps");
+  assert.ok(geometry.paneWidth <= 361, "split pane is actually ~360px");
+  assert.equal(geometry.stacked, true, "narrow pane stacks via container query, not a 700px viewport media query");
+  assert.equal(geometry.overflow, false, "settings card does not overflow the pane");
+  assert.equal(geometry.overlap, false, "label does not collide with the canvas button");
+  assert.ok(geometry.buttonHeight >= 32, "canvas button remains a usable compact control");
+  assert.equal(geometry.pageOverflow, false, "1024px viewport has no horizontal overflow");
+  await page.setViewportSize({ width: 390, height: 720 });
 });
 
 test("390px audited actions expose 44px targets and scrolling question tabs", { skip: !CHROME }, async () => {

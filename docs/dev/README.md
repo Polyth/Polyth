@@ -18,7 +18,7 @@ permissions, runtime pool) into a kernel context, then hands feature packages tw
 seams: a **server package seam** (`@polyth/plugins` `ServerPackageHost`: RouteHandler
 routes, append+broadcast events, services, runtimes) and a **web package seam**
 (`@polyth/web-sdk` `WebPackageHost`: slots, widgets, surfaces, capabilities, settings,
-reducers, navigation). Every conversation is an append-only `SessionEvent` log in
+project context, reducers, navigation). Every conversation is an append-only `SessionEvent` log in
 SQLite; the web app is a projection of that log delivered over one WebSocket. Only
 `packages/backend-opencode` may talk to the OpenCode process. Feature web UI lives in
 the feature package and registers through the web-sdk — see `ui.md` before any UI
@@ -187,6 +187,8 @@ decision table and `docs/dev/widgets.md` for widgets. The mechanisms:
   components directly into `App.tsx`.
 - User-placeable dashboard content → **widget** via
   `host.widgets.registerPlugin(...)` (`widgets.md`).
+  Mark `recommended: true` when the widget should appear in the Widget
+  Library recommended tab; recommendations merge across packages.
 - Settings → `host.settings.registerPage(...)` (group `Workspace |
   Engineering | Customize | System`) plus `host.settings.registerItems(...)`
   so item-level settings search keeps working.

@@ -34,11 +34,6 @@ for (const vp of viewports) {
     hasTouch: vp.mobile,
   });
   const page = await ctx.newPage();
-  // Pre-complete per-project onboarding so screenshots show the working shell.
-  await page.addInitScript(() => {
-    const pid = location.pathname.match(/^\/p\/([^/]+)/)?.[1];
-    if (pid) localStorage.setItem(`polyth.projectSetup.v1.${decodeURIComponent(pid)}`, "completed");
-  });
   await page.goto(base + path, { waitUntil: "networkidle" }).catch(() => {});
   await page.waitForTimeout(1200);
   await page.screenshot({ path: `${outDir}/${label}-${vp.name}.png` });

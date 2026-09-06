@@ -46,7 +46,6 @@ async function open(width, height, path, extra = {}) {
   }, {
     "polyth.prefs": PERSONA,
     "polyth.modelPrefs": MODEL_PREFS,
-    "polyth.projectSetup.v1.w3a-project": "completed",
   });
   const page = await context.newPage();
   page.on("pageerror", (e) => console.log("PAGE ERROR:", e.message));
