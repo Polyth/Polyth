@@ -1,31 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, type GitBranches } from "@polyth/session/web-api";
+import { api, type Worktree } from "@polyth/session/web-api";
 import { setOverlay, setSidebarOpen, useStore } from "../store.ts";
 import { startIsolatedSession } from "../init.ts";
 import { friendlyError } from "../settings.ts";
 import { tr } from "../i18n/index.ts";
-import { Button, Dialog, RefreshIcon, Select, TextInput } from "./ui/index.ts";
-
-interface RemoteBranchChoice {
-  short: string;
-  ref: string;
-  remote: string;
-}
+import { Button, Dialog, Select, TextInput } from "./ui/index.ts";
 
 export default function WorktreeSessionDialog() {
   const request = useStore((state) => state.worktreeSessionRequest);
-  const sourceSessionId = useStore((state) => state.activeSessionId);
+  const sourceSession = useStore((state) =>
+    state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null,
+  );
   const project = useStore((state) =>
     state.projectRegistry.projects.find(
       (candidate) => candidate.id === state.worktreeSessionRequest?.projectId,
     ) ?? null,
   );
-  const [branches, setBranches] = useState<GitBranches>({ current: "", branches: [] });
+  const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const [title, setTitle] = useState("");
   const [targetBranch, setTargetBranch] = useState("");
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [remoteNote, setRemoteNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
@@ -39,12 +33,14 @@ export default function WorktreeSessionDialog() {
     let active = true;
     setLoading(true);
     setError("");
-    setRemoteNote("");
     setTitle("");
-    void api.gitBranches(request.projectId).then((nextBranches) => {
+    void api.listWorktrees(request.projectId).then((next) => {
       if (!active) return;
-      setBranches(nextBranches);
-      setTargetBranch(nextBranches.current ?? nextBranches.branches.find((item) => item.current)?.name ?? "");
+      setWorktrees(next);
+      const preferred = request.worktreePath
+        ? next.find((item) => item.path === request.worktreePath)
+        : next.find((item) => item.isMain) ?? next[0];
+      setTargetBranch(preferred?.branch ?? "");
       setLoading(false);
     }).catch((cause) => {
       if (!active) return;
@@ -52,48 +48,12 @@ export default function WorktreeSessionDialog() {
       setLoading(false);
     });
     return () => { active = false; };
-  }, [request?.projectId]);
+  }, [request?.projectId, request?.worktreePath]);
 
-  const refresh = async () => {
-    if (!request || refreshing || busy) return;
-    setRefreshing(true);
-    setError("");
-    setRemoteNote("");
-    let note = "";
-    try {
-      await api.gitFetch(request.projectId);
-    } catch {
-      note = tr("gitview.remoteUnreachableShowingCached");
-    }
-    try {
-      const nextBranches = await api.gitBranches(request.projectId);
-      setBranches(nextBranches);
-      setRemoteNote(note);
-    } catch (cause) {
-      setError(friendlyError(tr("worktreesessiondialog.couldnTLoadBranches"), cause));
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  const localBranches = useMemo(
-    () => branches.branches.filter((item) => !item.remote),
-    [branches],
+  const checkedOut = useMemo(
+    () => worktrees.filter((item) => !!item.branch),
+    [worktrees],
   );
-  const remoteBranches = useMemo<RemoteBranchChoice[]>(() => {
-    const localNames = new Set(localBranches.map((item) => item.name));
-    const seen = new Set<string>();
-    const out: RemoteBranchChoice[] = [];
-    for (const item of branches.branches) {
-      if (!item.remote) continue;
-      const short = item.name.slice(item.remote.length + 1);
-      if (!short || short === "HEAD" || short.startsWith("HEAD ")) continue;
-      if (localNames.has(short) || seen.has(short)) continue;
-      seen.add(short);
-      out.push({ short, ref: item.name, remote: item.remote });
-    }
-    return out;
-  }, [branches, localBranches]);
 
   const submit = async () => {
     if (!request) return;
@@ -109,7 +69,9 @@ export default function WorktreeSessionDialog() {
       await startIsolatedSession(request.projectId, {
         ...(title.trim() ? { title: title.trim() } : {}),
         targetBranch: origin,
-        ...(sourceSessionId ? { sourceSessionId } : {}),
+        ...(sourceSession && sourceSession.projectId === request.projectId
+          ? { sourceSessionId: sourceSession.id }
+          : {}),
       });
       setSidebarOpen(false);
       setOverlay(null);
@@ -155,36 +117,22 @@ export default function WorktreeSessionDialog() {
           })} onChange={(event) => setTitle(event.target.value)} />
         </label>
 
-        {loading ? <div className="empty">{tr("worktreesessiondialog.loadingBranches")}</div> : <>
-          <div className="worktree-session-refresh-row">
-            <Button
-              size="sm"
-              variant="ghost"
-              iconStart={RefreshIcon}
-              busy={refreshing}
-              disabled={busy}
-              onClick={() => void refresh()}
-            >
-              {refreshing ? tr("gitview.fetchingRemoteBranches") : tr("gitview.fetchRemoteBranches")}
-            </Button>
-          </div>
-          {remoteNote && <small className="worktree-session-remote-note">{remoteNote}</small>}
-
+        {loading ? <div className="empty">{tr("worktreesessiondialog.loadingBranches")}</div> : (
           <label className="worktree-session-field">
             <span>{tr("worktreesessiondialog.baseBranch")}</span>
             <Select
               label={tr("worktreesessiondialog.baseBranch")}
               value={targetBranch}
-              options={[
-                ...localBranches.map((item) => ({ value: item.name, label: item.name })),
-                ...remoteBranches.map((item) => ({ value: item.ref, label: item.ref })),
-              ]}
+              options={checkedOut.map((item) => ({
+                value: item.branch!,
+                label: item.isMain ? item.branch! : item.branch!,
+              }))}
               onChange={setTargetBranch}
               ariaLabel={tr("worktreesessiondialog.baseBranch")}
             />
             <small className="muted">{tr("isolation.mergeInto", { branch: targetBranch || tr("worktreesessiondialog.theCurrentCommit") })}</small>
           </label>
-        </>}
+        )}
 
         {error && <div className="inline-error" role="alert">{error}</div>}
       </div>

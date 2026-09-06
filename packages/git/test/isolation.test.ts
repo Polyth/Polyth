@@ -70,6 +70,8 @@ interface SessionHarness extends IsolationSessionApi {
   events: SessionEvent[];
   projections: Map<string, SessionProjection>;
   failRebind: boolean;
+  persistCalls: number;
+  rebindCalls: number;
   sendImpl?: IsolationSessionApi["send"];
 }
 
@@ -80,6 +82,8 @@ const makeSessions = (): SessionHarness => {
     projections,
     events,
     failRebind: false,
+    persistCalls: 0,
+    rebindCalls: 0,
     async create(input: CreateSessionInput): Promise<SessionRef> {
       const id = input.id ?? randomUUID();
       if (projections.has(id)) throw Object.assign(new Error("session already exists"), { code: "conflict" });
@@ -113,6 +117,7 @@ const makeSessions = (): SessionHarness => {
       return {};
     },
     async patchIsolation(sessionId, isolation) {
+      api.persistCalls += 1;
       const current = projections.get(sessionId);
       if (!current) throw Object.assign(new Error("not found"), { code: "not-found" });
       const next: SessionProjection = { ...current, updatedAt: Date.now() };
@@ -122,6 +127,7 @@ const makeSessions = (): SessionHarness => {
       return { ...next, isolation: cloneIsolation(next.isolation) };
     },
     async rebindWorkspace(sessionId, input) {
+      api.rebindCalls += 1;
       if (api.failRebind) throw Object.assign(new Error("epoch failed"), { code: "unavailable" });
       const current = projections.get(sessionId);
       if (!current) throw Object.assign(new Error("not found"), { code: "not-found" });
@@ -149,6 +155,8 @@ const harness = (root: string, opts?: {
   testHooks?: IsolationTestHooks;
 }) => {
   const sessions = makeSessions();
+  const closeCalls: string[] = [];
+  const ctrl = { failClose: false, failAppend: false };
   const isolation = createIsolationService({
     git: opts?.git ?? git,
     ...(opts?.managed ? { managed: opts.managed } : {}),
@@ -158,6 +166,7 @@ const harness = (root: string, opts?: {
       list: async () => [{ id: "p1", path: root }],
     },
     append: async (_sessionId, type, data: JsonObject) => {
+      if (ctrl.failAppend) throw new Error("append failed");
       sessions.events.push({
         id: randomUUID(),
         sessionId: "x",
@@ -168,15 +177,34 @@ const harness = (root: string, opts?: {
         v: 1,
       });
     },
+    closeWorkspaceProcesses: async (cwd) => {
+      closeCalls.push(cwd);
+      if (ctrl.failClose) throw new Error("close failed");
+    },
     ...(opts?.testHooks ? { testHooks: opts.testHooks } : {}),
   });
-  return { sessions, isolation };
+  return { sessions, isolation, closeCalls, ctrl };
+};
+
+const effectiveCwd = (session: SessionProjection, projectPath: string): string =>
+  resolve(session.worktreePath ?? projectPath);
+
+const assertBoundTo = async (session: SessionProjection, projectPath: string, expectedCwd: string, branch: string) => {
+  assert.equal(session.id.length > 0, true);
+  assert.equal(effectiveCwd(session, projectPath), resolve(expectedCwd));
+  assert.equal(session.branch, branch);
+  assert.equal(runGit(expectedCwd, "rev-parse", "--abbrev-ref", "HEAD"), branch);
 };
 
 test("create isolated session persists origin and matches managed ownership", async () => {
   const root = repo();
   const { isolation, sessions } = harness(root);
-  const created = await isolation.createIsolatedSession({ projectId: "p1", title: "Fix auth", sourceSessionId: "src-1" });
+  await sessions.create({ id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", projectId: "p1" });
+  const created = await isolation.createIsolatedSession({
+    projectId: "p1",
+    title: "Fix auth",
+    sourceSessionId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+  });
   const session = await sessions.snapshot(created.id);
   const meta = session.isolation;
   assert.ok(meta);
@@ -185,7 +213,8 @@ test("create isolated session persists origin and matches managed ownership", as
   assert.equal(meta.state, "active");
   assert.equal(meta.targetPath, resolve(root));
   assert.equal(meta.targetBranch, "main");
-  assert.equal(meta.sourceSessionId, "src-1");
+  assert.equal(meta.originPath, resolve(root));
+  assert.equal(meta.sourceSessionId, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
   assert.equal(meta.baseCommit, runGit(root, "rev-parse", "HEAD"));
   assert.equal(meta.worktreeBranch, isolateBranchName(session.id));
   const owned = await isolation.managed.inspect(root, meta.worktreePath);
@@ -204,10 +233,12 @@ test("merge includes uncommitted task changes and skips gitignored files", async
   writeFileSync(join(wt, "secret.log"), "do-not-merge\n");
   const result = await isolation.mergeBack(created.id);
   assert.equal(result.ok, true);
+  assert.equal(result.finalized, true);
   assert.equal(result.session.id, created.id);
   assert.equal(result.session.isolation, undefined);
   assert.equal(result.session.worktreePath, undefined);
   assert.equal(result.session.branch, "main");
+  await assertBoundTo(result.session, root, root, "main");
   assert.equal(readFileSync(join(root, "feature.ts"), "utf8"), "export const n = 1;\n");
   assert.equal(existsSync(join(root, "secret.log")), false);
   assert.equal(existsSync(wt), false);
@@ -382,7 +413,7 @@ test("manual merge with no unique changes is a clean no-op error", async () => {
   assert.equal(session.isolation?.state, "active");
 });
 
-test("stale merge-ready is reconciled when changes disappear", async () => {
+test("stale merge-ready is derived on GET without writing", async () => {
   const root = repo();
   const { isolation, sessions } = harness(root);
   const created = await isolation.createIsolatedSession({ projectId: "p1" });
@@ -391,10 +422,14 @@ test("stale merge-ready is reconciled when changes disappear", async () => {
   await isolation.onTurnCompleted(created.id, [completedTurn(created.id)]);
   assert.equal((await sessions.snapshot(created.id)).isolation?.state, "merge-ready");
   rmSync(join(wt, "tmp.txt"));
+  const persists = sessions.persistCalls;
   const status = await isolation.getStatus(created.id);
-  assert.equal(status.isolation?.state, "active");
+  assert.equal(status.isolation?.state, "merge-ready");
+  assert.equal(status.effectiveState, "active");
   assert.equal(status.suggestion?.eligible, false);
   assert.equal(status.suggestion?.reason, "no-changes");
+  assert.equal(sessions.persistCalls, persists);
+  assert.equal((await sessions.snapshot(created.id)).isolation?.state, "merge-ready");
 });
 
 test("target branch checked out in another clean worktree integrates there", async () => {
@@ -406,11 +441,21 @@ test("target branch checked out in another clean worktree integrates there", asy
   await git.worktrees.create(root, { branch: "feature", path: featureWt });
   const { isolation, sessions } = harness(root);
   const created = await isolation.createIsolatedSession({ projectId: "p1", targetBranch: "feature" });
-  writeFileSync(join((await sessions.snapshot(created.id)).isolation!.worktreePath, "from-iso.txt"), "yes\n");
+  const isolated = await sessions.snapshot(created.id);
+  assert.equal(isolated.isolation?.originPath, resolve(featureWt));
+  const isoPath = isolated.isolation!.worktreePath;
+  writeFileSync(join(isoPath, "from-iso.txt"), "yes\n");
   await isolation.mergeBack(created.id);
   assert.equal(readFileSync(join(featureWt, "from-iso.txt"), "utf8"), "yes\n");
   assert.equal(existsSync(join(root, "from-iso.txt")), false);
   assert.equal(runGit(root, "rev-parse", "--abbrev-ref", "HEAD"), "main");
+  const after = await sessions.snapshot(created.id);
+  assert.equal(after.id, created.id);
+  assert.equal(after.isolation, undefined);
+  assert.equal(after.worktreePath, resolve(featureWt));
+  assert.equal(after.branch, "feature");
+  await assertBoundTo(after, root, featureWt, "feature");
+  assert.equal(existsSync(isoPath), false);
 });
 
 test("dirty checkout of the target branch refuses merge", async () => {
@@ -431,45 +476,20 @@ test("dirty checkout of the target branch refuses merge", async () => {
   assert.equal(existsSync(join(featureWt, "from-iso.txt")), false);
 });
 
-test("CAS update-ref when the target branch is not checked out", async () => {
+test("unchecked-out and remote-only targets are refused so the session never fakes a cwd", async () => {
   const root = repo();
   runGit(root, "branch", "feature");
-  const { isolation, sessions } = harness(root);
-  const created = await isolation.createIsolatedSession({ projectId: "p1", targetBranch: "feature" });
-  writeFileSync(join((await sessions.snapshot(created.id)).isolation!.worktreePath, "side.txt"), "s\n");
-  await isolation.mergeBack(created.id);
+  const { isolation } = harness(root);
+  await assert.rejects(
+    () => isolation.createIsolatedSession({ projectId: "p1", targetBranch: "feature" }),
+    /needs a checkout of feature/,
+  );
+  await assert.rejects(
+    () => isolation.createIsolatedSession({ projectId: "p1", targetBranch: "origin/feature" }),
+    /needs a local checkout/,
+  );
   assert.equal(runGit(root, "rev-parse", "--abbrev-ref", "HEAD"), "main");
   assert.equal((await git.status(root)).clean, true);
-  assert.equal(existsSync(join(root, "side.txt")), false);
-  const featureSha = runGit(root, "rev-parse", "feature");
-  assert.notEqual(featureSha, runGit(root, "rev-parse", "main"));
-  assert.match(runGit(root, "show", `${featureSha}:side.txt`), /s/);
-});
-
-test("remote-only branch selection creates a local tracking target", async () => {
-  const upstream = repo();
-  runGit(upstream, "checkout", "-b", "feature");
-  writeFileSync(join(upstream, "remote-only.txt"), "r\n");
-  runGit(upstream, "add", ".");
-  runGit(upstream, "commit", "-qm", "feature work");
-  runGit(upstream, "checkout", "main");
-  const clone = mkdtempSync(join(tmpdir(), "polyth-iso-clone-"));
-  dirs.push(clone);
-  rmSync(clone, { recursive: true, force: true });
-  execFileSync("git", ["clone", "-q", upstream, clone], { stdio: "pipe" });
-  runGit(clone, "config", "user.email", "t@example.com");
-  runGit(clone, "config", "user.name", "Test");
-  runGit(clone, "config", "commit.gpgsign", "false");
-  const localNames = runGit(clone, "branch").split("\n").map((line) => line.replace("*", "").trim());
-  assert.equal(localNames.includes("feature"), false);
-  const { isolation, sessions } = harness(clone);
-  const created = await isolation.createIsolatedSession({ projectId: "p1", targetBranch: "origin/feature" });
-  const session = await sessions.snapshot(created.id);
-  assert.equal(session.isolation?.targetBranch, "feature");
-  assert.ok(runGit(clone, "branch").includes("feature"));
-  writeFileSync(join(session.isolation!.worktreePath, "more.txt"), "m\n");
-  await isolation.mergeBack(created.id);
-  assert.match(runGit(clone, "show", "feature:more.txt"), /m/);
 });
 
 test("user-created worktrees and branches are never deleted", async () => {
@@ -561,12 +581,13 @@ test("crash after publication is recovered without duplicating the merge", async
   const created = await isolation.createIsolatedSession({ projectId: "p1", title: "Crash after" });
   const wt = (await sessions.snapshot(created.id)).isolation!.worktreePath;
   writeFileSync(join(wt, "published.txt"), "p\n");
-  await assert.rejects(() => isolation.mergeBack(created.id), /injected crash/);
-  const crashed = await sessions.snapshot(created.id);
-  assert.equal(crashed.isolation?.state, "merging");
-  assert.ok(crashed.isolation?.publish?.resultCommit);
+  const crashed = await isolation.mergeBack(created.id);
+  assert.equal(crashed.ok, true);
+  assert.equal(crashed.finalized, false);
+  assert.equal(crashed.session.isolation?.state, "merging");
+  assert.ok(crashed.session.isolation?.publish?.resultCommit);
   const head = runGit(root, "rev-parse", "HEAD");
-  assert.equal(head, crashed.isolation!.publish!.resultCommit);
+  assert.equal(head, crashed.session.isolation!.publish!.resultCommit);
   const recovered = await isolation.recoverSession(await sessions.snapshot(created.id));
   assert.equal(recovered.isolation, undefined);
   assert.equal(recovered.id, created.id);
@@ -604,17 +625,21 @@ test("rebind failure keeps the source workspace for retry", async () => {
   const wt = (await sessions.snapshot(created.id)).isolation!.worktreePath;
   writeFileSync(join(wt, "rebind.txt"), "r\n");
   sessions.failRebind = true;
-  await assert.rejects(() => isolation.mergeBack(created.id), /epoch failed/);
+  const failedMerge = await isolation.mergeBack(created.id);
+  assert.equal(failedMerge.ok, true);
+  assert.equal(failedMerge.finalized, false);
   const failed = await sessions.snapshot(created.id);
   assert.equal(failed.isolation?.state, "cleanup-pending");
   assert.equal(failed.isolation?.rebound, false);
   assert.ok(failed.isolation?.resultCommit);
   assert.equal(existsSync(wt), true);
+  assert.equal(failed.worktreePath, wt);
   assert.equal(readFileSync(join(root, "rebind.txt"), "utf8"), "r\n");
   sessions.failRebind = false;
   const recovered = await isolation.recoverSession(await sessions.snapshot(created.id));
   assert.equal(recovered.isolation, undefined);
   assert.equal(existsSync(wt), false);
+  await assertBoundTo(recovered, root, root, "main");
 });
 
 test("retry exhaustion leaves a recoverable merge-ready state", async () => {
@@ -697,7 +722,7 @@ test("ambiguous publication is left merging, never treated as unpublished", asyn
   assert.equal(existsSync(session.isolation!.worktreePath), true);
 });
 
-test("status recovery finishes a crash after publication", async () => {
+test("GET status after publication crash observes without recovering", async () => {
   const root = repo();
   const hooks: IsolationTestHooks = {
     afterPublish: async () => {
@@ -708,10 +733,276 @@ test("status recovery finishes a crash after publication", async () => {
   const created = await isolation.createIsolatedSession({ projectId: "p1" });
   const wt = (await sessions.snapshot(created.id)).isolation!.worktreePath;
   writeFileSync(join(wt, "via-status.txt"), "s\n");
-  await assert.rejects(() => isolation.mergeBack(created.id), /injected crash/);
+  const published = await isolation.mergeBack(created.id);
+  assert.equal(published.finalized, false);
+  const persists = sessions.persistCalls;
+  const rebinds = sessions.rebindCalls;
   const status = await isolation.getStatus(created.id);
-  assert.equal(status.isolation, null);
-  assert.equal((await sessions.snapshot(created.id)).isolation, undefined);
+  assert.equal(status.isolation?.state, "merging");
+  assert.equal(status.effectiveState, "merging");
+  assert.equal(sessions.persistCalls, persists);
+  assert.equal(sessions.rebindCalls, rebinds);
+  assert.equal(existsSync(wt), true);
+  const recovered = await isolation.recoverSession(await sessions.snapshot(created.id));
+  assert.equal(recovered.isolation, undefined);
   assert.equal(readFileSync(join(root, "via-status.txt"), "utf8"), "s\n");
   assert.equal(existsSync(wt), false);
+});
+
+test("unknown sourceSessionId is rejected", async () => {
+  const root = repo();
+  const { isolation } = harness(root);
+  await assert.rejects(
+    () => isolation.createIsolatedSession({ projectId: "p1", sourceSessionId: "missing" }),
+    /source session was not found/,
+  );
+});
+
+test("discard returns the session to the origin checkout", async () => {
+  const root = repo();
+  runGit(root, "branch", "feature");
+  const featureWt = mkdtempSync(join(tmpdir(), "polyth-feature-discard-"));
+  dirs.push(featureWt);
+  rmSync(featureWt, { recursive: true, force: true });
+  await git.worktrees.create(root, { branch: "feature", path: featureWt });
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1", targetBranch: "feature" });
+  const isoPath = (await sessions.snapshot(created.id)).isolation!.worktreePath;
+  writeFileSync(join(isoPath, "gone.txt"), "nope\n");
+  const discarded = await isolation.discard(created.id);
+  assert.equal(discarded.id, created.id);
+  assert.equal(discarded.isolation, undefined);
+  await assertBoundTo(discarded, root, featureWt, "feature");
+  assert.equal(existsSync(isoPath), false);
+  assert.equal(existsSync(join(featureWt, "gone.txt")), false);
+  assert.equal(runGit(root, "rev-parse", "--abbrev-ref", "HEAD"), "main");
+});
+
+test("notice append failure after publish does not report merge failure", async () => {
+  const root = repo();
+  const ctx = harness(root);
+  ctx.ctrl.failAppend = true;
+  const created = await ctx.isolation.createIsolatedSession({ projectId: "p1" });
+  writeFileSync(join((await ctx.sessions.snapshot(created.id)).isolation!.worktreePath, "ok.txt"), "ok\n");
+  const merged = await ctx.isolation.mergeBack(created.id);
+  assert.equal(merged.ok, true);
+  assert.equal(merged.finalized, true);
+  assert.equal(readFileSync(join(root, "ok.txt"), "utf8"), "ok\n");
+  assert.equal(merged.session.isolation, undefined);
+});
+
+test("cleanup failure after rebind keeps rebound true and retries cleanup only", async () => {
+  const root = repo();
+  const hooks: IsolationTestHooks = {
+    beforeCleanup: async () => {
+      throw Object.assign(new Error("injected cleanup crash"), { code: "injected" });
+    },
+  };
+  const { isolation, sessions } = harness(root, { testHooks: hooks });
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const wt = (await sessions.snapshot(created.id)).isolation!.worktreePath;
+  writeFileSync(join(wt, "keep-src.txt"), "k\n");
+  const published = await isolation.mergeBack(created.id);
+  assert.equal(published.ok, true);
+  assert.equal(published.finalized, false);
+  const pending = await sessions.snapshot(created.id);
+  assert.equal(pending.isolation?.state, "cleanup-pending");
+  assert.equal(pending.isolation?.rebound, true);
+  await assertBoundTo(pending, root, root, "main");
+  assert.equal(existsSync(wt), true);
+  const rebinds = sessions.rebindCalls;
+  hooks.beforeCleanup = undefined;
+  const recovered = await isolation.recoverSession(await sessions.snapshot(created.id));
+  assert.equal(sessions.rebindCalls, rebinds);
+  assert.equal(recovered.isolation, undefined);
+  assert.equal(existsSync(wt), false);
+});
+
+test("source process close failure does not delete the isolated workspace", async () => {
+  const root = repo();
+  const ctx = harness(root);
+  const created = await ctx.isolation.createIsolatedSession({ projectId: "p1" });
+  const wt = (await ctx.sessions.snapshot(created.id)).isolation!.worktreePath;
+  writeFileSync(join(wt, "close.txt"), "c\n");
+  ctx.ctrl.failClose = true;
+  const published = await ctx.isolation.mergeBack(created.id);
+  assert.equal(published.ok, true);
+  assert.equal(published.finalized, false);
+  const pending = await ctx.sessions.snapshot(created.id);
+  assert.equal(pending.isolation?.state, "cleanup-pending");
+  assert.equal(pending.isolation?.rebound, true);
+  assert.equal(existsSync(wt), true);
+  ctx.ctrl.failClose = false;
+  const recovered = await ctx.isolation.recoverSession(await ctx.sessions.snapshot(created.id));
+  assert.equal(recovered.isolation, undefined);
+  assert.equal(existsSync(wt), false);
+});
+
+test("busy runtime states block merge resolve and discard", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  writeFileSync(join((await sessions.snapshot(created.id)).isolation!.worktreePath, "busy.txt"), "b\n");
+  for (const status of ["working", "waiting", "reconciling", "epoch-pending"] as const) {
+    const current = await sessions.snapshot(created.id);
+    sessions.projections.set(created.id, { ...current, status });
+    await assert.rejects(() => isolation.mergeBack(created.id), /still running/);
+    await assert.rejects(() => isolation.keepIsolated(created.id), /still running/);
+    await assert.rejects(() => isolation.discard(created.id), /still running/);
+  }
+  const conflicted = await sessions.snapshot(created.id);
+  sessions.projections.set(created.id, {
+    ...conflicted,
+    status: "working",
+    isolation: { ...conflicted.isolation!, state: "conflict", conflict: { message: "x", files: ["README.md"] } },
+  });
+  await assert.rejects(() => isolation.resolveWithAgent(created.id), /still running/);
+});
+
+test("resolve with agent cannot start twice while a turn is running", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const current = await sessions.snapshot(created.id);
+  await sessions.patchIsolation!(created.id, {
+    ...current.isolation!,
+    state: "conflict",
+    conflict: { message: "conflict", files: ["README.md"] },
+  });
+  let sends = 0;
+  sessions.sendImpl = async () => {
+    sends += 1;
+    const live = await sessions.snapshot(created.id);
+    sessions.projections.set(created.id, { ...live, status: "working" });
+    return {};
+  };
+  await isolation.resolveWithAgent(created.id);
+  assert.equal(sends, 1);
+  await assert.rejects(() => isolation.resolveWithAgent(created.id), /still running/);
+  await assert.rejects(() => isolation.discard(created.id), /still running/);
+  assert.equal(sends, 1);
+});
+
+test("corrupted isolation pointing at another session does not delete it", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const a = await isolation.createIsolatedSession({ projectId: "p1", title: "A" });
+  const b = await isolation.createIsolatedSession({ projectId: "p1", title: "B" });
+  const sessionA = await sessions.snapshot(a.id);
+  const sessionB = await sessions.snapshot(b.id);
+  const bPath = sessionB.isolation!.worktreePath;
+  const bBranch = sessionB.isolation!.worktreeBranch;
+  await sessions.rebindWorkspace!(a.id, {
+    worktreePath: null,
+    branch: "main",
+    isolation: {
+      ...sessionA.isolation!,
+      state: "cleanup-pending",
+      rebound: true,
+      worktreePath: bPath,
+      worktreeBranch: bBranch,
+    },
+  });
+  const recovered = await isolation.recoverSession(await sessions.snapshot(a.id));
+  assert.equal(recovered.isolation?.state, "cleanup-pending");
+  assert.equal(existsSync(bPath), true);
+  assert.equal(existsSync(sessionA.isolation!.worktreePath), true);
+  assert.ok((await git.branches(root)).branches.some((item) => item.name === bBranch));
+  assert.ok((await git.branches(root)).branches.some((item) => item.name === sessionA.isolation!.worktreeBranch));
+});
+
+test("cleanup of one session does not prune another session's live integration", async () => {
+  const root = repo();
+  runGit(root, "branch", "feature");
+  const featureWt = mkdtempSync(join(tmpdir(), "polyth-feature-conc-"));
+  dirs.push(featureWt);
+  rmSync(featureWt, { recursive: true, force: true });
+  await git.worktrees.create(root, { branch: "feature", path: featureWt });
+  let resumeB!: () => void;
+  const holdB = new Promise<void>((resolveHold) => { resumeB = resolveHold; });
+  let bIntegration = "";
+  let bId = "";
+  const hooks: IsolationTestHooks = {
+    afterIntegrationCreated: async (sessionId) => {
+      if (sessionId !== bId) return;
+      const listed = await git.worktrees.list(root);
+      bIntegration = listed.find((item) => item.path.includes("polyth-integrate"))?.path ?? "";
+      await holdB;
+    },
+  };
+  const { isolation, sessions } = harness(root, { testHooks: hooks });
+  const a = await isolation.createIsolatedSession({ projectId: "p1", targetBranch: "main" });
+  const b = await isolation.createIsolatedSession({ projectId: "p1", targetBranch: "feature" });
+  bId = b.id;
+  writeFileSync(join((await sessions.snapshot(a.id)).isolation!.worktreePath, "a.txt"), "a\n");
+  writeFileSync(join((await sessions.snapshot(b.id)).isolation!.worktreePath, "b.txt"), "b\n");
+  const mergeB = isolation.mergeBack(b.id);
+  for (let i = 0; i < 40 && !bIntegration; i++) await new Promise((r) => setTimeout(r, 25));
+  assert.ok(bIntegration);
+  assert.equal(existsSync(bIntegration), true);
+  const mergedA = await isolation.mergeBack(a.id);
+  assert.equal(mergedA.ok, true);
+  assert.equal(mergedA.finalized, true);
+  assert.equal(existsSync(bIntegration), true);
+  resumeB();
+  const mergedB = await mergeB;
+  assert.equal(mergedB.ok, true);
+  assert.equal(mergedB.finalized, true);
+  assert.equal(readFileSync(join(root, "a.txt"), "utf8"), "a\n");
+  assert.equal(readFileSync(join(featureWt, "b.txt"), "utf8"), "b\n");
+  assert.equal(existsSync(bIntegration), false);
+});
+
+test("startup recovery waits on a live merge instead of pruning its integration", async () => {
+  const root = repo();
+  let resume!: () => void;
+  const hold = new Promise<void>((resolveHold) => { resume = resolveHold; });
+  let integration = "";
+  const hooks: IsolationTestHooks = {
+    afterIntegrationCreated: async () => {
+      const listed = await git.worktrees.list(root);
+      integration = listed.find((item) => item.path.includes("polyth-integrate"))?.path ?? "";
+      await hold;
+    },
+  };
+  const { isolation, sessions } = harness(root, { testHooks: hooks });
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  writeFileSync(join((await sessions.snapshot(created.id)).isolation!.worktreePath, "live.txt"), "l\n");
+  const merge = isolation.mergeBack(created.id);
+  for (let i = 0; i < 40 && !integration; i++) await new Promise((r) => setTimeout(r, 25));
+  assert.equal(existsSync(integration), true);
+  const recovering = isolation.recoverAll();
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(existsSync(integration), true);
+  resume();
+  const merged = await merge;
+  await recovering;
+  assert.equal(merged.ok, true);
+  assert.equal(merged.finalized, true);
+  assert.equal(existsSync(integration), false);
+});
+
+test("GET status during merge does not mutate refs or worktrees", async () => {
+  const root = repo();
+  let resume!: () => void;
+  const hold = new Promise<void>((resolveHold) => { resume = resolveHold; });
+  const hooks: IsolationTestHooks = {
+    afterIntegrationCreated: async () => { await hold; },
+  };
+  const { isolation, sessions } = harness(root, { testHooks: hooks });
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  writeFileSync(join((await sessions.snapshot(created.id)).isolation!.worktreePath, "g.txt"), "g\n");
+  const merge = isolation.mergeBack(created.id);
+  await new Promise((r) => setTimeout(r, 40));
+  const persists = sessions.persistCalls;
+  const rebinds = sessions.rebindCalls;
+  const beforeHead = runGit(root, "rev-parse", "HEAD");
+  const status = await isolation.getStatus(created.id);
+  assert.equal(status.isolation?.state, "merging");
+  assert.equal(sessions.persistCalls, persists);
+  assert.equal(sessions.rebindCalls, rebinds);
+  assert.equal(runGit(root, "rev-parse", "HEAD"), beforeHead);
+  resume();
+  const merged = await merge;
+  assert.equal(merged.ok, true);
 });

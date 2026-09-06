@@ -274,9 +274,7 @@ function useComposerLocation(session: SessionProjection | null): {
     }
 
     if (newWorktreeMode) {
-      // Every local branch — including the current one and ones already checked
-      // out elsewhere — is a valid fork point, because a fresh branch is cut
-      // from it rather than moved into the new worktree.
+      // Isolation starts from a live checkout so merge-back has a truthful cwd.
       const seen = new Set<string>();
       const choices: LocationChoice[] = [];
       if (currentBranchName) {
@@ -288,23 +286,14 @@ function useComposerLocation(session: SessionProjection | null): {
           target: { kind: "new-worktree", base: currentBranchName },
         });
       }
-      for (const candidate of localBranches) {
-        if (seen.has(candidate.name)) continue;
-        seen.add(candidate.name);
+      for (const worktree of worktrees) {
+        const name = worktree.branch;
+        if (!name || seen.has(name)) continue;
+        seen.add(name);
         choices.push({
-          id: `branch:${candidate.name}`,
-          label: candidate.name,
-          target: { kind: "new-worktree", base: candidate.name },
-        });
-      }
-      for (const remote of remoteOnly) {
-        if (seen.has(remote.short)) continue;
-        seen.add(remote.short);
-        choices.push({
-          id: `remote:${remote.ref}`,
-          label: remote.short,
-          detail: tr("gitview.remote"),
-          target: { kind: "new-worktree", base: remote.ref },
+          id: `branch:${name}`,
+          label: name,
+          target: { kind: "new-worktree", base: name },
         });
       }
       return choices;

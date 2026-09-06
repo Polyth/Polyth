@@ -15,6 +15,7 @@ import type {
   SessionService, SessionPersistence, UserTurnInput,
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
+import { isolationBlocksUserMutation } from "@polyth/contracts";
 import type { AutoAcceptStore, PermissionService } from "@polyth/permissions";
 import { resolveAutoAccept } from "@polyth/permissions";
 import {
@@ -5672,17 +5673,25 @@ export function createSessionService(deps: {
         if (projection.status === "archived") {
           throw Object.assign(new Error("unavailable while the session is archived"), { code: "conflict" });
         }
-        if (turnActive(sessionId) || projection.status === "working") {
+        if (turnActive(sessionId) || isolationBlocksUserMutation(projection.status)) {
           throw Object.assign(new Error("cannot rebind a running session"), { code: "conflict" });
         }
         const project = await projects.get(projection.projectId);
         const previousCwd = projection.worktreePath ?? project?.path;
-        if (previousCwd && deps.closeWorkspaceProcesses) {
-          await deps.closeWorkspaceProcesses(previousCwd).catch(() => undefined);
-        }
-        unwire(sessionId);
-        if (previousCwd && deps.releaseRuntime) {
-          await deps.releaseRuntime(projection.projectId, previousCwd).catch(() => undefined);
+        const destCwd = input.worktreePath === null
+          ? (project?.path ?? previousCwd)
+          : typeof input.worktreePath === "string"
+            ? input.worktreePath
+            : previousCwd;
+        const alreadyAtDest = !!previousCwd && !!destCwd && resolve(previousCwd) === resolve(destCwd);
+        if (!alreadyAtDest && previousCwd) {
+          if (deps.closeWorkspaceProcesses) {
+            await deps.closeWorkspaceProcesses(previousCwd);
+          }
+          unwire(sessionId);
+          if (deps.releaseRuntime) {
+            await deps.releaseRuntime(projection.projectId, previousCwd);
+          }
         }
         const next = await applyProjection(sessionId, (current) => {
           const patched: SessionProjection = {

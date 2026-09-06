@@ -931,6 +931,14 @@ export type SessionStatus =
   | "failed"
   | "archived";
 
+/** True while a lifecycle mutation (merge/keep/discard/resolve) must wait. */
+export const isolationBlocksUserMutation = (status: SessionStatus): boolean =>
+  status === "working"
+  || status === "waiting"
+  || status === "reconciling"
+  || status === "epoch-pending"
+  || status === "archived";
+
 /** Derived unresolved-request counters; always computed from durable events. */
 export interface SessionAttention {
   questions: number;
@@ -980,10 +988,12 @@ export interface IsolationPublishIntent {
  * Session isolation origin. The current backend is a managed Git worktree;
  * `kind` keeps the session-level concept open for later backends.
  *
- * `sourceSessionId` is lineage only. `targetPath` is the repository root,
- * `targetBranch` is the local branch name, and `baseCommit` is ancestry.
- * The live checkout of `targetBranch` is resolved at publish time from
- * `git worktree list` — never assumed to be `project.path`.
+ * `sourceSessionId` is lineage of the session that requested isolation.
+ * `targetPath` is the repository root, `targetBranch` is the local branch,
+ * `originPath` is the concrete checkout merge-back returns to, and
+ * `baseCommit` is ancestry. Isolation is only created when `targetBranch`
+ * is checked out somewhere; the session never claims that branch while
+ * running in a different workspace.
  */
 export interface SessionIsolation {
   kind: "git-worktree";
@@ -993,6 +1003,8 @@ export interface SessionIsolation {
   worktreeBranch: string;
   targetPath: string;
   targetBranch: string;
+  /** Concrete checkout of `targetBranch` the session returns to after merge/discard. */
+  originPath?: string;
   baseCommit: string;
   sourceSessionId?: string;
   /** Fingerprint of HEAD + dirty tree when the user chose Keep isolated. */
@@ -1012,7 +1024,7 @@ export interface CreateIsolatedSessionInput {
   model?: ModelRef;
   agent?: string;
   sourceSessionId?: string;
-  /** Branch (or remote ref) to isolate from and later merge back into. */
+  /** Local branch that is currently checked out; merge-back returns to that workspace. */
   targetBranch?: string;
 }
 
@@ -1037,6 +1049,8 @@ export interface IsolationSuggestionDto {
 export interface IsolationStatusDto {
   isolation: SessionIsolation | null;
   suggestion: IsolationSuggestionDto | null;
+  /** Derived from Git + persisted isolation without writing. */
+  effectiveState?: IsolationState | null;
 }
 
 export interface IsolationMergeResultDto {
@@ -1044,6 +1058,8 @@ export interface IsolationMergeResultDto {
   commit: string;
   targetBranch: string;
   session: SessionProjection;
+  /** False when Git published but rebind/cleanup still needs recovery. */
+  finalized: boolean;
 }
 
 export function isGitWorktreeIsolation(

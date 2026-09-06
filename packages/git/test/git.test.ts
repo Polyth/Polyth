@@ -392,19 +392,38 @@ test("snapshotCommit captures untracked files and respects gitignore", async () 
   assert.notEqual(fp1, fp2);
 });
 
-test("fingerprint hashes untracked size/mtime instead of file bytes", async () => {
+test("fingerprint is content-sensitive without reading files in Node", async () => {
   const dir = repo();
-  const big = join(dir, "blob.bin");
-  writeFileSync(big, Buffer.alloc(4 * 1024 * 1024, 7));
-  const started = Date.now();
+  writeFileSync(join(dir, "foo.ts"), "const n = 1;\n");
+  const g = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
+  g("add", "."); g("commit", "-qm", "add foo");
+  writeFileSync(join(dir, "foo.ts"), "const n = 2;\n");
   const fp1 = await git.fingerprint(dir);
-  assert.ok(Date.now() - started < 3000);
-  writeFileSync(big, Buffer.alloc(4 * 1024 * 1024 + 64, 8));
+  writeFileSync(join(dir, "foo.ts"), "const n = 3;\n");
   const fp2 = await git.fingerprint(dir);
   assert.notEqual(fp1, fp2);
+  writeFileSync(join(dir, "blob.bin"), Buffer.alloc(4 * 1024 * 1024, 7));
+  const started = Date.now();
+  const fp3 = await git.fingerprint(dir);
+  assert.ok(Date.now() - started < 5000);
+  writeFileSync(join(dir, "blob.bin"), Buffer.alloc(4 * 1024 * 1024, 8));
+  const fp4 = await git.fingerprint(dir);
+  assert.notEqual(fp3, fp4);
+  writeFileSync(join(dir, "same.txt"), "aaaa\n");
+  const fp5 = await git.fingerprint(dir);
+  writeFileSync(join(dir, "same.txt"), "bbbb\n");
+  const fp6 = await git.fingerprint(dir);
+  assert.notEqual(fp5, fp6);
+  rmSync(join(dir, "foo.ts"));
+  const fp7 = await git.fingerprint(dir);
+  assert.notEqual(fp6, fp7);
+  writeFileSync(join(dir, "renamed.ts"), "const n = 3;\n");
+  const fp8 = await git.fingerprint(dir);
+  assert.notEqual(fp7, fp8);
   const fn = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
-  assert.match(fn, /await stat\(/);
+  assert.match(fn, /hash-object/);
   assert.doesNotMatch(fn, /readFileSync/);
+  assert.doesNotMatch(fn, /fingerprint[\s\S]*await stat\(/);
 });
 
 test("isAncestor reports commit ancestry", async () => {

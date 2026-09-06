@@ -5,7 +5,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, rmSync, statSync } from "node:fs";
-import { mkdir, stat } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { basename, dirname, join, posix, resolve } from "node:path";
 import type { ProjectCloneInput, RemoteHost } from "@polyth/contracts";
 
@@ -334,6 +334,7 @@ interface GitRunOpts {
   allowFail?: boolean;
   timeoutMs?: number;
   env?: Record<string, string>;
+  input?: string;
 }
 
 export function createGitService(opts: GitServiceOptions = {}): GitService {
@@ -345,7 +346,7 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       const opts: GitRunOpts = typeof allowFailOrOpts === "boolean"
         ? { allowFail: allowFailOrOpts }
         : allowFailOrOpts;
-      execFile(bin, args, {
+      const child = execFile(bin, args, {
         cwd: root,
         timeout: opts.timeoutMs ?? timeout,
         maxBuffer: 32 * 1024 * 1024,
@@ -358,6 +359,10 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
         }
         res({ stdout: String(stdout), stderr: String(stderr), code: typeof code === "number" ? code : 1 });
       });
+      if (opts.input !== undefined) {
+        child.stdin?.on("error", () => undefined);
+        child.stdin?.end(opts.input);
+      }
     });
   const configValue = async (root: string, key: string): Promise<string> =>
     (await run(root, ["config", "--local", "--get", key], true)).stdout.trim();
@@ -679,25 +684,20 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
 
     async fingerprint(root) {
       const head = (await run(root, ["rev-parse", "HEAD"], true)).stdout.trim() || "unborn";
-      const porcelain = (await run(root, ["status", "--porcelain=v1", "-unormal"], true)).stdout;
-      const trackedDiff = (await run(root, ["diff", "HEAD", "--stat"], true)).stdout;
+      const porcelain = (await run(root, ["status", "--porcelain=v1", "-unormal", "-z"], true)).stdout;
+      const trackedDirty = (await run(root, ["diff", "HEAD", "--name-only", "-z"], true)).stdout;
       const untrackedList = (await run(root, ["ls-files", "--others", "--exclude-standard", "-z"], true)).stdout;
-      const untracked = untrackedList.split("\0").filter(Boolean);
+      const paths = [...trackedDirty.split("\0"), ...untrackedList.split("\0")]
+        .filter((path, index, all) => path && all.indexOf(path) === index && existsSync(join(root, path)));
       const hash = createHash("sha256");
       hash.update(porcelain);
-      hash.update("\n");
-      hash.update(trackedDiff);
-      for (const relative of untracked) {
-        hash.update(relative);
+      if (paths.length) {
+        const hashed = await run(root, ["hash-object", "--stdin-paths"], {
+          allowFail: true,
+          input: `${paths.join("\n")}\n`,
+        });
         hash.update("\n");
-        try {
-          const info = await stat(join(root, relative));
-          hash.update(String(info.size));
-          hash.update(":");
-          hash.update(String(Math.trunc(info.mtimeMs)));
-        } catch {
-          hash.update("missing");
-        }
+        hash.update(hashed.stdout);
       }
       return `${head}:${hash.digest("hex").slice(0, 16)}`;
     },

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { IsolationStatusDto, SessionIsolation, SessionProjection } from "@polyth/contracts";
+import { isolationBlocksUserMutation } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
 import { openChanges, setUiError, upsertSession, useStore } from "../../../apps/web/src/store.ts";
@@ -44,11 +45,12 @@ export function IsolationCard() {
 
   const suggestion = status?.suggestion;
   const live = status?.isolation ?? isolation;
+  const liveState = status?.effectiveState ?? live.state;
   const targetBranch = live.targetBranch;
-  const conflict = live.state === "conflict" && suggestion?.eligible !== true;
-  const missing = live.state === "missing" || suggestion?.reason === "missing";
+  const conflict = liveState === "conflict" && suggestion?.eligible !== true;
+  const missing = liveState === "missing" || suggestion?.reason === "missing";
   const dirty = suggestion?.reason === "dirty-target";
-  const working = session.status === "working" || session.status === "waiting" || session.status === "reconciling";
+  const working = isolationBlocksUserMutation(session.status);
   const ready = !working && (status
     ? suggestion?.eligible === true
     : isolation.state === "merge-ready");
@@ -106,7 +108,7 @@ export function IsolationCard() {
           <Button
             size="sm"
             variant="primary"
-            disabled={busy !== null}
+            disabled={busy !== null || working}
             busy={busy === "resolve"}
             onClick={() => void run("resolve", async () => {
               await api.isolationResolve(sessionId);
@@ -119,7 +121,7 @@ export function IsolationCard() {
           <Button
             size="sm"
             variant="primary"
-            disabled={busy !== null}
+            disabled={busy !== null || working}
             busy={busy === "merge"}
             onClick={() => void run("merge", async () => {
               applySession((await api.isolationMerge(sessionId)).session);
@@ -140,9 +142,10 @@ export function IsolationBadge() {
   );
   const isolation = isolationOf(session);
   const [busy, setBusy] = useState(false);
-  if (!sessionId || !isolation) return null;
+  if (!sessionId || !session || !isolation) return null;
   const branch = isolation.targetBranch;
   const merging = isolation.state === "merging" || isolation.state === "cleanup-pending";
+  const blocked = isolationBlocksUserMutation(session.status);
 
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -181,7 +184,7 @@ export function IsolationBadge() {
         {
           id: "merge",
           label: tr("isolation.mergeBack"),
-          disabled: busy || merging || isolation.state === "missing",
+          disabled: busy || blocked || isolation.state === "missing",
           onSelect: () => {
             void run(async () => {
               applySession((await api.isolationMerge(sessionId)).session);
@@ -191,7 +194,7 @@ export function IsolationBadge() {
         {
           id: "keep",
           label: tr("isolation.keepIsolated"),
-          disabled: busy || merging || isolation.state === "missing",
+          disabled: busy || blocked || merging || isolation.state === "missing",
           onSelect: () => {
             void run(async () => {
               applySession(await api.isolationKeep(sessionId));
@@ -202,7 +205,7 @@ export function IsolationBadge() {
           ? [{
               id: "resolve",
               label: tr("isolation.resolveWithAgent"),
-              disabled: busy,
+              disabled: busy || blocked,
               onSelect: () => {
                 void run(async () => {
                   await api.isolationResolve(sessionId);
@@ -215,7 +218,7 @@ export function IsolationBadge() {
           id: "discard",
           label: tr("isolation.discardWorkspace"),
           danger: true,
-          disabled: busy || merging,
+          disabled: busy || blocked || isolation.state === "merging",
           onSelect: () => { void discard(); },
         },
       ]}

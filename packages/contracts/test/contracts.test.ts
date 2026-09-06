@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { cap, isUiSlot, MODEL_VISIBLE_TYPES, UI_SLOTS } from "@polyth/contracts";
+import { cap, isolationBlocksUserMutation, isUiSlot, MODEL_VISIBLE_TYPES, UI_SLOTS } from "@polyth/contracts";
 import type {
   BrowserAction,
   DeliveryMode,
@@ -112,6 +112,7 @@ test("session projection new fields are optional to old clients", () => {
       worktreeBranch: "polyth/isolate/abc",
       targetPath: "/tmp/repo",
       targetBranch: "main",
+      originPath: "/tmp/repo",
       baseCommit: "abc123",
     },
   };
@@ -121,4 +122,16 @@ test("session projection new fields are optional to old clients", () => {
   assert.equal(parsed.isolation?.targetBranch, "main");
   const deliveries: DeliveryMode[] = ["normal", "steer", "queue", "interrupt"];
   assert.equal(deliveries.length, 4);
+});
+
+test("isolationBlocksUserMutation covers runtime epoch and wait states", () => {
+  assert.equal(isolationBlocksUserMutation("idle"), false);
+  assert.equal(isolationBlocksUserMutation("failed"), false);
+  assert.equal(isolationBlocksUserMutation("finished"), false);
+  assert.equal(isolationBlocksUserMutation("unknown"), false);
+  assert.equal(isolationBlocksUserMutation("working"), true);
+  assert.equal(isolationBlocksUserMutation("waiting"), true);
+  assert.equal(isolationBlocksUserMutation("reconciling"), true);
+  assert.equal(isolationBlocksUserMutation("epoch-pending"), true);
+  assert.equal(isolationBlocksUserMutation("archived"), true);
 });

@@ -40,7 +40,13 @@ export interface ManagedWorktree {
 export type RemoveOwnedResult =
   | { status: "removed" }
   | { status: "already-gone" }
-  | { status: "unowned"; reason: "not-listed" | "marker-missing" | "marker-corrupt" | "wrong-kind" };
+  | { status: "unowned"; reason: "not-listed" | "marker-missing" | "marker-corrupt" | "wrong-kind" | "mismatch" };
+
+export interface OwnedWorktreeRef {
+  sessionId: string;
+  worktreePath: string;
+  worktreeBranch: string;
+}
 
 const log = (event: string, data: JsonObject): void => {
   console.log(`[polyth] isolation ${event} ${JSON.stringify(data)}`);
@@ -208,43 +214,64 @@ export function createManagedWorktrees(git: GitService) {
       log("cleanup", { sessionId: owned.meta.sessionId, worktreePath, branch: owned.branch });
     },
 
-    async removeOwned(
-      root: string,
-      worktreePath: string,
-      expectedBranch?: string,
-    ): Promise<RemoveOwnedResult> {
+    async removeOwned(root: string, ref: OwnedWorktreeRef): Promise<RemoveOwnedResult> {
+      const expectedBranch = isolateBranchName(ref.sessionId);
+      if (ref.worktreeBranch !== expectedBranch || !isManagedBranch(ref.worktreeBranch)) {
+        log("cleanup-unowned", { worktreePath: ref.worktreePath, reason: "mismatch", sessionId: ref.sessionId });
+        return { status: "unowned", reason: "mismatch" };
+      }
       const listed = (await git.worktrees.list(root))
-        .find((item) => resolve(item.path) === resolve(worktreePath));
-      if (!listed && !existsSync(worktreePath)) {
-        if (expectedBranch && isManagedBranch(expectedBranch)) {
-          await git.deleteBranch(root, expectedBranch);
-        }
+        .find((item) => resolve(item.path) === resolve(ref.worktreePath));
+      if (!listed && !existsSync(ref.worktreePath)) {
+        await git.deleteBranch(root, expectedBranch);
         await git.worktrees.prune(root);
         return { status: "already-gone" };
       }
       if (!listed) {
-        log("cleanup-unowned", { worktreePath, reason: "not-listed" });
+        log("cleanup-unowned", { worktreePath: ref.worktreePath, reason: "not-listed" });
         return { status: "unowned", reason: "not-listed" };
       }
       const marker = await readManagedMarker(git, listed.path);
       if (marker === "corrupt") {
-        log("cleanup-unowned", { worktreePath, reason: "marker-corrupt" });
+        log("cleanup-unowned", { worktreePath: ref.worktreePath, reason: "marker-corrupt" });
         return { status: "unowned", reason: "marker-corrupt" };
       }
       if (!marker) {
-        log("cleanup-unowned", { worktreePath, reason: "marker-missing" });
+        log("cleanup-unowned", { worktreePath: ref.worktreePath, reason: "marker-missing" });
         return { status: "unowned", reason: "marker-missing" };
       }
       if (marker.kind === "integration") {
-        log("cleanup-unowned", { worktreePath, reason: "wrong-kind" });
+        log("cleanup-unowned", { worktreePath: ref.worktreePath, reason: "wrong-kind" });
         return { status: "unowned", reason: "wrong-kind" };
       }
-      await this.remove(root, worktreePath, { deleteBranch: true });
+      if (
+        marker.sessionId !== ref.sessionId
+        || marker.worktreeBranch !== ref.worktreeBranch
+        || (listed.branch && listed.branch !== ref.worktreeBranch)
+      ) {
+        log("cleanup-unowned", {
+          worktreePath: ref.worktreePath,
+          reason: "mismatch",
+          sessionId: ref.sessionId,
+          markerSessionId: marker.sessionId,
+        });
+        return { status: "unowned", reason: "mismatch" };
+      }
+      await this.remove(root, ref.worktreePath, { deleteBranch: true });
       return { status: "removed" };
     },
 
     async removeIfOwned(root: string, worktreePath: string): Promise<boolean> {
-      const result = await this.removeOwned(root, worktreePath);
+      const listed = (await git.worktrees.list(root))
+        .find((item) => resolve(item.path) === resolve(worktreePath));
+      if (!listed) return false;
+      const marker = await readManagedMarker(git, listed.path);
+      if (!marker || marker === "corrupt" || marker.kind === "integration") return false;
+      const result = await this.removeOwned(root, {
+        sessionId: marker.sessionId,
+        worktreePath,
+        worktreeBranch: marker.worktreeBranch,
+      });
       return result.status === "removed" || result.status === "already-gone";
     },
 
@@ -268,16 +295,18 @@ export function createManagedWorktrees(git: GitService) {
       }
     },
 
-    async pruneIntegrations(root: string): Promise<number> {
+    async pruneIntegrationsForSession(root: string, sessionId: string): Promise<number> {
+      if (!sessionId) return 0;
       const list = await git.worktrees.list(root);
       let removed = 0;
       for (const wt of list) {
         if (wt.isMain) continue;
         const marker = await readManagedMarker(git, wt.path);
         if (!marker || marker === "corrupt" || marker.kind !== "integration") continue;
+        if (marker.sessionId !== sessionId) continue;
         await this.discardIntegration(root, wt.path);
         removed += 1;
-        log("cleanup", { sessionId: marker.sessionId, worktreePath: wt.path, kind: "integration" });
+        log("cleanup", { sessionId, worktreePath: wt.path, kind: "integration" });
       }
       return removed;
     },
