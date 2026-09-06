@@ -1,11 +1,19 @@
 // F2: attachment pills — removable in the composer, read-only on timeline
-// user messages. Images show a thumbnail from the sanitized raw endpoint.
+// user messages. Images and browser contexts show a thumbnail when available.
 import { useState } from "react";
 import type { AttachmentRef } from "@polyth/contracts";
+import { browserContextHostPath } from "@polyth/contracts";
+import { browserContextChipTitle } from "../attachments.ts";
 import { formatNumber, tr } from "../i18n/index.ts";
 import AttachmentPreview from "./AttachmentPreview.tsx";
 
-const GLYPHS: Record<string, string> = { file: "▤", image: "▣", range: "¶", url: "↗" };
+const GLYPHS: Record<string, string> = {
+  file: "▤",
+  image: "▣",
+  range: "¶",
+  url: "↗",
+  "browser-context": "◉",
+};
 
 function fmtSize(n: number): string {
   if (n <= 0) return "";
@@ -29,6 +37,40 @@ export default function AttachmentPills({ attachments, onRemove }: {
       <div className="attachment-pills" aria-label={tr("attachmentpills.attachments")}>
         {attachments.map((a, i) => {
           const kind = a.kind ?? "file";
+          if (kind === "browser-context") {
+            const ctx = a.browserContext;
+            const title = ctx ? browserContextChipTitle(ctx) : a.name;
+            const detail = ctx ? browserContextHostPath(ctx.url) : "";
+            const body = (
+              <>
+                {a.url
+                  ? <img className="att-thumb" src={a.url} alt="" />
+                  : <span className="att-icon" aria-hidden>{GLYPHS["browser-context"]}</span>}
+                <span className="att-name" title={detail ? `${title} · ${detail}` : title}>{title}</span>
+              </>
+            );
+            return (
+              <span key={a.id || i} className={`attachment-pill att-browser-context`}>
+                <button
+                  type="button"
+                  className="attachment-open"
+                  aria-haspopup="dialog"
+                  aria-label={tr("attachmentpills.previewAttachmentValue", { name: title })}
+                  title={tr("attachmentpills.previewAttachmentValue", { name: title })}
+                  onClick={() => setPreviewAt(i)}
+                >{body}</button>
+                {onRemove && (
+                  <button
+                    type="button"
+                    className="att-remove"
+                    aria-label={tr("attachmentpills.removeAttachmentValue", { name: title })}
+                    title={tr("attachmentpills.removeAttachment")}
+                    onClick={() => onRemove(a.id)}
+                  >✕</button>
+                )}
+              </span>
+            );
+          }
           const detail = kind === "url" ? a.url : a.path;
           const size = kind === "url" ? "" : fmtSize(a.size);
           const body = (

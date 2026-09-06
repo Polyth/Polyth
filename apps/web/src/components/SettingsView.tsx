@@ -226,7 +226,13 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
       const pageId = typeof item.meta?.pageId === "string" ? item.meta.pageId : `slot:${item.id}`;
       for (const si of list) {
         if (si && typeof si.id === "string" && typeof si.label === "string") {
-          contributed.push({ ...si, pageId });
+          contributed.push({
+            ...si,
+            pageId,
+            ...(typeof item.meta?.packageId === "string"
+              ? { ownerPackageId: item.meta.packageId }
+              : {}),
+          });
         }
       }
     }

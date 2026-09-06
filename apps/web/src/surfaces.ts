@@ -7,6 +7,7 @@
 import { useSyncExternalStore } from "react";
 import type { JSX, ReactNode } from "react";
 import { listSlots } from "./slots.ts";
+import { assertOwnerCanReplace } from "./packages/ownership.ts";
 
 /** Values the rail computes once per render for badge/visibility decisions —
  *  shared so surfaces never spin up their own pollers (e.g. git status). */
@@ -58,6 +59,8 @@ export interface RailSurfaceComponentProps {
 
 export interface RailSurface {
   id: string;
+  /** Host-bound owner package. Missing means a host/core contribution. */
+  ownerPackageId?: string;
   title: string;
   /** One-line purpose shown under the title in the shared module header. */
   description?: string;
@@ -89,8 +92,18 @@ function bump(): void {
   for (const l of [...listeners]) l();
 }
 
-/** Register (or replace by id). Returns an unregister function. */
+/** Register (or same-owner replace by id). Cross-owner collisions throw.
+ *  Unregister is identity-safe. */
 export function registerSurface(surface: RailSurface): () => void {
+  const existing = registry.get(surface.id);
+  if (existing) {
+    assertOwnerCanReplace({
+      registry: "surface",
+      id: surface.id,
+      existingOwner: existing.ownerPackageId,
+      nextOwner: surface.ownerPackageId,
+    });
+  }
   registry.set(surface.id, surface);
   bump();
   return () => {

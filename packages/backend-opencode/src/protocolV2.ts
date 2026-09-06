@@ -22,6 +22,7 @@ import type {
   RuntimeSnapshot,
   RuntimeTurnBinding,
 } from "@polyth/contracts";
+import { formatBrowserContextForModel } from "@polyth/contracts";
 import {
   createTranslateState,
   type ObservationBinding,
@@ -499,8 +500,23 @@ const normalizeHistory = (body: unknown, path: string): RuntimeSessionMessage[] 
 
 const attachmentFiles = (input: RuntimeTurnBinding): JsonObject[] => {
   const files: JsonObject[] = [];
+  // The server guarantees any `_inbox/*` attachment is materialized into the
+  // runtime cwd before the turn, so resolving against the session directory is
+  // always correct here — no project-root awareness needed.
   const root = resolve(input.session.location.directory);
   for (const attachment of input.attachments ?? []) {
+    if (attachment.kind === "browser-context") {
+      // Text is merged into prompt.text by promptBody; only visual evidence
+      // rides as a file when a resolved local path is present.
+      const shot = attachment.browserContext?.crop ?? attachment.browserContext?.screenshot;
+      if (shot?.localPath && shot.mime.startsWith("image/")) {
+        files.push({
+          uri: pathToFileURL(shot.localPath).href,
+          name: attachment.name || `${attachment.browserContext?.type ?? "browser"}-capture`,
+        });
+      }
+      continue;
+    }
     if (attachment.kind === "url") {
       if (attachment.url && /^https?:\/\//i.test(attachment.url)) {
         files.push({ uri: attachment.url, name: attachment.name });
@@ -522,9 +538,16 @@ const attachmentFiles = (input: RuntimeTurnBinding): JsonObject[] => {
 
 const promptBody = (input: RuntimeTurnBinding, delivery: "queue" | "steer"): JsonObject => {
   const files = attachmentFiles(input);
+  const browserText = (input.attachments ?? [])
+    .filter((a) => a.kind === "browser-context" && a.browserContext)
+    .map((a) => formatBrowserContextForModel(a.browserContext!))
+    .join("\n\n");
+  const text = browserText
+    ? (input.text.trim() ? `${input.text}\n\n${browserText}` : browserText)
+    : input.text;
   return {
     prompt: {
-      text: input.text,
+      text,
       ...(files.length > 0 ? { files } : {}),
     },
     delivery,

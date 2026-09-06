@@ -135,10 +135,31 @@ const aggregate = async <T>(
   return result;
 };
 
+/** Route-local catalogs keep account/model identity scoped to the session's
+ * current runtime. A provider's empty model list means native default. */
+export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
+  return async (request) => {
+    const sessionId = request.url.searchParams.get("sessionId");
+    if (request.path !== "/api/runtime-catalog" || !sessionId || request.method !== "GET") return false;
+    const scoped = host.forSpace(request.space);
+    const session = await scoped.sessions.snapshot(sessionId);
+    const project = await scoped.projects.get(session.projectId);
+    if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
+    if (session.harnessTransition) throw Object.assign(new Error("Harness switch in progress"), { code: "conflict" });
+    const runtime = host.runtimes.forSession
+      ? await host.runtimes.forSession(session, session.worktreePath ?? project.path)
+      : await host.runtimes.forProject(project.id, session.worktreePath ?? project.path);
+    const [models, agents, capabilities] = await Promise.all([runtime.models(), runtime.agents(), runtime.capabilities()]);
+    request.json(200, { models, agents, capabilities, nativeDefault: models.length === 0, harnessId: runtime.harnessId }); return true;
+  };
+}
+
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   return {
-    remoteAccess: localOnlyRemoteAccess(["agent-profiles"]),
-    routes: profileRoutes({
+    remoteAccess: localOnlyRemoteAccess(["agent-profiles", "runtime-catalog"]),
+    routes: async (request) => {
+      if (await runtimeCatalogRoutes(host)(request)) return true;
+      return profileRoutes({
       store: host.store as unknown as ProfileStore,
       listModels: () => aggregate(
         host,
@@ -150,6 +171,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         async (projectId) => (await host.runtimes.forProject(projectId)).agents(),
         (agent) => agent.name,
       ),
-    }),
+      })(request);
+    },
   };
 }

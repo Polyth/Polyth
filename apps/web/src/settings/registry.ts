@@ -3,6 +3,7 @@
 // Search is diacritic-insensitive and groups hits by page; the view routes to
 // the page then focuses/flashes the exact row via its focusTarget.
 import { tr } from "../i18n/index.ts";
+import { assertOwnerCanReplace } from "../packages/ownership.ts";
 
 export interface SettingsSearchItem {
   id: string;
@@ -12,6 +13,7 @@ export interface SettingsSearchItem {
   keywords?: string[];
   /** data-settings-item value of the row to focus. */
   focusTarget: string;
+  ownerPackageId?: string;
 }
 
 export interface SettingsSearchHit {
@@ -25,13 +27,28 @@ export const fold = (s: string): string =>
 
 const registry = new Map<string, SettingsSearchItem>();
 
-/** Register items; duplicate ids overwrite (last registration wins) so a
- *  reloaded plugin never doubles its rows. Returns an unregister function. */
+/** Register items. Same-owner replacement is allowed; cross-owner collisions
+ *  throw. Unregister is identity-safe so a stale disposer cannot delete a
+ *  newer item. */
 export function registerSettingsItems(items: SettingsSearchItem[]): () => void {
-  const ids = items.map((i) => i.id);
-  for (const item of items) registry.set(item.id, item);
+  const registrations: SettingsSearchItem[] = [];
+  for (const item of items) {
+    const existing = registry.get(item.id);
+    if (existing) {
+      assertOwnerCanReplace({
+        registry: "settings search item",
+        id: item.id,
+        existingOwner: existing.ownerPackageId,
+        nextOwner: item.ownerPackageId,
+      });
+    }
+    registry.set(item.id, item);
+    registrations.push(item);
+  }
   return () => {
-    for (const id of ids) registry.delete(id);
+    for (const item of registrations) {
+      if (registry.get(item.id) === item) registry.delete(item.id);
+    }
   };
 }
 
@@ -63,7 +80,7 @@ export function searchSettingsItems(
 
 const BUILTIN_ITEMS: SettingsSearchItem[] = [
   { id: "general.language", pageId: "general", label: tr("settings.registry.language"), description: tr("settings.registry.interfaceLanguageAndRegionalFormatting"), keywords: ["locale", "translation", "rtl"], focusTarget: "general.language" },
-  { id: "projects.canvas", pageId: "projects", label: tr("settings.registry.projectCanvasSetup"), description: tr("settings.registry.perProjectStartingArrangementAndWidgets"), keywords: ["preset", "starting setup", "workspace", "canvas"], focusTarget: "projects.canvas" },
+  { id: "projects.canvas", pageId: "projects", label: tr("settings.pages.canvasSetup"), description: tr("settings.pages.chooseAStartingLayoutWidgetsAndWorkspace"), keywords: ["widgets", "layout", "workspace", "canvas"], focusTarget: "projects.canvas" },
   { id: "appearance.theme", pageId: "appearance", label: tr("settings.registry.theme"), description: tr("settings.registry.searchBundledSystemAndCustomColorThemes"), keywords: ["appearance", "dark", "light", "palette", "colors"], focusTarget: "appearance.theme" },
   { id: "appearance.background", pageId: "appearance", label: "Workspace background", description: "Choose a glass backdrop or add your own image", keywords: ["wallpaper", "image", "glass", "gradient"], focusTarget: "appearance.background" },
   { id: "appearance.glass", pageId: "appearance", label: "Glass surfaces", description: "Control matte transparency across the interface", keywords: ["blur", "transparency", "matte", "clear", "effects"], focusTarget: "appearance.glass" },

@@ -2,7 +2,7 @@ import type { PackageDescriptorDto } from "@polyth/contracts";
 
 interface PackageReconcileContext {
   packageStates: Map<string, boolean>;
-  applyCanonicalState(id: string): void;
+  applyCanonicalState(id: string): void | Promise<void>;
   notify(): void;
 }
 

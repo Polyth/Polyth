@@ -12,7 +12,6 @@ mkdirSync(outDir, { recursive: true });
 
 const projects = await (await fetch(`${base}/api/projects`)).json();
 const pid = process.env.POLYTH_QA_PID ?? projects[0]?.id;
-const projectIds = projects.map((p) => p.id);
 if (!pid) { console.error("no projects — seed one first"); process.exit(1); }
 
 const browser = await chromium.launch({
@@ -45,9 +44,6 @@ async function ctxPage(width, height, mobile, { statuses = true } = {}) {
     hasTouch: mobile,
   });
   const page = await ctx.newPage();
-  await page.addInitScript((ids) => {
-    for (const id of ids) localStorage.setItem(`polyth.projectSetup.v1.${id}`, "completed");
-  }, projectIds);
   if (statuses) await patchStatuses(page);
   await page.goto(base + "/", { waitUntil: "networkidle" }).catch(() => {});
   await page.waitForTimeout(1200);

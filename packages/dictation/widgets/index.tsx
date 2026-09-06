@@ -14,7 +14,7 @@ export default defineWebPackage((host) => () => {
       order: 30,
       component: VoicePage,
     }),
-    installVoice(),
+    installVoice(host),
     host.capabilities.register({
       id: "voice",
       label: "Voice input",

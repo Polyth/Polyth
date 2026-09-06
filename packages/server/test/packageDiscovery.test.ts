@@ -104,7 +104,7 @@ test("every server feature package owns its discoverable descriptor", async () =
   const packagesDir = join(import.meta.dirname, "../..");
   const discovered = await discoverServerPackages(packagesDir);
   const expected = discovered.map((pkg) => pkg.id);
-  assert.equal(expected.length, 26);
+  assert.equal(expected.length, 34);
   assert.deepEqual(expected, [...expected].sort());
   assert.deepEqual(
     discovered.map((pkg) => pkg.descriptor.id),

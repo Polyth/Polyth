@@ -33,6 +33,7 @@ import {
   type WidgetPlugin as HostWidgetPlugin,
 } from "../widgets/catalog.ts";
 import { registerWebReducer } from "./reducers.ts";
+import { registerProjectContext } from "./projectContext.ts";
 
 const snapshot = (): WebStoreSnapshot => {
   const state = getState();
@@ -48,14 +49,25 @@ const snapshot = (): WebStoreSnapshot => {
 
 export const webPackageHost: WebPackageHost = {
   slots: {
-    register: ({ slot, id, render, order, meta }) =>
-      registerSlot(slot, id, render, order, meta),
+    register: ({ slot, id, render, order, meta, ownerPackageId }) =>
+      registerSlot(slot, id, render, order, meta, ownerPackageId),
   },
   widgets: {
     register: (pluginId: string, definition: WidgetDefinition) =>
-      registerWidget({ ...definition, pluginId } as unknown as WidgetDef),
+      registerWidget({
+        ...definition,
+        pluginId,
+        ...(definition.ownerPackageId ? { ownerPackageId: definition.ownerPackageId } : {}),
+      } as unknown as WidgetDef),
     registerPlugin: (plugin: WidgetPlugin) =>
-      registerWidgetPlugin(plugin as unknown as HostWidgetPlugin),
+      registerWidgetPlugin({
+        ...plugin,
+        ...(plugin.ownerPackageId ? { ownerPackageId: plugin.ownerPackageId } : {}),
+        widgets: plugin.widgets?.map((widget) => ({
+          ...widget,
+          ...(widget.ownerPackageId ? { ownerPackageId: widget.ownerPackageId } : {}),
+        })),
+      } as unknown as HostWidgetPlugin),
   },
   surfaces: {
     register: (definition: SurfaceDefinition) =>
@@ -67,9 +79,12 @@ export const webPackageHost: WebPackageHost = {
   },
   settings: {
     registerPage: (definition: SettingsPageDefinition) =>
-      installSettingsPage(definition),
+      installSettingsPage({ ...definition, packageId: definition.packageId ?? "host" }),
     registerItems: (items: SettingsSearchItem[]) =>
       registerSettingsItems(items),
+  },
+  projectContext: {
+    register: (contribution) => registerProjectContext(contribution),
   },
   reducers: {
     register: registerWebReducer,

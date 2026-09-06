@@ -59,7 +59,8 @@ export function createProjectService(dataDir: string): ProjectRegistry {
   const file = `${dataDir}/projects.json`;
   let items: Project[] = [];
   try {
-    items = JSON.parse(readFileSync(file, "utf8"));
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as Project[];
+    items = parsed;
   } catch (err) {
     // Missing file = first run. Anything else (corrupt JSON, unreadable) keeps
     // empty in-memory state and does NOT rewrite the file with defaults.

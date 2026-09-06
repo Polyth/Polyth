@@ -17,6 +17,7 @@ function fakeRuntime(generatedTitle?: string, polledTitle?: string, polledTitleA
   let sessionId = "";
   let sessionReads = 0;
   return {
+    harnessId: "opencode",
     capabilities: async () => ({ streaming: true, permissions: true, questions: true, compaction: false, subagents: false }),
     models: async () => [],
     agents: async () => [],
@@ -311,6 +312,7 @@ test("project PATCH updates metadata and merges defaults; bad values rejected", 
   const upd = await projects.update!(p.id, { name: "renamed", color: "#a1b2c3", icon: "🚀" });
   assert.equal(upd.name, "renamed");
   assert.equal(upd.color, "#a1b2c3");
+  assert.equal(upd.icon, "🚀");
 
   await projects.update!(p.id, { defaults: { agent: "build" } });
   const merged = await projects.update!(p.id, { defaults: { groupingMode: "folders" } });

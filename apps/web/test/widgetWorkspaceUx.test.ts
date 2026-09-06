@@ -13,14 +13,6 @@ import {
   setWidgetVisible,
   widgetZoneOf,
 } from "../src/widgets/widgetLayout.ts";
-import {
-  applyProjectSetup,
-  createSetupDraft,
-  MAX_SETUP_WIDGETS,
-  MIN_SETUP_WIDGETS,
-  validSetupWidgetCount,
-  workflowOption,
-} from "../src/widgets/projectSetupLayout.ts";
 import { planWorkspaceCustomization } from "../src/widgets/workspaceCustomize.ts";
 
 const render = () => null;
@@ -189,33 +181,6 @@ test("plugin filters disambiguate colliding display names", () => {
   })));
   assert.deepEqual([...grouped.keys()], ["Tools — alpha-tools", "Tools — beta-tools", "Git"]);
   assert.equal(grouped.get("Tools — alpha-tools")?.length, 2);
-});
-
-test("project setup applies audience and exact widget visibility", async () => {
-  const layout = setWidgetVisible(createDefaultWidgetLayout(WIDGETS), "terminal.shell", true);
-  const draft = {
-    ...createSetupDraft("build-debug"),
-    audience: "power" as const,
-    widgetIds: ["git.recent"],
-  };
-  const next = applyProjectSetup(layout, draft, WIDGETS);
-  assert.equal(next.audience, "power");
-  assert.equal(next.widgets["core.chat"]?.visible, false);
-  assert.equal(next.widgets["git.recent"]?.visible, true);
-  assert.equal(next.widgets["terminal.shell"]?.visible, false);
-  assert.equal(workflowOption("build-debug").suggestedWidgetIds.length, 7);
-
-  const source = await readFile(new URL("../src/widgets/projectSetupLayout.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(source, /type:\s*"preset"|applyWidgetLayoutPreset/);
-});
-
-test("guided setup enforces its advertised five-to-eight unique widget range", () => {
-  assert.equal(MIN_SETUP_WIDGETS, 5);
-  assert.equal(MAX_SETUP_WIDGETS, 8);
-  assert.equal(validSetupWidgetCount(["1", "2", "3", "4"]), false);
-  assert.equal(validSetupWidgetCount(["1", "2", "3", "4", "5"]), true);
-  assert.equal(validSetupWidgetCount(["1", "2", "3", "4", "5", "5"]), false);
-  assert.equal(validSetupWidgetCount(["1", "2", "3", "4", "5", "6", "7", "8", "9"]), false);
 });
 
 test("missing plugin placeholders retain identity and placement without rendering plugin code", () => {

@@ -13,7 +13,8 @@ import {
   type SpeechRecognitionLike,
   type VoicePrefs,
 } from "@polyth/dictation";
-import { defineWidgetPlugin, registerWidgetPlugin } from "../../../apps/web/src/widgets/catalog.ts";
+import { defineWidgetPlugin } from "../../../apps/web/src/widgets/catalog.ts";
+import type { WebPackageHost } from "@polyth/web-sdk";
 import { requestComposerInsert } from "../../../apps/web/src/composerInsert.ts";
 import { getState, openSettingsPage, subscribeStore } from "../../../apps/web/src/store.ts";
 import { api } from "@polyth/session/web-api";
@@ -340,11 +341,11 @@ const VOICE_WIDGET_PLUGIN = defineWidgetPlugin({
 });
 
 /** Register the mic widget + auto read-aloud of newly completed replies.
- *  Idempotent and reversible so disabling the package removes every runtime
- *  contribution without losing the user's saved preferences. */
-export function installVoice(): () => void {
-  if (uninstallVoice) return uninstallVoice;
-  const unregisterWidget = registerWidgetPlugin(VOICE_WIDGET_PLUGIN);
+ *  A later call replaces the previous install. Disable removes runtime
+ *  contributions without losing saved preferences. */
+export function installVoice(host: WebPackageHost): () => void {
+  uninstallVoice?.();
+  const unregisterWidget = host.widgets.registerPlugin(VOICE_WIDGET_PLUGIN);
 
   // Auto-TTS: speak assistant/message events as they land in the active
   // session. Sessions are primed on first sight so history is never read.

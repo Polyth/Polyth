@@ -111,6 +111,7 @@ import { agentPickerDefaultLabel } from "../composerDefaults.ts";
 import { friendlyError, matchesSendShortcut, modKeyLabel, parseModelRef } from "../settings.ts";
 import { Icon } from "../icons.tsx";
 import ModelPicker from "@polyth/models/model-picker";
+import { useRuntimeCatalog } from "@polyth/models/runtime-catalog";
 import { modelSupportsThinking } from "@polyth/models/model-presentation";
 import { resolveProjectModelDefault, useSessionDefaults } from "../sessionDefaults.ts";
 import { contextTokensUsed } from "../reduce.ts";
@@ -433,13 +434,16 @@ export default function Composer({
   const [newSessionGoal, setNewSessionGoal] = useState(false);
   const [creatingSession, setCreatingSession] = useState(false);
   const profiles = useProfiles();
-  const models = useStore((s) => s.models);
-  const chatModels = models.filter(modelSupportsTextWorkflow);
-  const agents = useStore((s) => s.agents);
+  const globalModels = useStore((s) => s.models);
+  const globalAgents = useStore((s) => s.agents);
   const rolePrefs = useRolePrefs();
   const settings = useStore((s) => s.settings);
   const sessionDefaults = useSessionDefaults();
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
+  const routeCatalog = useRuntimeCatalog(session, globalModels, globalAgents);
+  const models = routeCatalog.models;
+  const agents = routeCatalog.agents;
+  const chatModels = models.filter(modelSupportsTextWorkflow);
   const activeSessionSeq = useStore((s) => {
     const events = s.activeSessionId ? s.events[s.activeSessionId] : undefined;
     return events?.at(-1)?.seq ?? 0;
@@ -483,7 +487,7 @@ export default function Composer({
       setAbortPending(false);
     }
   }, [canStop]);
-  const noModels = chatModels.length === 0;
+  const noModels = chatModels.length === 0 && !routeCatalog.nativeDefault;
   // The server-known cause, when there is one. "Check that the backend is
   // running" is a guess; this is what actually went wrong.
   const runtimeUnavailable = useStore((s) => s.runtimeUnavailable);
@@ -552,6 +556,15 @@ export default function Composer({
   // through composerConfig transitions so profile and explicit overrides
   // clear each other.
   const [cfg, setCfg] = useState<ComposerConfig>(() => loadComposerConfig(session?.id ?? null));
+  const priorRoute = useRef({ sessionId: session?.id, harnessId: session?.resolvedHarnessId });
+  useEffect(() => {
+    if (priorRoute.current.sessionId === session?.id && priorRoute.current.harnessId !== session?.resolvedHarnessId) {
+      const next: ComposerConfig = { profile: { kind: "inherit" } };
+      saveComposerConfig(session?.id, next);
+      setCfg(next);
+    }
+    priorRoute.current = { sessionId: session?.id, harnessId: session?.resolvedHarnessId };
+  }, [session?.id, session?.resolvedHarnessId]);
   const updateCfg = useCallback((next: ComposerConfig) => {
     setCfg(next);
     saveComposerConfig(sessionIdRef.current, next);
@@ -948,7 +961,7 @@ export default function Composer({
       const thinking = typeof requestedThinking === "string" && descriptor?.variants?.includes(requestedThinking)
         ? requestedThinking
         : undefined;
-      const selectedModel = selected
+      const selectedModel = selected && descriptor
         ? { providerID: selected.providerID, modelID: selected.modelID, ...(thinking ? { variant: thinking } : {}) }
         : undefined;
       const profile = wireProfileId(cfgSent);
@@ -1063,7 +1076,7 @@ export default function Composer({
       && selectedDescriptor?.variants?.includes(requestedThinking)
       ? requestedThinking
       : undefined;
-    const sentModel = selected
+    const sentModel = selected && selectedDescriptor
       ? {
           providerID: selected.providerID,
           modelID: selected.modelID,
@@ -1516,7 +1529,7 @@ export default function Composer({
   // the editor (where the effort track has room to drag); the desktop rail
   // keeps the same controls under the text. One element, one owner — only
   // the placement differs.
-  const modelControl = !noModels && (
+  const modelControl = chatModels.length > 0 && (
       <ModelPicker
         models={chatModels}
         value={cfg.model}

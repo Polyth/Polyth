@@ -437,7 +437,6 @@ async function openApp(options: OpenOptions): Promise<Page> {
     storage: Record<string, string>;
   }) => {
     localStorage.setItem("polyth.prefs", persona);
-    localStorage.setItem(`polyth.projectSetup.v1.${projectId}`, "completed");
     localStorage.setItem(`polyth.workspaceMode.v1.${projectId}`, "chat");
     localStorage.setItem(`polyth.capabilityLayout.v1.${projectId}`, JSON.stringify({
       version: 1,

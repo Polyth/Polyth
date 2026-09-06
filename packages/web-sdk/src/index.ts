@@ -16,6 +16,8 @@ export interface SlotRegistration {
   render: (props: Record<string, unknown>) => ReactNode;
   order?: number;
   meta?: Record<string, unknown>;
+  /** Host-bound owner package id. Package callers should omit this. */
+  ownerPackageId?: string;
 }
 
 export interface WidgetRenderContext extends Record<string, unknown> {
@@ -43,6 +45,12 @@ export type { PanelItemSize } from "@polyth/contracts";
 
 export interface WidgetDefinition {
   id: string;
+  /**
+   * Host-bound owner package id. Package callers should omit this; the
+   * activation scope stamps it. Semantic grouping uses `WidgetPlugin.id` /
+   * the `pluginId` argument to `widgets.register`, not this field.
+   */
+  ownerPackageId?: string;
   title: string;
   description: string;
   kind?: WidgetKind;
@@ -76,9 +84,12 @@ export interface WidgetDefinition {
 }
 
 export interface WidgetPlugin {
+  /** Semantic widget group id used by Widget Library grouping/filtering. */
   id: string;
   name: string;
   widgets?: readonly WidgetDefinition[];
+  /** Host-bound owner package id. Package callers should omit this. */
+  ownerPackageId?: string;
 }
 
 export interface SurfaceContext {
@@ -110,6 +121,8 @@ export interface SurfacePresentation {
 
 export interface SurfaceDefinition {
   id: string;
+  /** Host-bound owner package id. Package callers should omit this. */
+  ownerPackageId?: string;
   title: string;
   /** One-line purpose shown under the title in the shared module header. */
   description?: string;
@@ -126,6 +139,8 @@ export interface SurfaceDefinition {
 
 export interface CapabilityDefinition {
   id: string;
+  /** Host-bound owner package id. Package callers should omit this. */
+  ownerPackageId?: string;
   label: string;
   plainDescription: string;
   technicalLabel?: string;
@@ -144,13 +159,43 @@ export interface SettingsSearchItem {
   description?: string;
   keywords?: string[];
   focusTarget: string;
+  /** Host-bound owner package id. Package callers should omit this. */
+  ownerPackageId?: string;
 }
 
 export type SettingsPageGroup = "Workspace" | "Engineering" | "Customize" | "System";
 
-export interface SettingsPageDefinition {
+export interface ProjectContextItem {
+  label: string;
+  value: string;
+}
+
+export interface ProjectContextSnapshot {
+  title: string;
+  items?: readonly ProjectContextItem[];
+  recommendedWidgetIds?: readonly string[];
+  needsSetup?: {
+    label: string;
+    open(): void;
+  };
+}
+
+export interface ProjectContextContribution {
+  /** Semantic contribution id. Owner package identity is host-bound. */
   id: string;
-  packageId: string;
+  order?: number;
+  getSnapshot(projectId: string): ProjectContextSnapshot | null;
+  subscribe?(listener: () => void): Unregister;
+}
+
+export interface SettingsPageDefinition {
+  /** Semantic settings route id (for example `voice`). */
+  id: string;
+  /**
+   * Owner package id. Optional for package callers — the activation scope
+   * binds it. Do not use this as the settings route id.
+   */
+  packageId?: string;
   label: string;
   group: SettingsPageGroup;
   icon?: string;
@@ -202,6 +247,9 @@ export interface WebPackageHost {
   settings: {
     registerPage(definition: SettingsPageDefinition): Unregister;
     registerItems(items: SettingsSearchItem[]): Unregister;
+  };
+  projectContext: {
+    register(contribution: ProjectContextContribution): Unregister;
   };
   reducers: {
     register<State = unknown>(eventType: string, reducer: WebEventReducer<State>): Unregister;

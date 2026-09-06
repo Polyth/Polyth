@@ -1185,7 +1185,7 @@ export function createTaskTrackerInstaller(host: WebPackageHost): () => () => vo
   configureTaskTrackerHost(host);
   let uninstall: (() => void) | null = null;
   return () => {
-    if (uninstall) return uninstall;
+    uninstall?.();
     const unregister = host.widgets.registerPlugin(TASK_TRACKER_WIDGET_PLUGIN);
     const current = () => {
       unregister();

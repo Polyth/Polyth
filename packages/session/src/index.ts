@@ -4,10 +4,11 @@
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 
-import { MODEL_VISIBLE_TYPES } from "@polyth/contracts";
+import { MODEL_VISIBLE_TYPES, formatBrowserContextForModel } from "@polyth/contracts";
 import type {
   AgentProfile,
   AttachmentRef,
+  BrowserContext,
   CanonicalEventInput,
   ChildSnapshotInput,
   ChildSnapshotResult,
@@ -65,6 +66,8 @@ import {
 } from "./recovery.ts";
 import { effectiveHistory, recoveredUserText } from "./history.ts";
 
+export { redactContinuity } from "./continuity.ts";
+export type { ContinuityWorkspace } from "./continuity.ts";
 export { sessionRetentionSummary } from "./retention.ts";
 export type { SessionRetentionSummary } from "./retention.ts";
 
@@ -1552,8 +1555,27 @@ export function createStore(dbPath: string): Store {
       appendEpochRequestExpirations(input.sessionId, oldEpoch, priorEvents);
       appendEpochStateSnapshots(input.sessionId, priorEvents);
 
+      if (input.harness && projection.harnessTransition?.id !== input.harness.transitionId) {
+        throw Object.assign(new Error("harness switch intent changed"), { code: "conflict" });
+      }
+      if (input.harness) appendInTransaction(input.sessionId, "harness/switched", {
+        transitionId: input.harness.transitionId,
+        from: projection.resolvedHarnessId ?? "",
+        to: input.harness.leg.harnessId,
+        ...(projection.runtimeLeg ? { closedLeg: { ...projection.runtimeLeg, endedAt: Date.now() } } : {}),
+        leg: { ...input.harness.leg },
+      }, { ignorable: true });
       const nextProjection: SessionProjection = {
         ...projection,
+        ...(input.harness ? {
+          harness: input.harness.selection,
+          resolvedHarnessId: input.harness.leg.harnessId,
+          runtimeLeg: input.harness.leg,
+          harnessTransition: undefined,
+          model: undefined,
+          agent: undefined,
+          agentProfileId: undefined,
+        } : projection.runtimeLeg ? { runtimeLeg: { ...projection.runtimeLeg, id: randomUUID(), nativeSessionId: replacement.backendSessionId, startedAt: Date.now(), canonicalThroughSeq: 0, bootstrap: "continuity" as const } } : {}),
         backendSessionId: replacement.backendSessionId,
         runtimeBinding: replacement,
         status: "epoch-pending",
@@ -1673,6 +1695,41 @@ export function createStore(dbPath: string): Store {
   ): Promise<SessionEvent> {
     return Promise.resolve(transaction(() =>
       appendInTransaction(sessionId, type, data, opts)));
+  }
+
+  async function appendBatch(
+    sessionId: string,
+    inputs: Array<CanonicalEventInput & { time?: number }>,
+    opts: { projection?: SessionProjection; expectedSeq?: number; markRead?: boolean } = {},
+  ): Promise<SessionEvent[]> {
+    if (inputs.length > 2_000 || (opts.projection && opts.projection.id !== sessionId)) {
+      throw Object.assign(new Error("invalid event batch"), { code: "invalid-input" });
+    }
+    return Promise.resolve(transaction(() => {
+      const row = prep("SELECT COALESCE(MAX(seq), 0) AS seq FROM events WHERE session_id = ?")
+        .get(sessionId) as { seq: number };
+      if (opts.expectedSeq !== undefined && Number(row.seq) !== opts.expectedSeq) {
+        throw Object.assign(new Error("session changed during publication"), { code: "conflict" });
+      }
+      const events = inputs.map((input) => {
+        const event = appendInputInTransaction(sessionId, input);
+        if (input.time !== undefined && Number.isFinite(input.time)) {
+          event.time = input.time;
+          prep("UPDATE events SET time = ? WHERE session_id = ? AND seq = ?")
+            .run(event.time, sessionId, event.seq);
+        }
+        return event;
+      });
+      if (opts.projection) {
+        prep("INSERT INTO projections (session_id, data) VALUES (?, ?) ON CONFLICT(session_id) DO UPDATE SET data = excluded.data")
+          .run(sessionId, JSON.stringify(opts.projection));
+      }
+      if (opts.markRead) {
+        prep("INSERT INTO session_read (session_id, seq) VALUES (?, ?) ON CONFLICT(session_id) DO UPDATE SET seq = MAX(session_read.seq, excluded.seq)")
+          .run(sessionId, events.at(-1)?.seq ?? row.seq);
+      }
+      return events;
+    }));
   }
 
   // ------------------------------------------------------------- reads
@@ -3445,6 +3502,7 @@ export function createStore(dbPath: string): Store {
 
   return {
     append,
+    appendBatch,
     events,
     hasEventOfType,
     latestSeq,
@@ -3620,7 +3678,31 @@ export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
     const last = out[out.length - 1];
     if (!last || last.role !== "user") return;
     for (const raw of attachments) {
-      const a = raw as { name?: unknown; mime?: unknown; path?: unknown; url?: unknown; range?: unknown };
+      const a = raw as {
+        name?: unknown;
+        mime?: unknown;
+        path?: unknown;
+        url?: unknown;
+        range?: unknown;
+        kind?: unknown;
+        browserContext?: unknown;
+      };
+      if (a.kind === "browser-context") {
+        const ctx = a.browserContext as BrowserContext | undefined;
+        if (ctx && typeof ctx === "object" && typeof ctx.url === "string") {
+          last.parts.push({ type: "text", text: formatBrowserContextForModel(ctx) });
+          const shot = ctx.crop ?? ctx.screenshot;
+          if (shot?.localPath && shot.mime.startsWith("image/")) {
+            last.parts.push({
+              type: "file",
+              name: typeof a.name === "string" ? a.name : "browser-capture",
+              mime: shot.mime,
+              path: shot.localPath,
+            });
+          }
+        }
+        continue;
+      }
       if (typeof a?.name !== "string" || typeof a?.mime !== "string") continue;
       const range = Array.isArray(a.range) && a.range.length === 2
         && Number.isSafeInteger(a.range[0]) && Number.isSafeInteger(a.range[1])
@@ -3762,6 +3844,7 @@ export interface RuntimeEpochRecoveryPlan {
 }
 
 export interface PlanRuntimeEpochRecoveryInput {
+  workspace?: import("./continuity.ts").ContinuityWorkspace;
   events: readonly SessionEvent[];
   operations: readonly DurableOperation[];
   heldQueueIds?: ReadonlySet<string>;
@@ -3861,11 +3944,12 @@ export function selectConfirmedEpochRecoveryEvents(input: {
 export function planRuntimeEpochRecovery(
   input: PlanRuntimeEpochRecoveryInput,
 ): RuntimeEpochRecoveryPlan | null {
-  const epochMarkers = input.events.filter((event) => event.type === "runtime/epoch-replaced");
+  const epochMarkers = input.events.filter((event) => event.type === "runtime/epoch-replaced" || event.type === "session/snapshot-imported");
   const marker = epochMarkers.at(-1);
   if (!marker) return null;
-  const epoch = Number((marker.data as { new?: { epoch?: unknown } }).new?.epoch);
-  if (!Number.isSafeInteger(epoch) || epoch <= 0) return null;
+  const snapshot = marker.type === "session/snapshot-imported";
+  const epoch = snapshot ? 0 : Number((marker.data as { new?: { epoch?: unknown } }).new?.epoch);
+  if (!Number.isSafeInteger(epoch) || (!snapshot && epoch <= 0)) return null;
 
   const operationByOwnerSeq = new Map(
     input.operations
@@ -3902,6 +3986,7 @@ export function planRuntimeEpochRecovery(
   const built = buildRuntimeEpochRecoveryContext({
     epoch,
     markerSeq: marker.seq,
+    ...(snapshot ? { reason: "snapshot" as const, workspace: input.workspace } : marker.data.reason === "harness-switch" ? { reason: "harness-switch" as const, workspace: input.workspace } : {}),
     dialogue: dialogueFromMessages(deriveMessages(safeEvents)),
     ...(objective ? { objective } : {}),
     pinned,

@@ -39,13 +39,15 @@ test("task tracker web entry installs and disposes through the bounded host", ()
 
   const install = createTaskTrackerInstaller(host);
   const first = install();
-  const second = install();
-  assert.equal(first, second);
   assert.deepEqual(registered, [TASK_TRACKER_WIDGET_PLUGIN]);
-  first();
+  const second = install();
+  assert.notEqual(first, second, "a later install replaces the previous activation");
+  assert.equal(registered.length, 2);
   assert.equal(disposals, 1);
+  second();
+  assert.equal(disposals, 2);
 
   install()();
-  assert.equal(registered.length, 2);
-  assert.equal(disposals, 2);
+  assert.equal(registered.length, 3);
+  assert.equal(disposals, 3);
 });

@@ -1,0 +1,26 @@
+{
+  "name": "@polyth/backend-claude",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@polyth/contracts": "0.1.0",
+    "@polyth/harness-runtime": "0.1.0",
+    "@polyth/plugins": "0.1.0"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "Claude Code harness",
+      "description": "Claude Code through its Agent SDK",
+      "core": false,
+      "enabled": true,
+      "hasSettings": false
+    }
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.263"
+  }
+}

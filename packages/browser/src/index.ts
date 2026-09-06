@@ -6,6 +6,8 @@ import { randomUUID } from "node:crypto";
 import type {
   BrowserAction,
   BrowserColorScheme,
+  BrowserContext,
+  BrowserContextCaptureInput,
   BrowserObservation,
   BrowserSessionDto,
   BrowserTarget,
@@ -13,6 +15,8 @@ import type {
   JsonObject,
   JsonValue,
 } from "@polyth/contracts";
+import type { BrowserArtifactStore } from "./artifacts.ts";
+import { captureBrowserContext } from "./context.ts";
 import type { BrowserDriver, DriverPage, DriverPageEvent } from "./driver.ts";
 import { checkUrl, originOf, type UrlPolicyOptions } from "./policy.ts";
 import { redactObservationText } from "./redact.ts";
@@ -22,6 +26,8 @@ export { createFakeDriver, demoWeb, type FakeWeb, type FakePage } from "./fake.t
 export { checkUrl, isLoopbackHost, isPrivateAddress, isLoopbackAddress, originAliases, originOf, type UrlDecision, type UrlPolicyOptions, type Resolver } from "./policy.ts";
 export { redactObservationText, type RedactOptions } from "./redact.ts";
 export { createChromiumDriver, findChromiumExecutable, CHROMIUM_CANDIDATE_PATHS } from "./chromium.ts";
+export { createBrowserArtifactStore, type BrowserArtifactStore, BROWSER_ARTIFACT_TTL_MS, BROWSER_ARTIFACT_MAX_FILES } from "./artifacts.ts";
+export { captureBrowserContext } from "./context.ts";
 
 export interface BrowserFrame {
   browserSessionId: string;
@@ -86,6 +92,7 @@ export interface BrowserService {
   navigate(id: string, url: string, actor: "user" | "agent"): Promise<BrowserSessionDto>;
   action(id: string, action: BrowserAction, actor: "user" | "agent"): Promise<{ actionId: string; session: BrowserSessionDto; result?: JsonObject }>;
   observe(id: string, opts?: BrowserObserveOptions): Promise<ObservationWithShot>;
+  captureContext(id: string, input: BrowserContextCaptureInput, artifacts: BrowserArtifactStore): Promise<BrowserContext>;
   close(id: string): Promise<void>;
   closeAll(): Promise<void>;
   pauseAgent(id: string, paused: boolean): void;
@@ -170,11 +177,43 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
   };
 
   /** Serialize user+agent work on one session; a shared queue is what makes
-   *  "user and agent operate the same context" safe. */
-  const enqueue = <T>(s: SessionState, work: () => Promise<T>): Promise<T> => {
-    const run = s.queue.then(work, work);
+   *  "user and agent operate the same context" safe. Agent work re-checks
+   *  pause immediately before execution so Take control is authoritative. */
+  const enqueue = <T>(s: SessionState, work: () => Promise<T>, actor?: "user" | "agent"): Promise<T> => {
+    const gated = async (): Promise<T> => {
+      if (actor === "agent" && s.agentPaused) {
+        throw err("agent-paused", "agent control is paused for this browser session");
+      }
+      return work();
+    };
+    const run = s.queue.then(gated, gated);
     s.queue = run.catch(() => undefined);
     return run;
+  };
+
+  const withController = async <T>(
+    s: SessionState,
+    actor: "user" | "agent",
+    fn: () => Promise<T>,
+    extra?: { actionId?: string; actionKind?: string },
+  ): Promise<T> => {
+    if (extra?.actionKind) {
+      emit({
+        browserSessionId: s.dto.id,
+        kind: "action",
+        actor,
+        actionId: extra.actionId,
+        message: extra.actionKind,
+      });
+    }
+    s.dto.controller = actor;
+    emit({ browserSessionId: s.dto.id, kind: "controller", actor, actionId: extra?.actionId });
+    try {
+      return await fn();
+    } finally {
+      delete s.dto.controller;
+      emit({ browserSessionId: s.dto.id, kind: "controller", actionId: extra?.actionId });
+    }
   };
 
   const withTimeout = async <T>(p: Promise<T>, ms: number, what: string): Promise<T> => {
@@ -232,6 +271,8 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
         colorScheme: input.colorScheme ?? "no-preference",
         revision: 0,
         engine: driver.engine,
+        agentPaused: false,
+        viewportMode: "responsive",
       };
       const page = await driver.open({
         ...viewport,
@@ -318,12 +359,12 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
         emit({ browserSessionId: id, kind: "navigation-blocked", url, message: decision.reason });
         throw err(decision.code, decision.reason);
       }
-      return enqueue(s, async () => {
+      return enqueue(s, async () => withController(s, actor, async () => {
         await withTimeout(s.page.goto(decision.url), actionTimeoutMs, "navigate");
         syncNav(s);
         await captureFrame(s);
         return { ...s.dto };
-      });
+      }), actor);
     },
 
     async action(id, action, actor) {
@@ -331,18 +372,25 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
       if (actor === "agent" && s.agentPaused) throw err("agent-paused", "agent control is paused for this browser session");
       const actionId = randomUUID();
       validateTargets(action, s.dto.revision);
-      return enqueue(s, async () => {
-        emit({ browserSessionId: id, kind: "action", actor, actionId, message: action.kind });
+      return enqueue(s, async () => withController(s, actor, async () => {
         let result: JsonObject | undefined;
         const work = async (): Promise<void> => {
           switch (action.kind) {
-            case "click": return s.page.click(action.target);
+            case "click": {
+              const hit = await s.page.click(action.target);
+              if (hit && Object.keys(hit).length) result = redactJsonObject(hit, opts.secrets ?? []);
+              return;
+            }
             case "point": {
               result = redactJsonObject(await s.page.point(action.target.point), opts.secrets ?? []);
               return;
             }
             case "type": return s.page.type(action.target, action.text, action.submit);
-            case "press": return s.page.press(action.key);
+            case "press": {
+              const hit = await s.page.press(action.key);
+              if (hit && Object.keys(hit).length) result = redactJsonObject(hit, opts.secrets ?? []);
+              return;
+            }
             case "scroll": return s.page.scroll(action.x ?? 0, action.y ?? 0, action.target);
             case "select": return s.page.select(action.target, action.value);
             case "wait": return s.page.wait(action.condition, action.value, Math.min(action.timeoutMs ?? actionTimeoutMs, actionTimeoutMs));
@@ -356,6 +404,9 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
               };
               await s.page.resize(viewport);
               s.dto.viewport = { ...s.dto.viewport, ...viewport };
+              if (action.mode === "responsive" || action.mode === "preset" || action.mode === "custom") {
+                s.dto.viewportMode = action.mode;
+              }
               return;
             }
             case "color-scheme": {
@@ -378,7 +429,7 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
         // element geometry still describes the frame the user clicked.
         if (action.kind !== "point") await captureFrame(s);
         return { actionId, session: { ...s.dto }, ...(result ? { result } : {}) };
-      });
+      }, { actionId, actionKind: action.kind }), actor);
     },
 
     async observe(id, o = {}) {
@@ -399,6 +450,18 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
       });
     },
 
+    async captureContext(id, input, artifacts) {
+      const s = stateOf(id);
+      return enqueue(s, async () =>
+        captureBrowserContext({
+          input,
+          session: s.dto,
+          page: s.page,
+          artifacts,
+          secrets: opts.secrets ?? [],
+        }));
+    },
+
     close: doClose,
 
     async closeAll() {
@@ -409,6 +472,7 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
     pauseAgent(id, paused) {
       const s = stateOf(id);
       s.agentPaused = paused;
+      s.dto.agentPaused = paused;
       emit({ browserSessionId: id, kind: paused ? "agent-paused" : "agent-resumed" });
     },
 

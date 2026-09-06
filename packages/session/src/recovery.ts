@@ -2,6 +2,7 @@
 // Hard caps stay 40 messages / 16k characters. Budget is character length:
 // this repo has no tokenizer, and we do not add one (≈ chars/4 tokens).
 
+import { redactContinuity, type ContinuityWorkspace } from "./continuity.ts";
 import type { ModelMessage, SessionEvent } from "@polyth/contracts";
 
 /** Do not raise these ceilings. */
@@ -45,6 +46,8 @@ export interface RuntimeEpochRecoveryKnowledge {
 }
 
 export interface RuntimeEpochRecoveryInput {
+  reason?: "harness-switch" | "snapshot";
+  workspace?: ContinuityWorkspace;
   epoch: number;
   markerSeq: number;
   /** Confirmed, effective, rewind-respecting user/assistant lines, oldest first. */
@@ -87,7 +90,7 @@ const RECOVERY_CLOSE = "</polyth-runtime-epoch-recovery>";
 
 /** User-controlled text must not emit a second valid closing wrapper. */
 export function escapeRecoveryText(text: string): string {
-  return text.split(RECOVERY_CLOSE).join("</ polyth-runtime-epoch-recovery>");
+  return redactContinuity(text).split(RECOVERY_CLOSE).join("</ polyth-runtime-epoch-recovery>");
 }
 
 const SECTION_INTENT = "Session intent / active instructions";
@@ -191,11 +194,15 @@ export function compactionSummariesFromEvents(events: readonly SessionEvent[]): 
 export function buildRuntimeEpochRecoveryContext(
   input: RuntimeEpochRecoveryInput,
 ): RuntimeEpochRecoveryBuild {
+  input = JSON.parse(JSON.stringify(input, (_key, value) => typeof value === "string" ? redactContinuity(value) : value)) as RuntimeEpochRecoveryInput;
   const prefix = [
     `<polyth-runtime-epoch-recovery epoch="${input.epoch}" marker-seq="${input.markerSeq}">`,
     "Recovery context",
   ].join("\n");
-  const note = ["Recovery note:", ...EPOCH_RECOVERY_NOTE_LINES].join("\n");
+  const note = ["Recovery note:", ...(input.reason === "snapshot" ? ["This conversation was imported as a Snapshot. Polyth owns its future history.", "Only confirmed canonical dialogue was transferred."] : EPOCH_RECOVERY_NOTE_LINES),
+    ...(input.reason ? ["The workspace is authoritative. Inspect files before relying on previous work."] : []),
+    ...(input.workspace ? ["Current workspace: " + JSON.stringify(input.workspace)] : []),
+  ].join("\n");
   const suffix = RECOVERY_CLOSE;
   const footerSlack = 220;
   const fixed = prefix.length + suffix.length + note.length + 8;

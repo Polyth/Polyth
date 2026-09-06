@@ -4,8 +4,8 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   activateProject,
   applyProjectUpsert,
+  openSettingsPage,
   setAgents,
-  setOverlay,
   setUiError,
   updateSettings,
   useStore,
@@ -911,7 +911,7 @@ export function ProjectsPage() {
               size="sm"
               onClick={() => {
                 activateProject(p.id);
-                setOverlay("onboarding");
+                openSettingsPage("widgets");
               }}
             >{tr("settings.pages.configureCanvas")}</Button>
           </div>

@@ -56,13 +56,11 @@ async function open({
     reducedMotion,
     serviceWorkers: "block",
   });
-  await context.addInitScript(({ ids, locale, prefs, tourPrefs }) => {
+  await context.addInitScript(({ locale, prefs, tourPrefs }) => {
     localStorage.setItem("polyth.prefs", prefs);
     localStorage.setItem("polyth.packageTours.v1", tourPrefs);
     localStorage.setItem("polyth.locale", locale);
-    for (const id of ids) localStorage.setItem(`polyth.projectSetup.v1.${id}`, "completed");
   }, {
-    ids: [...projects.map((candidate) => candidate.id), "w2-project", "w3a-project"],
     locale,
     prefs,
     tourPrefs,

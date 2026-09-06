@@ -1,0 +1,7 @@
+.pkg-harnesses.pkg-harnesses-settings { container: harnesses / inline-size; }
+.pkg-harnesses.pkg-harnesses-picker, .pkg-harnesses .pkg-harnesses-line { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.pkg-harnesses.pkg-harnesses-settings { display: grid; gap: var(--space-4); }
+.pkg-harnesses .pkg-harnesses-row { display: grid; gap: var(--space-3); border-bottom: 1px solid var(--border); padding-block: var(--space-4); }
+.pkg-harnesses.pkg-harnesses-muted, .pkg-harnesses .pkg-harnesses-muted { color: var(--muted); font-size: var(--font-meta); }
+.pkg-harnesses .pkg-harnesses-command { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); font-size: var(--font-technical); background: var(--sunken); padding: var(--space-3); border-radius: var(--radius-control); }
+@container harnesses (max-width: 420px) { .pkg-harnesses .pkg-harnesses-line { align-items: flex-start; } }

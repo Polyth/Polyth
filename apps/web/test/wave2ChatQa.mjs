@@ -34,7 +34,7 @@ async function open(width, height, path, extra = {}) {
   });
   await context.addInitScript((entries) => {
     for (const [k, v] of Object.entries(entries)) localStorage.setItem(k, v);
-  }, { "polyth.prefs": PERSONA, "polyth.projectSetup.v1.w2-project": "completed" });
+  }, { "polyth.prefs": PERSONA });
   const page = await context.newPage();
   await page.goto(BASE + path, { waitUntil: "load" });
   await page.waitForSelector(".app", { timeout: 15000 });

@@ -14,9 +14,12 @@ import {
   type CapabilityTier, type ResolvedPlacement, type PlacementOverride,
 } from "./capabilityLayout.ts";
 import { tr } from "./i18n/index.ts";
+import { assertOwnerCanReplace } from "./packages/ownership.ts";
 
 export interface CapabilityDescriptor {
   id: string;
+  /** Host-bound owner package. Missing means a host/core contribution. */
+  ownerPackageId?: string;
   label: string;
   plainDescription: string;
   technicalLabel?: string;
@@ -101,9 +104,18 @@ function bump(): void {
   for (const l of [...listeners]) l();
 }
 
-/** Register (or replace by id — disposal is by identity, matching the surface
- *  registry contract). Returns an unregister function. */
+/** Register (or same-owner replace by id). Cross-owner collisions throw.
+ *  Disposal is by identity. */
 export function registerCapability(descriptor: CapabilityDescriptor): () => void {
+  const existing = registry.get(descriptor.id);
+  if (existing) {
+    assertOwnerCanReplace({
+      registry: "capability",
+      id: descriptor.id,
+      existingOwner: existing.ownerPackageId,
+      nextOwner: descriptor.ownerPackageId,
+    });
+  }
   registry.set(descriptor.id, descriptor);
   bump();
   return () => {

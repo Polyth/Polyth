@@ -21,15 +21,50 @@ import EmptyState from "./EmptyState.tsx";
 import { Button } from "./ui/index.ts";
 import { getLocale, tr } from "../i18n/index.ts";
 import { loadOlderEvents } from "../init.ts";
+import { useProjectContextSnapshots } from "../packages/projectContext.ts";
+import type { ProjectContextEntry } from "../packages/projectContext.ts";
 
 const NO_EVENTS: SessionEvent[] = [];
 
+export function ProjectContextList({ entries }: { entries: readonly ProjectContextEntry[] }) {
+  if (entries.length === 0) return null;
+  return (
+    <div>
+      {entries.map((entry) => (
+        <section key={entry.id} data-project-context={entry.id} data-owner-package={entry.ownerPackageId}>
+          <div className="stat-label">{entry.snapshot.title}</div>
+          {(entry.snapshot.items ?? []).map((item) => (
+            <div key={`${item.label}:${item.value}`} className="stat-row">
+              <span className="k">{item.label}</span>
+              <span>{item.value}</span>
+            </div>
+          ))}
+          {entry.snapshot.needsSetup && (
+            <div className="stat-row">
+              <Button type="button" size="sm" onClick={() => entry.snapshot.needsSetup!.open()}>
+                {entry.snapshot.needsSetup.label}
+              </Button>
+            </div>
+          )}
+        </section>
+      ))}
+    </div>
+  );
+}
+
 function ContextView() {
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
+  const projectId = useStore((s) => s.activeProjectId);
+  const packageContext = useProjectContextSnapshots(projectId);
   const models = useStore((s) => s.models);
   const model = useActiveModel();
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? NO_EVENTS);
-  if (!session) return <div className="rail-empty">{tr("railsurfaces.sessionStatusUsageAndPinnedContextWill")}</div>;
+  if (!session) {
+    if (packageContext.length === 0) {
+      return <div className="rail-empty">{tr("railsurfaces.sessionStatusUsageAndPinnedContextWill")}</div>;
+    }
+    return <ProjectContextList entries={packageContext} />;
+  }
 
   // Pinned messages = context/pinned minus context/unpinned (last event wins).
   const pinned = new Map<number, boolean>();
@@ -53,6 +88,7 @@ function ContextView() {
 
   return (
     <div>
+      <ProjectContextList entries={packageContext} />
       <div className="stat-row">
         <span className="k">{tr("railsurfaces.status")}</span>
         <span className="status-line rail-status-line">

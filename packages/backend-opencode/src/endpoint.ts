@@ -1,3 +1,4 @@
+import { createProcessAuthority } from "@polyth/harness-runtime";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -453,6 +454,7 @@ export interface OwnedLocalEndpointOptions {
 
 interface StartedLocalChild {
   child: ChildProcess;
+  authority?: Awaited<ReturnType<typeof createProcessAuthority>>;
   port: number;
   hostname: string;
 }
@@ -465,6 +467,7 @@ const startLocalChildOnce = async (
   pidFile: string,
   readIdentity: ProcessIdentityReader,
   runtime: PreparedOpenCodeRuntime,
+  incarnation: { authorityId: string; generation: number },
 ): Promise<StartedLocalChild> => {
   let env = { ...process.env };
   // OpenCode shells out constantly (git, ripgrep, LSP servers, bun/node for
@@ -482,12 +485,14 @@ const startLocalChildOnce = async (
   // The token is not an OpenCode credential. It lets child wrappers and
   // diagnostics identify the exact Polyth-owned instance.
   env.POLYTH_OPENCODE_INSTANCE_TOKEN = instanceToken;
-  const spawnProcess = options.spawn ?? spawn;
+  const authority = !options.spawn && process.platform === "linux" ? await createProcessAuthority(`${pidFile}.supervisor.json`, false, incarnation) : undefined;
+  const spawnProcess = options.spawn ?? (authority ? authority.spawn : spawn);
   const child = spawnProcess(
     runtime.binary.executablePath,
     ["serve", "--hostname", hostname, "--port", String(port)],
     {
       cwd: resolve(options.cwd),
+      detached: process.platform === "linux",
       env,
       stdio: ["ignore", "pipe", "pipe"],
     },
@@ -535,9 +540,10 @@ const startLocalChildOnce = async (
     child.stderr?.resume();
     await runtime.secureDatabaseFiles();
     await writePidRecord(pidFile, instanceToken, child, readIdentity);
-    return { child, port: actualPort, hostname };
+    return { child, port: actualPort, hostname, ...(authority ? { authority } : {}) };
   } catch (error) {
-    await terminateChild(child, options.gracefulStopMs ?? 3_000);
+    if (authority) await authority.close();
+    else await terminateChild(child, options.gracefulStopMs ?? 3_000);
     throw error;
   }
 };
@@ -575,9 +581,10 @@ export const createOwnedLocalEndpointLease = async (
     passwordEnv: options.passwordEnv ?? "OPENCODE_SERVER_PASSWORD",
   };
   let firstStart = true;
+  let activeAuthority: Awaited<ReturnType<typeof createProcessAuthority>> | undefined;
   let preparedRuntime: PreparedOpenCodeRuntime | undefined;
 
-  return createOwnedLease({
+  const lease = await createOwnedLease({
     async nextIncarnation() {
       const runtime = preparedRuntime;
       if (!runtime) throw unavailable("isolated OpenCode runtime was not prepared");
@@ -620,7 +627,8 @@ export const createOwnedLocalEndpointLease = async (
         );
       }
       if (!firstStart) return;
-      await reapPidFile(pidFile, {
+      const supervised = await readFile(`${pidFile}.supervisor.json`, "utf8").then(() => true, (error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return false; throw error; });
+      if (options.spawn || process.platform !== "linux" || !supervised) await reapPidFile(pidFile, {
         readIdentity,
         signal,
         graceMs: options.orphanGraceMs ?? 250,
@@ -652,7 +660,9 @@ export const createOwnedLocalEndpointLease = async (
             pidFile,
             readIdentity,
             runtime,
+            incarnation,
           );
+          activeAuthority = started.authority;
           let stopped = false;
           activeLocalInstanceTokens.add(instanceToken);
           return {
@@ -672,7 +682,8 @@ export const createOwnedLocalEndpointLease = async (
                 // Missing record is already clean.
               }
               if (shouldRemove) await rm(pidFile, { force: true });
-              await terminateChild(started.child, options.gracefulStopMs ?? 3_000);
+              if (started.authority) await started.authority.close();
+              else await terminateChild(started.child, options.gracefulStopMs ?? 3_000);
             },
           };
         } catch (error) {
@@ -681,6 +692,16 @@ export const createOwnedLocalEndpointLease = async (
         }
       }
       throw lastError ?? unavailable("could not bind an OpenCode local endpoint");
+    },
+  });
+  return Object.assign(lease, {
+    canReleaseExecution(proof: { authorityId: string; generation: number }) {
+      return activeAuthority?.releasedAuthorities.some((item) => item.authorityId === proof.authorityId && item.generation === proof.generation) ?? false;
+    },
+    async releaseExecution() {
+      if (!activeAuthority) throw unavailable("owned process supervision is unavailable");
+      await activeAuthority.close();
+      await lease.dispose();
     },
   });
 };

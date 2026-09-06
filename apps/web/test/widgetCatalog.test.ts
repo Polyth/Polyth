@@ -213,3 +213,46 @@ test("client plugins declare zero or many widgets through one ownership API", ()
   }
   assert.equal(listWidgets().some((widget) => widget.pluginId === "sample-tools"), false);
 });
+
+test("two package plugins contribute simultaneously and unregister independently", () => {
+  const offA = registerWidgetPlugin(defineWidgetPlugin({
+    id: "pkg-a",
+    name: "Package A",
+    widgets: [{
+      id: "pkg-a.board",
+      title: "A board",
+      description: "Package A context",
+      kind: "widget",
+      defaultSlot: "workspace.main",
+      supportedSlots: ["workspace.main"],
+      recommended: true,
+      render: () => "a",
+    }],
+  }));
+  const offB = registerWidgetPlugin(defineWidgetPlugin({
+    id: "pkg-b",
+    name: "Package B",
+    widgets: [{
+      id: "pkg-b.notes",
+      title: "B notes",
+      description: "Package B context",
+      kind: "widget",
+      defaultSlot: "workspace.right",
+      supportedSlots: ["workspace.right"],
+      recommended: true,
+      render: () => "b",
+    }],
+  }));
+  try {
+    const ids = listWidgets().map((widget) => widget.id);
+    assert.ok(ids.includes("pkg-a.board"));
+    assert.ok(ids.includes("pkg-b.notes"));
+    offA();
+    const afterA = listWidgets().map((widget) => widget.id);
+    assert.equal(afterA.includes("pkg-a.board"), false);
+    assert.ok(afterA.includes("pkg-b.notes"));
+  } finally {
+    offB();
+  }
+  assert.equal(listWidgets().some((widget) => widget.pluginId === "pkg-a" || widget.pluginId === "pkg-b"), false);
+});

@@ -13,6 +13,9 @@ type PreviewKind = "image" | "video" | "audio" | "pdf" | "text" | "link" | "unsu
 
 function previewKind(attachment: AttachmentRef): PreviewKind {
   if (attachment.kind === "url") return "link";
+  if (attachment.kind === "browser-context") {
+    return attachment.url ? "image" : "unsupported";
+  }
   if (attachment.kind === "image" || attachment.mime.startsWith("image/")) return "image";
   if (attachment.mime.startsWith("video/") || VIDEO_EXTENSIONS.test(attachment.name)) return "video";
   if (attachment.mime.startsWith("audio/") || AUDIO_EXTENSIONS.test(attachment.name)) return "audio";

@@ -20,6 +20,18 @@ export interface WebEntryLoaderOptions {
   document?: Document;
 }
 
+export interface PackageActivationHandle {
+  dispose(): void;
+}
+
+export interface ActivateWebPackageOptions extends WebEntryLoaderOptions {
+  createActivation: (ownerPackageId: string) => {
+    host: WebPackageHost;
+    dispose(): void;
+  };
+  isCurrent: () => boolean;
+}
+
 const validAsset = (value: unknown): value is WebPackageAsset => {
   const asset = value as Partial<WebPackageAsset> | null;
   const packageRoot = typeof asset?.id === "string"
@@ -36,31 +48,11 @@ const validAsset = (value: unknown): value is WebPackageAsset => {
       typeof style === "string" && style.startsWith(packageRoot));
 };
 
-function installStyles(asset: WebPackageAsset, documentRef: Document | undefined): void {
-  if (!documentRef) return;
-  for (const href of asset.styles) {
-    const id = `polyth-web-package-style:${asset.id}:${href}`;
-    if ([...documentRef.querySelectorAll<HTMLLinkElement>("link[data-polyth-web-package-style]")]
-      .some((link) => link.dataset.polythWebPackageStyle === id)) {
-      continue;
-    }
-    const link = documentRef.createElement("link");
-    link.rel = "stylesheet";
-    link.href = href;
-    link.dataset.polythWebPackageStyle = id;
-    documentRef.head.appendChild(link);
-  }
-}
-
-/** Load the build-generated package manifest and turn each browser entry into
- * a lifecycle installer. Entries receive only the bounded SDK host. */
-export async function loadWebPackageInstallers(
-  host: WebPackageHost,
+/** Cheap metadata only. Does not import modules, run factories, or attach CSS. */
+export async function loadWebPackageCatalog(
   options: WebEntryLoaderOptions = {},
-): Promise<Map<string, WebPackageInstaller>> {
+): Promise<WebPackageAsset[]> {
   const fetchImpl = options.fetch ?? globalThis.fetch;
-  const importModule = options.importModule
-    ?? ((url: string) => import(url) as Promise<unknown>);
   const response = await fetchImpl("/packages-manifest.json");
   if (!response.ok) {
     throw new Error(`web package manifest failed: HTTP ${response.status}`);
@@ -69,40 +61,92 @@ export async function loadWebPackageInstallers(
   if (!Array.isArray(parsed.packages) || !parsed.packages.every(validAsset)) {
     throw new Error("web package manifest is invalid");
   }
+  return parsed.packages;
+}
 
-  // Styles start downloading before package modules. The shell renders before
-  // this Promise settles, so gating CSS on the slowest module produces an
-  // unstyled first paint. Modules download in parallel (they are independent
-  // per-package bundles); factories still run sequentially in manifest order
-  // afterwards so install order stays deterministic. Per-package isolation:
-  // the manifest is baked into the shell dist while each bundle lives in its
-  // own packages/{id}/dist/web, so one stale or missing bundle must degrade to
-  // a logged skip — never abort the loop and take every remaining package down
-  // with it.
-  const loadedModules = await Promise.all(parsed.packages.map(async (asset) => {
-    installStyles(asset, options.document ?? globalThis.document);
-    try {
-      return { asset, loaded: await importModule(asset.module) as { default?: unknown } };
-    } catch (error) {
-      console.error(`[polyth] web package "${asset.id}" failed to load`, error);
-      return { asset, loaded: null };
-    }
-  }));
-  const installers = new Map<string, WebPackageInstaller>();
-  for (const { asset, loaded } of loadedModules) {
-    if (loaded === null) continue;
-    try {
-      if (typeof loaded.default !== "function") {
-        throw new Error(`web entry for "${asset.id}" must default-export a package factory`);
-      }
-      const installer = (loaded.default as WebPackageEntry)(host);
-      if (typeof installer !== "function") {
-        throw new Error(`web entry for "${asset.id}" must return an installer`);
-      }
-      installers.set(asset.id, installer);
-    } catch (error) {
-      console.error(`[polyth] web package "${asset.id}" failed to load`, error);
-    }
+/** Attach stylesheet links owned by this activation. The disposer removes
+ *  exactly those link elements, never another activation's. */
+export function attachPackageStyles(
+  asset: WebPackageAsset,
+  documentRef: Document | undefined,
+): () => void {
+  if (!documentRef) return () => undefined;
+  const links: HTMLLinkElement[] = [];
+  for (const href of asset.styles) {
+    const link = documentRef.createElement("link");
+    link.rel = "stylesheet";
+    link.href = href;
+    link.dataset.polythWebPackageStyle = `${asset.id}:${href}`;
+    documentRef.head.appendChild(link);
+    links.push(link);
   }
-  return installers;
+  let removed = false;
+  return () => {
+    if (removed) return;
+    removed = true;
+    for (const link of links) link.remove();
+  };
+}
+
+/**
+ * Activate one enabled package: attach CSS, import the module, create an
+ * activation scope, invoke factory then installer, publish contributions.
+ * Cancelled or failed attempts dispose any partial CSS and registrations.
+ */
+export async function activateWebPackage(
+  asset: WebPackageAsset,
+  options: ActivateWebPackageOptions,
+): Promise<PackageActivationHandle> {
+  const importModule = options.importModule
+    ?? ((url: string) => import(url) as Promise<unknown>);
+  const documentRef = options.document ?? globalThis.document;
+  const empty: PackageActivationHandle = { dispose() {} };
+
+  if (!options.isCurrent()) return empty;
+
+  const detachStyles = attachPackageStyles(asset, documentRef);
+  let scope: { host: WebPackageHost; dispose(): void } | null = null;
+  let cleanup: (() => void) | undefined;
+
+  const dispose = (): void => {
+    cleanup?.();
+    cleanup = undefined;
+    scope?.dispose();
+    scope = null;
+    detachStyles();
+  };
+
+  try {
+    if (!options.isCurrent()) {
+      dispose();
+      return empty;
+    }
+    const loaded = await importModule(asset.module) as { default?: unknown };
+    if (!options.isCurrent()) {
+      dispose();
+      return empty;
+    }
+    if (typeof loaded.default !== "function") {
+      throw new Error(`web entry for "${asset.id}" must default-export a package factory`);
+    }
+    scope = options.createActivation(asset.id);
+    const installer = (loaded.default as WebPackageEntry)(scope.host);
+    if (typeof installer !== "function") {
+      throw new Error(`web entry for "${asset.id}" must return an installer`);
+    }
+    if (!options.isCurrent()) {
+      dispose();
+      return empty;
+    }
+    const returned = installer() as WebPackageInstaller | void;
+    cleanup = typeof returned === "function" ? returned : undefined;
+    if (!options.isCurrent()) {
+      dispose();
+      return empty;
+    }
+    return { dispose };
+  } catch (error) {
+    dispose();
+    throw error;
+  }
 }

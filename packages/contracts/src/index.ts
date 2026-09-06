@@ -842,11 +842,13 @@ export interface AttachmentRef {
    *  files it is the sanitized raw endpoint and purely presentational. */
   url?: string;
   /** Attachment class; absent means "file" (backward compatible). */
-  kind?: "file" | "image" | "range" | "url";
+  kind?: "file" | "image" | "range" | "url" | "browser-context";
   /** Project-relative path for file/image/range attachments. */
   path?: string;
   /** 1-based inclusive line range (kind "range" only). */
   range?: [number, number];
+  /** Structured browser page/element/area/text context (kind "browser-context"). */
+  browserContext?: BrowserContext;
 }
 export interface ModelRef { providerID: string; modelID: string; variant?: string }
 
@@ -876,6 +878,7 @@ export interface ModelMessage {
 
 export interface CreateSessionInput {
   projectId: string;
+  harness?: HarnessSelection;
   title?: string;
   model?: ModelRef;
   agent?: string;
@@ -1094,6 +1097,11 @@ export interface SessionResumeState {
 
 export interface SessionProjection {
   id: string; projectId: string; parentId?: string;
+  /** Absence on legacy sessions is migrated to Auto with the bundled harness. */
+  harness?: HarnessSelection;
+  resolvedHarnessId?: string;
+  runtimeLeg?: RuntimeLeg;
+  harnessTransition?: HarnessTransition;
   /** Owning Space, denormalized from the project so listing/broadcast filters
    *  never need a project join. Backfilled by session-store migration v10. */
   spaceId?: string;
@@ -1234,6 +1242,7 @@ export interface SessionDebugDto {
 }
 
 export interface SessionService {
+  switchHarness?(sessionId: string, selection: HarnessSelection, timing?: "after-turn" | "stop-now"): Promise<SessionProjection>;
   create(input: CreateSessionInput): Promise<SessionRef>;
   /** Result carries turnId for admitted turns or queueId+queued for deferred delivery. */
   send(sessionId: string, input: UserTurnInput): Promise<SendResult>;
@@ -1374,6 +1383,8 @@ export interface EventPage {
 }
 
 export interface SessionPersistence {
+  /** Bounded atomic append and optional publication. expectedSeq is a CAS guard. */
+  appendBatch?(sessionId: string, events: Array<CanonicalEventInput & { time?: number }>, opts?: { projection?: SessionProjection; expectedSeq?: number; markRead?: boolean }): Promise<SessionEvent[]>;
   append(sessionId: string, type: string, data: JsonObject, opts?: Partial<Pick<SessionEvent, "ignorable" | "surfaceOp" | "sourceEventSeqs" | "producerPlugin">>): Promise<SessionEvent>;
   events(sessionId: string, afterSeq?: number, page?: EventPage): Promise<SessionEvent[]>;
   /** Indexed existence check (no full-log scan). Optional so fakes stay valid. */
@@ -1844,6 +1855,8 @@ export interface RuntimeEpochTransitionInput {
   replacementBinding: PersistedRuntimeBinding;
   resetOperationId: string;
   reason: string;
+  /** Atomically publish routing with the fresh runtime binding. */
+  harness?: { transitionId: string; selection: HarnessSelection; leg: RuntimeLeg };
   fence?: {
     authorityId: string;
     generation: number;
@@ -2066,7 +2079,80 @@ export interface AgentDescriptor {
   /** Role-specific model override. */
   model?: ModelRef;
 }
-export interface RuntimeCapabilities { streaming: boolean; permissions: boolean; questions: boolean; compaction: boolean; subagents: boolean; steering?: boolean }
+export interface RuntimeCapabilities { streaming: boolean; permissions: boolean; questions: boolean; compaction: boolean; subagents: boolean; steering?: boolean; resume?: boolean; usage?: boolean; cost?: boolean; fork?: boolean; mcp?: boolean }
+
+// Harnesses construct AgentRuntime; they never own canonical sessions.
+export type HarnessSelection = { mode: "auto" } | { mode: "pinned"; harnessId: string };
+export interface HarnessDescriptor {
+  id: string;
+  name: string;
+  integration: string;
+  /** Default selection order; smaller comes first. */
+  priority: number;
+  autoSelect?: boolean;
+  setupUrl?: string;
+  installCommand?: string;
+  signInCommand?: string;
+}
+export interface HarnessProbe {
+  harnessId: string;
+  installed: boolean;
+  authenticated: boolean | "unknown";
+  healthy: boolean;
+  version?: string;
+  message?: string;
+}
+export interface HarnessContext {
+  /** Server-validated context for provider-owned per-Space storage. */
+  space?: SpaceContext;
+  spaceId: string;
+  projectId: string;
+  cwd: string;
+  /** Session-specific engines must isolate their native maps and processes. */
+  sessionId?: string;
+  model?: ModelRef;
+  remote?: boolean;
+}
+export interface HarnessProvider {
+  descriptor: HarnessDescriptor;
+  probe(context: HarnessContext): Promise<HarnessProbe>;
+  createRuntime(context: HarnessContext): Promise<AgentRuntime>;
+  source?: SessionSourceProvider;
+}
+export interface HarnessRegistry {
+  register(provider: HarnessProvider): Disposable;
+  providers(): HarnessProvider[];
+  probe(context: HarnessContext): Promise<HarnessProbe[]>;
+  resolve(context: HarnessContext, selection: HarnessSelection, stickyId?: string): Promise<HarnessProvider>;
+}
+export interface RuntimeLeg {
+  id: string;
+  harnessId: string;
+  nativeSessionId: string;
+  startedAt: number;
+  /** Highest effective user/assistant dialogue seq confirmed in native history. */
+  canonicalThroughSeq: number;
+  /** User-authored role intent, independent of a profile's old model/account route. */
+  agentIntent?: string;
+  bootstrap: "native-resume" | "continuity" | "empty";
+}
+/** Durable switch intent. No target may admit work before the epoch commit. */
+export interface HarnessTransition {
+  id: string;
+  selection: HarnessSelection;
+  targetHarnessId: string;
+  timing: "after-turn" | "stop-now";
+  phase: "requested" | "released";
+  /** Exact old authority released by a provider, never inferred from UI state. */
+  released?: { authorityId: string; generation: number };
+}
+export interface SourceRecord { role: "user" | "assistant"; text: string; time?: number }
+export interface SourceSession { ref: string; title: string; updatedAt?: number }
+/** Provider-local native ids/paths are opaque outside the source. No live sync. */
+export interface SessionSourceProvider {
+  list(context: HarnessContext): Promise<SourceSession[]>;
+  read(context: HarnessContext, ref: string): AsyncIterable<SourceRecord>;
+}
 /** Why a project's agent runtime could not be started. An empty model catalog
  * is a symptom with many causes; this carries the cause itself so the UI can
  * state it instead of guessing that the backend is down. */
@@ -2171,6 +2257,11 @@ export type RuntimeEvent =
   | { type: "subagent/snapshot"; revision: number; agents: Array<{ sessionId: string; label: string; status: string; currentTask?: string }> };
 
 export interface AgentRuntime {
+  readonly harnessId?: string;
+  /** Positive proof that this binding (including its tools/children) can no
+   * longer mutate the workspace. Unknown is never permission to start a target.
+   * Must remain idempotently provable after restart for the supplied binding. */
+  releaseExecution?(binding: RuntimeSessionBinding, operationId: string): Promise<MutationOutcome<{ authorityId: string; generation: number }>>;
   capabilities(): Promise<RuntimeCapabilities>;
   models(): Promise<ModelDescriptor[]>;
   agents(): Promise<AgentDescriptor[]>;
@@ -3392,6 +3483,8 @@ export interface SecureSafePatchInput {
 }
 
 export interface SecureSafeService {
+  /** Replace known plaintext without exposing the values to callers. */
+  redact?(text: string): string;
   list(): SecureSafeEntryDto[];
   manifest(): SecureSafeManifest;
   hasHandle(handle: string): boolean;
@@ -3424,6 +3517,8 @@ export interface InstalledPluginDto {
 
 export type BrowserColorScheme = "light" | "dark" | "no-preference";
 
+export type BrowserViewportMode = "responsive" | "preset" | "custom";
+
 export interface BrowserSessionDto {
   id: string;
   projectId: string;
@@ -3436,6 +3531,12 @@ export interface BrowserSessionDto {
   revision: number;
   /** honest engine state: "chromium" when driven, "unavailable" for fallback */
   engine: "chromium" | "fake" | "unavailable";
+  /** Authoritative pause flag — never inferred from recency. */
+  agentPaused?: boolean;
+  /** Actor currently executing a queued action, if any. */
+  controller?: "user" | "agent";
+  /** How the current viewport was chosen. */
+  viewportMode?: BrowserViewportMode;
 }
 
 export type BrowserTarget =
@@ -3457,7 +3558,7 @@ export type BrowserAction =
   | { kind: "back" }
   | { kind: "forward" }
   | { kind: "reload" }
-  | { kind: "resize"; viewport: { width: number; height: number } }
+  | { kind: "resize"; viewport: { width: number; height: number }; mode?: BrowserViewportMode }
   | { kind: "color-scheme"; colorScheme: BrowserColorScheme }
   | { kind: "inspect"; selector: string };
 
@@ -3467,6 +3568,188 @@ export interface BrowserObservation {
   text: string;
   accessibilityDigest?: string;
   screenshotRef?: string;
+}
+
+/** First-class browser context shared with the composer and agent (text-first). */
+export type BrowserContextType = "page" | "element" | "area" | "text";
+
+export interface BrowserContextBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface BrowserContextRegion {
+  /** Normalized 0–1 rectangle relative to the captured frame. */
+  normalized: { x: number; y: number; width: number; height: number };
+  /** Pixel bounds in the browser viewport at capture time. */
+  pixels: BrowserContextBounds;
+}
+
+export interface BrowserContextElementSummary {
+  selector?: string;
+  tag?: string;
+  role?: string;
+  name?: string;
+  text?: string;
+  attributes?: Record<string, string>;
+  bounds?: BrowserContextBounds;
+}
+
+export interface BrowserContextArtifactRef {
+  id: string;
+  mime: string;
+  size: number;
+  /** Resolved absolute path filled server-side at verify time; never client-trusted. */
+  localPath?: string;
+}
+
+/**
+ * Durable browser context attached to a composer draft / user message.
+ * Keep summaries bounded — never dump full DOM trees.
+ */
+export interface BrowserContext {
+  id: string;
+  type: BrowserContextType;
+  browserSessionId: string;
+  projectId: string;
+  sessionId?: string;
+  frameRevision: number;
+  url: string;
+  title: string;
+  viewport: { width: number; height: number };
+  capturedAt: string;
+  note?: string;
+  quote?: string;
+  region?: BrowserContextRegion;
+  element?: BrowserContextElementSummary;
+  intersecting?: BrowserContextElementSummary[];
+  accessibilitySummary?: string;
+  textSummary?: string;
+  screenshot?: BrowserContextArtifactRef;
+  crop?: BrowserContextArtifactRef;
+  contentHash?: string;
+}
+
+/** Capture request; `id` is a stable client-generated identity for retries. */
+export type BrowserContextCaptureInput =
+  | {
+    type: "page";
+    id: string;
+    expectedRevision: number;
+    note?: string;
+    includeScreenshot?: boolean;
+  }
+  | {
+    type: "element";
+    id: string;
+    expectedRevision: number;
+    point: { x: number; y: number };
+    note?: string;
+    includeScreenshot?: boolean;
+  }
+  | {
+    type: "area";
+    id: string;
+    expectedRevision: number;
+    /** Normalized 0–1 rectangle on the frame used for selection. */
+    region: { x: number; y: number; width: number; height: number };
+    note?: string;
+    includeScreenshot?: boolean;
+  }
+  | {
+    type: "text";
+    id: string;
+    expectedRevision: number;
+    quote?: string;
+    start?: { x: number; y: number };
+    end?: { x: number; y: number };
+    note?: string;
+    includeScreenshot?: boolean;
+  };
+
+const BROWSER_CONTEXT_MIME = "application/vnd.polyth.browser-context+json";
+
+/** Compact model-visible text. Screenshots stay optional evidence. */
+export function formatBrowserContextForModel(ctx: BrowserContext): string {
+  const lines: string[] = ["[Browser context]"];
+  lines.push(`Type: ${ctx.type}`);
+  lines.push(`URL: ${ctx.url}`);
+  if (ctx.title) lines.push(`Page: ${ctx.title}`);
+  lines.push(`Viewport: ${ctx.viewport.width}×${ctx.viewport.height}`);
+  lines.push(`Frame revision: ${ctx.frameRevision}`);
+  if (ctx.quote) lines.push(`Quote: ${ctx.quote}`);
+  if (ctx.element) {
+    const el = ctx.element;
+    if (el.tag) lines.push(`Element: ${el.tag}`);
+    if (el.role) lines.push(`Role: ${el.role}`);
+    if (el.name) lines.push(`Accessible name: ${el.name}`);
+    if (el.text) lines.push(`Text: ${el.text}`);
+    if (el.selector) lines.push(`Selector: ${el.selector}`);
+    if (el.bounds) {
+      lines.push(
+        `Bounds: x=${el.bounds.x}, y=${el.bounds.y}, width=${el.bounds.width}, height=${el.bounds.height}`,
+      );
+    }
+    if (el.attributes && Object.keys(el.attributes).length > 0) {
+      const attrs = Object.entries(el.attributes)
+        .slice(0, 12)
+        .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+        .join(", ");
+      lines.push(`Attributes: ${attrs}`);
+    }
+  }
+  if (ctx.region) {
+    const p = ctx.region.pixels;
+    lines.push(`Area: ${p.width}×${p.height} at (${p.x}, ${p.y})`);
+  }
+  if (ctx.intersecting && ctx.intersecting.length > 0) {
+    lines.push("Intersecting elements:");
+    for (const el of ctx.intersecting.slice(0, 12)) {
+      const label = [el.tag, el.role, el.name || el.text].filter(Boolean).join(" · ");
+      lines.push(`- ${label || el.selector || "element"}`);
+    }
+  }
+  if (ctx.textSummary) lines.push(`Visible text:\n${ctx.textSummary}`);
+  if (ctx.accessibilitySummary) lines.push(`Accessibility:\n${ctx.accessibilitySummary}`);
+  if (ctx.note) lines.push(`Note: ${ctx.note}`);
+  return lines.join("\n");
+}
+
+/** English/model-facing label. UI copy is composed in the web layer. */
+export function browserContextLabel(ctx: BrowserContext): string {
+  if (ctx.type === "element") {
+    const label = (ctx.element?.name || ctx.element?.text || ctx.element?.tag || "Element")
+      .replace(/\s+/g, " ")
+      .trim();
+    return label.length > 48 ? `${label.slice(0, 47)}…` : label;
+  }
+  if (ctx.type === "area") return "Selected area";
+  if (ctx.type === "text") {
+    const quote = (ctx.quote || "").replace(/\s+/g, " ").trim();
+    if (!quote) return "Selected text";
+    return quote.length > 48 ? `${quote.slice(0, 47)}…` : quote;
+  }
+  const title = (ctx.title || hostPath(ctx.url) || "Page").replace(/\s+/g, " ").trim();
+  return title.length > 48 ? `${title.slice(0, 47)}…` : title;
+}
+
+export function browserContextHostPath(url: string): string {
+  return hostPath(url);
+}
+
+export function browserContextMime(): string {
+  return BROWSER_CONTEXT_MIME;
+}
+
+function hostPath(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.host}${parsed.pathname === "/" ? "" : parsed.pathname}`;
+  } catch {
+    return url;
+  }
 }
 
 // ---------------------------------------------------------------- dictation (WP15)

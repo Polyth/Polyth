@@ -162,7 +162,6 @@ async function openApp(opts: OpenOpts = {}): Promise<Page> {
   }
   const storage = {
     "polyth.prefs": ENGINEER_SEED,
-    [`polyth.projectSetup.v1.${PROJECT_ID}`]: "completed",
     ...(opts.storage ?? {}),
   };
   await context.addInitScript((entries: Record<string, string>) => {

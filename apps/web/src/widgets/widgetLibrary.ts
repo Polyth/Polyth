@@ -22,6 +22,8 @@ export interface WidgetLibraryFilters {
   category: string;
   tab: WidgetLibraryTab;
   recentlyUsed?: readonly string[];
+  /** Extra recommendation ids from context. Does not mutate catalog definitions. */
+  recommendedIds?: readonly string[];
 }
 
 export interface MissingWidgetPlaceholder {
@@ -41,6 +43,21 @@ export const RECOMMENDED_WIDGET_IDS = [
   "knowledge.notes",
   "git.recent",
 ] as const;
+
+export function mergeRecommendedWidgetIds(
+  ...groups: Array<readonly string[] | undefined>
+): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    for (const id of group ?? []) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+  return ids;
+}
 
 export function widgetSizeLabel(
   widget: Pick<WidgetDef, "recommendedSize" | "defaultSize">,
@@ -129,21 +146,33 @@ export function filterWidgetLibrary(
 ): WidgetDef[] {
   const query = filters.query.trim().toLowerCase();
   const recent = new Set(filters.recentlyUsed ?? []);
+  const extraRecommended = filters.recommendedIds ?? [];
+  const extraRecommendedSet = new Set(extraRecommended);
   const rank: Record<WidgetAudience, number> = { simple: 0, standard: 1, power: 2 };
-  return widgets.filter((widget) => {
+  const filtered = widgets.filter((widget) => {
     if (rank[widget.audience ?? "standard"] > rank[audience]) return false;
     if (query && !queryText(widget).includes(query)) return false;
     if (filters.pluginId !== "all" && widget.pluginId !== filters.pluginId) return false;
     if (filters.size !== "all" && widgetSizeLabel(widget) !== filters.size) return false;
     if (filters.zone !== "all" && !supportedWidgetZones(widget).includes(filters.zone)) return false;
     if (filters.category !== "all" && (widget.category ?? "workspace") !== filters.category) return false;
-    if (filters.tab === "recommended" && !(
-      widget.recommended === true
-      || RECOMMENDED_WIDGET_IDS.includes(widget.id as (typeof RECOMMENDED_WIDGET_IDS)[number])
-    )) return false;
+    if (filters.tab === "recommended") {
+      if (!(
+        extraRecommendedSet.has(widget.id)
+        || widget.recommended === true
+        || RECOMMENDED_WIDGET_IDS.includes(widget.id as (typeof RECOMMENDED_WIDGET_IDS)[number])
+      )) return false;
+    }
     if (filters.tab === "recent" && !recent.has(widget.id)) return false;
     return true;
   });
+  if (filters.tab !== "recommended" || extraRecommended.length === 0) return filtered;
+  const rankOf = (id: string): number => {
+    const index = extraRecommended.indexOf(id);
+    return index >= 0 ? index : extraRecommended.length + filtered.findIndex((widget) => widget.id === id);
+  };
+  return [...filtered].sort((a, b) =>
+    rankOf(a.id) - rankOf(b.id) || a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
 }
 
 export function groupWidgetsByPlugin(widgets: readonly WidgetDef[]): Map<string, WidgetDef[]> {
