@@ -224,6 +224,11 @@ export function messageMarkdown(m: RenderMessage): string {
   if (m.kind === "github-conflict") {
     return `### Fixing merge conflicts for pull request #${m.prNumber}\n\n${m.title}\n\n\`${m.baseRefName} ← ${m.headRefName}\`\n\n${m.url}`;
   }
+  if (m.kind === "notice") {
+    return m.topic === "isolation-merged"
+      ? tr("timeline.mergedIntoValue", { branch: m.branch ?? "", commit: m.commit ?? "" })
+      : tr("timeline.isolatedWorkspaceDiscarded");
+  }
   if (m.kind === "task") {
     return tr("utils.taskValueValue", { action: m.action, text: m.text });
   }
@@ -264,6 +269,13 @@ export function messageJson(m: RenderMessage): string {
         headRefName: m.headRefName,
         time: m.time,
       },
+      null,
+      2,
+    );
+  }
+  if (m.kind === "notice") {
+    return JSON.stringify(
+      { role: "notice", topic: m.topic, branch: m.branch, commit: m.commit, time: m.time },
       null,
       2,
     );
@@ -339,7 +351,7 @@ export function groupActivity(messages: RenderMessage[]): Array<RenderMessage | 
   };
 
   for (const message of messages) {
-    if (message.kind === "user" || message.kind === "github-conflict") {
+    if (message.kind === "user" || message.kind === "github-conflict" || message.kind === "notice") {
       flush();
       out.push(message);
     } else {

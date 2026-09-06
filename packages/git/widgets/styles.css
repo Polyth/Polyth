@@ -1111,3 +1111,73 @@ color: var(--purple);
   .git-clone-panel .folder-error { grid-column: 1; grid-row: auto; }
   .git-clone-panel .folder-source-hint { flex-direction: column; }
 }
+
+.isolation-card {
+  container: isolation-card / inline-size;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  width: min(calc(100% - (2 * var(--conversation-chrome-inset))), var(--chat-measure));
+  margin: var(--space-2) auto 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--elevated);
+  color: var(--text);
+}
+.isolation-card--warn {
+  border-color: color-mix(in srgb, var(--amber) 32%, var(--border));
+  background: var(--amber-wash);
+}
+.isolation-card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.isolation-card-copy strong {
+  font-size: var(--font-label);
+  font-weight: 650;
+}
+.isolation-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+}
+.isolation-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-round);
+  background: var(--elevated);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  cursor: pointer;
+}
+.isolation-badge:hover,
+.isolation-badge:focus-visible {
+  background: var(--raised);
+  color: var(--text);
+}
+.isolation-badge--warn {
+  color: var(--amber-on-wash);
+  border-color: color-mix(in srgb, var(--amber) 32%, var(--control-border));
+}
+.isolation-list-badge {
+  font-size: var(--font-meta);
+  color: var(--muted);
+}
+@container isolation-card (max-width: 420px) {
+  .isolation-card-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+

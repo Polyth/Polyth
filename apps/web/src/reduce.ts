@@ -117,7 +117,20 @@ export interface GithubConflictMsg {
   rev?: number;
 }
 
-export type RenderMessage = UserMsg | AssistantMsg | ToolMsg | TaskActivityMsg | GithubConflictMsg;
+export interface NoticeMsg {
+  kind: "notice";
+  id: string;
+  eventSeq: number;
+  topic: "isolation-merged" | "isolation-discarded";
+  branch?: string;
+  commit?: string;
+  undone?: boolean;
+  rewindMarkerSeq?: number;
+  time: number;
+  rev?: number;
+}
+
+export type RenderMessage = UserMsg | AssistantMsg | ToolMsg | TaskActivityMsg | GithubConflictMsg | NoticeMsg;
 
 export interface PendingPermission {
   sessionId: string;
@@ -451,6 +464,31 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
     model.queueVersion += 1;
   }
   switch (ev.type) {
+    case "isolation/merged": {
+      const branch = str(d, "targetBranch") ?? "";
+      const commit = (str(d, "commit") ?? "").slice(0, 7);
+      model.messages.push({
+        kind: "notice",
+        id: ev.id,
+        eventSeq: ev.seq,
+        topic: "isolation-merged",
+        ...(branch ? { branch } : {}),
+        ...(commit ? { commit } : {}),
+        time: ev.time,
+      });
+      break;
+    }
+    case "isolation/discarded": {
+      model.messages.push({
+        kind: "notice",
+        id: ev.id,
+        eventSeq: ev.seq,
+        topic: "isolation-discarded",
+        ...(str(d, "targetBranch") ? { branch: str(d, "targetBranch") } : {}),
+        time: ev.time,
+      });
+      break;
+    }
     case "github/conflict-resolution-started": {
       const prNumber = num(d, "prNumber");
       if (prNumber === undefined || !Number.isSafeInteger(prNumber) || prNumber <= 0) break;

@@ -15,12 +15,12 @@ test("worktree session dialog can fetch the remote and offer server-only branche
   assert.match(source, /tr\("gitview\.fetchRemoteBranches"\)/);
   assert.match(source, /tr\("gitview\.remoteUnreachableShowingCached"\)/);
 
-  // Remote-only branches are surfaced as fork points and, when chosen, the new
-  // local branch starts from the remote ref.
+  // Remote-only branches are merge targets for Work in isolation.
   assert.match(source, /const remoteBranches = useMemo/);
-  assert.match(source, /remoteBranches\.map\(\(item\) => <option/);
-  assert.match(source, /remoteMatch\s*\?\s*remoteMatch\.ref/);
-  assert.match(source, /tr\("worktreesessiondialog\.aNewCheckoutWillTrack"/);
+  assert.match(source, /remoteBranches\.map\(\(item\) => \(\{ value: item\.ref/);
+  assert.match(source, /startIsolatedSession\(request\.projectId/);
+  assert.match(source, /targetBranch: origin/);
+  assert.match(source, /tr\("isolation\.workInIsolation"\)/);
 });
 
 test("new-session branch picker fetches the remote on open and lists remote branches", async () => {

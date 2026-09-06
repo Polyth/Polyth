@@ -18,7 +18,7 @@ import {
   sendMessage,
   abortSession,
   createSession,
-  createDefaultWorktree,
+  startIsolatedSession,
   rememberProjectModelSelection,
   reconnectSync,
   recheckRuntimeCatalog,
@@ -382,12 +382,7 @@ function useComposerLocation(session: SessionProjection | null): {
         .catch((error) => setUiError(friendlyError(tr("composer.couldnTCreateTheWorktree"), error)))
         .finally(() => setBranchLoading(false));
     } else {
-      const base = choice.target.base;
-      setBranchLoading(true);
-      void createDefaultWorktree(projectId, newSessionIntent?.title, base)
-        .then((path) => startNewSession(projectId, { worktreePath: path }))
-        .catch((error) => setUiError(friendlyError(tr("composer.couldnTCreateTheWorktree"), error)))
-        .finally(() => setBranchLoading(false));
+      // Isolation fork point is recorded on send; don't create a workspace yet.
     }
   };
 
@@ -1128,30 +1123,33 @@ export default function Composer({
     } else if (activeProjectId) {
       setCreatingSession(true);
       void (async () => {
-        let worktreePath = newSessionTarget.kind === "main"
-          ? undefined
-          : newSessionIntent?.worktreePath;
-        if (newSessionTarget.kind === "worktree") {
-          worktreePath = newSessionTarget.path;
-        } else if (newSessionTarget.kind === "branch") {
-          worktreePath = (await api.createWorktree(
-            activeProjectId,
-            newSessionTarget.branch,
-            undefined,
-            newSessionTarget.base,
-          )).path;
-        } else if (newSessionTarget.kind === "new-worktree") {
-          worktreePath = await createDefaultWorktree(
-            activeProjectId,
-            newSessionIntent?.title,
-            newSessionTarget.base,
-          );
+        let created: string;
+        if (newSessionTarget.kind === "new-worktree") {
+          created = await startIsolatedSession(activeProjectId, {
+            ...(newSessionIntent?.title ? { title: newSessionIntent.title } : {}),
+            ...(newSessionTarget.base ? { targetBranch: newSessionTarget.base } : {}),
+            precache: true,
+          });
+        } else {
+          let worktreePath = newSessionTarget.kind === "main"
+            ? undefined
+            : newSessionIntent?.worktreePath;
+          if (newSessionTarget.kind === "worktree") {
+            worktreePath = newSessionTarget.path;
+          } else if (newSessionTarget.kind === "branch") {
+            worktreePath = (await api.createWorktree(
+              activeProjectId,
+              newSessionTarget.branch,
+              undefined,
+              newSessionTarget.base,
+            )).path;
+          }
+          created = await createSession(activeProjectId, {
+            ...(newSessionIntent?.title ? { title: newSessionIntent.title } : {}),
+            ...(worktreePath ? { worktreePath } : {}),
+            precache: true,
+          });
         }
-        const created = await createSession(activeProjectId, {
-          ...(newSessionIntent?.title ? { title: newSessionIntent.title } : {}),
-          ...(worktreePath ? { worktreePath } : {}),
-          precache: true,
-        });
         clearNewSessionDraft(activeProjectId);
         if (newSessionAutoApprove) await api.autoAcceptSet(created, "on");
         if (newSessionGoal) await api.goalAttach(created, t);
