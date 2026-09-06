@@ -5185,6 +5185,10 @@ html[dir="rtl"] input[type="number"] {
 .settings-pane-head-copy .modal-desc { overflow-wrap: anywhere; }
 .settings-pane-title { font-size: var(--font-heading); }
 .settings-pane-body { padding: var(--space-3) var(--space-5) var(--space-6); }
+/* Providers & Models owns its own inner scroll (the provider list). Make the
+   pane a flex column so the page fills the shell's full height instead of
+   stopping at a vh cap that left the list clipped with dead space below. */
+.settings-page-models .settings-pane-body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .settings-page-widgets .settings-pane-body { padding: 2px 20px 22px; }
 .widget-settings-steps { margin-top: 8px; }
 .widget-settings-steps span { min-height: 45px; display: flex; align-items: center; justify-content: center; gap: 4px; }

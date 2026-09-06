@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, type ProviderAuthMethodDto, type ProviderAuthPromptDto } from "@polyth/session/web-api";
 import { Button, Notice, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
-import { shouldShowApiKeyAuth } from "./providerAuth.ts";
+import { knownOAuthFallback, shouldShowApiKeyAuth } from "./providerAuth.ts";
 
 type PromptValues = Record<string, string>;
 
@@ -81,10 +81,14 @@ export default function ProviderConnect({
 
   useEffect(() => () => callbackAbortRef.current?.abort(), []);
 
-  const indexed = (methods ?? []).map((m, index) => ({ ...m, index }));
+  // Fall back to a known OAuth login when the backend reported no methods for
+  // this provider (plugin providers like Cursor can be missing from
+  // /provider/auth while the runtime warms up). Reported methods always win.
+  const effectiveMethods = methods?.length ? methods : knownOAuthFallback(providerId, methods) ?? methods;
+  const indexed = (effectiveMethods ?? []).map((m, index) => ({ ...m, index }));
   const oauthMethods = indexed.filter((m) => m.type === "oauth");
   const apiMethod = indexed.find((m) => m.type === "api");
-  const showApiKey = shouldShowApiKeyAuth(methods);
+  const showApiKey = shouldShowApiKeyAuth(effectiveMethods, providerId);
 
   const completeOAuth = async (methodIndex: number, code?: string) => {
     const busyKey = code ? "oauth-code" : "oauth-auto";

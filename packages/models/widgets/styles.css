@@ -55,7 +55,11 @@ color: var(--text); border-color: var(--accent-line); background: var(--accent-w
 opacity: 0.55;
 }
 .provider-list {
-display: flex; flex-direction: column; gap: 8px; max-height: 56vh; overflow-y: auto;
+display: flex; flex-direction: column; gap: 8px; overflow-y: auto;
+  /* Fills the remaining height of the settings pane (see .settings-page-models
+     in the app stylesheet) instead of an arbitrary vh cap that left the list
+     clipped with dead space below it. min-height:0 lets it actually scroll. */
+  flex: 1 1 auto; min-height: 0;
 }
 .provider-card {
 border: 0; border-radius: var(--radius-card); background: var(--panel);
@@ -498,9 +502,16 @@ transition: none;
 .model-star-btn[aria-pressed="true"] { color: var(--amber); }
 .model-sheet .sheet-row-star { color: var(--amber); }
 .models-page { min-width: 0; container: models-page / inline-size; }
+/* When hosted as a settings page the pane is a flex column (app stylesheet),
+   so the page fills it and only .provider-list scrolls. Harmless elsewhere. */
+.models-page { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.models-page > .models-toolbar,
+.models-page > .provider-chips,
+.models-page > .form-error { flex: none; }
 .models-toolbar { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-3) 0 var(--space-2); }
 .models-toolbar .models-search { flex: 1; margin: 0; min-width: 0; }
 .models-toolbar .models-add-provider { flex: none; }
+.models-toolbar .models-refresh { flex: none; }
 .provider-connect { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); padding: var(--space-2) 6px var(--space-3); }
 .provider-connect-method { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); width: 100%; }
 .provider-connect-or { align-self: stretch; padding: 2px 0; font-size: var(--font-meta); text-align: center; }
@@ -532,5 +543,7 @@ transition: none;
   .models-toolbar > .seg { width: 100%; }
   .models-toolbar > .seg button { flex: 1; }
   .models-toolbar .models-add-provider { width: 100%; }
+  /* Keep the icon-only refresh compact next to the full-width controls. */
+  .models-toolbar .models-refresh { align-self: flex-start; }
   .model-star-btn { width: var(--tap); min-width: var(--tap); }
 }
