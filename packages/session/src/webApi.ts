@@ -73,6 +73,9 @@ export interface BrowserSessionDto {
   colorScheme: "light" | "dark" | "no-preference";
   revision: number;
   engine: "chromium" | "fake" | "unavailable";
+  agentPaused?: boolean;
+  controller?: "user" | "agent";
+  viewportMode?: "responsive" | "preset" | "custom";
 }
 
 /** User navigation can intentionally pause for an origin approval. */
@@ -98,7 +101,7 @@ export type BrowserActionDto =
   | { kind: "back" }
   | { kind: "forward" }
   | { kind: "reload" }
-  | { kind: "resize"; viewport: { width: number; height: number } }
+  | { kind: "resize"; viewport: { width: number; height: number }; mode?: "responsive" | "preset" | "custom" }
   | { kind: "color-scheme"; colorScheme: "light" | "dark" | "no-preference" }
   | { kind: "inspect"; selector: string };
 
@@ -1333,6 +1336,13 @@ export const api = {
         ...(selector ? { selector } : {}),
       }),
     ),
+  browserCaptureContext: (id: string, input: import("@polyth/contracts").BrowserContextCaptureInput) =>
+    jfetch<{ context: import("@polyth/contracts").BrowserContext }>(
+      `/api/browser/sessions/${encodeURIComponent(id)}/context`,
+      json("POST", input as unknown as JsonObject),
+    ),
+  browserArtifactUrl: (artifactId: string) =>
+    `/api/browser/artifacts?id=${encodeURIComponent(artifactId)}`,
   browserClose: (id: string) =>
     jfetch<{ ok: true }>(`/api/browser/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
   browserPauseAgent: (id: string, paused: boolean) =>

@@ -2,7 +2,8 @@
 // pills survive session switches via localStorage and clear together on send.
 // Key "" holds the no-session (hero) composer's pills until a session exists.
 import { useCallback, useSyncExternalStore } from "react";
-import type { AttachmentRef } from "@polyth/contracts";
+import type { AttachmentRef, BrowserContext } from "@polyth/contracts";
+import { browserContextMime } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 import { tr } from "./i18n/index.ts";
 
@@ -80,11 +81,15 @@ export function addAttachment(sessionId: string | null | undefined, ref: Attachm
   const key = keyOf(sessionId);
   const cur = entry(key).refs;
   if (cur.length >= MAX_PENDING_ATTACHMENTS) return false;
-  // dedupe: same file/range or same link is a no-op, not a second pill
-  const dup = cur.some((r) =>
-    r.kind === "url" || ref.kind === "url"
-      ? r.url === ref.url
-      : r.path === ref.path && JSON.stringify(r.range ?? null) === JSON.stringify(ref.range ?? null));
+  // dedupe: same file/range, same link, or same browser context id is a no-op
+  const dup = cur.some((r) => {
+    if (r.id === ref.id) return true;
+    if (r.kind === "browser-context" || ref.kind === "browser-context") {
+      return r.kind === "browser-context" && ref.kind === "browser-context" && r.id === ref.id;
+    }
+    if (r.kind === "url" || ref.kind === "url") return r.url === ref.url;
+    return r.path === ref.path && JSON.stringify(r.range ?? null) === JSON.stringify(ref.range ?? null);
+  });
   if (dup) return true;
   set(key, [...cur, ref]);
   return true;
@@ -92,7 +97,20 @@ export function addAttachment(sessionId: string | null | undefined, ref: Attachm
 
 export function removeAttachment(sessionId: string | null | undefined, id: string): void {
   const key = keyOf(sessionId);
-  set(key, entry(key).refs.filter((r) => r.id !== id));
+  const refs = entry(key).refs;
+  const removed = refs.find((r) => r.id === id);
+  set(key, refs.filter((r) => r.id !== id));
+  discardBrowserArtifacts(removed);
+}
+
+/** Best-effort delete of managed capture files when a draft chip is discarded. */
+export function discardBrowserArtifacts(ref: AttachmentRef | undefined): void {
+  if (!ref || ref.kind !== "browser-context") return;
+  const ids = [ref.browserContext?.screenshot?.id, ref.browserContext?.crop?.id]
+    .filter((value): value is string => typeof value === "string" && value.length > 0);
+  for (const artifactId of ids) {
+    void fetch(`/api/browser/artifacts?id=${encodeURIComponent(artifactId)}`, { method: "DELETE" }).catch(() => undefined);
+  }
 }
 
 export function clearAttachments(sessionId: string | null | undefined): void {
@@ -198,4 +216,49 @@ export async function attachText(
   text: string,
 ): Promise<AttachResult> {
   return attachUpload(projectId, sessionId, new File([text], "pasted-context.txt", { type: "text/plain" }));
+}
+
+function clipChipLabel(value: string, max = 48): string {
+  const text = value.replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/** Localized composer chip title. Contracts keep English/model-facing labels. */
+export function browserContextChipTitle(ctx: BrowserContext): string {
+  if (ctx.type === "text") {
+    return clipChipLabel(ctx.quote || "") || tr("attachments.browserText");
+  }
+  if (ctx.type === "element") {
+    return clipChipLabel(ctx.element?.name || ctx.element?.text || ctx.element?.tag || "")
+      || tr("attachments.browserElement");
+  }
+  if (ctx.type === "area") return tr("attachments.browserArea");
+  return clipChipLabel(ctx.title || "") || tr("attachments.browserPage");
+}
+
+/** Attach a first-class browser context to the composer draft (does not send). */
+export function attachBrowserContext(
+  sessionId: string | null | undefined,
+  ctx: BrowserContext,
+): AttachResult {
+  const thumbId = ctx.crop?.id ?? ctx.screenshot?.id;
+  const ref: AttachmentRef = {
+    id: ctx.id,
+    name: browserContextChipTitle(ctx),
+    mime: browserContextMime(),
+    size: ctx.crop?.size ?? ctx.screenshot?.size ?? 0,
+    kind: "browser-context",
+    browserContext: ctx,
+    ...(thumbId ? { url: `/api/browser/artifacts?id=${encodeURIComponent(thumbId)}` } : {}),
+  };
+  if (!addAttachment(sessionId, ref)) {
+    return {
+      ok: false,
+      reason: tr("attachments.atMostValueAttachmentsPerMessage", {
+        count: MAX_PENDING_ATTACHMENTS,
+      }),
+    };
+  }
+  return { ok: true, ref };
 }

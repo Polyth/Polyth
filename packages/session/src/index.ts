@@ -4,10 +4,11 @@
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 
-import { MODEL_VISIBLE_TYPES } from "@polyth/contracts";
+import { MODEL_VISIBLE_TYPES, formatBrowserContextForModel } from "@polyth/contracts";
 import type {
   AgentProfile,
   AttachmentRef,
+  BrowserContext,
   CanonicalEventInput,
   ChildSnapshotInput,
   ChildSnapshotResult,
@@ -3677,7 +3678,31 @@ export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
     const last = out[out.length - 1];
     if (!last || last.role !== "user") return;
     for (const raw of attachments) {
-      const a = raw as { name?: unknown; mime?: unknown; path?: unknown; url?: unknown; range?: unknown };
+      const a = raw as {
+        name?: unknown;
+        mime?: unknown;
+        path?: unknown;
+        url?: unknown;
+        range?: unknown;
+        kind?: unknown;
+        browserContext?: unknown;
+      };
+      if (a.kind === "browser-context") {
+        const ctx = a.browserContext as BrowserContext | undefined;
+        if (ctx && typeof ctx === "object" && typeof ctx.url === "string") {
+          last.parts.push({ type: "text", text: formatBrowserContextForModel(ctx) });
+          const shot = ctx.crop ?? ctx.screenshot;
+          if (shot?.localPath && shot.mime.startsWith("image/")) {
+            last.parts.push({
+              type: "file",
+              name: typeof a.name === "string" ? a.name : "browser-capture",
+              mime: shot.mime,
+              path: shot.localPath,
+            });
+          }
+        }
+        continue;
+      }
       if (typeof a?.name !== "string" || typeof a?.mime !== "string") continue;
       const range = Array.isArray(a.range) && a.range.length === 2
         && Number.isSafeInteger(a.range[0]) && Number.isSafeInteger(a.range[1])

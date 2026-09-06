@@ -7,7 +7,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { JsonObject, SessionEvent } from "@polyth/contracts";
-import { createBrowserService, createFakeDriver } from "@polyth/browser";
+import { createBrowserArtifactStore, createBrowserService, createFakeDriver } from "@polyth/browser";
 import { browserRoutes } from "../src/serverEntry.ts";
 import type { RouteRequest } from "../../server/src/http.ts";
 
@@ -43,7 +43,12 @@ function makeHarness() {
     calls.push({ kind: "append", type, data });
     return { sessionId, seq: ++seq, ts: Date.now(), type, data } as unknown as SessionEvent;
   };
-  const routes = browserRoutes({ browser, append, shotsDir: join(mkdtempSync(join(tmpdir(), "polyth-shots-")), "shots") });
+  const routes = browserRoutes({
+    browser,
+    append,
+    shotsDir: join(mkdtempSync(join(tmpdir(), "polyth-shots-")), "shots"),
+    artifacts: createBrowserArtifactStore(join(mkdtempSync(join(tmpdir(), "polyth-arts-")), "artifacts")),
+  });
 
   const call = async (method: string, path: string, body: Record<string, unknown> = {}, query = "") => {
     let status = 0;
@@ -191,7 +196,12 @@ test("browser sessions without a linked polyth session append nothing", async ()
 
 test("capability endpoint reports honest unavailable state", async () => {
   const browser = createBrowserService({ driver: null, unavailableReason: "browser engine unavailable: nope" });
-  const routes = browserRoutes({ browser, append: async () => { throw new Error("no"); }, shotsDir: "/tmp/x" });
+  const routes = browserRoutes({
+    browser,
+    append: async () => { throw new Error("no"); },
+    shotsDir: "/tmp/x",
+    artifacts: createBrowserArtifactStore(join(mkdtempSync(join(tmpdir(), "polyth-arts-")), "artifacts")),
+  });
   let payload: unknown;
   await routes({
     req: {}, res: {}, url: new URL("http://x/api/browser/capability"),
@@ -199,6 +209,165 @@ test("capability endpoint reports honest unavailable state", async () => {
     body: async () => ({}), json: (_c: number, b: unknown) => { payload = b; },
   } as unknown as RouteRequest);
   assert.deepEqual(payload, { available: false, engine: null, reason: "browser engine unavailable: nope" });
+});
+
+test("context capture returns structured BrowserContext and rejects stale revisions", async () => {
+  const { browser, call, calls } = makeHarness();
+  const created = await call("POST", "/api/browser/sessions", { projectId: "p1", sessionId: "sess1", url: HOME });
+  assert.equal(created.status, 200);
+  const id = (created.payload as { id: string }).id;
+  const session = browser.get(id)!;
+  calls.length = 0;
+
+  const pageCtx = await call("POST", `/api/browser/sessions/${id}/context`, {
+    type: "page",
+    id: "ctx-page-1",
+    expectedRevision: session.revision,
+  });
+  assert.equal(pageCtx.status, 200);
+  const pagePayload = pageCtx.payload as {
+    context: { type: string; url: string; textSummary?: string; screenshot?: { id: string } };
+  };
+  assert.equal(pagePayload.context.type, "page");
+  assert.equal(pagePayload.context.url, HOME);
+  assert.ok(pagePayload.context.textSummary?.includes("hello"));
+  assert.ok(pagePayload.context.screenshot?.id);
+
+  const stale = await call("POST", `/api/browser/sessions/${id}/context`, {
+    type: "page",
+    id: "ctx-page-stale",
+    expectedRevision: session.revision - 1,
+  });
+  assert.equal(stale.status, 409);
+  assert.equal((stale.payload as { error: string }).error, "stale-frame");
+
+  const area = await call("POST", `/api/browser/sessions/${id}/context`, {
+    type: "area",
+    id: "ctx-area-1",
+    expectedRevision: browser.get(id)!.revision,
+    region: { x: 0.1, y: 0.1, width: 0.4, height: 0.3 },
+  });
+  assert.equal(area.status, 200);
+  const areaPayload = area.payload as {
+    context: { type: string; region?: { pixels: { width: number } }; screenshot?: { id: string }; crop?: { id: string } };
+  };
+  assert.equal(areaPayload.context.type, "area");
+  assert.ok((areaPayload.context.region?.pixels.width ?? 0) > 0);
+  assert.equal(areaPayload.context.screenshot, undefined);
+  assert.ok(areaPayload.context.crop?.id);
+
+  const element = await call("POST", `/api/browser/sessions/${id}/context`, {
+    type: "element",
+    id: "ctx-el-1",
+    expectedRevision: browser.get(id)!.revision,
+    point: { x: 12, y: 18 },
+  });
+  assert.equal(element.status, 200);
+  const elementPayload = element.payload as {
+    context: { type: string; screenshot?: { id: string }; crop?: { id: string }; element?: { tag?: string } };
+  };
+  assert.equal(elementPayload.context.type, "element");
+  assert.equal(elementPayload.context.screenshot, undefined);
+  assert.ok(elementPayload.context.crop?.id);
+  assert.ok(elementPayload.context.element?.tag);
+
+  const text = await call("POST", `/api/browser/sessions/${id}/context`, {
+    type: "text",
+    id: "ctx-text-1",
+    expectedRevision: browser.get(id)!.revision,
+    start: { x: 10, y: 10 },
+    end: { x: 80, y: 40 },
+  });
+  assert.equal(text.status, 200);
+  const textPayload = text.payload as {
+    context: { type: string; quote?: string; screenshot?: { id: string }; crop?: { id: string } };
+  };
+  assert.equal(textPayload.context.type, "text");
+  assert.ok((textPayload.context.quote ?? "").includes("hello"));
+  assert.equal(textPayload.context.screenshot, undefined);
+  assert.equal(textPayload.context.crop, undefined);
+  assert.ok(calls.some((c) => c.kind === "append" && c.type === "browser/context-captured"));
+});
+
+test("artifact endpoint serves managed browser captures", async () => {
+  const browser = createBrowserService({
+    driver: createFakeDriver({
+      pages: { [HOME]: { title: "App", text: "hello" } },
+    }),
+    allowedOrigins: () => ["http://127.0.0.1:5173"],
+  });
+  const artifacts = createBrowserArtifactStore(join(mkdtempSync(join(tmpdir(), "polyth-arts-")), "artifacts"));
+  const routes = browserRoutes({
+    browser,
+    append: async () => ({ sessionId: "x", seq: 1, ts: Date.now(), type: "x", data: {} }) as never,
+    shotsDir: join(mkdtempSync(join(tmpdir(), "polyth-shots-")), "shots"),
+    artifacts,
+  });
+  const session = await browser.create({ projectId: "p1", url: HOME });
+  const ctx = await browser.captureContext(session.id, {
+    type: "page",
+    id: "ctx-art",
+    expectedRevision: session.revision,
+  }, artifacts);
+  assert.ok(ctx.screenshot?.id);
+
+  let artStatus = 0;
+  let artHeaders: Record<string, string> = {};
+  let artBody: Buffer | undefined;
+  const handled = await routes({
+    req: {},
+    res: {
+      writeHead: (code: number, h: Record<string, string>) => { artStatus = code; artHeaders = h; },
+      end: (buf: Buffer) => { artBody = buf; },
+    },
+    url: new URL(`http://x/api/browser/artifacts?id=${encodeURIComponent(ctx.screenshot!.id)}`),
+    path: "/api/browser/artifacts",
+    method: "GET",
+    body: async () => ({}),
+    json: () => {},
+  } as unknown as RouteRequest);
+  assert.equal(handled, true);
+  assert.equal(artStatus, 200);
+  assert.match(artHeaders["content-type"] ?? "", /image\//);
+  assert.ok(artBody && artBody.length > 0);
+
+  let delStatus = 0;
+  let delPayload: unknown;
+  const deleted = await routes({
+    req: {},
+    res: { writeHead: () => {}, end: () => {} },
+    url: new URL(`http://x/api/browser/artifacts?id=${encodeURIComponent(ctx.screenshot!.id)}`),
+    path: "/api/browser/artifacts",
+    method: "DELETE",
+    body: async () => ({}),
+    json: (code: number, payload: unknown) => { delStatus = code; delPayload = payload; },
+  } as unknown as RouteRequest);
+  assert.equal(deleted, true);
+  assert.equal(delStatus, 200);
+  assert.equal((delPayload as { ok?: boolean }).ok, true);
+  assert.equal(await artifacts.read(ctx.screenshot!.id), null);
+
+  const kept = await browser.captureContext(session.id, {
+    type: "page",
+    id: "ctx-kept",
+    expectedRevision: browser.get(session.id)!.revision,
+  }, artifacts);
+  assert.ok(kept.screenshot?.id);
+  await artifacts.commit([kept.screenshot.id]);
+  let retainStatus = 0;
+  let retainPayload: unknown;
+  await routes({
+    req: {},
+    res: { writeHead: () => {}, end: () => {} },
+    url: new URL(`http://x/api/browser/artifacts?id=${encodeURIComponent(kept.screenshot.id)}`),
+    path: "/api/browser/artifacts",
+    method: "DELETE",
+    body: async () => ({}),
+    json: (code: number, payload: unknown) => { retainStatus = code; retainPayload = payload; },
+  } as unknown as RouteRequest);
+  assert.equal(retainStatus, 200);
+  assert.equal((retainPayload as { retained?: boolean }).retained, true);
+  assert.ok(await artifacts.read(kept.screenshot.id));
 });
 
 test("frame endpoint supports afterRevision resume and 204 when caught up", async () => {

@@ -22,13 +22,88 @@ test("sanitizeAttachments: valid refs pass and the file url is recomputed", () =
     { id: "a1", name: "notes.md", mime: "text/plain", size: 10, path: "docs/notes.md", url: "https://evil.example/x" },
     { id: "a2", name: "sel", mime: "text/plain", size: 5, kind: "range", path: "src/i.ts", range: [3, 9] },
     { id: "a3", name: "PR #4", mime: "text/uri-list", size: 0, kind: "url", url: "https://github.com/o/r/pull/4" },
+    {
+      id: "a4",
+      name: "Browser · Save",
+      mime: "application/vnd.polyth.browser-context+json",
+      size: 0,
+      kind: "browser-context",
+      browserContext: {
+        id: "a4",
+        type: "element",
+        browserSessionId: "b1",
+        projectId: "p1",
+        frameRevision: 3,
+        url: "http://localhost:3000/settings",
+        title: "Settings",
+        viewport: { width: 390, height: 844 },
+        capturedAt: "2026-09-05T00:00:00.000Z",
+        element: { tag: "button", name: "Save", selector: "button.save" },
+        screenshot: { id: "shot-1", mime: "image/jpeg", size: 120 },
+      },
+    },
   ], OPTS);
-  assert.equal(out.length, 3);
+  assert.equal(out.length, 4);
   assert.equal(out[0]?.kind, "file");
   // caller-supplied URL for a file kind never survives into the log
   assert.equal(out[0]?.url, "/api/files/raw?projectId=p1&path=docs%2Fnotes.md");
   assert.deepEqual(out[1]?.range, [3, 9]);
   assert.equal(out[2]?.url, "https://github.com/o/r/pull/4");
+  assert.equal(out[3]?.kind, "browser-context");
+  assert.equal(out[3]?.browserContext?.element?.name, "Save");
+  assert.equal(out[3]?.url, "/api/browser/artifacts?id=shot-1");
+  assert.equal(out[3]?.browserContext?.screenshot?.localPath, undefined);
+});
+
+test("sanitizeAttachments: browser context uses the current project and known element fields", () => {
+  const out = sanitizeAttachments([
+    {
+      id: "a4",
+      name: "Browser · Save",
+      mime: "application/vnd.polyth.browser-context+json",
+      size: 0,
+      kind: "browser-context",
+      browserContext: {
+        id: "a4",
+        type: "area",
+        browserSessionId: "b1",
+        projectId: "other-space",
+        frameRevision: 3,
+        url: "http://localhost:3000/settings",
+        title: "Settings",
+        viewport: { width: 390, height: 844 },
+        capturedAt: "2026-09-05T00:00:00.000Z",
+        region: {
+          normalized: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 },
+          pixels: { x: 39, y: 168, width: 117, height: 338 },
+        },
+        intersecting: [
+          {
+            tag: "button",
+            name: "Save",
+            selector: "button.save",
+            password: "hunter2",
+            extra: { nested: true },
+          },
+          { name: "no-tag-or-selector" },
+        ],
+        element: { tag: "button", name: "Save", onclick: "alert(1)" },
+      },
+    },
+  ], OPTS);
+  assert.equal(out[0]?.browserContext?.projectId, "p1");
+  assert.equal(out[0]?.browserContext?.element?.tag, "button");
+  assert.equal(
+    (out[0]?.browserContext?.element as { onclick?: unknown } | undefined)?.onclick,
+    undefined,
+  );
+  assert.equal(out[0]?.browserContext?.intersecting?.length, 1);
+  assert.equal(out[0]?.browserContext?.intersecting?.[0]?.name, "Save");
+  assert.equal(
+    (out[0]?.browserContext?.intersecting?.[0] as { password?: unknown } | undefined)?.password,
+    undefined,
+  );
+  assert.equal(out[0]?.browserContext?.region?.pixels?.width, 117);
 });
 
 test("sanitizeAttachments: typed rejections", () => {

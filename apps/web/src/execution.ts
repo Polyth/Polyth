@@ -13,6 +13,7 @@ export type ExecutionKind =
   | "move"
   | "search"
   | "web"
+  | "browser"
   | "mcp"
   | "subagent"
   | "test"
@@ -210,7 +211,8 @@ export function classifyTool(tool: string, input: JsonObject): ExecutionKind {
   if (/^(bash|shell|shell_command|run_shell|exec|terminal)$/.test(value)) return "shell";
   if (/(^|[_:/-])(subagent|agent|task)([_:/-]|$)/.test(value) || value === "task") return "subagent";
   if (/mcp|github|linear|slack|notion|figma/.test(value)) return "mcp";
-  if (/web|browser|fetch|url|http/.test(value)) return "web";
+  if (/polyth_browser|^browser(?:[_:/-]|$)/.test(value)) return "browser";
+  if (/web|fetch|url|http/.test(value)) return "web";
   if (/grep|glob|search|ripgrep|find/.test(value)) return "search";
   if (/delete|remove|unlink/.test(value)) return "delete";
   if (/move|rename/.test(value)) return "move";
@@ -237,6 +239,7 @@ function displayLabel(kind: ExecutionKind, tool: string): string {
     move: "Move",
     search: "Search",
     web: "Web",
+    browser: "Browser",
     subagent: "Subagent",
     test: "Test",
     git: "Git",
@@ -290,6 +293,12 @@ export function executionPresentation(message: Pick<ToolMsg, "tool" | "input" | 
   } else if (kind === "web") {
     const operation = description ?? (query ? `Search "${endTruncate(query, 38)}"` : "Open");
     preview = `${operation}${url ? ` · ${compactUrl(url, 48)}` : ""}`;
+  } else if (kind === "browser") {
+    const action = firstString(input, ["action", "kind", "operation"]) ?? description ?? "Browse";
+    const target = url
+      ?? firstString(input, ["selector", "text", "target"])
+      ?? query;
+    preview = `${action.replace(/[-_]+/g, " ")}${target ? ` · ${endTruncate(target, 48)}` : ""}`;
   } else if (kind === "mcp") {
     const action = description ?? tool.split(/__|[:/]/).at(-1)?.replace(/[-_]+/g, " ") ?? "Request";
     const humanized = action.replace(/\b(pr|pull request)\s*#?(\d+)/i, "pull request #$2");

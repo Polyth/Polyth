@@ -30,7 +30,7 @@ function ExecutionIcon({ kind }: { kind: ExecutionKind }) {
           : kind === "delete" ? Icon.trash
             : kind === "move" ? Icon.branch
               : kind === "search" ? Icon.search
-                : kind === "web" ? Icon.globe
+                : kind === "web" || kind === "browser" ? Icon.globe
                   : kind === "mcp" ? Icon.plug
                     : kind === "subagent" ? Icon.hierarchy
                       : kind === "test" ? Icon.check

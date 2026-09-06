@@ -1,7 +1,6 @@
-import { tr } from "../../../apps/web/src/i18n/index.ts";
-
 export const BROWSER_DEVICE_PRESETS = [
-  { id: "responsive", labelKey: "browserpreview.responsive", width: 1280, height: 800 },
+  /** 0×0 means “follow the pane”; never treat this as a fixed viewport. */
+  { id: "responsive", labelKey: "browserpreview.responsive", width: 0, height: 0 },
   { id: "iphone-14", labelKey: "browserpreview.iphone14", width: 390, height: 844 },
   { id: "pixel-7", labelKey: "browserpreview.pixel7", width: 412, height: 915 },
   { id: "ipad-mini", labelKey: "browserpreview.ipadMini", width: 768, height: 1024 },
@@ -10,26 +9,14 @@ export const BROWSER_DEVICE_PRESETS = [
 ] as const;
 
 export type BrowserDevicePresetId = typeof BROWSER_DEVICE_PRESETS[number]["id"];
+export type ViewportUiMode = "responsive" | "preset" | "custom";
 
-export type BrowserDisplayMode = "fit" | "entire" | "actual";
-
-export const BROWSER_DISPLAY_MODES = [
-  { id: "fit", labelKey: "previewview.displayFit" },
-  { id: "entire", labelKey: "previewview.displayEntire" },
-  { id: "actual", labelKey: "previewview.displayActual" },
-] as const;
-
-export const BROWSER_INSPECTOR_TABS = ["snapshot", "console", "activity"] as const;
-export type BrowserInspectorTab = typeof BROWSER_INSPECTOR_TABS[number];
-
-export interface BrowserAnnotation {
-  id: number;
-  /** Normalized coordinates keep a selected area tied to the captured frame. */
+/** Normalized 0–1 selection on the letterboxed frame. */
+export interface NormRect {
   x: number;
   y: number;
   width: number;
   height: number;
-  note: string;
 }
 
 export interface BrowserPointedElement {
@@ -40,55 +27,7 @@ export interface BrowserPointedElement {
   text?: string;
   rect: { x: number; y: number; width: number; height: number };
   attributes?: Record<string, string>;
-}
-
-/** One compact, stable label for the selected-element editor. Browser text can
- * include an entire page (especially for html/body), so never render it raw. */
-export function browserPointedElementLabel(
-  element: Pick<BrowserPointedElement, "name" | "text" | "selector">,
-  maxLength = 120,
-): string {
-  const raw = (element.name || element.text || element.selector).replace(/\s+/g, " ").trim();
-  if (raw.length <= maxLength) return raw;
-  return `${raw.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
-}
-
-/** WAI-ARIA tab-list navigation with wraparound. */
-export function browserInspectorTabFromKey(
-  current: BrowserInspectorTab,
-  key: string,
-): BrowserInspectorTab | null {
-  const index = BROWSER_INSPECTOR_TABS.indexOf(current);
-  if (key === "Home") return BROWSER_INSPECTOR_TABS[0];
-  if (key === "End") return BROWSER_INSPECTOR_TABS.at(-1) ?? null;
-  if (key === "ArrowRight" || key === "ArrowDown") {
-    return BROWSER_INSPECTOR_TABS[(index + 1) % BROWSER_INSPECTOR_TABS.length] ?? null;
-  }
-  if (key === "ArrowLeft" || key === "ArrowUp") {
-    return BROWSER_INSPECTOR_TABS[(index - 1 + BROWSER_INSPECTOR_TABS.length) % BROWSER_INSPECTOR_TABS.length] ?? null;
-  }
-  return null;
-}
-
-/** Approval errors carry a stable code; the message fallback keeps the UI
- * compatible with older servers whose fetch wrapper did not preserve it. */
-export function browserApprovalRequired(error: unknown): boolean {
-  const code = (error as { code?: unknown } | null)?.code;
-  if (code === "approval-required") return true;
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes("approval-required") || /\bneeds\b.*\bapproval\b/i.test(message);
-}
-
-/** Model-facing text paired with the pointed-element screenshot attachment. */
-export function browserElementContext(url: string, element: BrowserPointedElement): string {
-  return [
-    "[Browser element]",
-    `URL: ${url}`,
-    `Selector: ${element.selector}`,
-    `Element: <${element.tag}>${element.role ? ` role="${element.role}"` : ""}${element.name ? ` name="${element.name}"` : ""}`,
-    element.text ? `Text: ${element.text}` : "",
-    `Bounds: x=${element.rect.x}, y=${element.rect.y}, width=${element.rect.width}, height=${element.rect.height}`,
-  ].filter(Boolean).join("\n");
+  editable?: boolean;
 }
 
 export interface ImageRect {
@@ -101,9 +40,77 @@ export interface ImageRect {
 const clamp = (value: number, min = 0, max = 1): number =>
   Math.max(min, Math.min(max, value));
 
+/** Compact label for the selected-element editor — never dump page-sized text. */
+export function browserPointedElementLabel(
+  element: Pick<BrowserPointedElement, "name" | "text" | "selector">,
+  maxLength = 120,
+): string {
+  const raw = (element.name || element.text || element.selector).replace(/\s+/g, " ").trim();
+  if (raw.length <= maxLength) return raw;
+  return `${raw.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+/** Approval errors carry a stable code; message fallback covers older servers. */
+export function browserApprovalRequired(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === "approval-required") return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("approval-required") || /\bneeds\b.*\bapproval\b/i.test(message);
+}
+
+export function namedPresetForViewport(width: number, height: number): Exclude<BrowserDevicePresetId, "responsive"> | null {
+  const match = BROWSER_DEVICE_PRESETS.find((preset) =>
+    preset.id !== "responsive" && preset.width === width && preset.height === height
+  );
+  return match ? match.id as Exclude<BrowserDevicePresetId, "responsive"> : null;
+}
+
+/** @deprecated Prefer namedPresetForViewport — unmatched sizes are custom, not responsive. */
 export function devicePresetForViewport(width: number, height: number): BrowserDevicePresetId {
-  return BROWSER_DEVICE_PRESETS.find((preset) => preset.width === width && preset.height === height)?.id
-    ?? "responsive";
+  return namedPresetForViewport(width, height) ?? "responsive";
+}
+
+const viewportModeMemory = new Map<string, ViewportUiMode>();
+
+export function rememberViewportMode(browserId: string, mode: ViewportUiMode): void {
+  viewportModeMemory.set(browserId, mode);
+  try { sessionStorage.setItem(`polyth.browser.viewportMode.${browserId}`, mode); } catch { /* private mode */ }
+}
+
+export function recalledViewportMode(browserId: string): ViewportUiMode {
+  const mem = viewportModeMemory.get(browserId);
+  if (mem) return mem;
+  try {
+    const raw = sessionStorage.getItem(`polyth.browser.viewportMode.${browserId}`);
+    if (raw === "responsive" || raw === "preset" || raw === "custom") {
+      viewportModeMemory.set(browserId, raw);
+      return raw;
+    }
+  } catch { /* ignore */ }
+  return "responsive";
+}
+
+/** Host + path for compact chrome; full URL stays available on edit. */
+export function compactPageIdentity(url: string): string {
+  try {
+    const raw = /^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : `http://${url}`;
+    const parsed = new URL(raw);
+    const path = parsed.pathname === "/" ? "" : parsed.pathname;
+    const id = `${parsed.host}${path}`;
+    return id.length > 42 ? `${id.slice(0, 41)}…` : id;
+  } catch {
+    return url;
+  }
+}
+
+/** Coalesce pointer/wheel deltas so one rAF flush sends a single scroll action. */
+export function mergeScrollDelta(
+  pending: { x: number; y: number } | null,
+  dx: number,
+  dy: number,
+): { x: number; y: number } {
+  if (!pending) return { x: dx, y: dy };
+  return { x: pending.x + dx, y: pending.y + dy };
 }
 
 /** Bounds of an object-fit:contain image inside its element. */
@@ -125,47 +132,6 @@ export function containedImageRect(
     width,
     height,
   };
-}
-
-/** Bounds of a width-fitted image: full element width, height from source aspect.
- * The painted image may be taller than the stage and scroll vertically. */
-export function fittedWidthImageRect(
-  elementWidth: number,
-  sourceWidth: number,
-  sourceHeight: number,
-): ImageRect {
-  if (elementWidth <= 0 || sourceWidth <= 0 || sourceHeight <= 0) {
-    return { left: 0, top: 0, width: 0, height: 0 };
-  }
-  return {
-    left: 0,
-    top: 0,
-    width: elementWidth,
-    height: elementWidth * sourceHeight / sourceWidth,
-  };
-}
-
-/** Map pointer coordinates to viewport pixels for the active preview display mode.
- * For `actual`, the img is sized to viewport CSS pixels (not stretched to the stage);
- * pass the img client box — the fill rect is the full img element.
- * For `fit`, the img is width-fitted (aspect preserved); height may overflow the stage. */
-export function previewImageRect(
-  mode: BrowserDisplayMode,
-  elementWidth: number,
-  elementHeight: number,
-  sourceWidth: number,
-  sourceHeight: number,
-): ImageRect {
-  if (mode === "entire") {
-    return containedImageRect(elementWidth, elementHeight, sourceWidth, sourceHeight);
-  }
-  if (mode === "fit") {
-    return fittedWidthImageRect(elementWidth, sourceWidth, sourceHeight);
-  }
-  if (elementWidth <= 0 || elementHeight <= 0) {
-    return { left: 0, top: 0, width: 0, height: 0 };
-  }
-  return { left: 0, top: 0, width: elementWidth, height: elementHeight };
 }
 
 export const VIEWPORT_WIDTH_MIN = 320;
@@ -198,7 +164,7 @@ export function normalizedRectInImage(
   start: { x: number; y: number },
   end: { x: number; y: number },
   rect: ImageRect,
-): Omit<BrowserAnnotation, "id" | "note"> | null {
+): NormRect | null {
   if (rect.width <= 0 || rect.height <= 0) return null;
   const left = clamp(Math.min(start.x, end.x), rect.left, rect.left + rect.width);
   const top = clamp(Math.min(start.y, end.y), rect.top, rect.top + rect.height);
@@ -214,7 +180,7 @@ export function normalizedRectInImage(
 }
 
 export function annotationViewportRect(
-  annotation: Pick<BrowserAnnotation, "x" | "y" | "width" | "height">,
+  annotation: NormRect,
   viewport: { width: number; height: number },
 ): { x: number; y: number; width: number; height: number } {
   const x = Math.round(clamp(annotation.x) * viewport.width);
@@ -229,92 +195,65 @@ export function annotationViewportRect(
   };
 }
 
-export function captureFileName(now = new Date()): string {
-  return `browser-${now.toISOString().replace(/[:.]/g, "-")}.png`;
+/** Map a compositor keydown to a Playwright-style key chord. */
+export function pressKeyFromEvent(event: { key: string; shiftKey?: boolean }): string | null {
+  if (event.key === "Escape") return "Escape";
+  if (event.key === "Enter") return "Enter";
+  if (event.key === "Backspace") return "Backspace";
+  if (event.key === "Delete") return "Delete";
+  if (event.key === "Tab") return event.shiftKey ? "Shift+Tab" : "Tab";
+  if (event.key === "ArrowUp") return "ArrowUp";
+  if (event.key === "ArrowDown") return "ArrowDown";
+  if (event.key === "ArrowLeft") return "ArrowLeft";
+  if (event.key === "ArrowRight") return "ArrowRight";
+  if (event.key === "Home") return "Home";
+  if (event.key === "End") return "End";
+  return null;
 }
 
-const loadImage = (src: string): Promise<HTMLImageElement> =>
-  new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error(tr("browserpreview.couldnTDecodeTheCurrentBrowserFrame")));
-    image.src = src;
-  });
+/** Best-effort parse of click/press hit-test metadata from a browser action. */
+export function pointedFromActionResult(result: unknown): BrowserPointedElement | null {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return null;
+  const raw = result as Record<string, unknown>;
+  if (typeof raw.tag !== "string") return null;
+  const box = raw.rect && typeof raw.rect === "object" && !Array.isArray(raw.rect)
+    ? raw.rect as Record<string, unknown>
+    : null;
+  if (!box || !Number.isFinite(Number(box.x)) || !Number.isFinite(Number(box.y))) return null;
+  const attributes = raw.attributes && typeof raw.attributes === "object" && !Array.isArray(raw.attributes)
+    ? Object.fromEntries(
+      Object.entries(raw.attributes as Record<string, unknown>)
+        .filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+    )
+    : undefined;
+  return {
+    selector: typeof raw.selector === "string" ? raw.selector : "",
+    tag: raw.tag,
+    ...(typeof raw.role === "string" ? { role: raw.role } : {}),
+    ...(typeof raw.name === "string" ? { name: raw.name } : {}),
+    ...(typeof raw.text === "string" ? { text: raw.text } : {}),
+    rect: {
+      x: Number(box.x),
+      y: Number(box.y),
+      width: Number(box.width) || 0,
+      height: Number(box.height) || 0,
+    },
+    ...(attributes && Object.keys(attributes).length ? { attributes } : {}),
+    ...(raw.editable === true || raw.editable === false ? { editable: raw.editable } : {}),
+  };
+}
 
-/** Paint selected rectangles and their comments into the screenshot uploaded to chat. */
-export async function renderBrowserCapture(
-  src: string,
-  annotations: readonly BrowserAnnotation[],
-  fileName = captureFileName(),
-): Promise<File> {
-  const image = await loadImage(src);
-  const canvas = document.createElement("canvas");
-  canvas.width = image.naturalWidth || image.width;
-  canvas.height = image.naturalHeight || image.height;
-  const context = canvas.getContext("2d");
-  if (!context || canvas.width <= 0 || canvas.height <= 0) {
-    throw new Error(tr("browserpreview.couldnTPrepareTheBrowserCapture"));
-  }
-  context.drawImage(image, 0, 0, canvas.width, canvas.height);
-
-  const unit = Math.max(12, Math.round(Math.min(canvas.width, canvas.height) * 0.022));
-  context.font = `600 ${Math.max(13, Math.round(unit * 0.82))}px ui-sans-serif, system-ui, sans-serif`;
-  context.textBaseline = "middle";
-  annotations.forEach((annotation, index) => {
-    const x = clamp(annotation.x) * canvas.width;
-    const y = clamp(annotation.y) * canvas.height;
-    const width = Math.max(1, clamp(annotation.width, 0, 1 - clamp(annotation.x)) * canvas.width);
-    const height = Math.max(1, clamp(annotation.height, 0, 1 - clamp(annotation.y)) * canvas.height);
-    const number = String(index + 1);
-
-    context.save();
-    context.fillStyle = "rgba(229, 72, 77, 0.12)";
-    context.fillRect(x, y, width, height);
-    context.lineWidth = Math.max(3, unit * 0.18);
-    context.strokeStyle = "#e5484d";
-    context.strokeRect(x, y, width, height);
-    context.restore();
-
-    const pinX = clamp(x + unit * 0.15, unit, canvas.width - unit);
-    const pinY = clamp(y + unit * 0.15, unit, canvas.height - unit);
-    context.beginPath();
-    context.arc(pinX, pinY, unit, 0, Math.PI * 2);
-    context.fillStyle = "#e5484d";
-    context.fill();
-    context.lineWidth = Math.max(2, unit * 0.15);
-    context.strokeStyle = "#ffffff";
-    context.stroke();
-    context.fillStyle = "#ffffff";
-    context.textAlign = "center";
-    context.fillText(number, pinX, pinY + 0.5);
-
-    const note = annotation.note.trim();
-    if (!note) return;
-    const text = note.slice(0, 120);
-    const padding = Math.max(6, Math.round(unit * 0.45));
-    const textWidth = context.measureText(text).width;
-    const labelWidth = Math.min(canvas.width - padding * 2, textWidth + padding * 2);
-    const labelHeight = unit * 1.55;
-    const proposedX = pinX + unit * 1.35;
-    const labelX = clamp(proposedX, padding, Math.max(padding, canvas.width - labelWidth - padding));
-    const labelY = clamp(pinY - labelHeight / 2, padding, Math.max(padding, canvas.height - labelHeight - padding));
-    context.fillStyle = "rgba(17, 18, 20, 0.9)";
-    context.fillRect(labelX, labelY, labelWidth, labelHeight);
-    context.fillStyle = "#ffffff";
-    context.textAlign = "left";
-    context.save();
-    context.beginPath();
-    context.rect(labelX + padding, labelY, labelWidth - padding * 2, labelHeight);
-    context.clip();
-    context.fillText(text, labelX + padding, labelY + labelHeight / 2);
-    context.restore();
-  });
-
-  const blob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((value) => {
-      if (value) resolve(value);
-      else reject(new Error(tr("browserpreview.couldnTEncodeTheBrowserCapture")));
-    }, "image/png");
-  });
-  return new File([blob], fileName, { type: "image/png" });
+/** Map an element pixel rect into a normalized frame highlight. */
+export function elementHighlightRect(
+  rect: { x: number; y: number; width: number; height: number },
+  viewport: { width: number; height: number },
+): NormRect {
+  const x = Math.max(0, rect.x) / viewport.width;
+  const y = Math.max(0, rect.y) / viewport.height;
+  return {
+    x,
+    y,
+    width: Math.min(viewport.width - Math.max(0, rect.x), Math.max(1, rect.width)) / viewport.width,
+    height: Math.min(viewport.height - Math.max(0, rect.y), Math.max(1, rect.height)) / viewport.height,
+  };
 }

@@ -12,7 +12,7 @@ const mem = new Map<string, string>();
 };
 
 const {
-  addAttachment, attachText, clearAttachments, isLargeTextPaste, MAX_PENDING_ATTACHMENTS, newAttachmentId, pendingAttachments,
+  addAttachment, attachBrowserContext, attachText, clearAttachments, isLargeTextPaste, MAX_PENDING_ATTACHMENTS, newAttachmentId, pendingAttachments,
   removeAttachment, takeAttachments,
 } = await import("../src/attachments.ts");
 const { buildModel } = await import("../src/reduce.ts");
@@ -105,6 +105,56 @@ test("no-session pills stay in memory only", () => {
   assert.equal(pendingAttachments(null).length, 1);
   assert.ok(![...mem.keys()].some((k) => k === "polyth.draft.att."));
   assert.equal(takeAttachments(null)[0]?.id, "hero");
+});
+
+test("browser context attaches to the hero composer without a session", () => {
+  const attached = attachBrowserContext(null, {
+    id: "ctx-hero",
+    type: "page",
+    browserSessionId: "b1",
+    projectId: "p1",
+    frameRevision: 1,
+    url: "https://example.com/settings",
+    title: "Example Domain",
+    viewport: { width: 390, height: 844 },
+    capturedAt: "2026-09-06T00:00:00.000Z",
+  });
+  assert.equal(attached.ok, true);
+  assert.equal(pendingAttachments(null)[0]?.kind, "browser-context");
+  assert.equal(pendingAttachments(null)[0]?.name, "Example Domain");
+  assert.equal(takeAttachments(null)[0]?.id, "ctx-hero");
+});
+
+test("discarding a browser-context chip deletes managed artifacts", async () => {
+  const calls: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push(`${init?.method ?? "GET"} ${String(input)}`);
+    return new Response("{}", { status: 200 });
+  }) as typeof fetch;
+  try {
+    const attached = attachBrowserContext("sess-del", {
+      id: "ctx-del",
+      type: "element",
+      browserSessionId: "b1",
+      projectId: "p1",
+      frameRevision: 2,
+      url: "https://example.com/settings",
+      title: "Settings",
+      viewport: { width: 390, height: 844 },
+      capturedAt: "2026-09-06T00:00:00.000Z",
+      screenshot: { id: "shot-del", mime: "image/jpeg", size: 12 },
+      crop: { id: "crop-del", mime: "image/jpeg", size: 8 },
+    });
+    assert.equal(attached.ok, true);
+    removeAttachment("sess-del", "ctx-del");
+    await Promise.resolve();
+    assert.equal(pendingAttachments("sess-del").length, 0);
+    assert.ok(calls.some((call) => call === "DELETE /api/browser/artifacts?id=shot-del"));
+    assert.ok(calls.some((call) => call === "DELETE /api/browser/artifacts?id=crop-del"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("attachment IDs fall back when randomUUID is unavailable", () => {

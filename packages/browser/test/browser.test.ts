@@ -3,9 +3,13 @@
 // newest-frame reconnect, honest missing-engine capability, lifecycle.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  createBrowserArtifactStore,
   createBrowserService, createFakeDriver, redactObservationText,
-  type BrowserFrame, type FakeWeb,
+  type BrowserDriver, type BrowserFrame, type FakeWeb,
 } from "../src/index.ts";
 
 const HOME = "http://127.0.0.1:5173/";
@@ -316,5 +320,161 @@ test("in-page hops to loopback and private networks open without approval", asyn
   const priv = await svc.action(s.id, { kind: "click", target: { selector: "a#priv" } }, "user");
   assert.equal(priv.session.url, "http://10.0.0.5/");
   assert.ok(!svc.approvals().some((o) => o.includes("10.0.0.5") || o.includes("127.0.0.1:9999")));
+  await svc.close(s.id);
+});
+
+test("agent pause blocks already-queued agent work including navigation", async () => {
+  const inner = createFakeDriver(web());
+  let releaseClick: (() => void) | undefined;
+  let clickEntered: (() => void) | undefined;
+  const entered = new Promise<void>((resolve) => { clickEntered = resolve; });
+  const driver: BrowserDriver = {
+    engine: inner.engine,
+    close: inner.close,
+    async open(opts) {
+      const page = await inner.open(opts);
+      return {
+        ...page,
+        async click(target) {
+          clickEntered?.();
+          await new Promise<void>((resolve) => { releaseClick = resolve; });
+          return page.click(target);
+        },
+      };
+    },
+  };
+  const svc = createBrowserService({
+    driver,
+    allowedOrigins: () => ["http://127.0.0.1:5173"],
+  });
+  const s = await svc.create({ projectId: "p1", url: HOME });
+  const controllers: Array<string | undefined> = [];
+  svc.onEvent((e) => {
+    if (e.kind === "controller") controllers.push(e.actor);
+  });
+  const first = svc.action(s.id, { kind: "click", target: { selector: "a#next" } }, "agent");
+  await entered;
+  assert.equal(svc.get(s.id)?.controller, "agent");
+  const queued = svc.action(s.id, { kind: "reload" }, "agent");
+  const nav = svc.navigate(s.id, HOME, "agent");
+  svc.pauseAgent(s.id, true);
+  assert.equal(svc.get(s.id)?.controller, "agent");
+  releaseClick?.();
+  await first;
+  assert.notEqual(svc.get(s.id)?.controller, "agent");
+  await assert.rejects(queued, (e: Error & { code?: string }) => e.code === "agent-paused");
+  await assert.rejects(nav, (e: Error & { code?: string }) => e.code === "agent-paused");
+  await svc.navigate(s.id, `${HOME}next`, "agent").then(
+    () => { throw new Error("paused agent navigate should not run"); },
+    (e: Error & { code?: string }) => assert.equal(e.code, "agent-paused"),
+  );
+  svc.pauseAgent(s.id, false);
+  const after = await svc.navigate(s.id, `${HOME}next`, "agent");
+  assert.equal(after.url, `${HOME}next`);
+  assert.ok(controllers.includes("agent"));
+  assert.equal(controllers.at(-1), undefined);
+  await svc.close(s.id);
+});
+
+test("click returns focused-element metadata only, not a post-navigation hit", async () => {
+  const svc = createBrowserService({
+    driver: createFakeDriver({
+      pages: {
+        [HOME]: {
+          title: "App",
+          text: "welcome",
+          focused: {
+            selector: "input#q",
+            tag: "input",
+            name: "Search",
+            editable: true,
+            rect: { x: 8, y: 12, width: 200, height: 32 },
+          },
+          links: { "a#next": `${HOME}next` },
+        },
+        [`${HOME}next`]: { title: "Next", text: "second page" },
+      },
+    }),
+    allowedOrigins: () => ["http://127.0.0.1:5173"],
+  });
+  const s = await svc.create({ projectId: "p1", url: HOME });
+  const focused = await svc.action(s.id, {
+    kind: "click",
+    target: { point: { x: 24, y: 18 }, frameRevision: svc.get(s.id)!.revision },
+  }, "user");
+  assert.equal(focused.result?.tag, "input");
+  assert.equal(focused.result?.editable, true);
+  const navigated = await svc.action(s.id, { kind: "click", target: { selector: "a#next" } }, "user");
+  assert.equal(navigated.session.url, `${HOME}next`);
+  assert.equal(navigated.result, undefined);
+  const pointed = await svc.action(s.id, {
+    kind: "point",
+    target: { point: { x: 10, y: 10 }, frameRevision: navigated.session.revision },
+  }, "user");
+  assert.equal(pointed.result?.tag, "main");
+  await svc.close(s.id);
+});
+
+test("browser context redacts element metadata and empty text ranges stay empty-text-range", async () => {
+  const artifacts = createBrowserArtifactStore(join(mkdtempSync(join(tmpdir(), "polyth-arts-")), "arts"));
+  const svc = createBrowserService({
+    driver: createFakeDriver({
+      pages: {
+        [HOME]: { title: "App", text: "welcome home token=sk-secretvalue99" },
+        [`${HOME}blank`]: { title: "Blank" },
+      },
+    }),
+    allowedOrigins: () => ["http://127.0.0.1:5173"],
+    secrets: ["welcome home"],
+  });
+  const s = await svc.create({ projectId: "p1", url: HOME });
+  const element = await svc.captureContext(s.id, {
+    type: "element",
+    id: "ctx-el",
+    expectedRevision: svc.get(s.id)!.revision,
+    point: { x: 12, y: 12 },
+  }, artifacts);
+  assert.doesNotMatch(element.element?.text ?? "", /welcome home/);
+  assert.doesNotMatch(element.element?.text ?? "", /sk-secretvalue99/);
+  assert.match(element.element?.text ?? "", /\[redacted\]/i);
+  const area = await svc.captureContext(s.id, {
+    type: "area",
+    id: "ctx-area",
+    expectedRevision: svc.get(s.id)!.revision,
+    region: { x: 0.1, y: 0.1, width: 0.4, height: 0.4 },
+  }, artifacts);
+  assert.doesNotMatch(area.intersecting?.[0]?.text ?? "", /welcome home/);
+  assert.doesNotMatch(area.textSummary ?? "", /sk-secretvalue99/);
+  await svc.navigate(s.id, `${HOME}blank`, "user");
+  await assert.rejects(
+    () => svc.captureContext(s.id, {
+      type: "text",
+      id: "ctx-text",
+      expectedRevision: svc.get(s.id)!.revision,
+      start: { x: 10, y: 10 },
+      end: { x: 80, y: 40 },
+    }, artifacts),
+    (e: Error & { code?: string }) => e.code === "empty-text-range",
+  );
+  await svc.close(s.id);
+});
+
+test("resize stores an explicit viewport mode", async () => {
+  const svc = service();
+  const s = await svc.create({ projectId: "p1", url: HOME });
+  assert.equal(s.viewportMode, "responsive");
+  const preset = await svc.action(s.id, {
+    kind: "resize",
+    viewport: { width: 390, height: 844 },
+    mode: "preset",
+  }, "user");
+  assert.equal(preset.session.viewportMode, "preset");
+  assert.equal(preset.session.viewport.width, 390);
+  const custom = await svc.action(s.id, {
+    kind: "resize",
+    viewport: { width: 1111, height: 777 },
+    mode: "custom",
+  }, "user");
+  assert.equal(custom.session.viewportMode, "custom");
   await svc.close(s.id);
 });

@@ -4,7 +4,7 @@
 // reuse. Navigation hops run through the manager's policy guard via routing.
 import { access } from "node:fs/promises";
 import { constants } from "node:fs";
-import type { BrowserTarget } from "@polyth/contracts";
+import type { BrowserTarget, JsonObject } from "@polyth/contracts";
 import type { BrowserDriver, DriverNav, DriverPage, DriverPageEvent } from "./driver.ts";
 
 export const CHROMIUM_CANDIDATE_PATHS = [
@@ -47,6 +47,111 @@ export async function findChromiumExecutable(env: NodeJS.ProcessEnv = process.en
     // playwright-core absent or no local browser install
   }
   return null;
+}
+
+/** Page-side hit-test / focus inspect. Must stay self-contained for evaluate(). */
+function describeHit(args: { x?: number; y?: number; preferFocus?: boolean; focusedOnly?: boolean }): Record<string, unknown> {
+  const quote = (value: string) =>
+    typeof CSS !== "undefined" && typeof CSS.escape === "function"
+      ? CSS.escape(value)
+      : value.replace(/[^a-zA-Z0-9_-]/g, (char) => `\\${char}`);
+  const unique = (selector: string) => {
+    try { return document.querySelectorAll(selector).length === 1; } catch { return false; }
+  };
+  const selectorFor = (node: Element): string => {
+    const testId = node.getAttribute("data-testid");
+    if (testId) {
+      const candidate = `[data-testid="${testId.replace(/["\\]/g, "\\$&")}"]`;
+      if (unique(candidate)) return candidate;
+    }
+    if (node.id) {
+      const candidate = `#${quote(node.id)}`;
+      if (unique(candidate)) return candidate;
+    }
+    const parts: string[] = [];
+    let current: Element | null = node;
+    while (current && current !== document.documentElement) {
+      let part = current.tagName.toLowerCase();
+      const parent: Element | null = current.parentElement;
+      if (parent) {
+        const siblings = [...parent.children].filter((child) => child.tagName === current!.tagName);
+        if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(current) + 1})`;
+      }
+      parts.unshift(part);
+      const candidate = parts.join(" > ");
+      if (unique(candidate)) return candidate;
+      current = parent;
+    }
+    return parts.join(" > ") || node.tagName.toLowerCase();
+  };
+  const isEditable = (node: Element): boolean => {
+    if (!(node instanceof HTMLElement)) return false;
+    if (node.isContentEditable) return true;
+    const tag = node.tagName.toLowerCase();
+    if (tag === "textarea" || tag === "select") return true;
+    if (tag === "input") {
+      const type = (node.getAttribute("type") ?? "text").toLowerCase();
+      return !["button", "submit", "reset", "checkbox", "radio", "file", "image", "hidden", "range", "color"].includes(type);
+    }
+    return false;
+  };
+  const active = document.activeElement instanceof Element ? document.activeElement : null;
+  const hit = typeof args.x === "number" && typeof args.y === "number"
+    ? document.elementFromPoint(args.x, args.y)
+    : null;
+  const focusedEditable = Boolean(
+    active
+    && active !== document.body
+    && active !== document.documentElement
+    && isEditable(active),
+  );
+  // Post-click/press typing state must not fall back to elementFromPoint on a
+  // new document after navigation — a coincidental input at the old coordinates
+  // is not the focused field.
+  const element = args.focusedOnly
+    ? (focusedEditable ? active : null)
+    : (args.preferFocus && focusedEditable ? active : (hit ?? active));
+  if (!(element instanceof Element) || element === document.body || element === document.documentElement) {
+    return {};
+  }
+  const tag = element.tagName.toLowerCase();
+  const implicitRole: Record<string, string> = {
+    a: "link", button: "button", select: "combobox", textarea: "textbox",
+    img: "img", nav: "navigation", main: "main", form: "form",
+  };
+  const role = element.getAttribute("role")
+    ?? (tag === "input"
+      ? ((element.getAttribute("type") ?? "text") === "checkbox" ? "checkbox" : "textbox")
+      : implicitRole[tag]);
+  const name = element.getAttribute("aria-label")
+    ?? element.getAttribute("title")
+    ?? (element.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 160);
+  const rect = element.getBoundingClientRect();
+  const attributes: Record<string, string> = Object.fromEntries(
+    ["id", "class", "data-testid", "name", "type", "aria-label", "title", "contenteditable"]
+      .map((key) => [key, element.getAttribute(key)] as const)
+      .filter((entry): entry is readonly [string, string] => entry[1] !== null)
+      .map(([key, value]) => [key, value.slice(0, 300)]),
+  );
+  const editable = isEditable(element);
+  if (editable && !attributes.contenteditable && element instanceof HTMLElement && element.isContentEditable) {
+    attributes.contenteditable = "true";
+  }
+  return {
+    selector: selectorFor(element),
+    tag,
+    ...(role ? { role } : {}),
+    ...(name ? { name } : {}),
+    text: (element.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 500),
+    editable,
+    rect: {
+      x: Math.round(rect.x),
+      y: Math.round(rect.y),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    },
+    attributes,
+  };
 }
 
 export function createChromiumDriver(executablePath: string): BrowserDriver {
@@ -191,79 +296,10 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
           if (loc) { await loc.click(); }
           else if ("point" in target) { await page.mouse.click(target.point.x, target.point.y); }
           await refreshTitle();
+          return await page.evaluate(describeHit, { focusedOnly: true }) as JsonObject;
         },
         async point(point) {
-          return page.evaluate(({ x, y }) => {
-            const element = document.elementFromPoint(x, y);
-            if (!(element instanceof Element)) throw new Error(`no element at (${x}, ${y})`);
-
-            const quote = (value: string) =>
-              typeof CSS !== "undefined" && typeof CSS.escape === "function"
-                ? CSS.escape(value)
-                : value.replace(/[^a-zA-Z0-9_-]/g, (char) => `\\${char}`);
-            const unique = (selector: string) => {
-              try { return document.querySelectorAll(selector).length === 1; } catch { return false; }
-            };
-            const selectorFor = (node: Element): string => {
-              const testId = node.getAttribute("data-testid");
-              if (testId) {
-                const candidate = `[data-testid="${testId.replace(/["\\]/g, "\\$&")}"]`;
-                if (unique(candidate)) return candidate;
-              }
-              if (node.id) {
-                const candidate = `#${quote(node.id)}`;
-                if (unique(candidate)) return candidate;
-              }
-              const parts: string[] = [];
-              let current: Element | null = node;
-              while (current && current !== document.documentElement) {
-                let part = current.tagName.toLowerCase();
-                const parent: Element | null = current.parentElement;
-                if (parent) {
-                  const siblings = [...parent.children].filter((child) => child.tagName === current!.tagName);
-                  if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(current) + 1})`;
-                }
-                parts.unshift(part);
-                const candidate = parts.join(" > ");
-                if (unique(candidate)) return candidate;
-                current = parent;
-              }
-              return parts.join(" > ") || node.tagName.toLowerCase();
-            };
-            const tag = element.tagName.toLowerCase();
-            const implicitRole: Record<string, string> = {
-              a: "link", button: "button", select: "combobox", textarea: "textbox",
-              img: "img", nav: "navigation", main: "main", form: "form",
-            };
-            const role = element.getAttribute("role")
-              ?? (tag === "input"
-                ? ((element.getAttribute("type") ?? "text") === "checkbox" ? "checkbox" : "textbox")
-                : implicitRole[tag]);
-            const name = element.getAttribute("aria-label")
-              ?? element.getAttribute("title")
-              ?? (element.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 160);
-            const rect = element.getBoundingClientRect();
-            const attributes = Object.fromEntries(
-              ["id", "class", "data-testid", "name", "type", "aria-label", "title"]
-                .map((key) => [key, element.getAttribute(key)] as const)
-                .filter((entry): entry is readonly [string, string] => entry[1] !== null)
-                .map(([key, value]) => [key, value.slice(0, 300)]),
-            );
-            return {
-              selector: selectorFor(element),
-              tag,
-              ...(role ? { role } : {}),
-              ...(name ? { name } : {}),
-              text: (element.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 500),
-              rect: {
-                x: Math.round(rect.x),
-                y: Math.round(rect.y),
-                width: Math.round(rect.width),
-                height: Math.round(rect.height),
-              },
-              attributes,
-            };
-          }, point);
+          return await page.evaluate(describeHit, { x: point.x, y: point.y }) as JsonObject;
         },
         async type(target, text, submit) {
           const loc = locate(target);
@@ -279,6 +315,57 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
         },
         async press(key) {
           await page.keyboard.press(key);
+          return await page.evaluate(describeHit, { focusedOnly: true }) as JsonObject;
+        },
+        async textRange(start, end) {
+          return page.evaluate(({ a, b }) => {
+            const caret = (x: number, y: number): Range | null => {
+              const doc = document as Document & {
+                caretRangeFromPoint?: (x: number, y: number) => Range | null;
+                caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+              };
+              if (typeof doc.caretRangeFromPoint === "function") return doc.caretRangeFromPoint(x, y);
+              const pos = doc.caretPositionFromPoint?.(x, y);
+              if (!pos) return null;
+              const range = document.createRange();
+              range.setStart(pos.offsetNode, pos.offset);
+              range.collapse(true);
+              return range;
+            };
+            const startRange = caret(a.x, a.y);
+            const endRange = caret(b.x, b.y);
+            if (!startRange || !endRange) return { quote: "" };
+            const range = document.createRange();
+            try {
+              range.setStart(startRange.startContainer, startRange.startOffset);
+              range.setEnd(endRange.startContainer, endRange.startOffset);
+            } catch {
+              return { quote: "" };
+            }
+            if (range.collapsed) {
+              try {
+                range.setStart(endRange.startContainer, endRange.startOffset);
+                range.setEnd(startRange.startContainer, startRange.startOffset);
+              } catch {
+                return { quote: "" };
+              }
+            }
+            const quote = range.toString().replace(/\s+/g, " ").trim().slice(0, 4_000);
+            const rect = range.getBoundingClientRect();
+            return {
+              quote,
+              ...(quote && rect.width + rect.height > 0
+                ? {
+                  rect: {
+                    x: Math.round(rect.x),
+                    y: Math.round(rect.y),
+                    width: Math.round(rect.width),
+                    height: Math.round(rect.height),
+                  },
+                }
+                : {}),
+            };
+          }, { a: start, b: end });
         },
         async scroll(x, y, target) {
           const loc = target ? locate(target) : null;
@@ -337,6 +424,76 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
         async screenshot() {
           const data = await page.screenshot({ type: "jpeg", quality: 60 });
           return { data: new Uint8Array(data), mime: "image/jpeg" };
+        },
+        async screenshotClip(clip) {
+          const safe = {
+            x: Math.max(0, Math.floor(clip.x)),
+            y: Math.max(0, Math.floor(clip.y)),
+            width: Math.max(1, Math.floor(clip.width)),
+            height: Math.max(1, Math.floor(clip.height)),
+          };
+          const data = await page.screenshot({ type: "jpeg", quality: 70, clip: safe });
+          return { data: new Uint8Array(data), mime: "image/jpeg" };
+        },
+        async queryRegion(region) {
+          return page.evaluate((box) => {
+            const hits: Array<{
+              selector?: string;
+              tag?: string;
+              role?: string;
+              name?: string;
+              text?: string;
+              attributes?: Record<string, string>;
+              bounds?: { x: number; y: number; width: number; height: number };
+            }> = [];
+            const all = Array.from(document.querySelectorAll("body *")) as HTMLElement[];
+            const right = box.x + box.width;
+            const bottom = box.y + box.height;
+            for (const el of all) {
+              const rect = el.getBoundingClientRect();
+              if (rect.width < 2 || rect.height < 2) continue;
+              if (rect.right < box.x || rect.left > right || rect.bottom < box.y || rect.top > bottom) continue;
+              const tag = el.tagName.toLowerCase();
+              if (["script", "style", "meta", "link", "noscript"].includes(tag)) continue;
+              const role = el.getAttribute("role") || undefined;
+              const name = (el.getAttribute("aria-label")
+                || (el as HTMLInputElement).labels?.[0]?.textContent
+                || el.getAttribute("title")
+                || undefined)?.trim().slice(0, 200);
+              const text = (el.innerText || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 240);
+              const attrs: Record<string, string> = {};
+              for (const key of ["id", "name", "type", "href", "placeholder", "aria-label"]) {
+                const value = el.getAttribute(key);
+                if (value) attrs[key] = value.slice(0, 200);
+              }
+              let selector = tag;
+              if (el.id) selector = `${tag}#${CSS.escape(el.id)}`;
+              else if (attrs.class) selector = `${tag}.${CSS.escape(String(el.className).split(/\s+/).filter(Boolean)[0] ?? "")}`;
+              hits.push({
+                selector,
+                tag,
+                ...(role ? { role } : {}),
+                ...(name ? { name } : {}),
+                ...(text ? { text } : {}),
+                ...(Object.keys(attrs).length ? { attributes: attrs } : {}),
+                bounds: {
+                  x: Math.round(rect.x),
+                  y: Math.round(rect.y),
+                  width: Math.round(rect.width),
+                  height: Math.round(rect.height),
+                },
+              });
+              if (hits.length >= 24) break;
+            }
+            const textBits = hits
+              .map((hit) => hit.text || hit.name || "")
+              .filter(Boolean)
+              .slice(0, 16);
+            return {
+              elements: hits.slice(0, 12),
+              text: textBits.join("\n").slice(0, 4_000),
+            };
+          }, region);
         },
         async observe(selector) {
           await refreshTitle();

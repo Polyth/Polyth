@@ -842,11 +842,13 @@ export interface AttachmentRef {
    *  files it is the sanitized raw endpoint and purely presentational. */
   url?: string;
   /** Attachment class; absent means "file" (backward compatible). */
-  kind?: "file" | "image" | "range" | "url";
+  kind?: "file" | "image" | "range" | "url" | "browser-context";
   /** Project-relative path for file/image/range attachments. */
   path?: string;
   /** 1-based inclusive line range (kind "range" only). */
   range?: [number, number];
+  /** Structured browser page/element/area/text context (kind "browser-context"). */
+  browserContext?: BrowserContext;
 }
 export interface ModelRef { providerID: string; modelID: string; variant?: string }
 
@@ -3382,6 +3384,8 @@ export interface InstalledPluginDto {
 
 export type BrowserColorScheme = "light" | "dark" | "no-preference";
 
+export type BrowserViewportMode = "responsive" | "preset" | "custom";
+
 export interface BrowserSessionDto {
   id: string;
   projectId: string;
@@ -3394,6 +3398,12 @@ export interface BrowserSessionDto {
   revision: number;
   /** honest engine state: "chromium" when driven, "unavailable" for fallback */
   engine: "chromium" | "fake" | "unavailable";
+  /** Authoritative pause flag — never inferred from recency. */
+  agentPaused?: boolean;
+  /** Actor currently executing a queued action, if any. */
+  controller?: "user" | "agent";
+  /** How the current viewport was chosen. */
+  viewportMode?: BrowserViewportMode;
 }
 
 export type BrowserTarget =
@@ -3415,7 +3425,7 @@ export type BrowserAction =
   | { kind: "back" }
   | { kind: "forward" }
   | { kind: "reload" }
-  | { kind: "resize"; viewport: { width: number; height: number } }
+  | { kind: "resize"; viewport: { width: number; height: number }; mode?: BrowserViewportMode }
   | { kind: "color-scheme"; colorScheme: BrowserColorScheme }
   | { kind: "inspect"; selector: string };
 
@@ -3425,6 +3435,188 @@ export interface BrowserObservation {
   text: string;
   accessibilityDigest?: string;
   screenshotRef?: string;
+}
+
+/** First-class browser context shared with the composer and agent (text-first). */
+export type BrowserContextType = "page" | "element" | "area" | "text";
+
+export interface BrowserContextBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface BrowserContextRegion {
+  /** Normalized 0–1 rectangle relative to the captured frame. */
+  normalized: { x: number; y: number; width: number; height: number };
+  /** Pixel bounds in the browser viewport at capture time. */
+  pixels: BrowserContextBounds;
+}
+
+export interface BrowserContextElementSummary {
+  selector?: string;
+  tag?: string;
+  role?: string;
+  name?: string;
+  text?: string;
+  attributes?: Record<string, string>;
+  bounds?: BrowserContextBounds;
+}
+
+export interface BrowserContextArtifactRef {
+  id: string;
+  mime: string;
+  size: number;
+  /** Resolved absolute path filled server-side at verify time; never client-trusted. */
+  localPath?: string;
+}
+
+/**
+ * Durable browser context attached to a composer draft / user message.
+ * Keep summaries bounded — never dump full DOM trees.
+ */
+export interface BrowserContext {
+  id: string;
+  type: BrowserContextType;
+  browserSessionId: string;
+  projectId: string;
+  sessionId?: string;
+  frameRevision: number;
+  url: string;
+  title: string;
+  viewport: { width: number; height: number };
+  capturedAt: string;
+  note?: string;
+  quote?: string;
+  region?: BrowserContextRegion;
+  element?: BrowserContextElementSummary;
+  intersecting?: BrowserContextElementSummary[];
+  accessibilitySummary?: string;
+  textSummary?: string;
+  screenshot?: BrowserContextArtifactRef;
+  crop?: BrowserContextArtifactRef;
+  contentHash?: string;
+}
+
+/** Capture request; `id` is a stable client-generated identity for retries. */
+export type BrowserContextCaptureInput =
+  | {
+    type: "page";
+    id: string;
+    expectedRevision: number;
+    note?: string;
+    includeScreenshot?: boolean;
+  }
+  | {
+    type: "element";
+    id: string;
+    expectedRevision: number;
+    point: { x: number; y: number };
+    note?: string;
+    includeScreenshot?: boolean;
+  }
+  | {
+    type: "area";
+    id: string;
+    expectedRevision: number;
+    /** Normalized 0–1 rectangle on the frame used for selection. */
+    region: { x: number; y: number; width: number; height: number };
+    note?: string;
+    includeScreenshot?: boolean;
+  }
+  | {
+    type: "text";
+    id: string;
+    expectedRevision: number;
+    quote?: string;
+    start?: { x: number; y: number };
+    end?: { x: number; y: number };
+    note?: string;
+    includeScreenshot?: boolean;
+  };
+
+const BROWSER_CONTEXT_MIME = "application/vnd.polyth.browser-context+json";
+
+/** Compact model-visible text. Screenshots stay optional evidence. */
+export function formatBrowserContextForModel(ctx: BrowserContext): string {
+  const lines: string[] = ["[Browser context]"];
+  lines.push(`Type: ${ctx.type}`);
+  lines.push(`URL: ${ctx.url}`);
+  if (ctx.title) lines.push(`Page: ${ctx.title}`);
+  lines.push(`Viewport: ${ctx.viewport.width}×${ctx.viewport.height}`);
+  lines.push(`Frame revision: ${ctx.frameRevision}`);
+  if (ctx.quote) lines.push(`Quote: ${ctx.quote}`);
+  if (ctx.element) {
+    const el = ctx.element;
+    if (el.tag) lines.push(`Element: ${el.tag}`);
+    if (el.role) lines.push(`Role: ${el.role}`);
+    if (el.name) lines.push(`Accessible name: ${el.name}`);
+    if (el.text) lines.push(`Text: ${el.text}`);
+    if (el.selector) lines.push(`Selector: ${el.selector}`);
+    if (el.bounds) {
+      lines.push(
+        `Bounds: x=${el.bounds.x}, y=${el.bounds.y}, width=${el.bounds.width}, height=${el.bounds.height}`,
+      );
+    }
+    if (el.attributes && Object.keys(el.attributes).length > 0) {
+      const attrs = Object.entries(el.attributes)
+        .slice(0, 12)
+        .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+        .join(", ");
+      lines.push(`Attributes: ${attrs}`);
+    }
+  }
+  if (ctx.region) {
+    const p = ctx.region.pixels;
+    lines.push(`Area: ${p.width}×${p.height} at (${p.x}, ${p.y})`);
+  }
+  if (ctx.intersecting && ctx.intersecting.length > 0) {
+    lines.push("Intersecting elements:");
+    for (const el of ctx.intersecting.slice(0, 12)) {
+      const label = [el.tag, el.role, el.name || el.text].filter(Boolean).join(" · ");
+      lines.push(`- ${label || el.selector || "element"}`);
+    }
+  }
+  if (ctx.textSummary) lines.push(`Visible text:\n${ctx.textSummary}`);
+  if (ctx.accessibilitySummary) lines.push(`Accessibility:\n${ctx.accessibilitySummary}`);
+  if (ctx.note) lines.push(`Note: ${ctx.note}`);
+  return lines.join("\n");
+}
+
+/** English/model-facing label. UI copy is composed in the web layer. */
+export function browserContextLabel(ctx: BrowserContext): string {
+  if (ctx.type === "element") {
+    const label = (ctx.element?.name || ctx.element?.text || ctx.element?.tag || "Element")
+      .replace(/\s+/g, " ")
+      .trim();
+    return label.length > 48 ? `${label.slice(0, 47)}…` : label;
+  }
+  if (ctx.type === "area") return "Selected area";
+  if (ctx.type === "text") {
+    const quote = (ctx.quote || "").replace(/\s+/g, " ").trim();
+    if (!quote) return "Selected text";
+    return quote.length > 48 ? `${quote.slice(0, 47)}…` : quote;
+  }
+  const title = (ctx.title || hostPath(ctx.url) || "Page").replace(/\s+/g, " ").trim();
+  return title.length > 48 ? `${title.slice(0, 47)}…` : title;
+}
+
+export function browserContextHostPath(url: string): string {
+  return hostPath(url);
+}
+
+export function browserContextMime(): string {
+  return BROWSER_CONTEXT_MIME;
+}
+
+function hostPath(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.host}${parsed.pathname === "/" ? "" : parsed.pathname}`;
+  } catch {
+    return url;
+  }
 }
 
 // ---------------------------------------------------------------- dictation (WP15)

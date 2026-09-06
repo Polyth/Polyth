@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   BrowserAction,
+  BrowserContextCaptureInput,
   BrowserTarget,
   JsonObject,
   RemoteAccessPolicy,
@@ -15,19 +16,23 @@ import {
   type ServerPackageHost,
 } from "@polyth/plugins";
 import {
+  createBrowserArtifactStore,
   createBrowserService,
   createChromiumDriver,
   createFakeDriver,
   demoWeb,
   findChromiumExecutable,
   redactObservationText,
+  type BrowserArtifactStore,
   type BrowserService,
 } from "./index.ts";
 import { originOf } from "./policy.ts";
+import { isBrowserArtifactId } from "./artifacts.ts";
 
 const STATUS: Record<string, number> = {
   "not-found": 404,
   "invalid-input": 400,
+  "empty-text-range": 400,
   "invalid-url": 400,
   unavailable: 503,
   limit: 429,
@@ -72,8 +77,9 @@ export function browserRoutes(deps: {
   browser: BrowserService;
   append: (sessionId: string, type: string, data: JsonObject) => Promise<SessionEvent>;
   shotsDir: string;
+  artifacts: BrowserArtifactStore;
 }): RouteHandler {
-  const { browser, append } = deps;
+  const { browser, append, artifacts } = deps;
   const saveShot = async (
     browserSessionId: string,
     revision: number,
@@ -86,10 +92,104 @@ export function browserRoutes(deps: {
     return name;
   };
 
-  return async ({ path, method, url, body, json }) => {
+  const parseCaptureInput = (raw: Record<string, unknown>): BrowserContextCaptureInput => {
+    const id = typeof raw.id === "string" ? raw.id.trim() : "";
+    const expectedRevision = Number(raw.expectedRevision);
+    const type = raw.type;
+    const note = typeof raw.note === "string" ? raw.note : undefined;
+    const includeScreenshot = typeof raw.includeScreenshot === "boolean" ? raw.includeScreenshot : undefined;
+    if (!id || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      throw Object.assign(new Error("invalid browser context capture input"), { code: "invalid-input" });
+    }
+    if (type === "page") {
+      return { type, id, expectedRevision, ...(includeScreenshot !== undefined ? { includeScreenshot } : {}), ...(note ? { note } : {}) };
+    }
+    if (type === "element") {
+      const point = raw.point as { x?: unknown; y?: unknown } | undefined;
+      const x = Number(point?.x);
+      const y = Number(point?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        throw Object.assign(new Error("element point required"), { code: "invalid-input" });
+      }
+      return { type, id, expectedRevision, point: { x, y }, ...(includeScreenshot !== undefined ? { includeScreenshot } : {}), ...(note ? { note } : {}) };
+    }
+    if (type === "area") {
+      const region = raw.region as Record<string, unknown> | undefined;
+      const x = Number(region?.x);
+      const y = Number(region?.y);
+      const width = Number(region?.width);
+      const height = Number(region?.height);
+      if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
+        throw Object.assign(new Error("area region required"), { code: "invalid-input" });
+      }
+      return {
+        type,
+        id,
+        expectedRevision,
+        region: { x, y, width, height },
+        ...(includeScreenshot !== undefined ? { includeScreenshot } : {}),
+        ...(note ? { note } : {}),
+      };
+    }
+    if (type === "text") {
+      const quote = typeof raw.quote === "string" ? raw.quote : undefined;
+      const start = raw.start as { x?: unknown; y?: unknown } | undefined;
+      const end = raw.end as { x?: unknown; y?: unknown } | undefined;
+      const sx = Number(start?.x);
+      const sy = Number(start?.y);
+      const ex = Number(end?.x);
+      const ey = Number(end?.y);
+      const hasRange = [sx, sy, ex, ey].every(Number.isFinite);
+      if (!(quote?.trim()) && !hasRange) {
+        throw Object.assign(new Error("quote required"), { code: "invalid-input" });
+      }
+      return {
+        type,
+        id,
+        expectedRevision,
+        ...(quote ? { quote } : {}),
+        ...(hasRange ? { start: { x: sx, y: sy }, end: { x: ex, y: ey } } : {}),
+        ...(includeScreenshot !== undefined ? { includeScreenshot } : {}),
+        ...(note ? { note } : {}),
+      };
+    }
+    throw Object.assign(new Error("unknown browser context type"), { code: "invalid-input" });
+  };
+
+  return async ({ path, method, url, body, json, res }) => {
     try {
       if (path === "/api/browser/capability" && method === "GET") {
         json(200, browser.capability());
+        return true;
+      }
+      if (path === "/api/browser/artifacts" && method === "GET") {
+        const id = url.searchParams.get("id") ?? "";
+        if (!isBrowserArtifactId(id)) {
+          json(400, { error: "invalid-input", message: "artifact id required" });
+          return true;
+        }
+        const art = await artifacts.read(id);
+        if (!art) {
+          json(404, { error: "not-found", message: "artifact not found" });
+          return true;
+        }
+        res.writeHead(200, {
+          "content-type": art.mime,
+          "content-length": art.size,
+          "cache-control": "private, max-age=3600",
+          "x-content-type-options": "nosniff",
+        });
+        res.end(Buffer.from(art.data));
+        return true;
+      }
+      if (path === "/api/browser/artifacts" && method === "DELETE") {
+        const id = url.searchParams.get("id") ?? "";
+        if (!isBrowserArtifactId(id)) {
+          json(400, { error: "invalid-input", message: "artifact id required" });
+          return true;
+        }
+        const removed = await artifacts.remove(id);
+        json(200, { ok: true, ...(removed ? {} : { retained: true }) });
         return true;
       }
       if (path === "/api/browser/approvals" && method === "GET") {
@@ -305,6 +405,28 @@ export function browserRoutes(deps: {
         return true;
       }
 
+      match = path.match(/^\/api\/browser\/sessions\/([^/]+)\/context$/);
+      if (match && method === "POST") {
+        const id = match[1]!;
+        const input = parseCaptureInput(await body());
+        const context = await browser.captureContext(id, input, artifacts);
+        const linked = browser.get(id)?.sessionId;
+        if (linked) {
+          await append(linked, "browser/context-captured", {
+            browserSessionId: id,
+            contextId: context.id,
+            type: context.type,
+            url: context.url,
+            title: context.title,
+            frameRevision: context.frameRevision,
+            ...(context.screenshot ? { screenshotId: context.screenshot.id } : {}),
+            ...(context.crop ? { cropId: context.crop.id } : {}),
+          });
+        }
+        json(200, { context });
+        return true;
+      }
+
       match = path.match(/^\/api\/browser\/sessions\/([^/]+)\/pause-agent$/);
       if (match && method === "POST") {
         const input = await body();
@@ -359,9 +481,12 @@ export const BROWSER_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["POST"], path: "/api/browser/sessions/:id/navigate", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
     { methods: ["POST"], path: "/api/browser/sessions/:id/actions", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
     { methods: ["POST"], path: "/api/browser/sessions/:id/observe", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
+    { methods: ["POST"], path: "/api/browser/sessions/:id/context", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
     { methods: ["POST"], path: "/api/browser/sessions/:id/pause-agent", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
     { methods: ["GET"], path: "/api/browser/sessions/:id/console", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
     { methods: ["GET"], path: "/api/browser/sessions/:id/frame", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
+    { methods: ["GET"], path: "/api/browser/artifacts", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
+    { methods: ["DELETE"], path: "/api/browser/artifacts", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
   ],
 };
 
@@ -400,6 +525,7 @@ export default async function registerPackage(host: ServerPackageHost): Promise<
           { ignorable: true, producerPlugin: "review" },
         ),
         shotsDir: join(host.storageDir, "browser-shots"),
+        artifacts: createBrowserArtifactStore(join(host.storageDir, "browser-artifacts")),
       });
       routes ??= async (request) => {
         if (await bridge.route(request)) return true;

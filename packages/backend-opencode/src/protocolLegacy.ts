@@ -20,6 +20,7 @@ import type {
   RuntimeSnapshot,
   RuntimeTurnBinding,
 } from "@polyth/contracts";
+import { formatBrowserContextForModel } from "@polyth/contracts";
 import {
   comparableStatusRevision,
   createTranslateState,
@@ -247,6 +248,25 @@ const attachmentParts = (
   // always correct here — no project-root awareness needed.
   const root = resolve(input.session.location.directory);
   for (const attachment of input.attachments ?? []) {
+    if (attachment.kind === "browser-context") {
+      const ctx = attachment.browserContext;
+      if (ctx) {
+        parts.push({
+          type: "text",
+          text: formatBrowserContextForModel(ctx),
+        });
+        const shot = ctx.crop ?? ctx.screenshot;
+        if (shot?.localPath && shot.mime.startsWith("image/")) {
+          parts.push({
+            type: "file",
+            mime: shot.mime,
+            filename: attachment.name || `${ctx.type}-capture`,
+            url: pathToFileURL(shot.localPath).href,
+          });
+        }
+      }
+      continue;
+    }
     if (attachment.kind === "url") {
       if (attachment.url && /^https?:\/\//i.test(attachment.url)) {
         parts.push({

@@ -322,6 +322,12 @@ export function createSessionService(deps: {
       rel: string;
     }): Promise<{ kind: "file"; size: number }>;
   };
+  /** Managed browser capture artifacts outside the project worktree. */
+  browserArtifacts?: {
+    resolve(id: string): Promise<{ id: string; mime: string; size: number; localPath: string } | null>;
+    /** Promote draft captures to durable storage when a message is sent. */
+    commit?(ids: ReadonlyArray<string>): Promise<void>;
+  };
   /** F18: per-session auto-accept policy store (nearest-parent resolution). */
   autoAccept?: AutoAcceptStore;
   /** F18: human-needed / turn-ended signals for out-of-page delivery (web
@@ -3324,6 +3330,32 @@ export function createSessionService(deps: {
     const maxBytes = deps.attachments?.maxBytes ?? 20 * 1024 * 1024;
     const refs = sanitizeAttachments(raw, { maxBytes, projectId: proj.projectId });
     if (refs.length === 0) return undefined;
+    const committedIds: string[] = [];
+    for (const ref of refs) {
+      if (ref.kind !== "browser-context") continue;
+      const ctx = ref.browserContext;
+      if (!ctx) {
+        throw Object.assign(new Error("browser context required"), { code: "invalid-input" });
+      }
+      for (const key of ["screenshot", "crop"] as const) {
+        const art = ctx[key];
+        if (!art) continue;
+        if (!deps.browserArtifacts) {
+          throw Object.assign(new Error("browser artifacts unavailable"), { code: "unavailable" });
+        }
+        const resolved = await deps.browserArtifacts.resolve(art.id);
+        if (!resolved) {
+          throw Object.assign(new Error(`browser artifact not found: ${art.id}`), { code: "invalid-input" });
+        }
+        art.mime = resolved.mime;
+        art.size = resolved.size;
+        art.localPath = resolved.localPath;
+        committedIds.push(art.id);
+      }
+    }
+    if (committedIds.length && deps.browserArtifacts?.commit) {
+      await deps.browserArtifacts.commit(committedIds);
+    }
     if (!deps.attachments) {
       // The files package failed to load: ordinary refs pass through as before,
       // but a staged upload can never be materialized — fail loudly.
@@ -3339,6 +3371,7 @@ export function createSessionService(deps: {
       throw Object.assign(new Error("project not found"), { code: "not-found" });
     }
     for (const ref of refs) {
+      if (ref.kind === "browser-context") continue;
       if (!ref.path) continue; // url attachments have nothing on disk
       const rel = ref.path;
       let stat: { kind: "file" | "dir"; size: number };

@@ -1655,6 +1655,50 @@ export async function boot(opts: BootOptions = {}) {
   // raises a typed error for any staged `_inbox/*` attachment.
   const attachmentGuard = svc<NonNullable<SessionDeps["attachments"]>>("files.attachments");
   const autoAcceptStore = svc<NonNullable<SessionDeps["autoAccept"]>>("permissions.auto-accept");
+  const browserArtifactsDir = join(dataDir, "browser-artifacts");
+  const resolveBrowserArtifact = async (id: string) => {
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,120}$/.test(id)) return null;
+    const mimeFor = (ext: string) =>
+      ext === "png" ? "image/png"
+        : ext === "webp" ? "image/webp"
+          : ext === "jpg" || ext === "jpeg" ? "image/jpeg"
+            : "application/octet-stream";
+    const { stat } = await import("node:fs/promises");
+    const folders = ["draft", "committed", ""] as const;
+    for (const folder of folders) {
+      for (const ext of ["jpg", "jpeg", "png", "webp", "bin"] as const) {
+        const localPath = folder
+          ? join(browserArtifactsDir, folder, `${id}.${ext}`)
+          : join(browserArtifactsDir, `${id}.${ext}`);
+        try {
+          const st = await stat(localPath);
+          if (!st.isFile()) continue;
+          return { id, mime: mimeFor(ext), size: st.size, localPath };
+        } catch {
+          // try next location
+        }
+      }
+    }
+    return null;
+  };
+  const commitBrowserArtifacts = async (ids: ReadonlyArray<string>) => {
+    const { mkdir, rename } = await import("node:fs/promises");
+    const committedDir = join(browserArtifactsDir, "committed");
+    await mkdir(committedDir, { recursive: true });
+    for (const id of ids) {
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,120}$/.test(id)) continue;
+      for (const ext of ["jpg", "jpeg", "png", "webp", "bin"] as const) {
+        try {
+          await rename(
+            join(browserArtifactsDir, "draft", `${id}.${ext}`),
+            join(committedDir, `${id}.${ext}`),
+          );
+        } catch {
+          // already committed or never a draft
+        }
+      }
+    }
+  };
 
   const sessions = createSessionService({
     store, projects, runtimes, broadcast, queue: store, org: store, profiles: store, behavior, secureSafe,
@@ -1667,6 +1711,7 @@ export async function boot(opts: BootOptions = {}) {
     ...(autoAcceptStore ? { autoAccept: autoAcceptStore } : {}),
     notify: pushNotifier,
     ...(attachmentGuard ? { attachments: attachmentGuard } : {}),
+    browserArtifacts: { resolve: resolveBrowserArtifact, commit: commitBrowserArtifacts },
     ...(commandService ? {
       expand: async (projectId: string, text: string) => {
         const project = await projects.get(projectId);

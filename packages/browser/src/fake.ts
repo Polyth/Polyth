@@ -1,6 +1,6 @@
 // In-memory fake driver: deterministic pages, redirects, downloads, password
 // fields, console noise. Tests and the POLYTH_FAKE_BROWSER demo mode use it.
-import type { BrowserTarget } from "@polyth/contracts";
+import type { BrowserTarget, JsonObject } from "@polyth/contracts";
 import type { BrowserDriver, DriverNav, DriverPage, DriverPageEvent, DriverObservation } from "./driver.ts";
 
 export interface FakePage {
@@ -15,6 +15,8 @@ export interface FakePage {
   /** password inputs present on the page (values must never be observed) */
   passwordFields?: Record<string, string>;
   consoleOnLoad?: string[];
+  /** Actual focused editable metadata for click/press — never a generic hit-test. */
+  focused?: JsonObject;
 }
 
 export interface FakeWeb {
@@ -97,6 +99,7 @@ export function createFakeDriver(web: FakeWeb): BrowserDriver {
           const cur = pageOf(nav().url);
           const dest = cur.links?.[targetKey(target)];
           if (dest) await land(dest, true);
+          return { ...(pageOf(nav().url).focused ?? {}) } as JsonObject;
         },
         async point(point) {
           return {
@@ -112,12 +115,25 @@ export function createFakeDriver(web: FakeWeb): BrowserDriver {
               height: Math.max(1, Math.min(80, viewport.height)),
             },
             attributes: {},
+            editable: false,
           };
         },
         async type(target, text) {
           typed.set(targetKey(target), text);
         },
-        press: async () => {},
+        press: async () => ({ ...(pageOf(nav().url).focused ?? {}) } as JsonObject),
+        async textRange(start, end) {
+          const p = pageOf(nav().url);
+          return {
+            quote: (p.text ?? "").replace(/\s+/g, " ").trim().slice(0, 4_000),
+            rect: {
+              x: Math.round(Math.min(start.x, end.x)),
+              y: Math.round(Math.min(start.y, end.y)),
+              width: Math.max(1, Math.round(Math.abs(end.x - start.x))),
+              height: Math.max(1, Math.round(Math.abs(end.y - start.y))),
+            },
+          };
+        },
         scroll: async () => {},
         async select(target, value) {
           typed.set(targetKey(target), value);
@@ -142,6 +158,31 @@ export function createFakeDriver(web: FakeWeb): BrowserDriver {
           // deterministic bytes derived from the current URL (no real pixels)
           const data = new TextEncoder().encode(`frame:${nav().url}:${index}`);
           return { data, mime: "image/webp" };
+        },
+        async screenshotClip(clip) {
+          const data = new TextEncoder().encode(
+            `clip:${nav().url}:${Math.round(clip.x)},${Math.round(clip.y)},${Math.round(clip.width)}x${Math.round(clip.height)}`,
+          );
+          return { data, mime: "image/webp" };
+        },
+        async queryRegion(region) {
+          const p = pageOf(nav().url);
+          return {
+            elements: [{
+              selector: "main",
+              tag: "main",
+              role: "main",
+              name: p.title,
+              text: (p.text ?? "").slice(0, 240),
+              bounds: {
+                x: Math.round(region.x),
+                y: Math.round(region.y),
+                width: Math.round(region.width),
+                height: Math.round(region.height),
+              },
+            }],
+            text: (p.text ?? "").slice(0, 4_000),
+          };
         },
         async observe(): Promise<DriverObservation> {
           const url = nav().url;
