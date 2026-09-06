@@ -1,0 +1,28 @@
+{
+  "name": "@polyth/session-import",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@polyth/contracts": "0.1.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/session": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "Session Import",
+      "description": "Import a native conversation as a canonical Snapshot",
+      "core": false,
+      "enabled": true,
+      "hasSettings": false
+    },
+    "webEntry": "./widgets/index.tsx"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

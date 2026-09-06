@@ -8,6 +8,18 @@
   },
   "dependencies": {
     "@polyth/browser": "0.1.0",
-    "@polyth/contracts": "0.1.0"
+    "@polyth/contracts": "0.1.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/harness-runtime": "0.1.0"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "OpenCode harness",
+      "description": "Managed OpenCode HTTP and SSE runtime",
+      "core": true,
+      "enabled": true,
+      "hasSettings": false
+    }
   }
 }

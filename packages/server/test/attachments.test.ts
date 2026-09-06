@@ -1,12 +1,13 @@
 // F2: attachment sanitation + send-path persistence and runtime handoff.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createStore, deriveMessages } from "@polyth/session";
-import { createFileService } from "@polyth/files";
+import { createFileService, type FileService } from "@polyth/files";
+import { createAttachmentSourceService } from "../../files/src/serverEntry.ts";
 import type {
   AgentRuntime, AttachmentRef, CanonicalTurnRequest, Project, ProjectService, RuntimeEvent,
 } from "@polyth/contracts";
@@ -86,10 +87,16 @@ function fakeRuntime() {
 
 const flush = () => new Promise((r) => setTimeout(r, 20));
 
-function makeService(fake: ReturnType<typeof fakeRuntime>) {
+function makeService(
+  fake: ReturnType<typeof fakeRuntime>,
+  opts: { withWorktree?: boolean; filesFor?: (projectId: string | null) => Promise<FileService> } = {},
+) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-att-send-"));
   mkdirSync(join(dir, "docs"), { recursive: true });
   writeFileSync(join(dir, "docs", "notes.md"), "hello attachments");
+  // A linked worktree lives outside the project root — the exact shape that
+  // strands a hero-composer `_inbox/*` upload written at the project root.
+  const worktree = mkdtempSync(join(tmpdir(), "polyth-att-wt-"));
   const store = createStore(join(dir, "s.db"));
   const files = createFileService();
   const project: Project = { id: "p1", path: dir, name: "p", createdAt: 1 };
@@ -105,15 +112,12 @@ function makeService(fake: ReturnType<typeof fakeRuntime>) {
   const sessions = createSessionService({
     store, projects, permissions, broadcast, queue: store,
     runtimes: { forProject: async () => fake.rt },
-    attachments: {
-      stat: async (root, rel) => {
-        const st = await files.stat(root, rel);
-        return { kind: st.kind, size: st.size };
-      },
-      maxBytes: 1024 * 1024,
-    },
+    ...(opts.withWorktree
+      ? { worktrees: { list: async () => [{ path: worktree, branch: "wt" }] } }
+      : {}),
+    attachments: createAttachmentSourceService(opts.filesFor ?? (async () => files)),
   });
-  return { sessions, store, dir };
+  return { sessions, store, dir, worktree, files };
 }
 
 const fileRef = (over: Partial<AttachmentRef> = {}): AttachmentRef => ({
@@ -158,7 +162,7 @@ test("deleted files refuse attachment; nothing reaches the log", async () => {
     sessions.send(id, { text: "gone", attachments: [fileRef({ path: "docs/deleted.md" })] }),
     (err: Error & { code?: string }) => {
       assert.equal(err.code, "invalid-input");
-      assert.match(err.message, /not found/);
+      assert.match(err.message, /could not be prepared/);
       return true;
     },
   );
@@ -190,5 +194,146 @@ test("queued attachments survive dispatch; steer with attachments falls back to 
   assert.equal(fake.started[1]?.attachments?.[0]?.path, "docs/notes.md");
   const ums = (await store.events(id)).filter((e) => e.type === "user/message");
   assert.equal((ums[1]?.data as { attachments?: AttachmentRef[] }).attachments?.length, 1);
+  await store.close();
+});
+
+// -------------------------------------------- _inbox materialization (F2 bug)
+
+/** Simulate the hero/new-session composer: the file is uploaded before a
+ *  session exists, so it lands under `_inbox/` at the PROJECT ROOT. */
+function stageInbox(dir: string, name: string, body: string): string {
+  const rel = `_inbox/${Date.now().toString(36)}-${name}`;
+  mkdirSync(join(dir, "_inbox"), { recursive: true });
+  writeFileSync(join(dir, rel), body);
+  return rel;
+}
+
+const inboxRef = (rel: string, over: Partial<AttachmentRef> = {}): AttachmentRef => ({
+  id: "in1", name: rel.split("/").pop()!, mime: "text/plain", size: 1, kind: "file", path: rel, ...over,
+});
+
+test("_inbox upload is materialized into the session worktree on first send", async () => {
+  const fake = fakeRuntime();
+  const { sessions, store, dir, worktree } = makeService(fake, { withWorktree: true });
+  const body = "pasted from the hero composer";
+  const rel = stageInbox(dir, "note.txt", body);
+
+  const { id } = await sessions.create({ projectId: "p1", title: "T", worktreePath: worktree });
+  // No artificial delay: send immediately, exactly as the real repro.
+  await sessions.send(id, { text: "look", attachments: [inboxRef(rel)] });
+  await flush();
+
+  assert.equal(fake.started.length, 1, "send succeeded and the turn started");
+  assert.equal(statSync(join(worktree, rel)).size, body.length, "bytes copied into the worktree");
+  const um = (await store.events(id)).find((e) => e.type === "user/message");
+  assert.equal((um!.data as { attachments?: AttachmentRef[] }).attachments?.[0]?.size, body.length);
+  await store.close();
+});
+
+test("_inbox pasted-context upload is materialized the same way", async () => {
+  const fake = fakeRuntime();
+  const { sessions, store, dir, worktree } = makeService(fake, { withWorktree: true });
+  const body = "x".repeat(4096);
+  const rel = stageInbox(dir, "pasted-context.txt", body);
+
+  const { id } = await sessions.create({ projectId: "p1", title: "T", worktreePath: worktree });
+  await sessions.send(id, { text: "context", attachments: [inboxRef(rel)] });
+  await flush();
+
+  assert.equal(fake.started.length, 1);
+  assert.equal(statSync(join(worktree, rel)).size, body.length);
+  await store.close();
+});
+
+test("two _inbox attachments in one send both materialize", async () => {
+  const fake = fakeRuntime();
+  const { sessions, store, dir, worktree } = makeService(fake, { withWorktree: true });
+  const relA = stageInbox(dir, "a.txt", "aaa");
+  const relB = stageInbox(dir, "b.txt", "bbbb");
+
+  const { id } = await sessions.create({ projectId: "p1", title: "T", worktreePath: worktree });
+  await sessions.send(id, {
+    text: "both",
+    attachments: [inboxRef(relA, { id: "a" }), inboxRef(relB, { id: "b" })],
+  });
+  await flush();
+
+  assert.equal(fake.started.length, 1);
+  assert.equal(statSync(join(worktree, relA)).size, 3);
+  assert.equal(statSync(join(worktree, relB)).size, 4);
+  await store.close();
+});
+
+test("_inbox on the main workspace (no worktree) needs no copy", async () => {
+  const fake = fakeRuntime();
+  const { sessions, store, dir } = makeService(fake);
+  const body = "main workspace staging";
+  const rel = stageInbox(dir, "note.txt", body);
+
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.send(id, { text: "look", attachments: [inboxRef(rel)] });
+  await flush();
+
+  assert.equal(fake.started.length, 1);
+  assert.equal(fake.started[0]?.attachments?.[0]?.path, rel);
+  const um = (await store.events(id)).find((e) => e.type === "user/message");
+  assert.equal((um!.data as { attachments?: AttachmentRef[] }).attachments?.[0]?.size, body.length);
+  await store.close();
+});
+
+test("missing _inbox source → typed error with no path or _inbox in the message", async () => {
+  const fake = fakeRuntime();
+  const { sessions, store, worktree } = makeService(fake, { withWorktree: true });
+  const { id } = await sessions.create({ projectId: "p1", title: "T", worktreePath: worktree });
+
+  await assert.rejects(
+    sessions.send(id, {
+      text: "gone",
+      attachments: [inboxRef("_inbox/deadbeef-secret-brief.txt", { name: "secret-brief.txt" })],
+    }),
+    (err: Error & { code?: string }) => {
+      assert.equal(err.code, "invalid-input");
+      assert.ok(!err.message.includes("_inbox"), "no _inbox in message");
+      assert.ok(!err.message.includes("deadbeef-secret-brief"), "no rel path in message");
+      assert.match(err.message, /secret-brief\.txt/, "display name is present");
+      return true;
+    },
+  );
+  assert.equal(fake.started.length, 0);
+  assert.ok(!(await store.events(id)).some((e) => e.type === "user/message"));
+  await store.close();
+});
+
+test("remote/SSH project routes _inbox materialize through the remote FileService", async () => {
+  const fake = fakeRuntime();
+  // Stand-in for the remote host: a FileService rooted anywhere, wrapped so we
+  // can assert every read/write for the staged file went through it (not local
+  // disk). No SSH harness needed — filesFor is the seam that picks the store.
+  const remoteImpl = createFileService();
+  const calls: string[] = [];
+  const remote: FileService = new Proxy(remoteImpl, {
+    get(target, prop: string) {
+      const value = (target as unknown as Record<string, unknown>)[prop];
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) => {
+        calls.push(prop);
+        return (value as (...a: unknown[]) => unknown).apply(target, args);
+      };
+    },
+  });
+  const { sessions, store, dir, worktree } = makeService(fake, {
+    withWorktree: true,
+    filesFor: async () => remote,
+  });
+  const body = "remote staged bytes";
+  const rel = stageInbox(dir, "note.txt", body);
+
+  const { id } = await sessions.create({ projectId: "p1", title: "T", worktreePath: worktree });
+  await sessions.send(id, { text: "look", attachments: [inboxRef(rel)] });
+  await flush();
+
+  assert.equal(fake.started.length, 1);
+  assert.ok(calls.includes("readRaw") && calls.includes("writeBytes"), "copy went through the remote FileService");
+  assert.equal(statSync(join(worktree, rel)).size, body.length);
   await store.close();
 });

@@ -1,0 +1,22 @@
+{
+  "name": "@polyth/backend-cursor",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@polyth/backend-acp": "0.1.0",
+    "@polyth/plugins": "0.1.0"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "Cursor harness",
+      "description": "Cursor through shared ACP",
+      "core": false,
+      "enabled": true,
+      "hasSettings": false
+    }
+  }
+}

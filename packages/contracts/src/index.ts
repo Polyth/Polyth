@@ -876,6 +876,7 @@ export interface ModelMessage {
 
 export interface CreateSessionInput {
   projectId: string;
+  harness?: HarnessSelection;
   title?: string;
   model?: ModelRef;
   agent?: string;
@@ -975,6 +976,11 @@ export interface SessionResumeState {
 
 export interface SessionProjection {
   id: string; projectId: string; parentId?: string;
+  /** Absence on legacy sessions is migrated to Auto with the bundled harness. */
+  harness?: HarnessSelection;
+  resolvedHarnessId?: string;
+  runtimeLeg?: RuntimeLeg;
+  harnessTransition?: HarnessTransition;
   /** Owning Space, denormalized from the project so listing/broadcast filters
    *  never need a project join. Backfilled by session-store migration v10. */
   spaceId?: string;
@@ -1113,6 +1119,7 @@ export interface SessionDebugDto {
 }
 
 export interface SessionService {
+  switchHarness?(sessionId: string, selection: HarnessSelection, timing?: "after-turn" | "stop-now"): Promise<SessionProjection>;
   create(input: CreateSessionInput): Promise<SessionRef>;
   /** Result carries turnId for admitted turns or queueId+queued for deferred delivery. */
   send(sessionId: string, input: UserTurnInput): Promise<SendResult>;
@@ -1241,6 +1248,8 @@ export interface EventPage {
 }
 
 export interface SessionPersistence {
+  /** Bounded atomic append and optional publication. expectedSeq is a CAS guard. */
+  appendBatch?(sessionId: string, events: Array<CanonicalEventInput & { time?: number }>, opts?: { projection?: SessionProjection; expectedSeq?: number; markRead?: boolean }): Promise<SessionEvent[]>;
   append(sessionId: string, type: string, data: JsonObject, opts?: Partial<Pick<SessionEvent, "ignorable" | "surfaceOp" | "sourceEventSeqs" | "producerPlugin">>): Promise<SessionEvent>;
   events(sessionId: string, afterSeq?: number, page?: EventPage): Promise<SessionEvent[]>;
   /** Indexed existence check (no full-log scan). Optional so fakes stay valid. */
@@ -1711,6 +1720,8 @@ export interface RuntimeEpochTransitionInput {
   replacementBinding: PersistedRuntimeBinding;
   resetOperationId: string;
   reason: string;
+  /** Atomically publish routing with the fresh runtime binding. */
+  harness?: { transitionId: string; selection: HarnessSelection; leg: RuntimeLeg };
   fence?: {
     authorityId: string;
     generation: number;
@@ -1933,7 +1944,80 @@ export interface AgentDescriptor {
   /** Role-specific model override. */
   model?: ModelRef;
 }
-export interface RuntimeCapabilities { streaming: boolean; permissions: boolean; questions: boolean; compaction: boolean; subagents: boolean; steering?: boolean }
+export interface RuntimeCapabilities { streaming: boolean; permissions: boolean; questions: boolean; compaction: boolean; subagents: boolean; steering?: boolean; resume?: boolean; usage?: boolean; cost?: boolean; fork?: boolean; mcp?: boolean }
+
+// Harnesses construct AgentRuntime; they never own canonical sessions.
+export type HarnessSelection = { mode: "auto" } | { mode: "pinned"; harnessId: string };
+export interface HarnessDescriptor {
+  id: string;
+  name: string;
+  integration: string;
+  /** Default selection order; smaller comes first. */
+  priority: number;
+  autoSelect?: boolean;
+  setupUrl?: string;
+  installCommand?: string;
+  signInCommand?: string;
+}
+export interface HarnessProbe {
+  harnessId: string;
+  installed: boolean;
+  authenticated: boolean | "unknown";
+  healthy: boolean;
+  version?: string;
+  message?: string;
+}
+export interface HarnessContext {
+  /** Server-validated context for provider-owned per-Space storage. */
+  space?: SpaceContext;
+  spaceId: string;
+  projectId: string;
+  cwd: string;
+  /** Session-specific engines must isolate their native maps and processes. */
+  sessionId?: string;
+  model?: ModelRef;
+  remote?: boolean;
+}
+export interface HarnessProvider {
+  descriptor: HarnessDescriptor;
+  probe(context: HarnessContext): Promise<HarnessProbe>;
+  createRuntime(context: HarnessContext): Promise<AgentRuntime>;
+  source?: SessionSourceProvider;
+}
+export interface HarnessRegistry {
+  register(provider: HarnessProvider): Disposable;
+  providers(): HarnessProvider[];
+  probe(context: HarnessContext): Promise<HarnessProbe[]>;
+  resolve(context: HarnessContext, selection: HarnessSelection, stickyId?: string): Promise<HarnessProvider>;
+}
+export interface RuntimeLeg {
+  id: string;
+  harnessId: string;
+  nativeSessionId: string;
+  startedAt: number;
+  /** Highest effective user/assistant dialogue seq confirmed in native history. */
+  canonicalThroughSeq: number;
+  /** User-authored role intent, independent of a profile's old model/account route. */
+  agentIntent?: string;
+  bootstrap: "native-resume" | "continuity" | "empty";
+}
+/** Durable switch intent. No target may admit work before the epoch commit. */
+export interface HarnessTransition {
+  id: string;
+  selection: HarnessSelection;
+  targetHarnessId: string;
+  timing: "after-turn" | "stop-now";
+  phase: "requested" | "released";
+  /** Exact old authority released by a provider, never inferred from UI state. */
+  released?: { authorityId: string; generation: number };
+}
+export interface SourceRecord { role: "user" | "assistant"; text: string; time?: number }
+export interface SourceSession { ref: string; title: string; updatedAt?: number }
+/** Provider-local native ids/paths are opaque outside the source. No live sync. */
+export interface SessionSourceProvider {
+  list(context: HarnessContext): Promise<SourceSession[]>;
+  read(context: HarnessContext, ref: string): AsyncIterable<SourceRecord>;
+}
 /** Why a project's agent runtime could not be started. An empty model catalog
  * is a symptom with many causes; this carries the cause itself so the UI can
  * state it instead of guessing that the backend is down. */
@@ -2038,6 +2122,11 @@ export type RuntimeEvent =
   | { type: "subagent/snapshot"; revision: number; agents: Array<{ sessionId: string; label: string; status: string; currentTask?: string }> };
 
 export interface AgentRuntime {
+  readonly harnessId?: string;
+  /** Positive proof that this binding (including its tools/children) can no
+   * longer mutate the workspace. Unknown is never permission to start a target.
+   * Must remain idempotently provable after restart for the supplied binding. */
+  releaseExecution?(binding: RuntimeSessionBinding, operationId: string): Promise<MutationOutcome<{ authorityId: string; generation: number }>>;
   capabilities(): Promise<RuntimeCapabilities>;
   models(): Promise<ModelDescriptor[]>;
   agents(): Promise<AgentDescriptor[]>;
@@ -3259,6 +3348,8 @@ export interface SecureSafePatchInput {
 }
 
 export interface SecureSafeService {
+  /** Replace known plaintext without exposing the values to callers. */
+  redact?(text: string): string;
   list(): SecureSafeEntryDto[];
   manifest(): SecureSafeManifest;
   hasHandle(handle: string): boolean;

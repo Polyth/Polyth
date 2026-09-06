@@ -204,6 +204,10 @@ export function createSecureSafeService(opts: SecureSafeOptions): SecureSafeServ
   };
 
   return {
+    redact(text) {
+      for (const value of Object.values(secrets).filter(Boolean).sort((a, b) => b.length - a.length)) text = text.split(value).join("[redacted]");
+      return text;
+    },
     list: () => entries.map((entry) => ({ ...entry })),
     manifest: () => manifestFor(entries),
     hasHandle: (handle) => entries.some((entry) => entry.handle.toLocaleLowerCase() === handle.trim().toLocaleLowerCase()),

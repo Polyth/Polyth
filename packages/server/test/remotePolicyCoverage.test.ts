@@ -1,3 +1,4 @@
+import { createHarnessRegistry } from "@polyth/harness-runtime";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
@@ -12,6 +13,7 @@ import {
 } from "@polyth/contracts";
 import {
   createServerServiceRegistry,
+  serverServiceKey,
   discoverServerPackages,
   loadServerPackage,
   PairedSocketRegistry,
@@ -37,6 +39,8 @@ function instantiate(pattern: string): string {
 
 function stubHost(storageDir: string): ServerPackageHost {
   const services = createServerServiceRegistry();
+  services.provide(serverServiceKey("harnesses"), createHarnessRegistry());
+  services.provide(serverServiceKey("opencode.runtime"), async () => ({}));
   const fallback = {
     get: () => ({
       stt: { baseUrl: "", model: "", apiKeyEnv: "", language: "" },

@@ -27,7 +27,9 @@ export async function resolveSessionRuntimeBinding(
   const projectId = projection?.projectId ?? "__default__";
   const project = projection ? await deps.projects.get(projectId) : undefined;
   const cwd = projection?.worktreePath ?? project?.path ?? process.cwd();
-  const rt = await deps.runtimes.forProject(projectId, cwd);
+  const rt = projection && deps.runtimes.forSession
+    ? await deps.runtimes.forSession(projection, cwd)
+    : await deps.runtimes.forProject(projectId, cwd);
   return {
     rt,
     cwd,

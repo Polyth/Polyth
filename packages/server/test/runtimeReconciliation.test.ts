@@ -1351,7 +1351,7 @@ test("runtime observation uncertainty survives the AgentRuntime ingestion seam",
     code: "divergent-content",
     message: "recovered content diverges from the durable checkpoint",
   });
-  assert.equal(uncertainty?.producerPlugin, "backend-opencode");
+  assert.equal(uncertainty?.producerPlugin, "runtime");
   await store.close();
 });
 
