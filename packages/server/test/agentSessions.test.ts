@@ -7,6 +7,7 @@ import { join } from "node:path";
 
 import { createStore } from "@polyth/session";
 import type {
+  AgentDescriptor,
   AgentRuntime,
   Project,
   ProjectService,
@@ -28,7 +29,7 @@ const tenancy = await testTenancy();
 
 type Emit = (sessionId: string, event: RuntimeEvent) => void;
 
-function fakeRuntime() {
+function fakeRuntime(agentCatalog: AgentDescriptor[] = []) {
   const listeners = new Set<Emit>();
   const ensured: string[] = [];
   const permissionReplies: Array<{ sessionId: string; requestId: string; reply: string }> = [];
@@ -47,7 +48,7 @@ function fakeRuntime() {
       steering: false,
     }),
     models: async () => [],
-    agents: async () => [],
+    agents: async () => agentCatalog,
     ensureSession: async (input) => {
       ensured.push(input.sessionId);
       return `backend_${input.sessionId}`;
@@ -114,7 +115,7 @@ function fakeGoals(): AgentGoalService {
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 25));
 
-async function makeApp() {
+async function makeApp(agentCatalog: AgentDescriptor[] = []) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-agent-sessions-"));
   const projectRows: Project[] = [
     { id: "p1", path: join(dir, "one"), name: "One", createdAt: 1 },
@@ -128,7 +129,7 @@ async function makeApp() {
     remove: async () => {},
   };
   const store = createStore(join(dir, "sessions.db"));
-  const runtime = fakeRuntime();
+  const runtime = fakeRuntime(agentCatalog);
   const permissions = {
     evaluate: () => "ask",
     addRule: () => {},
@@ -187,6 +188,31 @@ const jsonRequest = (method: string, body?: unknown): RequestInit => ({
   method,
   headers: body === undefined ? undefined : { "content-type": "application/json" },
   body: body === undefined ? undefined : JSON.stringify(body),
+});
+
+test("auto agents require the launching agent to provide a model", async () => {
+  const app = await makeApp([{ name: "review", mode: "auto" }]);
+  try {
+    await assert.rejects(
+      () => app.sessions.create({ projectId: "p1", agent: "review" }),
+      (error: unknown) => (error as { code?: string }).code === "invalid-input"
+        && (error as Error).message === 'model is required when launching auto agent "review"',
+    );
+
+    const created = await app.sessions.create({
+      projectId: "p1",
+      agent: "review",
+      model: { providerID: "test", modelID: "launch-model" },
+    });
+    await app.sessions.send(created.id, { text: "uses the launch model", agent: "review" });
+    await app.sessions.send(created.id, {
+      text: "with a model",
+      agent: "review",
+      model: { providerID: "test", modelID: "launch-model" },
+    });
+  } finally {
+    await app.close();
+  }
 });
 
 test("agent inventory discovers projects and recent cross-project session activity", async () => {

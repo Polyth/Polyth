@@ -78,7 +78,7 @@ export interface BackendConfigApplier {
   applyAgent(name: string, role: {
     prompt?: string;
     model?: { providerID: string; modelID: string };
-    mode: "primary" | "subagent" | "all";
+    mode: "primary" | "subagent" | "all" | "auto";
   }): Promise<void>;
   /** Read the backend config ({} when the file is missing; throws on corrupt
    *  content so callers never trust a torn read). OpenCode treats the file as
@@ -109,6 +109,8 @@ export interface ConfigApplierOptions {
    *  config file path. */
   targetId?: string;
 }
+
+const POLYTH_AGENT_MODE_OPTION = "polyth.mode";
 
 const defaultConfigDir = (): string =>
   process.env.XDG_CONFIG_HOME
@@ -476,10 +478,27 @@ export function createConfigApplier(opts: ConfigApplierOptions = {}): BackendCon
         currentRaw && typeof currentRaw === "object" && !Array.isArray(currentRaw)
           ? { ...(currentRaw as Record<string, unknown>) }
           : {};
-      current.mode = role.mode;
+      // `auto` is Polyth policy, not an OpenCode mode. Keep the native config
+      // valid and persist the policy in the extensible agent options object.
+      current.mode = role.mode === "auto" ? "subagent" : role.mode;
+      const optionsRaw = current.options;
+      if (role.mode === "auto") {
+        const options: Record<string, unknown> =
+          optionsRaw && typeof optionsRaw === "object" && !Array.isArray(optionsRaw)
+            ? { ...(optionsRaw as Record<string, unknown>) }
+            : {};
+        options[POLYTH_AGENT_MODE_OPTION] = "auto";
+        current.options = options;
+      } else if (optionsRaw && typeof optionsRaw === "object" && !Array.isArray(optionsRaw)) {
+        const options = { ...(optionsRaw as Record<string, unknown>) };
+        delete options[POLYTH_AGENT_MODE_OPTION];
+        if (Object.keys(options).length > 0) current.options = options;
+        else delete current.options;
+      }
       if (role.prompt?.trim()) current.prompt = role.prompt;
       else delete current.prompt;
-      if (role.model) current.model = `${role.model.providerID}/${role.model.modelID}`;
+      if (role.mode === "auto") delete current.model;
+      else if (role.model) current.model = `${role.model.providerID}/${role.model.modelID}`;
       else delete current.model;
       agents[name] = current;
       await writeConfigIfChanged(existing, { ...existing, agent: agents });

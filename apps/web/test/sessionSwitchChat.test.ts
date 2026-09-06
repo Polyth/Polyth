@@ -170,6 +170,33 @@ test("non-pinned persisted windows are not restored on project activation", () =
   store.activateProject("p1");
 });
 
+test("closing an unloaded package window clears its stale pinned preference", () => {
+  store.activateProject("p1");
+  const unregister = registerSurface({
+    id: "late-package",
+    title: "Late package",
+    order: 2,
+    component: () => null,
+    presentation: {
+      kind: "workspace", defaultRatio: 0.42, minWidth: 360, preferredMaxWidth: 920,
+      keepAlive: true, escape: "close",
+    },
+  });
+  assert.equal(store.openWorkspacePane("late-package"), true);
+  store.togglePanePin();
+  unregister();
+
+  // The registry no longer knows the surface, but closing it must still clear
+  // the project-scoped record instead of restoring it on the next activation.
+  store.setRailPlugin(null);
+  assert.equal(store.getState().railPlugin, null);
+  assert.equal(getWorkspacePanePrefs("p1").openSurface, null);
+
+  store.activateProject("p2");
+  store.activateProject("p1");
+  assert.equal(store.getState().railPlugin, null);
+});
+
 test("session metadata and history start in parallel on a cold open", async () => {
   requestedPaths = [];
   blockFetches();

@@ -420,4 +420,8 @@ export const pl: GitMessages = {
   "gitprojectsource.projectName": "Project name",
   "gitprojectsource.noSshServers": "No SSH servers are configured.",
   "gitprojectsource.cloneDestinationHint": "Clones into the folder shown above. Browse to change it.",
+  "gitview.fetchRemoteBranches": "Pobierz zdalne gałęzie",
+  "gitview.fetchingRemoteBranches": "Pobieranie zdalnych gałęzi…",
+  "gitview.remoteUnreachableShowingCached": "Nie można połączyć się ze zdalnym repozytorium. Wyświetlono gałęzie z ostatniego pobrania.",
+  "worktreesessiondialog.aNewCheckoutWillTrack": "Nowa lokalna gałąź {branch} będzie śledzić {remote}.",
 };

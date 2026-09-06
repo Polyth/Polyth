@@ -1576,8 +1576,9 @@ export interface ProtocolAdapter {
     method: number,
     inputs?: Record<string, string>,
   ): Promise<ProviderAuthorization>;
-  /** Complete a "code"-style OAuth flow (user pastes back an authorization code). */
-  providerAuthCallback?(providerID: string, method: number, code: string): Promise<boolean>;
+  /** Complete OAuth. `code` is omitted for auto/device flows whose callback
+   * blocks while the user finishes browser authentication. */
+  providerAuthCallback?(providerID: string, method: number, code?: string): Promise<boolean>;
   /** Store a plain API key (plus any extra prompt answers) for a provider. */
   setProviderApiKey?(providerID: string, key: string, metadata?: Record<string, string>): Promise<boolean>;
   /** Revoke stored credentials for a provider. */
@@ -1925,7 +1926,8 @@ export interface ModelDescriptor { providerID: string; modelID: string; name: st
 export interface AgentDescriptor {
   name: string;
   description?: string;
-  mode: "primary" | "subagent" | "all";
+  /** `auto` delegates model selection to the agent that launches this role. */
+  mode: "primary" | "subagent" | "all" | "auto";
   /** OpenCode's role-level system prompt, when exposed by the backend. */
   prompt?: string;
   /** Role-specific model override. */
@@ -2051,8 +2053,9 @@ export interface AgentRuntime {
     method: number,
     inputs?: Record<string, string>,
   ): Promise<ProviderAuthorization>;
-  /** Complete a "code"-style OAuth flow (user pastes back an authorization code). */
-  providerAuthCallback?(providerID: string, method: number, code: string): Promise<boolean>;
+  /** Complete OAuth. `code` is omitted for auto/device flows whose callback
+   * blocks while the user finishes browser authentication. */
+  providerAuthCallback?(providerID: string, method: number, code?: string): Promise<boolean>;
   /** Store a plain API key (plus any extra prompt answers) for a provider. */
   setProviderApiKey?(providerID: string, key: string, metadata?: Record<string, string>): Promise<boolean>;
   /** Revoke stored credentials for a provider. */

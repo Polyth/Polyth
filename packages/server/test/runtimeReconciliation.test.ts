@@ -735,7 +735,7 @@ test("a stopped turn can send again when reconciliation status is unknown", asyn
   await store.close();
 });
 
-test("send does not abort an open turn when runtime status is unknown", async () => {
+test("send leaves an unknown turn untouched when replacement is unavailable", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-orphaned-turn-"));
   const endpoint = endpointFor(dir);
   let submissions = 0;
@@ -776,6 +776,82 @@ test("send does not abort an open turn when runtime status is unknown", async ()
     ["turn/started"],
   );
   assert.equal(submissions, 0);
+  await store.close();
+});
+
+test("normal send replaces an unrecovered unknown backend and reuses confirmed history", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-unknown-replacement-"));
+  const endpoint: RuntimeEndpoint = {
+    ...endpointFor(dir),
+    control: { kind: "owned", instanceToken: "same-authority" },
+  };
+  let resetOperationId: string | undefined;
+  const submitted: string[] = [];
+  const runtime = runtimeWithSnapshot(endpoint, (binding) => ({
+    authorityId: binding.authorityId,
+    generation: binding.generation,
+    location: binding.location,
+    backendSessionId: binding.backendSessionId!,
+    reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+    state: resetOperationId
+      ? { value: "idle", causalOperationId: resetOperationId }
+      : { value: "unknown" },
+    completeness: { events: "partial", permissions: "partial", questions: "partial" },
+    permissions: [],
+    questions: [],
+    events: [],
+  }));
+  runtime.resetSessionOperation = async (_input, operationId) => {
+    resetOperationId = operationId;
+    return {
+      kind: "confirmed",
+      value: { backendSessionId: "backend-replacement" },
+      receipt: "backend-replacement",
+    };
+  };
+  runtime.startTurnOperation = async (request) => {
+    submitted.push(request.text);
+    return { kind: "confirmed", value: {} };
+  };
+  const { sessions, store, project } = makeHarness(runtime, dir);
+  const sessionId = "session-unknown-replacement";
+  await store.upsertProjection({
+    id: sessionId,
+    projectId: project.id,
+    backendSessionId: "backend-old",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-old"),
+    title: "Unknown replacement",
+    status: "unknown",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  await store.append(sessionId, "user/message", { text: "confirmed prior request" });
+  await store.append(sessionId, "assistant/message", { partId: "prior", text: "confirmed prior answer" });
+  const stranded = await store.prepareOperation({
+    sessionId,
+    mutationKind: "turn-submit",
+    intentEvent: { type: "user/message", data: { text: "uncertain old request" } },
+  });
+  await store.claimOperation(stranded.operation.operationId);
+  await store.append(sessionId, "turn/started", { turnId: "stranded-1" });
+
+  await sessions.send(sessionId, { text: "new request" });
+
+  assert.equal(submitted.length, 1);
+  assert.match(submitted[0]!, /confirmed prior request/);
+  assert.doesNotMatch(submitted[0]!, /uncertain old request/);
+  assert.match(submitted[0]!, /new request$/);
+  assert.deepEqual(
+    (await store.events(sessionId)).filter((event) => event.type.startsWith("turn/")).map((event) => event.type),
+    ["turn/started", "turn/stopped"],
+  );
+  assert.equal((await store.projection(sessionId))?.backendSessionId, "backend-replacement");
+  assert.equal((await store.projection(sessionId))?.runtimeBinding?.epoch, 1);
+  assert.equal(
+    (await store.events(sessionId)).some((event) => event.type === "runtime/epoch-replaced"),
+    true,
+  );
+  assert.equal((await store.operation(stranded.operation.operationId))?.state, "unknown");
   await store.close();
 });
 

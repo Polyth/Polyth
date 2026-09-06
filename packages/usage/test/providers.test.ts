@@ -237,7 +237,7 @@ test("Codex maps primary/secondary percent windows and sends account scope", asy
   assert.deepEqual(calls, [{ url: "https://chatgpt.com/backend-api/wham/usage", account: "acct-1" }]);
   assert.deepEqual(snapshot.windows.map((window) => [window.id, window.used, window.limit, window.periodMs]), [
     ["5h", 20, 100, 18_000_000],
-    ["weekly", 60, 100, 604_800_000],
+    ["7d", 60, 100, 604_800_000],
   ]);
   assert.equal(snapshot.windows[0]?.resetsAt, 1_900_000_000_000);
 });

@@ -1867,12 +1867,20 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 }
 .focus-conversation > .question-cards {
   box-sizing: border-box;
+  position: relative;
+  z-index: calc(var(--z-shell) + 1);
+  flex: 0 1 auto;
   width: min(var(--chat-measure), calc(100% - 48px));
   max-height: min(62dvh, 520px);
   align-self: center;
   padding-inline: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+/* The composer dock floats absolutely at the bottom; lift the card clear of it
+   so its actions never sit under the composer. */
+.focus-conversation:has(> .conversation-composer-dock) > .question-cards {
+  margin-bottom: calc(var(--conversation-dock-height) + var(--space-4));
 }
 .question-card {
   container-type: inline-size;
@@ -2752,11 +2760,12 @@ html[data-density="compact"] .set-row { padding: 6px 0; }
 .picker-select .chip-k { display: none; }
 .picker-select .picker-chip {
   min-width: 0; max-width: 100%; min-height: max(var(--control-h-sm), var(--hit-min));
-  width: 100%; padding-inline: var(--control-pad-x-sm); font-size: var(--font-label);
+  width: 100%; height: auto; padding-inline: var(--control-pad-x-sm); font-size: var(--font-label);
+  border-radius: var(--radius-control); transform: none;
   background: var(--elevated); border-color: var(--control-border); color: var(--text);
 }
 .picker-select .picker-chip:hover:not(:disabled) {
-  background: var(--raised); border-color: var(--hair-strong);
+  background: var(--raised); border-color: var(--hair-strong); transform: none;
 }
 .picker-select .picker-chip-text { min-width: 0; }
 .chip-k { color: var(--muted); font-size: var(--font-meta); font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
@@ -2764,14 +2773,9 @@ html[data-density="compact"] .set-row { padding: 6px 0; }
 .picker-chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-caret { color: var(--muted); font-size: var(--font-meta); }
 .picker-pop {
-  position: absolute; left: 0; z-index: 41; width: 280px;
-  display: flex; flex-direction: column;
-  background: var(--material-glass); border: 1px solid var(--material-glass-border); border-radius: var(--radius-card);
-  box-shadow: var(--material-glass-highlight), var(--material-glass-shadow); overflow: hidden; font-size: var(--font-meta);
-  animation: pop .12s ease;
+  width: min(280px, calc(100vw - 2 * var(--space-2))); max-width: calc(100vw - 2 * var(--space-2));
+  display: flex; flex-direction: column; overflow: hidden; font-size: var(--font-meta);
 }
-.picker-pop.down { top: calc(100% + 6px); }
-.picker-pop.up { bottom: calc(100% + 6px); }
 .picker-pop input {
   width: 100%; padding: 8px 10px; font-size: var(--font-label);
   background: transparent; border: none; border-bottom: 1px solid var(--border-soft); border-radius: 0;
@@ -2934,6 +2938,8 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .worktree-session-field select { width: 100%; }
 .worktree-session-field small { font-weight: 400; }
 .worktree-field-warning { color: var(--red); }
+.worktree-session-refresh-row { display: flex; justify-content: flex-end; margin-bottom: calc(var(--space-3) * -1); }
+.worktree-session-remote-note { color: var(--muted); font-size: var(--font-meta); }
 .worktree-checkout-note { margin: -2px 0 0; color: var(--muted); font-size: var(--font-meta); }
 .dialog-md { width: min(560px, 92vw); }
 .dialog-lg { width: min(880px, 94vw); }
@@ -4108,8 +4114,8 @@ color: var(--text-dim);
 
 /* ================== UX-COMPOSER-DISC: honest discovery ==================== */
 
-/* Shared invisible click-catcher for transient menus/popovers (Picker, Add
-   menu). Sits under the popover layer; a press on it closes the surface. */
+/* Invisible click-catcher for legacy in-flow menus. Portaled popovers use the
+   shared .ui-popover-backdrop instead. */
 .menu-backdrop { position: fixed; inset: 0; z-index: 40; background: transparent; }
 
 /* --- Add trigger + menu ---------------------------------------------------- */
@@ -9154,7 +9160,7 @@ color: var(--muted);
     inset-inline:
       max(var(--conversation-chrome-inset), var(--safe-left))
       max(var(--conversation-chrome-inset), var(--safe-right));
-    z-index: var(--z-shell);
+    z-index: calc(var(--z-shell) + 2);
     display: grid;
     grid-template-columns: max(var(--tap), var(--mobile-island-height)) minmax(0, 1fr) auto;
     align-items: center;
@@ -10078,11 +10084,14 @@ html[dir="rtl"] .panel-sheet { animation-name: module-slide-in-rtl; }
   to { transform: translateX(0); }
 }
 
-@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+@media (max-width: 820px), (max-height: 480px) and (pointer: coarse) {
+  /* Full-screen package layers cover Chat and its composer, while the shell
+     header/menu remains the top chrome. */
+  .app > .header { z-index: calc(var(--z-shell) + 2); }
   .module-view--main {
     position: fixed;
-    inset: calc(60px + var(--safe-top)) 0 0 0;
-    z-index: 70;
+    inset: 0;
+    z-index: calc(var(--z-shell) + 1);
     background: var(--bg);
     animation: module-slide-in var(--motion-normal) var(--motion-ease);
   }
@@ -10091,12 +10100,38 @@ html[dir="rtl"] .panel-sheet { animation-name: module-slide-in-rtl; }
   .rail-fullscreen,
   .panel-sheet {
     position: fixed;
-    inset: calc(60px + var(--safe-top)) 0 0 0;
+    inset: 0;
     width: auto; min-width: 0; max-width: none;
-    z-index: calc(72 + var(--module-depth, 0));
-    background: var(--bg); border-left: none; box-shadow: none;
+    z-index: calc(var(--z-shell) + 1 + var(--module-depth, 0));
+    background: var(--bg); border: 0; box-shadow: none;
     animation: module-slide-in var(--motion-normal) var(--motion-ease);
   }
+  /* Keep the backdrop and its safe/keyboard clearance on the full-screen
+     layer, but start the shared close/title row below the shell menu. */
+  :is(.module-view--main, .rail-fullscreen, .panel-sheet) {
+    padding-block-start: calc(60px + var(--safe-top));
+    padding-block-end: max(var(--safe-bottom), var(--keyboard-inset));
+    padding-inline-start: var(--safe-left);
+    padding-inline-end: var(--safe-right);
+    background-color: var(--bg);
+    background-image: none;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover;
+  }
+  html[data-background]:not([data-background="none"]) :is(
+    .module-view--main,
+    .rail-fullscreen,
+    .panel-sheet
+  ) {
+    background-image:
+      linear-gradient(
+        color-mix(in srgb, var(--bg) 76%, transparent),
+        color-mix(in srgb, var(--bg) 76%, transparent)
+      ),
+      var(--app-background-image);
+  }
+  :is(.rail-fullscreen, .panel-sheet) > .module-view { background: transparent; }
   /* No dim backdrop and no secondary "Back to chat" affordance: the overlay
      covers everything and the one top-right close returns to the session. */
   .panel-sheet-backdrop { display: none; }
@@ -10359,8 +10394,6 @@ color: var(--text);
 }
 
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-  .rail-fullscreen { top: calc(60px + env(safe-area-inset-top, 0px)); }
-  .panel-sheet { top: calc(60px + env(safe-area-inset-top, 0px)); }
   .mobile-view-title { cursor: default; }
 }
 
@@ -12265,6 +12298,12 @@ html[data-font] body :is(
 .focus-conversation:has(> .conversation-composer-dock) .timeline {
   padding-bottom: calc(var(--conversation-dock-height) + var(--conversation-group-gap));
   scroll-padding-bottom: var(--conversation-dock-height);
+}
+/* When a question card is up it is lifted to sit just above the dock (see the
+   .question-cards margin-bottom rule), so it — not the timeline — owns the
+   clearance. The timeline then only needs to clear the card itself. */
+.focus-conversation:has(> .conversation-composer-dock):has(> .question-cards) .timeline {
+  padding-bottom: var(--conversation-group-gap);
 }
 
 @media (prefers-reduced-motion: reduce) {

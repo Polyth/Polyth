@@ -46,6 +46,7 @@ const providerBody = {
 const agentsBody = [
   { name: "build", description: "default", mode: "primary" },
   { name: "explore", description: "search", mode: "subagent" },
+  { name: "auto", description: "caller supplies the model", mode: "subagent", options: { "polyth.mode": "auto" } },
 ];
 
 const scriptedSequence = (sessionID: string): ScriptedEvent[] => [
@@ -340,6 +341,7 @@ test("models/agents flatten from verified /provider and /agent shapes", async ()
     assert.equal(models[0]?.providerName, "OpenCode");
     const agents = await runtime.agents();
     assert.equal(agents[1]?.mode, "subagent");
+    assert.equal(agents[2]?.mode, "auto");
     const caps = await runtime.capabilities();
     assert.equal(caps.streaming, true);
     assert.equal(caps.questions, true);

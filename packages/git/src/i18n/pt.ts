@@ -420,4 +420,8 @@ export const pt: GitMessages = {
   "gitprojectsource.projectName": "Project name",
   "gitprojectsource.noSshServers": "No SSH servers are configured.",
   "gitprojectsource.cloneDestinationHint": "Clones into the folder shown above. Browse to change it.",
+  "gitview.fetchRemoteBranches": "Obter ramos remotos",
+  "gitview.fetchingRemoteBranches": "A obter ramos remotos…",
+  "gitview.remoteUnreachableShowingCached": "Não foi possível aceder ao remoto. A mostrar os ramos da última obtenção.",
+  "worktreesessiondialog.aNewCheckoutWillTrack": "Um novo ramo local {branch} irá seguir {remote}.",
 };

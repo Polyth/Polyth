@@ -4,7 +4,15 @@ import { setOverlay, setSidebarOpen, startNewSession, useStore } from "../store.
 import { friendlyError } from "../settings.ts";
 import { randomWorktreeSlug, suggestWorktreeBranch } from "../worktreeSessions.ts";
 import { tr } from "../i18n/index.ts";
-import { Button, Dialog, Select, TextInput } from "./ui/index.ts";
+import { Button, Dialog, RefreshIcon, Select, TextInput } from "./ui/index.ts";
+
+/** A remote-tracking branch offered as a fork point: `feature` (the local
+ *  branch we would create) tracking `origin/feature` (the ref it starts from). */
+interface RemoteBranchChoice {
+  short: string;
+  ref: string;
+  remote: string;
+}
 
 export default function WorktreeSessionDialog() {
   const request = useStore((state) => state.worktreeSessionRequest);
@@ -22,6 +30,8 @@ export default function WorktreeSessionDialog() {
   const [branchSeed, setBranchSeed] = useState(randomWorktreeSlug);
   const [branchTouched, setBranchTouched] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [remoteNote, setRemoteNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
@@ -35,6 +45,7 @@ export default function WorktreeSessionDialog() {
     let active = true;
     setLoading(true);
     setError("");
+    setRemoteNote("");
     setTitle("");
     setBranchTouched(false);
     setBranchSeed(randomWorktreeSlug());
@@ -55,6 +66,34 @@ export default function WorktreeSessionDialog() {
     return () => { active = false; };
   }, [request?.projectId]);
 
+  // Pull the remote and re-read the branch list so branches that only exist on
+  // the server become selectable fork points without leaving the dialog.
+  const refresh = async () => {
+    if (!request || refreshing || busy) return;
+    setRefreshing(true);
+    setError("");
+    setRemoteNote("");
+    let note = "";
+    try {
+      await api.gitFetch(request.projectId);
+    } catch {
+      note = tr("gitview.remoteUnreachableShowingCached");
+    }
+    try {
+      const [nextWorktrees, nextBranches] = await Promise.all([
+        api.listWorktrees(request.projectId),
+        api.gitBranches(request.projectId),
+      ]);
+      setWorktrees(nextWorktrees);
+      setBranches(nextBranches);
+      setRemoteNote(note);
+    } catch (cause) {
+      setError(friendlyError(tr("worktreesessiondialog.couldnTLoadBranches"), cause));
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const linkedBranches = useMemo(
     () => new Set(worktrees.map((worktree) => worktree.branch).filter((value): value is string => !!value)),
     [worktrees],
@@ -63,6 +102,21 @@ export default function WorktreeSessionDialog() {
     () => branches.branches.filter((item) => !item.remote),
     [branches],
   );
+  // Remote-only branches, keyed by the local name they would be checked out as.
+  const remoteBranches = useMemo<RemoteBranchChoice[]>(() => {
+    const localNames = new Set(localBranches.map((item) => item.name));
+    const seen = new Set<string>();
+    const out: RemoteBranchChoice[] = [];
+    for (const item of branches.branches) {
+      if (!item.remote) continue;
+      const short = item.name.slice(item.remote.length + 1);
+      if (!short || short === "HEAD" || short.startsWith("HEAD ")) continue;
+      if (localNames.has(short) || seen.has(short)) continue;
+      seen.add(short);
+      out.push({ short, ref: item.name, remote: item.remote });
+    }
+    return out;
+  }, [branches, localBranches]);
   const suggestion = useMemo(
     () => suggestWorktreeBranch(template, branchSeed, [...linkedBranches, ...localBranches.map((item) => item.name)]),
     [template, branchSeed, linkedBranches, localBranches],
@@ -73,6 +127,9 @@ export default function WorktreeSessionDialog() {
 
   const branchName = branch.trim();
   const selectedExistingBranch = localBranches.find((item) => item.name === branchName) ?? null;
+  const remoteMatch = !selectedExistingBranch
+    ? remoteBranches.find((item) => item.short === branchName) ?? null
+    : null;
   const branchAlreadyCheckedOut = !!selectedExistingBranch && linkedBranches.has(branchName);
   const createsBranch = !!branchName && !selectedExistingBranch;
   const status = !branchName
@@ -81,7 +138,9 @@ export default function WorktreeSessionDialog() {
       ? tr("worktreesessiondialog.thisBranchAlreadyHasA")
       : selectedExistingBranch
         ? tr("worktreesessiondialog.aNewCheckoutWillBe", { branch: branchName })
-        : tr("worktreesessiondialog.aNewBranchWillBe", { base: baseBranch || tr("worktreesessiondialog.theCurrentCommit") });
+        : remoteMatch
+          ? tr("worktreesessiondialog.aNewCheckoutWillTrack", { branch: branchName, remote: remoteMatch.ref })
+          : tr("worktreesessiondialog.aNewBranchWillBe", { base: baseBranch || tr("worktreesessiondialog.theCurrentCommit") });
 
   const submit = async () => {
     if (!request) return;
@@ -97,11 +156,14 @@ export default function WorktreeSessionDialog() {
     setError("");
     try {
       setProgress(tr("worktreesessiondialog.creatingWorktree"));
+      const base = createsBranch
+        ? (remoteMatch ? remoteMatch.ref : (baseBranch || undefined))
+        : undefined;
       const worktreePath = (await api.createWorktree(
         request.projectId,
         branchName,
         undefined,
-        createsBranch && baseBranch ? baseBranch : undefined,
+        base,
       )).path;
       setProgress(tr("worktreesessiondialog.openingChat"));
       startNewSession(request.projectId, {
@@ -153,6 +215,20 @@ export default function WorktreeSessionDialog() {
         </label>
 
         {loading ? <div className="empty">{tr("worktreesessiondialog.loadingBranches")}</div> : <>
+          <div className="worktree-session-refresh-row">
+            <Button
+              size="sm"
+              variant="ghost"
+              iconStart={RefreshIcon}
+              busy={refreshing}
+              disabled={busy}
+              onClick={() => void refresh()}
+            >
+              {refreshing ? tr("gitview.fetchingRemoteBranches") : tr("gitview.fetchRemoteBranches")}
+            </Button>
+          </div>
+          {remoteNote && <small className="worktree-session-remote-note">{remoteNote}</small>}
+
           <label className="worktree-session-field">
             <span>{tr("worktreesessiondialog.branch")}</span>
             <TextInput
@@ -165,16 +241,20 @@ export default function WorktreeSessionDialog() {
             />
             <datalist id="worktree-branches">
               {localBranches.filter((item) => !linkedBranches.has(item.name)).map((item) => <option key={item.name} value={item.name} />)}
+              {remoteBranches.map((item) => <option key={`remote:${item.ref}`} value={item.short} label={item.ref} />)}
             </datalist>
             <small id="worktree-branch-status" className={branchAlreadyCheckedOut ? "worktree-field-warning" : "muted"}>{status}</small>
           </label>
 
-          {createsBranch && <label className="worktree-session-field">
+          {createsBranch && !remoteMatch && <label className="worktree-session-field">
             <span>{tr("worktreesessiondialog.baseBranch")}</span>
             <Select
               label={tr("worktreesessiondialog.baseBranch")}
               value={baseBranch}
-              options={localBranches.map((item) => ({ value: item.name, label: item.name }))}
+              options={[
+                ...localBranches.map((item) => ({ value: item.name, label: item.name })),
+                ...remoteBranches.map((item) => ({ value: item.ref, label: item.ref })),
+              ]}
               onChange={setBaseBranch}
               ariaLabel={tr("worktreesessiondialog.baseBranch")}
             />

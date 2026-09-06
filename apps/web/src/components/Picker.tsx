@@ -6,16 +6,15 @@ import {
   type KeyboardEvent, type ReactNode,
 } from "react";
 import { filterPickerItems, type PickerItem } from "../picker.ts";
-import { useEscape } from "../useEscape.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { dismissKeyboard } from "../mobileViewport.ts";
 import { tapFeedback } from "../haptics.ts";
 import Sheet, { SheetRow } from "./mobile/Sheet.tsx";
 import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
 import { tr } from "../i18n/index.ts";
-import { usePopoverPlacement } from "../usePopoverPlacement.ts";
 import Button from "./ui/Button.tsx";
 import Checkbox from "./ui/Checkbox.tsx";
+import Popover from "./ui/Popover.tsx";
 
 const MAX_SHOWN = 200;
 
@@ -96,16 +95,13 @@ export default function Picker({
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
   const pickerId = useId();
   const listId = `${pickerId}-listbox`;
-  const direction = usePopoverPlacement(open && !asSheet, triggerRef, popoverRef);
 
   const close = () => {
     setOpen(false);
     if (!asSheet) triggerRef.current?.focus();
   };
-  useEscape(open && !asSheet, close);
   // §22: never raise a sheet under an open keyboard.
   const toggleOpen = () => {
     if (open) {
@@ -240,9 +236,14 @@ export default function Picker({
         </Sheet>
       )}
       {open && !asSheet && (
-        <>
-          <div className="menu-backdrop" onClick={close} />
-          <div ref={popoverRef} className={`picker-pop ${direction}`}>
+        <Popover
+          open
+          onClose={close}
+          anchorRef={triggerRef}
+          side={_direction}
+          ariaLabel={label}
+          className="picker-pop"
+        >
             {popoverToggle && (
               <Checkbox
                 className="picker-toggle"
@@ -342,8 +343,7 @@ export default function Picker({
                 )}
               </div>
             )}
-          </div>
-        </>
+        </Popover>
       )}
     </span>
   );

@@ -262,19 +262,37 @@ function SessionSurface() {
   useEffect(() => {
     const conversation = composerDock?.parentElement;
     if (!composerDock || !conversation) return;
+    let raf = 0;
     const publishHeight = () => {
       const timeline = conversation.querySelector<HTMLElement>(".timeline");
       const followTail = timeline
         ? timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < 80
         : false;
-      conversation.style.setProperty("--conversation-dock-height", `${composerDock.offsetHeight}px`);
+      // getBoundingClientRect (not offsetHeight) so sub-pixel growth and late
+      // async widgets — usage panel, pending-changes list, question card — are
+      // all reflected in the timeline's bottom padding.
+      const height = Math.ceil(composerDock.getBoundingClientRect().height);
+      conversation.style.setProperty("--conversation-dock-height", `${height}px`);
       if (timeline && followTail) timeline.scrollTop = timeline.scrollHeight;
     };
+    const schedule = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(publishHeight);
+    };
     publishHeight();
+    // ResizeObserver catches the dock's own box growing/shrinking; a
+    // MutationObserver catches children mounting or unmounting (widgets toggled
+    // by git status) whose height only settles a frame later.
     const observer = typeof ResizeObserver === "function" ? new ResizeObserver(publishHeight) : null;
     observer?.observe(composerDock);
+    const mutations = typeof MutationObserver === "function" ? new MutationObserver(schedule) : null;
+    mutations?.observe(composerDock, { childList: true, subtree: true });
+    window.addEventListener("resize", schedule);
     return () => {
+      cancelAnimationFrame(raf);
       observer?.disconnect();
+      mutations?.disconnect();
+      window.removeEventListener("resize", schedule);
       conversation.style.removeProperty("--conversation-dock-height");
     };
   }, [composerDock]);

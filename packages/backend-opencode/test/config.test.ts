@@ -234,3 +234,16 @@ test("role and visibility edits preserve plugins in an existing opencode.jsonc",
   assert.equal(cfg.agent.review.mode, "subagent");
   assert.equal(cfg.agent.review.model, "anthropic/claude-sonnet");
 });
+
+test("auto agent roles keep OpenCode config valid and omit the fixed model", async () => {
+  const dir = tmp();
+  const applier = createConfigApplier({ configDir: dir });
+  await applier.applyAgent("review", {
+    mode: "auto",
+    model: { providerID: "anthropic", modelID: "ignored" },
+  });
+  const cfg = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"));
+  assert.equal(cfg.agent.review.mode, "subagent");
+  assert.deepEqual(cfg.agent.review.options, { "polyth.mode": "auto" });
+  assert.equal("model" in cfg.agent.review, false);
+});

@@ -205,7 +205,7 @@ min-height: 100%;
   height: auto;
   display: block;
   overflow: visible;
-  background: var(--bg);
+  background: transparent;
   color: var(--text);
   container: usage-dashboard / inline-size;
 }
@@ -266,8 +266,8 @@ flex: none; min-height: 30px;
 .usage-dashboard-content {
 display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 18px 24px 28px;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--gutter) var(--space-5);
 }
 .usage-stat-grid {
 display: grid;
@@ -286,7 +286,7 @@ display: grid;
   border: 1px solid var(--material-glass-border);
   border-radius: var(--radius-surface);
   background: var(--material-glass);
-  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+  box-shadow: var(--material-glass-highlight);
   color: var(--text);
 }
 .usage-stat-card {
@@ -394,25 +394,19 @@ display: grid;
   align-items: stretch;
 }
 .usage-overview-blocks {
-display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px;
+display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--space-3);
 }
 .usage-sortable-item {
-min-width: 0; display: flex; flex-direction: column;
+min-width: 0; display: flex; flex-direction: column; border-radius: var(--radius-surface); cursor: grab; touch-action: pan-y;
 }
 .usage-sortable-item.dragging {
-opacity: .55;
+opacity: .6; cursor: grabbing; touch-action: none;
 }
-.usage-sort-controls {
-height: var(--control-h-sm); display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding-inline: var(--space-1);
+.usage-sortable-item:focus-visible {
+outline: var(--focus-ring); outline-offset: 2px;
 }
-.usage-sort-controls .ui-icon-btn {
-background: var(--material-glass); border-color: var(--material-glass-border); box-shadow: var(--material-glass-highlight);
-}
-.usage-sort-controls .ui-icon-btn:first-child {
-cursor: grab;
-}
-.usage-sort-controls .ui-icon-btn:first-child:active {
-cursor: grabbing;
+.usage-sortable-item:has(button:hover, a:hover, input:hover, select:hover, textarea:hover) {
+cursor: default;
 }
 .usage-block-full { grid-column: 1 / -1; }
 .usage-block-stat { grid-column: span 3; }
@@ -427,7 +421,7 @@ cursor: grabbing;
 flex: 1;
 }
 .usage-sortable-item > .usage-stat-card {
-flex: 1; border: 1px solid var(--material-glass-border); border-radius: var(--radius-surface); background: var(--material-glass); box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+flex: 1; border: 1px solid var(--material-glass-border); border-radius: var(--radius-surface); background: var(--material-glass); box-shadow: var(--material-glass-highlight);
 }
 .usage-breakdown-grid {
 display: grid;

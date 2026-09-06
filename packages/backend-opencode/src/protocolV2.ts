@@ -62,6 +62,7 @@ interface V2Agent {
   mode?: unknown;
   system?: unknown;
   model?: unknown;
+  options?: unknown;
   hidden?: unknown;
 }
 
@@ -194,6 +195,10 @@ const mutateRequired = async (
   }
   return result.body;
 };
+
+// OpenCode's auto/device OAuth callback intentionally blocks while the user
+// signs in (upstream currently allows five minutes).
+const PROVIDER_OAUTH_CALLBACK_DEADLINE_MS = 15 * 60 * 1000;
 
 const requiredData = (body: unknown, path: string): unknown => {
   const record = asRecord(body);
@@ -422,12 +427,18 @@ const normalizeAgents = (body: unknown, path: string): AgentDescriptor[] =>
     }
     if (agent.hidden === true) return [];
     const model = asRecord(agent.model);
+    const options = asRecord(agent.options);
+    const auto = options?.["polyth.mode"] === "auto";
     return [{
       name: agent.id,
       ...(typeof agent.description === "string" && agent.description
         ? { description: agent.description }
         : {}),
-      mode: agent.mode === "subagent" || agent.mode === "all" ? agent.mode : "primary",
+      mode: auto || agent.mode === "auto"
+        ? "auto"
+        : agent.mode === "subagent" || agent.mode === "all"
+          ? agent.mode
+          : "primary",
       ...(typeof agent.system === "string" && agent.system ? { prompt: agent.system } : {}),
       ...(typeof model?.providerID === "string" && typeof model.id === "string"
         ? { model: { providerID: model.providerID, modelID: model.id } }
@@ -687,11 +698,17 @@ export const createV2ProtocolAdapter = (
       if (typeof body?.url !== "string" || typeof body?.method !== "string" || typeof body?.instructions !== "string") {
         throw invalidResponse(path, "url, method, and instructions");
       }
-      return { url: body.url, method: body.method as "auto" | "code", instructions: body.instructions };
+      return { url: body.url, method: body.method === "code" ? "code" : "auto", instructions: body.instructions };
     },
     async providerAuthCallback(providerID, method, code): Promise<boolean> {
       const path = withLocation(`/provider/${encodeURIComponent(providerID)}/oauth/callback`, options.endpoint.location);
-      return Boolean(await mutateRequired(options.transport, "POST", path, { method, code }, deadlineMs));
+      return Boolean(await mutateRequired(
+        options.transport,
+        "POST",
+        path,
+        { method, ...(code ? { code } : {}) },
+        PROVIDER_OAUTH_CALLBACK_DEADLINE_MS,
+      ));
     },
     async setProviderApiKey(providerID, key, metadata): Promise<boolean> {
       const path = withLocation(`/auth/${encodeURIComponent(providerID)}`, options.endpoint.location);

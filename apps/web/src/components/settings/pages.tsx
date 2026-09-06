@@ -939,7 +939,12 @@ function RoleEditor({ role, onClose }: { role: AgentDescriptor; onClose: () => v
     setBusy(true);
     setError("");
     try {
-      const saved = await api.saveRole(role.name, { prompt, model, mode });
+      const selectedModel = mode === "auto" ? undefined : model ?? defaultModel;
+      const saved = await api.saveRole(role.name, {
+        prompt,
+        ...(selectedModel ? { model: selectedModel } : {}),
+        mode,
+      });
       setAgents(agents.map((candidate) => candidate.name === saved.name ? saved : candidate));
       onClose();
     } catch (cause) {
@@ -967,12 +972,17 @@ function RoleEditor({ role, onClose }: { role: AgentDescriptor; onClose: () => v
           <Seg value={mode} options={[
             ["primary", tr("settings.pages.mainAgent")],
             ["subagent", tr("settings.pages.subagent2")],
-          ]} onChange={setMode} />
+            ["auto", "Auto"],
+          ]} onChange={(next) => { setMode(next); if (next === "auto") setModel(undefined); }} />
           <small>{tr("settings.pages.mainAgentsCanLeadSessionsSubagentsAre")}</small>
         </label>
         <label>
           <span>{tr("settings.pages.providerModel")}</span>
-          <ModelPicker direction="down" models={models} value={model} recommended={defaultModel} onPick={setModel} />
+          {mode === "auto" ? (
+            <span className="mono profile-model-locked">Model supplied by launching agent</span>
+          ) : (
+            <ModelPicker direction="down" models={models} value={model} recommended={defaultModel} onPick={setModel} />
+          )}
           <small>{tr("settings.pages.usesTheSameSearchablePickerAndFavorites")}</small>
         </label>
         <label>
@@ -1019,10 +1029,10 @@ export function AgentsPage() {
         <div className="role-card-grid">
           {configurableAgents.map((agent) => (
             <article key={agent.name} className="role-card">
-              <header><span className="role-card-icon">{agent.name.slice(0, 1).toUpperCase()}</span><div><strong>{agent.name}</strong><span className={`tag role-kind ${agent.mode}`}>{agent.mode === "subagent" ? tr("settings.pages.subagent2") : tr("settings.pages.mainAgent")}</span></div></header>
+              <header><span className="role-card-icon">{agent.name.slice(0, 1).toUpperCase()}</span><div><strong>{agent.name}</strong><span className={`tag role-kind ${agent.mode}`}>{agent.mode === "subagent" ? tr("settings.pages.subagent2") : agent.mode === "auto" ? "Auto" : tr("settings.pages.mainAgent")}</span></div></header>
               <p>{agent.description || tr("settings.pages.configurableOpenCodeRole")}</p>
               <div className="role-card-meta">
-                <span><b>{tr("settings.pages.model")}</b>{modelLabel(agent.model)}</span>
+                <span><b>{tr("settings.pages.model")}</b>{agent.mode === "auto" ? "Supplied by launching agent" : modelLabel(agent.model)}</span>
                 <span><b>{tr("settings.pages.prompt")}</b>{agent.prompt?.trim() ? `${agent.prompt.trim().slice(0, 72)}${agent.prompt.trim().length > 72 ? "…" : ""}` : tr("settings.pages.opencodeDefault")}</span>
               </div>
               <Button size="sm" onClick={() => setEditingRole(agent)}>{tr("settings.pages.editRole2")}</Button>

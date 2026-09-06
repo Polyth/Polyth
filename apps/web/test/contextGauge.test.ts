@@ -1,17 +1,29 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { JsonObject, SessionEvent } from "@polyth/contracts";
-import { buildModel, contextGauge } from "../src/reduce.ts";
+import { buildModel, contextGauge, contextTokensUsed } from "../src/reduce.ts";
 
-test("context gauge uses complete session input totals and honest unknown metadata", () => {
-  assert.deepEqual(contextGauge({ totals: { input: 12_000, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 } }), {
+/** A render-model shape carrying only what the gauge reads: a latest usage
+ *  sample plus a (deliberately large, and ignored) lifetime input total. */
+const withSample = (over: { input?: number; cacheRead?: number; cacheWrite?: number } = {}) => ({
+  totals: { input: 9_999_999, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
+  contextUsage: {
+    inputTokens: over.input ?? 0,
+    cacheReadTokens: over.cacheRead ?? 0,
+    cacheWriteTokens: over.cacheWrite ?? 0,
+  },
+});
+
+test("context gauge measures the last request's prompt footprint, not the lifetime input total", () => {
+  assert.deepEqual(contextGauge(withSample({ input: 12_000 })), {
     known: false,
     inputTokens: 12_000,
     contextTokens: null,
     percent: null,
     level: "unknown",
   });
-  assert.deepEqual(contextGauge({ totals: { input: 64_000, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 } }, 128_000), {
+  // 20k fresh + 40k cache-read + 4k cache-write = 64k resident of a 128k window.
+  assert.deepEqual(contextGauge(withSample({ input: 20_000, cacheRead: 40_000, cacheWrite: 4_000 }), 128_000), {
     known: true,
     inputTokens: 64_000,
     contextTokens: 128_000,
@@ -20,16 +32,27 @@ test("context gauge uses complete session input totals and honest unknown metada
   });
 });
 
+test("context gauge is empty until the first usage sample arrives", () => {
+  const fresh = { totals: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 }, contextUsage: null };
+  assert.equal(contextTokensUsed(fresh), 0);
+  assert.deepEqual(contextGauge(fresh, 128_000), {
+    known: true,
+    inputTokens: 0,
+    contextTokens: 128_000,
+    percent: 0,
+    level: "green",
+  });
+});
+
 test("context gauge clamps overflow and applies warning thresholds", () => {
-  const model = (input: number) => ({ totals: { input, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 } });
-  assert.equal(contextGauge(model(69), 100).level, "green");
-  assert.equal(contextGauge(model(70), 100).level, "yellow");
-  assert.equal(contextGauge(model(90), 100).level, "red");
-  const overflow = contextGauge(model(250), 100);
+  assert.equal(contextGauge(withSample({ input: 69 }), 100).level, "green");
+  assert.equal(contextGauge(withSample({ input: 70 }), 100).level, "yellow");
+  assert.equal(contextGauge(withSample({ input: 90 }), 100).level, "red");
+  const overflow = contextGauge(withSample({ input: 250 }), 100);
   assert.equal(overflow.known && overflow.percent, 100);
 });
 
-test("usage replay uses complete session input for context accounting", () => {
+test("usage replay tracks the latest sample for context, and the running sum for lifetime totals", () => {
   let seq = 0;
   const event = (type: string, data: JsonObject): SessionEvent => ({
     id: `e${++seq}`,
@@ -44,15 +67,33 @@ test("usage replay uses complete session input for context accounting", () => {
     event("turn/started", { turnId: "t1" }),
     event("usage/recorded", {
       model: { providerID: "test", modelID: "large" },
-      tokens: { input: 10_000, output: 100 },
+      tokens: { input: 10_000, output: 100, cacheRead: 2_000 },
     }),
     event("usage/recorded", {
       model: { providerID: "test", modelID: "large" },
-      tokens: { input: 12_000, output: 200 },
+      tokens: { input: 12_000, output: 200, cacheRead: 30_000, cacheWrite: 0 },
     }),
   ]);
+  // Lifetime totals still accumulate every request.
   assert.equal(model.totals.input, 22_000);
+  // Context accounting keeps only the newest sample's prompt footprint.
   assert.equal(model.contextUsage?.inputTokens, 12_000);
+  assert.equal(model.contextUsage?.cacheReadTokens, 30_000);
   assert.deepEqual(model.contextUsage?.model, { providerID: "test", modelID: "large" });
-  assert.equal(contextGauge(model, 24_000).percent, 92);
+  assert.equal(contextTokensUsed(model), 42_000);
+  assert.equal(contextGauge(model, 84_000).percent, 50);
+});
+
+test("a new turn keeps the prior footprint until fresh usage lands", () => {
+  let seq = 0;
+  const event = (type: string, data: JsonObject): SessionEvent => ({
+    id: `e${++seq}`, sessionId: "s1", seq, time: seq, type, data, v: 1,
+  });
+  const model = buildModel([
+    event("turn/started", { turnId: "t1" }),
+    event("usage/recorded", { model: { providerID: "test", modelID: "large" }, tokens: { input: 40_000, output: 100 } }),
+    event("turn/stopped", { turnId: "t1", reason: "completed" }),
+    event("turn/started", { turnId: "t2" }),
+  ]);
+  assert.equal(contextTokensUsed(model), 40_000);
 });

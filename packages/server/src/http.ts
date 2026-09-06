@@ -796,12 +796,16 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
           const providerID = decodeURIComponent(m[1]!);
           const b = await loadBody();
           const methodIndex = providerAuthMethodIndex(b.method);
-          if (typeof b.code !== "string" || !b.code.trim()) {
-            throw Object.assign(new Error("code is required"), { code: "invalid-input" });
+          if (b.code !== undefined && (typeof b.code !== "string" || !b.code.trim())) {
+            throw Object.assign(new Error("code must be a non-empty string"), { code: "invalid-input" });
           }
           const rt = await providerRuntime();
           if (!rt.providerAuthCallback) throw Object.assign(new Error("provider oauth unavailable"), { code: "unsupported" });
-          await rt.providerAuthCallback(providerID, methodIndex, b.code);
+          await rt.providerAuthCallback(
+            providerID,
+            methodIndex,
+            typeof b.code === "string" ? b.code.trim() : undefined,
+          );
           deps.catalog?.invalidateModels();
           return json(res, 200, { ok: true });
         }

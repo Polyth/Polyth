@@ -51,6 +51,7 @@ interface MutationCall {
   path: string;
   body?: unknown;
   operationId: string;
+  deadlineMs: number;
   replay: { kind: "never" } | { kind: "same-operation-id"; contract: string };
 }
 
@@ -286,6 +287,7 @@ test("V2 provider listing and auth methods use native endpoints", async () => {
     { url: "https://cursor.test/login", method: "code", instructions: "Sign in" },
   );
   assert.equal(await adapter.providerAuthCallback!("cursor", 0, "auth-code"), true);
+  assert.equal(await adapter.providerAuthCallback!("cursor", 0), true);
   assert.equal(await adapter.setProviderApiKey!("openai", "sk-test", { region: "us" }), true);
   assert.equal(await adapter.removeProviderAuth!("openai"), true);
 
@@ -303,6 +305,12 @@ test("V2 provider listing and auth methods use native endpoints", async () => {
       replay: { kind: "never" },
     },
     {
+      method: "POST",
+      path: "/provider/cursor/oauth/callback?directory=%2Fworkspace%2Fproject&workspace=worktree-a",
+      body: { method: 0 },
+      replay: { kind: "never" },
+    },
+    {
       method: "PUT",
       path: "/auth/openai?directory=%2Fworkspace%2Fproject&workspace=worktree-a",
       body: { type: "api", key: "sk-test", metadata: { region: "us" } },
@@ -315,6 +323,7 @@ test("V2 provider listing and auth methods use native endpoints", async () => {
       replay: { kind: "never" },
     },
   ]);
+  assert.equal(fake.mutations[2]?.deadlineMs, 15 * 60 * 1000);
 });
 
 test("V2 core session methods use native paths and reconcile pending requests", async () => {

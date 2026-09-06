@@ -1,4 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent,
+  type ReactNode,
+} from "react";
 import { fmtTokens } from "../../../../apps/web/src/format.ts";
 import { getLocale, tr } from "../../../../apps/web/src/i18n/index.ts";
 import { Icon } from "../../../../apps/web/src/icons.tsx";
@@ -11,14 +20,11 @@ import {
   useUsagePrefs,
 } from "../usagePrefs.ts";
 import ProviderLogo from "../../../models/widgets/ProviderLogo.tsx";
-import { fmtQuota, paceText, useQuotaSnapshots } from "./quotaUi.tsx";
+import { fmtQuota, useQuotaSnapshots } from "./quotaUi.tsx";
 import {
   AddIcon,
   Button,
-  ChevronDownIcon,
   ChevronRightIcon,
-  ChevronUpIcon,
-  DragHandleIcon,
   EmptyState,
   IconButton,
   RefreshIcon,
@@ -51,7 +57,7 @@ const seriesAccent = (index = 0): string =>
   SERIES_ACCENTS[index % SERIES_ACCENTS.length]!;
 
 const providerPreferenceId = (provider: UsageProviderSummary): string =>
-  provider.snapshot?.providerId ?? provider.id;
+  provider.id;
 
 interface SortableBlock {
   id: string;
@@ -72,38 +78,76 @@ function SortableBlocks({
   className: string;
 }) {
   const [dragged, setDragged] = useState<string | null>(null);
+  const touchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchPending = useRef<{ id: string; x: number; y: number; pointerId: number } | null>(null);
   const sorted = orderUsageBlocks(blocks, order, (block) => block.id);
   const ids = sorted.map((block) => block.id);
   const move = (id: string, to: string | number) => onChange(moveUsageBlock(ids, id, to));
+  const clearTouch = () => {
+    if (touchTimer.current) clearTimeout(touchTimer.current);
+    touchTimer.current = null;
+    touchPending.current = null;
+    setDragged(null);
+  };
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>, id: string) => {
+    if (event.pointerType !== "touch" || (event.target as Element).closest("button,a,input,select,textarea")) return;
+    touchPending.current = { id, x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+    const target = event.currentTarget;
+    touchTimer.current = setTimeout(() => {
+      target.setPointerCapture(event.pointerId);
+      setDragged(id);
+    }, 280);
+  };
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const pending = touchPending.current;
+    if (!pending || pending.pointerId !== event.pointerId) return;
+    if (!dragged && Math.hypot(event.clientX - pending.x, event.clientY - pending.y) > 8) {
+      clearTouch();
+      return;
+    }
+    if (!dragged) return;
+    event.preventDefault();
+    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-usage-block]");
+    if (target?.dataset.usageBlock && target.dataset.usageBlock !== dragged) move(dragged, target.dataset.usageBlock);
+  };
   return (
     <div className={className}>
-      {sorted.map((block, index) => (
+      {sorted.map((block) => (
         <div
           className={`usage-sortable-item${block.className ? ` ${block.className}` : ""}${dragged === block.id ? " dragging" : ""}`}
           key={block.id}
+          data-usage-block={block.id}
+          draggable
+          tabIndex={0}
+          role="group"
+          aria-label={block.label}
+          aria-roledescription="sortable dashboard block"
+          onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+            if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+            event.preventDefault();
+            move(block.id, event.key === "ArrowUp" ? -1 : 1);
+          }}
+          onDragStart={(event) => {
+            if ((event.target as Element).closest("button,a,input,select,textarea")) {
+              event.preventDefault();
+              return;
+            }
+            setDragged(block.id);
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", block.id);
+          }}
+          onDragEnd={() => setDragged(null)}
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => {
             event.preventDefault();
             if (dragged) move(dragged, block.id);
             setDragged(null);
           }}
+          onPointerDown={(event) => onPointerDown(event, block.id)}
+          onPointerMove={onPointerMove}
+          onPointerUp={clearTouch}
+          onPointerCancel={clearTouch}
         >
-          <div className="usage-sort-controls">
-            <IconButton
-              icon={DragHandleIcon}
-              size="sm"
-              draggable
-              label={`Reorder ${block.label}`}
-              onDragStart={(event) => {
-                setDragged(block.id);
-                event.dataTransfer.effectAllowed = "move";
-                event.dataTransfer.setData("text/plain", block.id);
-              }}
-              onDragEnd={() => setDragged(null)}
-            />
-            <IconButton icon={ChevronUpIcon} size="sm" label={`Move ${block.label} up`} disabled={index === 0} onClick={() => move(block.id, -1)} />
-            <IconButton icon={ChevronDownIcon} size="sm" label={`Move ${block.label} down`} disabled={index === sorted.length - 1} onClick={() => move(block.id, 1)} />
-          </div>
           {block.content}
         </div>
       ))}
@@ -315,7 +359,7 @@ function CohortChart({
   const bucketTotals = aggregateSeries(series, labels.length);
   const maximum = Math.max(1, ...bucketTotals);
   const bucketWidth = labels.length > 0 ? chartWidth / labels.length : chartWidth;
-  const barWidth = Math.min(42, Math.max(10, bucketWidth * .62));
+  const barWidth = Math.min(32, Math.max(2, bucketWidth * .68));
   const barX = (index: number) => left + bucketWidth * index + (bucketWidth - barWidth) / 2;
   const pointY = (value: number) => top + chartHeight - value / maximum * chartHeight;
   const populated = allValues.some((value) => value > 0);
@@ -448,8 +492,8 @@ function SessionCohorts({
   return (
     <article className="usage-dashboard-card usage-time-card">
       <SectionHeading
-        title={tr("usage.usagedashboard.sessionCohortsByLatestTurn")}
-        description={tr("usage.usagedashboard.valueEqualRollingBucketsValue", { count: data.chart.labels.length, hours: Math.round(data.chart.bucketHours) })}
+        title={tr("usage.usagedashboard.usageOverTime")}
+        description={tr("usage.usagedashboard.sessionTotalsGroupedByLastActivity")}
         aside={(
           <Tabs
             className="usage-metric-toggle"
@@ -835,7 +879,6 @@ function ProviderDetails({
               <div className="usage-provider-windows">
                 {provider.snapshot?.windows.map((quota) => {
                   const used = quota.limit > 0 ? Math.min(1, quota.used / quota.limit) : 0;
-                  const pace = provider.snapshot?.pace[quota.id] ?? null;
                   return (
                     <div key={quota.id} className="usage-provider-window">
                       <div>
@@ -852,7 +895,7 @@ function ProviderDetails({
                       >
                         <i className={used >= .8 ? "warning" : ""} style={{ width: `${used * 100}%` }} />
                       </span>
-                      <p>{pace ? paceText(pace, quota) : quota.resetsAt ? tr("usage.usagedashboard.resetsValue", { date: new Date(quota.resetsAt).toLocaleString(getLocale()) }) : tr("usage.usagedashboard.liveQuotaUsage")}</p>
+                      <p>{quota.resetsAt ? tr("usage.usagedashboard.resetsValue", { date: new Date(quota.resetsAt).toLocaleString(getLocale()) }) : tr("usage.usagedashboard.liveQuotaUsage")}</p>
                     </div>
                   );
                 })}
@@ -952,10 +995,6 @@ export function UsageDashboard(): ReactNode {
   const tokenSeries = aggregateSeries(data.chart.tokens, data.chart.labels.length);
   const costSeries = aggregateSeries(data.chart.cost, data.chart.labels.length);
   const sessionSeries = aggregateSeries(data.chart.sessions, data.chart.labels.length);
-  const averageSeries = costSeries.map((cost, index) => {
-    const tokens = tokenSeries[index] ?? 0;
-    return tokens > 0 ? cost / tokens * 1_000 : 0;
-  });
   const averageSessionCost = data.totals.sessions > 0 ? data.totals.cost / data.totals.sessions : 0;
   const addProvider = () => window.dispatchEvent(new CustomEvent("polyth:settings-page", { detail: "models" }));
   const refreshAll = async () => {
@@ -972,7 +1011,7 @@ export function UsageDashboard(): ReactNode {
     { id: "spend", label: tr("usage.usagedashboard.spend"), className: "usage-block-stat", content: <StatCard label={tr("usage.usagedashboard.spend")} value={formatMoney(data.totals.cost)} trend={data.trends.cost} icon="usage" tone="var(--accent)" detail={tr("usage.usagedashboard.valuePerSession2", { value: formatMoney(averageSessionCost) })} series={costSeries} /> },
     { id: "tokens", label: tr("usage.usagedashboard.tokens"), className: "usage-block-stat", content: <StatCard label={tr("usage.usagedashboard.tokens")} value={fmtTokens(data.totals.tokens)} trend={data.trends.tokens} icon="context" tone="var(--purple)" detail={data.models.length === 1 ? tr("usage.usagedashboard.oneModel") : tr("usage.usagedashboard.valueModels", { count: data.models.length })} series={tokenSeries} /> },
     { id: "sessions", label: tr("usage.usagedashboard.sessions"), className: "usage-block-stat", content: <StatCard label={tr("usage.usagedashboard.sessions")} value={data.totals.sessions.toLocaleString(getLocale())} trend={data.trends.sessions} icon="events" tone="var(--blue)" detail={visibleProviders.length === 1 ? tr("usage.usagedashboard.oneProviderShown") : tr("usage.usagedashboard.valueProvidersShown", { count: visibleProviders.length })} series={sessionSeries} /> },
-    { id: "rate", label: tr("usage.usagedashboard.cost1kTokens"), className: "usage-block-stat", content: <StatCard label={tr("usage.usagedashboard.cost1kTokens")} value={data.totals.tokens > 0 ? formatRate(data.totals.averageCostPerThousand) : "$0.0000"} trend={data.trends.averageCostPerThousand} icon="compare" tone="var(--amber)" detail={tr("usage.usagedashboard.valueDayCohortRatio", { days: rangeDays })} series={averageSeries} /> },
+    { id: "cache", label: "Cache hit", className: "usage-block-stat", content: <StatCard label="Cache hit" value={`${Math.round(data.totals.cacheHitPercent)}%`} trend={null} icon="compare" tone="var(--green)" detail={`${fmtTokens(data.totals.cacheRead)} cached`} series={[]} /> },
     {
       id: "cohorts",
       label: tr("usage.usagedashboard.sessionCohortsByLatestTurn"),

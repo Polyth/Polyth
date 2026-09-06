@@ -420,4 +420,8 @@ export const uk: GitMessages = {
   "gitprojectsource.projectName": "Назва проєкту",
   "gitprojectsource.noSshServers": "SSH-сервери ще не налаштовані.",
   "gitprojectsource.cloneDestinationHint": "Клонує в папку, показану вище. Перейдіть до іншої, щоб змінити.",
+  "gitview.fetchRemoteBranches": "Отримати віддалені гілки",
+  "gitview.fetchingRemoteBranches": "Отримання віддалених гілок…",
+  "gitview.remoteUnreachableShowingCached": "Не вдалося зв’язатися з віддаленим репозиторієм. Показано гілки з останнього отримання.",
+  "worktreesessiondialog.aNewCheckoutWillTrack": "Нова локальна гілка {branch} відстежуватиме {remote}.",
 };

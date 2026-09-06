@@ -287,7 +287,7 @@ const activityGroup = (
   settled: !items.some((item) => item.kind === "tool" && (item.status === "pending" || item.status === "running")),
 });
 const { default: PermissionBanner } = await import("../../../packages/permissions/widgets/PermissionBanner.tsx");
-const { activateSession, applyEvent, getState, setSessions } = await import("../src/store.ts");
+const { activateProject, activateSession, applyEvent, getState, setSessions } = await import("../src/store.ts");
 
 test("execution row renders collapsed value first, expands inline, and opens level three on demand", async () => {
   const timeline = document.createElement("div");
@@ -848,6 +848,77 @@ test("MCP and subagent executions render normalized first-class details", async 
     await act(async () => {
       activateSession(null);
       setSessions("execution-ui-test", []);
+    });
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("a subagent action opens while its canonical projection is still syncing", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const originalFetch = globalThis.fetch;
+  const child = {
+    id: "canonical-child",
+    projectId: "execution-child-open-test",
+    parentId: "parent-child-open",
+    backendSessionId: "backend-child",
+    title: "Child session",
+    status: "working" as const,
+    createdAt: 2,
+    updatedAt: 2,
+  };
+  try {
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/sessions/backend-child") {
+        return new Response(JSON.stringify({ error: "not-found" }), {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.pathname === "/api/sessions" && url.searchParams.get("projectId") === child.projectId) {
+        return new Response(JSON.stringify([child]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.pathname === "/api/sessions/canonical-child/events") {
+        return new Response("[]", {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`unexpected request: ${url.pathname}${url.search}`);
+    };
+    activateProject(child.projectId);
+    setSessions(child.projectId, []);
+    activateSession("parent-child-open");
+    await act(async () => root.render(createElement(ExecutionRow, {
+      message: tool({ tool: "task", status: "running", output: undefined }),
+      subagent: {
+        sessionId: child.backendSessionId,
+        label: "Research helper",
+        status: "running",
+      },
+      defaultOpen: true,
+    })));
+
+    const open = container.querySelector<HTMLButtonElement>(".execution-subagent-detail > button");
+    assert.ok(open);
+    assert.equal(open.disabled, false, "the unresolved child action remains clickable");
+    await act(async () => {
+      open!.click();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    assert.equal(getState().activeSessionId, child.id);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await act(async () => {
+      activateSession(null);
+      setSessions(child.projectId, []);
+      activateProject(null);
     });
     await act(async () => root.unmount());
     container.remove();

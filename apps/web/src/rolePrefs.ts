@@ -21,7 +21,7 @@ let state = (() => {
 const listeners = new Set<() => void>();
 
 export function roleKind(agent: AgentDescriptor, prefs: Record<string, RoleKind> = state): RoleKind {
-  return prefs[agent.name] ?? (agent.mode === "subagent" ? "subagent" : "main");
+  return prefs[agent.name] ?? (agent.mode === "subagent" || agent.mode === "auto" ? "subagent" : "main");
 }
 
 export function setRoleKind(name: string, kind: RoleKind): void {

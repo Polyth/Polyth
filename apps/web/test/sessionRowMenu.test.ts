@@ -334,6 +334,38 @@ test("pinned chats are first across worktrees and their menu offers Unpin", asyn
   }
 });
 
+test("each worktree keeps its newest matching session visible before pagination", async () => {
+  activateProject("p1");
+  const now = Date.now();
+  setSessions("p1", [
+    ...Array.from({ length: 6 }, (_, index) => session({
+      id: `main-${index}`,
+      title: `Main session ${index}`,
+      lastTurnAt: now + 6 - index,
+    })),
+    session({
+      id: "worktree-recent",
+      title: "Worktree recent",
+      worktreePath: "/repo-feature",
+      branch: "feature/recent",
+      lastTurnAt: now - 1,
+    }),
+  ]);
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(createElement(SessionList, { projectId: "p1" })));
+    const group = container.querySelector<HTMLElement>('[data-worktree="/repo-feature"]');
+    assert.ok(group, "the worktree group is present");
+    assert.match(group!.textContent ?? "", /Worktree recent/);
+    assert.equal(container.querySelector(".show-more-sessions"), null, "the visible worktree row is not hidden behind pagination");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
 test("every permanent delete confirms; running sessions include activity context", async () => {
   const { container, unmount } = await mountList();
   try {

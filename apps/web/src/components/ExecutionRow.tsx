@@ -563,7 +563,12 @@ function SubagentDetail({ subagent }: { subagent: Subagent }) {
   const sessions = useStore((state) => state.sessions);
   const activeSessionId = useStore((state) => state.activeSessionId);
   const models = useStore((state) => state.models);
-  const childSession = sessions.find((session) => session.id === subagent.sessionId);
+  // The runtime snapshot can briefly expose OpenCode's backend id before the
+  // server publishes the canonical Polyth projection. Match both ids so the
+  // action does not become a permanently disabled "Syncing" button.
+  const childSession = sessions.find((session) =>
+    session.id === subagent.sessionId || session.backendSessionId === subagent.sessionId,
+  );
   const activeSession = sessions.find((session) => session.id === activeSessionId);
   const parentSession = childSession?.parentId
     ? sessions.find((session) => session.id === childSession.parentId) ?? activeSession
@@ -578,7 +583,7 @@ function SubagentDetail({ subagent }: { subagent: Subagent }) {
   const inheritedModel = childSession?.model === undefined;
   const parentLabel = parentSession?.title ?? "Current session";
   const openChild = () => {
-    void openSession(subagent.sessionId).catch((error) =>
+    void openSession(childSession?.id ?? subagent.sessionId).catch((error) =>
       setUiError(error instanceof Error ? error.message : String(error)));
   };
   const effectiveSubagentStatus = childSessionStatus(subagent.status, childSession);
@@ -607,8 +612,8 @@ function SubagentDetail({ subagent }: { subagent: Subagent }) {
           </details>
         )}
       </div>
-      <button type="button" onClick={openChild} disabled={!childSession}>
-        {childSession ? "Open child session" : "Syncing child session…"} {childSession && <Icon.external />}
+      <button type="button" onClick={openChild}>
+        Open child session <Icon.external />
       </button>
     </section>
   );

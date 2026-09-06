@@ -35,6 +35,7 @@ function ContextSelector({
   sheetTitle,
   ariaLabel,
   onPick,
+  onOpen,
   popoverToggle,
 }: {
   kind: "project" | "branch";
@@ -45,6 +46,7 @@ function ContextSelector({
   sheetTitle: string;
   ariaLabel: string;
   onPick: (id: string) => void;
+  onOpen?: () => void;
   popoverToggle?: ContextToggle;
 }) {
   const phone = useShellMode() === "phone";
@@ -53,6 +55,7 @@ function ContextSelector({
   // §22: open on pointer-down, then dismiss the keyboard — a click can be
   // swallowed by the reflow the dismissal causes (see sheetTrigger.ts).
   const triggerHandlers = useSheetTrigger(phone, () => {
+    onOpen?.();
     setOpen(true);
     void dismissKeyboard();
   });
@@ -66,6 +69,7 @@ function ContextSelector({
         items={choices.map((choice) => ({ ...choice, group: "" }))}
         value={current}
         onPick={onPick}
+        {...(onOpen ? { onOpen } : {})}
         placeholder={value}
         ariaLabel={ariaLabel}
         disabled={disabled}
@@ -135,6 +139,9 @@ export interface SessionContextBarProps {
   branches: ContextChoice[];
   branchLoading?: boolean;
   onPickBranch: (id: string) => void;
+  /** Fired the first time the branch picker opens — used to fetch the remote
+   *  so server-only branches appear in the list. */
+  onBranchPickerOpen?: () => void;
   /** "New worktree" mode: a checkbox inside the branch list. When on, picking
    *  any branch forks a fresh linked worktree from it instead of switching. */
   newWorktreeMode?: boolean;
@@ -151,6 +158,7 @@ export default function SessionContextBar({
   branches,
   branchLoading,
   onPickBranch,
+  onBranchPickerOpen,
   newWorktreeMode,
   onToggleNewWorktree,
 }: SessionContextBarProps) {
@@ -175,6 +183,7 @@ export default function SessionContextBar({
         sheetTitle={tr("mobile.sessioncontextbar.branchOrWorktree")}
         ariaLabel={tr("mobile.sessioncontextbar.worktreeCurrentValue", { branchName })}
         onPick={onPickBranch}
+        {...(onBranchPickerOpen ? { onOpen: onBranchPickerOpen } : {})}
         {...(onToggleNewWorktree ? {
           popoverToggle: {
             label: tr("worktreesessiondialog.newWorktree"),

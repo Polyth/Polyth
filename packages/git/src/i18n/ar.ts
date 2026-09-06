@@ -420,4 +420,8 @@ export const ar: GitMessages = {
   "gitprojectsource.projectName": "Project name",
   "gitprojectsource.noSshServers": "No SSH servers are configured.",
   "gitprojectsource.cloneDestinationHint": "Clones into the folder shown above. Browse to change it.",
+  "gitview.fetchRemoteBranches": "جلب الفروع البعيدة",
+  "gitview.fetchingRemoteBranches": "جارٍ جلب الفروع البعيدة…",
+  "gitview.remoteUnreachableShowingCached": "تعذّر الوصول إلى المستودع البعيد. يتم عرض الفروع من آخر جلب.",
+  "worktreesessiondialog.aNewCheckoutWillTrack": "سيتتبع الفرع المحلي الجديد {branch} الفرع {remote}.",
 };

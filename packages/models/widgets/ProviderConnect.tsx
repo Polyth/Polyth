@@ -1,12 +1,13 @@
 // Connect UI for one provider row: OAuth buttons (with any extra prompts a
-// method needs, e.g. GitHub Enterprise's URL) and a plain API-key form,
-// stacked so every offered method is visible at once. Stateless about
+// method needs, e.g. GitHub Enterprise's URL) and an API-key form only when
+// the provider offers one. Stateless about
 // whether the provider ends up connected — the caller re-fetches the
 // catalog and decides what to render next.
 import { useEffect, useRef, useState } from "react";
 import { api, type ProviderAuthMethodDto, type ProviderAuthPromptDto } from "@polyth/session/web-api";
 import { Button, Notice, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { shouldShowApiKeyAuth } from "./providerAuth.ts";
 
 type PromptValues = Record<string, string>;
 
@@ -62,8 +63,7 @@ export default function ProviderConnect({
 }: {
   providerId: string;
   methods: ProviderAuthMethodDto[] | undefined;
-  /** Credentials were accepted (or a background OAuth check ran) — the
-   *  caller should re-fetch the catalog. */
+  /** Credentials were accepted — the caller should re-fetch the catalog. */
   onConnected: () => void;
   /** Present only for an already-connected provider's reconfigure panel. */
   onDisconnect?: () => void;
@@ -77,63 +77,60 @@ export default function ProviderConnect({
     { methodIndex: number; url: string; method: "auto" | "code"; instructions: string } | null
   >(null);
   const [code, setCode] = useState("");
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pollAttemptsRef = useRef(0);
+  const callbackAbortRef = useRef<AbortController | null>(null);
 
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+  useEffect(() => () => callbackAbortRef.current?.abort(), []);
 
   const indexed = (methods ?? []).map((m, index) => ({ ...m, index }));
   const oauthMethods = indexed.filter((m) => m.type === "oauth");
   const apiMethod = indexed.find((m) => m.type === "api");
+  const showApiKey = shouldShowApiKeyAuth(methods);
 
-  const stopPolling = () => {
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-  };
-
-  const checkNow = async () => {
-    try { await api.refreshProviders(); } catch { /* best effort */ }
-    onConnected();
-  };
-
-  const startPolling = () => {
-    stopPolling();
-    pollAttemptsRef.current = 0;
-    pollRef.current = setInterval(() => {
-      pollAttemptsRef.current += 1;
-      if (pollAttemptsRef.current > 15) { stopPolling(); return; }
-      void checkNow();
-    }, 4000);
+  const completeOAuth = async (methodIndex: number, code?: string) => {
+    const busyKey = code ? "oauth-code" : "oauth-auto";
+    const controller = new AbortController();
+    callbackAbortRef.current?.abort();
+    callbackAbortRef.current = controller;
+    setBusy(busyKey);
+    setError("");
+    try {
+      await api.completeProviderOAuth(providerId, methodIndex, code, controller.signal);
+      if (controller.signal.aborted) return;
+      setAuthorization(null);
+      setCode("");
+      onConnected();
+    } catch (e) {
+      if (!controller.signal.aborted) setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (callbackAbortRef.current === controller) callbackAbortRef.current = null;
+      setBusy((current) => current === busyKey ? "" : current);
+    }
   };
 
   const startOAuth = async (methodIndex: number) => {
-    setBusy(`oauth-${methodIndex}`);
+    const busyKey = `oauth-${methodIndex}`;
+    callbackAbortRef.current?.abort();
+    setBusy(busyKey);
     setError("");
     try {
       const result = await api.authorizeProviderOAuth(providerId, methodIndex, oauthPromptValues[methodIndex]);
       setAuthorization({ methodIndex, ...result });
-      if (typeof window !== "undefined") window.open(result.url, "_blank", "noopener,noreferrer");
-      if (result.method === "auto") startPolling();
+      if (typeof window !== "undefined" && providerId !== "claude-code") {
+        window.open(result.url, "_blank", "noopener,noreferrer");
+      }
+      // OpenCode's auto OAuth flow persists credentials inside this blocking
+      // callback. Polling the provider catalog cannot complete the login.
+      if (result.method === "auto") void completeOAuth(methodIndex);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy("");
+      setBusy((current) => current === busyKey ? "" : current);
     }
   };
 
   const submitOAuthCode = async () => {
     if (!authorization || !code.trim()) return;
-    setBusy("oauth-code");
-    setError("");
-    try {
-      await api.completeProviderOAuth(providerId, authorization.methodIndex, code.trim());
-      setAuthorization(null);
-      setCode("");
-      onConnected();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy("");
-    }
+    await completeOAuth(authorization.methodIndex, code.trim());
   };
 
   const submitApiKey = async () => {
@@ -183,6 +180,7 @@ export default function ProviderConnect({
           <Button
             variant="primary"
             busy={busy === `oauth-${m.index}`}
+            disabled={Boolean(busy)}
             onClick={() => void startOAuth(m.index)}
           >
             {m.label}
@@ -194,10 +192,7 @@ export default function ProviderConnect({
                 {tr("settings.modelspage.openLoginPage")}
               </a>
               {authorization.method === "auto" ? (
-                <>
-                  <p className="muted">{tr("settings.modelspage.waitingForBrowserLogin")}</p>
-                  <Button size="sm" onClick={() => void checkNow()}>{tr("settings.modelspage.checkNow")}</Button>
-                </>
+                <p className="muted" role="status">{tr("settings.modelspage.waitingForBrowserLogin")}</p>
               ) : (
                 <>
                   <TextInput
@@ -206,7 +201,7 @@ export default function ProviderConnect({
                     placeholder={tr("settings.modelspage.pasteTheAuthorizationCode")}
                     aria-label={tr("settings.modelspage.pasteTheAuthorizationCode")}
                   />
-                  <Button size="sm" busy={busy === "oauth-code"} onClick={() => void submitOAuthCode()}>
+                  <Button size="sm" busy={busy === "oauth-code"} disabled={Boolean(busy)} onClick={() => void submitOAuthCode()}>
                     {tr("settings.modelspage.submitCode")}
                   </Button>
                 </>
@@ -215,8 +210,8 @@ export default function ProviderConnect({
           )}
         </div>
       ))}
-      {oauthMethods.length > 0 && <div className="provider-connect-or muted">{tr("settings.modelspage.orApiKey")}</div>}
-      <div className="provider-connect-method">
+      {oauthMethods.length > 0 && showApiKey && <div className="provider-connect-or muted">{tr("settings.modelspage.orApiKey")}</div>}
+      {showApiKey && <div className="provider-connect-method">
         <PromptFields
           prompts={apiMethod?.prompts}
           values={apiPromptValues}
@@ -229,12 +224,12 @@ export default function ProviderConnect({
           placeholder={tr("settings.modelspage.apiKey")}
           aria-label={tr("settings.modelspage.apiKey")}
         />
-        <Button busy={busy === "apikey"} disabled={!apiKey.trim()} onClick={() => void submitApiKey()}>
+        <Button busy={busy === "apikey"} disabled={Boolean(busy) || !apiKey.trim()} onClick={() => void submitApiKey()}>
           {tr("settings.modelspage.connect")}
         </Button>
-      </div>
+      </div>}
       {onDisconnect && (
-        <Button variant="danger" size="sm" busy={busy === "disconnect"} onClick={() => void runDisconnect()}>
+        <Button variant="danger" size="sm" busy={busy === "disconnect"} disabled={Boolean(busy)} onClick={() => void runDisconnect()}>
           {tr("settings.modelspage.disconnect")}
         </Button>
       )}

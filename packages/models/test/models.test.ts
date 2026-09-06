@@ -28,6 +28,7 @@ import {
   modelModalityLabels,
   thinkingVariantLabel,
 } from "@polyth/models/model-presentation";
+import { shouldShowApiKeyAuth } from "../widgets/providerAuth.ts";
 
 test("model providers are collapsed by default and expansion/order persist", () => {
   const initial = defaultModelPrefs();
@@ -39,6 +40,16 @@ test("model providers are collapsed by default and expansion/order persist", () 
   const parsed = parseModelPrefs(serializeModelPrefs(reordered));
   assert.deepEqual(parsed.expandedProviders, ["anthropic"]);
   assert.deepEqual(parsed.providerOrder, ["google", "openai", "anthropic"]);
+});
+
+test("provider auth only offers API keys when methods allow them", () => {
+  assert.equal(shouldShowApiKeyAuth(undefined), true, "legacy providers retain the API-key fallback");
+  assert.equal(shouldShowApiKeyAuth([]), true);
+  assert.equal(shouldShowApiKeyAuth([{ type: "oauth", label: "Sign in" }]), false);
+  assert.equal(shouldShowApiKeyAuth([
+    { type: "oauth", label: "Sign in" },
+    { type: "api", label: "API key" },
+  ]), true);
 });
 
 const MODELS = [

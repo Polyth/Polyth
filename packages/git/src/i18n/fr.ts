@@ -420,4 +420,8 @@ export const fr: GitMessages = {
   "gitprojectsource.projectName": "Project name",
   "gitprojectsource.noSshServers": "No SSH servers are configured.",
   "gitprojectsource.cloneDestinationHint": "Clones into the folder shown above. Browse to change it.",
+  "gitview.fetchRemoteBranches": "Récupérer les branches distantes",
+  "gitview.fetchingRemoteBranches": "Récupération des branches distantes…",
+  "gitview.remoteUnreachableShowingCached": "Impossible de joindre le dépôt distant. Affichage des branches du dernier fetch.",
+  "worktreesessiondialog.aNewCheckoutWillTrack": "Une nouvelle branche locale {branch} suivra {remote}.",
 };

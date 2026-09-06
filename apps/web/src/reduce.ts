@@ -182,7 +182,12 @@ export interface Totals {
 }
 
 export interface ContextUsageState {
+  /** Fresh (uncached) input tokens of the most recent request. */
   inputTokens: number;
+  /** Cached prompt tokens read back on the most recent request. */
+  cacheReadTokens: number;
+  /** Prompt tokens written to the cache on the most recent request. */
+  cacheWriteTokens: number;
   model?: ModelRef;
 }
 
@@ -318,8 +323,24 @@ export function emptyModel(): RenderModel {
   };
 }
 
-export function contextGauge(model: Pick<RenderModel, "totals">, contextTokens?: number): ContextGauge {
-  const inputTokens = Math.max(0, model.totals.input);
+/** Tokens resident in the model's context window right now, taken from the
+ *  latest usage sample: the prompt footprint of the most recent request
+ *  (fresh input + cached input read + cache-creation input). This is NOT
+ *  `totals.input`, which sums every request's input and therefore counts the
+ *  resent conversation history once per turn — that running total blows past
+ *  the context window even when the live context is nearly empty. */
+export function contextTokensUsed(model: Partial<Pick<RenderModel, "contextUsage">>): number {
+  const u = model.contextUsage;
+  if (u) return Math.max(0, u.inputTokens + u.cacheReadTokens + u.cacheWriteTokens);
+  // No usage sample yet (fresh session): nothing is resident.
+  return 0;
+}
+
+export function contextGauge(
+  model: Partial<Pick<RenderModel, "contextUsage" | "totals">>,
+  contextTokens?: number,
+): ContextGauge {
+  const inputTokens = contextTokensUsed(model);
   if (!Number.isFinite(contextTokens) || !contextTokens || contextTokens <= 0) {
     return { known: false, inputTokens, contextTokens: null, percent: null, level: "unknown" };
   }
@@ -866,7 +887,15 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         agent: str(d, "agent"),
         startedAt: ev.time,
       };
-      model.contextUsage = { inputTokens: 0, ...(turnModel ? { model: turnModel } : {}) };
+      // Keep the previous sample's footprint so the gauge doesn't collapse to
+      // 0% between turn start and the first usage report; just adopt the new
+      // turn's model.
+      model.contextUsage = {
+        inputTokens: model.contextUsage?.inputTokens ?? 0,
+        cacheReadTokens: model.contextUsage?.cacheReadTokens ?? 0,
+        cacheWriteTokens: model.contextUsage?.cacheWriteTokens ?? 0,
+        ...(turnModel ? { model: turnModel } : model.contextUsage?.model ? { model: model.contextUsage.model } : {}),
+      };
       break;
     }
     case "turn/stopped": {
@@ -921,8 +950,13 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         model.totals.cacheRead += t.cacheRead ?? 0;
         model.totals.cacheWrite += t.cacheWrite ?? 0;
         const usageModel = obj(d, "model") as ModelRef | undefined;
+        // Overwrite (not accumulate): each request re-sends the whole
+        // conversation, so the newest sample already reflects the full live
+        // context. Summing would double-count history every turn.
         model.contextUsage = {
           inputTokens: Math.max(0, t.input ?? 0),
+          cacheReadTokens: Math.max(0, t.cacheRead ?? 0),
+          cacheWriteTokens: Math.max(0, t.cacheWrite ?? 0),
           ...(usageModel ? { model: usageModel } : model.contextUsage?.model ? { model: model.contextUsage.model } : {}),
         };
       }

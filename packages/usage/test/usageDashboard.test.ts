@@ -21,7 +21,7 @@ const session = (
   createdAt: updatedAt,
   updatedAt,
   model: { providerID, modelID: `${providerID}-model` },
-  tokenTotals: { input: tokens, output: 0 },
+  tokenTotals: { input: tokens, output: 0, cacheRead: 0 },
   costTotal: cost,
 });
 
@@ -46,6 +46,8 @@ test("dashboard derives current-period totals, trends, and provider quota health
   assert.deepEqual(dashboard.totals, {
     sessions: 2,
     tokens: 4_000,
+    cacheRead: 0,
+    cacheHitPercent: 0,
     cost: .05,
     averageCostPerThousand: .0125,
   });
@@ -87,7 +89,7 @@ test("dashboard keeps configured providers visible without fabricating activity"
 
   assert.equal(dashboard.totals.sessions, 0);
   assert.equal(dashboard.trends.tokens, null);
-  assert.equal(dashboard.chart.bucketHours, 72);
+  assert.equal(dashboard.chart.bucketHours, 24);
   assert.deepEqual(dashboard.chart.tokens, []);
   assert.deepEqual(dashboard.providers.map((provider) => ({
     id: provider.id,
@@ -140,6 +142,25 @@ test("dashboard merges provider aliases used by sessions and quota adapters", ()
   assert.equal(dashboard.providers[0]?.label, "Claude");
   assert.equal(dashboard.providers[0]?.snapshot?.providerId, "claude");
   assert.equal(dashboard.providers[0]?.remainingPercent, 25);
+});
+
+test("dashboard combines Codex quota with OpenAI API activity and calculates cache hits", () => {
+  const apiSession = session("openai-api", "openai", now - DAY_MS, 800, .02);
+  apiSession.tokenTotals = { input: 600, output: 200, cacheRead: 400 };
+  const dashboard = buildUsageDashboardData([apiSession], [{
+    ...anthropicQuota,
+    providerId: "codex",
+    windows: [{ id: "5h", label: "5h", used: 20, limit: 100, unit: "percent" }],
+  }], 30, now);
+
+  assert.equal(dashboard.providers.length, 1);
+  assert.equal(dashboard.providers[0]?.id, "openai");
+  assert.equal(dashboard.providers[0]?.label, "OpenAI");
+  assert.equal(dashboard.providers[0]?.snapshot?.providerId, "codex");
+  assert.equal(dashboard.totals.cacheRead, 400);
+  assert.equal(dashboard.totals.cacheHitPercent, 40);
+  assert.equal(dashboard.chart.labels.length, 30);
+  assert.equal(dashboard.chart.bucketHours, 24);
 });
 
 test("dashboard groups model activity within canonical providers", () => {

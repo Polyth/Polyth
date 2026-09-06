@@ -481,7 +481,11 @@ export function setRailPlugin(railPlugin: RailPlugin | null): void {
     openWorkspacePane(railPlugin!);
     return;
   }
-  if (railPlugin === null && paneSurfaceOf(state.railPlugin) !== null) {
+  const persistedPane = railPlugin === null
+    && state.activeProjectId !== null
+    && state.railPlugin !== null
+    && getWorkspacePanePrefs(state.activeProjectId).openSurface === state.railPlugin;
+  if (railPlugin === null && (paneSurfaceOf(state.railPlugin) !== null || persistedPane)) {
     closeWorkspacePane();
     return;
   }
@@ -577,9 +581,16 @@ export function openWorkspacePane(surfaceId: string, resource?: string): boolean
 }
 
 export function closeWorkspacePane({ restoreFocus = true }: { restoreFocus?: boolean } = {}): void {
-  const open = paneSurfaceOf(state.railPlugin);
-  if (open === null) return;
+  const surfaceId = state.railPlugin;
+  const open = paneSurfaceOf(surfaceId);
   const projectId = state.activeProjectId;
+  const persisted = projectId !== null
+    && surfaceId !== null
+    && getWorkspacePanePrefs(projectId).openSurface === surfaceId;
+  // A package can disappear while its window is still selected (late unload or
+  // replacement). Closing must still clear its project preference, otherwise a
+  // later project/session transition can resurrect the stale window.
+  if (open === null && !persisted) return;
   if (projectId !== null) setPaneOpenSurface(projectId, null);
   set({
     railPlugin: null,
@@ -587,7 +598,7 @@ export function closeWorkspacePane({ restoreFocus = true }: { restoreFocus?: boo
     panePreviousMode: "dynamic",
     paneFullscreen: false,
   });
-  if (restoreFocus) restorePaneFocus(open.id);
+  if (restoreFocus && open !== null) restorePaneFocus(open.id);
   else paneInvoker = null;
 }
 

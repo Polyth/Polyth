@@ -420,4 +420,8 @@ export const ptBR: GitMessages = {
   "gitprojectsource.projectName": "Project name",
   "gitprojectsource.noSshServers": "No SSH servers are configured.",
   "gitprojectsource.cloneDestinationHint": "Clones into the folder shown above. Browse to change it.",
+  "gitview.fetchRemoteBranches": "Buscar branches remotos",
+  "gitview.fetchingRemoteBranches": "Buscando branches remotos…",
+  "gitview.remoteUnreachableShowingCached": "Não foi possível acessar o remoto. Exibindo branches da última busca.",
+  "worktreesessiondialog.aNewCheckoutWillTrack": "Um novo branch local {branch} rastreará {remote}.",
 };

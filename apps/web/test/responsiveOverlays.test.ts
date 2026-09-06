@@ -304,3 +304,67 @@ test("Usage dashboard responds to a docked panel instead of the viewport", { ski
     assert.ok(layout.toolbarScrollWidth <= layout.toolbarClientWidth + 1, `${width}px toolbar has no horizontal overflow`);
   }
 });
+
+test("390px package windows cover Chat, clear the shell menu, and preserve the app background", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  const css = await read("../src/styles.css");
+  await page.setContent(`
+    <style>${css}</style>
+    <div class="app">
+      <header class="header"></header>
+      <section class="module-view module-view--main">
+        <header class="module-view-head"><h1 class="module-view-title">Main package</h1></header>
+        <div class="module-view-body"><div class="module-view-content"></div></div>
+      </section>
+      <aside class="rail rail-workspace rail-fullscreen">
+        <section class="module-view module-view--rail">
+          <header class="module-view-head"><h1 class="module-view-title">Rail package</h1></header>
+          <div class="module-view-body"><div class="module-view-content"></div></div>
+        </section>
+      </aside>
+      <div class="mobile-session-floats"></div>
+      <div class="conversation-composer-dock"></div>
+    </div>
+  `);
+  await page.evaluate(() => {
+    document.documentElement.dataset.background = "blue-hour";
+    document.documentElement.style.setProperty("--app-background-image", "linear-gradient(red, blue)");
+  });
+
+  const geometry = await page.evaluate(() => {
+    const main = document.querySelector<HTMLElement>(".module-view--main")!;
+    const rail = document.querySelector<HTMLElement>(".rail-fullscreen")!;
+    const mainHead = main.querySelector<HTMLElement>(".module-view-head")!;
+    const railHead = rail.querySelector<HTMLElement>(".module-view-head")!;
+    const floats = document.querySelector<HTMLElement>(".mobile-session-floats")!;
+    const composer = document.querySelector<HTMLElement>(".conversation-composer-dock")!;
+    return {
+      main: main.getBoundingClientRect().toJSON(),
+      rail: rail.getBoundingClientRect().toJSON(),
+      mainHeadTop: mainHead.getBoundingClientRect().top,
+      railHeadTop: railHead.getBoundingClientRect().top,
+      mainBackground: getComputedStyle(main).backgroundImage,
+      railBackground: getComputedStyle(rail).backgroundImage,
+      mainZ: getComputedStyle(main).zIndex,
+      railZ: getComputedStyle(rail).zIndex,
+      floatZ: getComputedStyle(floats).zIndex,
+      composerZ: getComputedStyle(composer).zIndex,
+    };
+  });
+
+  for (const name of ["main", "rail"] as const) {
+    assert.deepEqual(
+      { left: geometry[name].left, top: geometry[name].top, right: geometry[name].right, bottom: geometry[name].bottom },
+      { left: 0, top: 0, right: 390, bottom: 720 },
+      `${name} package window fills the viewport`,
+    );
+  }
+  assert.equal(geometry.mainHeadTop, 60, "main title row starts below the shell menu");
+  assert.equal(geometry.railHeadTop, 60, "rail title row starts below the shell menu");
+  assert.match(geometry.mainBackground, /linear-gradient/);
+  assert.match(geometry.railBackground, /linear-gradient/);
+  assert.equal(geometry.mainZ, "101", "main package covers the composer");
+  assert.equal(geometry.railZ, "101", "rail package covers the composer");
+  assert.equal(geometry.floatZ, "102", "the mobile menu remains above package windows");
+  assert.equal(geometry.composerZ, "100", "the chat composer remains below package windows");
+});

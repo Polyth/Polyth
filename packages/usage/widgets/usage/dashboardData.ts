@@ -50,6 +50,8 @@ export interface UsageDashboardData {
   totals: {
     sessions: number;
     tokens: number;
+    cacheRead: number;
+    cacheHitPercent: number;
     cost: number;
     averageCostPerThousand: number;
   };
@@ -78,6 +80,9 @@ const finiteNonNegative = (value: number | undefined): number =>
 const sessionTokens = (session: SessionProjection): number =>
   finiteNonNegative(session.tokenTotals?.input) + finiteNonNegative(session.tokenTotals?.output);
 
+const sessionCacheRead = (session: SessionProjection): number =>
+  finiteNonNegative(session.tokenTotals?.cacheRead);
+
 const sessionCost = (session: SessionProjection): number =>
   finiteNonNegative(session.costTotal);
 
@@ -89,6 +94,7 @@ const sessionActivityAt = (session: SessionProjection): number =>
 const canonicalProviderId = (providerId: string): string => {
   const normalized = providerId.trim().toLowerCase();
   if (normalized === "claude" || normalized === "claude-code") return "anthropic";
+  if (normalized === "codex" || normalized === "chatgpt") return "openai";
   if (normalized === "gemini") return "google";
   return providerId;
 };
@@ -140,10 +146,17 @@ const primaryQuotaWindow = (snapshot: QuotaSnapshotDto | undefined): QuotaWindow
 
 const sumSessions = (sessions: readonly SessionProjection[]) => {
   const tokens = sessions.reduce((sum, session) => sum + sessionTokens(session), 0);
+  const cacheRead = sessions.reduce((sum, session) => sum + sessionCacheRead(session), 0);
+  const cacheEligible = sessions.reduce(
+    (sum, session) => sum + finiteNonNegative(session.tokenTotals?.input) + sessionCacheRead(session),
+    0,
+  );
   const cost = sessions.reduce((sum, session) => sum + sessionCost(session), 0);
   return {
     sessions: sessions.length,
     tokens,
+    cacheRead,
+    cacheHitPercent: cacheEligible > 0 ? cacheRead / cacheEligible * 100 : 0,
     cost,
     averageCostPerThousand: tokens > 0 ? cost / tokens * 1_000 : 0,
   };
@@ -246,8 +259,8 @@ export function buildUsageDashboardData(
     b.sessions - a.sessions ||
     a.label.localeCompare(b.label));
 
-  const bucketCount = rangeDays === 7 ? 7 : rangeDays === 30 ? 10 : 12;
-  const bucketMs = (rangeEnd - rangeStart) / bucketCount;
+  const bucketCount = rangeDays;
+  const bucketMs = DAY_MS;
   const labels = Array.from({ length: bucketCount }, (_, index) => {
     const start = rangeStart + bucketMs * index;
     return bucketLabel(start, start + bucketMs);

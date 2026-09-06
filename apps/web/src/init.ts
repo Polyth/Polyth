@@ -673,19 +673,28 @@ function markActiveSessionRead(): void {
 // the browser a few milliseconds before its projection. Revalidate the
 // project list once instead of sending the user to a dead deep link.
 async function loadSessionForOpen(sessionId: string): Promise<SessionProjection> {
+  const matches = (session: SessionProjection): boolean =>
+    session.id === sessionId || session.backendSessionId === sessionId;
+  const cached = store.getState().sessions.find(matches);
+  if (cached) return cached;
   try {
     return await api.getSession(sessionId);
   } catch (firstError) {
     const projectId = store.getState().activeProjectId;
     if (projectId) {
       store.upsertSessions(await api.listSessions(projectId));
-      const refreshed = store.getState().sessions.find((session) => session.id === sessionId);
+      const refreshed = store.getState().sessions.find(matches);
       if (refreshed) return refreshed;
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
     try {
       return await api.getSession(sessionId);
     } catch {
+      if (projectId) {
+        store.upsertSessions(await api.listSessions(projectId));
+        const refreshed = store.getState().sessions.find(matches);
+        if (refreshed) return refreshed;
+      }
       throw firstError;
     }
   }
@@ -702,12 +711,15 @@ export async function openSession(
 ): Promise<void> {
   const generation = ++openSessionGeneration;
   const before = store.getState();
-  const cachedSession = before.sessions.find((session) => session.id === sessionId);
+  const cachedSession = before.sessions.find((session) =>
+    session.id === sessionId || session.backendSessionId === sessionId,
+  );
+  const cachedSessionId = cachedSession?.id ?? sessionId;
   // The events entry can be LRU-evicted while the id stays in hydratedSessions;
   // an evicted session re-hydrates exactly like a first open.
-  const cachedEvents = before.events[sessionId];
-  const useCachedView = hydratedSessions.has(sessionId) && cachedSession !== undefined && cachedEvents !== undefined;
-  const afterSeq = useCachedView ? store.lastSeq(sessionId) : 0;
+  const cachedEvents = before.events[cachedSessionId];
+  const useCachedView = hydratedSessions.has(cachedSessionId) && cachedSession !== undefined && cachedEvents !== undefined;
+  const afterSeq = useCachedView ? store.lastSeq(cachedSessionId) : 0;
 
   // Revisited sessions render their canonical cached history immediately while
   // metadata and the append-only suffix revalidate. A first open remains in
@@ -715,7 +727,7 @@ export async function openSession(
   // full log.
   if (useCachedView) {
     if (cachedSession.projectId !== before.activeProjectId) store.activateProject(cachedSession.projectId);
-    store.activateSession(sessionId);
+    store.activateSession(cachedSessionId);
     if (opts.showChat !== false) store.showSessionChat();
     // Claim takeover: this open owns navigation now. A superseded first
     // open's loading claim must not survive it — a leaked claim renders every
@@ -739,40 +751,51 @@ export async function openSession(
   };
   try {
     if (useCachedView) {
-      await reconcileSession(sessionId, afterSeq, generation);
+      await reconcileSession(cachedSessionId, afterSeq, generation);
       if (generation === openSessionGeneration) {
-        maybeSeedFromReplay(sessionId);
-        scheduleAutoBackfill(sessionId, generation);
-        if (store.getState().activeSessionId === sessionId) markActiveSessionRead();
+        maybeSeedFromReplay(cachedSessionId);
+        scheduleAutoBackfill(cachedSessionId, generation);
+        if (store.getState().activeSessionId === cachedSessionId) markActiveSessionRead();
       }
       return;
     }
-    // Metadata and history are independent reads. Starting both together saves
-    // one full round trip on high-latency links and old-session deep links.
-    // First opens fetch only the newest window; older history backfills below.
-    const tailWasPrefetched = prefetchedSessions.has(sessionId)
-      || tailRequests.get(sessionId)?.passive === true;
-    const [session] = await Promise.all([
-      cachedSession ?? loadSessionForOpen(sessionId),
-      requestSessionTail(sessionId, false),
-    ]);
+    // Resolve metadata first: delegated snapshots may carry the backend id
+    const hadPrefetchedTail = prefetchedSessions.has(sessionId)
+      || prefetchedSessions.has(cachedSessionId)
+      || tailRequests.get(sessionId)?.passive === true
+      || tailRequests.get(cachedSessionId)?.passive === true;
+    // briefly, and the canonical id is required for the event-tail request.
+    // Keep the two normal reads parallel; an alias tail is retried against the
+    // canonical id after metadata resolves.
+    const sessionPromise = cachedSession ?? loadSessionForOpen(sessionId);
+    const tailPromise = requestSessionTail(sessionId, false)
+      .then(() => ({ ok: true as const }))
+      .catch(() => ({ ok: false as const }));
+    const [session, initialTail] = await Promise.all([sessionPromise, tailPromise]);
+    const resolvedSessionId = session.id;
+    const tailWasPrefetched = hadPrefetchedTail
+      || prefetchedSessions.has(resolvedSessionId)
+      || tailRequests.get(resolvedSessionId)?.passive === true;
+    if (resolvedSessionId !== sessionId || !initialTail.ok) {
+      await requestSessionTail(resolvedSessionId, false);
+    }
     if (generation !== openSessionGeneration) return;
     store.upsertSession(session);
-    store.ensureEventCache(sessionId); // empty logs still count as cached
-    hydratedSessions.add(sessionId);
-    maybeSeedFromReplay(sessionId);
+    store.ensureEventCache(resolvedSessionId); // empty logs still count as cached
+    hydratedSessions.add(resolvedSessionId);
+    maybeSeedFromReplay(resolvedSessionId);
     if (!userNavigatedAway()) {
       if (session.projectId !== store.getState().activeProjectId) store.activateProject(session.projectId);
-      store.activateSession(sessionId);
+      store.activateSession(resolvedSessionId);
       if (opts.showChat !== false) store.showSessionChat();
-      scheduleAutoBackfill(sessionId, generation);
+      scheduleAutoBackfill(resolvedSessionId, generation);
       markActiveSessionRead();
     }
     if (tailWasPrefetched) {
-      await reconcileSession(sessionId, store.lastSeq(sessionId), generation);
+      await reconcileSession(resolvedSessionId, store.lastSeq(resolvedSessionId), generation);
       // The reconcile suffix can carry events newer than the mark above (the
       // prefetch→open gap) — the user is viewing, so those are read too.
-      if (store.getState().activeSessionId === sessionId) markActiveSessionRead();
+      if (store.getState().activeSessionId === resolvedSessionId) markActiveSessionRead();
     }
   } finally {
     // A newer concurrent open owns the claim and active-session transition.

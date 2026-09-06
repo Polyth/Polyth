@@ -27,7 +27,7 @@ const windowLabel = (seconds: number | null): string => {
   if (!seconds) return "limit";
   if (seconds % 86400 === 0) {
     const days = seconds / 86400;
-    return days === 7 ? "weekly" : `${days}d`;
+    return `${days}d`;
   }
   if (seconds % 3600 === 0) return `${seconds / 3600}h`;
   if (seconds % 60 === 0) return `${seconds / 60}m`;

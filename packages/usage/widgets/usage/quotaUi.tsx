@@ -24,29 +24,6 @@ export function fmtQuota(n: number, unit: QuotaWindowDto["unit"]): string {
   return formatNumber(Math.round(n));
 }
 
-export function paceText(pace: QuotaPaceDto | null, win: QuotaWindowDto): string {
-  if (!pace) return "";
-  const bits: string[] = [
-    tr("usage.quotaui.usedWindowElapsed", {
-      usage: Math.round(pace.usageFraction * 100),
-      time: Math.round(pace.timeFraction * 100),
-      pace: pace.pace,
-    }),
-  ];
-  if (pace.predictedAtReset !== undefined) {
-    bits.push(tr("usage.quotaui.currentPaceEstimate", {
-      predicted: fmtQuota(pace.predictedAtReset, win.unit),
-      limit: fmtQuota(win.limit, win.unit),
-    }));
-  }
-  if (pace.exhaustsAt !== undefined) {
-    bits.push(tr("usage.quotaui.mayRunOutAround", {
-      time: new Date(pace.exhaustsAt).toLocaleTimeString(getLocale()),
-    }));
-  }
-  return bits.join(" · ");
-}
-
 function quotaWindowLabel(window: QuotaWindowDto): string {
   if (window.id === "requests-day") return tr("usage.quotaui.requests24h");
   if (window.id === "spend-month") return tr("usage.quotaui.spendMonth");
@@ -78,7 +55,6 @@ export function QuotaWindowRow({
       >
         <div className={`quota-progress-fill ${pace?.pace ?? ""}`} style={{ width: `${frac * 100}%` }} />
       </div>
-      {pace && <div className="quota-pace">{paceText(pace, w)}</div>}
       {w.resetsAt !== undefined && (
         <div className="muted quota-meta">{tr("usage.quotaui.resets")}{" "}{new Date(w.resetsAt).toLocaleString(getLocale())}</div>
       )}

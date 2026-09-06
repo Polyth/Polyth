@@ -836,7 +836,7 @@ export async function boot(opts: BootOptions = {}) {
         : {}),
       ...(inner.providerAuthCallback
         ? {
-            providerAuthCallback: (providerID: string, method: number, code: string) =>
+            providerAuthCallback: (providerID: string, method: number, code?: string) =>
               useRuntime(() => inner.providerAuthCallback!(providerID, method, code)),
           }
         : {}),

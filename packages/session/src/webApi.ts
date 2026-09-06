@@ -801,10 +801,10 @@ export const api = {
       `/api/providers/${encodeURIComponent(id)}/connect/oauth/authorize`,
       json("POST", { method, ...(inputs ? { inputs } : {}) }),
     )),
-  completeProviderOAuth: (id: string, method: number, code: string) =>
+  completeProviderOAuth: (id: string, method: number, code?: string, signal?: AbortSignal) =>
     pendingMutation(jfetch<{ ok: true }>(
       `/api/providers/${encodeURIComponent(id)}/connect/oauth/callback`,
-      json("POST", { method, code }),
+      { ...json("POST", { method, ...(code ? { code } : {}) }), ...(signal ? { signal } : {}) },
     )),
   disconnectProvider: (id: string) =>
     pendingMutation(jfetch<{ ok: true }>(`/api/providers/${encodeURIComponent(id)}/disconnect`, json("POST", {}))),

@@ -711,6 +711,9 @@ export default function SessionList({
       || (session.attention?.permissions ?? 0) > 0;
   };
   const matchingActive = projectSessions.filter((s) => s.status !== "archived" && matchesFilters(s));
+  const mainWorktree = worktrees.find((worktree) => worktree.isMain);
+  const worktreeKey = (session: SessionProjection): string =>
+    !session.worktreePath || session.worktreePath === mainWorktree?.path ? "__main__" : session.worktreePath;
   // Pinned chats belong to one project-level section, rather than their
   // individual worktree buckets. This keeps them at the top even when their
   // worktree is collapsed or appears later in the list.
@@ -723,6 +726,19 @@ export default function SessionList({
   const selectedActive = orderedActive.find((session) => session.id === activeSessionId);
   if (!searchMode && selectedActive && !active.some((session) => session.id === selectedActive.id) && active.length > 0) {
     active = [...active.slice(0, -1), selectedActive];
+  }
+  // Pagination is project-wide, but every worktree still needs its newest
+  // matching row or it falsely renders as empty until "Show more" is pressed.
+  if (!searchMode) {
+    const visibleWorktrees = new Set(
+      active.filter((session) => session.pinned === undefined).map(worktreeKey),
+    );
+    for (const session of unpinnedActive) {
+      const key = worktreeKey(session);
+      if (visibleWorktrees.has(key)) continue;
+      visibleWorktrees.add(key);
+      active.push(session);
+    }
   }
   // Children are part of the parent's navigation context. They must not
   // disappear behind the session pagination while their parent is visible.
@@ -740,9 +756,6 @@ export default function SessionList({
   }
   const archived = projectSessions.filter((s) => s.status === "archived" && matchesFilters(s));
   const hiddenActive = searchMode ? 0 : Math.max(0, orderedActive.length - active.length);
-  const mainWorktree = worktrees.find((worktree) => worktree.isMain);
-  const worktreeKey = (session: SessionProjection): string =>
-    !session.worktreePath || session.worktreePath === mainWorktree?.path ? "__main__" : session.worktreePath;
   const sessionsForRemoval = removeTarget === null
     ? []
     : projectSessions.filter((session) => worktreeKey(session) === removeTarget.path);

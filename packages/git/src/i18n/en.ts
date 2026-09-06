@@ -422,6 +422,10 @@ export const en = {
   "gitprojectsource.projectName": "Project name",
   "gitprojectsource.noSshServers": "No SSH servers are configured.",
   "gitprojectsource.cloneDestinationHint": "Clones into the folder shown above. Browse to change it.",
+  "gitview.fetchRemoteBranches": "Fetch remote branches",
+  "gitview.fetchingRemoteBranches": "Fetching remote branches…",
+  "gitview.remoteUnreachableShowingCached": "Couldn’t reach the remote. Showing branches from the last fetch.",
+  "worktreesessiondialog.aNewCheckoutWillTrack": "A new local branch {branch} will track {remote}.",
 } as const;
 
 export type GitMessageKey = keyof typeof en;

@@ -56,6 +56,7 @@ interface LegacyAgent {
   mode?: string;
   prompt?: string;
   model?: { providerID?: string; modelID?: string };
+  options?: unknown;
 }
 
 interface LegacySession {
@@ -632,9 +633,12 @@ export const createLegacyProtocolAdapter = (
       return rows.map((agent) => ({
         name: agent.name,
         ...(agent.description ? { description: agent.description } : {}),
-        mode: agent.mode === "subagent" || agent.mode === "all" || agent.mode === "primary"
-          ? agent.mode
-          : "primary",
+        mode: asRecord(agent.options)?.["polyth.mode"] === "auto"
+          || agent.mode === "auto"
+          ? "auto"
+          : agent.mode === "subagent" || agent.mode === "all" || agent.mode === "primary"
+            ? agent.mode
+            : "primary",
         ...(agent.prompt ? { prompt: agent.prompt } : {}),
         ...(agent.model?.providerID && agent.model.modelID
           ? { model: { providerID: agent.model.providerID, modelID: agent.model.modelID } }

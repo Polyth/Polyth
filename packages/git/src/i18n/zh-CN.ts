@@ -420,4 +420,8 @@ export const zhCN: GitMessages = {
   "gitprojectsource.projectName": "Project name",
   "gitprojectsource.noSshServers": "No SSH servers are configured.",
   "gitprojectsource.cloneDestinationHint": "Clones into the folder shown above. Browse to change it.",
+  "gitview.fetchRemoteBranches": "获取远程分支",
+  "gitview.fetchingRemoteBranches": "正在获取远程分支…",
+  "gitview.remoteUnreachableShowingCached": "无法连接到远程仓库。显示上次获取的分支。",
+  "worktreesessiondialog.aNewCheckoutWillTrack": "新的本地分支 {branch} 将跟踪 {remote}。",
 };

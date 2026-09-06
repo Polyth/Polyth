@@ -104,7 +104,7 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
     const roleMatch = path.match(/^\/api\/settings\/roles\/([^/]+)$/);
     if (roleMatch && method === "PUT" && deps.saveRole) {
       const b = await rc.body();
-      const mode = b.mode === "subagent" || b.mode === "all" ? b.mode : "primary";
+      const mode = b.mode === "subagent" || b.mode === "all" || b.mode === "auto" ? b.mode : "primary";
       const rawModel = b.model as { providerID?: unknown; modelID?: unknown } | undefined;
       const model = rawModel
         && typeof rawModel.providerID === "string"
@@ -115,7 +115,7 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
         : undefined;
       rc.json(200, await deps.saveRole(decodeURIComponent(roleMatch[1]!), {
         prompt: typeof b.prompt === "string" ? b.prompt.slice(0, 128 * 1024) : undefined,
-        ...(model ? { model } : {}),
+        ...(model && mode !== "auto" ? { model } : {}),
         mode,
       }));
       return true;

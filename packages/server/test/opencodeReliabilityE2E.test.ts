@@ -685,7 +685,7 @@ test("changed-ID semantic SSE duplicate is consumed without an observation error
             input: 1,
             output: 1,
             reasoning: 0,
-            cache: { read: 0, write: 0 },
+            cache: { read: 3, write: 4 },
           },
           time: { created: 1, completed: 2 },
         },
@@ -711,6 +711,12 @@ test("changed-ID semantic SSE duplicate is consumed without an observation error
         .filter((event) => event.type === "usage/recorded").length,
       1,
     );
+    assert.deepEqual((await harness.store.projection(created.id))?.tokenTotals, {
+      input: 1,
+      output: 1,
+      cacheRead: 3,
+      cacheWrite: 4,
+    });
   } finally {
     console.error = originalError;
     await harness.runtime.dispose();

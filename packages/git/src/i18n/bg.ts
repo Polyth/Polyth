@@ -420,4 +420,8 @@ export const bg: GitMessages = {
   "gitprojectsource.projectName": "Project name",
   "gitprojectsource.noSshServers": "No SSH servers are configured.",
   "gitprojectsource.cloneDestinationHint": "Clones into the folder shown above. Browse to change it.",
+  "gitview.fetchRemoteBranches": "Извличане на отдалечените клонове",
+  "gitview.fetchingRemoteBranches": "Извличане на отдалечените клонове…",
+  "gitview.remoteUnreachableShowingCached": "Отдалеченото хранилище е недостъпно. Показват се клоновете от последното извличане.",
+  "worktreesessiondialog.aNewCheckoutWillTrack": "Нов локален клон {branch} ще следи {remote}.",
 };

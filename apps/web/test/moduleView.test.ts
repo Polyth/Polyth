@@ -216,11 +216,17 @@ test("styles.css realizes the phone module overlay: slide-in, opaque cover, one 
     "modules enter right-to-left");
   assert.match(css, /\.module-view--main\s*\{[^}]*position:\s*fixed[^}]*animation:\s*module-slide-in/s,
     "the main module view is a fixed slide-in layer on phone");
+  assert.match(css, /\.module-view--main\s*\{[^}]*inset:\s*0/s,
+    "the main module view covers the full phone viewport");
   assert.match(css, /\.rail-fullscreen,\s*\n\s*\.panel-sheet\s*\{[^}]*background:\s*var\(--bg\)[^}]*animation:\s*module-slide-in/s,
     "rail panels share the identical opaque slide-in cover on phone");
+  assert.match(css, /padding-block-start:\s*calc\(60px \+ var\(--safe-top\)\)[\s\S]*?padding-block-end:\s*max\(var\(--safe-bottom\),\s*var\(--keyboard-inset\)\)/,
+    "the shared module header clears the shell menu and the bottom safe area");
+  assert.match(css, /var\(--app-background-image\)/,
+    "mobile package windows use the selected app background");
   assert.match(css, /\.panel-sheet-backdrop\s*\{\s*display:\s*none;\s*\}/, "no dim backdrop on phone");
   assert.match(css, /\.pane-back\s*\{\s*display:\s*none;\s*\}/, "no secondary Back-to-chat affordance on phone");
-  assert.match(css, /z-index:\s*calc\(72 \+ var\(--module-depth, 0\)\)/, "stacked rail panels layer by open order");
+  assert.match(css, /z-index:\s*calc\(var\(--z-shell\) \+ 1 \+ var\(--module-depth, 0\)\)/, "stacked rail panels layer above the composer");
 });
 
 test("ContextRail uses ModuleView rather than its own second header", async () => {

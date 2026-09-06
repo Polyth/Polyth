@@ -19,6 +19,8 @@ test("session usage renderer shows context percentage and all default metrics", 
     cacheWrite: 0,
     cost: 1.25,
   };
+  // Context % tracks the latest request's live footprint, not lifetime totals.
+  model.contextUsage = { inputTokens: 800, cacheReadTokens: 200, cacheWriteTokens: 0 };
   const html = renderToStaticMarkup(createElement(SessionUsageStats, {
     model,
     contextTokens: 1_000,
@@ -37,6 +39,7 @@ test("session usage renderer honors per-instance metric visibility", () => {
   model.totals.input = 900;
   model.totals.output = 100;
   model.totals.cost = 2;
+  model.contextUsage = { inputTokens: 900, cacheReadTokens: 0, cacheWriteTokens: 0 };
   const html = renderToStaticMarkup(createElement(SessionUsageStats, {
     model,
     contextTokens: 2_000,
