@@ -7,6 +7,7 @@ import { en as browserEn } from "@polyth/browser/i18n/en";
 import { en as chatWorkspaceEn } from "@polyth/chat-workspace/i18n/en";
 import { en as commandsEn } from "@polyth/commands/i18n/en";
 import { en as dictationEn } from "@polyth/dictation/i18n/en";
+import { en as editorEn } from "@polyth/editor/i18n/en";
 import { en as filesEn } from "@polyth/files/i18n/en";
 import { en as fusionEn } from "@polyth/fusion/i18n/en";
 import { en as gitEn } from "@polyth/git/i18n/en";
@@ -41,6 +42,7 @@ const catalogs: Partial<Record<Locale, TranslationCatalog>> = {
     browserEn,
     commandsEn,
     dictationEn,
+    editorEn,
     filesEn,
     fusionEn,
     gitEn,

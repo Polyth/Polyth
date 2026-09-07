@@ -4,6 +4,7 @@ import { it as app } from "../locales/it.ts";
 import { it as p_browser } from "@polyth/browser/i18n/it";
 import { it as p_commands } from "@polyth/commands/i18n/it";
 import { it as p_dictation } from "@polyth/dictation/i18n/it";
+import { it as p_editor } from "@polyth/editor/i18n/it";
 import { it as p_files } from "@polyth/files/i18n/it";
 import { it as p_fusion } from "@polyth/fusion/i18n/it";
 import { it as p_git } from "@polyth/git/i18n/it";
@@ -28,6 +29,7 @@ const parts: Array<Record<string, string>> = [app,
   p_browser,
   p_commands,
   p_dictation,
+  p_editor,
   p_files,
   p_fusion,
   p_git,

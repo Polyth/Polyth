@@ -44,7 +44,7 @@ test("all browser feature packages own a canonical web entry", () => {
   const browserFeatures = featureManifests()
     .filter(({ manifest }) => manifest.polyth?.webEntry !== undefined);
 
-  assert.equal(browserFeatures.length, 30);
+  assert.equal(browserFeatures.length, 31);
   for (const { id, dir, manifest } of browserFeatures) {
     assert.equal(
       manifest.polyth?.webEntry,
@@ -98,6 +98,10 @@ const GENERIC_SHELL_IMPORTS = new Set([
   "mobileViewport.ts",
   "pendingChanges.ts",
   "reduce.ts",
+  "resources/documents.ts",
+  "resources/liveFile.ts",
+  "resources/providers.ts",
+  "resources/views.ts",
   "responsiveShell.ts",
   "review/anchors.ts",
   "selectionActions.ts",
@@ -150,6 +154,27 @@ test("package homes can only register through the system window seam", () => {
   assert.deepEqual(violations, [], "packages supply content and metadata; the host owns every window shell");
 });
 
+test("CodeMirror stays inside @polyth/editor and is lazy from the package entry", () => {
+  const leaks: string[] = [];
+  for (const { id, dir, manifest } of featureManifests()) {
+    if (!manifest.polyth?.webEntry) continue;
+    if (id === "editor") continue;
+    const widgetsDir = join(dir, "widgets");
+    if (!existsSync(widgetsDir)) continue;
+    for (const file of filesUnder(widgetsDir)) {
+      if (![".ts", ".tsx"].includes(extname(file))) continue;
+      const source = readFileSync(file, "utf8");
+      if (source.includes("@codemirror/") || source.includes("from \"codemirror\"")) {
+        leaks.push(`${id}/${relative(dir, file)}`);
+      }
+    }
+  }
+  assert.deepEqual(leaks, [], "only @polyth/editor may import CodeMirror");
+  const entry = readFileSync(join(packagesDir, "editor/widgets/index.tsx"), "utf8");
+  assert.equal(entry.includes("@codemirror/"), false, "editor entry must not import CodeMirror");
+  assert.match(entry, /lazy\(\(\) => import\("\.\/runtime\.tsx"\)\)/);
+});
+
 // These imports assemble package locale bundles and connect package-owned state
 // to generic shell controls. They are integration infrastructure, not feature UI.
 const GENERIC_PACKAGE_IMPORTERS = new Set([
@@ -194,6 +219,7 @@ test("feature-named source files do not return to the web app", () => {
   const genericNamedFiles = new Set([
     "commands.ts",
     "handoffTargets.ts",
+    "components/input/editorCore.ts",
     "packages/onboarding/tours/git.ts",
   ]);
   const leaks = filesUnder(webSrcDir)

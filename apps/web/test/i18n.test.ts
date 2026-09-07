@@ -4,6 +4,7 @@ import type { LocaleBundle } from "@polyth/contracts";
 import { browserLocales } from "@polyth/browser/i18n";
 import { commandsLocales } from "@polyth/commands/i18n";
 import { dictationLocales } from "@polyth/dictation/i18n";
+import { editorLocales } from "@polyth/editor/i18n";
 import { filesLocales } from "@polyth/files/i18n";
 import { fusionLocales } from "@polyth/fusion/i18n";
 import { gitLocales } from "@polyth/git/i18n";
@@ -66,6 +67,7 @@ const bundles: Record<string, LocaleBundle> = {
   browser: browserLocales,
   commands: commandsLocales,
   dictation: dictationLocales,
+  editor: editorLocales,
   files: filesLocales,
   fusion: fusionLocales,
   git: gitLocales,

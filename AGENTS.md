@@ -29,9 +29,9 @@ When documents conflict, resolve in this order:
 - `packages/session` — append-only `node:sqlite` WAL event store, projections, queue, `deriveMessages`.
 - `packages/backend-opencode` — the ONLY OpenCode integration: spawns/attaches `opencode serve`, translates SSE to runtime events.
 - `packages/server` — composition root: HTTP/WS gateway, `RouteHandler` chain, per-project runtime pool, broadcast, auth, static web.
-- `packages/web-sdk` — **the supported feature/package UI integration seam**: `defineWebPackage`, `WebPackageHost` (slots, widgets, surfaces, workspace surfaces, capabilities, settings, project context, reducers, store, navigation, ui, errors), `createApiTransport`.
+- `packages/web-sdk` — **the supported feature/package UI integration seam**: `defineWebPackage`, `WebPackageHost` (slots, widgets, surfaces, workbench, resources, resource views, capabilities, settings, project context, reducers, store, navigation, ui, errors), `createApiTransport`.
 - `packages/plugins` — server-side package seam: `ServerPackageHost` (routes, events, services, runtimes, oneShot/smallModel), package discovery via `polyth.serverEntry`.
-- Feature packages (one dir each under `packages/`): permissions, goals, files, git, commands, terminal, multirun, fusion, walkthrough, schedule, knowledge, github, usage, browser, dictation, models, hotkeys, plugins, ssh, secure-safe, home-assistant, task-trackers, workflow, example-feature.
+- Feature packages (one dir each under `packages/`): permissions, goals, files, editor, git, commands, terminal, multirun, fusion, walkthrough, schedule, knowledge, github, usage, browser, dictation, models, hotkeys, plugins, ssh, secure-safe, home-assistant, task-trackers, workflow, example-feature.
 
 Every browser feature package declares `"polyth": { "webEntry": "./widgets/index.tsx" }` and owns a `widgets/` dir (web entry + feature UI + `styles.css`). Every server feature package declares `"polyth": { "serverEntry": "./src/serverEntry.ts" }`. The build bundles each `widgets/index.tsx` into `packages/<id>/dist/web/` and publishes `/packages-manifest.json`; the shell loads catalog metadata, then activates only enabled packages (`defineWebPackage((host) => installer)`).
 

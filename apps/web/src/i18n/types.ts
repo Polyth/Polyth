@@ -2,6 +2,7 @@ import type { Locale } from "@polyth/contracts";
 import type { BrowserMessageKey } from "@polyth/browser/i18n";
 import type { CommandsMessageKey } from "@polyth/commands/i18n";
 import type { DictationMessageKey } from "@polyth/dictation/i18n";
+import type { EditorMessageKey } from "@polyth/editor/i18n";
 import type { FilesMessageKey } from "@polyth/files/i18n";
 import type { FusionMessageKey } from "@polyth/fusion/i18n";
 import type { GitMessageKey } from "@polyth/git/i18n";
@@ -33,6 +34,7 @@ export type TranslationKey =
   | BrowserMessageKey
   | CommandsMessageKey
   | DictationMessageKey
+  | EditorMessageKey
   | FilesMessageKey
   | FusionMessageKey
   | GitMessageKey

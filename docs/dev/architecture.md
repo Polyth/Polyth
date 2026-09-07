@@ -19,7 +19,7 @@ One-minute map for a new agent; everything after this section is the deep refere
   `capabilities.ts`, `settings/registry.ts`)
   and renders contributions through `SlotHost`/surface hosts — never edit
   `App.tsx`/`Main.tsx` for a feature. Full guide: `docs/dev/ui.md`.
-- **Feature packages** (one directory each under `packages/`): permissions, goals, files, git, commands, terminal, multirun, fusion, walkthrough, schedule, knowledge, github, usage, browser, dictation, models, hotkeys, plugins, ssh, secure-safe, home-assistant, task-trackers, workflow, example-feature.
+- **Feature packages** (one directory each under `packages/`): permissions, goals, files, editor, git, commands, terminal, multirun, fusion, walkthrough, schedule, knowledge, github, usage, browser, dictation, models, hotkeys, plugins, ssh, secure-safe, home-assistant, task-trackers, workflow, example-feature.
 - **Conventions:** erasable TS on Node >= 22.14 (type stripping; no
   enums/namespaces/parameter properties), explicit `.ts` on local imports,
   `@polyth/*` workspace imports, `node --test` + `node:assert`. Full rules: `/AGENTS.md`. Feature workflow: `docs/dev/README.md`. Feature status: `docs/parity/polyth-parity.yaml`.
@@ -50,7 +50,8 @@ packages/session (node:sqlite WAL: events + projections + queue/org/profiles)
 | `backend-opencode` | The only OpenCode integration point. Spawns/attaches `opencode serve`, translates its SSE into `RuntimeEvent`s, maps canonical session ids ↔ backend ids, applies behavior/MCP config (`createConfigApplier`), imports pre-existing OpenCode sessions, snapshots task/subagent state as revisioned events. |
 | `permissions` | Monotonic fail-closed rule engine; scopes user/project/session; deny beats allow; "always" persists a rule at the chosen scope. |
 | `goals` | Objective attach/audit loop: small-model auditor verdicts (`keep`/`done`/`stuck`), budgets, auto-continuation, pause/resume; rehydrates from the event log after restart. |
-| `files` | Path-jailed file service: tree/stat/read (revision = mtime+size), revision-guarded `write` (stale `baseRevision` → `conflict`), binary-overwrite refusal, mkdir/rename/delete/upload, scored file search (shared with palette + mentions). |
+| `files` | Path-jailed file service: tree/stat/read (revision = mtime+size), revision-guarded `write` (stale `baseRevision` → `conflict`), binary-overwrite refusal, mkdir/rename/delete/upload, scored file search (shared with palette + mentions). Explorer + file `ResourceProvider`; does not own CodeMirror. |
+| `editor` | Sole CodeMirror 6 owner: one `EditorView` per visible group, `EditorState` retained per tab, honest language grammars (JS/JSX/TS/TSX/JSON/YAML/Markdown). Registers Authoring and Development workbench profiles. |
 | `git` | Porcelain wrapper: status/diff/show/stage/unstage/discard/commit/log/graph/branches/checkout/stash/fetch/pull/push/worktrees, diffHead/diffRange for review flows. Session-scoped Git routes resolve an owned worktree cwd server-side. |
 | `commands` | Slash commands + `#alias` snippets: project (`.polyth/commands`, snippets in `.polyth/snippets`) and user scopes, `$ARGUMENTS`/`@file`/`!cmd` template expansion, CRUD for the settings UI. |
 | `terminal` | Terminal sessions on a real PTY when the optional `node-pty` dependency builds (full-screen TUIs, true resize), falling back to piped `node:child_process` shells (COLUMNS/LINES exported, resize → SIGWINCH) otherwise; create/list/close/rename; bounded per-terminal replay ring (default 200 KB, UTF-8-tear-safe) replayed on every `/ws/terminal/:id` attach; terminals survive socket drops — close only via REST or process exit. The web client renders through its own VT emulator (`apps/web/src/terminal/emulator.ts`): cell grid + scrollback, 16/256/truecolor SGR, alternate screen, mouse reporting, OSC 8 links, DSR/DA replies. |
@@ -329,7 +330,7 @@ ignored by the web reducer (never crash).
   content-driven visibility, badges, and per-surface width + last-open persisted
   in `polyth.railPrefs`; `contextRail.tabs` slot unchanged), `CommandPalette` (commands/workspaces/files,
   `Mod+P` file mode), `EditorView` (pane tabs via `workspace/paneStore.ts`, per-tab
-  IME-safe autosave, `editor/liveFile.ts` revision/conflict checks, sandboxed
+  IME-safe autosave, host `resources/liveFile.ts` revision/conflict checks, sandboxed
   Markdown/HTML previews), `GitView` + `WorktreeSessionDialog` (sidebar/Git/palette
   entry points, existing-or-new worktree selection, branch-template suggestions),
   `GithubView`/`PullRequestView` (F7: `+ session` bootstraps a session with the

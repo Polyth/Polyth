@@ -12,6 +12,7 @@ import customAction from "../../../packages/custom-action/src/serverEntry.ts";
 import dictation from "../../../packages/dictation/src/serverEntry.ts";
 import exampleFeature from "../../../packages/example-feature/src/serverEntry.ts";
 import files from "../../../packages/files/src/serverEntry.ts";
+import editor from "../../../packages/editor/src/serverEntry.ts";
 import fusion from "../../../packages/fusion/src/serverEntry.ts";
 import git from "../../../packages/git/src/serverEntry.ts";
 import github from "../../../packages/github/src/serverEntry.ts";
@@ -70,6 +71,7 @@ export const desktopServerPackages = [
   entry("commands", { name: "Commands", description: "Reusable project command definitions.", core: false, enabled: true, settingsGroup: "Engineering", icon: "/", hasSettings: true }, commands),
   entry("custom-action", { name: "Custom Action", description: "Configurable icon widgets that run project commands.", core: false, enabled: true, settingsGroup: "Customize", icon: "▶", hasSettings: false }, customAction),
   entry("dictation", { name: "Voice & Dictation", description: "Speech-to-text dictation and spoken replies.", core: false, enabled: true, settingsGroup: "Workspace", icon: "🎤", hasSettings: true }, dictation),
+  entry("editor", { name: "Editor", description: "Text and code editing runtime for the workbench.", core: true, enabled: true, hasSettings: false }, editor),
   entry("example-feature", { name: "Example Feature", description: "Proof-of-concept package registered via package discovery.", core: false, enabled: true, settingsGroup: "Customize", icon: "🧪", hasSettings: false }, exampleFeature),
   entry("files", { name: "Files", description: "Workspace file access and attachments.", core: true, enabled: true, hasSettings: false }, files),
   entry("fusion", { name: "Fusion", description: "Synthesize multiple model responses.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⧉", hasSettings: false }, fusion),
