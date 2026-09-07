@@ -3352,13 +3352,17 @@ export function createSessionService(deps: {
         }
         const resolved = await deps.browserArtifacts.resolve(art.id);
         if (!resolved) {
-          throw Object.assign(new Error(`browser artifact not found: ${art.id}`), { code: "invalid-input" });
+          delete ctx[key];
+          continue;
         }
         art.mime = resolved.mime;
         art.size = resolved.size;
         art.localPath = resolved.localPath;
         committedIds.push(art.id);
       }
+      const thumb = ctx.crop ?? ctx.screenshot;
+      if (thumb) ref.url = `/api/browser/artifacts?id=${encodeURIComponent(thumb.id)}`;
+      else delete ref.url;
     }
     if (committedIds.length && deps.browserArtifacts?.commit) {
       await deps.browserArtifacts.commit(committedIds);

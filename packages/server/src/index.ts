@@ -105,6 +105,7 @@ import {
   type AssistService,
 } from "./assist.ts";
 import { assistRoutes } from "./routes/assist.ts";
+import { promptHistoryRoutes } from "./routes/promptHistory.ts";
 import { oneShot } from "./oneshot.ts";
 import { createSmallModelService } from "./smallModel.ts";
 import { createWsGateway, type WsGateway } from "./ws.ts";
@@ -2024,6 +2025,7 @@ export async function boot(opts: BootOptions = {}) {
       },
     }),
     sessionRetentionRoutes(spaceServices),
+    promptHistoryRoutes({ spaces: spaceServices, store }),
     agentSessionRoutes({
       spaces: spaceServices,
       store,

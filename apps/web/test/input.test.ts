@@ -14,12 +14,6 @@ import {
   replaceAll,
 } from "../src/components/input/editorCore.ts";
 import { activeToken, completeToken, composerMode, fencedSpans, parsePromptTokens, shellCommand } from "../src/composer/language.ts";
-import {
-  emptyPromptHistoryCursor,
-  promptHistory,
-  restorePromptHistoryDraft,
-  stepPromptHistory,
-} from "../src/composer/history.ts";
 import { isActivateKey, moveRoving } from "../src/components/a11y/roving.ts";
 
 test("commands apply immediately when no composition is active", () => {
@@ -121,31 +115,6 @@ test("leading bang selects shell mode and extracts the command", () => {
   assert.equal(shellCommand("  ! npm test  "), "npm test");
   assert.equal(shellCommand("!"), "");
   assert.equal(shellCommand("plain"), null);
-});
-
-test("prompt history derives durable prompts and restores an unsent draft", () => {
-  const items = promptHistory([
-    { kind: "user", id: "u1", eventSeq: 1, text: "first", time: 1 },
-    {
-      kind: "tool", id: "c1", callId: "c1", eventSeq: 2, tool: "shell",
-      input: { command: "git status" }, status: "done", time: 2,
-    },
-    { kind: "user", id: "u2", eventSeq: 3, text: "hidden", time: 3, undone: true },
-    { kind: "user", id: "u3", eventSeq: 4, text: "expanded", raw: "/review", time: 4 },
-  ]);
-  assert.deepEqual(items, ["first", "!git status", "/review"]);
-
-  let step = stepPromptHistory(items, "unsent draft", emptyPromptHistoryCursor(), "up");
-  assert.equal(step.text, "/review");
-  step = stepPromptHistory(items, step.text, step.cursor, "up");
-  assert.equal(step.text, "!git status");
-  step = stepPromptHistory(items, step.text, step.cursor, "down");
-  assert.equal(step.text, "/review");
-  step = stepPromptHistory(items, step.text, step.cursor, "down");
-  assert.equal(step.text, "unsent draft");
-  const restored = restorePromptHistoryDraft("first", { index: 0, draft: "keep me" });
-  assert.equal(restored.text, "keep me");
-  assert.equal(restored.cursor.index, null);
 });
 
 test("roving list wraps and ignores composition keys", () => {

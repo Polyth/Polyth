@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { AttachmentRef } from "@polyth/contracts";
 import { browserContextHostPath } from "@polyth/contracts";
 import { browserContextChipTitle } from "../attachments.ts";
+import { isBlockedAttachment } from "../composer/history.ts";
 import { formatNumber, tr } from "../i18n/index.ts";
 import AttachmentPreview from "./AttachmentPreview.tsx";
 
@@ -71,26 +72,35 @@ export default function AttachmentPills({ attachments, onRemove }: {
               </span>
             );
           }
+          const blocked = isBlockedAttachment(a);
           const detail = kind === "url" ? a.url : a.path;
           const size = kind === "url" ? "" : fmtSize(a.size);
           const body = (
             <>
-              {kind === "image" && a.url
+              {kind === "image" && a.url && !blocked
                 ? <img className="att-thumb" src={a.url} alt="" />
                 : <span className="att-icon" aria-hidden>{GLYPHS[kind] ?? "▤"}</span>}
               <span className="att-name" title={detail ? `${detail}${size ? ` · ${size}` : ""}` : a.name}>{a.name}</span>
             </>
           );
           return (
-            <span key={a.id || i} className={`attachment-pill att-${kind}`}>
-              <button
-                type="button"
-                className="attachment-open"
-                aria-haspopup="dialog"
-                aria-label={tr("attachmentpills.previewAttachmentValue", { name: a.name })}
-                title={tr("attachmentpills.previewAttachmentValue", { name: a.name })}
-                onClick={() => setPreviewAt(i)}
-              >{body}</button>
+            <span key={a.id || i} className={`attachment-pill att-${kind}${blocked ? " att-unavailable" : ""}`}>
+              {blocked ? (
+                <span
+                  className="attachment-open"
+                  aria-label={tr("attachmentpills.unavailableAttachmentValue", { name: a.name })}
+                  title={tr("attachmentpills.unavailableAttachmentValue", { name: a.name })}
+                >{body}</span>
+              ) : (
+                <button
+                  type="button"
+                  className="attachment-open"
+                  aria-haspopup="dialog"
+                  aria-label={tr("attachmentpills.previewAttachmentValue", { name: a.name })}
+                  title={tr("attachmentpills.previewAttachmentValue", { name: a.name })}
+                  onClick={() => setPreviewAt(i)}
+                >{body}</button>
+              )}
               {onRemove && (
                 <button
                   type="button"

@@ -46,7 +46,7 @@ import SlotHost from "./slots/SlotHost.ts";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import { dragKind, dropIntoSession } from "../dnd.ts";
 import {
-  addAttachment, attachText, attachUpload, isLargeTextPaste, removeAttachment, takeAttachments, usePendingAttachments,
+  addAttachment, attachText, attachUpload, clearAttachments, isLargeTextPaste, pendingAttachments, removeAttachment, seedAttachments, takeAttachments, usePendingAttachments,
 } from "../attachments.ts";
 import {
   attachGithubLink,
@@ -84,12 +84,8 @@ import {
   withAutoThinking, withExplicitAgent, withExplicitThinking, withModelForNextTurn,
   type ComposerConfig,
 } from "../composerConfig.ts";
-import {
-  emptyPromptHistoryCursor,
-  promptHistory,
-  restorePromptHistoryDraft,
-  stepPromptHistory,
-} from "../composer/history.ts";
+import { shouldHandlePromptHistoryKey } from "../composer/history.ts";
+import { usePromptHistory } from "../composer/usePromptHistory.ts";
 import type { PickerItem } from "../picker.ts";
 import Picker from "./Picker.tsx";
 import AdaptiveTextInput, { type TextInputHandle } from "./input/AdaptiveTextInput.tsx";
@@ -100,7 +96,7 @@ import QueuedMessageList, { latestSteerableQueuedItem } from "./QueuedMessageLis
 import { GoalAttachForm } from "../../../../packages/goals/widgets/GoalStrip.tsx";
 import { announce } from "./a11y/live.tsx";
 import { noteModelUsed } from "@polyth/models/web-prefs";
-import { getUiSettings, setUiSettings } from "../uiPrefs.ts";
+import { getUiSettings, setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
 import type {
   ModelRef,
@@ -544,10 +540,25 @@ export default function Composer({
   const isPhone = shellLayout === "phone" && !widgetMode;
   const sendShortcut = isPhone ? settings.mobileSendShortcut : settings.desktopSendShortcut;
   const sendKey = sendShortcut === "none" ? `${modKeyLabel()}↵` : sendShortcut === "shift-enter" ? "⇧↵" : "↵";
-
-  const historyCursor = useRef(emptyPromptHistoryCursor());
-  const applyingHistory = useRef(false);
-  const historyItems = promptHistory(model.messages);
+  const uiPrefs = useUiSettings();
+  const activeProjectId = useStore((s) => s.activeProjectId);
+  const promptHistoryNav = usePromptHistory({
+    sessionId: session?.id ?? null,
+    projectId: activeProjectId,
+    worktreePath: session?.worktreePath ?? newSessionIntent?.worktreePath,
+    scope: uiPrefs.promptHistoryScope,
+    limit: uiPrefs.promptHistoryLimit,
+  });
+  const promptHistoryNavRef = useRef(promptHistoryNav);
+  promptHistoryNavRef.current = promptHistoryNav;
+  const promoteHistoryDraft = () => {
+    const nav = promptHistoryNavRef.current;
+    if (!nav.isBrowsing()) return;
+    const sid = sessionIdRef.current;
+    const displayed = nav.displayedAttachments ?? [];
+    nav.reset();
+    seedAttachments(sid, displayed);
+  };
   const shell = shellCommand(text);
   const shellMode = shell !== null;
 
@@ -579,9 +590,11 @@ export default function Composer({
     const id = sessionIdRef.current;
     if (id === null) return;
     const editing = queueEditRef.current;
-    saveDraft(id, editing?.sessionId === id
-      ? editing.draftBefore
-      : inputRef.current?.getText() ?? committedTextRef.current);
+    const nav = promptHistoryNavRef.current;
+    const live = nav.isBrowsing()
+      ? (nav.snapshot()?.text ?? inputRef.current?.getText() ?? committedTextRef.current)
+      : inputRef.current?.getText() ?? committedTextRef.current;
+    saveDraft(id, editing?.sessionId === id ? editing.draftBefore : live);
     flushDraftToServer(id);
   }, []);
 
@@ -590,6 +603,10 @@ export default function Composer({
   // pending execution configuration is per-session and reloads with it.
   // Deliberately NOT reactive to session.draft: live cross-client draft
   // updates apply below, only when the composer is empty.
+  //
+  // This effect is registered after usePromptHistory(). The hook must not
+  // destroy the browse snapshot on sessionId change, or this flush would
+  // persist the recalled textarea instead of the canonical draft.
   useEffect(() => {
     const outgoing = sessionIdRef.current;
     if (outgoing !== null && outgoing !== (session?.id ?? null)) {
@@ -612,7 +629,7 @@ export default function Composer({
     if (session?.id && serverDraft !== undefined && serverDraft !== localDraft) {
       saveDraft(session.id, serverDraft);
     }
-    historyCursor.current = emptyPromptHistoryCursor();
+    promptHistoryNav.reset();
     setCfg(loadComposerConfig(session?.id ?? null));
     setAcToken(null);
     acTokenRef.current = null;
@@ -624,6 +641,15 @@ export default function Composer({
     setSteeringQueuedId(null);
     setPromptRewrite(null);
   }, [session?.id, newSessionIntent, flushComposerDraft]);
+
+  // Settings / project change is not a session switch: restore the snapshot
+  // into the textarea, then end browse. Never flush the live historical text.
+  useEffect(() => {
+    promptHistoryNavRef.current.cancelToDraft((draft) => {
+      setText(draft.text);
+      inputRef.current?.replaceText(draft.text, { anchor: draft.text.length }, { silent: true });
+    });
+  }, [uiPrefs.promptHistoryScope, uiPrefs.promptHistoryLimit, activeProjectId]);
 
   // Disengage after an outside click has reached its target. Collapsing on
   // pointer-down can move a timeline control before pointer-up and swallow the
@@ -660,6 +686,7 @@ export default function Composer({
   useEffect(() => {
     const id = session?.id;
     if (!id || queueEdit?.sessionId === id) return;
+    if (promptHistoryNavRef.current.isBrowsing()) return;
     const t = setTimeout(() => saveDraft(id, text), 250);
     return () => clearTimeout(t);
   }, [session?.id, text, queueEdit]);
@@ -685,7 +712,10 @@ export default function Composer({
   const [dropHint, setDropHint] = useState<"path" | "files" | null>(null);
 
   // Pending attachment pills live in the per-session draft store (F2).
-  const attachments = usePendingAttachments(session?.id ?? null);
+  // History browsing overlays recalled refs locally; the canonical store is
+  // untouched until a genuine edit or send.
+  const pending = usePendingAttachments(session?.id ?? null);
+  const attachments = promptHistoryNav.displayedAttachments ?? pending;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pendingLargePaste, setPendingLargePaste] = useState<{
     text: string;
@@ -696,6 +726,7 @@ export default function Composer({
     const projectId = getState().activeProjectId;
     if (!projectId || files.length === 0) return;
     const target = sessionIdRef.current;
+    if (promptHistoryNavRef.current.isBrowsing()) promoteHistoryDraft();
     for (const f of files) {
       void attachUpload(projectId, target, f).then((r) => {
         if (!r.ok) {
@@ -708,6 +739,7 @@ export default function Composer({
     }
   }, []);
   const attachPastedText = useCallback((pasted: string, projectId: string, sessionId: string | null) => {
+    if (promptHistoryNavRef.current.isBrowsing()) promoteHistoryDraft();
     void attachText(projectId, sessionId, pasted).then((r) => {
       if (!r.ok) {
         setUiError(tr("composer.couldNotAttachValue", {
@@ -742,6 +774,7 @@ export default function Composer({
   const onPaste = useCallback((e: ClipboardEvent<HTMLTextAreaElement>) => {
     const projectId = getState().activeProjectId;
     if (!projectId) return;
+    promoteHistoryDraft();
     const files = Array.from(e.clipboardData?.files ?? []);
     if (files.length > 0) {
       e.preventDefault();
@@ -776,7 +809,6 @@ export default function Composer({
   // ---- capability catalogs (UX-COMPOSER-DISC) --------------------------------
   // Strict independent command/snippet outcomes; an HTTP failure is
   // `unavailable`, never a successful empty list.
-  const activeProjectId = useStore((s) => s.activeProjectId);
   const activeProject = useStore((s) =>
     s.projectRegistry.projects.find((candidate) => candidate.id === s.activeProjectId));
   const globalDefaultModel = sessionDefaults.defaultModel ?? parseModelRef(settings.defaultModel);
@@ -1032,7 +1064,7 @@ export default function Composer({
           setText(editing.draftBefore);
           inputRef.current?.replaceText(editing.draftBefore);
           saveDraft(target, editing.draftBefore);
-          historyCursor.current = emptyPromptHistoryCursor();
+          promptHistoryNav.reset();
           announce(tr("composer.queuedMessageValueUpdatedInPlace", { id: editing.id }));
         })
         .catch((error) => setUiError(friendlyError("Couldn’t update queued message", error)))
@@ -1060,7 +1092,9 @@ export default function Composer({
     // Capture the target session at send time — project/session switches must
     // never reroute a send (delivery admission handles active turns server-side).
     // Pills leave the draft the moment the message leaves the composer.
-    const atts = command === null ? takeAttachments(target) : [];
+    const recalled = promptHistoryNav.takeDisplayedForSend();
+    const atts = command === null ? (recalled ?? takeAttachments(target)) : [];
+    if (command === null && recalled) clearAttachments(target);
     const delivery = working ? deliveryOverride ?? getUiSettings().followUpBehavior : undefined;
     const cfgSent = cfg;
     const wire = wireProfileId(cfgSent);
@@ -1084,7 +1118,9 @@ export default function Composer({
         }
       : undefined;
     const deliver = (targetSessionId: string) => command !== null
-      ? api.runShell(targetSessionId, command).catch(
+      ? api.runShell(targetSessionId, command).then(() => {
+          promptHistoryNav.reload();
+        }).catch(
           (err) => setUiError(tr("composer.couldNotRunShellCommand", {
             reason: err instanceof Error ? err.message : String(err),
           })),
@@ -1114,6 +1150,7 @@ export default function Composer({
             }
             return;
           }
+          promptHistoryNav.reload();
           // The server recorded the sent configuration in the projection and
           // durable log; drop the local pending record only when it still
           // equals what was sent, then reflect the authoritative state.
@@ -1177,7 +1214,7 @@ export default function Composer({
     }
     setText("");
     inputRef.current?.replaceText("");
-    historyCursor.current = emptyPromptHistoryCursor();
+    promptHistoryNav.reset();
     if (target) {
       saveDraft(target, "");
       syncDraftToServer(target, ""); // clear server draft on send
@@ -1186,7 +1223,7 @@ export default function Composer({
     acTokenRef.current = null;
   }, [
     text, attachments, cfg, profileMissing, noModels, runtimeUnavailable, working, activeProjectId, queueEdit, queueEditSaving,
-    emptySteerItem, steerQueuedItem,
+    emptySteerItem, steerQueuedItem, promptHistoryNav,
     session?.model, session?.status, session?.runtimeControl, preferredModel,
     sessionDefaults.defaultThinking, chatModels, creatingSession, newSessionTarget,
     newSessionAutoApprove, newSessionGoal, newSessionIntent,
@@ -1247,12 +1284,13 @@ export default function Composer({
     if (acView) {
       // Arrows move the active descendant; Enter/Tab insert only when a
       // selectable option exists (Tab otherwise follows normal focus order).
-      if (e.key === "ArrowDown" && acOptions.length > 0) {
-        setAcIndex((i) => (i + 1) % acOptions.length);
+      // Consume arrows even while loading or empty so history cannot steal them.
+      if (e.key === "ArrowDown") {
+        if (acOptions.length > 0) setAcIndex((i) => (i + 1) % acOptions.length);
         return true;
       }
-      if (e.key === "ArrowUp" && acOptions.length > 0) {
-        setAcIndex((i) => (i - 1 + acOptions.length) % acOptions.length);
+      if (e.key === "ArrowUp") {
+        if (acOptions.length > 0) setAcIndex((i) => (i - 1 + acOptions.length) % acOptions.length);
         return true;
       }
       if ((e.key === "Enter" || e.key === "Tab") && acOptions.length > 0) {
@@ -1264,32 +1302,12 @@ export default function Composer({
         return true;
       }
     }
-    const h = inputRef.current;
-    const current = h?.getText() ?? text;
-    const selection = h?.getSelection() ?? { start: 0, end: 0 };
-    if (e.key === "ArrowUp" && (historyCursor.current.index !== null || (selection.start === 0 && selection.end === 0))) {
-      const next = stepPromptHistory(historyItems, current, historyCursor.current, "up");
-      historyCursor.current = next.cursor;
-      applyingHistory.current = true;
-      setText(next.text);
-      h?.replaceText(next.text);
-      return historyItems.length > 0;
-    }
-    if (e.key === "ArrowDown" && (historyCursor.current.index !== null || (selection.start === current.length && selection.end === current.length))) {
-      const next = stepPromptHistory(historyItems, current, historyCursor.current, "down");
-      historyCursor.current = next.cursor;
-      applyingHistory.current = true;
-      setText(next.text);
-      h?.replaceText(next.text);
-      return historyCursor.current.index !== null || next.text !== current;
-    }
-    if (e.key === "Escape" && historyCursor.current.index !== null) {
-      const next = restorePromptHistoryDraft(current, historyCursor.current);
-      historyCursor.current = next.cursor;
-      applyingHistory.current = true;
-      setText(next.text);
-      h?.replaceText(next.text);
-      return true;
+    if (e.key === "Escape") {
+      const restored = promptHistoryNav.cancelToDraft((draft) => {
+        setText(draft.text);
+        inputRef.current?.replaceText(draft.text, { anchor: draft.text.length }, { silent: true });
+      });
+      if (restored) return true;
     }
     if (e.key === "Enter") {
       if (e.metaKey || e.ctrlKey) {
@@ -1304,17 +1322,33 @@ export default function Composer({
     return false;
   };
 
+  const onUnmovedArrow = (key: "ArrowUp" | "ArrowDown") => {
+    if (!shouldHandlePromptHistoryKey({
+      key,
+      composing: false,
+      autocompleteActive: Boolean(acView),
+      queueEditActive: Boolean(queueEdit),
+    })) return;
+    const current = {
+      text: inputRef.current?.getText() ?? text,
+      attachments: pendingAttachments(sessionIdRef.current),
+    };
+    promptHistoryNav.step(current, key === "ArrowUp" ? "up" : "down", (draft) => {
+      setText(draft.text);
+      inputRef.current?.replaceText(draft.text, { anchor: draft.text.length }, { silent: true });
+    });
+  };
+
   // Token-based autocomplete on committed text changes. File searches keep the
   // sequence guard: a project, session, token, or query change invalidates the
   // in-flight request, so a stale response never reopens or replaces results.
   const onTextChange = useCallback(
     (val: string) => {
       draftRevisionRef.current += 1;
+      promoteHistoryDraft();
       setText(val);
       setPromptRewrite((current) => current?.generated === val ? current : null);
       if (sessionIdRef.current === null && activeProjectId) saveNewSessionDraftText(activeProjectId, val);
-      if (!applyingHistory.current) historyCursor.current = emptyPromptHistoryCursor();
-      applyingHistory.current = false;
       const caret = inputRef.current?.getSelection().end ?? val.length;
       const token = activeToken(val, caret);
       acTokenRef.current = token;
@@ -1512,7 +1546,7 @@ export default function Composer({
   const consumeWorkflowDraft = () => {
     setText("");
     inputRef.current?.replaceText("");
-    historyCursor.current = emptyPromptHistoryCursor();
+    promptHistoryNav.reset();
     const target = sessionIdRef.current;
     if (target) {
       saveDraft(target, "");
@@ -1760,7 +1794,11 @@ export default function Composer({
       {attachments.length > 0 && (
         <AttachmentPills
           attachments={attachments}
-          onRemove={(id) => removeAttachment(session?.id ?? null, id)}
+          onRemove={(id) => {
+            const sid = session?.id ?? null;
+            if (promptHistoryNavRef.current.isBrowsing()) promoteHistoryDraft();
+            removeAttachment(sid, id);
+          }}
         />
       )}
       {attachments.length > 0 && !noModels && attachNote && (
@@ -1795,6 +1833,7 @@ export default function Composer({
           } : {})}
           onTextChange={onTextChange}
           onKeyIntercept={onKeyIntercept}
+          onUnmovedArrow={onUnmovedArrow}
           onPaste={onPaste}
           onFocusChange={(focused) => {
             if (focused) setInputFocused(true);

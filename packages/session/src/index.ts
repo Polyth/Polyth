@@ -4,7 +4,7 @@
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 
-import { MODEL_VISIBLE_TYPES, formatBrowserContextForModel } from "@polyth/contracts";
+import { MODEL_VISIBLE_TYPES, formatBrowserContextForModel, clampPromptHistoryLimit } from "@polyth/contracts";
 import { withImmediateTransaction, type SyncOnly } from "./syncTransaction.ts";
 import type {
   AgentProfile,
@@ -37,6 +37,7 @@ import type {
   PreparedOperationResult,
   PrepareSessionCreateInput,
   PreparedSessionCreateResult,
+  PromptHistoryEntryDto,
   QueueItemDto,
   QueueReservation,
   QueueReservationInput,
@@ -66,6 +67,14 @@ import {
   dialogueFromMessages,
 } from "./recovery.ts";
 import { effectiveHistory, recoveredUserText } from "./history.ts";
+import {
+  parsePromptHistoryCandidate,
+  rewindVisibility,
+  type PromptHistoryCandidateRow,
+  type RewindMarkerRow,
+} from "./promptHistory.ts";
+
+const PROMPT_HISTORY_CHUNK = 32;
 
 export { redactContinuity } from "./continuity.ts";
 export type { ContinuityWorkspace } from "./continuity.ts";
@@ -296,6 +305,12 @@ export interface Store extends SessionPersistence {
   setReadCursor(sessionId: string, seq: number): Promise<boolean>;
   /** Bounded LIKE search over message text; snippets are trimmed around the hit. */
   searchEventText(q: string, limit?: number): Promise<SearchHit[]>;
+  /** Newest eligible `user/message` composer payloads in one Space, oldest-first. */
+  listPromptHistory(opts: {
+    spaceId: string;
+    sessionId?: string;
+    limit: number;
+  }): Promise<PromptHistoryEntryDto[]>;
   // -- server-owned agent profiles (WP8) --
   profileList(): Promise<AgentProfile[]>;
   profileGet(id: string): Promise<AgentProfile | undefined>;
@@ -3419,6 +3434,91 @@ export function createStore(dbPath: string): Store {
     return out;
   }
 
+  function listPromptHistory(opts: {
+    spaceId: string;
+    sessionId?: string;
+    limit: number;
+  }): Promise<PromptHistoryEntryDto[]> {
+    const limit = clampPromptHistoryLimit(opts.limit);
+    const sessionId = opts.sessionId;
+    const hiders = new Map<string, (seq: number) => boolean>();
+    const hidden = (sid: string, seq: number) => hiders.get(sid)?.(seq) ?? false;
+    const ensureRewindHiders = (sessionIds: readonly string[]) => {
+      const missing = [...new Set(sessionIds)].filter((id) => id && !hiders.has(id));
+      if (missing.length === 0) return;
+      const placeholders = missing.map(() => "?").join(",");
+      const rows = prep(
+        `SELECT e.session_id AS sessionId, e.seq, e.type, e.data
+         FROM events e
+         INNER JOIN projections p ON p.session_id = e.session_id
+         WHERE p.space_id = ?
+           AND e.session_id IN (${placeholders})
+           AND e.type IN ('session/rewound', 'session/rewind-cleared')
+         ORDER BY e.session_id, e.seq ASC`,
+      ).all(opts.spaceId, ...missing) as unknown as RewindMarkerRow[];
+      const grouped = new Map<string, RewindMarkerRow[]>();
+      for (const id of missing) grouped.set(id, []);
+      for (const row of rows) grouped.get(row.sessionId)!.push(row);
+      for (const id of missing) hiders.set(id, rewindVisibility(grouped.get(id)!));
+    };
+    if (sessionId) ensureRewindHiders([sessionId]);
+    // Do not json_extract() candidate payloads: SQLite JSON functions abort
+    // the statement on malformed JSON, which would 500 the whole endpoint.
+    const candidateSql = `
+      e.type = 'user/message'
+      OR (e.type = 'tool/call' AND e.producer = 'composer-shell')`;
+    const selectSql = `SELECT e.session_id AS sessionId, e.seq, e.id, e.time, e.type, e.data,
+              e.rowid AS rowid, p.project_id AS projectId,
+              json_extract(p.data, '$.worktreePath') AS worktreePath
+       FROM events e
+       INNER JOIN projections p ON p.session_id = e.session_id`;
+    const chunk = Math.min(200, Math.max(PROMPT_HISTORY_CHUNK, limit));
+    const newestFirst: PromptHistoryEntryDto[] = [];
+    let cursor: { seq: number } | { time: number; rowid: number } | null = null;
+    while (newestFirst.length < limit) {
+      const rows = (sessionId
+        ? (cursor && "seq" in cursor
+            ? prep(
+                `${selectSql}
+                 WHERE p.space_id = ? AND e.session_id = ? AND (${candidateSql}) AND e.seq < ?
+                 ORDER BY e.seq DESC LIMIT ?`,
+              ).all(opts.spaceId, sessionId, cursor.seq, chunk)
+            : prep(
+                `${selectSql}
+                 WHERE p.space_id = ? AND e.session_id = ? AND (${candidateSql})
+                 ORDER BY e.seq DESC LIMIT ?`,
+              ).all(opts.spaceId, sessionId, chunk))
+        : (cursor && "time" in cursor
+            ? prep(
+                `${selectSql}
+                 WHERE p.space_id = ? AND (${candidateSql})
+                   AND (e.time < ? OR (e.time = ? AND e.rowid < ?))
+                 ORDER BY e.time DESC, e.rowid DESC LIMIT ?`,
+              ).all(opts.spaceId, cursor.time, cursor.time, cursor.rowid, chunk)
+            : prep(
+                `${selectSql}
+                 WHERE p.space_id = ? AND (${candidateSql})
+                 ORDER BY e.time DESC, e.rowid DESC LIMIT ?`,
+              ).all(opts.spaceId, chunk))) as unknown as Array<PromptHistoryCandidateRow & { rowid: number }>;
+      if (rows.length === 0) break;
+      ensureRewindHiders(rows.map((row) => row.sessionId));
+      for (const row of rows) {
+        if (hidden(row.sessionId, row.seq)) continue;
+        const entry = parsePromptHistoryCandidate(row);
+        if (!entry) continue;
+        newestFirst.push(entry);
+        if (newestFirst.length >= limit) break;
+      }
+      const last = rows[rows.length - 1]!;
+      cursor = sessionId
+        ? { seq: last.seq }
+        : { time: last.time, rowid: last.rowid };
+      if (rows.length < chunk) break;
+    }
+    newestFirst.reverse();
+    return Promise.resolve(newestFirst);
+  }
+
   function close(): Promise<void> {
     if (closed) return Promise.resolve();
     closed = true;
@@ -3496,6 +3596,7 @@ export function createStore(dbPath: string): Store {
     attentionFor,
     setReadCursor,
     searchEventText,
+    listPromptHistory,
     profileList,
     profileGet,
     profileCreate,

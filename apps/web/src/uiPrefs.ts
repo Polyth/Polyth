@@ -2,7 +2,8 @@
 // versioned record; `polyth.settings` is read only as a one-time migration
 // source because older builds shared it with product-level settings.
 import { useSyncExternalStore } from "react";
-import type { NotificationKind } from "@polyth/contracts";
+import type { NotificationKind, PromptHistoryScope } from "@polyth/contracts";
+import { clampPromptHistoryLimit, parsePromptHistoryScope, PROMPT_HISTORY_DEFAULT_LIMIT } from "@polyth/contracts";
 
 export type FollowUpBehavior = "steer" | "queue" | "interrupt";
 export type LargeTextPasteBehavior = "ask" | "attach" | "inline";
@@ -99,6 +100,10 @@ export interface UiSettings {
   showQuickActions: boolean;
   /** MCP server entries (stored locally; runtime integration pending). */
   mcpServers: Array<{ name: string; url: string }>;
+  /** Composer ArrowUp/Down prompt history: this session, or every project in this Space. */
+  promptHistoryScope: PromptHistoryScope;
+  /** Maximum submitted prompts recalled by history navigation. */
+  promptHistoryLimit: number;
 }
 
 export const UI_SETTINGS_KEY = "polyth.uiSettings.v1";
@@ -150,6 +155,8 @@ export const UI_DEFAULTS: UiSettings = {
   showGoals: true,
   showQuickActions: true,
   mcpServers: [],
+  promptHistoryScope: "session",
+  promptHistoryLimit: PROMPT_HISTORY_DEFAULT_LIMIT,
 };
 
 const NOTIFY_KINDS: NotificationKindPref[] = ["completed", "failed", "question", "permission", "subagent"];
@@ -251,6 +258,8 @@ export function parseUiSettings(raw: string | null): UiSettings {
             .filter((s): s is { name: string; url: string } => !!s && typeof s.name === "string" && typeof s.url === "string")
             .slice(0, 32)
         : [],
+      promptHistoryScope: parsePromptHistoryScope(data.promptHistoryScope),
+      promptHistoryLimit: clampPromptHistoryLimit(data.promptHistoryLimit),
     };
   } catch {
     return d;

@@ -1605,6 +1605,14 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   padding: 0 2px; font-size: var(--font-meta); line-height: 1;
 }
 .attachment-pill .att-remove:hover { color: var(--text); }
+.attachment-pill.att-unavailable {
+  color: var(--muted);
+  opacity: 0.78;
+}
+.attachment-pill.att-unavailable .att-name { text-decoration: line-through; }
+.attachment-pill.att-unavailable .att-icon { color: var(--muted); }
+.attachment-pill.att-unavailable .attachment-open { cursor: default; }
+.attachment-pill.att-unavailable .attachment-open:hover .att-name { text-decoration: line-through; }
 .task-activity {
   display: flex; align-items: baseline; gap: 7px; margin: 4px 0; padding: 5px 9px;
   border-left: 2px solid var(--hair-strong); color: var(--text-dim); font-size: 12px;

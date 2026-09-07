@@ -25,8 +25,9 @@ import {
 } from "./editorCore.ts";
 
 export interface TextInputHandle {
-  /** Replace all text. Deferred while an IME composition is active. */
-  replaceText(text: string, selection?: TextSelection): void;
+  /** Replace all text. Deferred while an IME composition is active.
+   *  `silent` skips onTextChange so programmatic history recall is not a user edit. */
+  replaceText(text: string, selection?: TextSelection, opts?: { silent?: boolean }): void;
   /** Insert at the caret (or over the selection). Deferred while composing. */
   insertText(text: string): void;
   focus(): void;
@@ -57,6 +58,8 @@ export interface AdaptiveTextInputProps {
   onTextChange?: (text: string) => void;
   /** Raw keydown with a composition flag; return true to consume the event. */
   onKeyIntercept?: (e: KeyboardEvent<HTMLTextAreaElement>, composing: boolean) => boolean;
+  /** Fires after native ArrowUp/Down when the caret did not move. */
+  onUnmovedArrow?: (key: "ArrowUp" | "ArrowDown") => void;
   onPaste?: (e: ClipboardEvent<HTMLTextAreaElement>) => void;
   onFocusChange?: (focused: boolean) => void;
 }
@@ -66,13 +69,15 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
     initialText = "", placeholder, rows = 3, className, disabled, ariaLabel,
     "data-composer-input": dataComposerInput,
     role, ariaAutocomplete, ariaExpanded, ariaControls, ariaActiveDescendant,
-    onTextChange, onKeyIntercept, onPaste, onFocusChange,
+    onTextChange, onKeyIntercept, onUnmovedArrow, onPaste, onFocusChange,
   },
   ref,
 ) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const gate = useRef(createGate());
   const committed = useRef(initialText);
+  const arrowGen = useRef(0);
+  const historyTick = useRef(0);
 
   const applyCommand = (cmd: EditorCommand) => {
     const el = taRef.current;
@@ -81,13 +86,15 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
       const r = replaceAll(cmd.text, cmd.selection);
       el.value = r.value;
       el.setSelectionRange(r.caret, r.selEnd);
+      if (cmd.silent) historyTick.current++;
+      else arrowGen.current++;
     } else {
       const r = insertAt(el.value, cmd.text, el.selectionStart ?? el.value.length, el.selectionEnd ?? el.value.length);
       el.value = r.value;
       el.setSelectionRange(r.caret, r.caret);
     }
     committed.current = el.value;
-    onTextChange?.(el.value);
+    if (cmd.kind !== "replace" || !cmd.silent) onTextChange?.(el.value);
   };
 
   const runOrDefer = (cmd: EditorCommand) => {
@@ -95,8 +102,14 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
   };
 
   useImperativeHandle(ref, () => ({
-    replaceText(text, selection) {
-      runOrDefer({ kind: "replace", text, ...(selection ? { selection } : {}), generation: gate.current.generation });
+    replaceText(text, selection, opts) {
+      runOrDefer({
+        kind: "replace",
+        text,
+        ...(selection ? { selection } : {}),
+        generation: gate.current.generation,
+        ...(opts?.silent ? { silent: true } : {}),
+      });
     },
     insertText(text) {
       runOrDefer({ kind: "insert", text, generation: gate.current.generation });
@@ -159,6 +172,32 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
     );
     if (onKeyIntercept?.(e, composing)) {
       e.preventDefault();
+      return;
+    }
+    if (
+      onUnmovedArrow
+      && (e.key === "ArrowUp" || e.key === "ArrowDown")
+      && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey
+      && !composing
+    ) {
+      const ta = taRef.current;
+      if (!ta) return;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      const key = e.key;
+      const gen = arrowGen.current;
+      const tick = historyTick.current;
+      // Chrome applies the textarea caret default action after the keydown
+      // microtask checkpoint. Wait a macrotask so native wrap movement is
+      // visible before we decide whether history may run. Silent history
+      // replacement changes the caret; stacked key-repeat timeouts must still
+      // step. Non-silent session switches bump arrowGen so stale timeouts die.
+      setTimeout(() => {
+        if (taRef.current !== ta) return;
+        if (arrowGen.current !== gen) return;
+        const unmoved = ta.selectionStart === start && ta.selectionEnd === end;
+        if (unmoved || historyTick.current !== tick) onUnmovedArrow(key);
+      }, 0);
     }
   };
 

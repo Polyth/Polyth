@@ -9,7 +9,7 @@ export interface TextSelection {
 }
 
 export type EditorCommand =
-  | { kind: "replace"; text: string; selection?: TextSelection; generation: number }
+  | { kind: "replace"; text: string; selection?: TextSelection; generation: number; silent?: boolean }
   | { kind: "insert"; text: string; generation: number };
 
 /** Composition gate: programmatic writes never interrupt an active IME

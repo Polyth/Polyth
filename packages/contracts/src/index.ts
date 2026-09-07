@@ -839,6 +839,43 @@ export interface AttachmentRef {
   /** Structured browser page/element/area/text context (kind "browser-context"). */
   browserContext?: BrowserContext;
 }
+
+export const PROMPT_HISTORY_DEFAULT_LIMIT = 40;
+export const PROMPT_HISTORY_MIN_LIMIT = 1;
+export const PROMPT_HISTORY_MAX_LIMIT = 200;
+
+export function clampPromptHistoryLimit(value: unknown, fallback = PROMPT_HISTORY_DEFAULT_LIMIT): number {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(PROMPT_HISTORY_MAX_LIMIT, Math.max(PROMPT_HISTORY_MIN_LIMIT, n));
+}
+
+/** Composer prompt-history navigation. `session` is the active conversation;
+ *  `space` is every eligible session in the current Space. Legacy stored
+ *  `"server"` values mean `space` — there is no cross-Space user history. */
+export type PromptHistoryScope = "session" | "space";
+
+export function parsePromptHistoryScope(value: unknown): PromptHistoryScope {
+  if (value === "space" || value === "server") return "space";
+  return "session";
+}
+
+/** One submitted composer payload, oldest-first / newest-last in API responses. */
+export interface PromptHistoryEntryDto {
+  id: string;
+  sessionId: string;
+  projectId: string;
+  /** Session worktree when the prompt was stored; empty/absent means the project root. */
+  worktreePath?: string;
+  seq: number;
+  time: number;
+  text: string;
+  attachments: AttachmentRef[];
+}
+
+export interface PromptHistoryDto {
+  entries: PromptHistoryEntryDto[];
+}
 export interface ModelRef { providerID: string; modelID: string; variant?: string }
 
 // Model-visible derivation: these types feed deriveMessages()
@@ -3729,6 +3766,8 @@ export interface BrowserContext {
   id: string;
   type: BrowserContextType;
   browserSessionId: string;
+  /** Project that owned the browser session at capture time. Recall and
+   *  resend keep this provenance; they do not rebind it to the destination. */
   projectId: string;
   sessionId?: string;
   frameRevision: number;
@@ -3857,6 +3896,124 @@ export function browserContextHostPath(url: string): string {
 
 export function browserContextMime(): string {
   return BROWSER_CONTEXT_MIME;
+}
+
+function parseBounds(raw: unknown): BrowserContextBounds | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const b = raw as Record<string, unknown>;
+  const x = Number(b.x);
+  const y = Number(b.y);
+  const width = Number(b.width);
+  const height = Number(b.height);
+  if (![x, y, width, height].every(Number.isFinite)) return undefined;
+  return { x, y, width, height };
+}
+
+function parseElementSummary(raw: unknown): BrowserContextElementSummary | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const e = raw as Record<string, unknown>;
+  const selector = typeof e.selector === "string" ? e.selector : undefined;
+  const tag = typeof e.tag === "string" ? e.tag : undefined;
+  if (!selector && !tag) return undefined;
+  const attributes = e.attributes && typeof e.attributes === "object" && !Array.isArray(e.attributes)
+    ? Object.fromEntries(
+      Object.entries(e.attributes as Record<string, unknown>)
+        .filter((entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string"),
+    )
+    : undefined;
+  const bounds = parseBounds(e.bounds);
+  return {
+    ...(selector ? { selector } : {}),
+    ...(tag ? { tag } : {}),
+    ...(typeof e.role === "string" ? { role: e.role } : {}),
+    ...(typeof e.name === "string" ? { name: e.name } : {}),
+    ...(typeof e.text === "string" ? { text: e.text } : {}),
+    ...(attributes && Object.keys(attributes).length ? { attributes } : {}),
+    ...(bounds ? { bounds } : {}),
+  };
+}
+
+function parseArtifactRef(raw: unknown): BrowserContextArtifactRef | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const a = raw as Record<string, unknown>;
+  if (typeof a.id !== "string" || !a.id) return undefined;
+  if (typeof a.mime !== "string" || !a.mime) return undefined;
+  const size = Number(a.size);
+  if (!Number.isSafeInteger(size) || size < 0) return undefined;
+  return { id: a.id, mime: a.mime, size };
+}
+
+/** Fail-soft rebuild of a stored `BrowserContext`. Unknown keys and artifact
+ *  `localPath` are dropped. Returns null when required fields are missing. */
+export function parseBrowserContext(raw: unknown): BrowserContext | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const c = raw as Record<string, unknown>;
+  if (typeof c.id !== "string" || !c.id) return null;
+  const type = c.type;
+  if (type !== "page" && type !== "element" && type !== "area" && type !== "text") return null;
+  if (typeof c.browserSessionId !== "string" || !c.browserSessionId) return null;
+  if (typeof c.projectId !== "string" || !c.projectId) return null;
+  const frameRevision = Number(c.frameRevision);
+  if (!Number.isSafeInteger(frameRevision) || frameRevision < 0) return null;
+  if (typeof c.url !== "string" || !c.url) return null;
+  if (typeof c.title !== "string") return null;
+  const viewportRaw = c.viewport && typeof c.viewport === "object" && !Array.isArray(c.viewport)
+    ? c.viewport as Record<string, unknown>
+    : null;
+  const width = Number(viewportRaw?.width);
+  const height = Number(viewportRaw?.height);
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1) return null;
+  if (typeof c.capturedAt !== "string" || !c.capturedAt) return null;
+  const regionRaw = c.region && typeof c.region === "object" && !Array.isArray(c.region)
+    ? c.region as Record<string, unknown>
+    : null;
+  const region = regionRaw
+    ? (() => {
+      const normalizedRaw = regionRaw.normalized && typeof regionRaw.normalized === "object"
+        && !Array.isArray(regionRaw.normalized)
+        ? regionRaw.normalized as Record<string, unknown>
+        : null;
+      const pixels = parseBounds(regionRaw.pixels);
+      if (!normalizedRaw || !pixels) return undefined;
+      const x = Number(normalizedRaw.x);
+      const y = Number(normalizedRaw.y);
+      const nWidth = Number(normalizedRaw.width);
+      const nHeight = Number(normalizedRaw.height);
+      if (![x, y, nWidth, nHeight].every(Number.isFinite)) return undefined;
+      return {
+        normalized: { x, y, width: nWidth, height: nHeight },
+        pixels,
+      };
+    })()
+    : undefined;
+  const element = parseElementSummary(c.element);
+  const intersecting = Array.isArray(c.intersecting)
+    ? c.intersecting.map(parseElementSummary).filter((el): el is BrowserContextElementSummary => el !== undefined)
+    : undefined;
+  const screenshot = parseArtifactRef(c.screenshot);
+  const crop = parseArtifactRef(c.crop);
+  return {
+    id: c.id,
+    type,
+    browserSessionId: c.browserSessionId,
+    projectId: c.projectId,
+    ...(typeof c.sessionId === "string" && c.sessionId ? { sessionId: c.sessionId } : {}),
+    frameRevision,
+    url: c.url,
+    title: c.title,
+    viewport: { width, height },
+    capturedAt: c.capturedAt,
+    ...(typeof c.note === "string" ? { note: c.note } : {}),
+    ...(typeof c.quote === "string" ? { quote: c.quote } : {}),
+    ...(typeof c.textSummary === "string" ? { textSummary: c.textSummary } : {}),
+    ...(typeof c.accessibilitySummary === "string" ? { accessibilitySummary: c.accessibilitySummary } : {}),
+    ...(typeof c.contentHash === "string" ? { contentHash: c.contentHash } : {}),
+    ...(region ? { region } : {}),
+    ...(element ? { element } : {}),
+    ...(intersecting && intersecting.length ? { intersecting } : {}),
+    ...(screenshot ? { screenshot } : {}),
+    ...(crop ? { crop } : {}),
+  };
 }
 
 function hostPath(url: string): string {

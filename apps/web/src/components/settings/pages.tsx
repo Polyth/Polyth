@@ -11,6 +11,7 @@ import {
   useStore,
 } from "../../store.ts";
 import { HEADER_METRIC_IDS, RESPONSE_ACTION_IDS, UI_DEFAULTS, setUiSettings, useUiSettings, type ContextIndicatorMode, type GlassEffect, type HeaderMetricId, type ResponseActionId } from "../../uiPrefs.ts";
+import { clampPromptHistoryLimit } from "@polyth/contracts";
 import { DEFAULT_SETTINGS, friendlyError, INTERFACE_FONTS } from "../../settings.ts";
 import { requestNotifyPermission } from "../../notify.ts";
 import { disablePush, enablePush, pushSubscription, pushUnsupportedReason } from "../../push.ts";
@@ -456,6 +457,13 @@ export function AppearancePage() {
 export function ChatPage() {
   const ui = useUiSettings();
   const settings = useStore((s) => s.settings);
+  const [limitEdit, setLimitEdit] = useState(String(ui.promptHistoryLimit));
+  useEffect(() => { setLimitEdit(String(ui.promptHistoryLimit)); }, [ui.promptHistoryLimit]);
+  const commitHistoryLimit = () => {
+    const next = clampPromptHistoryLimit(limitEdit, ui.promptHistoryLimit);
+    setLimitEdit(String(next));
+    if (next !== ui.promptHistoryLimit) setUiSettings({ promptHistoryLimit: next });
+  };
   // F9 hard switch lives server-side: disabled means nothing is generated at all
   const [assist, setAssist] = useState<AssistSettingsDto | null>(null);
   useEffect(() => { void api.assistSettings().then(setAssist).catch(() => setAssist(null)); }, []);
@@ -518,6 +526,39 @@ export function ChatPage() {
       </Row>
       <Row label={tr("settings.pages.mobileSendShortcut")} itemId="chat.mobileSendShortcut">
         <Seg value={settings.mobileSendShortcut} options={[["none", tr("common.none")], ["enter", "Enter"], ["shift-enter", "Shift+Enter"]]} onChange={(mobileSendShortcut) => updateSettings({ mobileSendShortcut })} />
+      </Row>
+      <Row
+        label={tr("settings.pages.promptHistory")}
+        hint={tr("settings.pages.promptHistoryHint")}
+        itemId="chat.promptHistory"
+      >
+        <Seg
+          value={ui.promptHistoryScope}
+          options={[
+            ["session", tr("settings.pages.promptHistoryScopeSession")],
+            ["space", tr("settings.pages.promptHistoryScopeSpace")],
+          ]}
+          onChange={(promptHistoryScope) => setUiSettings({ promptHistoryScope })}
+        />
+      </Row>
+      <Row
+        label={tr("settings.pages.promptHistoryLimit")}
+        hint={tr("settings.pages.promptHistoryLimitHint")}
+        itemId="chat.promptHistoryLimit"
+      >
+        <div className="editor-font-control">
+          <TextInput
+            uiSize="sm"
+            type="number"
+            min={1}
+            max={200}
+            value={limitEdit}
+            aria-label={tr("settings.pages.promptHistoryLimit")}
+            onChange={(e) => setLimitEdit(e.target.value)}
+            onBlur={commitHistoryLimit}
+            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+          />
+        </div>
       </Row>
       {assist && (
         <Row

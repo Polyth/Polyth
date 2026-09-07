@@ -7,6 +7,7 @@ import type {
   AutoAcceptSetting,
   BulkSessionResult,
   ClientSettingsDto,
+  PromptHistoryDto,
   DictationSessionDto,
   ForkResult,
   FusionDto,
@@ -1526,6 +1527,12 @@ export const api = {
     ),
   sshCreateProject: (input: { connectionId: string; path: string; name?: string; createDirectory?: boolean }) =>
     jfetch<Project>("/api/ssh/projects", json("POST", input)),
+
+  promptHistory: (opts: { scope: "session" | "space"; sessionId?: string; limit: number }) => {
+    const q = new URLSearchParams({ scope: opts.scope, limit: String(opts.limit) });
+    if (opts.sessionId) q.set("sessionId", opts.sessionId);
+    return jfetch<PromptHistoryDto>(`/api/prompt-history?${q}`);
+  },
 
   // ---- shared client preferences (Appearance, chat, notifications, …) ----------
   /** Server copy of this workspace's client settings; `revision` 0 means the

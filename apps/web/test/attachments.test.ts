@@ -13,7 +13,7 @@ const mem = new Map<string, string>();
 
 const {
   addAttachment, attachBrowserContext, attachText, clearAttachments, isLargeTextPaste, MAX_PENDING_ATTACHMENTS, newAttachmentId, pendingAttachments,
-  removeAttachment, takeAttachments,
+  removeAttachment, seedAttachments, takeAttachments,
 } = await import("../src/attachments.ts");
 const { buildModel } = await import("../src/reduce.ts");
 
@@ -155,6 +155,24 @@ test("discarding a browser-context chip deletes managed artifacts", async () => 
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("recalled attachments seed the composer without uploading", () => {
+  const recalled = ref({ id: "hist", path: "_inbox/shot.png", name: "shot.png" });
+  seedAttachments("sess-hist", [recalled]);
+  assert.deepEqual(pendingAttachments("sess-hist"), [recalled]);
+  removeAttachment("sess-hist", "hist");
+  assert.equal(pendingAttachments("sess-hist").length, 0);
+});
+
+test("takeAttachments sends canonical draft pills and clears the store", () => {
+  const draft = ref({ id: "draft", path: "draft.txt", name: "draft.txt" });
+  seedAttachments("sess-send", [draft]);
+  const taken = takeAttachments("sess-send");
+  assert.equal(taken[0]?.id, "draft");
+  assert.equal(pendingAttachments("sess-send").length, 0);
+  addAttachment("sess-send", taken[0]!);
+  assert.equal(pendingAttachments("sess-send")[0]?.id, "draft");
 });
 
 test("attachment IDs fall back when randomUUID is unavailable", () => {

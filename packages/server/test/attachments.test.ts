@@ -55,7 +55,7 @@ test("sanitizeAttachments: valid refs pass and the file url is recomputed", () =
   assert.equal(out[3]?.browserContext?.screenshot?.localPath, undefined);
 });
 
-test("sanitizeAttachments: browser context uses the current project and known element fields", () => {
+test("sanitizeAttachments: browser context keeps capture provenance and known element fields", () => {
   const out = sanitizeAttachments([
     {
       id: "a4",
@@ -91,7 +91,7 @@ test("sanitizeAttachments: browser context uses the current project and known el
       },
     },
   ], OPTS);
-  assert.equal(out[0]?.browserContext?.projectId, "p1");
+  assert.equal(out[0]?.browserContext?.projectId, "other-space");
   assert.equal(out[0]?.browserContext?.element?.tag, "button");
   assert.equal(
     (out[0]?.browserContext?.element as { onclick?: unknown } | undefined)?.onclick,
@@ -105,6 +105,16 @@ test("sanitizeAttachments: browser context uses the current project and known el
   );
   assert.equal(out[0]?.browserContext?.region?.pixels?.width, 117);
 });
+
+test("sanitizeAttachments rebuilds refs and drops unknown fields", () => {
+  const out = sanitizeAttachments([
+    { id: "a1", name: "gone.txt", mime: "text/plain", size: 4, path: "gone.txt", extra: true },
+  ], OPTS);
+  assert.equal(out.length, 1);
+  assert.equal(out[0]?.path, "gone.txt");
+  assert.equal("extra" in out[0]!, false);
+});
+
 
 test("sanitizeAttachments: typed rejections", () => {
   const bad = (refs: unknown, re: RegExp) => {
@@ -123,6 +133,7 @@ test("sanitizeAttachments: typed rejections", () => {
   bad([{ id: "x", name: "a", mime: "not a mime", size: 1, path: "f.txt" }], /mime/);
   bad([{ id: "x", name: "a", mime: "text/plain", size: 1, kind: "blob", path: "f.txt" }], /kind/);
   bad([{ id: "x", name: "a", mime: "text/plain", size: 1, kind: "range", path: "f.txt", range: [0, 4] }], /range/);
+  bad([{ id: "x", name: "a", mime: "application/vnd.polyth.browser-context+json", size: 0, kind: "browser-context", browserContext: { id: "x" } }], /browser context invalid/);
   bad(Array.from({ length: 17 }, (_, i) => ({ id: `i${i}`, name: "a", mime: "text/plain", size: 1, path: "f.txt" })), /too many/);
 });
 

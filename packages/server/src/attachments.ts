@@ -1,7 +1,7 @@
 // F2: attachment sanitation for /api/sessions/:id/message. Pure shape checks
 // live here (testable without IO); existence checks stay in the session
 // service where the project root is known.
-import type { AttachmentRef } from "@polyth/contracts";
+import { parseBrowserContext, type AttachmentRef, type BrowserContext } from "@polyth/contracts";
 
 const MAX_ATTACHMENTS = 16;
 const NAME_MAX = 200;
@@ -72,7 +72,7 @@ export function sanitizeAttachments(
     }
 
     if (kind === "browser-context") {
-      const ctx = sanitizeBrowserContext(a.browserContext, opts.projectId);
+      const ctx = sanitizeBrowserContext(a.browserContext);
       out.push({
         id,
         name,
@@ -112,141 +112,66 @@ export function sanitizeAttachments(
   return out;
 }
 
-function sanitizeBounds(raw: unknown): import("@polyth/contracts").BrowserContextBounds | undefined {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
-  const b = raw as Record<string, unknown>;
-  const x = Number(b.x);
-  const y = Number(b.y);
-  const width = Number(b.width);
-  const height = Number(b.height);
-  if (![x, y, width, height].every((n) => Number.isFinite(n))) return undefined;
-  return {
-    x: Math.round(x),
-    y: Math.round(y),
-    width: Math.max(0, Math.round(width)),
-    height: Math.max(0, Math.round(height)),
-  };
+function clip(value: string | undefined, max: number): string | undefined {
+  const next = value?.trim().slice(0, max);
+  return next || undefined;
 }
 
-function sanitizeElement(raw: unknown): import("@polyth/contracts").BrowserContextElementSummary | undefined {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
-  const e = raw as Record<string, unknown>;
-  const selector = typeof e.selector === "string" ? e.selector.slice(0, 300) : undefined;
-  const tag = typeof e.tag === "string" ? e.tag.slice(0, 40) : undefined;
-  if (!selector && !tag) return undefined;
-  const attributes = e.attributes && typeof e.attributes === "object" && !Array.isArray(e.attributes)
+function clipElement(el: NonNullable<BrowserContext["element"]>): NonNullable<BrowserContext["element"]> {
+  const attributes = el.attributes
     ? Object.fromEntries(
-      Object.entries(e.attributes as Record<string, unknown>)
-        .filter((entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string")
-        .slice(0, 12)
-        .map(([k, v]) => [k.slice(0, 80), v.slice(0, 200)]),
+      Object.entries(el.attributes).slice(0, 12).map(([k, v]) => [k.slice(0, 80), v.slice(0, 200)]),
     )
     : undefined;
-  const bounds = sanitizeBounds(e.bounds);
   return {
-    ...(selector ? { selector } : {}),
-    ...(tag ? { tag } : {}),
-    ...(typeof e.role === "string" ? { role: e.role.slice(0, 80) } : {}),
-    ...(typeof e.name === "string" ? { name: e.name.slice(0, 300) } : {}),
-    ...(typeof e.text === "string" ? { text: e.text.slice(0, 500) } : {}),
+    ...(el.selector ? { selector: el.selector.slice(0, 300) } : {}),
+    ...(el.tag ? { tag: el.tag.slice(0, 40) } : {}),
+    ...(el.role ? { role: el.role.slice(0, 80) } : {}),
+    ...(el.name ? { name: el.name.slice(0, 300) } : {}),
+    ...(el.text ? { text: el.text.slice(0, 500) } : {}),
     ...(attributes && Object.keys(attributes).length ? { attributes } : {}),
-    ...(bounds ? { bounds } : {}),
+    ...(el.bounds ? { bounds: el.bounds } : {}),
   };
 }
 
-function sanitizeRegion(raw: unknown): import("@polyth/contracts").BrowserContextRegion | undefined {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
-  const r = raw as Record<string, unknown>;
-  const normalizedRaw = r.normalized && typeof r.normalized === "object" && !Array.isArray(r.normalized)
-    ? r.normalized as Record<string, unknown>
-    : null;
-  const pixels = sanitizeBounds(r.pixels);
-  if (!normalizedRaw || !pixels) return undefined;
-  const x = Number(normalizedRaw.x);
-  const y = Number(normalizedRaw.y);
-  const width = Number(normalizedRaw.width);
-  const height = Number(normalizedRaw.height);
-  if (![x, y, width, height].every((n) => Number.isFinite(n))) return undefined;
-  const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
-  return {
-    normalized: {
-      x: clamp01(x),
-      y: clamp01(y),
-      width: clamp01(width),
-      height: clamp01(height),
-    },
-    pixels,
+/** Strict request policy over the shared fail-soft `parseBrowserContext` shape.
+ *  `projectId` is capture provenance and is not rewritten to the destination. */
+function sanitizeBrowserContext(raw: unknown): BrowserContext {
+  const parsed = parseBrowserContext(raw);
+  if (!parsed) throw invalid("browser context invalid");
+  if (parsed.id.length > 100) throw invalid("browser context id required");
+  if (parsed.browserSessionId.length > 100) throw invalid("browser session id required");
+  if (parsed.url.length > URL_MAX) throw invalid("browser context url required");
+  const artifact = (value: BrowserContext["screenshot"]) => {
+    if (!value) return undefined;
+    if (value.id.length > 120 || !MIME_RE.test(value.mime)) throw invalid("browser artifact invalid");
+    return { id: value.id, mime: value.mime, size: value.size };
   };
-}
-
-function sanitizeBrowserContext(raw: unknown, projectId: string): import("@polyth/contracts").BrowserContext {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    throw invalid("browser context required");
-  }
-  const c = raw as Record<string, unknown>;
-  const id = typeof c.id === "string" && c.id.trim() && c.id.length <= 100 ? c.id : undefined;
-  if (!id) throw invalid("browser context id required");
-  const type = c.type;
-  if (type !== "page" && type !== "element" && type !== "area" && type !== "text") {
-    throw invalid("browser context type invalid");
-  }
-  const browserSessionId = typeof c.browserSessionId === "string" ? c.browserSessionId : "";
-  if (!browserSessionId || browserSessionId.length > 100) throw invalid("browser session id required");
-  const url = typeof c.url === "string" ? c.url.trim() : "";
-  if (!url || url.length > URL_MAX) throw invalid("browser context url required");
-  const title = typeof c.title === "string" ? c.title.slice(0, 500) : "";
-  const frameRevision = Number(c.frameRevision);
-  if (!Number.isSafeInteger(frameRevision) || frameRevision < 0) throw invalid("browser frame revision invalid");
-  const viewportRaw = c.viewport && typeof c.viewport === "object" && !Array.isArray(c.viewport)
-    ? c.viewport as Record<string, unknown>
-    : null;
-  const width = Number(viewportRaw?.width);
-  const height = Number(viewportRaw?.height);
-  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1) {
-    throw invalid("browser viewport invalid");
-  }
-  const capturedAt = typeof c.capturedAt === "string" && c.capturedAt ? c.capturedAt : new Date(0).toISOString();
-  const artifact = (value: unknown) => {
-    if (value === undefined || value === null) return undefined;
-    if (typeof value !== "object" || Array.isArray(value)) throw invalid("browser artifact invalid");
-    const a = value as Record<string, unknown>;
-    const artId = typeof a.id === "string" ? a.id : "";
-    const mime = typeof a.mime === "string" ? a.mime : "";
-    const size = Number(a.size);
-    if (!artId || artId.length > 120 || !MIME_RE.test(mime) || !Number.isSafeInteger(size) || size < 0) {
-      throw invalid("browser artifact invalid");
-    }
-    return { id: artId, mime, size };
-  };
-  const region = sanitizeRegion(c.region);
-  const element = sanitizeElement(c.element);
-  const intersecting = Array.isArray(c.intersecting)
-    ? c.intersecting.slice(0, 12).map(sanitizeElement).filter((el): el is NonNullable<typeof el> => el !== undefined)
-    : undefined;
+  const intersecting = parsed.intersecting?.slice(0, 12).map(clipElement);
+  const screenshot = artifact(parsed.screenshot);
+  const crop = artifact(parsed.crop);
+  const note = clip(parsed.note, 2_000);
+  const quote = clip(parsed.quote, 4_000);
   return {
-    id,
-    type,
-    browserSessionId,
-    projectId,
-    ...(typeof c.sessionId === "string" && c.sessionId ? { sessionId: c.sessionId } : {}),
-    frameRevision,
-    url,
-    title,
-    viewport: { width, height },
-    capturedAt,
-    ...(typeof c.note === "string" && c.note.trim() ? { note: c.note.trim().slice(0, 2_000) } : {}),
-    ...(typeof c.quote === "string" && c.quote.trim() ? { quote: c.quote.trim().slice(0, 4_000) } : {}),
-    ...(typeof c.textSummary === "string" && c.textSummary
-      ? { textSummary: c.textSummary.slice(0, 6_000) }
-      : {}),
-    ...(typeof c.accessibilitySummary === "string" && c.accessibilitySummary
-      ? { accessibilitySummary: c.accessibilitySummary.slice(0, 2_000) }
-      : {}),
-    ...(typeof c.contentHash === "string" ? { contentHash: c.contentHash.slice(0, 64) } : {}),
-    ...(region ? { region } : {}),
-    ...(element ? { element } : {}),
+    id: parsed.id,
+    type: parsed.type,
+    browserSessionId: parsed.browserSessionId,
+    projectId: parsed.projectId,
+    ...(parsed.sessionId ? { sessionId: parsed.sessionId } : {}),
+    frameRevision: parsed.frameRevision,
+    url: parsed.url,
+    title: parsed.title.slice(0, 500),
+    viewport: parsed.viewport,
+    capturedAt: parsed.capturedAt,
+    ...(note ? { note } : {}),
+    ...(quote ? { quote } : {}),
+    ...(parsed.textSummary ? { textSummary: parsed.textSummary.slice(0, 6_000) } : {}),
+    ...(parsed.accessibilitySummary ? { accessibilitySummary: parsed.accessibilitySummary.slice(0, 2_000) } : {}),
+    ...(parsed.contentHash ? { contentHash: parsed.contentHash.slice(0, 64) } : {}),
+    ...(parsed.region ? { region: parsed.region } : {}),
+    ...(parsed.element ? { element: clipElement(parsed.element) } : {}),
     ...(intersecting && intersecting.length ? { intersecting } : {}),
-    ...(artifact(c.screenshot) ? { screenshot: artifact(c.screenshot) } : {}),
-    ...(artifact(c.crop) ? { crop: artifact(c.crop) } : {}),
+    ...(screenshot ? { screenshot } : {}),
+    ...(crop ? { crop } : {}),
   };
 }

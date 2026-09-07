@@ -220,3 +220,19 @@ test("mobile shortcut settings preserve order and reject unknown or duplicate id
     ["settings", "files", "notification-centre"],
   );
 });
+
+test("prompt history settings default to the current session and 40 prompts", () => {
+  const defaults = ui.parseUiSettings(null);
+  assert.equal(defaults.promptHistoryScope, "session");
+  assert.equal(defaults.promptHistoryLimit, 40);
+  const parsed = ui.parseUiSettings(JSON.stringify({
+    promptHistoryScope: "server",
+    promptHistoryLimit: 12.6,
+  }));
+  assert.equal(parsed.promptHistoryScope, "space");
+  assert.equal(parsed.promptHistoryLimit, 13);
+  assert.equal(ui.parseUiSettings(JSON.stringify({ promptHistoryScope: "space" })).promptHistoryScope, "space");
+  assert.equal(ui.parseUiSettings(JSON.stringify({ promptHistoryScope: "nope" })).promptHistoryScope, "session");
+  assert.equal(ui.parseUiSettings(JSON.stringify({ promptHistoryLimit: 0 })).promptHistoryLimit, 1);
+  assert.equal(ui.parseUiSettings(JSON.stringify({ promptHistoryLimit: 9999 })).promptHistoryLimit, 200);
+});
