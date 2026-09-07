@@ -64,7 +64,14 @@ const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { resetDocsForTest } = await import("../widgets/editor/fileDocs.ts");
 const { getEditorPrefs } = await import("../../../apps/web/src/uiPrefs.ts");
+const { registerEditorSurface } = await import("../../../apps/web/src/resources/views.ts");
 const { default: FilePane } = await import("../widgets/editor/FilePane.tsx");
+
+registerEditorSurface((props) => createElement("div", {
+  className: "editor-code",
+  "aria-label": props.ariaLabel,
+  "data-path": props.path,
+}));
 
 const MouseEventCtor = (dom as unknown as { MouseEvent: typeof MouseEvent }).MouseEvent;
 const click = (el: Element) => el.dispatchEvent(new MouseEventCtor("click", { bubbles: true }));
@@ -76,7 +83,7 @@ async function mountFile(path: string) {
   await act(async () => {
     root.render(createElement(FilePane, { projectId: "p1", sessionId: null, resource: path, visible: true }));
   });
-  await act(async () => { await Promise.resolve(); });
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
   return {
     container,
     unmount: async () => {
@@ -86,19 +93,14 @@ async function mountFile(path: string) {
   };
 }
 
-test("code files open straight into edit mode with a highlight backdrop; toolbar is trimmed", async () => {
+test("code files open straight into edit mode; toolbar is trimmed", async () => {
   resetDocsForTest();
   const { container, unmount } = await mountFile("src/app.ts");
   try {
-    // Finding 4: no Edit-button detour — the textarea IS the first view.
-    const ta = container.querySelector<HTMLTextAreaElement>("textarea.editor-ta");
-    assert.ok(ta, "textarea rendered on first open");
-    assert.equal(ta!.value, contents["src/app.ts"]);
-    assert.equal(ta!.getAttribute("aria-label"), "Edit src/app.ts");
-    const backdrop = container.querySelector<HTMLElement>(".editor-hl-backdrop");
-    assert.ok(backdrop, "highlight backdrop rendered while editing");
-    assert.match(backdrop!.innerHTML, /tok-kw/, "language-detected tokens present while editing");
-    assert.equal(backdrop!.getAttribute("aria-hidden"), "true", "backdrop stays out of the a11y tree");
+    // Finding 4: no Edit-button detour — the editor surface IS the first view.
+    const surface = container.querySelector(".editor-code");
+    assert.ok(surface, "editor surface rendered on first open");
+    assert.equal(surface!.getAttribute("aria-label"), "Edit src/app.ts");
     assert.equal(container.querySelector('[role="switch"]'), null, "non-previewable files have no mode switch");
 
     // Finding 5: the trimmed toolbar has no permanent single-action buttons.
@@ -140,7 +142,7 @@ test("markdown opens in preview behind a real switch; the choice persists per ki
   try {
     // Finding 3: preview is the landing mode…
     assert.ok(first.container.querySelector(".editor-md-preview"), "markdown lands in preview");
-    assert.equal(first.container.querySelector("textarea.editor-ta"), null);
+    assert.equal(first.container.querySelector(".editor-code"), null);
     const sw = first.container.querySelector<HTMLElement>('[role="switch"]');
     assert.ok(sw, "a real switch controls preview↔edit");
     assert.equal(sw!.getAttribute("aria-checked"), "true", "switch reports preview on");
@@ -148,7 +150,7 @@ test("markdown opens in preview behind a real switch; the choice persists per ki
     // …and the switch flips to edit without closing the file.
     await act(async () => { click(sw!); });
     assert.equal(first.container.querySelector(".editor-md-preview"), null, "preview hidden after flip");
-    assert.ok(first.container.querySelector("textarea.editor-ta"), "edit mode active after flip");
+    assert.ok(first.container.querySelector(".editor-code"), "edit mode active after flip");
     assert.equal(sw!.getAttribute("aria-checked"), "false");
     assert.equal(getEditorPrefs().previewByKind.markdown, false, "flip persists the per-kind choice");
   } finally {
@@ -159,7 +161,7 @@ test("markdown opens in preview behind a real switch; the choice persists per ki
   resetDocsForTest();
   const second = await mountFile("notes.md");
   try {
-    assert.ok(second.container.querySelector("textarea.editor-ta"), "persisted choice lands in edit mode");
+    assert.ok(second.container.querySelector(".editor-code"), "persisted choice lands in edit mode");
     assert.equal(second.container.querySelector(".editor-md-preview"), null);
     const sw = second.container.querySelector<HTMLElement>('[role="switch"]')!;
     assert.equal(sw.getAttribute("aria-checked"), "false");

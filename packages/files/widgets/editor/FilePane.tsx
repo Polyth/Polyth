@@ -1,24 +1,33 @@
 // UX-PANE-MODEL / EXTENSION-SEAMS slice 3: ONE file document's lifecycle —
 // read, edit, preview, revision-guarded save/autosave, IME pause, conflict,
 // external replacement, deletion, Reload/Overwrite/Recreate/Retry — behind
-// the "file" pane provider. The buffer lives in editor/fileDocs.ts scoped by
-// canonical projectId + (sessionId ?? "project"), so it survives tab,
-// surface, session, and presentation switches without ever leaking into
-// another scope. This component is kept alive (hidden, inert) by PaneHost;
-// its UI-only revision polling pauses while hidden.
+// the "file" pane provider. Live text lives in the editor runtime (pull
+// model); this pane is chrome + preview. Keep-alive (hidden, inert) is
+// PaneHost; revision polling pauses while hidden.
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { api, httpStatusOf } from "@polyth/session/web-api";
+import { api } from "@polyth/session/web-api";
 import { clearEditorLocation, useStore } from "../../../../apps/web/src/store.ts";
 import { MarkdownDoc } from "../../../../apps/web/src/markdown.tsx";
 import JsonTree, { tryParseJson } from "../../../../apps/web/src/markdown/JsonTree.tsx";
-import { highlight, highlightLines, langOf } from "../../../../apps/web/src/highlight.ts";
-import { formatFileChat, formatSelectionChat, lineRangeOf } from "../../../../apps/web/src/chatclip.ts";
+import { highlightLines, langOf } from "../../../../apps/web/src/highlight.ts";
+import { formatFileChat, formatSelectionChat } from "../../../../apps/web/src/chatclip.ts";
 import { requestComposerInsert } from "../../../../apps/web/src/composerInsert.ts";
 import { MOD } from "../../../../apps/web/src/format.ts";
 import { clampMenuPosition } from "../../../../apps/web/src/selectionActions.ts";
 import { copyText } from "../../../../apps/web/src/utils.ts";
 import { getEditorPrefs, setEditorPreviewDefault, useUiSettings } from "../../../../apps/web/src/uiPrefs.ts";
 import { confirmAlert } from "../../../../apps/web/src/alerts.ts";
+import {
+  EditorSurfaceSlot,
+  readEditorSelection,
+  resourceViewsVersion,
+  subscribeResourceViews,
+} from "../../../../apps/web/src/resources/views.ts";
+import {
+  deleteDoc, docScopeKey, docsVersion, ensureDoc, fileDocKey, installDocUnloadGuard,
+  isDocDirty, moveDoc, subscribeDocs,
+} from "./fileDocs.ts";
+import "../fileProvider.ts";
 import {
   Button,
   CheckIcon,
@@ -32,24 +41,10 @@ import {
   type MenuEntry,
 } from "../../../../apps/web/src/components/ui/index.ts";
 import {
-  autosaveDelay,
-  beginLiveFileSave,
-  checkLiveFile,
-  completeLiveFileSave,
-  conflictLiveFile,
-  dismissLiveFileNotice,
-  editLiveFile,
-  failLiveFileSave,
   htmlPreviewDocument,
   initialPreviewVisible,
-  loadedLiveFile,
   previewKindForPath,
-  restoreLiveFileBuffer,
-} from "./liveFile.ts";
-import {
-  bumpDocs, deleteDoc, docScopeKey, docsVersion, ensureDoc, installDocUnloadGuard,
-  isDocDirty, moveDoc, subscribeDocs,
-} from "./fileDocs.ts";
+} from "../../../../apps/web/src/resources/liveFile.ts";
 import { registerPaneProvider, type PaneResourceContext } from "../../../../apps/web/src/workspace/paneProviders.ts";
 import { usePaneActions } from "../../../../apps/web/src/components/workspace/PaneHost.tsx";
 import { tr } from "../../../../apps/web/src/i18n/index.ts";
@@ -61,7 +56,6 @@ const msg = (err: unknown) => (err instanceof Error ? err.message : String(err))
 const INLINE_FILE_CHARS = 4000;
 /** Above this many lines, fall back to a plain block (no per-line rows). */
 const MAX_ROWED_LINES = 8000;
-const AUTOSAVE_MS = 1_500;
 const FILE_REFRESH_MS = 8_000;
 
 type MediaKind = "image" | "audio" | "video" | "pdf";
@@ -92,20 +86,23 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   const location = useStore((s) => s.editorLocation);
   const actions = usePaneActions();
   useSyncExternalStore(subscribeDocs, docsVersion);
+  useSyncExternalStore(subscribeResourceViews, resourceViewsVersion);
 
   const td = ensureDoc(scope, path);
+  const snap = td.handle.getSnapshot();
   const doc = td.doc;
-  const buf = td.buf;
   const editing = td.editing;
   const error = td.error;
-  const live = td.live;
-  const dirty = doc !== null && buf !== doc.content;
-  const readOnly = doc ? doc.truncated || doc.tooLarge === true : false;
+  const live = snap.live;
+  const dirty = snap.dirty;
+  const readOnly = snap.readOnly;
+  // Preview/read views need the live text; edit mode must not toString per render.
+  const previewText = !editing ? td.handle.getBuffer() : "";
 
-  // ---- transient chrome (per keep-alive pane, so it survives tab switches) -----
   const [wrap, setWrap] = useState(true);
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState("");
+  const [opError, setOpError] = useState("");
   const [renameTo, setRenameTo] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
   const [hlRange, setHlRange] = useState<[number, number] | null>(null);
@@ -113,42 +110,21 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   const [gotoVal, setGotoVal] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [selHint, setSelHint] = useState<{ x: number; y: number } | null>(null);
+  const [reveal, setReveal] = useState<{ startLine: number; endLine: number } | null>(null);
 
   const bodyRef = useRef<HTMLDivElement>(null);
-  const taRef = useRef<HTMLTextAreaElement>(null);
-  const gutterRef = useRef<HTMLPreElement>(null);
-  const hlRef = useRef<HTMLPreElement>(null);
+  const [modeArmed, setModeArmed] = useState(false);
 
   useEffect(() => { installDocUnloadGuard(); }, []);
 
-  // Load once; keep-alive afterwards (scope switch back reuses the buffer).
-  // Finding 3/4: the landing mode is decided here — previewable kinds honor
-  // the per-kind preference (preview by default), everything else editable
-  // opens straight into edit mode.
   useEffect(() => {
-    const entry = ensureDoc(scope, path);
-    if (entry.doc || entry.loading) return;
-    entry.loading = true;
-    bumpDocs();
-    api.filesRead(projectId, path, sid)
-      .then((got) => {
-        entry.doc = got;
-        entry.buf = got.content;
-        entry.live = loadedLiveFile(got.revision);
-        const canEdit = !got.truncated && got.tooLarge !== true;
-        const prefsNow = getEditorPrefs();
-        entry.editing = canEdit && !initialPreviewVisible(path, prefsNow.openInPreview, prefsNow.previewByKind);
-        entry.loading = false;
-        bumpDocs();
-      })
-      .catch((err) => {
-        entry.error = msg(err);
-        entry.loading = false;
-        bumpDocs();
-      });
-  }, [scope, path, projectId, sid]);
+    if (modeArmed || snap.status !== "ready") return;
+    const canEdit = !snap.truncated && !snap.binary;
+    const prefsNow = getEditorPrefs();
+    td.editing = canEdit && !initialPreviewVisible(path, prefsNow.openInPreview, prefsNow.previewByKind);
+    setModeArmed(true);
+  }, [modeArmed, path, snap.status, snap.truncated, snap.binary, td]);
 
-  // Pending location from a file reference (chat) — consume once the doc is in.
   useEffect(() => {
     if (!visible || !doc || !location || location.path !== doc.path) return;
     if (location.startLine !== undefined) {
@@ -164,11 +140,9 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
     return () => clearTimeout(t);
   }, [flash]);
 
-  /** Flip preview↔edit (finding 3). User-driven flips persist per kind. */
   const setPreviewMode = (on: boolean, opts: { persist?: boolean } = {}) => {
     if (!doc || readOnly) return;
     td.editing = !on;
-    bumpDocs();
     setSelHint(null);
     const kind = previewKindForPath(doc.path);
     if (opts.persist !== false && kind) setEditorPreviewDefault(kind, on);
@@ -176,54 +150,11 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
 
   const gotoLine = (start: number, end?: number) => {
     const last = end !== undefined && end >= start ? end : start;
-    if (doc && !readOnly) {
-      // Editable files select the range in the textarea (finding 4: editing
-      // IS the source view now).
-      if (!td.editing) setPreviewMode(false, { persist: false });
-      requestAnimationFrame(() => {
-        const ta = taRef.current;
-        if (!ta) return;
-        const rows = ta.value.split("\n");
-        const from = Math.min(Math.max(1, start), rows.length);
-        const to = Math.min(Math.max(from, last), rows.length);
-        const offsetOf = (line: number) => rows.slice(0, line - 1).reduce((n, l) => n + l.length + 1, 0);
-        const startOff = offsetOf(from);
-        const endOff = Math.min(ta.value.length, offsetOf(to) + (rows[to - 1]?.length ?? 0));
-        ta.focus();
-        ta.setSelectionRange(startOff, endOff);
-        const lineHeight = parseFloat(window.getComputedStyle(ta).lineHeight) || 19;
-        ta.scrollTop = Math.max(0, (from - 3) * lineHeight);
-        syncEditScroll();
-      });
-      return;
-    }
+    if (doc && !readOnly && !td.editing) setPreviewMode(false, { persist: false });
     setHlRange([start, last]);
-    requestAnimationFrame(() => {
-      const row = bodyRef.current?.querySelector(`[data-ln="${start}"]`);
-      row?.scrollIntoView({ block: "center" });
-    });
+    setReveal({ startLine: start, endLine: last });
   };
 
-  /** Keep the highlight backdrop and gutter glued to the textarea scroll. */
-  const syncEditScroll = () => {
-    const ta = taRef.current;
-    if (!ta) return;
-    if (gutterRef.current) gutterRef.current.scrollTop = ta.scrollTop;
-    if (hlRef.current) {
-      hlRef.current.scrollTop = ta.scrollTop;
-      hlRef.current.scrollLeft = ta.scrollLeft;
-    }
-  };
-
-  const setBuf = (text: string) => {
-    const e = ensureDoc(scope, path);
-    e.buf = text;
-    const isDirty = !!e.doc && text !== e.doc.content;
-    if (e.live) e.live = isDirty ? editLiveFile(e.live) : restoreLiveFileBuffer(e.live);
-    bumpDocs();
-  };
-
-  // ---- chat inserts ----------------------------------------------------------
   const insertToChat = (text: string) => {
     requestComposerInsert(text);
     setFlash("Added to chat ✓");
@@ -232,14 +163,12 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   const addSelection = () => {
     if (!doc) return;
     if (editing) {
-      const el = taRef.current;
-      if (!el || el.selectionStart === el.selectionEnd) {
+      const sel = readEditorSelection(fileDocKey(projectId, sessionId, path));
+      if (!sel) {
         setFlash("Select some text first");
         return;
       }
-      const text = buf.slice(el.selectionStart, el.selectionEnd);
-      const { startLine, endLine } = lineRangeOf(buf, el.selectionStart, el.selectionEnd);
-      insertToChat(formatSelectionChat(doc.path, text, startLine, endLine));
+      insertToChat(formatSelectionChat(doc.path, sel.text, sel.startLine, sel.endLine));
       return;
     }
     const s = window.getSelection();
@@ -268,35 +197,12 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
 
   const addFile = () => {
     if (!doc) return;
-    insertToChat(readOnly ? `@${doc.path}` : formatFileChat(doc.path, doc.content, INLINE_FILE_CHARS));
+    insertToChat(readOnly ? `@${doc.path}` : formatFileChat(doc.path, td.handle.getBuffer(), INLINE_FILE_CHARS));
   };
 
-  // ---- contextual selection hint (finding 5) -----------------------------------
-  // A small floating "add to chat" affordance that exists ONLY while a text
-  // selection is active in this file — never a permanent toolbar button.
   const placeHint = (x: number, y: number) =>
     setSelHint(clampMenuPosition(x, y, 34, 30, window.innerWidth, window.innerHeight));
 
-  /** Edit mode: pointer selections anchor at the pointer; keyboard selections
-   *  fall back to a caret-line approximation. Collapsed selections clear it. */
-  const updateEditHint = (at?: { x: number; y: number }) => {
-    const ta = taRef.current;
-    if (!ta || ta.selectionStart === ta.selectionEnd) {
-      setSelHint(null);
-      return;
-    }
-    if (at) {
-      placeHint(at.x, at.y);
-      return;
-    }
-    const rect = ta.getBoundingClientRect();
-    const lineHeight = parseFloat(window.getComputedStyle(ta).lineHeight) || 19;
-    const line = ta.value.slice(0, ta.selectionEnd).split("\n").length;
-    const y = rect.top + 8 + line * lineHeight - ta.scrollTop;
-    placeHint(rect.left + 24, Math.min(Math.max(y, rect.top + 4), rect.bottom - 34));
-  };
-
-  // Read/preview modes: follow the DOM selection inside this pane's body.
   useEffect(() => {
     if (!visible || editing) return;
     const onSelectionChange = () => {
@@ -317,89 +223,21 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, editing]);
 
-  // Mode, file, or visibility changes invalidate the hint position.
   useEffect(() => { setSelHint(null); }, [visible, editing, path]);
 
-  // ---- revision-guarded save / reload / check ----------------------------------
   const save = async (opts: { force?: boolean } = {}) => {
-    const e = ensureDoc(scope, path);
-    if (!e.doc || e.doc.truncated || e.doc.tooLarge) return;
-    // One in-flight write at a time: mid-flight edits keep kind "saving" and
-    // must not start a second autosave/manual save until this one settles.
-    if (e.live?.kind === "saving") return;
-    const content = e.buf;
-    e.live = beginLiveFileSave(e.live ?? loadedLiveFile(e.doc.revision));
-    bumpDocs();
-    try {
-      // This revision came from filesRead; only an explicit conflict overwrite
-      // omits it. Autosave can therefore never silently clobber an external edit.
-      const base = opts.force ? undefined : e.doc.revision;
-      const res = await api.filesWrite(projectId, path, content, base, sid);
-      const stillDirty = e.buf !== content;
-      e.doc = { ...e.doc, content, revision: res.revision };
-      e.live = completeLiveFileSave(e.live, res.revision, stillDirty);
-      e.error = "";
-      if (!stillDirty) setFlash("Saved ✓");
-    } catch (err) {
-      if (httpStatusOf(err) === 409) {
-        e.live = conflictLiveFile(e.live);
-      } else {
-        e.error = msg(err);
-        e.live = failLiveFileSave(e.live);
-      }
-    } finally {
-      bumpDocs();
-    }
+    await td.handle.save(opts);
+    if (td.handle.getSnapshot().live?.kind === "saved") setFlash("Saved ✓");
   };
 
   const reload = async () => {
-    const e = ensureDoc(scope, path);
-    try {
-      const got = await api.filesRead(projectId, path, sid);
-      e.doc = got;
-      e.buf = got.content;
-      e.live = loadedLiveFile(got.revision);
-      e.error = "";
-    } catch (err) {
-      e.error = msg(err);
-    }
-    bumpDocs();
+    await td.handle.reload();
   };
 
   const checkFile = async () => {
-    const e = ensureDoc(scope, path);
-    if (!e.doc || !e.live) return;
-    try {
-      const stat = await api.filesStat(projectId, path, sid);
-      e.live = checkLiveFile(e.live, { kind: "present", revision: stat.revision });
-    } catch (err) {
-      e.live = httpStatusOf(err) === 404
-        ? checkLiveFile(e.live, { kind: "deleted" })
-        : checkLiveFile(e.live, { kind: "failed", message: msg(err) });
-    }
-    bumpDocs();
+    await td.handle.check();
   };
 
-  // Autosave owns its debounce; IME composition pauses it; conflicted /
-  // deleted / check-failed states remain paused (autosaveDelay).
-  const docTick = docsVersion();
-  useEffect(() => {
-    const e = ensureDoc(scope, path);
-    if (!e.doc || !e.live) return;
-    const delay = autosaveDelay(e.live, {
-      enabled: prefs.editorAutosave,
-      editing: e.editing,
-      composing: e.composing,
-      readOnly: e.doc.truncated || e.doc.tooLarge === true,
-    }, AUTOSAVE_MS);
-    if (delay === null) return;
-    const timer = setTimeout(() => void save(), delay);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, path, prefs.editorAutosave, docTick]);
-
-  // One revision-check owner per document — paused while hidden (keep-alive
-  // must not authorize duplicate or invisible polling).
   useEffect(() => {
     if (!visible) return;
     const refresh = () => {
@@ -421,7 +259,6 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, scope, path]);
 
-  // ---- rename / delete ---------------------------------------------------------
   const rename = async () => {
     const to = renameTo?.trim();
     if (!doc || !to || to === doc.path) {
@@ -436,8 +273,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
       setRenameTo(null);
       announceFilesChanged();
     } catch (err) {
-      td.error = msg(err);
-      bumpDocs();
+      setOpError(msg(err));
     } finally {
       setBusy(false);
     }
@@ -453,14 +289,12 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
       actions?.closeSelf("file", doc.path);
       announceFilesChanged();
     } catch (err) {
-      td.error = msg(err);
-      bumpDocs();
+      setOpError(msg(err));
     } finally {
       setBusy(false);
     }
   };
 
-  // ---- keyboard: save, selection→chat, go-to-line, Escape ladder ---------------
   useEffect(() => {
     if (!visible) return;
     const h = (e: globalThis.KeyboardEvent) => {
@@ -475,51 +309,34 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
         e.preventDefault();
         setGotoOpen(true);
       } else if (e.key === "Escape") {
-        if (menuOpen) return; // the menu's own capture-phase Escape closes it
+        if (menuOpen) return;
         if (gotoOpen) { setGotoOpen(false); return; }
         if (selHint) { setSelHint(null); return; }
         if (confirmDel) { setConfirmDel(false); return; }
-        if (renameTo !== null) return; // the rename input owns Esc
-        actions?.closeSelf("file", path); // dirty guard applies in the host
+        if (renameTo !== null) return;
+        actions?.closeSelf("file", path);
       }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   });
 
-  // ---- render -----------------------------------------------------------------
   const lang = doc ? langOf(doc.path) : "";
   const mediaKind = doc && doc.tooLarge ? mediaKindOf(doc.path) : null;
   const rawUrl = doc ? api.filesRawUrl(projectId, doc.path, sid) : "";
   const lines = useMemo(
-    () => (doc && !editing ? highlightLines(doc.content, lang) : []),
-    [doc, editing, lang],
+    () => (doc && !editing ? highlightLines(previewText, lang) : []),
+    [doc, editing, lang, previewText],
   );
-  const bufLineCount = useMemo(() => (editing ? buf.split("\n").length : 0), [editing, buf]);
-  const gutterText = useMemo(
-    () => Array.from({ length: bufLineCount }, (_, i) => i + 1).join("\n"),
-    [bufLineCount],
-  );
-  // Finding 4: highlight WHILE editing — a backdrop <pre> mirrors the buffer
-  // under a transparent-text textarea. Very large buffers fall back to the
-  // plain textarea (same cap as the read view's per-line rows).
-  const editHl = useMemo(
-    () => (editing && !readOnly && doc && bufLineCount <= MAX_ROWED_LINES ? highlight(buf, lang) : null),
-    [editing, readOnly, doc, buf, bufLineCount, lang],
-  );
-  useEffect(() => { syncEditScroll(); }, [editHl, wrap]); // eslint-disable-line react-hooks/exhaustive-deps
-  /** Previewable kinds keep their switch visible in BOTH modes (finding 3). */
   const previewKind = doc && !readOnly ? previewKindForPath(doc.path) : null;
   const previewName = previewKind === "json" ? tr("markdown.render.tree") : tr("previewview.preview");
-  // Previews render the LIVE buffer, not the saved snapshot — flipping the
-  // switch while dirty must show the pending edits (they equal doc.content
-  // when clean).
   const jsonValue = useMemo(
-    () => (previewKind === "json" && doc && !editing ? tryParseJson(buf) : undefined),
-    [previewKind, doc, editing, buf],
+    () => (previewKind === "json" && doc && !editing ? tryParseJson(previewText) : undefined),
+    [previewKind, doc, editing, previewText],
   );
+  const shownError = opError || error;
 
-  if (td.loading || (!doc && !error)) {
+  if (td.loading || (!doc && !shownError)) {
     return (
       <div className="editor-empty">
         <EmptyState
@@ -535,7 +352,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
       <div className="editor-empty">
         <EmptyState
           title={`${tr("editor.filepane.couldnTOpen")} ${path}.`}
-          description={error}
+          description={shownError}
         />
       </div>
     );
@@ -636,7 +453,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
                     void confirmAlert(tr("editor.filepane.discardUnsavedChanges"), {
                       title: tr("common.discardChanges"),
                       confirmLabel: tr("common.discard"),
-                    }).then((ok) => { if (ok) setBuf(doc.content); });
+                    }).then((ok) => { if (ok) td.handle.discard(); });
                   },
                 } satisfies MenuEntry]
               : []),
@@ -662,7 +479,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
           style={{ left: selHint.x, top: selHint.y }}
           aria-label={tr("editor.filepane.addSelectionToChatValueL", { MOD: MOD })}
           title={tr("editor.filepane.addSelectionToChatValueL", { MOD: MOD })}
-          onPointerDown={(e) => e.preventDefault() /* keep the selection + focus */}
+          onPointerDown={(e) => e.preventDefault()}
           onClick={() => { addSelection(); setSelHint(null); }}
         >
           @
@@ -695,74 +512,54 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
       {live && !live.noticeDismissed && (live.kind === "external-change" || live.kind === "conflict") && (
         <div className="editor-banner editor-conflict" role="alert">
           <span>
-            {tr("editor.filepane.fileChangedOnDisk")}{live.dirty ? tr("editor.filepane.yourUnsavedBufferIsPreserved") : tr("editor.filepane.reloadToViewTheReplacement")}
+            {tr("editor.filepane.fileChangedOnDisk")}{live.kind === "conflict" ? tr("editor.filepane.yourUnsavedBufferIsPreserved") : tr("editor.filepane.reloadToViewTheReplacement")}
           </span>
           <Button size="sm" onClick={() => void reload()}>{tr("editor.filepane.reloadFromDisk")}</Button>
-          {live.dirty && <Button size="sm" variant="danger" onClick={() => void save({ force: true })}>{tr("editor.filepane.overwrite")}</Button>}
-          <IconButton icon={CloseIcon} size="sm" label={tr("editor.filepane.dismissFileChangeNotice")} onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }} />
+          {snap.dirty && <Button size="sm" variant="danger" onClick={() => void save({ force: true })}>{tr("editor.filepane.overwrite")}</Button>}
+          <IconButton icon={CloseIcon} size="sm" label={tr("editor.filepane.dismissFileChangeNotice")} onClick={() => td.handle.dismissNotice()} />
         </div>
       )}
       {live && !live.noticeDismissed && live.kind === "deleted" && (
         <div className="editor-banner editor-conflict" role="alert">
-          <span>{tr("editor.filepane.fileWasDeletedOnDisk")}{live.dirty ? tr("editor.filepane.savingRecreatesItYourBufferIsPreserved") : ""}</span>
-          {live.dirty && <Button size="sm" variant="danger" onClick={() => void save({ force: true })}>{tr("editor.filepane.recreate")}</Button>}
-          <IconButton icon={CloseIcon} size="sm" label={tr("editor.filepane.dismissDeletedFileNotice")} onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }} />
+          <span>{tr("editor.filepane.fileWasDeletedOnDisk")}{snap.dirty ? tr("editor.filepane.savingRecreatesItYourBufferIsPreserved") : ""}</span>
+          {snap.dirty && <Button size="sm" variant="danger" onClick={() => void save({ force: true })}>{tr("editor.filepane.recreate")}</Button>}
+          <IconButton icon={CloseIcon} size="sm" label={tr("editor.filepane.dismissDeletedFileNotice")} onClick={() => td.handle.dismissNotice()} />
         </div>
       )}
       {live && !live.noticeDismissed && live.kind === "check-failed" && (
         <div className="editor-banner" role="alert">
           <span>{tr("editor.filepane.couldnTCheckForExternalChanges")}{" "}{live.message}</span>
           <Button size="sm" onClick={() => void checkFile()}>{tr("common.retry")}</Button>
-          <IconButton icon={CloseIcon} size="sm" label={tr("editor.filepane.dismissFileCheckNotice")} onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }} />
+          <IconButton icon={CloseIcon} size="sm" label={tr("editor.filepane.dismissFileCheckNotice")} onClick={() => td.handle.dismissNotice()} />
         </div>
       )}
-      {doc.truncated && <div className="editor-banner">{tr("editor.filepane.truncatedFileExceeds512KbReadOnly")}</div>}
-      {doc.tooLarge && <div className="editor-banner">{tr("editor.filepane.binaryFileDetectedReadOnly")}</div>}
-      {error && <div className="form-error editor-error">{error}</div>}
+      {snap.truncated && <div className="editor-banner">{tr("editor.filepane.truncatedFileExceeds512KbReadOnly")}</div>}
+      {snap.binary && <div className="editor-banner">{tr("editor.filepane.binaryFileDetectedReadOnly")}</div>}
+      {shownError && <div className="form-error editor-error">{shownError}</div>}
       {editing && !readOnly ? (
         <div
           className="editor-edit"
           onContextMenu={(e) => {
-            // The textarea keeps its native menu (paste, spell-check, …).
-            if (e.target === taRef.current) return;
             e.preventDefault();
             setMenuOpen(true);
           }}
         >
-          {!wrap && (
-            <pre className="editor-gutter" ref={gutterRef} aria-hidden="true">
-              {gutterText}
-            </pre>
-          )}
-          <div className="editor-edit-surface">
-            {editHl !== null && (
-              <pre
-                className={`editor-hl-backdrop${wrap ? " wrap" : ""}`}
-                ref={hlRef}
-                aria-hidden="true"
-                dangerouslySetInnerHTML={{ __html: `${editHl}\n ` }}
-              />
-            )}
-            <textarea
-              ref={taRef}
-              className={`editor-ta${editHl !== null ? " editor-ta-hl" : ""}`}
-              value={buf}
-              wrap={wrap ? "soft" : "off"}
-              spellCheck={false}
-              aria-label={tr("editor.filepane.editValue", { path: doc.path })}
-              onChange={(e) => setBuf(e.target.value)}
-              onCompositionStart={() => { td.composing = true; bumpDocs(); }}
-              onCompositionEnd={() => { td.composing = false; bumpDocs(); }}
-              onPointerUp={(e) => updateEditHint({ x: e.clientX + 10, y: e.clientY + 14 })}
-              onKeyUp={(e) => { if (e.shiftKey || selHint) updateEditHint(); }}
-              onScroll={syncEditScroll}
-            />
-          </div>
+          <EditorSurfaceSlot
+            docKey={fileDocKey(projectId, sessionId, path)}
+            path={doc.path}
+            readOnly={readOnly}
+            wrap={wrap}
+            ariaLabel={tr("editor.filepane.editValue", { path: doc.path })}
+            visible={visible}
+            onSave={() => { if (dirty && !readOnly) void save(); }}
+            reveal={reveal}
+            onRevealConsumed={() => setReveal(null)}
+          />
         </div>
       ) : previewKind === "markdown" && !editing ? (
         <div className="editor-body editor-md-preview" ref={bodyRef}>
           <div className="editor-md-content">
-            <MarkdownDoc text={buf} keyBase={`md-${doc.path}`} />
+            <MarkdownDoc text={previewText} keyBase={`md-${doc.path}`} />
           </div>
         </div>
       ) : previewKind === "html" && !editing ? (
@@ -771,7 +568,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
             className="html-preview-frame"
             title={tr("editor.filepane.previewOfValue", { path: doc.path })}
             sandbox="allow-scripts"
-            srcDoc={htmlPreviewDocument(buf, `${window.location.origin}/`)}
+            srcDoc={htmlPreviewDocument(previewText, `${window.location.origin}/`)}
           />
           <div className="html-preview-note muted">
             {tr("editor.filepane.sandboxedPreviewScriptsAreIsolatedAndNetwork")}</div>
@@ -784,7 +581,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
             <div className="editor-banner">{tr("editor.filepane.notValidJsonShowingSourceInstead")}</div>
           )}
           {jsonValue === undefined && (
-            <pre className="code-view editor-plain">{buf}</pre>
+            <pre className="code-view editor-plain">{previewText}</pre>
           )}
         </div>
       ) : mediaKind ? (
@@ -794,7 +591,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
           {mediaKind === "audio" && <audio className="editor-media-item" src={rawUrl} controls preload="metadata" />}
           {mediaKind === "pdf" && <iframe className="editor-media-item" src={rawUrl} title={doc.path} />}
         </div>
-      ) : doc.tooLarge ? (
+      ) : snap.binary ? (
         <div className="editor-body editor-media">
           <iframe className="editor-media-item" src={rawUrl} title={doc.path} />
           <a className="editor-file-download" href={rawUrl} download={doc.path.split(/[\\/]/).pop()}>Download {doc.path}</a>
@@ -837,7 +634,6 @@ export function registerFilePaneProvider(): () => void {
   return registerPaneProvider({
     kind: "file",
     title: baseOf,
-    // Files stay resolvable (a missing file errors honestly on open).
     available: () => true,
     dirty: (scope, path) => isDocDirty(docScopeKey(scope.projectId, scope.sessionId), path),
     subscribe: subscribeDocs,
