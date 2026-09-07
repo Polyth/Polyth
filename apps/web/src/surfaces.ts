@@ -81,6 +81,8 @@ export interface RailSurface {
   /** Present on canonical workspace surfaces only; contextual surfaces
    *  (Context/Knowledge/Usage/Events) leave it undefined. */
   presentation?: WorkspacePanePresentation;
+  /** Workbench placement constraints. Optional until a package opts in. */
+  placement?: import("@polyth/web-sdk").WorkbenchSurfacePlacement;
 }
 
 const registry = new Map<string, RailSurface>();

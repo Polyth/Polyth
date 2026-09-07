@@ -121,6 +121,77 @@ export interface SurfacePresentation {
   dock?: "side" | "bottom";
 }
 
+// ---- Workbench -----------------------------------------------------------------
+// Profile-driven layout of one workbench: semantic regions (never left/right),
+// per-surface presentation, and a public profile registry. Packages contribute
+// profiles and placement constraints; they never own global geometry.
+
+export type WorkbenchRegion = "start" | "primary" | "end" | "bottom";
+export const WORKBENCH_REGIONS: readonly WorkbenchRegion[] = ["start", "primary", "end", "bottom"];
+export type WorkbenchPresentation = "docked" | "floating" | "fullscreen";
+
+export interface WorkbenchSurfacePlacement {
+  preferredRegion?: WorkbenchRegion;
+  allowedRegions?: readonly WorkbenchRegion[];
+  minInlineSize?: number;
+  minBlockSize?: number;
+  keepAlive?: boolean;
+}
+
+export interface WorkbenchLayoutTemplateEntry {
+  surface: string;
+  region: WorkbenchRegion;
+  presentation?: WorkbenchPresentation;
+  active?: boolean;
+}
+
+export interface WorkbenchLayoutTemplate {
+  surfaces: readonly WorkbenchLayoutTemplateEntry[];
+  sizes?: Partial<Record<WorkbenchRegion, number>>;
+  collapsed?: readonly WorkbenchRegion[];
+  sidebarCollapsed?: boolean;
+}
+
+export interface WorkbenchProfileDefinition {
+  id: string;
+  label: string;
+  description: string;
+  order: number;
+  available?: () => boolean;
+  defaultLayout: WorkbenchLayoutTemplate;
+  /** Presentation hints (e.g. `{ text: "prose" }`). Never geometry. */
+  presentation?: Readonly<Record<string, unknown>>;
+}
+
+export interface WorkbenchProfileSummary {
+  id: string;
+  label: string;
+  description: string;
+  order: number;
+  available: boolean;
+  presentation: Readonly<Record<string, unknown>>;
+}
+
+export interface WorkbenchRegionSnapshot {
+  surfaces: readonly string[];
+  active: string | null;
+  collapsed: boolean;
+}
+
+export interface WorkbenchSnapshot {
+  activeProfile: string;
+  profiles: readonly WorkbenchProfileSummary[];
+  regions: Readonly<Record<WorkbenchRegion, WorkbenchRegionSnapshot>>;
+  floating: readonly string[];
+  fullscreen: string | null;
+}
+
+export interface OpenSurfaceOptions {
+  region?: WorkbenchRegion;
+  presentation?: WorkbenchPresentation;
+  activate?: boolean;
+}
+
 export interface SurfaceDefinition {
   id: string;
   /** Host-bound owner package id. Package callers should omit this. */
@@ -137,6 +208,152 @@ export interface SurfaceDefinition {
   visible?: (context: SurfaceContext) => boolean;
   /** Required package-window capabilities. The host owns all resulting chrome. */
   presentation: SurfacePresentation;
+  /** Workbench placement constraints. Packages declare where their surface
+   *  may live; they never own global geometry. */
+  placement?: WorkbenchSurfacePlacement;
+}
+
+// ---- Resources --------------------------------------------------------------------
+// Resource identity/data ≠ view/editor ≠ workbench placement.
+// The document contract is pull-based: keystrokes must not require
+// materializing the full buffer into this snapshot.
+
+export interface ResourceRef {
+  scheme: string;
+  locator: string;
+  projectId: string;
+  sessionId: string | null;
+}
+
+export interface ResourceSelection {
+  startLine: number;
+  endLine?: number;
+  column?: number;
+}
+
+export type ResourceKind = "text" | "binary" | "unknown";
+
+export interface ResourceDescriptor {
+  label: string;
+  kind: ResourceKind;
+  mediaType?: string;
+  language?: string;
+  readOnly?: boolean;
+  metadata?: Readonly<JsonObject>;
+}
+
+export interface ResourceContent {
+  content: string;
+  revision?: string;
+  truncated?: boolean;
+  tooLarge?: boolean;
+  binary?: boolean;
+}
+
+export interface ResourceWriteResult {
+  revision?: string;
+}
+
+export type ResourceStat =
+  | { kind: "present"; revision?: string }
+  | { kind: "missing" };
+
+export interface ResourceProvider {
+  scheme: string;
+  describe(ref: ResourceRef): ResourceDescriptor;
+  read(ref: ResourceRef): Promise<ResourceContent>;
+  write?(ref: ResourceRef, content: string, baseRevision?: string): Promise<ResourceWriteResult>;
+  rename?(ref: ResourceRef, to: string): Promise<ResourceRef>;
+  remove?(ref: ResourceRef): Promise<void>;
+  stat?(ref: ResourceRef): Promise<ResourceStat>;
+  subscribe?(ref: ResourceRef, listener: () => void): Unregister;
+  rawUrl?(ref: ResourceRef): string;
+}
+
+export type ResourceViewKind = "editor" | "viewer" | "diff";
+
+export interface ResourceViewMatch {
+  ref: ResourceRef;
+  descriptor: ResourceDescriptor;
+  profileId: string;
+  purpose?: string;
+}
+
+export interface ResourceViewProps {
+  ref: ResourceRef;
+  descriptor: ResourceDescriptor;
+  visible: boolean;
+  selection: ResourceSelection | null;
+  onSelectionConsumed: () => void;
+}
+
+export interface ResourceViewDefinition {
+  id: string;
+  label: string;
+  kind: ResourceViewKind;
+  /** Suitability: <= 0 means cannot open. */
+  score(match: ResourceViewMatch): number;
+  component: ComponentType<ResourceViewProps>;
+}
+
+export type ResourceDocumentStatus = "idle" | "loading" | "ready" | "error";
+export type ResourceLiveKind =
+  | "clean" | "dirty" | "saving" | "saved" | "external-change" | "conflict" | "deleted" | "check-failed";
+
+export interface ResourceDocumentSnapshot {
+  status: ResourceDocumentStatus;
+  /** Last authoritative (saved) text. Not updated on keystrokes. */
+  saved: string;
+  revision?: string;
+  dirty: boolean;
+  readOnly: boolean;
+  truncated: boolean;
+  binary: boolean;
+  live: { kind: ResourceLiveKind; noticeDismissed: boolean; message?: string } | null;
+  error: string;
+  composing: boolean;
+  saveCount: number;
+  /** Monotonic. Increments on user edits and authoritative resets. */
+  bufferVersion: number;
+}
+
+/** Live editor (or other view) that owns the unsaved text without copying it
+ *  into the document snapshot on every keystroke. */
+export interface ResourceTextSource {
+  getText(): string;
+  resetAuthoritative(text: string): void;
+}
+
+export interface ResourceDocumentHandle {
+  key: string;
+  ref: ResourceRef;
+  getSnapshot(): ResourceDocumentSnapshot;
+  subscribe(listener: () => void): Unregister;
+  /** Materialize current text. Call on save/preview/chat-insert, not per keystroke. */
+  getBuffer(): string;
+  attachSource(source: ResourceTextSource): void;
+  detachSource(): void;
+  /** User edited the attached source. First dirty transition notifies React. */
+  markUserEdit(): void;
+  load(): Promise<void>;
+  setComposing(composing: boolean): void;
+  save(options?: { force?: boolean }): Promise<void>;
+  reload(): Promise<void>;
+  check(): Promise<void>;
+  discard(): void;
+  dismissNotice(): void;
+  autosaveDelay(enabled: boolean, delayMs?: number): number | null;
+  release(): void;
+  moveTo(ref: ResourceRef): void;
+}
+
+export interface OpenResourceOptions {
+  region?: WorkbenchRegion;
+  side?: boolean;
+  preview?: boolean;
+  focus?: boolean;
+  selection?: ResourceSelection;
+  viewId?: string;
 }
 
 export interface CapabilityDefinition {
@@ -212,6 +429,8 @@ export interface WebStoreSnapshot {
   activeView: string;
   overlay: string | null;
   railPlugin: string | null;
+  /** Active workbench profile id ("conversation" by default). */
+  workbenchProfile: string;
   settings: Readonly<Record<string, unknown>>;
 }
 
@@ -294,6 +513,45 @@ export interface WebPackageHost {
     closeWorkspacePane(): void;
     openRailSurface(surfaceId: string): void;
     setOverlay(overlay: string | null): void;
+    /** Canonical resource navigation: every file/artifact/diff open lands here. */
+    openResource(ref: ResourceRef, options?: OpenResourceOptions): void;
+    reopenResourceWith(ref: ResourceRef, viewId: string): void;
+    revealResource(ref: ResourceRef): void;
+    closeResource(ref: ResourceRef): void;
+  };
+  workbench: {
+    profiles: {
+      register(definition: WorkbenchProfileDefinition): Unregister;
+      list(): readonly WorkbenchProfileSummary[];
+    };
+    activateProfile(profileId: string): boolean;
+    getActiveProfile(): WorkbenchProfileSummary;
+    getSnapshot(): WorkbenchSnapshot;
+    subscribe(listener: () => void): Unregister;
+    openSurface(surfaceId: string, options?: OpenSurfaceOptions): boolean;
+    closeSurface(surfaceId: string): void;
+    moveSurface(surfaceId: string, region: WorkbenchRegion): boolean;
+    swapSurfaces(surfaceId: string, otherSurfaceId: string): boolean;
+    setPresentation(surfaceId: string, presentation: WorkbenchPresentation): boolean;
+    resetProfileLayout(profileId?: string): void;
+  };
+  resources: {
+    registerProvider(provider: ResourceProvider): Unregister;
+    getProvider(scheme: string): ResourceProvider | undefined;
+    describe(ref: ResourceRef): ResourceDescriptor | null;
+    key(ref: ResourceRef): string;
+    notifyMoved(from: ResourceRef, to: ResourceRef): void;
+    notifyRemoved(ref: ResourceRef): void;
+    documents: {
+      open(ref: ResourceRef): ResourceDocumentHandle;
+      isDirty(ref: ResourceRef): boolean;
+      subscribe(listener: () => void): Unregister;
+    };
+  };
+  resourceViews: {
+    register(definition: ResourceViewDefinition): Unregister;
+    list(): readonly ResourceViewDefinition[];
+    candidates(ref: ResourceRef): readonly ResourceViewDefinition[];
   };
   ui: {
     icons: Readonly<Record<string, () => ReactNode>>;
@@ -389,4 +647,9 @@ export function createApiTransport(options: ApiTransportOptions = {}): ApiTransp
 export function friendlyError(action: string, cause: unknown): string {
   const detail = cause instanceof Error ? cause.message.trim() : String(cause).trim();
   return detail ? `${action}: ${detail}` : action;
+}
+
+/** Stable, scoped identity of a resource — independent of any view or placement. */
+export function resourceKey(ref: ResourceRef): string {
+  return `${ref.scheme}:${ref.projectId}:${ref.sessionId ?? "project"}:${ref.locator}`;
 }

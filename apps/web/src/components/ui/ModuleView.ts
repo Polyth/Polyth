@@ -27,6 +27,11 @@ export interface ModuleViewProps {
   icon?: ReactNode;
   /** Right-aligned controls rendered just before the close button. */
   actions?: ReactNode;
+  /** Workbench regions hosting several surfaces replace the single title with
+   *  a tab strip; the title then names the group for assistive tech only. */
+  tabs?: ReactNode;
+  /** Optional drag handle props spread onto the heading (workbench moves). */
+  headingProps?: Record<string, unknown>;
   /** Window controls are host-owned. Packages cannot replace their order or
    * geometry; they only declare supported capabilities at registration. */
   onTogglePin?: () => void;
@@ -65,7 +70,7 @@ function systemAction(icon: typeof CloseIcon, label: string, onClick: () => void
 
 export default function ModuleView(props: ModuleViewProps): ReactNode {
   const {
-    id, title, description, icon, actions, onClose, closeLabel,
+    id, title, description, icon, actions, tabs, headingProps, onClose, closeLabel,
     onTogglePin, onToggleFullscreen, pinned = false, fullscreen = false,
     variant = "main", contentMode = "page", depth = 0, className, children,
   } = props;
@@ -79,16 +84,18 @@ export default function ModuleView(props: ModuleViewProps): ReactNode {
     },
     createElement(
       "header",
-      { className: "module-view-head" },
-      icon ? createElement("span", { className: "module-view-icon", "aria-hidden": true }, icon) : null,
-      createElement(
-        "div",
-        { className: "module-view-heading" },
-        createElement("h1", { className: "module-view-title", tabIndex: -1, title }, title),
-        description
-          ? createElement("p", { className: "module-view-desc" }, description)
-          : null,
-      ),
+      { className: "module-view-head", ...(tabs ? { "aria-label": title } : {}) },
+      tabs ?? [
+        icon ? createElement("span", { key: "icon", className: "module-view-icon", "aria-hidden": true }, icon) : null,
+        createElement(
+          "div",
+          { key: "heading", className: "module-view-heading", ...headingProps },
+          createElement("h1", { className: "module-view-title", tabIndex: -1, title }, title),
+          description
+            ? createElement("p", { className: "module-view-desc" }, description)
+            : null,
+        ),
+      ],
       createElement("span", { className: "header-spacer" }),
       actions ? createElement("div", { className: "module-view-actions" }, actions) : null,
       onTogglePin ? systemAction(PinIcon, pinned ? "Unpin window" : "Pin window", onTogglePin, pinned, "module-view-system-action") : null,

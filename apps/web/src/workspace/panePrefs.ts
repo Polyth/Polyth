@@ -85,6 +85,11 @@ function legacyWorkspacePaneKey(projectId: string): string {
   return `polyth.workspacePane.v1.${projectId}`;
 }
 
+/** Every storage key an older build may have left for this project, newest first. */
+export function legacyWorkspacePaneKeys(projectId: string): string[] {
+  return [workspacePaneKey(projectId), legacyWorkspacePaneKey(projectId)];
+}
+
 /** Hard bounds applied when a persisted width is USED (never silently written
  *  back): sizes below this are rejected as garbage, the upper bound is the
  *  live geometry cap applied by the host at render time. */

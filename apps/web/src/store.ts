@@ -32,6 +32,11 @@ import {
   type PanePreviousMode,
 } from "./workspace/panePrefs.ts";
 import {
+  setWorkbenchProject,
+  workbenchCloseSurface,
+  workbenchOpenSurface,
+} from "./workbench/store.ts";
+import {
   beginListRequest,
   initialProjectRegistry,
   mutationVersionOf,
@@ -427,6 +432,7 @@ export function activateProject(id: string | null): void {
     ...(restored !== null && restoredResource !== undefined ? applyPaneResource(restored, restoredResource) : {}),
   });
   setWorkspaceModeProject(id);
+  setWorkbenchProject(id);
 }
 export function setActiveView(view: AppView | LegacyPaneViewId): void {
   // One-time legacy adapter: a stored/contributed "files"/"git"/"terminal"/
@@ -598,6 +604,7 @@ export function openWorkspacePane(surfaceId: string, resource?: string): boolean
     ...(selectedResource !== undefined ? applyPaneResource(surfaceId, selectedResource) : {}),
   });
   saveActiveView("session");
+  workbenchOpenSurface(surfaceId);
   return true;
 }
 
@@ -613,6 +620,7 @@ export function closeWorkspacePane({ restoreFocus = true }: { restoreFocus?: boo
   // later project/session transition can resurrect the stale window.
   if (open === null && !persisted) return;
   if (projectId !== null) setPaneOpenSurface(projectId, null);
+  if (surfaceId !== null) workbenchCloseSurface(surfaceId);
   set({
     railPlugin: null,
     paneMode: "dynamic",

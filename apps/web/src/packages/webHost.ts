@@ -1,5 +1,7 @@
 import type {
   CapabilityDefinition,
+  OpenResourceOptions,
+  ResourceRef,
   SettingsPageDefinition,
   SettingsSearchItem,
   SurfaceDefinition,
@@ -8,15 +10,17 @@ import type {
   WidgetDefinition,
   WidgetPlugin,
 } from "@polyth/web-sdk";
+import { resourceKey } from "@polyth/web-sdk";
 import { Icon } from "../icons.tsx";
 import Dialog from "../components/a11y/Dialog.tsx";
 import SlotHost from "../components/slots/SlotHost.ts";
 import { friendlyError } from "../settings.ts";
 import {
+  closeWorkspacePane,
   getState,
+  openEditorFile,
   openSettingsPage,
   openWorkspacePane,
-  closeWorkspacePane,
   setActiveView,
   setOverlay,
   setRailPlugin,
@@ -43,6 +47,40 @@ import {
   updateDraftExecutionConfig,
 } from "../executionDraft.ts";
 import { installDefaultHandoffTargets, listHandoffTargets, registerHandoffTarget } from "../handoffTargets.ts";
+import {
+  deleteDocument,
+  isDocumentDirty,
+  openDocument,
+  peekDocument,
+  subscribeDocuments,
+} from "../resources/documents.ts";
+import {
+  describeResource,
+  getResourceProvider,
+  registerResourceProvider,
+} from "../resources/providers.ts";
+import {
+  listResourceViews,
+  registerResourceView,
+  resourceViewCandidates,
+} from "../resources/views.ts";
+import {
+  activateWorkbenchProfile,
+  getActiveProfileId,
+  getActiveProfileSummary,
+  resetWorkbenchProfile,
+  subscribeWorkbench,
+  workbenchCloseSurface,
+  workbenchMoveSurface,
+  workbenchOpenSurface,
+  workbenchSetPresentation,
+  workbenchSnapshot,
+  workbenchSwapSurfaces,
+} from "../workbench/store.ts";
+import {
+  listWorkbenchProfileSummaries,
+  registerWorkbenchProfile,
+} from "../workbench/profiles.ts";
 
 installDefaultHandoffTargets();
 
@@ -54,9 +92,24 @@ const snapshot = (): WebStoreSnapshot => {
     activeView: state.activeView,
     overlay: state.overlay,
     railPlugin: state.railPlugin,
+    workbenchProfile: getActiveProfileId(),
     settings: { ...state.settings },
   };
 };
+
+function openResource(ref: ResourceRef, options: OpenResourceOptions = {}): void {
+  if (ref.scheme === "file") {
+    openEditorFile(ref.locator, options.selection ? {
+      path: ref.locator,
+      startLine: options.selection.startLine,
+      endLine: options.selection.endLine,
+      column: options.selection.column,
+    } : undefined);
+    if (options.region) workbenchOpenSurface("files", { region: options.region, activate: options.focus !== false });
+    return;
+  }
+  openWorkspacePane(ref.scheme, `${ref.scheme}:${ref.locator}`);
+}
 
 export const webPackageHost: WebPackageHost = {
   slots: {
@@ -123,6 +176,44 @@ export const webPackageHost: WebPackageHost = {
     closeWorkspacePane,
     openRailSurface: setRailPlugin,
     setOverlay: (overlay) => setOverlay(overlay as never),
+    openResource,
+    reopenResourceWith: (ref, _viewId) => openResource(ref),
+    revealResource: (ref) => openResource(ref),
+    closeResource: (ref) => { deleteDocument(ref); },
+  },
+  workbench: {
+    profiles: {
+      register: registerWorkbenchProfile,
+      list: listWorkbenchProfileSummaries,
+    },
+    activateProfile: activateWorkbenchProfile,
+    getActiveProfile: getActiveProfileSummary,
+    getSnapshot: workbenchSnapshot,
+    subscribe: subscribeWorkbench,
+    openSurface: workbenchOpenSurface,
+    closeSurface: (surfaceId) => { workbenchCloseSurface(surfaceId); },
+    moveSurface: workbenchMoveSurface,
+    swapSurfaces: workbenchSwapSurfaces,
+    setPresentation: workbenchSetPresentation,
+    resetProfileLayout: resetWorkbenchProfile,
+  },
+  resources: {
+    registerProvider: registerResourceProvider,
+    getProvider: getResourceProvider,
+    describe: describeResource,
+    key: resourceKey,
+    notifyMoved: (from, to) => { peekDocument(from)?.moveTo(to); },
+    notifyRemoved: (ref) => { deleteDocument(ref); },
+    documents: {
+      open: openDocument,
+      isDirty: isDocumentDirty,
+      subscribe: subscribeDocuments,
+    },
+  },
+  resourceViews: {
+    register: registerResourceView,
+    list: listResourceViews,
+    candidates: resourceViewCandidates,
   },
   ui: {
     icons: Icon,

@@ -99,6 +99,30 @@ export function createPackageActivation(
         return track(host.reducers.register(eventType, reducer));
       },
     },
+    workbench: {
+      ...host.workbench,
+      profiles: {
+        ...host.workbench.profiles,
+        register: (definition) => {
+          if (disposed) return reject("workbench.profiles.register");
+          return track(host.workbench.profiles.register(definition));
+        },
+      },
+    },
+    resources: {
+      ...host.resources,
+      registerProvider: (provider) => {
+        if (disposed) return reject("resources.registerProvider");
+        return track(host.resources.registerProvider(provider));
+      },
+    },
+    resourceViews: {
+      ...host.resourceViews,
+      register: (definition) => {
+        if (disposed) return reject("resourceViews.register");
+        return track(host.resourceViews.register(definition));
+      },
+    },
   };
 
   return {
