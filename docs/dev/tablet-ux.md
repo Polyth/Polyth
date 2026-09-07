@@ -67,16 +67,35 @@ no `responsiveShell.ts` / contract-test churn, no parallel components.
 
 ## To do
 
-- [ ] Plan doc committed + pushed
-- [ ] `.app-shell` container + `@container` tablet layout state in `styles.css`
-- [ ] Verify pinned-split / dynamic-overlay / fullscreen still correct in the band
-- [ ] Verify chat text, code blocks, tool output clear the affordance (no overlap)
-- [ ] Verify ≤820 compact and >1400 desktop unchanged
-- [ ] `styleArchitecture.test.ts` + `responsiveShell.test.ts` + `moduleView.test.ts` green
-- [ ] Add one assertion: `.app-shell` uses `container: app-shell / inline-size`
-- [ ] `npm run build:web` (typecheck) green
-- [ ] Inspect final diff for duplicated responsive logic
+- [x] Plan doc committed + pushed
+- [x] `.app-shell` container + `@container` tablet layout state in `styles.css`
+      (`@container app-shell (min-width: 821px) and (max-width: 1400px)`, scoped
+      to `.railbar:not(:has(.rail))` / `.app-shell:not(:has(.rail))` so it is
+      only the idle strip-only state that reshapes)
+- [x] Pinned-split / dynamic-overlay / fullscreen unchanged in the band — the
+      `:not(:has(.rail))` guard switches the reshape off the moment any pane
+      element mounts, handing back to the existing pane CSS
+- [x] Chat surfaces (`.timeline`, `.composer-chat`, question cards, archived
+      guard) get a right lane sized from the existing centring formula + the
+      cluster width, so text / code / tool output never render beneath it
+- [x] ≤820 compact untouched (band starts at 821); >1400 desktop untouched
+      (band ends at 1400) — verified by the bounded container query
+- [x] `styleArchitecture.test.ts` + `responsiveShell.test.ts` +
+      `moduleView.test.ts` + `sidebarNavigationGeometry.test.ts` green; full
+      `apps/web/test/*.test.ts` shows only 3 pre-existing glob-pollution flakes
+      (identical set with and without this change)
+- [x] Added `styleArchitecture.test.ts` assertion pinning the container + band
+- [x] `npm run build:web` green; built `main.css` block well-formed
+- [x] Final diff: one `container:` decl + one `@container` block + one test —
+      no duplicated responsive logic, no new `@media`
 - [ ] Open PR to `master`
+
+## Follow-ups (not this branch)
+
+- Live Chromium pass (`responsiveShell.live.ts` needs a running server + seeded
+  fixture) at 1366×1024 / 1194×834 / 1024×1366 / 744 / 600 to confirm pixels.
+- If the band still reads heavy after real use: hide the wide header's
+  `CapabilityNav` tool rail in the band (it duplicates the floating cluster).
 
 ## Deliberately NOT doing (challenge the spec)
 

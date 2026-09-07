@@ -124,3 +124,27 @@ test("mobile Canvas chrome uses the shared tap target", async () => {
     /@media \(max-width: 760px\)\s*\{\s*\.widget-canvas-grid[\s\S]*?\.widget-menu-trigger\s*\{\s*min-height:\s*var\(--tap\)/,
   );
 });
+
+test("tablet-class width is a container-query layout state, not a media pile", async () => {
+  const styles = await read("../src/styles.css");
+
+  assert.match(
+    styles,
+    /\.app-shell\s*\{[^}]*container:\s*app-shell\s*\/\s*inline-size/,
+    ".app-shell is the shell container the tablet band queries",
+  );
+  // The launcher strip collapses to a floating cluster only while no pane or
+  // panel is open; opening a tool still runs the dynamic/pinned/fullscreen
+  // pane model unchanged.
+  const band = /@container app-shell \(min-width: 821px\) and \(max-width: 1400px\)\s*\{/;
+  assert.match(styles, band, "the tablet band is bounded to the wide shell");
+  assert.match(
+    styles,
+    new RegExp(band.source + /[\s\S]*?\.railbar:not\(:has\(\.rail\)\)\s*\{[^}]*height:\s*auto/.source),
+  );
+  assert.match(
+    styles,
+    new RegExp(band.source + /[\s\S]*?\.app-shell:not\(:has\(\.rail\)\)[\s\S]*?padding-inline-end:/.source),
+    "chat surfaces reserve a lane for the affordance so nothing renders beneath it",
+  );
+});

@@ -4544,7 +4544,7 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
   max-width: 100%;
   background: var(--bg);
 }
-.app-shell { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; overflow: hidden; }
+.app-shell { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; overflow: hidden; container: app-shell / inline-size; }
 .app > .header {
   flex: none;
   width: 100%;
@@ -11898,6 +11898,44 @@ html[data-font] body :is(
    body that owns its overflow; themed thin scrollbars come from the global
    rules at the top of this file. */
 .ui-scroll { overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; min-height: 0; }
+
+/* ---- tablet-class width, wide shell ----------------------------------------
+   Landscape iPad and half-snapped desktop windows keep the wide shell
+   (navigator + workspace) but the launcher strip must not read as a permanent
+   third column. While no pane or panel is open it collapses to a top-anchored
+   floating cluster — the spec's "subtle edge affordance / compact trigger" —
+   and the conversation gets a matching right lane so nothing renders beneath
+   it. Opening a tool still runs the existing dynamic (slide-over) / pinned
+   (split) / fullscreen (focus) pane model unchanged, and <=820px still gets
+   the compact drawer shell. Structural, not a per-pixel override. */
+@container app-shell (min-width: 821px) and (max-width: 1400px) {
+  .railbar:not(:has(.rail)) {
+    inset-block: var(--space-3) auto;
+    inset-inline-end: var(--space-3);
+    height: auto;
+    border: 1px solid var(--hair);
+    border-radius: var(--radius-card);
+  }
+  .railbar:not(:has(.rail)) > .rail-icon-col.plugin-strip {
+    flex: none;
+    width: auto;
+    min-width: 0;
+    min-height: 0;
+    padding-block: var(--space-2);
+    overflow: visible;
+  }
+  .app-shell:not(:has(.rail)) :is(
+    .timeline,
+    .composer-chat,
+    .focus-conversation > .question-cards,
+    .focus-conversation > .archived-guard
+  ) {
+    padding-inline-end: calc(
+      max(var(--gutter), (100% - var(--chat-measure)) / 2)
+      + var(--control-h-sm) + var(--space-5)
+    );
+  }
+}
 
 /* ---- conversation hierarchy ------------------------------------------------ */
 /* Standalone run summaries own their surface; nested ones inherit the
