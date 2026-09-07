@@ -3,7 +3,7 @@
 // with defaults on load — boot with an empty in-memory registry and leave the
 // file untouched until a deliberate user write succeeds.
 import { readFileSync, mkdirSync, existsSync } from "node:fs";
-import { atomicWriteSync } from "./atomicWrite.ts";
+import { atomicWriteSync } from "@polyth/plugins";
 import { basename, dirname, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type {

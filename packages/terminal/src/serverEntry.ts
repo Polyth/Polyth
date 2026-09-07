@@ -365,5 +365,10 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       detachers.clear();
       await terminals.closeAll();
     },
+    stopIngress() {
+      wsEnabled = false;
+      for (const stop of detachers.values()) stop();
+      detachers.clear();
+    },
   };
 }

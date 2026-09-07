@@ -4,7 +4,10 @@
 // one-contribution failure isolation via the per-item error boundary.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { register } from "node:module";
 import { isValidElement, type ReactElement } from "react";
+
+register("./tsxHooks.mjs", import.meta.url);
 import {
   listSlots, registerSlot, renderSlot, slotVersion, subscribeSlots,
 } from "../src/slots.ts";
@@ -206,6 +209,28 @@ test("SlotBoundary resets on item replacement but stays failed for the same item
   // Same-id replacement (new SlotItem): the boundary reopens for the fix.
   const replaced = SlotBoundary.getDerivedStateFromProps({ ...props, item: fixed }, state as never);
   assert.deepEqual(replaced, { failed: false, item: fixed });
+});
+
+test("timeline after-slot summary keeps only pending permissions and secrets", async () => {
+  const { timelineAfterSlotContext } = await import("../src/components/Timeline.tsx");
+  const summary = timelineAfterSlotContext({
+    sessionId: "s1",
+    messageCount: 3,
+    promptCount: 1,
+    turnStatus: "running",
+    permissions: [
+      { status: "pending" },
+      { status: "resolved" },
+    ],
+    secrets: [
+      { status: "answered" },
+      { status: "pending" },
+    ],
+  });
+  assert.deepEqual(summary.permissions.map((item) => item.status), ["pending"]);
+  assert.deepEqual(summary.secrets.map((item) => item.status), ["pending"]);
+  assert.equal(summary.sessionId, "s1");
+  assert.equal(summary.messageCount, 3);
 });
 
 test("contracts expose the runtime slot vocabulary used for validation", () => {

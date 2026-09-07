@@ -5,7 +5,7 @@
 ```
 cargo test -p polyth-link-core --tests
 cargo test -p polyth-link-host --tests
-node --experimental-strip-types --test packages/server/test/authIngress.test.ts packages/server/test/httpTunnel.test.ts packages/server/test/remotePolicyCoverage.test.ts packages/tunnel/test/*.test.ts packages/pairing-qr/test/*.test.ts packages/tunnel-relay/test/*.test.ts apps/mobile/test/runtime.test.ts
+node --experimental-strip-types --test packages/server/test/authIngress.test.ts packages/server/test/httpTunnel.test.ts packages/server/test/remotePolicyCoverage.test.ts packages/tunnel/test/*.test.ts packages/pairing-qr/test/*.test.ts apps/mobile/test/runtime.test.ts
 ```
 
 ## Coverage intent

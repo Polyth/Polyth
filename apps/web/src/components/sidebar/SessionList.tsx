@@ -6,7 +6,7 @@ import {
   type CSSProperties, type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { SessionProjection, WorkspaceLabel } from "@polyth/contracts";
-import { api, type Worktree } from "@polyth/session/web-api";
+import { api, errorChangesOf, errorCodeOf, type Worktree } from "@polyth/session/web-api";
 import {
   getState, setSidebarOpen, setUiError, startNewSession, useStore,
 } from "../../store.ts";
@@ -656,6 +656,8 @@ export default function SessionList({
   const [removeTarget, setRemoveTarget] = useState<Worktree | null>(null);
   const [deleteBranch, setDeleteBranch] = useState(false);
   const [removeBusy, setRemoveBusy] = useState(false);
+  const [removePhase, setRemovePhase] = useState<"confirm" | "dirty">("confirm");
+  const [dirtyChanges, setDirtyChanges] = useState(0);
   // Shift-key customization mode is a desktop affordance: shift+hover reveals
   // Archive/Delete on a row. Compact/touch shells keep swipe + menu only.
   const shiftArmed = useShiftArmed();
@@ -982,6 +984,8 @@ export default function SessionList({
                     aria-label={tr("sidebar.sessionlist.deleteValueWorktreeAndAll", { label: group.label })}
                     onClick={() => {
                       setDeleteBranch(false);
+                      setRemovePhase("confirm");
+                      setDirtyChanges(0);
                       setRemoveTarget(group.worktree);
                     }}
                   ><Icon.trash /></button>
@@ -1020,21 +1024,52 @@ export default function SessionList({
       {removeTarget && (
         <Dialog
           title={tr("sidebar.sessionlist.deleteWorktreeAndItsSessions")}
-          onClose={() => { if (!removeBusy) setRemoveTarget(null); }}
+          onClose={() => {
+            if (removeBusy) return;
+            setRemovePhase("confirm");
+            setDirtyChanges(0);
+            setRemoveTarget(null);
+          }}
           footer={(
             <>
-              <Button size="sm" disabled={removeBusy} onClick={() => setRemoveTarget(null)}>{tr("common.cancel")}</Button>
+              <Button
+                size="sm"
+                disabled={removeBusy}
+                onClick={() => {
+                  setRemovePhase("confirm");
+                  setDirtyChanges(0);
+                  setRemoveTarget(null);
+                }}
+              >{tr("common.cancel")}</Button>
               <span className="header-spacer" />
               <Button
                 size="sm"
                 variant="danger"
                 busy={removeBusy}
                 onClick={() => {
+                  const force = removePhase === "dirty";
+                  const path = removeTarget.path;
+                  const sessionIds = sessionsForRemoval.map((session) => session.id);
                   setRemoveBusy(true);
-                  void Promise.all(sessionsForRemoval.map((session) => deleteSession(session.id)))
-                    .then(() => api.removeWorktree(projectId, removeTarget.path, deleteBranch))
-                    .then(() => { setRemoveTarget(null); onChanged(); })
-                    .catch((error) => setUiError(friendlyError(tr("sidebar.sessionlist.couldnTRemoveTheWorktree"), error)))
+                  void api.removeWorktree(projectId, path, deleteBranch, force)
+                    .then(async (result) => {
+                      setRemoveTarget(null);
+                      setRemovePhase("confirm");
+                      setDirtyChanges(0);
+                      onChanged();
+                      const settled = await Promise.allSettled(sessionIds.map((id) => deleteSession(id)));
+                      if (result.metadataCleanupFailed || result.branchCleanupFailed || settled.some((item) => item.status === "rejected")) {
+                        setUiError(tr("sidebar.sessionlist.couldnTCleanUpSessionsAfterRemovingTheWorktree"));
+                      }
+                    })
+                    .catch((error) => {
+                      if (!force && errorCodeOf(error) === "worktree-dirty") {
+                        setRemovePhase("dirty");
+                        setDirtyChanges(errorChangesOf(error));
+                        return;
+                      }
+                      setUiError(friendlyError(tr("sidebar.sessionlist.couldnTRemoveTheWorktree"), error));
+                    })
                     .finally(() => setRemoveBusy(false));
                 }}
               >
@@ -1047,6 +1082,14 @@ export default function SessionList({
             {tr("sidebar.sessionlist.deleteValueWorktree", { value: worktreeLabel(removeTarget.branch, removeTarget.path) })}
             <br />{removeTarget.path}
           </p>
+          <p className="muted">{tr("gitview.theLinkedWorktreeAtValue", { path: removeTarget.path })}</p>
+          {removePhase === "dirty" && (
+            <p className="muted" role="alert">
+              {dirtyChanges > 0
+                ? tr("gitview.destroyDirtyWorktreeValue", { count: dirtyChanges })
+                : tr("gitview.destroyDirtyWorktree")}
+            </p>
+          )}
           <div className="worktree-remove-options">
             <Checkbox checked disabled onChange={() => {}} label={tr("sidebar.sessionlist.deleteTheLocalWorktreeCheckout")} />
             <Checkbox

@@ -1,8 +1,9 @@
 // Monotonic, fail-closed permission rules engine.
 // Rules persist to <dataDir>/permissions.json. "always" replies become allow
 // rules whose scope is explicit (WP15): user-wide, one project, or one session.
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { atomicWriteSync } from "@polyth/plugins";
 
 export type RuleAction = "allow" | "deny" | "ask";
 export interface PermissionRule {
@@ -38,7 +39,7 @@ export function createPermissionService(dataDir: string): PermissionService {
 
   const persist = () => {
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, JSON.stringify(ruleList, null, 2));
+    atomicWriteSync(file, JSON.stringify(ruleList, null, 2));
   };
 
   return {
@@ -115,7 +116,7 @@ export function createAutoAcceptStore(file: string): AutoAcceptStore {
 
   const persist = () => {
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, JSON.stringify(Object.fromEntries(settings), null, 2));
+    atomicWriteSync(file, JSON.stringify(Object.fromEntries(settings), null, 2));
   };
 
   return {

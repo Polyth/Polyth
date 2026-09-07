@@ -78,16 +78,6 @@ export function setGroupingMode(mode: string): void {
   notify();
 }
 
-export function useGroupingMode(): string {
-  return useSyncExternalStore(
-    (cb) => {
-      listeners.add(cb);
-      return () => { listeners.delete(cb); };
-    },
-    getGroupingMode,
-  );
-}
-
 // ---- sidebar view mode (UX-FILES-TIMELINE-03 finding 9) -----------------------
 // "list": projects plus the active project's worktree-grouped sessions.
 // "tree": project → worktrees → sessions for every expanded project.

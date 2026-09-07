@@ -1828,6 +1828,7 @@ export const uk: AppMessages = {
   "sidebar.sessionlist.archiveValueShiftHoverQuickAction": "Архів {value} (швидка дія Shift+наведення курсора)",
   "sidebar.sessionlist.archiveValueTheAgentIsStillRunning": "Архів \" {label} \"? Агент все ще працює або очікує на вас.",
   "sidebar.sessionlist.collapse": "Крах",
+  "sidebar.sessionlist.couldnTCleanUpSessionsAfterRemovingTheWorktree": "Не вдалося очистити сеанси після видалення worktree",
   "sidebar.sessionlist.couldnTRemoveTheWorktree": "Не вдалося видалити worktree",
   "sidebar.sessionlist.couldnTUpdateSessionLabels": "Не вдалося оновити мітки сеансу",
   "sidebar.sessionlist.deletedValue": "Видалено {label}",

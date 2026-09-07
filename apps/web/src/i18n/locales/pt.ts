@@ -1828,6 +1828,7 @@ export const pt: AppMessages = {
   "sidebar.sessionlist.archiveValueShiftHoverQuickAction": "Arquivar {value} (Acção rápida Shift+passar o rato)",
   "sidebar.sessionlist.archiveValueTheAgentIsStillRunning": "Arquivar \" {label} \"? O agente ainda está em execução ou a aguardar a sua resposta.",
   "sidebar.sessionlist.collapse": "Recolher",
+  "sidebar.sessionlist.couldnTCleanUpSessionsAfterRemovingTheWorktree": "Não foi possível limpar as sessões após remover o worktree",
   "sidebar.sessionlist.couldnTRemoveTheWorktree": "Não foi possível remover o worktree",
   "sidebar.sessionlist.couldnTUpdateSessionLabels": "Não foi possível atualizar os rótulos da sessão.",
   "sidebar.sessionlist.deletedValue": "Eliminado {label}",

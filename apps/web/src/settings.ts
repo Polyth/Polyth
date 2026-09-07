@@ -207,10 +207,6 @@ export function parseModelRef(value: string): { providerID: string; modelID: str
   return { providerID: value.slice(0, i), modelID: value.slice(i + 1) };
 }
 
-export function formatModelRef(ref: { providerID: string; modelID: string }): string {
-  return `${ref.providerID}/${ref.modelID}`;
-}
-
 // ---- error display ----------------------------------------------------------
 
 const RECONNECT_RE = /\b503\b|unavailable|reconnect|fetch failed|econnrefused|socket hang up|network error/i;
@@ -263,10 +259,4 @@ export function modKeyLabel(): string {
   if (typeof navigator === "undefined") return "Ctrl";
   const hint = `${navigator.platform ?? ""} ${navigator.userAgent ?? ""}`;
   return /mac|iphone|ipad|ipod/i.test(hint) ? "⌘" : "Ctrl";
-}
-
-// Compact one-chip shortcut label: "⌘K" on Apple platforms, "Ctrl+K" elsewhere.
-export function shortcutLabel(key: string): string {
-  const mod = modKeyLabel();
-  return mod === "⌘" ? `⌘${key}` : `${mod}+${key}`;
 }

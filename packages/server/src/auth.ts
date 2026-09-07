@@ -7,8 +7,9 @@
 // Canonical API is ingress-aware `resolve()`. Loopback optional never applies
 // to Polyth Link ingress, even when the tunnel physically connects via 127.0.0.1.
 import { randomBytes, scryptSync, timingSafeEqual, createHash } from "node:crypto";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { atomicWriteSync } from "@polyth/plugins";
 import type {
   AuthPrincipal,
   AuthResolution,
@@ -152,7 +153,6 @@ export interface AuthService {
   enabled(): boolean;
   cookieName(): string;
   resolve(request: AuthRequestLike, ingress: RequestIngress): AuthResolution;
-  requireAuthenticated(request: AuthRequestLike, ingress: RequestIngress): AuthPrincipal;
   requireCapability(principal: AuthPrincipal, capability: string): void;
   /** null = request may proceed; otherwise the 401 to answer with. */
   gate(request: AuthRequestLike, ingress: RequestIngress): GateDenial | null;
@@ -225,11 +225,7 @@ export function publicHttpIngress(
   };
 }
 
-export function principalScope(principal: AuthPrincipal): AuthStatusDto["scope"] {
-  return principal.kind;
-}
-
-export function principalHasCapability(principal: AuthPrincipal, capability: string): boolean {
+function principalHasCapability(principal: AuthPrincipal, capability: string): boolean {
   if (!capability) return false;
   switch (principal.kind) {
     case "anonymous":
@@ -305,7 +301,7 @@ export function createAuthService(opts: AuthServiceOptions): AuthService {
   const save = (): void => {
     purge();
     mkdirSync(dirname(opts.file), { recursive: true });
-    writeFileSync(opts.file, `${JSON.stringify(stored, null, 2)}\n`);
+    atomicWriteSync(opts.file, `${JSON.stringify(stored, null, 2)}\n`, 0o600);
   };
   purge();
 
@@ -376,14 +372,6 @@ export function createAuthService(opts: AuthServiceOptions): AuthService {
       return resolvePublicHttp(request, ingress);
     },
 
-    requireAuthenticated(request, ingress) {
-      const resolution = svc.resolve(request, ingress);
-      if (!resolution.authenticated) {
-        throw new AuthorizationError("unauthorized", "authentication required");
-      }
-      return resolution.principal;
-    },
-
     requireCapability(principal, capability) {
       requirePrincipalCapability(principal, capability);
     },
@@ -398,7 +386,7 @@ export function createAuthService(opts: AuthServiceOptions): AuthService {
       return {
         required: resolution.principal.kind === "paired-device" ? false : svc.enabled(),
         authorized: resolution.authenticated,
-        scope: principalScope(resolution.principal),
+        scope: resolution.principal.kind,
       };
     },
 

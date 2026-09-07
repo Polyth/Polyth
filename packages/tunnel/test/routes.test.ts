@@ -3,12 +3,21 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AuthPrincipal, RouteRequest } from "@polyth/contracts";
+import type { AuthPrincipal, RouteRequest, SpaceContext } from "@polyth/contracts";
 import { createTunnelStore } from "../src/index.ts";
 import { TunnelEventBus } from "../src/events.ts";
 import { tunnelRoutes } from "../src/serverEntry.ts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "polyth-tunnel-routes-"));
+
+const SPACE: SpaceContext = {
+  spaceId: "spc_test",
+  spaceSlug: "test",
+  userId: "usr_test",
+  role: "owner",
+  deployment: "local-trusted",
+  storageDir: "/tmp/polyth-tunnel-test-space",
+};
 
 const request = (opts: {
   path: string;
@@ -33,6 +42,7 @@ const request = (opts: {
     method: opts.method ?? "GET",
     ingress,
     principal: opts.principal,
+    space: SPACE,
     requireCapability() {},
     body: async () => opts.body ?? {},
     json(code) { codes.push(code); },

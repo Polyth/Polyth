@@ -19,14 +19,14 @@ import type {
   TaskTrackerStatusDto,
   TaskTrackerTaskDto,
 } from "@polyth/contracts";
-import type {
-  WebPackageHost,
-  WidgetDefinition,
-  WidgetPlugin,
-  WidgetRenderContext,
-  WidgetSettingsContext,
+import {
+  friendlyError,
+  type WebPackageHost,
+  type WidgetDefinition,
+  type WidgetPlugin,
+  type WidgetRenderContext,
+  type WidgetSettingsContext,
 } from "@polyth/web-sdk";
-import { friendlyError } from "@polyth/web-sdk";
 import { api } from "./api.ts";
 import {
   Button,

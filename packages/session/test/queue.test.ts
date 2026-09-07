@@ -12,7 +12,7 @@ function freshDir(): string {
   return mkdtempSync(join(tmpdir(), "polyth-queue-"));
 }
 
-test("enqueue keeps FIFO order and queueShift pops in order", async () => {
+test("enqueue keeps FIFO order and dispatch pops in order", async () => {
   const store = createStore(join(freshDir(), "q.db"));
   try {
     await store.enqueue("s1", "first", "queue");
@@ -22,8 +22,13 @@ test("enqueue keeps FIFO order and queueShift pops in order", async () => {
     assert.deepEqual(list.map((i) => i.text), ["first", "second", "third"]);
     assert.equal(list[2]!.delivery, "steer");
 
-    const a = await store.queueShift("s1");
-    assert.equal(a?.text, "first");
+    const reserved = await store.reserveQueueHead({ sessionId: "s1" });
+    assert.equal(reserved.kind, "reserved");
+    if (reserved.kind !== "reserved") return;
+    const { operationId } = reserved.reservation.operation;
+    await store.claimOperation(operationId);
+    const a = await store.confirmQueueReservation(operationId);
+    assert.equal(a.text, "first");
     const rest = await store.queueList("s1");
     assert.deepEqual(rest.map((i) => i.text), ["second", "third"]);
   } finally {

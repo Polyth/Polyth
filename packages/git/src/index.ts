@@ -67,7 +67,18 @@ export interface Worktree {
 export interface WorktreeService {
   list(root: string): Promise<Worktree[]>;
   create(root: string, input: { branch: string; path?: string; base?: string }): Promise<{ path: string; branch: string }>;
-  remove(root: string, input: { path: string; deleteBranch?: boolean }): Promise<void>;
+  /** Git is the authority. First call is `git worktree remove` without
+   *  `--force`. Dirty/untracked refusal becomes `worktree-dirty`. `--force`
+   *  is used only when the caller passes `force` after explicit confirmation.
+   *  Already-absent paths are a physical success. `ownedBranch` is a
+   *  server-derived identity for branch cleanup when the worktree row is gone;
+   *  it is never a client-supplied name. */
+  remove(root: string, input: {
+    path: string;
+    deleteBranch?: boolean;
+    force?: boolean;
+    ownedBranch?: string;
+  }): Promise<{ branchCleanupFailed?: boolean }>;
   prune(root: string): Promise<void>;
   /** Detached checkout used as a transient integration workspace. */
   addDetached(root: string, path: string, startPoint: string): Promise<void>;
@@ -306,7 +317,14 @@ export async function cloneRepository(
   return { path: target, name };
 }
 
-interface RunResult { stdout: string; stderr: string; code: number }
+interface RunResult {
+  stdout: string;
+  stderr: string;
+  /** Process exit status when Git actually exited. */
+  code: number;
+  /** False when the process was killed, timed out, or never started. */
+  exited: boolean;
+}
 
 const STATUS_LETTER: Record<string, GitFileStatus> = {
   A: "added", M: "modified", D: "deleted", R: "renamed", C: "copied", T: "typechange", U: "conflicted",
@@ -318,6 +336,13 @@ const shortErr = (stderr: string): string => {
   const line = stderr.split("\n").map((l) => l.trim()).filter(Boolean)[0] ?? "git command failed";
   return line.replace(/^(fatal|error):\s*/i, "");
 };
+
+/** Git's own refusal for a dirty linked worktree. Status is never the gate. */
+const isDirtyWorktreeRefusal = (stderr: string): boolean =>
+  /use --force to delete/i.test(stderr);
+
+/** Server-derived branch names only. Rejects empty, spaced, or dashed-option forms. */
+const OWNED_BRANCH = /^[\w][\w./@+-]*$/;
 
 const sanitizeBranchDir = (branch: string): string =>
   branch.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "worktree";
@@ -337,6 +362,21 @@ interface GitRunOpts {
   input?: string;
 }
 
+const parseWorktrees = (stdout: string): Worktree[] => {
+  const out: Worktree[] = [];
+  let cur: Partial<Worktree> | null = null;
+  for (const line of stdout.split("\n")) {
+    if (line.startsWith("worktree ")) {
+      if (cur?.path) out.push({ path: cur.path, branch: cur.branch ?? null, head: cur.head ?? "", isMain: out.length === 0 });
+      cur = { path: line.slice("worktree ".length) };
+    } else if (line.startsWith("HEAD ") && cur) cur.head = line.slice(5).trim();
+    else if (line.startsWith("branch ") && cur) cur.branch = line.slice(7).replace("refs/heads/", "").trim();
+    else if (line === "detached" && cur) cur.branch = null;
+  }
+  if (cur?.path) out.push({ path: cur.path, branch: cur.branch ?? null, head: cur.head ?? "", isMain: out.length === 0 });
+  return out;
+};
+
 export function createGitService(opts: GitServiceOptions = {}): GitService {
   const bin = opts.bin ?? process.env.POLYTH_GIT_BIN ?? "git";
   const timeout = opts.timeoutMs ?? 30_000;
@@ -352,18 +392,40 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
         maxBuffer: 32 * 1024 * 1024,
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...(opts.env ?? {}) },
       }, (err, stdout, stderr) => {
-        const code = (err as (Error & { code?: number }) | null)?.code ?? 0;
+        const execErr = err as (Error & {
+          code?: number | string;
+          killed?: boolean;
+        }) | null;
+        const raw = execErr?.code;
+        const exited = !execErr || (typeof raw === "number" && !execErr.killed);
+        const code = typeof raw === "number" ? raw : execErr ? 1 : 0;
         if (err && !opts.allowFail) {
           rej(Object.assign(new Error(shortErr(String(stderr || err.message))), { cause: stderr, code: "git-failed" }));
           return;
         }
-        res({ stdout: String(stdout), stderr: String(stderr), code: typeof code === "number" ? code : 1 });
+        res({ stdout: String(stdout), stderr: String(stderr), code, exited });
       });
       if (opts.input !== undefined) {
         child.stdin?.on("error", () => undefined);
         child.stdin?.end(opts.input);
       }
     });
+
+  const listWorktrees = async (root: string): Promise<{ ok: boolean; trees: Worktree[] }> => {
+    const listed = await run(root, ["worktree", "list", "--porcelain"], true);
+    if (listed.code !== 0) return { ok: false, trees: [] };
+    return { ok: true, trees: parseWorktrees(listed.stdout) };
+  };
+
+  const deleteOwnedBranch = async (root: string, branch: string): Promise<boolean> => {
+    const deleted = await run(root, ["branch", "-D", branch], true);
+    if (deleted.exited && deleted.code === 0) return true;
+    const still = await run(root, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], true);
+    // git-show-ref: 0 = ref exists, 1 = requested ref is absent. Timeouts,
+    // spawn failures, and fatal 128 are not proof of absence.
+    return still.exited && still.code === 1;
+  };
+
   const configValue = async (root: string, key: string): Promise<string> =>
     (await run(root, ["config", "--local", "--get", key], true)).stdout.trim();
 
@@ -782,18 +844,7 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       async list(root) {
         const r = await run(root, ["worktree", "list", "--porcelain"], true);
         if (r.code !== 0) return [];
-        const out: Worktree[] = [];
-        let cur: Partial<Worktree> | null = null;
-        for (const line of r.stdout.split("\n")) {
-          if (line.startsWith("worktree ")) {
-            if (cur?.path) out.push({ path: cur.path, branch: cur.branch ?? null, head: cur.head ?? "", isMain: out.length === 0 });
-            cur = { path: line.slice("worktree ".length) };
-          } else if (line.startsWith("HEAD ") && cur) cur.head = line.slice(5).trim();
-          else if (line.startsWith("branch ") && cur) cur.branch = line.slice(7).replace("refs/heads/", "").trim();
-          else if (line === "detached" && cur) cur.branch = null;
-        }
-        if (cur?.path) out.push({ path: cur.path, branch: cur.branch ?? null, head: cur.head ?? "", isMain: out.length === 0 });
-        return out;
+        return parseWorktrees(r.stdout);
       },
 
       async create(root, input) {
@@ -813,10 +864,39 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       },
 
       async remove(root, input) {
-        const list = await service.worktrees.list(root);
-        const wt = list.find((w) => resolve(w.path) === resolve(input.path));
-        await run(root, ["worktree", "remove", "--force", input.path]);
-        if (input.deleteBranch && wt?.branch) await run(root, ["branch", "-D", wt.branch], true);
+        const listed = await listWorktrees(root);
+        const wt = listed.trees.find((w) => resolve(w.path) === resolve(input.path));
+        const args = input.force
+          ? ["worktree", "remove", "--force", input.path]
+          : ["worktree", "remove", input.path];
+        const result = await run(root, args, true);
+        if (result.code !== 0) {
+          if (!input.force && isDirtyWorktreeRefusal(result.stderr)) {
+            const inspectRoot = wt?.path && existsSync(wt.path) ? wt.path : input.path;
+            const status = existsSync(inspectRoot)
+              ? await run(inspectRoot, ["status", "--porcelain=v1", "-z", "--untracked-files=all"], true)
+              : { code: 1, stdout: "", stderr: "" };
+            const changes = status.code === 0 ? status.stdout.split("\0").filter(Boolean).length : 0;
+            throw Object.assign(
+              new Error(
+                changes > 0
+                  ? `This worktree has ${changes} uncommitted change${changes === 1 ? "" : "s"} that will be lost. Remove anyway?`
+                  : "This worktree has uncommitted or untracked changes that will be lost. Remove anyway?",
+              ),
+              { code: "worktree-dirty", ...(changes > 0 ? { changes } : {}) },
+            );
+          }
+          const after = await listWorktrees(root);
+          const stillPresent = after.ok && after.trees.some((tree) => resolve(tree.path) === resolve(input.path));
+          if (stillPresent || !after.ok) {
+            throw Object.assign(new Error(shortErr(result.stderr)), { cause: result.stderr, code: "git-failed" });
+          }
+        }
+        if (!input.deleteBranch) return {};
+        const branch = wt?.branch
+          ?? (input.ownedBranch && OWNED_BRANCH.test(input.ownedBranch) ? input.ownedBranch : null);
+        if (!branch) return { branchCleanupFailed: true };
+        return (await deleteOwnedBranch(root, branch)) ? {} : { branchCleanupFailed: true };
       },
 
       async prune(root) {

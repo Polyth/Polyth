@@ -12,7 +12,7 @@ import {
   prepareOpenCodeRuntime,
   resolveOpenCodeBinary,
   sweepOpenCodeRuntimes,
-} from "../src/runtimeStorage.ts";
+} from "../src/index.ts";
 
 const TEST_ENGINE = {
   engine: "opencode" as const,

@@ -224,6 +224,10 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       routes ??= scheduleRoutes({ schedule, projects: host.projects });
       schedule.start();
       void loopSync();
+      if (loopTimer) {
+        clearInterval(loopTimer);
+        loopTimer = null;
+      }
       loopTimer = setInterval(() => void loopSync(), 60_000);
       loopTimer.unref?.();
     },

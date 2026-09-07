@@ -1,12 +1,6 @@
-import {
-  chmodSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { atomicWriteSync } from "@polyth/plugins";
 import {
   cap,
   type HomeAssistantConfigDto,
@@ -330,22 +324,6 @@ const normalizeEntities = (
   };
 };
 
-function atomicWrite(path: string, data: string, mode?: number): void {
-  const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync(tmp, data, { encoding: "utf8", ...(mode ? { mode } : {}) });
-  try {
-    renameSync(tmp, path);
-    if (mode) chmodSync(path, mode);
-  } catch (error) {
-    try {
-      unlinkSync(tmp);
-    } catch {
-      // already renamed or removed
-    }
-    throw error;
-  }
-}
-
 const jsonRecord = (value: unknown): Record<string, JsonValue> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   try {
@@ -414,8 +392,8 @@ export function createHomeAssistantService(
   });
 
   const persist = (): void => {
-    atomicWrite(options.file, JSON.stringify(settings, null, 2));
-    atomicWrite(secretsFile, JSON.stringify(secrets), 0o600);
+    atomicWriteSync(options.file, JSON.stringify(settings, null, 2));
+    atomicWriteSync(secretsFile, JSON.stringify(secrets), 0o600);
   };
 
   const request = async (path: string, init: RequestInit = {}): Promise<unknown> => {

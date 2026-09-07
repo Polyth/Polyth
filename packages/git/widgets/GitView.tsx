@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type GitBranches, type GitFileEntry, type GitGraphEntry, type GitStash, type GitStatus, type Worktree } from "@polyth/session/web-api";
+import { api, errorCodeOf, errorChangesOf, type GitBranches, type GitFileEntry, type GitGraphEntry, type GitStash, type GitStatus, type Worktree } from "@polyth/session/web-api";
 import { layoutGraph, type GraphRow } from "./git/graph.ts";
 import { setGitPrefs, splitDiffRows, useGitPrefs } from "./gitPrefs.ts";
 import { refreshGitStatus, useGitStatus } from "./gitStatusStore.ts";
@@ -1134,7 +1134,28 @@ export default function GitView() {
                       title: tr("gitview.removeWorktreeQuestion"),
                       description: tr("gitview.theLinkedWorktreeAtValue", { path: tree.path }),
                       confirmLabel: tr("gitview.removeWorktree"),
-                      action: () => api.removeWorktree(projectId, tree.path, true),
+                      action: async () => {
+                        const finish = async (force?: boolean) => {
+                          const result = await api.removeWorktree(projectId, tree.path, true, force);
+                          if (result.metadataCleanupFailed || result.branchCleanupFailed) {
+                            setUiError(tr("gitview.couldntCleanUpAfterRemovingTheWorktree"));
+                          }
+                        };
+                        try {
+                          await finish();
+                        } catch (err) {
+                          if (errorCodeOf(err) !== "worktree-dirty") throw err;
+                          const changes = errorChangesOf(err);
+                          setConfirmRequest({
+                            title: tr("gitview.removeWorktreeQuestion"),
+                            description: changes > 0
+                              ? tr("gitview.destroyDirtyWorktreeValue", { count: changes })
+                              : tr("gitview.destroyDirtyWorktree"),
+                            confirmLabel: tr("gitview.removeWorktree"),
+                            action: () => finish(true),
+                          });
+                        }
+                      },
                     })} />}
                   </article>
                 ))}

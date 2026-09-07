@@ -173,7 +173,7 @@ test("the phone session island combines recents, tasks, and requests", () => {
   // The pill dropped the "SESSION ·" / "TASK ·" kind prefix; a status glyph
   // (spinner, done dot, or tone dot) now carries the state instead.
   assert.doesNotMatch(mobileHeader, /mobile-island-kind/);
-  assert.match(mobileHeader, /mobile-island-spinner/);
+  assert.match(mobileHeader, /mobile-island-live/);
   assert.match(css, /\.mobile-island-diff \.add/);
   assert.match(css, /@keyframes island-task-pulse/);
   assert.match(css, /@keyframes sheet-drop/);

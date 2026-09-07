@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   BUILTIN_CAPABILITY_META, GROUP_ORDER, TECHNICAL_GROUP_LABEL,
-  capabilityGroup, getCapability, listCapabilities, registerCapability,
+  capabilityGroup, getCapability, listCapabilities, notifyCapabilities, registerCapability,
   resolveCapabilities, subscribeCapabilities,
   type CapabilityDescriptor,
 } from "../src/capabilities.ts";
@@ -98,6 +98,21 @@ test("register/replace/dispose: replace by id, dispose by identity, listeners fi
   assert.equal(getCapability("test-ext"), null);
   assert.equal(listCapabilities().length, before);
   unsub();
+});
+
+test("notify re-renders consumers without replacing the descriptor", () => {
+  const descriptor = fakeDescriptor("notify-cap");
+  const dispose = registerCapability(descriptor);
+  let fired = 0;
+  const unsub = subscribeCapabilities(() => { fired++; });
+  try {
+    notifyCapabilities();
+    assert.equal(fired, 1);
+    assert.equal(getCapability("notify-cap"), descriptor);
+  } finally {
+    unsub();
+    dispose();
+  }
 });
 
 test("dynamically registered capability appears in resolution immediately with its default tier", () => {

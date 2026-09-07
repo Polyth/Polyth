@@ -209,7 +209,11 @@ export function createManagedWorktrees(git: GitService) {
         });
       }
       const deleteBranch = opts?.deleteBranch !== false && isManagedBranch(owned.branch);
-      await git.worktrees.remove(root, { path: worktreePath, deleteBranch });
+      // Owned isolation worktrees are discarded after identity + rebound gates.
+      // User `/api/worktrees/remove` still refuses dirty trees unless the user
+      // confirms `force`. Isolation cleanup is throwing away managed
+      // infrastructure, so Git `--force` is required here.
+      await git.worktrees.remove(root, { path: worktreePath, deleteBranch, force: true });
       await git.worktrees.prune(root);
       log("cleanup", { sessionId: owned.meta.sessionId, worktreePath, branch: owned.branch });
     },
@@ -277,7 +281,7 @@ export function createManagedWorktrees(git: GitService) {
 
     async discardIntegration(root: string, integrationPath: string): Promise<void> {
       try {
-        await git.worktrees.remove(root, { path: integrationPath, deleteBranch: false });
+        await git.worktrees.remove(root, { path: integrationPath, deleteBranch: false, force: true });
       } catch (error) {
         log("cleanup-failed", {
           worktreePath: integrationPath,

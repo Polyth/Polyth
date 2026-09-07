@@ -40,7 +40,7 @@ export interface SpaceSessionStore {
   adoptLabelsIntoSpace?(spaceId: string): Promise<number>;
 }
 
-export const SPACE_COOKIE = "polyth_space";
+const SPACE_COOKIE = "polyth_space";
 export const SPACE_HEADER = "x-polyth-space";
 
 /** What the gateway calls per request. Deliberately tiny: the gateway must not

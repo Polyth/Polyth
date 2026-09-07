@@ -32,6 +32,7 @@ test("list combines shell and manifest packages with core packages always enable
     [...BUILTIN_PACKAGES, ...FEATURE_PACKAGES].map((descriptor) => descriptor.id),
   );
   assert.ok(packages.filter((descriptor) => descriptor.core).every((descriptor) => descriptor.enabled));
+  assert.equal(packageRegistry.get("agents"), null);
   assert.equal(packageRegistry.get("home-assistant")?.enabled, false);
   assert.equal(packageRegistry.get("git")?.enabled, true);
   assert.equal(packageRegistry.get("missing"), null);

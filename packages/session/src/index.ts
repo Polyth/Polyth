@@ -5,6 +5,7 @@ import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 
 import { MODEL_VISIBLE_TYPES, formatBrowserContextForModel } from "@polyth/contracts";
+import { withImmediateTransaction, type SyncOnly } from "./syncTransaction.ts";
 import type {
   AgentProfile,
   AttachmentRef,
@@ -269,9 +270,9 @@ export interface Store extends SessionPersistence {
     canonicalSessionId: string,
     retirement: { kind: "confirmed" } | { kind: "purged"; policy: string },
   ): Promise<DeletionTombstone>;
-  deleteProjection(sessionId: string): Promise<void>;
   /** Hard delete: events + projection + queued messages, one transaction. */
   deleteSession(sessionId: string): Promise<void>;
+  deleteProjection(sessionId: string): Promise<void>;
   // -- organization: folders + labels (WP5) --
   folderList(projectId: string): Promise<SessionFolderDto[]>;
   /** Owning project of a folder — the tenancy guard's join point for folder
@@ -465,10 +466,28 @@ const EVENTS_COLS = [
 ] as const;
 
 export function createStore(dbPath: string): Store {
-  const db = new DatabaseSync(dbPath);
-  db.exec("PRAGMA journal_mode = WAL");
-  db.exec("PRAGMA synchronous = NORMAL");
-  db.exec(`
+  const raw = new DatabaseSync(dbPath);
+  // Closed-store fence: teardown may begin while a service operation is still
+  // inside itself. Getting a live service reference does not cancel that work,
+  // so every sqlite boundary must refuse after close() rather than touch a
+  // disposed DatabaseSync.
+  let closed = false;
+  const assertOpen = (): void => {
+    if (closed) {
+      throw Object.assign(new Error("session store is closed"), { code: "unavailable" });
+    }
+  };
+  const sqlitePrepare = (sql: string): StatementSync => {
+    assertOpen();
+    return raw.prepare(sql);
+  };
+  const sqliteExec = (sql: string): void => {
+    assertOpen();
+    raw.exec(sql);
+  };
+  sqliteExec("PRAGMA journal_mode = WAL");
+  sqliteExec("PRAGMA synchronous = NORMAL");
+  sqliteExec(`
     CREATE TABLE IF NOT EXISTS events (
       session_id TEXT NOT NULL,
       seq       INTEGER NOT NULL,
@@ -484,7 +503,7 @@ export function createStore(dbPath: string): Store {
       PRIMARY KEY (session_id, seq)
     )
   `);
-  db.exec(`
+  sqliteExec(`
     CREATE TABLE IF NOT EXISTS projections (
       session_id TEXT PRIMARY KEY,
       data TEXT NOT NULL
@@ -493,20 +512,20 @@ export function createStore(dbPath: string): Store {
 
   // Forward-only, transactional schema migrations. Reopening an old DB runs
   // only the missing steps; reopening a new DB is a no-op.
-  db.exec(`CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+  sqliteExec(`CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
   const getVersion = (): number => {
-    const row = db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined;
+    const row = sqlitePrepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined;
     return row ? Number(row.value) : 0;
   };
   const setVersion = (v: number): void => {
-    db.prepare(
+    sqlitePrepare(
       "INSERT INTO schema_meta (key, value) VALUES ('version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
     ).run(String(v));
   };
   const MIGRATIONS: Array<() => void> = [
     // v1: durable per-session delivery queue (WP3)
     () => {
-      db.exec(`
+      sqliteExec(`
         CREATE TABLE IF NOT EXISTS session_queue (
           queue_id   TEXT PRIMARY KEY,
           session_id TEXT NOT NULL,
@@ -516,11 +535,11 @@ export function createStore(dbPath: string): Store {
           created_at INTEGER NOT NULL
         )
       `);
-      db.exec("CREATE INDEX IF NOT EXISTS idx_queue_session ON session_queue (session_id, position)");
+      sqliteExec("CREATE INDEX IF NOT EXISTS idx_queue_session ON session_queue (session_id, position)");
     },
     // v2: session folders + workspace labels (WP5)
     () => {
-      db.exec(`
+      sqliteExec(`
         CREATE TABLE IF NOT EXISTS folders (
           id         TEXT PRIMARY KEY,
           project_id TEXT NOT NULL,
@@ -530,8 +549,8 @@ export function createStore(dbPath: string): Store {
           revision   INTEGER NOT NULL DEFAULT 1
         )
       `);
-      db.exec("CREATE INDEX IF NOT EXISTS idx_folders_project ON folders (project_id, position)");
-      db.exec(`
+      sqliteExec("CREATE INDEX IF NOT EXISTS idx_folders_project ON folders (project_id, position)");
+      sqliteExec(`
         CREATE TABLE IF NOT EXISTS labels (
           id       TEXT PRIMARY KEY,
           name     TEXT NOT NULL,
@@ -543,7 +562,7 @@ export function createStore(dbPath: string): Store {
     },
     // v3: server-owned agent profiles (WP8)
     () => {
-      db.exec(`
+      sqliteExec(`
         CREATE TABLE IF NOT EXISTS agent_profiles (
           id          TEXT PRIMARY KEY,
           name        TEXT NOT NULL,
@@ -564,23 +583,23 @@ export function createStore(dbPath: string): Store {
     },
     // v4: queued messages keep their attachments (F2)
     () => {
-      db.exec("ALTER TABLE session_queue ADD COLUMN attachments TEXT");
+      sqliteExec("ALTER TABLE session_queue ADD COLUMN attachments TEXT");
     },
     // v5: index for the message-search read path (searchEventText filters on
     // type and orders by time; the primary key only covers session_id+seq)
     () => {
-      db.exec("CREATE INDEX IF NOT EXISTS idx_events_type_time ON events (type, time)");
+      sqliteExec("CREATE INDEX IF NOT EXISTS idx_events_type_time ON events (type, time)");
     },
     // v6: instant-load read paths — project-scoped projection listing via an
     // indexed generated column, indexed per-session type lookups, and
     // append-maintained open-attention counters replacing full log scans.
     () => {
-      db.exec(
+      sqliteExec(
         "ALTER TABLE projections ADD COLUMN project_id TEXT GENERATED ALWAYS AS (json_extract(data, '$.projectId')) VIRTUAL",
       );
-      db.exec("CREATE INDEX IF NOT EXISTS idx_projections_project ON projections (project_id)");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_events_session_type ON events (session_id, type)");
-      db.exec(`
+      sqliteExec("CREATE INDEX IF NOT EXISTS idx_projections_project ON projections (project_id)");
+      sqliteExec("CREATE INDEX IF NOT EXISTS idx_events_session_type ON events (session_id, type)");
+      sqliteExec(`
         CREATE TABLE IF NOT EXISTS attention_open (
           session_id TEXT NOT NULL,
           kind       TEXT NOT NULL,
@@ -589,7 +608,7 @@ export function createStore(dbPath: string): Store {
         )
       `);
       // Backfill from the durable log so counters on old databases stay honest.
-      db.exec(`
+      sqliteExec(`
         INSERT OR IGNORE INTO attention_open (session_id, kind, request_id)
         SELECT e.session_id,
                CASE WHEN e.type = 'permission/requested' THEN 'permission' ELSE 'question' END,
@@ -609,7 +628,7 @@ export function createStore(dbPath: string): Store {
     // queue leases, semantic observation identity, response CAS, restart
     // barriers, and deletion negative state are durable across process restart.
     () => {
-      db.exec(`
+      sqliteExec(`
         CREATE TABLE IF NOT EXISTS runtime_operations (
           operation_id    TEXT PRIMARY KEY,
           session_id      TEXT NOT NULL,
@@ -629,15 +648,15 @@ export function createStore(dbPath: string): Store {
           UNIQUE (session_id, ordinal)
         )
       `);
-      db.exec("CREATE INDEX IF NOT EXISTS idx_runtime_operations_session ON runtime_operations (session_id, ordinal)");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_runtime_operations_state ON runtime_operations (state)");
+      sqliteExec("CREATE INDEX IF NOT EXISTS idx_runtime_operations_session ON runtime_operations (session_id, ordinal)");
+      sqliteExec("CREATE INDEX IF NOT EXISTS idx_runtime_operations_state ON runtime_operations (state)");
 
-      db.exec("ALTER TABLE session_queue ADD COLUMN reservation_operation_id TEXT");
-      db.exec(
+      sqliteExec("ALTER TABLE session_queue ADD COLUMN reservation_operation_id TEXT");
+      sqliteExec(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_reservation_operation ON session_queue (reservation_operation_id) WHERE reservation_operation_id IS NOT NULL",
       );
 
-      db.exec(`
+      sqliteExec(`
         CREATE TABLE IF NOT EXISTS response_intents (
           session_id   TEXT NOT NULL,
           kind         TEXT NOT NULL CHECK (kind IN ('permission','question','secret')),
@@ -649,7 +668,7 @@ export function createStore(dbPath: string): Store {
         )
       `);
 
-      db.exec(`
+      sqliteExec(`
         CREATE TABLE IF NOT EXISTS observations (
           authority_id          TEXT NOT NULL,
           directory             TEXT NOT NULL,
@@ -669,8 +688,8 @@ export function createStore(dbPath: string): Store {
           )
         )
       `);
-      db.exec("CREATE INDEX IF NOT EXISTS idx_observations_session ON observations (session_id)");
-      db.exec(`
+      sqliteExec("CREATE INDEX IF NOT EXISTS idx_observations_session ON observations (session_id)");
+      sqliteExec(`
         CREATE TABLE IF NOT EXISTS observation_checkpoints (
           authority_id       TEXT NOT NULL,
           directory          TEXT NOT NULL,
@@ -688,7 +707,7 @@ export function createStore(dbPath: string): Store {
           )
         )
       `);
-      db.exec(`
+      sqliteExec(`
         CREATE TABLE IF NOT EXISTS observation_cursors (
           authority_id       TEXT NOT NULL,
           directory          TEXT NOT NULL,
@@ -701,7 +720,7 @@ export function createStore(dbPath: string): Store {
         )
       `);
 
-      db.exec(`
+      sqliteExec(`
         CREATE TABLE IF NOT EXISTS session_reconciliations (
           session_id TEXT PRIMARY KEY,
           ordinal    INTEGER NOT NULL,
@@ -711,7 +730,7 @@ export function createStore(dbPath: string): Store {
         )
       `);
 
-      db.exec(`
+      sqliteExec(`
         CREATE TABLE IF NOT EXISTS deletion_tombstones (
           canonical_session_id TEXT PRIMARY KEY,
           authority_id         TEXT NOT NULL,
@@ -726,7 +745,7 @@ export function createStore(dbPath: string): Store {
           retirement_policy    TEXT
         )
       `);
-      db.exec(
+      sqliteExec(
         `CREATE INDEX IF NOT EXISTS idx_deletion_tombstone_binding
          ON deletion_tombstones (
            authority_id, directory, workspace, backend_session_id, retired_at
@@ -736,7 +755,7 @@ export function createStore(dbPath: string): Store {
     // v8: runtime epochs. Fenced is a terminal unknown-outcome disposition,
     // and queue admissions fenced by an epoch become durable held drafts.
     () => {
-      db.exec(`
+      sqliteExec(`
         CREATE TABLE runtime_operations_v8 (
           operation_id    TEXT PRIMARY KEY,
           session_id      TEXT NOT NULL,
@@ -774,7 +793,7 @@ export function createStore(dbPath: string): Store {
     // feature shipped) count as read — bold only appears for messages that
     // arrived after the user last looked.
     () => {
-      db.exec(`
+      sqliteExec(`
         CREATE TABLE IF NOT EXISTS session_read (
           session_id TEXT PRIMARY KEY,
           seq INTEGER NOT NULL
@@ -787,11 +806,11 @@ export function createStore(dbPath: string): Store {
     // written before tenancy have no spaceId — the server's boot migration
     // adopts them into the default Space via adoptSessionsIntoSpace().
     () => {
-      db.exec(
+      sqliteExec(
         "ALTER TABLE projections ADD COLUMN space_id TEXT GENERATED ALWAYS AS (json_extract(data, '$.spaceId')) VIRTUAL",
       );
-      db.exec("CREATE INDEX IF NOT EXISTS idx_projections_space ON projections (space_id)");
-      db.exec(
+      sqliteExec("CREATE INDEX IF NOT EXISTS idx_projections_space ON projections (space_id)");
+      sqliteExec(
         "CREATE INDEX IF NOT EXISTS idx_projections_space_project ON projections (space_id, project_id)",
       );
     },
@@ -799,23 +818,15 @@ export function createStore(dbPath: string): Store {
     // their project; labels were global, so their NAMES were visible to every
     // tenant. Rows written before tenancy are adopted by the boot migration.
     () => {
-      db.exec("ALTER TABLE labels ADD COLUMN space_id TEXT");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_labels_space ON labels (space_id, position)");
+      sqliteExec("ALTER TABLE labels ADD COLUMN space_id TEXT");
+      sqliteExec("CREATE INDEX IF NOT EXISTS idx_labels_space ON labels (space_id, position)");
     },
   ];
-  {
-    const current = getVersion();
-    for (let v = current; v < MIGRATIONS.length; v++) {
-      db.exec("BEGIN IMMEDIATE");
-      try {
-        MIGRATIONS[v]!();
-        setVersion(v + 1);
-        db.exec("COMMIT");
-      } catch (err) {
-        db.exec("ROLLBACK");
-        throw err;
-      }
-    }
+  for (let v = getVersion(); v < MIGRATIONS.length; v++) {
+    transaction(() => {
+      MIGRATIONS[v]!();
+      setVersion(v + 1);
+    });
   }
 
   // Prepared-statement cache for the fixed queries below (compiled once, then
@@ -823,8 +834,9 @@ export function createStore(dbPath: string): Store {
   // Queries with a variable placeholder count (attentionFor) stay uncached.
   const stmts = new Map<string, StatementSync>();
   const prep = (sql: string): StatementSync => {
+    assertOpen();
     let s = stmts.get(sql);
-    if (!s) { s = db.prepare(sql); stmts.set(sql, s); }
+    if (!s) { s = sqlitePrepare(sql); stmts.set(sql, s); }
     return s;
   };
 
@@ -868,16 +880,9 @@ export function createStore(dbPath: string): Store {
 
   // ------------------------------------------------------------- transaction helpers
 
-  function transaction<T>(run: () => T): T {
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      const value = run();
-      db.exec("COMMIT");
-      return value;
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw err;
-    }
+  function transaction<T>(run: () => SyncOnly<T>): SyncOnly<T> {
+    assertOpen();
+    return withImmediateTransaction((sql) => sqliteExec(sql), run);
   }
 
   function appendInTransaction(
@@ -1771,8 +1776,7 @@ export function createStore(dbPath: string): Store {
   // ------------------------------------------------------------- fork copy
 
   function copyTo(srcSessionId: string, dstSessionId: string, upToSeq?: number): Promise<void> {
-    db.exec("BEGIN IMMEDIATE");
-    try {
+    transaction(() => {
       const limit = upToSeq === undefined ? Number.MAX_SAFE_INTEGER : upToSeq;
       const src = prep("SELECT * FROM events WHERE session_id = ? AND seq <= ? ORDER BY seq")
         .all(srcSessionId, limit) as unknown as Row[];
@@ -1802,11 +1806,7 @@ export function createStore(dbPath: string): Store {
         );
         applyAttentionRaw(dstSessionId, r.type, r.data);
       }
-      db.exec("COMMIT");
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw err;
-    }
+    });
     return Promise.resolve();
   }
 
@@ -1818,17 +1818,14 @@ export function createStore(dbPath: string): Store {
   // provenance in source_seqs.
   function publishChildSession(input: ChildSnapshotInput): Promise<ChildSnapshotResult> {
     const childId = input.childSessionId;
-    const out: SessionEvent[] = [];
-    let marker: SessionEvent;
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      const existing = db
-        .prepare("SELECT COALESCE(MAX(seq), 0) AS m FROM events WHERE session_id = ?")
+    return Promise.resolve(transaction(() => {
+      const out: SessionEvent[] = [];
+      const existing = prep("SELECT COALESCE(MAX(seq), 0) AS m FROM events WHERE session_id = ?")
         .get(childId) as { m: number };
       if (Number(existing.m) > 0) {
         throw Object.assign(new Error("child session already has events"), { code: "conflict" });
       }
-      const ins = db.prepare(
+      const ins = prep(
         `INSERT INTO events (session_id, seq, id, time, type, data, ignorable, surface_op, source_seqs, producer, v)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
       );
@@ -1860,31 +1857,28 @@ export function createStore(dbPath: string): Store {
         childId, seq, markerId, markerTime, input.marker.type, JSON.stringify(input.marker.data),
         input.marker.ignorable ? 1 : 0, null, null, null,
       );
-      marker = {
+      const marker: SessionEvent = {
         id: markerId, sessionId: childId, seq, time: markerTime,
         type: input.marker.type, data: input.marker.data,
         ...(input.marker.ignorable ? { ignorable: true } : {}),
         v: 1,
       };
-      db.prepare(
-        `INSERT INTO projections (session_id, data) VALUES (?, ?)
-         ON CONFLICT(session_id) DO UPDATE SET data = excluded.data`,
-      ).run(input.projection.id, JSON.stringify(input.projection));
-      db.exec("COMMIT");
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw err;
-    }
-    return Promise.resolve({ events: out, marker });
+      upsertProjectionRow(input.projection);
+      return { events: out, marker };
+    }));
   }
 
   // ------------------------------------------------------------- projections
 
-  function upsertProjection(p: SessionProjection): Promise<void> {
+  function upsertProjectionRow(p: SessionProjection): void {
     prep(
       `INSERT INTO projections (session_id, data) VALUES (?, ?)
        ON CONFLICT(session_id) DO UPDATE SET data = excluded.data`,
     ).run(p.id, JSON.stringify(p));
+  }
+
+  function upsertProjection(p: SessionProjection): Promise<void> {
+    upsertProjectionRow(p);
     return Promise.resolve();
   }
 
@@ -1895,23 +1889,15 @@ export function createStore(dbPath: string): Store {
     sessionId: string,
     patch: (current: SessionProjection) => SessionProjection,
   ): Promise<SessionProjection | undefined> {
-    let next: SessionProjection | undefined;
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      const row = db
-        .prepare("SELECT data FROM projections WHERE session_id = ?")
+    return Promise.resolve(transaction(() => {
+      const row = prep("SELECT data FROM projections WHERE session_id = ?")
         .get(sessionId) as { data: string } | undefined;
-      if (row) {
-        next = patch(JSON.parse(row.data) as SessionProjection);
-        db.prepare("UPDATE projections SET data = ? WHERE session_id = ?")
-          .run(JSON.stringify(next), sessionId);
-      }
-      db.exec("COMMIT");
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw err;
-    }
-    return Promise.resolve(next);
+      if (!row) return undefined;
+      const next = patch(JSON.parse(row.data) as SessionProjection);
+      prep("UPDATE projections SET data = ? WHERE session_id = ?")
+        .run(JSON.stringify(next), sessionId);
+      return next;
+    }));
   }
 
   function projection(sessionId: string): Promise<SessionProjection | undefined> {
@@ -1946,6 +1932,12 @@ export function createStore(dbPath: string): Store {
     );
   }
 
+  function exportJsonl(sessionId: string): Promise<string> {
+    const rows = prep("SELECT data FROM events WHERE session_id = ? ORDER BY seq")
+      .all(sessionId) as { data: string }[];
+    return Promise.resolve(rows.map((r) => r.data).join("\n"));
+  }
+
   /** Owning Space of one session, or undefined when the session is unknown or
    *  predates tenancy. Used by event fan-out, which must not ship a session
    *  event to a socket attached to another Space. */
@@ -1957,7 +1949,7 @@ export function createStore(dbPath: string): Store {
 
   /** Boot migration half: adopt ownerless workspace labels. Idempotent. */
   function adoptLabelsIntoSpace(spaceId: string): Promise<number> {
-    const res = db.prepare("UPDATE labels SET space_id = ? WHERE space_id IS NULL").run(spaceId);
+    const res = sqlitePrepare("UPDATE labels SET space_id = ? WHERE space_id IS NULL").run(spaceId);
     return Promise.resolve(Number(res.changes));
   }
 
@@ -1976,15 +1968,6 @@ export function createStore(dbPath: string): Store {
       }
       return rows.length;
     }));
-  }
-
-  // ------------------------------------------------------------- export
-
-  function exportJsonl(sessionId: string): Promise<string> {
-    const rows = db
-      .prepare("SELECT data FROM events WHERE session_id = ? ORDER BY seq")
-      .all(sessionId) as { data: string }[];
-    return Promise.resolve(rows.map((r) => r.data).join("\n"));
   }
 
   // ------------------------------------------------------------- delivery queue (WP3)
@@ -2028,20 +2011,14 @@ export function createStore(dbPath: string): Store {
   async function enqueue(sessionId: string, text: string, delivery: DeliveryMode, attachments?: AttachmentRef[]): Promise<QueueItemDto> {
     const queueId = randomUUID();
     const createdAt = Date.now();
-    let position = 0;
-    db.exec("BEGIN IMMEDIATE");
-    try {
+    const position = transaction(() => {
       const row = prep("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM session_queue WHERE session_id = ?")
         .get(sessionId) as { next: number };
-      position = Number(row.next);
       prep(
         "INSERT INTO session_queue (queue_id, session_id, position, text, delivery, created_at, attachments) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      ).run(queueId, sessionId, position, text, delivery, createdAt, attachments?.length ? JSON.stringify(attachments) : null);
-      db.exec("COMMIT");
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw err;
-    }
+      ).run(queueId, sessionId, Number(row.next), text, delivery, createdAt, attachments?.length ? JSON.stringify(attachments) : null);
+      return Number(row.next);
+    });
     return {
       id: queueId, sessionId, position, text, delivery, createdAt,
       ...(attachments?.length ? { attachments } : {}),
@@ -2067,10 +2044,9 @@ export function createStore(dbPath: string): Store {
   }
 
   async function queueReorder(sessionId: string, ids: string[]): Promise<QueueItemDto[]> {
-    db.exec("BEGIN IMMEDIATE");
-    try {
+    transaction(() => {
       const rows = prep("SELECT queue_id FROM session_queue WHERE session_id = ?")
-        .all(sessionId) as Array<{ queue_id: string; reservation_operation_id?: string | null }>;
+        .all(sessionId) as Array<{ queue_id: string }>;
       const reserved = prep(
         "SELECT 1 AS one FROM session_queue WHERE session_id = ? AND reservation_operation_id IS NOT NULL LIMIT 1",
       ).get(sessionId);
@@ -2086,11 +2062,7 @@ export function createStore(dbPath: string): Store {
       }
       const upd = prep("UPDATE session_queue SET position = ? WHERE queue_id = ? AND session_id = ?");
       ids.forEach((id, i) => upd.run(i, id, sessionId));
-      db.exec("COMMIT");
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw err;
-    }
+    });
     return queueList(sessionId);
   }
 
@@ -2104,21 +2076,13 @@ export function createStore(dbPath: string): Store {
   }
 
   function queueShift(sessionId: string): Promise<QueueItemDto | undefined> {
-    let item: QueueItemDto | undefined;
-    db.exec("BEGIN IMMEDIATE");
-    try {
+    return Promise.resolve(transaction(() => {
       const row = prep("SELECT * FROM session_queue WHERE session_id = ? ORDER BY position LIMIT 1")
         .get(sessionId) as QueueRow | undefined;
-      if (row && row.reservation_operation_id === null && row.held_for_review === 0) {
-        prep("DELETE FROM session_queue WHERE queue_id = ?").run(row.queue_id);
-        item = rowToQueueItem(row);
-      }
-      db.exec("COMMIT");
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw err;
-    }
-    return Promise.resolve(item);
+      if (!row || row.reservation_operation_id !== null || row.held_for_review !== 0) return undefined;
+      prep("DELETE FROM session_queue WHERE queue_id = ?").run(row.queue_id);
+      return rowToQueueItem(row);
+    }));
   }
 
   const queueReservationInDatabase = (operationId: string): QueueReservation | undefined => {
@@ -2584,7 +2548,7 @@ export function createStore(dbPath: string): Store {
   const eventsAtSeqs = (sessionId: string, seqs: readonly number[]): SessionEvent[] => {
     if (seqs.length === 0) return [];
     const placeholders = seqs.map(() => "?").join(",");
-    const rows = db.prepare(
+    const rows = sqlitePrepare(
       `SELECT * FROM events
        WHERE session_id = ? AND seq IN (${placeholders}) ORDER BY seq`,
     ).all(sessionId, ...seqs) as unknown as Row[];
@@ -2999,15 +2963,7 @@ export function createStore(dbPath: string): Store {
         createdAt,
       );
 
-      prep("DELETE FROM events WHERE session_id = ?").run(input.binding.canonicalSessionId);
-      prep("DELETE FROM projections WHERE session_id = ?").run(input.binding.canonicalSessionId);
-      prep("DELETE FROM session_queue WHERE session_id = ?").run(input.binding.canonicalSessionId);
-      prep("DELETE FROM attention_open WHERE session_id = ?").run(input.binding.canonicalSessionId);
-      prep("DELETE FROM response_intents WHERE session_id = ?").run(input.binding.canonicalSessionId);
-      prep("DELETE FROM session_read WHERE session_id = ?").run(input.binding.canonicalSessionId);
-      prep("DELETE FROM observations WHERE session_id = ?").run(input.binding.canonicalSessionId);
-      prep("DELETE FROM session_reconciliations WHERE session_id = ?")
-        .run(input.binding.canonicalSessionId);
+      deleteSessionRows(input.binding.canonicalSessionId);
       prep(
         `DELETE FROM observation_checkpoints
          WHERE authority_id = ? AND directory = ? AND workspace = ?
@@ -3068,28 +3024,28 @@ export function createStore(dbPath: string): Store {
     });
   }
 
-  function deleteProjection(sessionId: string): Promise<void> {
-    prep("DELETE FROM projections WHERE session_id = ?").run(sessionId);
-    return Promise.resolve();
+  /** Delete every row keyed by Polyth `session_id` except `runtime_operations`.
+   *  The session-delete tombstone's own operation lives there and must survive
+   *  the purge. `observation_checkpoints` / `observation_cursors` are keyed by
+   *  backend session identity, not `session_id`. `deletion_tombstones`, folders,
+   *  labels, and agent_profiles are not session-owned rows. */
+  function deleteSessionRows(sessionId: string): void {
+    for (const table of [
+      "events", "projections", "session_queue", "attention_open",
+      "response_intents", "session_read", "observations", "session_reconciliations",
+    ]) {
+      prep(`DELETE FROM ${table} WHERE session_id = ?`).run(sessionId);
+    }
   }
 
   /** Hard delete: events + projection + queued messages, one transaction. */
   function deleteSession(sessionId: string): Promise<void> {
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      prep("DELETE FROM events WHERE session_id = ?").run(sessionId);
-      prep("DELETE FROM projections WHERE session_id = ?").run(sessionId);
-      prep("DELETE FROM session_queue WHERE session_id = ?").run(sessionId);
-      prep("DELETE FROM attention_open WHERE session_id = ?").run(sessionId);
-      prep("DELETE FROM response_intents WHERE session_id = ?").run(sessionId);
-      prep("DELETE FROM session_read WHERE session_id = ?").run(sessionId);
-      prep("DELETE FROM observations WHERE session_id = ?").run(sessionId);
-      prep("DELETE FROM session_reconciliations WHERE session_id = ?").run(sessionId);
-      db.exec("COMMIT");
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw err;
-    }
+    transaction(() => deleteSessionRows(sessionId));
+    return Promise.resolve();
+  }
+
+  function deleteProjection(sessionId: string): Promise<void> {
+    prep("DELETE FROM projections WHERE session_id = ?").run(sessionId);
     return Promise.resolve();
   }
 
@@ -3115,7 +3071,7 @@ export function createStore(dbPath: string): Store {
     name: string,
     exceptIds: readonly string[] = [],
   ): void => {
-    const siblings = db.prepare("SELECT * FROM folders WHERE project_id = ?").all(projectId) as unknown as FolderRow[];
+    const siblings = sqlitePrepare("SELECT * FROM folders WHERE project_id = ?").all(projectId) as unknown as FolderRow[];
     const duplicate = siblings.some((row) =>
       !exceptIds.includes(row.id)
       && row.parent_id === parentId
@@ -3143,8 +3099,7 @@ export function createStore(dbPath: string): Store {
   }
 
   async function folderList(projectId: string): Promise<SessionFolderDto[]> {
-    const rows = db
-      .prepare("SELECT * FROM folders WHERE project_id = ? ORDER BY position, name")
+    const rows = sqlitePrepare("SELECT * FROM folders WHERE project_id = ? ORDER BY position, name")
       .all(projectId) as unknown as FolderRow[];
     return rows.map(rowToFolder);
   }
@@ -3159,8 +3114,8 @@ export function createStore(dbPath: string): Store {
     }
     assertUniqueFolderName(projectId, parentId ?? null, trimmed);
     const id = randomUUID();
-    const pos = db.prepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM folders WHERE project_id = ?").get(projectId) as { next: number };
-    db.prepare("INSERT INTO folders (id, project_id, parent_id, name, position, revision) VALUES (?, ?, ?, ?, ?, 1)")
+    const pos = sqlitePrepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM folders WHERE project_id = ?").get(projectId) as { next: number };
+    sqlitePrepare("INSERT INTO folders (id, project_id, parent_id, name, position, revision) VALUES (?, ?, ?, ?, ?, 1)")
       .run(id, projectId, parentId ?? null, trimmed, Number(pos.next));
     return rowToFolder(folderRow(id)!);
   }
@@ -3170,8 +3125,7 @@ export function createStore(dbPath: string): Store {
     patch: { name?: string; parentId?: string | null; position?: number },
     expectedRevision: number,
   ): Promise<SessionFolderDto> {
-    db.exec("BEGIN IMMEDIATE");
-    try {
+    return transaction(() => {
       const row = folderRow(id);
       if (!row) throw Object.assign(new Error("folder not found"), { code: "not-found" });
       if (Number(row.revision) !== expectedRevision) {
@@ -3201,36 +3155,24 @@ export function createStore(dbPath: string): Store {
       }
       assertUniqueFolderName(row.project_id, parentId, name, [id]);
       const position = patch.position !== undefined ? patch.position : Number(row.position);
-      db.prepare("UPDATE folders SET name = ?, parent_id = ?, position = ?, revision = revision + 1 WHERE id = ?")
+      sqlitePrepare("UPDATE folders SET name = ?, parent_id = ?, position = ?, revision = revision + 1 WHERE id = ?")
         .run(name, parentId, position, id);
-      db.exec("COMMIT");
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw err;
-    }
-    return rowToFolder(folderRow(id)!);
+      return rowToFolder(folderRow(id)!);
+    });
   }
 
   async function folderRemove(id: string): Promise<boolean> {
-    let removed = false;
-    db.exec("BEGIN IMMEDIATE");
-    try {
+    return transaction(() => {
       const row = folderRow(id);
-      if (row) {
-        const children = db.prepare("SELECT * FROM folders WHERE parent_id = ?").all(id) as unknown as FolderRow[];
-        for (const child of children) {
-          assertUniqueFolderName(row.project_id, row.parent_id, child.name, [id, child.id]);
-        }
-        db.prepare("UPDATE folders SET parent_id = ?, revision = revision + 1 WHERE parent_id = ?").run(row.parent_id, id);
-        db.prepare("DELETE FROM folders WHERE id = ?").run(id);
-        removed = true;
+      if (!row) return false;
+      const children = sqlitePrepare("SELECT * FROM folders WHERE parent_id = ?").all(id) as unknown as FolderRow[];
+      for (const child of children) {
+        assertUniqueFolderName(row.project_id, row.parent_id, child.name, [id, child.id]);
       }
-      db.exec("COMMIT");
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw err;
-    }
-    return removed;
+      sqlitePrepare("UPDATE folders SET parent_id = ?, revision = revision + 1 WHERE parent_id = ?").run(row.parent_id, id);
+      sqlitePrepare("DELETE FROM folders WHERE id = ?").run(id);
+      return true;
+    });
   }
 
   interface LabelRow { id: string; name: string; color: string; position: number; revision: number; space_id: string | null }
@@ -3240,8 +3182,8 @@ export function createStore(dbPath: string): Store {
 
   async function labelList(spaceId?: string): Promise<WorkspaceLabel[]> {
     const rows = (spaceId === undefined
-      ? db.prepare("SELECT * FROM labels ORDER BY position, name").all()
-      : db.prepare("SELECT * FROM labels WHERE space_id = ? ORDER BY position, name").all(spaceId)
+      ? sqlitePrepare("SELECT * FROM labels ORDER BY position, name").all()
+      : sqlitePrepare("SELECT * FROM labels WHERE space_id = ? ORDER BY position, name").all(spaceId)
     ) as unknown as LabelRow[];
     return rows.map(rowToLabel);
   }
@@ -3251,10 +3193,10 @@ export function createStore(dbPath: string): Store {
     if (!trimmed || trimmed.length > 60) throw Object.assign(new Error("label name required (≤60 chars)"), { code: "invalid-input" });
     if (!/^#[0-9a-fA-F]{3,8}$/.test(color)) throw Object.assign(new Error("label color must be a hex value"), { code: "invalid-input" });
     const id = randomUUID();
-    const pos = db.prepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM labels").get() as { next: number };
-    db.prepare("INSERT INTO labels (id, name, color, position, revision, space_id) VALUES (?, ?, ?, ?, 1, ?)")
+    const pos = sqlitePrepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM labels").get() as { next: number };
+    sqlitePrepare("INSERT INTO labels (id, name, color, position, revision, space_id) VALUES (?, ?, ?, ?, 1, ?)")
       .run(id, trimmed, color, Number(pos.next), spaceId ?? null);
-    const row = db.prepare("SELECT * FROM labels WHERE id = ?").get(id) as unknown as LabelRow;
+    const row = sqlitePrepare("SELECT * FROM labels WHERE id = ?").get(id) as unknown as LabelRow;
     return rowToLabel(row);
   }
 
@@ -3264,9 +3206,8 @@ export function createStore(dbPath: string): Store {
     expectedRevision: number,
     spaceId?: string,
   ): Promise<WorkspaceLabel> {
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      const row = db.prepare("SELECT * FROM labels WHERE id = ?").get(id) as LabelRow | undefined;
+    return transaction(() => {
+      const row = sqlitePrepare("SELECT * FROM labels WHERE id = ?").get(id) as LabelRow | undefined;
       // A label owned by another Space is reported as missing, never as
       // forbidden — the id must not become an existence oracle.
       if (!row || (spaceId !== undefined && row.space_id !== spaceId)) {
@@ -3278,21 +3219,16 @@ export function createStore(dbPath: string): Store {
       const color = patch.color ?? row.color;
       if (!/^#[0-9a-fA-F]{3,8}$/.test(color)) throw Object.assign(new Error("label color must be a hex value"), { code: "invalid-input" });
       const position = patch.position ?? Number(row.position);
-      db.prepare("UPDATE labels SET name = ?, color = ?, position = ?, revision = revision + 1 WHERE id = ?")
+      sqlitePrepare("UPDATE labels SET name = ?, color = ?, position = ?, revision = revision + 1 WHERE id = ?")
         .run(name, color, position, id);
-      db.exec("COMMIT");
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw err;
-    }
-    const row = db.prepare("SELECT * FROM labels WHERE id = ?").get(id) as unknown as LabelRow;
-    return rowToLabel(row);
+      return rowToLabel(sqlitePrepare("SELECT * FROM labels WHERE id = ?").get(id) as unknown as LabelRow);
+    });
   }
 
   async function labelRemove(id: string, spaceId?: string): Promise<boolean> {
     const res = spaceId === undefined
-      ? db.prepare("DELETE FROM labels WHERE id = ?").run(id)
-      : db.prepare("DELETE FROM labels WHERE id = ? AND space_id = ?").run(id, spaceId);
+      ? sqlitePrepare("DELETE FROM labels WHERE id = ?").run(id)
+      : sqlitePrepare("DELETE FROM labels WHERE id = ? AND space_id = ?").run(id, spaceId);
     return Number(res.changes) > 0;
   }
 
@@ -3331,10 +3267,10 @@ export function createStore(dbPath: string): Store {
     }
   };
   const profileRow = (id: string): ProfileRow | undefined =>
-    db.prepare("SELECT * FROM agent_profiles WHERE id = ?").get(id) as unknown as ProfileRow | undefined;
+    sqlitePrepare("SELECT * FROM agent_profiles WHERE id = ?").get(id) as unknown as ProfileRow | undefined;
 
   async function profileList(): Promise<AgentProfile[]> {
-    const rows = db.prepare("SELECT * FROM agent_profiles ORDER BY name").all() as unknown as ProfileRow[];
+    const rows = sqlitePrepare("SELECT * FROM agent_profiles ORDER BY name").all() as unknown as ProfileRow[];
     return rows.map(rowToProfile);
   }
 
@@ -3351,7 +3287,7 @@ export function createStore(dbPath: string): Store {
     if (!input.providerID || !input.modelID) throw Object.assign(new Error("providerID and modelID are required"), { code: "invalid-input" });
     const id = randomUUID();
     const now = Date.now();
-    db.prepare(
+    sqlitePrepare(
       `INSERT INTO agent_profiles (id, name, provider_id, model_id, agent, mode, thinking, features, notes, icon, color, revision, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
     ).run(
@@ -3368,14 +3304,13 @@ export function createStore(dbPath: string): Store {
     patch: Partial<Omit<AgentProfile, "id" | "revision" | "createdAt" | "updatedAt">>,
     expectedRevision: number,
   ): Promise<AgentProfile> {
-    db.exec("BEGIN IMMEDIATE");
-    try {
+    return transaction(() => {
       const row = profileRow(id);
       if (!row) throw Object.assign(new Error("profile not found"), { code: "not-found" });
       if (Number(row.revision) !== expectedRevision) throw Object.assign(new Error("stale profile revision"), { code: "conflict" });
       const name = patch.name !== undefined ? patch.name.trim() : row.name;
       if (!name || name.length > 80) throw Object.assign(new Error("profile name required (≤80 chars)"), { code: "invalid-input" });
-      db.prepare(
+      sqlitePrepare(
         `UPDATE agent_profiles SET name = ?, provider_id = ?, model_id = ?, agent = ?, mode = ?, thinking = ?,
          features = ?, notes = ?, icon = ?, color = ?, revision = revision + 1, updated_at = ? WHERE id = ?`,
       ).run(
@@ -3391,16 +3326,12 @@ export function createStore(dbPath: string): Store {
         patch.color !== undefined ? patch.color || null : row.color,
         Date.now(), id,
       );
-      db.exec("COMMIT");
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw err;
-    }
-    return rowToProfile(profileRow(id)!);
+      return rowToProfile(profileRow(id)!);
+    });
   }
 
   async function profileRemove(id: string): Promise<boolean> {
-    const res = db.prepare("DELETE FROM agent_profiles WHERE id = ?").run(id);
+    const res = sqlitePrepare("DELETE FROM agent_profiles WHERE id = ?").run(id);
     return Number(res.changes) > 0;
   }
 
@@ -3413,8 +3344,7 @@ export function createStore(dbPath: string): Store {
     // Counters come from the append-maintained attention_open table — a
     // primary-key range count per session instead of replaying event logs.
     const placeholders = sessionIds.map(() => "?").join(",");
-    const rows = db
-      .prepare(
+    const rows = sqlitePrepare(
         `SELECT session_id, kind, COUNT(*) AS n FROM attention_open
          WHERE session_id IN (${placeholders}) GROUP BY session_id, kind`,
       )
@@ -3427,8 +3357,7 @@ export function createStore(dbPath: string): Store {
     }
     // Unread assistant messages past the read cursor (session_read). The
     // (session_id, seq) primary key keeps this a per-session range scan.
-    const unreadRows = db
-      .prepare(
+    const unreadRows = sqlitePrepare(
         `SELECT e.session_id, COUNT(*) AS n FROM events e
          JOIN session_read r ON r.session_id = e.session_id
          WHERE e.session_id IN (${placeholders})
@@ -3447,7 +3376,7 @@ export function createStore(dbPath: string): Store {
   function setReadCursor(sessionId: string, seq: number): Promise<boolean> {
     if (!Number.isSafeInteger(seq) || seq <= 0) return Promise.resolve(false);
     const advanced = transaction(() => {
-      const row = db.prepare("SELECT seq FROM session_read WHERE session_id = ?")
+      const row = sqlitePrepare("SELECT seq FROM session_read WHERE session_id = ?")
         .get(sessionId) as { seq: number } | undefined;
       if (row !== undefined && row.seq >= seq) return false;
       prep(
@@ -3491,7 +3420,10 @@ export function createStore(dbPath: string): Store {
   }
 
   function close(): Promise<void> {
-    db.close();
+    if (closed) return Promise.resolve();
+    closed = true;
+    stmts.clear();
+    raw.close();
     return Promise.resolve();
   }
 
@@ -3550,8 +3482,8 @@ export function createStore(dbPath: string): Store {
     deletionTombstone,
     hasDeletionTombstone,
     retireDeletionTombstone,
-    deleteProjection,
     deleteSession,
+    deleteProjection,
     folderList,
     folderProject,
     folderCreate,
@@ -3638,12 +3570,6 @@ export function activeRewind(events: readonly SessionEvent[]): ActiveRewind | nu
   return active;
 }
 
-/** The one pure effective-history selector (UX-MSG-ACTIONS): timeline replay,
- *  model derivation, export, mutation eligibility, and backend branch
- *  preparation all consume this so they can never disagree about the visible
- *  prefix. Rewinds splice history without mutating old rows: redo restores the
- *  captured tail; a replacement clear permanently drops it and lets subsequent
- *  events form a new tail. */
 /** Composer seed for the active rewind marker: the hidden target's exact
  *  `raw ?? text` plus attachments. Null when no rewind is active. */
 export function rewindDraft(events: readonly SessionEvent[]): { text: string; attachments: AttachmentRef[] } | null {
@@ -3662,21 +3588,18 @@ export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
   const emittedAssistantParts = new Set<string>();
   const visibleEvents = effectiveHistory(events).events;
 
-  const pushText = (role: "user" | "assistant" | "tool", text: string) => {
+  // Consecutive parts from the same role merge into one message.
+  const push = (role: ModelMessage["role"], part: ModelMessage["parts"][number]) => {
     const last = out[out.length - 1];
-    if (last && last.role === role) {
-      last.parts.push({ type: "text", text });
-    } else {
-      out.push({ role, parts: [{ type: "text", text }] });
-    }
+    if (last && last.role === role) last.parts.push(part);
+    else out.push({ role, parts: [part] });
   };
+  const pushText = (role: ModelMessage["role"], text: string) => push(role, { type: "text", text });
 
   // Attachments ride the same user message so replay/fork keeps them adjacent
   // to the text the model saw. Malformed rows are skipped, never thrown.
   const pushUserFiles = (attachments: unknown) => {
     if (!Array.isArray(attachments)) return;
-    const last = out[out.length - 1];
-    if (!last || last.role !== "user") return;
     for (const raw of attachments) {
       const a = raw as {
         name?: unknown;
@@ -3690,10 +3613,10 @@ export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
       if (a.kind === "browser-context") {
         const ctx = a.browserContext as BrowserContext | undefined;
         if (ctx && typeof ctx === "object" && typeof ctx.url === "string") {
-          last.parts.push({ type: "text", text: formatBrowserContextForModel(ctx) });
+          push("user", { type: "text", text: formatBrowserContextForModel(ctx) });
           const shot = ctx.crop ?? ctx.screenshot;
           if (shot?.localPath && shot.mime.startsWith("image/")) {
-            last.parts.push({
+            push("user", {
               type: "file",
               name: typeof a.name === "string" ? a.name : "browser-capture",
               mime: shot.mime,
@@ -3708,7 +3631,7 @@ export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
         && Number.isSafeInteger(a.range[0]) && Number.isSafeInteger(a.range[1])
         ? [Number(a.range[0]), Number(a.range[1])] as [number, number]
         : undefined;
-      last.parts.push({
+      push("user", {
         type: "file",
         name: a.name,
         mime: a.mime,
@@ -3716,42 +3639,6 @@ export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
         ...(typeof a.url === "string" ? { url: a.url } : {}),
         ...(range ? { range } : {}),
       });
-    }
-  };
-
-  const pushReasoning = (text: string) => {
-    const last = out[out.length - 1];
-    if (last && last.role === "assistant") {
-      last.parts.push({ type: "reasoning", text });
-    } else {
-      out.push({ role: "assistant", parts: [{ type: "reasoning", text }] });
-    }
-  };
-
-  const pushToolCall = (
-    callId: string,
-    tool: string,
-    input: JsonObject,
-  ) => {
-    const last = out[out.length - 1];
-    if (last && last.role === "assistant") {
-      last.parts.push({ type: "tool-call", callId, tool, input });
-    } else {
-      out.push({ role: "assistant", parts: [{ type: "tool-call", callId, tool, input }] });
-    }
-  };
-
-  const pushToolResult = (
-    callId: string,
-    tool: string,
-    output: string,
-    isError: boolean,
-  ) => {
-    const last = out[out.length - 1];
-    if (last && last.role === "tool") {
-      last.parts.push({ type: "tool-result", callId, tool, output, isError });
-    } else {
-      out.push({ role: "tool", parts: [{ type: "tool-result", callId, tool, output, isError }] });
     }
   };
 
@@ -3781,30 +3668,29 @@ export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
         }
         const text = String(d.text ?? "");
         const reasoning = d.reasoning === undefined ? undefined : String(d.reasoning);
-        if (reasoning) pushReasoning(reasoning);
+        if (reasoning) push("assistant", { type: "reasoning", text: reasoning });
         // Reasoning-only final records carry text:"" — an empty text part must
         // not become an ordinary answer bubble in model history.
         if (text !== "") pushText("assistant", text);
         break;
       }
       case "tool/call":
-        pushToolCall(String(d.callId ?? ""), String(d.tool ?? ""), (d.input as JsonObject) ?? {});
+        push("assistant", {
+          type: "tool-call",
+          callId: String(d.callId ?? ""),
+          tool: String(d.tool ?? ""),
+          input: (d.input as JsonObject) ?? {},
+        });
         break;
       case "tool/result":
-        pushToolResult(
-          String(d.callId ?? ""),
-          String(d.tool ?? ""),
-          String(d.output ?? ""),
-          false,
-        );
-        break;
       case "tool/error":
-        pushToolResult(
-          String(d.callId ?? ""),
-          String(d.tool ?? ""),
-          String(d.error ?? ""),
-          true,
-        );
+        push("tool", {
+          type: "tool-result",
+          callId: String(d.callId ?? ""),
+          tool: String(d.tool ?? ""),
+          output: String((ev.type === "tool/error" ? d.error : d.output) ?? ""),
+          isError: ev.type === "tool/error",
+        });
         break;
       case "question/asked": {
         const questions = Array.isArray(d.questions) ? (d.questions as JsonObject[]) : [];

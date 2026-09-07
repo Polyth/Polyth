@@ -5,13 +5,10 @@ import { useSyncExternalStore } from "react";
 // is tracked at the window before any hover begins, so pressing Shift and
 // then pointing at a row still arms it; keyup or window blur disarms.
 let shiftKeyDown = false;
-let customizeMode = false;
 let listening = false;
 const subscribers = new Set<() => void>();
 
 const snapshot = (): boolean => shiftKeyDown;
-const customizeSnapshot = (): boolean => customizeMode;
-const activeSnapshot = (): boolean => shiftKeyDown || customizeMode;
 
 export function shouldArmShift(key: string, editingText: boolean): boolean {
   return key === "Shift" && !editingText;
@@ -43,22 +40,11 @@ function setKeyDown(down: boolean): void {
   for (const notify of [...subscribers]) notify();
 }
 
-export function setCustomizeMode(on: boolean): void {
-  if (customizeMode === on) return;
-  customizeMode = on;
-  if (typeof document !== "undefined") {
-    if (on) document.body.dataset.uiEditing = "true";
-    else delete document.body.dataset.uiEditing;
-  }
-  for (const notify of [...subscribers]) notify();
-}
-
 function ensureListeners(): void {
   if (listening || typeof window === "undefined") return;
   listening = true;
   window.addEventListener("keydown", (event) => {
     setKeyDown(shouldArmShift(event.key, isTextEditing(event.target)));
-    if (event.key === "Escape" && customizeMode) setCustomizeMode(false);
   });
   window.addEventListener("keyup", (event) => {
     if (event.key === "Shift") setKeyDown(false);
@@ -80,21 +66,7 @@ export function useShiftArmed(): boolean {
   );
 }
 
-
-/** Explicit edit mode used by the persistent Edit/Done control. */
-export function useCustomizeMode(): boolean {
-  return useSyncExternalStore(
-    (onChange) => {
-      ensureListeners();
-      subscribers.add(onChange);
-      return () => { subscribers.delete(onChange); };
-    },
-    customizeSnapshot,
-    () => false,
-  );
-}
-
-/** Shift quick-edit or the explicit edit mode. */
+/** Shift quick-edit. `enabled` lets a surface opt out without unmounting. */
 export function useCustomizeActive(enabled = true): boolean {
   return useSyncExternalStore(
     (onChange) => {
@@ -103,7 +75,7 @@ export function useCustomizeActive(enabled = true): boolean {
       subscribers.add(onChange);
       return () => { subscribers.delete(onChange); };
     },
-    enabled ? activeSnapshot : () => false,
+    enabled ? snapshot : () => false,
     () => false,
   );
 }

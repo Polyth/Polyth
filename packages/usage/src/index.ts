@@ -5,8 +5,9 @@
 //
 // Quota data is account telemetry — it is never appended to any session log,
 // and error messages are redacted so credentials cannot leak to the browser.
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { atomicWriteSync } from "@polyth/plugins";
 import type { QuotaPace, QuotaSnapshot, QuotaWindow } from "@polyth/contracts";
 import { computePace, type QuotaSample } from "./pace.ts";
 
@@ -107,7 +108,7 @@ export function createUsageService(opts: UsageServiceOptions = {}): UsageService
     if (!opts.file) return;
     try {
       mkdirSync(dirname(opts.file), { recursive: true });
-      writeFileSync(opts.file, JSON.stringify([...lastGood.values()]));
+      atomicWriteSync(opts.file, JSON.stringify([...lastGood.values()]));
     } catch { /* best effort */ }
   };
 

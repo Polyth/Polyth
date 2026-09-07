@@ -398,13 +398,14 @@ function FileChangesView({
   );
 }
 
-function OutputPreview({ text, error = false, onOpenFull }: {
+function OutputPreview({ text, error = false, animate = false, onOpenFull }: {
   text: string;
   error?: boolean;
+  animate?: boolean;
   onOpenFull: () => void;
 }) {
   const [showAll, setShowAll] = useState(false);
-  const printed = usePrintText(text);
+  const printed = usePrintText(text, animate);
   const lines = outputLineCount(text);
   const long = lines > 12 || text.length > 1600;
   const shown = showAll ? printed : printed.split(/\r?\n/).slice(0, 12).join("\n");
@@ -970,14 +971,14 @@ export function ExecutionRow({
                 </section>
               )}
               {message.error !== undefined && (
-                <OutputPreview text={message.error} error onOpenFull={() => openViewer(`${presentation.label} error`, message.error ?? "")} />
+                <OutputPreview text={message.error} error animate={entering} onOpenFull={() => openViewer(`${presentation.label} error`, message.error ?? "")} />
               )}
               {message.output !== undefined && !isTrivialFileEditOutput(message.output, Boolean(presentation.files?.length)) && (
                 presentation.kind === "search"
                   ? <SearchResults text={message.output} onOpenFull={() => openViewer(`${presentation.label} results`, message.output ?? "")} />
                   : presentation.kind === "mcp"
                     ? <McpResult output={message.output} />
-                  : <OutputPreview text={message.output} onOpenFull={() => openViewer(`${presentation.label} output`, message.output ?? "")} />
+                  : <OutputPreview text={message.output} animate={entering} onOpenFull={() => openViewer(`${presentation.label} output`, message.output ?? "")} />
               )}
               {!presentation.files?.length && presentation.kind !== "subagent" && (
                 <footer className="execution-metadata">

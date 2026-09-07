@@ -1828,6 +1828,7 @@ export const bg: AppMessages = {
   "sidebar.sessionlist.archiveValueShiftHoverQuickAction": "Архивиране {value} (Shift+бързо действие с мишката)",
   "sidebar.sessionlist.archiveValueTheAgentIsStillRunning": "Архивиране на „ {label} “? Агентът все още работи или ви чака.",
   "sidebar.sessionlist.collapse": "Свиване",
+  "sidebar.sessionlist.couldnTCleanUpSessionsAfterRemovingTheWorktree": "Неуспешно почистване на сесиите след премахване на worktree",
   "sidebar.sessionlist.couldnTRemoveTheWorktree": "Неуспешно премахване на worktree",
   "sidebar.sessionlist.couldnTUpdateSessionLabels": "Не можаха да се актуализират етикетите на сесиите",
   "sidebar.sessionlist.deletedValue": "Изтрит {label}",

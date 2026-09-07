@@ -1,4 +1,4 @@
-import { posix } from "node:path";
+import { posix, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import type {
   AgentRuntime,
@@ -121,6 +121,26 @@ export function assertGitRelativePath(value: string, allowEmpty = false): string
     });
   }
   return value;
+}
+
+async function ownedBranchForWorktree(
+  sessions: SessionService,
+  projectId: string,
+  worktreePath: string,
+): Promise<string | null> {
+  let listed: SessionProjection[];
+  try {
+    listed = await sessions.list(projectId);
+  } catch {
+    return null;
+  }
+  const names = new Set<string>();
+  for (const session of listed) {
+    if (!session.worktreePath || !session.branch) continue;
+    if (resolve(session.worktreePath) !== resolve(worktreePath)) continue;
+    names.add(session.branch);
+  }
+  return names.size === 1 ? [...names][0]! : null;
 }
 
 export function gitRoutes(deps: {
@@ -380,13 +400,35 @@ export function gitRoutes(deps: {
           ...(input.base ? { base: String(input.base) } : {}),
         }));
         return true;
-      case "/api/worktrees/remove":
-        await git.worktrees.remove(root, {
-          path: String(input.path ?? ""),
-          deleteBranch: input.deleteBranch === true,
+      case "/api/worktrees/remove": {
+        const worktreePath = String(input.path ?? "");
+        const deleteBranch = input.deleteBranch === true;
+        const force = input.force === true;
+        const ownedBranch = deleteBranch
+          ? await ownedBranchForWorktree(deps.sessions, projectId, worktreePath)
+          : null;
+        // GitService owns physical removal and postcondition verification.
+        // The route must not reinterpret Git state through the lossy public list.
+        const cleanup = await git.worktrees.remove(root, {
+          path: worktreePath,
+          deleteBranch,
+          force,
+          ...(ownedBranch ? { ownedBranch } : {}),
+        }) ?? {};
+        let metadataCleanupFailed = false;
+        try {
+          await deps.sessions.markWorktreeMissing?.(projectId, worktreePath);
+        } catch (error) {
+          metadataCleanupFailed = true;
+          console.error("[polyth] worktree metadata cleanup failed after removal", error);
+        }
+        json(200, {
+          ok: true,
+          ...(metadataCleanupFailed ? { metadataCleanupFailed: true } : {}),
+          ...(cleanup.branchCleanupFailed ? { branchCleanupFailed: true } : {}),
         });
-        await deps.sessions.markWorktreeMissing?.(projectId, String(input.path ?? ""));
-        break;
+        return true;
+      }
       default:
         return false;
     }

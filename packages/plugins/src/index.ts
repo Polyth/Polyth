@@ -27,6 +27,7 @@ import {
   type WidgetScope,
   type WidgetSize,
 } from "@polyth/contracts";
+import { atomicWriteSync } from "./atomicWrite.ts";
 import { loadServerEntry } from "./trustedServerEntry.ts";
 import { buildUiBundle } from "./uiBundle.ts";
 
@@ -73,6 +74,7 @@ export {
   type BackgroundWorkTransition,
 } from "./backgroundWork.ts";
 export { buildUiBundle };
+export { atomicWrite, atomicWriteSync } from "./atomicWrite.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -198,6 +200,11 @@ function parseWidget(value: unknown): WidgetContributionDescriptor {
   if (showIn?.some((item) => item !== "simple" && item !== "standard" && item !== "power")) {
     throw err("invalid-input", "widget showIn contains an invalid audience");
   }
+  const capabilities = optionalStrings(widget.capabilities, "widget capabilities");
+  const recommendedSize = optionalSize(widget.recommendedSize, "widget recommendedSize");
+  const defaultSize = optionalSize(widget.defaultSize, "widget defaultSize");
+  const minSize = optionalSize(widget.minSize, "widget minSize");
+  const maxSize = optionalSize(widget.maxSize, "widget maxSize");
   return {
     id: widget.id!,
     module: widget.module!,
@@ -208,21 +215,11 @@ function parseWidget(value: unknown): WidgetContributionDescriptor {
     supportedSlots,
     ...(typeof widget.order === "number" && Number.isFinite(widget.order) ? { order: widget.order } : {}),
     ...(typeof widget.category === "string" ? { category: widget.category } : {}),
-    ...(optionalStrings(widget.capabilities, "widget capabilities")
-      ? { capabilities: optionalStrings(widget.capabilities, "widget capabilities")! }
-      : {}),
-    ...(optionalSize(widget.recommendedSize, "widget recommendedSize")
-      ? { recommendedSize: optionalSize(widget.recommendedSize, "widget recommendedSize")! }
-      : {}),
-    ...(optionalSize(widget.defaultSize, "widget defaultSize")
-      ? { defaultSize: optionalSize(widget.defaultSize, "widget defaultSize")! }
-      : {}),
-    ...(optionalSize(widget.minSize, "widget minSize")
-      ? { minSize: optionalSize(widget.minSize, "widget minSize")! }
-      : {}),
-    ...(optionalSize(widget.maxSize, "widget maxSize")
-      ? { maxSize: optionalSize(widget.maxSize, "widget maxSize")! }
-      : {}),
+    ...(capabilities ? { capabilities } : {}),
+    ...(recommendedSize ? { recommendedSize } : {}),
+    ...(defaultSize ? { defaultSize } : {}),
+    ...(minSize ? { minSize } : {}),
+    ...(maxSize ? { maxSize } : {}),
     ...(audience ? { audience } : {}),
     ...(showIn ? { showIn } : {}),
     ...(scope ? { scope } : {}),
@@ -422,11 +419,7 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
     }
   };
 
-  const persist = () => {
-    const tmp = `${stateFile}.tmp-${process.pid}`;
-    writeFileSync(tmp, JSON.stringify([...plugins.values()], null, 2));
-    renameSync(tmp, stateFile);
-  };
+  const persist = () => atomicWriteSync(stateFile, JSON.stringify([...plugins.values()], null, 2));
 
   const widgetSlotItem = (pluginId: string, widget: WidgetContributionDescriptor): UiSlotItem => {
     const { module, defaultSlot: _defaultSlot, supportedSlots: _supportedSlots, ...metadata } = widget;

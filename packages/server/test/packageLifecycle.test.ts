@@ -87,3 +87,44 @@ test("startEnabled continues after an enabled package fails", async () => {
 
   assert.deepEqual(calls, ["broken", "healthy"]);
 });
+
+test("stopIngress detaches owners without disabling packages", async () => {
+  const lifecycle = createPackageLifecycle(createRouteRegistry());
+  const calls: string[] = [];
+  lifecycle.register("terminal", {
+    onEnable: () => { calls.push("enable"); },
+    onDisable: () => { calls.push("disable"); },
+    stopIngress: () => { calls.push("stop-ingress"); },
+  });
+  await lifecycle.enable("terminal");
+  await lifecycle.stopIngress();
+  assert.deepEqual(calls, ["enable", "stop-ingress"]);
+  await lifecycle.disable("terminal");
+  assert.deepEqual(calls, ["enable", "stop-ingress", "disable"]);
+});
+
+test("stopIngress logs a warning when a detacher throws and continues", async () => {
+  const lifecycle = createPackageLifecycle(createRouteRegistry());
+  const calls: string[] = [];
+  const warnings: unknown[][] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => { warnings.push(args); };
+  try {
+    lifecycle.register("broken", {
+      stopIngress: () => {
+        calls.push("broken");
+        throw new Error("detach failed");
+      },
+    });
+    lifecycle.register("healthy", {
+      stopIngress: () => { calls.push("healthy"); },
+    });
+    await lifecycle.stopIngress();
+    assert.deepEqual(calls, ["broken", "healthy"]);
+    assert.equal(warnings.length, 1);
+    assert.match(String(warnings[0]![0]), /package "broken" failed to stop ingress/);
+    assert.equal((warnings[0]![1] as Error).message, "detach failed");
+  } finally {
+    console.warn = original;
+  }
+});

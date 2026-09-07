@@ -1164,26 +1164,8 @@ export function redoWidgetLayout(): void {
   commit(next, false);
 }
 
-export function canUndoWidgetLayout(): boolean {
-  return history.length > 0;
-}
-
 export function getWidgetSaveStatus(): WidgetSaveStatus {
   return saveStatus;
-}
-
-export function retryWidgetSave(): void {
-  if (writeTimer !== null) flushWrite();
-  else {
-    saveStatus = "saving";
-    for (const listener of [...statusListeners]) listener();
-    saveStatus = write(state, activeProjectId) ? "saved" : "error";
-    for (const listener of [...statusListeners]) listener();
-  }
-}
-
-export function ensureWidgetIds(ids: readonly string[]): void {
-  ensureWidgets(ids.map((id) => ({ id })));
 }
 
 export function ensureWidgets(definitions: readonly WidgetLayoutDefinition[]): void {

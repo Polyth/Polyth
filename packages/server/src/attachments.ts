@@ -3,7 +3,7 @@
 // service where the project root is known.
 import type { AttachmentRef } from "@polyth/contracts";
 
-export const MAX_ATTACHMENTS = 16;
+const MAX_ATTACHMENTS = 16;
 const NAME_MAX = 200;
 const MIME_RE = /^[\w.+-]+\/[\w.+-]+$/;
 const URL_MAX = 2048;
@@ -13,7 +13,7 @@ const invalid = (message: string): Error =>
 
 /** Same relative-path rule the files package enforces: no absolute paths,
  *  drive letters, `..` segments, or NUL bytes. */
-export function isSafeRelPath(rel: unknown): rel is string {
+function isSafeRelPath(rel: unknown): rel is string {
   if (typeof rel !== "string" || !rel || rel.length > 1024) return false;
   if (rel.includes("\0")) return false;
   if (rel.startsWith("/") || /^[A-Za-z]:[\\/]/.test(rel)) return false;

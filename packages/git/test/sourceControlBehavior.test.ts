@@ -31,7 +31,7 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { activateProject, activateSession, applyEvents, applyProjectAdded, getState, seedSessionCache, setGitBranch, setModels } = await import("../../../apps/web/src/store.ts");
+const { activateProject, activateSession, applyEvents, applyProjectAdded, clearUiError, getState, seedSessionCache, setGitBranch, setModels } = await import("../../../apps/web/src/store.ts");
 const { default: GitView, DiffContent } = await import("../widgets/GitView.tsx");
 const { api } = await import("@polyth/session/web-api");
 const { refreshGitStatus } = await import("../widgets/gitStatusStore.ts");
@@ -536,6 +536,61 @@ test("edited-files card stays hidden when git is dirty but this session edited n
     assert.equal(view.container.textContent?.includes("src/leftover.ts"), false);
   } finally {
     await view.unmount();
+    activateProject(null);
+  }
+});
+
+test("GitView surfaces worktree cleanup warnings without claiming removal failed", async () => {
+  const projectId = "git-remove-cleanup-project";
+  let removeCalls = 0;
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    const method = (init as { method?: string } | undefined)?.method ?? "GET";
+    if (url.startsWith("/api/git/status")) {
+      return response({
+        branch: "main", ahead: 0, behind: 0, staged: [], unstaged: [],
+        untracked: [], conflicted: [], isRepo: true,
+      });
+    }
+    if (url.startsWith("/api/git/branches")) {
+      return response({ current: "main", branches: [{ name: "main", current: true }] });
+    }
+    if (url.startsWith("/api/git/graph") || url.startsWith("/api/git/stashes")) return response([]);
+    if (method === "GET" && url.startsWith("/api/worktrees")) {
+      return response([
+        { path: "/repo", branch: "main", head: "aaa", isMain: true },
+        { path: "/repo-worktrees/feat", branch: "feat", head: "bbb", isMain: false },
+      ]);
+    }
+    if (method === "POST" && url.includes("/api/worktrees/remove")) {
+      removeCalls++;
+      return response({ ok: true, metadataCleanupFailed: true, branchCleanupFailed: true });
+    }
+    throw new Error(`Unexpected request: ${url} ${method}`);
+  };
+
+  clearUiError();
+  activateProject(projectId);
+  const view = await mounted(createElement(GitView));
+  try {
+    await act(async () => { await delay(40); });
+    const branchesTab = [...view.container.querySelectorAll('[role="tab"]')]
+      .find((tab) => (tab.textContent ?? "").includes("Branches"));
+    assert.ok(branchesTab, "branches tab is present");
+    await act(async () => { (branchesTab as HTMLElement).click(); await delay(20); });
+    const remove = view.container.querySelector<HTMLButtonElement>("button.danger, button[title='Remove worktree']");
+    assert.ok(remove, "linked worktree remove control is present");
+    await act(async () => { remove!.click(); await delay(20); });
+    const confirm = [...document.querySelectorAll("button")]
+      .find((button) => (button.textContent ?? "") === "Remove worktree" && button.className.includes("danger"));
+    assert.ok(confirm, "confirm dialog opened");
+    await act(async () => { confirm!.click(); await delay(40); });
+    assert.equal(removeCalls, 1);
+    assert.match(getState().uiError ?? "", /clean up sessions or the branch after removing the worktree/i);
+    assert.doesNotMatch(getState().uiError ?? "", /Couldn.t update the repository/);
+  } finally {
+    await view.unmount();
+    clearUiError();
     activateProject(null);
   }
 });

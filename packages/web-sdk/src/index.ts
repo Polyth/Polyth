@@ -243,6 +243,9 @@ export interface WebPackageHost {
   };
   capabilities: {
     register(definition: CapabilityDefinition): Unregister;
+    /** Re-render consumers when a registered capability's `available()`
+     *  result changes without replacing the descriptor. */
+    notify(): void;
   };
   settings: {
     registerPage(definition: SettingsPageDefinition): Unregister;

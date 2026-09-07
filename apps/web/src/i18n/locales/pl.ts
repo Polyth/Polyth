@@ -1828,6 +1828,7 @@ export const pl: AppMessages = {
   "sidebar.sessionlist.archiveValueShiftHoverQuickAction": "Archiwum {value} (Shift+szybka akcja najechania kursorem)",
   "sidebar.sessionlist.archiveValueTheAgentIsStillRunning": "Archiwum „ {label} ”? Agent nadal działa lub czeka na Ciebie.",
   "sidebar.sessionlist.collapse": "Zawalenie",
+  "sidebar.sessionlist.couldnTCleanUpSessionsAfterRemovingTheWorktree": "Nie udało się posprzątać sesji po usunięciu worktree",
   "sidebar.sessionlist.couldnTRemoveTheWorktree": "Nie udało się usunąć worktree",
   "sidebar.sessionlist.couldnTUpdateSessionLabels": "Nie można zaktualizować etykiet sesji",
   "sidebar.sessionlist.deletedValue": "Usunięto {label}",

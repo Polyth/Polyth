@@ -58,7 +58,6 @@ import {
 import { classifyProviderLimitNotice } from "./providerLimit.ts";
 import {
   createOwnedLocalEndpointLease,
-  LISTEN_RE,
 } from "./endpoint.ts";
 import {
   createRuntimeLifecycle,
@@ -95,7 +94,10 @@ export interface OpenCodeAdapterOptions {
   probeDeadlineMs?: number;
 }
 
-export { createConfigApplier, normalizePluginEntries } from "./config.ts";
+export {
+  createConfigApplier,
+  normalizePluginEntries,
+} from "./config.ts";
 export type {
   BackendConfigApplier,
   McpApplyEntry,

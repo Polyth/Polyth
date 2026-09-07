@@ -47,6 +47,7 @@ export function registerServerPackage(
         throw error;
       }
     },
+    stopIngress: () => pkg.stopIngress?.(),
   });
 }
 

@@ -4,8 +4,9 @@
 // failed apply rolls the canonical copy back, so file and backend never split.
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
-import { readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { atomicWrite } from "@polyth/plugins";
 
 export interface BehaviorState {
   text: string;
@@ -36,17 +37,6 @@ export const behaviorRevision = (text: string): string =>
 export const favoriteSubagentRoutingSection = `## Favorite subagent routing (mandatory)
 
 Before delegating work, evaluate the task and explicitly choose the best-fit agent from the user's favorites. Never spawn a subagent that merely inherits the parent or default model. If no suitable favorite is available, do the work directly. If the chosen agent stalls, errors, or returns unusable work, switch to a different favorite; do not repeatedly retry the same failed choice.`;
-
-async function atomicWrite(path: string, data: string): Promise<void> {
-  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
-  await writeFile(tmp, data, "utf8");
-  try {
-    await rename(tmp, path);
-  } catch (err) {
-    await unlink(tmp).catch(() => {});
-    throw err;
-  }
-}
 
 export function createBehaviorService(opts: {
   file: string;

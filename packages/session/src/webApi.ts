@@ -217,10 +217,12 @@ async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
     // callers can explain conflicts/history mismatches without regexing HTML.
     let code: string | undefined;
     let message: string | undefined;
+    let changes: number | undefined;
     try {
-      const parsed = JSON.parse(body) as { error?: unknown; message?: unknown };
+      const parsed = JSON.parse(body) as { error?: unknown; message?: unknown; changes?: unknown };
       if (typeof parsed.error === "string") code = parsed.error;
       if (typeof parsed.message === "string") message = parsed.message;
+      if (typeof parsed.changes === "number") changes = parsed.changes;
     } catch {
       // non-JSON error body
     }
@@ -230,7 +232,11 @@ async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
         statusText: res.statusText,
         body,
       })),
-      { status: res.status, ...(code !== undefined ? { code } : {}) },
+      {
+        status: res.status,
+        ...(code !== undefined ? { code } : {}),
+        ...(changes !== undefined ? { changes } : {}),
+      },
     );
   }
   if (res.status === 204) return undefined as T;
@@ -243,6 +249,12 @@ export const httpStatusOf = (err: unknown): number =>
 /** Typed error code from a server error body (e.g. "conflict", "history-mismatch"). */
 export const errorCodeOf = (err: unknown): string =>
   typeof (err as { code?: unknown })?.code === "string" ? (err as { code: string }).code : "";
+
+/** Dirty-worktree refusal may include a porcelain change count for the confirm copy. */
+export const errorChangesOf = (err: unknown): number =>
+  typeof (err as { changes?: unknown }).changes === "number"
+    ? (err as { changes: number }).changes
+    : 0;
 
 function json(method: string, body?: unknown): RequestInit {
   return {
@@ -910,8 +922,12 @@ export const api = {
     jfetch<Worktree[]>(`/api/worktrees?projectId=${encodeURIComponent(projectId)}`),
   createWorktree: (projectId: string, branch: string, wtPath?: string, base?: string) =>
     jfetch<Worktree>(`/api/worktrees`, json("POST", { projectId, branch, path: wtPath, base })),
-  removeWorktree: (projectId: string, wtPath: string, deleteBranch?: boolean) =>
-    jfetch<{ ok: true }>(`/api/worktrees/remove`, json("POST", { projectId, path: wtPath, deleteBranch })),
+  /** Rejects with code `worktree-dirty` when uncommitted changes would be lost; pass `force` after the user confirms.
+   *  `ok: true` means Git removal (or an already-absent worktree) succeeded. `metadataCleanupFailed` /
+   *  `branchCleanupFailed` are follow-up warnings: session rows may still need `worktreeState: missing`
+   *  reconciliation, or the dedicated branch may still exist. */
+  removeWorktree: (projectId: string, wtPath: string, deleteBranch?: boolean, force?: boolean) =>
+    jfetch<{ ok: true; metadataCleanupFailed?: boolean; branchCleanupFailed?: boolean }>(`/api/worktrees/remove`, json("POST", { projectId, path: wtPath, deleteBranch, ...(force ? { force: true } : {}) })),
 
   createIsolatedSession: (input: CreateIsolatedSessionInput) =>
     jfetch<SessionRef>(`/api/isolation/sessions`, json("POST", input)),

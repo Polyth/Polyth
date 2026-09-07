@@ -317,9 +317,7 @@ function SessionSurface() {
   if (kind === "loading") return <><SessionLoading />{picker}</>;
   if (kind === "hero") return <><SessionHero starterContext={starterContext} />{picker}</>;
 
-  const pendingPermissions = model.permissions.filter((p) => p.status === "pending");
   const pendingQuestions = model.questions.filter((q) => q.status === "pending");
-  const pendingSecrets = model.secrets.filter((secret) => secret.status === "pending");
   const archived = composerBlockedByArchive(session);
 
   return (

@@ -1831,6 +1831,7 @@ export const en = {
   "sidebar.sessionlist.archiveValueShiftHoverQuickAction": "Archive {value} (Shift+hover quick action)",
   "sidebar.sessionlist.archiveValueTheAgentIsStillRunning": "Archive \"{label}\"? The agent is still running or waiting on you.",
   "sidebar.sessionlist.collapse": "Collapse",
+  "sidebar.sessionlist.couldnTCleanUpSessionsAfterRemovingTheWorktree": "Couldn’t clean up sessions after removing the worktree",
   "sidebar.sessionlist.couldnTRemoveTheWorktree": "Couldn’t remove the worktree",
   "sidebar.sessionlist.couldnTUpdateSessionLabels": "Couldn’t update session labels",
   "sidebar.sessionlist.deletedValue": "Deleted {label}",

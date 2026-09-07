@@ -11,6 +11,7 @@ import {
   createStore,
   deriveMessages,
   latestCompletedExchange,
+  rewindDraft,
   unrestoredCompactionSeq,
 } from "@polyth/session";
 import type { SessionEvent, SessionProjection } from "@polyth/contracts";
@@ -277,6 +278,7 @@ test("deriveMessages soft-rewind, redo, and replacement are replay-deterministic
     { role: "assistant", parts: [{ type: "text", text: "one" }] },
   ]);
   assert.deepEqual(activeRewind(base), { markerSeq: 5, atSeq: 3, restoredText: "second" });
+  assert.deepEqual(rewindDraft(base), { text: "second", attachments: [] });
 
   const redone = [...base, ev(6, "session/rewind-cleared", { rewindSeq: 5 })];
   assert.deepEqual(deriveMessages(redone).map((message) => message.parts), [
@@ -394,3 +396,4 @@ test("exportJsonl returns events as JSONL", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+

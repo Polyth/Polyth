@@ -70,6 +70,8 @@ import { createSessionService, type Broadcaster, type RuntimePool } from "./sess
 import { resolveSessionRuntimeBinding } from "./sessionRuntime.ts";
 import { createRuntimeCatalog } from "./runtimeCatalog.ts";
 import { createHttpHandler, createInternalControlServer, createPublicHttpServer, createTunnelIngress, type RouteHandler } from "./http.ts";
+import { drainAndCloseServer, HTTP_DRAIN_MS } from "./httpDrain.ts";
+import { createHttpAdmission } from "./httpAdmission.ts";
 import { packageRoutes } from "./routes/packages.ts";
 import { contextRoutes } from "./routes/context.ts";
 import { orgRoutes } from "./routes/org.ts";
@@ -1495,8 +1497,10 @@ export async function boot(opts: BootOptions = {}) {
   // capture this stable delegate; invoking it before composition finishes is
   // a package bug surfaced with an explicit error.
   let sessionsImpl: SessionService | null = null;
+  const httpAdmission = createHttpAdmission();
   const lazySessions: SessionService = new Proxy({} as SessionService, {
     get(_target, property) {
+      httpAdmission.assertLive();
       if (!sessionsImpl) {
         throw new Error(
           `session service accessed during package load (property "${String(property)}"); resolve it lazily inside onEnable or route handlers`,
@@ -2048,6 +2052,7 @@ export async function boot(opts: BootOptions = {}) {
     version: "0.1.0",
     remotePolicies: () => routeRegistry.policies(),
     listenerId: "public",
+    admission: httpAdmission,
   });
   httpHandlerRef = httpHandler;
   const server = createPublicHttpServer(httpHandler, "public");
@@ -2105,6 +2110,24 @@ export async function boot(opts: BootOptions = {}) {
     // finish before disposing its OpenCode process. This keeps watcher-driven
     // source reloads from truncating unrelated agent sessions.
     shutdownPromise = admissionBarrier.drain(async () => {
+      // Ingress owners first, then HTTP drain, then package/store disposal.
+      // Destroying a TCP socket is not handler completion: admission tracks
+      // request JS and fences leftovers before services go away.
+      live?.close();
+      await packageLifecycle.stopIngress();
+      httpAdmission.stop();
+      await Promise.all([
+        drainAndCloseServer(controlServer, { timeoutMs: HTTP_DRAIN_MS }),
+        drainAndCloseServer(server, {
+          timeoutMs: HTTP_DRAIN_MS,
+          untilIdle: (ms) => httpAdmission.waitIdle(ms),
+        }),
+      ]);
+      httpAdmission.fence();
+      // Leave the control socket path for the next boot to remove. An older
+      // graceful shutdown can finish after a replacement server has already
+      // claimed this path; unlinking here would silently disable the new
+      // control socket.
       for (const descriptor of packageRegistry.list().toReversed()) {
         await packageLifecycle.disable(descriptor.id).catch((error: unknown) => {
           console.error(`[polyth] package "${descriptor.id}" failed to disable during shutdown`, error);
@@ -2125,12 +2148,6 @@ export async function boot(opts: BootOptions = {}) {
       await svc<SshTransportService>("ssh")?.disconnectAll().catch(() => {});
       await root.dispose();
       await store.close();
-      controlServer.close();
-      // Leave the path for the next boot to remove. An older graceful
-      // shutdown can finish after a replacement server has already claimed
-      // this path; unlinking here would silently disable the new control
-      // socket.
-      server.close();
       await writerLease.release();
     });
     return shutdownPromise;

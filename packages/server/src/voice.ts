@@ -3,7 +3,7 @@
 // resolved at call time and never persisted or returned. URLs are explicit
 // user input saved through PUT (egress goes only where the user pointed it).
 import { mkdirSync, readFileSync } from "node:fs";
-import { atomicWriteSync } from "./atomicWrite.ts";
+import { atomicWriteSync } from "@polyth/plugins";
 import { dirname } from "node:path";
 
 export interface VoiceSttSettings {

@@ -77,7 +77,7 @@ export function lastRuntimeEpochReplaced(
   return { reason: data.reason, old: oldId, new: newId, seq: marker.seq };
 }
 
-export function debugOperationCounts(
+function debugOperationCounts(
   operations: readonly DurableOperation[] | undefined,
   events: readonly SessionEvent[],
   heldForReview: number,
@@ -98,7 +98,7 @@ export function debugOperationCounts(
   return { fencedOperations, unknownOperations, heldForReview };
 }
 
-export function debugRecoveryPlanStats(
+function debugRecoveryPlanStats(
   plan: SessionDebugRecoveryStatsInput | null | undefined,
   restored: boolean,
 ): SessionDebugRecoveryPlanDto | undefined {

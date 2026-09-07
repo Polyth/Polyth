@@ -100,23 +100,12 @@ export function isRemotePathPattern(pattern: string): boolean {
 }
 
 /** Reject encoded dots, backslashes, NUL, duplicate separators, and any
- *  percent-encoding that would change route interpretation. */
+ *  percent-encoding: remote paths are matched literally, so an encoded
+ *  segment can never mean the same route as its decoded form. */
 export function canonicalizeRemotePath(path: string): string | null {
   if (typeof path !== "string" || path.length === 0 || path.length > 2048) return null;
   if (!path.startsWith("/") || path.includes("//") || path.includes("\\") || path.includes("\0")) return null;
-  if (path.includes("%")) {
-    const parts = path.split("/").slice(1);
-    for (const part of parts) {
-      if (!/^(?:%[0-9A-Fa-f]{2}|[^%])*$/.test(part)) return null;
-      try {
-        const decoded = decodeURIComponent(part);
-        if (decoded !== part) return null;
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  }
+  if (path.includes("%")) return null;
   const parts = path.split("/").slice(1);
   for (const part of parts) {
     if (!part || part === "." || part === "..") return null;

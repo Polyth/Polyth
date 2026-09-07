@@ -5,10 +5,19 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { AttachmentRef, SessionEvent } from "@polyth/contracts";
-import { createStore, deriveMessages } from "../src/index.ts";
+import type { AttachmentRef, QueueItemDto, SessionEvent } from "@polyth/contracts";
+import { createStore, deriveMessages, type Store } from "../src/index.ts";
 
 const tmpStore = () => createStore(join(mkdtempSync(join(tmpdir(), "polyth-att-")), "s.db"));
+
+/** Pop the queue head through the production reserve → confirm path. */
+async function dispatchHead(store: Store, sessionId: string): Promise<QueueItemDto | undefined> {
+  const reserved = await store.reserveQueueHead({ sessionId });
+  if (reserved.kind !== "reserved") return undefined;
+  const { operationId } = reserved.reservation.operation;
+  await store.claimOperation(operationId);
+  return store.confirmQueueReservation(operationId);
+}
 
 const refs: AttachmentRef[] = [
   { id: "a1", name: "notes.md", mime: "text/plain", size: 12, kind: "file", path: "docs/notes.md", url: "/api/files/raw?projectId=p1&path=docs%2Fnotes.md" },
@@ -28,9 +37,9 @@ test("queue round-trip preserves attachments; text-only rows stay clean", async 
   assert.deepEqual(listed[0]?.attachments, refs);
   assert.equal(listed[1]?.attachments, undefined);
 
-  const head = await store.queueShift("s1");
+  const head = await dispatchHead(store, "s1");
   assert.deepEqual(head?.attachments, refs);
-  const next = await store.queueShift("s1");
+  const next = await dispatchHead(store, "s1");
   assert.equal(next?.attachments, undefined);
   await store.close();
 });

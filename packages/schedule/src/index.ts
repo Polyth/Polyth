@@ -6,8 +6,9 @@
 // WP10 adds: cron cadence with IANA time zones (preview and executor share
 // one code path), explicit run targets with bounded history, overlap policy,
 // and reconciliation of Markdown-managed loops from .agents/loops.
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { atomicWriteSync } from "@polyth/plugins";
 import { randomUUID } from "node:crypto";
 import { describeCron, nextRun, nextRuns, validateCron } from "./cron.ts";
 import type { LoopFileResult } from "./loops.ts";
@@ -240,7 +241,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
 
   const save = (): void => {
     mkdirSync(dirname(opts.file), { recursive: true });
-    writeFileSync(opts.file, JSON.stringify({ v: 2, tasks, loopErrors: loopErrorsByProject }, null, 2));
+    atomicWriteSync(opts.file, JSON.stringify({ v: 2, tasks, loopErrors: loopErrorsByProject }, null, 2));
   };
   if (migrated) save();
 

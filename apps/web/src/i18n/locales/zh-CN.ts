@@ -1828,6 +1828,7 @@ export const zhCN: AppMessages = {
   "sidebar.sessionlist.archiveValueShiftHoverQuickAction": "归档{value} （Shift+鼠标悬停快速操作）",
   "sidebar.sessionlist.archiveValueTheAgentIsStillRunning": "归档“ {label} ”？代理仍在运行或等待您。",
   "sidebar.sessionlist.collapse": "折叠",
+  "sidebar.sessionlist.couldnTCleanUpSessionsAfterRemovingTheWorktree": "移除 worktree 后无法清理会话",
   "sidebar.sessionlist.couldnTRemoveTheWorktree": "无法移除 worktree",
   "sidebar.sessionlist.couldnTUpdateSessionLabels": "无法更新会话标签",
   "sidebar.sessionlist.deletedValue": "已删除{label}",

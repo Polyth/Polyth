@@ -3,8 +3,9 @@
 // execution ledger. Runtime execution is composed by the server from goals,
 // schedules, tests, and Git; this package only owns durable workflow state.
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { atomicWriteSync } from "@polyth/plugins";
 import type {
   TrackCreateInput,
   TrackDto,
@@ -107,14 +108,7 @@ export function createTrackStore(opts: TrackStoreOptions): TrackStore {
 
   const save = (): void => {
     mkdirSync(dirname(opts.file), { recursive: true });
-    const temporary = `${opts.file}.tmp-${process.pid}-${randomUUID()}`;
-    writeFileSync(temporary, `${JSON.stringify({ v: 1, tracks } satisfies PersistedTracks, null, 2)}\n`, "utf8");
-    try {
-      renameSync(temporary, opts.file);
-    } catch (error) {
-      try { unlinkSync(temporary); } catch { /* already removed */ }
-      throw error;
-    }
+    atomicWriteSync(opts.file, `${JSON.stringify({ v: 1, tracks } satisfies PersistedTracks, null, 2)}\n`);
   };
 
   const mustGet = (id: string): TrackDto => {

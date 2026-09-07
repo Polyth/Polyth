@@ -1828,6 +1828,7 @@ export const ar: AppMessages = {
   "sidebar.sessionlist.archiveValueShiftHoverQuickAction": "أرشفة {value} (إجراء سريع بالضغط على مفتاح Shift مع تحريك المؤشر)",
   "sidebar.sessionlist.archiveValueTheAgentIsStillRunning": "أرشفة \" {label} \"؟ لا يزال الوكيل قيد التشغيل أو ينتظرك.",
   "sidebar.sessionlist.collapse": "هبوط",
+  "sidebar.sessionlist.couldnTCleanUpSessionsAfterRemovingTheWorktree": "تعذّر تنظيف الجلسات بعد إزالة شجرة العمل",
   "sidebar.sessionlist.couldnTRemoveTheWorktree": "تعذّرت إزالة شجرة العمل",
   "sidebar.sessionlist.couldnTUpdateSessionLabels": "تعذر تحديث تسميات الجلسة",
   "sidebar.sessionlist.deletedValue": "تم حذف {label}",

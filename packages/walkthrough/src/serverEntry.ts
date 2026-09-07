@@ -282,6 +282,10 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     remoteAccess: localOnlyRemoteAccess(["walkthrough"]),
     routes,
     onEnable() {
+      if (flowTimer) {
+        clearInterval(flowTimer);
+        flowTimer = null;
+      }
       flowTimer = setInterval(() => void flow.tick(), 4_000);
       flowTimer.unref?.();
     },

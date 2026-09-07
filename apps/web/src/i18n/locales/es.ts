@@ -1828,6 +1828,7 @@ export const es: AppMessages = {
   "sidebar.sessionlist.archiveValueShiftHoverQuickAction": "Archivar {value} (acción rápida con Mayús + pasar el ratón por encima)",
   "sidebar.sessionlist.archiveValueTheAgentIsStillRunning": "¿Archivar \" {label} \"? El agente aún se está ejecutando o está esperando por usted.",
   "sidebar.sessionlist.collapse": "Contraer",
+  "sidebar.sessionlist.couldnTCleanUpSessionsAfterRemovingTheWorktree": "No se pudieron limpiar las sesiones tras eliminar el worktree",
   "sidebar.sessionlist.couldnTRemoveTheWorktree": "No se pudo eliminar el worktree",
   "sidebar.sessionlist.couldnTUpdateSessionLabels": "No se pudieron actualizar las etiquetas de sesión.",
   "sidebar.sessionlist.deletedValue": "Eliminado {label}",

@@ -32,7 +32,6 @@ or unauthenticated share link.
 
 - `@polyth/tunnel` — product package (Polyth Link UI, device store, host process).
 - `@polyth/pairing-qr` — encode/decode/preview only.
-- `@polyth/tunnel-relay` — operations around upstream `iroh-relay = 1.1.0`.
 - `crates/polyth-link-core` — protocol owner.
 - `crates/polyth-link-host` — Node/desktop host process.
 - `crates/polyth-link-uniffi` — ticket-parse FFI only, not a native pairing core.

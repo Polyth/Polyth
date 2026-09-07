@@ -16,10 +16,10 @@ import type {
 import {
   createOwnedLocalEndpointLease,
   createOwnedSshEndpointLease,
+  createRuntimeLifecycle,
   type OwnedLocalEndpointOptions,
-} from "../src/endpoint.ts";
-import { createRuntimeLifecycle } from "../src/runtime.ts";
-import type { OpenCodeEngineIdentity } from "../src/runtimeStorage.ts";
+  type OpenCodeEngineIdentity,
+} from "../src/index.ts";
 
 const engineIdentity = (
   digest = "a".repeat(64),

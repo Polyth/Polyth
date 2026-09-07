@@ -9,6 +9,12 @@ export interface EffectiveHistory {
   rewind: { markerSeq: number; atSeq: number } | null;
 }
 
+/** The one pure effective-history selector: timeline replay, model
+ *  derivation, mutation eligibility, and backend branch preparation all
+ *  consume this so they can never disagree about the visible prefix. Rewinds
+ *  splice history without mutating old rows: redo restores the captured tail;
+ *  a replacement clear permanently drops it and lets subsequent events form a
+ *  new tail. */
 export function effectiveHistory(events: readonly SessionEvent[]): EffectiveHistory {
   let visibleEvents: SessionEvent[] = [];
   let hidden: { markerSeq: number; atSeq: number; events: SessionEvent[] } | null = null;

@@ -16,7 +16,6 @@ import { firstUserTextCached } from "./utils.ts";
 export const ISLAND_RECENT_LIMIT = 8;
 export const ISLAND_PEER_LIMIT = 2;
 export const ISLAND_PROMPT_EXCERPT = 88;
-export const ISLAND_CYCLE_MS = 3800;
 
 export type IslandKind = "request" | "task" | "peer" | "session";
 

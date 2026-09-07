@@ -41,8 +41,13 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
   assert.match(sessions, /group\.worktree && !group\.worktree\.isMain/);
   assert.match(sessions, /setRemoveTarget\(group\.worktree\)/);
   assert.match(sessions, /tr\("sidebar\.sessionlist\.deleteWorktreeAndItsSessions"\)/);
-  assert.match(sessions, /Promise\.all\(sessionsForRemoval\.map\(\(session\) => deleteSession\(session\.id\)\)\)/);
-  assert.match(sessions, /api\.removeWorktree\(projectId, removeTarget\.path, deleteBranch\)/);
+  assert.match(sessions, /removePhase === "dirty"/);
+  assert.doesNotMatch(sessions, /dirtyWaiter/);
+  assert.doesNotMatch(sessions, /removeWorktreeThenDeleteSessions/);
+  assert.match(sessions, /Promise\.allSettled/);
+  assert.match(sessions, /couldnTCleanUpSessionsAfterRemovingTheWorktree/);
+  assert.match(sessions, /gitview\.destroyDirtyWorktree/);
+  assert.doesNotMatch(sessions, /api\.removeWorktree\([^)]+true\)/);
   assert.match(sessions, /group\.sessions\.length === 0 && <div className="empty session-list-empty">\{tr\("sidebar\.sessionlist\.noMatchingSessions"\)\}/);
   assert.doesNotMatch(sessions, /session-worktree-empty|sidebar\.sessionlist\.noSessions/);
   assert.doesNotMatch(styles, /\.session-worktree-empty/);

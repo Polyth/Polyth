@@ -5,6 +5,7 @@ import LinkPage from "./LinkPage.tsx";
 import {
   applyTunnelStatusToCapability,
   polythLinkCapabilityAvailable,
+  subscribePolythLinkCapability,
 } from "./availability.ts";
 import "./styles.css";
 
@@ -42,6 +43,21 @@ async function refreshLinkAvailability(): Promise<void> {
 export default defineWebPackage((host) => () => {
   void refreshLinkAvailability();
   const timer = setInterval(() => { void refreshLinkAvailability(); }, 5_000);
+  const linkCapability = {
+    id: "polyth-link",
+    label: "Pair a phone",
+    technicalLabel: "Polyth Link",
+    plainDescription: "Pair a phone with a QR code for secure remote access when the host is ready.",
+    keywords: ["link", "pair", "qr", "mobile"],
+    standardTier: "technical" as const,
+    standardRank: 36,
+    open: () => host.navigation.openSettingsPage("tunnel"),
+    available: () => polythLinkCapabilityAvailable(),
+  };
+  const capOff = host.capabilities.register(linkCapability);
+  const unsubAvailability = subscribePolythLinkCapability(() => {
+    host.capabilities.notify();
+  });
   const off = [
     host.settings.registerPage({
       id: "tunnel",
@@ -52,17 +68,10 @@ export default defineWebPackage((host) => () => {
       order: 42,
       component: LinkPage,
     }),
-    host.capabilities.register({
-      id: "polyth-link",
-      label: "Pair a phone",
-      technicalLabel: "Polyth Link",
-      plainDescription: "Pair a phone with a QR code for secure remote access when the host is ready.",
-      keywords: ["link", "pair", "qr", "mobile"],
-      standardTier: "technical",
-      standardRank: 36,
-      open: () => host.navigation.openSettingsPage("tunnel"),
-      available: () => polythLinkCapabilityAvailable(),
-    }),
+    () => {
+      unsubAvailability();
+      capOff();
+    },
   ];
   return () => {
     clearInterval(timer);

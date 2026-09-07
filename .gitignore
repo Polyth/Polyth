@@ -19,3 +19,14 @@ logs/
 *.sse.ndjson
 *.websocket.ndjson
 _inbox/
+/.polyth/screenshots/
+*.polyth-tmp.*
+# Data-dir runtime state that has historically been written at the repo root
+# when POLYTH_DATA_DIR was unset or pointed at cwd. Canonical location is ./data.
+/mcp.json
+/mcp-secrets.json
+/packages.json
+/model-visibility.json
+/quotas.json
+/forbidden-config.json
+/.polyth-writer.lock

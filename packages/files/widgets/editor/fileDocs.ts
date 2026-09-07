@@ -52,10 +52,6 @@ function scopeDocs(scope: string): Map<string, FileDoc> {
   return docs;
 }
 
-export function getDoc(scope: string, path: string): FileDoc | undefined {
-  return scopes.get(scope)?.get(path);
-}
-
 /** Get-or-create the entry for a path in a scope. */
 export function ensureDoc(scope: string, path: string): FileDoc {
   const docs = scopeDocs(scope);

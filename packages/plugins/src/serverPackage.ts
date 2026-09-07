@@ -55,6 +55,9 @@ export interface ServerPackage {
   remoteAccess?: RemoteAccessPolicy;
   onEnable?: () => void | Promise<void>;
   onDisable?: () => void | Promise<void>;
+  /** Detach HTTP/WS ingress before the HTTP server drain. Packages that own
+   *  upgraded sockets must implement this so `server.close()` is not pinned. */
+  stopIngress?: () => void | Promise<void>;
 }
 
 export type ServerPackageFactory = (
@@ -438,7 +441,7 @@ export async function loadServerPackage(
   if (!pkg || typeof pkg !== "object" || Array.isArray(pkg)) {
     throw err("invalid-input", `registerPackage for "${discovered.id}" must return a ServerPackage object`);
   }
-  for (const field of ["routes", "onEnable", "onDisable"] as const) {
+  for (const field of ["routes", "onEnable", "onDisable", "stopIngress"] as const) {
     if (pkg[field] !== undefined && typeof pkg[field] !== "function") {
       throw err(
         "invalid-input",

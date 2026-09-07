@@ -60,8 +60,3 @@ export function resolveHostBinary(opts: HostBinaryLookup = {}): HostBinaryResolu
   if (exists(debug)) return { ok: true, path: debug, source: "dev-debug" };
   return { ok: false, reason: "missing" };
 }
-
-export function findHostBinary(): string | null {
-  const resolved = resolveHostBinary();
-  return resolved.ok ? resolved.path : null;
-}

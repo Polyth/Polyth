@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync } from "node:fs";
-import { atomicWriteSync } from "./atomicWrite.ts";
+import { atomicWriteSync } from "@polyth/plugins";
 import { dirname } from "node:path";
 import type { PackageDescriptorDto } from "@polyth/contracts";
 

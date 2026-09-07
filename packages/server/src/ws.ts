@@ -28,7 +28,7 @@ import {
   normalizeWsAttachAuth,
   type WsAttachAuth,
   type WsAuthorize,
-} from "./wsAuth.ts";
+} from "@polyth/plugins";
 
 interface Sub {
   sessionId: string | null;
@@ -78,6 +78,7 @@ const GAP_FILL_CHUNK = 500;
 
 export interface WsGateway extends Broadcaster {
   attach(server: Server, auth?: WsAuthorize | WsAttachAuth): void;
+  close(): void;
 }
 
 export function createWsGateway(
@@ -94,19 +95,28 @@ export function createWsGateway(
   const wss = new WebSocketServer({ noServer: true });
   const clients = new Map<WebSocket, Sub>();
   const attached = new WeakSet<Server>();
+  const browserDisposals: Array<{ dispose(): void }> = [];
+  const upgradeReleases: Array<() => void> = [];
+  let closed = false;
 
   const send = (ws: WebSocket, msg: unknown) => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+    if (closed || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify(msg));
   };
 
-  /** True when this socket's tenant owns `sessionId`. With no tenancy
-   *  composed (`sub.spaceId === null`) every socket sees everything, which is
-   *  the pre-tenancy behavior bare gateways in tests rely on. */
-  const inSpace = (sub: Sub, sessionId: string): boolean => {
-    if (sub.spaceId === null) return true;
-    if (!spaces) return true;
-    return spaces.spaceOfSession(sessionId) === sub.spaceId;
+  /** Owning Space of `sessionId`, looked up once per fan-out rather than once
+   *  per socket. With no tenancy composed every socket sees everything, which
+   *  is the pre-tenancy behavior bare gateways in tests rely on. */
+  const spaceOf = (sessionId: string): (() => string | undefined) => {
+    let resolved: string | undefined;
+    let looked = false;
+    return () => {
+      if (!looked) { looked = true; resolved = spaces?.spaceOfSession(sessionId); }
+      return resolved;
+    };
   };
+  const inSpace = (sub: Sub, owner: () => string | undefined): boolean =>
+    sub.spaceId === null || !spaces || owner() === sub.spaceId;
 
   const currentPrincipal = (ws: WebSocket, sub: Sub): AuthPrincipal | null => {
     const live = liveWsPrincipal(sub.principal, sub.refreshPrincipal);
@@ -161,12 +171,14 @@ export function createWsGateway(
   flusher.unref?.();
 
   if (browser) {
-    browser.onFrame((frame) => {
+    const onFrame = browser.onFrame((frame) => {
+      if (closed) return;
       for (const [ws, sub] of clients) {
         if (sub.browserSessionId === frame.browserSessionId) deliverFrame(ws, sub, frame);
       }
     });
-    browser.onEvent((event) => {
+    const onEvent = browser.onEvent((event) => {
+      if (closed) return;
       for (const [ws, sub] of clients) {
         if (sub.browserSessionId === event.browserSessionId) {
           const live = currentPrincipal(ws, sub);
@@ -175,6 +187,8 @@ export function createWsGateway(
         }
       }
     });
+    if (onFrame) browserDisposals.push(onFrame);
+    if (onEvent) browserDisposals.push(onEvent);
   }
 
   wss.on("connection", (ws, req: IncomingMessage) => {
@@ -222,6 +236,7 @@ export function createWsGateway(
       clients.delete(ws);
     });
     ws.on("message", async (raw) => {
+      if (closed) return;
       let msg: {
         type?: string; sessionId?: string; afterSeq?: number; projectId?: string;
         browserSessionId?: string; afterRevision?: number;
@@ -264,6 +279,7 @@ export function createWsGateway(
         try {
           const pcm = new Uint8Array(Buffer.from(String(msg.pcm ?? ""), "base64"));
           const r = await dictation.push(id, Number(msg.seq), pcm);
+          if (closed) return;
           if (!requireCap(ws, sub, REMOTE_CAPABILITY.dictationUse)) return;
           send(ws, { type: "dictation/ack", dictationId: id, seq: r.ack, duplicate: r.duplicate });
           if (r.transcript) {
@@ -307,6 +323,11 @@ export function createWsGateway(
       sub.busy = true;
       try {
         subscriptions: while (sub.pendingSubscribe) {
+          if (closed) {
+            sub.pendingSubscribe = null;
+            sub.liveBuffer = [];
+            break;
+          }
           if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) {
             sub.pendingSubscribe = null;
             sub.liveBuffer = [];
@@ -321,6 +342,7 @@ export function createWsGateway(
             sub.caughtUp = false;
             try {
               const gap = await sub.sessions.events(sub.sessionId, sub.afterSeq);
+              if (closed) return;
               if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) {
                 sub.caughtUp = true;
                 sub.liveBuffer = [];
@@ -366,6 +388,7 @@ export function createWsGateway(
             try {
               if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) break subscriptions;
               const list = await sub.sessions.list(cur.projectId ?? undefined);
+              if (closed) return;
               if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) break subscriptions;
               for (let i = 0; i < list.length; i += GAP_FILL_CHUNK) {
                 if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) break subscriptions;
@@ -383,10 +406,11 @@ export function createWsGateway(
 
   return {
     attach(server, authArg) {
-      if (attached.has(server)) return;
+      if (closed || attached.has(server)) return;
       attached.add(server);
       const auth = normalizeWsAttachAuth(authArg);
       const stopClaim = claimWsUpgrade(server, (req, socket, head) => {
+        if (closed) return false;
         if (new URL(req.url ?? "/", "http://x").pathname !== "/ws") return false;
         const resolution = defaultWsIdentity(auth, req);
         if (auth.authorize ? !auth.authorize(req) : !resolution.authenticated) {
@@ -403,17 +427,22 @@ export function createWsGateway(
         });
         return true;
       });
-      server.on("close", () => {
+      const onServerClose = () => { stopClaim(); };
+      upgradeReleases.push(() => {
+        server.off("close", onServerClose);
         stopClaim();
       });
+      server.on("close", onServerClose);
     },
     event(ev: SessionEvent) {
+      if (closed) return;
+      const owner = spaceOf(ev.sessionId);
       for (const [ws, sub] of clients) {
         const live = currentPrincipal(ws, sub);
         if (!allowWsCapability(live, REMOTE_CAPABILITY.coreSessionsRead)) continue;
         // Tenant filter comes first: a socket must never observe even the
         // existence of another Space's session traffic.
-        if (!inSpace(sub, ev.sessionId)) continue;
+        if (!inSpace(sub, owner)) continue;
         if (sub.sessionId && ev.sessionId !== sub.sessionId) continue;
         if (!sub.caughtUp) {
           // Gap-fill in flight: buffer instead of dropping. These seqs are
@@ -427,6 +456,7 @@ export function createWsGateway(
       }
     },
     projection(p: SessionProjection) {
+      if (closed) return;
       for (const [ws, sub] of clients) {
         const live = currentPrincipal(ws, sub);
         if (!allowWsCapability(live, REMOTE_CAPABILITY.coreSessionsRead)) continue;
@@ -436,18 +466,21 @@ export function createWsGateway(
       }
     },
     notification(record: NotificationRecord) {
+      if (closed) return;
       // NTF-01: global inbox fan-out — every authenticated socket receives it
       // regardless of its active-session subscription. Never buffered into
       // liveBuffer, never counted against afterSeq, never part of gap-fill;
       // REST `after=<ts>` catch-up owns reconnect delivery.
+      const owner = spaceOf(record.sessionId);
       for (const [ws, sub] of clients) {
         const live = currentPrincipal(ws, sub);
         if (!allowWsCapability(live, REMOTE_CAPABILITY.coreNotificationsRead)) continue;
-        if (!inSpace(sub, record.sessionId)) continue;
+        if (!inSpace(sub, owner)) continue;
         send(ws, { type: "notification/added", notification: record });
       }
     },
     pluginChanged(plugin: InstalledPluginDto) {
+      if (closed) return;
       for (const [ws, sub] of clients) {
         const live = currentPrincipal(ws, sub);
         if (!live || !isLocalUiPrincipal(live)) continue;
@@ -455,6 +488,7 @@ export function createWsGateway(
       }
     },
     packageChanged(pkg: PackageDescriptorDto) {
+      if (closed) return;
       for (const [ws, sub] of clients) {
         const live = currentPrincipal(ws, sub);
         if (!live || !isLocalUiPrincipal(live)) continue;
@@ -462,6 +496,7 @@ export function createWsGateway(
       }
     },
     clientSettingsChanged(settings: ClientSettingsDto) {
+      if (closed) return;
       // Every socket hears it, including the author's — the client drops the
       // echo by revision. Never buffered, never part of gap-fill.
       for (const [ws, sub] of clients) {
@@ -469,6 +504,22 @@ export function createWsGateway(
         if (!live || !isLocalUiPrincipal(live)) continue;
         send(ws, { type: "client-settings/changed", settings });
       }
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      clearInterval(flusher);
+      for (const disposal of browserDisposals.splice(0)) {
+        try { disposal.dispose(); } catch { /* already disposed */ }
+      }
+      for (const release of upgradeReleases.splice(0)) {
+        try { release(); } catch { /* already released */ }
+      }
+      for (const ws of clients.keys()) {
+        try { ws.terminate(); } catch { /* already closing */ }
+      }
+      clients.clear();
+      wss.close();
     },
   };
 }

@@ -10,7 +10,7 @@
 // provider's blacklist — unknown provider/model metadata (reasoning,
 // modalities, limits, variants, future fields) is preserved by the applier.
 import { mkdirSync, readFileSync } from "node:fs";
-import { atomicWriteSync } from "./atomicWrite.ts";
+import { atomicWriteSync } from "@polyth/plugins";
 import { dirname } from "node:path";
 import type { AvailableProviderDescriptor, ModelDescriptor } from "@polyth/contracts";
 
@@ -94,7 +94,7 @@ export interface ModelVisibilityService {
 
 const err = (code: string, message: string) => Object.assign(new Error(message), { code });
 
-export const modelVisibilityKey = (m: { providerID: string; modelID: string }): string =>
+const modelVisibilityKey = (m: { providerID: string; modelID: string }): string =>
   `${m.providerID}/${m.modelID}`;
 
 /** Accepts plain id strings too (forward-compatible with a simpler shape),
@@ -151,7 +151,7 @@ export function visibilityFromBackendConfig(cfg: Record<string, unknown>): Visib
   return parseVisibility({ disabledProviders, disabledModels });
 }
 
-export function isModelVisible(m: ModelDescriptor, state: VisibilityState): boolean {
+function isModelVisible(m: ModelDescriptor, state: VisibilityState): boolean {
   if (state.disabledProviders.includes(m.providerID)) return false;
   return !state.disabledModels.includes(modelVisibilityKey(m));
 }

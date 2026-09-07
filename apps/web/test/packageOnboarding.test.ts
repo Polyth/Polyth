@@ -327,8 +327,14 @@ test("every built-in package surface has a substantial onboarding tour", async (
     "multirun", "workflow", "fusion", "walkthrough", "schedule", "usage",
     "github", "knowledge", "voice", "home-assistant", "secure-safe", "mcp",
     "commands", "plugins", "integrations", "ssh", "packages", "widgets",
+    // Catalog-only: production BUILTIN_PACKAGES does not advertise `agents`.
+    // The tour stays registered for a future Roles surface and must not be
+    // confused with a live package descriptor from /api/packages.
     "agents",
   ];
+
+  assert.equal(descriptors.has("agents"), false, "onboarding fixture must not fake a live Roles package");
+  assert.ok(getPackageOnboarding("agents"), "Roles tour remains catalog-only");
 
   for (const packageId of expectedPackageIds) {
     const tour = getPackageOnboarding(packageId);

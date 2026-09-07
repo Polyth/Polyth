@@ -5,6 +5,7 @@ import {
   applyTunnelStatusToCapability,
   polythLinkCapabilityAvailable,
   setPolythLinkCapabilityAvailable,
+  subscribePolythLinkCapability,
 } from "../widgets/availability.ts";
 
 const base = (): TunnelStatusDto => ({
@@ -34,4 +35,16 @@ test("capability availability changes when the host becomes ready", () => {
   assert.equal(polythLinkCapabilityAvailable(), true);
   applyTunnelStatusToCapability(base());
   assert.equal(polythLinkCapabilityAvailable(), false);
+});
+
+test("subscribers are notified when pairing availability flips", () => {
+  setPolythLinkCapabilityAvailable(false);
+  let hits = 0;
+  const off = subscribePolythLinkCapability(() => { hits += 1; });
+  applyTunnelStatusToCapability({ ...base(), pairingAvailable: true });
+  applyTunnelStatusToCapability({ ...base(), pairingAvailable: true });
+  applyTunnelStatusToCapability(base());
+  off();
+  applyTunnelStatusToCapability({ ...base(), pairingAvailable: true });
+  assert.equal(hits, 2);
 });

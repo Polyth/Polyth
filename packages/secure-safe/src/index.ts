@@ -1,13 +1,7 @@
 import { randomUUID } from "node:crypto";
-import {
-  chmodSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { atomicWriteSync } from "@polyth/plugins";
 import type {
   SecureSafeCreateInput,
   SecureSafeEntryDto,
@@ -25,18 +19,6 @@ export interface SecureSafeOptions {
 }
 
 const error = (code: string, message: string) => Object.assign(new Error(message), { code });
-
-function atomicWrite(path: string, data: string, mode?: number): void {
-  const tmp = `${path}.tmp-${process.pid}-${Date.now()}-${randomUUID()}`;
-  writeFileSync(tmp, data, { encoding: "utf8", ...(mode === undefined ? {} : { mode }) });
-  try {
-    renameSync(tmp, path);
-    if (mode !== undefined) chmodSync(path, mode);
-  } catch (cause) {
-    try { unlinkSync(tmp); } catch { /* already removed */ }
-    throw cause;
-  }
-}
 
 function load<T>(path: string, fallback: T): T {
   try {
@@ -130,9 +112,9 @@ export function createSecureSafeService(opts: SecureSafeOptions): SecureSafeServ
 
   const persist = (): SecureSafeManifest => {
     const manifest = manifestFor(entries);
-    atomicWrite(metadataFile, JSON.stringify(entries, null, 2));
-    atomicWrite(secretsFile, JSON.stringify(secrets), 0o600);
-    atomicWrite(manifestFile, JSON.stringify(manifest, null, 2));
+    atomicWriteSync(metadataFile, JSON.stringify(entries, null, 2));
+    atomicWriteSync(secretsFile, JSON.stringify(secrets), 0o600);
+    atomicWriteSync(manifestFile, JSON.stringify(manifest, null, 2));
     return manifest;
   };
 
@@ -234,7 +216,7 @@ export function createSecureSafeService(opts: SecureSafeOptions): SecureSafeServ
     },
     async syncForbiddenConfig(): Promise<SecureSafeManifest> {
       const manifest = manifestFor(entries);
-      atomicWrite(manifestFile, JSON.stringify(manifest, null, 2));
+      atomicWriteSync(manifestFile, JSON.stringify(manifest, null, 2));
       return manifest;
     },
   };

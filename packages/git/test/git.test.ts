@@ -1,13 +1,64 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cloneRepository, createGitService, normalizeRepositoryUrl, pathsUnder } from "../src/index.ts";
 
 const git = createGitService();
 const dirs: string[] = [];
+const REAL_GIT = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+
+const recordedGit = (opts?: {
+  failStatus?: boolean;
+  failForce?: boolean;
+  failBranchDelete?: boolean;
+  raceRemove?: boolean;
+  failListAfterRemove?: boolean;
+  showRef?: "absent" | "fatal" | "hang";
+  timeoutMs?: number;
+}) => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-gitwrap-"));
+  dirs.push(dir);
+  const logFile = join(dir, "argv.log");
+  const listCount = join(dir, "worktree-list.count");
+  const wrapper = join(dir, "git");
+  writeFileSync(wrapper, `#!/bin/sh
+{
+  printf '%s\\n' "$@"
+  echo ---
+} >> ${JSON.stringify(logFile)}
+${opts?.failStatus ? 'if [ "$1" = status ]; then echo status failed >&2; exit 1; fi' : ""}
+${opts?.failForce ? 'for a in "$@"; do if [ "$a" = --force ]; then echo forced remove failed >&2; exit 1; fi; done' : ""}
+${opts?.failBranchDelete ? 'if [ "$1" = branch ] && [ "$2" = "-D" ]; then echo cannot delete branch >&2; exit 1; fi' : ""}
+${opts?.raceRemove ? `if [ "$1" = worktree ] && [ "$2" = remove ]; then ${JSON.stringify(REAL_GIT)} "$@" >/dev/null 2>&1 || true; echo "fatal: not a working tree" >&2; exit 128; fi` : ""}
+${opts?.failListAfterRemove ? `if [ "$1" = worktree ] && [ "$2" = list ]; then
+  n=0
+  if [ -f ${JSON.stringify(listCount)} ]; then n=$(cat ${JSON.stringify(listCount)}); fi
+  n=$((n + 1))
+  echo "$n" > ${JSON.stringify(listCount)}
+  if [ "$n" -ge 2 ]; then echo "fatal: not a git repository" >&2; exit 128; fi
+fi
+if [ "$1" = worktree ] && [ "$2" = remove ]; then echo "fatal: cannot remove worktree" >&2; exit 128; fi` : ""}
+${opts?.showRef === "absent" ? 'if [ "$1" = show-ref ]; then exit 1; fi' : ""}
+${opts?.showRef === "fatal" ? 'if [ "$1" = show-ref ]; then echo "fatal: not a git repository" >&2; exit 128; fi' : ""}
+${opts?.showRef === "hang" ? 'if [ "$1" = show-ref ]; then exec sleep 2; fi' : ""}
+exec ${JSON.stringify(REAL_GIT)} "$@"
+`);
+  chmodSync(wrapper, 0o755);
+  writeFileSync(logFile, "");
+  return {
+    git: createGitService({ bin: wrapper, ...(opts?.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}) }),
+    commands: (): string[][] => readFileSync(logFile, "utf8")
+      .split("\n---\n")
+      .map((block) => block.split("\n").filter(Boolean))
+      .filter((args) => args.length > 0),
+  };
+};
+
+const removeArgs = (commands: string[][]) =>
+  commands.filter((args) => args[0] === "worktree" && args[1] === "remove");
 
 const repo = (withCommit = true): string => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-git-"));
@@ -178,6 +229,199 @@ test("worktree create, list and remove (with branch cleanup)", async () => {
   await git.worktrees.remove(dir, { path: created.path, deleteBranch: true });
   assert.equal((await git.worktrees.list(dir)).length, 1);
   assert.equal((await git.branches(dir)).branches.some((b) => b.name === "wt/one"), false);
+});
+
+test("worktree removal refuses to destroy uncommitted work unless forced", async () => {
+  const dir = repo();
+  const created = await git.worktrees.create(dir, { branch: "wt/dirty" });
+  dirs.push(created.path);
+  writeFileSync(join(created.path, "draft.txt"), "not committed\n");
+
+  await assert.rejects(
+    () => git.worktrees.remove(dir, { path: created.path }),
+    (err: Error & { code?: string; changes?: number }) => {
+      assert.equal(err.code, "worktree-dirty");
+      assert.equal(err.changes, 1);
+      return true;
+    },
+  );
+  assert.equal((await git.worktrees.list(dir)).length, 2, "the dirty worktree survives the refusal");
+
+  await git.worktrees.remove(dir, { path: created.path, force: true });
+  assert.equal((await git.worktrees.list(dir)).length, 1);
+});
+
+test("clean worktree removal does not pass --force to git", async () => {
+  const dir = repo();
+  const created = await git.worktrees.create(dir, { branch: "wt/clean" });
+  dirs.push(created.path);
+  const recorded = recordedGit();
+  await recorded.git.worktrees.remove(dir, { path: created.path, deleteBranch: true });
+  const removes = removeArgs(recorded.commands());
+  assert.equal(removes.length, 1);
+  assert.deepEqual(removes[0]!.slice(0, 2), ["worktree", "remove"]);
+  assert.equal(removes[0]!.includes("--force"), false);
+  assert.equal(existsSync(created.path), false);
+  assert.equal((await git.worktrees.list(dir)).some((w) => w.branch === "wt/clean"), false);
+});
+
+test("dirty tracked file is refused by git without --force and keeps the branch", async () => {
+  const dir = repo();
+  const created = await git.worktrees.create(dir, { branch: "wt/tracked" });
+  dirs.push(created.path);
+  writeFileSync(join(created.path, "README.md"), "edited\n");
+  const recorded = recordedGit();
+  await assert.rejects(
+    () => recorded.git.worktrees.remove(dir, { path: created.path, deleteBranch: true }),
+    (err: Error & { code?: string; changes?: number }) => {
+      assert.equal(err.code, "worktree-dirty");
+      assert.equal(err.changes, 1);
+      return true;
+    },
+  );
+  const removes = removeArgs(recorded.commands());
+  assert.equal(removes.length, 1);
+  assert.equal(removes[0]!.includes("--force"), false);
+  assert.equal((await git.worktrees.list(dir)).length, 2);
+  assert.equal((await git.branches(dir)).branches.some((b) => b.name === "wt/tracked"), true);
+});
+
+test("failed status inspection does not force-delete a dirty worktree", async () => {
+  const dir = repo();
+  const created = await git.worktrees.create(dir, { branch: "wt/status-fail" });
+  dirs.push(created.path);
+  writeFileSync(join(created.path, "draft.txt"), "untracked\n");
+  const recorded = recordedGit({ failStatus: true });
+  await assert.rejects(
+    () => recorded.git.worktrees.remove(dir, { path: created.path, deleteBranch: true }),
+    (err: Error & { code?: string; changes?: number }) => {
+      assert.equal(err.code, "worktree-dirty");
+      assert.equal(err.changes, undefined);
+      return true;
+    },
+  );
+  const removes = removeArgs(recorded.commands());
+  assert.equal(removes.length, 1);
+  assert.equal(removes[0]!.includes("--force"), false);
+  assert.equal(existsSync(created.path), true);
+  assert.equal((await git.worktrees.list(dir)).length, 2);
+  assert.equal((await git.branches(dir)).branches.some((b) => b.name === "wt/status-fail"), true);
+});
+
+test("explicit force removal uses --force and then deletes the branch", async () => {
+  const dir = repo();
+  const created = await git.worktrees.create(dir, { branch: "wt/force" });
+  dirs.push(created.path);
+  writeFileSync(join(created.path, "draft.txt"), "untracked\n");
+  const recorded = recordedGit();
+  await recorded.git.worktrees.remove(dir, { path: created.path, deleteBranch: true, force: true });
+  const removes = removeArgs(recorded.commands());
+  assert.equal(removes.length, 1);
+  assert.equal(removes[0]!.includes("--force"), true);
+  assert.equal((await git.worktrees.list(dir)).length, 1);
+  assert.equal((await git.branches(dir)).branches.some((b) => b.name === "wt/force"), false);
+});
+
+test("remove reports success when another actor already deleted the worktree", async () => {
+  const dir = repo();
+  const created = await git.worktrees.create(dir, { branch: "wt/race" });
+  dirs.push(created.path);
+  const recorded = recordedGit({ raceRemove: true });
+  const result = await recorded.git.worktrees.remove(dir, { path: created.path, deleteBranch: true });
+  assert.deepEqual(result, {});
+  assert.equal((await git.worktrees.list(dir)).length, 1);
+  assert.equal((await git.branches(dir)).branches.some((b) => b.name === "wt/race"), false);
+});
+
+test("branch delete failure after physical success is reported, not thrown", async () => {
+  const dir = repo();
+  const created = await git.worktrees.create(dir, { branch: "wt/keep-branch" });
+  dirs.push(created.path);
+  const recorded = recordedGit({ failBranchDelete: true });
+  const result = await recorded.git.worktrees.remove(dir, { path: created.path, deleteBranch: true });
+  assert.deepEqual(result, { branchCleanupFailed: true });
+  assert.equal((await git.worktrees.list(dir)).some((w) => w.branch === "wt/keep-branch"), false);
+  assert.equal((await git.branches(dir)).branches.some((b) => b.name === "wt/keep-branch"), true);
+});
+
+test("branch already absent after -D failure is cleanup success", async () => {
+  const dir = repo();
+  const created = await git.worktrees.create(dir, { branch: "wt/gone-branch" });
+  dirs.push(created.path);
+  const recorded = recordedGit({ failBranchDelete: true, showRef: "absent" });
+  const result = await recorded.git.worktrees.remove(dir, { path: created.path, deleteBranch: true });
+  assert.deepEqual(result, {});
+  assert.equal((await git.worktrees.list(dir)).some((w) => w.branch === "wt/gone-branch"), false);
+});
+
+test("branch verification fatal is cleanup failure, not absence", async () => {
+  const dir = repo();
+  const created = await git.worktrees.create(dir, { branch: "wt/verify-fatal" });
+  dirs.push(created.path);
+  const recorded = recordedGit({ failBranchDelete: true, showRef: "fatal" });
+  const result = await recorded.git.worktrees.remove(dir, { path: created.path, deleteBranch: true });
+  assert.deepEqual(result, { branchCleanupFailed: true });
+});
+
+test("branch verification timeout is cleanup failure, not absence", async () => {
+  const dir = repo();
+  const created = await git.worktrees.create(dir, { branch: "wt/verify-hang" });
+  dirs.push(created.path);
+  const recorded = recordedGit({ failBranchDelete: true, showRef: "hang", timeoutMs: 200 });
+  const result = await recorded.git.worktrees.remove(dir, { path: created.path, deleteBranch: true });
+  assert.deepEqual(result, { branchCleanupFailed: true });
+});
+
+test("remove failure plus list verification failure does not report success", async () => {
+  const dir = repo();
+  const created = await git.worktrees.create(dir, { branch: "wt/list-fail" });
+  dirs.push(created.path);
+  const recorded = recordedGit({ failListAfterRemove: true });
+  await assert.rejects(
+    () => recorded.git.worktrees.remove(dir, { path: created.path }),
+    (err: Error & { code?: string }) => err.code === "git-failed",
+  );
+  assert.equal(existsSync(created.path), true);
+  assert.equal((await git.worktrees.list(dir)).length, 2);
+});
+
+test("already-absent worktree with owned branch still deletes that branch", async () => {
+  const dir = repo();
+  const created = await git.worktrees.create(dir, { branch: "wt/retry-branch" });
+  dirs.push(created.path);
+  await git.worktrees.remove(dir, { path: created.path });
+  assert.equal((await git.branches(dir)).branches.some((b) => b.name === "wt/retry-branch"), true);
+  const result = await git.worktrees.remove(dir, {
+    path: created.path, deleteBranch: true, ownedBranch: "wt/retry-branch",
+  });
+  assert.deepEqual(result, {});
+  assert.equal((await git.branches(dir)).branches.some((b) => b.name === "wt/retry-branch"), false);
+});
+
+test("already-absent worktree without identifiable branch reports branchCleanupFailed", async () => {
+  const dir = repo();
+  const created = await git.worktrees.create(dir, { branch: "wt/unknown" });
+  dirs.push(created.path);
+  await git.worktrees.remove(dir, { path: created.path });
+  const result = await git.worktrees.remove(dir, { path: created.path, deleteBranch: true });
+  assert.deepEqual(result, { branchCleanupFailed: true });
+});
+
+test("failed force removal keeps the worktree and its branch", async () => {
+  const dir = repo();
+  const created = await git.worktrees.create(dir, { branch: "wt/force-fail" });
+  dirs.push(created.path);
+  writeFileSync(join(created.path, "draft.txt"), "untracked\n");
+  const recorded = recordedGit({ failForce: true });
+  await assert.rejects(
+    () => recorded.git.worktrees.remove(dir, { path: created.path, deleteBranch: true, force: true }),
+    (err: Error & { code?: string }) => {
+      assert.equal(err.code, "git-failed");
+      return true;
+    },
+  );
+  assert.equal((await git.worktrees.list(dir)).length, 2);
+  assert.equal((await git.branches(dir)).branches.some((b) => b.name === "wt/force-fail"), true);
 });
 
 test("worktree honours an explicit path and an existing branch", async () => {

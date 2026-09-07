@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import { resolveHostBinary, type HostBinaryResolution } from "./hostBinary.ts";
 
-export { findHostBinary, resolveHostBinary, hostExecutableName } from "./hostBinary.ts";
+export { resolveHostBinary, hostExecutableName } from "./hostBinary.ts";
 export type { HostBinaryResolution, HostBinaryLookup } from "./hostBinary.ts";
 
 const RPC_TIMEOUT_MS = 15_000;

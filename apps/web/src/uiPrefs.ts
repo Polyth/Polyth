@@ -392,7 +392,6 @@ let editorPrefs = parseEditorPrefs(
     try { return localStorage.getItem(EDITOR_PREFS_KEY); } catch { return null; }
   })(),
 );
-const editorPrefListeners = new Set<() => void>();
 
 export function getEditorPrefs(): EditorPrefs {
   return editorPrefs;
@@ -401,7 +400,6 @@ export function getEditorPrefs(): EditorPrefs {
 export function setEditorPrefs(patch: Partial<EditorPrefs>): void {
   editorPrefs = { ...editorPrefs, ...patch };
   try { localStorage.setItem(EDITOR_PREFS_KEY, JSON.stringify(editorPrefs)); } catch { /* best-effort */ }
-  for (const listener of [...editorPrefListeners]) listener();
 }
 
 /** Persist the user's preview/edit choice for one previewable kind (the
@@ -410,12 +408,3 @@ export function setEditorPreviewDefault(kind: PreviewableKind, on: boolean): voi
   setEditorPrefs({ previewByKind: { ...editorPrefs.previewByKind, [kind]: on } });
 }
 
-export function useEditorPrefs(): EditorPrefs {
-  return useSyncExternalStore(
-    (listener) => {
-      editorPrefListeners.add(listener);
-      return () => { editorPrefListeners.delete(listener); };
-    },
-    getEditorPrefs,
-  );
-}

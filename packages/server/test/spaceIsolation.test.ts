@@ -440,6 +440,7 @@ test("a socket bound to one Space receives neither projections nor events from a
   } finally {
     homeClient.ws.close();
     workClient.ws.close();
+    gateway.close();
     server.close();
   }
 });

@@ -4,8 +4,9 @@
 // event log BEFORE the job flips to ready (invariant: log before display).
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdir, writeFile, rename } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+import { atomicWrite } from "@polyth/plugins";
 import type { GeneratedWalkthroughDto, GeneratedWalkthroughStage, JsonObject, SessionEvent, WalkthroughSource } from "@polyth/contracts";
 import {
   WALKTHROUGH_PROMPT_VERSION, buildWalkthroughPrompt, heuristicStages,
@@ -68,9 +69,7 @@ export function createWalkthroughJobService(deps: WalkthroughJobDeps): Walkthrou
     cacheWrite = cacheWrite.catch(() => {}).then(async () => {
       try {
         await mkdir(dirname(file), { recursive: true });
-        const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
-        await writeFile(tmp, snapshot, "utf8");
-        await rename(tmp, file);
+        await atomicWrite(file, snapshot);
       } catch { /* cache is best-effort */ }
     });
   };

@@ -71,6 +71,3 @@ export function resolveSessionStatus(
   }
   return { kind: "regular", glyph: "○", label: "Idle" };
 }
-
-/** Compatibility name for row call sites while status ownership moves here. */
-export const sessionRowStatus = resolveSessionStatus;

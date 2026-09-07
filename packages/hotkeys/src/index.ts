@@ -104,8 +104,7 @@ export function parseKeymap(raw: string | null): Record<HotkeyAction, string> {
   return map;
 }
 
-/** Repair legacy or hand-edited maps so each combo has one owner. When a
- * duplicate appears, the later action receives the first unused default. */
+/** Move colliding bindings onto unused defaults so every action stays reachable. */
 export function resolveKeymapConflicts(
   map: Record<HotkeyAction, string>,
 ): Record<HotkeyAction, string> {

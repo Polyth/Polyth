@@ -10,7 +10,6 @@
 // denial would turn any id parameter into an existence oracle for other
 // tenants.
 import type {
-  Project,
   ProjectService,
   SessionProjection,
   SessionService,
@@ -60,7 +59,7 @@ export function createSpaceGuard(source: SpaceOwnershipSource): SpaceGuard {
  * methods stay optional: a facade must never make an unsupported operation
  * look supported, so an absent underlying method stays absent here.
  */
-export function scopeSessions(
+function scopeSessions(
   base: SessionService,
   ctx: SpaceContext,
   guard: SpaceGuard,
@@ -201,8 +200,3 @@ export function createSpaceServices(deps: {
  *  resolver, not the services, so it MUST pass a SpaceContext to get anything
  *  at all. Route handlers call `spaces(rc.space)`. */
 export type SpaceServicesFor = (ctx: SpaceContext) => SpaceServices;
-
-/** Projects visible in one Space — used by search and any cross-resource
- *  read that needs the tenant's project inventory. */
-export const projectsOf = (services: SpaceServices): Promise<Project[]> =>
-  services.projects.list();

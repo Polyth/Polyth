@@ -8,7 +8,8 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
-import { constants } from "node:fs";
+import { constants, existsSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { inflateSync } from "node:zlib";
 import type { Browser, BrowserContext, Page } from "playwright-core";
@@ -28,6 +29,22 @@ import {
 const BASE = "http://127.0.0.1:4467";
 const ARTIFACTS = process.env.POLYTH_LIVE_ARTIFACTS ?? "/tmp/polyth-workflow-artifacts";
 const BASELINES = join(REPO_ROOT, "apps/web/test/baselines");
+/** Playwright records with its own ffmpeg, not the system binary. */
+const CAN_RECORD_VIDEO = (() => {
+  const root = join(homedir(), ".cache/ms-playwright");
+  try {
+    for (const name of readdirSync(root)) {
+      if (!name.startsWith("ffmpeg-")) continue;
+      const dir = join(root, name);
+      if (["ffmpeg-linux", "ffmpeg-mac", "ffmpeg-win64.exe"].some((file) => existsSync(join(dir, file)))) {
+        return true;
+      }
+    }
+  } catch {
+    // Playwright cache missing; geometry assertions do not need video.
+  }
+  return false;
+})();
 const PERSONA = JSON.stringify({ persona: "engineer", plugins: [] });
 const MANUAL_PARENT = "workflow-manual-parent";
 const MANUAL_CHILD = "workflow-manual-child";
@@ -424,7 +441,7 @@ async function openApp(options: OpenOptions): Promise<Page> {
     reducedMotion: options.reducedMotion ?? "no-preference",
     colorScheme: options.colorScheme ?? "dark",
     serviceWorkers: "block",
-    ...(options.record ? { recordVideo: { dir: ARTIFACTS, size: { width: options.width, height: options.height } } } : {}),
+    ...(options.record && CAN_RECORD_VIDEO ? { recordVideo: { dir: ARTIFACTS, size: { width: options.width, height: options.height } } } : {}),
   });
   contexts.push(context);
   await context.addInitScript(({

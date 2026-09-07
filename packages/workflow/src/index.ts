@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { atomicWriteSync } from "@polyth/plugins";
 import type {
   JsonObject,
   WorkflowDto,
@@ -166,9 +167,7 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
 
   const save = (): void => {
     mkdirSync(dirname(deps.file), { recursive: true });
-    const temporary = `${deps.file}.tmp-${process.pid}`;
-    writeFileSync(temporary, `${JSON.stringify({ v: 1, workflows }, null, 2)}\n`, "utf8");
-    renameSync(temporary, deps.file);
+    atomicWriteSync(deps.file, `${JSON.stringify({ v: 1, workflows }, null, 2)}\n`);
   };
 
   const mustGet = (id: string): WorkflowDto => {

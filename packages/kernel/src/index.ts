@@ -78,10 +78,7 @@ class ScopeContext implements KernelContext {
     const list = this.providers.get(id);
     if (!list || list.length === 0) return undefined;
     let best = list[0]!;
-    for (let i = 1; i < list.length; i++) {
-      const e = list[i]!;
-      if (e.priority > best.priority || e.priority === best.priority) best = e;
-    }
+    for (const e of list) if (e.priority >= best.priority) best = e;
     return best;
   }
 

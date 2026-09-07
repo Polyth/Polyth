@@ -20,7 +20,7 @@ import {
 import {
   POLYTH_OPENCODE_BIN_ENV,
   resolveOpenCodeBinary,
-} from "../src/runtimeStorage.ts";
+} from "../src/index.ts";
 
 const HERMETIC = { loginShellProbe: false } as const;
 

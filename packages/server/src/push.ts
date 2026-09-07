@@ -7,8 +7,9 @@ import {
   hkdfSync, randomBytes, sign as cryptoSign,
   type JsonWebKey as CryptoJwk,
 } from "node:crypto";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { atomicWriteSync } from "@polyth/plugins";
 import type { JsonObject, NotificationKind, SessionProjection } from "@polyth/contracts";
 
 // ---- base64url helpers ---------------------------------------------------------
@@ -110,7 +111,7 @@ const SECRET_PATTERNS: RegExp[] = [
   /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}/g,
 ];
 
-export function redactPushText(text: string): string {
+function redactPushText(text: string): string {
   let out = text;
   for (const p of SECRET_PATTERNS) out = out.replace(p, "[redacted]");
   return out;
@@ -274,7 +275,7 @@ export function createPushService(opts: {
   const save = (): void => {
     if (!state) return;
     mkdirSync(dirname(opts.file), { recursive: true });
-    writeFileSync(opts.file, `${JSON.stringify(state, null, 2)}\n`);
+    atomicWriteSync(opts.file, `${JSON.stringify(state, null, 2)}\n`, 0o600);
   };
 
   // VAPID keys are minted once and reused forever — rotating them would orphan

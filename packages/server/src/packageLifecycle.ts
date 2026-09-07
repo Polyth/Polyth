@@ -4,12 +4,14 @@ import type { RouteRegistry } from "./routeRegistry.ts";
 export interface PackageLifecycleHooks {
   onEnable?: () => void | Promise<void>;
   onDisable?: () => void | Promise<void>;
+  stopIngress?: () => void | Promise<void>;
 }
 
 export interface PackageLifecycle {
   register(id: string, hooks: PackageLifecycleHooks): void;
   enable(id: string): Promise<void>;
   disable(id: string): Promise<void>;
+  stopIngress(): Promise<void>;
   startEnabled(registry: PackageRegistry): Promise<void>;
 }
 
@@ -57,6 +59,17 @@ export function createPackageLifecycle(routeRegistry: RouteRegistry): PackageLif
     },
     enable,
     disable,
+    async stopIngress() {
+      for (const [id, hooks] of hooksById) {
+        try {
+          await hooks.stopIngress?.();
+        } catch (error) {
+          // Isolate a broken detach so remaining owners still stop. A silent
+          // swallow leaves HTTP drain waiting the full timeout with no cause.
+          console.warn(`[polyth] package "${id}" failed to stop ingress`, error);
+        }
+      }
+    },
     async startEnabled(registry) {
       for (const descriptor of registry.list()) {
         if (!registry.isEnabled(descriptor.id)) continue;

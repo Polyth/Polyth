@@ -207,6 +207,3 @@ export default function Menu({
     </>
   );
 }
-
-/** Anchor ref type helper for callers that need the trigger element. */
-export type MenuAnchor = RefObject<HTMLButtonElement | null>;

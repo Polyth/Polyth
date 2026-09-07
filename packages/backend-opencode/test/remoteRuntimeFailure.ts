@@ -6,10 +6,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RuntimeEndpoint } from "@polyth/contracts";
-import {
-  createOwnedSshEndpointLease,
-  prepareRemoteOpenCodeRuntime,
-} from "../src/index.ts";
+import { createOwnedSshEndpointLease, prepareRemoteOpenCodeRuntime } from "../src/index.ts";
 import type { PreparedRemoteOpenCodeRuntime } from "../src/remoteStorage.ts";
 import {
   createFakeRemoteHost,

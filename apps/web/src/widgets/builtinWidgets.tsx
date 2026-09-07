@@ -2,7 +2,6 @@ import { type ReactNode } from "react";
 import Composer from "../components/Composer.tsx";
 import QuestionCards from "../components/QuestionCards.tsx";
 import Timeline from "../components/Timeline.tsx";
-import SlotHost from "../components/slots/SlotHost.ts";
 import { useActiveModel, useStore } from "../store.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
 import { getLocale, tr } from "../i18n/index.ts";
@@ -15,12 +14,9 @@ function ChatWidget() {
   const model = useActiveModel();
   if (!session) return <div className="widget-chat-empty"><p>{tr("widgets.builtinwidgets.startASessionInThisProject")}</p><Composer variant="widget" /></div>;
   const questions = model.questions.filter((item) => item.status === "pending");
-  const permissions = model.permissions.filter((item) => item.status === "pending");
-  const secrets = model.secrets.filter((item) => item.status === "pending");
   return <div className="widget-chat">
     <Timeline model={model} />
     {questions.length > 0 && <QuestionCards questions={questions} />}
-    <SlotHost slot="session.timeline.after" context={{ permissions, secrets, sessionId: session.id, projectId: session.projectId }} customizable />
     {session.status === "archived" ? <div className="archived-guard">{tr("widgets.builtinwidgets.thisSessionIsArchivedAndReadOnly")}</div> : <Composer variant="widget" />}
   </div>;
 }

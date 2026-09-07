@@ -1,13 +1,7 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { homedir as systemHomedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { atomicWriteSync } from "@polyth/plugins";
 
 export type OpenCodeAuthEntry = string | Record<string, unknown>;
 export type OpenCodeAuth = Record<string, OpenCodeAuthEntry>;
@@ -55,15 +49,8 @@ const parseAuth = (text: string): OpenCodeAuth => {
 };
 
 const atomicWriteJson = (path: string, value: unknown): void => {
-  const dir = dirname(path);
-  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  try {
-    writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-    renameSync(temporary, path);
-  } finally {
-    try { unlinkSync(temporary); } catch { /* already renamed */ }
-  }
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  atomicWriteSync(path, `${JSON.stringify(value, null, 2)}\n`, 0o600);
 };
 
 export const resolveQuotaRuntime = (opts: QuotaDiscoveryOptions = {}): QuotaRuntime => {

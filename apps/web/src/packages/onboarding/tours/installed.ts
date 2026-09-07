@@ -28,6 +28,8 @@ export const MODELS_TOUR: PackageOnboardingTour = {
   ],
 };
 
+// Catalog-only: production does not advertise an `agents` package, so this
+// tour never becomes a live Roles settings entry by itself.
 export const AGENTS_TOUR: PackageOnboardingTour = {
   packageId: "agents",
   title: tr("packages.onboarding.tours.installed.roles"),

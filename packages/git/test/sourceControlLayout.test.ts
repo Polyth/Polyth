@@ -35,6 +35,7 @@ test("320px source-control layout keeps repository metadata clear of tabs", { sk
   assert.ok(page);
   await page.setContent(`
     <style>${css}</style>
+    <div class="module-view-content module-view-content--page" style="width: 320px">
     <main class="view-page github-page">
       <section class="gh-repo-card">
         <span class="gh-repo-icon">GH</span>
@@ -51,6 +52,7 @@ test("320px source-control layout keeps repository metadata clear of tabs", { sk
         <nav class="source-tabs gh-tabs"><button>Issues <span>12</span></button><button>Pull requests <span>8</span></button></nav>
       </div>
     </main>
+    </div>
   `);
   const geometry = await page.evaluate(() => {
     const card = document.querySelector(".gh-repo-card")!.getBoundingClientRect();
@@ -78,6 +80,7 @@ test("320px source controls expose 44px tabs, copy actions, and chips", { skip: 
   await page.setViewportSize({ width: 320, height: 720 });
   await page.setContent(`
     <style>${css}</style>
+    <div class="module-view-content module-view-content--page" style="width: 320px">
     <main class="view-page git-page">
       <nav class="source-tabs">
         <button>Changes 12</button><button id="log-tab">Log</button><button>Branches 4</button><button>Stashes 2</button>
@@ -86,6 +89,7 @@ test("320px source controls expose 44px tabs, copy actions, and chips", { skip: 
       <div class="gh-filter-chips"><button class="ui-btn ui-btn--ghost ui-btn--sm" id="all-chip">All</button></div>
       <p>Open <button class="file-ref" id="file-ref">a.ts</button> now.</p>
     </main>
+    </div>
   `);
   const targets = await page.evaluate(() => {
     const rect = (selector: string) => {
@@ -155,6 +159,7 @@ test("narrow source-control shell keeps every change group above the commit comp
         <div class="app-shell">
           <aside class="rail rail-workspace rail-fullscreen">
             <div class="rail-head"><span class="rail-title">Source control</span></div>
+            <div class="module-view-content module-view-content--workspace">
             <div class="rail-body">
               <main class="view-page git-page">
                 <header class="source-control-head">
@@ -192,6 +197,7 @@ test("narrow source-control shell keeps every change group above the commit comp
                   </section>
                 </div>
               </main>
+            </div>
             </div>
           </aside>
         </div>

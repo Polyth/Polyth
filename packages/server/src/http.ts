@@ -44,6 +44,8 @@ import {
   CORE_REMOTE_ACCESS,
   type OwnedRemotePolicy,
 } from "./remotePolicy.ts";
+import { logHttp500 } from "./httpLog.ts";
+import type { HttpAdmission } from "./httpAdmission.ts";
 
 const MIME: Record<string, string> = {
   ".html": "text/html", ".js": "text/javascript", ".css": "text/css",
@@ -118,7 +120,7 @@ const sendStaticFile = async (
       ? "public, max-age=31536000, immutable"
       : "no-cache",
   };
-  // ponytail: in-process gzip, no reverse proxy assumed.
+  // In-process gzip: no reverse proxy is assumed.
   if (
     data.length > 1024
     && COMPRESSIBLE.test(contentType)
@@ -255,6 +257,9 @@ export interface HttpDeps {
   remotePolicies?: () => readonly OwnedRemotePolicy[];
   /** Public listener id recorded on RequestIngress. */
   listenerId?: string;
+  /** Optional request drain/fence. When set, new requests stop at shutdown
+   *  and late handlers cannot keep using live services after dispose. */
+  admission?: HttpAdmission;
 }
 
 // Public even when a password is set: the SPA lock screen must be able to
@@ -299,7 +304,7 @@ const stripUntrustedHeaders = (req: IncomingMessage, ingress: RequestIngress): v
 export const TUNNEL_INTERNAL_TOKEN_HEADER = "x-polyth-internal-token";
 export const TUNNEL_INTERNAL_CONNECTION_HEADER = "x-polyth-internal-connection";
 
-export function internalTokenEquals(provided: string | undefined, expected: string): boolean {
+function internalTokenEquals(provided: string | undefined, expected: string): boolean {
   if (!provided || !expected) return false;
   const left = Buffer.from(provided);
   const right = Buffer.from(expected);
@@ -426,19 +431,35 @@ export function createTunnelIngress(opts: {
 }
 
 export function createHttpHandler(deps: HttpDeps): HttpHandler {
-  // Aggregate across the CURRENT SPACE's live runtimes (per-project pools may
-  // differ). Passing the scoped project service is what keeps a model/agent
-  // catalog from spanning tenants.
-  const aggregate = <T>(
-    projects: ProjectService,
-    fetch: (rt: AgentRuntime) => Promise<T[]>,
-  ): Promise<T[]> =>
-    aggregateRuntimes({ projects, runtimes: deps.runtimes }, fetch)
-      .then((result) => result.items);
-  const models = (projects: ProjectService) =>
-    deps.catalog?.models() ?? aggregate<ModelDescriptor>(projects, (runtime) => runtime.models());
-
   return async (req, res, ingress) => {
+    if (deps.admission && !deps.admission.enter()) {
+      if (!res.headersSent && !res.writableEnded) {
+        writeJson(req, res, 503, { error: "unavailable", message: "server shutting down" });
+      }
+      return;
+    }
+    try {
+      await dispatchHttp(deps, req, res, ingress);
+    } finally {
+      deps.admission?.leave();
+    }
+  };
+}
+
+async function dispatchHttp(
+  deps: HttpDeps,
+  req: IncomingMessage,
+  res: ServerResponse,
+  ingress: RequestIngress,
+): Promise<void> {
+    const aggregate = <T>(
+      projects: ProjectService,
+      fetch: (rt: AgentRuntime) => Promise<T[]>,
+    ): Promise<T[]> =>
+      aggregateRuntimes({ projects, runtimes: deps.runtimes }, fetch)
+        .then((result) => result.items);
+    const models = (projects: ProjectService) =>
+      deps.catalog?.models() ?? aggregate<ModelDescriptor>(projects, (runtime) => runtime.models());
     const json = (target: ServerResponse, code: number, body: unknown): void => {
       writeJson(req, target, code, body);
     };
@@ -476,6 +497,7 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
       const rememberedSpace = parseSpaceCookie(req.headers.cookie, deps.spaces.cookieName);
       let scoped: SpaceServices | null = null;
       const space = (): SpaceServices => {
+        deps.admission?.assertLive();
         if (!scoped) {
           const ctx = principal.kind === "internal-service"
             ? deps.spaces.resolveInternal(explicitSpace)
@@ -900,7 +922,7 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
       }
       await sendStaticFile(req, res, filePath);
     } catch (err) {
-      const e = err as Error & { code?: string; cause?: unknown; field?: unknown; status?: number };
+      const e = err as Error & { code?: string; cause?: unknown; field?: unknown; status?: number; changes?: unknown };
       if (e instanceof AuthorizationError || e.code === "unauthorized" || e.code === "forbidden") {
         return json(res, e.status === 401 || e.code === "unauthorized" ? 401 : 403, {
           error: e.code ?? "forbidden",
@@ -917,7 +939,7 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
         : e.code === "invalid-json" || e.code === "invalid-path" || e.code === "invalid-input" ? 400
         // history-mismatch keeps its own code in the body so the client can
         // explain a failed exact-history branch, but shares 409 semantics.
-        : e.code === "conflict" || e.code === "history-mismatch" || RECOVERY_CONFLICT_CODES.has(e.code ?? "") ? 409
+        : e.code === "conflict" || e.code === "history-mismatch" || e.code === "worktree-dirty" || RECOVERY_CONFLICT_CODES.has(e.code ?? "") ? 409
         : e.code === "payload-too-large" ? 413
         // A failed git subprocess (rejected push, no upstream, auth prompt
         // disabled, diverged fetch) is the user's to fix, not a server bug.
@@ -935,13 +957,16 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
         : e.code === "invalid-json" ? e.message
         : status === 500 ? "An internal server error occurred."
         : e.message;
+      // The client only sees the generic message; the operator needs a
+      // redacted cause — never raw URLs, query tokens, or secret-shaped text.
+      if (status === 500) logHttp500(req.method ?? "GET", req.url, err);
       json(res, status, {
         error: e.code ?? "internal",
         message,
         ...(e.code === "invalid-input" && typeof e.field === "string" ? { field: e.field } : {}),
+        ...(e.code === "worktree-dirty" && typeof e.changes === "number" ? { changes: e.changes } : {}),
       });
     }
-  };
 }
 
 export function createPublicHttpServer(handler: HttpHandler, listenerId = "public"): Server {

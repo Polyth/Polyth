@@ -1828,6 +1828,7 @@ export const it: AppMessages = {
   "sidebar.sessionlist.archiveValueShiftHoverQuickAction": "Archivio {value} (azione rapida con Maiusc+passa il mouse sopra)",
   "sidebar.sessionlist.archiveValueTheAgentIsStillRunning": "Archivio \" {label} \"? L'agente è ancora in esecuzione o in attesa di una tua risposta.",
   "sidebar.sessionlist.collapse": "Riduci",
+  "sidebar.sessionlist.couldnTCleanUpSessionsAfterRemovingTheWorktree": "Impossibile pulire le sessioni dopo la rimozione del worktree",
   "sidebar.sessionlist.couldnTRemoveTheWorktree": "Impossibile rimuovere il worktree",
   "sidebar.sessionlist.couldnTUpdateSessionLabels": "Impossibile aggiornare le etichette della sessione",
   "sidebar.sessionlist.deletedValue": "Etichetta eliminata {label}",

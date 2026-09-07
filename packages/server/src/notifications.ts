@@ -6,7 +6,7 @@
 // increasing timestamps, read state, a 200-row FIFO cap, and atomic writes.
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
-import { atomicWriteSync } from "./atomicWrite.ts";
+import { atomicWriteSync } from "@polyth/plugins";
 import { dirname } from "node:path";
 import type { NotificationKind, NotificationRecord } from "@polyth/contracts";
 

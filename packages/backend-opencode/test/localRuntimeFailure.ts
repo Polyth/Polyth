@@ -22,9 +22,9 @@ import type { RuntimeEndpoint } from "@polyth/contracts";
 import {
   createOwnedLocalEndpointLease,
   parseOpenCodeRuntimeMetadata,
+  type OwnedLocalEndpointOptions,
   type OpenCodeEngineIdentity,
   type OpenCodeRuntimeMetadata,
-  type OwnedLocalEndpointOptions,
 } from "../src/index.ts";
 
 export const TEST_LOCAL_DIGEST = "a".repeat(64);

@@ -106,6 +106,10 @@ export interface FileService {
 
 const posix = (p: string): string => p.split(path.sep).join("/");
 
+/** Cheap revision token: changes whenever content plausibly changed. */
+const revisionOf = (st: { mtimeMs: number; size: number }): string =>
+  `${st.mtimeMs.toString(36)}-${st.size.toString(36)}`;
+
 export function createFileService(): FileService {
   return {
     async tree(root, opts = {}) {
@@ -142,7 +146,7 @@ export function createFileService(): FileService {
       const fh = await open(abs, "r");
       try {
         const st = await fh.stat();
-        const revision = `${st.mtimeMs.toString(36)}-${st.size.toString(36)}`;
+        const revision = revisionOf(st);
         const scanLen = Math.min(BINARY_SCAN, st.size);
         if (scanLen > 0) {
           const head = Buffer.alloc(scanLen);
@@ -170,8 +174,7 @@ export function createFileService(): FileService {
       const out: FileStatResult = { path: posix(rel), kind, size: st.size };
       if (kind === "file") {
         out.mime = rawMimeOf(rel);
-        // Cheap revision token: changes whenever content plausibly changed.
-        out.revision = `${st.mtimeMs.toString(36)}-${st.size.toString(36)}`;
+        out.revision = revisionOf(st);
       }
       return out;
     },
@@ -192,7 +195,7 @@ export function createFileService(): FileService {
         existing = await lstat(abs);
       } catch { /* new file */ }
       if (existing?.isFile()) {
-        const currentRev = `${existing.mtimeMs.toString(36)}-${existing.size.toString(36)}`;
+        const currentRev = revisionOf(existing);
         if (opts.baseRevision !== undefined && opts.baseRevision !== currentRev) {
           throw Object.assign(new Error(`File changed on disk: ${rel}`), { code: "conflict", revision: currentRev });
         }
@@ -216,7 +219,7 @@ export function createFileService(): FileService {
       // Refuse if the written file (or a parent symlink) landed outside root.
       await resolveInside(root, rel);
       const st = await lstat(abs);
-      return { revision: `${st.mtimeMs.toString(36)}-${st.size.toString(36)}` };
+      return { revision: revisionOf(st) };
     },
 
     async writeBytes(root, rel, data) {

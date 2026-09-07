@@ -1828,6 +1828,7 @@ export const de: AppMessages = {
   "sidebar.sessionlist.archiveValueShiftHoverQuickAction": "Archivieren {value} (Schnellaktion mit Shift+Hover)",
   "sidebar.sessionlist.archiveValueTheAgentIsStillRunning": "Archiv \" {label} \"? Der Agent läuft noch oder wartet auf Ihre Antwort.",
   "sidebar.sessionlist.collapse": "Ausblenden",
+  "sidebar.sessionlist.couldnTCleanUpSessionsAfterRemovingTheWorktree": "Sitzungen konnten nach dem Entfernen des Worktrees nicht aufgeräumt werden",
   "sidebar.sessionlist.couldnTRemoveTheWorktree": "Worktree konnte nicht entfernt werden",
   "sidebar.sessionlist.couldnTUpdateSessionLabels": "Sitzungsbezeichnungen konnten nicht aktualisiert werden.",
   "sidebar.sessionlist.deletedValue": "Gelöscht {label}",

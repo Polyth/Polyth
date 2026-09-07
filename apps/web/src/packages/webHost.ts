@@ -22,7 +22,7 @@ import {
   subscribeStore,
 } from "../store.ts";
 import { registerSlot } from "../slots.ts";
-import { registerCapability, type CapabilityDescriptor } from "../capabilities.ts";
+import { notifyCapabilities, registerCapability, type CapabilityDescriptor } from "../capabilities.ts";
 import { registerSurface, type RailSurface } from "../surfaces.ts";
 import { registerSettingsItems } from "../settings/registry.ts";
 import { installSettingsPage } from "./settingsPage.ts";
@@ -76,6 +76,7 @@ export const webPackageHost: WebPackageHost = {
   capabilities: {
     register: (definition: CapabilityDefinition) =>
       registerCapability(definition as CapabilityDescriptor),
+    notify: notifyCapabilities,
   },
   settings: {
     registerPage: (definition: SettingsPageDefinition) =>

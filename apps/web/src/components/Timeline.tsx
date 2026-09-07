@@ -1557,6 +1557,31 @@ function blankAssistant(m: RenderMessage): boolean {
   return m.kind === "assistant" && m.finalized && m.text.trim() === "" && m.reasoning.trim() === "";
 }
 
+export function timelineAfterSlotContext(input: {
+  sessionId: string | null;
+  messageCount: number;
+  promptCount: number;
+  turnStatus: string | null;
+  permissions: ReadonlyArray<{ status: string }>;
+  secrets: ReadonlyArray<{ status: string }>;
+}): {
+  sessionId: string | null;
+  messageCount: number;
+  promptCount: number;
+  turnStatus: string | null;
+  permissions: Array<{ status: string }>;
+  secrets: Array<{ status: string }>;
+} {
+  return {
+    sessionId: input.sessionId,
+    messageCount: input.messageCount,
+    promptCount: input.promptCount,
+    turnStatus: input.turnStatus,
+    permissions: input.permissions.filter((permission) => permission.status === "pending"),
+    secrets: input.secrets.filter((secret) => secret.status === "pending"),
+  };
+}
+
 export default function Timeline({
   model,
   latestRevealTarget,
@@ -2092,12 +2117,16 @@ export default function Timeline({
 
   // Bounded, already-reduced summary for the timeline before/after hosts —
   // contributions never receive live events or a mutable model reference.
-  const slotSummary = {
+  // Pending approvals/secrets belong here: permissions and secure-safe render
+  // in `session.timeline.after` from this context, not from a live store.
+  const slotSummary = timelineAfterSlotContext({
     sessionId,
     messageCount: model.messages.length,
     promptCount: prompts.length,
     turnStatus: turn?.status ?? null,
-  };
+    permissions: model.permissions,
+    secrets: model.secrets,
+  });
 
   // One timeline, one scroll root (§2.1): the shell stacks the reserved
   // utility region, the single `.timeline` scrollport, and the reserved

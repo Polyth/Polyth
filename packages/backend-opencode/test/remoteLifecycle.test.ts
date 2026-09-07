@@ -8,9 +8,7 @@ import type {
   RemoteHost,
   RemoteProcessHandle,
 } from "@polyth/contracts";
-import { createOwnedSshEndpointLease } from "../src/endpoint.ts";
-import { createRemoteOpenCodeRuntime } from "../src/remote.ts";
-import { prepareRemoteOpenCodeRuntime } from "../src/remoteStorage.ts";
+import { createOwnedSshEndpointLease, createRemoteOpenCodeRuntime, prepareRemoteOpenCodeRuntime } from "../src/index.ts";
 import {
   applyRemoteStorageCommand,
   createFakeRemoteStorage,

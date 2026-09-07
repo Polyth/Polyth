@@ -8,7 +8,7 @@
 // names exactly the Polyth-managed entries, so unsupported entries and unknown
 // fields in the backend config always survive.
 import { mkdirSync, readFileSync } from "node:fs";
-import { atomicWriteSync } from "./atomicWrite.ts";
+import { atomicWriteSync } from "@polyth/plugins";
 import { access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
@@ -187,7 +187,7 @@ export function createMcpConfigService(opts: { file: string; applier?: McpApplie
 
   const persist = () => {
     atomicWriteSync(opts.file, JSON.stringify(servers, null, 2));
-    atomicWriteSync(secretsFile, JSON.stringify(secrets));
+    atomicWriteSync(secretsFile, JSON.stringify(secrets), 0o600);
   };
 
   const toDto = (s: StoredServer): McpServerDto => ({

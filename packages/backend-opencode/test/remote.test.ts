@@ -5,15 +5,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
-  acquireRemoteRuntimeLock,
   createRemoteOpenCodeRuntime,
-  DEFAULT_REMOTE_RUNTIME_ROOT_EXPR,
   installRemoteOpenCode,
-  OPENCODE_UPDATE_DISABLE_ENV,
-  ownedSshRuntimeIdentityKey,
-  parseOpenCodeRuntimeMetadata,
   probeRemoteOpenCode,
+  ownedSshRuntimeIdentityKey,
+  acquireRemoteRuntimeLock,
+  DEFAULT_REMOTE_RUNTIME_ROOT_EXPR,
   REMOTE_STORAGE_MARKERS,
+  OPENCODE_UPDATE_DISABLE_ENV,
+  parseOpenCodeRuntimeMetadata,
 } from "../src/index.ts";
 import {
   createFakeRemoteHost,

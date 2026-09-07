@@ -5,7 +5,7 @@
 // monotonic revision: clients drop the WS echo of their own change and ignore
 // any broadcast whose revision they already hold.
 import { mkdirSync, readFileSync } from "node:fs";
-import { atomicWriteSync } from "./atomicWrite.ts";
+import { atomicWriteSync } from "@polyth/plugins";
 import { dirname } from "node:path";
 import type { ClientSettingsDto } from "@polyth/contracts";
 

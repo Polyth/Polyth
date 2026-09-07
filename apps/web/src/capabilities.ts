@@ -126,6 +126,13 @@ export function registerCapability(descriptor: CapabilityDescriptor): () => void
   };
 }
 
+/** Re-render navigation when a registered capability's `available()` result
+ *  changes. The registry only bumps on register/dispose; closures that read
+ *  live state need this so Header/rail pick up the new answer. */
+export function notifyCapabilities(): void {
+  bump();
+}
+
 export function listCapabilities(): CapabilityDescriptor[] {
   return [...registry.values()];
 }

@@ -8,7 +8,7 @@ import type { SessionAssist } from "@polyth/contracts";
 import { latestCompletedExchange } from "@polyth/session/next-action";
 import type { SessionEvent } from "@polyth/contracts";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { atomicWriteSync } from "./atomicWrite.ts";
+import { atomicWriteSync } from "@polyth/plugins";
 import { dirname } from "node:path";
 
 export interface AssistSettings {
@@ -17,7 +17,7 @@ export interface AssistSettings {
   idleSeconds: number;
 }
 
-export const DEFAULT_ASSIST_SETTINGS: AssistSettings = { enabled: false, idleSeconds: 120 };
+const DEFAULT_ASSIST_SETTINGS: AssistSettings = { enabled: false, idleSeconds: 120 };
 const MIN_IDLE_SECONDS = 10;
 const MAX_IDLE_SECONDS = 3600;
 export const RECAP_MAX_WORDS = 20;
@@ -135,8 +135,8 @@ export function parseNoteReply(raw: string): { title: string; body: string } {
 
 // ------------------------------------------------------------- next action
 
-export const NEXT_ACTION_CONTEXT_MAX_CHARS = 12_000;
-export const NEXT_ACTION_OUTPUT_MAX_CHARS = 800;
+const NEXT_ACTION_CONTEXT_MAX_CHARS = 12_000;
+const NEXT_ACTION_OUTPUT_MAX_CHARS = 800;
 export const PROMPT_IMPROVEMENT_OUTPUT_MAX_CHARS = 4_000;
 
 const capChars = (text: string, max: number): string =>

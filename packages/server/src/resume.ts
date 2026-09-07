@@ -16,7 +16,7 @@ export const RESUME_FALLBACK_BACKOFF_SEC = [30, 60, 120, 300, 600, 900] as const
 /** Floor for a provider-advised wait so a "0s"/"1s" hint can't spin. */
 export const RESUME_MIN_WAIT_SEC = 5;
 /** setTimeout's max delay; longer waits re-arm on the way down. */
-export const MAX_TIMER_MS = 2_147_483_647;
+const MAX_TIMER_MS = 2_147_483_647;
 
 /** Command Code's reserved provider-window notice, emitted as reasoning rather
  * than a terminal `session.error`. This runs server-side too so a restart while

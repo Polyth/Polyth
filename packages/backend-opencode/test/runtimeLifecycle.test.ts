@@ -18,25 +18,19 @@ import {
   attachRuntimeLifecycle,
   createOpenCodeRuntimeLifecycle,
   createOpenCodeRuntimeFacade,
-} from "../src/index.ts";
-import {
   createBorrowedExternalEndpointLease,
   createBorrowedServiceEndpointLease,
   createOwnedLocalEndpointLease,
   createOwnedSshEndpointLease,
-  type OwnedLocalEndpointOptions,
-  type ProcessIdentity,
-} from "../src/endpoint.ts";
-import {
   createRuntimeLifecycle,
   DEFAULT_RUNTIME_READY_PATHS,
   waitForRuntimeReady,
-} from "../src/runtime.ts";
-import {
   OPENCODE_UPDATE_DISABLE_ENV,
   POLYTH_OPENCODE_BIN_ENV,
+  type OwnedLocalEndpointOptions,
+  type ProcessIdentity,
   type OpenCodeEngineIdentity,
-} from "../src/runtimeStorage.ts";
+} from "../src/index.ts";
 import { createFakeOpenCode } from "./fakeOpenCode.ts";
 
 interface FakeChild extends ChildProcess {

@@ -51,8 +51,12 @@ test("API transport preserves structured errors and unauthorized callback", asyn
   assert.equal(unauthorized, 1);
 });
 
-test("entry and friendly-error helpers keep package code host-agnostic", () => {
-  const entry = defineWebPackage(() => () => () => undefined);
-  assert.equal(typeof entry, "function");
+test("defineWebPackage returns the entry unchanged", () => {
+  const entry = () => () => () => undefined;
+  assert.equal(defineWebPackage(entry), entry);
+});
+
+test("friendlyError is a public host-agnostic helper", () => {
   assert.equal(friendlyError("Could not load", new Error("offline")), "Could not load: offline");
+  assert.equal(friendlyError("Could not load", "  "), "Could not load");
 });

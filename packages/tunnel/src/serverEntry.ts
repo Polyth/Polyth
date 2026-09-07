@@ -619,5 +619,10 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       linkHost = null;
       connections.clear();
     },
+    stopIngress() {
+      eventsEnabled = false;
+      for (const stop of detachers.values()) stop();
+      detachers.clear();
+    },
   };
 }

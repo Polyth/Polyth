@@ -8,7 +8,6 @@ import {
   type HttpMethod,
   type RemoteAccessPolicy,
   type RemoteHttpRule,
-  type RemoteWebSocketRule,
 } from "@polyth/contracts";
 import { AuthorizationError } from "./auth.ts";
 
@@ -263,30 +262,6 @@ export function findRemoteHttpRule(
   return selectHttpMatch(httpMatches(policies, method, path));
 }
 
-export function findRemoteWebSocketRule(
-  policies: readonly OwnedRemotePolicy[],
-  path: string,
-): { owner: string; rule: RemoteWebSocketRule } | null {
-  const matches: Array<{ owner: string; rule: RemoteWebSocketRule }> = [];
-  for (const owned of policies) {
-    for (const rule of owned.policy.websocket ?? []) {
-      if (rule.path === "/ws" ? path === "/ws" : matchRemotePath(rule.path, path)) {
-        matches.push({ owner: owned.owner, rule });
-      }
-    }
-  }
-  if (matches.length === 0) return null;
-  const first = matches[0]!;
-  if (matches.some((match) => match.owner !== first.owner || match.rule.capability !== first.rule.capability)) {
-    throw new AuthorizationError("forbidden", "not allowed");
-  }
-  return [...matches].sort((left, right) => {
-    const spec = patternSpecificity(right.rule.path) - patternSpecificity(left.rule.path);
-    if (spec !== 0) return spec;
-    return left.rule.path.localeCompare(right.rule.path) || left.owner.localeCompare(right.owner);
-  })[0] ?? null;
-}
-
 export function assertPairedHttpAllowed(
   principal: AuthPrincipal,
   method: string,
@@ -308,30 +283,6 @@ export function assertPairedHttpAllowed(
     throw Object.assign(new Error("request body too large"), { code: "payload-too-large" });
   }
   return match;
-}
-
-export function assertPairedWebSocketAllowed(
-  principal: AuthPrincipal,
-  path: string,
-  policies: readonly OwnedRemotePolicy[],
-): { owner: string; rule: RemoteWebSocketRule } {
-  if (principal.kind !== "paired-device") {
-    throw new AuthorizationError("forbidden", "not allowed");
-  }
-  const match = findRemoteWebSocketRule(policies, path);
-  if (!match || !principal.grants.includes(match.rule.capability)) {
-    throw new AuthorizationError("forbidden", "not allowed");
-  }
-  return match;
-}
-
-export function capabilityIdsFromPolicies(policies: readonly OwnedRemotePolicy[]): string[] {
-  const ids = new Set<string>();
-  for (const owned of policies) {
-    for (const rule of owned.policy.http) ids.add(rule.capability);
-    for (const rule of owned.policy.websocket ?? []) ids.add(rule.capability);
-  }
-  return [...ids].sort();
 }
 
 export function findRemotePolicyOverlaps(policies: readonly OwnedRemotePolicy[]): string[] {

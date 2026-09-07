@@ -6,7 +6,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createStore, deriveMessages, rewindDraft } from "@polyth/session";
+import { createStore, deriveMessages, effectiveHistory, rewindDraft } from "@polyth/session";
 import type {
   AgentRuntime, JsonObject, ModelMessage, ModelRef, Project, ProjectService, RuntimeBranchRequest,
   RuntimeEndpoint, RuntimeEvent, RuntimeSessionBinding, RuntimeSnapshot,
@@ -484,6 +484,8 @@ test("rewind rejects running turns, supports redo, and branches backend before r
   // new markers never duplicate prompt text; the draft derives from replay
   assert.equal("restoredText" in (marker.data as Record<string, unknown>), false);
   assert.deepEqual(rewindDraft(await store.events(id)), { text: "second", attachments: [] });
+  const hidden = effectiveHistory(await store.events(id)).hidden;
+  assert.equal((hidden.find((event) => event.type === "user/message")?.data as { text?: string }).text, "second");
   const restored = await sessions.clearRewind!(id);
   assert.equal(restored.type, "session/rewind-cleared");
 

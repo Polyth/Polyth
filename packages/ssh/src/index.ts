@@ -20,10 +20,11 @@
 // the agent runtime on the remote machine.
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
 import { randomUUID } from "node:crypto";
+import { atomicWriteSync } from "@polyth/plugins";
 import type {
   Disposable,
   RemoteHost,
@@ -252,17 +253,6 @@ const defaultFreePort = (): Promise<number> =>
     });
   });
 
-function atomicWrite(path: string, data: string): void {
-  const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync(tmp, data, "utf8");
-  try {
-    renameSync(tmp, path);
-  } catch (error) {
-    try { unlinkSync(tmp); } catch { /* already renamed or removed */ }
-    throw error;
-  }
-}
-
 /** Short stable hash — unix socket paths have a ~104 byte limit. */
 const shortHash = (value: string): string => {
   let h = 0;
@@ -297,7 +287,7 @@ export function createSshService(options: SshServiceOptions): SshService {
   const connecting = new Map<string, Promise<SshConnectionStatusDto>>();
 
   const persist = (): void => {
-    atomicWrite(options.file, JSON.stringify(items, null, 2));
+    atomicWriteSync(options.file, JSON.stringify(items, null, 2), 0o600);
   };
 
   const must = (id: string): StoredConnection => {

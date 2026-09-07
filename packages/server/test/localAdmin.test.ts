@@ -9,7 +9,7 @@ import type { AuthPrincipal, RequestIngress, RouteRequest } from "@polyth/contra
 import { createAuthService } from "../src/auth.ts";
 import { createHttpHandler } from "../src/http.ts";
 import { settingsRoutes } from "../src/routes/settings.ts";
-import { testTenancy } from "./support/spaces.ts";
+import { testTenancy, fakeSpaceContext } from "./support/spaces.ts";
 
 const tenancy = await testTenancy();
 
@@ -95,6 +95,7 @@ test("system info is denied to a non-loopback unauthenticated caller", async () 
     }),
   });
 
+  const space = fakeSpaceContext({ storageDir: tmp() });
   const invoke = async (principal: AuthPrincipal, ingress: RequestIngress) => {
     let code = 0;
     let body: { dataDirLabel?: string } | undefined;
@@ -106,6 +107,7 @@ test("system info is denied to a non-loopback unauthenticated caller", async () 
       method: "GET",
       ingress,
       principal,
+      space,
       requireCapability() {},
       body: async () => ({}),
       json(nextCode, nextBody) {
