@@ -212,8 +212,9 @@ export interface ServerPackageHost extends TrustedServerPluginHost {
   /** Resolve tenant-scoped core services inside request handlers. */
   forSpace(ctx: SpaceContext): { projects: ProjectService; sessions: SessionService };
   /** Deployment/security profile. Branch on this instead of ad-hoc
-   *  `if (cloud)` checks — see `allowsHostFilesystemBrowsing` and
-   *  `allowsTenantPackagesInControlPlane` in @polyth/contracts. */
+   *  `if (cloud)` checks — see `allowsHostFilesystemBrowsing`,
+   *  `allowsTenantPackagesInControlPlane`, and `allowsInteractiveProviderAuth`
+   *  in @polyth/contracts. */
   deployment: DeploymentProfile;
   projects: ProjectService;
   /** Canonical session service. The reference is stable, but the service is

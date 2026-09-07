@@ -12,6 +12,7 @@ import type {
   ProtocolAdapter,
   ProtocolCapabilities,
   ProviderAuthMethod,
+  ProviderAuthWrite,
   ProviderAuthorization,
   RuntimeEndpoint,
   RuntimeLocation,
@@ -56,6 +57,8 @@ interface V2Provider {
   id?: unknown;
   name?: unknown;
   disabled?: unknown;
+  env?: unknown;
+  docs?: unknown;
 }
 
 interface V2Agent {
@@ -729,6 +732,13 @@ export const createV2ProtocolAdapter = (
     },
     async setProviderApiKey(providerID, key, metadata): Promise<boolean> {
       return providerHttp.setProviderApiKey(providerID, key, metadata);
+    },
+    async setProviderAuth(providerID, info: ProviderAuthWrite): Promise<boolean> {
+      const path = withLocation(`/auth/${encodeURIComponent(providerID)}`, options.endpoint.location);
+      const body = info.type === "api"
+        ? { type: "api", key: info.key, ...(info.metadata ? { metadata: info.metadata } : {}) }
+        : { type: "wellknown", key: info.key, token: info.token };
+      return Boolean(await mutateRequired(options.transport, "PUT", path, body, deadlineMs));
     },
     async removeProviderAuth(providerID): Promise<boolean> {
       return providerHttp.removeProviderAuth(providerID);

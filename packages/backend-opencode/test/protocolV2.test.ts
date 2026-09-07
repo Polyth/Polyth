@@ -280,7 +280,7 @@ test("V2 provider listing and auth methods use native endpoints", async () => {
 
   assert.deepEqual(await adapter.listAllProviders!(), [{ id: "cursor", name: "Cursor" }]);
   assert.deepEqual(await adapter.providerAuthMethods!(), {
-    cursor: [{ type: "oauth", label: "Sign in" }],
+    cursor: [{ type: "oauth", label: "Sign in", upstreamIndex: 0 }],
   });
   assert.deepEqual(
     await adapter.providerAuthorize!("cursor", 0, { instance: "cloud" }),
@@ -289,6 +289,7 @@ test("V2 provider listing and auth methods use native endpoints", async () => {
   assert.equal(await adapter.providerAuthCallback!("cursor", 0, "auth-code"), true);
   assert.equal(await adapter.providerAuthCallback!("cursor", 0), true);
   assert.equal(await adapter.setProviderApiKey!("openai", "sk-test", { region: "us" }), true);
+  assert.equal(await adapter.setProviderAuth!("https://org.example", { type: "wellknown", key: "OPENCODE_ORG_TOKEN", token: "tok" }), true);
   assert.equal(await adapter.removeProviderAuth!("openai"), true);
 
   assert.deepEqual(fake.mutations.map(({ method, path, body, replay }) => ({ method, path, body, replay })), [
@@ -317,6 +318,12 @@ test("V2 provider listing and auth methods use native endpoints", async () => {
       replay: { kind: "never" },
     },
     {
+      method: "PUT",
+      path: "/auth/https%3A%2F%2Forg.example?directory=%2Fworkspace%2Fproject&workspace=worktree-a",
+      body: { type: "wellknown", key: "OPENCODE_ORG_TOKEN", token: "tok" },
+      replay: { kind: "never" },
+    },
+    {
       method: "DELETE",
       path: "/auth/openai?directory=%2Fworkspace%2Fproject&workspace=worktree-a",
       body: undefined,
@@ -324,6 +331,29 @@ test("V2 provider listing and auth methods use native endpoints", async () => {
     },
   ]);
   assert.equal(fake.mutations[2]?.deadlineMs, 15 * 60 * 1000);
+});
+
+test("V2 auth method parsing keeps original upstream indices and ignores unknown types", async () => {
+  const fake = transportDouble({
+    query: (path) => path.startsWith("/provider/auth?")
+      ? httpResponse({
+          acme: [
+            { type: "mystery", label: "Future" },
+            { type: "oauth", label: "Browser" },
+            { label: "missing type" },
+            { type: "api", label: "API key", prompts: [{ type: "text", key: "region", message: "Region" }] },
+          ],
+        })
+      : httpResponse({ all: [] }),
+  });
+  const adapter = createV2ProtocolAdapter({ transport: fake.transport, endpoint });
+  const methods = await adapter.providerAuthMethods!();
+  assert.deepEqual(methods.acme?.map((item) => ({ type: item.type, index: item.upstreamIndex, label: item.label })), [
+    { type: "oauth", index: 1, label: "Browser" },
+    { type: "api", index: 3, label: "API key" },
+  ]);
+  assert.equal("providerAuthEntries" in adapter, false);
+  assert.equal(fake.queries.some((path) => path.startsWith("/auth?") || path === "/auth"), false);
 });
 
 test("V2 core session methods use native paths and reconcile pending requests", async () => {

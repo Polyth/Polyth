@@ -9,6 +9,8 @@
     "./model-picker-state": "./widgets/modelPickerState.ts",
     "./model-presentation": "./widgets/modelPresentation.ts",
     "./web-prefs": "./widgets/modelPrefs.ts",
+    "./auth": "./src/auth/index.ts",
+    "./auth/well-known": "./src/auth/wellKnown.ts",
     "./widgets": "./widgets/index.tsx",
     "./i18n/*": "./src/i18n/*.ts",
     "./runtime-catalog": "./widgets/runtimeCatalog.ts"

@@ -3,6 +3,7 @@ import type {
   AgentDescriptor,
   AgentProfile,
   AttachmentRef,
+  AuthAttemptDto,
   AutoAcceptDto,
   AutoAcceptSetting,
   BulkSessionResult,
@@ -30,6 +31,8 @@ import type {
   OpenCodePluginListResponseDto,
   OpenCodePluginRemoveResponseDto,
   PackageDescriptorDto,
+  ProviderAuthCapabilitiesDto,
+  ProviderAuthView,
   SystemInfoDto,
   TrackCreateInput,
   TrackDto,
@@ -65,6 +68,8 @@ import type {
   IsolationStatusDto,
 } from "@polyth/contracts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+
+export type { AuthAttemptDto, ProviderAuthCapabilitiesDto, ProviderAuthView };
 
 export interface BrowserSessionDto {
   id: string;
@@ -195,29 +200,6 @@ export interface AvailableProviderDto {
   id: string;
   name: string;
 }
-export interface ProviderAuthPromptOptionDto {
-  label: string;
-  value: string;
-  hint?: string;
-}
-export interface ProviderAuthPromptDto {
-  type: "text" | "select";
-  key: string;
-  message: string;
-  placeholder?: string;
-  options?: ProviderAuthPromptOptionDto[];
-  when?: { key: string; op: "eq" | "neq"; value: string };
-}
-export interface ProviderAuthMethodDto {
-  type: "oauth" | "api";
-  label: string;
-  prompts?: ProviderAuthPromptDto[];
-}
-export interface ProviderAuthorizationDto {
-  url: string;
-  method: "auto" | "code";
-  instructions: string;
-}
 
 async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init);
@@ -232,11 +214,15 @@ async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
     // callers can explain conflicts/history mismatches without regexing HTML.
     let code: string | undefined;
     let message: string | undefined;
+    let details: string | undefined;
+    let field: string | undefined;
     let changes: number | undefined;
     try {
-      const parsed = JSON.parse(body) as { error?: unknown; message?: unknown; changes?: unknown };
+      const parsed = JSON.parse(body) as { error?: unknown; message?: unknown; details?: unknown; field?: unknown; changes?: unknown };
       if (typeof parsed.error === "string") code = parsed.error;
       if (typeof parsed.message === "string") message = parsed.message;
+      if (typeof parsed.details === "string") details = parsed.details;
+      if (typeof parsed.field === "string") field = parsed.field;
       if (typeof parsed.changes === "number") changes = parsed.changes;
     } catch {
       // non-JSON error body
@@ -250,6 +236,8 @@ async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
       {
         status: res.status,
         ...(code !== undefined ? { code } : {}),
+        ...(details !== undefined ? { details } : {}),
+        ...(field !== undefined ? { field } : {}),
         ...(changes !== undefined ? { changes } : {}),
       },
     );
@@ -819,28 +807,43 @@ export const api = {
    *  connect/OAuth flow to finish; prefer listProviders() otherwise. */
   refreshProviders: () => jfetch<ProviderCatalogDto[]>("/api/providers?refresh=1"),
   listAvailableProviders: () => jfetch<AvailableProviderDto[]>("/api/providers/available"),
-  providerAuthMethods: () => jfetch<Record<string, ProviderAuthMethodDto[]>>("/api/providers/auth-methods"),
+  providerAuthCapabilities: (signal?: AbortSignal) =>
+    jfetch<ProviderAuthCapabilitiesDto>("/api/providers/auth-capabilities", { signal }),
+  providerAuthView: (id: string, signal?: AbortSignal) =>
+    jfetch<ProviderAuthView>(`/api/providers/${encodeURIComponent(id)}/auth`, { signal }),
+  startProviderAuthAttempt: (id: string, methodId: string, inputs?: Record<string, string>, revision?: string) =>
+    pendingMutation(jfetch<AuthAttemptDto>(
+      `/api/providers/${encodeURIComponent(id)}/auth/attempts`,
+      json("POST", { methodId, ...(inputs ? { inputs } : {}), ...(revision ? { revision } : {}) }),
+    )),
+  providerAuthAttempt: (attemptId: string, signal?: AbortSignal) =>
+    jfetch<AuthAttemptDto>(`/api/providers/auth/attempts/${encodeURIComponent(attemptId)}`, { signal }),
+  completeProviderAuthAttempt: (attemptId: string, code?: string) =>
+    pendingMutation(jfetch<AuthAttemptDto>(
+      `/api/providers/auth/attempts/${encodeURIComponent(attemptId)}/complete`,
+      json("POST", code ? { code } : {}),
+    )),
+  cancelProviderAuthAttempt: (attemptId: string) =>
+    pendingMutation(jfetch<AuthAttemptDto>(
+      `/api/providers/auth/attempts/${encodeURIComponent(attemptId)}`,
+      { method: "DELETE" },
+    )),
+  previewWellKnownAuth: (origin: string) =>
+    pendingMutation(jfetch<{ origin: string; hash: string; command: string[]; env: string }>(
+      "/api/providers/auth/well-known/preview",
+      json("POST", { origin }),
+    )),
+  executeWellKnownAuth: (origin: string, hash: string) =>
+    pendingMutation(jfetch<{ ok: true }>(
+      "/api/providers/auth/well-known/execute",
+      json("POST", { origin, hash, confirm: true }),
+    )),
   addProvider: (id: string, name?: string) =>
     pendingMutation(jfetch<VisibilityStateDto>(`/api/providers/${encodeURIComponent(id)}/add`, json("POST", name ? { name } : {}))),
   removeProvider: (id: string) =>
     pendingMutation(jfetch<VisibilityStateDto>(`/api/providers/${encodeURIComponent(id)}/remove`, json("POST", {}))),
-  connectProviderApiKey: (id: string, key: string, metadata?: Record<string, string>) =>
-    pendingMutation(jfetch<{ ok: true }>(
-      `/api/providers/${encodeURIComponent(id)}/connect/apikey`,
-      json("POST", { key, ...(metadata ? { metadata } : {}) }),
-    )),
-  authorizeProviderOAuth: (id: string, method: number, inputs?: Record<string, string>) =>
-    pendingMutation(jfetch<ProviderAuthorizationDto>(
-      `/api/providers/${encodeURIComponent(id)}/connect/oauth/authorize`,
-      json("POST", { method, ...(inputs ? { inputs } : {}) }),
-    )),
-  completeProviderOAuth: (id: string, method: number, code?: string, signal?: AbortSignal) =>
-    pendingMutation(jfetch<{ ok: true }>(
-      `/api/providers/${encodeURIComponent(id)}/connect/oauth/callback`,
-      { ...json("POST", { method, ...(code ? { code } : {}) }), ...(signal ? { signal } : {}) },
-    )),
   disconnectProvider: (id: string) =>
-    pendingMutation(jfetch<{ ok: true }>(`/api/providers/${encodeURIComponent(id)}/disconnect`, json("POST", {}))),
+    pendingMutation(jfetch<{ ok: true; remaining?: ProviderAuthView["credential"] }>(`/api/providers/${encodeURIComponent(id)}/disconnect`, json("POST", {}))),
   createCustomProvider: (input: {
     id?: string;
     name: string;

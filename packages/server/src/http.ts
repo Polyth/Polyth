@@ -200,25 +200,6 @@ const readBody = async (req: IncomingMessage, limit = MAX_BODY_BYTES): Promise<R
   }
 };
 
-const optionalStringRecord = (value: unknown, label: string): Record<string, string> | undefined => {
-  if (value === undefined) return undefined;
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw Object.assign(new Error(`${label} must be an object of strings`), { code: "invalid-input" });
-  }
-  const entries = Object.entries(value);
-  if (entries.some(([key, item]) => !key || typeof item !== "string")) {
-    throw Object.assign(new Error(`${label} must be an object of strings`), { code: "invalid-input" });
-  }
-  return Object.fromEntries(entries);
-};
-
-const providerAuthMethodIndex = (value: unknown): number => {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-    throw Object.assign(new Error("method must be a non-negative integer"), { code: "invalid-input" });
-  }
-  return value;
-};
-
 /** The gateway's route contract is public so trusted plugins can contribute it. */
 export type { RouteHandler, RouteRequest } from "@polyth/contracts";
 
@@ -727,20 +708,6 @@ async function dispatchHttp(
       // Provider/model visibility routes must win over the plain aggregate below.
       if (deps.visibility) {
         const vis = deps.visibility;
-        // Provider auth (connect/disconnect) is a global, not project-scoped,
-        // concern — opencode.json and auth.json are shared across every
-        // project's runtime on this host, so any one of them can carry it.
-        const providerRuntime = () => deps.runtimes.forProject("__default__");
-        const optionalProviderCall = <T,>(
-          call: (() => Promise<T>) | undefined,
-          fallback: T,
-        ): Promise<T> => call
-          ? call().catch((error: unknown) => {
-              const code = (error as { code?: unknown }).code;
-              if (code === "unsupported" || code === "capability-unsupported") return fallback;
-              throw error;
-            })
-          : Promise.resolve(fallback);
         if (path === "/api/models" && method === "GET") {
           const allModels = await models(space().projects);
           // ?all=1 → unfiltered catalog (settings); default → enabled + connected.
@@ -753,22 +720,6 @@ async function dispatchHttp(
           if (url.searchParams.get("refresh") === "1") deps.catalog?.invalidateModels();
           await vis.seed();
           return json(res, 200, vis.catalog(await models(space().projects)));
-        }
-        if (path === "/api/providers/available" && method === "GET") {
-          const rt = await providerRuntime();
-          const [live, authMethods, allModels] = await Promise.all([
-            optionalProviderCall(rt.listAllProviders ? () => rt.listAllProviders!() : undefined, []),
-            optionalProviderCall(rt.providerAuthMethods ? () => rt.providerAuthMethods!() : undefined, {}),
-            models(space().projects),
-          ]);
-          return json(res, 200, vis.available(allModels, live, Object.keys(authMethods)));
-        }
-        if (path === "/api/providers/auth-methods" && method === "GET") {
-          const rt = await providerRuntime();
-          return json(res, 200, await optionalProviderCall(
-            rt.providerAuthMethods ? () => rt.providerAuthMethods!() : undefined,
-            {},
-          ));
         }
         m = path.match(/^\/api\/providers\/([^/]+)\/enabled$/);
         if (m && method === "POST") {
@@ -789,57 +740,6 @@ async function dispatchHttp(
         if (m && method === "POST") {
           const state = await vis.removeProvider(decodeURIComponent(m[1]!));
           return json(res, 200, { ok: true, ...state });
-        }
-        m = path.match(/^\/api\/providers\/([^/]+)\/connect\/apikey$/);
-        if (m && method === "POST") {
-          const providerID = decodeURIComponent(m[1]!);
-          const b = await loadBody();
-          if (typeof b.key !== "string" || !b.key.trim()) {
-            throw Object.assign(new Error("key is required"), { code: "invalid-input" });
-          }
-          const rt = await providerRuntime();
-          if (!rt.setProviderApiKey) throw Object.assign(new Error("provider auth unavailable"), { code: "unsupported" });
-          const metadata = optionalStringRecord(b.metadata, "metadata");
-          await rt.setProviderApiKey(providerID, b.key, metadata);
-          deps.catalog?.invalidateModels();
-          return json(res, 200, { ok: true });
-        }
-        m = path.match(/^\/api\/providers\/([^/]+)\/connect\/oauth\/authorize$/);
-        if (m && method === "POST") {
-          const providerID = decodeURIComponent(m[1]!);
-          const b = await loadBody();
-          const methodIndex = providerAuthMethodIndex(b.method);
-          const rt = await providerRuntime();
-          if (!rt.providerAuthorize) throw Object.assign(new Error("provider oauth unavailable"), { code: "unsupported" });
-          const inputs = optionalStringRecord(b.inputs, "inputs");
-          return json(res, 200, await rt.providerAuthorize(providerID, methodIndex, inputs));
-        }
-        m = path.match(/^\/api\/providers\/([^/]+)\/connect\/oauth\/callback$/);
-        if (m && method === "POST") {
-          const providerID = decodeURIComponent(m[1]!);
-          const b = await loadBody();
-          const methodIndex = providerAuthMethodIndex(b.method);
-          if (b.code !== undefined && (typeof b.code !== "string" || !b.code.trim())) {
-            throw Object.assign(new Error("code must be a non-empty string"), { code: "invalid-input" });
-          }
-          const rt = await providerRuntime();
-          if (!rt.providerAuthCallback) throw Object.assign(new Error("provider oauth unavailable"), { code: "unsupported" });
-          await rt.providerAuthCallback(
-            providerID,
-            methodIndex,
-            typeof b.code === "string" ? b.code.trim() : undefined,
-          );
-          deps.catalog?.invalidateModels();
-          return json(res, 200, { ok: true });
-        }
-        m = path.match(/^\/api\/providers\/([^/]+)\/disconnect$/);
-        if (m && method === "POST") {
-          const providerID = decodeURIComponent(m[1]!);
-          const rt = await providerRuntime();
-          if (!rt.removeProviderAuth) throw Object.assign(new Error("provider auth unavailable"), { code: "unsupported" });
-          await rt.removeProviderAuth(providerID);
-          deps.catalog?.invalidateModels();
-          return json(res, 200, { ok: true });
         }
         if (path === "/api/models/enabled" && method === "POST") {
           const b = await loadBody();
@@ -923,7 +823,7 @@ async function dispatchHttp(
       }
       await sendStaticFile(req, res, filePath);
     } catch (err) {
-      const e = err as Error & { code?: string; cause?: unknown; field?: unknown; status?: number; changes?: unknown };
+      const e = err as Error & { code?: string; cause?: unknown; field?: unknown; status?: number; details?: unknown; changes?: unknown };
       if (e instanceof AuthorizationError || e.code === "unauthorized" || e.code === "forbidden") {
         return json(res, e.status === 401 || e.code === "unauthorized" ? 401 : 403, {
           error: e.code ?? "forbidden",
@@ -954,6 +854,15 @@ async function dispatchHttp(
         : e.code === "unavailable" || e.code === "unreachable" ? 503
         : e.code === "invalid-response" ? 502
         : e.code === "unsupported" || e.code === "capability-unsupported" ? 501
+        : typeof e.code === "string" && e.code.startsWith("AUTH_")
+          ? (
+            e.code === "AUTH_INPUT_INVALID" || e.code === "AUTH_CREDENTIAL_INVALID" || e.code === "AUTH_WELLKNOWN_UNSAFE" ? 400
+            : e.code === "AUTH_DENIED" ? 403
+            : e.code === "AUTH_RATE_LIMITED" ? 429
+            : e.code === "AUTH_CAPABILITY_UNAVAILABLE" || e.code === "AUTH_METHOD_UNAVAILABLE" ? 501
+            : e.code === "AUTH_PROVIDER_UNREACHABLE" || e.code === "AUTH_NETWORK_ERROR" ? 503
+            : 422
+          )
         : typeof e.status === "number" && e.status >= 400 && e.status < 600 ? e.status
         : 500;
       const message =
@@ -968,6 +877,8 @@ async function dispatchHttp(
         error: e.code ?? "internal",
         message,
         ...(e.code === "invalid-input" && typeof e.field === "string" ? { field: e.field } : {}),
+        ...(typeof e.code === "string" && e.code.startsWith("AUTH_") && typeof e.field === "string" ? { field: e.field } : {}),
+        ...(typeof e.code === "string" && e.code.startsWith("AUTH_") && typeof e.details === "string" ? { details: e.details } : {}),
         ...(e.code === "worktree-dirty" && typeof e.changes === "number" ? { changes: e.changes } : {}),
       });
     }

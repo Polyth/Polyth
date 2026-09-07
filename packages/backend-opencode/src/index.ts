@@ -771,6 +771,10 @@ export const createOpenCodeRuntimeFacade = (
       if (!protocol.setProviderApiKey) throw Object.assign(new Error("provider auth unavailable"), { code: "unsupported" });
       return protocol.setProviderApiKey(providerID, key, metadata);
     }),
+    setProviderAuth: (providerID, info) => lifecycle.usingProtocol((protocol) => {
+      if (!protocol.setProviderAuth) throw Object.assign(new Error("provider auth unavailable"), { code: "unsupported" });
+      return protocol.setProviderAuth(providerID, info);
+    }),
     removeProviderAuth: (providerID) => lifecycle.usingProtocol((protocol) => {
       if (!protocol.removeProviderAuth) throw Object.assign(new Error("provider auth unavailable"), { code: "unsupported" });
       return protocol.removeProviderAuth(providerID);

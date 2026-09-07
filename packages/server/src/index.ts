@@ -852,6 +852,12 @@ export async function boot(opts: BootOptions = {}) {
               useRuntime(() => inner.setProviderApiKey!(providerID, key, metadata)),
           }
         : {}),
+      ...(inner.setProviderAuth
+        ? {
+            setProviderAuth: (providerID: string, info: import("@polyth/contracts").ProviderAuthWrite) =>
+              useRuntime(() => inner.setProviderAuth!(providerID, info)),
+          }
+        : {}),
       ...(inner.removeProviderAuth
         ? { removeProviderAuth: (providerID: string) => useRuntime(() => inner.removeProviderAuth!(providerID)) }
         : {}),
@@ -1307,6 +1313,12 @@ export async function boot(opts: BootOptions = {}) {
   };
   services.provide(serverServiceKey("opencode.runtime"), (context: import("@polyth/contracts").HarnessContext) =>
     openCodePool.forProject(context.projectId, context.cwd));
+  services.provide(serverServiceKey<{
+    onRestart(listener: (runtime: AgentRuntime) => void | Promise<void>): Disposable;
+  }>("opencode.runtime.events"), {
+    onRestart: (listener) => openCodePool.onRestart?.(async (runtime) => { await listener(runtime); })
+      ?? { dispose() {} },
+  });
   const harnessPool = createHarnessPool({
     registry: harnesses,
     legacyHarnessId: "opencode",
@@ -1325,6 +1337,13 @@ export async function boot(opts: BootOptions = {}) {
   };
   openCodePool.onEvict?.((runtime) => harnessPool.forget(runtime));
   const runtimeCatalog = createRuntimeCatalog({ projects, runtimes });
+  services.provide(serverServiceKey<{
+    invalidateModels(): void;
+    models(): Promise<import("@polyth/contracts").ModelDescriptor[]>;
+  }>("runtime.catalog"), {
+    invalidateModels: () => runtimeCatalog.invalidateModels(),
+    models: () => runtimeCatalog.models(),
+  });
 
   const parseModel = (raw?: string) => {
     if (!raw || !raw.includes("/")) return undefined;
@@ -1416,6 +1435,7 @@ export async function boot(opts: BootOptions = {}) {
   // provider blacklists), then mirrors every toggle back to it.
   const visibility = createModelVisibilityService({ file: `${dataDir}/model-visibility.json`, applier: configApplier });
   await visibility.seed();
+  services.provide(serverServiceKey<typeof visibility>("models.visibility"), visibility);
 
   // An empty Polyth MCP store adopts whatever OpenCode already has configured,
   // so the settings page reflects reality instead of an empty list.

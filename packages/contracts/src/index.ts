@@ -230,6 +230,12 @@ export const allowsHostFilesystemBrowsing = (profile: DeploymentProfile): boolea
 export const allowsTenantPackagesInControlPlane = (profile: DeploymentProfile): boolean =>
   profile === "local-trusted";
 
+/** Interactive OpenCode provider-auth mutations write the host-global
+ *  OpenCode credential store. That is honest only when the deployment has
+ *  one trusted operator boundary. */
+export const allowsInteractiveProviderAuth = (profile: DeploymentProfile): boolean =>
+  profile === "local-trusted";
+
 /** Membership role inside one Space. Ordered least → most privileged. */
 export type SpaceRole = "viewer" | "member" | "admin" | "owner";
 
@@ -1696,6 +1702,10 @@ export interface ProtocolCapabilities {
 export interface AvailableProviderDescriptor {
   id: string;
   name: string;
+  /** Declared environment variable *names* (never values) the provider reads. */
+  env?: string[];
+  /** Documentation / "get a key" URL when the catalog supplies one. */
+  docs?: string;
 }
 
 /** How a provider instance entered the managed set. */
@@ -1841,18 +1851,179 @@ export interface ProviderAuthPrompt {
   when?: { key: string; op: "eq" | "neq"; value: string };
 }
 
-/** One way to authenticate a provider. A provider absent from
- *  `providerAuthMethods()` still takes a plain API key via `setProviderApiKey`. */
+/** One way to authenticate a provider as reported by the OpenCode wire.
+ *  Current upstream only emits `oauth` and `api`. `upstreamIndex` is the
+ *  original array index on that provider's method list — it is not recomputed
+ *  after skipping malformed entries. */
 export interface ProviderAuthMethod {
   type: "oauth" | "api";
   label: string;
   prompts?: ProviderAuthPrompt[];
+  upstreamIndex: number;
 }
 
+/** Current OpenCode authorize HTTP body: url, method, instructions only. */
 export interface ProviderAuthorization {
   url: string;
   method: "auto" | "code";
   instructions: string;
+}
+
+/** Persist a credential through OpenCode PUT /auth/:id. Never sent to browsers. */
+export type ProviderAuthWrite =
+  | { type: "api"; key: string; metadata?: Record<string, string> }
+  | { type: "wellknown"; key: string; token: string };
+
+export type AuthMethodKind = "oauth" | "api";
+
+export type AuthFieldKind = "text" | "secret" | "url" | "email" | "otp" | "select" | "boolean";
+
+export type AuthProvenance =
+  | "opencode-plugin"
+  | "provider-metadata"
+  | "environment";
+
+export type AuthCapabilityStatus = "loaded" | "empty" | "unavailable" | "failed";
+
+export type AuthPhase =
+  | "starting"
+  | "browser_action_required"
+  | "device_action_required"
+  | "awaiting_code"
+  | "waiting"
+  | "validating"
+  | "connected"
+  | "configured_unverified"
+  | "failed"
+  | "denied"
+  | "expired"
+  | "cancelled"
+  | "stale";
+
+export type AuthErrorCode =
+  | "AUTH_CAPABILITY_UNAVAILABLE"
+  | "AUTH_DISCOVERY_FAILED"
+  | "AUTH_METHOD_UNAVAILABLE"
+  | "AUTH_INPUT_INVALID"
+  | "AUTH_CREDENTIAL_INVALID"
+  | "AUTH_DENIED"
+  | "AUTH_EXPIRED"
+  | "AUTH_CALLBACK_FAILED"
+  | "AUTH_SAVE_FAILED"
+  | "AUTH_SESSION_STALE"
+  | "AUTH_RUNTIME_RESTARTED"
+  | "AUTH_REMOTE_LOOPBACK_UNREACHABLE"
+  | "AUTH_PROVIDER_UNREACHABLE"
+  | "AUTH_RATE_LIMITED"
+  | "AUTH_NETWORK_ERROR"
+  | "AUTH_PROVIDER_PROTOCOL_CHANGED"
+  | "AUTH_WELLKNOWN_UNSAFE"
+  | "AUTH_CANCELLED";
+
+export type CredentialSourceKind =
+  | "none"
+  | "environment"
+  | "unknown";
+
+export type CredentialVerification = "verified" | "saved" | "unverified" | "invalid" | "needs_reauth";
+
+export type AuthUrlKind = "authorization" | "device_verification" | "informational" | "unknown";
+
+export interface AuthErrorDto {
+  code: AuthErrorCode;
+  message: string;
+  details?: string;
+  field?: string;
+}
+
+export interface NormalizedAuthField {
+  key: string;
+  kind: AuthFieldKind;
+  label: string;
+  placeholder?: string;
+  options?: ProviderAuthPromptOption[];
+  when?: { key: string; op: "eq" | "neq"; value: string };
+  secret: boolean;
+  autocomplete?: string;
+}
+
+export interface NormalizedAuthMethod {
+  id: string;
+  upstreamIndex: number;
+  fingerprint: string;
+  provenance: AuthProvenance;
+  kind: AuthMethodKind;
+  label: string;
+  fields: NormalizedAuthField[];
+  usable: boolean;
+  unavailability?: AuthErrorDto;
+  docsUrl?: string;
+}
+
+export interface ProviderCredentialStatus {
+  source: CredentialSourceKind;
+  verification: CredentialVerification;
+  accountHint?: string;
+  expiresAt?: number;
+  /** Environment variable *names* still supplying credentials after a disconnect. */
+  envVarNames?: string[];
+}
+
+export interface AuthAttemptDto {
+  id: string;
+  providerId: string;
+  methodId: string;
+  upstreamIndex: number;
+  fingerprint: string;
+  revision: string;
+  authorityId: string;
+  generation: number;
+  phase: AuthPhase;
+  createdAt: number;
+  expiresAt?: number;
+  instructions?: string;
+  url?: string;
+  urlKind?: AuthUrlKind;
+  userCode?: string;
+  verificationUri?: string;
+  verificationUriComplete?: string;
+  loopbackWarning?: boolean;
+  error?: AuthErrorDto;
+}
+
+export interface WellKnownPreviewDto {
+  origin: string;
+  hash: string;
+  command: string[];
+  env: string;
+}
+
+export interface ProviderAuthView {
+  providerId: string;
+  discovery: {
+    status: AuthCapabilityStatus;
+    provenance: AuthProvenance[];
+    revision: string;
+    authorityId: string;
+    generation: number;
+    error?: AuthErrorDto;
+  };
+  methods: NormalizedAuthMethod[];
+  credential?: ProviderCredentialStatus;
+  activeAttempt?: AuthAttemptDto;
+}
+
+export interface ProviderAuthCapabilitiesDto {
+  revision: string;
+  authorityId: string;
+  generation: number;
+  discoveredAt: number;
+  providers: Record<string, ProviderAuthView>;
+  discovery: {
+    status: AuthCapabilityStatus;
+    provenance: AuthProvenance[];
+    error?: AuthErrorDto;
+  };
 }
 
 export interface ProtocolAdapter {
@@ -1863,8 +2034,8 @@ export interface ProtocolAdapter {
   /** Every provider the backend currently exposes (id + name only) — for the
    *  "add a provider" picker. Optional: legacy backends may not support it. */
   listAllProviders?(): Promise<AvailableProviderDescriptor[]>;
-  /** Special login flows (oauth, or api with extra prompts) registered per
-   *  provider id. */
+  /** Special login flows registered per provider id. Absence means discovery
+   *  could not list methods — it is not an invitation to invent an API key. */
   providerAuthMethods?(): Promise<Record<string, ProviderAuthMethod[]>>;
   /** Start a provider's OAuth flow; `inputs` answers that method's prompts. */
   providerAuthorize?(
@@ -1877,6 +2048,8 @@ export interface ProtocolAdapter {
   providerAuthCallback?(providerID: string, method: number, code?: string): Promise<boolean>;
   /** Store a plain API key (plus any extra prompt answers) for a provider. */
   setProviderApiKey?(providerID: string, key: string, metadata?: Record<string, string>): Promise<boolean>;
+  /** Persist OpenCode Auth.Info (api or wellknown). Secret values never return. */
+  setProviderAuth?(providerID: string, info: ProviderAuthWrite): Promise<boolean>;
   /** Revoke stored credentials for a provider. */
   removeProviderAuth?(providerID: string): Promise<boolean>;
   sessions(): Promise<RuntimeSession[]>;
@@ -2420,8 +2593,8 @@ export interface AgentRuntime {
   /** Every provider the backend currently exposes (id + name only) — for the
    *  "add a provider" picker. Optional: legacy backends may not support it. */
   listAllProviders?(): Promise<AvailableProviderDescriptor[]>;
-  /** Special login flows (oauth, or api with extra prompts) registered per
-   *  provider id. A provider absent here still takes a plain API key. */
+  /** Special login flows registered per provider id. Absence means discovery
+   *  could not list methods — it is not an invitation to invent an API key. */
   providerAuthMethods?(): Promise<Record<string, ProviderAuthMethod[]>>;
   /** Start a provider's OAuth flow; `inputs` answers that method's prompts. */
   providerAuthorize?(
@@ -2434,6 +2607,8 @@ export interface AgentRuntime {
   providerAuthCallback?(providerID: string, method: number, code?: string): Promise<boolean>;
   /** Store a plain API key (plus any extra prompt answers) for a provider. */
   setProviderApiKey?(providerID: string, key: string, metadata?: Record<string, string>): Promise<boolean>;
+  /** Persist OpenCode Auth.Info (api or wellknown). Secret values never return. */
+  setProviderAuth?(providerID: string, info: ProviderAuthWrite): Promise<boolean>;
   /** Revoke stored credentials for a provider. */
   removeProviderAuth?(providerID: string): Promise<boolean>;
   ensureSession(canonical: CreateSessionInput & { sessionId: string; cwd: string }): Promise<string>;

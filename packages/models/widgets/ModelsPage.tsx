@@ -13,7 +13,7 @@ import { setModels } from "../../../apps/web/src/store.ts";
 import {
   api,
   type AvailableProviderDto,
-  type ProviderAuthMethodDto,
+  type ProviderAuthCapabilitiesDto,
   type ProviderCatalogDto,
   type VisibilityStateDto,
 } from "@polyth/session/web-api";
@@ -21,7 +21,7 @@ import { EmptyState, PageHead, Toggle } from "../../../apps/web/src/components/s
 import { modelDisplayName } from "../../../apps/web/src/composer/discovery.ts";
 import Picker from "../../../apps/web/src/components/Picker.tsx";
 import { confirmAlert } from "../../../apps/web/src/alerts.ts";
-import ProviderConnect from "./ProviderConnect.tsx";
+import ProviderConnect, { OrganizationLogin } from "./ProviderConnect.tsx";
 import ProviderLogo from "./ProviderLogo.tsx";
 import CustomProviderDialog from "./CustomProviderDialog.tsx";
 import MoveControls from "../../../apps/web/src/components/MoveControls.tsx";
@@ -68,11 +68,11 @@ export default function ModelsPage() {
   const [busyKey, setBusyKey] = useState("");
   const [options, setOptions] = useState<{
     available: AvailableProviderDto[];
-    authMethods: Record<string, ProviderAuthMethodDto[]>;
+    authCapabilities: ProviderAuthCapabilitiesDto | null;
     loaded: boolean;
     loading: boolean;
     error: string;
-  }>({ available: [], authMethods: {}, loaded: false, loading: false, error: "" });
+  }>({ available: [], authCapabilities: null, loaded: false, loading: false, error: "" });
   const [refreshing, setRefreshing] = useState(false);
   const [reconfiguring, setReconfiguring] = useState<ReadonlySet<string>>(new Set());
   const [customOpen, setCustomOpen] = useState<null | { id?: string }>(null);
@@ -90,13 +90,13 @@ export default function ModelsPage() {
     if (options.loaded && !opts.force) return;
     setOptions((prev) => ({ ...prev, loading: true, error: opts.quiet ? prev.error : "" }));
     try {
-      const [nextAvailable, nextAuthMethods] = await Promise.all([
+      const [nextAvailable, nextCapabilities] = await Promise.all([
         api.listAvailableProviders(),
-        api.providerAuthMethods().catch(() => ({})),
+        api.providerAuthCapabilities(),
       ]);
       setOptions({
         available: nextAvailable,
-        authMethods: nextAuthMethods,
+        authCapabilities: nextCapabilities,
         loaded: true,
         loading: false,
         error: "",
@@ -269,7 +269,9 @@ export default function ModelsPage() {
             id: p.id,
             label: p.name,
             group: "",
-            ...(options.authMethods[p.id]?.some((m) => m.type === "oauth") ? { detail: tr("settings.modelspage.oauthMethod") } : {}),
+            ...(options.authCapabilities?.providers[p.id]?.methods.some((m) => m.kind === "oauth")
+              ? { detail: tr("settings.modelspage.oauthMethod") }
+              : {}),
           }))}
           onPick={(id) => void handleAddProvider(id)}
           placeholder={tr("settings.modelspage.addProvider")}
@@ -290,6 +292,14 @@ export default function ModelsPage() {
           }}
         />
       </div>
+      <details className="provider-org-login-wrap">
+        <summary>{tr("settings.modelspage.organizationLogin")}</summary>
+        {options.authCapabilities?.discovery.status === "unavailable" ? (
+          <p className="muted">{tr("settings.modelspage.authManagedByDeployment")}</p>
+        ) : (
+          <OrganizationLogin onDone={() => { void refreshCatalog(); void loadProviderOptions({ force: true, quiet: true }); }} />
+        )}
+      </details>
 
       {error && <div className="form-error" role="alert">{error}</div>}
 
@@ -435,8 +445,9 @@ export default function ModelsPage() {
                   {(p.origin !== "custom" || externalCustom) && p.models.length === 0 && (
                     <ProviderConnect
                       providerId={p.id}
-                      methods={options.authMethods[p.id]}
-                      onConnected={() => void refreshCatalog()}
+                      view={options.authCapabilities?.providers[p.id]}
+                      onConnected={() => { void refreshCatalog(); void loadProviderOptions({ force: true, quiet: true }); }}
+                      onRetryDiscovery={() => void loadProviderOptions({ force: true })}
                     />
                   )}
                   {(p.origin !== "custom" || externalCustom) && p.models.length > 0 && (
@@ -452,9 +463,10 @@ export default function ModelsPage() {
                   {(p.origin !== "custom" || externalCustom) && p.models.length > 0 && reconfiguring.has(p.id) && (
                     <ProviderConnect
                       providerId={p.id}
-                      methods={options.authMethods[p.id]}
-                      onConnected={() => { void refreshCatalog(); }}
-                      onDisconnect={() => { void refreshCatalog(); closeReconfigure(p.id); }}
+                      view={options.authCapabilities?.providers[p.id]}
+                      onConnected={() => { void refreshCatalog(); void loadProviderOptions({ force: true, quiet: true }); }}
+                      onDisconnect={() => { void refreshCatalog(); void loadProviderOptions({ force: true, quiet: true }); closeReconfigure(p.id); }}
+                      onRetryDiscovery={() => void loadProviderOptions({ force: true })}
                     />
                   )}
                   {p.removable !== false && (

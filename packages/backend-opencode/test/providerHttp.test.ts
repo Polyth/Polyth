@@ -25,7 +25,7 @@ test("catalogue parser does not treat a raw array as providers", () => {
 
 test("auth method and authorization parsers match the generation-1 wire", () => {
   assert.deepEqual(parseProviderAuthMethods({ cursor: [{ type: "oauth", label: "Sign in" }] }), {
-    cursor: [{ type: "oauth", label: "Sign in" }],
+    cursor: [{ type: "oauth", label: "Sign in", upstreamIndex: 0 }],
   });
   assert.deepEqual(
     parseProviderAuthorization({ url: "https://x", method: "code", instructions: "go" }),

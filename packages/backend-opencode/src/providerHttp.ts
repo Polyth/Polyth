@@ -57,16 +57,85 @@ export function parseProviderCatalogue(
     if (typeof provider?.id !== "string" || !provider.id) continue;
     const name = typeof provider.name === "string" ? provider.name : "";
     if (opts.requireName && !name) continue;
-    out.push({ id: provider.id, name: name || provider.id });
+    const env = Array.isArray(provider.env)
+      ? provider.env.filter((item): item is string => typeof item === "string" && Boolean(item))
+      : undefined;
+    const docs = typeof provider.docs === "string" && provider.docs ? provider.docs : undefined;
+    out.push({
+      id: provider.id,
+      name: name || provider.id,
+      ...(env?.length ? { env } : {}),
+      ...(docs ? { docs } : {}),
+    });
   }
   return out;
 }
+
+const parseAuthMethodType = (value: unknown): "oauth" | "api" | undefined => {
+  if (typeof value !== "string") return undefined;
+  const raw = value.trim().toLowerCase().replaceAll("_", "-");
+  if (raw === "api" || raw === "api-key" || raw === "apikey") return "api";
+  if (raw === "oauth" || raw === "oauth2" || raw === "oidc") return "oauth";
+  return undefined;
+};
+
+const parseAuthPrompt = (value: unknown): NonNullable<ProviderAuthMethod["prompts"]>[number] | undefined => {
+  const record = asRecord(value);
+  if (!record || typeof record.key !== "string" || !record.key || typeof record.message !== "string" || !record.message) {
+    return undefined;
+  }
+  const when = asRecord(record.when);
+  const options = Array.isArray(record.options)
+    ? record.options.flatMap((option) => {
+      const item = asRecord(option);
+      if (!item || typeof item.label !== "string" || typeof item.value !== "string") return [];
+      return [{
+        label: item.label,
+        value: item.value,
+        ...(typeof item.hint === "string" && item.hint ? { hint: item.hint } : {}),
+      }];
+    })
+    : undefined;
+  return {
+    type: record.type === "select" ? "select" : "text",
+    key: record.key,
+    message: record.message,
+    ...(typeof record.placeholder === "string" ? { placeholder: record.placeholder } : {}),
+    ...(options?.length ? { options } : {}),
+    ...(when && typeof when.key === "string" && (when.op === "eq" || when.op === "neq") && typeof when.value === "string"
+      ? { when: { key: when.key, op: when.op, value: when.value } }
+      : {}),
+  };
+};
 
 export function parseProviderAuthMethods(body: unknown): Record<string, ProviderAuthMethod[]> {
   const rec = asRecord(body) ?? {};
   const out: Record<string, ProviderAuthMethod[]> = {};
   for (const [id, methods] of Object.entries(rec)) {
-    if (Array.isArray(methods)) out[id] = methods as ProviderAuthMethod[];
+    if (!Array.isArray(methods)) continue;
+    const parsed: ProviderAuthMethod[] = [];
+    methods.forEach((item, upstreamIndex) => {
+      const record = asRecord(item);
+      const label = typeof record?.label === "string" && record.label
+        ? record.label
+        : typeof record?.name === "string" && record.name ? record.name : undefined;
+      if (!record || !label) return;
+      const type = parseAuthMethodType(record.type);
+      if (!type) return;
+      const prompts = Array.isArray(record.prompts)
+        ? record.prompts.flatMap((prompt) => {
+          const parsedPrompt = parseAuthPrompt(prompt);
+          return parsedPrompt ? [parsedPrompt] : [];
+        })
+        : undefined;
+      parsed.push({
+        type,
+        label,
+        upstreamIndex,
+        ...(prompts?.length ? { prompts } : {}),
+      });
+    });
+    if (parsed.length) out[id] = parsed;
   }
   return out;
 }
