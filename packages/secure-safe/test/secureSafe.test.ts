@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSecureSafeService } from "../src/index.ts";
@@ -77,6 +77,20 @@ test("PATCH with a blank value retains the prior write-only value", async () => 
   const stored = JSON.parse(readFileSync(join(dataDir, "secure-safe-secrets.json"), "utf8")) as Record<string, string>;
   assert.equal(stored[created.id], "original-secret");
   assert.doesNotMatch(JSON.stringify(safe.list()), /original-secret/);
+});
+
+test("opaque secrets stay out of list() and the handle manifest", () => {
+  const dataDir = tempDir();
+  const safe = createSecureSafeService({ dataDir });
+  safe.putOpaque("pkgconn:spc_a:pkg.one:ref", "package-access-token");
+  assert.deepEqual(safe.list(), []);
+  assert.equal(safe.getOpaque("pkgconn:spc_a:pkg.one:ref"), "package-access-token");
+  assert.doesNotMatch(JSON.stringify(safe.list()), /package-access-token/);
+  assert.equal(existsSync(join(dataDir, "forbidden-config.json")), false);
+  assert.match(readFileSync(join(dataDir, "secure-safe-secrets.json"), "utf8"), /package-access-token/);
+  assert.equal(safe.redact?.("use package-access-token here"), "use [redacted] here");
+  safe.deleteOpaqueByPrefix("pkgconn:spc_a:pkg.one:");
+  assert.equal(safe.getOpaque("pkgconn:spc_a:pkg.one:ref"), null);
 });
 
 test("duplicate handles and env-ref collisions are rejected", async () => {

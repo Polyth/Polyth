@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@polyth/mobile": "0.1.0",
+    "@polyth/package-sdk": "0.1.0",
     "@polyth/session": "0.1.0",
     "@polyth/web-sdk": "0.1.0"
   }

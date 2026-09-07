@@ -2,7 +2,7 @@
 // subscription (per-session afterSeq) on open and dedupes by (sessionId, seq)
 // so replay/gap-fill never double-applies an event. DOM-free apart from the
 // browser's native WebSocket, which is only touched inside connect().
-import type { ClientSettingsDto, InstalledPluginDto, NotificationKind, NotificationRecord, PackageDescriptorDto, SessionEvent, SessionProjection } from "@polyth/contracts";
+import type { ClientSettingsDto, NotificationKind, NotificationRecord, PackageDescriptorDto, SessionEvent, SessionProjection } from "@polyth/contracts";
 
 export type SyncInbound =
   | { type: "event"; event: SessionEvent }
@@ -12,7 +12,7 @@ export type SyncInbound =
   /** Batched projection snapshot frame (project-scoped on subscribe). */
   | { type: "projections"; sessions: SessionProjection[] }
   | { type: "notification/added"; notification: NotificationRecord }
-  | { type: "plugin/changed"; plugin: InstalledPluginDto }
+  | { type: "plugin/changed"; packageId: string }
   | { type: "package/changed"; package: PackageDescriptorDto }
   /** Server-persisted client preferences changed on another device. */
   | { type: "client-settings/changed"; settings: ClientSettingsDto }
@@ -72,12 +72,7 @@ export function isSyncInbound(raw: unknown): raw is SyncInbound {
       && typeof n.read === "boolean";
   }
   if (m.type === "plugin/changed") {
-    const plugin = m.plugin as Record<string, unknown> | undefined;
-    return !!plugin
-      && typeof plugin.id === "string"
-      && typeof plugin.enabled === "boolean"
-      && typeof plugin.status === "string"
-      && Array.isArray(plugin.contributions);
+    return typeof m.packageId === "string" && m.packageId.length > 0;
   }
   if (m.type === "package/changed") {
     const pkg = m.package as Record<string, unknown> | undefined;

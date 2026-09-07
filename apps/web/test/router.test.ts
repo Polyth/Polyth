@@ -1,7 +1,7 @@
 // Session URL parse/format: /p/:projectId/s/:sessionId plus ?session= for agents.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatAppUrl, parseAppUrl } from "../src/router.ts";
+import { formatAppUrl, parseAppUrl, settingsPageFromSearch } from "../src/router.ts";
 
 test("parseAppUrl reads project and session from the path", () => {
   assert.deepEqual(parseAppUrl("/p/prj_1/s/ses_2"), { projectId: "prj_1", sessionId: "ses_2" });
@@ -28,6 +28,14 @@ test("percent-encoded ids round-trip", () => {
   const url = formatAppUrl("prj/with slash", "ses 100%");
   assert.equal(url, "/p/prj%2Fwith%20slash/s/ses%20100%25");
   assert.deepEqual(parseAppUrl(url), { projectId: "prj/with slash", sessionId: "ses 100%" });
+});
+
+test("settingsPageFromSearch reads a safe settings deep-link", () => {
+  assert.equal(settingsPageFromSearch("?settings=plugins"), "plugins");
+  assert.equal(settingsPageFromSearch("?session=ses_1&settings=plugins"), "plugins");
+  assert.equal(settingsPageFromSearch("?settings=not a page"), null);
+  assert.equal(settingsPageFromSearch("?settings=/evil"), null);
+  assert.equal(settingsPageFromSearch(""), null);
 });
 
 test("formatAppUrl builds canonical urls", () => {

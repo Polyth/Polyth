@@ -18,6 +18,7 @@ export type AlertRequest =
     placeholder?: string;
     initialValue?: string;
     confirmLabel: string;
+    secret?: boolean;
     resolve: (value: string | null) => void;
   };
 
@@ -57,7 +58,7 @@ export function confirmAlert(
 
 export function promptAlert(
   message: string,
-  options: { title?: string; confirmLabel?: string; placeholder?: string; initialValue?: string } = {},
+  options: { title?: string; confirmLabel?: string; placeholder?: string; initialValue?: string; secret?: boolean } = {},
 ): Promise<string | null> {
   replaceCurrent();
   return new Promise<string | null>((resolve) => {
@@ -68,6 +69,7 @@ export function promptAlert(
       confirmLabel: options.confirmLabel ?? "Continue",
       ...(options.placeholder !== undefined ? { placeholder: options.placeholder } : {}),
       ...(options.initialValue !== undefined ? { initialValue: options.initialValue } : {}),
+      ...(options.secret ? { secret: true } : {}),
       resolve,
     };
     emit();

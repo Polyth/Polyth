@@ -41,6 +41,9 @@ function stubHost(storageDir: string): ServerPackageHost {
   const services = createServerServiceRegistry();
   services.provide(serverServiceKey("harnesses"), createHarnessRegistry());
   services.provide(serverServiceKey("opencode.runtime"), async () => ({}));
+  services.provide(serverServiceKey("opencode.runtime.events"), {
+    onRestart: () => ({ dispose() {} }),
+  });
   const fallback = {
     get: () => ({
       stt: { baseUrl: "", model: "", apiKeyEnv: "", language: "" },

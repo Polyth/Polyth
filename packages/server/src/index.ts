@@ -63,7 +63,7 @@ import {
   type SpaceGateway,
 } from "./spaces.ts";
 import { spaceRoutes } from "./routes/spaces.ts";
-import { createSpaceStorage } from "@polyth/tenancy";
+import { createSpaceStorage, spaceStorageDir } from "@polyth/tenancy";
 import { projectRoutes } from "./routes/projects.ts";
 import { createPackageRegistry } from "./packages.ts";
 import { createSessionService, type Broadcaster, type RuntimePool } from "./sessions.ts";
@@ -455,7 +455,7 @@ export async function boot(opts: BootOptions = {}) {
     event: (e: SessionEvent) => live?.event(e),
     projection: (p: SessionProjection) => live?.projection(p),
     notification: (n) => live?.notification?.(n),
-    pluginChanged: (plugin) => live?.pluginChanged?.(plugin),
+    pluginChanged: (packageId) => live?.pluginChanged?.(packageId),
     packageChanged: (pkg) => live?.packageChanged?.(pkg),
     clientSettingsChanged: (settings) => live?.clientSettingsChanged?.(settings),
   };
@@ -1659,6 +1659,18 @@ export async function boot(opts: BootOptions = {}) {
     return smallModel();
   };
 
+  const packageSpaces = () =>
+    spaceGateway.store.allSpaces().map((space) => ({
+      spaceId: space.id,
+      storage: createSpaceStorage(spaceStorageDir(dataDir, space)),
+    }));
+
+  const hostFor = (id: string): ServerPackageHost => ({
+    ...packageHost,
+    pluginId: id,
+    ...(id === "plugins" ? { packageSpaces } : {}),
+  });
+
   const packageHost: Omit<ServerPackageHost, "pluginId"> = {
     forSpace: spaceServices,
     storageDir: dataDir,
@@ -1698,7 +1710,7 @@ export async function boot(opts: BootOptions = {}) {
       const registered: string[] = [];
       for (const source of bundledServerPackages) {
         try {
-          const pkg = await source.factory({ ...packageHost, pluginId: source.id });
+          const pkg = await source.factory(hostFor(source.id));
           registerServerPackage({ lifecycle: packageLifecycle, routes: routeRegistry }, source.id, pkg);
           registered.push(source.id);
         } catch (error) {
@@ -1711,6 +1723,7 @@ export async function boot(opts: BootOptions = {}) {
       packagesDir,
       discovered: discoveredPackageManifests,
       host: packageHost,
+      hostFor,
       lifecycle: packageLifecycle,
       routes: routeRegistry,
       onError: (id, error) => console.error(`[polyth] server package "${id}" failed to load`, error),

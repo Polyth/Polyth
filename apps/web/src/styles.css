@@ -12469,3 +12469,82 @@ body[data-glass="off"] :is(.scrim, .dialog-backdrop, .sheet-backdrop) {
   .background-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .background-option { min-height: calc(var(--control-h-lg) + var(--space-6) + var(--space-3)); }
 }
+
+.polyth-remote-ui {
+  container: polyth-remote-ui / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3);
+}
+
+.polyth-remote-ui-stack {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.polyth-remote-ui-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+}
+
+.polyth-remote-ui-gap-sm { gap: var(--space-2); }
+.polyth-remote-ui-gap-md { gap: var(--space-3); }
+.polyth-remote-ui-gap-lg { gap: var(--space-5); }
+
+.polyth-remote-ui-text {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-body);
+}
+
+.polyth-remote-ui-text.is-muted,
+.polyth-remote-ui-text.is-faint { color: var(--muted); }
+.polyth-remote-ui-text.is-danger { color: var(--red); }
+.polyth-remote-ui-text.is-success { color: var(--green); }
+.polyth-remote-ui-text.is-warning { color: var(--amber); }
+
+.polyth-remote-ui-heading {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-title);
+  font-weight: 600;
+}
+
+.polyth-remote-ui-card,
+.polyth-remote-ui-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--elevated);
+  color: var(--text);
+  text-align: start;
+}
+
+.polyth-remote-ui-item {
+  width: 100%;
+  cursor: pointer;
+}
+
+.polyth-remote-ui-item:hover {
+  background: var(--raised);
+}
+
+.polyth-remote-ui-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+@container polyth-remote-ui (max-width: 36rem) {
+  .polyth-remote-ui-inline { flex-direction: column; align-items: stretch; }
+}
+

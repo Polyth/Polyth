@@ -4,7 +4,7 @@ import { SyncClient, type SyncStatus } from "./sync.ts";
 import { applyRemoteClientSettings, initSettingsSync } from "./settingsSync.ts";
 import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown } from "./format.ts";
 import { friendlyError } from "./settings.ts";
-import { formatAppUrl, parseAppUrl } from "./router.ts";
+import { formatAppUrl, parseAppUrl, settingsPageFromSearch } from "./router.ts";
 import * as store from "./store.ts";
 import { resolveActiveProjectId } from "./projectRegistry.ts";
 import type { AttachmentRef, JsonObject, ModelRef, Project, ProjectCloneInput, ProjectPatch, SessionEvent, SessionProjection } from "@polyth/contracts";
@@ -523,7 +523,15 @@ function startSync(): void {
     // becomes fetchable again — heal it now instead of waiting out a backoff.
     recheckRuntimeCatalog();
   });
-  void initPluginBridge(sync).catch((error) => {
+  void initPluginBridge(sync).then(() => {
+    const page = settingsPageFromSearch(location.search);
+    if (!page) return;
+    store.openSettingsPage(page);
+    const url = new URL(location.href);
+    url.searchParams.delete("settings");
+    const search = url.searchParams.toString();
+    history.replaceState(history.state, "", `${url.pathname}${search ? `?${search}` : ""}${url.hash}`);
+  }).catch((error) => {
     console.error("plugin bridge initialization failed", error);
   });
   sync.connect(`${proto}://${location.host}/ws`);

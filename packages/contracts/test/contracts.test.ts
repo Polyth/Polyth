@@ -25,7 +25,7 @@ test("cap() carries id and version", () => {
   assert.equal(cap<number>("polyth.default").version, "1");
 });
 
-test("model-visible vocabulary is unchanged (replay compatibility)", () => {
+test("model-visible vocabulary includes package attachments", () => {
   assert.deepEqual([...MODEL_VISIBLE_TYPES], [
     "user/message",
     "assistant/message",
@@ -34,6 +34,8 @@ test("model-visible vocabulary is unchanged (replay compatibility)", () => {
     "tool/error",
     "question/asked",
     "question/answered",
+    "package/attached",
+    "package/context",
   ]);
 });
 

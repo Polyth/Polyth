@@ -55,7 +55,7 @@ export interface Broadcaster {
    *  fakes stay valid; inbox records never pass through appendAndBroadcast
    *  or any session reducer. */
   notification?(record: NotificationRecord): void;
-  pluginChanged?(plugin: InstalledPluginDto): void;
+  pluginChanged?(packageId: string): void;
   packageChanged?(pkg: PackageDescriptorDto): void;
   /** Server-persisted client preferences changed on another device. */
   clientSettingsChanged?(settings: ClientSettingsDto): void;

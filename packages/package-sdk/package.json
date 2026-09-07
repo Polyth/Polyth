@@ -1,0 +1,25 @@
+{
+  "name": "@polyth/package-sdk",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "browser": "./src/public.ts",
+      "default": "./src/index.ts"
+    },
+    "./browser": "./src/public.ts",
+    "./host": "./src/host.ts",
+    "./manifest": "./src/manifest.ts"
+  },
+  "bin": {
+    "polyth-package": "./src/cli.ts"
+  },
+  "dependencies": {
+    "@polyth/contracts": "0.1.0",
+    "semver": "^7.7.3",
+    "yazl": "^3.3.1"
+  },
+  "devDependencies": {
+    "@types/semver": "^7.7.0"
+  }
+}

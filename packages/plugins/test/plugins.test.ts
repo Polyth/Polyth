@@ -2,12 +2,13 @@
 // atomic install, kernel-scoped disposal, log redaction and bounds.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InstalledPluginDto, RouteHandler, UiSlotItem } from "@polyth/contracts";
 import { createContext } from "@polyth/kernel";
-import { createPluginRegistry, parseManifest, redactSecrets, TRUST_GRANTS } from "../src/index.ts";
+import { createPluginRegistry, parseManifest, redactSecrets, TRUST_GRANTS, type PluginRegistry } from "../src/index.ts";
+import { testSpaceStorage } from "./helpers.ts";
 
 const manifest = (over: Record<string, unknown> = {}) => JSON.stringify({
   id: "sample.widget",
@@ -146,7 +147,8 @@ test("file install stages atomically; traversal and duplicates rejected", async 
 
   await assert.rejects(() => reg.install("file:../outside"), /escapes the trusted/);
   await assert.rejects(() => reg.install("file:/etc/passwd"), /relative/);
-  await assert.rejects(() => reg.install("git+ssh://host/repo"), /npm:.*file:/s);
+  await assert.rejects(() => reg.install("git+ssh://host/repo"), /git and npm package sources are disabled/);
+  await assert.rejects(() => reg.install("npm:left-pad"), /git and npm package sources are disabled/);
 
   const dto = await reg.install("file:sample");
   assert.equal(dto.id, "sample.widget");
@@ -178,7 +180,8 @@ test("enable is atomic; disable disposes the kernel scope completely", async () 
 test("disable clears scope and persists disabled state when disposal fails", async () => {
   const { dir, trusted } = scaffold();
   const changes: InstalledPluginDto[] = [];
-  const reg = createPluginRegistry({
+  let reg!: PluginRegistry;
+  reg = createPluginRegistry({
     dir,
     trustedDir: trusted,
     slots: {
@@ -190,7 +193,10 @@ test("disable clears scope and persists disabled state when disposal fails", asy
         };
       },
     },
-    onChange: (plugin) => changes.push(plugin),
+    onChange: (id) => {
+      const row = reg.list().find((plugin) => plugin.id === id);
+      if (row) changes.push(row);
+    },
   });
   await reg.install("file:sample");
   await reg.enable("sample.widget");
@@ -261,6 +267,7 @@ test("low-trust manifests cannot install executable server entries", async () =>
 
 test("concurrent disable then enable is serialized per plugin", async () => {
   const { dir, trusted } = scaffold();
+  const storage = testSpaceStorage(join(dir, "..", "space"));
   const active = new Set<UiSlotItem>();
   let markDisposalStarted!: () => void;
   const disposalStarted = new Promise<void>((resolve) => { markDisposalStarted = resolve; });
@@ -283,15 +290,15 @@ test("concurrent disable then enable is serialized per plugin", async () => {
     },
   });
   await reg.install("file:sample");
-  await reg.enable("sample.widget");
+  await reg.enable("sample.widget", storage);
 
-  const disabling = reg.disable("sample.widget");
+  const disabling = reg.disable("sample.widget", storage);
   await disposalStarted;
-  const enabling = reg.enable("sample.widget");
+  const enabling = reg.enable("sample.widget", storage);
   releaseDisposal();
   await Promise.all([disabling, enabling]);
 
-  const state = reg.list().find((plugin) => plugin.id === "sample.widget");
+  const state = reg.detail("sample.widget", storage);
   assert.equal(state?.enabled, true);
   assert.equal(state?.status, "ready");
   assert.equal(active.size, 1, "the final enabled state retains one active contribution");
@@ -334,15 +341,19 @@ test("remove serializes teardown against later lifecycle transitions", async () 
 
 test("onChange publishes persisted enable and disable states", async () => {
   const { dir, trusted } = scaffold();
+  const storage = testSpaceStorage(join(dir, "..", "space"));
   const changes: InstalledPluginDto[] = [];
-  const reg = createPluginRegistry({
+  let reg!: PluginRegistry;
+  reg = createPluginRegistry({
     dir,
     trustedDir: trusted,
-    onChange: (plugin) => changes.push(plugin),
+    onChange: (id) => {
+      changes.push(reg.detail(id, storage));
+    },
   });
   await reg.install("file:sample");
-  await reg.enable("sample.widget");
-  await reg.disable("sample.widget");
+  await reg.enable("sample.widget", storage);
+  await reg.disable("sample.widget", storage);
 
   assert.deepEqual(
     changes.slice(-2).map((plugin) => ({ enabled: plugin.enabled, status: plugin.status })),
@@ -359,17 +370,16 @@ test("integrity mismatch fails activation without losing the install", async () 
   const reg = createPluginRegistry({ dir, trustedDir: trusted });
   await reg.install("file:sample");
   // Tamper after install: enable must refuse and report an error status.
-  writeFileSync(join(dir, "sample.widget", "polyth-plugin.json"), manifest({ name: "Tampered" }));
+  writeFileSync(join(reg.installDir("sample.widget"), "polyth-plugin.json"), manifest({ name: "Tampered" }));
   await assert.rejects(() => reg.enable("sample.widget"), /integrity/);
   const row = reg.list().find((p) => p.id === "sample.widget")!;
   assert.equal(row.status, "error");
   assert.match(row.lastError ?? "", /integrity/);
 
-  // reload re-reads the manifest and recomputes integrity → healthy again
-  const reloaded = await reg.reload("sample.widget");
-  assert.equal(reloaded.status, "installed");
-  const ok = await reg.enable("sample.widget");
-  assert.equal(ok.status, "ready");
+  const before = readFileSync(join(reg.installDir("sample.widget"), "polyth-plugin.json"), "utf8");
+  await assert.rejects(() => reg.reload("sample.widget"), /integrity/);
+  assert.equal(reg.list().find((p) => p.id === "sample.widget")?.status, "error");
+  assert.equal(readFileSync(join(reg.installDir("sample.widget"), "polyth-plugin.json"), "utf8"), before);
   await reg.dispose();
 });
 
@@ -396,9 +406,10 @@ test("logs are bounded and secrets are redacted", async () => {
   reg.log("sample.widget", "auth: Bearer abc123def456ghi789");
   reg.log("sample.widget", "gh token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456");
   reg.log("sample.widget", "password=supersecret123 rest");
+  reg.log("sample.widget", "https://example/cb?code=oauthcodevalue&code_verifier=pkceverifiervalue");
   const lines = reg.logs("sample.widget").map((l) => l.line);
   for (const l of lines) {
-    assert.doesNotMatch(l, /sk-abcdefghijklmnopqrstuvwx|abc123def456|ghp_ABCDEF|supersecret123/);
+    assert.doesNotMatch(l, /sk-abcdefghijklmnopqrstuvwx|abc123def456|ghp_ABCDEF|supersecret123|oauthcodevalue|pkceverifiervalue/);
     assert.match(l, /\[redacted\]/);
   }
 
@@ -411,4 +422,21 @@ test("logs are bounded and secrets are redacted", async () => {
 test("redactSecrets leaves ordinary text alone", () => {
   const s = "installed 42 packages in 3s (no vulnerabilities)";
   assert.equal(redactSecrets(s), s);
+});
+
+test("legacy trust classes do not invent sandbox network.fetch capabilities", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-legacy-trust-"));
+  writeFileSync(join(dir, "polyth-plugin.json"), JSON.stringify({
+    id: "sample.network",
+    name: "Legacy network",
+    version: "1.0.0",
+    trust: "network",
+    capabilities: ["polyth.demo"],
+    contributions: [],
+  }));
+  const { loadCanonicalManifest } = await import("../src/canonical.ts");
+  const loaded = loadCanonicalManifest(dir);
+  assert.equal(loaded.canonical.runtime?.kind, "trusted-local");
+  assert.equal((loaded.canonical.capabilities ?? []).some((cap) => cap.name === "network.fetch"), false);
+  assert.equal(loaded.legacy.trust, "network");
 });

@@ -90,6 +90,13 @@ export function secureSafeBehaviorSection(manifestPath: string, manifest: Secure
   ].join("\n");
 }
 
+const OPAQUE_KEY = /^[A-Za-z0-9:._-]{8,240}$/;
+
+function opaqueName(key: string): string {
+  if (!OPAQUE_KEY.test(key)) throw error("invalid-input", "opaque key is invalid");
+  return `opaque:${key}`;
+}
+
 export function createSecureSafeService(opts: SecureSafeOptions): SecureSafeService {
   mkdirSync(opts.dataDir, { recursive: true });
   const metadataFile = join(opts.dataDir, "secure-safe.json");
@@ -110,10 +117,14 @@ export function createSecureSafeService(opts: SecureSafeOptions): SecureSafeServ
     }
   };
 
+  const persistSecrets = (): void => {
+    atomicWriteSync(secretsFile, JSON.stringify(secrets), 0o600);
+  };
+
   const persist = (): SecureSafeManifest => {
     const manifest = manifestFor(entries);
     atomicWriteSync(metadataFile, JSON.stringify(entries, null, 2));
-    atomicWriteSync(secretsFile, JSON.stringify(secrets), 0o600);
+    persistSecrets();
     atomicWriteSync(manifestFile, JSON.stringify(manifest, null, 2));
     return manifest;
   };
@@ -218,6 +229,26 @@ export function createSecureSafeService(opts: SecureSafeOptions): SecureSafeServ
       const manifest = manifestFor(entries);
       atomicWriteSync(manifestFile, JSON.stringify(manifest, null, 2));
       return manifest;
+    },
+    putOpaque(key, value) {
+      const opaqueKey = opaqueName(key);
+      if (typeof value !== "string" || !value) throw error("invalid-input", "opaque value is required");
+      secrets[opaqueKey] = value;
+      persistSecrets();
+    },
+    getOpaque(key) {
+      return secrets[opaqueName(key)] ?? null;
+    },
+    deleteOpaque(key) {
+      delete secrets[opaqueName(key)];
+      persistSecrets();
+    },
+    deleteOpaqueByPrefix(prefix) {
+      const needle = `opaque:${prefix}`;
+      for (const key of Object.keys(secrets)) {
+        if (key.startsWith(needle)) delete secrets[key];
+      }
+      persistSecrets();
     },
   };
 }

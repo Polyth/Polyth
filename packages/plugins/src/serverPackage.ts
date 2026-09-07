@@ -72,7 +72,7 @@ export interface ServerBroadcast {
   event(ev: SessionEvent): void;
   projection(p: SessionProjection): void;
   notification?(record: NotificationRecord): void;
-  pluginChanged?(plugin: InstalledPluginDto): void;
+  pluginChanged?(packageId: string): void;
   packageChanged?(pkg: PackageDescriptorDto): void;
 }
 
@@ -271,6 +271,17 @@ export interface ServerPackageHost extends TrustedServerPluginHost {
   /** Close WebSocket/proxy sockets belonging to one paired device. */
   closePairedDevice(deviceId: string): void;
   pairedSockets: PairedSocketRegistry;
+  /**
+   * Administrative Space enumeration for the package manager.
+   * Wired only when `pluginId` is `"plugins"`. Third-party packages must not call this.
+   */
+  packageSpaces?(): PackageSpaceAdminView[];
+}
+
+/** Canonical Space identity + storage for package-manager administration. */
+export interface PackageSpaceAdminView {
+  spaceId: string;
+  storage: SpaceStorage;
 }
 
 // ---- discovery --------------------------------------------------------------------
@@ -281,7 +292,10 @@ export const INFRASTRUCTURE_PACKAGE_DIRS: ReadonlySet<string> = new Set([
   "kernel",
   "session",
   "tenancy",
+  "outbound",
   "server",
+  "web-sdk",
+  "package-sdk",
 ]);
 
 export interface DiscoveredServerPackage {

@@ -115,7 +115,7 @@ test("settings Sessions page renders defaults and never lists sessions", async (
     const agentPicker = container.querySelector<HTMLButtonElement>('button[aria-label="Default Agent"]');
     assert.ok(agentPicker);
     await act(async () => { agentPicker.click(); });
-    const agentOptions = [...container.querySelectorAll<HTMLElement>('[role="option"] .palette-label')]
+    const agentOptions = [...document.querySelectorAll<HTMLElement>('[role="option"] .palette-label')]
       .map((option) => option.textContent);
     assert.deepEqual(agentOptions, ["OpenCode agent default", "review", "plan"]);
 

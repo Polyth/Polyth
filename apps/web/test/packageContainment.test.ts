@@ -66,6 +66,7 @@ const GENERIC_SHELL_IMPORTS = new Set([
   "attachments.ts",
   "chatclip.ts",
   "components/a11y/Dialog.tsx",
+  "components/a11y/announce.ts",
   "components/a11y/live.tsx",
   "components/a11y/Menu.ts",
   "components/CopyButton.tsx",

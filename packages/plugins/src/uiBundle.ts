@@ -1,7 +1,8 @@
-import { createHash } from "node:crypto";
-import { rename, mkdir, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { basename, join, resolve, sep } from "node:path";
+import { realpath, stat } from "node:fs/promises";
+import { join, resolve, sep } from "node:path";
 import { build } from "esbuild";
+import { confineBundlePlugin } from "./confineBundle.ts";
+import { writeHashedBundle } from "./hashedBundle.ts";
 
 const EXTERNAL_REACT = [
   "react",
@@ -51,21 +52,14 @@ export async function buildUiBundle(opts: {
     write: false,
     outfile: join(opts.outDir, "ui.mjs"),
     logLevel: "silent",
+    plugins: [confineBundlePlugin({ installDir, allowedRoots: [installDir] })],
   });
   const output = result.outputFiles[0];
   if (!output) throw new Error("ui bundle produced no output");
-
-  const integrity = createHash("sha256").update(output.contents).digest("hex");
-  const file = join(opts.outDir, `ui-${integrity}.mjs`);
-  const temporary = join(opts.outDir, `.ui-${process.pid}-${Date.now()}.mjs`);
-  await mkdir(opts.outDir, { recursive: true });
-  await writeFile(temporary, output.contents);
-  await rename(temporary, file);
-
-  for (const prior of await readdir(opts.outDir)) {
-    if (prior !== basename(file) && /^ui-[a-f0-9]{64}\.mjs$/.test(prior)) {
-      await rm(join(opts.outDir, prior), { force: true });
-    }
-  }
-  return { file, integrity };
+  return writeHashedBundle({
+    outDir: opts.outDir,
+    fileName: (integrity) => `ui-${integrity}.mjs`,
+    priorPattern: /^ui-[a-f0-9]{64}\.mjs$/,
+    contents: output.contents,
+  });
 }

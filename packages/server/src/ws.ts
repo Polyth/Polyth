@@ -5,7 +5,6 @@ import type { IncomingMessage } from "node:http";
 import type {
   AuthPrincipal,
   ClientSettingsDto,
-  InstalledPluginDto,
   NotificationRecord,
   PackageDescriptorDto,
   SessionEvent,
@@ -479,12 +478,12 @@ export function createWsGateway(
         send(ws, { type: "notification/added", notification: record });
       }
     },
-    pluginChanged(plugin: InstalledPluginDto) {
+    pluginChanged(packageId: string) {
       if (closed) return;
       for (const [ws, sub] of clients) {
         const live = currentPrincipal(ws, sub);
         if (!live || !isLocalUiPrincipal(live)) continue;
-        send(ws, { type: "plugin/changed", plugin });
+        send(ws, { type: "plugin/changed", packageId });
       }
     },
     packageChanged(pkg: PackageDescriptorDto) {

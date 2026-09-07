@@ -1,10 +1,14 @@
+import { register } from "node:module";
+register("./tsxHooks.mjs", import.meta.url);
+
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { InstalledPluginDto } from "@polyth/contracts";
 import type { ComponentType, ReactElement } from "react";
-import { initPluginBridge } from "../src/pluginBridge.ts";
 import { listSlots } from "../src/slots.ts";
 import type { SyncListener } from "../src/sync.ts";
+
+const { initPluginBridge } = await import("../src/pluginBridge.ts");
 
 const plugin = (enabled: boolean, uiIntegrity?: string): InstalledPluginDto => ({
   id: "test.bridge",
@@ -14,7 +18,7 @@ const plugin = (enabled: boolean, uiIntegrity?: string): InstalledPluginDto => (
   trust: "ui-only",
   enabled,
   status: enabled ? "ready" : "disabled",
-  capabilities: [],
+  permissions: { effective: [], requested: [] },
   contributions: [{
     slot: "widget.catalog",
     id: "test.bridge.widget",
@@ -36,7 +40,12 @@ const plugin = (enabled: boolean, uiIntegrity?: string): InstalledPluginDto => (
   } : {}),
 });
 
-test("plugin bridge registers initial catalog items and reconciles WS changes", async () => {
+const flush = async () => {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await new Promise<void>((resolve) => setImmediate(resolve));
+};
+
+test("plugin bridge registers initial catalog items and reconciles WS invalidation", async () => {
   let listener: SyncListener | null = null;
   const emit = (message: Parameters<SyncListener>[0]): void => {
     if (!listener) throw new Error("plugin sync listener is not registered");
@@ -48,8 +57,9 @@ test("plugin bridge registers initial catalog items and reconciles WS changes", 
       return () => { if (listener === callback) listener = null; };
     },
   };
+  let current = plugin(true);
   const dispose = await initPluginBridge(sync, {
-    pluginsList: async () => [plugin(true)],
+    pluginsList: async () => [current],
   });
 
   try {
@@ -60,13 +70,17 @@ test("plugin bridge registers initial catalog items and reconciles WS changes", 
     assert.equal(initial.meta?.pluginName, "Bridge Test");
     assert.equal(initial.render({}), "Plugin widget: Bridge Widget");
 
-    emit({ type: "plugin/changed", plugin: plugin(false) });
+    current = plugin(false);
+    emit({ type: "plugin/changed", packageId: "test.bridge" });
+    await flush();
     assert.equal(
       listSlots("widget.catalog").some((item) => item.id === "test.bridge.widget"),
       false,
     );
 
-    emit({ type: "plugin/changed", plugin: plugin(true) });
+    current = plugin(true);
+    emit({ type: "plugin/changed", packageId: "test.bridge" });
+    await flush();
     assert.equal(
       listSlots("widget.catalog").some((item) => item.id === "test.bridge.widget"),
       true,
@@ -80,6 +94,42 @@ test("plugin bridge registers initial catalog items and reconciles WS changes", 
     listSlots("widget.catalog").some((item) => item.id === "test.bridge.widget"),
     false,
   );
+});
+
+test("plugin/changed does not apply a Space-specific DTO from the wire", async () => {
+  let listener: SyncListener | null = null;
+  const emit = (message: Parameters<SyncListener>[0]): void => {
+    if (!listener) throw new Error("plugin sync listener is not registered");
+    listener(message);
+  };
+  const sync = {
+    onEvent(callback: SyncListener) {
+      listener = callback;
+      return () => { if (listener === callback) listener = null; };
+    },
+  };
+  const spaceA = plugin(true);
+  const spaceB = plugin(false);
+  let current = spaceB;
+  const dispose = await initPluginBridge(sync, {
+    pluginsList: async () => [current],
+  });
+  try {
+    assert.equal(listSlots("widget.catalog").some((item) => item.id === "test.bridge.widget"), false);
+    emit({ type: "plugin/changed", packageId: spaceA.id });
+    await flush();
+    assert.equal(
+      listSlots("widget.catalog").some((item) => item.id === "test.bridge.widget"),
+      false,
+      "Space B must refetch its own list, not apply another Space's grants",
+    );
+    current = plugin(true);
+    emit({ type: "plugin/changed", packageId: "test.bridge" });
+    await flush();
+    assert.equal(listSlots("widget.catalog").some((item) => item.id === "test.bridge.widget"), true);
+  } finally {
+    dispose();
+  }
 });
 
 test("plugin bridge resolves UI modules for contributions in every slot", async () => {
@@ -120,6 +170,37 @@ test("plugin bridge resolves UI modules for contributions in every slot", async 
   }
 });
 
+test("plugin bridge never loads host modules for sandboxed packages", async () => {
+  let loaded = false;
+  const sandboxed: InstalledPluginDto = {
+    ...plugin(true),
+    runtimeKind: "sandboxed",
+    contributions: [{
+      slot: "workspace.right.tabs",
+      id: "test.bridge.surface.main",
+      module: "sandbox-surface:main",
+      props: { pluginId: "test.bridge", surfaceId: "main", title: "Hello" },
+    }],
+    sandbox: {
+      url: `/api/plugins/test.bridge/sandbox/${"a".repeat(64)}/entry.js`,
+      integrity: "a".repeat(64),
+    },
+  };
+  const dispose = await initPluginBridge(undefined, {
+    pluginsList: async () => [sandboxed],
+    load: async () => {
+      loaded = true;
+      return { modules: {} };
+    },
+  });
+  try {
+    assert.equal(loaded, false);
+    assert.ok(listSlots("workspace.right.tabs").some((item) => item.id === "test.bridge.surface.main"));
+  } finally {
+    dispose();
+  }
+});
+
 test("plugin bridge reconciles integrity changes and ignores a disabled slow load", async () => {
   let listener: SyncListener | null = null;
   const emit = (message: Parameters<SyncListener>[0]): void => {
@@ -136,8 +217,9 @@ test("plugin bridge reconciles integrity changes and ignores a disabled slow loa
       return () => { if (listener === callback) listener = null; };
     },
   };
+  let current = plugin(true, "a".repeat(64));
   const dispose = await initPluginBridge(sync, {
-    pluginsList: async () => [plugin(true, "a".repeat(64))],
+    pluginsList: async () => [current],
     load: async (_pluginId, _url, integrity) => {
       loads++;
       if (integrity === "c".repeat(64)) await slow;
@@ -148,14 +230,18 @@ test("plugin bridge reconciles integrity changes and ignores a disabled slow loa
 
   try {
     assert.equal(loads, 1);
-    emit({ type: "plugin/changed", plugin: plugin(true, "b".repeat(64)) });
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    current = plugin(true, "b".repeat(64));
+    emit({ type: "plugin/changed", packageId: "test.bridge" });
+    await flush();
     assert.equal(loads, 2, "a new integrity changes the reconciliation signature");
 
-    emit({ type: "plugin/changed", plugin: plugin(true, "c".repeat(64)) });
-    emit({ type: "plugin/changed", plugin: plugin(false, "c".repeat(64)) });
+    current = plugin(true, "c".repeat(64));
+    emit({ type: "plugin/changed", packageId: "test.bridge" });
+    current = plugin(false, "c".repeat(64));
+    emit({ type: "plugin/changed", packageId: "test.bridge" });
     releaseSlow();
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    await flush();
+    await flush();
     assert.equal(
       listSlots("widget.catalog").some((item) => item.id === "test.bridge.widget"),
       false,

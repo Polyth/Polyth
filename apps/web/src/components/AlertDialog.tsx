@@ -37,6 +37,8 @@ export default function AlertDialog() {
         <p id={descriptionId}>{alert.message}</p>
         {alert.kind === "prompt" && (
           <TextInput
+            type={alert.secret ? "password" : "text"}
+            autoComplete={alert.secret ? "off" : undefined}
             value={value}
             placeholder={alert.placeholder}
             aria-label={alert.message}

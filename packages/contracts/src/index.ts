@@ -893,6 +893,8 @@ export const MODEL_VISIBLE_TYPES = [
   "tool/error",
   "question/asked",
   "question/answered",
+  "package/attached",
+  "package/context",
 ] as const;
 
 export interface ModelMessage {
@@ -3831,6 +3833,67 @@ export interface SecureSafeService {
   remove(id: string): Promise<boolean>;
   upsertByHandle(input: SecureSafeCreateInput): Promise<SecureSafeEntryDto>;
   syncForbiddenConfig(): Promise<SecureSafeManifest>;
+  /** Opaque host-owned secrets that never appear in list() or the Secure Safe UI. */
+  putOpaque(key: string, value: string): void;
+  getOpaque(key: string): string | null;
+  deleteOpaque(key: string): void;
+  deleteOpaqueByPrefix(prefix: string): void;
+}
+
+/** How a package's code executes. Bundled first-party packages are not
+ *  represented here — they use the workspace discovery path. */
+export type PackageRuntimeKind = "trusted-local" | "sandboxed";
+
+export interface PackageCapabilityConstraintDto {
+  origins?: string[];
+}
+
+export interface PackageCapabilityRequestDto {
+  name: string;
+  constraints?: PackageCapabilityConstraintDto;
+}
+
+export interface PackageCapabilityGrantDto {
+  name: string;
+  constraints?: PackageCapabilityConstraintDto;
+  grantedAt: number;
+  grantedBy?: string;
+}
+
+export interface PackageConnectionPublicDto {
+  id: string;
+  label: string;
+  kind: "oauth" | "token";
+  status: "disconnected" | "connecting" | "connected" | "error";
+  account?: string;
+  error?: string;
+}
+
+/** Browser-safe connection security fields. Never includes secrets. */
+export interface PackageConnectionSecurityDto {
+  kind: "oauth" | "token";
+  origins: string[];
+  authorizeUrl?: string;
+  tokenUrl?: string;
+  clientId?: string;
+  scopes?: string[];
+}
+
+export interface PackageConnectionReviewDto {
+  id: string;
+  label: string;
+  kind: "new" | "changed";
+  current?: PackageConnectionSecurityDto;
+  next: PackageConnectionSecurityDto;
+}
+
+export interface PackagePermissionsDto {
+  effective: string[];
+  requested: PackageCapabilityRequestDto[];
+  review?: {
+    capabilities: PackageCapabilityRequestDto[];
+    connections: PackageConnectionReviewDto[];
+  };
 }
 
 export interface InstalledPluginDto {
@@ -3842,13 +3905,21 @@ export interface InstalledPluginDto {
   enabled: boolean;
   status: "installed" | "loading" | "ready" | "error" | "disabled";
   update?: { version: string };
-  capabilities: string[];
   contributions: UiSlotItem[];
   /** Widget declarations owned by this plugin; absent on older registries. */
   widgets?: WidgetContributionDescriptor[];
   /** Browser-safe URL and content hash for the install-time UI bundle. */
   ui?: { url: string; integrity: string };
   lastError?: string;
+  runtimeKind?: PackageRuntimeKind;
+  description?: string;
+  icon?: string;
+  previousVersion?: string;
+  versions?: string[];
+  permissions: PackagePermissionsDto;
+  connections?: PackageConnectionPublicDto[];
+  /** Sandboxed UI bootstrap (integrity-addressed). Absent for host-module UI. */
+  sandbox?: { url: string; integrity: string };
 }
 
 // ---------------------------------------------------------------- browser (WP14)

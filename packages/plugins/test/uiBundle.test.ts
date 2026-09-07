@@ -12,7 +12,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { buildUiBundle, createPluginRegistry } from "../src/index.ts";
+import { buildUiBundle } from "../src/uiBundle.ts";
+import { createPluginRegistry } from "../src/index.ts";
 
 const fixtureDir = resolve(import.meta.dirname, "fixtures/test-ui-plugin");
 
@@ -80,16 +81,15 @@ test("managed install and reload publish only browser-safe UI metadata", async (
     `/api/plugins/test.ui-plugin/ui/${first.ui.integrity}.mjs`,
   );
   assert.equal("file" in first.ui, false, "DTO must not expose an install path");
-  const uiDir = join(installed, "test.ui-plugin", ".polyth", "ui");
+  const uiDir = join(registry.installDir("test.ui-plugin"), ".polyth", "ui");
   assert.deepEqual(readdirSync(uiDir), [`ui-${first.ui.integrity}.mjs`]);
 
   writeFileSync(
-    join(installed, "test.ui-plugin", "ui.tsx"),
+    join(registry.installDir("test.ui-plugin"), "ui.tsx"),
     'export const modules = { "test-ui-widget": () => "reloaded" };\n',
   );
-  const reloaded = await registry.reload("test.ui-plugin");
-  assert.ok(reloaded.ui);
-  assert.notEqual(reloaded.ui.integrity, first.ui.integrity);
-  assert.deepEqual(readdirSync(uiDir), [`ui-${reloaded.ui.integrity}.mjs`]);
+  const before = first.ui.integrity;
+  await assert.rejects(() => registry.reload("test.ui-plugin"), /integrity/);
+  assert.deepEqual(readdirSync(uiDir), [`ui-${before}.mjs`]);
   await registry.dispose();
 });

@@ -1,5 +1,5 @@
 import type { InstalledPluginDto } from "@polyth/contracts";
-import { createElement } from "react";
+import { createElement, useEffect, useState, type ComponentType } from "react";
 import { api } from "@polyth/session/web-api";
 import {
   loadPluginModule,
@@ -9,6 +9,23 @@ import {
 import { registerSlot } from "./slots.ts";
 import type { SyncClient } from "./sync.ts";
 import { tr } from "./i18n/index.ts";
+import { buttonClassName } from "./components/ui/buttonClassName.ts";
+import { setRailPlugin } from "./store.ts";
+import { disposePackageRuntimes } from "./packages/sandbox/runtime.ts";
+import { requestComposerAction } from "./packages/sandbox/composerAction.ts";
+
+function SandboxHostSlot(props: { plugin: InstalledPluginDto; surfaceId: string }) {
+  const [Frame, setFrame] = useState<ComponentType<{ plugin: InstalledPluginDto; surfaceId: string }> | null>(null);
+  useEffect(() => {
+    let active = true;
+    void import("./packages/sandbox/SandboxFrame.tsx").then((mod) => {
+      if (active) setFrame(() => mod.SandboxFrame);
+    });
+    return () => { active = false; };
+  }, []);
+  if (!Frame) return createElement("div", { className: "polyth-sandbox-pending", "aria-busy": true });
+  return createElement(Frame, props);
+}
 
 type PluginSync = Pick<SyncClient, "onEvent">;
 type SlotRegistrar = typeof registerSlot;
@@ -30,9 +47,9 @@ interface PluginRegistration {
 }
 
 /**
- * Mirrors server-owned plugin descriptors into the web slot registry. UI
- * bundles turn manifest module keys into React components; catalog items keep
- * their metadata placeholder when a plugin has no matching exported module.
+ * Mirrors server-owned plugin descriptors into the web slot registry. Trusted
+ * UI bundles turn module keys into React components. Sandboxed packages never
+ * import into the host React realm — they render through SandboxFrame.
  */
 export async function initPluginBridge(
   sync?: PluginSync,
@@ -44,11 +61,11 @@ export async function initPluginBridge(
   const resolve = dependencies.resolve ?? resolveModule;
   const unload = dependencies.unload ?? unloadPluginModule;
   const active = new Map<string, PluginRegistration>();
-  const queued = new Map<string, InstalledPluginDto>();
   const generations = new Map<string, number>();
   const known = new Set<string>();
-  let loading = true;
   let disposed = false;
+  let refreshing = false;
+  let refreshQueued = false;
 
   const nextGeneration = (pluginId: string): number => {
     const generation = (generations.get(pluginId) ?? 0) + 1;
@@ -63,6 +80,7 @@ export async function initPluginBridge(
       current.unregister[index]!();
     }
     active.delete(pluginId);
+    disposePackageRuntimes(pluginId);
   };
 
   const registerItems = (
@@ -72,9 +90,8 @@ export async function initPluginBridge(
   ): void => {
     if (disposed || generations.get(plugin.id) !== generation) return;
     const disposers: Array<() => void> = [];
+    const sandboxed = plugin.runtimeKind === "sandboxed";
     for (const item of plugin.contributions) {
-      const component = resolve(plugin.id, item.module);
-      if (!component && item.slot !== "widget.catalog") continue;
       const meta: Record<string, unknown> = {
         ...(item.props ?? {}),
         pluginId: plugin.id,
@@ -85,12 +102,20 @@ export async function initPluginBridge(
       const title = typeof meta.title === "string"
         ? meta.title
         : item.id.replace(/[._-]+/g, " ");
+      let render = sandboxed
+        ? sandboxRender(plugin, item.module, meta)
+        : (() => {
+          const component = resolve(plugin.id, item.module);
+          if (!component && item.slot !== "widget.catalog") return null;
+          return component
+            ? (props: Record<string, unknown>) => createElement(component, { ...(item.props ?? {}), ...props })
+            : () => tr("pluginbridge.pluginWidgetValue", { title });
+        })();
+      if (!render) continue;
       disposers.push(register(
         item.slot,
         item.id,
-        component
-          ? (props) => createElement(component, { ...(item.props ?? {}), ...props })
-          : () => tr("pluginbridge.pluginWidgetValue", { title }),
+        render,
         item.order ?? 0,
         meta,
       ));
@@ -102,10 +127,14 @@ export async function initPluginBridge(
     known.add(plugin.id);
     const signature = JSON.stringify({
       name: plugin.name,
+      version: plugin.version,
       enabled: plugin.enabled,
       status: plugin.status,
       contributions: plugin.contributions,
+      runtimeKind: plugin.runtimeKind ?? null,
+      permissions: plugin.permissions.effective,
       ui: plugin.ui ? { url: plugin.ui.url, integrity: plugin.ui.integrity } : null,
+      sandbox: plugin.sandbox ? { url: plugin.sandbox.url, integrity: plugin.sandbox.integrity } : null,
     });
     if (active.get(plugin.id)?.signature === signature) return;
     const generation = nextGeneration(plugin.id);
@@ -115,7 +144,7 @@ export async function initPluginBridge(
       return;
     }
 
-    if (plugin.ui) {
+    if (plugin.runtimeKind !== "sandboxed" && plugin.ui) {
       try {
         await load(plugin.id, plugin.ui.url, plugin.ui.integrity);
       } catch {
@@ -127,22 +156,39 @@ export async function initPluginBridge(
     registerItems(plugin, signature, generation);
   };
 
+  const refreshFromServer = async (): Promise<void> => {
+    if (disposed) return;
+    if (refreshing) {
+      refreshQueued = true;
+      return;
+    }
+    refreshing = true;
+    try {
+      do {
+        refreshQueued = false;
+        const plugins = await pluginsList();
+        if (disposed) return;
+        const listed = new Set(plugins.map((plugin) => plugin.id));
+        for (const pluginId of [...active.keys()]) {
+          if (!listed.has(pluginId)) {
+            unregister(pluginId);
+            unload(pluginId);
+          }
+        }
+        await Promise.all(plugins.map(reconcile));
+      } while (refreshQueued && !disposed);
+    } finally {
+      refreshing = false;
+    }
+  };
+
   const offSync = sync?.onEvent((message) => {
     if (message.type !== "plugin/changed") return;
-    if (loading) queued.set(message.plugin.id, message.plugin);
-    else void reconcile(message.plugin);
+    void refreshFromServer();
   }) ?? (() => {});
 
   try {
-    const plugins = await pluginsList();
-    const listed = new Set(plugins.map((plugin) => plugin.id));
-    for (const pluginId of [...active.keys()]) {
-      if (!listed.has(pluginId)) unregister(pluginId);
-    }
-    await Promise.all(plugins.map(reconcile));
-    loading = false;
-    await Promise.all([...queued.values()].map(reconcile));
-    queued.clear();
+    await refreshFromServer();
   } catch (error) {
     offSync();
     throw error;
@@ -157,4 +203,39 @@ export async function initPluginBridge(
       unload(pluginId);
     }
   };
+}
+
+function firstSandboxSurfaceId(plugin: InstalledPluginDto): string {
+  for (const item of plugin.contributions) {
+    if (item.module.startsWith("sandbox-surface:")) {
+      return item.module.slice("sandbox-surface:".length);
+    }
+  }
+  return "main";
+}
+
+function sandboxRender(
+  plugin: InstalledPluginDto,
+  moduleKey: string,
+  meta: Record<string, unknown>,
+) {
+  if (moduleKey.startsWith("sandbox-action:")) {
+    const actionId = moduleKey.slice("sandbox-action:".length);
+    const surface = firstSandboxSurfaceId(plugin);
+    const label = typeof meta.label === "string" ? meta.label : plugin.name;
+    return () => createElement("button", {
+      type: "button",
+      className: buttonClassName({ size: "sm", variant: "ghost" }),
+      onClick: () => {
+        requestComposerAction(plugin.id, actionId, surface);
+        setRailPlugin(`slot:${plugin.id}.surface.${surface}`);
+      },
+    }, label);
+  }
+  const surfaceId = moduleKey.startsWith("sandbox-surface:")
+    ? moduleKey.slice("sandbox-surface:".length)
+    : typeof meta.surfaceId === "string"
+      ? meta.surfaceId
+      : moduleKey;
+  return () => createElement(SandboxHostSlot, { plugin, surfaceId });
 }

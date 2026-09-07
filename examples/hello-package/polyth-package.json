@@ -1,0 +1,18 @@
+{
+  "manifestVersion": 1,
+  "id": "com-example-hello",
+  "version": "1.0.0",
+  "engines": { "polyth": ">=0.1.0" },
+  "display": {
+    "name": "Hello",
+    "description": "Sandboxed hello package that renders Remote UI."
+  },
+  "runtime": {
+    "kind": "sandboxed",
+    "ui": { "entry": "src/index.ts" }
+  },
+  "contributes": {
+    "surfaces": [{ "id": "main", "title": "Hello" }]
+  },
+  "capabilities": ["ui.render", "ui.toast"]
+}

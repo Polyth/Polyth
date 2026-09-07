@@ -13,6 +13,7 @@ const INFRASTRUCTURE_PACKAGES = new Set([
   "backend-opencode",
   "contracts",
   "kernel",
+  "package-sdk",
   "server",
   "session",
   "web-sdk",

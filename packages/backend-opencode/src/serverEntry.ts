@@ -37,7 +37,7 @@ export default function registerPackage(host: ServerPackageHost) {
     runtime: openCodeRuntime,
     invalidateModels: () => catalog?.invalidateModels(),
   });
-  const restart = events?.onRestart(async (runtime) => {
+  const restart = events?.onRestart?.(async (runtime) => {
     const endpoint = await runtime.endpoint?.();
     auth.notifyRuntimeChange(endpoint);
   });

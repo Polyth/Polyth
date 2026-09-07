@@ -30,6 +30,8 @@ import type {
   OpenCodePluginImportResponseDto,
   OpenCodePluginListResponseDto,
   OpenCodePluginRemoveResponseDto,
+  PackageCapabilityRequestDto,
+  PackageConnectionPublicDto,
   PackageDescriptorDto,
   ProviderAuthCapabilitiesDto,
   ProviderAuthView,
@@ -771,6 +773,30 @@ export const api = {
   pluginsRemove: (id: string) => jfetch<{ ok: boolean }>(`/api/plugins/${encodeURIComponent(id)}`, { method: "DELETE" }),
   pluginsLogs: (id: string, after = 0) =>
     jfetch<Array<{ at: number; line: string }>>(`/api/plugins/${encodeURIComponent(id)}/logs?after=${after}`),
+  pluginsGrant: (id: string, capabilities?: string[], connections?: string[]) =>
+    jfetch<InstalledPluginDto>(`/api/plugins/${encodeURIComponent(id)}/grants`, json("POST", {
+      ...(capabilities ? { capabilities } : {}),
+      ...(connections ? { connections } : {}),
+    })),
+  pluginsUpdate: (id: string) =>
+    jfetch<InstalledPluginDto>(`/api/plugins/${encodeURIComponent(id)}/update`, json("POST", {})),
+  pluginsRollback: (id: string, version?: string) =>
+    jfetch<InstalledPluginDto>(`/api/plugins/${encodeURIComponent(id)}/rollback`, json("POST", version ? { version } : {})),
+  pluginsRpc: (id: string, method: string, payload?: unknown, ctx?: { sessionId?: string; projectId?: string }) =>
+    jfetch<{ ok: boolean; payload?: unknown; error?: { code: string; message: string } }>(
+      `/api/plugins/${encodeURIComponent(id)}/rpc`,
+      json("POST", { method, payload, ...(ctx ?? {}) }),
+    ),
+  pluginsSetConnectionToken: (id: string, connectionId: string, token: string) =>
+    jfetch<PackageConnectionPublicDto>(
+      `/api/plugins/${encodeURIComponent(id)}/connections/${encodeURIComponent(connectionId)}`,
+      json("POST", { token }),
+    ),
+  pluginsStartOauth: (id: string, connectionId: string) =>
+    jfetch<PackageConnectionPublicDto & { url?: string }>(
+      `/api/plugins/${encodeURIComponent(id)}/connections/${encodeURIComponent(connectionId)}/oauth`,
+      json("POST", {}),
+    ),
 
   replyPermission: (id: string, requestId: string, reply: "once" | "always" | "reject", scope?: "session" | "project") =>
     jfetch<void>(`/api/sessions/${id}/permission/${encodeURIComponent(requestId)}`, json("POST", { reply, ...(scope ? { scope } : {}) })),

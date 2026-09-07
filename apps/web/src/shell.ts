@@ -12,7 +12,7 @@ import {
   getGroupingMode, listGroupings, registerGrouping, setGroupingMode,
   type GroupingDescriptor,
 } from "./sidebarPrefs.ts";
-import { announce } from "./components/a11y/live.tsx";
+import { announce } from "./components/a11y/announce.ts";
 import { listCapabilities, subscribeCapabilities, type CapabilityDescriptor } from "./capabilities.ts";
 import "./builtinCapabilities.ts";
 import { tr } from "./i18n/index.ts";

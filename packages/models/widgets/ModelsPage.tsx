@@ -294,7 +294,7 @@ export default function ModelsPage() {
       </div>
       <details className="provider-org-login-wrap">
         <summary>{tr("settings.modelspage.organizationLogin")}</summary>
-        {options.authCapabilities?.discovery.status === "unavailable" ? (
+        {options.authCapabilities?.discovery?.status === "unavailable" ? (
           <p className="muted">{tr("settings.modelspage.authManagedByDeployment")}</p>
         ) : (
           <OrganizationLogin onDone={() => { void refreshCatalog(); void loadProviderOptions({ force: true, quiet: true }); }} />

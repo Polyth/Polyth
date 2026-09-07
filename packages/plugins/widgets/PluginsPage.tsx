@@ -5,6 +5,9 @@ import type {
   OpenCodePluginConfigEntry,
   OpenCodePluginEntryDto,
   OpenCodePluginPreviewDto,
+  PackageCapabilityRequestDto,
+  PackageConnectionReviewDto,
+  PackageConnectionSecurityDto,
 } from "@polyth/contracts";
 import { confirmAlert } from "../../../apps/web/src/alerts.ts";
 import { EmptyState, PageHead } from "../../../apps/web/src/components/settings/parts.tsx";
@@ -12,6 +15,7 @@ import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { useWidgetCatalog } from "../../../apps/web/src/widgets/catalog.ts";
 import { useWidgetLayout } from "../../../apps/web/src/widgets/widgetLayout.ts";
 import { describePluginSpec, parseOpenCodePluginJson } from "./pluginImport.ts";
+import { isSupportedInstallSource } from "../src/installSourceContract.ts";
 import { Button, IconButton, Tabs, Textarea, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 import { CloseIcon } from "../../../apps/web/src/components/ui/icons.ts";
 
@@ -184,6 +188,82 @@ function PluginLogViewer({ id }: { id: string }) {
   );
 }
 
+function isInstallSource(value: string): boolean {
+  return isSupportedInstallSource(value);
+}
+
+function capabilityLine(capability: PackageCapabilityRequestDto): string {
+  const label = tr(`packages.plugins.capability.${capability.name}` as Parameters<typeof tr>[0]);
+  const origins = capability.constraints?.origins ?? [];
+  return origins.length > 0 ? `${label} (${origins.join(", ")})` : label;
+}
+
+function securityLine(label: string, value?: string | string[]): string | null {
+  if (!value || (Array.isArray(value) && value.length === 0)) return null;
+  return `${label}: ${Array.isArray(value) ? value.join(", ") : value}`;
+}
+
+function ConnectionSecurity({ value }: { value: PackageConnectionSecurityDto }) {
+  const lines = [
+    securityLine(tr("packages.plugins.kind"), value.kind),
+    securityLine(tr("packages.plugins.apiOrigins"), value.origins),
+    securityLine(tr("packages.plugins.oauthAuthorize"), value.authorizeUrl),
+    securityLine(tr("packages.plugins.oauthToken"), value.tokenUrl),
+    securityLine(tr("packages.plugins.oauthClientId"), value.clientId),
+    securityLine(tr("packages.plugins.oauthScopes"), value.scopes),
+  ].filter((line): line is string => Boolean(line));
+  return (
+    <ul>
+      {lines.map((line) => <li key={line}>{line}</li>)}
+    </ul>
+  );
+}
+
+function ConnectionReviewList({ items }: { items: PackageConnectionReviewDto[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="plugin-permission-block">
+      <strong>{tr("packages.plugins.connectionSecurity")}</strong>
+      {items.map((item) => (
+        <div key={item.id}>
+          <p>
+            {item.label}
+            {item.kind === "changed" ? ` — ${tr("packages.plugins.changed")}` : ` — ${tr("packages.plugins.new")}`}
+          </p>
+          {item.current && (
+            <>
+              <span className="muted">{tr("packages.plugins.current")}</span>
+              <ConnectionSecurity value={item.current} />
+            </>
+          )}
+          <span className="muted">{tr("packages.plugins.requested")}</span>
+          <ConnectionSecurity value={item.next} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PermissionList({
+  title,
+  items,
+}: {
+  title: string;
+  items: PackageCapabilityRequestDto[];
+}) {
+  if (items.length === 0) return null;
+  return (
+    <div className="plugin-permission-block">
+      <strong>{title}</strong>
+      <ul>
+        {items.map((item) => (
+          <li key={`${item.name}:${item.constraints?.origins?.join(",") ?? ""}`}>{capabilityLine(item)}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function ManagedPluginsSection() {
   const [plugins, setPlugins] = useState<InstalledPluginDto[]>([]);
   const [source, setSource] = useState("");
@@ -194,7 +274,7 @@ export function ManagedPluginsSection() {
   const [toast, setToast] = useState("");
   const widgets = useWidgetCatalog();
   const layout = useWidgetLayout();
-  const sourceValid = /^(?:npm|file):\S+$/.test(source.trim());
+  const sourceValid = isInstallSource(source);
   const refresh = () => void api.pluginsList().then(setPlugins);
   useEffect(() => { refresh(); }, []);
 
@@ -226,6 +306,60 @@ export function ManagedPluginsSection() {
     refresh();
   };
 
+  const approveReview = async (plugin: InstalledPluginDto, enableAfter = false) => {
+    setError("");
+    const review = plugin.permissions.review;
+    if (!review) return;
+    try {
+      const capabilities = review.capabilities.map((item) => item.name);
+      const connections = review.connections.map((item) => item.id);
+      await api.pluginsGrant(plugin.id, capabilities, connections);
+      if (enableAfter) {
+        const enabled = await api.pluginsOp(plugin.id, "enable");
+        setToast(tr("settings.pages.pluginEnabledSeeContributions", { name: enabled.name }));
+      } else if (plugin.update) {
+        setToast(tr("settings.pages.pluginReloaded", { name: plugin.name }));
+      } else {
+        setToast(tr("settings.pages.pluginReloaded", { name: plugin.name }));
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    refresh();
+  };
+
+  const stageUpdate = async (id: string) => {
+    setError("");
+    try {
+      const plugin = await api.pluginsUpdate(id);
+      if (plugin.permissions.review || plugin.update) {
+        setSelected(id);
+        setDetailTab("permissions");
+        setToast(tr("packages.plugins.additionalAccessRequested"));
+      } else {
+        setToast(tr("settings.pages.pluginReloaded", { name: plugin.name }));
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      const plugin = plugins.find((item) => item.id === id);
+      setError(plugin?.previousVersion
+        ? tr("packages.plugins.updateFailedRestored", { version: plugin.previousVersion })
+        : message);
+    }
+    refresh();
+  };
+
+  const rollback = async (id: string) => {
+    setError("");
+    try {
+      const plugin = await api.pluginsRollback(id);
+      setToast(tr("packages.plugins.updateFailedRestored", { version: plugin.version }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    refresh();
+  };
+
   const remove = async (plugin: InstalledPluginDto) => {
     const active = Object.values(layout.widgets).filter((placement) =>
       placement.visible
@@ -244,55 +378,96 @@ export function ManagedPluginsSection() {
     refresh();
   };
 
+  const openReview = (plugin: InstalledPluginDto) => {
+    setSelected(plugin.id);
+    setDetailTab("permissions");
+  };
+
   const selectedPlugin = plugins.find((plugin) => plugin.id === selected);
   const contributionCount = (plugin: InstalledPluginDto, prefix: string) =>
     plugin.contributions.filter((item) => item.slot.startsWith(prefix)).length;
+  const sandboxed = (plugin: InstalledPluginDto) => plugin.runtimeKind === "sandboxed";
+  const hasReview = (plugin: InstalledPluginDto) => Boolean(plugin.permissions.review);
+  const needsReviewToEnable = (plugin: InstalledPluginDto) =>
+    sandboxed(plugin) && !plugin.enabled && plugin.permissions.requested.some(
+      (item) => !plugin.permissions.effective.includes(item.name),
+    );
+  const detailTabs = (plugin: InstalledPluginDto) => {
+    const tabs: Array<{ id: string; label: string }> = [
+      { id: "overview", label: "Overview" },
+      { id: "permissions", label: "Permissions" },
+    ];
+    if ((plugin.connections?.length ?? 0) > 0 || plugin.contributions.length > 0) {
+      tabs.push({ id: "contributions", label: "Contributions" });
+    }
+    if (!sandboxed(plugin)) {
+      if (contributionCount(plugin, "widget.") > 0) tabs.push({ id: "widgets", label: "Widgets" });
+      if (contributionCount(plugin, "command") > 0) tabs.push({ id: "commands", label: "Commands" });
+      if (plugin.permissions.requested.length > 0) tabs.push({ id: "tools", label: "Tools" });
+      if (contributionCount(plugin, "settings.") > 0) tabs.push({ id: "settings", label: "Settings" });
+    }
+    return tabs;
+  };
 
   return (
     <div className="plugin-library" data-settings-item="plugins.managed">
       <div className="plugin-library-head">
-        <div><strong>{tr("settings.pages.managedPolythPlugins")}</strong><span>{tr("settings.pages.extensionsWithAPolythPlugin")}</span></div>
+        <div><strong>{tr("packages.plugins.packages")}</strong><span>{tr("packages.plugins.packagesHint")}</span></div>
         <span>{plugins.length} {tr("settings.pages.installed")}</span>
       </div>
       {plugins.length === 0 && (
         <EmptyState
-          title={tr("settings.pages.noManagedPluginsInstalled")}
-          body={tr("settings.pages.installManagedPluginHint")}
+          title={tr("packages.plugins.noPackages")}
+          body={tr("packages.plugins.sourceHint")}
         />
       )}
       <div className="plugin-card-grid">
         {plugins.map((p) => {
           const widgetCount = contributionCount(p, "widget.");
           const commandCount = contributionCount(p, "command");
-          const toolCount = p.capabilities.length;
+          const toolCount = p.permissions.requested.length;
           return (
             <article key={p.id} className={`plugin-card ${p.enabled ? "enabled" : "disabled"}`}>
               <button type="button" className="plugin-card-main" onClick={() => setSelected(p.id)}>
-                <span className="plugin-card-icon">{p.name.slice(0, 1).toUpperCase()}</span>
+                <span className="plugin-card-icon">{(p.icon ?? p.name).slice(0, 1).toUpperCase()}</span>
                 <span className="plugin-card-copy">
                   <strong>{p.name}</strong>
-                  <small>{p.source}</small>
+                  <small>{p.source} · {tr("settings.pages.v")}{p.version}</small>
                 </span>
-                <span className={`tag mcp-status ${p.status === "ready" ? "connected" : p.status === "error" ? "error" : "disabled"}`}>
-                  {p.status === "ready"
-                    ? tr("settings.pages.ready")
-                    : p.status === "error"
-                      ? tr("common.error")
-                      : p.status === "disabled"
-                        ? tr("settings.packagespage.disabled")
+                <span className={`tag mcp-status ${!p.enabled ? "disabled" : p.status === "ready" ? "connected" : p.status === "error" ? "error" : "disabled"}`}>
+                  {!p.enabled
+                    ? tr("packages.plugins.disabledInThisSpace")
+                    : p.status === "ready"
+                      ? tr("settings.pages.ready")
+                      : p.status === "error"
+                        ? tr("common.error")
                         : p.status}
                 </span>
-                <p>{p.lastError || tr("settings.pages.pluginContributionsCount", {
+                <p>{p.lastError || p.description || tr("settings.pages.pluginContributionsCount", {
                   name: p.name,
                   count: p.contributions.length,
                 })}</p>
                 <span className="plugin-card-counts">
-                  <b>{widgetCount} {tr("settings.pages.widgets")}</b><b>{commandCount} {tr("settings.pages.commands")}</b><b>{toolCount} {tr("settings.pages.tools")}</b>
+                  <b>{sandboxed(p) ? tr("packages.plugins.sandboxedPackage") : tr("packages.plugins.trustedLocalPackage")}</b>
+                  <b>{widgetCount} {tr("settings.pages.widgets")}</b>
+                  <b>{commandCount} {tr("settings.pages.commands")}</b>
+                  <b>{toolCount} {tr("settings.pages.tools")}</b>
                 </span>
               </button>
               <div className="plugin-card-actions">
-                {p.update && <Button size="sm" onClick={() => void op(p.id, "reload")}>{tr("settings.pages.updateTo")}{" "}{p.update.version}</Button>}
-                <Button size="sm" onClick={() => void op(p.id, p.enabled ? "disable" : "enable")}>{p.enabled ? tr("settings.pages.disable") : tr("settings.pages.enable")}</Button>
+                {p.update && hasReview(p)
+                  ? <Button size="sm" onClick={() => openReview(p)}>{tr("packages.plugins.reviewUpdate")}</Button>
+                  : p.update
+                    ? <Button size="sm" onClick={() => void stageUpdate(p.id)}>{tr("settings.pages.updateTo")}{" "}{p.update.version}</Button>
+                    : null}
+                {p.previousVersion && (
+                  <Button size="sm" onClick={() => void rollback(p.id)}>{tr("packages.plugins.rollback")}</Button>
+                )}
+                {p.enabled
+                  ? <Button size="sm" onClick={() => void op(p.id, "disable")}>{tr("settings.pages.disable")}</Button>
+                  : needsReviewToEnable(p)
+                    ? <Button size="sm" onClick={() => openReview(p)}>{tr("packages.plugins.reviewAndEnable")}</Button>
+                    : <Button size="sm" onClick={() => void op(p.id, "enable")}>{tr("settings.pages.enable")}</Button>}
                 <Button size="sm" onClick={() => setLogsFor(logsFor === p.id ? null : p.id)}>{tr("settings.pages.logs")}</Button>
                 <Button size="sm" variant="danger" onClick={() => void remove(p)}>{tr("settings.pages.uninstall")}</Button>
               </div>
@@ -303,8 +478,11 @@ export function ManagedPluginsSection() {
       {selectedPlugin && (
         <section className="plugin-detail">
           <header>
-            <span className="plugin-card-icon">{selectedPlugin.name.slice(0, 1).toUpperCase()}</span>
-            <div><strong>{selectedPlugin.name}</strong><small>{tr("settings.pages.v")}{selectedPlugin.version} · {selectedPlugin.source}</small></div>
+            <span className="plugin-card-icon">{(selectedPlugin.icon ?? selectedPlugin.name).slice(0, 1).toUpperCase()}</span>
+            <div>
+              <strong>{selectedPlugin.name}</strong>
+              <small>{tr("settings.pages.v")}{selectedPlugin.version} · {selectedPlugin.source}</small>
+            </div>
             <IconButton icon={CloseIcon} size="sm" label={tr("settings.pages.closePluginDetails")} onClick={() => setSelected(null)} />
           </header>
           <Tabs
@@ -312,19 +490,81 @@ export function ManagedPluginsSection() {
             className="plugin-detail-tabs ui-scroll-tabs"
             label={tr("settings.pages.pluginContributionsCount", { name: selectedPlugin.name, count: selectedPlugin.contributions.length })}
             value={detailTab}
-            tabs={(["overview", "widgets", "commands", "tools", "settings", "permissions", "contributions"] as const).map((tab) => ({
-              id: tab,
-              label: tab[0]!.toUpperCase() + tab.slice(1),
-            }))}
+            tabs={detailTabs(selectedPlugin)}
             onChange={(tab) => setDetailTab(tab as typeof detailTab)}
           />
           <div className="plugin-detail-body">
-            {detailTab === "overview" && <p>{selectedPlugin.enabled ? tr("settings.pages.enabledAndReadyToContributeToYour") : tr("settings.pages.disabledExistingLayoutPlacementsAreKeptUntil")}</p>}
+            {detailTab === "overview" && (
+              <div className="plugin-permission-block">
+                <p className="plugin-trust-copy">
+                  <span className={`tag plugin-trust trust-${selectedPlugin.trust}`}>
+                    {sandboxed(selectedPlugin)
+                      ? tr("packages.plugins.sandboxedPackage")
+                      : tr("packages.plugins.trustedLocalPackage")}
+                  </span>
+                  {" "}
+                  {sandboxed(selectedPlugin)
+                    ? tr("packages.plugins.sandboxedPackageHint")
+                    : tr("packages.plugins.trustedLocalPackageHint")}
+                </p>
+                <p>{selectedPlugin.description}</p>
+                <p>{selectedPlugin.enabled
+                  ? tr("settings.pages.enabledAndReadyToContributeToYour")
+                  : tr("settings.pages.disabledExistingLayoutPlacementsAreKeptUntil")}</p>
+                {selectedPlugin.lastError && <p className="form-error">{selectedPlugin.lastError}</p>}
+                {selectedPlugin.connections && selectedPlugin.connections.length > 0 && (
+                  <ul>
+                    {selectedPlugin.connections.map((connection) => (
+                      <li key={connection.id}>{connection.label}: {connection.status}{connection.account ? ` (${connection.account})` : ""}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
             {detailTab === "widgets" && <p>{contributionCount(selectedPlugin, "widget.")} {tr("settings.pages.widgetContributionsInstallingAPluginNeverInserts")}</p>}
             {detailTab === "commands" && <p>{contributionCount(selectedPlugin, "command")} {tr("settings.pages.commandContributions")}</p>}
-            {detailTab === "tools" && <p>{selectedPlugin.capabilities.length ? selectedPlugin.capabilities.join(", ") : tr("settings.pages.noDeclaredTools")}</p>}
+            {detailTab === "tools" && (
+              <p>
+                {selectedPlugin.permissions.requested.length
+                  ? selectedPlugin.permissions.requested.map(capabilityLine).join(", ")
+                  : tr("settings.pages.noDeclaredTools")}
+              </p>
+            )}
             {detailTab === "settings" && <p>{contributionCount(selectedPlugin, "settings.")} {tr("settings.pages.settingsPagesOrControls")}</p>}
-            {detailTab === "permissions" && <p><span className={`tag plugin-trust trust-${selectedPlugin.trust}`}>{selectedPlugin.trust}</span> {tr("settings.pages.permissionsAreRequestedWhenThePluginNeeds")}</p>}
+            {detailTab === "permissions" && (
+              <div>
+                <p className="plugin-trust-copy">
+                  {sandboxed(selectedPlugin)
+                    ? tr("packages.plugins.grantToEnable")
+                    : tr("settings.pages.permissionsAreRequestedWhenThePluginNeeds")}
+                </p>
+                {selectedPlugin.permissions.review && (
+                  <>
+                    <PermissionList
+                      title={tr("packages.plugins.additionalAccessRequested")}
+                      items={selectedPlugin.permissions.review.capabilities}
+                    />
+                    <ConnectionReviewList items={selectedPlugin.permissions.review.connections} />
+                    <div className="plugin-card-actions">
+                      {selectedPlugin.update
+                        ? <Button size="sm" onClick={() => void approveReview(selectedPlugin)}>{tr("packages.plugins.reviewUpdate")}</Button>
+                        : !selectedPlugin.enabled
+                          ? <Button size="sm" onClick={() => void approveReview(selectedPlugin, true)}>{tr("packages.plugins.reviewAndEnable")}</Button>
+                          : <Button size="sm" onClick={() => void approveReview(selectedPlugin)}>{tr("packages.plugins.approveAccess")}</Button>}
+                    </div>
+                  </>
+                )}
+                <PermissionList
+                  title={tr("packages.plugins.requestedAccess")}
+                  items={selectedPlugin.permissions.requested}
+                />
+                <p>
+                  {sandboxed(selectedPlugin)
+                    ? tr("packages.plugins.doesNotRequestServerExecution")
+                    : tr("packages.plugins.trustedLocalPackageHint")}
+                </p>
+              </div>
+            )}
             {detailTab === "contributions" && (
               <ul>{selectedPlugin.contributions.map((item) => <li key={`${item.slot}:${item.id}`}><code>{item.slot}</code> {item.id}</li>)}</ul>
             )}
@@ -336,12 +576,13 @@ export function ManagedPluginsSection() {
         <TextInput
           uiSize="sm"
           value={source}
-          placeholder={tr("settings.pages.npmScopeName100Or")}
+          placeholder={tr("packages.plugins.sourceHint")}
+          aria-label={tr("packages.plugins.addPackage")}
           aria-invalid={source.length > 0 && !sourceValid ? true : undefined}
           onChange={(e) => setSource(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && sourceValid) void install(); }}
         />
-        <Button size="sm" disabled={!sourceValid} onClick={() => void install()}>{tr("settings.pages.install")}</Button>
+        <Button size="sm" disabled={!sourceValid} onClick={() => void install()}>{tr("packages.plugins.addPackage")}</Button>
       </div>
       {error && <div className="form-error">{error}</div>}
       {toast && <div className="plugin-toast" role="status"><span>{toast}</span><Button size="sm" variant="ghost" onClick={() => setToast("")}>{tr("settings.pages.dismiss")}</Button></div>}
@@ -352,7 +593,7 @@ export function ManagedPluginsSection() {
 export default function PluginsPage() {
   return (
     <div className="pkg-plugins">
-      <PageHead title="Plugins" blurb="Configure OpenCode runtime plugins or install managed Polyth UI extensions." />
+      <PageHead title={tr("packages.plugins.pageTitle")} blurb={tr("packages.plugins.pageBlurb")} />
       <OpenCodePluginsSection />
       <ManagedPluginsSection />
     </div>

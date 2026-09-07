@@ -22,6 +22,13 @@ export function parseAppUrl(pathname: string, search = ""): AppLocation {
   return out;
 }
 
+/** Settings deep-link used by package OAuth callbacks (`/?settings=plugins`). */
+export function settingsPageFromSearch(search = ""): string | null {
+  const page = new URLSearchParams(search.startsWith("?") || search.length === 0 ? search : `?${search}`).get("settings");
+  if (!page || !/^[a-z][a-z0-9-]*$/i.test(page)) return null;
+  return page;
+}
+
 /** Canonical URL for the current selection ("/" when nothing is active). */
 export function formatAppUrl(projectId: string | null, sessionId: string | null): string {
   if (!projectId) return "/";

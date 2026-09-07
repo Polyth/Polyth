@@ -6,14 +6,13 @@ import { once } from "node:events";
 import type { Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { InstalledPluginDto } from "@polyth/contracts";
 import { createHttpServer } from "../src/http.ts";
 import { pluginAssetRoutes } from "../../plugins/src/serverEntry.ts";
 import { testTenancy } from "./support/spaces.ts";
 
 const tenancy = await testTenancy();
 
-test("plugin UI assets require enabled matching metadata and are immutable", async () => {
+test("plugin UI assets are integrity-addressed even when the process flag is disabled", async () => {
   const root = mkdtempSync(join(tmpdir(), "polyth-plugin-assets-"));
   const pluginsDir = join(root, "plugins");
   const webDist = join(root, "web");
@@ -24,19 +23,10 @@ test("plugin UI assets require enabled matching metadata and are immutable", asy
   mkdirSync(webDist);
   writeFileSync(join(assetDir, `ui-${integrity}.mjs`), contents);
 
-  const plugin: InstalledPluginDto = {
+  const plugin = {
     id: "test.ui",
-    name: "Test UI",
-    version: "1.0.0",
-    source: "file:test",
-    trust: "ui-only",
-    enabled: true,
-    status: "ready",
-    capabilities: [],
-    contributions: [],
     ui: {
       url: `/api/plugins/test.ui/ui/${integrity}.mjs`,
-      integrity,
     },
   };
   const server = createHttpServer({
@@ -46,8 +36,10 @@ test("plugin UI assets require enabled matching metadata and are immutable", asy
     webDist,
     version: "test",
     routes: [pluginAssetRoutes({
-      plugins: { list: () => [plugin] },
-      pluginsDir,
+      plugins: {
+        has: (id) => id === plugin.id,
+        installDir: () => join(pluginsDir, "test.ui"),
+      },
     })],
   });
   server.listen(0);
@@ -65,10 +57,6 @@ test("plugin UI assets require enabled matching metadata and are immutable", asy
       `${base}/api/plugins/test.ui/ui/${"b".repeat(64)}.mjs`,
     );
     assert.equal(mismatch.status, 404);
-
-    plugin.enabled = false;
-    const disabled = await fetch(`${base}${plugin.ui!.url}`);
-    assert.equal(disabled.status, 404);
   } finally {
     await new Promise<void>((resolve) => (server as Server).close(() => resolve()));
   }

@@ -20,6 +20,8 @@ export interface PackageDiscoveryDeps {
   discovered?: readonly DiscoveredServerPackage[];
   /** Shared host template; each package receives it with its own pluginId. */
   host: Omit<ServerPackageHost, "pluginId">;
+  /** Optional per-package host factory (used to attach infrastructure-only seams). */
+  hostFor?: (id: string) => ServerPackageHost;
   lifecycle: PackageLifecycle;
   routes: RouteRegistry;
   onError?: (id: string, error: unknown) => void;
@@ -60,7 +62,10 @@ export async function registerDiscoveredPackages(
   const packages = deps.discovered ?? await discoverServerPackages(deps.packagesDir);
   for (const discovered of packages) {
     try {
-      const pkg = await loadServerPackage(discovered, { ...deps.host, pluginId: discovered.id });
+      const pkg = await loadServerPackage(
+        discovered,
+        deps.hostFor?.(discovered.id) ?? { ...deps.host, pluginId: discovered.id },
+      );
       registerServerPackage(deps, discovered.id, pkg);
       registered.push(discovered.id);
     } catch (error) {

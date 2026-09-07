@@ -3814,6 +3814,17 @@ export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
         if (text) pushText("user", text);
         break;
       }
+      case "package/attached":
+      case "package/context": {
+        const titleRaw = String(d.title ?? "").trim();
+        const title = titleRaw || "Attached context";
+        const text = String(d.text ?? "");
+        const subtitleRaw = String(d.subtitle ?? "").trim();
+        const subtitle = subtitleRaw ? ` (${subtitleRaw})` : "";
+        const body = text.trim() ? `${title}${subtitle}\n${text}` : `${title}${subtitle}`;
+        if (body.trim()) pushText("user", body);
+        break;
+      }
     }
   }
 
