@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import http from "node:http";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -9,16 +9,20 @@ import {
   installRemoteOpenCode,
   probeRemoteOpenCode,
   ownedSshRuntimeIdentityKey,
-  acquireRemoteRuntimeLock,
   DEFAULT_REMOTE_RUNTIME_ROOT_EXPR,
-  REMOTE_STORAGE_MARKERS,
   OPENCODE_UPDATE_DISABLE_ENV,
   parseOpenCodeRuntimeMetadata,
+  type ManagedOpenCodeRuntime,
 } from "../src/index.ts";
+import { acquireRemoteRuntimeLock, REMOTE_STORAGE_MARKERS } from "../src/remoteStorage.ts";
+import { createKeyedRuntimeOwner } from "../../server/src/runtimeOccupancy.ts";
 import {
+  createDeferred,
   createFakeRemoteHost,
   TEST_REMOTE_DIGEST,
   TEST_REMOTE_DIGEST_B,
+  waitUntil,
+  type FakeRemoteStorageState,
 } from "./fakeRemoteRuntime.ts";
 
 const providerBody = {
@@ -109,7 +113,12 @@ test("remote runtime boots serve on the host, attaches through the forward, and 
     assert.equal(fake.guardianStartCommands.length, 1);
     assert.equal(fake.serveStartCommands.length, 1);
     const cmd = fake.serveStartCommands[0]!;
-    assert.ok(cmd.includes("cd '/home/dev/app'; opencode serve --hostname 127.0.0.1 --port 37001"), cmd);
+    assert.ok(cmd.includes("cd '/home/dev/app'"), cmd);
+    assert.ok(cmd.includes("setsid opencode serve --hostname 127.0.0.1 --port 37001"), cmd);
+    assert.ok(
+      fake.storage.serveLive && fake.storage.serveIdentity?.port === 37001,
+      "must publish a serve-process record with listen identity after spawn",
+    );
     assert.ok(
       cmd.includes("export OPENCODE_DB='/var/lib/polyth/runtimes/app/opencode.db'"),
       "remote owned runtime must export its exact isolated DB path",
@@ -122,7 +131,7 @@ test("remote runtime boots serve on the host, attaches through the forward, and 
     assert.ok(cmd.includes('oc_start "$OLD_PID"'), "must verify the recorded child start identity");
     assert.ok(cmd.includes('oc_exe "$OLD_PID"'), "must verify the recorded executable");
     assert.ok(cmd.includes('oc_cmd "$OLD_PID"'), "must verify the recorded command");
-    assert.match(cmd, /printf .*POLYTH_REMOTE_PID/s, "must record an exact instance token");
+    assert.match(cmd, /POLYTH_REMOTE_PID=/, "must record the remote serve pid");
     const dbProbe = fake.execCalls.find((call) => call.includes(" db path"));
     assert.ok(
       dbProbe?.includes(
@@ -159,16 +168,20 @@ test("remote runtime boots serve on the host, attaches through the forward, and 
     assert.equal(metadata?.binaryDigest, TEST_REMOTE_DIGEST);
     assert.equal(/session|message/i.test(fake.storage.metadata ?? ""), false);
     assert.ok(
-      cmd.includes(`.polyth-runtime-owner`),
-      "serve must record a runtime-directory owner token",
+      cmd.includes("write_pf()"),
+      "serve must write the process record atomically",
+    );
+    assert.ok(
+      cmd.includes("terminate_unpublished_child()"),
+      "PF publication failure must reap the unpublished child directly",
+    );
+    assert.ok(
+      cmd.includes('mv "$tmp" "$PF"'),
+      "every process-record mutation must rename into place",
     );
     assert.ok(
       cmd.includes("POLYTH_RUNTIME_OWNED="),
-      "a live owner must fail closed rather than being killed",
-    );
-    assert.ok(
-      cmd.includes(".polyth-runtime-lock"),
-      "serve must write the STARTING→RUNNING handoff after the owner file",
+      "a live serve-process record must fail closed rather than being killed",
     );
     // the forward targets the actual listen port
     assert.deepEqual(fake.forwards.map((f) => f.remotePort), [37001]);
@@ -182,15 +195,17 @@ test("remote runtime boots serve on the host, attaches through the forward, and 
     stub.server.close();
   }
   // dispose kills the remote pid, removes the pidfile, closes the channel and forward
-  const killExec = fake.execCalls.find((c) => c.includes('kill "$PID"'));
-  assert.ok(killExec, `expected a remote kill, got: ${fake.execCalls.join(" | ")}`);
+  const killExec = fake.execCalls.find((c) => c.includes("POLYTH_REMOTE_STOP_SERVE=1"));
+  assert.ok(killExec, `expected a remote terminate, got: ${fake.execCalls.join(" | ")}`);
+  assert.ok(killExec!.includes("kill -TERM"));
+  assert.ok(killExec!.includes("kill -KILL"));
+  assert.ok(killExec!.includes("wait_gone"));
   assert.ok(killExec!.includes('oc_start "$PID"'));
   assert.ok(killExec!.includes('oc_exe "$PID"'));
   assert.ok(killExec!.includes('oc_cmd "$PID"'));
-  assert.ok(killExec!.includes('rm -f "$PF"'));
-  const serveIndex = fake.startCommands.findIndex((command) => command.includes("opencode serve"));
-  assert.ok(serveIndex >= 0);
-  assert.ok(fake.killedHandles.includes(serveIndex));
+  assert.ok(killExec!.includes("remove_ours"));
+  assert.deepEqual(fake.storage.killedPids, ["4242"]);
+  assert.equal(fake.storage.serveLive, false);
   assert.equal(fake.forwards[0]!.cancelled, true);
 });
 
@@ -583,7 +598,7 @@ test("a live remote owner token fails closed instead of opening writable storage
       remotePath: "/srv/app",
       runtimeDir: "/var/lib/polyth/runtimes/owned",
     }),
-    /already owned|locked|held by a live serve/,
+    /already owned|locked|held by a live serve|startup owner is still alive/,
   );
   assert.equal(fake.serveStartCommands.length, 0);
 
@@ -594,7 +609,7 @@ test("a live remote owner token fails closed instead of opening writable storage
       remotePath: "/srv/app",
       runtimeDir: "/var/lib/polyth/runtimes/owned",
     }),
-    /owner record is a symlink/,
+    /owner record is a symlink|could not verify remote startup ownership/,
   );
   assert.equal(fake.serveStartCommands.length, 0);
 });
@@ -655,13 +670,8 @@ test("owned SSH startup fails closed without Linux process identity and never st
       error.code === "unavailable"
       && /Linux-compatible process identity/.test(error.message),
   );
-  assert.equal(fake.startCommands.length, 0);
+  assert.equal(fake.serveStartCommands.length, 0);
   assert.equal(fake.forwards.length, 0);
-  assert.equal(
-    fake.execCalls.some((call) => call.includes(REMOTE_STORAGE_MARKERS.acquireLock)),
-    false,
-    "process-identity failure must happen before the remote lock",
-  );
 });
 
 test("two simultaneous remote runtimes cannot share one runtimeDir", async () => {
@@ -714,105 +724,43 @@ test("two simultaneous remote runtimes cannot share one runtimeDir", async () =>
   }
 });
 
-test("stale remote lock steal uses exclusive reclaim mkdir", async () => {
-  assert.equal(REMOTE_STORAGE_MARKERS.lockGuardian, "POLYTH_REMOTE_LOCK_GUARDIAN=1");
-  const src = await readFile(new URL("../src/remoteStorage.ts", import.meta.url), "utf8");
-  const acquire = src.slice(
-    src.indexOf("const remoteLockGuardianCommand"),
-    src.indexOf("const withStartDeadline"),
-  );
-  const reclaimAt = acquire.indexOf('mkdir "$LOCK.reclaim"');
-  const rmAt = acquire.indexOf('rm -rf "$LOCK"', reclaimAt);
-  assert.ok(reclaimAt >= 0, "stale path must mkdir an exclusive reclaim dir");
-  assert.ok(rmAt > reclaimAt, "must not rm the lock before winning reclaim");
-  assert.match(acquire, /REMOTE_STORAGE_MARKERS\.lockGuardian/);
-  assert.match(acquire, /write_starting/);
-  assert.match(acquire, /id_state/);
-  assert.match(acquire, /STARTING_STATE/);
-  assert.match(acquire, /SERVE_STATE/);
-  assert.match(acquire, /verify-failed/);
-});
-
-test("stale lock recover needs complete identities and exclusive reclaim", async () => {
+test("incomplete serve-process record fails closed", async () => {
   const runtimeDir = "/var/lib/polyth/runtimes/stale-lock";
   const fake = createFakeHost({ stubPort: 1, runtimeDir });
   const dead = { token: "dead-token", pid: "9", start: "1", exe: "/bin/oc", cmd: "1:1" };
   const state = fake.storageAt(runtimeDir);
-  state.lockHeld = true;
-  state.lockToken = dead.token;
-  state.ownerKind = "file";
-  state.ownerLive = false;
-  state.ownerIdentity = { ...dead, pid: "" };
+  state.lockHeld = false;
+  state.serveIdentity = { ...dead, pid: "" };
 
   await assert.rejects(
-    () => acquireRemoteRuntimeLock(fake.host, runtimeDir, "next", "/home/dev/app"),
+    () => acquireRemoteRuntimeLock(fake.host, runtimeDir, "/home/dev/app"),
     /could not verify remote startup ownership/,
   );
-  assert.equal(state.lockHeld, true);
-  assert.equal(state.lockToken, dead.token);
-  assert.equal(state.lockReclaimHeld, false, "incomplete RUNNING owner must not start reclaim");
+  assert.equal(state.lockHeld, false);
 
-  state.ownerKind = "missing";
-  state.ownerIdentity = undefined;
-  state.startingIdentity = { ...dead, pid: "" };
-  state.startingLive = false;
+  state.serveIdentity = { ...dead };
+  state.serveLive = true;
   await assert.rejects(
-    () => acquireRemoteRuntimeLock(fake.host, runtimeDir, "next", "/home/dev/app"),
-    /could not verify remote startup ownership/,
+    () => acquireRemoteRuntimeLock(fake.host, runtimeDir, "/home/dev/app"),
+    /listen endpoint is unknown/,
   );
-  assert.equal(state.lockHeld, true);
-  assert.equal(state.lockToken, dead.token);
-  assert.equal(state.lockReclaimHeld, false, "incomplete STARTING identity must not start reclaim");
+  assert.equal(state.lockHeld, false);
 
-  state.startingIdentity = dead;
-  state.startingLive = false;
-  state.ownerKind = "file";
-  state.ownerIdentity = dead;
-  state.ownerLive = true;
-  await assert.rejects(
-    () => acquireRemoteRuntimeLock(fake.host, runtimeDir, "next", "/home/dev/app"),
-    /already owned|locked/,
-  );
-  assert.equal(state.lockHeld, true);
-  assert.equal(state.lockToken, dead.token);
-
-  state.ownerLive = false;
-  state.lockReclaimHeld = true;
-  await assert.rejects(
-    () => acquireRemoteRuntimeLock(fake.host, runtimeDir, "next", "/home/dev/app"),
-    /already owned|locked/,
-  );
-  assert.equal(state.lockHeld, true);
-  assert.equal(state.lockToken, dead.token, "must not rm while another process holds reclaim");
-
-  state.lockReclaimHeld = false;
-  state.ownerKind = "missing";
-  state.ownerIdentity = undefined;
-  state.startingIdentity = dead;
-  state.startingLive = false;
   state.serveLive = false;
   state.serveIdentity = undefined;
-  const lock = await acquireRemoteRuntimeLock(fake.host, runtimeDir, "next", "/home/dev/app");
+  const lock = await acquireRemoteRuntimeLock(fake.host, runtimeDir, "/home/dev/app");
   assert.equal(state.lockHeld, true);
-  assert.equal(state.lockToken, "next");
-  assert.equal(state.lockReclaimHeld, false);
-  assert.equal(state.startingLive, true);
-  await lock.guardian.kill();
+  await lock.release();
 });
 
-test("dead STARTING lock with no owner or serve is reclaimed by the next runtime", async () => {
+test("stale controller metadata does not block a free flock", async () => {
   const stub = await startStubServe();
   const directory = await mkdtemp(join(tmpdir(), "polyth-remote-crash-a-"));
   const runtimeDir = "/var/lib/polyth/runtimes/crash-a";
   const fake = createFakeHost({ stubPort: stub.port, runtimeDir });
   const dead = { token: "crash-a", pid: "8", start: "1", exe: "/bin/sh", cmd: "1:1" };
   const state = fake.storageAt(runtimeDir);
-  state.lockHeld = true;
-  state.lockToken = dead.token;
-  state.startingIdentity = dead;
-  state.startingLive = false;
-  state.ownerKind = "missing";
-  state.ownerLive = false;
+  state.lockHeld = false;
   state.serveLive = false;
   try {
     const runtime = await createRemoteOpenCodeRuntime({
@@ -824,9 +772,8 @@ test("dead STARTING lock with no owner or serve is reclaimed by the next runtime
       readyTimeoutMs: 5_000,
       listenTimeoutMs: 5_000,
     });
-    assert.equal(fake.serveStartCommands.length, 1, "Crash A recovery must start exactly one serve");
+    assert.equal(fake.serveStartCommands.length, 1, "a free flock must start exactly one serve");
     assert.equal(state.lockHeld, true);
-    assert.notEqual(state.lockToken, dead.token);
     await runtime.dispose();
   } finally {
     stub.server.close();
@@ -834,7 +781,7 @@ test("dead STARTING lock with no owner or serve is reclaimed by the next runtime
   }
 });
 
-test("live STARTING owner fails closed while the first runtime is still preparing", async () => {
+test("controller flock held during prepare blocks a second controller", async () => {
   const stub = await startStubServe();
   const directory = await mkdtemp(join(tmpdir(), "polyth-remote-hold-"));
   const runtimeDir = "/var/lib/polyth/runtimes/hold-starting";
@@ -856,7 +803,6 @@ test("live STARTING owner fails closed while the first runtime is still preparin
     await fake.whenLockHeld();
     const state = fake.storageAt(runtimeDir);
     assert.equal(state.lockHeld, true);
-    assert.equal(state.startingLive, true);
     assert.equal(fake.serveStartCommands.length, 0, "A must still be preparing when B starts");
 
     const second = createRemoteOpenCodeRuntime({
@@ -872,11 +818,11 @@ test("live STARTING owner fails closed while the first runtime is still preparin
       () => second,
       /already owned|locked|startup owner is still alive/,
     );
-    assert.equal(fake.serveStartCommands.length, 0, "live STARTING must not let B start serve");
+    assert.equal(fake.serveStartCommands.length, 0, "held flock must not let B start serve");
 
     fake.releaseHoldAfterLock();
     const runtime = await first;
-    assert.equal(fake.serveStartCommands.length, 1, "only the live STARTING owner may start serve");
+    assert.equal(fake.serveStartCommands.length, 1, "only the flock holder may start serve");
     await runtime.dispose();
   } finally {
     stub.server.close();
@@ -884,75 +830,12 @@ test("live STARTING owner fails closed while the first runtime is still preparin
   }
 });
 
-test("two simultaneous recoveries of a dead STARTING lock start exactly one serve", async () => {
-  const stub = await startStubServe();
-  const directory = await mkdtemp(join(tmpdir(), "polyth-remote-reclaim-race-"));
-  const runtimeDir = "/var/lib/polyth/runtimes/reclaim-race";
-  const fake = createFakeHost({
-    stubPort: stub.port,
-    runtimeDir,
-    awaitLockRivals: 2,
-  });
-  const dead = { token: "dead-starting", pid: "7", start: "1", exe: "/bin/sh", cmd: "1:1" };
-  const state = fake.storageAt(runtimeDir);
-  state.lockHeld = true;
-  state.lockToken = dead.token;
-  state.startingIdentity = dead;
-  state.startingLive = false;
-  state.ownerKind = "missing";
-  state.serveLive = false;
-  try {
-    const results = await Promise.allSettled([
-      createRemoteOpenCodeRuntime({
-        host: fake.host,
-        remotePath: "/home/dev/app",
-        runtimeDir,
-        leaseStateFile: join(directory, "a.lease.json"),
-        pickPort: () => 37321,
-        readyTimeoutMs: 5_000,
-        listenTimeoutMs: 5_000,
-      }),
-      createRemoteOpenCodeRuntime({
-        host: fake.host,
-        remotePath: "/home/dev/app",
-        runtimeDir,
-        leaseStateFile: join(directory, "b.lease.json"),
-        pickPort: () => 37322,
-        readyTimeoutMs: 5_000,
-        listenTimeoutMs: 5_000,
-      }),
-    ]);
-    const fulfilled = results.filter((result) => result.status === "fulfilled");
-    const rejected = results.filter((result) => result.status === "rejected");
-    assert.equal(fulfilled.length, 1, "exactly one recovery may win exclusive reclaim");
-    assert.equal(rejected.length, 1, "exactly one recovery must lose exclusive reclaim");
-    assert.match(
-      String((rejected[0] as PromiseRejectedResult).reason),
-      /already owned|locked|startup owner is still alive|could not reclaim/,
-    );
-    assert.equal(fake.serveStartCommands.length, 1);
-    await (fulfilled[0] as PromiseFulfilledResult<
-      Awaited<ReturnType<typeof createRemoteOpenCodeRuntime>>
-    >).value.dispose();
-  } finally {
-    stub.server.close();
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-test("Crash C: live serve pid with missing owner fails closed and does not start another serve", async () => {
+test("live serve-process record without a port fails closed and does not start another serve", async () => {
   const runtimeDir = "/var/lib/polyth/runtimes/crash-c";
   const fake = createFakeHost({ stubPort: 1, runtimeDir });
-  const deadStarting = { token: "dead-start", pid: "6", start: "1", exe: "/bin/sh", cmd: "1:1" };
   const liveServe = { token: "live-serve", pid: "4242", start: "200", exe: "/usr/bin/opencode", cmd: "3:4" };
   const state = fake.storageAt(runtimeDir);
-  state.lockHeld = true;
-  state.lockToken = deadStarting.token;
-  state.startingIdentity = deadStarting;
-  state.startingLive = false;
-  state.ownerKind = "missing";
-  state.ownerIdentity = undefined;
-  state.ownerLive = false;
+  state.lockHeld = false;
   state.serveIdentity = liveServe;
   state.serveLive = true;
   const serveBefore = fake.serveStartCommands.length;
@@ -962,15 +845,13 @@ test("Crash C: live serve pid with missing owner fails closed and does not start
       remotePath: "/home/dev/app",
       runtimeDir,
     }),
-    /already owned|locked/,
+    /listen endpoint is unknown/,
   );
   assert.equal(fake.serveStartCommands.length, serveBefore);
-  assert.equal(state.lockHeld, true);
-  assert.equal(state.lockToken, deadStarting.token);
-  assert.equal(state.lockReclaimHeld, false);
+  assert.equal(state.lockHeld, false);
 });
 
-test("dispose releases lock, owner, and STARTING so the next create succeeds", async () => {
+test("dispose releases the controller flock so the next create succeeds", async () => {
   const stub = await startStubServe();
   const directory = await mkdtemp(join(tmpdir(), "polyth-remote-dispose-"));
   const runtimeDir = "/var/lib/polyth/runtimes/dispose-lock";
@@ -988,11 +869,8 @@ test("dispose releases lock, owner, and STARTING so the next create succeeds", a
     await first.dispose();
     const state = fake.storageAt(runtimeDir);
     assert.equal(state.lockHeld, false);
-    assert.equal(state.lockToken, undefined);
-    assert.equal(state.startingIdentity, undefined);
-    assert.equal(state.startingLive, false);
-    assert.equal(state.ownerKind, "missing");
-    assert.equal(state.ownerLive, false);
+    assert.equal(state.serveLive, false);
+    assert.equal(state.serveIdentity, undefined);
 
     const second = await createRemoteOpenCodeRuntime({
       host: fake.host,
@@ -1009,4 +887,957 @@ test("dispose releases lock, owner, and STARTING so the next create succeeds", a
     stub.server.close();
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("orphan live OpenCode with a dead controller is adopted without a second serve", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-remote-adopt-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/adopt";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  const owner = {
+    token: "orphan-token",
+    pid: "4242",
+    start: "100",
+    exe: "/usr/bin/opencode",
+    cmd: "1:2",
+    port: stub.port,
+  };
+  const state = fake.storageAt(runtimeDir);
+  state.lockHeld = false;
+  state.serveIdentity = owner;
+  state.serveLive = true;
+  state.dbKind = "file";
+  state.dbEntries = ["opencode.db"];
+  state.dbContent = "opaque-remote-opencode-db";
+  state.metadataKind = "file";
+  state.metadata = JSON.stringify({
+    engine: "opencode",
+    version: "1.18.18",
+    binaryDigest: TEST_REMOTE_DIGEST,
+    protocolGeneration: 1,
+    storageId: "11111111-1111-4111-8111-111111111111",
+    binarySource: "path",
+    binaryPath: state.binaryPath,
+    runtimeAuthority: "owned:orphan",
+    runtimeLocation: { projectId: "dev@fake.example", cwd: "/home/dev/app" },
+    createdAt: new Date().toISOString(),
+    lastOpenedAt: new Date().toISOString(),
+  });
+  try {
+    const runtime = await createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/home/dev/app",
+      runtimeDir,
+      leaseStateFile: join(directory, "adopt.lease.json"),
+      pickPort: () => 37401,
+      readyTimeoutMs: 5_000,
+      listenTimeoutMs: 5_000,
+    });
+    assert.equal(fake.serveStartCommands.length, 0, "adoption must not spawn a second OpenCode");
+    assert.equal(state.serveIdentity?.token, owner.token, "adopt keeps the immutable serve token");
+    assert.equal(state.serveIdentity?.port, stub.port);
+    assert.equal(state.serveLive, true);
+    await runtime.dispose();
+    assert.deepEqual(state.killedPids, ["4242"]);
+    assert.equal(state.serveLive, false);
+    assert.equal(state.serveIdentity, undefined);
+    const next = await createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/home/dev/app",
+      runtimeDir,
+      leaseStateFile: join(directory, "next.lease.json"),
+      pickPort: () => 37402,
+      readyTimeoutMs: 5_000,
+      listenTimeoutMs: 5_000,
+    });
+    assert.equal(fake.serveStartCommands.length, 1, "clean acquisition after adopted dispose may spawn");
+    await next.dispose();
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("PID reuse of a stale owner record does not kill the unrelated process", async () => {
+  const runtimeDir = "/var/lib/polyth/runtimes/pid-reuse";
+  const fake = createFakeRemoteHost({ stubPort: 1, runtimeDir });
+  const stale = {
+    token: "stale",
+    pid: "9999",
+    start: "1",
+    exe: "/usr/bin/opencode",
+    cmd: "1:1",
+  };
+  const state = fake.storageAt(runtimeDir);
+  state.lockHeld = false;
+  state.serveLive = false;
+  state.serveIdentity = stale;
+  const lock = await acquireRemoteRuntimeLock(fake.host, runtimeDir, "/home/dev/app");
+  assert.equal(state.killedPids.length, 0);
+  assert.equal(state.lockHeld, true);
+  await lock.release();
+});
+
+test("second live Polyth controller cannot steal a locked remote runtime", async () => {
+  const runtimeDir = "/var/lib/polyth/runtimes/second-server";
+  const fake = createFakeRemoteHost({ stubPort: 1, runtimeDir });
+  const state = fake.storageAt(runtimeDir);
+  state.lockHeld = true;
+  state.serveLive = true;
+  state.serveIdentity = {
+    token: "serve",
+    pid: "4242",
+    start: "200",
+    exe: "/usr/bin/opencode",
+    cmd: "3:4",
+    port: 4100,
+  };
+  await assert.rejects(
+    () => acquireRemoteRuntimeLock(fake.host, runtimeDir, "/home/dev/app"),
+    /already owned|locked/,
+  );
+  assert.equal(state.lockHeld, true);
+  assert.equal(state.killedPids.length, 0);
+});
+
+test("daemonized OpenCode stays alive until explicit runtime dispose", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-remote-ssh-drop-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/ssh-drop";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  try {
+    const runtime = await createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/home/dev/app",
+      runtimeDir,
+      leaseStateFile: join(directory, "ssh.lease.json"),
+      pickPort: () => 37411,
+      readyTimeoutMs: 5_000,
+      listenTimeoutMs: 5_000,
+    });
+    const serveStarts = fake.serveStartCommands.length;
+    const state = fake.storageAt(runtimeDir);
+    assert.equal(serveStarts, 1);
+    assert.equal(state.serveLive, true, "daemonized OpenCode outlives the one-shot start shell");
+    assert.equal(state.lockHeld, true, "controller guardian stays until dispose");
+    await runtime.dispose();
+    assert.equal(fake.serveStartCommands.length, serveStarts);
+    assert.equal(state.serveLive, false);
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("SSH transport loss with live OpenCode reconnects without a second serve", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-remote-revive-live-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/revive-live";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  try {
+    const runtime = await createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/home/dev/app",
+      runtimeDir,
+      leaseStateFile: join(directory, "revive.lease.json"),
+      pickPort: () => 37421,
+      readyTimeoutMs: 5_000,
+      listenTimeoutMs: 5_000,
+    });
+    const starts = fake.serveStartCommands.length;
+    const forwards = fake.forwards.length;
+    await (runtime as ManagedOpenCodeRuntime).lifecycle.refresh("disconnect");
+    assert.equal(fake.serveStartCommands.length, starts);
+    assert.ok(fake.forwards.length > forwards, "must re-establish the SSH forward");
+    await runtime.dispose();
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("SSH transport loss with a dead OpenCode replaces the serve", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-remote-revive-dead-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/revive-dead";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  try {
+    const runtime = await createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/home/dev/app",
+      runtimeDir,
+      leaseStateFile: join(directory, "dead.lease.json"),
+      pickPort: () => 37422,
+      readyTimeoutMs: 5_000,
+      listenTimeoutMs: 5_000,
+    });
+    const state = fake.storageAt(runtimeDir);
+    state.serveLive = false;
+    await (runtime as ManagedOpenCodeRuntime).lifecycle.refresh("disconnect");
+    assert.equal(fake.serveStartCommands.length, 2);
+    await runtime.dispose();
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("unreachable SSH during revive does not spawn a second OpenCode", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-remote-revive-ssh-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/revive-ssh";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  try {
+    const runtime = await createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/home/dev/app",
+      runtimeDir,
+      leaseStateFile: join(directory, "ssh-down.lease.json"),
+      pickPort: () => 37423,
+      readyTimeoutMs: 5_000,
+      listenTimeoutMs: 5_000,
+    });
+    fake.setServeProbeUnreachable(true);
+    await assert.rejects(
+      () => (runtime as ManagedOpenCodeRuntime).lifecycle.refresh("disconnect"),
+      /owned serve may still be alive/,
+    );
+    assert.equal(fake.serveStartCommands.length, 1);
+    fake.setServeProbeUnreachable(false);
+    await runtime.dispose();
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("controller lease loss is observable and allows a new controller to adopt", async () => {
+  const runtimeDir = "/var/lib/polyth/runtimes/controller-lost";
+  const fake = createFakeRemoteHost({ stubPort: 1, runtimeDir });
+  const first = await acquireRemoteRuntimeLock(fake.host, runtimeDir, "/home/dev/app");
+    assert.equal(first.held(), true);
+  await assert.rejects(
+    () => acquireRemoteRuntimeLock(fake.host, runtimeDir, "/home/dev/app"),
+    /already owned|locked/,
+  );
+  fake.killGuardians();
+  await first.lost;
+  assert.equal(first.held(), false);
+  const second = await acquireRemoteRuntimeLock(fake.host, runtimeDir, "/home/dev/app");
+  assert.equal(second.held(), true);
+  await second.release();
+});
+
+test("startup fails when the forwarded HTTP endpoint never becomes ready", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-remote-unready-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/unready";
+  const fake = createFakeRemoteHost({ stubPort: 1, runtimeDir });
+  try {
+    await assert.rejects(
+      () => createRemoteOpenCodeRuntime({
+        host: fake.host,
+        remotePath: "/home/dev/app",
+        runtimeDir,
+        leaseStateFile: join(directory, "unready.lease.json"),
+        pickPort: () => 37999,
+        readyTimeoutMs: 400,
+        listenTimeoutMs: 2_000,
+      }),
+      /did not become ready/,
+    );
+    assert.equal(fake.serveStartCommands.length, 1);
+    const failed = fake.storageAt(runtimeDir);
+    assert.equal(failed.serveLive, false);
+    assert.equal(failed.serveIdentity, undefined);
+    assert.deepEqual(failed.killedPids, ["4242"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("live PID with mismatched owner identity fails closed and is not killed", async () => {
+  const runtimeDir = "/var/lib/polyth/runtimes/pid-mismatch";
+  const fake = createFakeRemoteHost({ stubPort: 1, runtimeDir });
+  const stale = {
+    token: "stale",
+    pid: "9999",
+    start: "1",
+    exe: "/usr/bin/opencode",
+    cmd: "1:1",
+  };
+  const state = fake.storageAt(runtimeDir);
+  state.lockHeld = false;
+  state.serveIdentity = stale;
+  state.serveLive = true;
+  state.serveMismatch = true;
+  await assert.rejects(
+    () => acquireRemoteRuntimeLock(fake.host, runtimeDir, "/home/dev/app"),
+    /identity does not match/,
+  );
+  assert.equal(state.lockHeld, false);
+  assert.equal(state.killedPids.length, 0);
+});
+
+test("lost controller lease fences the old runtime before another controller may adopt", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-remote-controller-fence-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/controller-fence";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  try {
+    const runtime = await createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/home/dev/app",
+      runtimeDir,
+      leaseStateFile: join(directory, "a.lease.json"),
+      pickPort: () => 37501,
+      readyTimeoutMs: 5_000,
+      listenTimeoutMs: 5_000,
+    });
+    fake.killGuardians();
+    await assert.rejects(
+      () => runtime.endpoint!(),
+      (error: Error & { code?: string }) =>
+        error.code === "conflict" && /controller lease was lost/.test(error.message),
+    );
+    const adopted = await acquireRemoteRuntimeLock(fake.host, runtimeDir, "/home/dev/app");
+    assert.equal(adopted.held(), true);
+    await adopted.release();
+    await runtime.dispose();
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("guardian exit after ACQUIRED before the caller observes the handle marks the lease lost", async () => {
+  const runtimeDir = "/var/lib/polyth/runtimes/acquire-gap";
+  const fake = createFakeRemoteHost({ stubPort: 1, runtimeDir, exitAfterAcquired: true });
+  const lock = await acquireRemoteRuntimeLock(fake.host, runtimeDir, "/home/dev/app");
+  assert.equal(lock.held(), false);
+  await lock.lost;
+  await lock.release();
+});
+
+test("a stale controller cannot release a later controller's flock", async () => {
+  const runtimeDir = "/var/lib/polyth/runtimes/stale-release";
+  const fake = createFakeRemoteHost({ stubPort: 1, runtimeDir });
+  const first = await acquireRemoteRuntimeLock(fake.host, runtimeDir, "/home/dev/app");
+  fake.killGuardians();
+  await first.lost;
+  const second = await acquireRemoteRuntimeLock(fake.host, runtimeDir, "/home/dev/app");
+  await first.release();
+  assert.equal(second.held(), true);
+  assert.equal(fake.storageAt(runtimeDir).lockHeld, true);
+  await second.release();
+  assert.equal(second.held(), false);
+  assert.equal(fake.storageAt(runtimeDir).lockHeld, false);
+});
+
+test("crash after spawn before ready recovers a healthy candidate without a second serve", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-remote-candidate-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/candidate";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  const owner = {
+    token: "spawned-not-ready",
+    pid: "4242",
+    start: "100",
+    exe: "/usr/bin/opencode",
+    cmd: "1:2",
+    port: stub.port,
+  };
+  const state = fake.storageAt(runtimeDir);
+  state.lockHeld = false;
+  state.serveLive = true;
+  state.serveIdentity = owner;
+  state.dbKind = "file";
+  state.dbEntries = ["opencode.db"];
+  state.dbContent = "opaque-remote-opencode-db";
+  state.metadataKind = "file";
+  state.metadata = JSON.stringify({
+    engine: "opencode",
+    version: "1.18.18",
+    binaryDigest: TEST_REMOTE_DIGEST,
+    protocolGeneration: 1,
+    storageId: "22222222-2222-4222-8222-222222222222",
+    binarySource: "path",
+    binaryPath: state.binaryPath,
+    runtimeAuthority: "owned:candidate",
+    runtimeLocation: { projectId: "dev@fake.example", cwd: "/home/dev/app" },
+    createdAt: new Date().toISOString(),
+    lastOpenedAt: new Date().toISOString(),
+  });
+  try {
+    const runtime = await createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/home/dev/app",
+      runtimeDir,
+      leaseStateFile: join(directory, "candidate.lease.json"),
+      pickPort: () => 39999,
+      readyTimeoutMs: 5_000,
+      listenTimeoutMs: 5_000,
+    });
+    assert.equal(fake.serveStartCommands.length, 0, "healthy candidate must be adopted, not respawned");
+    assert.equal(state.serveIdentity?.port, stub.port);
+    await runtime.dispose();
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("adopted serve survives pre-commit forward failure and remains adoptable", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-remote-forward-fail-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/forward-fail";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  const owner = {
+    token: "orphan-old",
+    pid: "4242",
+    start: "100",
+    exe: "/usr/bin/opencode",
+    cmd: "1:2",
+    port: stub.port,
+  };
+  const state = fake.storageAt(runtimeDir);
+  state.lockHeld = false;
+  state.serveIdentity = owner;
+  state.serveLive = true;
+  state.dbKind = "file";
+  state.dbEntries = ["opencode.db"];
+  state.dbContent = "opaque-remote-opencode-db";
+  state.metadataKind = "file";
+  state.metadata = JSON.stringify({
+    engine: "opencode",
+    version: "1.18.18",
+    binaryDigest: TEST_REMOTE_DIGEST,
+    protocolGeneration: 1,
+    storageId: "11111111-1111-4111-8111-111111111111",
+    binarySource: "path",
+    binaryPath: state.binaryPath,
+    runtimeAuthority: "owned:orphan",
+    runtimeLocation: { projectId: "dev@fake.example", cwd: "/home/dev/app" },
+    createdAt: new Date().toISOString(),
+    lastOpenedAt: new Date().toISOString(),
+  });
+  fake.failNextForwards(1);
+  try {
+    await assert.rejects(
+      () => createRemoteOpenCodeRuntime({
+        host: fake.host,
+        remotePath: "/home/dev/app",
+        runtimeDir,
+        leaseStateFile: join(directory, "b.lease.json"),
+        pickPort: () => 37601,
+        readyTimeoutMs: 5_000,
+        listenTimeoutMs: 5_000,
+      }),
+      /injected forward failure|forward/,
+    );
+    assert.equal(fake.serveStartCommands.length, 0, "forward failure must not spawn a second serve");
+    assert.equal(state.serveLive, true, "adopted serve must survive pre-commit forward failure");
+    assert.equal(state.serveIdentity?.token, owner.token);
+    assert.equal(state.killedPids.length, 0, "no kill issued");
+    assert.equal(state.lockHeld, false, "controller B must release flock");
+
+    const runtime = await createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/home/dev/app",
+      runtimeDir,
+      leaseStateFile: join(directory, "c.lease.json"),
+      pickPort: () => 37602,
+      readyTimeoutMs: 5_000,
+      listenTimeoutMs: 5_000,
+    });
+    assert.equal(fake.serveStartCommands.length, 0, "controller C must adopt the same serve");
+    assert.equal(state.serveIdentity?.token, owner.token);
+    await runtime.dispose();
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+const seedLiveServe = (
+  state: FakeRemoteStorageState,
+  port: number,
+  token = "live-serve",
+) => {
+  state.lockHeld = false;
+  state.serveLive = true;
+  state.serveIdentity = {
+    token,
+    pid: "4242",
+    start: "100",
+    exe: "/usr/bin/opencode",
+    cmd: "1:2",
+    port,
+  };
+  state.dbKind = "file";
+  state.dbEntries = ["opencode.db"];
+  state.dbContent = "opaque-remote-opencode-db";
+  state.metadataKind = "file";
+  state.metadata = JSON.stringify({
+    engine: "opencode",
+    version: "1.18.18",
+    binaryDigest: TEST_REMOTE_DIGEST,
+    protocolGeneration: 1,
+    storageId: "11111111-1111-4111-8111-111111111111",
+    binarySource: "path",
+    binaryPath: state.binaryPath,
+    runtimeAuthority: "owned:seed",
+    runtimeLocation: { projectId: "dev@fake.example", cwd: "/home/dev/app" },
+    createdAt: new Date().toISOString(),
+    lastOpenedAt: new Date().toISOString(),
+  });
+};
+
+const keyedFactory = (
+  fake: ReturnType<typeof createFakeRemoteHost>,
+  directory: string,
+  runtimeDir: string,
+  options: { lifecycleTimeoutMs?: number } = {},
+) => {
+  let n = 0;
+  return async () => {
+    n += 1;
+    const runtime = await createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/home/dev/app",
+      runtimeDir,
+      leaseStateFile: join(directory, `${n}.lease.json`),
+      pickPort: () => 38000 + n,
+      readyTimeoutMs: 5_000,
+      listenTimeoutMs: 5_000,
+      lifecycleTimeoutMs: options.lifecycleTimeoutMs ?? 5_000,
+    });
+    return { value: runtime, dispose: () => runtime.dispose() };
+  };
+};
+
+test("R2 delayed SIGTERM death keeps same-key acquire blocked until the process is gone", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-r2-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/r2";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  const owner = createKeyedRuntimeOwner<Awaited<ReturnType<typeof createRemoteOpenCodeRuntime>>>();
+  const factory = keyedFactory(fake, directory, runtimeDir);
+  try {
+    await owner.acquire("k", factory);
+    const state = fake.storageAt(runtimeDir);
+    state.exitOnTerm = false;
+    state.holdAfterTerm = createDeferred();
+    const disposeP = owner.dispose("k");
+    await waitUntil(() => state.serveSignals.includes("TERM"));
+    let created = false;
+    const next = owner.acquire("k", async () => {
+      created = true;
+      return factory();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(created, false, "R2 must not start while R1 death is unproven");
+    assert.equal(state.serveLive, true);
+    state.serveLive = false;
+    state.serveIdentity = undefined;
+    state.holdAfterTerm.resolve();
+    await disposeP;
+    await next;
+    assert.equal(created, true);
+    await owner.dispose("k");
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("R3 SIGKILL is issued only after SIGTERM grace if the exact process remains", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-r3-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/r3";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  try {
+    const runtime = await createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/home/dev/app",
+      runtimeDir,
+      leaseStateFile: join(directory, "a.lease.json"),
+      pickPort: () => 38011,
+      readyTimeoutMs: 5_000,
+      listenTimeoutMs: 5_000,
+    });
+    const state = fake.storageAt(runtimeDir);
+    state.exitOnTerm = false;
+    state.exitOnKill = true;
+    await runtime.dispose();
+    assert.deepEqual(state.serveSignals, ["TERM", "KILL"]);
+    assert.equal(state.serveLive, false);
+    assert.equal(state.serveIdentity, undefined);
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("R4 unproven death rejects dispose, keeps PF, and fences the keyed owner", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-r4-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/r4";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  const owner = createKeyedRuntimeOwner<Awaited<ReturnType<typeof createRemoteOpenCodeRuntime>>>();
+  const factory = keyedFactory(fake, directory, runtimeDir);
+  try {
+    await owner.acquire("k", factory);
+    const state = fake.storageAt(runtimeDir);
+    state.exitOnTerm = false;
+    state.exitOnKill = false;
+    await assert.rejects(() => owner.dispose("k"), /could not prove|still-alive/);
+    assert.equal(state.serveLive, true);
+    assert.ok(state.serveIdentity, "PF must remain when death is unproven");
+    assert.deepEqual(state.serveSignals, ["TERM", "KILL"]);
+    let created = false;
+    await assert.rejects(
+      () => owner.acquire("k", async () => {
+        created = true;
+        return factory();
+      }),
+      /fenced/,
+    );
+    assert.equal(created, false);
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("R5 PID reuse during SIGTERM never kills the replacement process", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-r5-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/r5";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  try {
+    const runtime = await createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/home/dev/app",
+      runtimeDir,
+      leaseStateFile: join(directory, "a.lease.json"),
+      pickPort: () => 38021,
+      readyTimeoutMs: 5_000,
+      listenTimeoutMs: 5_000,
+    });
+    const state = fake.storageAt(runtimeDir);
+    state.exitOnTerm = false;
+    state.pidReuseAfterTerm = true;
+    await runtime.dispose();
+    assert.deepEqual(state.serveSignals, ["TERM"]);
+    assert.equal(state.reusedProcessLive, true);
+    assert.equal(state.serveIdentity, undefined);
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("R6/R7 replacement generation is published and adopted after Polyth restart", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-r67-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/r67";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  try {
+    const runtime = await createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/home/dev/app",
+      runtimeDir,
+      leaseStateFile: join(directory, "a.lease.json"),
+      pickPort: () => 38031,
+      readyTimeoutMs: 5_000,
+      listenTimeoutMs: 5_000,
+    }) as ManagedOpenCodeRuntime;
+    const firstToken = fake.storageAt(runtimeDir).serveIdentity?.token;
+    assert.ok(firstToken);
+    assert.equal(runtime.lifecycle.control.kind, "owned");
+    assert.ok("restart" in runtime.lifecycle);
+    await runtime.lifecycle.restart("manual");
+    const second = fake.storageAt(runtimeDir).serveIdentity;
+    assert.ok(second);
+    assert.notEqual(second.token, firstToken);
+    assert.equal(fake.serveStartCommands.length, 2);
+    assert.equal(fake.storageAt(runtimeDir).serveLive, true);
+    fake.killGuardians();
+    const adopted = await createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/home/dev/app",
+      runtimeDir,
+      leaseStateFile: join(directory, "b.lease.json"),
+      pickPort: () => 38032,
+      readyTimeoutMs: 5_000,
+      listenTimeoutMs: 5_000,
+    });
+    assert.equal(fake.serveStartCommands.length, 2, "new Polyth must adopt R2, not spawn R3");
+    assert.equal(fake.storageAt(runtimeDir).serveIdentity?.token, second.token);
+    await adopted.dispose();
+    await runtime.dispose().catch(() => undefined);
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("R8 live candidate plus transient attach failure does not spawn a replacement", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-r8-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/r8";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  const state = fake.storageAt(runtimeDir);
+  seedLiveServe(state, stub.port, "candidate-live");
+  fake.failNextAttach(1);
+  try {
+    await assert.rejects(
+      () => createRemoteOpenCodeRuntime({
+        host: fake.host,
+        remotePath: "/home/dev/app",
+        runtimeDir,
+        leaseStateFile: join(directory, "a.lease.json"),
+        pickPort: () => 38041,
+        readyTimeoutMs: 5_000,
+        listenTimeoutMs: 5_000,
+      }),
+      /could not attach|connection refused|unavailable/,
+    );
+    assert.equal(fake.serveStartCommands.length, 0);
+    assert.equal(state.serveLive, true);
+    assert.equal(state.serveIdentity?.token, "candidate-live");
+    assert.equal(state.lockHeld, false);
+    const recovered = await createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/home/dev/app",
+      runtimeDir,
+      leaseStateFile: join(directory, "b.lease.json"),
+      pickPort: () => 38042,
+      readyTimeoutMs: 5_000,
+      listenTimeoutMs: 5_000,
+    });
+    assert.equal(fake.serveStartCommands.length, 0, "later controller must still adopt the candidate");
+    await recovered.dispose();
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("R9 proven-dead candidate record may be replaced", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-r9-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/r9";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  const state = fake.storageAt(runtimeDir);
+  seedLiveServe(state, stub.port, "dead-candidate");
+  state.serveLive = false;
+  try {
+    const runtime = await createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/home/dev/app",
+      runtimeDir,
+      leaseStateFile: join(directory, "a.lease.json"),
+      pickPort: () => 38051,
+      readyTimeoutMs: 5_000,
+      listenTimeoutMs: 5_000,
+    });
+    assert.equal(fake.serveStartCommands.length, 1);
+    assert.notEqual(state.serveIdentity?.token, "dead-candidate");
+    await runtime.dispose();
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("R11 spawned serve plus precommit forward failure reaps that process", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-r11-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/r11";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  fake.failNextForwards(1);
+  try {
+    await assert.rejects(
+      () => createRemoteOpenCodeRuntime({
+        host: fake.host,
+        remotePath: "/home/dev/app",
+        runtimeDir,
+        leaseStateFile: join(directory, "a.lease.json"),
+        pickPort: () => 38061,
+        readyTimeoutMs: 5_000,
+        listenTimeoutMs: 5_000,
+      }),
+      /injected forward failure|forward/,
+    );
+    const state = fake.storageAt(runtimeDir);
+    assert.equal(fake.serveStartCommands.length, 1);
+    assert.equal(state.serveLive, false);
+    assert.equal(state.serveIdentity, undefined);
+    assert.deepEqual(state.killedPids, ["4242"]);
+    assert.equal(state.lockHeld, false);
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("R13 controller release failure fences the keyed owner", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-r13-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/r13";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  const owner = createKeyedRuntimeOwner<Awaited<ReturnType<typeof createRemoteOpenCodeRuntime>>>();
+  const factory = keyedFactory(fake, directory, runtimeDir, { lifecycleTimeoutMs: 200 });
+  try {
+    await owner.acquire("k", factory);
+    fake.storageAt(runtimeDir).failControllerRelease = true;
+    await assert.rejects(() => owner.dispose("k"), /did not release|exceeded|no release channel/);
+    let created = false;
+    await assert.rejects(
+      () => owner.acquire("k", async () => {
+        created = true;
+        return factory();
+      }),
+      /fenced/,
+    );
+    assert.equal(created, false);
+    assert.equal(fake.storageAt(runtimeDir).lockHeld, true);
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+const pfWriteFailBoot = (
+  fake: ReturnType<typeof createFakeRemoteHost>,
+  directory: string,
+  runtimeDir: string,
+  port: number,
+) =>
+  createRemoteOpenCodeRuntime({
+    host: fake.host,
+    remotePath: "/home/dev/app",
+    runtimeDir,
+    leaseStateFile: join(directory, `${port}.lease.json`),
+    pickPort: () => port,
+    readyTimeoutMs: 5_000,
+    listenTimeoutMs: 5_000,
+  });
+
+test("F1 PF write fails and TERM exits the unpublished child", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-f1-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/f1";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  const state = fake.storageAt(runtimeDir);
+  state.failPfWrite = true;
+  state.exitOnTerm = true;
+  try {
+    await assert.rejects(
+      () => pfWriteFailBoot(fake, directory, runtimeDir, 38101),
+      (error: Error) =>
+        /IDENTITY_INCOMPLETE|exited|did not become ready/.test(error.message)
+        && !/unpublished remote OpenCode serve/.test(error.message),
+    );
+    assert.deepEqual(state.serveSignals, ["TERM"]);
+    assert.equal(state.serveLive, false);
+    assert.equal(state.serveIdentity, undefined);
+    assert.equal(state.lockHeld, false);
+    state.failPfWrite = false;
+    const next = await pfWriteFailBoot(fake, directory, runtimeDir, 38102);
+    assert.equal(fake.serveStartCommands.length, 2);
+    assert.equal(state.serveLive, true);
+    await next.dispose();
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("F2 PF write fails, TERM does not stop the child, KILL does", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-f2-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/f2";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  const state = fake.storageAt(runtimeDir);
+  state.failPfWrite = true;
+  state.exitOnTerm = false;
+  state.exitOnKill = true;
+  try {
+    await assert.rejects(
+      () => pfWriteFailBoot(fake, directory, runtimeDir, 38111),
+      (error: Error) =>
+        /IDENTITY_INCOMPLETE|exited|did not become ready/.test(error.message)
+        && !/unpublished remote OpenCode serve/.test(error.message),
+    );
+    assert.deepEqual(state.serveSignals, ["TERM", "KILL"]);
+    assert.equal(state.serveLive, false);
+    assert.equal(state.serveIdentity, undefined);
+    assert.equal(state.lockHeld, false);
+    state.failPfWrite = false;
+    const next = await pfWriteFailBoot(fake, directory, runtimeDir, 38112);
+    assert.equal(state.serveLive, true);
+    await next.dispose();
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("F3 PF write fails and unpublished child death is unprovable", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-f3-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/f3";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  const state = fake.storageAt(runtimeDir);
+  state.failPfWrite = true;
+  state.exitOnTerm = false;
+  state.exitOnKill = false;
+  try {
+    await assert.rejects(
+      () => pfWriteFailBoot(fake, directory, runtimeDir, 38121),
+      (error: Error) =>
+        /unpublished remote OpenCode serve/.test(error.message)
+        && !/IDENTITY_INCOMPLETE/.test(error.message),
+    );
+    assert.deepEqual(state.serveSignals, ["TERM", "KILL"]);
+    assert.equal(state.serveLive, true);
+    assert.equal(state.serveIdentity, undefined);
+    assert.equal(state.lockHeld, true);
+    assert.equal(fake.serveStartCommands.length, 1);
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("F4 acquisition timeout with successful guardian cleanup allows the next acquire", async () => {
+  const runtimeDir = "/var/lib/polyth/runtimes/f4";
+  const fake = createFakeRemoteHost({ stubPort: 1, runtimeDir, lockOutputDelayMs: 200 });
+  await assert.rejects(
+    () => acquireRemoteRuntimeLock(fake.host, runtimeDir, "/home/dev/app", { timeoutMs: 30 }),
+    /did not acquire within/,
+  );
+  assert.equal(fake.storageAt(runtimeDir).lockHeld, false);
+  const lock = await acquireRemoteRuntimeLock(fake.host, runtimeDir, "/home/dev/app");
+  assert.equal(lock.held(), true);
+  await lock.release();
+  assert.equal(fake.storageAt(runtimeDir).lockHeld, false);
+});
+
+test("F5 acquisition timeout plus guardian cleanup failure keeps the flock", async () => {
+  const runtimeDir = "/var/lib/polyth/runtimes/f5";
+  const fake = createFakeRemoteHost({ stubPort: 1, runtimeDir, lockOutputDelayMs: 200 });
+  fake.storageAt(runtimeDir).failControllerRelease = true;
+  await assert.rejects(
+    () => acquireRemoteRuntimeLock(fake.host, runtimeDir, "/home/dev/app", { timeoutMs: 30 }),
+    (error: unknown) => {
+      assert.ok(error instanceof AggregateError);
+      assert.match(error.message, /guardian cleanup could not be confirmed/);
+      assert.match(String(error.errors[0]), /did not acquire within/);
+      return true;
+    },
+  );
+  assert.equal(fake.storageAt(runtimeDir).lockHeld, true);
 });

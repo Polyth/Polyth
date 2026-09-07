@@ -485,9 +485,25 @@ export const openCodeEnginesMatch = (
   right: OpenCodeEngineIdentity,
 ): boolean =>
   left.engine === right.engine
-  && left.version === right.version
   && left.binaryDigest === right.binaryDigest
   && left.protocolGeneration === right.protocolGeneration;
+
+/** Digest is the safety identity. Version strings are diagnostic only and
+ * may stay equal across incompatible binaries. */
+export const formatEngineRolloverDiagnostic = (
+  location: string,
+  previous: OpenCodeEngineIdentity,
+  selected: OpenCodeEngineIdentity,
+): string => {
+  const prefix = (digest: string) => digest.slice(0, 12);
+  return (
+    `runtime.engine.rollover ${location}: the previous writable runtime DB was quarantined without being opened. `
+    + `previous version=${previous.version} digest=${prefix(previous.binaryDigest)} `
+    + `selected version=${selected.version} digest=${prefix(selected.binaryDigest)}. `
+    + `Existing sessions need a new runtime epoch. `
+    + `Pin an immutable binary with ${POLYTH_OPENCODE_BIN_ENV} when reproducibility matters.`
+  );
+};
 
 const databaseNames = new Set(["opencode.db", "opencode.db-wal", "opencode.db-shm"]);
 
@@ -618,10 +634,7 @@ export const prepareOpenCodeRuntime = async (options: {
   const compatible = engineCompatible && databaseIsRegular;
   const diagnostic = previous && sameLocation
     ? !openCodeEnginesMatch(previous, options.engineIdentity)
-      ? `OpenCode engine identity changed for ${runtimeDir}; the previous writable runtime DB was quarantined without being opened. `
-        + `Previous engine: version ${previous.version}, digest ${previous.binaryDigest}. `
-        + `Selected engine: version ${options.engineIdentity.version}, digest ${options.engineIdentity.binaryDigest}. `
-        + `Existing sessions will require a new runtime epoch. For development, set ${POLYTH_OPENCODE_BIN_ENV} to pin the intended binary.`
+      ? formatEngineRolloverDiagnostic(runtimeDir, previous, options.engineIdentity)
       : !databaseIsRegular
         ? `OpenCode runtime storage was missing or unsafe for ${runtimeDir}; recognized DB paths were quarantined without being opened. `
           + "Existing sessions will require a new runtime epoch."

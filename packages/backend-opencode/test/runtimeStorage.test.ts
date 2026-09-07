@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -9,10 +9,12 @@ import {
   OPEN_CODE_RUNTIME_STALE_TTL_MS,
   OPENCODE_UPDATE_DISABLE_ENV,
   POLYTH_OPENCODE_BIN_ENV,
+  openCodeEnginesMatch,
   prepareOpenCodeRuntime,
   resolveOpenCodeBinary,
   sweepOpenCodeRuntimes,
 } from "../src/index.ts";
+import { formatEngineRolloverDiagnostic } from "../src/runtimeStorage.ts";
 
 const TEST_ENGINE = {
   engine: "opencode" as const,
@@ -316,4 +318,35 @@ test("prepare treats a symlink runtime.json as invalid metadata and mints a new 
   await prepared.recordOpen({ authorityId: "owned:new", generation: 1 });
   assert.equal((await lstat(join(runtimeDir, "runtime.json"))).isSymbolicLink(), false);
   assert.equal(JSON.parse(await readFile(foreign, "utf8")).storageId, stolen.storageId);
+});
+
+test("engine identity is digest-based: equal versions with different digests roll over", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "polyth-engine-digest-rollover-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const runtimeDir = join(directory, "runtime");
+  const cwd = join(directory, "cwd");
+  await mkdir(runtimeDir, { recursive: true, mode: 0o700 });
+  await mkdir(cwd, { recursive: true });
+  const previous = metadata("project-a", cwd, Date.now());
+  await writeFile(join(runtimeDir, "runtime.json"), JSON.stringify(previous));
+  await writeFile(join(runtimeDir, "opencode.db"), "engine-a-db", { mode: 0o600 });
+  const engineB = { ...TEST_ENGINE, version: TEST_ENGINE.version, binaryDigest: "b".repeat(64) };
+  assert.equal(openCodeEnginesMatch(TEST_ENGINE, { ...TEST_ENGINE, version: "9.9.9" }), true);
+  assert.equal(openCodeEnginesMatch(TEST_ENGINE, engineB), false);
+  const prepared = await prepareOpenCodeRuntime({
+    runtimeDir,
+    projectId: "project-a",
+    cwd,
+    engineIdentity: engineB,
+    binary: TEST_BINARY,
+  });
+  assert.notEqual(prepared.storageId, previous.storageId);
+  assert.match(prepared.diagnostic ?? "", /runtime\.engine\.rollover/);
+  assert.match(
+    formatEngineRolloverDiagnostic(runtimeDir, TEST_ENGINE, engineB),
+    /previous writable runtime DB was quarantined/,
+  );
+  await assert.rejects(() => stat(join(runtimeDir, "opencode.db")));
+  const entries = await readdir(join(runtimeDir, "quarantine"));
+  assert.ok(entries.some((name) => name.includes("incompatible-engine")));
 });

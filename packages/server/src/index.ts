@@ -122,6 +122,10 @@ import {
   createRuntimeIdleController,
   type RuntimeIdleController,
 } from "./runtimeIdle.ts";
+import {
+  createKeyedRuntimeOwner,
+  type SharedRuntimeOccupancy,
+} from "./runtimeOccupancy.ts";
 
 /** POLYTH_SMALL_MODEL="provider/model-id" — cheap model for auditors/commit messages. */
 const smallModel = (): { providerID: string; modelID: string } | undefined => {
@@ -223,7 +227,9 @@ export interface RuntimeAdmissionBarrier {
  * Admissions join synchronously before their first await. An exclusive caller
  * fences new admissions, waits for current admissions to settle, then holds
  * the fence through its complete critical section. */
-export function createRuntimeAdmissionBarrier(): RuntimeAdmissionBarrier {
+export function createRuntimeAdmissionBarrier(options?: {
+  isShuttingDown?: () => boolean;
+}): RuntimeAdmissionBarrier {
   let fenceDepth = 0;
   let activeAdmissions = 0;
   let exclusiveTail = Promise.resolve();
@@ -269,6 +275,12 @@ export function createRuntimeAdmissionBarrier(): RuntimeAdmissionBarrier {
   return {
     fenced: () => fenceDepth > 0,
     async admit<T>(action: () => Promise<T>): Promise<T> {
+      if (options?.isShuttingDown?.()) {
+        throw Object.assign(
+          new Error("runtime admission is fenced for shutdown"),
+          { code: "shutting_down" },
+        );
+      }
       if (fenceDepth > 0) {
         throw Object.assign(
           new Error("runtime admission is fenced for configuration restart"),
@@ -471,7 +483,16 @@ export async function boot(opts: BootOptions = {}) {
     });
   }
   root.provide(CAP.sessionPersistence, store);
-  const admissionBarrier = createRuntimeAdmissionBarrier();
+  let shuttingDown = false;
+  const isShuttingDown = (): boolean => shuttingDown;
+  const beginShutdown = (): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log("[polyth] server.shutdown.quiescing reason=signal");
+  };
+  const admissionBarrier = createRuntimeAdmissionBarrier({
+    isShuttingDown,
+  });
   const projects = createProjectService(dataDir);
   root.provide(CAP.projects, projects);
 
@@ -506,8 +527,8 @@ export async function boot(opts: BootOptions = {}) {
 
   // --- per-project opencode runtime pool (lazy spawn, one serve process per project)
   const runtimeDiagnostics = createRuntimeDiagnostics();
-  const runtimesByProject = new Map<string, Promise<AgentRuntime>>();
-  const runtimeEvictions = new Map<string, Promise<void>>();
+  const openCodeRuntimes = createKeyedRuntimeOwner<AgentRuntime>();
+  const occupancyByFacade = new WeakMap<AgentRuntime, SharedRuntimeOccupancy>();
   const runtimeRestarters = new Map<string, {
     runtime: AgentRuntime;
     restart(): Promise<void>;
@@ -560,6 +581,15 @@ export async function boot(opts: BootOptions = {}) {
   // pointing at a killed process, so model/agent lookups came back empty.
   const cwdFor = async (projectId: string, cwd?: string): Promise<string> =>
     resolve(cwd ?? (await projects.get(projectId))?.path ?? process.cwd());
+
+  // In-memory lifecycle key. Disk identity stays `openCodeRuntimeId` /
+  // `openCodeRemoteRuntimeId` and must not change. Remote scope includes the
+  // SSH connection; local does not.
+  const sharedRuntimePoolKey = (
+    projectId: string,
+    cwd: string,
+    connectionId?: string,
+  ): string => `opencode:${connectionId ?? "local"}:${projectId}:${cwd}`;
 
   // The bridge is created after package discovery (it consumes the browser
   // package's service) but the pool only spawns runtimes after boot completes.
@@ -646,22 +676,32 @@ export async function boot(opts: BootOptions = {}) {
     cwd: string,
     first: AgentRuntime,
     configRestartable: boolean,
-  ): AgentRuntime => {
+    occupancy: SharedRuntimeOccupancy,
+  ): { facade: AgentRuntime; dispose: () => Promise<void> } => {
     let inner = first;
     let idleController: RuntimeIdleController | undefined;
     const liveStreamSessionIds = new Set<string>();
     const setTurnActive = (sessionId: string, active: boolean): void => {
       if (active) {
         if (liveStreamSessionIds.has(sessionId)) return;
+        if (!occupancy.beginExecution(sessionId)) {
+          throw Object.assign(
+            new Error(`runtime ${occupancy.key} is not accepting executions`),
+            { code: "unavailable" },
+          );
+        }
         liveStreamSessionIds.add(sessionId);
       } else if (!liveStreamSessionIds.delete(sessionId)) {
         return;
+      } else {
+        occupancy.endExecution(sessionId);
       }
       admissionBarrier.trackTurn(sessionId, active);
     };
     const clearActiveTurns = (): void => {
       for (const sessionId of liveStreamSessionIds) {
         admissionBarrier.trackTurn(sessionId, false);
+        occupancy.endExecution(sessionId);
       }
       liveStreamSessionIds.clear();
     };
@@ -752,7 +792,6 @@ export async function boot(opts: BootOptions = {}) {
       inner = await spawnRuntime(projectId, cwd);
       clearActiveTurns();
       innerSubs = subscribeInner();
-      runtimesByProject.set(key, Promise.resolve(facade));
       await settleAllOrThrow(
         [...runtimeRestartListeners].map((listener) => listener(facade)),
       );
@@ -813,7 +852,7 @@ export async function boot(opts: BootOptions = {}) {
     const useRuntime = <T,>(action: () => Promise<T>): Promise<T> =>
       idleController ? idleController.use(action) : action();
     let disposal: Promise<void> | undefined;
-    const disposeInner = (): Promise<void> => {
+    const teardownPhysical = (): Promise<void> => {
       if (disposal) return disposal;
       disposal = (async () => {
         for (const subscription of innerSubs) subscription.dispose();
@@ -823,7 +862,6 @@ export async function boot(opts: BootOptions = {}) {
       })();
       return disposal;
     };
-
     const facade: AgentRuntime = {
       capabilities: () => useRuntime(() => inner.capabilities()),
       models: () => useRuntime(() => inner.models()),
@@ -1017,25 +1055,28 @@ export async function boot(opts: BootOptions = {}) {
           }
         : {}),
       releaseExecution: (binding, operationId) => admissionBarrier.run(async () => {
-        // An owned process may serve several canonical sessions. Never stop a
-        // neighbour's work as a side effect of switching this session.
-        for (const row of await store.projections(projectId)) {
-          if (row.id === binding.canonicalSessionId || row.runtimeBinding?.authorityId !== binding.authorityId) continue;
-          if (!["idle", "failed", "archived"].includes(row.status) || (await store.operations(row.id)).some((op) => ["prepared", "executing", "unknown"].includes(op.state))) {
-            return { kind: "rejected", code: "conflict", message: "Another session is using this runtime; switch after it finishes" };
-          }
+        if (!inner.releaseExecution) {
+          return {
+            kind: "unknown" as const,
+            operationId,
+            message: "This harness cannot prove execution has stopped",
+          };
         }
-        if (!inner.releaseExecution) return { kind: "rejected", code: "unsupported", message: "This runtime cannot release execution authority" };
-        const result = await inner.releaseExecution(binding, operationId);
-        if (result.kind === "confirmed") {
-          idleController?.stop();
-          runtimesByProject.delete(key);
-          runtimeRestarters.delete(key);
-          clearActiveTurns();
-          for (const subscription of innerSubs) subscription.dispose();
-          await settleAllOrThrow([...runtimeEvictionListeners].map(async (listener) => listener(facade)));
+        const outcome = await inner.releaseExecution(binding, operationId);
+        if (outcome.kind !== "confirmed") return outcome;
+        if (
+          outcome.value.authorityId !== binding.authorityId
+          || outcome.value.generation !== binding.generation
+          || outcome.value.backendSessionId !== binding.backendSessionId
+        ) {
+          return {
+            kind: "unknown" as const,
+            operationId,
+            message: "release proof does not name this execution incarnation",
+          };
         }
-        return result;
+        setTurnActive(binding.canonicalSessionId, false);
+        return outcome;
       }),
       endpoint: () => useRuntime(endpoint),
       protocol: () => useRuntime(protocol),
@@ -1053,15 +1094,14 @@ export async function boot(opts: BootOptions = {}) {
         return { dispose: () => { listeners.delete(cb); } };
       },
       dispose: async () => {
-        idleController?.stop();
-        runtimesByProject.delete(key);
-        runtimeRestarters.delete(key);
-        await disposeInner();
+        await openCodeRuntimes.dispose(key);
       },
     };
     idleController = createRuntimeIdleController({
       withAdmissionBarrier: (action) => admissionBarrier.run(action),
       canEvict: async () => {
+        const counters = occupancy.snapshot();
+        if (counters.bindings > 0 || counters.executions > 0) return false;
         const expected = await endpoint();
         return (await canEvictRuntime(
           facade,
@@ -1074,19 +1114,7 @@ export async function boot(opts: BootOptions = {}) {
         )).safe;
       },
       evict: async () => {
-        let eviction!: Promise<void>;
-        eviction = (async () => {
-          await disposeInner();
-          runtimesByProject.delete(key);
-          runtimeRestarters.delete(key);
-          await settleAllOrThrow(
-            [...runtimeEvictionListeners].map(async (listener) => listener(facade)),
-          );
-        })().finally(() => {
-          if (runtimeEvictions.get(key) === eviction) runtimeEvictions.delete(key);
-        });
-        runtimeEvictions.set(key, eviction);
-        await eviction;
+        await facade.dispose();
       },
     });
     if (configRestartable) {
@@ -1096,7 +1124,18 @@ export async function boot(opts: BootOptions = {}) {
         withConfigRestart,
       });
     }
-    return facade;
+    occupancyByFacade.set(facade, occupancy);
+    return {
+      facade,
+      dispose: async () => {
+        idleController?.stop();
+        runtimeRestarters.delete(key);
+        await teardownPhysical();
+        await settleAllOrThrow(
+          [...runtimeEvictionListeners].map(async (listener) => listener(facade)),
+        );
+      },
+    };
   };
 
   type RuntimeRestartFingerprint = {
@@ -1185,7 +1224,7 @@ export async function boot(opts: BootOptions = {}) {
     try {
       // A pool promise created before the synchronous fence may still be
       // installing its facade. Let it finish so it is included below.
-      await Promise.allSettled([...runtimesByProject.values()]);
+      await openCodeRuntimes.settleCreates();
       const entries = [...runtimeRestarters];
       const capabilities = new Map<string, () => Promise<void>>();
       const acquire = async (index: number): Promise<T> => {
@@ -1240,67 +1279,66 @@ export async function boot(opts: BootOptions = {}) {
     }
   };
 
+  const occupancyOf = (runtime: AgentRuntime): SharedRuntimeOccupancy | undefined =>
+    occupancyByFacade.get(runtime);
+
   const openCodePool: RuntimePool = {
     async forProject(projectId, cwd) {
       const dir = await cwdFor(projectId, cwd);
-      const key = `${projectId}::${dir}`;
-      await runtimeEvictions.get(key);
-      let p = runtimesByProject.get(key);
-      if (!p) {
-        if (runtimeCreationFenceDepth > 0) {
+      const project = await projects.get(projectId);
+      const connectionId = project?.remote?.kind === "ssh" ? project.remote.connectionId : undefined;
+      const key = sharedRuntimePoolKey(projectId, dir, connectionId);
+      if (isShuttingDown()) {
+        const existing = openCodeRuntimes.peek(key);
+        if (!existing) {
           throw Object.assign(
-            new Error("runtime creation is fenced for configuration restart"),
-            { code: "restart-deferred" },
+            new Error("runtime creation is fenced for shutdown"),
+            { code: "shutting_down" },
           );
         }
-        // Every catalog read fans out with `allSettled`, so a spawn that never
-        // succeeds is otherwise swallowed here and surfaces only as an empty
-        // model list. Record it so the log and the UI can name the cause.
-        p = runtimeDiagnostics.observe(key, { projectId, cwd: dir }, () => withSpawnSlot(async () => {
+        return existing.value;
+      }
+      if (runtimeCreationFenceDepth > 0 && !openCodeRuntimes.busy(key)) {
+        throw Object.assign(
+          new Error("runtime creation is fenced for configuration restart"),
+          { code: "restart-deferred" },
+        );
+      }
+      const record = await runtimeDiagnostics.observe(key, { projectId, cwd: dir }, () =>
+        openCodeRuntimes.acquire(key, async (occupancy) => withSpawnSlot(async () => {
           const configRestartable = !(await projects.get(projectId))?.remote;
-          try {
-            const facade = facadeFor(
+          const spawn = async () => {
+            const built = facadeFor(
               key,
               projectId,
               dir,
               await spawnRuntime(projectId, dir),
               configRestartable,
+              occupancy,
             );
             if (configRestartable) await refreshSafeBehavior();
-            return facade;
+            return { value: built.facade, dispose: built.dispose };
+          };
+          try {
+            return await spawn();
           } catch (err) {
             if (!isTransportError(err)) throw err;
-            const facade = facadeFor(
-              key,
-              projectId,
-              dir,
-              await spawnRuntime(projectId, dir),
-              configRestartable,
-            ); // one spawn retry before any mutation exists
-            if (configRestartable) await refreshSafeBehavior();
-            return facade;
+            return spawn();
           }
-        }));
-        runtimesByProject.set(key, p);
-        p.catch(() => runtimesByProject.delete(key)); // allow retry
-      }
-      return p;
+        })));
+      return record.value;
     },
     async restartAll() {
       return restartRuntimeEntries();
     },
     async release(projectId, cwd) {
       const dir = await cwdFor(projectId, cwd);
-      const key = `${projectId}::${dir}`;
-      const pending = runtimesByProject.get(key);
+      const project = await projects.get(projectId);
+      const connectionId = project?.remote?.kind === "ssh" ? project.remote.connectionId : undefined;
+      const key = sharedRuntimePoolKey(projectId, dir, connectionId);
+      const pending = openCodeRuntimes.peek(key);
       if (!pending) return;
-      try {
-        const facade = await pending;
-        await facade.dispose();
-      } catch {
-        runtimesByProject.delete(key);
-        runtimeRestarters.delete(key);
-      }
+      await pending.value.dispose();
     },
     onRestart(listener) {
       runtimeRestartListeners.add(listener);
@@ -1309,6 +1347,16 @@ export async function boot(opts: BootOptions = {}) {
     onEvict(listener) {
       runtimeEvictionListeners.add(listener);
       return { dispose: () => { runtimeEvictionListeners.delete(listener); } };
+    },
+    bindSession(sessionId, runtime) {
+      occupancyOf(runtime)?.acquireBinding(sessionId);
+    },
+    unbindSession(sessionId, runtime) {
+      const occupancy = occupancyOf(runtime);
+      if (!occupancy) return;
+      occupancy.releaseBinding(sessionId, {
+        abandonExecution: !occupancy.snapshot().accepting,
+      });
     },
   };
   services.provide(serverServiceKey("opencode.runtime"), (context: import("@polyth/contracts").HarnessContext) =>
@@ -1334,8 +1382,10 @@ export async function boot(opts: BootOptions = {}) {
     onRestart: openCodePool.onRestart,
     onEvict: openCodePool.onEvict,
     release: openCodePool.release,
+    bindSession: openCodePool.bindSession,
+    unbindSession: openCodePool.unbindSession,
   };
-  openCodePool.onEvict?.((runtime) => harnessPool.forget(runtime));
+  openCodePool.onEvict?.((runtime) => harnessPool.forgetRuntime(runtime));
   const runtimeCatalog = createRuntimeCatalog({ projects, runtimes });
   services.provide(serverServiceKey<{
     invalidateModels(): void;
@@ -1378,7 +1428,8 @@ export async function boot(opts: BootOptions = {}) {
       const assessments = await settleAllOrThrow((await store.projections()).map(async (projection) => {
         const project = await projects.get(projection.projectId);
         const cwd = projection.worktreePath ?? project?.path ?? process.cwd();
-        const key = `${projection.projectId}::${cwd}`;
+        const connectionId = project?.remote?.kind === "ssh" ? project.remote.connectionId : undefined;
+        const key = sharedRuntimePoolKey(projection.projectId, cwd, connectionId);
         const restarter = runtimeRestarters.get(key);
         if (!restarter) return { safe: true as const };
         const fingerprint = expected?.get(key);
@@ -1744,6 +1795,7 @@ export async function boot(opts: BootOptions = {}) {
   const sessions = createSessionService({
     store, projects, runtimes, broadcast, queue: store, org: store, profiles: store, behavior, secureSafe,
     admission: admissionBarrier,
+    isShuttingDown,
     permissions: requireSvc<SessionDeps["permissions"]>("permissions"),
     ...(gitService ? { worktrees: gitService.worktrees } : {}),
     ...(terminalService ? {
@@ -2130,6 +2182,7 @@ export async function boot(opts: BootOptions = {}) {
   let shutdownPromise: Promise<void> | undefined;
   const shutdown = (): Promise<void> => {
     if (shutdownPromise) return shutdownPromise;
+    beginShutdown();
     // Fence new turn admission first, then let every accepted runtime turn
     // finish before disposing its OpenCode process. This keeps watcher-driven
     // source reloads from truncating unrelated agent sessions.
@@ -2166,9 +2219,20 @@ export async function boot(opts: BootOptions = {}) {
       svc<{ close(): void }>("knowledge")?.close();
       await svc<{ closeAll(): Promise<void> }>("browser")?.closeAll().catch(() => {});
       await svc<{ closeAll(): Promise<void> }>("terminal")?.closeAll().catch(() => {});
-      await harnessPool.dispose();
-      await Promise.all([...runtimesByProject.values()].map(async (p) =>
-        (await p.catch(() => null))?.dispose().catch(() => {})));
+      const physicalErrors = await openCodeRuntimes.disposeAll({ force: true }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      const harnessErrors = await harnessPool.dispose().then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      if (physicalErrors) {
+        console.error("[polyth] runtime physical disposal failed during shutdown", physicalErrors);
+      }
+      if (harnessErrors) {
+        console.error("[polyth] harness runtime disposal failed during shutdown", harnessErrors);
+      }
       await svc<SshTransportService>("ssh")?.disconnectAll().catch(() => {});
       await root.dispose();
       await store.close();

@@ -329,9 +329,10 @@ test("in-place binary digest change quarantines DB, mints authority, and rejects
     assert.equal(metadata.binaryDigest, digest);
     assert.equal(metadata.runtimeAuthority, rotated.authorityId);
     assert.equal(diagnostics.length, 1);
+    assert.match(diagnostics[0]!, /runtime\.engine\.rollover/);
     assert.match(diagnostics[0]!, /previous writable runtime DB was quarantined without being opened/i);
-    assert.ok(diagnostics[0]!.includes(`version 1.18.18, digest ${"a".repeat(64)}`));
-    assert.ok(diagnostics[0]!.includes(`version 1.18.18, digest ${"b".repeat(64)}`));
+    assert.match(diagnostics[0]!, /previous version=1\.18\.18 digest=aaaaaaaaaaaa/);
+    assert.match(diagnostics[0]!, /selected version=1\.18\.18 digest=bbbbbbbbbbbb/);
     assert.match(diagnostics[0]!, /new runtime epoch/);
     assert.match(diagnostics[0]!, /POLYTH_OPENCODE_BIN/);
 

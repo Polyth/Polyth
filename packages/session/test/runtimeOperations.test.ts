@@ -674,7 +674,7 @@ test("owned epoch fences executing operations so a late confirm cannot land", as
       replacementBinding: replacement,
       resetOperationId: reset.operation.operationId,
       reason: "owned runtime authority changed",
-      fence: { authorityId: oldBinding.authorityId, generation: oldBinding.generation },
+      fence: { mode: "destroyed", authorityId: oldBinding.authorityId, generation: oldBinding.generation },
     });
 
     assert.equal((await store.operation(turn.operation.operationId))?.state, "fenced");
@@ -816,7 +816,7 @@ test("fenced and rejected operations refuse every settlement and claim path", as
       },
       resetOperationId: reset.operation.operationId,
       reason: "owned runtime authority changed",
-      fence: { authorityId: oldBinding.authorityId, generation: oldBinding.generation },
+      fence: { mode: "destroyed", authorityId: oldBinding.authorityId, generation: oldBinding.generation },
     });
     assert.equal((await store.operation(turn.operation.operationId))?.state, "fenced");
     await assert.rejects(

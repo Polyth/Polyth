@@ -2182,10 +2182,7 @@ export interface RuntimeEpochTransitionInput {
   reason: string;
   /** Atomically publish routing with the fresh runtime binding. */
   harness?: { transitionId: string; selection: HarnessSelection; leg: RuntimeLeg };
-  fence?: {
-    authorityId: string;
-    generation: number;
-  };
+  fence?: RuntimeEpochFence;
 }
 
 export interface RuntimeEpochTransitionResult {
@@ -2461,16 +2458,28 @@ export interface RuntimeLeg {
   agentIntent?: string;
   bootstrap: "native-resume" | "continuity" | "empty";
 }
+/** Provider-proven identity of one session execution incarnation. Abort
+ * acknowledgement is not this proof: the named backend session must be idle. */
+export interface ExecutionReleaseProof {
+  authorityId: string;
+  generation: number;
+  backendSessionId: string;
+}
+
+export type RuntimeEpochFence =
+  | { mode: "destroyed"; authorityId: string; generation: number }
+  | ({ mode: "session-released" } & ExecutionReleaseProof);
+
 /** Durable switch intent. No target may admit work before the epoch commit. */
-export interface HarnessTransition {
+export type HarnessTransition = {
   id: string;
   selection: HarnessSelection;
   targetHarnessId: string;
   timing: "after-turn" | "stop-now";
-  phase: "requested" | "released";
-  /** Exact old authority released by a provider, never inferred from UI state. */
-  released?: { authorityId: string; generation: number };
-}
+} & (
+  | { phase: "requested" }
+  | { phase: "released"; released: ExecutionReleaseProof }
+);
 export interface SourceRecord { role: "user" | "assistant"; text: string; time?: number }
 export interface SourceSession { ref: string; title: string; updatedAt?: number }
 /** Provider-local native ids/paths are opaque outside the source. No live sync. */
@@ -2583,10 +2592,11 @@ export type RuntimeEvent =
 
 export interface AgentRuntime {
   readonly harnessId?: string;
-  /** Positive proof that this binding (including its tools/children) can no
-   * longer mutate the workspace. Unknown is never permission to start a target.
-   * Must remain idempotently provable after restart for the supplied binding. */
-  releaseExecution?(binding: RuntimeSessionBinding, operationId: string): Promise<MutationOutcome<{ authorityId: string; generation: number }>>;
+  /** Positive proof that THIS backend session on THIS authority generation can
+   * no longer continue the previous execution. Abort acknowledgement is not
+   * sufficient. Unknown is never permission to start a target. Must remain
+   * idempotently re-verifiable for the supplied binding incarnation. */
+  releaseExecution?(binding: RuntimeSessionBinding, operationId: string): Promise<MutationOutcome<ExecutionReleaseProof>>;
   capabilities(): Promise<RuntimeCapabilities>;
   models(): Promise<ModelDescriptor[]>;
   agents(): Promise<AgentDescriptor[]>;

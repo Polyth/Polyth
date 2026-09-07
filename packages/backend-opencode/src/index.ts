@@ -140,20 +140,10 @@ export {
 } from "./remote.ts";
 export type { RemoteOpenCodeOptions, RemoteOpenCodeProbe } from "./remote.ts";
 export {
-  acquireRemoteRuntimeLock,
   DEFAULT_REMOTE_RUNTIME_ROOT_EXPR,
   prepareRemoteOpenCodeRuntime,
-  probeRemoteProcessIdentity,
-  releaseRemoteRuntimeLock,
-  remoteProcessKey,
-  REMOTE_LOCK_DIR,
-  REMOTE_LOCK_HANDOFF,
-  REMOTE_LOCK_STARTING,
-  REMOTE_STORAGE_MARKERS,
   resolveRemoteRuntimeDir,
-  stopRemoteLockGuardian,
 } from "./remoteStorage.ts";
-export type { RemoteRuntimeLockHandle } from "./remoteStorage.ts";
 export {
   createBorrowedExternalEndpointLease,
   createBorrowedServiceEndpointLease,
@@ -971,6 +961,54 @@ export const createOpenCodeRuntimeFacade = (
       }
       return outcome;
     },
+    async releaseExecution(binding, operationId) {
+      if (!binding.backendSessionId) {
+        return {
+          kind: "unknown",
+          operationId,
+          message: "release requires a backend session identity",
+        };
+      }
+      let snapshot;
+      try {
+        snapshot = await lifecycle.reconcile({
+          ...binding,
+          protocol: await lifecycle.protocol(),
+        });
+      } catch {
+        return {
+          kind: "unknown",
+          operationId,
+          message: "Could not verify that the old execution has stopped",
+        };
+      }
+      if (
+        snapshot.backendSessionId !== binding.backendSessionId
+        || snapshot.authorityId !== binding.authorityId
+        || snapshot.generation !== binding.generation
+      ) {
+        return {
+          kind: "unknown",
+          operationId,
+          message: "release proof does not name this execution incarnation",
+        };
+      }
+      if (snapshot.state.value === "running" || snapshot.state.value === "unknown") {
+        return {
+          kind: "unknown",
+          operationId,
+          message: "Old execution has not been proven idle",
+        };
+      }
+      return {
+        kind: "confirmed",
+        value: {
+          authorityId: binding.authorityId,
+          generation: binding.generation,
+          backendSessionId: binding.backendSessionId,
+        },
+      };
+    },
     async replyPermission(sessionId: string, requestId: string, reply: "once" | "always" | "reject") {
       const binding = await lifecycleBinding(sessionId);
       outcomeValue(await lifecycle.replyPermission(binding, requestId, reply, randomUUID()));
@@ -1073,21 +1111,6 @@ export const createOpenCodeRuntime = async (
     disposed = true;
     await disposeFacade();
     await lifecycle.dispose();
-  };
-  let released: { authorityId: string; generation: number } | undefined;
-  facade.releaseExecution = async (binding, operationId) => {
-    if (released?.authorityId === binding.authorityId && released.generation === binding.generation) return { kind: "confirmed", value: released };
-    const current = await lifecycle.endpoint();
-    const priorReleased = (lease as typeof lease & { canReleaseExecution?: (proof: { authorityId: string; generation: number }) => boolean }).canReleaseExecution?.(binding);
-    if ((current.authorityId !== binding.authorityId || current.generation !== binding.generation) && !priorReleased) return { kind: "unknown", operationId, message: "Old execution authority cannot be verified" };
-    const release = (lease as typeof lease & { releaseExecution?: () => Promise<void> }).releaseExecution;
-    if (!release) return { kind: "rejected", code: "unsupported", message: "Owned process release is unavailable" };
-    try {
-      await release();
-      released = { authorityId: binding.authorityId, generation: binding.generation };
-      await facade.dispose();
-      return { kind: "confirmed", value: released };
-    } catch { return { kind: "unknown", operationId, message: "Execution authority could not be released" }; }
   };
   return attachRuntimeLifecycle(facade, lifecycle);
 };

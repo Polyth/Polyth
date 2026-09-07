@@ -10,7 +10,7 @@
 // This module owns everything OpenCode-specific about the remote leg (binary
 // name, serve invocation, listen-line protocol, pidfile reaping); the
 // transport knows nothing about OpenCode, keeping the adapter boundary intact.
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import type {
@@ -27,23 +27,18 @@ import {
 } from "./index.ts";
 import {
   createOwnedSshEndpointLease,
-  LISTEN_RE,
 } from "./endpoint.ts";
 import type { PreparedRemoteOpenCodeRuntime } from "./remoteStorage.ts";
 import {
   acquireRemoteRuntimeLock,
   prepareRemoteOpenCodeRuntime,
-  probeRemoteProcessIdentity,
-  releaseRemoteRuntimeLock,
   remoteServePidFileExpr,
-  REMOTE_LOCK_DIR,
-  REMOTE_LOCK_HANDOFF,
-  REMOTE_LOCK_STARTING,
-  REMOTE_OWNER_FILE,
   REMOTE_PROCESS_IDENTITY_FUNS,
+  REMOTE_STORAGE_MARKERS,
   resolveRemoteRuntimeDir,
   shq,
-  stopRemoteLockGuardian,
+  withRemoteDeadline,
+  type RemoteRuntimeAdoption,
 } from "./remoteStorage.ts";
 import { OPENCODE_UPDATE_DISABLE_ENV } from "./runtimeStorage.ts";
 
@@ -89,38 +84,6 @@ const invalid = (message: string): Error =>
 
 const unavailable = (message: string): Error =>
   Object.assign(new Error(message), { code: "unavailable" });
-
-const withDeadline = <T>(
-  operation: Promise<T>,
-  timeoutMs: number,
-  label: string,
-  onLateResult?: (value: T) => void | Promise<void>,
-): Promise<T> =>
-  new Promise<T>((resolveOperation, rejectOperation) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      rejectOperation(unavailable(`${label} exceeded ${timeoutMs}ms`));
-    }, timeoutMs);
-    operation.then(
-      (value) => {
-        if (settled) {
-          void onLateResult?.(value);
-          return;
-        }
-        settled = true;
-        clearTimeout(timer);
-        resolveOperation(value);
-      },
-      (error: unknown) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        rejectOperation(error);
-      },
-    );
-  });
 
 const checkBin = (bin: string): string => {
   if (!/^[A-Za-z0-9_.~/-]+$/.test(bin)) throw invalid(`invalid remote binary name: ${bin}`);
@@ -238,15 +201,95 @@ export const installRemoteOpenCode = async (host: RemoteHost): Promise<void> => 
   }
 };
 
-interface StartedServe {
-  handle: Awaited<ReturnType<RemoteHost["start"]>>;
+interface ServeProcess {
   port: number;
   remotePid: number | null;
   pidFileExpr: string;
-  instanceToken: string;
-  alive(): boolean;
-  disposeExit(): void;
+  serveToken: string;
 }
+
+interface StartedServe extends ServeProcess {
+  cleanupOnFailedStart(): Promise<void>;
+  disposeCommittedRuntime(): Promise<void>;
+}
+
+const TERMINATE_GRACE_CHECKS = 20;
+
+const terminateServeScript = (serve: Pick<ServeProcess, "pidFileExpr" | "serveToken">): string => [
+  REMOTE_STORAGE_MARKERS.stopServe,
+  `PF=${serve.pidFileExpr}`,
+  `EXPECT_TOKEN=${shq(serve.serveToken)}`,
+  `GRACE_CHECKS=${TERMINATE_GRACE_CHECKS}`,
+  REMOTE_PROCESS_IDENTITY_FUNS,
+  'TAB=$(printf "\\t")',
+  'read_pf() { IFS="$TAB" read -r TOKEN PID START EXE CMD PORT < "$PF" || true; }',
+  'exact_live() {',
+  '  [ -n "$PID" ] && [ "$(oc_start "$PID")" = "$START" ] '
+    + '&& [ "$(oc_exe "$PID")" = "$EXE" ] && [ "$(oc_cmd "$PID")" = "$CMD" ]',
+  "}",
+  'remove_ours() { if [ -f "$PF" ]; then read_pf; if [ "$TOKEN" = "$EXPECT_TOKEN" ]; then rm -f "$PF"; fi; fi; }',
+  "wait_gone() {",
+  '  N=0; while [ "$N" -lt "$GRACE_CHECKS" ]; do',
+  '    if [ ! -f "$PF" ]; then return 0; fi',
+  "    read_pf",
+  '    if [ "$TOKEN" != "$EXPECT_TOKEN" ]; then return 0; fi',
+  "    if ! exact_live; then return 0; fi",
+  '    sleep 0.05; N=$((N+1))',
+  "  done; return 1",
+  "}",
+  'if [ ! -f "$PF" ]; then echo POLYTH_STOP_OK=1; exit 0; fi',
+  "read_pf",
+  'if [ "$TOKEN" != "$EXPECT_TOKEN" ]; then echo POLYTH_STOP_OK=1; exit 0; fi',
+  "if ! exact_live; then remove_ours; echo POLYTH_STOP_OK=1; exit 0; fi",
+  'kill -TERM "$PID" 2>/dev/null || true',
+  "echo POLYTH_STOP_TERM=1",
+  "if wait_gone; then remove_ours; echo POLYTH_STOP_OK=1; exit 0; fi",
+  "read_pf",
+  'if [ "$TOKEN" = "$EXPECT_TOKEN" ] && exact_live; then kill -KILL "$PID" 2>/dev/null || true; echo POLYTH_STOP_KILL=1; fi',
+  "if wait_gone; then remove_ours; echo POLYTH_STOP_OK=1; exit 0; fi",
+  "read_pf",
+  'if [ "$TOKEN" = "$EXPECT_TOKEN" ] && exact_live; then echo POLYTH_STOP_ERROR=still-alive; exit 78; fi',
+  "remove_ours",
+  "echo POLYTH_STOP_OK=1",
+].join("\n");
+
+const terminateServeAndVerify = async (
+  host: RemoteHost,
+  serve: Pick<ServeProcess, "pidFileExpr" | "serveToken">,
+  timeoutMs: number,
+): Promise<void> => {
+  const result = await host.exec(terminateServeScript(serve), { timeoutMs });
+  const output = `${result.stdout}\n${result.stderr}`;
+  if (result.code !== 0 || /POLYTH_STOP_ERROR=/.test(output)) {
+    throw unavailable(
+      `could not prove remote OpenCode serve exited: ${
+        output.match(/POLYTH_STOP_ERROR=([A-Za-z0-9._-]+)/)?.[1]
+        ?? result.stderr.trim().slice(-300)
+        ?? `exit ${result.code}`
+      }`,
+    );
+  }
+};
+
+const spawnedServe = (
+  serve: ServeProcess,
+  host: RemoteHost,
+  timeoutMs: number,
+): StartedServe => ({
+  ...serve,
+  cleanupOnFailedStart: () => terminateServeAndVerify(host, serve, timeoutMs),
+  disposeCommittedRuntime: () => terminateServeAndVerify(host, serve, timeoutMs),
+});
+
+const adoptedServe = (
+  serve: ServeProcess,
+  host: RemoteHost,
+  timeoutMs: number,
+): StartedServe => ({
+  ...serve,
+  cleanupOnFailedStart: async () => undefined,
+  disposeCommittedRuntime: () => terminateServeAndVerify(host, serve, timeoutMs),
+});
 
 const startServe = async (
   opts: Required<Pick<RemoteOpenCodeOptions, "host" | "remotePath">> & {
@@ -255,20 +298,17 @@ const startServe = async (
     lifecycleTimeoutMs: number;
     runtimeDir: string;
     port: number;
-    instanceToken: string;
-    lockToken: string;
+    serveToken: string;
   },
 ): Promise<StartedServe> => {
   // The PID record is a process-ownership boundary. Key it by the isolated
   // runtime directory as well as the worktree: two configured projects may
   // legitimately address the same remote path but must never reap each other.
   const dbPath = posix.join(opts.runtimeDir, "opencode.db");
-  // A private PID record carries the exact lease token plus process start,
-  // executable, and command identities. A stale/reused PID fails this complete
-  // match and is never signalled.
+  // The external PF is the serve-process record: immutable serveToken plus
+  // start/exe/cmd identities. A stale/reused PID fails this complete match
+  // and is never signalled. The start shell daemonizes and exits.
   const pidFileExpr = remoteServePidFileExpr(opts.runtimeDir, opts.remotePath);
-  const ownerFileExpr = `"$RUNTIME_DIR/${REMOTE_OWNER_FILE}"`;
-  const lockFileExpr = `"$RUNTIME_DIR/${REMOTE_LOCK_DIR}"`;
   const command = [
     REMOTE_PATH,
     "umask 077",
@@ -280,45 +320,58 @@ const startServe = async (
     `export OPENCODE_DB=${shq(dbPath)}`,
     `export ${OPENCODE_UPDATE_DISABLE_ENV}=true`,
     `PF=${pidFileExpr}`,
-    `OWNER=${ownerFileExpr}`,
-    `LOCK=${lockFileExpr}`,
     'mkdir -p "$(dirname "$PF")"',
     REMOTE_PROCESS_IDENTITY_FUNS,
     'TAB=$(printf "\\t")',
-    'if [ -L "$OWNER" ]; then echo "POLYTH_RUNTIME_OWNED_SYMLINK=$OWNER" >&2; exit 78; fi',
-    'if [ -f "$OWNER" ] && IFS="$TAB" read -r OWN_TOKEN OWN_PID OWN_START OWN_EXE OWN_CMD < "$OWNER"; then '
-      + 'if [ -n "$OWN_TOKEN" ] && [ "$(oc_start "$OWN_PID")" = "$OWN_START" ] '
-      + '&& [ "$(oc_exe "$OWN_PID")" = "$OWN_EXE" ] && [ "$(oc_cmd "$OWN_PID")" = "$OWN_CMD" ]; '
-      + 'then echo "POLYTH_RUNTIME_OWNED=$OWN_PID" >&2; exit 78; fi; fi',
-    'if [ -f "$PF" ] && IFS="$TAB" read -r OLD_TOKEN OLD_PID OLD_START OLD_EXE OLD_CMD < "$PF"; then '
-      + 'if [ -n "$OLD_TOKEN" ] && [ "$(oc_start "$OLD_PID")" = "$OLD_START" ] '
+    'if [ -L "$PF" ]; then echo "POLYTH_RUNTIME_OWNED_SYMLINK=$PF" >&2; exit 78; fi',
+    'if [ -f "$PF" ] && IFS="$TAB" read -r OLD_TOKEN OLD_PID OLD_START OLD_EXE OLD_CMD OLD_PORT < "$PF"; then '
+      + 'if [ -n "$OLD_TOKEN" ] && [ -n "$OLD_PID" ] && [ "$(oc_start "$OLD_PID")" = "$OLD_START" ] '
       + '&& [ "$(oc_exe "$OLD_PID")" = "$OLD_EXE" ] && [ "$(oc_cmd "$OLD_PID")" = "$OLD_CMD" ]; '
       + 'then echo "POLYTH_RUNTIME_OWNED=$OLD_PID" >&2; exit 78; fi; fi',
+    `SERVE_TOKEN=${shq(opts.serveToken)}`,
+    'LOG="$RUNTIME_DIR/opencode.serve.log"',
     `cd ${shq(opts.remotePath)}`,
-    `${opts.bin} serve --hostname 127.0.0.1 --port ${opts.port} & OC_PID=$!`,
-    'trap \'kill "$OC_PID" 2>/dev/null || true\' TERM INT HUP',
+    'rm -f "$LOG"; : > "$LOG"',
+    `setsid ${opts.bin} serve --hostname 127.0.0.1 --port ${opts.port} </dev/null >"$LOG" 2>&1 & OC_PID=$!`,
     'N=0; while [ "$N" -lt 100 ]; do OC_CMD=$(oc_cmd "$OC_PID"); '
       + 'case "$OC_CMD" in *" serve --hostname "*) break;; esac; '
       + 'N=$((N + 1)); sleep 0.02; done',
     'OC_START=$(oc_start "$OC_PID")',
     'OC_EXE=$(oc_exe "$OC_PID")',
-    `printf '%s\\t%s\\t%s\\t%s\\t%s\\n' ${shq(opts.instanceToken)} "$OC_PID" "$OC_START" "$OC_EXE" "$OC_CMD" > "$PF"`,
-    `printf '%s\\t%s\\t%s\\t%s\\t%s\\n' ${shq(opts.instanceToken)} "$OC_PID" "$OC_START" "$OC_EXE" "$OC_CMD" > "$OWNER"`,
-    `if [ "$(cut -f1 "$LOCK/${REMOTE_LOCK_STARTING}" 2>/dev/null)" = ${shq(opts.lockToken)} ]; then `
-      + `printf '%s\\n' ${shq(opts.lockToken)} > "$LOCK/${REMOTE_LOCK_HANDOFF}"; fi`,
+    'write_pf() { tok=$1; pid=$2; st=$3; ex=$4; cm=$5; po=$6; '
+      + 'if [ -z "$tok" ] || [ -z "$pid" ] || [ -z "$st" ] || [ -z "$ex" ] || [ -z "$cm" ] || [ -z "$po" ]; then return 1; fi; '
+      + 'tmp="$PF.$$.$RANDOM.tmp"; '
+      + 'printf "%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n" "$tok" "$pid" "$st" "$ex" "$cm" "$po" > "$tmp" || { rm -f "$tmp"; return 1; }; '
+      + 'mv "$tmp" "$PF" || { rm -f "$tmp"; return 1; }; }',
+    `terminate_unpublished_child() { [ -z "$OC_PID" ] && return 0; `
+      + 'kill -TERM "$OC_PID" 2>/dev/null || true; echo POLYTH_UNPUBLISHED_TERM=1; '
+      + `N=0; while [ "$N" -lt ${TERMINATE_GRACE_CHECKS} ]; do `
+      + 'if ! kill -0 "$OC_PID" 2>/dev/null; then return 0; fi; '
+      + 'N=$((N+1)); sleep 0.05; done; '
+      + 'if ! kill -0 "$OC_PID" 2>/dev/null; then return 0; fi; '
+      + 'kill -KILL "$OC_PID" 2>/dev/null || true; echo POLYTH_UNPUBLISHED_KILL=1; '
+      + `N=0; while [ "$N" -lt ${TERMINATE_GRACE_CHECKS} ]; do `
+      + 'if ! kill -0 "$OC_PID" 2>/dev/null; then return 0; fi; '
+      + 'N=$((N+1)); sleep 0.05; done; '
+      + 'if kill -0 "$OC_PID" 2>/dev/null; then echo POLYTH_UNPUBLISHED_ERROR=still-alive; return 1; fi; '
+      + "return 0; }",
+    `write_pf "$SERVE_TOKEN" "$OC_PID" "$OC_START" "$OC_EXE" "$OC_CMD" ${shq(String(opts.port))} `
+      + '|| { if terminate_unpublished_child; then echo POLYTH_SERVE_IDENTITY_INCOMPLETE=1; exit 1; fi; exit 78; }',
     'echo "POLYTH_REMOTE_PID=$OC_PID"',
-    'wait "$OC_PID"; CODE=$?',
-    `if [ "$(cut -f1 "$PF" 2>/dev/null)" = ${shq(opts.instanceToken)} ]; then rm -f "$PF"; fi`,
-    `if [ "$(cut -f1 "$OWNER" 2>/dev/null)" = ${shq(opts.instanceToken)} ]; then rm -f "$OWNER"; fi`,
-    'exit "$CODE"',
+    'N=0; while [ "$N" -lt 40 ]; do '
+      + 'if ! kill -0 "$OC_PID" 2>/dev/null; then '
+      + 'echo POLYTH_SERVE_EXITED=1; tail -c 4096 "$LOG" 2>/dev/null; exit 1; fi; '
+      + 'N=$((N + 1)); sleep 0.05; done',
+    "echo POLYTH_SERVE_SPAWNED=1",
+    "exit 0",
   ].join("; ");
 
-  const handle = await withDeadline(
+  const handle = await withRemoteDeadline(
     opts.host.start(command),
     opts.lifecycleTimeoutMs,
     "remote OpenCode process start",
     async (lateHandle) => {
-      await withDeadline(
+      await withRemoteDeadline(
         lateHandle.kill(),
         opts.lifecycleTimeoutMs,
         "late remote OpenCode process cleanup",
@@ -328,51 +381,131 @@ const startServe = async (
   return new Promise<StartedServe>((resolve, reject) => {
     let buf = "";
     let settled = false;
-    let exited = false;
     let remotePid: number | null = null;
-    const finish = (err?: Error, port?: number) => {
+    const serveRecord = (): ServeProcess => ({
+      port: opts.port,
+      remotePid,
+      pidFileExpr,
+      serveToken: opts.serveToken,
+    });
+    const finish = (err?: Error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       outputSub.dispose();
+      exitSub.dispose();
       if (err) {
-        exitSub.dispose();
-        void withDeadline(
-          handle.kill(),
+        void withRemoteDeadline(
+          Promise.all([
+            handle.kill(),
+            terminateServeAndVerify(opts.host, serveRecord(), opts.lifecycleTimeoutMs),
+          ]).then(() => undefined),
           opts.lifecycleTimeoutMs,
-          "failed remote OpenCode process cleanup",
-        ).catch(() => {}).finally(() => reject(err));
+          "failed remote OpenCode start-shell cleanup",
+        ).then(
+          () => reject(err),
+          (stopErr) => reject(stopErr),
+        );
       } else {
-        resolve({
-          handle,
-          port: port!,
-          remotePid,
-          pidFileExpr,
-          instanceToken: opts.instanceToken,
-          alive: () => !exited,
-          disposeExit: () => { exitSub.dispose(); },
-        });
+        resolve(spawnedServe(serveRecord(), opts.host, opts.lifecycleTimeoutMs));
       }
     };
+    const spawnFailed = (code?: number | null) => {
+      if (/POLYTH_UNPUBLISHED_ERROR=/.test(buf)) {
+        finish(unavailable("could not prove unpublished remote OpenCode serve exited"));
+        return;
+      }
+      const err = IN_USE_RE.test(buf)
+        ? Object.assign(new Error(`remote port ${opts.port} is in use`), { code: "port-in-use" })
+        : unavailable(
+          `remote opencode serve exited${code === undefined ? "" : ` (${code ?? "killed"})`}: ${buf.trim().slice(-400)}`,
+        );
+      finish(err);
+    };
     const timer = setTimeout(
-      () => finish(unavailable(`remote opencode serve did not report a listen address within ${opts.listenTimeoutMs}ms`)),
+      () => finish(unavailable(`remote opencode serve did not spawn within ${opts.listenTimeoutMs}ms`)),
       opts.listenTimeoutMs,
     );
     const outputSub = handle.onOutput((chunk) => {
       buf += chunk;
       const pid = buf.match(PID_LINE_RE);
       if (pid) remotePid = Number(pid[1]);
-      const listen = buf.match(LISTEN_RE);
-      if (listen) finish(undefined, Number(listen[1]));
+      if (/POLYTH_SERVE_EXITED=1/.test(buf)) {
+        spawnFailed();
+        return;
+      }
+      if (/POLYTH_SERVE_SPAWNED=1/.test(buf)) finish();
     });
     const exitSub = handle.onExit((code) => {
-      exited = true;
-      const err = IN_USE_RE.test(buf)
-        ? Object.assign(new Error(`remote port ${opts.port} is in use`), { code: "port-in-use" })
-        : unavailable(`remote opencode serve exited (${code ?? "killed"}): ${buf.trim().slice(-400)}`);
-      finish(err);
+      if (settled) return;
+      if (code === 0) {
+        queueMicrotask(() => {
+          if (settled) return;
+          if (/POLYTH_SERVE_SPAWNED=1/.test(buf) || remotePid !== null) finish();
+          else spawnFailed(code);
+        });
+        return;
+      }
+      spawnFailed(code);
     });
   });
+};
+
+type AttachResult =
+  | { kind: "live"; serve: StartedServe }
+  | { kind: "dead" };
+
+const attachAdoptedServe = async (opts: {
+  host: RemoteHost;
+  runtimeDir: string;
+  remotePath: string;
+  adoption: RemoteRuntimeAdoption;
+  lifecycleTimeoutMs: number;
+}): Promise<AttachResult> => {
+  const pidFileExpr = remoteServePidFileExpr(opts.runtimeDir, opts.remotePath);
+  let result;
+  try {
+    result = await opts.host.exec(
+      [
+        REMOTE_STORAGE_MARKERS.attach,
+        REMOTE_PROCESS_IDENTITY_FUNS,
+        `RUNTIME_DIR=${shq(opts.runtimeDir)}`,
+        `EXPECT_PID=${shq(opts.adoption.pid)}`,
+        `EXPECT_START=${shq(opts.adoption.startIdentity)}`,
+        `EXPECT_EXE=${shq(opts.adoption.executable)}`,
+        `EXPECT_CMD=${shq(opts.adoption.command)}`,
+        'if ! kill -0 "$EXPECT_PID" 2>/dev/null; then echo POLYTH_ATTACH_ERROR=dead; exit 78; fi',
+        'if [ "$(oc_start "$EXPECT_PID")" != "$EXPECT_START" ] '
+          + '|| [ "$(oc_exe "$EXPECT_PID")" != "$EXPECT_EXE" ] '
+          + '|| [ "$(oc_cmd "$EXPECT_PID")" != "$EXPECT_CMD" ]; then '
+          + "echo POLYTH_ATTACH_ERROR=dead; exit 78; fi",
+        "echo POLYTH_ATTACH_OK=1",
+      ].join("; "),
+      { timeoutMs: opts.lifecycleTimeoutMs },
+    );
+  } catch (error) {
+    throw unavailable(
+      `could not attach to live remote OpenCode: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (result.stdout.includes("POLYTH_ATTACH_OK=1")) {
+    return {
+      kind: "live",
+      serve: adoptedServe({
+        port: opts.adoption.port,
+        remotePid: Number(opts.adoption.pid),
+        pidFileExpr,
+        serveToken: opts.adoption.serveToken,
+      }, opts.host, opts.lifecycleTimeoutMs),
+    };
+  }
+  const error = `${result.stdout}\n${result.stderr}`.match(/POLYTH_ATTACH_ERROR=([A-Za-z0-9._-]+)/)?.[1];
+  if (error === "dead") return { kind: "dead" };
+  throw unavailable(
+    `could not attach to live remote OpenCode: ${
+      error ?? result.stderr.trim().slice(-300) ?? `exit ${result.code}`
+    }`,
+  );
 };
 
 /** Spawn `opencode serve` on the remote host and return the standard adapter
@@ -415,17 +548,29 @@ export const createRemoteOpenCodeRuntime = async (
     usernameEnv: options.usernameEnv ?? "OPENCODE_SERVER_USERNAME",
     passwordEnv: options.passwordEnv ?? "OPENCODE_SERVER_PASSWORD",
   };
-  await probeRemoteProcessIdentity(host);
-  const lockToken = randomUUID();
-  const lock = await acquireRemoteRuntimeLock(host, runtimeDir, lockToken, remotePath, {
+  const lock = await acquireRemoteRuntimeLock(host, runtimeDir, remotePath, {
     timeoutMs: lifecycleTimeoutMs,
   });
+  if (lock.adoption) {
+    console.log(
+      `[polyth] runtime.remote.adopt host=${host.label} runtimeDir=${runtimeDir} `
+        + `pid=${lock.adoption.pid} port=${lock.adoption.port}`,
+    );
+  }
+  let pendingAdoption = lock.adoption;
   let lockHeld = true;
+  let publishedPort: number | undefined;
+  let publishedServeToken: string | undefined;
+  let committed = false;
+  void lock.lost.then(() => {
+    if (lockHeld) {
+      console.log(`[polyth] runtime.controller.lost runtimeDir=${runtimeDir}`);
+    }
+  });
   const releaseLock = async (): Promise<void> => {
     if (!lockHeld) return;
+    await lock.release();
     lockHeld = false;
-    await stopRemoteLockGuardian(host, lock);
-    await releaseRemoteRuntimeLock(host, runtimeDir, lockToken);
   };
   let prepared: PreparedRemoteOpenCodeRuntime | undefined;
   try {
@@ -443,6 +588,7 @@ export const createRemoteOpenCodeRuntime = async (
         bin,
         version: probe.version!,
         binarySource: options.bin ? "configured" : "path",
+        ...(pendingAdoption ? { adoption: pendingAdoption } : {}),
       });
       if (prepared.diagnostic) {
         const emit = options.onRuntimeDiagnostic
@@ -467,91 +613,157 @@ export const createRemoteOpenCodeRuntime = async (
         storageId: runtime.storageId,
       };
     },
-    async start(instanceToken, incarnation) {
+    async start(leaseToken, incarnation) {
+      // leaseToken is the endpoint generation UUID. A newly spawned serve
+      // uses it as serveToken. An adopted serve keeps its existing serveToken;
+      // controller ownership is this guardian + flock, not a process rename.
       const runtime = prepared;
       if (!runtime) throw unavailable("isolated remote OpenCode runtime was not prepared");
+      if (!lock.held()) {
+        throw Object.assign(
+          new Error("remote runtime controller lease was lost; refusing concurrent mutation"),
+          { code: "conflict" },
+        );
+      }
       await runtime.recordOpen(incarnation);
       let started: StartedServe | null = null;
-      let lastError: unknown;
-      // Three collisions still get three fresh retries and a fourth candidate.
-      for (let attempt = 0; attempt < 4 && !started; attempt++) {
-        const port = pickPort();
-        try {
-          started = await startServe({
-            host,
-            remotePath,
-            runtimeDir: runtime.runtimeDir,
-            bin,
-            listenTimeoutMs,
-            lifecycleTimeoutMs,
-            port,
-            instanceToken,
-            lockToken,
-          });
-        } catch (error) {
-          lastError = error;
-          if ((error as { code?: string }).code !== "port-in-use") throw error;
-        }
+      if (pendingAdoption) {
+        const adoption = pendingAdoption;
+        pendingAdoption = undefined;
+        const attached = await attachAdoptedServe({
+          host,
+          runtimeDir: runtime.runtimeDir,
+          remotePath,
+          adoption,
+          lifecycleTimeoutMs,
+        });
+        if (attached.kind === "live") started = attached.serve;
       }
       if (!started) {
-        throw lastError ?? unavailable(`could not start opencode serve on ${host.label}`);
+        let lastError: unknown;
+        // Three collisions still get three fresh retries and a fourth candidate.
+        for (let attempt = 0; attempt < 4 && !started; attempt++) {
+          const port = pickPort();
+          try {
+            started = await startServe({
+              host,
+              remotePath,
+              runtimeDir: runtime.runtimeDir,
+              bin,
+              listenTimeoutMs,
+              lifecycleTimeoutMs,
+              port,
+              serveToken: leaseToken,
+            });
+          } catch (error) {
+            lastError = error;
+            if ((error as { code?: string }).code !== "port-in-use") throw error;
+          }
+        }
+        if (!started) {
+          throw lastError ?? unavailable(`could not start opencode serve on ${host.label}`);
+        }
       }
       const serve = started;
-      const ownerPath = posix.join(runtime.runtimeDir, REMOTE_OWNER_FILE);
+      publishedPort = serve.port;
+      publishedServeToken = serve.serveToken;
 
-      const cleanupRemote = async (): Promise<void> => {
-        const command = [
-          `PF=${serve.pidFileExpr}`,
-          `OWNER=${shq(ownerPath)}`,
-          REMOTE_PROCESS_IDENTITY_FUNS,
-          'TAB=$(printf "\\t")',
-          'if [ -f "$PF" ] && IFS="$TAB" read -r TOKEN PID START EXE CMD < "$PF"; then '
-            + `if [ "$TOKEN" = ${shq(serve.instanceToken)} ] `
-            + '&& [ "$(oc_start "$PID")" = "$START" ] '
-            + '&& [ "$(oc_exe "$PID")" = "$EXE" ] '
-            + '&& [ "$(oc_cmd "$PID")" = "$CMD" ]; '
-            + 'then kill "$PID" 2>/dev/null || true; fi; '
-            + `if [ "$TOKEN" = ${shq(serve.instanceToken)} ]; then rm -f "$PF"; fi; fi`,
-          `if [ "$(cut -f1 "$OWNER" 2>/dev/null)" = ${shq(serve.instanceToken)} ]; then rm -f "$OWNER"; fi`,
-        ].join("; ");
-        await host.exec(command, { timeoutMs: lifecycleTimeoutMs }).catch(() => {});
-        await withDeadline(
-          serve.handle.kill(),
-          lifecycleTimeoutMs,
-          "remote OpenCode handle cleanup",
-        ).catch(() => {});
-      };
-
-      let forward: Awaited<ReturnType<RemoteHost["forward"]>>;
-      try {
-        forward = await withDeadline(
-          host.forward(serve.port),
+      const openForward = async (port: number) =>
+        withRemoteDeadline(
+          host.forward(port),
           lifecycleTimeoutMs,
           "remote OpenCode forward",
           async (lateForward) => {
-            await withDeadline(
+            await withRemoteDeadline(
               Promise.resolve(lateForward.dispose()),
               lifecycleTimeoutMs,
               "late remote OpenCode forward cleanup",
             ).catch(() => {});
           },
         );
+
+      let forward: Awaited<ReturnType<RemoteHost["forward"]>>;
+      try {
+        forward = await openForward(serve.port);
       } catch (error) {
-        await cleanupRemote();
+        await serve.cleanupOnFailedStart();
         throw error;
       }
 
       let stopped = false;
+      let reviving: Promise<string | undefined> | undefined;
+      let recoveredTransport = false;
+      let transportDead = false;
+      const probeServe = async (): Promise<"live" | "dead" | "unreachable"> => {
+        try {
+          const result = await host.exec(
+            [
+              REMOTE_PROCESS_IDENTITY_FUNS,
+              `PF=${serve.pidFileExpr}`,
+              `TOKEN=${shq(serve.serveToken)}`,
+              'TAB=$(printf "\\t")',
+              'if [ -f "$PF" ] && IFS="$TAB" read -r PF_TOK PID START EXE CMD PORT < "$PF"; then '
+                + 'if [ "$PF_TOK" = "$TOKEN" ] '
+                + '&& [ "$(oc_start "$PID")" = "$START" ] '
+                + '&& [ "$(oc_exe "$PID")" = "$EXE" ] '
+                + '&& [ "$(oc_cmd "$PID")" = "$CMD" ]; then echo POLYTH_SERVE_LIVE=1; fi; fi',
+            ].join("; "),
+            { timeoutMs: lifecycleTimeoutMs },
+          );
+          if (result.stdout.includes("POLYTH_SERVE_LIVE=1")) return "live";
+          if (result.code === 0) return "dead";
+          return "unreachable";
+        } catch {
+          return "unreachable";
+        }
+      };
+      const transportIsUp = (): boolean =>
+        !stopped && (recoveredTransport || !transportDead);
       return {
         url: `http://127.0.0.1:${forward.localPort}`,
-        instanceIdentity: `${instanceToken}:${serve.remotePid ?? "unknown"}:${serve.port}`,
-        alive: () => serve.alive() && !stopped,
+        instanceIdentity: `${serve.serveToken}:${serve.remotePid ?? "unknown"}:${serve.port}`,
+        notStopped: () => !stopped,
+        controllerAlive: () => lock.held() && !stopped,
+        transportAlive: transportIsUp,
+        markTransportDead: () => {
+          recoveredTransport = false;
+          transportDead = true;
+        },
+        async revive() {
+          if (stopped) return undefined;
+          if (reviving) return reviving;
+          reviving = (async () => {
+            if (!lock.held()) {
+              throw Object.assign(
+                new Error("remote runtime controller lease was lost; refusing concurrent mutation"),
+                { code: "conflict" },
+              );
+            }
+            const status = await probeServe();
+            if (status === "unreachable") {
+              throw unavailable(
+                "remote runtime transport is down while the owned serve may still be alive",
+              );
+            }
+            if (status === "dead") return undefined;
+            if (transportIsUp()) return `http://127.0.0.1:${forward.localPort}`;
+            const next = await openForward(serve.port);
+            await Promise.resolve(forward.dispose()).catch(() => {});
+            forward = next;
+            recoveredTransport = true;
+            console.log(
+              `[polyth] runtime.remote.reconnect runtimeDir=${runtime.runtimeDir} port=${serve.port}`,
+            );
+            return `http://127.0.0.1:${forward.localPort}`;
+          })().finally(() => { reviving = undefined; });
+          return reviving;
+        },
         async stop() {
           if (stopped) return;
           stopped = true;
-          serve.disposeExit();
-          await cleanupRemote();
-          await withDeadline(
+          if (committed) await serve.disposeCommittedRuntime();
+          else await serve.cleanupOnFailedStart();
+          await withRemoteDeadline(
             Promise.resolve(forward.dispose()),
             lifecycleTimeoutMs,
             "remote OpenCode forward disposal",
@@ -567,8 +779,21 @@ export const createRemoteOpenCodeRuntime = async (
       lease,
       startupDeadlineMs: readyTimeoutMs,
     });
+    if (publishedPort === undefined || !publishedServeToken) {
+      throw unavailable("remote OpenCode listen identity was not captured");
+    }
+    if (!lock.held()) {
+      throw Object.assign(
+        new Error("remote runtime controller lease was lost; refusing concurrent mutation"),
+        { code: "conflict" },
+      );
+    }
+    committed = true;
   } catch (error) {
     await lease.dispose();
+    if (error instanceof Error && /unpublished remote OpenCode serve/.test(error.message)) {
+      throw error;
+    }
     throw unavailable(
       `remote opencode serve on ${host.label} did not become ready: ${error instanceof Error ? error.message : String(error)}`,
     );
@@ -591,7 +816,9 @@ export const createRemoteOpenCodeRuntime = async (
   };
   return attachRuntimeLifecycle(runtime, lifecycle) as ManagedOpenCodeRuntime;
   } catch (error) {
-    await releaseLock();
+    if (!(error instanceof Error && /unpublished remote OpenCode serve/.test(error.message))) {
+      await releaseLock();
+    }
     throw error;
   }
 };

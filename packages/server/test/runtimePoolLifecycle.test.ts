@@ -711,6 +711,7 @@ test("fenced operations and held review drafts do not pin a runtime forever", as
       resetOperationId: reset.operation.operationId,
       reason: "test replacement",
       fence: {
+        mode: "destroyed",
         authorityId: oldBinding.authorityId,
         generation: oldBinding.generation,
       },

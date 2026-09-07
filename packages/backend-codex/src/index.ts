@@ -228,7 +228,8 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
             };
         },
         releaseExecution: (binding, operationId) => mutate(operationId, async () => { if ((binding.authorityId !== endpoint.authorityId || binding.generation !== endpoint.generation) && !rpc.releasedAuthorities.some((proof) => proof.authorityId === binding.authorityId && proof.generation === binding.generation))
-            throw new Error("authority mismatch"); await rpc.close(); return { authorityId: binding.authorityId, generation: binding.generation }; }),
+            throw new Error("authority mismatch"); if (!binding.backendSessionId || binding.backendSessionId !== nativeId)
+            throw Object.assign(new Error("release requires the native backend session"), { code: "unknown-session" }); await rpc.close(); return { authorityId: binding.authorityId, generation: binding.generation, backendSessionId: binding.backendSessionId }; }),
         onEvent: (cb) => { listeners.add(cb); return { dispose: () => { listeners.delete(cb); } }; },
         onObservation: (cb) => { observations.add(cb); return { dispose: () => { observations.delete(cb); } }; },
         onLifecycle: (cb) => { lifecycle.add(cb); return { dispose: () => { lifecycle.delete(cb); } }; },

@@ -280,6 +280,7 @@ export const createRuntimeLifecycle = async (
       current
       && current.endpoint.authorityId === endpoint.authorityId
       && current.endpoint.generation === endpoint.generation
+      && current.endpoint.url === endpoint.url
     ) {
       return current;
     }
@@ -338,7 +339,16 @@ export const createRuntimeLifecycle = async (
   const generation = async (): Promise<RuntimeGeneration> => {
     if (disposed) throw unavailable("runtime lifecycle is disposed");
     if (replacement) return replacement;
-    return current ?? replaceSingleFlight(() => options.lease.endpoint());
+    if (!current) return replaceSingleFlight(() => options.lease.endpoint());
+    const endpoint = await options.lease.endpoint();
+    if (
+      current.endpoint.authorityId === endpoint.authorityId
+      && current.endpoint.generation === endpoint.generation
+      && current.endpoint.url === endpoint.url
+    ) {
+      return current;
+    }
+    return replaceSingleFlight(async () => endpoint);
   };
 
   const bindingForCurrent = (

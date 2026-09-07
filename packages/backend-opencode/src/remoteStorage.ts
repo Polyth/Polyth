@@ -8,6 +8,7 @@ import type { OwnedRuntimeIncarnation } from "./ownedRuntimeState.ts";
 import {
   OPENCODE_BINARY_DIGEST_RE,
   OPENCODE_PROTOCOL_GENERATION,
+  formatEngineRolloverDiagnostic,
   openCodeEnginesMatch,
   parseOpenCodeRuntimeMetadata,
   type OpenCodeBinarySource,
@@ -22,20 +23,17 @@ export const REMOTE_STORAGE_MARKERS = {
   writeDigestCache: "POLYTH_REMOTE_WRITE_DIGEST_CACHE=1",
   quarantine: "POLYTH_REMOTE_STORAGE_QUARANTINE=1",
   writeMetadata: "POLYTH_REMOTE_STORAGE_WRITE_METADATA=1",
-  processIdentity: "POLYTH_REMOTE_PROCESS_IDENTITY=1",
   acquireLock: "POLYTH_REMOTE_ACQUIRE_LOCK=1",
   lockGuardian: "POLYTH_REMOTE_LOCK_GUARDIAN=1",
-  releaseLock: "POLYTH_REMOTE_RELEASE_LOCK=1",
+  attach: "POLYTH_REMOTE_ATTACH=1",
+  stopServe: "POLYTH_REMOTE_STOP_SERVE=1",
 } as const;
 
-export const REMOTE_OWNER_FILE = ".polyth-runtime-owner";
-export const REMOTE_LOCK_DIR = ".polyth-runtime-lock";
-export const REMOTE_LOCK_STARTING = "starting";
-export const REMOTE_LOCK_HANDOFF = "handoff";
-export const REMOTE_DIGEST_CACHE_FILE = ".polyth-binary-digest";
+const REMOTE_CONTROLLER_LOCK_FILE = ".polyth-controller.lock";
+const REMOTE_DIGEST_CACHE_FILE = ".polyth-binary-digest";
 
 /** Same key `startServe` uses for `${XDG_CACHE_HOME:-$HOME/.cache}/polyth/serve-<hash>.pid`. */
-export const remoteProcessKey = (runtimeDir: string, remotePath: string): string =>
+const remoteProcessKey = (runtimeDir: string, remotePath: string): string =>
   createHash("sha256")
     .update(runtimeDir)
     .update("\0")
@@ -170,47 +168,23 @@ export const resolveRemoteRuntimeDir = async (options: {
   return posix.normalize(resolved);
 };
 
-export const probeRemoteProcessIdentity = async (host: RemoteHost): Promise<void> => {
-  const result = await host.exec(
-    [
-      REMOTE_STORAGE_MARKERS.processIdentity,
-      REMOTE_PROCESS_IDENTITY_FUNS,
-      "START=$(oc_start self)",
-      "EXE=$(oc_exe self)",
-      "CMD=$(oc_cmd self)",
-      'if [ -z "$START" ] || [ -z "$EXE" ] || [ -z "$CMD" ]; then '
-        + "echo POLYTH_PROCESS_IDENTITY_ERROR=unsupported; exit 78; fi",
-      "echo POLYTH_PROCESS_IDENTITY_OK=1",
-      'echo "POLYTH_PROCESS_START=$START"',
-      'echo "POLYTH_PROCESS_EXE=$EXE"',
-      'echo "POLYTH_PROCESS_CMD=$CMD"',
-    ].join("; "),
-    { timeoutMs: 20_000 },
-  );
-  const error = taggedLine(result.stdout, "POLYTH_PROCESS_IDENTITY_ERROR");
-  const start = taggedLine(result.stdout, "POLYTH_PROCESS_START");
-  const exe = taggedLine(result.stdout, "POLYTH_PROCESS_EXE");
-  const cmd = taggedLine(result.stdout, "POLYTH_PROCESS_CMD");
-  if (
-    result.code !== 0
-    || error
-    || taggedLine(result.stdout, "POLYTH_PROCESS_IDENTITY_OK") !== "1"
-    || !start
-    || !exe
-    || !cmd
-  ) {
-    throw unavailable(
-      "owned SSH runtime requires Linux-compatible process identity "
-        + "(/proc/self/stat, /proc/self/exe, /proc/self/cmdline); "
-        + "refusing to start OpenCode serve",
-    );
-  }
-};
+export interface RemoteRuntimeAdoption {
+  pid: string;
+  startIdentity: string;
+  executable: string;
+  command: string;
+  /** Immutable identity of the adopted OpenCode serve process. */
+  serveToken: string;
+  port: number;
+}
 
 export interface RemoteRuntimeLockHandle {
-  lockToken: string;
-  runtimeDir: string;
-  guardian: RemoteProcessHandle;
+  adoption?: RemoteRuntimeAdoption;
+  /** True while this controller still holds the flock. */
+  held(): boolean;
+  lost: Promise<void>;
+  /** Ask the flock-holding guardian to exit. Process exit releases the flock. */
+  release(): Promise<void>;
 }
 
 const LOCK_ACQUIRED_RE = /POLYTH_LOCK_ACQUIRED=1/;
@@ -220,14 +194,25 @@ const lockUnavailable = (runtimeDir: string, error: string | undefined, fallback
   if (error === "already-owned") {
     return unavailable(`owned remote runtime directory ${runtimeDir} is already owned / locked`);
   }
-  if (error === "starting-alive") {
-    return unavailable("owned remote runtime startup owner is still alive");
+  if (error === "unsupported") {
+    return unavailable(
+      "owned SSH runtime requires Linux-compatible process identity "
+        + "(/proc/self/stat, /proc/self/exe, /proc/self/cmdline); "
+        + "refusing to start OpenCode serve",
+    );
+  }
+  if (error === "identity-mismatch") {
+    return unavailable(
+      "owned remote runtime process identity does not match its owner record; refusing to adopt or kill it",
+    );
   }
   if (error === "verify-failed") {
     return unavailable("could not verify remote startup ownership");
   }
-  if (error === "reclaim-failed") {
-    return unavailable("could not reclaim stale remote runtime lock");
+  if (error === "listen-unknown") {
+    return unavailable(
+      "owned remote runtime is live but its listen endpoint is unknown; refusing to adopt or kill it",
+    );
   }
   return unavailable(
     `could not acquire the remote runtime lock in ${runtimeDir}: ${error ?? fallback}`,
@@ -236,7 +221,6 @@ const lockUnavailable = (runtimeDir: string, error: string | undefined, fallback
 
 const remoteLockGuardianCommand = (
   runtimeDir: string,
-  lockToken: string,
   remotePath: string,
 ): string => {
   const pidFileExpr = remoteServePidFileExpr(runtimeDir, remotePath);
@@ -245,67 +229,60 @@ const remoteLockGuardianCommand = (
     REMOTE_STORAGE_MARKERS.acquireLock,
     "umask 077",
     `RUNTIME_DIR=${shq(runtimeDir)}`,
-    `LOCK_TOKEN=${shq(lockToken)}`,
     REMOTE_PROCESS_IDENTITY_FUNS,
     'if [ -z "$(oc_start $$)" ] || [ -z "$(oc_exe $$)" ] || [ -z "$(oc_cmd $$)" ]; then '
       + "echo POLYTH_LOCK_ERROR=unsupported; exit 78; fi",
     'if [ -L "$RUNTIME_DIR" ]; then echo POLYTH_LOCK_ERROR=runtime-dir-is-symlink; exit 78; fi',
     'if ! mkdir -p "$RUNTIME_DIR" || ! chmod 700 "$RUNTIME_DIR"; then '
       + "echo POLYTH_LOCK_ERROR=mkdir-failed; exit 78; fi",
-    `LOCK="$RUNTIME_DIR/${REMOTE_LOCK_DIR}"`,
-    `OWNER="$RUNTIME_DIR/${REMOTE_OWNER_FILE}"`,
+    'command -v flock >/dev/null 2>&1 || { echo POLYTH_LOCK_ERROR=flock-unavailable; exit 78; }',
+    `CONTROLLER="$RUNTIME_DIR/${REMOTE_CONTROLLER_LOCK_FILE}"`,
     `PF=${pidFileExpr}`,
+    'read_pf() { TAB=$(printf "\\t"); IFS="$TAB" read -r PF_TOK PF_PID PF_START PF_EXE PF_CMD PF_PORT < "$PF" || true; }',
     'id_state() {',
-    '  _f="$1"',
-    '  if [ ! -e "$_f" ]; then echo missing; return; fi',
-    '  if [ -L "$_f" ] || [ ! -f "$_f" ]; then echo incomplete; return; fi',
-    '  TAB=$(printf "\\t")',
-    '  IFS="$TAB" read -r _tok _pid _st _ex _cm < "$_f" || true',
-    '  if [ -z "$_tok" ] || [ -z "$_pid" ] || [ -z "$_st" ] || [ -z "$_ex" ] || [ -z "$_cm" ]; then '
+    '  if [ ! -e "$PF" ]; then echo missing; return; fi',
+    '  if [ -L "$PF" ] || [ ! -f "$PF" ]; then echo incomplete; return; fi',
+    "  read_pf",
+    '  if [ -z "$PF_TOK" ] || [ -z "$PF_PID" ] || [ -z "$PF_START" ] || [ -z "$PF_EXE" ] || [ -z "$PF_CMD" ]; then '
       + "echo incomplete; return; fi",
-    '  if [ "$(oc_start "$_pid")" = "$_st" ] '
-      + '&& [ "$(oc_exe "$_pid")" = "$_ex" ] '
-      + '&& [ "$(oc_cmd "$_pid")" = "$_cm" ]; then echo live; return; fi',
-    "  echo dead",
+    '  if ! kill -0 "$PF_PID" 2>/dev/null; then echo dead; return; fi',
+    '  if [ "$(oc_start "$PF_PID")" = "$PF_START" ] '
+      + '&& [ "$(oc_exe "$PF_PID")" = "$PF_EXE" ] '
+      + '&& [ "$(oc_cmd "$PF_PID")" = "$PF_CMD" ]; then echo live; return; fi',
+    "  echo mismatch",
     "}",
-    "write_starting() {",
-    `  printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "$LOCK_TOKEN" "$$" "$(oc_start $$)" "$(oc_exe $$)" "$(oc_cmd $$)" > "$LOCK/${REMOTE_LOCK_STARTING}" || return 1`,
-    "}",
-    "wait_handoff() {",
+    "wait_release() {",
     "  echo POLYTH_LOCK_ACQUIRED=1",
-    `  while [ ! -f "$LOCK/${REMOTE_LOCK_HANDOFF}" ]; do sleep 0.1; done`,
+    "  while IFS= read -r line; do",
+    '    case "$line" in',
+    "      POLYTH_RELEASE) exit 0 ;;",
+    "    esac",
+    "  done",
     "  exit 0",
     "}",
-    'if mkdir "$LOCK"; then',
-    "  if ! write_starting; then",
-    '    rm -rf "$LOCK"',
-    "    echo POLYTH_LOCK_ERROR=starting-write",
-    "    exit 78",
-    "  fi",
-    "  wait_handoff",
-    "fi",
-    `STARTING_STATE=$(id_state "$LOCK/${REMOTE_LOCK_STARTING}")`,
-    'if [ "$STARTING_STATE" = "live" ]; then echo POLYTH_LOCK_ERROR=starting-alive; exit 78; fi',
-    'if [ "$STARTING_STATE" = "incomplete" ]; then echo POLYTH_LOCK_ERROR=verify-failed; exit 78; fi',
-    'OWNER_STATE=$(id_state "$OWNER")',
-    'if [ "$OWNER_STATE" = "live" ]; then echo POLYTH_LOCK_ERROR=already-owned; exit 78; fi',
-    'if [ "$OWNER_STATE" = "incomplete" ]; then echo POLYTH_LOCK_ERROR=verify-failed; exit 78; fi',
-    'SERVE_STATE=$(id_state "$PF")',
-    'if [ "$SERVE_STATE" = "live" ]; then echo POLYTH_LOCK_ERROR=already-owned; exit 78; fi',
+    "emit_adopt() {",
+    "  read_pf",
+    '  if [ -z "$PF_PORT" ]; then echo POLYTH_LOCK_ERROR=listen-unknown; exit 78; fi',
+    "  echo POLYTH_LOCK_ADOPTABLE=1",
+    '  echo "POLYTH_ADOPT_PID=$PF_PID"',
+    '  echo "POLYTH_ADOPT_START=$PF_START"',
+    '  echo "POLYTH_ADOPT_EXE=$PF_EXE"',
+    '  echo "POLYTH_ADOPT_CMD=$PF_CMD"',
+    '  echo "POLYTH_ADOPT_TOKEN=$PF_TOK"',
+    '  echo "POLYTH_ADOPT_PORT=$PF_PORT"',
+    "  wait_release",
+    "}",
+    'exec 9>"$CONTROLLER" || { echo POLYTH_LOCK_ERROR=lock-open-failed; exit 78; }',
+    'if ! flock -n 9; then echo POLYTH_LOCK_ERROR=already-owned; exit 78; fi',
+    'SERVE_STATE=$(id_state)',
     'if [ "$SERVE_STATE" = "incomplete" ]; then echo POLYTH_LOCK_ERROR=verify-failed; exit 78; fi',
-    // Exclusive reclaim: only the mkdir winner may rm -rf $LOCK. Do not rm
-    // just because owner is missing. Incomplete identities never reclaim.
-    'if ! mkdir "$LOCK.reclaim"; then echo POLYTH_LOCK_ERROR=already-owned; exit 78; fi',
-    'rm -rf "$LOCK"',
-    'if ! mv "$LOCK.reclaim" "$LOCK"; then '
-      + 'rm -rf "$LOCK.reclaim"; echo POLYTH_LOCK_ERROR=reclaim-failed; exit 78; fi',
-    "if ! write_starting; then echo POLYTH_LOCK_ERROR=starting-write; exit 78; fi",
-    "echo POLYTH_LOCK_RECOVERED=1",
-    "wait_handoff",
+    'if [ "$SERVE_STATE" = "mismatch" ]; then echo POLYTH_LOCK_ERROR=identity-mismatch; exit 78; fi',
+    'if [ "$SERVE_STATE" = "live" ]; then emit_adopt; fi',
+    "wait_release",
   ].join("\n");
 };
 
-const withStartDeadline = <T>(
+export const withRemoteDeadline = <T>(
   operation: Promise<T>,
   timeoutMs: number,
   label: string,
@@ -337,51 +314,153 @@ const withStartDeadline = <T>(
     );
   });
 
+const requestGuardianExit = (handle: RemoteProcessHandle): void => {
+  if (handle.write) handle.write("POLYTH_RELEASE\n");
+  else void handle.kill();
+};
+
+const confirmGuardianExit = async (
+  handle: RemoteProcessHandle,
+  lost: Promise<void>,
+  stillHeld: () => boolean,
+  timeoutMs: number,
+): Promise<void> => {
+  if (!stillHeld()) return;
+  let finished = false;
+  try {
+    await withRemoteDeadline(
+      new Promise<void>((resolveRelease) => {
+        void lost.then(() => {
+          finished = true;
+          resolveRelease();
+        });
+        requestGuardianExit(handle);
+      }),
+      timeoutMs,
+      "remote controller release",
+    );
+  } catch (error) {
+    if (!stillHeld() || finished) return;
+    throw error;
+  }
+  if (stillHeld()) {
+    throw unavailable("remote runtime controller did not release the flock");
+  }
+};
+
+const stopLateGuardian = async (
+  handle: RemoteProcessHandle,
+  timeoutMs: number,
+): Promise<void> => {
+  let exited = false;
+  const lost = new Promise<void>((resolveLost) => {
+    handle.onExit(() => {
+      exited = true;
+      resolveLost();
+    });
+  });
+  await confirmGuardianExit(handle, lost, () => !exited, timeoutMs);
+};
+
+const acquisitionCleanupFailed = (error: Error, cleanupErr: unknown): Error => {
+  const cleanup = cleanupErr instanceof Error ? cleanupErr : new Error(String(cleanupErr));
+  return Object.assign(
+    new AggregateError(
+      [error, cleanup],
+      "remote controller acquisition failed; guardian cleanup could not be confirmed: "
+        + cleanup.message,
+    ),
+    { code: "unavailable" },
+  );
+};
+
 export const acquireRemoteRuntimeLock = async (
   host: RemoteHost,
   runtimeDir: string,
-  lockToken: string,
   remotePath: string,
   options?: { timeoutMs?: number },
 ): Promise<RemoteRuntimeLockHandle> => {
   if (!runtimeDir.startsWith("/")) throw invalid("remote runtimeDir must be an absolute path");
-  if (!lockToken.trim()) throw unavailable("remote runtime lock token is required");
   if (!remotePath.trim()) throw invalid("remote path is required");
   const timeoutMs = options?.timeoutMs ?? 20_000;
-  const command = remoteLockGuardianCommand(runtimeDir, lockToken, remotePath);
-  const handle = await withStartDeadline(
-    host.start(command),
+  const command = remoteLockGuardianCommand(runtimeDir, remotePath);
+  const handle = await withRemoteDeadline(
+    host.start(command, { interactive: true }),
     timeoutMs,
     "remote runtime lock guardian start",
-    async (lateHandle) => {
-      await withStartDeadline(
-        lateHandle.kill(),
-        timeoutMs,
-        "late remote runtime lock guardian cleanup",
-      ).catch(() => {});
+    (lateHandle) => {
+      void stopLateGuardian(lateHandle, timeoutMs).catch((error) => {
+        console.error(
+          `[polyth] remote controller late-start cleanup failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
     },
   );
   return new Promise<RemoteRuntimeLockHandle>((resolve, reject) => {
     let buf = "";
     let settled = false;
-    const finish = (error?: Error) => {
+    let acquired = false;
+    let controllerAlive = true;
+    let lostResolve!: () => void;
+    const lost = new Promise<void>((resolveLost) => { lostResolve = resolveLost; });
+    const markLost = (): void => {
+      if (!controllerAlive) return;
+      controllerAlive = false;
+      lostResolve();
+    };
+    const parseAdoption = (): RemoteRuntimeAdoption | undefined => {
+      if (!/POLYTH_LOCK_ADOPTABLE=1/.test(buf) && !taggedLine(buf, "POLYTH_ADOPT_PID")) {
+        return undefined;
+      }
+      const pid = taggedLine(buf, "POLYTH_ADOPT_PID");
+      const startIdentity = taggedLine(buf, "POLYTH_ADOPT_START");
+      const executable = taggedLine(buf, "POLYTH_ADOPT_EXE");
+      const command = taggedLine(buf, "POLYTH_ADOPT_CMD");
+      const serveToken = taggedLine(buf, "POLYTH_ADOPT_TOKEN");
+      const port = Number(taggedLine(buf, "POLYTH_ADOPT_PORT"));
+      if (
+        !pid
+        || !startIdentity
+        || !executable
+        || !command
+        || !serveToken
+        || !Number.isInteger(port)
+        || port < 1
+        || port > 65535
+      ) {
+        return undefined;
+      }
+      return { pid, startIdentity, executable, command, serveToken, port };
+    };
+    const fail = (error: Error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      outputSub.dispose();
-      if (error) {
-        exitSub.dispose();
-        void withStartDeadline(
-          handle.kill(),
-          timeoutMs,
-          "failed remote runtime lock guardian cleanup",
-        ).catch(() => {}).finally(() => reject(error));
+      void confirmGuardianExit(handle, lost, () => controllerAlive, timeoutMs).then(
+        () => reject(error),
+        (cleanupErr) => reject(acquisitionCleanupFailed(error, cleanupErr)),
+      );
+    };
+    const succeed = () => {
+      if (settled) return;
+      const adoption = parseAdoption();
+      if ((/POLYTH_LOCK_ADOPTABLE=1/.test(buf) || taggedLine(buf, "POLYTH_ADOPT_PID")) && !adoption) {
+        fail(lockUnavailable(runtimeDir, "listen-unknown", "adopt"));
         return;
       }
-      resolve({ lockToken, runtimeDir, guardian: handle });
+      settled = true;
+      clearTimeout(timer);
+      resolve({
+        ...(adoption ? { adoption } : {}),
+        held: () => controllerAlive,
+        lost,
+        release: () => confirmGuardianExit(handle, lost, () => controllerAlive, timeoutMs),
+      });
     };
     const timer = setTimeout(
-      () => finish(unavailable(
+      () => fail(unavailable(
         `remote runtime lock guardian did not acquire within ${timeoutMs}ms`,
       )),
       timeoutMs,
@@ -390,69 +469,26 @@ export const acquireRemoteRuntimeLock = async (
       buf += chunk;
       const tagged = buf.match(LOCK_ERROR_RE)?.[1];
       if (tagged) {
-        finish(lockUnavailable(runtimeDir, tagged, tagged));
+        fail(lockUnavailable(runtimeDir, tagged, tagged));
         return;
       }
-      if (LOCK_ACQUIRED_RE.test(buf)) finish();
+      if (LOCK_ACQUIRED_RE.test(buf)) {
+        acquired = true;
+        outputSub.dispose();
+        succeed();
+      }
     });
-    const exitSub = handle.onExit((code) => {
+    handle.onExit((code) => {
+      markLost();
+      if (acquired || settled) return;
       const tagged = buf.match(LOCK_ERROR_RE)?.[1];
-      finish(lockUnavailable(
+      fail(lockUnavailable(
         runtimeDir,
         tagged,
         buf.trim().slice(-300) || `exit ${code ?? "killed"}`,
       ));
     });
   });
-};
-
-export const stopRemoteLockGuardian = async (
-  host: RemoteHost,
-  handle: RemoteRuntimeLockHandle,
-): Promise<void> => {
-  const { runtimeDir, lockToken, guardian } = handle;
-  if (!runtimeDir.startsWith("/") || !lockToken.trim()) {
-    await guardian.kill().catch(() => {});
-    return;
-  }
-  await host.exec(
-    [
-      REMOTE_PROCESS_IDENTITY_FUNS,
-      `LOCK=${shq(`${runtimeDir}/${REMOTE_LOCK_DIR}`)}`,
-      `LOCK_TOKEN=${shq(lockToken)}`,
-      `STARTING="$LOCK/${REMOTE_LOCK_STARTING}"`,
-      'TAB=$(printf "\\t")',
-      'if [ -f "$STARTING" ] && [ ! -L "$STARTING" ] '
-        + '&& IFS="$TAB" read -r TOK PID START EXE CMD < "$STARTING"; then '
-        + 'if [ "$TOK" = "$LOCK_TOKEN" ] '
-        + '&& [ "$(oc_start "$PID")" = "$START" ] '
-        + '&& [ "$(oc_exe "$PID")" = "$EXE" ] '
-        + '&& [ "$(oc_cmd "$PID")" = "$CMD" ]; then '
-        + 'kill "$PID" 2>/dev/null || true; fi; fi',
-    ].join("; "),
-    { timeoutMs: 20_000 },
-  ).catch(() => {});
-  await guardian.kill().catch(() => {});
-};
-
-export const releaseRemoteRuntimeLock = async (
-  host: RemoteHost,
-  runtimeDir: string,
-  lockToken: string,
-): Promise<void> => {
-  if (!runtimeDir.startsWith("/") || !lockToken.trim()) return;
-  await host.exec(
-    [
-      REMOTE_STORAGE_MARKERS.releaseLock,
-      `RUNTIME_DIR=${shq(runtimeDir)}`,
-      `LOCK_TOKEN=${shq(lockToken)}`,
-      `LOCK="$RUNTIME_DIR/${REMOTE_LOCK_DIR}"`,
-      'if [ -d "$LOCK" ] && [ ! -L "$LOCK" ] '
-        + `&& [ "$(cut -f1 "$LOCK/${REMOTE_LOCK_STARTING}" 2>/dev/null)" = "$LOCK_TOKEN" ]; then `
-        + 'rm -rf "$LOCK"; echo POLYTH_LOCK_RELEASED=1; fi',
-    ].join("; "),
-    { timeoutMs: 20_000 },
-  ).catch(() => {});
 };
 
 const inspectRemoteStorage = async (
@@ -464,8 +500,6 @@ const inspectRemoteStorage = async (
   metadataRaw?: string;
   dbKind: "missing" | "file" | "symlink" | "other";
   dbEntries: string[];
-  ownerKind: "missing" | "file" | "symlink" | "other";
-  ownerLive: boolean;
   binaryPath: string;
   binarySize: string;
   binaryMtime: string;
@@ -487,7 +521,6 @@ const inspectRemoteStorage = async (
       kindOfFn,
       `META="$RUNTIME_DIR/runtime.json"`,
       `DB="$RUNTIME_DIR/opencode.db"`,
-      `OWNER="$RUNTIME_DIR/${REMOTE_OWNER_FILE}"`,
       `CACHE="$RUNTIME_DIR/${REMOTE_DIGEST_CACHE_FILE}"`,
       'echo "POLYTH_METADATA_KIND=$(kind_of "$META")"',
       'if [ -f "$META" ] && [ ! -L "$META" ]; then '
@@ -499,19 +532,6 @@ const inspectRemoteStorage = async (
         + 'if [ -L "$p" ] || [ -e "$p" ]; then ENTRIES="$ENTRIES $name"; fi; '
         + "done",
       'echo "POLYTH_DB_ENTRIES=$ENTRIES"',
-      'echo "POLYTH_OWNER_KIND=$(kind_of "$OWNER")"',
-      "POLYTH_OWNER_LIVE=0",
-      'if [ -f "$OWNER" ] && [ ! -L "$OWNER" ]; then '
-        + 'TAB=$(printf "\\t"); '
-        + 'IFS="$TAB" read -r OLD_TOKEN OLD_PID OLD_START OLD_EXE OLD_CMD < "$OWNER" || true; '
-        + 'oc_start() { sed "s/.*) //" "/proc/$1/stat" 2>/dev/null | cut -d" " -f20; }; '
-        + 'oc_exe() { readlink "/proc/$1/exe" 2>/dev/null; }; '
-        + 'oc_cmd() { tr "\\000" " " < "/proc/$1/cmdline" 2>/dev/null | cksum | awk \'{print $1 ":" $2}\'; }; '
-        + 'if [ -n "$OLD_TOKEN" ] && [ -n "$OLD_PID" ] '
-        + '&& [ "$(oc_start "$OLD_PID")" = "$OLD_START" ] '
-        + '&& [ "$(oc_exe "$OLD_PID")" = "$OLD_EXE" ] '
-        + '&& [ "$(oc_cmd "$OLD_PID")" = "$OLD_CMD" ]; then POLYTH_OWNER_LIVE=1; fi; fi',
-      'echo "POLYTH_OWNER_LIVE=$POLYTH_OWNER_LIVE"',
       'if expr "$BIN" : "/" >/dev/null; then BIN_PATH="$BIN"; '
         + 'else BIN_PATH=$(command -v "$BIN" 2>/dev/null) || true; fi',
       'if [ -z "$BIN_PATH" ] || [ ! -x "$BIN_PATH" ]; then '
@@ -560,8 +580,6 @@ const inspectRemoteStorage = async (
       .trim()
       .split(/\s+/)
       .filter(Boolean),
-    ownerKind: pathKind(taggedLine(result.stdout, "POLYTH_OWNER_KIND")),
-    ownerLive: taggedLine(result.stdout, "POLYTH_OWNER_LIVE") === "1",
     binaryPath,
     binarySize,
     binaryMtime,
@@ -709,6 +727,9 @@ export const prepareRemoteOpenCodeRuntime = async (options: {
   version: string;
   binarySource: OpenCodeBinarySource;
   now?: number;
+  /** Exact serve already verified by the controller lock. Storage must not
+   * quarantine a DB that process still has open. */
+  adoption?: RemoteRuntimeAdoption;
 }): Promise<PreparedRemoteOpenCodeRuntime> => {
   if (!options.runtimeDir.startsWith("/")) {
     throw invalid("remote runtimeDir must be an absolute path");
@@ -721,16 +742,6 @@ export const prepareRemoteOpenCodeRuntime = async (options: {
   const cwd = posix.normalize(options.cwd);
   const now = options.now ?? Date.now();
   const inspect = await inspectRemoteStorage(options.host, runtimeDir, options.bin);
-  if (inspect.ownerKind === "symlink") {
-    throw unavailable(
-      `owned remote runtime owner record is a symlink in ${runtimeDir}; refusing to open writable storage`,
-    );
-  }
-  if (inspect.ownerLive) {
-    throw unavailable(
-      `owned remote runtime directory ${runtimeDir} is held by a live serve; refusing to take over`,
-    );
-  }
 
   let binaryDigest = cachedDigest(inspect);
   if (!binaryDigest) {
@@ -761,12 +772,23 @@ export const prepareRemoteOpenCodeRuntime = async (options: {
   const engineCompatible = previous && sameLocation
     && openCodeEnginesMatch(previous, engineIdentity);
   const compatible = Boolean(engineCompatible && databaseIsRegular);
+  if (options.adoption && previous && sameLocation && !engineCompatible) {
+    throw Object.assign(
+      new Error(
+        `runtime.engine.rollover remote ${runtimeDir}: live process still owns the previous engine `
+          + `digest ${previous.binaryDigest.slice(0, 12)}; refusing to attach or quarantine a live DB`,
+      ),
+      { code: "incompatible" },
+    );
+  }
+  if (options.adoption && !compatible) {
+    throw unavailable(
+      `cannot adopt live remote runtime ${runtimeDir}: storage is missing or unsafe`,
+    );
+  }
   const diagnostic = previous && sameLocation
     ? !openCodeEnginesMatch(previous, engineIdentity)
-      ? `OpenCode engine identity changed for remote ${runtimeDir}; the previous writable runtime DB was quarantined without being opened. `
-        + `Previous engine: version ${previous.version}, digest ${previous.binaryDigest}. `
-        + `Selected engine: version ${engineIdentity.version}, digest ${engineIdentity.binaryDigest}. `
-        + "Existing sessions will require a new runtime epoch."
+      ? formatEngineRolloverDiagnostic(`remote ${runtimeDir}`, previous, engineIdentity)
       : !databaseIsRegular
         ? `OpenCode runtime storage was missing or unsafe for remote ${runtimeDir}; recognized DB paths were quarantined without being opened. `
           + "Existing sessions will require a new runtime epoch."

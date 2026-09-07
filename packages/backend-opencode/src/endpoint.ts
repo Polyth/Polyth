@@ -280,9 +280,44 @@ interface StartedOwnedInstance {
   url: string;
   instanceIdentity: string;
   authentication: RuntimeAuthentication;
-  alive(): boolean;
+  /** False after this controller locally stopped the instance. Not a process probe. */
+  notStopped(): boolean;
+  /** Polyth controller lease. Lost lease fences mutations without claiming the serve is dead. */
+  controllerAlive(): boolean;
+  /** When false while notStopped, revive() may re-establish transport. */
+  transportAlive(): boolean;
+  /** Marks the control/forwarding path dead without claiming the serve is dead. */
+  markTransportDead(): void;
+  /**
+   * Reconnect a live serve after transport loss.
+   * Returns a URL when the serve is still owned, `undefined` when the serve is
+   * proven dead (caller may replace), and throws when ownership is unreachable
+   * (do not spawn a second process).
+   */
+  revive(): Promise<string | undefined>;
   stop(): Promise<void>;
 }
+
+const bindOwnedInstance = (partial: {
+  url: string;
+  instanceIdentity: string;
+  authentication: RuntimeAuthentication;
+  notStopped?(): boolean;
+  controllerAlive?(): boolean;
+  transportAlive?(): boolean;
+  markTransportDead?(): void;
+  revive?(): Promise<string | undefined>;
+  stop(): Promise<void>;
+}): StartedOwnedInstance => ({
+  ...partial,
+  notStopped: partial.notStopped ?? (() => true),
+  controllerAlive: partial.controllerAlive ?? (() => true),
+  transportAlive: partial.transportAlive ?? (() => true),
+  markTransportDead: partial.markTransportDead ?? (() => {}),
+  revive: partial.revive ?? (async () => partial.url),
+});
+
+type OwnedInstanceStart = Parameters<typeof bindOwnedInstance>[0];
 
 interface OwnedLeaseOptions {
   authorityId?: string;
@@ -295,7 +330,7 @@ interface OwnedLeaseOptions {
   start(
     instanceToken: string,
     incarnation: OwnedRuntimeIncarnation,
-  ): Promise<StartedOwnedInstance>;
+  ): Promise<OwnedInstanceStart>;
 }
 
 const createOwnedLease = async (
@@ -314,8 +349,19 @@ const createOwnedLease = async (
   let disposal: Promise<void> | undefined;
   let disposed = false;
 
+  const controllerConflict = (): Error =>
+    Object.assign(
+      new Error("remote runtime controller lease was lost; refusing concurrent mutation"),
+      { code: "conflict" },
+    );
+
+  const assertController = (): void => {
+    if (current?.instance.controllerAlive() === false) throw controllerConflict();
+  };
+
   const replace = async (): Promise<RuntimeEndpoint> => {
     if (disposed) throw unavailable("runtime endpoint lease is disposed");
+    assertController();
     const previous = current;
     current = undefined;
     if (previous) await previous.instance.stop();
@@ -335,7 +381,7 @@ const createOwnedLease = async (
     ) {
       throw unavailable("owned runtime incarnation did not advance");
     }
-    const instance = await options.start(instanceToken, incarnation);
+    const instance = bindOwnedInstance(await options.start(instanceToken, incarnation));
     if (disposed) {
       await instance.stop();
       throw unavailable("runtime endpoint lease was disposed during startup");
@@ -369,6 +415,20 @@ const createOwnedLease = async (
 
   await replaceSingleFlight();
 
+  type TransportRevive = "current" | "replace" | RuntimeEndpoint;
+
+  const reviveTransport = async (
+    active: NonNullable<typeof current>,
+    force: boolean,
+  ): Promise<TransportRevive> => {
+    if (!force && active.instance.transportAlive()) return "current";
+    if (force) active.instance.markTransportDead();
+    const url = await active.instance.revive();
+    if (!url) return "replace";
+    active.endpoint = { ...active.endpoint, url };
+    return active.endpoint;
+  };
+
   const lease: OwnedRuntimeEndpointLease = {
     get control() {
       if (!current) {
@@ -378,21 +438,26 @@ const createOwnedLease = async (
     },
     async endpoint() {
       if (disposed) throw unavailable("runtime endpoint lease is disposed");
-      // A known-dead instance must never be handed out: after a failed
-      // post-disconnect refresh (exit-notification race), endpoint() is the
-      // only acquisition path left, and returning the dead generation would
-      // wedge the runtime on a closed port forever.
-      if (!current || !current.instance.alive()) return replaceSingleFlight();
-      return current.endpoint;
+      assertController();
+      if (!current || !current.instance.notStopped()) return replaceSingleFlight();
+      const revived = await reviveTransport(current, false);
+      if (revived === "replace") return replaceSingleFlight();
+      if (revived === "current") return current.endpoint;
+      return revived;
     },
     async refresh() {
       if (disposed) throw unavailable("runtime endpoint lease is disposed");
+      assertController();
       if (!current) return replaceSingleFlight();
       const credentialsChanged =
         environmentCredentialFingerprint(current.endpoint.authentication)
         !== current.credentialFingerprint;
-      if (!current.instance.alive() || credentialsChanged) return replaceSingleFlight();
-      return current.endpoint;
+      if (credentialsChanged) return replaceSingleFlight();
+      if (!current.instance.notStopped()) return replaceSingleFlight();
+      const revived = await reviveTransport(current, true);
+      if (revived === "replace") return replaceSingleFlight();
+      if (revived === "current") return current.endpoint;
+      return revived;
     },
     restart() {
       return replaceSingleFlight();
@@ -581,7 +646,6 @@ export const createOwnedLocalEndpointLease = async (
     passwordEnv: options.passwordEnv ?? "OPENCODE_SERVER_PASSWORD",
   };
   let firstStart = true;
-  let activeAuthority: Awaited<ReturnType<typeof createProcessAuthority>> | undefined;
   let preparedRuntime: PreparedOpenCodeRuntime | undefined;
 
   const lease = await createOwnedLease({
@@ -662,14 +726,13 @@ export const createOwnedLocalEndpointLease = async (
             runtime,
             incarnation,
           );
-          activeAuthority = started.authority;
           let stopped = false;
           activeLocalInstanceTokens.add(instanceToken);
           return {
             url: `http://${started.hostname}:${started.port}`,
             instanceIdentity: `${instanceToken}:${started.child.pid ?? "unknown"}`,
             authentication,
-            alive: () => !stopped && !childExited(started.child),
+            notStopped: () => !stopped && !childExited(started.child),
             async stop() {
               if (stopped) return;
               stopped = true;
@@ -694,16 +757,7 @@ export const createOwnedLocalEndpointLease = async (
       throw lastError ?? unavailable("could not bind an OpenCode local endpoint");
     },
   });
-  return Object.assign(lease, {
-    canReleaseExecution(proof: { authorityId: string; generation: number }) {
-      return activeAuthority?.releasedAuthorities.some((item) => item.authorityId === proof.authorityId && item.generation === proof.generation) ?? false;
-    },
-    async releaseExecution() {
-      if (!activeAuthority) throw unavailable("owned process supervision is unavailable");
-      await activeAuthority.close();
-      await lease.dispose();
-    },
-  });
+  return lease;
 };
 
 export interface OwnedSshStorageIdentity {
@@ -760,7 +814,11 @@ export interface OwnedSshEndpointOptions {
   ): Promise<{
     url: string;
     instanceIdentity: string;
-    alive?(): boolean;
+    notStopped?(): boolean;
+    controllerAlive?(): boolean;
+    transportAlive?(): boolean;
+    revive?(): Promise<string | undefined>;
+    markTransportDead?(): void;
     stop(): Promise<void>;
   }>;
   authorityId?: string;
@@ -812,12 +870,7 @@ export const createOwnedSshEndpointLease = async (
     config: { kind: "read-only" },
     authentication,
     async start(instanceToken, incarnation) {
-      const started = await options.start(instanceToken, incarnation);
-      return {
-        ...started,
-        authentication,
-        alive: started.alive ?? (() => true),
-      };
+      return { ...await options.start(instanceToken, incarnation), authentication };
     },
   });
 };

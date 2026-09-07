@@ -9,6 +9,8 @@ import type {
   PersistedRuntimeBinding,
   InstalledPluginDto, PackageDescriptorDto, QueueItemDto, RateLimitRetry, RateLimitRetryHint, RuntimeEvent,
   RuntimeEpochTransitionResult, TurnResumeCancelledData,
+  ExecutionReleaseProof,
+  RuntimeEpochFence,
   RuntimeEndpoint, RuntimeLifecycleNotification, RuntimeMutationKind, RuntimeObservation,
   RuntimeSessionBinding, RuntimeSnapshot,
   SecretRequestData, SecretResolvedData, SecureSafeKind, SecureSafeService,
@@ -39,6 +41,12 @@ import {
   rateLimitNoticeHint,
   RESUME_FALLBACK_BACKOFF_SEC,
 } from "./resume.ts";
+const QUIET_DISPATCH_ERRORS = new Set([
+  "shutting_down",
+  "restart-deferred",
+  "outcome-unknown",
+  "epoch-pending",
+]);
 
 export interface Broadcaster {
   event(ev: SessionEvent): void;
@@ -81,9 +89,13 @@ export interface RuntimePool {
   forProject(projectId: string, cwd?: string): Promise<AgentRuntime>;
   forSession?(projection: SessionProjection, cwd: string, targetHarnessId?: string): Promise<AgentRuntime>;
   resolve?(projection: SessionProjection, cwd: string, selection: HarnessSelection): Promise<string>;
-  forget?(runtime: AgentRuntime): void;
+  forgetSession?(sessionId: string): void;
+  forgetRuntime?(runtime: AgentRuntime): void;
   /** Dispose the facade for one project+cwd so the next lookup starts fresh. */
   release?(projectId: string, cwd: string): Promise<void>;
+  /** Session lease on a shared pool facade. Does not own process disposal. */
+  bindSession?(sessionId: string, runtime: AgentRuntime): void;
+  unbindSession?(sessionId: string, runtime: AgentRuntime): void;
   /** Restart all currently live runtime facades in place. */
   restartAll?(): Promise<number>;
   /** Generation replacement notification. Resolves only after every wired
@@ -122,11 +134,8 @@ export interface RestartSafetySessionService extends SessionService {
 }
 
 export type RuntimeEpochAuthorityDisposition =
-  | {
-      kind: "owned-authority-destroyed";
-      authorityId: string;
-      generation: number;
-    }
+  | ({ kind: "owned-authority-destroyed" } & Omit<ExecutionReleaseProof, "backendSessionId">)
+  | ({ kind: "session-execution-released" } & ExecutionReleaseProof)
   | { kind: "borrowed-runtime-confirmed" }
   /** The backend session is unusable, but the endpoint identity itself is
    * still valid. Start a fresh backend context without fencing the old one. */
@@ -286,6 +295,8 @@ export function createSessionService(deps: {
     fenced(): boolean;
     admit<T>(action: () => Promise<T>): Promise<T>;
   };
+  /** Process shutdown fence. Distinct from config-restart fencing. */
+  isShuttingDown?: () => boolean;
   hooks?: TurnHooks;
   expand?: ExpandInput;
   queue?: QueueStore;
@@ -2415,8 +2426,10 @@ export function createSessionService(deps: {
               refreshGeneratedTitle(sessionId, titleRuntime);
             }
             const current = await store.projection(sessionId);
-            if (current?.harnessTransition) void withSessionLock(sessionId, () => finishHarnessSwitchUnderLock(sessionId))
-              .then(() => dispatchQueue(sessionId)).catch((error) => console.error("[polyth] harness switch remains pending", error));
+            if (current?.harnessTransition && !deps.isShuttingDown?.()) {
+              void withSessionLock(sessionId, () => finishHarnessSwitchUnderLock(sessionId))
+                .then(() => dispatchQueue(sessionId)).catch((error) => console.error("[polyth] harness switch remains pending", error));
+            }
             deps.notify?.turnStopped(sessionId, effectiveReason);
             if (effectiveReason === "completed") hooks.onTurnCompleted?.(sessionId, replyText(sessionId));
             if (!requestsOpen && effectiveReason !== "error") {
@@ -2691,6 +2704,7 @@ export function createSessionService(deps: {
   const wire = (sessionId: string, rt: AgentRuntime) => {
     if (sessionRuntime.has(sessionId)) return;
     sessionRuntime.set(sessionId, rt);
+    runtimes.bindSession?.(sessionId, rt);
     if (runtimeSubs.has(rt)) return;
     const subscriptions: Disposable[] = [];
     subscriptions.push(rt.onEvent((sid, ev) => {
@@ -2736,6 +2750,7 @@ export function createSessionService(deps: {
     const rt = sessionRuntime.get(sessionId);
     if (!rt) return;
     sessionRuntime.delete(sessionId);
+    runtimes.unbindSession?.(sessionId, rt);
     clearSessionToolWatchdogs(sessionId);
     turnReply.delete(sessionId);
     behaviorLogged.delete(sessionId);
@@ -3472,9 +3487,11 @@ export function createSessionService(deps: {
     if (!deps.queue) return;
     try {
       await withSessionLock(sessionId, async () => {
-        if (turnActive(sessionId)) return;
+        if (deps.isShuttingDown?.() || deps.admission?.fenced()) return;
         let proj = await store.projection(sessionId);
         if (proj?.harnessTransition) proj = await finishHarnessSwitchUnderLock(sessionId);
+        if (deps.isShuttingDown?.() || deps.admission?.fenced()) return;
+        if (turnActive(sessionId)) return;
         if (!proj || proj.harnessTransition || proj.status !== "idle") return;
         const reconciliation = await durable.reconciliation(sessionId);
         if (reconciliation?.state === "reconciling"
@@ -3511,9 +3528,8 @@ export function createSessionService(deps: {
         });
       });
     } catch (err) {
-      if ((err as { code?: unknown }).code !== "outcome-unknown") {
-        console.error(`[polyth] queued dispatch failed for ${sessionId}`, err);
-      }
+      if (QUIET_DISPATCH_ERRORS.has(String((err as { code?: unknown })?.code))) return;
+      console.error(`[polyth] queued dispatch failed for ${sessionId}`, err);
     }
   };
 
@@ -3840,7 +3856,7 @@ export function createSessionService(deps: {
             { code: "unsupported" },
           );
         }
-        let fence: { authorityId: string; generation: number } | undefined;
+        let fence: RuntimeEpochFence | undefined;
         if (options.authorityDisposition.kind === "unknown-session-replaced") {
           if (lastTurnId.has(sessionId) || admitting.has(sessionId)) {
             throw Object.assign(
@@ -3849,21 +3865,48 @@ export function createSessionService(deps: {
             );
           }
         } else if (endpoint.control.kind === "owned") {
+          const disposition = options.authorityDisposition;
           if (
-            options.authorityDisposition.kind !== "owned-authority-destroyed"
-            || options.authorityDisposition.authorityId !== oldBinding.authorityId
-            || options.authorityDisposition.generation !== oldBinding.generation
-            || endpoint.authorityId === oldBinding.authorityId
+            disposition.kind !== "session-execution-released"
+            && disposition.kind !== "owned-authority-destroyed"
+          ) {
+            throw Object.assign(
+              new Error("owned runtime epoch requires proof of the released binding"),
+              { code: "epoch-proof-required" },
+            );
+          }
+          if (
+            disposition.authorityId !== oldBinding.authorityId
+            || disposition.generation !== oldBinding.generation
+          ) {
+            throw Object.assign(
+              new Error("owned runtime epoch requires proof of the released binding"),
+              { code: "epoch-proof-required" },
+            );
+          }
+          if (
+            disposition.kind === "owned-authority-destroyed"
+            && endpoint.authorityId === oldBinding.authorityId
           ) {
             throw Object.assign(
               new Error("owned runtime epoch requires proof of the destroyed binding"),
               { code: "epoch-proof-required" },
             );
           }
-          fence = {
-            authorityId: options.authorityDisposition.authorityId,
-            generation: options.authorityDisposition.generation,
-          };
+          if (disposition.kind === "session-execution-released") {
+            fence = {
+              mode: "session-released",
+              authorityId: disposition.authorityId,
+              generation: disposition.generation,
+              backendSessionId: disposition.backendSessionId,
+            };
+          } else {
+            fence = {
+              mode: "destroyed",
+              authorityId: disposition.authorityId,
+              generation: disposition.generation,
+            };
+          }
         } else if (options.authorityDisposition.kind !== "borrowed-runtime-confirmed") {
           throw Object.assign(
             new Error("borrowed runtime epoch requires explicit user confirmation"),
@@ -4491,6 +4534,7 @@ export function createSessionService(deps: {
     if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
     let transition = projection.harnessTransition;
     if (!transition) return projection;
+    if (deps.isShuttingDown?.()) return projection;
     let oldBinding = projection.runtimeBinding;
     if (!oldBinding || !runtimes.forSession) throw Object.assign(new Error("runtime binding unavailable"), { code: "unsupported" });
     const cwd = projection.worktreePath ?? (await projects.get(projection.projectId))?.path ?? process.cwd();
@@ -4507,6 +4551,9 @@ export function createSessionService(deps: {
       }
       oldBinding = (await store.projection(sessionId))!.runtimeBinding!;
       if (!old.releaseExecution) throw Object.assign(new Error("This harness cannot yet prove execution has stopped"), { code: "unsupported" });
+      if (!oldBinding.backendSessionId) {
+        throw Object.assign(new Error("Old execution identity is missing"), { code: "outcome-unknown" });
+      }
       const released = await boundedRuntimeAwait(old.releaseExecution({
         canonicalSessionId: sessionId,
         backendSessionId: oldBinding.backendSessionId,
@@ -4516,18 +4563,23 @@ export function createSessionService(deps: {
         location: oldBinding.location,
       }, transition.id), transition.id);
       if (released.kind !== "confirmed") throw outcomeError(released);
-      if (released.value.authorityId !== oldBinding.authorityId || released.value.generation !== oldBinding.generation) {
-        throw Object.assign(new Error("release proof does not match the old authority"), { code: "stale-evidence" });
+      if (
+        released.value.authorityId !== oldBinding.authorityId
+        || released.value.generation !== oldBinding.generation
+        || released.value.backendSessionId !== oldBinding.backendSessionId
+      ) {
+        throw Object.assign(new Error("release proof does not match the old execution incarnation"), { code: "stale-evidence" });
       }
       transition = { ...transition, phase: "released", released: released.value };
       await commitHarnessIntent(sessionId, { harnessTransition: transition }, "harness/execution-released", { transitionId: transition.id, ...released.value });
       unwire(sessionId);
       lastTurnId.delete(sessionId);
       admitting.delete(sessionId);
-      runtimes.forget?.(old);
+      runtimes.forgetSession?.(sessionId);
       projection = (await store.projection(sessionId))!;
     }
-    // The old authority is durably released BEFORE a target runtime can exist.
+    if (deps.isShuttingDown?.()) return (await store.projection(sessionId))!;
+    // The old execution incarnation is durably released BEFORE a target runtime can exist.
     const target = await runtimeFor(projection, cwd, transition.targetHarnessId);
     const events = await store.events(sessionId);
     const intent = events.findLast((event) => event.type === "harness/native-create-requested" && event.data.transitionId === transition!.id);
@@ -4562,10 +4614,13 @@ export function createSessionService(deps: {
     }
     const profile = projection.agentProfileId ? await deps.profiles?.profileGet(projection.agentProfileId) : undefined;
     const agentIntent = profile ? [profile.name, profile.notes].filter(Boolean).join(": ") : projection.runtimeLeg?.agentIntent ?? projection.agent;
-    await transitionRuntimeEpochUnderLock(sessionId, target, {
+      if (transition.phase !== "released") {
+        throw Object.assign(new Error("release proof was not persisted"), { code: "stale-evidence" });
+      }
+      await transitionRuntimeEpochUnderLock(sessionId, target, {
       resetOperationId: operation.operationId,
       reason: "harness-switch",
-      authorityDisposition: { kind: "owned-authority-destroyed", ...transition.released! },
+      authorityDisposition: { kind: "session-execution-released", ...transition.released },
       harness: {
         transitionId: transition.id,
         selection: transition.selection,
@@ -4592,6 +4647,11 @@ export function createSessionService(deps: {
       return withSessionLock(sessionId, async () => {
         let projection = await store.projection(sessionId);
         if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        if (deps.isShuttingDown?.() && !projection.harnessTransition) {
+          throw Object.assign(new Error("harness switching is fenced for shutdown"), {
+            code: "shutting_down",
+          });
+        }
         if (!runtimes.resolve) throw Object.assign(new Error("harness selection unavailable"), { code: "unsupported" });
         if (selection.mode !== "auto" && (selection.mode !== "pinned" || !/^[a-z][a-z0-9-]*$/.test(selection.harnessId))) throw Object.assign(new Error("invalid harness selection"), { code: "invalid-input" });
         if (projection.harnessTransition) {

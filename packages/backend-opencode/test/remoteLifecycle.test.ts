@@ -13,11 +13,13 @@ import {
   applyRemoteStorageCommand,
   createFakeRemoteStorage,
   injectRemoteIdentityBreak,
+  TEST_REMOTE_DIGEST,
+  TEST_REMOTE_DIGEST_B,
 } from "./fakeRemoteRuntime.ts";
 
 const execSuccess = (storage = createFakeRemoteStorage("/var/lib/polyth/runtimes/project")) =>
   async (command: string) => {
-    const handled = applyRemoteStorageCommand(command, () => storage, storage);
+    const handled = await applyRemoteStorageCommand(command, () => storage, storage);
     if (handled) return handled;
     if (command.includes("command -v") && !command.includes("POLYTH_REMOTE_STORAGE_INSPECT")) {
       return { code: 0, stdout: "1.18.18\n", stderr: "" };
@@ -35,6 +37,12 @@ const isGuardianCommand = (command: string): boolean =>
 const acquiredGuardianHandle = (): RemoteProcessHandle => {
   const output = new Set<(chunk: string) => void>();
   const exit = new Set<(code: number | null) => void>();
+  let alive = true;
+  const finish = () => {
+    if (!alive) return;
+    alive = false;
+    for (const callback of exit) callback(0);
+  };
   setImmediate(() => {
     for (const callback of output) callback("POLYTH_LOCK_ACQUIRED=1\n");
   });
@@ -47,7 +55,10 @@ const acquiredGuardianHandle = (): RemoteProcessHandle => {
       exit.add(callback);
       return { dispose: () => { exit.delete(callback); } };
     },
-    async kill() {},
+    write(data) {
+      if (String(data).includes("POLYTH_RELEASE")) finish();
+    },
+    async kill() { finish(); },
   };
 };
 
@@ -60,7 +71,7 @@ const listeningHandle = (
   setImmediate(() => {
     for (const callback of output) {
       callback("POLYTH_REMOTE_PID=4321\n");
-      callback(`opencode server listening on http://127.0.0.1:${port}\n`);
+      callback("POLYTH_SERVE_SPAWNED=1\n");
     }
   });
   return {
@@ -102,17 +113,18 @@ test("remote process startup has a finite orchestration deadline", async () => {
 });
 
 test("timed-out remote forward is disposed if it resolves late", async () => {
-  let processKills = 0;
+  let stopServe = 0;
   let lateForwardDisposals = 0;
   const host: RemoteHost = {
     label: "forward-deadline.example",
-    exec: execSuccess(),
+    async exec(command) {
+      if (command.includes("POLYTH_REMOTE_STOP_SERVE=1")) stopServe += 1;
+      return execSuccess()(command);
+    },
     async start(command) {
       if (isGuardianCommand(command)) return acquiredGuardianHandle();
       const port = Number(command.match(/--port (\d+)/)?.[1]);
-      return listeningHandle(port, async () => {
-        processKills += 1;
-      });
+      return listeningHandle(port);
     },
     async forward() {
       return await new Promise<RemoteForwardHandle>((resolveForward) => {
@@ -139,7 +151,7 @@ test("timed-out remote forward is disposed if it resolves late", async () => {
     /forward exceeded 20ms/,
   );
   await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-  assert.equal(processKills, 1);
+  assert.equal(stopServe, 1, "spawned serve must be reaped after forward timeout");
   assert.equal(lateForwardDisposals, 1);
 });
 
@@ -238,5 +250,128 @@ test("wiping remote runtime storage between two SSH leases mints a new authority
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("owned lease reconnects live serve, replaces dead serve, and refuses unreachable steal", async () => {
+  let starts = 0;
+  let transportUp = true;
+  let mode: "live" | "dead" | "unreachable" = "live";
+  const lease = await createOwnedSshEndpointLease({
+    location: { directory: "/srv/project" },
+    async start(instanceToken) {
+      starts += 1;
+      const generation = starts;
+      transportUp = true;
+      return {
+        url: `http://127.0.0.1:${40_000 + generation}`,
+        instanceIdentity: `${instanceToken}:${generation}`,
+        notStopped: () => true,
+        transportAlive: () => transportUp,
+        markTransportDead: () => { transportUp = false; },
+        async revive() {
+          if (mode === "unreachable") {
+            throw Object.assign(
+              new Error("remote runtime transport is down while the owned serve may still be alive"),
+              { code: "unavailable" },
+            );
+          }
+          if (mode === "dead") return undefined;
+          transportUp = true;
+          return `http://127.0.0.1:${41_000 + generation}`;
+        },
+        async stop() {},
+      };
+    },
+  });
+  try {
+    const first = await lease.endpoint();
+    assert.equal(starts, 1);
+    assert.equal(first.url, "http://127.0.0.1:40001");
+
+    mode = "live";
+    transportUp = false;
+    const revived = await lease.endpoint();
+    assert.equal(starts, 1, "live serve must not be replaced");
+    assert.equal(revived.url, "http://127.0.0.1:41001");
+    assert.equal(revived.generation, first.generation);
+
+    mode = "dead";
+    transportUp = false;
+    const replaced = await lease.endpoint();
+    assert.equal(starts, 2, "proven-dead serve may start a new epoch");
+    assert.equal(replaced.url, "http://127.0.0.1:40002");
+    assert.equal(replaced.generation, first.generation + 1);
+
+    mode = "unreachable";
+    transportUp = false;
+    await assert.rejects(() => lease.endpoint(), /may still be alive/);
+    assert.equal(starts, 2, "unreachable probe must not spawn another serve");
+  } finally {
+    await lease.dispose();
+  }
+});
+
+test("live remote adopt with engine digest mismatch does not quarantine", async () => {
+  const runtimeDir = "/var/lib/polyth/runtimes/live-mismatch";
+  const storage = createFakeRemoteStorage(runtimeDir);
+  storage.serveLive = true;
+  storage.serveIdentity = {
+    token: "live-token",
+    pid: "4242",
+    start: "100",
+    exe: "/usr/bin/opencode",
+    cmd: "1:2",
+    port: 4100,
+  };
+  storage.dbKind = "file";
+  storage.dbEntries = ["opencode.db"];
+  storage.dbContent = "live-engine-a-db";
+  storage.binaryDigest = TEST_REMOTE_DIGEST_B;
+  storage.metadataKind = "file";
+  storage.metadata = JSON.stringify({
+    engine: "opencode",
+    version: "1.18.18",
+    binaryDigest: TEST_REMOTE_DIGEST,
+    protocolGeneration: 1,
+    storageId: "11111111-1111-4111-8111-111111111111",
+    binarySource: "path",
+    binaryPath: storage.binaryPath,
+    runtimeAuthority: "owned:live-mismatch",
+    runtimeLocation: { projectId: "project-a", cwd: "/srv/project" },
+    createdAt: new Date().toISOString(),
+    lastOpenedAt: new Date().toISOString(),
+  });
+  const host: RemoteHost = {
+    label: "identity.example",
+    exec: execSuccess(storage),
+    async start() {
+      throw new Error("serve must not start during adopt mismatch tests");
+    },
+    async forward() {
+      throw new Error("forward must not start during adopt mismatch tests");
+    },
+  };
+  await assert.rejects(
+    () => prepareRemoteOpenCodeRuntime({
+      host,
+      runtimeDir,
+      projectId: "project-a",
+      cwd: "/srv/project",
+      bin: "opencode",
+      version: "1.18.18",
+      binarySource: "path",
+      adoption: {
+        pid: "4242",
+        startIdentity: "100",
+        executable: "/usr/bin/opencode",
+        command: "1:2",
+        serveToken: "live-token",
+        port: 4100,
+      },
+    }),
+    (error: Error & { code?: string }) => error.code === "incompatible",
+  );
+  assert.equal(storage.quarantineCalls, 0);
+  assert.equal(storage.dbContent, "live-engine-a-db");
 });
 

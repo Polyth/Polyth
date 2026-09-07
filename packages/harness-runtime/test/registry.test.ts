@@ -38,3 +38,55 @@ test("factory fallback is before native creation only; persisted routes remain e
     assert.notEqual(one, two);
     await pool.dispose();
 });
+
+test("shared physical runtimes are cached per session and forgotten by session id", async () => {
+    let physical = 0;
+    const owner = {
+        dispose: async () => { physical += 1; },
+        models: async () => [],
+    } as AgentRuntime;
+    const r = createHarnessRegistry();
+    r.register({
+        descriptor: { id: "shared", name: "shared", priority: 0, integration: "test" },
+        probe: async () => ({ harnessId: "shared", installed: true, authenticated: true, healthy: true }),
+        createRuntime: async () => owner,
+    });
+    const pool = createHarnessPool({
+        registry: r,
+        legacyHarnessId: "shared",
+        context: async (projectId, cwd, sessionId) => ({ ...context, projectId, sessionId, cwd: cwd!, spaceId: projectId }),
+    });
+    const one = await pool.forSession({ id: "s1", projectId: "p", title: "s", createdAt: 0, updatedAt: 0, status: "idle" } as SessionProjection, "/tmp");
+    const two = await pool.forSession({ id: "s2", projectId: "p", title: "s", createdAt: 0, updatedAt: 0, status: "idle" } as SessionProjection, "/tmp");
+    assert.equal(one, owner);
+    assert.equal(two, owner);
+    pool.forgetSession("s1");
+    const oneAgain = await pool.forSession({ id: "s1", projectId: "p", title: "s", createdAt: 0, updatedAt: 0, status: "idle" } as SessionProjection, "/tmp");
+    const twoAgain = await pool.forSession({ id: "s2", projectId: "p", title: "s", createdAt: 0, updatedAt: 0, status: "idle" } as SessionProjection, "/tmp");
+    assert.equal(oneAgain, owner);
+    assert.equal(twoAgain, two);
+    pool.forgetRuntime(owner);
+    const afterPhysical = await pool.forSession({ id: "s2", projectId: "p", title: "s", createdAt: 0, updatedAt: 0, status: "idle" } as SessionProjection, "/tmp");
+    assert.equal(afterPhysical, owner);
+    await pool.dispose();
+    assert.equal(physical, 1);
+});
+
+test("harness pool dispose surfaces runtime disposal failures", async () => {
+    const r = createHarnessRegistry();
+    r.register({
+        descriptor: { id: "broken", name: "broken", priority: 0, integration: "test" },
+        probe: async () => ({ harnessId: "broken", installed: true, authenticated: true, healthy: true }),
+        createRuntime: async () => ({
+            dispose: async () => { throw new Error("kill failed"); },
+            models: async () => [],
+        } as AgentRuntime),
+    });
+    const pool = createHarnessPool({
+        registry: r,
+        legacyHarnessId: "broken",
+        context: async (projectId, cwd, sessionId) => ({ ...context, projectId, sessionId, cwd: cwd!, spaceId: projectId }),
+    });
+    await pool.forSession({ id: "s", projectId: "p", title: "s", createdAt: 0, updatedAt: 0, status: "idle" } as SessionProjection, "/tmp");
+    await assert.rejects(() => pool.dispose(), /kill failed/);
+});

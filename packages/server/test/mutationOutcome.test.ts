@@ -562,7 +562,7 @@ test("epoch-fenced operations stay uncertain and cannot be claimed, replayed, or
     },
     resetOperationId: reset.operation.operationId,
     reason: "destroyed runtime authority was quarantined",
-    fence: { authorityId: oldBinding.authorityId, generation: oldBinding.generation },
+    fence: { mode: "destroyed", authorityId: oldBinding.authorityId, generation: oldBinding.generation },
   });
 
   assert.equal((await store.operation(uncertain.operation.operationId))?.state, "fenced");

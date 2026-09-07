@@ -1,6 +1,7 @@
 export { createProcessAuthority } from "./authority.ts";
 export { createStdioRpc, type RpcPeer } from "./rpc.ts";
 import type { AgentRuntime, HarnessContext, HarnessProvider, HarnessRegistry, HarnessSelection, SessionProjection } from "@polyth/contracts";
+
 export const harnessError = (code: string, message: string): Error => Object.assign(new Error(message), { code });
 export type HarnessPreferences = Record<string, {
     enabled?: boolean;
@@ -49,25 +50,42 @@ export function createHarnessRegistry() {
 /** The registry chooses factories; AgentRuntime remains the execution seam.
  * Persisted routes are exact lookups, never Auto fallback while old authority
  * may be alive. Only a new, not-yet-admitted session may try another factory. */
+type HarnessCacheEntry = {
+    sessionId: string;
+    pending: Promise<AgentRuntime>;
+    runtime?: AgentRuntime;
+};
+
+const harnessCacheKey = (
+    spaceId: string,
+    projectId: string,
+    cwd: string,
+    sessionId: string,
+    harnessId: string,
+): string => JSON.stringify([spaceId, projectId, cwd, sessionId, harnessId]);
+
 export function createHarnessPool(options: {
     registry: HarnessRegistry;
     context(projectId: string, cwd?: string, sessionId?: string): Promise<HarnessContext>;
     legacyHarnessId: string;
 }) {
-    const cached = new Map<string, Promise<AgentRuntime>>();
+    const cached = new Map<string, HarnessCacheEntry>();
     const get = async (context: HarnessContext, provider: HarnessProvider) => {
-        const key = JSON.stringify([context.spaceId, context.projectId, context.cwd, context.sessionId ?? "", provider.descriptor.id]);
-        let flight = cached.get(key);
-        if (!flight) {
-            flight = provider.createRuntime(context).then((runtime) => {
+        const sessionId = context.sessionId ?? "";
+        const key = harnessCacheKey(context.spaceId, context.projectId, context.cwd, sessionId, provider.descriptor.id);
+        let entry = cached.get(key);
+        if (!entry) {
+            const pending = provider.createRuntime(context).then((runtime) => {
                 Object.defineProperty(runtime, "harnessId", { value: provider.descriptor.id, configurable: true });
+                const current = cached.get(key);
+                if (current?.pending === pending) current.runtime = runtime;
                 return runtime;
             });
-            cached.set(key, flight);
-            flight.catch(() => { if (cached.get(key) === flight)
-                cached.delete(key); });
+            entry = { sessionId, pending };
+            cached.set(key, entry);
+            pending.catch(() => { if (cached.get(key)?.pending === pending) cached.delete(key); });
         }
-        return flight;
+        return entry.pending;
     };
     return {
         async forProject(projectId: string, cwd?: string) {
@@ -82,9 +100,9 @@ export function createHarnessPool(options: {
             // Once a route has native state, probe failure must not select another
             // engine or prevent the provider from reconciling/releasing that state.
             if (existingId) {
-                const existing = cached.get(JSON.stringify([context.spaceId, context.projectId, context.cwd, context.sessionId ?? "", existingId]));
+                const existing = cached.get(harnessCacheKey(context.spaceId, context.projectId, context.cwd, context.sessionId ?? "", existingId));
                 if (existing)
-                    return existing;
+                    return existing.pending;
                 const provider = options.registry.providers().find((p) => p.descriptor.id === existingId);
                 if (!provider)
                     throw harnessError("runtime-unavailable", `Harness ${existingId} is not registered`);
@@ -115,11 +133,29 @@ export function createHarnessPool(options: {
             const context = { ...await options.context(projection.projectId, cwd, projection.id), model: projection.model };
             return (await options.registry.resolve(context, selection, projection.resolvedHarnessId)).descriptor.id;
         },
-        forget(runtime: AgentRuntime) {
-            for (const [key, flight] of cached)
-                void flight.then((value) => { if (value === runtime && cached.get(key) === flight)
-                    cached.delete(key); }).catch(() => { });
+        forgetSession(sessionId: string) {
+            for (const [key, entry] of cached) {
+                if (entry.sessionId === sessionId) cached.delete(key);
+            }
         },
-        async dispose() { await Promise.allSettled([...cached.values()].map(async (flight) => (await flight).dispose())); cached.clear(); },
+        forgetRuntime(runtime: AgentRuntime) {
+            for (const [key, entry] of cached) {
+                if (entry.runtime === runtime) cached.delete(key);
+            }
+        },
+        async dispose() {
+            const seen = new Set<AgentRuntime>();
+            const jobs = [...cached.values()].map(async (entry) => {
+                const runtime = entry.runtime ?? await entry.pending;
+                if (seen.has(runtime)) return;
+                seen.add(runtime);
+                await runtime.dispose();
+            });
+            cached.clear();
+            const results = await Promise.allSettled(jobs);
+            const errors = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+            if (errors.length === 1) throw errors[0];
+            if (errors.length > 1) throw new AggregateError(errors, "harness runtime disposal failed");
+        },
     };
 }

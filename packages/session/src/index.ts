@@ -1442,11 +1442,20 @@ export function createStore(dbPath: string): Store {
         && (
           input.fence.authorityId !== currentBinding.authorityId
           || input.fence.generation !== currentBinding.generation
-          || replacement.authorityId === currentBinding.authorityId
+          || (
+            input.fence.mode !== "session-released"
+            && replacement.authorityId === currentBinding.authorityId
+          )
+          || (
+            input.fence.mode === "session-released"
+            && input.fence.backendSessionId !== currentBinding.backendSessionId
+          )
         )
       ) {
         throw Object.assign(
-          new Error("runtime epoch fence does not name the destroyed binding"),
+          new Error(input.fence.mode === "session-released"
+            ? "runtime epoch fence does not name the released binding"
+            : "runtime epoch fence does not name the destroyed binding"),
           { code: "epoch-proof-mismatch" },
         );
       }
