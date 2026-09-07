@@ -138,7 +138,9 @@ test("every enabled package policy validates, local-only packages expose no remo
   const remotePaths = CORE_REMOTE_ACCESS.http.map((rule) => rule.path);
   assert.ok(CORE_LOCAL_ONLY_PREFIXES.includes("/api/auth/login"));
   assert.ok(CORE_LOCAL_ONLY_PREFIXES.includes("/internal"));
+  assert.ok(CORE_LOCAL_ONLY_PREFIXES.includes("/api/providers/custom"));
   assert.equal(remotePaths.includes("/api/auth/login"), false);
+  assert.equal(remotePaths.includes("/api/providers/custom"), false);
   assert.equal(remotePaths.some((path) => path.startsWith("/api/sessions/") && path.includes("secrets")), false);
 });
 

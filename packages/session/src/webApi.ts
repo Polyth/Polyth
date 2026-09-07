@@ -166,15 +166,29 @@ export interface ProviderCatalogModelDto {
 export interface ProviderCatalogDto {
   id: string;
   name: string;
+  origin?: "builtin" | "custom" | "externally-configured";
   connected: boolean;
   enabled: boolean;
+  configured?: boolean;
+  editable?: boolean;
+  removable?: boolean;
+  status?: "ready" | "needs-setup" | "disabled";
+  hasCredential?: boolean;
   models: ProviderCatalogModelDto[];
+  custom?: {
+    protocol: "openai-compatible" | "openai-responses";
+    baseURL: string;
+    authMode?: "api-key" | "none";
+    hasHeaders: boolean;
+    headerNames?: string[];
+    modelIDs?: string[];
+  };
 }
 export interface VisibilityStateDto {
   ok: boolean;
   disabledProviders: string[];
   disabledModels: string[];
-  addedProviders: Array<{ id: string; name?: string }>;
+  addedProviders: Array<{ id: string; name?: string; origin?: "builtin" | "custom" | "externally-configured" }>;
 }
 export interface AvailableProviderDto {
   id: string;
@@ -826,6 +840,55 @@ export const api = {
     )),
   disconnectProvider: (id: string) =>
     pendingMutation(jfetch<{ ok: true }>(`/api/providers/${encodeURIComponent(id)}/disconnect`, json("POST", {}))),
+  createCustomProvider: (input: {
+    id?: string;
+    name: string;
+    baseURL: string;
+    protocol: "openai-compatible" | "openai-responses";
+    authMode: "api-key" | "none";
+    apiKey?: string;
+    headers?: Record<string, string>;
+    headerPatch?: { set?: Record<string, string>; unset?: string[]; clear?: boolean };
+  }) =>
+    pendingMutation(jfetch<{ ok: true; id: string; discovered?: number }>("/api/providers/custom", json("POST", input))),
+  updateCustomProvider: (id: string, input: {
+    name: string;
+    baseURL: string;
+    protocol: "openai-compatible" | "openai-responses";
+    authMode: "api-key" | "none";
+    apiKey?: string;
+    headers?: Record<string, string>;
+    headerPatch?: { set?: Record<string, string>; unset?: string[]; clear?: boolean };
+  }) =>
+    pendingMutation(jfetch<{ ok: true; id: string }>(
+      `/api/providers/custom/${encodeURIComponent(id)}`,
+      json("PATCH", input),
+    )),
+  removeCustomProvider: (id: string, deleteCredentials = true) =>
+    pendingMutation(jfetch<{ ok: true; id: string }>(
+      `/api/providers/custom/${encodeURIComponent(id)}`,
+      json("DELETE", { deleteCredentials }),
+    )),
+  discoverCustomProviderModels: (id: string, apiKey?: string) =>
+    pendingMutation(jfetch<{
+      ok: true;
+      models: Array<{ id: string; name?: string }>;
+      unsupported?: boolean;
+      message?: string;
+    }>(
+      `/api/providers/custom/${encodeURIComponent(id)}/discover`,
+      json("POST", apiKey ? { apiKey } : {}),
+    )),
+  addCustomProviderModel: (id: string, model: { id: string; name?: string; context?: number; output?: number }) =>
+    pendingMutation(jfetch<{ ok: true; id: string; modelID: string }>(
+      `/api/providers/custom/${encodeURIComponent(id)}/models`,
+      json("POST", model),
+    )),
+  removeCustomProviderModel: (id: string, modelId: string) =>
+    pendingMutation(jfetch<{ ok: true; id: string; modelID: string }>(
+      `/api/providers/custom/${encodeURIComponent(id)}/models/${encodeURIComponent(modelId)}`,
+      { method: "DELETE" },
+    )),
   saveRole: (name: string, input: { prompt?: string; model?: ModelRef; mode: AgentDescriptor["mode"] }) =>
     pendingMutation(jfetch<AgentDescriptor>(`/api/settings/roles/${encodeURIComponent(name)}`, json("PUT", input))),
   opencodePluginsList: () =>

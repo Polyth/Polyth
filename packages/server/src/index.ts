@@ -1435,6 +1435,8 @@ export async function boot(opts: BootOptions = {}) {
   // Infrastructure seams consumed by discovered packages.
   provideService("secure-safe", secureSafe);
   provideService("plugins.config", configApplier);
+  provideService("models.visibility", visibility);
+  provideService("models.invalidate-catalog", () => { runtimeCatalog.invalidateModels(); });
   // The probe stays bound here so no feature package ever imports
   // backend-opencode; routes consuming it never learn OpenCode specifics.
   provideService("ssh.probe-runtime", async (connectionId: string) => {

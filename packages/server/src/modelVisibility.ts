@@ -12,7 +12,16 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { atomicWriteSync } from "@polyth/plugins";
 import { dirname } from "node:path";
-import type { AvailableProviderDescriptor, ModelDescriptor } from "@polyth/contracts";
+import type {
+  AvailableProviderDescriptor,
+  CustomProviderConfigDto,
+  CustomProviderProtocol,
+  ModelDescriptor,
+  ProviderOrigin,
+  ProviderStatus,
+} from "@polyth/contracts";
+import { deriveProviderStatus } from "@polyth/contracts";
+import { isCustomProviderEntry, protocolFromNpm } from "@polyth/backend-opencode";
 
 export type AvailableProvider = AvailableProviderDescriptor;
 
@@ -22,6 +31,10 @@ export type AvailableProvider = AvailableProviderDescriptor;
 export interface AddedProvider {
   id: string;
   name?: string;
+  origin?: ProviderOrigin;
+  protocol?: CustomProviderProtocol;
+  authMode?: CustomProviderConfigDto["authMode"];
+  hasStoredCredential?: boolean;
 }
 
 export interface VisibilityState {
@@ -51,14 +64,33 @@ export interface ProviderCatalogModel {
 export interface ProviderCatalogEntry {
   id: string;
   name: string;
-  connected: boolean;
+  origin: ProviderOrigin;
   enabled: boolean;
+  configured: boolean;
+  editable: boolean;
+  removable: boolean;
+  status: ProviderStatus;
+  hasCredential: boolean;
+  /** Runtime model-serving signal. Not the enable toggle. Kept for composer. */
+  connected: boolean;
   models: ProviderCatalogModel[];
+  custom?: CustomProviderConfigDto;
 }
 
 export interface ConfiguredProvider {
   id: string;
   name?: string;
+  origin?: ProviderOrigin;
+  protocol?: CustomProviderProtocol;
+  authMode?: CustomProviderConfigDto["authMode"];
+  baseURL?: string;
+  hasHeaders?: boolean;
+  headerNames?: string[];
+  owned?: boolean;
+  hasStoredCredential?: boolean;
+  /** Models declared in the provider stanza (manual + last discovery). Shown
+   *  even before OpenCode reloads and serves them. */
+  models?: Array<{ id: string; name?: string; context?: number }>;
 }
 
 export interface VisibilityApplier {
@@ -84,7 +116,16 @@ export interface ModelVisibilityService {
   setModelEnabled(key: string, enabled: boolean): Promise<VisibilityState>;
   /** Explicitly add a zero-model provider so it appears in catalog(); resets
    *  any stale disabled flag so a freshly-added row starts enabled. */
-  addProvider(providerID: string, name?: string): Promise<VisibilityState>;
+  addProvider(
+    providerID: string,
+    name?: string,
+    origin?: ProviderOrigin,
+    meta?: {
+      protocol?: CustomProviderProtocol;
+      authMode?: CustomProviderConfigDto["authMode"];
+      hasStoredCredential?: boolean;
+    },
+  ): Promise<VisibilityState>;
   /** Undo addProvider — hides the row again. Credentials, if any were set,
    *  are left alone; re-adding may reconnect for free. */
   removeProvider(providerID: string): Promise<VisibilityState>;
@@ -111,7 +152,20 @@ function parseAddedProviders(v: unknown): AddedProvider[] {
     const id = (entry as Record<string, unknown>).id;
     const name = (entry as Record<string, unknown>).name;
     if (typeof id === "string" && id) {
-      byId.set(id, { id, ...(typeof name === "string" && name ? { name } : {}) });
+      const origin = (entry as Record<string, unknown>).origin;
+      const protocol = (entry as Record<string, unknown>).protocol;
+      const authMode = (entry as Record<string, unknown>).authMode;
+      const hasStoredCredential = (entry as Record<string, unknown>).hasStoredCredential;
+      byId.set(id, {
+        id,
+        ...(typeof name === "string" && name ? { name } : {}),
+        ...(origin === "builtin" || origin === "custom" || origin === "externally-configured"
+          ? { origin }
+          : {}),
+        ...(protocol === "openai-compatible" || protocol === "openai-responses" ? { protocol } : {}),
+        ...(authMode === "api-key" || authMode === "none" ? { authMode } : {}),
+        ...(hasStoredCredential === true ? { hasStoredCredential: true } : {}),
+      });
     }
   }
   return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
@@ -171,52 +225,167 @@ export function filterVisibleModels(
   return connected.length > 0 ? connected : enabled;
 }
 
+type CatalogDraft = Omit<ProviderCatalogEntry, "status">;
+
+/** Drop Polyth-owned custom rows whose physical stanza never landed (restart
+ *  before Apply & Restart). npm-matching stanzas without origin=custom stay
+ *  externally-configured — never auto-own them. */
+export function dropGhostCustomProviders(
+  added: readonly AddedProvider[],
+  physicalIds: ReadonlySet<string>,
+): AddedProvider[] {
+  return added.filter((row) => row.origin !== "custom" || physicalIds.has(row.id));
+}
+
+function modelsFromConfigEntry(rec: Record<string, unknown>): ConfiguredProvider["models"] {
+  const raw = rec.models;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const out: NonNullable<ConfiguredProvider["models"]> = [];
+  for (const [id, entry] of Object.entries(raw as Record<string, unknown>)) {
+    if (!id.trim()) continue;
+    const model = entry && typeof entry === "object" && !Array.isArray(entry)
+      ? entry as Record<string, unknown>
+      : {};
+    const limit = model.limit && typeof model.limit === "object" && !Array.isArray(model.limit)
+      ? model.limit as Record<string, unknown>
+      : {};
+    out.push({
+      id,
+      ...(typeof model.name === "string" && model.name ? { name: model.name } : {}),
+      ...(typeof limit.context === "number" ? { context: limit.context } : {}),
+    });
+  }
+  return out.length ? out : undefined;
+}
+
+function originOf(
+  id: string,
+  configuredById: ReadonlyMap<string, ConfiguredProvider>,
+  addedById: ReadonlyMap<string, AddedProvider>,
+): ProviderOrigin {
+  return configuredById.get(id)?.origin ?? addedById.get(id)?.origin ?? "builtin";
+}
+
 export function buildProviderCatalog(
   models: ModelDescriptor[],
   state: VisibilityState,
   configuredProviders: readonly ConfiguredProvider[] = [],
 ): ProviderCatalogEntry[] {
-  const byProvider = new Map<string, ProviderCatalogEntry>();
+  const configuredById = new Map(configuredProviders.filter((p) => p.id).map((p) => [p.id, p]));
+  const addedById = new Map(state.addedProviders.map((p) => [p.id, p]));
+  const disabledProviderIds = new Set(state.disabledProviders);
+  const disabledModelKeys = new Set(state.disabledModels);
+  const byProvider = new Map<string, CatalogDraft>();
+  const modelKeys = new Map<string, Set<string>>();
+  const put = (
+    id: string,
+    name: string,
+    extras: {
+      configured?: boolean;
+      connected?: boolean;
+      origin?: ProviderOrigin;
+      editable?: boolean;
+      removable?: boolean;
+      hasCredential?: boolean;
+      custom?: CustomProviderConfigDto;
+    } = {},
+  ): CatalogDraft => {
+    const existing = byProvider.get(id);
+    if (existing) {
+      if (name && existing.name === existing.id) existing.name = name;
+      if (extras.configured) existing.configured = true;
+      if (extras.connected) existing.connected = true;
+      if (extras.hasCredential) existing.hasCredential = true;
+      if (extras.custom && !existing.custom) existing.custom = extras.custom;
+      if (extras.origin && existing.origin === "builtin") existing.origin = extras.origin;
+      if (extras.editable) existing.editable = true;
+      if (extras.removable) existing.removable = true;
+      return existing;
+    }
+    const configured = extras.configured ?? configuredById.has(id);
+    const origin = extras.origin ?? originOf(id, configuredById, addedById);
+    const ownedCustom = origin === "custom" && configuredById.get(id)?.owned !== false;
+    const row: CatalogDraft = {
+      id,
+      name: name || humanizeProviderId(id),
+      origin,
+      enabled: !disabledProviderIds.has(id),
+      configured,
+      editable: extras.editable ?? ownedCustom,
+      removable: extras.removable ?? (ownedCustom || addedById.has(id)),
+      connected: extras.connected ?? false,
+      hasCredential: extras.hasCredential ?? false,
+      models: [],
+      ...(extras.custom ? { custom: extras.custom } : {}),
+    };
+    byProvider.set(id, row);
+    modelKeys.set(id, new Set());
+    return row;
+  };
+
   for (const provider of configuredProviders) {
     if (!provider.id) continue;
-    byProvider.set(provider.id, {
-      id: provider.id,
-      name: provider.name || provider.id,
-      connected: false,
-      enabled: !state.disabledProviders.includes(provider.id),
-      models: [],
+    const custom: CustomProviderConfigDto | undefined = provider.protocol && provider.baseURL
+      ? {
+          protocol: provider.protocol,
+          baseURL: provider.baseURL,
+          ...(provider.authMode === "none" || provider.authMode === "api-key"
+            ? { authMode: provider.authMode }
+            : {}),
+          hasHeaders: provider.hasHeaders === true || (provider.headerNames?.length ?? 0) > 0,
+          headerNames: provider.headerNames ?? [],
+          ...(provider.models?.length
+            ? { modelIDs: provider.models.map((model) => model.id) }
+            : {}),
+        }
+      : undefined;
+    const origin: ProviderOrigin = provider.origin
+      ?? (provider.owned === true
+        ? "custom"
+        : provider.protocol && provider.owned === false
+          ? "externally-configured"
+          : "builtin");
+    put(provider.id, provider.name || provider.id, {
+      configured: true,
+      origin,
+      editable: origin === "custom" && provider.owned !== false,
+      removable: origin === "custom" && provider.owned !== false,
+      ...(typeof provider.hasStoredCredential === "boolean"
+        ? { hasCredential: provider.hasStoredCredential }
+        : {}),
+      ...(custom ? { custom } : {}),
     });
   }
   for (const added of state.addedProviders) {
-    if (byProvider.has(added.id)) continue;
-    byProvider.set(added.id, {
-      id: added.id,
-      name: added.name || added.id,
-      connected: false,
-      enabled: !state.disabledProviders.includes(added.id),
-      models: [],
+    put(added.id, added.name || added.id, {
+      origin: added.origin,
+      removable: true,
+      ...(added.origin === "custom" ? { editable: true } : {}),
+      ...(added.hasStoredCredential ? { hasCredential: true } : {}),
     });
   }
+  // Disabled providers stay in the managed list even with zero models.
+  for (const id of state.disabledProviders) {
+    put(id, humanizeProviderId(id), {});
+  }
+
   for (const m of models) {
-    // OpenCode's full model catalog also contains providers without live
-    // credentials. Keep those out of the settings list; they belong in the
-    // add-provider picker. Configured/explicitly-added providers still get a
-    // zero-model row above so they can be connected here.
-    if (m.connected === false) continue;
-    let entry = byProvider.get(m.providerID);
-    if (!entry) {
-      entry = {
-        id: m.providerID,
-        name: m.providerName ?? m.providerID,
-        connected: true,
-        enabled: !state.disabledProviders.includes(m.providerID),
-        models: [],
-      };
-      byProvider.set(m.providerID, entry);
+    const managed = byProvider.has(m.providerID);
+    // Unconfigured, disconnected OpenCode catalogue rows stay in Add Provider.
+    if (!managed && m.connected === false) continue;
+    const entry = put(
+      m.providerID,
+      m.providerName ?? m.providerID,
+      { connected: m.connected !== false },
+    );
+    if (m.connected !== false) {
+      entry.connected = true;
     }
-    entry.connected = true;
-    if (m.providerName && entry.name === entry.id) entry.name = m.providerName;
     const key = modelVisibilityKey(m);
+    const seen = modelKeys.get(entry.id) ?? new Set<string>();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    modelKeys.set(entry.id, seen);
     entry.models.push({
       providerID: m.providerID,
       modelID: m.modelID,
@@ -227,15 +396,49 @@ export function buildProviderCatalog(
       ...(m.cost ? { cost: m.cost } : {}),
       ...(m.capabilities ? { capabilities: m.capabilities } : {}),
       ...(m.variants ? { variants: m.variants } : {}),
-      connected: true,
-      enabled: entry.enabled && !state.disabledModels.includes(key),
+      connected: m.connected !== false,
+      enabled: entry.enabled && !disabledModelKeys.has(key),
     });
   }
-  const out = [...byProvider.values()];
+
+  for (const provider of configuredProviders) {
+    const entry = byProvider.get(provider.id);
+    if (!entry || !provider.models) continue;
+    const seen = modelKeys.get(entry.id) ?? new Set<string>();
+    for (const model of provider.models) {
+      const key = `${provider.id}/${model.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      entry.models.push({
+        providerID: provider.id,
+        modelID: model.id,
+        key,
+        name: model.name || model.id,
+        ...(model.context !== undefined ? { context: model.context } : {}),
+        connected: false,
+        enabled: entry.enabled && !disabledModelKeys.has(key),
+      });
+    }
+  }
+
+  const out = [...byProvider.values()].map((entry) => ({
+    ...entry,
+    status: deriveProviderStatus({
+      enabled: entry.enabled,
+      configured: entry.configured,
+      hasCredential: entry.hasCredential,
+      connected: entry.connected,
+      ...(entry.custom?.authMode === "none"
+        ? { authRequired: false as const }
+        : entry.custom?.authMode === "api-key"
+          ? { authRequired: true as const }
+          : {}),
+    }),
+  }));
   for (const p of out) p.models.sort((a, b) => a.name.localeCompare(b.name));
   out.sort((a, b) => {
-    if (a.connected !== b.connected) return a.connected ? -1 : 1;
-    return a.name.localeCompare(b.name);
+    const rank = (p: ProviderCatalogEntry) => (p.enabled ? 0 : 1) + (p.connected ? 0 : 1);
+    return rank(a) - rank(b) || a.name.localeCompare(b.name);
   });
   return out;
 }
@@ -250,6 +453,7 @@ export function shownProviderIds(
   const ids = new Set<string>();
   for (const p of configuredProviders) if (p.id) ids.add(p.id);
   for (const p of state.addedProviders) ids.add(p.id);
+  for (const id of state.disabledProviders) ids.add(id);
   for (const m of models) if (m.connected !== false) ids.add(m.providerID);
   return ids;
 }
@@ -341,18 +545,55 @@ export function createModelVisibilityService(opts: { file: string; applier?: Vis
         const config = await opts.applier.readConfig();
         const provider = config.provider;
         if (provider && typeof provider === "object" && !Array.isArray(provider)) {
-          configuredProviders = Object.entries(provider as Record<string, unknown>).map(([id, entry]) => ({
-            id,
-            ...(entry && typeof entry === "object" && !Array.isArray(entry)
-              && typeof (entry as Record<string, unknown>).name === "string"
-              ? { name: (entry as Record<string, unknown>).name as string }
-              : {}),
-          }));
+          configuredProviders = Object.entries(provider as Record<string, unknown>).map(([id, entry]) => {
+            const rec = entry && typeof entry === "object" && !Array.isArray(entry)
+              ? entry as Record<string, unknown>
+              : {};
+            const custom = isCustomProviderEntry(rec);
+            const options = rec.options && typeof rec.options === "object" && !Array.isArray(rec.options)
+              ? rec.options as Record<string, unknown>
+              : {};
+            const baseURL = typeof options.baseURL === "string" ? options.baseURL : undefined;
+            const added = state.addedProviders.find((p) => p.id === id);
+            const owned = added?.origin === "custom";
+            const origin: ProviderOrigin | undefined = owned
+              ? "custom"
+              : custom
+                ? "externally-configured"
+                : added?.origin;
+            const protocol = added?.protocol ?? protocolFromNpm(rec.npm);
+            const headersRaw = options.headers && typeof options.headers === "object" && !Array.isArray(options.headers)
+              ? options.headers as Record<string, unknown>
+              : undefined;
+            const headerNames = headersRaw
+              ? Object.keys(headersRaw).filter((key) => typeof headersRaw[key] === "string")
+              : [];
+            const configModels = modelsFromConfigEntry(rec);
+            return {
+              id,
+              ...(typeof rec.name === "string" ? { name: rec.name } : {}),
+              ...(origin ? { origin } : {}),
+              ...(protocol ? { protocol } : {}),
+              ...(added?.authMode ? { authMode: added.authMode } : {}),
+              ...(baseURL ? { baseURL } : {}),
+              ...(headerNames.length ? { hasHeaders: true, headerNames } : {}),
+              ...(owned ? { owned: true } : custom ? { owned: false } : {}),
+              ...(added?.hasStoredCredential ? { hasStoredCredential: true } : {}),
+              ...(configModels ? { models: configModels } : {}),
+            };
+          });
         }
         if (!loaded) {
           state = visibilityFromBackendConfig(config);
           persist();
           loaded = true;
+        } else {
+          const physicalIds = new Set(configuredProviders.map((p) => p.id));
+          const nextAdded = dropGhostCustomProviders(state.addedProviders, physicalIds);
+          if (nextAdded.length !== state.addedProviders.length) {
+            state = { ...state, addedProviders: nextAdded };
+            persist();
+          }
         }
       } catch (e) {
         // A corrupt backend config must not brick boot; start empty in memory.
@@ -377,11 +618,29 @@ export function createModelVisibilityService(opts: { file: string; applier?: Vis
       return commit({ ...state, disabledModels: [...set] });
     },
 
-    addProvider(providerID, name) {
+    addProvider(providerID, name, origin?: ProviderOrigin, meta?: {
+      protocol?: CustomProviderProtocol;
+      authMode?: CustomProviderConfigDto["authMode"];
+      hasStoredCredential?: boolean;
+    }) {
       if (!providerID) throw err("invalid-input", "provider id required");
+      const previous = state.addedProviders.find((p) => p.id === providerID);
       const nextAdded = [
         ...state.addedProviders.filter((p) => p.id !== providerID),
-        { id: providerID, ...(name ? { name } : {}) },
+        {
+          id: providerID,
+          ...(name ? { name } : previous?.name ? { name: previous.name } : {}),
+          ...(origin ? { origin } : previous?.origin ? { origin: previous.origin } : {}),
+          ...(meta?.protocol ?? previous?.protocol
+            ? { protocol: meta?.protocol ?? previous?.protocol }
+            : {}),
+          ...(meta?.authMode ?? previous?.authMode
+            ? { authMode: meta?.authMode ?? previous?.authMode }
+            : {}),
+          ...((meta?.hasStoredCredential ?? previous?.hasStoredCredential)
+            ? { hasStoredCredential: true as const }
+            : {}),
+        },
       ].sort((a, b) => a.id.localeCompare(b.id));
       const disabled = new Set(state.disabledProviders);
       disabled.delete(providerID); // a freshly-added provider starts enabled
@@ -390,7 +649,11 @@ export function createModelVisibilityService(opts: { file: string; applier?: Vis
 
     removeProvider(providerID) {
       if (!providerID) throw err("invalid-input", "provider id required");
-      return commit({ ...state, addedProviders: state.addedProviders.filter((p) => p.id !== providerID) });
+      return commit({
+        ...state,
+        addedProviders: state.addedProviders.filter((p) => p.id !== providerID),
+        disabledProviders: state.disabledProviders.filter((id) => id !== providerID),
+      });
     },
   };
 }

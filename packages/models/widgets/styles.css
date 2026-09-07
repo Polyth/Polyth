@@ -1,19 +1,4 @@
 /* Package-owned models web styles. */
-.model-filter-input {
-width: 100%; font-family: var(--mono); font-size: var(--font-meta); padding: 4px 8px;
-  background: var(--input-bg); border: 1px solid var(--border); border-radius: calc(var(--radius-control) - 2px);
-  color: var(--text); flex-basis: 100%;
-}
-.model-chip {
-display: inline-flex; align-items: center; gap: 6px;
-  border-radius: var(--radius-control); padding: 4px 8px; color: var(--muted);
-}
-.model-chip-provider-logo {
-width: 18px; height: 18px;
-}
-.model-chip.on {
-color: var(--text); background: var(--accent-wash);
-}
 .provider-logo {
 aspect-ratio: 1;
   display: grid; place-items: center; flex: none;
@@ -42,23 +27,8 @@ flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: n
 .set-model-meta {
 color: var(--muted); font-size: var(--font-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 44%;
 }
-.provider-chips {
-display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px;
-}
-.provider-chip {
-height: 26px; padding: 0 11px; font-size: var(--font-meta);
-}
-.provider-chip.on {
-color: var(--text); border-color: var(--accent-line); background: var(--accent-wash);
-}
-.provider-chip.chip-off {
-opacity: 0.55;
-}
 .provider-list {
 display: flex; flex-direction: column; gap: 8px; overflow-y: auto;
-  /* Fills the remaining height of the settings pane (see .settings-page-models
-     in the app stylesheet) instead of an arbitrary vh cap that left the list
-     clipped with dead space below it. min-height:0 lets it actually scroll. */
   flex: 1 1 auto; min-height: 0;
 }
 .provider-card {
@@ -85,10 +55,13 @@ display: inline-block; color: var(--muted); font-size: 14px; transition: transfo
 transform: rotate(90deg);
 }
 .provider-name {
-font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
 }
-.provider-tag {
-color: var(--muted); flex-shrink: 0;
+.provider-status {
+flex-shrink: 0;
+}
+.provider-empty-models {
+margin: 0; padding: 4px 8px; color: var(--muted); font-size: var(--font-meta);
 }
 .provider-count {
 margin-left: auto; color: var(--muted); font-size: var(--font-meta); flex-shrink: 0;
@@ -103,44 +76,6 @@ opacity: 0.45;
 }
 .set-model-ctx {
 color: var(--faint); font-size: var(--font-meta); flex-shrink: 0;
-}
-.provider-filter {
-display: flex; flex-direction: column; gap: 8px; margin: 8px 0 14px; padding: 10px;
-  border: 0; border-radius: var(--radius-card); background: var(--sunken);
-}
-.provider-filter-head {
-display: flex; align-items: center; gap: 6px;
-}
-.provider-filter-head > span {
-flex: 1; color: var(--muted); font-size: var(--font-meta); font-weight: 650; text-transform: uppercase; letter-spacing: .05em;
-}
-.provider-filter-head button {
-border: 0; padding: 2px 5px; color: var(--muted); font-size: var(--font-meta);
-}
-.provider-filter-head button:hover {
-color: var(--text);
-}
-.provider-filter-pills {
-display: flex; flex-wrap: wrap; gap: 6px;
-}
-.provider-filter-pills button {
-display: inline-flex; align-items: center; gap: var(--space-2); min-height: 30px; padding: 4px 9px;
-  border-color: var(--border-soft); border-radius: var(--radius-round); color: var(--muted); background: var(--elevated);
-}
-.provider-filter-pills button.active {
-border-color: var(--accent-line); color: var(--text); background: var(--accent-wash);
-}
-.provider-filter-pills i {
-width: 7px; height: 7px; border-radius: 50%; background: var(--faint);
-}
-.provider-filter-pills button.active i {
-background: var(--accent);
-}
-.provider-filter-pills b {
-color: var(--faint); font-size: var(--font-meta);
-}
-.provider-filter-pills button.active b {
-color: var(--accent);
 }
 html[dir="rtl"] .provider-count {
 margin-left: 0;
@@ -409,7 +344,7 @@ color: var(--text); background: var(--surface-overlay);
 }
 /* Tiny monogram inside a 24px logo tile — decorative, not meta text. */
 .provider-logo-fallback {
-font-family: var(--ui-font-family); font-size: 8px; font-weight: 780; letter-spacing: -.04em; line-height: 1;
+font-family: var(--ui-font-family); font-size: var(--font-meta); font-weight: 780; letter-spacing: -.04em; line-height: 1;
   white-space: nowrap;
 }
 .sheet-section-toggle .model-provider-logo {
@@ -430,16 +365,6 @@ font-size: var(--font-meta);
 .model-sheet .sheet-row-copy small {
 font-size: var(--font-meta); line-height: 14px;
 }
-@container feature-panel (max-width: 700px) {
-.model-picker {
-width: 100%;
-    min-width: 0;
-    max-width: 100%;
-}
-}
-.provider-logo-fallback {
-font-size: var(--font-meta);
-}
 .model-row-provider-logo {
 width: 16px;
   height: 16px;
@@ -458,31 +383,26 @@ width: 28px;
 .model-sheet .model-sheet-grip { color: var(--faint); font-size: var(--font-meta); }
 .model-sheet .model-capability-icons { display: inline-flex; }
 @container feature-panel (max-width: 700px) {
-.model-chip {
-flex: 1 1 min(100%, 180px); justify-content: flex-start; overflow-wrap: anywhere;
-}
-
-/* Scroll behavior comes from the core .ui-scroll-tabs primitive. */
-.provider-chips {
-flex-wrap: nowrap;
-    padding-bottom: 4px;
-}
-
-.provider-chip {
-flex: none;
+.model-picker {
+width: 100%;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .provider-head {
 gap: 4px; padding-right: 5px;
 }
 
-.provider-tag,
 .set-model-meta {
-display: none;
+max-width: 30%;
 }
 
 .provider-expand {
 min-width: 0;
+}
+
+.provider-name {
+flex: 1 1 auto;
 }
 
 .set-model-row {
@@ -497,21 +417,42 @@ transition: none;
 
 /* Models settings and picker surfaces. */
 .set-provider-logo { width: var(--icon-md); height: var(--icon-md); }
-.set-provider-no-matches { padding: 4px 8px; font-size: var(--font-meta); }
 .model-star-btn.on,
 .model-star-btn[aria-pressed="true"] { color: var(--amber); }
 .model-sheet .sheet-row-star { color: var(--amber); }
-.models-page { min-width: 0; container: models-page / inline-size; }
-/* When hosted as a settings page the pane is a flex column (app stylesheet),
-   so the page fills it and only .provider-list scrolls. Harmless elsewhere. */
-.models-page { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.models-page {
+  min-width: 0;
+  container: models-page / inline-size;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
 .models-page > .models-toolbar,
-.models-page > .provider-chips,
 .models-page > .form-error { flex: none; }
-.models-toolbar { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-3) 0 var(--space-2); }
-.models-toolbar .models-search { flex: 1; margin: 0; min-width: 0; }
+.models-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-3); margin: var(--space-3) 0 var(--space-2); }
 .models-toolbar .models-add-provider { flex: none; }
 .models-toolbar .models-refresh { flex: none; }
+.provider-model-filter { width: 100%; margin: 4px 0 6px; }
+.provider-model-filter--quiet { opacity: 0.7; }
+.provider-manual-model { display: flex; flex-wrap: wrap; gap: var(--space-2); min-width: 0; }
+.provider-manual-model .ui-input { flex: 1 1 8rem; min-width: 0; }
+.custom-provider-form { display: flex; flex-direction: column; gap: var(--space-3); }
+.custom-provider-field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.custom-provider-field > span { color: var(--muted); font-size: var(--font-meta); }
+.custom-provider-headers { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.custom-provider-headers > span { color: var(--muted); font-size: var(--font-meta); }
+.custom-provider-header-row { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; min-width: 0; }
+.custom-provider-header-row .ui-input { flex: 1 1 8rem; min-width: 0; }
+.custom-provider-header-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.custom-provider-models { display: flex; flex-direction: column; gap: var(--space-2); }
+.custom-provider-model-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.custom-provider-model-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.custom-provider-model-row > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-meta); }
+.custom-provider-discover-msg,
+.custom-provider-readonly,
+.provider-configured-outside { margin: 0; color: var(--muted); font-size: var(--font-meta); }
 .provider-connect { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); padding: var(--space-2) 6px var(--space-3); }
 .provider-connect-method { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); width: 100%; }
 .provider-connect-or { align-self: stretch; padding: 2px 0; font-size: var(--font-meta); text-align: center; }
@@ -539,11 +480,8 @@ transition: none;
 .sheet-section-caret svg { width: var(--icon-sm); height: var(--icon-sm); }
 .sheet-section-caret:not(.open) { transform: rotate(-90deg); }
 @container models-page (max-width: 700px) {
-  .models-toolbar { align-items: stretch; flex-direction: column; }
-  .models-toolbar > .seg { width: 100%; }
-  .models-toolbar > .seg button { flex: 1; }
-  .models-toolbar .models-add-provider { width: 100%; }
-  /* Keep the icon-only refresh compact next to the full-width controls. */
-  .models-toolbar .models-refresh { align-self: flex-start; }
+  .models-toolbar { align-items: stretch; justify-content: flex-start; }
+  .models-toolbar .models-add-provider { margin-left: auto; }
   .model-star-btn { width: var(--tap); min-width: var(--tap); }
+  .provider-manual-model { flex-direction: column; }
 }

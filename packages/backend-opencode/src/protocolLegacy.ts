@@ -2,6 +2,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
   AgentDescriptor,
+  AvailableProviderDescriptor,
   JsonObject,
   ModelDescriptor,
   ModelMessage,
@@ -10,6 +11,8 @@ import type {
   OpenCodeTransport,
   ProtocolAdapter,
   ProtocolCapabilities,
+  ProviderAuthMethod,
+  ProviderAuthorization,
   RuntimeEndpoint,
   RuntimeEvent,
   RuntimeLocation,
@@ -26,6 +29,7 @@ import {
   createTranslateState,
   type ObservationBinding,
 } from "./events.ts";
+import { createProviderHttpClient } from "./providerHttp.ts";
 import { appendPulledEvents } from "./reconciliationEvents.ts";
 
 export type LegacyPromptPath = "prompt_async" | "message";
@@ -633,6 +637,30 @@ export const createLegacyProtocolAdapter = (
     return promptPaths;
   };
 
+  const providerHttp = createProviderHttpClient({
+    locate: (path) => withLocation(path, options.endpoint.location),
+    transport: {
+      queryRequired: (path) => queryRequired(options.transport, path, deadlineMs),
+      queryOptional: (path) => queryOptional(options.transport, path, deadlineMs),
+      mutate: async (method, path, body, extra) => options.transport.mutate<unknown>({
+        method,
+        path,
+        body,
+        deadlineMs: extra?.deadlineMs ?? deadlineMs,
+        replay: { kind: "never" },
+        operationId: extra?.operationId ?? `provider-${method}-${path}`,
+      }),
+    },
+    deadlineMs,
+    authMethodsOptional: true,
+    operationIdFor: (kind, providerID) => {
+      if (kind === "authorize") return `provider-oauth-authorize-${providerID}`;
+      if (kind === "callback") return `provider-oauth-callback-${providerID}`;
+      if (kind === "auth-remove") return `provider-auth-remove-${providerID}`;
+      return `provider-auth-${providerID}`;
+    },
+  });
+
   return {
     protocol: "legacy",
     async capabilities() {
@@ -667,6 +695,24 @@ export const createLegacyProtocolAdapter = (
           ? { model: { providerID: agent.model.providerID, modelID: agent.model.modelID } }
           : {}),
       }));
+    },
+    async listAllProviders(): Promise<AvailableProviderDescriptor[]> {
+      return providerHttp.listAllProviders();
+    },
+    async providerAuthMethods(): Promise<Record<string, ProviderAuthMethod[]>> {
+      return providerHttp.providerAuthMethods();
+    },
+    async providerAuthorize(providerID, method, inputs): Promise<ProviderAuthorization> {
+      return providerHttp.providerAuthorize(providerID, method, inputs);
+    },
+    async providerAuthCallback(providerID, method, code): Promise<boolean> {
+      return providerHttp.providerAuthCallback(providerID, method, code);
+    },
+    async setProviderApiKey(providerID, key, metadata): Promise<boolean> {
+      return providerHttp.setProviderApiKey(providerID, key, metadata);
+    },
+    async removeProviderAuth(providerID): Promise<boolean> {
+      return providerHttp.removeProviderAuth(providerID);
     },
     async sessions(): Promise<RuntimeSession[]> {
       const rows = await queryRequired<LegacySession[]>(

@@ -1,17 +1,15 @@
-// Providers & Models: the OpenCode-truth catalog. Accordion per provider with
-// enable/disable at both levels (mirrored into opencode.json server-side),
-// search, provider filter chips, and a Connected/All scope. Favorites (star)
-// still feed the composer picker ordering. Every toggle refreshes the model
-// list in the store so the composer picker updates immediately.
+// Providers & Models: managed provider instances as the navigation.
+// Status is derived (Ready / Needs setup / Disabled) and is never
+// the same thing as the enable toggle. Model search is local to a card.
 import { useEffect, useMemo, useState } from "react";
-import { isFavorite, modelKey, orderProviders } from "@polyth/models";
+import { deriveProviderStatus, filterProviderModels, isFavorite, orderProviders } from "@polyth/models";
 import {
   reorderModelProviders,
   setModelProviderExpanded,
   toggleModelFavorite,
   useModelPrefs,
 } from "./modelPrefs.ts";
-import { setModels, useStore } from "../../../apps/web/src/store.ts";
+import { setModels } from "../../../apps/web/src/store.ts";
 import {
   api,
   type AvailableProviderDto,
@@ -19,38 +17,66 @@ import {
   type ProviderCatalogDto,
   type VisibilityStateDto,
 } from "@polyth/session/web-api";
-import { EmptyState, PageHead, Seg, Toggle } from "../../../apps/web/src/components/settings/parts.tsx";
+import { EmptyState, PageHead, Toggle } from "../../../apps/web/src/components/settings/parts.tsx";
 import { modelDisplayName } from "../../../apps/web/src/composer/discovery.ts";
 import Picker from "../../../apps/web/src/components/Picker.tsx";
+import { confirmAlert } from "../../../apps/web/src/alerts.ts";
 import ProviderConnect from "./ProviderConnect.tsx";
 import ProviderLogo from "./ProviderLogo.tsx";
+import CustomProviderDialog from "./CustomProviderDialog.tsx";
 import MoveControls from "../../../apps/web/src/components/MoveControls.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
-import { AddIcon, Button, FavoriteIcon, Icon, IconButton, RefreshIcon, Switch, TextInput } from "../../../apps/web/src/components/ui/index.ts";
-
-type Scope = "connected" | "all";
+import {
+  AddIcon,
+  Badge,
+  Button,
+  FavoriteIcon,
+  Icon,
+  IconButton,
+  RefreshIcon,
+  Switch,
+  TextInput,
+} from "../../../apps/web/src/components/ui/index.ts";
 
 function fmtContext(context?: number): string {
   if (!context) return "";
   return context >= 1000 ? `${Math.round(context / 1000)}k ctx` : `${context} ctx`;
 }
 
+function statusLabel(status: ProviderCatalogDto["status"]): { text: string; tone: "neutral" | "warning" | "danger" | "success" } | null {
+  if (status === "needs-setup") return { text: tr("settings.modelspage.statusNeedsSetup"), tone: "warning" };
+  if (status === "disabled") return { text: tr("settings.modelspage.statusDisabled"), tone: "neutral" };
+  return null;
+}
+
+/** Re-derive the quiet badge from catalog facts + the enabled overlay. */
+function overlayStatus(provider: ProviderCatalogDto, enabled: boolean): NonNullable<ProviderCatalogDto["status"]> {
+  return deriveProviderStatus({
+    enabled,
+    configured: provider.configured === true,
+    hasCredential: provider.hasCredential === true,
+    connected: provider.connected,
+    authRequired: provider.custom?.authMode === "none" ? false : provider.custom?.authMode === "api-key" ? true : undefined,
+  });
+}
+
 export default function ModelsPage() {
-  const models = useStore((s) => s.models);
   const prefs = useModelPrefs();
   const [providers, setProviders] = useState<ProviderCatalogDto[] | null>(null);
   const [error, setError] = useState("");
-  const [q, setQ] = useState("");
-  const [scope, setScope] = useState<Scope>("all");
-  const [providerFilter, setProviderFilter] = useState<string | null>(null);
   const [draggedProvider, setDraggedProvider] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState("");
-  const [available, setAvailable] = useState<AvailableProviderDto[]>([]);
-  const [authMethods, setAuthMethods] = useState<Record<string, ProviderAuthMethodDto[]>>({});
-  const [providerOptionsLoaded, setProviderOptionsLoaded] = useState(false);
-  const [providerOptionsLoading, setProviderOptionsLoading] = useState(false);
+  const [options, setOptions] = useState<{
+    available: AvailableProviderDto[];
+    authMethods: Record<string, ProviderAuthMethodDto[]>;
+    loaded: boolean;
+    loading: boolean;
+    error: string;
+  }>({ available: [], authMethods: {}, loaded: false, loading: false, error: "" });
   const [refreshing, setRefreshing] = useState(false);
   const [reconfiguring, setReconfiguring] = useState<ReadonlySet<string>>(new Set());
+  const [customOpen, setCustomOpen] = useState<null | { id?: string }>(null);
+  const [modelQuery, setModelQuery] = useState<Record<string, string>>({});
   const catalogModels = useMemo(
     () => providers?.flatMap((provider) => provider.models) ?? [],
     [providers],
@@ -59,34 +85,33 @@ export default function ModelsPage() {
   const refreshCatalog = () =>
     api.listProviders().then(setProviders).catch((e) => setError(e instanceof Error ? e.message : String(e)));
 
-  /** Available providers + per-provider auth methods (for the add-provider
-   *  picker and the connect panels). `force` re-fetches even once loaded — the
-   *  Refresh button and any flow that just changed credentials use it.
-   *  `quiet` suppresses the error banner for background/eager loads. */
   const loadProviderOptions = async (opts: { force?: boolean; quiet?: boolean } = {}) => {
-    if (providerOptionsLoading) return;
-    if (providerOptionsLoaded && !opts.force) return;
-    setProviderOptionsLoading(true);
-    if (!opts.quiet) setError("");
+    if (options.loading) return;
+    if (options.loaded && !opts.force) return;
+    setOptions((prev) => ({ ...prev, loading: true, error: opts.quiet ? prev.error : "" }));
     try {
       const [nextAvailable, nextAuthMethods] = await Promise.all([
         api.listAvailableProviders(),
         api.providerAuthMethods().catch(() => ({})),
       ]);
-      setAvailable(nextAvailable);
-      setAuthMethods(nextAuthMethods);
-      setProviderOptionsLoaded(true);
+      setOptions({
+        available: nextAvailable,
+        authMethods: nextAuthMethods,
+        loaded: true,
+        loading: false,
+        error: "",
+      });
     } catch (e) {
-      if (!opts.quiet) setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setProviderOptionsLoading(false);
+      setOptions((prev) => ({
+        ...prev,
+        loading: false,
+        error: e instanceof Error ? e.message : String(e),
+      }));
     }
   };
 
   useEffect(() => {
     void refreshCatalog();
-    // Eager, quiet: connect panels need auth methods ready before a provider
-    // row is expanded so OAuth-only providers never flash an API-key form.
     void loadProviderOptions({ quiet: true });
   }, []);
 
@@ -105,11 +130,11 @@ export default function ModelsPage() {
     });
 
   const handleAddProvider = async (id: string) => {
-    const picked = available.find((p) => p.id === id);
+    const picked = options.available.find((p) => p.id === id);
     setError("");
     try {
       await api.addProvider(id, picked?.name);
-      setAvailable((prev) => prev.filter((p) => p.id !== id));
+      setOptions((prev) => ({ ...prev, available: prev.available.filter((p) => p.id !== id) }));
       setModelProviderExpanded(id, true);
       await refreshCatalog();
     } catch (e) {
@@ -117,12 +142,25 @@ export default function ModelsPage() {
     }
   };
 
-  const handleRemoveProvider = async (id: string) => {
+  const handleRemoveProvider = async (p: ProviderCatalogDto) => {
     setError("");
     try {
-      await api.removeProvider(id);
+      if (p.origin === "custom" && p.editable !== false) {
+        const ok = await confirmAlert(
+          tr("settings.modelspage.removeCustomConfirm", { name: p.name }),
+          { title: tr("settings.modelspage.removeProvider"), confirmLabel: tr("common.remove") },
+        );
+        if (!ok) return;
+        await api.removeCustomProvider(p.id);
+      } else {
+        await api.removeProvider(p.id);
+      }
       await refreshCatalog();
-      if (providerOptionsLoaded) await api.listAvailableProviders().then(setAvailable).catch(() => {});
+      if (options.loaded) {
+        await api.listAvailableProviders()
+          .then((available) => setOptions((prev) => ({ ...prev, available })))
+          .catch(() => {});
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -152,6 +190,7 @@ export default function ModelsPage() {
       return {
         ...provider,
         enabled: providerEnabled,
+        status: overlayStatus(provider, providerEnabled),
         models: provider.models.map((model) => ({
           ...model,
           enabled: providerEnabled && !state.disabledModels.includes(model.key),
@@ -159,8 +198,6 @@ export default function ModelsPage() {
       };
     });
 
-  /** Optimistic UI; the response only reconciles visibility flags and never
-   * re-runs OpenCode's expensive provider discovery endpoint. */
   const mutate = async (
     key: string,
     optimistic: (catalog: ProviderCatalogDto[]) => ProviderCatalogDto[],
@@ -181,9 +218,6 @@ export default function ModelsPage() {
     }
   };
 
-  /** Re-pull the OpenCode-truth catalog (busting the server-lifetime cache)
-   *  and the provider options in one go, so a model that just went live or a
-   *  provider that finished connecting shows up without reloading the app. */
   const handleRefresh = async () => {
     if (refreshing) return;
     setRefreshing(true);
@@ -198,31 +232,16 @@ export default function ModelsPage() {
     }
   };
 
-  const query = q.trim().toLowerCase();
-  const shown = useMemo(() => {
-    if (!providers) return [];
-    return orderProviders(providers
-      .filter((p) => (scope === "connected" ? p.connected : true))
-      .filter((p) => (providerFilter ? p.id === providerFilter : true))
-      .map((p) => ({
-        ...p,
-        models: query
-          ? p.models.filter((m) =>
-              m.name.toLowerCase().includes(query)
-              || m.key.toLowerCase().includes(query)
-              || p.name.toLowerCase().includes(query))
-          : p.models,
-      }))
-      .filter((p) => p.models.length > 0 || !query), prefs);
-  }, [providers, scope, providerFilter, query, prefs]);
-
-  // Search auto-expands so hits are visible without clicking each provider.
-  const isOpen = (id: string) => query.length > 0 || prefs.expandedProviders.includes(id);
+  const shown = useMemo(
+    () => (providers ? orderProviders(providers, prefs) : []),
+    [providers, prefs],
+  );
 
   if (providers === null && !error) {
     return <div className="models-page"><PageHead title={tr("settings.modelspage.providersModels")} /><EmptyState title={tr("settings.modelspage.loadingCatalog")} busy /></div>;
   }
-  const chipProviders = (providers ?? []).filter((p) => (scope === "connected" ? p.connected : true));
+
+  const editing = customOpen?.id ? providers?.find((p) => p.id === customOpen.id) : undefined;
 
   return (
     <div className="models-page">
@@ -231,17 +250,6 @@ export default function ModelsPage() {
         blurb={tr("settings.modelspage.whatTheModelPickerOffersTogglesAre")}
       />
       <div className="models-toolbar" data-settings-item="models.catalog">
-        <TextInput
-          className="models-search"
-          value={q}
-          placeholder={tr("settings.modelspage.searchModels")}
-          aria-label={tr("settings.modelspage.searchModels2")}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <Seg value={scope} options={[
-          ["connected", tr("sidebar.connected")],
-          ["all", tr("importsessionsdialog.all")],
-        ]} onChange={setScope} />
         <IconButton
           className="models-refresh"
           icon={RefreshIcon}
@@ -257,38 +265,30 @@ export default function ModelsPage() {
           ariaLabel={tr("settings.modelspage.addProvider")}
           triggerIcon={<Icon icon={AddIcon} size="sm" />}
           onOpen={() => void loadProviderOptions()}
-          items={available.map((p) => ({
+          items={options.available.map((p) => ({
             id: p.id,
             label: p.name,
             group: "",
-            ...(authMethods[p.id]?.some((m) => m.type === "oauth") ? { detail: tr("settings.modelspage.oauthMethod") } : {}),
+            ...(options.authMethods[p.id]?.some((m) => m.type === "oauth") ? { detail: tr("settings.modelspage.oauthMethod") } : {}),
           }))}
           onPick={(id) => void handleAddProvider(id)}
-          placeholder={providerOptionsLoading
-            ? tr("settings.modelspage.loadingCatalog")
-            : available.length === 0 ? tr("settings.modelspage.noProvidersToAdd") : tr("settings.modelspage.addProvider")}
-          disabled={providerOptionsLoaded && available.length === 0}
+          placeholder={tr("settings.modelspage.addProvider")}
+          searchPlaceholder={tr("settings.modelspage.searchProviders")}
+          emptyMessage={options.error
+            ? tr("settings.modelspage.catalogueFailed")
+            : options.loaded && options.available.length === 0
+              ? tr("settings.modelspage.allBuiltinsAdded")
+              : options.loading
+                ? tr("settings.modelspage.loadingCatalog")
+                : undefined}
+          emptyAction={options.error
+            ? { label: tr("common.retry"), run: () => void loadProviderOptions({ force: true }) }
+            : undefined}
+          footerAction={{
+            label: tr("settings.modelspage.customProvider"),
+            run: () => setCustomOpen({}),
+          }}
         />
-      </div>
-
-      <div className="provider-chips ui-scroll-tabs" role="group" aria-label={tr("settings.modelspage.filterByProvider")}>
-        <button
-          className={`chip provider-chip ${providerFilter === null ? "on" : ""}`}
-          aria-pressed={providerFilter === null}
-          onClick={() => setProviderFilter(null)}
-        >
-          {tr("settings.modelspage.allProviders")}</button>
-        {chipProviders.map((p) => (
-          <button
-            key={p.id}
-            className={`chip provider-chip ${providerFilter === p.id ? "on" : ""} ${p.enabled ? "" : "chip-off"}`}
-            aria-pressed={providerFilter === p.id}
-            onClick={() => setProviderFilter(providerFilter === p.id ? null : p.id)}
-          >
-            <ProviderLogo providerID={p.id} providerName={p.name} className="set-provider-logo" />
-            {p.name}
-          </button>
-        ))}
       </div>
 
       {error && <div className="form-error" role="alert">{error}</div>}
@@ -296,12 +296,17 @@ export default function ModelsPage() {
       <div className="provider-list">
         {shown.map((p, index) => {
           const enabledCount = p.models.filter((m) => m.enabled).length;
-          const expanded = isOpen(p.id);
+          const expanded = prefs.expandedProviders.includes(p.id);
+          const status = statusLabel(p.status);
+          const query = modelQuery[p.id] ?? "";
+          const visibleModels = filterProviderModels(p.models, query);
+          const customOwned = p.origin === "custom" && p.editable !== false;
+          const externalCustom = p.origin === "externally-configured";
           return (
             <div
               key={p.id}
               className={`provider-card ${p.enabled ? "" : "provider-disabled"}`}
-              draggable={!query}
+              draggable
               onDragStart={() => setDraggedProvider(p.id)}
               onDragOver={(event) => event.preventDefault()}
               onDrop={(event) => {
@@ -328,20 +333,20 @@ export default function ModelsPage() {
                   <span className={`provider-chevron ${expanded ? "open" : ""}`} aria-hidden="true">›</span>
                   <ProviderLogo providerID={p.id} providerName={p.name} className="set-provider-logo" />
                   <span className="provider-name">{p.name}</span>
-                  {!p.connected && <span className="tag provider-tag">{tr("settings.modelspage.notConnected")}</span>}
+                  {status && (
+                    <Badge tone={status.tone} className="provider-status">{status.text}</Badge>
+                  )}
                   <span className="provider-count mono">{enabledCount}/{p.models.length}</span>
                 </button>
-                {!query && (
-                  <MoveControls
-                    label={p.name}
-                    index={index}
-                    count={shown.length}
-                    onMove={(nextIndex) => {
-                      const target = shown[nextIndex];
-                      if (target) reorderModelProviders(shown.map((provider) => provider.id), p.id, target.id);
-                    }}
-                  />
-                )}
+                <MoveControls
+                  label={p.name}
+                  index={index}
+                  count={shown.length}
+                  onMove={(nextIndex) => {
+                    const target = shown[nextIndex];
+                    if (target) reorderModelProviders(shown.map((provider) => provider.id), p.id, target.id);
+                  }}
+                />
                 <Toggle
                   on={p.enabled}
                   label={tr("settings.modelspage.valueProviderValue", {
@@ -351,7 +356,14 @@ export default function ModelsPage() {
                   onChange={(on) => void mutate(
                     p.id,
                     (catalog) => catalog.map((provider) => provider.id === p.id
-                      ? { ...provider, enabled: on, models: provider.models.map((model) => ({ ...model, enabled: on })) }
+                      ? {
+                          ...provider,
+                          enabled: on,
+                          status: overlayStatus(provider, on),
+                          models: on
+                            ? provider.models
+                            : provider.models.map((model) => ({ ...model, enabled: false })),
+                        }
                       : provider),
                     () => api.setProviderEnabled(p.id, on),
                   )}
@@ -359,21 +371,22 @@ export default function ModelsPage() {
               </div>
               {expanded && (
                 <div className="provider-models">
-                  {p.models.length === 0 && (
-                    <>
-                      <ProviderConnect
-                        providerId={p.id}
-                        methods={authMethods[p.id]}
-                        onConnected={() => void refreshCatalog()}
-                      />
-                      <div className="provider-connect-toggle">
-                        <Button size="sm" variant="ghost" onClick={() => void handleRemoveProvider(p.id)}>
-                          {tr("settings.modelspage.removeProvider")}
-                        </Button>
-                      </div>
-                    </>
+                  {p.models.length > 0 && (
+                    <TextInput
+                      className={`provider-model-filter${p.models.length < 6 ? " provider-model-filter--quiet" : ""}`}
+                      value={query}
+                      placeholder={tr("settings.modelspage.filterProviderModels", { name: p.name })}
+                      aria-label={tr("settings.modelspage.filterProviderModels", { name: p.name })}
+                      onChange={(e) => setModelQuery((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                    />
                   )}
-                  {p.models.map((m) => {
+                  {p.models.length === 0 && (
+                    <p className="provider-empty-models">{tr("settings.modelspage.noModelsYet")}</p>
+                  )}
+                  {query.trim() && visibleModels.length === 0 && p.models.length > 0 && (
+                    <p className="provider-empty-models">{tr("settings.modelspage.noMatches")}</p>
+                  )}
+                  {visibleModels.map((m) => {
                     const fav = isFavorite(prefs, m.key);
                     const displayName = modelDisplayName(m, catalogModels);
                     return (
@@ -392,7 +405,9 @@ export default function ModelsPage() {
                         <span className="set-model-meta mono">{m.key}</span>
                         <Switch
                           checked={m.enabled}
-                          label={m.enabled
+                          label={!p.enabled
+                            ? tr("settings.modelspage.enableTheProviderFirst")
+                            : m.enabled
                             ? tr("settings.modelspage.disableValue", { value: displayName })
                             : tr("settings.modelspage.enableValue", { value: displayName })}
                           disabled={busyKey === m.key || !p.enabled}
@@ -407,7 +422,24 @@ export default function ModelsPage() {
                       </div>
                     );
                   })}
-                  {p.models.length > 0 && (
+                  {customOwned && (
+                    <div className="provider-connect-toggle">
+                      <Button size="sm" variant="ghost" onClick={() => setCustomOpen({ id: p.id })}>
+                        {tr("settings.modelspage.providerSettings")}
+                      </Button>
+                    </div>
+                  )}
+                  {externalCustom && (
+                    <p className="provider-configured-outside">{tr("settings.modelspage.configuredOutsideHint")}</p>
+                  )}
+                  {(p.origin !== "custom" || externalCustom) && p.models.length === 0 && (
+                    <ProviderConnect
+                      providerId={p.id}
+                      methods={options.authMethods[p.id]}
+                      onConnected={() => void refreshCatalog()}
+                    />
+                  )}
+                  {(p.origin !== "custom" || externalCustom) && p.models.length > 0 && (
                     <div className="provider-connect-toggle">
                       <Button size="sm" variant="ghost" onClick={() => {
                         void loadProviderOptions();
@@ -417,13 +449,20 @@ export default function ModelsPage() {
                       </Button>
                     </div>
                   )}
-                  {p.models.length > 0 && reconfiguring.has(p.id) && (
+                  {(p.origin !== "custom" || externalCustom) && p.models.length > 0 && reconfiguring.has(p.id) && (
                     <ProviderConnect
                       providerId={p.id}
-                      methods={authMethods[p.id]}
+                      methods={options.authMethods[p.id]}
                       onConnected={() => { void refreshCatalog(); }}
                       onDisconnect={() => { void refreshCatalog(); closeReconfigure(p.id); }}
                     />
+                  )}
+                  {p.removable !== false && (
+                    <div className="provider-connect-toggle">
+                      <Button size="sm" variant="ghost" onClick={() => void handleRemoveProvider(p)}>
+                        {tr("settings.modelspage.removeProvider")}
+                      </Button>
+                    </div>
                   )}
                 </div>
               )}
@@ -436,10 +475,29 @@ export default function ModelsPage() {
             body={tr("settings.modelspage.checkThatTheBackendIsRunningAnd")}
           />
         )}
-        {providers && providers.length > 0 && shown.length === 0 && (
-          <EmptyState title={tr("settings.modelspage.noMatches")} body={tr("settings.modelspage.tryTheAllScopeOrClearThe")} />
-        )}
       </div>
+      {customOpen && (
+        <CustomProviderDialog
+          existing={editing
+            ? {
+                id: editing.id,
+                name: editing.name,
+                baseURL: editing.custom?.baseURL ?? "",
+                protocol: editing.custom?.protocol ?? "openai-compatible",
+                authMode: editing.custom?.authMode ?? "api-key",
+                headerNames: editing.custom?.headerNames,
+                modelIDs: editing.custom?.modelIDs
+                  ?? editing.models.filter((model) => !model.connected).map((model) => model.modelID),
+                readOnly: editing.editable === false || editing.origin === "externally-configured",
+              }
+            : undefined}
+          onClose={() => setCustomOpen(null)}
+          onSaved={(id) => {
+            setModelProviderExpanded(id, true);
+            void refreshCatalog();
+          }}
+        />
+      )}
     </div>
   );
 }

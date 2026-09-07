@@ -1661,6 +1661,132 @@ export interface AvailableProviderDescriptor {
   name: string;
 }
 
+/** How a provider instance entered the managed set. */
+export type ProviderOrigin = "builtin" | "custom" | "externally-configured";
+
+/** Quiet user-facing readiness. Distinct from `enabled` (visibility toggle). */
+export type ProviderStatus = "ready" | "needs-setup" | "disabled";
+
+export interface ProviderStatusInput {
+  enabled: boolean;
+  /** Has a config stanza, explicit add, or live models. */
+  configured: boolean;
+  /** Polyth or OpenCode stored a credential. Never the secret itself. */
+  hasCredential: boolean;
+  /** OpenCode reported the provider as currently serving models. */
+  connected: boolean;
+  /** False when the provider is configured for no-auth. Undefined = assume auth may be required. */
+  authRequired?: boolean;
+}
+
+/**
+ * Derive the single user-facing status.
+ *
+ * !enabled → Disabled
+ * runtime connected → Ready (includes environment auth)
+ * known API-key provider without a credential → Needs setup
+ * stored credential → Ready
+ * configured no-auth provider → Ready
+ * otherwise → Needs setup
+ *
+ * Disconnected catalogue models never imply readiness.
+ */
+export function deriveProviderStatus(input: ProviderStatusInput): ProviderStatus {
+  if (!input.enabled) return "disabled";
+  if (input.connected) return "ready";
+  if (input.authRequired === true && !input.hasCredential) return "needs-setup";
+  if (input.hasCredential) return "ready";
+  if (input.configured && input.authRequired === false) return "ready";
+  return "needs-setup";
+}
+
+/** Controlled custom-provider adapters. Never accept an arbitrary npm spec. */
+export type CustomProviderProtocol = "openai-compatible" | "openai-responses";
+
+/** npm packages Polyth may write for custom providers. The UI never supplies these. */
+export const CUSTOM_PROVIDER_ADAPTERS: Record<CustomProviderProtocol, string> = {
+  "openai-compatible": "@ai-sdk/openai-compatible",
+  "openai-responses": "@ai-sdk/openai",
+};
+
+export type CustomProviderAuthMode = "api-key" | "none";
+
+/** Precise header mutation. Omit the whole patch to leave existing headers
+ *  untouched. OpenCode stores these values in provider options — Polyth never
+ *  returns the values on public DTOs. */
+export interface CustomProviderHeaderPatch {
+  /** Replace/add only these names. */
+  set?: Record<string, string>;
+  /** Delete only these names. */
+  unset?: string[];
+  /** Drop every header, then apply `set` if present. */
+  clear?: boolean;
+}
+
+/** Polyth-owned slice written into `opencode.json` `provider.<id>`. Only
+ *  OpenCode-understood fields are persisted there. Secrets go through
+ *  OpenCode auth; Polyth ownership/authMode live in Polyth persistence. */
+export interface CustomProviderApply {
+  id: string;
+  name: string;
+  protocol: CustomProviderProtocol;
+  baseURL: string;
+  authMode?: CustomProviderAuthMode;
+  headerPatch?: CustomProviderHeaderPatch;
+  /** Merge by model id. Discovery is merge-only and never deletes models. */
+  models?: Record<string, CustomProviderModelApply>;
+}
+
+export interface CustomProviderModelApply {
+  name?: string;
+  context?: number;
+  output?: number;
+}
+
+export interface CustomProviderConfigDto {
+  protocol: CustomProviderProtocol;
+  baseURL: string;
+  /** Absent when Polyth does not know the auth requirement. */
+  authMode?: CustomProviderAuthMode;
+  hasHeaders: boolean;
+  /** Names only — never values. */
+  headerNames: string[];
+  /** Models declared in the Polyth-owned config stanza. */
+  modelIDs?: string[];
+}
+
+/** Server-side view of one provider stanza. Header values stay here and must
+ *  never be copied into a browser DTO. */
+export interface ProviderInspect {
+  id: string;
+  name: string;
+  owned: boolean;
+  protocol?: CustomProviderProtocol;
+  authMode?: CustomProviderAuthMode;
+  baseURL?: string;
+  /** Server-only. Never serialize this object to the browser. */
+  headers?: Record<string, string>;
+  headerNames: string[];
+  modelIDs: string[];
+}
+
+/** Narrow config port so feature packages do not import OpenCode internals. */
+export interface ProviderConfigPort {
+  readConfig(): Promise<Record<string, unknown>>;
+  applyCustomProvider(input: CustomProviderApply): Promise<void>;
+  /** Remove a Polyth-owned custom provider stanza. Unknown sibling providers
+   *  and unowned fields of other entries are preserved. */
+  removeCustomProvider(id: string): Promise<void>;
+  inspectProvider(id: string): Promise<ProviderInspect | undefined>;
+  mergeDiscoveredModels(
+    id: string,
+    discovered: ReadonlyArray<{ id: string; name?: string }>,
+  ): Promise<void>;
+  addManualModel(id: string, model: CustomProviderModelApply & { id: string }): Promise<void>;
+  /** Remove one Polyth-configured model id. Sibling models and unknown fields stay. */
+  removeConfiguredModel(id: string, modelId: string): Promise<void>;
+}
+
 export interface ProviderAuthPromptOption {
   label: string;
   value: string;
@@ -3402,7 +3528,8 @@ export type OpenCodePendingChangeKind =
   | "behavior"
   | "mcp"
   | "plugins"
-  | "provider-visibility";
+  | "provider-visibility"
+  | "provider-config";
 
 export interface OpenCodePendingChangeDto {
   id: string;

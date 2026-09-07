@@ -342,3 +342,99 @@ test("writable authority must match the exact config target", async () => {
   await matching.applyProviderVisibility({ disabledProviders: ["azure"], blacklists: {} });
   assert.deepEqual(readCfg(file).disabled_providers, ["azure"], "exact writable target may write");
 });
+
+test("custom provider writes preserve sibling providers and unknown fields", async () => {
+  const dir = tmp();
+  const file = join(dir, "opencode.json");
+  const original = baseDocument();
+  writeFileSync(file, `${JSON.stringify(original, null, 2)}\n`);
+  const applier = createConfigApplier({ configDir: dir });
+
+  await applier.applyCustomProvider({
+    id: "local-lmstudio",
+    name: "LM Studio",
+    protocol: "openai-compatible",
+    baseURL: "http://127.0.0.1:1234/v1",
+    authMode: "none",
+  });
+
+  const afterCreate = readCfg(file);
+  assert.deepEqual(
+    (afterCreate.provider as Record<string, unknown>).custom,
+    (original.provider as Record<string, unknown>).custom,
+    "external custom provider stanza survived a sibling write",
+  );
+  assert.equal(afterCreate.theme, "dark");
+  assert.deepEqual(afterCreate.futureTopLevelBlock, original.futureTopLevelBlock);
+  const created = (afterCreate.provider as Record<string, Record<string, unknown>>)["local-lmstudio"]!;
+  assert.equal(created.npm, "@ai-sdk/openai-compatible");
+  assert.equal(created.name, "LM Studio");
+  assert.equal("polyth" in created, false, "OpenCode config must not carry Polyth metadata");
+  created.keepMe = { nested: true };
+
+  writeFileSync(file, `${JSON.stringify(afterCreate, null, 2)}\n`);
+  await applier.applyCustomProvider({
+    id: "local-lmstudio",
+    name: "LM Studio local",
+    protocol: "openai-compatible",
+    baseURL: "http://127.0.0.1:1234/v1",
+    models: { "manual-one": { name: "Manual" } },
+  });
+  const afterUpdate = readCfg(file);
+  const updated = (afterUpdate.provider as Record<string, Record<string, unknown>>)["local-lmstudio"]!;
+  assert.deepEqual(updated.keepMe, { nested: true }, "unknown fields on the owned entry survive");
+  assert.equal(updated.name, "LM Studio local");
+  assert.equal("polyth" in updated, false);
+
+  await applier.applyCustomProvider({
+    id: "local-lmstudio",
+    name: "LM Studio local",
+    protocol: "openai-compatible",
+    baseURL: "http://127.0.0.1:1234/v1",
+    headerPatch: { set: { "X-Test": "secret-value" } },
+  });
+  await applier.applyCustomProvider({
+    id: "local-lmstudio",
+    name: "LM Studio renamed",
+    protocol: "openai-compatible",
+    baseURL: "http://10.0.0.8:1234/v1",
+  });
+  const afterHeaderPreserve = readCfg(file);
+  const preserved = (afterHeaderPreserve.provider as Record<string, { options?: { headers?: Record<string, string>; baseURL?: string } }>)["local-lmstudio"]!;
+  assert.equal(preserved.options?.baseURL, "http://10.0.0.8:1234/v1");
+  assert.equal(preserved.options?.headers?.["X-Test"], "secret-value");
+
+  await applier.mergeDiscoveredModels("local-lmstudio", [{ id: "discovered-a", name: "A" }]);
+  const afterDiscover = readCfg(file);
+  const models = ((afterDiscover.provider as Record<string, Record<string, unknown>>)["local-lmstudio"]!.models) as Record<string, unknown>;
+  assert.ok("manual-one" in models, "manual model survived discovery");
+  assert.ok("discovered-a" in models);
+
+  await applier.removeCustomProvider("local-lmstudio");
+  const afterRemove = readCfg(file);
+  assert.equal("local-lmstudio" in (afterRemove.provider as object), false);
+  assert.deepEqual(
+    (afterRemove.provider as Record<string, unknown>).custom,
+    (original.provider as Record<string, unknown>).custom,
+  );
+});
+
+test("failed custom provider write cannot leave a torn opencode.json", async () => {
+  const dir = tmp();
+  const file = join(dir, "opencode.json");
+  writeFileSync(file, `${JSON.stringify({ theme: "dark", provider: { keep: { npm: "x" } } }, null, 2)}\n`);
+  const before = readFileSync(file, "utf8");
+  const applier = createConfigApplier({
+    configDir: dir,
+    authority: { kind: "read-only" },
+  });
+  await assert.rejects(
+    () => applier.applyCustomProvider({
+      id: "broken",
+      name: "Broken",
+      protocol: "openai-compatible",
+      baseURL: "http://127.0.0.1:9/v1",
+    }),
+  );
+  assert.equal(readFileSync(file, "utf8"), before);
+});

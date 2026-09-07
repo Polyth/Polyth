@@ -104,6 +104,23 @@ export type {
   ProviderVisibilityApply,
 } from "./config.ts";
 export {
+  adapterForProtocol,
+  addManualModelIntoProvider,
+  applyHeaderPatch,
+  applyProviderOps,
+  dropCustomProvider,
+  inspectProviderEntry,
+  isCustomProviderEntry,
+  mergeCustomProvider,
+  mergeDiscoveredIntoProvider,
+  projectConfig,
+  protocolFromNpm,
+  reconcileDiscoveredModels,
+} from "./customProvider.ts";
+export type { StagedProviderOp } from "./customProvider.ts";
+export { createProviderHttpClient } from "./providerHttp.ts";
+export type { ProviderHttpClient, ProviderHttpTransport } from "./providerHttp.ts";
+export {
   BROWSER_TOOL_PATH,
   createBrowserToolBridge,
   createBrowserToolPluginSource,

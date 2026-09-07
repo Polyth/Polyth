@@ -101,6 +101,34 @@ test("paired-device default-deny: unknown route, read grant, and admin capabilit
   );
 });
 
+test("remote paired devices cannot use custom-provider discovery as a fetch primitive", () => {
+  const principal = {
+    kind: "paired-device" as const,
+    deviceId: "dev-1",
+    deviceEndpointId: "abc",
+    connectionId: "c1",
+    transport: "direct" as const,
+    grants: [...GRANT_PROFILE_PRESETS.interact],
+    grantRevision: 1,
+  };
+  const policies = [{ owner: "core", policy: CORE_REMOTE_ACCESS }];
+  for (const path of [
+    "/api/providers/custom",
+    "/api/providers/custom/lab",
+    "/api/providers/custom/lab/discover",
+    "/api/providers/custom/lab/models",
+    "/api/providers/custom/lab/models/gpt-x",
+  ]) {
+    for (const method of ["GET", "POST", "PATCH", "DELETE"]) {
+      assert.throws(
+        () => assertPairedHttpAllowed(principal, method, path, policies),
+        (e: AuthorizationError) => e.status === 403,
+        `${method} ${path} must be denied remotely`,
+      );
+    }
+  }
+});
+
 test("remote path matcher rejects traversal and accepts :param segments", () => {
   assert.equal(matchRemotePath("/api/sessions/:id", "/api/sessions/abc"), true);
   assert.equal(matchRemotePath("/api/sessions/:id", "/api/sessions/abc/extra"), false);

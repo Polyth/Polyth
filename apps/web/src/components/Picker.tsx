@@ -28,6 +28,8 @@ export interface PickerProps {
   /** Called when the picker is opened, before its options are shown. */
   onOpen?: () => void;
   placeholder?: string;
+  /** Placeholder for the open list's filter field. Defaults to a "Filter {label}" string. */
+  searchPlaceholder?: string;
   direction?: "up" | "down";
   disabled?: boolean;
   /** Trailing per-row action (e.g. create/edit profile). Never also picks the
@@ -63,6 +65,13 @@ export interface PickerProps {
   ariaLabel?: string;
   /** Icon rendered in place of the uppercase label key (compact triggers). */
   triggerIcon?: ReactNode;
+  /** Replaces the default "no matches" copy when the filtered list is empty. */
+  emptyMessage?: string;
+  /** Optional action shown under the empty message (e.g. Retry). */
+  emptyAction?: {
+    label: string;
+    run: () => void;
+  };
   /** UX-MOBILE-01 §46: open as the shared bottom sheet on phones instead of a
    *  desktop popover. Opt-in, so only the surfaces redesigned for touch (the
    *  composer's mode selector) change behavior. */
@@ -77,6 +86,7 @@ export default function Picker({
   onPick,
   onOpen,
   placeholder = tr("picker.default"),
+  searchPlaceholder,
   direction: _direction = "down",
   disabled,
   trailingAction,
@@ -87,6 +97,8 @@ export default function Picker({
   mobileSheet,
   searchable = true,
   popoverToggle,
+  emptyMessage,
+  emptyAction,
 }: PickerProps) {
   const multi = values !== undefined;
   const asSheet = useShellMode() === "phone" && mobileSheet === true;
@@ -195,7 +207,7 @@ export default function Picker({
             search: {
               value: q,
               onChange: setQ,
-              placeholder: tr("picker.searchValue", { value: label.toLowerCase() }),
+              placeholder: searchPlaceholder ?? tr("picker.searchValue", { value: label.toLowerCase() }),
               ariaLabel: `Filter ${label}`,
             },
           } : {})}
@@ -219,7 +231,16 @@ export default function Picker({
                 onClick={() => pick(it.id)}
               />
             ))}
-            {shown.length === 0 && <p className="sheet-empty">{tr("picker.noMatches")}</p>}
+            {shown.length === 0 && (
+              <p className="sheet-empty">
+                {emptyMessage ?? tr("picker.noMatches")}
+                {emptyAction && (
+                  <button type="button" className="sheet-foot-action" onClick={() => { emptyAction.run(); }}>
+                    {emptyAction.label}
+                  </button>
+                )}
+              </p>
+            )}
           </div>
           {footerAction && (
             <button
@@ -257,7 +278,7 @@ export default function Picker({
             <input
               autoFocus
               value={q}
-              placeholder={tr("picker.filterValue", { value: label.toLowerCase() })}
+              placeholder={searchPlaceholder ?? tr("picker.filterValue", { value: label.toLowerCase() })}
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={onKey}
               role="combobox"
@@ -309,7 +330,20 @@ export default function Picker({
                   </div>
                 </Fragment>
               ))}
-              {shown.length === 0 && <div className="palette-empty">{tr("picker.noMatches")}</div>}
+              {shown.length === 0 && (
+                <div className="palette-empty">
+                  {emptyMessage ?? tr("picker.noMatches")}
+                  {emptyAction && (
+                    <button
+                      type="button"
+                      className="picker-footer-action"
+                      onClick={() => { emptyAction.run(); }}
+                    >
+                      {emptyAction.label}
+                    </button>
+                  )}
+                </div>
+              )}
               {hits.length > MAX_SHOWN && (
                 <div className="picker-more">{hits.length - MAX_SHOWN} {tr("picker.moreRefineTheFilter")}</div>
               )}

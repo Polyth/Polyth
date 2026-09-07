@@ -80,6 +80,7 @@ test("shared selects render the chosen value once and use field styling", async 
 
   assert.match(select, /className=\{`picker-select\$\{/);
   assert.match(picker, /<Popover[\s\S]*side=\{_direction\}/);
+  assert.doesNotMatch(picker, /close\(\); emptyAction\.run\(\)/);
   assert.doesNotMatch(picker, /menu-backdrop/);
   assert.match(css, /\.picker-select \.chip-k\s*\{\s*display:\s*none;/);
   assert.match(css, /\.picker-select \.picker-chip\s*\{[\s\S]*?background:\s*var\(--elevated\)/);

@@ -72,6 +72,7 @@ export function createPackageActivation(
         if (disposed) return reject("capabilities.register");
         return track(host.capabilities.register({ ...definition, ownerPackageId }));
       },
+      notify: () => host.capabilities.notify(),
     },
     settings: {
       registerPage: (definition) => {

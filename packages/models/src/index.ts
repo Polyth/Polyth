@@ -207,3 +207,27 @@ export function planFavoriteMigration(
   }
   return out;
 }
+
+export {
+  CUSTOM_PROVIDER_ADAPTERS,
+  PROVIDER_ID_PATTERN,
+  redactProviderError,
+  slugifyProviderId,
+  uniqueProviderId,
+  validateAuthMode,
+  validateCustomProviderInput,
+  validateHeaderPatch,
+  validateProtocol,
+  validateProviderBaseURL,
+  validateProviderId,
+} from "./customProvider.ts";
+export type { CustomProviderInput, ValidatedCustomProvider } from "./customProvider.ts";
+
+export {
+  deriveProviderStatus,
+  filterProviderModels,
+} from "./providerStatus.ts";
+export type { ProviderStatusInput } from "./providerStatus.ts";
+
+export { createProviderManager } from "./providerManager.ts";
+export type { ProviderManager, VisibilityPort } from "./providerManager.ts";

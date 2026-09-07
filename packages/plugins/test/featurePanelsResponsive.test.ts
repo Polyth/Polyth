@@ -92,7 +92,7 @@ test("feature forms stack and dense lists scroll at narrow panel widths", async 
   assert.match(narrow, /\.sched-form \.view-toolbar-row\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
   assert.match(narrow, /@container knowledge-panel \(max-width: 700px\)[\s\S]*?\.knowledge-panel > \.knowledge-toolbar,[\s\S]*?flex-direction:\s*column/);
   assert.match(narrow, /\.settings-pane-body \.set-row\s*\{[\s\S]*flex-direction:\s*column/);
-  assert.match(narrow, /\.provider-chips\s*\{[\s\S]*overflow-x:\s*auto/);
+  assert.match(narrow, /\.provider-list\s*\{[\s\S]*min-height:\s*0/);
   assert.match(narrow, /\.step-dots\s*\{[\s\S]*overflow-x:\s*auto/);
   assert.match(narrow, /\.fusion-model-picks\s*\{[\s\S]*overflow-y:\s*auto/);
 });

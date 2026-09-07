@@ -5,6 +5,7 @@ import type {
   RouteHandler,
 } from "@polyth/contracts";
 import { localOnlyRemoteAccess, type ServerPackage, type ServerPackageHost } from "@polyth/plugins";
+import { customProviderRoutes } from "./customProviderRoutes.ts";
 import { validateProfile } from "./index.ts";
 
 interface ProfileStore {
@@ -155,23 +156,28 @@ export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
+  const listModels = () => aggregate(
+    host,
+    async (projectId) => (await host.runtimes.forProject(projectId)).models(),
+    (model) => `${model.providerID}/${model.modelID}`,
+  );
+  const listAgents = () => aggregate(
+    host,
+    async (projectId) => (await host.runtimes.forProject(projectId)).agents(),
+    (agent) => agent.name,
+  );
+  const profiles = profileRoutes({
+    store: host.store as unknown as ProfileStore,
+    listModels,
+    listAgents,
+  });
+  const custom = customProviderRoutes(host, listModels);
   return {
     remoteAccess: localOnlyRemoteAccess(["agent-profiles", "runtime-catalog"]),
     routes: async (request) => {
       if (await runtimeCatalogRoutes(host)(request)) return true;
-      return profileRoutes({
-      store: host.store as unknown as ProfileStore,
-      listModels: () => aggregate(
-        host,
-        async (projectId) => (await host.runtimes.forProject(projectId)).models(),
-        (model) => `${model.providerID}/${model.modelID}`,
-      ),
-      listAgents: () => aggregate(
-        host,
-        async (projectId) => (await host.runtimes.forProject(projectId)).agents(),
-        (agent) => agent.name,
-      ),
-      })(request);
+      if (await custom(request)) return true;
+      return profiles(request);
     },
   };
 }

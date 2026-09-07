@@ -27,6 +27,7 @@ import {
   createTranslateState,
   type ObservationBinding,
 } from "./events.ts";
+import { createProviderHttpClient } from "./providerHttp.ts";
 import { appendPulledEvents } from "./reconciliationEvents.ts";
 import {
   pulledV2MessageEvents,
@@ -661,6 +662,28 @@ export const createV2ProtocolAdapter = (
     });
   };
 
+  const providerHttp = createProviderHttpClient({
+    locate: (path) => withLocation(path, options.endpoint.location),
+    transport: {
+      queryRequired: (path) => queryRequired(options.transport, path, deadlineMs),
+      mutate: (method, path, body, extra) => mutateRequired(
+        options.transport,
+        method,
+        path,
+        body,
+        extra?.deadlineMs ?? deadlineMs,
+      ),
+    },
+    deadlineMs,
+    oauthCallbackDeadlineMs: PROVIDER_OAUTH_CALLBACK_DEADLINE_MS,
+    listAllRequireName: true,
+    authorizeUnavailable: () => invalidResponse(
+      withLocation("/provider/:id/oauth/authorize", options.endpoint.location),
+      "url, method, and instructions",
+    ),
+    operationIdFor: () => randomUUID(),
+  });
+
   return {
     protocol: "v2",
     async capabilities() {
@@ -693,55 +716,22 @@ export const createV2ProtocolAdapter = (
       return normalizeAgents(await queryRequired(options.transport, path, deadlineMs), path);
     },
     async listAllProviders(): Promise<AvailableProviderDescriptor[]> {
-      const path = withLocation("/provider", options.endpoint.location);
-      const body = asRecord(await queryRequired(options.transport, path, deadlineMs));
-      const out: AvailableProviderDescriptor[] = [];
-      for (const entry of Array.isArray(body?.all) ? body.all : []) {
-        const provider = asRecord(entry);
-        if (typeof provider?.id === "string" && provider.id && typeof provider.name === "string" && provider.name) {
-          out.push({ id: provider.id, name: provider.name });
-        }
-      }
-      return out;
+      return providerHttp.listAllProviders();
     },
     async providerAuthMethods(): Promise<Record<string, ProviderAuthMethod[]>> {
-      const path = withLocation("/provider/auth", options.endpoint.location);
-      const body = asRecord(await queryRequired(options.transport, path, deadlineMs)) ?? {};
-      const out: Record<string, ProviderAuthMethod[]> = {};
-      for (const [id, methods] of Object.entries(body)) {
-        if (Array.isArray(methods)) out[id] = methods as ProviderAuthMethod[];
-      }
-      return out;
+      return providerHttp.providerAuthMethods();
     },
     async providerAuthorize(providerID, method, inputs): Promise<ProviderAuthorization> {
-      const path = withLocation(`/provider/${encodeURIComponent(providerID)}/oauth/authorize`, options.endpoint.location);
-      const body = asRecord(await mutateRequired(
-        options.transport, "POST", path, { method, ...(inputs ? { inputs } : {}) }, deadlineMs,
-      ));
-      if (typeof body?.url !== "string" || typeof body?.method !== "string" || typeof body?.instructions !== "string") {
-        throw invalidResponse(path, "url, method, and instructions");
-      }
-      return { url: body.url, method: body.method === "code" ? "code" : "auto", instructions: body.instructions };
+      return providerHttp.providerAuthorize(providerID, method, inputs);
     },
     async providerAuthCallback(providerID, method, code): Promise<boolean> {
-      const path = withLocation(`/provider/${encodeURIComponent(providerID)}/oauth/callback`, options.endpoint.location);
-      return Boolean(await mutateRequired(
-        options.transport,
-        "POST",
-        path,
-        { method, ...(code ? { code } : {}) },
-        PROVIDER_OAUTH_CALLBACK_DEADLINE_MS,
-      ));
+      return providerHttp.providerAuthCallback(providerID, method, code);
     },
     async setProviderApiKey(providerID, key, metadata): Promise<boolean> {
-      const path = withLocation(`/auth/${encodeURIComponent(providerID)}`, options.endpoint.location);
-      return Boolean(await mutateRequired(
-        options.transport, "PUT", path, { type: "api", key, ...(metadata ? { metadata } : {}) }, deadlineMs,
-      ));
+      return providerHttp.setProviderApiKey(providerID, key, metadata);
     },
     async removeProviderAuth(providerID): Promise<boolean> {
-      const path = withLocation(`/auth/${encodeURIComponent(providerID)}`, options.endpoint.location);
-      return Boolean(await mutateRequired(options.transport, "DELETE", path, undefined, deadlineMs));
+      return providerHttp.removeProviderAuth(providerID);
     },
     async sessions(): Promise<RuntimeSession[]> {
       const path = withLocation(

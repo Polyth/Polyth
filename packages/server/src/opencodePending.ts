@@ -5,10 +5,13 @@ import type {
   OpenCodePluginConfigEntry,
 } from "@polyth/contracts";
 import {
+  inspectProviderEntry,
   normalizePluginEntries,
+  projectConfig,
   type BackendConfigApplier,
   type McpApplyEntry,
   type ProviderVisibilityApply,
+  type StagedProviderOp,
 } from "@polyth/backend-opencode";
 
 interface PendingTask extends OpenCodePendingChangeDto {
@@ -94,13 +97,15 @@ const clonePlugins = (plugins: OpenCodePluginConfigEntry[]): OpenCodePluginConfi
 
 /** Defers every OpenCode-facing config write behind one pending-restart queue.
  * Reads still use the real adapter; plugin reads additionally project the
- * staged desired list so settings update immediately without touching disk. */
+ * staged desired list so settings update immediately without touching disk.
+ * Custom-provider mutations use a projected view of actual + staged ops. */
 export function createDeferredConfigApplier(
   actual: BackendConfigApplier,
   pending: OpenCodePendingService,
 ): DeferredConfigApplier {
   let staging = false;
   let stagedPlugins: OpenCodePluginConfigEntry[] | null = null;
+  let providerOps: StagedProviderOp[] = [];
 
   const stage = (
     id: string,
@@ -128,6 +133,45 @@ export function createDeferredConfigApplier(
     return clonePlugins(desired);
   };
 
+  const projectedConfig = async (): Promise<Record<string, unknown>> => {
+    const physical = await actual.readConfig();
+    if (!staging || providerOps.length === 0) return physical;
+    return projectConfig(physical, providerOps);
+  };
+
+  const restageProviders = (): void => {
+    const ops = providerOps;
+    if (ops.length === 0) return;
+    const last = ops[ops.length - 1]!;
+    const label = last.kind === "upsert"
+      ? `Custom provider: ${last.input.name || last.input.id}`
+      : last.kind === "remove"
+        ? `Remove custom provider: ${last.id}`
+        : last.kind === "mergeDiscovered"
+        ? `Discover models: ${last.id}`
+        : last.kind === "dropModel"
+          ? `Remove model: ${last.id}/${last.modelId}`
+          : `Add model: ${last.id}`;
+    stage(
+      "provider-config",
+      "provider-config",
+      label,
+      async () => {
+        await actual.applyStagedProviderOps([...ops]);
+      },
+      () => {
+        if (providerOps === ops) providerOps = [];
+      },
+    );
+  };
+
+  const pushProviderOp = (op: StagedProviderOp, immediate: () => Promise<void>): Promise<void> => {
+    if (!staging) return immediate();
+    providerOps = [...providerOps, op];
+    restageProviders();
+    return Promise.resolve();
+  };
+
   return {
     enableStaging() {
       staging = true;
@@ -140,7 +184,7 @@ export function createDeferredConfigApplier(
     ...(actual.configAuthority
       ? { configAuthority: () => actual.configAuthority!() }
       : {}),
-    readConfig: () => actual.readConfig(),
+    readConfig: () => projectedConfig(),
 
     // Behavior instructions are read for each turn and their revision is
     // logged at admission time, so they do not require a process restart.
@@ -163,6 +207,70 @@ export function createDeferredConfigApplier(
         async () => { await actual.applyProviderVisibility(desired); },
       );
       return Promise.resolve();
+    },
+
+    async applyCustomProvider(input) {
+      await pushProviderOp({ kind: "upsert", input: structuredClone(input) }, () => actual.applyCustomProvider(input));
+    },
+
+    async removeCustomProvider(id) {
+      const providerId = id.trim();
+      await pushProviderOp({ kind: "remove", id: providerId }, () => actual.removeCustomProvider(providerId));
+    },
+
+    async applyStagedProviderOps(ops) {
+      if (!staging) return actual.applyStagedProviderOps(ops);
+      for (const op of ops) {
+        await pushProviderOp(op, () => actual.applyStagedProviderOps([op]));
+      }
+    },
+
+    async inspectProvider(id) {
+      const trimmed = id.trim();
+      if (!trimmed) return undefined;
+      const projected = await projectedConfig();
+      const providerRaw = projected.provider;
+      const provider = providerRaw && typeof providerRaw === "object" && !Array.isArray(providerRaw)
+        ? providerRaw as Record<string, unknown>
+        : {};
+      let overlay: { owned?: boolean; authMode?: "api-key" | "none" } = {};
+      for (const op of providerOps) {
+        const matches = op.kind === "upsert" ? op.input.id === trimmed : op.id === trimmed;
+        if (!matches) continue;
+        if (op.kind === "remove") overlay = {};
+        else if (op.kind === "upsert") {
+          overlay = {
+            owned: true,
+            ...(op.input.authMode ? { authMode: op.input.authMode } : overlay.authMode ? { authMode: overlay.authMode } : {}),
+          };
+        }
+      }
+      return inspectProviderEntry(trimmed, provider[trimmed], overlay);
+    },
+
+    async mergeDiscoveredModels(id, discovered) {
+      const providerId = id.trim();
+      await pushProviderOp(
+        { kind: "mergeDiscovered", id: providerId, discovered: structuredClone(discovered) },
+        () => actual.mergeDiscoveredModels(providerId, discovered),
+      );
+    },
+
+    async addManualModel(id, model) {
+      const providerId = id.trim();
+      await pushProviderOp(
+        { kind: "addManual", id: providerId, model: structuredClone(model) },
+        () => actual.addManualModel(providerId, model),
+      );
+    },
+
+    async removeConfiguredModel(id, modelId) {
+      const providerId = id.trim();
+      const trimmedModel = modelId.trim();
+      await pushProviderOp(
+        { kind: "dropModel", id: providerId, modelId: trimmedModel },
+        () => actual.removeConfiguredModel(providerId, trimmedModel),
+      );
     },
 
     applyAgent(name, role) {

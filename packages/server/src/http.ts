@@ -751,6 +751,7 @@ async function dispatchHttp(
           // ?refresh=1 busts the server-lifetime model cache — used while
           // actively waiting for a connect/OAuth flow to finish.
           if (url.searchParams.get("refresh") === "1") deps.catalog?.invalidateModels();
+          await vis.seed();
           return json(res, 200, vis.catalog(await models(space().projects)));
         }
         if (path === "/api/providers/available" && method === "GET") {
@@ -949,8 +950,11 @@ async function dispatchHttp(
         // Dependency failures (unreachable SSH host, missing remote runtime,
         // dead backend) are honest 503s with their actionable message — a
         // masked 500 would hide "install opencode on <host>" from the user.
-        : e.code === "unavailable" ? 503
-        : e.code === "unsupported" ? 501
+        : e.code === "auth-rejected" ? 401
+        : e.code === "unavailable" || e.code === "unreachable" ? 503
+        : e.code === "invalid-response" ? 502
+        : e.code === "unsupported" || e.code === "capability-unsupported" ? 501
+        : typeof e.status === "number" && e.status >= 400 && e.status < 600 ? e.status
         : 500;
       const message =
         e.code === "invalid-path" ? "The requested path is invalid."

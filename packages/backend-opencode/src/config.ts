@@ -22,7 +22,25 @@ import { readFile, rename, writeFile, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import type { JsonObject, JsonValue, OpenCodePluginConfigEntry, RuntimeConfigAuthority } from "@polyth/contracts";
+import type {
+  CustomProviderApply,
+  CustomProviderModelApply,
+  JsonObject,
+  JsonValue,
+  OpenCodePluginConfigEntry,
+  ProviderInspect,
+  RuntimeConfigAuthority,
+} from "@polyth/contracts";
+import {
+  addManualModelIntoProvider,
+  applyProviderOps,
+  dropConfiguredModelFromProvider,
+  dropCustomProvider,
+  inspectProviderEntry,
+  mergeCustomProvider,
+  mergeDiscoveredIntoProvider,
+  type StagedProviderOp,
+} from "./customProvider.ts";
 
 export interface McpApplyEntry {
   name: string;
@@ -74,6 +92,19 @@ export interface BackendConfigApplier {
   /** Mirror provider/model visibility into the backend config, preserving all
    *  other keys (including unrelated per-provider options). */
   applyProviderVisibility(v: ProviderVisibilityApply): Promise<void>;
+  /** Create or update one Polyth-owned custom provider stanza. */
+  applyCustomProvider(input: CustomProviderApply): Promise<void>;
+  /** Remove one Polyth-owned custom provider stanza. Sibling providers stay. */
+  removeCustomProvider(id: string): Promise<void>;
+  inspectProvider(id: string): Promise<ProviderInspect | undefined>;
+  /** Re-read physical config and apply coalesced provider ops in one write. */
+  applyStagedProviderOps(ops: readonly StagedProviderOp[]): Promise<void>;
+  mergeDiscoveredModels(
+    id: string,
+    discovered: ReadonlyArray<{ id: string; name?: string }>,
+  ): Promise<void>;
+  addManualModel(id: string, model: CustomProviderModelApply & { id: string }): Promise<void>;
+  removeConfiguredModel(id: string, modelId: string): Promise<void>;
   /** Merge one role override without disturbing plugins or unrelated options. */
   applyAgent(name: string, role: {
     prompt?: string;
@@ -285,7 +316,7 @@ export function createConfigApplier(opts: ConfigApplierOptions = {}): BackendCon
   // plugin entries (including commandcode) remain in the effective config.
   const configPath = existsSync(jsoncPath) ? jsoncPath : jsonPath;
   const targetId = opts.targetId ?? configPath;
-  let pluginWrite = Promise.resolve();
+  let configWrite = Promise.resolve();
 
   // Invariant 14: config authority is separate from process ownership and is
   // read-only unless explicitly proven writable for exactly this target.
@@ -341,13 +372,14 @@ export function createConfigApplier(opts: ConfigApplierOptions = {}): BackendCon
   const pluginsFrom = (config: Record<string, unknown>): OpenCodePluginConfigEntry[] =>
     config.plugin === undefined ? [] : normalizePluginEntries(config.plugin);
 
-  // Serialize plugin mutations so simultaneous imports/removals cannot both
-  // read the same base and lose one another before their atomic renames.
-  const mutatePlugins = <T>(work: () => Promise<T>): Promise<T> => {
-    const run = pluginWrite.then(work, work);
-    pluginWrite = run.then(() => undefined, () => undefined);
+  // Serialize opencode.json mutations so concurrent plugin/provider writes
+  // cannot both read the same base and lose one another before the rename.
+  const mutateConfig = <T>(work: () => Promise<T>): Promise<T> => {
+    const run = configWrite.then(work, work);
+    configWrite = run.then(() => undefined, () => undefined);
     return run;
   };
+  const mutatePlugins = mutateConfig;
 
   return {
     behaviorPath: () => agentsPath,
@@ -431,37 +463,119 @@ export function createConfigApplier(opts: ConfigApplierOptions = {}): BackendCon
 
     async applyProviderVisibility(v: ProviderVisibilityApply): Promise<void> {
       assertWritable("applyProviderVisibility");
-      const existing = await readExisting();
-      const next: Record<string, unknown> = { ...existing };
+      return mutateConfig(async () => {
+        const existing = await readExisting();
+        const next: Record<string, unknown> = { ...existing };
 
-      const disabled = [...new Set(v.disabledProviders)].sort();
-      if (disabled.length > 0) next.disabled_providers = disabled;
-      else delete next.disabled_providers;
+        const disabled = [...new Set(v.disabledProviders)].sort();
+        if (disabled.length > 0) next.disabled_providers = disabled;
+        else delete next.disabled_providers;
 
-      // provider.<id>.blacklist — merge into existing provider entries so
-      // unrelated per-provider options (apiKey, baseURL, …) survive.
-      const providerRaw = existing.provider;
-      const provider: Record<string, unknown> =
-        providerRaw && typeof providerRaw === "object" && !Array.isArray(providerRaw)
-          ? { ...(providerRaw as Record<string, unknown>) }
-          : {};
-      const ids = new Set([...Object.keys(provider), ...Object.keys(v.blacklists)]);
-      for (const id of ids) {
-        const entryRaw = provider[id];
-        const entry: Record<string, unknown> =
-          entryRaw && typeof entryRaw === "object" && !Array.isArray(entryRaw)
-            ? { ...(entryRaw as Record<string, unknown>) }
+        // provider.<id>.blacklist — merge into existing provider entries so
+        // unrelated per-provider options (apiKey, baseURL, …) survive.
+        const providerRaw = existing.provider;
+        const provider: Record<string, unknown> =
+          providerRaw && typeof providerRaw === "object" && !Array.isArray(providerRaw)
+            ? { ...(providerRaw as Record<string, unknown>) }
             : {};
-        const blacklist = [...new Set(v.blacklists[id] ?? [])].sort();
-        if (blacklist.length > 0) entry.blacklist = blacklist;
-        else delete entry.blacklist;
-        if (Object.keys(entry).length > 0) provider[id] = entry;
-        else delete provider[id];
-      }
-      if (Object.keys(provider).length > 0) next.provider = provider;
-      else delete next.provider;
+        const ids = new Set([...Object.keys(provider), ...Object.keys(v.blacklists)]);
+        for (const id of ids) {
+          const entryRaw = provider[id];
+          const entry: Record<string, unknown> =
+            entryRaw && typeof entryRaw === "object" && !Array.isArray(entryRaw)
+              ? { ...(entryRaw as Record<string, unknown>) }
+              : {};
+          const blacklist = [...new Set(v.blacklists[id] ?? [])].sort();
+          if (blacklist.length > 0) entry.blacklist = blacklist;
+          else delete entry.blacklist;
+          if (Object.keys(entry).length > 0) provider[id] = entry;
+          else delete provider[id];
+        }
+        if (Object.keys(provider).length > 0) next.provider = provider;
+        else delete next.provider;
 
-      await writeConfigIfChanged(existing, next);
+        await writeConfigIfChanged(existing, next);
+      });
+    },
+
+    async applyCustomProvider(input: CustomProviderApply): Promise<void> {
+      assertWritable("applyCustomProvider");
+      if (!input.id?.trim()) throw Object.assign(new Error("provider id required"), { code: "invalid-input" });
+      return mutateConfig(async () => {
+        const existing = await readExisting();
+        const provider = mergeCustomProvider(existing.provider, input);
+        await writeConfigIfChanged(existing, { ...existing, provider });
+      });
+    },
+
+    async removeCustomProvider(id: string): Promise<void> {
+      assertWritable("removeCustomProvider");
+      if (!id?.trim()) throw Object.assign(new Error("provider id required"), { code: "invalid-input" });
+      return mutateConfig(async () => {
+        const existing = await readExisting();
+        const provider = dropCustomProvider(existing.provider, id.trim());
+        const next: Record<string, unknown> = { ...existing };
+        if (provider && Object.keys(provider).length > 0) next.provider = provider;
+        else delete next.provider;
+        await writeConfigIfChanged(existing, next);
+      });
+    },
+
+    async inspectProvider(id: string): Promise<ProviderInspect | undefined> {
+      if (!id?.trim()) return undefined;
+      const existing = await readExisting();
+      const providerRaw = existing.provider;
+      const provider = providerRaw && typeof providerRaw === "object" && !Array.isArray(providerRaw)
+        ? providerRaw as Record<string, unknown>
+        : {};
+      return inspectProviderEntry(id, provider[id]);
+    },
+
+    async applyStagedProviderOps(ops: readonly StagedProviderOp[]): Promise<void> {
+      assertWritable("applyStagedProviderOps");
+      if (ops.length === 0) return;
+      return mutateConfig(async () => {
+        const existing = await readExisting();
+        const provider = applyProviderOps(existing.provider, ops);
+        const next: Record<string, unknown> = { ...existing };
+        if (provider && Object.keys(provider).length > 0) next.provider = provider;
+        else delete next.provider;
+        await writeConfigIfChanged(existing, next);
+      });
+    },
+
+    async mergeDiscoveredModels(id, discovered): Promise<void> {
+      assertWritable("mergeDiscoveredModels");
+      if (!id?.trim()) throw Object.assign(new Error("provider id required"), { code: "invalid-input" });
+      return mutateConfig(async () => {
+        const existing = await readExisting();
+        const provider = mergeDiscoveredIntoProvider(existing.provider, id.trim(), discovered);
+        await writeConfigIfChanged(existing, { ...existing, provider });
+      });
+    },
+
+    async addManualModel(id, model): Promise<void> {
+      assertWritable("addManualModel");
+      if (!id?.trim() || !model.id?.trim()) {
+        throw Object.assign(new Error("provider id and model id required"), { code: "invalid-input" });
+      }
+      return mutateConfig(async () => {
+        const existing = await readExisting();
+        const provider = addManualModelIntoProvider(existing.provider, id.trim(), model);
+        await writeConfigIfChanged(existing, { ...existing, provider });
+      });
+    },
+
+    async removeConfiguredModel(id, modelId): Promise<void> {
+      assertWritable("removeConfiguredModel");
+      if (!id?.trim() || !modelId?.trim()) {
+        throw Object.assign(new Error("provider id and model id required"), { code: "invalid-input" });
+      }
+      return mutateConfig(async () => {
+        const existing = await readExisting();
+        const provider = dropConfiguredModelFromProvider(existing.provider, id.trim(), modelId.trim());
+        await writeConfigIfChanged(existing, { ...existing, provider });
+      });
     },
 
     async applyAgent(name, role): Promise<void> {
