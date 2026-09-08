@@ -429,16 +429,13 @@ registerDocumentEditorBridge({
     const fromKey = retainedKey(from);
     const toKey = retainedKey(to);
     const retained = states.get(fromKey);
-    const lang = languageStatus.get(fromKey);
     if (retained) {
       states.delete(fromKey);
       states.set(toKey, retained);
     }
-    if (lang) {
-      languageStatus.delete(fromKey);
-      languageStatus.set(toKey, lang);
-      bumpLanguageStatus();
-    }
+    languageStatus.delete(fromKey);
+    languageStatus.delete(toKey);
+    bumpLanguageStatus();
     for (const group of groups.values()) {
       if (group.active && resourceKey(group.active.ref) === fromKey) {
         group.active = { ...group.active, ref: to, path: to.locator, languageTicket: ++languageTicketCounter };

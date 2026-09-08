@@ -33,7 +33,8 @@ register("./tsxHooks.mjs", import.meta.url);
 
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { undo } = await import("@codemirror/commands");
+const { resourceKey } = await import("@polyth/web-sdk");
+const { undo, redo } = await import("@codemirror/commands");
 const { EditorView } = await import("@codemirror/view");
 const { openDocument, resetDocumentsForTest } = await import("../../../apps/web/src/resources/documents.ts");
 const { registerResourceProvider } = await import("../../../apps/web/src/resources/providers.ts");
@@ -340,8 +341,9 @@ test("undo matrix: dirty survives first undo, baseline clears dirty", async () =
     undo(view);
     assert.equal(handle.getSnapshot().dirty, false);
     assert.equal(handle.getBuffer(), "aaa");
-    view.dispatch({ changes: { from: 3, insert: "d" } });
+    redo(view);
     assert.equal(handle.getSnapshot().dirty, true);
+    assert.equal(handle.getBuffer(), "aaab");
   } finally {
     await act(async () => { root.unmount(); });
     host.remove();
@@ -376,8 +378,10 @@ test("rename/move: retained state follows the new resource key", async () => {
     await act(async () => {
       root.render(createElement(EditorRuntime, { ...runtimeProps("app.ts", true), path: "app.ts", resource: refApp }));
     });
-    for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
     const shell = host.querySelector(".editor-code") as HTMLElement;
+    for (let i = 0; i < 40 && shell.getAttribute("data-language") !== "TypeScript"; i++) {
+      await act(async () => { await Promise.resolve(); });
+    }
     assert.equal(shell.getAttribute("data-language"), "TypeScript");
   } finally {
     await act(async () => { root.unmount(); });
@@ -414,8 +418,7 @@ test("language stale apply: delayed TypeScript load does not reconfigure YAML ta
     });
     releaseLanguageLoadsForTest();
     for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
-    const bKey = `${scheme}:p::b.yaml`;
-    assert.notEqual(editorLanguageStatus(bKey).label, "TypeScript");
+    assert.notEqual(editorLanguageStatus(resourceKey(docRef("b.yaml"))).label, "TypeScript");
     const shellB = hostB.querySelector(".editor-code") as HTMLElement;
     assert.notEqual(shellB.getAttribute("data-language"), "TypeScript");
   } finally {

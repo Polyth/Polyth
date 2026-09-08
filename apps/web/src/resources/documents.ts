@@ -337,6 +337,8 @@ function moveSession(session: Session, to: ResourceRef): void {
   const toKey = resourceKey(to);
   if (fromKey === toKey) return;
   const from = session.ref;
+  session.checkpoint = getBuffer(session);
+  session.source = null;
   sessions.delete(fromKey);
   session.ref = to;
   sessions.set(toKey, session);
