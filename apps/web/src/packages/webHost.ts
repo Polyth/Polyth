@@ -193,7 +193,6 @@ export const webPackageHost: WebPackageHost = {
     setOverlay: (overlay) => setOverlay(overlay as never),
     openResource,
     revealResource: (ref) => openResource(ref),
-    closeResource: (ref) => { deleteDocument(ref); },
   },
   workbench: {
     profiles: {

@@ -104,6 +104,11 @@ test("every server feature package owns its discoverable descriptor", async () =
   const packagesDir = join(import.meta.dirname, "../..");
   const discovered = await discoverServerPackages(packagesDir);
   const expected = discovered.map((pkg) => pkg.id);
+  assert.ok(expected.includes("editor"), "workbench editor package is discoverable");
+  assert.ok(expected.includes("opencode"), "opencode package is discoverable");
+  assert.ok(expected.includes("handoff"), "handoff package is discoverable");
+  assert.ok(expected.includes("chat-workspace"), "chat-workspace package is discoverable");
+  assert.equal(expected.length, new Set(expected).size);
   assert.equal(expected.length, 38);
   assert.deepEqual(expected, [...expected].sort());
   assert.deepEqual(

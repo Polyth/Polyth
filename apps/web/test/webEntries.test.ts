@@ -136,7 +136,6 @@ const createHost = (): RecordingHost => {
       setOverlay: () => {},
       openResource: () => {},
       revealResource: () => {},
-      closeResource: () => {},
     },
     workbench: {
       profiles: { register: () => () => {}, list: () => [] },

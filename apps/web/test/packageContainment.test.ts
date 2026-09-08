@@ -44,6 +44,8 @@ test("all browser feature packages own a canonical web entry", () => {
   const browserFeatures = featureManifests()
     .filter(({ manifest }) => manifest.polyth?.webEntry !== undefined);
 
+  assert.ok(browserFeatures.some((pkg) => pkg.id === "editor"));
+  assert.ok(browserFeatures.some((pkg) => pkg.id === "opencode"));
   assert.equal(browserFeatures.length, 31);
   for (const { id, dir, manifest } of browserFeatures) {
     assert.equal(

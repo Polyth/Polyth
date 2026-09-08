@@ -484,7 +484,6 @@ export interface WebPackageHost {
     /** Canonical resource navigation: every file/artifact/diff open lands here. */
     openResource(ref: ResourceRef, options?: OpenResourceOptions): void;
     revealResource(ref: ResourceRef): void;
-    closeResource(ref: ResourceRef): void;
   };
   workbench: {
     profiles: {
