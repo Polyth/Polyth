@@ -50,8 +50,6 @@ workflows:
         script: |
           set -euo pipefail
           node scripts/release-version.mjs
-        env:
-          CM_TAG: $CM_TAG
 
       - name: Resolve iOS build number from App Store Connect
         script: |
