@@ -83,6 +83,8 @@ import {
 } from "../workbench/profiles.ts";
 
 installDefaultHandoffTargets();
+/** WorkbenchHost is not live — ContextRail remains the presentation authority. */
+const WORKBENCH_HOST_LIVE = false;
 
 const snapshot = (): WebStoreSnapshot => {
   const state = getState();
@@ -98,6 +100,8 @@ const snapshot = (): WebStoreSnapshot => {
 };
 
 function openResource(ref: ResourceRef, options: OpenResourceOptions = {}): void {
+  // View routing is deferred — files open through the legacy editor path until
+  // ResourceView selection is wired end-to-end.
   if (ref.scheme === "file") {
     openEditorFile(ref.locator, options.selection ? {
       path: ref.locator,
@@ -177,7 +181,6 @@ export const webPackageHost: WebPackageHost = {
     openRailSurface: setRailPlugin,
     setOverlay: (overlay) => setOverlay(overlay as never),
     openResource,
-    reopenResourceWith: (ref, _viewId) => openResource(ref),
     revealResource: (ref) => openResource(ref),
     closeResource: (ref) => { deleteDocument(ref); },
   },
@@ -186,7 +189,7 @@ export const webPackageHost: WebPackageHost = {
       register: registerWorkbenchProfile,
       list: listWorkbenchProfileSummaries,
     },
-    activateProfile: activateWorkbenchProfile,
+    activateProfile: (profileId) => WORKBENCH_HOST_LIVE ? activateWorkbenchProfile(profileId) : false,
     getActiveProfile: getActiveProfileSummary,
     getSnapshot: workbenchSnapshot,
     subscribe: subscribeWorkbench,

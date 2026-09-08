@@ -135,7 +135,6 @@ const createHost = (): RecordingHost => {
       openRailSurface: () => {},
       setOverlay: () => {},
       openResource: () => {},
-      reopenResourceWith: () => {},
       revealResource: () => {},
       closeResource: () => {},
     },

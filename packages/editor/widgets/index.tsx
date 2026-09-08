@@ -9,13 +9,6 @@ const EditorRuntime = lazy(() => import("./runtime.tsx"));
 export default defineWebPackage((host) => () => {
   const off = [
     registerEditorSurface(EditorRuntime),
-    host.resourceViews.register({
-      id: "editor.text",
-      label: "Text editor",
-      kind: "editor",
-      score: (match) => match.descriptor.kind === "text" ? 10 : 0,
-      component: EditorRuntime as never,
-    }),
     host.workbench.profiles.register({
       id: "authoring",
       label: tr("editor.profile.authoring"),
