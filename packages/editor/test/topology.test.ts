@@ -713,12 +713,48 @@ test("active discard preserves TypeScript, wrap=false, and aria-label", async ()
     assert.equal(mounted.view().contentDOM.getAttribute("aria-label"), "test editor");
     mounted.view().dispatch({ changes: { from: mounted.view().state.doc.length, insert: "\n// edit" } });
     mounted.handle.discard();
+    await mounted.rerender();
+    for (let i = 0; i < 200 && editorLanguageStatus(resourceKey(docRef("app.ts"))).label !== "TypeScript"; i++) {
+      await act(async () => { await Promise.resolve(); });
+    }
     assert.equal(mounted.view().state.doc.toString(), "const x = 1;");
     undo(mounted.view());
     assert.equal(mounted.view().state.doc.toString(), "const x = 1;");
     assert.equal(editorLanguageStatus(resourceKey(docRef("app.ts"))).label, "TypeScript");
     assert.equal(viewWrapEnabled(mounted.view()), false);
     assert.equal(mounted.view().contentDOM.getAttribute("aria-label"), "test editor");
+    assert.equal(peekRetainedState(docRef("app.ts"))?.searchConfigured, false);
+  } finally {
+    await act(async () => { mounted.root.unmount(); });
+    mounted.host.remove();
+    resetEditorRuntimeForTest();
+    resetDocumentsForTest();
+  }
+});
+
+test("active reload preserves TypeScript, wrap=false, and aria-label", async () => {
+  resetBodies();
+  bodies.set("app.ts", "const x = 1;");
+  resetDocumentsForTest();
+  resetEditorRuntimeForTest();
+  const mounted = await mountWithConfig("app.ts", { wrap: false, ariaLabel: "reload editor" });
+  try {
+    for (let i = 0; i < 200 && editorLanguageStatus(resourceKey(docRef("app.ts"))).label !== "TypeScript"; i++) {
+      await act(async () => { await Promise.resolve(); });
+    }
+    mounted.view().dispatch({ changes: { from: mounted.view().state.doc.length, insert: "\n// edit" } });
+    bodies.set("app.ts", "const x = 2;");
+    await mounted.handle.reload();
+    await mounted.rerender();
+    for (let i = 0; i < 200 && editorLanguageStatus(resourceKey(docRef("app.ts"))).label !== "TypeScript"; i++) {
+      await act(async () => { await Promise.resolve(); });
+    }
+    assert.equal(mounted.view().state.doc.toString(), "const x = 2;");
+    undo(mounted.view());
+    assert.equal(mounted.view().state.doc.toString(), "const x = 2;");
+    assert.equal(editorLanguageStatus(resourceKey(docRef("app.ts"))).label, "TypeScript");
+    assert.equal(viewWrapEnabled(mounted.view()), false);
+    assert.equal(mounted.view().contentDOM.getAttribute("aria-label"), "reload editor");
   } finally {
     await act(async () => { mounted.root.unmount(); });
     mounted.host.remove();
@@ -784,6 +820,7 @@ test("authoritative reset during delayed language load does not misconfigure edi
   try {
     mounted.view().dispatch({ changes: { from: mounted.view().state.doc.length, insert: "\n// edit" } });
     mounted.handle.discard();
+    await mounted.rerender();
     releaseLanguageLoadsForTest();
     for (let i = 0; i < 200 && editorLanguageStatus(resourceKey(docRef("app.ts"))).label !== "TypeScript"; i++) {
       await act(async () => { await Promise.resolve(); });

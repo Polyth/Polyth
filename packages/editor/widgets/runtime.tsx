@@ -347,7 +347,6 @@ function bindingConfigForReset(ref: ResourceRef): { readOnly: boolean; wrap: boo
 
 function resetRetainedState(ref: ResourceRef, text: string, generation: number): void {
   const key = retainedKey(ref);
-  const existing = states.get(key);
   const config = bindingConfigForReset(ref);
   const fresh = freshRetained(
     text,
@@ -355,7 +354,7 @@ function resetRetainedState(ref: ResourceRef, text: string, generation: number):
     config.wrap,
     config.ariaLabel,
     generation,
-    existing?.searchConfigured ?? false,
+    false,
   );
   states.set(key, fresh);
   for (const group of groups.values()) {
