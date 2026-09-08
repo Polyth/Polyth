@@ -375,7 +375,6 @@ async function saveSession(session: Session, options: { force?: boolean } = {}):
   const release = claimPersistence(session);
   if (!release) return;
   const refKey = resourceKey(session.ref);
-  const epoch = session.observationEpoch;
   const writeRef = session.ref;
   const content = getBuffer(session);
   session.live = beginLiveFileSave(session.live ?? loadedLiveFile(session.revision));
@@ -384,7 +383,7 @@ async function saveSession(session: Session, options: { force?: boolean } = {}):
     try {
       const base = options.force ? undefined : session.revision;
       const res = await provider.write(writeRef, content, base);
-      if (!isCurrentSession(session, refKey, epoch)) return;
+      if (!isCurrentSession(session, refKey)) return;
       const current = getBuffer(session);
       const stillDirty = current !== content;
       session.saved = content;
@@ -398,7 +397,7 @@ async function saveSession(session: Session, options: { force?: boolean } = {}):
       if (stillDirty) armAutosave(session);
       else clearAutosave(session);
     } catch (err) {
-      if (!isCurrentSession(session, refKey, epoch)) return;
+      if (!isCurrentSession(session, refKey)) return;
       if (isConflictError(err)) {
         session.live = conflictLiveFile(session.live ?? loadedLiveFile(session.revision));
       } else {
@@ -656,6 +655,8 @@ export function resetDocumentsForTest(): void {
 subscribeProviderUnload((scheme) => {
   for (const session of sessions.values()) {
     if (session.closed || session.ref.scheme !== scheme) continue;
+    bumpObservation(session);
+    if (session.persistence) continue;
     if (session.dirty) {
       session.status = "error";
       session.error = "Provider unavailable";

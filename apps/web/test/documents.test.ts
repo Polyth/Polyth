@@ -804,3 +804,34 @@ test("older check cannot overwrite a newer check", async () => {
     resetDocumentsForTest();
   }
 });
+
+test("stale load after provider unload does not publish into the closed-provider session", async () => {
+  resetDocumentsForTest();
+  const unloadScheme = `doc-unload-${process.pid}`;
+  let releaseRead!: (result: { content: string; revision: string }) => void;
+  let started!: () => void;
+  const startedP = new Promise<void>((resolve) => { started = resolve; });
+  const unregister = registerResourceProvider({
+    scheme: unloadScheme,
+    describe: (ref) => ({ label: ref.locator, kind: "text" }),
+    read: async () => {
+      started();
+      return await new Promise((resolve) => { releaseRead = resolve; });
+    },
+  });
+  const unloadRef = { scheme: unloadScheme, locator: "gone.ts", projectId: "p", sessionId: null };
+  try {
+    const handle = openDocument(unloadRef);
+    await startedP;
+    const genBefore = handle.getSnapshot().authoritativeGeneration;
+    unregister();
+    releaseRead({ content: "STALE-UNLOAD", revision: "old" });
+    await handle.load();
+    assert.notEqual(handle.getSnapshot().saved, "STALE-UNLOAD");
+    assert.equal(handle.getSnapshot().authoritativeGeneration, genBefore);
+    assert.equal(handle.getSnapshot().status, "error");
+  } finally {
+    unregister();
+    resetDocumentsForTest();
+  }
+});
