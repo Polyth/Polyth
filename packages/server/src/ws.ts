@@ -13,6 +13,7 @@ import type {
 } from "@polyth/contracts";
 import { REMOTE_CAPABILITY, isLocalUiPrincipal } from "@polyth/contracts";
 import type { BrowserFrame, BrowserService } from "@polyth/browser";
+import type { ChatWorkspaceFrameBus, ChatWorkspaceFrame, ChatWorkspaceTabEvent } from "@polyth/contracts";
 import type { DictationService } from "@polyth/dictation";
 import type { Broadcaster } from "./sessions.ts";
 import type { SpaceGateway } from "./spaces.ts";
@@ -52,7 +53,11 @@ interface Sub {
   browserSessionId: string | null;
   browserAfterRevision: number;
   pendingFrame: BrowserFrame | null;
-  // WP15: dictation audio gets its own rate window (higher than control msgs).
+  chatTabId: string | null;
+  chatAfterRevision: number;
+  chatPopupRevisions: Map<string, number>;
+  chatVisible: boolean;
+  pendingChatFrame: ChatWorkspaceFrame | null;
   audioCount: number;
   principal: AuthPrincipal;
   refreshPrincipal?: (principal: AuthPrincipal) => AuthPrincipal | null;
@@ -63,7 +68,7 @@ interface Sub {
   sessions: SessionService;
 }
 
-// A client re-subscribing faster than this is either buggy or hostile — either
+// WP15: dictation audio gets its own rate window (higher than control msgs).
 // way it must never be able to turn "one gap-fill + one projections fan-out"
 // into an unbounded number of concurrent DB reads / JSON serializations.
 const MAX_MESSAGES_PER_SECOND = 20;
@@ -87,6 +92,7 @@ export function createWsGateway(
   /** Tenancy boundary. When present, every socket is bound to one Space at
    *  upgrade time and both gap-fill and live fan-out are filtered by it. */
   spaces?: SpaceGateway,
+  chatWorkspace?: ChatWorkspaceFrameBus,
 ): WsGateway {
   // noServer + manual upgrade matcher: a WSS bound with {server, path} aborts
   // *every* unmatched upgrade with 400, which would kill the terminal channel's
@@ -95,6 +101,7 @@ export function createWsGateway(
   const clients = new Map<WebSocket, Sub>();
   const attached = new WeakSet<Server>();
   const browserDisposals: Array<{ dispose(): void }> = [];
+  const chatDisposals: Array<{ dispose(): void }> = [];
   const upgradeReleases: Array<() => void> = [];
   let closed = false;
 
@@ -137,6 +144,61 @@ export function createWsGateway(
     return true;
   };
 
+  const chatFrameMsg = (f: ChatWorkspaceFrame) => ({
+    type: "chat-workspace/frame",
+    spaceId: f.spaceId,
+    tabId: f.tabId,
+    revision: f.revision,
+    mime: f.mime,
+    data: Buffer.from(f.data).toString("base64"),
+    width: f.width,
+    height: f.height,
+    ...(f.popupId ? { popupId: f.popupId } : {}),
+  });
+
+  const deliverChatFrame = (ws: WebSocket, sub: Sub, frame: ChatWorkspaceFrame): void => {
+    const live = currentPrincipal(ws, sub);
+    if (!allowWsCapability(live, REMOTE_CAPABILITY.browserUse)) return;
+    if (sub.spaceId !== null && frame.spaceId !== sub.spaceId) return;
+    if (frame.popupId) {
+      const afterPopup = sub.chatPopupRevisions.get(frame.popupId) ?? 0;
+      if (frame.revision <= afterPopup) return;
+    } else if (frame.revision <= sub.chatAfterRevision) {
+      return;
+    }
+    if (ws.readyState !== WebSocket.OPEN) return;
+    if (ws.bufferedAmount > FRAME_HIGH_WATER) {
+      sub.pendingChatFrame = frame;
+      return;
+    }
+    sub.pendingChatFrame = null;
+    if (frame.popupId) sub.chatPopupRevisions.set(frame.popupId, frame.revision);
+    else sub.chatAfterRevision = frame.revision;
+    send(ws, chatFrameMsg(frame));
+  };
+
+  const chatEventMsg = (event: ChatWorkspaceTabEvent, includeClipboardText: boolean) => ({
+    type: "chat-workspace/event",
+    spaceId: event.spaceId,
+    tabId: event.tabId,
+    kind: event.kind,
+    ...(event.origin ? { origin: event.origin } : {}),
+    ...(event.reason ? { reason: event.reason } : {}),
+    ...(event.message ? { message: event.message } : {}),
+    ...(event.url ? { url: event.url } : {}),
+    ...(event.popupId ? { popupId: event.popupId } : {}),
+    ...(includeClipboardText && event.text ? { text: event.text } : {}),
+  });
+
+  const deliverChatEvent = (ws: WebSocket, sub: Sub, event: ChatWorkspaceTabEvent): void => {
+    const live = currentPrincipal(ws, sub);
+    if (!allowWsCapability(live, REMOTE_CAPABILITY.browserUse)) return;
+    if (sub.spaceId !== null && event.spaceId !== sub.spaceId) return;
+    if (sub.chatTabId !== event.tabId) return;
+    if (ws.readyState !== WebSocket.OPEN) return;
+    const includeClipboardText = event.kind === "clipboard-written";
+    send(ws, chatEventMsg(event, includeClipboardText));
+  };
   const frameMsg = (f: BrowserFrame) => ({
     type: "browser/frame",
     browserSessionId: f.browserSessionId,
@@ -165,6 +227,9 @@ export function createWsGateway(
       if (sub.pendingFrame && ws.bufferedAmount <= FRAME_HIGH_WATER) {
         deliverFrame(ws, sub, sub.pendingFrame);
       }
+      if (sub.pendingChatFrame && ws.bufferedAmount <= FRAME_HIGH_WATER) {
+        deliverChatFrame(ws, sub, sub.pendingChatFrame);
+      }
     }
   }, 250);
   flusher.unref?.();
@@ -188,6 +253,23 @@ export function createWsGateway(
     });
     if (onFrame) browserDisposals.push(onFrame);
     if (onEvent) browserDisposals.push(onEvent);
+  }
+
+  if (chatWorkspace) {
+    const onChatFrame = chatWorkspace.onFrame((frame) => {
+      if (closed) return;
+      for (const [ws, sub] of clients) {
+        if (sub.chatTabId === frame.tabId) deliverChatFrame(ws, sub, frame);
+      }
+    });
+    const onChatEvent = chatWorkspace.onEvent((event) => {
+      if (closed) return;
+      for (const [ws, sub] of clients) {
+        deliverChatEvent(ws, sub, event);
+      }
+    });
+    chatDisposals.push(onChatFrame);
+    chatDisposals.push(onChatEvent);
   }
 
   wss.on("connection", (ws, req: IncomingMessage) => {
@@ -224,6 +306,7 @@ export function createWsGateway(
       busy: false, pendingSubscribe: null, snapshotScope: null, liveBuffer: [],
       windowStart: Date.now(), windowCount: 0,
       browserSessionId: null, browserAfterRevision: 0, pendingFrame: null,
+      chatTabId: null, chatAfterRevision: 0, chatPopupRevisions: new Map(), chatVisible: true, pendingChatFrame: null,
       audioCount: 0,
       principal: resolution.principal,
       refreshPrincipal: attachAuth.refreshPrincipal,
@@ -239,6 +322,7 @@ export function createWsGateway(
       let msg: {
         type?: string; sessionId?: string; afterSeq?: number; projectId?: string;
         browserSessionId?: string; afterRevision?: number;
+        tabId?: string; visible?: boolean; quality?: number;
         dictationId?: string; seq?: number; pcm?: string;
       };
       try { msg = JSON.parse(String(raw)); } catch { return; }
@@ -291,6 +375,22 @@ export function createWsGateway(
           if (!requireCap(ws, sub, REMOTE_CAPABILITY.dictationUse)) return;
           const e = err as Error & { code?: string };
           send(ws, { type: "dictation/error", dictationId: id, code: e.code ?? "internal", message: e.message });
+        }
+        return;
+      }
+      if (msg.type === "chat-workspace/subscribe" && chatWorkspace) {
+        if (!requireCap(ws, sub, REMOTE_CAPABILITY.browserUse)) return;
+        sub.chatTabId = msg.tabId ?? null;
+        sub.chatAfterRevision = Number(msg.afterRevision ?? 0);
+        sub.chatVisible = msg.visible !== false;
+        sub.pendingChatFrame = null;
+        sub.chatPopupRevisions.clear();
+        if (sub.chatTabId) {
+          chatWorkspace.setTabStream(sub.spaceId, sub.chatTabId, sub.chatVisible, Number(msg.quality ?? 60));
+          const latest = chatWorkspace.latestFrame(sub.spaceId ?? "", sub.chatTabId, sub.chatAfterRevision);
+          if (latest && (sub.spaceId === null || latest.spaceId === sub.spaceId)) {
+            deliverChatFrame(ws, sub, latest);
+          }
         }
         return;
       }
@@ -509,6 +609,9 @@ export function createWsGateway(
       closed = true;
       clearInterval(flusher);
       for (const disposal of browserDisposals.splice(0)) {
+        try { disposal.dispose(); } catch { /* already disposed */ }
+      }
+      for (const disposal of chatDisposals.splice(0)) {
         try { disposal.dispose(); } catch { /* already disposed */ }
       }
       for (const release of upgradeReleases.splice(0)) {

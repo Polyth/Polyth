@@ -32,6 +32,7 @@ import {
   type SnippetDef,
   type Worktree,
 } from "@polyth/session/web-api";
+import { flushNewSessionHandoffImport } from "@polyth/handoff/web";
 import { loadDraft, saveDraft, syncDraftToServer, flushDraftToServer } from "../utils.ts";
 import {
   canApplyNextAction,
@@ -1322,6 +1323,7 @@ export default function Composer({
         clearDraftExecutionConfig(activeProjectId);
         if (newSessionAutoApprove) await api.autoAcceptSet(created, "on");
         if (newSessionGoal) await api.goalAttach(created, t);
+        await flushNewSessionHandoffImport(activeProjectId, created, t);
         await deliver(created);
         setNewSessionAutoApprove(false);
         setNewSessionGoal(false);

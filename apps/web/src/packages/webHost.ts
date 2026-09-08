@@ -42,6 +42,9 @@ import {
   subscribeDraftExecutionConfig,
   updateDraftExecutionConfig,
 } from "../executionDraft.ts";
+import { installDefaultHandoffTargets, listHandoffTargets, registerHandoffTarget } from "../handoffTargets.ts";
+
+installDefaultHandoffTargets();
 
 const snapshot = (): WebStoreSnapshot => {
   const state = getState();
@@ -128,5 +131,9 @@ export const webPackageHost: WebPackageHost = {
   },
   errors: {
     friendly: friendlyError,
+  },
+  handoffTargets: {
+    register: registerHandoffTarget,
+    list: listHandoffTargets,
   },
 };

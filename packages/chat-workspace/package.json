@@ -1,0 +1,35 @@
+{
+  "name": "@polyth/chat-workspace",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./providers": "./src/providers.ts",
+    "./i18n": "./widgets/i18n/index.ts",
+    "./i18n/*": "./widgets/i18n/*.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Chat Workspace",
+      "description": "Use the AI chats you already have, directly alongside your work.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Workspace",
+      "icon": "💬",
+      "hasSettings": true
+    }
+  },
+  "dependencies": {
+    "@polyth/browser": "0.1.0",
+    "@polyth/contracts": "0.1.0",
+    "@polyth/handoff": "0.1.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/tenancy": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

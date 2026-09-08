@@ -2,7 +2,7 @@
 // always-open, approvals, and DNS resolution errors.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkUrl, isPrivateAddress, originAliases, originOf, type Resolver } from "../src/index.ts";
+import { checkUrl, checkNetworkEgress, checkTopLevelNavigation, isInternalBrowserUrl, isPrivateAddress, originAliases, originOf, webSocketUrlAsHttp, type Resolver } from "../src/index.ts";
 
 const publicDns: Resolver = async () => ["93.184.216.34"];
 
@@ -125,8 +125,131 @@ test("www and apex share an approval in both directions", async () => {
   if (approvedApex.ok) assert.equal(approvedApex.origin, "https://www.example.com");
 });
 
-test("new public origin without approval is still approval-required", async () => {
-  const d = await checkUrl("https://other.example.org/", { resolve: publicDns });
+test("generic Browser still opens private and metadata targets without approval", async () => {
+  for (const raw of ["http://127.0.0.1/", "http://10.1.2.3/", "http://192.168.1.1/", "http://169.254.169.254/"]) {
+    const d = await checkUrl(raw, {});
+    assert.equal(d.ok, true, raw);
+  }
+});
+
+test("explicit-only blocks unlisted private, loopback, and metadata targets", async () => {
+  const opts = { privateNetwork: "explicit-only" as const, resolve: publicDns };
+  for (const raw of [
+    "http://127.0.0.1/",
+    "http://localhost/",
+    "http://10.1.2.3/",
+    "http://192.168.1.1/",
+    "http://172.16.0.9/",
+    "http://169.254.169.254/",
+  ]) {
+    const d = await checkUrl(raw, opts);
+    assert.equal(d.ok, false, raw);
+    if (!d.ok) assert.equal(d.code, "blocked-private", raw);
+  }
+});
+
+test("explicit-only allows a listed custom local origin", async () => {
+  const d = await checkUrl("http://127.0.0.1:8123/lovelace", {
+    privateNetwork: "explicit-only",
+    allowedOrigins: ["http://127.0.0.1:8123"],
+  });
+  assert.equal(d.ok, true);
+  if (d.ok) assert.equal(d.origin, "http://127.0.0.1:8123");
+});
+
+test("explicit-only listed custom origin does not grant other private ranges", async () => {
+  const d = await checkUrl("http://192.168.1.1/", {
+    privateNetwork: "explicit-only",
+    allowedOrigins: ["http://127.0.0.1:8123"],
+  });
+  assert.equal(d.ok, false);
+  if (!d.ok) assert.equal(d.code, "blocked-private");
+});
+
+test("explicit-only does not auto-allow a hostname that resolves privately", async () => {
+  const d = await checkUrl("http://private.example/", {
+    privateNetwork: "explicit-only",
+    resolve: async () => ["10.0.0.2"],
+  });
+  assert.equal(d.ok, false);
+  if (!d.ok) assert.equal(d.code, "blocked-private");
+});
+
+test("explicit-only listed hostname may resolve privately (custom local DNS)", async () => {
+  const d = await checkUrl("http://homeassistant.local/", {
+    privateNetwork: "explicit-only",
+    allowedOrigins: ["http://homeassistant.local"],
+    resolve: async () => ["192.168.1.50"],
+  });
+  assert.equal(d.ok, true);
+});
+
+test("explicit-only still requires approval for unlisted public origins", async () => {
+  const d = await checkUrl("https://example.com/docs", {
+    privateNetwork: "explicit-only",
+    resolve: publicDns,
+  });
   assert.equal(d.ok, false);
   if (!d.ok) assert.equal(d.code, "approval-required");
+});
+
+test("subresource purpose allows unlisted public origins without approval", async () => {
+  const d = await checkNetworkEgress("https://cdn.example.com/app.js", {
+    privateNetwork: "explicit-only",
+    resolve: publicDns,
+  });
+  assert.equal(d.ok, true);
+});
+
+test("subresource purpose still blocks unlisted private and metadata destinations", async () => {
+  const opts = { privateNetwork: "explicit-only" as const, purpose: "subresource" as const };
+  for (const raw of ["http://127.0.0.1/", "http://192.168.1.1/", "http://169.254.169.254/"]) {
+    const d = await checkUrl(raw, opts);
+    assert.equal(d.ok, false, raw);
+    if (!d.ok) assert.equal(d.code, "blocked-private", raw);
+  }
+});
+
+test("subresource purpose allows an explicitly listed custom local origin", async () => {
+  const d = await checkNetworkEgress("http://127.0.0.1:8123/api", {
+    privateNetwork: "explicit-only",
+    allowedOrigins: ["http://127.0.0.1:8123"],
+  });
+  assert.equal(d.ok, true);
+});
+
+test("generic Browser subresource still allows private destinations", async () => {
+  const d = await checkNetworkEgress("http://192.168.1.1/img.png", {});
+  assert.equal(d.ok, true);
+});
+
+test("websocket URLs map onto HTTP policy without becoming a navigable scheme", async () => {
+  const raw = await checkUrl("ws://127.0.0.1:8123/ws");
+  assert.equal(raw.ok, false);
+  if (!raw.ok) assert.equal(raw.code, "blocked-scheme");
+  const listed = await checkNetworkEgress(webSocketUrlAsHttp("ws://127.0.0.1:8123/ws"), {
+    privateNetwork: "explicit-only",
+    allowedOrigins: ["http://127.0.0.1:8123"],
+  });
+  assert.equal(listed.ok, true);
+  const otherPort = await checkNetworkEgress(webSocketUrlAsHttp("ws://127.0.0.1:9999/ws"), {
+    privateNetwork: "explicit-only",
+    allowedOrigins: ["http://127.0.0.1:8123"],
+  });
+  assert.equal(otherPort.ok, false);
+  if (!otherPort.ok) assert.equal(otherPort.code, "blocked-private");
+});
+
+test("top-level wrapper still requires approval for unlisted public origins", async () => {
+  const d = await checkTopLevelNavigation("https://example.com/docs", { resolve: publicDns });
+  assert.equal(d.ok, false);
+  if (!d.ok) assert.equal(d.code, "approval-required");
+});
+
+test("isInternalBrowserUrl accepts about:blank variants only", () => {
+  assert.equal(isInternalBrowserUrl("about:blank"), true);
+  assert.equal(isInternalBrowserUrl(" about:blank#foo "), true);
+  assert.equal(isInternalBrowserUrl("about:srcdoc"), true);
+  assert.equal(isInternalBrowserUrl("about:config"), false);
+  assert.equal(isInternalBrowserUrl("http://127.0.0.1/"), false);
 });

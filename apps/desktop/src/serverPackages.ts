@@ -4,6 +4,8 @@
 import type { PackageDescriptorDto } from "@polyth/contracts";
 import type { ServerPackageFactory } from "@polyth/plugins";
 import type { ServerPackageRegistration } from "@polyth/server";
+import chatWorkspace from "../../../packages/chat-workspace/src/serverEntry.ts";
+import handoff from "../../../packages/handoff/src/serverEntry.ts";
 import browser from "../../../packages/browser/src/serverEntry.ts";
 import commands from "../../../packages/commands/src/serverEntry.ts";
 import customAction from "../../../packages/custom-action/src/serverEntry.ts";
@@ -64,6 +66,7 @@ export const desktopServerPackages = [
   entry("backend-fx", {"name": "fx harness", "description": "fx through shared ACP", "core": false, "enabled": true, "hasSettings": false}, backendFx),
   entry("backend-opencode", {"name": "OpenCode harness", "description": "Managed OpenCode HTTP and SSE runtime", "core": true, "enabled": true, "hasSettings": false}, backendOpencode),
   entry("browser", { name: "Browser", description: "A shared internal browser for users, agents, and element context.", core: false, enabled: true, settingsGroup: "Engineering", icon: "🌐", hasSettings: false }, browser),
+  entry("chat-workspace", { name: "Chat Workspace", description: "Use the AI chats you already have, directly alongside your work.", core: false, enabled: true, settingsGroup: "Workspace", icon: "💬", hasSettings: true }, chatWorkspace),
   entry("commands", { name: "Commands", description: "Reusable project command definitions.", core: false, enabled: true, settingsGroup: "Engineering", icon: "/", hasSettings: true }, commands),
   entry("custom-action", { name: "Custom Action", description: "Configurable icon widgets that run project commands.", core: false, enabled: true, settingsGroup: "Customize", icon: "▶", hasSettings: false }, customAction),
   entry("dictation", { name: "Voice & Dictation", description: "Speech-to-text dictation and spoken replies.", core: false, enabled: true, settingsGroup: "Workspace", icon: "🎤", hasSettings: true }, dictation),
@@ -73,6 +76,7 @@ export const desktopServerPackages = [
   entry("git", { name: "Git", description: "Source control status, diffs, commits, and worktrees.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⎇", hasSettings: true }, git),
   entry("github", { name: "GitHub", description: "GitHub pull request and check integration.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⎇", hasSettings: false }, github),
   entry("goals", { name: "Goals", description: "Goal tracking and completion audits.", core: false, enabled: true, settingsGroup: "Workspace", icon: "◎", hasSettings: false }, goals),
+  entry("handoff", { name: "Handoff", description: "Build context bundles and import chat results into Polyth sessions.", core: false, enabled: true, settingsGroup: "Workspace", icon: "⇄", hasSettings: false }, handoff),
   entry("harness-runtime", {"name": "Harnesses", "description": "Choose the execution engine for a canonical session", "core": true, "enabled": true, "hasSettings": true, "settingsGroup": "Engineering"}, harnessRuntime),
   entry("home-assistant", { name: "Home Assistant", description: "Home Assistant entities and controls.", core: false, enabled: false, settingsGroup: "Customize", icon: "🏠", hasSettings: true }, homeAssistant),
   entry("hotkeys", { name: "Shortcuts", description: "Keyboard shortcut configuration and runtime registration.", core: true, enabled: true, settingsGroup: "Workspace", icon: "⌨", hasSettings: true }, hotkeys),

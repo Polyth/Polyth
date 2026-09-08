@@ -8,6 +8,7 @@ import {
 } from "@polyth/plugins";
 import { createFileService, MAX_RAW_BYTES, type FileService } from "./index.ts";
 import { createRemoteFileService } from "./remote.ts";
+import { registerFilesHandoffSources } from "./handoffSources.ts";
 
 /** `_inbox/` is an explicit project-root staging area for freshly attached
  *  files: uploads land here before any session/worktree owns the message. */
@@ -300,6 +301,10 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     remoteAccess: FILES_REMOTE_ACCESS,
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
+      const handoffRegistry = host.services.get(serverServiceKey<import("@polyth/handoff").ContextSourceRegistry>("handoff.sources"));
+      if (handoffRegistry) {
+        registerFilesHandoffSources({ registry: handoffRegistry, files, projects: host.projects });
+      }
       routes ??= workspaceRoutes({
         projects: host.projects,
         sessions: host.sessions,

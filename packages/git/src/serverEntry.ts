@@ -24,6 +24,7 @@ import {
   pathsUnder,
   type GitService,
 } from "./index.ts";
+import { registerGitHandoffSources } from "./handoffSources.ts";
 import { createIsolationService, type IsolationService } from "./sessionIntegration.ts";
 
 const COMMIT_PROMPT_VERSION = 2;
@@ -584,6 +585,10 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         },
       });
       host.services.provide(serverServiceKey<IsolationService>("isolation"), isolation);
+      const handoffRegistry = host.services.get(serverServiceKey<import("@polyth/handoff").ContextSourceRegistry>("handoff.sources"));
+      if (handoffRegistry) {
+        registerGitHandoffSources({ registry: handoffRegistry, git, projects: host.projects });
+      }
       const gitHandler = gitRoutes({
         projects: host.projects,
         sessions: host.sessions,

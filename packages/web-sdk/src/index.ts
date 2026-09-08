@@ -232,6 +232,19 @@ export interface WebDialogProps {
   ariaDescribedBy?: string;
 }
 
+export interface HandoffTargetInput {
+  projectId: string;
+  sessionId?: string | null;
+  text: string;
+}
+
+export interface HandoffTargetRegistration {
+  id: "current-session" | "queue" | "new-session" | "draft";
+  label: string;
+  available(): boolean;
+  send(input: HandoffTargetInput): Promise<void>;
+}
+
 export interface WebPackageHost {
   slots: {
     register(registration: SlotRegistration): Unregister;
@@ -289,6 +302,10 @@ export interface WebPackageHost {
   };
   errors: {
     friendly(action: string, cause: unknown): string;
+  };
+  handoffTargets: {
+    register(registration: HandoffTargetRegistration): Unregister;
+    list(): HandoffTargetRegistration[];
   };
 }
 

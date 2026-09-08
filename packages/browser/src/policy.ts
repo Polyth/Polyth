@@ -1,9 +1,25 @@
 // URL/origin policy for the controlled browser (WP14). Canonicalization,
-// unsafe-scheme and private-network blocking, per-origin approvals, and
-// per-hop DNS re-resolution so redirects cannot rebind into private ranges.
+// unsafe-scheme and private-network blocking, per-origin approvals, and a
+// DNS lookup at policy time. Chromium may resolve the same hostname again
+// when it connects, so DNS-rebinding TOCTOU is a residual V1 limitation —
+// we do not pin the browser connection to the validated address.
 import { lookup } from "node:dns/promises";
 
 export type Resolver = (hostname: string) => Promise<string[]>;
+
+/** How private/loopback/link-local destinations are treated.
+ *  `allow` is the generic local-first Browser default.
+ *  `explicit-only` is for third-party Chat Workspace pages: private
+ *  destinations are allowed only when that origin is listed. */
+export type PrivateNetworkPolicy = "allow" | "explicit-only";
+
+/** Why a URL is being checked.
+ *  `top-level` — user-visible destination (tab/popup). Unlisted public origins
+ *  need approval.
+ *  `subresource` — any other HTTP(S) request (fetch, image, iframe, redirect
+ *  hop inside a nested frame, …). Public destinations are ordinary browser
+ *  traffic; unlisted private destinations are still blocked. */
+export type UrlCheckPurpose = "top-level" | "subresource";
 
 export interface UrlPolicyOptions {
   /** Origins Polyth itself started (preview/dev servers) — loopback allowed. */
@@ -12,6 +28,10 @@ export interface UrlPolicyOptions {
   approvedOrigins?: ReadonlySet<string>;
   /** Injectable DNS for tests; defaults to dns.lookup (all addresses). */
   resolve?: Resolver;
+  /** Private-network handling. Defaults to `allow` (generic Browser). */
+  privateNetwork?: PrivateNetworkPolicy;
+  /** Defaults to `top-level` so existing callers keep approval semantics. */
+  purpose?: UrlCheckPurpose;
 }
 
 export type UrlDecision =
@@ -87,6 +107,15 @@ export function isLoopbackAddress(ip: string): boolean {
   return ip.startsWith("127.");
 }
 
+/** Chromium internal documents that must not go through http(s) policy. */
+export function isInternalBrowserUrl(raw: string): boolean {
+  const trimmed = raw.trim().toLowerCase();
+  if (trimmed === "about:blank" || trimmed === "about:srcdoc") return true;
+  if (trimmed.startsWith("about:blank#") || trimmed.startsWith("about:blank?")) return true;
+  if (trimmed.startsWith("about:srcdoc#") || trimmed.startsWith("about:srcdoc?")) return true;
+  return false;
+}
+
 /** Canonical origin string for approvals ("https://example.com"). */
 export function originOf(raw: string): string | null {
   try {
@@ -105,8 +134,9 @@ export function originOf(raw: string): string | null {
   }
 }
 
-/** Validate one URL (one navigation hop). Re-run per redirect hop with a fresh
- *  resolver call — the second resolution is what defeats DNS rebinding. */
+/** Validate one URL (one navigation hop). Re-run per redirect hop with a
+ *  fresh resolver call. This is not a pinned connection: Chromium may
+ *  resolve again, so a rebinding hostname remains a residual risk. */
 export async function checkUrl(raw: string, opts: UrlPolicyOptions = {}): Promise<UrlDecision> {
   // Bare "localhost:5173" style input gets an http scheme; "localhost:5173"
   // would otherwise parse as scheme "localhost:".
@@ -135,22 +165,34 @@ export async function checkUrl(raw: string, opts: UrlPolicyOptions = {}): Promis
   const allowed = new Set((opts.allowedOrigins ?? []).map((o) => o.toLowerCase()));
   const approved = new Set([...(opts.approvedOrigins ?? [])].map((o) => o.toLowerCase()));
   const host = url.hostname.toLowerCase();
+  const listed = listedHas(allowed, origin) || listedHas(approved, origin);
+  const privateNetwork = opts.privateNetwork ?? "allow";
 
-  // Loopback and private-network targets are local-first: they open without
-  // approval or blocking. This is a local tool the operator drives, so the
-  // SSRF-style private-range defense is dropped — intranets, routers, dev
-  // servers, and localhost must all "just work".
+  const allowPrivate = (): UrlDecision => {
+    if (privateNetwork === "allow" || listed) {
+      return { ok: true, url: canonical, origin };
+    }
+    return {
+      ok: false,
+      code: "blocked-private",
+      reason: `private-network origin ${origin} is not allowed`,
+    };
+  };
+
+  // Loopback and private-network targets are local-first in generic Browser:
+  // they open without approval. Chat Workspace uses `explicit-only` so a
+  // third-party provider page cannot inherit that LAN/metadata access.
   if (isLoopbackHost(host) || (/^\d+\.\d+\.\d+\.\d+$/.test(host) && isLoopbackAddress(host))) {
-    return { ok: true, url: canonical, origin };
+    return allowPrivate();
   }
 
   // Literal IP host: no DNS ambiguity, decide directly.
   if (/^\d+\.\d+\.\d+\.\d+$/.test(host) || host.startsWith("[")) {
     const ip = host.replace(/^\[|\]$/g, "");
-    if (isPrivateAddress(ip)) return { ok: true, url: canonical, origin };
+    if (isPrivateAddress(ip)) return allowPrivate();
   } else {
     // Hostname: resolving into a private/loopback range is a legitimate
-    // intranet/local setup, not a reason to block.
+    // intranet/local setup for generic Browser, not a reason to block.
     const resolve = opts.resolve ?? defaultResolve;
     let addrs: string[];
     try {
@@ -162,10 +204,23 @@ export async function checkUrl(raw: string, opts: UrlPolicyOptions = {}): Promis
       return { ok: false, code: "dns-error", reason: `cannot resolve ${host}: no addresses` };
     }
     if (addrs.some(isPrivateAddress)) {
-      return { ok: true, url: canonical, origin };
+      return allowPrivate();
     }
   }
 
-  if (listedHas(allowed, origin) || listedHas(approved, origin)) return { ok: true, url: canonical, origin };
+  if (listed) return { ok: true, url: canonical, origin };
+  // Public subresources (CDN, API, nested iframe documents) are normal
+  // browser traffic. Origin-approval UX is reserved for top-level changes.
+  if (opts.purpose === "subresource") {
+    return { ok: true, url: canonical, origin };
+  }
   return { ok: false, code: "approval-required", reason: `external origin ${origin} needs a per-origin approval` };
+}
+
+export function checkTopLevelNavigation(raw: string, opts: UrlPolicyOptions = {}): Promise<UrlDecision> {
+  return checkUrl(raw, { ...opts, purpose: "top-level" });
+}
+
+export function checkNetworkEgress(raw: string, opts: UrlPolicyOptions = {}): Promise<UrlDecision> {
+  return checkUrl(raw, { ...opts, purpose: "subresource" });
 }

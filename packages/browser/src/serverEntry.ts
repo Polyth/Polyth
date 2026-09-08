@@ -20,11 +20,15 @@ import {
   createBrowserService,
   createChromiumDriver,
   createFakeDriver,
+  createFakeProfileDriver,
+  createProfileChromiumDriver,
+  createProfileRegistry,
   demoWeb,
   findChromiumExecutable,
   redactObservationText,
   type BrowserArtifactStore,
   type BrowserService,
+  type ProfileRegistry,
 } from "./index.ts";
 import { originOf } from "./policy.ts";
 import { isBrowserArtifactId } from "./artifacts.ts";
@@ -46,6 +50,8 @@ const STATUS: Record<string, number> = {
   "approval-required": 403,
   "download-blocked": 403,
   "dns-error": 502,
+  forbidden: 403,
+  "profile-locked": 409,
 };
 
 const targetText = (target: BrowserTarget): string => {
@@ -75,11 +81,22 @@ const summarize = (action: BrowserAction): string => {
 
 export function browserRoutes(deps: {
   browser: BrowserService;
+  profiles?: ProfileRegistry;
   append: (sessionId: string, type: string, data: JsonObject) => Promise<SessionEvent>;
   shotsDir: string;
   artifacts: BrowserArtifactStore;
 }): RouteHandler {
-  const { browser, append, artifacts } = deps;
+  const { browser, profiles, append, artifacts } = deps;
+
+  const rejectChatTab = (id: string): { error: string; message: string } | null => {
+    if (profiles?.isChatTab(id)) {
+      return {
+        error: "forbidden",
+        message: "chat-workspace-manual-only: agent browser APIs cannot control chat tabs",
+      };
+    }
+    return null;
+  };
   const saveShot = async (
     browserSessionId: string,
     revision: number,
@@ -246,13 +263,17 @@ export function browserRoutes(deps: {
         return true;
       }
 
-      let match = path.match(/^\/api\/browser\/sessions\/([^/]+)$/);
+      let       match = path.match(/^\/api\/browser\/sessions\/([^/]+)$/);
       if (match && method === "GET") {
+        const blocked = rejectChatTab(match[1]!);
+        if (blocked) { json(403, blocked); return true; }
         const session = browser.get(match[1]!);
         json(session ? 200 : 404, session ?? { error: "not-found" });
         return true;
       }
       if (match && method === "DELETE") {
+        const blocked = rejectChatTab(match[1]!);
+        if (blocked) { json(403, blocked); return true; }
         await browser.close(match[1]!);
         json(200, { ok: true });
         return true;
@@ -260,6 +281,8 @@ export function browserRoutes(deps: {
 
       match = path.match(/^\/api\/browser\/sessions\/([^/]+)\/navigate$/);
       if (match && method === "POST") {
+        const blocked = rejectChatTab(match[1]!);
+        if (blocked) { json(403, blocked); return true; }
         const id = match[1]!;
         const input = await body();
         const actor = input.actor === "agent" ? "agent" as const : "user" as const;
@@ -314,6 +337,8 @@ export function browserRoutes(deps: {
 
       match = path.match(/^\/api\/browser\/sessions\/([^/]+)\/actions$/);
       if (match && method === "POST") {
+        const blocked = rejectChatTab(match[1]!);
+        if (blocked) { json(403, blocked); return true; }
         const id = match[1]!;
         const input = await body();
         const actor = input.actor === "agent" ? "agent" as const : "user" as const;
@@ -362,6 +387,8 @@ export function browserRoutes(deps: {
 
       match = path.match(/^\/api\/browser\/sessions\/([^/]+)\/observe$/);
       if (match && method === "POST") {
+        const blocked = rejectChatTab(match[1]!);
+        if (blocked) { json(403, blocked); return true; }
         const id = match[1]!;
         const input = await body();
         const observation = await browser.observe(id, {
@@ -407,6 +434,8 @@ export function browserRoutes(deps: {
 
       match = path.match(/^\/api\/browser\/sessions\/([^/]+)\/context$/);
       if (match && method === "POST") {
+        const blocked = rejectChatTab(match[1]!);
+        if (blocked) { json(403, blocked); return true; }
         const id = match[1]!;
         const input = parseCaptureInput(await body());
         const context = await browser.captureContext(id, input, artifacts);
@@ -491,21 +520,25 @@ export const BROWSER_REMOTE_ACCESS: RemoteAccessPolicy = {
 };
 
 export default async function registerPackage(host: ServerPackageHost): Promise<ServerPackage> {
-  // Internal browser: Chromium if configured/found, fake driver behind
-  // POLYTH_FAKE_BROWSER=1, otherwise an honest unavailable state. Created at
-  // load time because the runtime pool's browser-tool bridge needs it even
-  // while this package's routes are disabled.
   const chromiumPath = process.env.POLYTH_FAKE_BROWSER === "1" ? null : await findChromiumExecutable();
   const driver = process.env.POLYTH_FAKE_BROWSER === "1"
     ? createFakeDriver(demoWeb())
     : chromiumPath
       ? createChromiumDriver(chromiumPath)
       : null;
+  const profileDriver = process.env.POLYTH_FAKE_BROWSER === "1"
+    ? createFakeProfileDriver()
+    : await createProfileChromiumDriver(chromiumPath ?? undefined);
+  const profiles = createProfileRegistry({
+    driver: profileDriver,
+    unavailableReason: "browser engine unavailable: no Chromium executable found (set POLYTH_CHROMIUM_PATH)",
+  });
   const browser = createBrowserService({
     driver,
     unavailableReason: "browser engine unavailable: no Chromium executable found (set POLYTH_CHROMIUM_PATH)",
   });
   host.services.provide(serverServiceKey<BrowserService>("browser"), browser);
+  host.services.provide(serverServiceKey<ProfileRegistry>("browser.profiles"), profiles);
   let routes: RouteHandler | null = null;
   return {
     remoteAccess: BROWSER_REMOTE_ACCESS,
@@ -518,6 +551,7 @@ export default async function registerPackage(host: ServerPackageHost): Promise<
       );
       const browserRoute = browserRoutes({
         browser,
+        profiles,
         append: (sessionId, type, data) => host.events.append(
           sessionId,
           type,
@@ -534,6 +568,7 @@ export default async function registerPackage(host: ServerPackageHost): Promise<
     },
     async onDisable() {
       await browser.closeAll();
+      await profiles.closeAll();
     },
   };
 }

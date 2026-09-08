@@ -4419,6 +4419,15 @@ export interface BrowserSessionDto {
   viewportMode?: BrowserViewportMode;
 }
 
+/** Chat-workspace tabs are manual-only: no agent observation or extraction. */
+export interface ContentAccessPolicy {
+  contentAccess: "manual-only";
+  agentControl: false;
+  observation: false;
+  contextCapture: false;
+  inspect: false;
+}
+
 export type BrowserTarget =
   | { selector: string }
   | { text: string; exact?: boolean }
@@ -5228,4 +5237,182 @@ export interface PolythLinkErrorDto {
   message: string;
   retryable: boolean;
   detail?: string;
+}
+
+// ---------------------------------------------------------------- handoff bridge
+
+export interface ContextSourceDescriptorDto {
+  id: string;
+  label: string;
+  description: string;
+  defaultOn?: boolean;
+}
+
+export interface ContextBundleSourceDto {
+  id: string;
+  params?: JsonObject;
+  tokens: number;
+  fingerprint: string;
+  status: "ok" | "missing" | "error";
+  error?: string;
+}
+
+export interface ContextBundleWarningDto {
+  tokens: number;
+  largestSources: Array<{ id: string; label: string; tokens: number }>;
+}
+
+export interface ContextBundleSectionDto {
+  id: string;
+  sourceId: string;
+  title: string;
+  body: string;
+  tokens: number;
+  fingerprint: string;
+}
+
+export interface ContextBundleOmissionDto {
+  sourceId: string;
+  label: string;
+  total: number;
+  included: number;
+  omitted: number;
+  reason: string;
+}
+
+export interface ContextBundleDto {
+  id: string;
+  projectId: string;
+  sessionId: string;
+  presetId: string;
+  label: string;
+  instruction: string;
+  sections: ContextBundleSectionDto[];
+  sources: ContextBundleSourceDto[];
+  markdown: string;
+  tokens: number;
+  createdAt: number;
+  fingerprints: Record<string, string>;
+  omissions?: ContextBundleOmissionDto[];
+  warning?: ContextBundleWarningDto;
+}
+
+export interface HandoffPresetDto {
+  id: string;
+  label: string;
+  instruction: string;
+  sources: Array<{ id: string; params?: JsonObject }>;
+}
+
+export interface HandoffResultImportedData {
+  provenance: {
+    sourceKind: "chat-workspace";
+    provider: string;
+    profileName: string;
+    tabTitle?: string;
+    bundleId?: string;
+    bundleLabel?: string;
+  };
+  textHash: string;
+}
+
+export interface HandoffBundleStaleDto {
+  stale: boolean;
+  staleSources: Array<{ id: string; reason: string }>;
+}
+
+// ---------------------------------------------------------------- chat workspace
+
+export interface ChatProviderDto {
+  id: string;
+  name: string;
+  homeUrl: string;
+  allowedOrigins: string[];
+}
+
+export interface ChatProfileDto {
+  id: string;
+  providerId: string;
+  name: string;
+  customUrl?: string;
+  createdAt: number;
+  lastUsedAt: number;
+  approvedOrigins: string[];
+}
+
+export interface ChatTabDto {
+  id: string;
+  profileId: string;
+  url: string;
+  title: string;
+  pinned: boolean;
+  lastActiveAt: number;
+  hibernated: boolean;
+  contentAccess: ContentAccessPolicy;
+}
+
+export interface ChatTabStateDto {
+  tab: ChatTabDto;
+  loading: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  pendingApproval?: { origin: string; reason: string; url?: string } | null;
+  pendingPopups?: Array<{ popupId: string; url?: string }>;
+  pendingFileChooser?: boolean;
+  hibernated?: boolean;
+  crashed?: boolean;
+  unreachable?: boolean;
+  profileRestarted?: boolean;
+  downloadBlocked?: boolean;
+  liveTabCount?: number;
+}
+
+export interface ChatTabEventDto {
+  tabId: string;
+  kind: string;
+  origin?: string;
+  reason?: string;
+  message?: string;
+  url?: string;
+  popupId?: string;
+  text?: string;
+}
+
+export interface ChatWorkspaceDto {
+  tabs: ChatTabDto[];
+  activeTabId: string | null;
+  order: string[];
+}
+
+export interface ChatWorkspaceSettingsDto {
+  liveTabLimit: number;
+  hibernateDelayMs: number;
+  streamQuality: number;
+  warnTokenThreshold: number;
+  defaultProviderId: string;
+  defaultTarget: "current-session" | "queue" | "new-session" | "draft";
+  externalLinkBehavior: "prompt" | "allow" | "system";
+  restoreLastTabs: boolean;
+}
+
+export interface ChatWorkspaceFrame {
+  tabId: string;
+  spaceId: string;
+  revision: number;
+  mime: string;
+  data: Uint8Array;
+  width: number;
+  height: number;
+  popupId?: string;
+}
+
+export interface ChatWorkspaceTabEvent extends ChatTabEventDto {
+  spaceId: string;
+}
+
+export interface ChatWorkspaceFrameBus {
+  latestFrame(spaceId: string, tabId: string, afterRevision?: number, popupId?: string): ChatWorkspaceFrame | null;
+  onFrame(cb: (frame: ChatWorkspaceFrame) => void): Disposable;
+  onEvent(cb: (event: ChatWorkspaceTabEvent) => void): Disposable;
+  setTabStream(spaceId: string | null, tabId: string, visible: boolean, quality?: number): void;
 }

@@ -23,11 +23,64 @@ import { redactObservationText } from "./redact.ts";
 
 export type { BrowserDriver, DriverPage, DriverPageEvent, DriverObservation, DriverNav, DriverOpenOptions } from "./driver.ts";
 export { createFakeDriver, demoWeb, type FakeWeb, type FakePage } from "./fake.ts";
-export { checkUrl, isLoopbackHost, isPrivateAddress, isLoopbackAddress, originAliases, originOf, type UrlDecision, type UrlPolicyOptions, type Resolver } from "./policy.ts";
+export {
+  checkUrl,
+  checkTopLevelNavigation,
+  checkNetworkEgress,
+  isInternalBrowserUrl,
+  isLoopbackHost,
+  isPrivateAddress,
+  isLoopbackAddress,
+  originAliases,
+  originOf,
+  type UrlDecision,
+  type UrlPolicyOptions,
+  type UrlCheckPurpose,
+  type PrivateNetworkPolicy,
+  type Resolver,
+} from "./policy.ts";
 export { redactObservationText, type RedactOptions } from "./redact.ts";
 export { createChromiumDriver, findChromiumExecutable, CHROMIUM_CANDIDATE_PATHS } from "./chromium.ts";
 export { createBrowserArtifactStore, type BrowserArtifactStore, BROWSER_ARTIFACT_TTL_MS, BROWSER_ARTIFACT_MAX_FILES } from "./artifacts.ts";
 export { captureBrowserContext } from "./context.ts";
+export type {
+  ProfileContext,
+  ProfileDriver,
+  ProfileDriverOpenOptions,
+  ProfilePage,
+  ProfilePageEvent,
+  ProfileNav,
+  ScreencastFrame,
+  NavigationKind,
+} from "./profileDriver.ts";
+export { MANUAL_ONLY_POLICY } from "./profileDriver.ts";
+export { createFakeProfileDriver, resetFakeProfileLocks } from "./fakeProfile.ts";
+export {
+  createProfileChromiumDriver,
+  profileChromiumAvailable,
+  resetProfileChromiumLocks,
+  isTopLevelNavigationRequest,
+  classifyTopLevelRequest,
+  webSocketUrlAsHttp,
+} from "./profileChromium.ts";
+export type { TopLevelRequestClass, TopLevelOwnerLookup } from "./profileChromium.ts";
+export {
+  createProfileRegistry,
+  newChatTabId,
+  type ProfileRegistry,
+  type ProfileFrame,
+  type ProfileRegistryEvent,
+  type TabRecord,
+  type ProfileOpenInput,
+} from "./profileRegistry.ts";
+export {
+  createScreencastPacing,
+  noteScreencastActivity,
+  setScreencastVisible,
+  screencastMinIntervalMs,
+  shouldEmitScreencastFrame,
+  markScreencastFrameEmitted,
+} from "./screencastPacing.ts";
 
 export interface BrowserFrame {
   browserSessionId: string;

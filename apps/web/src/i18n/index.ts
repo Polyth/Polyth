@@ -4,6 +4,7 @@ import { LOCALES, type Locale } from "@polyth/contracts";
 // its own chunk (PR #51 bundled all 12 eagerly — ~4.9MB of the 6MB main.js).
 import { en as appEn } from "./locales/en.ts";
 import { en as browserEn } from "@polyth/browser/i18n/en";
+import { en as chatWorkspaceEn } from "@polyth/chat-workspace/i18n/en";
 import { en as commandsEn } from "@polyth/commands/i18n/en";
 import { en as dictationEn } from "@polyth/dictation/i18n/en";
 import { en as filesEn } from "@polyth/files/i18n/en";
@@ -36,6 +37,7 @@ const catalogs: Partial<Record<Locale, TranslationCatalog>> = {
   en: Object.assign(
     {},
     appEn,
+    chatWorkspaceEn,
     browserEn,
     commandsEn,
     dictationEn,

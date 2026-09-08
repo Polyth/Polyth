@@ -1,0 +1,234 @@
+.handoff-provenance-chip {
+  font-size: var(--font-size-xs);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-1);
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.handoff-provenance-popover {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.handoff-surface-drawer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+.handoff-surface-drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: var(--surface-overlay);
+  pointer-events: auto;
+}
+
+.handoff-surface-drawer-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  max-height: min(60%, calc(100% - var(--space-4)));
+  margin: 0 var(--space-2) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: var(--material-glass-strong);
+  box-shadow: var(--material-glass-shadow);
+  pointer-events: auto;
+  overflow: hidden;
+}
+
+.handoff-surface-drawer-head,
+.handoff-surface-drawer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--hair);
+}
+
+.handoff-surface-drawer-foot {
+  border-bottom: 0;
+  border-top: 1px solid var(--hair);
+}
+
+.handoff-surface-drawer-title {
+  margin: 0;
+  font-size: var(--font-size-md);
+}
+
+.handoff-surface-drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  overflow: auto;
+  min-height: 0;
+}
+
+.handoff-source-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.handoff-source-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.handoff-source-check {
+  display: flex;
+  align-items: flex-start;
+  padding-top: var(--space-1);
+}
+
+.handoff-source-copy {
+  min-width: 0;
+}
+
+.handoff-source-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.handoff-source-tokens {
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.handoff-source-desc {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+}
+
+.handoff-source-extra {
+  grid-column: 1 / -1;
+}
+
+.handoff-instruction-field,
+.handoff-field-label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.handoff-drawer-estimate {
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+}
+
+.handoff-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.handoff-error {
+  color: var(--red);
+}
+
+.handoff-bundle-warning {
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--amber-wash);
+  color: var(--amber-on-wash);
+}
+
+.handoff-preview-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.handoff-preview-body {
+  margin: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  white-space: pre-wrap;
+  font-size: var(--font-size-sm);
+}
+
+.handoff-target-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.handoff-target-fieldset legend {
+  font-size: var(--font-size-sm);
+  color: var(--muted);
+  margin-bottom: var(--space-1);
+}
+
+.handoff-target-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.handoff-target-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.handoff-target-option.is-selected {
+  border-color: var(--accent-line);
+  background: var(--accent-wash);
+}
+
+.handoff-target-option input {
+  margin-top: var(--space-1);
+}
+
+.handoff-target-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.handoff-target-meta {
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+}
+
+.handoff-send-behavior {
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+  margin: 0;
+}
+
+@container (max-width: 640px) {
+  .handoff-surface-drawer-panel {
+    max-height: calc(100% - var(--space-2));
+    margin: 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+}

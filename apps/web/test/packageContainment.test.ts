@@ -44,7 +44,7 @@ test("all browser feature packages own a canonical web entry", () => {
   const browserFeatures = featureManifests()
     .filter(({ manifest }) => manifest.polyth?.webEntry !== undefined);
 
-  assert.equal(browserFeatures.length, 28);
+  assert.equal(browserFeatures.length, 30);
   for (const { id, dir, manifest } of browserFeatures) {
     assert.equal(
       manifest.polyth?.webEntry,
@@ -193,6 +193,7 @@ test("feature-named source files do not return to the web app", () => {
     .map(({ id }) => id.replaceAll("-", "").toLowerCase());
   const genericNamedFiles = new Set([
     "commands.ts",
+    "handoffTargets.ts",
     "packages/onboarding/tours/git.ts",
   ]);
   const leaks = filesUnder(webSrcDir)

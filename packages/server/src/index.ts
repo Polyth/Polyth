@@ -420,6 +420,7 @@ interface CommandExpandService {
 
 type BrowserForWs = NonNullable<Parameters<typeof createWsGateway>[1]>;
 type DictationForWs = NonNullable<Parameters<typeof createWsGateway>[2]>;
+type ChatWorkspaceForWs = NonNullable<Parameters<typeof createWsGateway>[4]>;
 
 export async function boot(opts: BootOptions = {}) {
   const port = opts.port ?? Number(process.env.PORT ?? 4400);
@@ -1572,7 +1573,6 @@ export async function boot(opts: BootOptions = {}) {
   // provider blacklists), then mirrors every toggle back to it.
   const visibility = createModelVisibilityService({ file: `${dataDir}/model-visibility.json`, applier: configApplier });
   await visibility.seed();
-  services.provide(serverServiceKey<typeof visibility>("models.visibility"), visibility);
 
   // An empty Polyth MCP store adopts whatever OpenCode already has configured,
   // so the settings page reflects reality instead of an empty list. Adoption is
@@ -2381,6 +2381,7 @@ export async function boot(opts: BootOptions = {}) {
     svc<BrowserForWs>("browser"),
     svc<DictationForWs>("dictation"),
     spaceGateway,
+    svc<ChatWorkspaceForWs>("chat-workspace.frames"),
   );
   const publicIngress = (req: import("node:http").IncomingMessage) =>
     publicHttpIngress(req, { listenerId: "public" });

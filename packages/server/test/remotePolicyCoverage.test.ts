@@ -64,10 +64,29 @@ function stubHost(storageDir: string): ServerPackageHost {
     runtimes: { forProject: async () => ({}) as never },
     services: {
       provide: (key, service) => services.provide(key, service),
-      get: (key) => services.get(key) ?? fallback as never,
-      require: (key) => services.get(key) ?? fallback as never,
+      get: (key) => {
+        if (key.id === serverServiceKey("opencode.runtime.events").id) {
+          return { onRestart: () => ({ dispose() {} }) };
+        }
+        return services.get(key);
+      },
+      require: (key) => {
+        if (key.id === serverServiceKey("opencode.runtime.events").id) {
+          return { onRestart: () => ({ dispose() {} }) } as never;
+        }
+        const found = services.get(key);
+        if (found !== undefined) return found as never;
+        if (key.id === serverServiceKey("voice.settings").id) return fallback as never;
+        return services.require(key);
+      },
       ids: () => services.ids(),
     },
+    forSpace: () => ({
+      projects: { list: async () => [], get: async () => undefined, add: async () => { throw new Error("unused"); }, create: async () => { throw new Error("unused"); }, remove: async () => {} },
+      sessions: { events: async () => [], snapshot: async () => { throw new Error("unused"); } } as never,
+    }),
+    spaceStorage: () => ({ root: storageDir, packageDir: () => storageDir, path: (rel: string) => join(storageDir, rel) }),
+    deployment: "local",
     events: { append: async () => ({}) as never },
     oneShot: async () => "",
     smallModelComplete: async () => ({}) as never,
