@@ -74,12 +74,17 @@ registerPaneProvider({
   dirty: (_scope, resource) => peekDocument(docRef(resource))?.getSnapshot().dirty === true,
   discard: (_scope, resource) => { peekDocument(docRef(resource))?.discard(); },
   close: (_scope, resource) => { deleteDocument(docRef(resource)); },
-  component: ({ resource, visible }) => createElement(EditorRuntime, {
-    groupId: "files",
-    resource: docRef(resource),
-    path: resource,
-    visible,
-  }),
+  component: ({ resource, visible }) => {
+    useEffect(() => {
+      void openDocument(docRef(resource)).load();
+    }, [resource]);
+    return createElement(EditorRuntime, {
+      groupId: "files",
+      resource: docRef(resource),
+      path: resource,
+      visible,
+    });
+  },
 });
 
 test("PaneHost close with discard confirm drops dirty buffer on reopen", async () => {

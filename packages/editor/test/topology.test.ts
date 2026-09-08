@@ -10,6 +10,7 @@ Object.assign(globalThis, {
   HTMLElement: dom.HTMLElement,
   Element: dom.Element,
   Node: dom.Node,
+  localStorage: dom.localStorage,
   MutationObserver: (dom as unknown as { MutationObserver: typeof MutationObserver }).MutationObserver,
   ResizeObserver: (dom as unknown as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver ?? class {
     observe() {}
@@ -37,6 +38,7 @@ const { resourceKey } = await import("@polyth/web-sdk");
 const { undo, redo } = await import("@codemirror/commands");
 const { EditorView } = await import("@codemirror/view");
 const { openDocument, resetDocumentsForTest } = await import("../../../apps/web/src/resources/documents.ts");
+const { setLocale } = await import("../../../apps/web/src/i18n/index.ts");
 const { registerResourceProvider } = await import("../../../apps/web/src/resources/providers.ts");
 const {
   default: EditorRuntime,
@@ -166,6 +168,75 @@ test("multi-instance: hidden B cannot mutate A; Mod-S saves visible doc only", a
   }
 });
 
+test("unmounting hidden A while B is visible does not copy B into A", async () => {
+  resetBodies();
+  resetDocumentsForTest();
+  resetEditorRuntimeForTest();
+  const pair = await mountPair();
+  try {
+    pair.viewA().dispatch({ changes: { from: 3, insert: "-edit" } });
+    await pair.showB();
+    pair.viewB().dispatch({ changes: { from: 3, insert: "-other" } });
+    await act(async () => { pair.rootA.unmount(); });
+    const retainedA = peekRetainedState(docRef("a.ts"));
+    assert.equal(retainedA?.state.doc.toString(), "aaa-edit");
+    assert.equal(pair.handleB.getBuffer(), "bbb-other");
+    const hostA = document.createElement("div");
+    document.body.appendChild(hostA);
+    const rootA = createRoot(hostA);
+    await act(async () => {
+      rootA.render(createElement(EditorRuntime, runtimeProps("a.ts", true, () => pair.saves.push("a"))));
+      pair.rootB.render(createElement(EditorRuntime, runtimeProps("b.ts", false)));
+    });
+    const restored = EditorView.findFromDOM(hostA.querySelector(".cm-editor") as HTMLElement)!;
+    assert.equal(restored.state.doc.toString(), "aaa-edit");
+    undo(restored);
+    assert.equal(restored.state.doc.toString(), "aaa");
+    await act(async () => { rootA.unmount(); });
+    hostA.remove();
+  } finally {
+    await pair.cleanup();
+    resetEditorRuntimeForTest();
+    resetDocumentsForTest();
+  }
+});
+
+test("delete then unmount hidden A while B is visible cannot resurrect A as B", async () => {
+  resetBodies();
+  resetDocumentsForTest();
+  resetEditorRuntimeForTest();
+  const pair = await mountPair();
+  try {
+    pair.viewA().dispatch({ changes: { from: 3, insert: "-edit" } });
+    await pair.showB();
+    pair.viewB().dispatch({ changes: { from: 3, insert: "-other" } });
+    pair.handleA.discard();
+    const { deleteDocument } = await import("../../../apps/web/src/resources/documents.ts");
+    deleteDocument(docRef("a.ts"));
+    await act(async () => { pair.rootA.unmount(); });
+    assert.equal(peekRetainedState(docRef("a.ts")), null);
+    const reopened = openDocument(docRef("a.ts"));
+    await reopened.load();
+    const hostA = document.createElement("div");
+    document.body.appendChild(hostA);
+    const rootA = createRoot(hostA);
+    await act(async () => {
+      rootA.render(createElement(EditorRuntime, runtimeProps("a.ts", true)));
+      pair.rootB.render(createElement(EditorRuntime, runtimeProps("b.ts", false)));
+    });
+    const view = EditorView.findFromDOM(hostA.querySelector(".cm-editor") as HTMLElement)!;
+    assert.equal(view.state.doc.toString(), "aaa");
+    undo(view);
+    assert.equal(view.state.doc.toString(), "aaa");
+    await act(async () => { rootA.unmount(); });
+    hostA.remove();
+  } finally {
+    await pair.cleanup();
+    resetEditorRuntimeForTest();
+    resetDocumentsForTest();
+  }
+});
+
 test("two groupIds share two EditorViews", async () => {
   resetBodies();
   resetDocumentsForTest();
@@ -263,10 +334,10 @@ test("open and close clean files bounds retained state", async () => {
     await act(async () => {
       root.render(createElement(EditorRuntime, runtimeProps(path, true)));
     });
-    await act(async () => { root.unmount(); });
-    host.remove();
     const { deleteDocument } = await import("../../../apps/web/src/resources/documents.ts");
     deleteDocument(docRef(path));
+    await act(async () => { root.unmount(); });
+    host.remove();
   }
   assert.equal(retainedStateCount(), 0);
   resetEditorRuntimeForTest();
@@ -379,8 +450,8 @@ test("rename/move: retained state follows the new resource key", async () => {
       root.render(createElement(EditorRuntime, { ...runtimeProps("app.ts", true), path: "app.ts", resource: refApp }));
     });
     const shell = host.querySelector(".editor-code") as HTMLElement;
-    for (let i = 0; i < 40 && shell.getAttribute("data-language") !== "TypeScript"; i++) {
-      await act(async () => { await Promise.resolve(); });
+    for (let i = 0; i < 200 && shell.getAttribute("data-language") !== "TypeScript"; i++) {
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     }
     assert.equal(shell.getAttribute("data-language"), "TypeScript");
   } finally {
@@ -498,6 +569,34 @@ test("close discard reopen: saved content returns without undo history", async (
     undo(reopened);
     assert.equal(reopened.state.doc.toString(), "aaa");
   } finally {
+    await act(async () => { root.unmount(); });
+    host.remove();
+    resetEditorRuntimeForTest();
+    resetDocumentsForTest();
+  }
+});
+
+test("locale change while the editor is alive reconfigures search phrases", async () => {
+  resetBodies();
+  resetDocumentsForTest();
+  resetEditorRuntimeForTest();
+  const handle = openDocument(docRef("a.ts"));
+  await handle.load();
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => {
+      root.render(createElement(EditorRuntime, runtimeProps("a.ts", true)));
+    });
+    const view = EditorView.findFromDOM(host.querySelector(".cm-editor") as HTMLElement)!;
+    assert.equal(view.state.phrase("Find"), "Find");
+    await act(async () => { await setLocale("uk"); });
+    assert.equal(view.state.phrase("Find"), "Знайти");
+    await act(async () => { await setLocale("en"); });
+    assert.equal(view.state.phrase("Find"), "Find");
+  } finally {
+    await setLocale("en");
     await act(async () => { root.unmount(); });
     host.remove();
     resetEditorRuntimeForTest();

@@ -11,7 +11,7 @@ import {
   peekDocument,
   registerDocumentEditorBridge,
 } from "../../../apps/web/src/resources/documents.ts";
-import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { subscribeLocale, tr } from "../../../apps/web/src/i18n/index.ts";
 import { registerEditorSelection, type EditorSurfaceProps } from "../../../apps/web/src/resources/views.ts";
 import { editorTheme } from "./theme.ts";
 import { detectIndentUnit, languageOf, lineRangeFromOffsets, PLAIN_TEXT_LABEL } from "./languages.ts";
@@ -92,6 +92,16 @@ function phrases() {
     "close": tr("editor.search.close"),
   });
 }
+
+function reconfigureLivePhrases(): void {
+  for (const group of groups.values()) {
+    group.skip = true;
+    group.view.dispatch({ effects: phrasesComp.reconfigure(phrases()) });
+    group.skip = false;
+  }
+}
+
+subscribeLocale(reconfigureLivePhrases);
 
 function createState(doc: string, readOnly: boolean, wrap: boolean, ariaLabel?: string): EditorState {
   const unit = detectIndentUnit(doc);
@@ -278,6 +288,15 @@ function bindingMatches(a: EditorBinding | null, b: EditorBinding): boolean {
     && a.groupId === b.groupId
     && resourceKey(a.ref) === resourceKey(b.ref)
     && a.generation === b.generation;
+}
+
+/** Persist the live view into retained state only when this binding owns it.
+ *  Never recreate an evicted entry — close/delete must be able to drop state. */
+function persistOwnedView(group: EditorGroup, binding: EditorBinding): void {
+  if (!bindingMatches(group.active, binding)) return;
+  const existing = states.get(retainedKey(binding.ref));
+  if (!existing) return;
+  existing.state = group.view.state;
 }
 
 function resetRetainedState(ref: ResourceRef, text: string, generation: number, readOnly = false, wrap = true): void {
@@ -476,13 +495,19 @@ export default function EditorRuntime(props: EditorSurfaceProps): ReactElement {
 
     if (!props.visible) {
       const group = groups.get(props.groupId);
+      if (group) persistOwnedView(group, binding);
       if (group && bindingMatches(group.active, binding)) {
-        states.set(docKey, { state: group.view.state, generation, baseline: states.get(docKey)?.baseline ?? group.view.state.doc, searchConfigured: states.get(docKey)?.searchConfigured ?? false });
         if (group.view.dom.parentElement === host) host.removeChild(group.view.dom);
         handle?.detachSource();
         group.active = null;
       }
-      return;
+      return () => {
+        const g = groups.get(props.groupId);
+        if (g) persistOwnedView(g, binding);
+        peekDocument(binding.ref)?.detachSource();
+        if (g && bindingMatches(g.active, binding)) g.active = null;
+        if (g?.view.dom.parentElement === host) host.removeChild(g.view.dom);
+      };
     }
 
     const group = getOrCreateGroup(props.groupId);
@@ -556,20 +581,11 @@ export default function EditorRuntime(props: EditorSurfaceProps): ReactElement {
     props.onReady?.();
 
     return () => {
-      const current = bindingRef.current;
       const g = groups.get(props.groupId);
-      if (!g || !current) return;
-      const key = retainedKey(current.ref);
-      states.set(key, {
-        state: g.view.state,
-        generation: current.generation,
-        baseline: states.get(key)?.baseline ?? g.view.state.doc,
-        searchConfigured: states.get(key)?.searchConfigured ?? false,
-      });
-      if (bindingMatches(g.active, current)) {
-        peekDocument(current.ref)?.detachSource();
-        g.active = null;
-      }
+      if (!g) return;
+      persistOwnedView(g, binding);
+      peekDocument(binding.ref)?.detachSource();
+      if (bindingMatches(g.active, binding)) g.active = null;
       if (g.view.dom.parentElement === host) host.removeChild(g.view.dom);
     };
   }, [
