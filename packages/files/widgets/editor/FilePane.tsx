@@ -24,10 +24,9 @@ import {
   subscribeResourceViews,
 } from "../../../../apps/web/src/resources/views.ts";
 import {
-  deleteDoc, docScopeKey, docsVersion, ensureDoc, fileDocKey, installDocUnloadGuard,
-  isDocDirty, moveDoc, subscribeDocs,
+  deleteDoc, docsVersion, fileResourceRef, installDocUnloadGuard,
+  isDocDirty, moveDoc, openFileDoc, peekFileDoc, subscribeDocs,
 } from "./fileDocs.ts";
-import "../fileProvider.ts";
 import {
   Button,
   CheckIcon,
@@ -79,25 +78,48 @@ export function announceFilesChanged(): void {
   window.dispatchEvent(new CustomEvent("polyth:files-changed"));
 }
 
+const FILES_GROUP_ID = "files";
+
 export default function FilePane({ projectId, sessionId, resource: path, visible }: PaneResourceContext) {
-  const scope = docScopeKey(projectId, sessionId);
   const sid = sessionId ?? undefined;
+  const resourceRef = useMemo(() => fileResourceRef(projectId, sessionId, path), [projectId, sessionId, path]);
   const prefs = useUiSettings();
   const location = useStore((s) => s.editorLocation);
   const actions = usePaneActions();
   useSyncExternalStore(subscribeDocs, docsVersion);
   useSyncExternalStore(subscribeResourceViews, resourceViewsVersion);
 
-  const td = ensureDoc(scope, path);
-  const snap = td.handle.getSnapshot();
-  const doc = td.doc;
-  const editing = td.editing;
-  const error = td.error;
+  useEffect(() => {
+    void openFileDoc(projectId, sessionId, path).load();
+  }, [projectId, sessionId, path]);
+
+  useEffect(() => () => {
+    deleteDoc(projectId, sessionId, path);
+  }, [projectId, sessionId, path]);
+
+  const td = peekFileDoc(projectId, sessionId, path);
+  const snap = td?.handle.getSnapshot() ?? {
+    status: "idle" as const,
+    saved: "",
+    dirty: false,
+    readOnly: false,
+    truncated: false,
+    binary: false,
+    live: null,
+    error: "",
+    composing: false,
+    saveCount: 0,
+    bufferVersion: 0,
+    authoritativeGeneration: 0,
+  };
+  const doc = td?.doc ?? null;
+  const editing = td?.editing ?? true;
+  const error = td?.error ?? "";
   const live = snap.live;
   const dirty = snap.dirty;
   const readOnly = snap.readOnly;
   // Preview/read views need the live text; edit mode must not toString per render.
-  const previewText = !editing ? td.handle.getBuffer() : "";
+  const previewText = !editing && td ? td.handle.getBuffer() : "";
 
   const [wrap, setWrap] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -118,7 +140,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   useEffect(() => { installDocUnloadGuard(); }, []);
 
   useEffect(() => {
-    if (modeArmed || snap.status !== "ready") return;
+    if (modeArmed || snap.status !== "ready" || !td) return;
     const canEdit = !snap.truncated && !snap.binary;
     const prefsNow = getEditorPrefs();
     td.editing = canEdit && !initialPreviewVisible(path, prefsNow.openInPreview, prefsNow.previewByKind);
@@ -141,7 +163,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   }, [flash]);
 
   const setPreviewMode = (on: boolean, opts: { persist?: boolean } = {}) => {
-    if (!doc || readOnly) return;
+    if (!doc || readOnly || !td) return;
     td.editing = !on;
     setSelHint(null);
     const kind = previewKindForPath(doc.path);
@@ -150,7 +172,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
 
   const gotoLine = (start: number, end?: number) => {
     const last = end !== undefined && end >= start ? end : start;
-    if (doc && !readOnly && !td.editing) setPreviewMode(false, { persist: false });
+    if (doc && !readOnly && td && !td.editing) setPreviewMode(false, { persist: false });
     setHlRange([start, last]);
     setReveal({ startLine: start, endLine: last });
   };
@@ -163,7 +185,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   const addSelection = () => {
     if (!doc) return;
     if (editing) {
-      const sel = readEditorSelection(fileDocKey(projectId, sessionId, path));
+      const sel = readEditorSelection(resourceRef);
       if (!sel) {
         setFlash("Select some text first");
         return;
@@ -197,7 +219,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
 
   const addFile = () => {
     if (!doc) return;
-    insertToChat(readOnly ? `@${doc.path}` : formatFileChat(doc.path, td.handle.getBuffer(), INLINE_FILE_CHARS));
+    insertToChat(readOnly || !td ? `@${doc.path}` : formatFileChat(doc.path, td.handle.getBuffer(), INLINE_FILE_CHARS));
   };
 
   const placeHint = (x: number, y: number) =>
@@ -226,15 +248,18 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   useEffect(() => { setSelHint(null); }, [visible, editing, path]);
 
   const save = async (opts: { force?: boolean } = {}) => {
+    if (!td) return;
     await td.handle.save(opts);
     if (td.handle.getSnapshot().live?.kind === "saved") setFlash("Saved ✓");
   };
 
   const reload = async () => {
+    if (!td) return;
     await td.handle.reload();
   };
 
   const checkFile = async () => {
+    if (!td) return;
     await td.handle.check();
   };
 
@@ -257,7 +282,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
       clearInterval(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, scope, path]);
+  }, [visible, projectId, sessionId, path]);
 
   const rename = async () => {
     const to = renameTo?.trim();
@@ -268,7 +293,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
     setBusy(true);
     try {
       await api.filesRename(projectId, doc.path, to, sid);
-      moveDoc(scope, doc.path, to);
+      moveDoc(projectId, sessionId, doc.path, to);
       actions?.renameSelf("file", doc.path, to, baseOf(to));
       setRenameTo(null);
       announceFilesChanged();
@@ -285,7 +310,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
     try {
       await api.filesDelete(projectId, doc.path, sid);
       setConfirmDel(false);
-      deleteDoc(scope, doc.path);
+      deleteDoc(projectId, sessionId, doc.path);
       actions?.closeSelf("file", doc.path);
       announceFilesChanged();
     } catch (err) {
@@ -336,7 +361,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   );
   const shownError = opError || error;
 
-  if (td.loading || (!doc && !shownError)) {
+  if (!td || td.loading || (!doc && !shownError)) {
     return (
       <div className="editor-empty">
         <EmptyState
@@ -453,7 +478,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
                     void confirmAlert(tr("editor.filepane.discardUnsavedChanges"), {
                       title: tr("common.discardChanges"),
                       confirmLabel: tr("common.discard"),
-                    }).then((ok) => { if (ok) td.handle.discard(); });
+                    }).then((ok) => { if (ok) td?.handle.discard(); });
                   },
                 } satisfies MenuEntry]
               : []),
@@ -516,36 +541,31 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
           </span>
           <Button size="sm" onClick={() => void reload()}>{tr("editor.filepane.reloadFromDisk")}</Button>
           {snap.dirty && <Button size="sm" variant="danger" onClick={() => void save({ force: true })}>{tr("editor.filepane.overwrite")}</Button>}
-          <IconButton icon={CloseIcon} size="sm" label={tr("editor.filepane.dismissFileChangeNotice")} onClick={() => td.handle.dismissNotice()} />
+          <IconButton icon={CloseIcon} size="sm" label={tr("editor.filepane.dismissFileChangeNotice")} onClick={() => td?.handle.dismissNotice()} />
         </div>
       )}
       {live && !live.noticeDismissed && live.kind === "deleted" && (
         <div className="editor-banner editor-conflict" role="alert">
           <span>{tr("editor.filepane.fileWasDeletedOnDisk")}{snap.dirty ? tr("editor.filepane.savingRecreatesItYourBufferIsPreserved") : ""}</span>
           {snap.dirty && <Button size="sm" variant="danger" onClick={() => void save({ force: true })}>{tr("editor.filepane.recreate")}</Button>}
-          <IconButton icon={CloseIcon} size="sm" label={tr("editor.filepane.dismissDeletedFileNotice")} onClick={() => td.handle.dismissNotice()} />
+          <IconButton icon={CloseIcon} size="sm" label={tr("editor.filepane.dismissDeletedFileNotice")} onClick={() => td?.handle.dismissNotice()} />
         </div>
       )}
       {live && !live.noticeDismissed && live.kind === "check-failed" && (
         <div className="editor-banner" role="alert">
           <span>{tr("editor.filepane.couldnTCheckForExternalChanges")}{" "}{live.message}</span>
           <Button size="sm" onClick={() => void checkFile()}>{tr("common.retry")}</Button>
-          <IconButton icon={CloseIcon} size="sm" label={tr("editor.filepane.dismissFileCheckNotice")} onClick={() => td.handle.dismissNotice()} />
+          <IconButton icon={CloseIcon} size="sm" label={tr("editor.filepane.dismissFileCheckNotice")} onClick={() => td?.handle.dismissNotice()} />
         </div>
       )}
       {snap.truncated && <div className="editor-banner">{tr("editor.filepane.truncatedFileExceeds512KbReadOnly")}</div>}
       {snap.binary && <div className="editor-banner">{tr("editor.filepane.binaryFileDetectedReadOnly")}</div>}
       {shownError && <div className="form-error editor-error">{shownError}</div>}
       {editing && !readOnly ? (
-        <div
-          className="editor-edit"
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setMenuOpen(true);
-          }}
-        >
+        <div className="editor-edit">
           <EditorSurfaceSlot
-            docKey={fileDocKey(projectId, sessionId, path)}
+            groupId={FILES_GROUP_ID}
+            ref={resourceRef}
             path={doc.path}
             readOnly={readOnly}
             wrap={wrap}
@@ -635,7 +655,13 @@ export function registerFilePaneProvider(): () => void {
     kind: "file",
     title: baseOf,
     available: () => true,
-    dirty: (scope, path) => isDocDirty(docScopeKey(scope.projectId, scope.sessionId), path),
+    dirty: (scope, resourcePath) => isDocDirty(scope.projectId, scope.sessionId, resourcePath),
+    discard: (scope, resourcePath) => {
+      peekFileDoc(scope.projectId, scope.sessionId, resourcePath)?.handle.discard();
+    },
+    close: (scope, resourcePath) => {
+      deleteDoc(scope.projectId, scope.sessionId, resourcePath);
+    },
     subscribe: subscribeDocs,
     component: FilePane,
   });

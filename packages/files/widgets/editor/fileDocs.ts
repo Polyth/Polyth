@@ -1,5 +1,5 @@
 import type { FileReadResult } from "@polyth/session/web-api";
-import type { ResourceDocumentHandle } from "@polyth/web-sdk";
+import type { ResourceDocumentHandle, ResourceRef } from "@polyth/web-sdk";
 import { resourceKey } from "@polyth/web-sdk";
 import {
   deleteDocument,
@@ -13,6 +13,7 @@ import {
   resetDocumentsForTest,
   setDocumentEditing,
   subscribeDocuments,
+  documentSessionCount,
 } from "../../../../apps/web/src/resources/documents.ts";
 
 export interface FileDoc {
@@ -29,18 +30,6 @@ export interface FileDoc {
 
 export function docScopeKey(projectId: string, sessionId: string | null): string {
   return `${projectId}:${sessionId ?? "project"}`;
-}
-
-function parseScope(scope: string): { projectId: string; sessionId: string | null } {
-  const split = scope.indexOf(":");
-  const projectId = split < 0 ? scope : scope.slice(0, split);
-  const rest = split < 0 ? "project" : scope.slice(split + 1);
-  return { projectId, sessionId: rest === "project" ? null : rest };
-}
-
-function handleFor(scope: string, path: string): ResourceDocumentHandle {
-  const { projectId, sessionId } = parseScope(scope);
-  return openDocument(fileRef(projectId, sessionId, path));
 }
 
 function asFileDoc(handle: ResourceDocumentHandle, path: string): FileDoc {
@@ -70,31 +59,37 @@ function asFileDoc(handle: ResourceDocumentHandle, path: string): FileDoc {
   };
 }
 
-export function bumpDocs(): void {}
 export const subscribeDocs = subscribeDocuments;
 export const docsVersion = documentsVersion;
 export const installDocUnloadGuard = installDocumentUnloadGuard;
 export const resetDocsForTest = resetDocumentsForTest;
+export const sessionCount = documentSessionCount;
 
-export function ensureDoc(scope: string, path: string): FileDoc {
-  return asFileDoc(handleFor(scope, path), path);
+export function openFileDoc(projectId: string, sessionId: string | null, path: string): ResourceDocumentHandle {
+  return openDocument(fileRef(projectId, sessionId, path));
 }
 
-export function deleteDoc(scope: string, path: string): void {
-  const { projectId, sessionId } = parseScope(scope);
+export function peekFileDoc(projectId: string, sessionId: string | null, path: string): FileDoc | null {
+  const handle = peekDocument(fileRef(projectId, sessionId, path));
+  return handle ? asFileDoc(handle, path) : null;
+}
+
+export function deleteDoc(projectId: string, sessionId: string | null, path: string): void {
   deleteDocument(fileRef(projectId, sessionId, path));
 }
 
-export function moveDoc(scope: string, from: string, to: string): void {
-  const { projectId, sessionId } = parseScope(scope);
+export function moveDoc(projectId: string, sessionId: string | null, from: string, to: string): void {
   peekDocument(fileRef(projectId, sessionId, from))?.moveTo(fileRef(projectId, sessionId, to));
 }
 
-export function isDocDirty(scope: string, path: string): boolean {
-  const { projectId, sessionId } = parseScope(scope);
+export function isDocDirty(projectId: string, sessionId: string | null, path: string): boolean {
   return isDocumentDirty(fileRef(projectId, sessionId, path));
 }
 
 export function fileDocKey(projectId: string, sessionId: string | null, path: string): string {
   return resourceKey(fileRef(projectId, sessionId, path));
+}
+
+export function fileResourceRef(projectId: string, sessionId: string | null, path: string): ResourceRef {
+  return fileRef(projectId, sessionId, path);
 }

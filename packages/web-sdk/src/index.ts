@@ -315,6 +315,8 @@ export interface ResourceDocumentSnapshot {
   saveCount: number;
   /** Monotonic. Increments on user edits and authoritative resets. */
   bufferVersion: number;
+  /** Incremented on load, discard, and reload — invalidates retained editor state. */
+  authoritativeGeneration: number;
 }
 
 /** Live editor (or other view) that owns the unsaved text without copying it
@@ -335,6 +337,8 @@ export interface ResourceDocumentHandle {
   detachSource(): void;
   /** User edited the attached source. First dirty transition notifies React. */
   markUserEdit(): void;
+  /** Report edit equivalence to saved baseline without serializing on each keystroke. */
+  reportUserEdit(equivalentToSaved: boolean): void;
   load(): Promise<void>;
   setComposing(composing: boolean): void;
   save(options?: { force?: boolean }): Promise<void>;
@@ -343,17 +347,13 @@ export interface ResourceDocumentHandle {
   discard(): void;
   dismissNotice(): void;
   autosaveDelay(enabled: boolean, delayMs?: number): number | null;
-  release(): void;
   moveTo(ref: ResourceRef): void;
 }
 
 export interface OpenResourceOptions {
   region?: WorkbenchRegion;
-  side?: boolean;
-  preview?: boolean;
   focus?: boolean;
   selection?: ResourceSelection;
-  viewId?: string;
 }
 
 export interface CapabilityDefinition {
@@ -515,7 +515,6 @@ export interface WebPackageHost {
     setOverlay(overlay: string | null): void;
     /** Canonical resource navigation: every file/artifact/diff open lands here. */
     openResource(ref: ResourceRef, options?: OpenResourceOptions): void;
-    reopenResourceWith(ref: ResourceRef, viewId: string): void;
     revealResource(ref: ResourceRef): void;
     closeResource(ref: ResourceRef): void;
   };

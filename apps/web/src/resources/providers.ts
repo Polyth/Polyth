@@ -17,8 +17,16 @@ export function registerResourceProvider(provider: ResourceProvider): Unregister
     if (providers.get(provider.scheme) === provider) {
       providers.delete(provider.scheme);
       bump();
+      for (const listener of [...unloadListeners]) listener(provider.scheme);
     }
   };
+}
+
+const unloadListeners = new Set<(scheme: string) => void>();
+
+export function subscribeProviderUnload(listener: (scheme: string) => void): Unregister {
+  unloadListeners.add(listener);
+  return () => { unloadListeners.delete(listener); };
 }
 
 export function getResourceProvider(scheme: string): ResourceProvider | undefined {

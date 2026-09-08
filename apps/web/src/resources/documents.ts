@@ -22,7 +22,7 @@ import {
   restoreLiveFileBuffer,
   type LiveFileState,
 } from "./liveFile.ts";
-import { getResourceProvider } from "./providers.ts";
+import { getResourceProvider, subscribeProviderUnload } from "./providers.ts";
 
 const AUTOSAVE_MS = 1_500;
 
@@ -35,6 +35,7 @@ interface Session {
   binary: boolean;
   dirty: boolean;
   bufferVersion: number;
+  authoritativeGeneration: number;
   composing: boolean;
   editing: boolean;
   error: string;
@@ -42,7 +43,6 @@ interface Session {
   saveCount: number;
   checkpoint: string;
   source: ResourceTextSource | null;
-  holds: number;
   autosaveTimer: ReturnType<typeof setTimeout> | null;
   loading: Promise<void> | null;
   listeners: Set<() => void>;
@@ -51,6 +51,22 @@ interface Session {
 const sessions = new Map<string, Session>();
 let storeVersion = 0;
 const storeListeners = new Set<() => void>();
+
+export interface DocumentEditorBridge {
+  onAuthoritativeReset(ref: ResourceRef, text: string, generation: number): void;
+  onSavedClean(ref: ResourceRef, text: string): void;
+  onDocumentDeleted(ref: ResourceRef): void;
+  onDocumentMoved(from: ResourceRef, to: ResourceRef): void;
+}
+
+let editorBridge: DocumentEditorBridge | null = null;
+
+export function registerDocumentEditorBridge(bridge: DocumentEditorBridge): Unregister {
+  editorBridge = bridge;
+  return () => {
+    if (editorBridge === bridge) editorBridge = null;
+  };
+}
 
 function notifyStore(): void {
   storeVersion++;
@@ -64,6 +80,13 @@ function notify(session: Session, store = true): void {
 
 function msg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function bumpAuthoritative(session: Session, text: string): void {
+  session.authoritativeGeneration++;
+  session.checkpoint = text;
+  session.source?.resetAuthoritative(text);
+  editorBridge?.onAuthoritativeReset(session.ref, text, session.authoritativeGeneration);
 }
 
 export function documentsVersion(): number {
@@ -95,6 +118,7 @@ function snapshotOf(session: Session): ResourceDocumentSnapshot {
     composing: session.composing,
     saveCount: session.saveCount,
     bufferVersion: session.bufferVersion,
+    authoritativeGeneration: session.authoritativeGeneration,
   };
 }
 
@@ -131,6 +155,7 @@ function handleOf(session: Session): ResourceDocumentHandle {
     },
     getBuffer: () => getBuffer(session),
     attachSource: (source) => {
+      if (session.source !== null && session.source !== source) return;
       session.checkpoint = getBuffer(session);
       session.source = source;
     },
@@ -139,12 +164,10 @@ function handleOf(session: Session): ResourceDocumentHandle {
       session.source = null;
     },
     markUserEdit: () => {
-      const wasDirty = session.dirty;
-      session.bufferVersion++;
-      session.dirty = true;
-      if (session.live) session.live = editLiveFile(session.live);
-      armAutosave(session);
-      if (!wasDirty) notify(session);
+      reportUserEdit(session, false);
+    },
+    reportUserEdit: (equivalentToSaved: boolean) => {
+      reportUserEdit(session, equivalentToSaved);
     },
     load: () => loadSession(session),
     setComposing: (composing) => {
@@ -156,11 +179,11 @@ function handleOf(session: Session): ResourceDocumentHandle {
     reload: () => reloadSession(session),
     check: () => checkSession(session),
     discard: () => {
-      session.checkpoint = session.saved;
+      session.saved = session.saved;
       session.dirty = false;
       session.bufferVersion++;
       if (session.live) session.live = restoreLiveFileBuffer(session.live);
-      session.source?.resetAuthoritative(session.saved);
+      bumpAuthoritative(session, session.saved);
       clearAutosave(session);
       notify(session);
     },
@@ -175,11 +198,25 @@ function handleOf(session: Session): ResourceDocumentHandle {
       composing: session.composing,
       readOnly: session.truncated || session.binary,
     }, delayMs),
-    release: () => {
-      session.holds = Math.max(0, session.holds - 1);
-    },
     moveTo: (ref) => moveSession(session, ref),
   };
+}
+
+function reportUserEdit(session: Session, equivalentToSaved: boolean): void {
+  const wasDirty = session.dirty;
+  session.bufferVersion++;
+  if (equivalentToSaved) {
+    if (!wasDirty) return;
+    session.dirty = false;
+    if (session.live) session.live = restoreLiveFileBuffer(session.live);
+    clearAutosave(session);
+    notify(session);
+    return;
+  }
+  session.dirty = true;
+  if (session.live) session.live = editLiveFile(session.live);
+  armAutosave(session);
+  if (!wasDirty) notify(session);
 }
 
 async function loadSession(session: Session): Promise<void> {
@@ -207,6 +244,7 @@ async function loadSession(session: Session): Promise<void> {
       session.error = "";
       session.dirty = false;
       session.bufferVersion++;
+      bumpAuthoritative(session, got.content);
     } catch (err) {
       session.status = "error";
       session.error = msg(err);
@@ -231,7 +269,8 @@ async function saveSession(session: Session, options: { force?: boolean } = {}):
   try {
     const base = options.force ? undefined : session.revision;
     const res = await provider.write(session.ref, content, base);
-    const stillDirty = getBuffer(session) !== content;
+    const current = getBuffer(session);
+    const stillDirty = current !== content;
     session.saved = content;
     session.revision = res.revision;
     session.live = completeLiveFileSave(session.live, res.revision ?? session.revision ?? "", stillDirty);
@@ -239,7 +278,10 @@ async function saveSession(session: Session, options: { force?: boolean } = {}):
     session.error = "";
     session.saveCount++;
     if (stillDirty) armAutosave(session);
-    else clearAutosave(session);
+    else {
+      clearAutosave(session);
+      editorBridge?.onSavedClean(session.ref, content);
+    }
   } catch (err) {
     if (httpStatusOf(err) === 409) {
       session.live = conflictLiveFile(session.live ?? loadedLiveFile(session.revision));
@@ -266,7 +308,7 @@ async function reloadSession(session: Session): Promise<void> {
     session.error = "";
     session.status = "ready";
     session.bufferVersion++;
-    session.source?.resetAuthoritative(got.content);
+    bumpAuthoritative(session, got.content);
     clearAutosave(session);
   } catch (err) {
     session.error = msg(err);
@@ -294,9 +336,11 @@ function moveSession(session: Session, to: ResourceRef): void {
   const fromKey = resourceKey(session.ref);
   const toKey = resourceKey(to);
   if (fromKey === toKey) return;
+  const from = session.ref;
   sessions.delete(fromKey);
   session.ref = to;
   sessions.set(toKey, session);
+  editorBridge?.onDocumentMoved(from, to);
   notify(session);
 }
 
@@ -312,6 +356,7 @@ function ensureSession(ref: ResourceRef): Session {
       binary: false,
       dirty: false,
       bufferVersion: 0,
+      authoritativeGeneration: 0,
       composing: false,
       editing: true,
       error: "",
@@ -319,7 +364,6 @@ function ensureSession(ref: ResourceRef): Session {
       saveCount: 0,
       checkpoint: "",
       source: null,
-      holds: 0,
       autosaveTimer: null,
       loading: null,
       listeners: new Set(),
@@ -331,7 +375,6 @@ function ensureSession(ref: ResourceRef): Session {
 
 export function openDocument(ref: ResourceRef): ResourceDocumentHandle {
   const session = ensureSession(ref);
-  session.holds++;
   const handle = handleOf(session);
   if (session.status === "idle") void handle.load();
   return handle;
@@ -364,6 +407,7 @@ export function deleteDocument(ref: ResourceRef): void {
   if (!session) return;
   clearAutosave(session);
   sessions.delete(key);
+  editorBridge?.onDocumentDeleted(ref);
   notifyStore();
 }
 
@@ -397,6 +441,27 @@ export function resetDocumentsForTest(): void {
   for (const session of sessions.values()) clearAutosave(session);
   sessions.clear();
   storeVersion = 0;
+}
+
+subscribeProviderUnload((scheme) => {
+  for (const session of sessions.values()) {
+    if (session.ref.scheme !== scheme) continue;
+    if (session.dirty) {
+      session.status = "error";
+      session.error = "Provider unavailable";
+      notify(session);
+      continue;
+    }
+    if (session.status === "ready" || session.status === "loading") {
+      session.status = "error";
+      session.error = "Provider unavailable";
+      notify(session);
+    }
+  }
+});
+
+export function documentSessionCount(): number {
+  return sessions.size;
 }
 
 export function fileRef(projectId: string, sessionId: string | null, path: string): ResourceRef {

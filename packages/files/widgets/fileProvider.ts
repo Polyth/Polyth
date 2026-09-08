@@ -1,14 +1,30 @@
 import { api, httpStatusOf } from "@polyth/session/web-api";
-import type { ResourceProvider, ResourceRef } from "@polyth/web-sdk";
-import { registerResourceProvider } from "../../../apps/web/src/resources/providers.ts";
+import type { ResourceKind, ResourceProvider, ResourceRef } from "@polyth/web-sdk";
 
 const baseOf = (path: string) => path.split("/").pop() ?? path;
+
+type MediaKind = "image" | "audio" | "video" | "pdf";
+const MEDIA_EXT: Record<string, MediaKind> = {
+  ".png": "image", ".jpg": "image", ".jpeg": "image", ".gif": "image",
+  ".webp": "image", ".avif": "image", ".bmp": "image", ".ico": "image",
+  ".mp4": "video", ".m4v": "video", ".mov": "video", ".ogv": "video", ".webm": "video",
+  ".aac": "audio", ".flac": "audio", ".m4a": "audio", ".mp3": "audio",
+  ".oga": "audio", ".ogg": "audio", ".wav": "audio", ".weba": "audio",
+  ".pdf": "pdf",
+};
+
+function fileKindOf(path: string): ResourceKind {
+  const ext = path.toLowerCase().match(/\.[^.]+$/)?.[0] ?? "";
+  if (MEDIA_EXT[ext]) return "binary";
+  if (!ext) return "unknown";
+  return "text";
+}
 
 export const fileResourceProvider: ResourceProvider = {
   scheme: "file",
   describe: (ref) => ({
     label: baseOf(ref.locator),
-    kind: "text",
+    kind: fileKindOf(ref.locator),
   }),
   read: async (ref) => {
     const got = await api.filesRead(ref.projectId, ref.locator, ref.sessionId ?? undefined);
@@ -46,5 +62,3 @@ export const fileResourceProvider: ResourceProvider = {
 export function fileRefFrom(projectId: string, sessionId: string | null, path: string): ResourceRef {
   return { scheme: "file", projectId, sessionId, locator: path };
 }
-
-registerResourceProvider(fileResourceProvider);

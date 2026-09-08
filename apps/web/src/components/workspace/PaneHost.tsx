@@ -129,19 +129,24 @@ const PaneHost = forwardRef<PaneHostHandle, PaneHostProps>(function PaneHost(
     setPane((p) => {
       const t = p.tabs.find((x) => x.id === id);
       if (!t) return p;
+      const scope = { projectId, sessionId };
+      const provider = getPaneProvider(t.kind);
       if (!opts.force && isDirty(t)) {
         closed = false;
         void confirmAlert(tr("workspace.panehost.discardUnsavedChangesInValue", { title: t.title }), { title: tr("common.discardChanges"), confirmLabel: tr("common.discard") })
           .then((confirmed) => {
             if (!confirmed) return;
+            provider?.discard?.(scope, t.resource);
+            provider?.close?.(scope, t.resource);
             setPane((current) => closeTab(markDirty(current, id, false), id, { force: true }).state);
           });
         return p;
       }
+      provider?.close?.(scope, t.resource);
       return closeTab(markDirty(p, id, false), id, { force: true }).state;
     });
     return closed;
-  }, [isDirty]);
+  }, [isDirty, projectId, sessionId]);
 
   const openResource = useCallback((kind: string, resource: string, title?: string) => {
     setPane((p) => openTab(p, {

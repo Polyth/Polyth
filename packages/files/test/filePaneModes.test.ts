@@ -65,12 +65,17 @@ const { createRoot } = await import("react-dom/client");
 const { resetDocsForTest } = await import("../widgets/editor/fileDocs.ts");
 const { getEditorPrefs } = await import("../../../apps/web/src/uiPrefs.ts");
 const { registerEditorSurface } = await import("../../../apps/web/src/resources/views.ts");
+const { registerResourceProvider } = await import("../../../apps/web/src/resources/providers.ts");
+const { fileResourceProvider } = await import("../widgets/fileProvider.ts");
 const { default: FilePane } = await import("../widgets/editor/FilePane.tsx");
+
+registerResourceProvider(fileResourceProvider);
 
 registerEditorSurface((props) => createElement("div", {
   className: "editor-code",
   "aria-label": props.ariaLabel,
   "data-path": props.path,
+  "data-group": props.groupId,
 }));
 
 const MouseEventCtor = (dom as unknown as { MouseEvent: typeof MouseEvent }).MouseEvent;
@@ -83,7 +88,9 @@ async function mountFile(path: string) {
   await act(async () => {
     root.render(createElement(FilePane, { projectId: "p1", sessionId: null, resource: path, visible: true }));
   });
-  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  for (let i = 0; i < 8; i++) {
+    await act(async () => { await Promise.resolve(); });
+  }
   return {
     container,
     unmount: async () => {
