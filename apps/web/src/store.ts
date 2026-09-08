@@ -35,6 +35,10 @@ import {
   setWorkbenchProject,
   workbenchCloseSurface,
   workbenchOpenSurface,
+  workbenchEscape,
+  workbenchOutsideClose,
+  workbenchToggleFullscreen,
+  workbenchTogglePin,
 } from "./workbench/store.ts";
 import {
   beginListRequest,
@@ -642,6 +646,11 @@ function applyPaneModeTransition(
   restoreFocus = true,
 ): boolean {
   if (paneSurfaceOf(state.railPlugin) === null) return false;
+  const surfaceId = state.railPlugin;
+  if (transition.type === "toggle-fullscreen") workbenchToggleFullscreen(surfaceId);
+  else if (transition.type === "toggle-pin") workbenchTogglePin(surfaceId);
+  else if (transition.type === "escape") workbenchEscape(surfaceId);
+  else if (transition.type === "outside-close") workbenchOutsideClose(surfaceId);
   const next = transitionPaneWindow(
     { mode: state.paneMode, previousMode: state.panePreviousMode },
     transition,
