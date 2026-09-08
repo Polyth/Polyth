@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { isManagedIsolationBranch } from "@polyth/contracts";
 import { api, errorCodeOf, errorChangesOf, type GitBranches, type GitFileEntry, type GitGraphEntry, type GitStash, type GitStatus, type Worktree } from "@polyth/session/web-api";
 import { layoutGraph, type GraphRow } from "./git/graph.ts";
 import { setGitPrefs, splitDiffRows, useGitPrefs } from "./gitPrefs.ts";
@@ -349,8 +350,8 @@ export default function GitView() {
         api.gitGraph(projectId, GRAPH_PAGE, 0, sessionId ?? undefined),
         api.gitStashes(projectId, sessionId ?? undefined),
       ]);
-      setBranches(nextBranches);
-      setTrees(nextTrees);
+      setBranches({ ...nextBranches, branches: nextBranches.branches.filter((branch) => !isManagedIsolationBranch(branch.remote ? branch.name.slice(branch.remote.length + 1) : branch.name)) });
+      setTrees(nextTrees.filter((tree) => !isManagedIsolationBranch(tree.branch)));
       setGraph(nextGraph);
       setStashes(nextStashes);
       setGraphDone(nextGraph.length < GRAPH_PAGE);
@@ -1160,7 +1161,7 @@ export default function GitView() {
                   </article>
                 ))}
               </div>
-              <Button size="sm" className="git-new-session-btn" iconStart={SessionIcon} onClick={() => openWorktreeSessionDialog(projectId)}>{tr("gitview.newWorktreeSession")}</Button>
+              <Button size="sm" className="git-new-session-btn" iconStart={SessionIcon} onClick={() => openWorktreeSessionDialog(projectId)}>{tr("isolation.workInIsolation")}</Button>
             </section>
           </div>
         </div>

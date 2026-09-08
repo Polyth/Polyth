@@ -448,4 +448,12 @@ export const de: GitMessages = {
   "isolation.missingWorkspace": "Der isolierte Arbeitsbereich ist nicht mehr verfügbar.",
   "isolation.workInIsolation": "Isoliert arbeiten",
   "isolation.workInIsolationHint": "Nutzt einen temporären Git-Arbeitsbereich, der sich nach Abschluss zurückmergen lässt.",
+  "isolation.recoveryNeeded": "Arbeitsbereich muss wiederhergestellt werden",
+  "isolation.restoreOrigin": "Stellen Sie den Checkout von {branch} unter {path} wieder her und versuchen Sie es erneut. Die Sitzung und ihr Verlauf bleiben erhalten.",
+  "isolation.cleanupPendingDetail": "Die Sitzung ist in ihren ursprünglichen Arbeitsbereich zurückgekehrt. Wiederholen Sie die Bereinigung, um den temporären Arbeitsbereich zu entfernen.",
+  "isolation.ownershipUnverified": "Die Eigentümerschaft des isolierten Arbeitsbereichs konnte nicht bestätigt werden",
+  "isolation.ownershipDetail": "Der Arbeitsbereich wurde beibehalten. Stellen Sie seine ursprünglichen Eigentumsmetadaten wieder her, bevor Sie die Wiederherstellung erneut versuchen.",
+  "isolation.retryRecovery": "Wiederherstellung wiederholen",
+  "isolation.nestedUnsupported": "Starten Sie die Isolation aus einer normalen Sitzung oder einem Arbeitsbereich. Verschachtelte Isolation wird nicht unterstützt.",
+  "isolation.finishBeforeDelete": "Führen Sie den isolierten Arbeitsbereich zusammen, verwerfen Sie ihn oder stellen Sie ihn wieder her, bevor Sie diese Sitzung löschen.",
 };

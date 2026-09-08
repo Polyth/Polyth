@@ -162,7 +162,11 @@ export function installShell(): void {
   });
   registerCommand({
     id: "cmd.fork", label: tr("shell.forkSession"), group: tr("shell.session"),
-    when: () => !!getState().activeSessionId,
+    when: () => {
+      const state = getState();
+      const session = state.sessions.find((candidate) => candidate.id === state.activeSessionId);
+      return !!session && !session.isolation;
+    },
     run: () => { const id = getState().activeSessionId; if (id) void forkSession(id); },
   });
   registerCommand({

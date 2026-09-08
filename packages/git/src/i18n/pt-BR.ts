@@ -448,4 +448,12 @@ export const ptBR: GitMessages = {
   "isolation.missingWorkspace": "O espaço isolado não está mais disponível.",
   "isolation.workInIsolation": "Trabalhar em isolamento",
   "isolation.workInIsolationHint": "Usa um espaço Git temporário que pode ser mesclado ao terminar.",
+  "isolation.recoveryNeeded": "É necessário recuperar o espaço de trabalho",
+  "isolation.restoreOrigin": "Restaure a cópia de trabalho de {branch} em {path} e tente novamente. Esta sessão e seu histórico foram preservados.",
+  "isolation.cleanupPendingDetail": "A sessão voltou ao espaço de trabalho original. Repita a limpeza para remover o espaço temporário.",
+  "isolation.ownershipUnverified": "Não foi possível verificar a propriedade do espaço de trabalho isolado",
+  "isolation.ownershipDetail": "O espaço de trabalho foi preservado. Restaure os metadados de propriedade originais antes de repetir a recuperação.",
+  "isolation.retryRecovery": "Tentar recuperação novamente",
+  "isolation.nestedUnsupported": "Inicie o isolamento a partir de uma sessão ou espaço de trabalho normal. O isolamento aninhado não é suportado.",
+  "isolation.finishBeforeDelete": "Integre, descarte ou recupere o espaço isolado antes de excluir esta sessão.",
 };

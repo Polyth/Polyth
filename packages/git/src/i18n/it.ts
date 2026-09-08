@@ -448,4 +448,12 @@ export const it: GitMessages = {
   "isolation.missingWorkspace": "Lo spazio isolato non è più disponibile.",
   "isolation.workInIsolation": "Lavora in isolamento",
   "isolation.workInIsolationHint": "Usa uno spazio Git temporaneo che può essere unito al termine.",
+  "isolation.recoveryNeeded": "È necessario ripristinare lo spazio di lavoro",
+  "isolation.restoreOrigin": "Ripristina la copia di lavoro di {branch} in {path}, poi riprova. La sessione e la sua cronologia sono conservate.",
+  "isolation.cleanupPendingDetail": "La sessione è tornata nello spazio di lavoro originale. Ripeti la pulizia per rimuovere lo spazio temporaneo.",
+  "isolation.ownershipUnverified": "Impossibile verificare la proprietà dello spazio di lavoro isolato",
+  "isolation.ownershipDetail": "Lo spazio di lavoro è stato conservato. Ripristina i metadati di proprietà originali prima di riprovare il ripristino.",
+  "isolation.retryRecovery": "Riprova il ripristino",
+  "isolation.nestedUnsupported": "Avvia l’isolamento da una sessione o da uno spazio di lavoro normale. L’isolamento annidato non è supportato.",
+  "isolation.finishBeforeDelete": "Unisci, scarta o ripristina lo spazio isolato prima di eliminare questa sessione.",
 };

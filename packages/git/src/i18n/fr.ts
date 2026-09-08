@@ -448,4 +448,12 @@ export const fr: GitMessages = {
   "isolation.missingWorkspace": "L’espace isolé n’est plus disponible.",
   "isolation.workInIsolation": "Travailler isolément",
   "isolation.workInIsolationHint": "Utilise un espace Git temporaire qui peut être fusionné une fois terminé.",
+  "isolation.recoveryNeeded": "Le rétablissement de l’espace de travail est nécessaire",
+  "isolation.restoreOrigin": "Rétablissez la copie de travail de {branch} à {path}, puis réessayez. Cette session et son historique sont conservés.",
+  "isolation.cleanupPendingDetail": "La session est revenue dans son espace de travail initial. Relancez le nettoyage pour supprimer l’espace temporaire.",
+  "isolation.ownershipUnverified": "La propriété de l’espace de travail isolé n’a pas pu être vérifiée",
+  "isolation.ownershipDetail": "L’espace de travail a été conservé. Restaurez ses métadonnées de propriété initiales avant de relancer le rétablissement.",
+  "isolation.retryRecovery": "Réessayer le rétablissement",
+  "isolation.nestedUnsupported": "Démarrez l’isolation depuis une session ou un espace de travail normal. L’isolation imbriquée n’est pas prise en charge.",
+  "isolation.finishBeforeDelete": "Fusionnez, abandonnez ou rétablissez l’espace isolé avant de supprimer cette session.",
 };

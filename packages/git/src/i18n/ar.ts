@@ -448,4 +448,12 @@ export const ar: GitMessages = {
   "isolation.missingWorkspace": "المساحة المعزولة لم تعد متاحة.",
   "isolation.workInIsolation": "العمل بمعزل",
   "isolation.workInIsolationHint": "يستخدم مساحة Git مؤقتة يمكن دمجها عند الانتهاء.",
+  "isolation.recoveryNeeded": "يلزم استعادة مساحة العمل",
+  "isolation.restoreOrigin": "استعد نسخة العمل للفرع {branch} في {path}، ثم حاول مجددًا. تم الاحتفاظ بهذه الجلسة وسجلها.",
+  "isolation.cleanupPendingDetail": "عادت الجلسة إلى مساحة العمل الأصلية. أعد التنظيف لإزالة مساحة العمل المؤقتة.",
+  "isolation.ownershipUnverified": "تعذر التحقق من ملكية مساحة العمل المعزولة",
+  "isolation.ownershipDetail": "تم الاحتفاظ بمساحة العمل. استعد بيانات الملكية الأصلية قبل إعادة محاولة الاستعادة.",
+  "isolation.retryRecovery": "إعادة محاولة الاستعادة",
+  "isolation.nestedUnsupported": "ابدأ العزل من جلسة أو مساحة عمل عادية. العزل المتداخل غير مدعوم.",
+  "isolation.finishBeforeDelete": "ادمج مساحة العمل المعزولة أو تجاهلها أو استعدها قبل حذف هذه الجلسة.",
 };

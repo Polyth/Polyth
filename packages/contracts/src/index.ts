@@ -1041,6 +1041,7 @@ export type SessionStatus =
 /** True while a lifecycle mutation (merge/keep/discard/resolve) must wait. */
 export const isolationBlocksUserMutation = (status: SessionStatus): boolean =>
   status === "working"
+  || status === "unknown"
   || status === "waiting"
   || status === "reconciling"
   || status === "epoch-pending"
@@ -1076,6 +1077,10 @@ export type IsolationState =
   | "active"
   | "merge-ready"
   | "merging"
+  | "publishing"
+  | "rebind-pending"
+  | "unowned"
+  | "corrupt"
   | "conflict"
   | "cleanup-pending"
   | "missing";
@@ -1089,6 +1094,10 @@ export interface IsolationPublishIntent {
   resultCommit: string;
   snapshotSha: string;
   targetRef: string;
+  /** Atomic Git receipt, absent only in legacy records. */
+  receiptRef?: string;
+  checkoutPath?: string;
+  sourceRevision?: string;
 }
 
 /**
@@ -1102,27 +1111,101 @@ export interface IsolationPublishIntent {
  * is checked out somewhere; the session never claims that branch while
  * running in a different workspace.
  */
-export interface SessionIsolation {
+export interface IsolationOrigin {
   kind: "git-worktree";
-  state: IsolationState;
   createdAt: string;
   worktreePath: string;
   worktreeBranch: string;
   targetPath: string;
   targetBranch: string;
-  /** Concrete checkout of `targetBranch` the session returns to after merge/discard. */
+  /** Immutable checkout identity. Restore this checkout before recovery. */
   originPath?: string;
   baseCommit: string;
   sourceSessionId?: string;
-  /** Fingerprint of HEAD + dirty tree when the user chose Keep isolated. */
   dismissedRevision?: string;
+}
+
+type IsolationLifecycleFields = {
   conflict?: { message: string; files: string[] };
-  /** Set immediately before CAS/ff publication. Survives a crash across that window. */
   publish?: IsolationPublishIntent;
-  /** Published commit SHA, kept through cleanup-pending for crash recovery. */
   resultCommit?: string;
-  /** True only after session cwd/runtime rebind succeeded. Required before worktree deletion. */
   rebound?: boolean;
+  sourceRevision?: string;
+};
+type IsolationPhase<T extends Partial<IsolationLifecycleFields> & { state: IsolationState }> =
+  T & { [K in Exclude<keyof IsolationLifecycleFields, keyof T>]?: never };
+
+/** Only state-valid recovery payloads can be written. Legacy JSON is normalized on read. */
+export type IsolationLifecycle =
+  | IsolationPhase<{ state: "active" | "merge-ready" | "merging" | "missing" | "unowned" | "corrupt" }>
+  | IsolationPhase<{ state: "conflict"; conflict: { message: string; files: string[] } }>
+  | IsolationPhase<{ state: "publishing"; publish: IsolationPublishIntent }>
+  | IsolationPhase<{ state: "rebind-pending"; resultCommit?: string; sourceRevision?: string; rebound?: false }>
+  | IsolationPhase<{ state: "cleanup-pending"; resultCommit?: string; sourceRevision?: string; rebound: true }>;
+
+export type SessionIsolation = IsolationOrigin & IsolationLifecycle;
+
+/** Replacing a lifecycle always drops fields belonging to the previous phase. */
+export function transitionIsolation(isolation: IsolationOrigin, phase: IsolationLifecycle): SessionIsolation {
+  const { conflict: _conflict, publish: _publish, resultCommit: _result, rebound: _rebound,
+    state: _state, sourceRevision: _revision, ...origin } = isolation as SessionIsolation;
+  return { ...origin, ...phase } as SessionIsolation;
+}
+
+/** Additive, non-destructive normalization of PR #128 records; unknown payloads fail closed. */
+export function normalizeIsolation(value: SessionIsolation): SessionIsolation {
+  const raw = value as IsolationOrigin & IsolationLifecycleFields & { state: string };
+  const corrupt = () => transitionIsolation(value, { state: "corrupt" });
+  if (![raw.createdAt, raw.worktreePath, raw.worktreeBranch, raw.targetPath, raw.targetBranch, raw.baseCommit]
+    .every((part) => typeof part === "string" && part.length > 0)) return corrupt();
+  if (raw.originPath !== undefined && typeof raw.originPath !== "string") return corrupt();
+  if (raw.sourceRevision !== undefined && typeof raw.sourceRevision !== "string") return corrupt();
+  const intent = raw.publish;
+  if (intent) {
+    if (![intent.expectedTargetSha, intent.resultCommit, intent.snapshotSha, intent.targetRef]
+      .every((part) => typeof part === "string" && part.length > 0)) return corrupt();
+    if ([intent.receiptRef, intent.checkoutPath, intent.sourceRevision].some((part) => part !== undefined && (typeof part !== "string" || !part))) return corrupt();
+    if (intent.receiptRef && (!intent.checkoutPath || !intent.sourceRevision)) return corrupt();
+    if ((raw.state !== "merging" && raw.state !== "publishing") || raw.rebound || raw.resultCommit) return corrupt();
+    return transitionIsolation(value, { state: "publishing", publish: intent });
+  }
+  if (raw.state === "publishing") return corrupt();
+  if (raw.state === "cleanup-pending" || raw.state === "rebind-pending") {
+    if (raw.resultCommit !== undefined && typeof raw.resultCommit !== "string") return corrupt();
+    return transitionIsolation(value, raw.rebound === true
+      ? { state: "cleanup-pending", rebound: true, ...(raw.resultCommit ? { resultCommit: raw.resultCommit } : {}), ...(raw.sourceRevision ? { sourceRevision: raw.sourceRevision } : {}) }
+      : { state: "rebind-pending", ...(raw.resultCommit ? { resultCommit: raw.resultCommit } : {}), ...(raw.sourceRevision ? { sourceRevision: raw.sourceRevision } : {}) });
+  }
+  if (raw.resultCommit || raw.rebound !== undefined) return corrupt();
+  if (raw.state === "conflict") {
+    if (!raw.conflict || typeof raw.conflict.message !== "string" || !Array.isArray(raw.conflict.files)
+      || !raw.conflict.files.every((file) => typeof file === "string")) return corrupt();
+    return transitionIsolation(value, { state: "conflict", conflict: raw.conflict });
+  }
+  if (["active", "merge-ready", "merging", "missing", "unowned", "corrupt"].includes(raw.state)) {
+    return transitionIsolation(value, { state: raw.state as "active" | "merge-ready" | "merging" | "missing" | "unowned" | "corrupt" });
+  }
+  return corrupt();
+}
+
+export const isManagedIsolationBranch = (branch?: string | null): boolean =>
+  !!branch && /^polyth\/(isolate|integrate)\//.test(branch.replace(/^refs\/heads\//, ""));
+
+export const isolationNeedsRecovery = (state: IsolationState): boolean =>
+  state === "merging" || state === "publishing" || state === "rebind-pending" || state === "cleanup-pending";
+
+export function isolationActions(status: IsolationStatusDto, sessionStatus?: SessionStatus) {
+  const state = status.effectiveState ?? status.isolation?.state;
+  const blocked = !!sessionStatus && isolationBlocksUserMutation(sessionStatus);
+  const active = state === "active" || state === "merge-ready" || state === "conflict";
+  return {
+    canReview: active,
+    canMerge: active && !blocked && status.suggestion?.hasChanges === true && !status.suggestion.targetDirty && status.suggestion.reason !== "destination-unavailable",
+    canKeep: active && !blocked,
+    canResolve: state === "conflict" && !blocked && status.suggestion?.reason !== "destination-unavailable",
+    canDiscard: (active || state === "missing") && !blocked && status.suggestion?.reason !== "destination-unavailable",
+    needsRecovery: !!state && !blocked && (isolationNeedsRecovery(state) || state === "missing" || state === "unowned" || state === "corrupt"),
+  };
 }
 
 export interface CreateIsolatedSessionInput {
@@ -1151,6 +1234,9 @@ export interface IsolationSuggestionDto {
     | "conflict"
     | "dirty-target"
     | "missing"
+    | "unowned"
+    | "corrupt"
+    | "destination-unavailable"
     | "merging";
 }
 

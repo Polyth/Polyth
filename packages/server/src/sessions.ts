@@ -5,6 +5,7 @@
 // projections; they are not durable history.
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { continuityWorkspace } from "./continuityWorkspace.ts";
 import type {
   AgentProfile, AgentRuntime, AttachmentRef, AttachmentModality, AutoAcceptSetting, CanonicalEventInput, ChildSnapshotResult, ClientSettingsDto, ContextWindowState, CreateSessionInput, DeliveryMode,
@@ -24,7 +25,7 @@ import type {
   FeatureSupport,
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
-import { isolationBlocksUserMutation } from "@polyth/contracts";
+import { isolationBlocksUserMutation, isolationNeedsRecovery, isManagedIsolationBranch, normalizeIsolation, transitionIsolation } from "@polyth/contracts";
 import { isPlaceholderTitle, titleFromPrompt, effectiveAttachmentSupport, attachmentModality } from "@polyth/harness-runtime";
 import type { AutoAcceptStore, PermissionService } from "@polyth/permissions";
 import { resolveAutoAccept } from "@polyth/permissions";
@@ -97,9 +98,9 @@ export interface RuntimePool {
   forSession?(projection: SessionProjection, cwd: string, targetHarnessId?: string): Promise<AgentRuntime>;
   resolve?(projection: SessionProjection, cwd: string, selection: HarnessSelection): Promise<string>;
   forgetSession?(sessionId: string): void;
+  /** Release this canonical session cache; the physical owner protects shared occupancy. */
+  releaseSession?(sessionId: string): Promise<void>;
   forgetRuntime?(runtime: AgentRuntime): void;
-  /** Dispose the facade for one project+cwd so the next lookup starts fresh. */
-  release?(projectId: string, cwd: string): Promise<void>;
   /** Session lease on a shared pool facade. Does not own process disposal. */
   bindSession?(sessionId: string, runtime: AgentRuntime): void;
   unbindSession?(sessionId: string, runtime: AgentRuntime): void;
@@ -312,10 +313,6 @@ export function createSessionService(deps: {
   worktrees?: {
     list(root: string): Promise<Array<{ path: string; branch: string | null }>>;
   };
-  /** Stop shells/watchers whose cwd is about to be deleted. */
-  closeWorkspaceProcesses?: (cwd: string) => Promise<void>;
-  /** Drop the OpenCode facade for a previous session cwd after rebind. */
-  releaseRuntime?: (projectId: string, cwd: string) => Promise<void>;
   /** Agent-profile lookup (WP8) — profiles resolve to explicit model/agent at send time. */
   profiles?: { profileGet(id: string): Promise<AgentProfile | undefined> };
   /** Global behavior instructions (WP9): revision+digest logged before a turn
@@ -455,6 +452,13 @@ export function createSessionService(deps: {
   // through sessionRuntime, so wiring N sessions to a runtime costs a single
   // listener that unwire() disposes once the last session leaves it.
   const runtimeSubs = new Map<AgentRuntime, Disposable[]>();
+  const wireTokens = new Map<string, symbol>();
+  const assertIsolationExecutable = (projection: SessionProjection): void => {
+    const state = projection.isolation ? normalizeIsolation(projection.isolation).state : undefined;
+    if (state && state !== "active" && state !== "merge-ready" && state !== "conflict") {
+      throw Object.assign(new Error("Session isolation needs recovery before workspace execution"), { code: "conflict" });
+    }
+  };
   const lastTurnId = new Map<string, string>();           // sessionId -> active turnId
   // sessions whose turn admission is in flight (startTurn sent, turn/started
   // not yet observed) — a concurrent send must treat these as active
@@ -1968,8 +1972,12 @@ export function createSessionService(deps: {
     runtime: AgentRuntime,
     reason: string,
   ): void => {
+    const token = wireTokens.get(sessionId);
     queueMicrotask(() => {
-      void reconcileUnderLock(sessionId, projection, runtime, reason).catch((error) => {
+      void withSessionLock(sessionId, async () => {
+        if (wireTokens.get(sessionId) !== token) return;
+        await reconcileSession(sessionId, projection, runtime, reason);
+      }).catch((error) => {
         console.error(`[polyth] runtime reconciliation failed for ${sessionId}`, error);
       });
     });
@@ -1978,18 +1986,17 @@ export function createSessionService(deps: {
     const reconciliations: Promise<void>[] = [];
     for (const [sessionId, wired] of sessionRuntime) {
       if (wired !== runtime) continue;
-      const projection = await store.projection(sessionId);
-      if (projection) {
-        reconciliations.push((async () => {
-          await reconcileUnderLock(
-            sessionId,
-            projection,
-            runtime,
-            "runtime-generation-replaced",
-          );
+      const token = wireTokens.get(sessionId);
+      reconciliations.push((async () => {
+        await withSessionLock(sessionId, async () => {
+          if (sessionRuntime.get(sessionId) !== runtime || wireTokens.get(sessionId) !== token) return;
+          const projection = await store.projection(sessionId);
+          if (projection) await reconcileSession(sessionId, projection, runtime, "runtime-generation-replaced");
+        });
+        if (sessionRuntime.get(sessionId) === runtime && wireTokens.get(sessionId) === token) {
           await recoverOwnedEpochIfPending(sessionId);
-        })());
-      }
+        }
+      })());
     }
     await settleAllOrThrow(reconciliations);
   });
@@ -3041,8 +3048,9 @@ export function createSessionService(deps: {
   const wire = (sessionId: string, rt: AgentRuntime) => {
     if (sessionRuntime.has(sessionId)) return;
     materializationFailures.delete(sessionId);
-    sessionRuntime.set(sessionId, rt);
     runtimes.bindSession?.(sessionId, rt);
+    sessionRuntime.set(sessionId, rt);
+    wireTokens.set(sessionId, Symbol());
     if (runtimeSubs.has(rt)) return;
     const subscriptions: Disposable[] = [];
     subscriptions.push(rt.onEvent((sid, ev) => {
@@ -3051,14 +3059,16 @@ export function createSessionService(deps: {
       if (sessionRuntime.get(sid) !== rt) return;
       // Serialize each canonical session: a terminal turn/stopped can never be
       // overwritten by an older usage or chunk projection update.
-      void withSessionLock(sid, async () => { if (sessionRuntime.get(sid) === rt) await onRuntimeEvent(sid, ev); }).catch((err) => {
+      const token = wireTokens.get(sid);
+      void withSessionLock(sid, async () => { if (sessionRuntime.get(sid) === rt && wireTokens.get(sid) === token) await onRuntimeEvent(sid, ev); }).catch((err) => {
         console.error(`[polyth] runtime event handling failed for ${sid}`, err);
       });
     }));
     if (rt.onObservation) {
       subscriptions.push(rt.onObservation((sid, observation) => {
         if (sessionRuntime.get(sid) !== rt) return;
-        void withSessionLock(sid, async () => { if (sessionRuntime.get(sid) === rt) await ingestRuntimeObservation(sid, observation); }).catch((err) => {
+        const token = wireTokens.get(sid);
+        void withSessionLock(sid, async () => { if (sessionRuntime.get(sid) === rt && wireTokens.get(sid) === token) await ingestRuntimeObservation(sid, observation); }).catch((err) => {
           console.error(`[polyth] runtime observation handling failed for ${sid}`, err);
         });
       }));
@@ -3070,11 +3080,14 @@ export function createSessionService(deps: {
           && notification.type !== "endpoint-replaced") return;
         for (const [sid, wired] of sessionRuntime) {
           if (wired !== rt) continue;
+          const token = wireTokens.get(sid);
           void (async () => {
-            const projection = await store.projection(sid);
-            if (!projection) return;
-            await reconcileUnderLock(sid, projection, rt, notification.type);
-            await recoverOwnedEpochIfPending(sid);
+            await withSessionLock(sid, async () => {
+              if (sessionRuntime.get(sid) !== rt || wireTokens.get(sid) !== token) return;
+              const projection = await store.projection(sid);
+              if (projection) await reconcileSession(sid, projection, rt, notification.type);
+            });
+            if (sessionRuntime.get(sid) === rt && wireTokens.get(sid) === token) await recoverOwnedEpochIfPending(sid);
           })().catch((err) => {
             console.error(`[polyth] runtime lifecycle reconciliation failed for ${sid}`, err);
           });
@@ -3089,8 +3102,9 @@ export function createSessionService(deps: {
     materializationFailures.delete(sessionId);
     const rt = sessionRuntime.get(sessionId);
     if (!rt) return;
-    sessionRuntime.delete(sessionId);
     runtimes.unbindSession?.(sessionId, rt);
+    sessionRuntime.delete(sessionId);
+    wireTokens.delete(sessionId);
     clearSessionToolWatchdogs(sessionId);
     turnReply.delete(sessionId);
     behaviorLogged.delete(sessionId);
@@ -3359,6 +3373,7 @@ export function createSessionService(deps: {
   ): Promise<{ proj: SessionProjection; events: SessionEvent[] }> => {
     const proj = await store.projection(sessionId);
     if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+    assertIsolationExecutable(proj);
     if (proj.status === "archived") {
       throw Object.assign(new Error("unavailable while the session is archived"), { code: "conflict" });
     }
@@ -3911,6 +3926,7 @@ export function createSessionService(deps: {
         if (deps.isShuttingDown?.() || deps.admission?.fenced()) return;
         if (turnActive(sessionId)) return;
         if (!proj || proj.harnessTransition || proj.status !== "idle") return;
+        assertIsolationExecutable(proj);
         const reconciliation = await durable.reconciliation(sessionId);
         if (reconciliation?.state === "reconciling"
           || reconciliation?.state === "blocked"
@@ -4243,6 +4259,7 @@ export function createSessionService(deps: {
   ): Promise<SendResult> =>
     withSessionLock(sessionId, async () => {
       let current = (await store.projection(sessionId)) ?? proj;
+      assertIsolationExecutable(current);
       const active = turnActive(sessionId);
       if (current.harnessTransition) {
         current = await finishHarnessSwitchUnderLock(sessionId);
@@ -4580,6 +4597,77 @@ export function createSessionService(deps: {
       reset = (await durable.operation(reset.operationId))!;
     }
     return reset;
+  };
+
+  const workspaceCreateIntent = async (sessionId: string, operation: DurableOperation, cwd: string) => {
+    if (operation.mutationKind !== "session-create") return undefined;
+    const event = (await store.events(sessionId)).find(event => event.seq === operation.ownerEventSeq);
+    const data = event?.data as { reason?: string; cwd?: string; authorityId?: string; generation?: number } | undefined;
+    return event?.type === "session/native-create-requested" && data?.reason === "workspace-rebind"
+      && data.cwd === cwd ? data : undefined;
+  };
+
+  /** Definitive initial-create rejection owns no native execution. Retry its
+   * first binding at the destination, preserving the canonical session/log. */
+  const createWorkspaceBindingUnderLock = async (projection: SessionProjection, runtime: AgentRuntime, cwd: string) => {
+    const sessionId = projection.id;
+    if (projection.backendSessionId || projection.runtimeBinding) {
+      throw Object.assign(new Error("Incomplete native binding requires reconciliation before workspace recovery"), { code: "binding-mismatch" });
+    }
+    const endpoint = await runtime.endpoint?.();
+    if (runtime.endpoint && (!endpoint || resolve(endpoint.location.directory) !== resolve(cwd))) {
+      throw Object.assign(new Error("Runtime endpoint does not match the destination workspace"), { code: "binding-mismatch" });
+    }
+    let operation = (await durable.operations(sessionId)).filter(op => op.mutationKind === "session-create")
+      .sort((a, b) => b.ordinal - a.ordinal)[0];
+    const intent = operation && await workspaceCreateIntent(sessionId, operation, cwd);
+    if (operation?.state === "prepared" && intent
+      && (intent.authorityId !== endpoint?.authorityId || intent.generation !== endpoint?.generation)) {
+      const stale = operation;
+      operation = await broadcastTail(sessionId, () => durable.settleOperation(stale.operationId, {
+        kind: "rejected", code: "endpoint-replaced-before-create", message: "Destination endpoint changed before native creation was claimed",
+      }));
+    }
+    if (operation && (operation.state === "rejected" || operation.state === "not-applied")) {
+      operation = (await broadcastTail(sessionId, () => durable.prepareOperation({
+        sessionId, mutationKind: "session-create",
+        intentEvent: { type: "session/native-create-requested", ignorable: true, data: {
+          reason: "workspace-rebind", cwd,
+          ...(endpoint ? { authorityId: endpoint.authorityId, generation: endpoint.generation } : {}),
+        } },
+      }))).operation;
+    } else if (!operation || !intent || (operation.state !== "prepared" && operation.state !== "confirmed")
+      || intent.authorityId !== endpoint?.authorityId || intent.generation !== endpoint?.generation) {
+      throw Object.assign(new Error("Initial native creation requires reconciliation before workspace recovery"), { code: "outcome-unknown" });
+    }
+    if (operation.state === "prepared") {
+      const request = { sessionId, projectId: projection.projectId, title: projection.title, cwd,
+        ...(projection.model ? { model: projection.model } : {}), ...(projection.agent ? { agent: projection.agent } : {}) };
+      const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(operation,
+        id => runtime.createSessionOperation ? runtime.createSessionOperation(request, id) : runtime.ensureSession(request),
+        backendSessionId => ({ backendSessionId }),
+        result => settleOperation(operation!, result.kind === "confirmed" ? { ...result, receipt: result.value.backendSessionId } : result));
+      if (outcome.kind !== "confirmed") {
+        await updateProjection(sessionId, { status: outcome.kind === "unknown" ? "unknown" : "failed" });
+        throw outcomeError(outcome);
+      }
+      operation = (await durable.operation(operation.operationId))!;
+    }
+    if (!operation.receipt) throw Object.assign(new Error("Native creation has no confirmed receipt"), { code: "outcome-unknown" });
+    await updateProjection(sessionId, {
+      backendSessionId: operation.receipt,
+      runtimeBinding: await newRuntimeBinding(runtime, operation.receipt, cwd, "empty"),
+      ...(runtime.harnessId ? { resolvedHarnessId: runtime.harnessId } : {}),
+      status: "reconciling",
+    });
+    const bound = await store.projection(sessionId);
+    if (!bound) throw Object.assign(new Error("session not found"), { code: "not-found" });
+    wire(sessionId, runtime);
+    if (runtime.reconcile) await reconcileSession(sessionId, bound, runtime, "workspace-native-created", operation.operationId);
+    else if (!runtime.endpoint) await updateProjection(sessionId, { status: "idle" });
+    const ready = (await store.projection(sessionId))!;
+    if (ready.status !== "idle") throw Object.assign(new Error("Destination native session is not reconciled idle"), { code: "outcome-unknown" });
+    return ready;
   };
 
   const establishFreshRuntimeEpochUnderLock = async (
@@ -5173,6 +5261,7 @@ export function createSessionService(deps: {
       return withSessionLock(sessionId, async () => {
         let projection = await store.projection(sessionId);
         if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        assertIsolationExecutable(projection);
         if (deps.isShuttingDown?.() && !projection.harnessTransition) {
           throw Object.assign(new Error("harness switching is fenced for shutdown"), {
             code: "shutting_down",
@@ -5392,7 +5481,17 @@ export function createSessionService(deps: {
         if (!worktree) {
           throw Object.assign(new Error("worktree does not belong to this project"), { code: "invalid-input" });
         }
+        if (isManagedIsolationBranch(worktree.branch) && !input.isolation) {
+          throw Object.assign(new Error("Managed isolation workspaces belong to their canonical session"), { code: "conflict" });
+        }
         input = { ...input, worktreePath: worktree.path };
+      }
+      if (input.worktreePath) {
+        const owner = (await store.projections(input.projectId)).find(projection => projection.isolation
+          && resolve(projection.isolation.worktreePath) === resolve(input.worktreePath!));
+        if (owner && owner.id !== input.id) {
+          throw Object.assign(new Error("Managed isolation workspaces belong to their canonical session"), { code: "conflict" });
+        }
       }
       const sessionId = input.id?.trim() || randomUUID();
       if (input.id) {
@@ -5521,6 +5620,7 @@ export function createSessionService(deps: {
     async send(sessionId, input: UserTurnInput): Promise<SendResult> {
       let proj = await store.projection(sessionId);
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      assertIsolationExecutable(proj);
       if (input.autoResume !== true) await clearResume(sessionId, "user");
       let stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
       const delivery: DeliveryMode = input.delivery ?? "normal";
@@ -6141,6 +6241,7 @@ export function createSessionService(deps: {
     async fork(sessionId, atSeq): Promise<ForkResult> {
       return withSessionLock(sessionId, async () => {
         const { proj, events } = await assertMutable(sessionId);
+        if (proj.isolation) throw Object.assign(new Error("Merge or discard isolation before forking its workspace"), { code: "conflict" });
         const eff = effectiveHistory(events);
         let draft: ForkDraft | undefined;
         let prefix: SessionEvent[];
@@ -6355,38 +6456,41 @@ export function createSessionService(deps: {
     },
 
     async runShell(sessionId, command) {
-      const proj = await store.projection(sessionId);
-      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
-      if (!deps.shell) throw Object.assign(new Error("composer shell unavailable"), { code: "unsupported" });
-      if (turnActive(sessionId) || proj.status === "working" || proj.status === "waiting") {
-        throw Object.assign(new Error("cannot run a composer shell command during an active turn"), { code: "conflict" });
-      }
-      const cmd = command.trim();
-      if (!cmd || cmd.length > 8_000 || cmd.includes("\0")) {
-        throw Object.assign(new Error("shell command required (≤8000 chars)"), { code: "invalid-input" });
-      }
-      const callId = `shell_${randomUUID()}`;
-      const verdict = permissions.evaluate("shell", [cmd], proj.projectId, sessionId);
-      if (verdict === "deny") {
-        await finishShell(sessionId, proj, cmd, callId, true);
-        return { callId, status: "rejected" };
-      }
-      if (verdict === "ask") {
-        const requestId = `per_${randomUUID()}`;
-        await appendAndBroadcast(sessionId, "permission/requested", {
-          requestId,
-          permission: "shell",
-          patterns: [cmd],
-          tool: "shell",
-          callId,
-          preview: buildPermissionPreview({ permission: "shell", patterns: [cmd], tool: "shell" }) as unknown as JsonObject,
-          allowedScopes: [...PERMISSION_ALLOWED_SCOPES],
-        }, { ignorable: true, producerPlugin: "composer-shell" });
-        await updateProjection(sessionId, { status: "waiting" });
-        return { callId, requestId, status: "pending" };
-      }
-      await finishShell(sessionId, proj, cmd, callId);
-      return { callId, status: "completed" };
+      return withSessionLock(sessionId, async () => {
+        const proj = await store.projection(sessionId);
+        if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        assertIsolationExecutable(proj);
+        if (!deps.shell) throw Object.assign(new Error("composer shell unavailable"), { code: "unsupported" });
+        if (turnActive(sessionId) || proj.status === "working" || proj.status === "waiting") {
+          throw Object.assign(new Error("cannot run a composer shell command during an active turn"), { code: "conflict" });
+        }
+        const cmd = command.trim();
+        if (!cmd || cmd.length > 8_000 || cmd.includes("\0")) {
+          throw Object.assign(new Error("shell command required (≤8000 chars)"), { code: "invalid-input" });
+        }
+        const callId = `shell_${randomUUID()}`;
+        const verdict = permissions.evaluate("shell", [cmd], proj.projectId, sessionId);
+        if (verdict === "deny") {
+          await finishShell(sessionId, proj, cmd, callId, true);
+          return { callId, status: "rejected" };
+        }
+        if (verdict === "ask") {
+          const requestId = `per_${randomUUID()}`;
+          await appendAndBroadcast(sessionId, "permission/requested", {
+            requestId,
+            permission: "shell",
+            patterns: [cmd],
+            tool: "shell",
+            callId,
+            preview: buildPermissionPreview({ permission: "shell", patterns: [cmd], tool: "shell" }) as unknown as JsonObject,
+            allowedScopes: [...PERMISSION_ALLOWED_SCOPES],
+          }, { ignorable: true, producerPlugin: "composer-shell" });
+          await updateProjection(sessionId, { status: "waiting" });
+          return { callId, requestId, status: "pending" };
+        }
+        await finishShell(sessionId, proj, cmd, callId);
+        return { callId, status: "completed" };
+      });
     },
 
     async archive(sessionId) {
@@ -6417,6 +6521,7 @@ export function createSessionService(deps: {
       return withSessionLock(sessionId, async () => {
         const proj = await store.projection(sessionId);
         if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        if (proj.isolation) throw Object.assign(new Error("Merge or discard isolation before deleting the session"), { code: "conflict" });
         const active = turnActive(sessionId);
         const project = await projects.get(proj.projectId);
         const cwd = proj.worktreePath ?? project?.path ?? process.cwd();
@@ -6606,35 +6711,56 @@ export function createSessionService(deps: {
       // session-lifetime; remove on worktree deletion (this is the hook).
       const missingPath = resolve(worktreePath);
       for (const projection of await store.projections(projectId)) {
-        if (!projection.worktreePath || resolve(projection.worktreePath) !== missingPath) continue;
-        const next: SessionProjection = {
-          ...projection,
-          worktreeState: "missing",
-          updatedAt: Date.now(),
-          ...(projection.isolation
-            ? { isolation: { ...projection.isolation, state: "missing" as const } }
-            : {}),
-        };
-        await store.upsertProjection(next);
-        publishProjection(next);
+        await withSessionLock(projection.id, async () => {
+          await applyProjection(projection.id, current => {
+            if (!current.worktreePath || resolve(current.worktreePath) !== missingPath) return current;
+            const isolation = current.isolation && normalizeIsolation(current.isolation);
+            return {
+              ...current,
+              worktreeState: "missing",
+              updatedAt: Date.now(),
+              ...(current.isolation
+                ? { isolation: isolation?.state === "corrupt" || isolationNeedsRecovery(isolation!.state)
+                    ? current.isolation
+                    : transitionIsolation(current.isolation, { state: "missing" }) }
+                : {}),
+            };
+          });
+        });
       }
     },
 
     async patchIsolation(sessionId, isolation) {
-      const next = await applyProjection(sessionId, (current) => {
-        const patched: SessionProjection = { ...current, updatedAt: Date.now() };
-        if (isolation) patched.isolation = isolation;
-        else delete patched.isolation;
-        return patched;
+      return withSessionLock(sessionId, async () => {
+        const next = await applyProjection(sessionId, (current) => {
+          const normalized = current.isolation && normalizeIsolation(current.isolation);
+          if (normalized?.state === "corrupt" && !isDeepStrictEqual(normalized, current.isolation)
+            && !isDeepStrictEqual(current.isolation, isolation)) {
+            throw Object.assign(new Error("Corrupt isolation evidence requires explicit repair"), { code: "conflict" });
+          }
+          if (isolation && isolationNeedsRecovery(isolation.state)
+            && !isolationNeedsRecovery(current.isolation?.state ?? "active")
+            && (turnActive(sessionId) || isolationBlocksUserMutation(current.status))) {
+            throw Object.assign(new Error("cannot start isolation transition during an active session"), { code: "conflict" });
+          }
+          const patched: SessionProjection = { ...current, updatedAt: Date.now() };
+          if (isolation) patched.isolation = isolation;
+          else delete patched.isolation;
+          return patched;
       });
       if (!next) throw Object.assign(new Error("session not found"), { code: "not-found" });
       return next;
+      });
     },
 
     async rebindWorkspace(sessionId, input) {
       return withSessionLock(sessionId, async () => {
         const projection = await store.projection(sessionId);
         if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        const normalized = projection.isolation && normalizeIsolation(projection.isolation);
+        if (normalized?.state === "corrupt" && !isDeepStrictEqual(normalized, projection.isolation)) {
+          throw Object.assign(new Error("Corrupt isolation evidence requires explicit repair"), { code: "conflict" });
+        }
         if (projection.status === "archived") {
           throw Object.assign(new Error("unavailable while the session is archived"), { code: "conflict" });
         }
@@ -6649,14 +6775,18 @@ export function createSessionService(deps: {
             ? input.worktreePath
             : previousCwd;
         const alreadyAtDest = !!previousCwd && !!destCwd && resolve(previousCwd) === resolve(destCwd);
+        const blocker = await blockingOperation(sessionId);
+        if (blocker && !(blocker.state === "prepared" && !projection.backendSessionId && destCwd
+          && await workspaceCreateIntent(sessionId, blocker, destCwd))) {
+          throw Object.assign(new Error("Reconcile the previous execution before releasing its workspace"), { code: "outcome-unknown" });
+        }
         if (!alreadyAtDest && previousCwd) {
-          if (deps.closeWorkspaceProcesses) {
-            await deps.closeWorkspaceProcesses(previousCwd);
-          }
+          const harnessId = projection.resolvedHarnessId ?? sessionRuntime.get(sessionId)?.harnessId;
           unwire(sessionId);
-          if (deps.releaseRuntime) {
-            await deps.releaseRuntime(projection.projectId, previousCwd);
-          }
+          await runtimes.releaseSession?.(sessionId);
+          if (harnessId) await deps.onHarnessTargetReleased?.({
+            sessionId, projectId: projection.projectId, cwd: previousCwd, harnessId,
+          });
         }
         const next = await applyProjection(sessionId, (current) => {
           const patched: SessionProjection = {
@@ -6683,9 +6813,30 @@ export function createSessionService(deps: {
         if (!next) throw Object.assign(new Error("session not found"), { code: "not-found" });
         const cwd = next.worktreePath ?? project?.path ?? process.cwd();
         const runtime = await runtimeFor(next, cwd);
+        if (!next.backendSessionId || !next.runtimeBinding) {
+          return createWorkspaceBindingUnderLock(next, runtime, cwd);
+        }
+        if (next.runtimeBinding && !runtime.endpoint && !next.runtimeBinding.authorityId.startsWith("legacy:")) {
+          throw Object.assign(new Error("Runtime cannot verify the persisted workspace binding"), { code: "binding-mismatch" });
+        }
+        // A crash after epoch publication must not reset the native session twice.
+        if (alreadyAtDest && next.backendSessionId && next.runtimeBinding
+          && resolve(next.runtimeBinding.location.directory) === resolve(cwd)) {
+          await ensureWired(sessionId, next);
+          const ready = await store.projection(sessionId);
+          if (ready?.status !== "idle") throw Object.assign(new Error("Destination session is not reconciled idle"), { code: "outcome-unknown" });
+          return ready;
+        }
+        if (next.runtimeBinding && next.backendSessionId && runtime.endpoint
+          && !runtime.resetSessionOperation && !runtime.resetSession) {
+          throw Object.assign(new Error("Runtime cannot establish a fresh workspace session"), { code: "unsupported" });
+        }
         if (next.runtimeBinding && next.backendSessionId && (runtime.resetSessionOperation || runtime.resetSession)) {
           try {
             const endpoint = await (runtime as ReliabilityRuntime).endpoint?.();
+            if (runtime.endpoint && (!endpoint || resolve(endpoint.location.directory) !== resolve(cwd))) {
+              throw Object.assign(new Error("Runtime endpoint does not match the destination workspace"), { code: "binding-mismatch" });
+            }
             if (endpoint) {
               const reset = await prepareFreshEpochResetUnderLock(sessionId, next, runtime, endpoint, cwd);
               await transitionRuntimeEpochUnderLock(sessionId, runtime, {
@@ -6700,6 +6851,13 @@ export function createSessionService(deps: {
             console.error(`[polyth] isolation session-rebind epoch failed for ${sessionId}`, error);
             throw error;
           }
+        }
+        if (!runtime.endpoint) {
+          if (next.backendSessionId) await updateProjection(sessionId, {
+            runtimeBinding: await newRuntimeBinding(runtime, next.backendSessionId, cwd,
+              next.runtimeBinding?.historyBaseline, (next.runtimeBinding?.epoch ?? 0) + 1),
+          });
+          wire(sessionId, runtime);
         }
         return (await store.projection(sessionId)) ?? next;
       });

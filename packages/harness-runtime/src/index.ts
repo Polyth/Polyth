@@ -286,6 +286,7 @@ type HarnessCacheEntry = {
     sessionId: string;
     pending: Promise<AgentRuntime>;
     runtime?: AgentRuntime;
+    releasing?: Promise<void>;
 };
 
 const harnessCacheKey = (
@@ -302,10 +303,36 @@ export function createHarnessPool(options: {
     legacyHarnessId: string;
     /** Runs before a new runtime is constructed. Provisioning uses this hook. */
     beforeCreate?: (provider: HarnessProvider, context: HarnessContext) => Promise<void>;
+    /** Physical owner may retain a shared runtime with other bindings/executions. */
+    releaseRuntime?: (runtime: AgentRuntime, dispose: () => Promise<void>) => Promise<void>;
 }) {
     const cached = new Map<string, HarnessCacheEntry>();
+    const disposals = new WeakMap<AgentRuntime, Promise<void>>();
+    const disposeOnce = (runtime: AgentRuntime): Promise<void> => {
+        let pending = disposals.get(runtime);
+        if (!pending) {
+            // Start synchronously: a shared owner's occupancy check and fence
+            // must not be separated by a microtask that admits a new binding.
+            pending = (async () => runtime.dispose())();
+            disposals.set(runtime, pending);
+        }
+        return pending;
+    };
+    const available = async (entry: HarnessCacheEntry): Promise<AgentRuntime> => {
+        const runtime = await entry.pending;
+        if (entry.releasing) {
+            await entry.releasing;
+            throw harnessError("runtime-unavailable", "Session runtime was released; retry with the current workspace");
+        }
+        return runtime;
+    };
     const get = async (context: HarnessContext, provider: HarnessProvider) => {
         const sessionId = context.sessionId ?? "";
+        const releasing = [...cached.values()].find(entry => entry.sessionId === sessionId && entry.releasing);
+        if (releasing) {
+            await releasing.releasing;
+            throw harnessError("runtime-unavailable", "Session runtime release is pending; retry with the current workspace");
+        }
         const key = harnessCacheKey(context.spaceId, context.projectId, context.cwd, sessionId, provider.descriptor.id);
         let entry = cached.get(key);
         if (!entry) {
@@ -313,6 +340,7 @@ export function createHarnessPool(options: {
             created.pending = (async () => {
                 await options.beforeCreate?.(provider, context);
                 const runtime = await provider.createRuntime(context);
+                if (disposals.has(runtime)) throw harnessError("runtime-unavailable", "Provider returned a released runtime");
                 Object.defineProperty(runtime, "harnessId", { value: provider.descriptor.id, configurable: true });
                 if (cached.get(key) === created) created.runtime = runtime;
                 return runtime;
@@ -321,7 +349,7 @@ export function createHarnessPool(options: {
             cached.set(key, entry);
             created.pending.catch(() => { if (cached.get(key) === created) cached.delete(key); });
         }
-        return entry.pending;
+        return available(entry);
     };
     return {
         async forProject(projectId: string, cwd?: string) {
@@ -337,8 +365,7 @@ export function createHarnessPool(options: {
             // engine or prevent the provider from reconciling/releasing that state.
             if (existingId) {
                 const existing = cached.get(harnessCacheKey(context.spaceId, context.projectId, context.cwd, context.sessionId ?? "", existingId));
-                if (existing)
-                    return existing.pending;
+                if (existing) return available(existing);
                 const provider = options.registry.providers().find((p) => p.descriptor.id === existingId);
                 if (!provider)
                     throw harnessError("runtime-unavailable", `Harness ${existingId} is not registered`);
@@ -369,9 +396,36 @@ export function createHarnessPool(options: {
             const context = { ...await options.context(projection.projectId, cwd, projection.id), model: projection.model };
             return (await options.registry.resolve(context, selection, projection.resolvedHarnessId)).descriptor.id;
         },
+        async releaseSession(sessionId: string) {
+            const entries = [...cached].filter(([, entry]) => entry.sessionId === sessionId);
+            const results = await Promise.allSettled(entries.map(([key, entry]) => {
+                entry.releasing ??= (async () => {
+                    const runtime = entry.runtime ?? await entry.pending;
+                    // Cached canonical sessions are leases even for providers
+                    // without an additional physical occupancy controller.
+                    let others: HarnessCacheEntry[];
+                    do {
+                        others = [...cached.values()].filter(other => other.sessionId !== sessionId && !other.releasing);
+                        await Promise.all(others.map(other => other.pending.catch(() => undefined)));
+                        // A lookup may have arrived while construction settled.
+                        // Include it before deciding this is the last lease.
+                    } while ([...cached.values()].some(other => other.sessionId !== sessionId
+                        && !other.releasing && !others.includes(other)));
+                    if (!others.some(other => other.runtime === runtime)) {
+                        if (options.releaseRuntime) await options.releaseRuntime(runtime, () => disposeOnce(runtime));
+                        else await disposeOnce(runtime);
+                    }
+                    if (cached.get(key) === entry) cached.delete(key);
+                })();
+                // Failed disposal deliberately keeps the source cache fenced.
+                return entry.releasing;
+            }));
+            const errors = results.flatMap(result => result.status === "rejected" ? [result.reason] : []);
+            if (errors.length) throw new AggregateError(errors, "session runtime release failed");
+        },
         forgetSession(sessionId: string) {
             for (const [key, entry] of cached) {
-                if (entry.sessionId === sessionId) cached.delete(key);
+                if (entry.sessionId === sessionId && !entry.releasing) cached.delete(key);
             }
         },
         forgetRuntime(runtime: AgentRuntime) {
@@ -385,7 +439,7 @@ export function createHarnessPool(options: {
                 const runtime = entry.runtime ?? await entry.pending;
                 if (seen.has(runtime)) return;
                 seen.add(runtime);
-                await runtime.dispose();
+                await disposeOnce(runtime);
             });
             cached.clear();
             const results = await Promise.allSettled(jobs);

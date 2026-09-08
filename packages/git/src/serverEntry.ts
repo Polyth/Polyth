@@ -1,3 +1,4 @@
+import { readManagedMarker, isManagedBranch } from "./managedWorktrees.ts";
 import { posix, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import type {
@@ -264,7 +265,13 @@ export function gitRoutes(deps: {
     }
     if (path === "/api/worktrees" && method === "GET") {
       const root = await projectRootOf(query("projectId"));
-      json(200, (await git.isRepo(root)) ? await git.worktrees.list(root) : []);
+      const worktrees = (await git.isRepo(root)) ? await git.worktrees.list(root) : [];
+      const visible = await Promise.all(worktrees.map(async (worktree) => {
+        if (isManagedBranch(worktree.branch)) return null;
+        const marker = await readManagedMarker(git, worktree.path);
+        return marker ? null : worktree;
+      }));
+      json(200, visible.filter((worktree) => worktree !== null));
       return true;
     }
 
@@ -403,6 +410,13 @@ export function gitRoutes(deps: {
         return true;
       case "/api/worktrees/remove": {
         const worktreePath = String(input.path ?? "");
+        const sessions = await deps.sessions.list(projectId);
+        if (sessions.some((session) => session.isolation && resolve(session.isolation.worktreePath) === resolve(worktreePath))) {
+          throw Object.assign(new Error("Merge back or discard the isolated session before removing its workspace."), { code: "conflict" });
+        }
+        if (await readManagedMarker(git, worktreePath)) {
+          throw Object.assign(new Error("Managed workspaces must be removed through their session lifecycle."), { code: "conflict" });
+        }
         const deleteBranch = input.deleteBranch === true;
         const force = input.force === true;
         const ownedBranch = deleteBranch
@@ -478,6 +492,10 @@ export function isolationRoutes(deps: {
       return true;
     }
     if (method !== "POST") return false;
+    if (action === "recover") {
+      json(200, await isolation.recover(sessionId));
+      return true;
+    }
     if (action === "merge") {
       json(200, await isolation.mergeBack(sessionId));
       return true;
@@ -533,6 +551,7 @@ export const GIT_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["POST"], path: "/api/isolation/:sessionId/merge", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/isolation/:sessionId/keep", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/isolation/:sessionId/discard", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/isolation/:sessionId/recover", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/isolation/:sessionId/resolve", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
   ],
 };
@@ -576,7 +595,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         sessions: host.sessions,
         projects: host.projects,
         append,
-        commitMessage,
+        readEvents: (sessionId) => host.sessions.events(sessionId),
         closeWorkspaceProcesses: async (cwd) => {
           const terminals = host.services.get<{ closeByCwd(path: string): Promise<void> }>(
             serverServiceKey("terminal"),

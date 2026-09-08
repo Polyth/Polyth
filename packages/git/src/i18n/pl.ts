@@ -448,4 +448,12 @@ export const pl: GitMessages = {
   "isolation.missingWorkspace": "Izolowana przestrzeń nie jest już dostępna.",
   "isolation.workInIsolation": "Pracuj w izolacji",
   "isolation.workInIsolationHint": "Używa tymczasowej przestrzeni Git, którą można scalić po zakończeniu.",
+  "isolation.recoveryNeeded": "Obszar roboczy wymaga odzyskania",
+  "isolation.restoreOrigin": "Przywróć kopię roboczą gałęzi {branch} w {path}, a następnie spróbuj ponownie. Sesja i jej historia zostały zachowane.",
+  "isolation.cleanupPendingDetail": "Sesja wróciła do pierwotnego obszaru roboczego. Ponów czyszczenie, aby usunąć obszar tymczasowy.",
+  "isolation.ownershipUnverified": "Nie udało się potwierdzić własności izolowanego obszaru roboczego",
+  "isolation.ownershipDetail": "Obszar roboczy został zachowany. Przywróć oryginalne metadane własności przed ponowieniem odzyskiwania.",
+  "isolation.retryRecovery": "Ponów odzyskiwanie",
+  "isolation.nestedUnsupported": "Rozpocznij izolację ze zwykłej sesji lub obszaru roboczego. Zagnieżdżona izolacja nie jest obsługiwana.",
+  "isolation.finishBeforeDelete": "Scal, odrzuć lub odzyskaj izolowany obszar przed usunięciem tej sesji.",
 };

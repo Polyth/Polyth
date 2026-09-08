@@ -186,3 +186,71 @@ test("execution resolution refines unknown readiness without probing native deta
     );
     assert.equal(discoveries, 2);
 });
+
+
+test("session release waits for pending creation and disposes its runtime exactly once", async () => {
+    const registry = createHarnessRegistry();
+    let finish!: () => void;
+    const gate = new Promise<void>(resolve => { finish = resolve; });
+    let disposals = 0;
+    const factory = provider("native", 0);
+    factory.createRuntime = async () => { await gate; return { dispose: async () => { disposals++; } } as AgentRuntime; };
+    registry.register(factory);
+    const pool = createHarnessPool({ registry, legacyHarnessId: "native", context: async (projectId, cwd, sessionId) => ({ ...context, projectId, cwd: cwd!, sessionId }) });
+    const projection = { id: "s", projectId: "p", resolvedHarnessId: "native" } as SessionProjection;
+    const creating = pool.forSession(projection, "/source");
+    await new Promise(resolve => setImmediate(resolve));
+    const release = pool.releaseSession("s");
+    const concurrentRelease = pool.releaseSession("s");
+    const refused = assert.rejects(creating, /runtime was released/);
+    finish();
+    await refused;
+    await Promise.all([release, concurrentRelease]);
+    assert.equal(disposals, 1);
+    await pool.forSession(projection, "/destination");
+    await pool.dispose();
+    assert.equal(disposals, 2);
+});
+
+test("failed physical release fences source lookup and cannot double-dispose or start replacement", async () => {
+    const registry = createHarnessRegistry();
+    let creates = 0;
+    let disposals = 0;
+    const factory = provider("native", 0);
+    factory.createRuntime = async () => { creates++; return { dispose: async () => { disposals++; throw new Error("physical teardown failed"); } } as AgentRuntime; };
+    registry.register(factory);
+    const pool = createHarnessPool({ registry, legacyHarnessId: "native", context: async (projectId, cwd, sessionId) => ({ ...context, projectId, cwd: cwd!, sessionId }) });
+    const projection = { id: "s", projectId: "p", resolvedHarnessId: "native" } as SessionProjection;
+    await pool.forSession(projection, "/source");
+    await assert.rejects(pool.releaseSession("s"), /release failed/);
+    await assert.rejects(pool.forSession(projection, "/source"), /physical teardown failed/);
+    await assert.rejects(pool.releaseSession("s"), /release failed/);
+    await assert.rejects(pool.forSession(projection, "/destination"), /physical teardown failed/);
+    assert.equal(creates, 1);
+    assert.equal(disposals, 1);
+    await assert.rejects(pool.dispose(), /physical teardown failed/);
+    assert.equal(disposals, 1);
+});
+
+
+test("configured physical release cannot dispose a generic facade still cached by another session", async () => {
+    const registry = createHarnessRegistry();
+    let disposed = 0;
+    const runtime = { dispose: async () => { disposed++; } } as AgentRuntime;
+    const factory = provider("shared", 0);
+    factory.createRuntime = async () => runtime;
+    registry.register(factory);
+    const pool = createHarnessPool({
+        registry, legacyHarnessId: "shared",
+        context: async (projectId, cwd, sessionId) => ({ ...context, projectId, cwd: cwd!, sessionId }),
+        releaseRuntime: async (_runtime, dispose) => dispose(),
+    });
+    const projection = { projectId: "p", resolvedHarnessId: "shared" } as SessionProjection;
+    await pool.forSession({ ...projection, id: "one" }, "/source");
+    await pool.forSession({ ...projection, id: "two" }, "/source");
+    await pool.releaseSession("one");
+    assert.equal(disposed, 0);
+    assert.equal(await pool.forSession({ ...projection, id: "two" }, "/source"), runtime);
+    await pool.releaseSession("two");
+    assert.equal(disposed, 1);
+});

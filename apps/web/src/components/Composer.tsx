@@ -103,6 +103,7 @@ import { announce } from "./a11y/live.tsx";
 import { noteModelUsed } from "@polyth/models/web-prefs";
 import { getUiSettings, setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
+import { isManagedIsolationBranch } from "@polyth/contracts";
 import type {
   DraftExecutionConfig,
   ModelRef,
@@ -219,7 +220,7 @@ function useComposerLocation(session: SessionProjection | null): {
     void Promise.all([api.listWorktrees(projectId), api.gitBranches(projectId, sessionId)])
       .then(([nextWorktrees, nextBranches]) => {
         if (!active) return;
-        setWorktrees(nextWorktrees);
+        setWorktrees(nextWorktrees.filter((worktree) => !isManagedIsolationBranch(worktree.branch)));
         setBranches(nextBranches);
         const currentWorktree = intendedWorktree
           ? nextWorktrees.find((worktree) => worktree.path === intendedWorktree)
@@ -255,7 +256,7 @@ function useComposerLocation(session: SessionProjection | null): {
           api.listWorktrees(projectId),
           api.gitBranches(projectId),
         ]);
-        setWorktrees(nextWorktrees);
+        setWorktrees(nextWorktrees.filter((worktree) => !isManagedIsolationBranch(worktree.branch)));
         setBranches(nextBranches);
       } catch {
         // A failed refresh leaves the already-loaded local branches in place.
@@ -271,7 +272,7 @@ function useComposerLocation(session: SessionProjection | null): {
 
   const branchChoices = useMemo<LocationChoice[]>(() => {
     const linkedBranches = new Set(worktrees.map((worktree) => worktree.branch).filter(Boolean));
-    const localBranches = branches.branches.filter((candidate) => !candidate.remote);
+    const localBranches = branches.branches.filter((candidate) => !candidate.remote && !isManagedIsolationBranch(candidate.name));
     // Branches that only exist on a remote, keyed by the local name a checkout
     // would create. `ref` (e.g. `origin/foo`) is the start point.
     const localNames = new Set(localBranches.map((candidate) => candidate.name));
@@ -280,7 +281,7 @@ function useComposerLocation(session: SessionProjection | null): {
     for (const candidate of branches.branches) {
       if (!candidate.remote) continue;
       const short = candidate.name.slice(candidate.remote.length + 1);
-      if (!short || short === "HEAD" || short.startsWith("HEAD ")) continue;
+      if (isManagedIsolationBranch(short) || !short || short === "HEAD" || short.startsWith("HEAD ")) continue;
       if (localNames.has(short) || seenRemote.has(short)) continue;
       seenRemote.add(short);
       remoteOnly.push({ short, ref: candidate.name });
@@ -290,7 +291,7 @@ function useComposerLocation(session: SessionProjection | null): {
       // Isolation starts from a live checkout so merge-back has a truthful cwd.
       const seen = new Set<string>();
       const choices: LocationChoice[] = [];
-      if (currentBranchName) {
+      if (currentBranchName && !isManagedIsolationBranch(currentBranchName)) {
         seen.add(currentBranchName);
         choices.push({
           id: `branch:${currentBranchName}`,
@@ -301,7 +302,7 @@ function useComposerLocation(session: SessionProjection | null): {
       }
       for (const worktree of worktrees) {
         const name = worktree.branch;
-        if (!name || seen.has(name)) continue;
+        if (!name || isManagedIsolationBranch(name) || seen.has(name)) continue;
         seen.add(name);
         choices.push({
           id: `branch:${name}`,

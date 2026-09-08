@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { IsolationStatusDto, SessionIsolation, SessionProjection } from "@polyth/contracts";
-import { isolationBlocksUserMutation } from "@polyth/contracts";
+import { isolationActions } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
 import { openChanges, setUiError, upsertSession, useStore } from "../../../apps/web/src/store.ts";
@@ -10,231 +10,167 @@ import { Button, Menu, confirmAlert } from "../../../apps/web/src/components/ui/
 const isolationOf = (session: SessionProjection | null | undefined): SessionIsolation | null =>
   session?.isolation?.kind === "git-worktree" ? session.isolation : null;
 
-function applySession(next: SessionProjection): void {
-  upsertSession(next);
-}
-
-export function IsolationCard() {
-  const sessionId = useStore((state) => state.activeSessionId);
+/** Both surfaces use the same authoritative status and action policy. A late
+ * response can never become the status of a different session or projection. */
+function useIsolationStatus() {
   const session = useStore((state) =>
     state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null,
   );
   const isolation = isolationOf(session);
-  const [status, setStatus] = useState<IsolationStatusDto | null>(null);
-  const [busy, setBusy] = useState<"merge" | "keep" | "resolve" | null>(null);
-
-  const refresh = useCallback(async () => {
-    if (!sessionId || !isolation) {
-      setStatus(null);
-      return;
-    }
-    try {
-      setStatus(await api.isolationStatus(sessionId));
-    } catch {
-      setStatus({ isolation, suggestion: null });
-    }
-  }, [sessionId, isolation?.state, isolation?.dismissedRevision, session?.updatedAt]);
-
+  const [revision, setRevision] = useState(0);
+  const [loaded, setLoaded] = useState<{ key: string; status: IsolationStatusDto } | null>(null);
+  const key = `${session?.id}:${session?.updatedAt}:${JSON.stringify(isolation)}:${revision}`;
+  const refresh = useCallback(() => setRevision((value) => value + 1), []);
   useEffect(() => {
-    void refresh();
+    if (!session || !isolation) return;
+    let active = true;
+    void api.isolationStatus(session.id).then((status) => {
+      if (active) setLoaded({ key, status });
+    }).catch(() => {
+      // Failed reads never enable mutations using stale Git/ownership state.
+      if (active) setLoaded(null);
+    });
+    return () => { active = false; };
+  }, [key]);
+  useEffect(() => {
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
   }, [refresh]);
-
-  if (!sessionId || !session || !isolation || isolation.state === "cleanup-pending" || isolation.state === "merging") {
-    return null;
-  }
-
-  const suggestion = status?.suggestion;
+  const status = loaded?.key === key ? loaded.status : null;
   const live = status?.isolation ?? isolation;
-  const liveState = status?.effectiveState ?? live.state;
-  const targetBranch = live.targetBranch;
-  const conflict = liveState === "conflict" && suggestion?.eligible !== true;
-  const missing = liveState === "missing" || suggestion?.reason === "missing";
+  const state = status?.effectiveState ?? live?.state;
+  const actions = isolationActions(status ?? { isolation: null, suggestion: null }, session?.status);
+  return { session, isolation: live, status, state, actions, refresh };
+}
+
+function isolationLabel(state: SessionIsolation["state"], branch: string): string {
+  if (state === "rebind-pending" || state === "cleanup-pending") return tr("isolation.recoveryNeeded");
+  if (state === "merging" || state === "publishing") return tr("isolation.merging");
+  if (state === "missing") return tr("isolation.missingWorkspace");
+  if (state === "unowned" || state === "corrupt") return tr("isolation.ownershipUnverified");
+  if (state === "conflict") return tr("isolation.mergeNeedsAttention");
+  return tr("isolation.isolatedBranch", { branch });
+}
+
+export function IsolationCard() {
+  const { session, isolation, status, state, actions, refresh } = useIsolationStatus();
+  const [busy, setBusy] = useState<string | null>(null);
+  if (!session || !isolation || !state) return null;
+  const suggestion = status?.suggestion;
+  const conflict = state === "conflict" && suggestion?.eligible !== true;
+  const unavailable = state === "missing" || state === "unowned" || state === "corrupt";
   const dirty = suggestion?.reason === "dirty-target";
-  const working = isolationBlocksUserMutation(session.status);
-  const ready = !working && (status
-    ? suggestion?.eligible === true
-    : isolation.state === "merge-ready");
-  if (!conflict && !missing && !dirty && !ready) return null;
+  const destinationUnavailable = suggestion?.reason === "destination-unavailable";
+  const pending = state === "merging" || state === "publishing" || state === "rebind-pending" || state === "cleanup-pending";
+  const ready = suggestion?.eligible === true;
+  if (!conflict && !unavailable && !dirty && !destinationUnavailable && !pending && !ready) return null;
 
-  const run = async (kind: "merge" | "keep" | "resolve", action: () => Promise<void>) => {
+  const run = async (kind: string, action: () => Promise<void>) => {
     setBusy(kind);
-    try {
-      await action();
-      await refresh();
-    } catch (cause) {
-      setUiError(friendlyError(tr("common.error"), cause));
-      await refresh();
-    } finally {
-      setBusy(null);
-    }
+    try { await action(); }
+    catch (cause) { setUiError(friendlyError(tr("common.error"), cause)); }
+    finally { setBusy(null); refresh(); }
   };
-
-  const title = missing
-    ? tr("isolation.missingWorkspace")
+  const title = destinationUnavailable ? tr("isolation.recoveryNeeded") : unavailable || pending || conflict
+    ? isolationLabel(state, isolation.targetBranch)
     : dirty
-      ? tr("isolation.dirtyTarget", { branch: targetBranch })
-      : conflict
-        ? tr("isolation.mergeNeedsAttention")
-        : tr("isolation.changesAreReady");
-  const detail = conflict
-    ? (live.conflict?.message || tr("isolation.conflictDetail", { branch: targetBranch }))
-    : dirty || missing
-      ? null
-      : tr("isolation.mergeInto", { branch: targetBranch });
-
+      ? tr("isolation.dirtyTarget", { branch: isolation.targetBranch })
+      : tr("isolation.changesAreReady");
+  const detail = state === "publishing" || state === "rebind-pending" || destinationUnavailable
+    ? tr("isolation.restoreOrigin", { path: isolation.originPath ?? isolation.targetPath, branch: isolation.targetBranch })
+    : state === "cleanup-pending"
+      ? tr("isolation.cleanupPendingDetail")
+      : state === "unowned" || state === "corrupt"
+        ? tr("isolation.ownershipDetail")
+        : conflict
+          ? isolation.conflict?.message || tr("isolation.conflictDetail", { branch: isolation.targetBranch })
+          : !unavailable && !pending && !dirty
+            ? tr("isolation.mergeInto", { branch: isolation.targetBranch })
+            : null;
   return (
-    <div className={`isolation-card${conflict || missing || dirty ? " isolation-card--warn" : ""}`} role="status">
+    <div className={`isolation-card${conflict || unavailable || dirty || destinationUnavailable || actions.needsRecovery ? " isolation-card--warn" : ""}`} role="status">
       <div className="isolation-card-copy">
         <strong>{title}</strong>
         {detail && <span className="muted">{detail}</span>}
+        {(unavailable || pending) && <span className="muted">{isolation.worktreePath}</span>}
       </div>
       <div className="isolation-card-actions">
-        {missing ? null : (
-          <Button size="sm" disabled={busy !== null} onClick={() => openChanges()}>
-            {conflict ? tr("isolation.reviewConflicts") : tr("isolation.reviewChanges")}
-          </Button>
-        )}
-        <Button
-          size="sm"
-          disabled={busy !== null}
-          busy={busy === "keep"}
-          onClick={() => void run("keep", async () => {
-            applySession(await api.isolationKeep(sessionId));
-          })}
-        >
+        {destinationUnavailable && <Button size="sm" disabled={busy !== null} onClick={refresh}>
+          {tr("gitview.checkAgain")}
+        </Button>}
+        {actions.canReview && <Button size="sm" disabled={busy !== null} onClick={() => openChanges()}>
+          {conflict ? tr("isolation.reviewConflicts") : tr("isolation.reviewChanges")}
+        </Button>}
+        {actions.canKeep && <Button size="sm" disabled={busy !== null} busy={busy === "keep"}
+          onClick={() => void run("keep", async () => { upsertSession(await api.isolationKeep(session.id)); })}>
           {tr("isolation.keepIsolated")}
-        </Button>
-        {conflict && (
-          <Button
-            size="sm"
-            variant="primary"
-            disabled={busy !== null || working}
-            busy={busy === "resolve"}
-            onClick={() => void run("resolve", async () => {
-              await api.isolationResolve(sessionId);
-            })}
-          >
-            {tr("isolation.resolveWithAgent")}
-          </Button>
-        )}
-        {!conflict && !missing && !dirty && ready && (
-          <Button
-            size="sm"
-            variant="primary"
-            disabled={busy !== null || working}
-            busy={busy === "merge"}
-            onClick={() => void run("merge", async () => {
-              applySession((await api.isolationMerge(sessionId)).session);
-            })}
-          >
-            {tr("isolation.merge")}
-          </Button>
-        )}
+        </Button>}
+        {actions.canResolve && conflict && <Button size="sm" variant="primary" disabled={busy !== null} busy={busy === "resolve"}
+          onClick={() => void run("resolve", async () => { await api.isolationResolve(session.id); })}>
+          {tr("isolation.resolveWithAgent")}
+        </Button>}
+        {actions.canMerge && !conflict && <Button size="sm" variant="primary" disabled={busy !== null} busy={busy === "merge"}
+          onClick={() => void run("merge", async () => { upsertSession((await api.isolationMerge(session.id)).session); })}>
+          {tr("isolation.merge")}
+        </Button>}
+        {actions.needsRecovery && <Button size="sm" variant="primary" disabled={busy !== null} busy={busy === "recover"}
+          onClick={() => void run("recover", async () => { upsertSession(await api.isolationRecover(session.id)); })}>
+          {tr("isolation.retryRecovery")}
+        </Button>}
       </div>
     </div>
   );
 }
 
 export function IsolationBadge() {
-  const sessionId = useStore((state) => state.activeSessionId);
-  const session = useStore((state) =>
-    state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null,
-  );
-  const isolation = isolationOf(session);
+  const { session, isolation, state, actions, refresh } = useIsolationStatus();
   const [busy, setBusy] = useState(false);
-  if (!sessionId || !session || !isolation) return null;
-  const branch = isolation.targetBranch;
-  const merging = isolation.state === "merging" || isolation.state === "cleanup-pending";
-  const blocked = isolationBlocksUserMutation(session.status);
-
+  if (!session || !isolation || !state) return null;
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
-    try {
-      await action();
-    } catch (cause) {
-      setUiError(friendlyError(tr("common.error"), cause));
-    } finally {
-      setBusy(false);
-    }
+    try { await action(); }
+    catch (cause) { setUiError(friendlyError(tr("common.error"), cause)); }
+    finally { setBusy(false); refresh(); }
   };
-
   const discard = async () => {
     if (!await confirmAlert(tr("isolation.discardConfirm"), {
-      title: tr("isolation.discardTitle"),
-      confirmLabel: tr("isolation.discard"),
-      destructive: true,
+      title: tr("isolation.discardTitle"), confirmLabel: tr("isolation.discard"), destructive: true,
     })) return;
-    await run(async () => {
-      applySession(await api.isolationDiscard(sessionId));
-    });
+    await run(async () => { upsertSession(await api.isolationDiscard(session.id)); });
   };
-
+  const label = isolationLabel(state, isolation.targetBranch);
   return (
-    <Menu
-      label={tr("isolation.isolatedBranch", { branch })}
-      title={tr("isolation.isolated")}
-      align="end"
-      entries={[
-        {
-          id: "review",
-          label: isolation.state === "conflict" ? tr("isolation.reviewConflicts") : tr("isolation.reviewChanges"),
-          disabled: busy || isolation.state === "missing",
-          onSelect: () => openChanges(),
-        },
-        {
-          id: "merge",
-          label: tr("isolation.mergeBack"),
-          disabled: busy || blocked || isolation.state === "missing",
-          onSelect: () => {
-            void run(async () => {
-              applySession((await api.isolationMerge(sessionId)).session);
-            });
-          },
-        },
-        {
-          id: "keep",
-          label: tr("isolation.keepIsolated"),
-          disabled: busy || blocked || merging || isolation.state === "missing",
-          onSelect: () => {
-            void run(async () => {
-              applySession(await api.isolationKeep(sessionId));
-            });
-          },
-        },
-        ...(isolation.state === "conflict"
-          ? [{
-              id: "resolve",
-              label: tr("isolation.resolveWithAgent"),
-              disabled: busy || blocked,
-              onSelect: () => {
-                void run(async () => {
-                  await api.isolationResolve(sessionId);
-                });
-              },
-            }]
-          : []),
-        "separator",
-        {
-          id: "discard",
-          label: tr("isolation.discardWorkspace"),
-          danger: true,
-          disabled: busy || blocked || isolation.state === "merging",
-          onSelect: () => { void discard(); },
-        },
-      ]}
-    >
-      {(trigger) => (
-        <button
-          {...trigger}
-          type="button"
-          className={`isolation-badge${isolation.state === "conflict" ? " isolation-badge--warn" : ""}`}
-          disabled={busy}
-        >
-          {merging
-            ? tr("isolation.merging")
-            : tr("isolation.isolatedBranch", { branch })}
-        </button>
-      )}
+    <Menu label={label} title={tr("isolation.isolated")} align="end" entries={[
+      {
+        id: "review", label: state === "conflict" ? tr("isolation.reviewConflicts") : tr("isolation.reviewChanges"),
+        disabled: busy || !actions.canReview, onSelect: () => openChanges(),
+      },
+      {
+        id: "merge", label: tr("isolation.mergeBack"), disabled: busy || !actions.canMerge,
+        onSelect: () => { void run(async () => { upsertSession((await api.isolationMerge(session.id)).session); }); },
+      },
+      {
+        id: "keep", label: tr("isolation.keepIsolated"), disabled: busy || !actions.canKeep,
+        onSelect: () => { void run(async () => { upsertSession(await api.isolationKeep(session.id)); }); },
+      },
+      ...(state === "conflict" ? [{
+        id: "resolve", label: tr("isolation.resolveWithAgent"), disabled: busy || !actions.canResolve,
+        onSelect: () => { void run(async () => { await api.isolationResolve(session.id); }); },
+      }] : []),
+      ...(actions.needsRecovery ? [{
+        id: "recover", label: tr("isolation.retryRecovery"), disabled: busy,
+        onSelect: () => { void run(async () => { upsertSession(await api.isolationRecover(session.id)); }); },
+      }] : []),
+      "separator",
+      {
+        id: "discard", label: tr("isolation.discardWorkspace"), danger: true,
+        disabled: busy || !actions.canDiscard, onSelect: () => { void discard(); },
+      },
+    ]}>
+      {(trigger) => <button {...trigger} type="button" disabled={busy}
+        className={`isolation-badge${actions.needsRecovery || state === "conflict" || state === "missing" || state === "unowned" || state === "corrupt" ? " isolation-badge--warn" : ""}`}>
+        {label}
+      </button>}
     </Menu>
   );
 }
@@ -244,7 +180,8 @@ export function IsolationListBadge({ sessionId }: { sessionId: string }) {
     isolationOf(state.sessions.find((candidate) => candidate.id === sessionId) ?? null),
   );
   if (!isolation) return null;
-  return (
-    <span className="isolation-list-badge">{tr("isolation.isolated")}</span>
-  );
+  return <span className="isolation-list-badge" title={isolationLabel(isolation.state, isolation.targetBranch)}>
+    {isolation.state === "active" || isolation.state === "merge-ready"
+      ? tr("isolation.isolated") : isolationLabel(isolation.state, isolation.targetBranch)}
+  </span>;
 }

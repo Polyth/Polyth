@@ -450,6 +450,14 @@ export const en = {
   "isolation.missingWorkspace": "The isolated workspace is no longer available.",
   "isolation.workInIsolation": "Work in isolation",
   "isolation.workInIsolationHint": "Uses a temporary Git workspace that can be merged back when finished.",
+  "isolation.recoveryNeeded": "Workspace recovery needed",
+  "isolation.restoreOrigin": "Restore the {branch} checkout at {path}, then try again. This session and its history are preserved.",
+  "isolation.cleanupPendingDetail": "The session has returned to its original workspace. Retry cleanup to finish removing the temporary workspace.",
+  "isolation.ownershipUnverified": "Isolated workspace ownership could not be verified",
+  "isolation.ownershipDetail": "The workspace has been preserved. Restore its original ownership metadata before retrying recovery.",
+  "isolation.retryRecovery": "Retry recovery",
+  "isolation.nestedUnsupported": "Start isolation from a normal session or workspace. Nested isolation is not supported.",
+  "isolation.finishBeforeDelete": "Merge, discard, or recover the isolated workspace before deleting this session.",
 } as const;
 
 export type GitMessageKey = keyof typeof en;

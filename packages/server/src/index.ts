@@ -1423,15 +1423,6 @@ export async function boot(opts: BootOptions = {}) {
     async restartAll() {
       return restartRuntimeEntries();
     },
-    async release(projectId, cwd) {
-      const dir = await cwdFor(projectId, cwd);
-      const project = await projects.get(projectId);
-      const connectionId = project?.remote?.kind === "ssh" ? project.remote.connectionId : undefined;
-      const key = sharedRuntimePoolKey(projectId, dir, connectionId);
-      const pending = openCodeRuntimes.peek(key);
-      if (!pending) return;
-      await pending.value.dispose();
-    },
     onRestart(listener) {
       runtimeRestartListeners.add(listener);
       return { dispose: () => { runtimeRestartListeners.delete(listener); } };
@@ -1467,6 +1458,11 @@ export async function boot(opts: BootOptions = {}) {
       const space = spaceGateway.resolveInternal(project?.spaceId);
       return { projectId, spaceId: space.spaceId, space, cwd: await cwdFor(projectId, cwd), sessionId, remote: Boolean(project?.remote) };
     },
+    async releaseRuntime(runtime, dispose) {
+      const occupancy = occupancyOf(runtime)?.snapshot();
+      if (occupancy && (occupancy.bindings > 0 || occupancy.executions > 0)) return;
+      await dispose();
+    },
     async beforeCreate(provider, context) {
       if (!capabilityController) return;
       await capabilityController.reconcile(provider, context);
@@ -1477,7 +1473,6 @@ export async function boot(opts: BootOptions = {}) {
     restartAll: openCodePool.restartAll,
     onRestart: openCodePool.onRestart,
     onEvict: openCodePool.onEvict,
-    release: openCodePool.release,
     bindSession: openCodePool.bindSession,
     unbindSession: openCodePool.unbindSession,
   };
@@ -2086,9 +2081,7 @@ export async function boot(opts: BootOptions = {}) {
     ...(gitService ? { worktrees: gitService.worktrees } : {}),
     ...(terminalService ? {
       shell: terminalService,
-      closeWorkspaceProcesses: (cwd: string) => terminalService.closeByCwd(cwd),
     } : {}),
-    releaseRuntime: (projectId: string, cwd: string) => runtimes.release?.(projectId, cwd) ?? Promise.resolve(),
     // F18: server-owned per-session auto-accept policy (nearest-parent
     // resolution for subagents; session-scoped only, never a global default).
     ...(autoAcceptStore ? { autoAccept: autoAcceptStore } : {}),

@@ -252,6 +252,7 @@ function SessionRow({
   };
 
   const performDelete = () => {
+    if (s.isolation) return;
     const label = s.title || tr("sidebar.sessionlist.session");
     void deleteSession(s.id)
       .then(() => {
@@ -267,6 +268,7 @@ function SessionRow({
   };
 
   const quickDelete = async () => {
+    if (s.isolation) return;
     const label = s.title || tr("sidebar.sessionlist.session");
     const activity = needsDestructiveConfirm(s) ? ` ${tr("sidebar.sessionlist.theAgentIsStillRunningOr")}` : "";
     if (!await confirmAlert(tr("sidebar.sessionlist.deleteValueValueThisPermanentlyRemovesThe", { label: label, activity: activity }), { title: tr("sidebar.sessionlist.deleteSession"), confirmLabel: tr("common.delete") })) return;
@@ -276,6 +278,7 @@ function SessionRow({
   // Shift-hover quick delete: deliberate (modifier held), so it skips the
   // confirmation unless the session is still active.
   const shiftQuickDelete = async () => {
+    if (s.isolation) return;
     if (needsDestructiveConfirm(s)) {
       const label = s.title || tr("sidebar.sessionlist.session");
       const activity = ` ${tr("sidebar.sessionlist.theAgentIsStillRunningOr")}`;
@@ -349,6 +352,7 @@ function SessionRow({
     { id: "rename", label: tr("common.rename"), onSelect: () => { setTitle(s.title); setRenaming(true); } },
     {
       id: "fork",
+      disabled: !!s.isolation,
       label: tr("sidebar.sessionlist.fork"),
       onSelect: () => void forkSession(s.id).catch((e) => setUiError(friendlyError(tr("common.error"), e))),
     },
@@ -366,7 +370,7 @@ function SessionRow({
           onSelect: () => void restoreSession(s.id).then(onChanged).catch((e) => setUiError(friendlyError(tr("common.error"), e))),
         }
       : { id: "archive", label: tr("common.archive"), onSelect: () => void quickArchive() },
-    { id: "delete", label: tr("common.delete"), danger: true, onSelect: () => void quickDelete() },
+    { id: "delete", label: s.isolation ? tr("isolation.finishBeforeDelete") : tr("common.delete"), disabled: !!s.isolation, danger: true, onSelect: () => void quickDelete() },
     ...(labels.length > 0 ? [{ heading: tr("sidebar.sessionlist.labels") }] : []),
     ...labelEntries,
   ];
@@ -587,7 +591,8 @@ function SessionRow({
           )}
           <button
             className="session-quick-btn danger"
-            title={tr("sidebar.sessionlist.deleteValue", { value: s.title || tr("sidebar.sessionlist.session") })}
+            disabled={!!s.isolation}
+            title={s.isolation ? tr("isolation.finishBeforeDelete") : tr("sidebar.sessionlist.deleteValue", { value: s.title || tr("sidebar.sessionlist.session") })}
             aria-label={tr("sidebar.sessionlist.deleteValue", { value: s.title || tr("sidebar.sessionlist.session") })}
             onClick={shiftQuick && swipeX === null && !swipeRevealed ? shiftQuickDelete : quickDelete}
           >✕</button>
@@ -980,6 +985,7 @@ export default function SessionList({
                 {group.worktree && !group.worktree.isMain && (
                   <button
                     className="danger"
+                    disabled={group.sessions.some((session) => !!session.isolation)}
                     title={tr("sidebar.sessionlist.deleteValueWorktreeAndIts", { label: group.label })}
                     aria-label={tr("sidebar.sessionlist.deleteValueWorktreeAndAll", { label: group.label })}
                     onClick={() => {

@@ -448,4 +448,12 @@ export const zhCN: GitMessages = {
   "isolation.missingWorkspace": "隔离工作区已不可用。",
   "isolation.workInIsolation": "隔离工作",
   "isolation.workInIsolationHint": "使用可在完成后合并回去的临时 Git 工作区。",
+  "isolation.recoveryNeeded": "需要恢复工作区",
+  "isolation.restoreOrigin": "请在 {path} 恢复 {branch} 的工作副本，然后重试。此会话及其历史记录已保留。",
+  "isolation.cleanupPendingDetail": "会话已返回原始工作区。请重试清理以移除临时工作区。",
+  "isolation.ownershipUnverified": "无法验证隔离工作区的所有权",
+  "isolation.ownershipDetail": "工作区已保留。请恢复其原始所有权元数据，然后重试恢复。",
+  "isolation.retryRecovery": "重试恢复",
+  "isolation.nestedUnsupported": "请从普通会话或工作区开始隔离。暂不支持嵌套隔离。",
+  "isolation.finishBeforeDelete": "删除此会话前，请合并、丢弃或恢复隔离工作区。",
 };

@@ -5,7 +5,8 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, rmSync, statSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readlink, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, dirname, join, posix, resolve } from "node:path";
 import type { ProjectCloneInput, RemoteHost } from "@polyth/contracts";
 
@@ -66,7 +67,7 @@ export interface Worktree {
 
 export interface WorktreeService {
   list(root: string): Promise<Worktree[]>;
-  create(root: string, input: { branch: string; path?: string; base?: string }): Promise<{ path: string; branch: string }>;
+  create(root: string, input: { branch: string; path?: string; base?: string; newBranchOnly?: boolean }): Promise<{ path: string; branch: string }>;
   /** Git is the authority. First call is `git worktree remove` without
    *  `--force`. Dirty/untracked refusal becomes `worktree-dirty`. `--force`
    *  is used only when the caller passes `force` after explicit confirmation.
@@ -114,6 +115,8 @@ export interface GitService {
   setIdentity(root: string, identity: { name: string; email: string }): Promise<void>;
   /** Resolve a ref to a 40-char SHA. */
   revParse(root: string, rev: string): Promise<string>;
+  /** Exact ref lookup. Null means proven absence; lookup/corruption errors throw. */
+  readRef(root: string, ref: string): Promise<string | null>;
   gitDir(root: string): Promise<string>;
   commonDir(root: string): Promise<string>;
   /** `git add -A` — tracked mods/deletes plus untracked files, honouring gitignore. */
@@ -123,9 +126,9 @@ export interface GitService {
   /** True when `root` has commits or a dirty tree not contained in `againstRef`. */
   hasUniqueChanges(root: string, againstRef: string): Promise<boolean>;
   /**
-   * Snapshot uncommitted (gitignore-respecting) work as a synthetic commit on
-   * the current branch. Returns the resulting HEAD. Identity is passed via
-   * `-c` so the user's repo config is never rewritten.
+   * Snapshot the working tree through a temporary index and an unreferenced
+   * commit object. Preserves the source HEAD and index, respects gitignore,
+   * and never invokes commit hooks or signing.
    */
   snapshotCommit(root: string, message: string, identity?: { name: string; email: string }): Promise<{ sha: string; created: boolean }>;
   mergeSquash(root: string, ref: string): Promise<{ ok: true } | { ok: false; conflicted: string[] }>;
@@ -134,8 +137,14 @@ export interface GitService {
   mergeFfOnly(root: string, sha: string): Promise<void>;
   /** Compare-and-swap a ref. Returns false when `expectedOldSha` no longer matches. */
   updateRef(root: string, ref: string, newSha: string, expectedOldSha: string): Promise<boolean>;
+  /** Atomically compare-and-swap a branch and record its publication receipt. */
+  publishRef(root: string, input: { targetRef: string; expectedHead: string; newSha: string; receiptRef: string }): Promise<boolean>;
+  /** Repair a published branch checkout only when its old or new tree is pristine. */
+  syncPublishedCheckout(root: string, input: { branch: string; expectedHead: string; resultCommit: string }): Promise<void>;
   /** `git merge-base --is-ancestor ancestor descendant`. */
   isAncestor(root: string, ancestor: string, descendant: string): Promise<boolean>;
+  /** Remove exactly the ref value inspected by its owner; never a replacement. */
+  deleteRef(root: string, ref: string, expectedSha: string): Promise<boolean>;
   /** Delete a local branch. Returns false when the name does not exist. */
   deleteBranch(root: string, name: string): Promise<boolean>;
   worktrees: WorktreeService;
@@ -390,7 +399,7 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
         cwd: root,
         timeout: opts.timeoutMs ?? timeout,
         maxBuffer: 32 * 1024 * 1024,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...(opts.env ?? {}) },
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", ...(opts.env ?? {}) },
       }, (err, stdout, stderr) => {
         const execErr = err as (Error & {
           code?: number | string;
@@ -731,13 +740,21 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       return r.stdout.trim();
     },
 
+    async readRef(root, ref) {
+      assertRev(ref);
+      if (!ref.startsWith("refs/")) throw Object.assign(new Error("full ref name required"), { code: "invalid-input" });
+      const result = await run(root, ["for-each-ref", "--format=%(refname) %(objectname)", ref]);
+      if (result.stderr.trim()) throw Object.assign(new Error(shortErr(result.stderr)), { code: "git-failed" });
+      const row = result.stdout.split("\n").find((line) => line.startsWith(`${ref} `));
+      return row ? row.slice(ref.length + 1).trim() : null;
+    },
+
     async gitDir(root) {
       return (await run(root, ["rev-parse", "--absolute-git-dir"])).stdout.trim();
     },
 
     async commonDir(root) {
-      const r = await run(root, ["rev-parse", "--absolute-git-common-dir"], true);
-      return (r.code === 0 && r.stdout.trim()) || (await service.gitDir(root));
+      return (await run(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"])).stdout.trim();
     },
 
     async stageAll(root) {
@@ -749,17 +766,27 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       const porcelain = (await run(root, ["status", "--porcelain=v1", "-unormal", "-z"], true)).stdout;
       const trackedDirty = (await run(root, ["diff", "HEAD", "--name-only", "-z"], true)).stdout;
       const untrackedList = (await run(root, ["ls-files", "--others", "--exclude-standard", "-z"], true)).stdout;
-      const paths = [...trackedDirty.split("\0"), ...untrackedList.split("\0")]
-        .filter((path, index, all) => path && all.indexOf(path) === index && existsSync(join(root, path)));
+      const paths = [...new Set([...trackedDirty.split("\0"), ...untrackedList.split("\0")].filter(Boolean))];
       const hash = createHash("sha256");
       hash.update(porcelain);
-      if (paths.length) {
-        const hashed = await run(root, ["hash-object", "--stdin-paths"], {
-          allowFail: true,
-          input: `${paths.join("\n")}\n`,
-        });
-        hash.update("\n");
-        hash.update(hashed.stdout);
+      const regular: string[] = [];
+      for (const path of paths) {
+        let stat;
+        try { stat = await lstat(join(root, path)); }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          hash.update(JSON.stringify([path, "missing"]));
+          continue;
+        }
+        hash.update(JSON.stringify([path, stat.mode]));
+        if (stat.isSymbolicLink()) hash.update(await readlink(join(root, path)));
+        else if (stat.isFile()) regular.push(path);
+        else throw Object.assign(new Error("unsupported resource in isolated workspace"), { code: "conflict" });
+      }
+      // argv boundaries preserve names containing newlines; bounded batches
+      // avoid operating-system argument limits. Never follow untracked symlinks.
+      for (let offset = 0; offset < regular.length; offset += 128) {
+        hash.update((await run(root, ["hash-object", "--", ...regular.slice(offset, offset + 128)])).stdout);
       }
       return `${head}:${hash.digest("hex").slice(0, 16)}`;
     },
@@ -773,19 +800,30 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
     },
 
     async snapshotCommit(root, message, identity) {
-      await service.stageAll(root);
-      const staged = await run(root, ["diff", "--cached", "--quiet"], true);
-      if (staged.code === 0) {
-        const sha = (await run(root, ["rev-parse", "HEAD"], true)).stdout.trim();
-        return { sha, created: false };
+      const head = await service.revParse(root, "HEAD");
+      const temporary = await mkdtemp(join(tmpdir(), "polyth-git-index-"));
+      const env = { GIT_INDEX_FILE: join(temporary, "index") };
+      try {
+        await run(root, ["read-tree", head], { env });
+        await run(root, ["add", "-A", "--"], { env });
+        const tree = (await run(root, ["write-tree"], { env })).stdout.trim();
+        const oldTree = (await run(root, ["rev-parse", `${head}^{tree}`])).stdout.trim();
+        if (tree === oldTree) return { sha: head, created: false };
+        const author = identity ?? await service.identity(root);
+        const sha = (await run(root, [
+          "-c", `user.name=${author.name.trim() || "Polyth"}`,
+          "-c", `user.email=${author.email.trim() || "polyth@localhost"}`,
+          "-c", "commit.gpgsign=false", "commit-tree", tree, "-p", head,
+        ], { input: message, env })).stdout.trim();
+        return { sha, created: true };
+      } finally {
+        await rm(temporary, { recursive: true, force: true });
       }
-      const committed = await service.commitWithIdentity(root, message, identity);
-      return { sha: committed.sha, created: true };
     },
 
     async mergeSquash(root, ref) {
       assertRev(ref);
-      const r = await run(root, ["merge", "--squash", "--no-commit", ref], {
+      const r = await run(root, ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "merge", "--squash", "--no-commit", ref], {
         allowFail: true,
         timeoutMs: Math.max(timeout, 120_000),
       });
@@ -815,15 +853,75 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
 
     async mergeFfOnly(root, sha) {
       assertRev(sha);
-      await run(root, ["merge", "--ff-only", sha], { timeoutMs: Math.max(timeout, 120_000) });
+      await run(root, ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "merge", "--ff-only", sha], { timeoutMs: Math.max(timeout, 120_000) });
     },
 
     async updateRef(root, ref, newSha, expectedOldSha) {
       assertRev(ref);
       assertRev(newSha, "sha");
       assertRev(expectedOldSha, "sha");
-      const r = await run(root, ["update-ref", ref, newSha, expectedOldSha], true);
+      const r = await run(root, ["-c", "core.hooksPath=/dev/null", "update-ref", ref, newSha, expectedOldSha], true);
       return r.code === 0;
+    },
+
+    async publishRef(root, input) {
+      for (const value of [input.targetRef, input.receiptRef, input.expectedHead, input.newSha]) assertRev(value);
+      if (!input.targetRef.startsWith("refs/heads/") || !input.receiptRef.startsWith("refs/polyth/")) {
+        throw Object.assign(new Error("publication requires a local branch and internal receipt ref"), { code: "invalid-input" });
+      }
+      const result = await run(root, ["-c", "core.hooksPath=/dev/null", "update-ref", "--stdin"], {
+        allowFail: true,
+        input: `start\nupdate ${input.targetRef} ${input.newSha} ${input.expectedHead}\ncreate ${input.receiptRef} ${input.newSha}\nprepare\ncommit\n`,
+      });
+      if (result.code === 0) return true;
+      // A process timeout can hide a committed transaction; its receipt is the
+      // durable authority even if the target has subsequently moved again.
+      const receipt = await run(root, ["rev-parse", "--verify", input.receiptRef], true);
+      if (receipt.code === 0) {
+        if (receipt.stdout.trim() === input.newSha) return true;
+        throw Object.assign(new Error("publication receipt identity mismatch"), { code: "conflict" });
+      }
+      const target = await service.revParse(root, input.targetRef);
+      if (target !== input.expectedHead) return false;
+      throw Object.assign(new Error(shortErr(result.stderr || "Git publication transaction failed")), { code: "git-failed" });
+    },
+
+    async syncPublishedCheckout(root, input) {
+      const branch = input.branch.replace(/^refs\/heads\//, "");
+      assertRev(branch);
+      assertRev(input.expectedHead);
+      assertRev(input.resultCommit);
+      const refuse = () => Object.assign(new Error("published checkout changed; restore its branch and pristine old or published tree before recovery"), { code: "conflict" });
+      const readBranchHead = async () => {
+        const symbolic = await run(root, ["symbolic-ref", "-q", "HEAD"], true);
+        if (symbolic.code !== 0 || symbolic.stdout.trim() !== `refs/heads/${branch}`) throw refuse();
+        return service.revParse(root, "HEAD");
+      };
+      const live = await readBranchHead();
+      const assertBranch = async () => { if (await readBranchHead() !== live) throw refuse(); };
+      if (live !== input.resultCommit) {
+        // A later valid commit may already have synchronized the checkout. A
+        // pristine descendant needs no repair, and must never be rolled back.
+        if (!(await service.isAncestor(root, input.resultCommit, live))) throw refuse();
+        const tree = (await run(root, ["rev-parse", `${live}^{tree}`])).stdout.trim();
+        if ((await run(root, ["write-tree"])).stdout.trim() !== tree
+          || (await run(root, ["diff", "--quiet", live, "--"], true)).code !== 0) throw refuse();
+        await assertBranch();
+        return;
+      }
+      const oldTree = (await run(root, ["rev-parse", `${input.expectedHead}^{tree}`])).stdout.trim();
+      const newTree = (await run(root, ["rev-parse", `${input.resultCommit}^{tree}`])).stdout.trim();
+      const indexTree = (await run(root, ["write-tree"])).stdout.trim();
+      if (indexTree !== oldTree && indexTree !== newTree) throw refuse();
+      const against = indexTree === newTree ? input.resultCommit : input.expectedHead;
+      if ((await run(root, ["diff", "--quiet", against, "--"], true)).code !== 0) throw refuse();
+      if (indexTree === newTree) { await assertBranch(); return; }
+      // Recheck after inspection; read-tree's two-tree update refuses local
+      // modifications or untracked obstructions instead of overwriting them.
+      await assertBranch();
+      await run(root, ["read-tree", "-m", "-u", input.expectedHead, input.resultCommit]);
+      await assertBranch();
+      if ((await run(root, ["diff", "--quiet", input.resultCommit, "--"], true)).code !== 0) throw refuse();
     },
 
     async isAncestor(root, ancestor, descendant) {
@@ -831,6 +929,13 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       assertRev(descendant, "sha");
       const r = await run(root, ["merge-base", "--is-ancestor", ancestor, descendant], true);
       return r.code === 0;
+    },
+
+    async deleteRef(root, ref, expectedSha) {
+      assertRev(ref);
+      assertRev(expectedSha);
+      const result = await run(root, ["-c", "core.hooksPath=/dev/null", "update-ref", "-d", ref, expectedSha], true);
+      return result.code === 0 || await service.readRef(root, ref) === null;
     },
 
     async deleteBranch(root, name) {
@@ -842,8 +947,7 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
 
     worktrees: {
       async list(root) {
-        const r = await run(root, ["worktree", "list", "--porcelain"], true);
-        if (r.code !== 0) return [];
+        const r = await run(root, ["worktree", "list", "--porcelain"]);
         return parseWorktrees(r.stdout);
       },
 
@@ -855,10 +959,11 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
           : join(dirname(resolve(root)), `${basename(resolve(root))}-worktrees`, sanitizeBranchDir(branch));
         await mkdir(dirname(target), { recursive: true });
         const exists = (await run(root, ["rev-parse", "--verify", `refs/heads/${branch}`], true)).code === 0;
+        if (exists && input.newBranchOnly) throw Object.assign(new Error("branch already exists"), { code: "conflict" });
         if (exists) await run(root, ["worktree", "add", target, branch]);
         else {
           const base = input.base ?? "HEAD";
-          await run(root, ["worktree", "add", "-b", branch, target, base]);
+          await run(root, [...(input.newBranchOnly ? ["-c", "core.hooksPath=/dev/null"] : []), "worktree", "add", "-b", branch, target, base]);
         }
         return { path: target, branch };
       },
@@ -907,7 +1012,7 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
         assertRev(startPoint);
         const target = resolve(path);
         await mkdir(dirname(target), { recursive: true });
-        await run(root, ["worktree", "add", "--detach", target, startPoint]);
+        await run(root, ["-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach", target, startPoint]);
       },
     },
   };

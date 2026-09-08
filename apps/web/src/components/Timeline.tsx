@@ -1839,7 +1839,10 @@ export default function Timeline({
   const revertOk = revertPending
     ? { enabled: false as const, reason: "Revert unavailable while another revert is being applied" }
     : revertAvailability(guards);
-  const forkOk = forkAvailability(guards);
+  const isolated = useStore((s) => !!s.sessions.find((x) => x.id === s.activeSessionId)?.isolation);
+  const forkOk = isolated
+    ? { enabled: false as const, reason: tr("isolation.nestedUnsupported") }
+    : forkAvailability(guards);
 
   const visibleMessages = useMemo(() => model.messages.filter((message) => !message.undone && !blankAssistant(message)), [model]);
   const undoneMessages = useMemo(() => model.messages.filter((message) => message.undone && !blankAssistant(message)), [model]);

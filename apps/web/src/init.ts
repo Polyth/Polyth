@@ -1081,6 +1081,7 @@ export async function createSession(projectId: string, opts: CreateSessionOption
   const { model, agent } = compatibleCreationDefaults(project, opts);
   if (!opts.worktreePath && project?.defaults?.worktreeBehavior === "fresh-worktree") {
     return startIsolatedSession(projectId, {
+      ...(opts.harness ? { harness: opts.harness } : {}),
       ...(opts.title ? { title: opts.title } : {}),
       ...(opts.model ? { model: opts.model } : {}),
       ...(opts.agent ? { agent: opts.agent } : {}),

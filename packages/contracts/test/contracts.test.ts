@@ -134,7 +134,7 @@ test("isolationBlocksUserMutation covers runtime epoch and wait states", () => {
   assert.equal(isolationBlocksUserMutation("idle"), false);
   assert.equal(isolationBlocksUserMutation("failed"), false);
   assert.equal(isolationBlocksUserMutation("finished"), false);
-  assert.equal(isolationBlocksUserMutation("unknown"), false);
+  assert.equal(isolationBlocksUserMutation("unknown"), true);
   assert.equal(isolationBlocksUserMutation("working"), true);
   assert.equal(isolationBlocksUserMutation("waiting"), true);
   assert.equal(isolationBlocksUserMutation("reconciling"), true);

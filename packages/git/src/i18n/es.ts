@@ -448,4 +448,12 @@ export const es: GitMessages = {
   "isolation.missingWorkspace": "El espacio aislado ya no está disponible.",
   "isolation.workInIsolation": "Trabajar en aislamiento",
   "isolation.workInIsolationHint": "Usa un espacio Git temporal que se puede fusionar al terminar.",
+  "isolation.recoveryNeeded": "Es necesario recuperar el espacio de trabajo",
+  "isolation.restoreOrigin": "Restaura la copia de trabajo de {branch} en {path} y vuelve a intentarlo. Esta sesión y su historial se conservan.",
+  "isolation.cleanupPendingDetail": "La sesión ha vuelto a su espacio de trabajo original. Reintenta la limpieza para eliminar el espacio temporal.",
+  "isolation.ownershipUnverified": "No se pudo verificar la propiedad del espacio de trabajo aislado",
+  "isolation.ownershipDetail": "El espacio de trabajo se ha conservado. Restaura sus metadatos de propiedad originales antes de reintentar la recuperación.",
+  "isolation.retryRecovery": "Reintentar recuperación",
+  "isolation.nestedUnsupported": "Inicia el aislamiento desde una sesión o un espacio de trabajo normal. No se admite el aislamiento anidado.",
+  "isolation.finishBeforeDelete": "Fusiona, descarta o recupera el espacio aislado antes de eliminar esta sesión.",
 };

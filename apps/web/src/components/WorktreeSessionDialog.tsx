@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { isManagedIsolationBranch } from "@polyth/contracts";
 import { api, type Worktree } from "@polyth/session/web-api";
 import { setOverlay, setSidebarOpen, useStore } from "../store.ts";
 import { startIsolatedSession } from "../init.ts";
@@ -36,10 +37,11 @@ export default function WorktreeSessionDialog() {
     setTitle("");
     void api.listWorktrees(request.projectId).then((next) => {
       if (!active) return;
-      setWorktrees(next);
+      const origins = next.filter((item) => !!item.branch && !isManagedIsolationBranch(item.branch));
+      setWorktrees(origins);
       const preferred = request.worktreePath
-        ? next.find((item) => item.path === request.worktreePath)
-        : next.find((item) => item.isMain) ?? next[0];
+        ? origins.find((item) => item.path === request.worktreePath)
+        : origins.find((item) => item.isMain) ?? origins[0];
       setTargetBranch(preferred?.branch ?? "");
       setLoading(false);
     }).catch((cause) => {
@@ -55,8 +57,10 @@ export default function WorktreeSessionDialog() {
     [worktrees],
   );
 
+  const nested = sourceSession?.projectId === request?.projectId && !!sourceSession?.isolation;
+
   const submit = async () => {
-    if (!request) return;
+    if (!request || nested) return;
     const origin = targetBranch.trim();
     if (!origin) {
       setError(tr("worktreesessiondialog.enterABranchNameTo"));
@@ -98,7 +102,7 @@ export default function WorktreeSessionDialog() {
             size="sm"
             variant="primary"
             busy={busy}
-            disabled={loading || !targetBranch.trim()}
+            disabled={loading || nested || !targetBranch.trim()}
             onClick={() => void submit()}
           >
             {busy ? progress || tr("worktreesessiondialog.creating") : tr("isolation.workInIsolation")}
@@ -134,6 +138,7 @@ export default function WorktreeSessionDialog() {
           </label>
         )}
 
+        {nested && <div className="inline-error" role="alert">{tr("isolation.nestedUnsupported")}</div>}
         {error && <div className="inline-error" role="alert">{error}</div>}
       </div>
     </Dialog>
