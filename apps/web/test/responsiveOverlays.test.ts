@@ -45,6 +45,7 @@ test("modal primitives lock background scroll and retain touch dismissal", async
   assert.match(dialog, /useModalScrollLock\(enabled && open\)/);
   assert.match(dialog, /root\?\.parentElement/);
   assert.match(dialog, /\[\.\.\.parent\.children\]\.filter\(\(element\) => element !== root\)/);
+  assert.match(dialog, /createPortal\(surface, document\.body\)/, "dialogs render outside glass containing blocks");
   assert.match(dialog, /onPointerDown=\{\(e\) => \{ if \(e\.target === e\.currentTarget\) onClose\(\); \}\}/);
   assert.match(settings, /useModalSurface\(\{/);
   assert.match(settings, /open:\s*true/);

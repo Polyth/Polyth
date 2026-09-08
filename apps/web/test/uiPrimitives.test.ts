@@ -373,9 +373,9 @@ test("ResponsiveOverlay: desktop dialog vs anchored popover vs phone sheet", asy
     children: createElement("p", null, "content"),
   }));
   try {
-    const surface = dialog.container.querySelector('[role="dialog"]')!;
+    const surface = document.body.querySelector('[role="dialog"]')!;
     assert.equal(surface.getAttribute("aria-label"), "Configure");
-    assert.ok(dialog.container.querySelector(".ui-dialog-head h2")?.textContent?.includes("Configure"));
+    assert.ok(document.body.querySelector(".ui-dialog-head h2")?.textContent?.includes("Configure"));
   } finally { await dialog.unmount(); }
 
   // Desktop with an anchor → popover.

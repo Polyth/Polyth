@@ -378,7 +378,7 @@ test("every permanent delete confirms; running sessions include activity context
     const idleDelete = menuItems().find((b) => b.textContent?.trim() === "Delete");
     assert.ok(idleDelete, "row menu offers Delete");
     await act(async () => { idleDelete!.click(); });
-    const idleDialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
+    const idleDialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
     assert.ok(idleDialog, "idle delete opens the themed confirmation first");
     assert.match(idleDialog.textContent ?? "", /permanently removes the session and its history/i);
     await act(async () => {
@@ -392,7 +392,7 @@ test("every permanent delete confirms; running sessions include activity context
     });
     const idleDelete2 = menuItems().find((b) => b.textContent?.trim() === "Delete");
     await act(async () => { idleDelete2!.click(); });
-    const idleDialog2 = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
+    const idleDialog2 = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
     assert.ok(idleDialog2);
     await act(async () => {
       idleDialog2.querySelector<HTMLButtonElement>(".alert-confirm")!.click();
@@ -419,7 +419,7 @@ test("every permanent delete confirms; running sessions include activity context
     fetchCalls.length = 0;
     const runDelete = menuItems().find((b) => b.textContent?.trim() === "Delete");
     await act(async () => { runDelete!.click(); });
-    const runDialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
+    const runDialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
     assert.ok(runDialog, "running delete opens the themed confirmation first");
     assert.match(runDialog.textContent ?? "", /still running|permanently/i);
     await act(async () => {
@@ -433,7 +433,7 @@ test("every permanent delete confirms; running sessions include activity context
     });
     const runDelete2 = menuItems().find((b) => b.textContent?.trim() === "Delete");
     await act(async () => { runDelete2!.click(); });
-    const runDialog2 = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
+    const runDialog2 = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
     assert.ok(runDialog2);
     await act(async () => {
       runDialog2.querySelector<HTMLButtonElement>(".alert-confirm")!.click();
@@ -528,7 +528,7 @@ test("holding Shift mounts quick actions; delete skips confirm only for backgrou
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     assert.equal(
-      container.querySelector('[role="dialog"][aria-label="Delete session"]'),
+      document.querySelector('[role="dialog"][aria-label="Delete session"]'),
       null,
       "background rows delete without a confirmation",
     );
@@ -552,7 +552,7 @@ test("holding Shift mounts quick actions; delete skips confirm only for backgrou
     const runDelete = runRow.querySelector<HTMLButtonElement>(".session-quick .session-quick-btn.danger");
     assert.ok(runDelete, "running row also mounts the quick layer");
     await act(async () => { runDelete!.click(); });
-    const dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
     assert.ok(dialog, "active work keeps the delete confirmation");
     await act(async () => {
       dialog!.querySelector<HTMLButtonElement>(".ui-btn--quiet")!.click();

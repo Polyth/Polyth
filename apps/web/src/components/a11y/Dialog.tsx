@@ -5,6 +5,7 @@
 // session drawer (Sidebar) and panel sheet (ContextRail) share one
 // implementation instead of copying focus traps.
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { usePackageWindowOwner } from "../ui/PackageWindowContext.ts";
 import IconButton from "../ui/IconButton.tsx";
 import { CloseIcon } from "../ui/icons.ts";
@@ -273,7 +274,7 @@ export default function Dialog({
     onAfterRestoreFocus,
   });
 
-  return (
+  const surface = (
     <div
       ref={backdropRef}
       className={`dialog-backdrop${backdropClassName ? ` ${backdropClassName}` : ""}`}
@@ -299,4 +300,11 @@ export default function Dialog({
       </div>
     </div>
   );
+
+  // A fixed backdrop must not stay inside a glass shell. Ancestors with
+  // backdrop-filter (the sidebar/rail/composer) create a containing block and
+  // otherwise clip the dialog to that surface instead of the viewport.
+  return typeof document !== "undefined" && document.body
+    ? createPortal(surface, document.body)
+    : surface;
 }

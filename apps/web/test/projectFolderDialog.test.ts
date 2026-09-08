@@ -73,14 +73,14 @@ test("mounted Add/Open dialog has no project classification control", async () =
     root.render(createElement(ProjectFolderDialog, { onClose: () => {} }));
   });
   try {
-    const text = container.textContent ?? "";
+    const text = document.body.textContent ?? "";
     assert.match(text, /Open a project|Open project/);
     assert.doesNotMatch(text, /Project type/);
     assert.doesNotMatch(text, /General|Write|Research|Plan & Coordinate|Design & Explore|Build & Debug/);
-    assert.equal(container.querySelector("select"), null);
-    assert.ok(container.querySelector(".folder-open-btn"));
-    assert.equal(container.querySelector(".folder-type-row"), null);
-    assert.equal(container.querySelector(".project-type-controls"), null);
+    assert.equal(document.body.querySelector("select"), null);
+    assert.ok(document.body.querySelector(".folder-open-btn"));
+    assert.equal(document.body.querySelector(".folder-type-row"), null);
+    assert.equal(document.body.querySelector(".project-type-controls"), null);
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();

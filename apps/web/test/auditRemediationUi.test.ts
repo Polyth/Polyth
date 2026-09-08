@@ -207,16 +207,16 @@ test("header primary rail exposes a permanent Terminal toggle after project acti
 
   const searchSurface = await mounted(createElement(CommandPalette));
   try {
-    assert.equal(searchSurface.container.querySelector('[role="dialog"]')?.getAttribute("aria-label"), "Search workspace");
-    assert.match(searchSurface.container.textContent ?? "", /Commands, projects, sessions, and files/);
+    assert.equal(document.body.querySelector('[role="dialog"]')?.getAttribute("aria-label"), "Search workspace");
+    assert.match(document.body.textContent ?? "", /Commands, projects, sessions, and files/);
   } finally {
     await searchSurface.unmount();
   }
 
   const historySurface = await mounted(createElement(SessionSearch));
   try {
-    assert.equal(historySurface.container.querySelector(".palette-heading-title")?.textContent, "Session history");
-    assert.match(historySurface.container.textContent ?? "", /Recent sessions and conversation content/);
+    assert.equal(document.body.querySelector(".palette-heading-title")?.textContent, "Session history");
+    assert.match(document.body.textContent ?? "", /Recent sessions and conversation content/);
   } finally {
     await historySurface.unmount();
   }
