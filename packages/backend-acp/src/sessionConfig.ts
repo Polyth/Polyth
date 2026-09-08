@@ -3,9 +3,9 @@
 // vendor-specific:
 //
 //  - current: `session/new` / `session/load` return `configOptions`, a list of
-//    `{ id, name, category, type: "select" | "boolean", ... }`. A `model`
-//    category select is the model catalog; a `thought_level` category select is
-//    the reasoning-variant control. Changes go through
+//    `{ id, name, category?, type: "select" | "boolean", ... }`. The optional
+//    category or the exact well-known ids `model` / `thought_level` identify
+//    the two controls. Changes go through
 //    `session/set_config_option`.
 //  - legacy (still shipped by some agents): `session/new` returns
 //    `models: { availableModels, currentModelId }` and changes go through
@@ -26,15 +26,18 @@ export interface AcpConfigSelect {
 }
 
 export interface AcpSessionConfig {
-  /** The `category: "model"` select, when the agent exposes one. */
+  /** The model select identified by category or exact well-known id. */
   model?: AcpConfigSelect;
-  /** The `category: "thought_level"` select, when the agent exposes one. */
+  /** The thinking select identified by category or exact well-known id. */
   thoughtLevel?: AcpConfigSelect;
   /** Legacy `models` block from `session/new`. */
   legacyModels?: { available: AcpSelectOption[]; current?: string };
   /** Session modes, kept for `current_mode_update` bookkeeping. */
   currentModeId?: string;
 }
+
+const classified = (option: AcpConfigSelect, kind: "model" | "thought_level"): boolean =>
+  option.category === kind || (option.category === undefined && option.id === kind);
 
 const str = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() ? value : undefined;
@@ -99,18 +102,19 @@ export function parseSessionConfig(result: unknown): AcpSessionConfig {
     .flatMap((entry) => { const parsed = parseSelect(entry); return parsed ? [parsed] : []; });
   const modes = asRecord(row.modes);
   return {
-    ...(options.find((option) => option.category === "model")
-      ? { model: options.find((option) => option.category === "model")! }
+    ...(options.find((option) => classified(option, "model"))
+      ? { model: options.find((option) => classified(option, "model"))! }
       : {}),
-    ...(options.find((option) => option.category === "thought_level")
-      ? { thoughtLevel: options.find((option) => option.category === "thought_level")! }
+    ...(options.find((option) => classified(option, "thought_level"))
+      ? { thoughtLevel: options.find((option) => classified(option, "thought_level"))! }
       : {}),
     ...(parseLegacyModels(row.models) ? { legacyModels: parseLegacyModels(row.models)! } : {}),
     ...(modes && str(modes.currentModeId) ? { currentModeId: str(modes.currentModeId)! } : {}),
   };
 }
 
-/** Merge a `config_option_update` notification into the tracked config. */
+/** A config update carries the complete option state. Replace recognized
+ * controls so a removed option cannot remain available from stale state. */
 export function applyConfigOptionUpdate(
   config: AcpSessionConfig,
   update: unknown,
@@ -120,10 +124,11 @@ export function applyConfigOptionUpdate(
   const options = (Array.isArray(row.configOptions) ? row.configOptions : [])
     .flatMap((entry) => { const parsed = parseSelect(entry); return parsed ? [parsed] : []; });
   if (options.length === 0) return config;
-  const model = options.find((option) => option.category === "model");
-  const thoughtLevel = options.find((option) => option.category === "thought_level");
+  const model = options.find((option) => classified(option, "model"));
+  const thoughtLevel = options.find((option) => classified(option, "thought_level"));
+  const { model: _oldModel, thoughtLevel: _oldThought, ...rest } = config;
   return {
-    ...config,
+    ...rest,
     ...(model ? { model } : {}),
     ...(thoughtLevel ? { thoughtLevel } : {}),
   };
@@ -155,14 +160,21 @@ export function acpModelDescriptors(
   harnessId: string,
 ): ModelDescriptor[] {
   const rows = config.model?.options ?? config.legacyModels?.available ?? [];
-  const variants = config.thoughtLevel?.options.map((option) => option.value) ?? [];
-  const defaultVariant = config.thoughtLevel?.currentValue;
+  const variants = config.thoughtLevel?.options
+    .map((option) => option.value)
+    .filter((value) => value !== "auto" && value !== "default") ?? [];
   return rows.map((row) => ({
     providerID: harnessId,
     modelID: row.value,
     name: row.name,
     connected: true,
     ...(variants.length ? { variants } : {}),
-    ...(defaultVariant && variants.includes(defaultVariant) ? { defaultVariant } : {}),
   } satisfies ModelDescriptor));
+}
+
+/** Only an explicit protocol value is a portable reset target. Mutable
+ * `currentValue` is intentionally not treated as a static default. */
+export function explicitThoughtLevelReset(config: AcpSessionConfig): string | undefined {
+  return config.thoughtLevel?.options
+    .find((option) => option.value === "auto" || option.value === "default")?.value;
 }

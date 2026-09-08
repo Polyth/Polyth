@@ -13,12 +13,21 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
      * cheaper place to ask.
      */
     const discoveryProbe = (context: HarnessContext) => ({
-        async open() {
-            const connection = await connectAcp(profile, context);
+        async open(signal?: AbortSignal) {
+            const connection = await connectAcp(profile, context, undefined, signal);
+            const abort = () => { void connection.rpc.close().catch(() => {}); };
+            signal?.addEventListener("abort", abort, { once: true });
             try {
                 const result = await connection.rpc.request("session/new", { cwd: context.cwd, mcpServers: [] });
-                return { result, close: () => connection.rpc.close() };
+                return {
+                    result,
+                    close: async () => {
+                        signal?.removeEventListener("abort", abort);
+                        await connection.rpc.close();
+                    },
+                };
             } catch (error) {
+                signal?.removeEventListener("abort", abort);
                 await connection.rpc.close();
                 throw error;
             }

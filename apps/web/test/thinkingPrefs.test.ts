@@ -23,9 +23,19 @@ test("thinking effort saves immediately and independently for each model", () =>
   setModelThinking(claude, "low");
   assert.equal(getModelThinking(gpt), "high");
   assert.equal(getModelThinking(claude), "low");
-  assert.equal(mem.get(THINKING_PREFS_KEY), '{"anthropic/claude-4":"low","openai/gpt-5":"high"}');
+  assert.equal(mem.get(THINKING_PREFS_KEY), '{"local/anthropic/claude-4":"low","local/openai/gpt-5":"high"}');
 
   setModelThinking(gpt, undefined);
   assert.equal(getModelThinking(gpt), undefined);
   assert.equal(getModelThinking(claude), "low");
+});
+
+test("identical provider/model ids keep independent thinking per harness", () => {
+  mem.clear();
+  const left = { harnessId: "claude", providerID: "shared", modelID: "same" };
+  const right = { harnessId: "acp", providerID: "shared", modelID: "same" };
+  setModelThinking(left, "high");
+  setModelThinking(right, "low");
+  assert.equal(getModelThinking(left), "high");
+  assert.equal(getModelThinking(right), "low");
 });

@@ -31,13 +31,13 @@ const until = async (condition: () => Promise<boolean>) => {
 
 /** Harness A: two models, one with reasoning levels; files ride natively. */
 const A_MODELS: ModelDescriptor[] = [
-  { providerID: "prov-a", modelID: "a-deep", name: "A Deep", variants: ["low", "high"], defaultVariant: "low" },
-  { providerID: "prov-a", modelID: "a-fast", name: "A Fast" },
+  { providerID: "prov-a", modelID: "a-deep", name: "A Deep", variants: ["low", "high"], defaultVariant: "low", capabilities: ["input:text", "input:file"] },
+  { providerID: "prov-a", modelID: "a-fast", name: "A Fast", capabilities: ["input:text"] },
 ];
 
 /** Harness B: different models, different variant vocabulary, emulated files. */
 const B_MODELS: ModelDescriptor[] = [
-  { providerID: "prov-b", modelID: "b-think", name: "B Think", variants: ["quick", "thorough"], defaultVariant: "quick" },
+  { providerID: "prov-b", modelID: "b-think", name: "B Think", variants: ["quick", "thorough"], defaultVariant: "quick", capabilities: ["input:text", "input:file"] },
 ];
 
 const CAPABILITIES: Record<string, Partial<RuntimeCapabilities>> = {
@@ -288,5 +288,53 @@ test("runtime features and the model catalog belong to the current harness", asy
   const after = await f.sessions.runtimeFeatures!(id);
   assert.equal(after.attachmentSupport.file, "emulated");
   assert.equal("pdf" in after.attachmentSupport, false);
+  await f.close();
+});
+
+test("queued attachments are re-evaluated against a later selected model", async () => {
+  const f = fixture({});
+  const { id } = await f.sessions.create({ projectId: "p" });
+  await f.sessions.send(id, { text: "active", model: { providerID: "prov-a", modelID: "a-deep" } });
+  const engine = f.engineFor("fake-a").at(-1)!;
+  await f.sessions.send(id, {
+    text: "queued image", delivery: "queue",
+    model: { providerID: "prov-a", modelID: "a-deep" },
+    attachments: [{ id: "att", name: "shot.png", mime: "image/png", size: 13, kind: "image", path: "shot.png" }],
+  });
+  // A later queued choice changes the session's actual next-turn model.
+  await f.sessions.send(id, {
+    text: "switch model", delivery: "queue",
+    model: { providerID: "prov-a", modelID: "a-fast" },
+  });
+  engine.complete();
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.deepEqual(engine.requests.map((request) => ({ text: request.text, model: request.model, attachments: request.attachments })), [{
+    text: "active",
+    model: { providerID: "prov-a", modelID: "a-deep" },
+    attachments: undefined,
+  }], "the image-incompatible model receives no turn");
+  assert.equal((await f.store.queueList(id)).length, 2, "the rejected head remains reviewable");
+  assert.deepEqual(f.reads, [], "no delivery work is generated for a rejected eventual target");
+  await f.close();
+});
+
+test("queued attachments are projected once for the harness selected before dispatch", async () => {
+  const f = fixture({ "notes.txt": new TextEncoder().encode("queued notes\n") });
+  const { id } = await f.sessions.create({ projectId: "p" });
+  await f.sessions.send(id, { text: "active" });
+  const engineA = f.engineFor("fake-a").at(-1)!;
+  await f.sessions.send(id, {
+    text: "queued attachment", delivery: "queue",
+    attachments: [{ id: "att", name: "notes.txt", mime: "text/plain", size: 13, kind: "file", path: "notes.txt" }],
+  });
+  await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" });
+  engineA.complete();
+  await until(async () => f.engineFor("fake-b").some((engine) => engine.requests.length > 0));
+  const request = f.engineFor("fake-b").at(-1)!.requests[0]!;
+  assert.match(request.text, /queued notes/);
+  assert.deepEqual(request.attachments ?? [], []);
+  assert.equal(f.reads.length, 1, "the eventual harness projects exactly once");
+  f.engineFor("fake-b").at(-1)!.complete();
+  await f.idle(id);
   await f.close();
 });

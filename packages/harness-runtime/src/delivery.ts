@@ -67,7 +67,13 @@ export function planAttachmentDelivery(input: AttachmentDeliveryInput): Attachme
   }
   const level = support[modality];
   if (level === undefined || level === "unsupported") {
-    if (input.supportDeclared === false) return { kind: "native", modality };
+    // Compatibility for older runtimes with no declaration is deliberately
+    // narrow: ordinary UTF-8 text can use Polyth's guarded projection. Unknown
+    // binary/native modalities are never forwarded on an assumption.
+    if (level === undefined && input.supportDeclared === false && modality === "file"
+        && (ref.mime?.startsWith("text/") || ref.mime === "application/json")) {
+      return { kind: "text-projection", modality: "file" };
+    }
     return {
       kind: "unsupported",
       modality,
@@ -91,6 +97,10 @@ export type TextProjection =
   | { ok: false; code: TurnRejectionCode; reason: string };
 
 const NUL = 0;
+
+export type TextMaterialization =
+  | { ok: true; content: string; truncatedBytes: number }
+  | { ok: false; code: TurnRejectionCode; reason: string };
 
 /** Longest complete UTF-8 prefix of `bytes` no longer than `limit` bytes. */
 const utf8Prefix = (bytes: Uint8Array, limit: number): Uint8Array => {
@@ -126,12 +136,26 @@ export interface TextProjectionInput {
   maxBytes?: number;
 }
 
-/**
- * Render one file as a delimited prompt section. Deterministic for identical
- * input: head truncation on a UTF-8 boundary with an explicit byte count, and
- * a binary file is refused rather than smuggled in as mojibake.
- */
-export function projectAttachmentText(input: TextProjectionInput): TextProjection {
+/** Select a line range before applying the byte ceiling. This keeps a late
+ * range reachable without ever decoding or retaining an unbounded string. */
+const rangedBytes = (bytes: Uint8Array, range: readonly [number, number]): Uint8Array => {
+  const from = Math.max(1, Math.trunc(range[0]));
+  const to = Math.max(from, Math.trunc(range[1]));
+  let line = 1;
+  let start = from === 1 ? 0 : bytes.length;
+  let end = bytes.length;
+  for (let index = 0; index < bytes.length; index++) {
+    if (bytes[index] !== 10) continue;
+    line += 1;
+    if (line === from) start = index + 1;
+    if (line === to + 1) { end = index; break; }
+  }
+  return bytes.subarray(start, Math.max(start, end));
+};
+
+/** Canonical bounded UTF-8 materialization shared by prompt projection and
+ * adapters that transport text in a native resource block. */
+export function materializeAttachmentText(input: TextProjectionInput): TextMaterialization {
   const limit = input.maxBytes ?? TEXT_PROJECTION_MAX_BYTES;
   if (input.bytes.includes(NUL)) {
     return {
@@ -140,7 +164,8 @@ export function projectAttachmentText(input: TextProjectionInput): TextProjectio
       reason: `${input.path} looks like a binary file, so its text cannot be attached.`,
     };
   }
-  const kept = utf8Prefix(input.bytes, limit);
+  const selected = input.range ? rangedBytes(input.bytes, input.range) : input.bytes;
+  const kept = utf8Prefix(selected, limit);
   const decoded = decodeStrict(kept);
   if (decoded === undefined) {
     return {
@@ -149,18 +174,18 @@ export function projectAttachmentText(input: TextProjectionInput): TextProjectio
       reason: `${input.path} is not UTF-8 text, so it cannot be attached.`,
     };
   }
-  let content = decoded;
-  let truncatedBytes = input.bytes.length - kept.length;
-  if (input.range) {
-    const [from, to] = input.range;
-    const lines = content.split("\n");
-    const start = Math.max(1, Math.trunc(from));
-    const end = Math.max(start, Math.trunc(to));
-    content = lines.slice(start - 1, end).join("\n");
-    // A ranged slice of a truncated head would report bytes the user never
-    // asked for; the range itself is the stated bound.
-    truncatedBytes = 0;
-  }
+  return { ok: true, content: decoded, truncatedBytes: selected.length - kept.length };
+}
+
+/**
+ * Render one file as a delimited prompt section. Deterministic for identical
+ * input: head truncation on a UTF-8 boundary with an explicit byte count, and
+ * a binary file is refused rather than smuggled in as mojibake.
+ */
+export function projectAttachmentText(input: TextProjectionInput): TextProjection {
+  const materialized = materializeAttachmentText(input);
+  if (!materialized.ok) return materialized;
+  const { content, truncatedBytes } = materialized;
   const header = input.range
     ? `${input.path} (lines ${Math.trunc(input.range[0])}-${Math.trunc(input.range[1])})`
     : input.path;

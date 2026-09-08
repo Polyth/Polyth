@@ -10,14 +10,15 @@ export {
     acpModelDescriptors,
     applyConfigOptionUpdate,
     currentModelId,
+    explicitThoughtLevelReset,
     modelControl,
     parseSessionConfig,
     type AcpModelControl,
     type AcpSessionConfig,
 } from "./sessionConfig.ts";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { open, readFile, realpath } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { AgentRuntime, HarnessContext, HarnessDescriptor, HarnessProvider, JsonObject, ModelDescriptor, MutationOutcome, RuntimeCommandDescriptor, RuntimeEvent, RuntimeSnapshot } from "@polyth/contracts";
 import {
@@ -26,6 +27,7 @@ import {
     captureCapabilityLaunch,
     composeTurnPrompt,
     createStdioRpc,
+    materializeAttachmentText,
     provisioningTarget,
     releaseCapabilityLaunch,
     resolveModelSelection,
@@ -37,6 +39,7 @@ import {
     acpModelDescriptors,
     applyConfigOptionUpdate,
     currentModelId,
+    explicitThoughtLevelReset,
     modelControl,
     parseSessionConfig,
     type AcpSessionConfig,
@@ -90,6 +93,38 @@ const attachmentModalitySupport = (agentCapabilities?: AcpAgentCapabilities) => 
 const acpAdvertised = (value: unknown): boolean =>
     value === true || (typeof value === "object" && value !== null);
 
+const ACP_TEXT_SOURCE_MAX_BYTES = 20 * 1024 * 1024;
+
+const confinedAttachmentPath = async (root: string, candidate: string): Promise<string> => {
+    const rootPath = await realpath(root);
+    const target = await realpath(isAbsolute(candidate) ? candidate : resolve(rootPath, candidate));
+    const rel = relative(rootPath, target);
+    if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+        throw Object.assign(new Error("Attachment path escapes the execution root"), { code: "invalid-attachment" });
+    }
+    return target;
+};
+
+const readBoundedTextSource = async (path: string): Promise<Uint8Array> => {
+    const handle = await open(path, "r");
+    try {
+        const stat = await handle.stat();
+        if (!stat.isFile() || stat.size > ACP_TEXT_SOURCE_MAX_BYTES) {
+            throw Object.assign(new Error("Attachment is not a bounded regular file"), { code: "invalid-attachment" });
+        }
+        const bytes = new Uint8Array(stat.size);
+        let offset = 0;
+        while (offset < bytes.length) {
+            const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+            if (bytesRead === 0) break;
+            offset += bytesRead;
+        }
+        return bytes.subarray(0, offset);
+    } finally {
+        await handle.close();
+    }
+};
+
 export const ACP_STATIC_FEATURES = {
     streaming: true,
     permissions: true,
@@ -129,9 +164,12 @@ const parseAuthMethods = (value: unknown): AcpAuthMethod[] =>
     });
 /** ACP v1 is deliberately version-pinned. V2 changes prompt admission and
  * session lifecycle; it must not be guessed from a superficially similar API. */
-export async function connectAcp(profile: AcpProfile, context: HarnessContext, stateFile?: string): Promise<AcpConnection> {
+export async function connectAcp(profile: AcpProfile, context: HarnessContext, stateFile?: string, signal?: AbortSignal): Promise<AcpConnection> {
     const rpc = await createStdioRpc({ command: profile.command, args: profile.args, cwd: context.cwd, stateFile });
+    const abort = () => { void rpc.close().catch(() => {}); };
+    signal?.addEventListener("abort", abort, { once: true });
     try {
+        if (signal?.aborted) throw Object.assign(new Error("ACP connection cancelled"), { code: "discovery-unavailable" });
         const result = await rpc.request<{
             protocolVersion: number;
             agentCapabilities?: AcpAgentCapabilities;
@@ -145,6 +183,8 @@ export async function connectAcp(profile: AcpProfile, context: HarnessContext, s
     catch (error) {
         await rpc.close();
         throw error;
+    } finally {
+        signal?.removeEventListener("abort", abort);
     }
 }
 export function createAcpRuntime(
@@ -169,8 +209,15 @@ export function createAcpRuntime(
     let sessionConfig: AcpSessionConfig = {};
     let desiredModelId: string | undefined;
     let desiredVariant: string | undefined;
-    /** Set once an agent answers -32601: it has no such control at all. */
-    let selectionUnavailable = false;
+    /** Model control failure must not erase an independent thought control. */
+    let modelSelectionUnavailable = false;
+    const thoughtDefaults = new Map<string, string>();
+    const rememberThoughtDefault = (allowCurrent: boolean): void => {
+        const model = currentModelId(sessionConfig);
+        const reset = explicitThoughtLevelReset(sessionConfig)
+            ?? (allowCurrent ? sessionConfig.thoughtLevel?.currentValue : undefined);
+        if (model && reset) thoughtDefaults.set(model, reset);
+    };
     const nativeCommands: RuntimeCommandDescriptor[] = [];
     const listeners = new Set<(sid: string, event: RuntimeEvent) => void>();
     const lifecycle = new Set<Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]>();
@@ -202,6 +249,7 @@ export function createAcpRuntime(
         const update = params.update;
         if (update.sessionUpdate === "config_option_update") {
             sessionConfig = applyConfigOptionUpdate(sessionConfig, update);
+            rememberThoughtDefault(false);
             return;
         }
         if (update.sessionUpdate === "current_mode_update") {
@@ -351,6 +399,7 @@ export function createAcpRuntime(
                 return created;
             }, "ACP session/new accepted mcpServers; native model load is unverifiable");
             sessionConfig = parseSessionConfig(result);
+            rememberThoughtDefault(true);
             nativeId = result.sessionId;
             createId = operationId;
             await rpc.receipt(operationId, nativeId);
@@ -375,7 +424,8 @@ export function createAcpRuntime(
         nativeId = backendSessionId;
         // A reloaded session starts on the agent's own selection, so the
         // conversation's choice has to be asserted again.
-        await applySelection(desiredModelId, desiredVariant).catch(() => {});
+        const applied = await applySelection(desiredModelId, desiredVariant);
+        if (!applied.ok) throw Object.assign(new Error(applied.message), { code: applied.code });
     };
 
     /**
@@ -399,6 +449,7 @@ export function createAcpRuntime(
             (error as { rpcCode?: number; code?: unknown }).rpcCode === -32601
             || (error as { code?: unknown }).code === -32601
             || /method not found/i.test((error as { message?: string }).message ?? "");
+        let operation: "model" | "thought" = "model";
         try {
             if (modelId && modelId !== currentModelId(sessionConfig)) {
                 const control = modelControl(sessionConfig);
@@ -411,18 +462,28 @@ export function createAcpRuntime(
                 } else {
                     return { ok: false, code: "unsupported", message: "This agent does not expose model selection." };
                 }
+                rememberThoughtDefault(true);
             }
-            if (variant !== undefined && sessionConfig.thoughtLevel
-                && variant !== sessionConfig.thoughtLevel.currentValue) {
-                await setOption(sessionConfig.thoughtLevel.id, variant);
+            operation = "thought";
+            const thought = sessionConfig.thoughtLevel;
+            const target = variant ?? (modelId ? thoughtDefaults.get(modelId) : undefined)
+                ?? explicitThoughtLevelReset(sessionConfig);
+            if (thought && target && target !== thought.currentValue) {
+                await setOption(thought.id, target);
+            } else if (thought && variant === undefined && modelId !== undefined && !target) {
+                return { ok: false, code: "unsupported", message: "This agent does not expose a native default thinking level to restore." };
             }
             return { ok: true };
         } catch (error) {
             if (methodMissing(error)) {
-                selectionUnavailable = true;
-                return { ok: false, code: "unsupported", message: "This agent does not expose model selection." };
+                if (operation === "model") modelSelectionUnavailable = true;
+                return { ok: false, code: "unsupported", message: operation === "model"
+                    ? "This agent does not expose model selection."
+                    : "This agent does not expose thinking-level selection." };
             }
-            return { ok: false, code: "native-failure", message: "The agent did not accept this model selection." };
+            return { ok: false, code: "native-failure", message: operation === "model"
+                ? "The agent did not accept this model selection."
+                : "The agent did not accept this thinking level." };
         }
     };
     const runtime: AgentRuntime = {
@@ -439,7 +500,7 @@ export function createAcpRuntime(
         commands: async () => [...nativeCommands],
         // Only what the agent advertised for this session. An agent that
         // exposes no model control reports an empty catalog, truthfully.
-        models: async () => selectionUnavailable ? [] : acpModelDescriptors(sessionConfig, harnessId),
+        models: async () => modelSelectionUnavailable ? [] : acpModelDescriptors(sessionConfig, harnessId),
         agents: async () => [],
         ensureSession: async (input) => {
             if (input.backendSessionId === nativeId && nativeId) return nativeId;
@@ -454,10 +515,10 @@ export function createAcpRuntime(
         async startTurnOperation(request, operationId) {
             if (active)
                 return { kind: "rejected", code: "unsupported", message: "ACP adapter supports idle text turns" };
-            const catalog: ModelDescriptor[] = selectionUnavailable
+            const catalog: ModelDescriptor[] = modelSelectionUnavailable
                 ? []
                 : acpModelDescriptors(sessionConfig, harnessId);
-            if (request.model && (selectionUnavailable || modelControl(sessionConfig).kind === "none")) {
+            if (request.model && (modelSelectionUnavailable || modelControl(sessionConfig).kind === "none")) {
                 return { kind: "rejected", code: "unsupported", message: "This agent does not expose model selection." };
             }
             const selection = resolveModelSelection(catalog, request.model, harnessId);
@@ -497,13 +558,25 @@ export function createAcpRuntime(
                         return { kind: "rejected", code: "invalid-attachment", message: `${ref.name} could not be read.` };
                     }
                     try {
-                        const data = await readBytes(ref.path);
+                        const path = await confinedAttachmentPath(context.cwd, ref.path);
+                        const data = await readBoundedTextSource(path);
+                        const materialized = materializeAttachmentText({
+                            path: ref.path,
+                            ...(ref.kind === "range" && ref.range ? { range: ref.range } : {}),
+                            bytes: data,
+                        });
+                        if (!materialized.ok) {
+                            return { kind: "rejected", code: materialized.code, message: materialized.reason };
+                        }
+                        const resourceText = materialized.truncatedBytes > 0
+                            ? `${materialized.content}\n[truncated ${materialized.truncatedBytes} bytes]`
+                            : materialized.content;
                         prompt.push({
                             type: "resource",
                             resource: {
-                                uri: pathToFileURL(absolute(ref.path)).href,
+                                uri: pathToFileURL(path).href,
                                 ...(ref.mime ? { mimeType: ref.mime } : {}),
-                                text: data.toString("utf8"),
+                                text: resourceText,
                             },
                         });
                     } catch {

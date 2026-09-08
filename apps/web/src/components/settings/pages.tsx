@@ -848,7 +848,8 @@ export function ProjectsPage() {
   const globalModel = resolveSessionDefaultModel(null, sessionDefaults.defaultModel, models[0]);
   const globalModelName = globalModel
     ? models.find((model) =>
-        model.providerID === globalModel.providerID && model.modelID === globalModel.modelID)?.name
+        model.providerID === globalModel.providerID && model.modelID === globalModel.modelID
+        && (!globalModel.harnessId || model.harnessId === globalModel.harnessId))?.name
       ?? globalModel.modelID
     : "No model available";
   useEffect(() => {
@@ -865,11 +866,15 @@ export function ProjectsPage() {
       setUiError(friendlyError("Couldn’t save project execution defaults", error));
     }
   };
-  const saveModel = async (projectId: string, model?: ModelRef) => {
+  const saveModel = async (projectId: string, model?: ModelRef & { harnessId?: string }) => {
     if (!model) return;
     try {
       const updated = await api.patchProject(projectId, {
-        defaults: { rememberModelSelection: true, model },
+        defaults: {
+          rememberModelSelection: true,
+          model: { providerID: model.providerID, modelID: model.modelID },
+          ...(model.harnessId ? { harness: { mode: "pinned", harnessId: model.harnessId } as const } : {}),
+        },
       });
       applyProjectUpsert(updated);
     } catch (error) {
@@ -975,7 +980,10 @@ export function ProjectsPage() {
               <ModelPicker
                 direction="down"
                 models={models}
-                value={p.defaults?.model ?? undefined}
+                value={p.defaults?.model ? {
+                  ...p.defaults.model,
+                  ...(p.defaults.harness?.mode === "pinned" ? { harnessId: p.defaults.harness.harnessId } : {}),
+                } : undefined}
                 recommended={globalModel}
                 onPick={(model) => void saveModel(p.id, model)}
               />

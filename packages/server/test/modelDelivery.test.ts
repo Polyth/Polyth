@@ -30,18 +30,21 @@ const CATALOG: ModelDescriptor[] = [{
   providerID: "fake",
   modelID: "plain",
   name: "Plain",
+  capabilities: ["input:text"],
 }];
 
 function fixture(options: {
   capabilities?: Partial<RuntimeCapabilities>;
   files?: Record<string, Uint8Array | Error>;
   remote?: boolean;
+  models?: Error;
 } = {}) {
   const store = createStore(":memory:");
   const listeners = new Set<(sessionId: string, event: RuntimeEvent) => void>();
   const requests: CanonicalTurnRequest[] = [];
   const materialized: string[] = [];
   const reads: string[] = [];
+  const readProjects: Array<string | undefined> = [];
   const runtime: AgentRuntime = {
     harnessId: "fake",
     capabilities: async () => ({
@@ -53,7 +56,10 @@ function fixture(options: {
       ...options.capabilities,
     }),
     commands: async () => [],
-    models: async () => CATALOG,
+    models: async () => {
+      if (options.models) throw options.models;
+      return CATALOG;
+    },
     agents: async () => [],
     ensureSession: async ({ sessionId }) => `native-${sessionId}`,
     sessions: async () => [],
@@ -104,8 +110,9 @@ function fixture(options: {
         materialized.push(rel);
         return { kind: "file", size: 1 };
       },
-      async read(_root, rel) {
+      async read(_root, rel, projectId) {
         reads.push(rel);
+        readProjects.push(projectId);
         const found = options.files?.[rel];
         if (found === undefined) throw new Error(`no such file ${rel}`);
         if (found instanceof Error) throw found;
@@ -119,6 +126,7 @@ function fixture(options: {
     requests,
     materialized,
     reads,
+    readProjects,
     emit: (sessionId: string, event: RuntimeEvent) => {
       for (const listener of listeners) listener(sessionId, event);
     },
@@ -170,6 +178,22 @@ test("an emulated file becomes exactly one projected prompt section, and no adap
   const logged = (await f.store.events(id)).find((event) => event.type === "user/message")!;
   assert.equal((logged.data as { attachments?: unknown[] }).attachments?.length, 1);
   assert.doesNotMatch(JSON.stringify(logged.data), /second line/);
+  await f.store.close();
+});
+
+test("remote emulated text reads through the project-qualified attachment store", async () => {
+  const f = fixture({
+    remote: true,
+    capabilities: { attachments: { modalities: { file: "emulated" } } },
+    files: { "notes.txt": text("remote bytes") },
+  });
+  const { id } = await f.sessions.create({ projectId: "p", title: "T" });
+  await f.sessions.send(id, {
+    text: "summarize",
+    attachments: [{ id: "a", name: "notes.txt", mime: "text/plain", size: 12, kind: "file", path: "notes.txt" }],
+  });
+  assert.deepEqual(f.readProjects, ["p"]);
+  assert.match(f.requests[0]!.text, /remote bytes/);
   await f.store.close();
 });
 
@@ -232,6 +256,21 @@ test("a binary file is refused rather than projected as mojibake", async () => {
     },
   );
   assert.equal(f.requests.length, 0);
+  await f.store.close();
+});
+
+test("final admission intersects image support with the selected model", async () => {
+  const f = fixture({
+    capabilities: { attachments: { modalities: { image: "native" } } },
+  });
+  const { id } = await f.sessions.create({ projectId: "p", title: "T" });
+  await assert.rejects(f.sessions.send(id, {
+    text: "read",
+    model: { providerID: "fake", modelID: "plain" },
+    attachments: [{ id: "a", name: "shot.png", mime: "image/png", size: 5, kind: "image", path: "shot.png" }],
+  }), (error: Error & { code?: string }) => error.code === "unsupported");
+  assert.equal(f.requests.length, 0);
+  assert.deepEqual((await f.store.events(id)).filter((event) => event.type === "user/message"), []);
   await f.store.close();
 });
 
@@ -338,6 +377,38 @@ test("a model the harness does not have is rejected as an unknown model", async 
       return true;
     },
   );
+  await f.store.close();
+});
+
+test("a wrong provider with a valid model id is rejected before the turn log", async () => {
+  const f = fixture();
+  const { id } = await f.sessions.create({ projectId: "p", title: "T" });
+  await assert.rejects(
+    f.sessions.send(id, { text: "x", model: { providerID: "other", modelID: "thinker" } }),
+    (error: Error & { code?: string }) => error.code === "invalid-model",
+  );
+  assert.equal(f.requests.length, 0);
+  assert.deepEqual((await f.store.events(id)).filter((event) => event.type === "user/message"), []);
+  await f.store.close();
+});
+
+test("a model catalog failure rejects before the turn is logged", async () => {
+  const f = fixture({ models: new Error("vendor-specific catalog failure") });
+  const { id } = await f.sessions.create({ projectId: "p", title: "T" });
+  await assert.rejects(
+    f.sessions.send(id, {
+      text: "think",
+      model: { providerID: "fake", modelID: "thinker", variant: "high" },
+    }),
+    (error: Error & { code?: string }) => {
+      assert.equal(error.code, "discovery-unavailable");
+      assert.match(error.message, /Fake Engine could not verify/i);
+      assert.doesNotMatch(error.message, /vendor-specific/i);
+      return true;
+    },
+  );
+  assert.equal(f.requests.length, 0);
+  assert.deepEqual((await f.store.events(id)).filter((event) => event.type === "user/message"), []);
   await f.store.close();
 });
 

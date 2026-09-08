@@ -32,17 +32,32 @@ test("an empty catalog for the harness defers to the adapter instead of inventin
   assert.deepEqual(result, { ok: true, variant: "high" });
 });
 
-test("a providerID mismatch never invalidates a model the harness demonstrably has", () => {
-  // Codex `model/list` reports no provider, so the descriptor's providerID is
-  // a best guess. The modelID is the identity.
+test("a wrong provider is rejected even when the model id exists", () => {
   const result = resolveModelSelection(
     catalog,
     { providerID: "azure", modelID: "gpt-5.5-codex", variant: "xhigh" },
     "codex",
   );
-  assert.equal(result.ok, true);
-  assert.equal(result.ok && result.variant, "xhigh");
-  assert.equal(result.ok && result.descriptor?.modelID, "gpt-5.5-codex");
+  assert.equal(result.ok, false);
+  assert.equal(result.ok === false && result.code, "invalid-model");
+});
+
+test("duplicate model ids resolve only within the requested provider", () => {
+  const duplicates: ModelDescriptor[] = [
+    { harnessId: "shared", providerID: "provider-a", modelID: "same", name: "A" },
+    { harnessId: "shared", providerID: "provider-b", modelID: "same", name: "B" },
+  ];
+  assert.equal(findModelDescriptor(duplicates, { providerID: "provider-b", modelID: "same" }, "shared")?.name, "B");
+  assert.equal(findModelDescriptor(duplicates, { providerID: "provider-c", modelID: "same" }, "shared"), undefined);
+});
+
+test("a harness switch with identical provider/model ids stays harness-scoped", () => {
+  const duplicates: ModelDescriptor[] = [
+    { harnessId: "left", providerID: "shared", modelID: "same", name: "Left" },
+    { harnessId: "right", providerID: "shared", modelID: "same", name: "Right" },
+  ];
+  assert.equal(findModelDescriptor(duplicates, { providerID: "shared", modelID: "same" }, "left")?.name, "Left");
+  assert.equal(findModelDescriptor(duplicates, { providerID: "shared", modelID: "same" }, "right")?.name, "Right");
 });
 
 test("a variant the model does not advertise is rejected, never silently dropped", () => {

@@ -4,9 +4,10 @@
 // exposes nothing must produce an empty catalog, never an invented one.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readdir, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, symlink, truncate, writeFile, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import { createAcpRuntime, acpModelDescriptors, modelControl, parseSessionConfig } from "../src/index.ts";
 import { discoverAcpModels, invalidateAcpDiscovery } from "../src/discovery.ts";
 import { fakeRpc } from "../../harness-runtime/test/rpcPeer.ts";
@@ -67,6 +68,13 @@ const startedRuntime = async (sessionResult: unknown, capabilities?: Parameters<
 const paramsOf = (f: ReturnType<typeof fakeRpc>, method: string) =>
     f.calls.filter((call) => call.method === method).map((call) => call.params);
 
+const sessionConfigAt = (model: string, thought: string) => ({
+    ...configOptionsSession,
+    configOptions: configOptionsSession.configOptions.map((option) => option.id === "model"
+        ? { ...option, currentValue: model }
+        : option.id === "thinking" ? { ...option, currentValue: thought } : option),
+});
+
 test("a configOptions model select becomes the session catalog", async () => {
     const { rt } = await startedRuntime(configOptionsSession);
     const models = await rt.models!();
@@ -76,11 +84,11 @@ test("a configOptions model select becomes the session catalog", async () => {
     assert.equal(models[0]!.providerID, "acp");
 });
 
-test("a thought_level select is the variant control, and its current value the default", async () => {
+test("a thought_level select exposes variants without treating mutable current state as a default", async () => {
     const { rt } = await startedRuntime(configOptionsSession);
     const [model] = await rt.models!();
     assert.deepEqual(model!.variants, ["low", "medium", "high"]);
-    assert.equal(model!.defaultVariant, "medium");
+    assert.equal(model!.defaultVariant, undefined);
 });
 
 test("the legacy models block becomes the same canonical catalog", async () => {
@@ -103,7 +111,11 @@ test("an agent that advertises no model control reports an empty catalog", async
 });
 
 test("a model change is pushed with set_config_option before the prompt", async () => {
-    const { f, rt } = await startedRuntime(configOptionsSession);
+    const modelOnlySession = {
+        ...configOptionsSession,
+        configOptions: configOptionsSession.configOptions.filter((option) => option.category !== "thought_level"),
+    };
+    const { f, rt } = await startedRuntime(modelOnlySession);
     await rt.startTurnOperation!(
         { sessionId: "canonical", text: "task", model: { providerID: "acp", modelID: "deep-2" } },
         "submit",
@@ -123,6 +135,101 @@ test("a variant change is pushed onto the thought_level option", async () => {
     assert.deepEqual(paramsOf(f, "session/set_config_option"), [
         { sessionId: "native", configId: "thinking", value: "high" },
     ]);
+});
+
+test("high to Auto actively restores the native session default", async () => {
+    const f = fakeRpc();
+    let model = "fast-1";
+    let thought = "medium";
+    f.handle(async (method, params) => {
+        if (method === "session/new") return sessionConfigAt(model, thought);
+        if (method === "session/set_config_option") {
+            if (params.configId === "model") model = params.value;
+            if (params.configId === "thinking") thought = params.value;
+            return sessionConfigAt(model, thought);
+        }
+        return { stopReason: "end_turn" };
+    });
+    const rt = createAcpRuntime(context, f.rpc, "acp", undefined, "Test Agent");
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    await rt.startTurnOperation!({ sessionId: "canonical", text: "high", model: { providerID: "acp", modelID: model, variant: "high" } }, "high");
+    await rt.startTurnOperation!({ sessionId: "canonical", text: "auto", model: { providerID: "acp", modelID: model } }, "auto");
+    assert.deepEqual(paramsOf(f, "session/set_config_option").map((call) => [call.configId, call.value]), [
+        ["thinking", "high"],
+        ["thinking", "medium"],
+    ]);
+});
+
+test("Auto to high to Auto restores a low native baseline", async () => {
+    const f = fakeRpc();
+    let thought = "low";
+    f.handle(async (method, params) => {
+        if (method === "session/new") return sessionConfigAt("fast-1", thought);
+        if (method === "session/set_config_option") {
+            thought = params.value;
+            return sessionConfigAt("fast-1", thought);
+        }
+        return { stopReason: "end_turn" };
+    });
+    const rt = createAcpRuntime(context, f.rpc, "acp", undefined, "Test Agent");
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    await rt.startTurnOperation!({ sessionId: "canonical", text: "auto-1", model: { providerID: "acp", modelID: "fast-1" } }, "auto-1");
+    await rt.startTurnOperation!({ sessionId: "canonical", text: "high", model: { providerID: "acp", modelID: "fast-1", variant: "high" } }, "high");
+    await rt.startTurnOperation!({ sessionId: "canonical", text: "auto-2", model: { providerID: "acp", modelID: "fast-1" } }, "auto-2");
+    assert.deepEqual(paramsOf(f, "session/set_config_option").map((call) => call.value), ["high", "low"]);
+});
+
+test("an explicit ACP auto option is the reset target but not a visible variant", async () => {
+    const explicitAuto = {
+        ...configOptionsSession,
+        configOptions: configOptionsSession.configOptions.map((option) => option.category === "thought_level"
+            ? { ...option, currentValue: "auto", options: [{ value: "auto", name: "Auto" }, { value: "high", name: "High" }] }
+            : option),
+    };
+    const f = fakeRpc();
+    let thought = "auto";
+    f.handle(async (method, params) => {
+        if (method === "session/new") return explicitAuto;
+        if (method === "session/set_config_option") {
+            thought = params.value;
+            return {
+                ...explicitAuto,
+                configOptions: explicitAuto.configOptions.map((option) => option.category === "thought_level"
+                    ? { ...option, currentValue: thought }
+                    : option),
+            };
+        }
+        return { stopReason: "end_turn" };
+    });
+    const rt = createAcpRuntime(context, f.rpc, "acp", undefined, "Test Agent");
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    assert.deepEqual((await rt.models!())[0]!.variants, ["high"]);
+    await rt.startTurnOperation!({ sessionId: "canonical", text: "high", model: { providerID: "acp", modelID: "fast-1", variant: "high" } }, "high");
+    await rt.startTurnOperation!({ sessionId: "canonical", text: "auto", model: { providerID: "acp", modelID: "fast-1" } }, "auto");
+    assert.deepEqual(paramsOf(f, "session/set_config_option").map((call) => call.value), ["high", "auto"]);
+});
+
+test("model switch followed by Auto uses the new model's native state", async () => {
+    const f = fakeRpc();
+    let model = "fast-1";
+    let thought = "medium";
+    f.handle(async (method, params) => {
+        if (method === "session/new") return sessionConfigAt(model, thought);
+        if (method === "session/set_config_option") {
+            if (params.configId === "model") { model = params.value; thought = "low"; }
+            if (params.configId === "thinking") thought = params.value;
+            return sessionConfigAt(model, thought);
+        }
+        return { stopReason: "end_turn" };
+    });
+    const rt = createAcpRuntime(context, f.rpc, "acp", undefined, "Test Agent");
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    await rt.startTurnOperation!({ sessionId: "canonical", text: "high", model: { providerID: "acp", modelID: "fast-1", variant: "high" } }, "high");
+    await rt.startTurnOperation!({ sessionId: "canonical", text: "switch", model: { providerID: "acp", modelID: "deep-2" } }, "switch");
+    assert.equal(thought, "low");
+    assert.deepEqual(paramsOf(f, "session/set_config_option").at(-1), {
+        sessionId: "native", configId: "model", value: "deep-2",
+    });
 });
 
 test("selecting what the session already runs issues no config call at all", async () => {
@@ -221,6 +328,33 @@ test("a config_option_update notification keeps the session's selection current"
     assert.deepEqual(paramsOf(f, "session/set_config_option"), []);
 });
 
+test("a native thought-level update becomes current without becoming a static default", async () => {
+    const { f, rt } = await startedRuntime(configOptionsSession);
+    f.emit("session/update", {
+        sessionId: "native",
+        update: { sessionUpdate: "config_option_update", ...sessionConfigAt("fast-1", "high") },
+    });
+    await rt.startTurnOperation!({
+        sessionId: "canonical", text: "task",
+        model: { providerID: "acp", modelID: "fast-1", variant: "high" },
+    }, "submit");
+    assert.deepEqual(paramsOf(f, "session/set_config_option"), []);
+    assert.equal((await rt.models!())[0]!.defaultVariant, undefined);
+});
+
+test("category-less exact config ids are recognized without label guessing", () => {
+    const config = parseSessionConfig({
+        configOptions: [
+            { id: "model", name: "Anything", type: "select", currentValue: "m", options: [{ value: "m", name: "M" }] },
+            { id: "thought_level", name: "Anything", type: "select", currentValue: "low", options: [{ value: "low", name: "Low" }] },
+            { id: "engine", name: "Model", type: "select", currentValue: "x", options: [{ value: "x", name: "X" }] },
+        ],
+    });
+    assert.equal(config.model?.id, "model");
+    assert.equal(config.thoughtLevel?.id, "thought_level");
+    assert.deepEqual(acpModelDescriptors(config, "acp").map((model) => model.modelID), ["m"]);
+});
+
 test("a current_model_update notification tracks the legacy selection", async () => {
     const { f, rt } = await startedRuntime(legacySession);
     f.emit("session/update", { sessionId: "native", update: { sessionUpdate: "current_model_update", modelId: "legacy-b" } });
@@ -254,6 +388,46 @@ test("a reloaded session has the conversation's selection asserted again", async
     ]);
 });
 
+test("resume followed by Auto restores the remembered native default", async () => {
+    const f = fakeRpc();
+    let thought = "medium";
+    f.handle(async (method, params) => {
+        if (method === "session/new") return sessionConfigAt("fast-1", thought);
+        if (method === "session/load") return sessionConfigAt("fast-1", "high");
+        if (method === "session/set_config_option") {
+            thought = params.value;
+            return sessionConfigAt("fast-1", thought);
+        }
+        return { stopReason: "end_turn" };
+    });
+    const rt = createAcpRuntime(context, f.rpc, "acp", { loadSession: true }, "Test Agent");
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    await rt.startTurnOperation!({ sessionId: "canonical", text: "high", model: { providerID: "acp", modelID: "fast-1", variant: "high" } }, "high");
+    await rt.startTurnOperation!({ sessionId: "canonical", text: "auto", model: { providerID: "acp", modelID: "fast-1" } }, "auto");
+    await rt.ensureSession!({ sessionId: "canonical", projectId: "p", backendSessionId: "reloaded", cwd: "/tmp" });
+    assert.deepEqual(paramsOf(f, "session/set_config_option").at(-1), {
+        sessionId: "reloaded", configId: "thinking", value: "medium",
+    });
+});
+
+test("Auto after a cold resume rejects when ACP exposes no truthful reset target", async () => {
+    const f = fakeRpc();
+    f.handle(async (method) => {
+        if (method === "session/load") return sessionConfigAt("fast-1", "high");
+        return { stopReason: "end_turn" };
+    });
+    const rt = createAcpRuntime(context, f.rpc, "acp", { loadSession: true }, "Test Agent");
+    await rt.ensureSession!({ sessionId: "canonical", projectId: "p", backendSessionId: "reloaded", cwd: "/tmp" });
+    const outcome = await rt.startTurnOperation!({
+        sessionId: "canonical",
+        text: "auto",
+        model: { providerID: "acp", modelID: "fast-1" },
+    }, "auto");
+    assert.equal(outcome.kind === "rejected" && outcome.code, "unsupported");
+    assert.match(outcome.kind === "rejected" ? outcome.message! : "", /native default thinking level/i);
+    assert.deepEqual(paramsOf(f, "session/prompt"), []);
+});
+
 test("embedded context carries a text file as an ACP resource block", async () => {
     const path = `/tmp/acp-embedded-${process.pid}.txt`;
     await writeFile(path, "hello from the file");
@@ -273,6 +447,85 @@ test("embedded context carries a text file as an ACP resource block", async () =
         assert.equal(resource.resource.mimeType, "text/plain");
     } finally {
         await rm(path, { force: true });
+    }
+});
+
+test("embedded context rejects non-UTF-8 and NUL content", async () => {
+    for (const [suffix, data] of [["invalid", Buffer.from([0xff])], ["nul", Buffer.from("a\0b")]] as const) {
+        const path = `/tmp/acp-${suffix}-${process.pid}.txt`;
+        await writeFile(path, data);
+        try {
+            const { rt } = await startedRuntime(configOptionsSession, { promptCapabilities: { embeddedContext: true } });
+            const outcome = await rt.startTurnOperation!({
+                sessionId: "canonical", text: "look",
+                attachments: [{ kind: "file", name: "bad.txt", path, mime: "text/plain" }],
+            }, `submit-${suffix}`);
+            assert.equal(outcome.kind === "rejected" && outcome.code, "invalid-attachment");
+        } finally {
+            await rm(path, { force: true });
+        }
+    }
+});
+
+test("embedded context applies the canonical 64 KiB text ceiling", async () => {
+    const path = `/tmp/acp-large-${process.pid}.txt`;
+    await writeFile(path, "x".repeat(70 * 1024));
+    try {
+        const { f, rt } = await startedRuntime(configOptionsSession, { promptCapabilities: { embeddedContext: true } });
+        await rt.startTurnOperation!({
+            sessionId: "canonical", text: "look",
+            attachments: [{ kind: "file", name: "large.txt", path, mime: "text/plain" }],
+        }, "submit-large");
+        const [prompt] = paramsOf(f, "session/prompt");
+        const text = prompt.prompt.find((block: { type: string }) => block.type === "resource").resource.text as string;
+        assert.equal(text.startsWith("x".repeat(64 * 1024)), true);
+        assert.match(text, /\[truncated 6144 bytes\]$/);
+    } finally {
+        await rm(path, { force: true });
+    }
+});
+
+test("embedded context honors a late line range with bounded canonical text", async () => {
+    const path = `/tmp/acp-range-${process.pid}.txt`;
+    await writeFile(path, `${Array.from({ length: 20_000 }, (_, index) => `line-${index + 1}`).join("\n")}\n`);
+    try {
+        const { f, rt } = await startedRuntime(configOptionsSession, { promptCapabilities: { embeddedContext: true } });
+        await rt.startTurnOperation!({
+            sessionId: "canonical", text: "look",
+            attachments: [{ kind: "range", name: "late.txt", path, mime: "text/plain", range: [20_000, 20_000] }],
+        }, "submit-range");
+        const [prompt] = paramsOf(f, "session/prompt");
+        assert.equal(prompt.prompt.find((block: { type: string }) => block.type === "resource").resource.text, "line-20000");
+    } finally {
+        await rm(path, { force: true });
+    }
+});
+
+test("embedded context rejects oversized files and symlink escapes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "acp-safe-root-"));
+    const outside = join(tmpdir(), `acp-outside-${process.pid}.txt`);
+    const oversized = join(root, "oversized.txt");
+    await writeFile(outside, "outside");
+    await writeFile(oversized, "x");
+    await truncate(oversized, 20 * 1024 * 1024 + 1);
+    await symlink(outside, join(root, "escape.txt"));
+    try {
+        const f = fakeRpc();
+        f.handle(async (method) => method === "session/new" ? configOptionsSession : { stopReason: "end_turn" });
+        const rt = createAcpRuntime({ ...context, cwd: root }, f.rpc, "acp", {
+            promptCapabilities: { embeddedContext: true },
+        }, "Test Agent");
+        await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: root }, "create");
+        for (const path of ["oversized.txt", "escape.txt"]) {
+            const outcome = await rt.startTurnOperation!({
+                sessionId: "canonical", text: "look",
+                attachments: [{ kind: "file", name: path, path, mime: "text/plain" }],
+            }, `submit-${path}`);
+            assert.equal(outcome.kind === "rejected" && outcome.code, "invalid-attachment");
+        }
+    } finally {
+        await rm(root, { recursive: true, force: true });
+        await rm(outside, { force: true });
     }
 });
 
@@ -385,6 +638,21 @@ test("a failed start is degraded with its cause, and never cached as empty", asy
     const result = await discoverAcpModels({ harnessId: "acp", version: "5.0.0", authFingerprint: "true", probe });
     assert.equal(result.state, "degraded");
     assert.match(result.state === "degraded" ? result.reason : "", /ENOENT/);
+});
+
+test("cold discovery is bounded and late probes are closed", async () => {
+    invalidateAcpDiscovery();
+    let closes = 0;
+    const result = await discoverAcpModels({
+        harnessId: "acp", version: "slow", authFingerprint: "true", timeoutMs: 5,
+        probe: { async open() {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            return { result: configOptionsSession, close: async () => { closes++; } };
+        } },
+    });
+    assert.equal(result.state, "degraded");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(closes, 1);
 });
 
 test("session config parsing ignores what it does not understand", () => {

@@ -19,7 +19,7 @@ export const INBOX_PREFIX = "_inbox/";
 export interface AttachmentSourceService {
   maxBytes: number;
   /** Stat a project file (ordinary attachment) against an execution root. */
-  stat(root: string, rel: string): Promise<{ kind: "file" | "dir"; size: number }>;
+  stat(root: string, rel: string, projectId?: string): Promise<{ kind: "file" | "dir"; size: number }>;
   /** Ensure a staged `_inbox/*` file exists at execRoot. Copies from
    *  projectRoot when execRoot differs (linked worktree, remote host).
    *  Returns the final stat. */
@@ -62,8 +62,8 @@ export function createAttachmentSourceService(
 ): AttachmentSourceService {
   return {
     maxBytes: MAX_RAW_BYTES,
-    stat: async (root, rel) => {
-      const fs = await filesFor(null);
+    stat: async (root, rel, projectId) => {
+      const fs = await filesFor(projectId ?? null);
       const st = await fs.stat(root, rel);
       return { kind: st.kind, size: st.size };
     },

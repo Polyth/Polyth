@@ -12,7 +12,7 @@ import { acpModelDescriptors, parseSessionConfig } from "@polyth/backend-acp";
 import { discoverAcpModels, invalidateAcpDiscovery } from "../../backend-acp/src/discovery.ts";
 import { createAcpRuntime } from "../../backend-acp/src/index.ts";
 import { fakeRpc } from "../../harness-runtime/test/rpcPeer.ts";
-import { CURSOR_MODEL_API_MIN_VERSION, cursorModelDiscoverySupport } from "../src/version.ts";
+import { cursorModelDiscoverySupport } from "../src/version.ts";
 
 const probe = (overrides: Partial<HarnessProbe>): HarnessProbe => ({
     harnessId: "cursor",
@@ -55,14 +55,9 @@ test("an unsigned-in CLI names the sign-in as the cause, not an empty catalog", 
     assert.match(gate.ok === false ? gate.reason : "", /signed in|agent login/i);
 });
 
-test("a CLI older than the ACP model API says so, and names the version needed", () => {
-    const gate = cursorModelDiscoverySupport(probe({ authenticated: true, version: "2026.08.01" }));
-    assert.equal(gate.ok, false);
-    assert.ok((gate.ok === false ? gate.reason : "").includes(CURSOR_MODEL_API_MIN_VERSION));
-});
-
-test("the first verified generation and anything newer are asked for models", () => {
-    assert.equal(cursorModelDiscoverySupport(probe({ authenticated: true, version: CURSOR_MODEL_API_MIN_VERSION })).ok, true);
+test("CalVer is cache identity, never guessed as a capability boundary", () => {
+    assert.equal(cursorModelDiscoverySupport(probe({ authenticated: true, version: "2026.08.01" })).ok, true);
+    assert.equal(cursorModelDiscoverySupport(probe({ authenticated: true, version: "2026.09.02" })).ok, true);
     assert.equal(cursorModelDiscoverySupport(probe({ authenticated: true, version: "2026.10.14" })).ok, true);
     assert.equal(cursorModelDiscoverySupport(probe({ authenticated: true, version: "2027.01.01" })).ok, true);
 });
@@ -76,7 +71,7 @@ test("Cursor's legacy model block becomes a harness-qualified catalog", async ()
     invalidateAcpDiscovery();
     const result = await discoverAcpModels({
         harnessId: "cursor",
-        version: CURSOR_MODEL_API_MIN_VERSION,
+        version: "2026.09.02",
         authFingerprint: "true",
         probe: { async open() { return { result: legacySession, close: async () => {} }; } },
     });
@@ -118,7 +113,7 @@ test("an unauthenticated session/new is reported as needing a sign-in", async ()
     invalidateAcpDiscovery();
     const result = await discoverAcpModels({
         harnessId: "cursor",
-        version: CURSOR_MODEL_API_MIN_VERSION,
+        version: "2026.09.02",
         authFingerprint: "false",
         probe: {
             async open(): Promise<never> {

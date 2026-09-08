@@ -1505,11 +1505,11 @@ export async function boot(opts: BootOptions = {}) {
   // lists, so they are invalidated as one: a stale half is what makes "only
   // some models show up" survive until a restart.
   let invalidateModelCatalog = (): void => {};
-  openCodePool.onRestart?.(async () => { harnesses.invalidate(); invalidateModelCatalog(); });
+  openCodePool.onRestart?.(async () => { harnesses.invalidate({ harnessId: "opencode" }); invalidateModelCatalog(); });
   const runtimeCatalog = createRuntimeCatalog({
     projects,
     runtimes,
-    onModelsInvalidated: () => harnesses.invalidate(),
+    onModelsInvalidated: () => harnesses.invalidate({ harnessId: "opencode" }),
   });
   invalidateModelCatalog = () => runtimeCatalog.invalidateModels();
   services.provide(serverServiceKey<{

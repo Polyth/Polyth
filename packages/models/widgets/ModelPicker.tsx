@@ -176,9 +176,9 @@ function ModelHoverDetails({ model, favorite }: { model: ModelDescriptor; favori
 
 interface ModelPickerProps {
   models: ModelDescriptor[];
-  value?: ModelRef;
-  recommended?: ModelRef;
-  onPick: (model?: ModelRef) => void;
+  value?: ModelRef & { harnessId?: string };
+  recommended?: ModelRef & { harnessId?: string };
+  onPick: (model?: ModelRef & { harnessId?: string }) => void;
   /** Package-contributed catalog routing shown above the model list. */
   header?: ReactNode;
   /** Preferred opening side for the desktop popover (collision may flip it). */
@@ -217,11 +217,10 @@ export default function ModelPicker({
   const listRef = useRef<HTMLDivElement>(null);
 
   const current = value
-    ? models.find((model) => model.providerID === value.providerID && model.modelID === value.modelID)
+    ? models.find((model) => modelKey(model) === modelKey(value))
     : undefined;
   const fallback = recommended
-    ? models.find((model) =>
-        model.providerID === recommended.providerID && model.modelID === recommended.modelID)
+    ? models.find((model) => modelKey(model) === modelKey(recommended))
     : undefined;
   const selectedModel = current ?? fallback ?? models[0];
   const label = selectedModel?.name ?? tr("modelpicker.noModel");
@@ -363,13 +362,17 @@ export default function ModelPicker({
   };
   const choose = (model: ModelDescriptor) => {
     if (phone) tapFeedback();
-    onPick({ providerID: model.providerID, modelID: model.modelID });
+    onPick({
+      providerID: model.providerID,
+      modelID: model.modelID,
+      ...(model.harnessId ? { harnessId: model.harnessId } : {}),
+    });
     noteModelUsed(modelKey(model));
     close();
     if (!phone) triggerRef.current?.focus();
   };
   const isSelected = (model: ModelDescriptor) => selectedModel
-    ? selectedModel.providerID === model.providerID && selectedModel.modelID === model.modelID
+    ? modelKey(selectedModel) === modelKey(model)
     : false;
 
   const startDrag = (event: DragEvent, kind: ModelPickerDragKind, id: string) => {

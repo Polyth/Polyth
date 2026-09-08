@@ -26,6 +26,8 @@ const fakeSdk = () => {
     closes: 0,
     flagSettings: [] as Array<Record<string, unknown>>,
     setModels: [] as Array<string | undefined>,
+    rejectModelChange: false,
+    rejectModelDiscovery: false,
     inputs: undefined as AsyncIterator<{ uuid: string }> | undefined,
     push: (_message: unknown): void => {},
   };
@@ -46,9 +48,15 @@ const fakeSdk = () => {
           }
         },
         initializationResult: async () => ({}),
-        supportedModels: async () => MODELS,
+        supportedModels: async () => {
+          if (state.rejectModelDiscovery) throw new Error("vendor-specific discovery failure");
+          return MODELS;
+        },
         applyFlagSettings: async (settings: Record<string, unknown>) => { state.flagSettings.push(settings); },
-        setModel: async (model?: string) => { state.setModels.push(model); },
+        setModel: async (model?: string) => {
+          state.setModels.push(model);
+          if (state.rejectModelChange) throw new Error("vendor-specific model failure");
+        },
         interrupt: async () => {},
         close() { closed = true; state.closes += 1; wake?.(); },
       } as never;
@@ -110,6 +118,28 @@ test("a second cold call is served from cache and deduped in flight", async () =
   assert.equal(state.spawns, 2, "invalidation forces a fresh probe");
 });
 
+test("cold discovery timeout closes the probe and is retryable", async () => {
+  invalidateClaudeModelCache();
+  let closes = 0;
+  let calls = 0;
+  const query = (() => {
+    calls++;
+    return {
+      supportedModels: () => calls === 1 ? new Promise<never>(() => {}) : Promise.resolve(MODELS),
+      close: () => { closes++; },
+    };
+  }) as never;
+  await assert.rejects(discoverClaudeModels({
+    query, cwd: "/tmp", executable: "claude", authFingerprint: "timeout", timeoutMs: 5,
+  }), /did not report its models in time/);
+  assert.equal(closes, 1);
+  assert.equal((await discoverClaudeModels({
+    query, cwd: "/tmp", executable: "claude", authFingerprint: "timeout", timeoutMs: 5,
+  })).length, 2);
+  assert.equal(calls, 2, "a failed probe is not cached as an empty catalog");
+  assert.equal(closes, 2);
+});
+
 test("a live session's query answers models with no extra spawn", async () => {
   invalidateClaudeModelCache();
   const { sdk, state } = fakeSdk();
@@ -121,7 +151,7 @@ test("a live session's query answers models with no extra spawn", async () => {
   assert.equal(state.spawns, 1, "the live query is reused, not probed alongside");
 });
 
-test("a variant on the first turn is applied at query creation", async () => {
+test("the first model and variant are applied together at query creation", async () => {
   invalidateClaudeModelCache();
   const { sdk, state } = fakeSdk();
   const rt = await createClaudeRuntime(context, sdk, fakeAuthority());
@@ -130,6 +160,8 @@ test("a variant on the first turn is applied at query creation", async () => {
     model: { providerID: "anthropic", modelID: "sonnet", variant: "high" },
   }, randomUUID());
   assert.equal(state.options!.effort, "high");
+  assert.equal(state.options!.model, "sonnet");
+  assert.deepEqual(state.setModels, [], "the initial model is not deferred to the first turn");
 });
 
 test("an invalid variant is refused at session create when the catalog is already warm", async () => {
@@ -192,6 +224,39 @@ test("a variant Claude does not advertise for the model is rejected", async () =
   }, randomUUID());
   assert.equal(outcome.kind, "rejected");
   assert.equal(outcome.kind === "rejected" && outcome.code, "invalid-variant");
+  assert.deepEqual(state.flagSettings, []);
+});
+
+test("a native model rejection stays inside the stable runtime contract", async () => {
+  invalidateClaudeModelCache();
+  const { sdk, state } = fakeSdk();
+  const rt = await createClaudeRuntime(context, sdk, fakeAuthority());
+  await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, randomUUID());
+  state.rejectModelChange = true;
+  const outcome = await rt.startTurnOperation!({
+    sessionId: "canonical",
+    text: "task",
+    model: { providerID: "anthropic", modelID: "sonnet" },
+  }, randomUUID());
+  assert.equal(outcome.kind === "rejected" && outcome.code, "native-failure");
+  assert.match(outcome.kind === "rejected" ? outcome.message : "", /did not accept the model or thinking level/i);
+  assert.doesNotMatch(outcome.kind === "rejected" ? outcome.message : "", /vendor-specific/i);
+});
+
+test("a live catalog failure rejects before native model admission", async () => {
+  invalidateClaudeModelCache();
+  const { sdk, state } = fakeSdk();
+  const rt = await createClaudeRuntime(context, sdk, fakeAuthority());
+  await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, randomUUID());
+  state.rejectModelDiscovery = true;
+  const outcome = await rt.startTurnOperation!({
+    sessionId: "canonical",
+    text: "task",
+    model: { providerID: "anthropic", modelID: "sonnet", variant: "high" },
+  }, randomUUID());
+  assert.equal(outcome.kind === "rejected" && outcome.code, "discovery-unavailable");
+  assert.match(outcome.kind === "rejected" ? outcome.message : "", /could not verify/i);
+  assert.deepEqual(state.setModels, []);
   assert.deepEqual(state.flagSettings, []);
 });
 

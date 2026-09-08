@@ -61,14 +61,24 @@ test("an unsupported modality is refused with the engine's name, not adapter pro
   );
 });
 
-test("a harness that declares nothing is not made to refuse what it never denied", () => {
+test("unknown support never forwards a binary modality as native", () => {
   const plan = planAttachmentDelivery({
     ref: ref({ mime: "application/pdf", path: "spec.pdf" }),
     support: {},
     harnessName: "Legacy",
     supportDeclared: false,
   });
-  assert.deepEqual(plan, { kind: "native", modality: "pdf" });
+  assert.equal(plan.kind, "unsupported");
+});
+
+test("legacy unknown support keeps only guarded text projection compatibility", () => {
+  const plan = planAttachmentDelivery({
+    ref: ref({ kind: "file", mime: "text/plain", path: "notes.txt" }),
+    support: {},
+    harnessName: "Legacy",
+    supportDeclared: false,
+  });
+  assert.deepEqual(plan, { kind: "text-projection", modality: "file" });
 });
 
 test("browser context with no usable capture is merged into the prompt, never refused", () => {
@@ -146,6 +156,19 @@ test("a range attachment projects only the requested lines", () => {
     "Attached file: src/a.ts (lines 2-3)\n```\ntwo\nthree\n```",
   );
   assert.equal(projection.ok && projection.truncatedBytes, 0);
+});
+
+test("a range after the 64 KiB prefix remains reachable", () => {
+  const prefix = Array.from({ length: 20_000 }, (_, index) => `line-${index + 1}`).join("\n");
+  const projection = projectAttachmentText({
+    path: "late.txt",
+    range: [19_999, 20_000],
+    bytes: bytes(`${prefix}\n`),
+  });
+  assert.equal(
+    projection.ok && projection.section,
+    "Attached file: late.txt (lines 19999-20000)\n```\nline-19999\nline-20000\n```",
+  );
 });
 
 test("projected sections follow the user's text in order", () => {

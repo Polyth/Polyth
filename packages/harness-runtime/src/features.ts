@@ -17,7 +17,6 @@ export const titleFromPrompt = (text: string, max = 48): string => {
   if (collapsed.length <= max) return collapsed;
   return collapsed.slice(0, max - 1).trimEnd() + "…";
 };
-
 /** English/ISO/uuid/ses_ placeholder detection (shell i18n extras stay in apps/web). */
 export const isPlaceholderTitle = (title: string, sessionId?: string): boolean => {
   const t = title.trim();
@@ -94,4 +93,3 @@ export const composeTurnPrompt = (
     images,
   };
 };
-

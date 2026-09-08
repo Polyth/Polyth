@@ -4,12 +4,14 @@
 import type { ModelDescriptor, ModelRef } from "@polyth/contracts";
 import { resolveVariantPreference } from "@polyth/contracts";
 
-export const THINKING_PREFS_KEY = "polyth.thinkingPrefs.v1";
+export const THINKING_PREFS_KEY = "polyth.thinkingPrefs.v2";
 
 export type ThinkingPrefs = Record<string, string>;
 
-export function thinkingModelKey(model: Pick<ModelRef, "providerID" | "modelID">): string {
-  return `${model.providerID}/${model.modelID}`;
+type ThinkingModelRef = Pick<ModelRef, "providerID" | "modelID"> & { harnessId?: string };
+
+export function thinkingModelKey(model: ThinkingModelRef): string {
+  return `${model.harnessId ?? "local"}/${model.providerID}/${model.modelID}`;
 }
 
 /**
@@ -60,13 +62,13 @@ function read(): ThinkingPrefs {
 
 let prefs = read();
 
-export function getModelThinking(model?: Pick<ModelRef, "providerID" | "modelID">): string | undefined {
+export function getModelThinking(model?: ThinkingModelRef): string | undefined {
   return model ? prefs[thinkingModelKey(model)] : undefined;
 }
 
 /** Save immediately on selection, including before the next message is sent. */
 export function setModelThinking(
-  model: Pick<ModelRef, "providerID" | "modelID">,
+  model: ThinkingModelRef,
   effort: string | undefined,
 ): void {
   const key = thinkingModelKey(model);

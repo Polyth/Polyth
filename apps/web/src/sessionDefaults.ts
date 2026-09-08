@@ -3,21 +3,29 @@ import type { ModelRef, ProjectDefaults } from "@polyth/contracts";
 
 export const SESSION_DEFAULTS_KEY = "polyth.sessionDefaults";
 
+type StoredModelRef = ModelRef & { harnessId?: string };
+
 export interface SessionDefaults {
-  defaultModel?: ModelRef;
+  defaultModel?: StoredModelRef;
   defaultThinking?: string;
   defaultAgent?: string;
-  smallModel?: ModelRef;
-  walkthroughModel?: ModelRef;
+  smallModel?: StoredModelRef;
+  walkthroughModel?: StoredModelRef;
   retentionDays?: number;
   retentionAction?: "archive";
 }
 
-function modelRef(value: unknown): ModelRef | undefined {
-  const candidate = value as Partial<ModelRef> | undefined;
+function modelRef(value: unknown): StoredModelRef | undefined {
+  const candidate = value as (Partial<ModelRef> & { harnessId?: unknown }) | undefined;
   return typeof candidate?.providerID === "string" && candidate.providerID
     && typeof candidate.modelID === "string" && candidate.modelID
-    ? { providerID: candidate.providerID, modelID: candidate.modelID }
+    ? {
+        providerID: candidate.providerID,
+        modelID: candidate.modelID,
+        ...(typeof candidate.harnessId === "string" && candidate.harnessId
+          ? { harnessId: candidate.harnessId }
+          : {}),
+      }
     : undefined;
 }
 
@@ -51,10 +59,10 @@ export function parseSessionDefaults(raw: string | null): SessionDefaults {
 }
 
 export function resolveSessionDefaultModel(
-  projectDefault?: ModelRef | null,
-  globalDefault?: ModelRef,
-  availableFallback?: ModelRef,
-): ModelRef | undefined {
+  projectDefault?: StoredModelRef | null,
+  globalDefault?: StoredModelRef,
+  availableFallback?: StoredModelRef,
+): StoredModelRef | undefined {
   return projectDefault || globalDefault || availableFallback;
 }
 
@@ -66,9 +74,9 @@ export function projectRemembersModelSelection(defaults?: ProjectDefaults): bool
 
 export function resolveProjectModelDefault(
   defaults?: ProjectDefaults,
-  globalDefault?: ModelRef,
-  availableFallback?: ModelRef,
-): ModelRef | undefined {
+  globalDefault?: StoredModelRef,
+  availableFallback?: StoredModelRef,
+): StoredModelRef | undefined {
   return resolveSessionDefaultModel(
     projectRemembersModelSelection(defaults) ? defaults?.model : null,
     globalDefault,
@@ -106,7 +114,7 @@ export function getSessionDefaults(): SessionDefaults {
   return state;
 }
 
-export function setGlobalDefaultModel(defaultModel?: ModelRef): void {
+export function setGlobalDefaultModel(defaultModel?: StoredModelRef): void {
   setSessionDefaults({ defaultModel });
 }
 

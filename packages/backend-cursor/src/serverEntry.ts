@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { registerAcpProfile } from "@polyth/backend-acp";
 import type { ServerPackageHost } from "@polyth/plugins";
-import { CURSOR_MODEL_API_MIN_VERSION, cursorModelDiscoverySupport } from "./version.ts";
+import { cursorModelDiscoverySupport } from "./version.ts";
 const exec = promisify(execFile);
 export default function registerPackage(host: ServerPackageHost) {
     return registerAcpProfile(host, {
@@ -37,4 +37,4 @@ export default function registerPackage(host: ServerPackageHost) {
         },
     });
 }
-export { CURSOR_MODEL_API_MIN_VERSION, cursorModelDiscoverySupport };
+export { cursorModelDiscoverySupport };

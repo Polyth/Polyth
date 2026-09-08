@@ -7,6 +7,8 @@
 // sent.
 import type { ModelRef } from "@polyth/contracts";
 
+type ComposerModelRef = ModelRef & { harnessId?: string };
+
 /** `inherit`: no local choice — the session's stored profile (if any) applies.
  *  `none`: explicit None — the send clears the stored profile.
  *  `id`: an explicitly selected stored profile. */
@@ -17,7 +19,7 @@ export type ProfileChoice =
 
 export interface ComposerConfig {
   profile: ProfileChoice;
-  model?: ModelRef;
+  model?: ComposerModelRef;
   agent?: string;
   /** A null value is an explicit Auto choice; undefined inherits defaults. */
   thinking?: string | null;
@@ -47,9 +49,13 @@ export function parseComposerConfig(raw: string | null): ComposerConfig {
     const cfg = emptyComposerConfig();
     if (v.profile === "none") cfg.profile = { kind: "none" };
     else if (typeof v.profile === "string" && v.profile) cfg.profile = { kind: "id", id: v.profile };
-    const m = v.model as { providerID?: unknown; modelID?: unknown } | undefined;
+    const m = v.model as { harnessId?: unknown; providerID?: unknown; modelID?: unknown } | undefined;
     if (m && typeof m.providerID === "string" && typeof m.modelID === "string") {
-      cfg.model = { providerID: m.providerID, modelID: m.modelID };
+      cfg.model = {
+        providerID: m.providerID,
+        modelID: m.modelID,
+        ...(typeof m.harnessId === "string" && m.harnessId ? { harnessId: m.harnessId } : {}),
+      };
     }
     if (typeof v.agent === "string" && v.agent) cfg.agent = v.agent;
     if (v.thinking === null) cfg.thinking = null;
@@ -64,7 +70,11 @@ export function serializeComposerConfig(cfg: ComposerConfig): string {
   return JSON.stringify({
     v: 1,
     profile: cfg.profile.kind === "id" ? cfg.profile.id : cfg.profile.kind === "none" ? "none" : null,
-    ...(cfg.model ? { model: { providerID: cfg.model.providerID, modelID: cfg.model.modelID } } : {}),
+    ...(cfg.model ? { model: {
+      providerID: cfg.model.providerID,
+      modelID: cfg.model.modelID,
+      ...(cfg.model.harnessId ? { harnessId: cfg.model.harnessId } : {}),
+    } } : {}),
     ...(cfg.agent ? { agent: cfg.agent } : {}),
     ...(cfg.thinking !== undefined ? { thinking: cfg.thinking } : {}),
   });
@@ -102,7 +112,7 @@ export function withProfileNone(cfg: ComposerConfig): ComposerConfig {
 
 /** An explicit model clears the selected profile (the bundle no longer
  *  applies unmodified). Clearing the override (undefined) keeps the profile. */
-export function withExplicitModel(cfg: ComposerConfig, model: ModelRef | undefined): ComposerConfig {
+export function withExplicitModel(cfg: ComposerConfig, model: ComposerModelRef | undefined): ComposerConfig {
   if (!model) {
     const next: ComposerConfig = { profile: cfg.profile };
     if (cfg.agent !== undefined) next.agent = cfg.agent;
@@ -117,7 +127,7 @@ export function withExplicitModel(cfg: ComposerConfig, model: ModelRef | undefin
 
 /** A pending effort belongs to the prior model. Model-specific saved effort
  * remains in thinkingPrefs and is re-derived when that model is selected. */
-export function withModelForNextTurn(cfg: ComposerConfig, model: ModelRef): ComposerConfig {
+export function withModelForNextTurn(cfg: ComposerConfig, model: ComposerModelRef): ComposerConfig {
   return withExplicitThinking(withExplicitModel(cfg, model), undefined);
 }
 

@@ -5659,18 +5659,17 @@ export const harnessModels = (
 ): ModelDescriptor[] => catalog.filter((descriptor) => belongsToHarness(descriptor, harnessId));
 
 /**
- * Find the descriptor a ref names. `modelID` is the identity: providers report
- * their own id inconsistently across harnesses (Codex `model/list` carries no
- * provider at all), so a providerID mismatch narrows the search but never
- * invalidates a model the harness demonstrably has.
+ * Find the descriptor a ref names. Provider + model are both identity fields;
+ * adapters whose native protocol omits a provider must normalize one before
+ * publishing their canonical catalog.
  */
 export const findModelDescriptor = (
   catalog: readonly ModelDescriptor[],
   ref: Pick<ModelRef, "providerID" | "modelID">,
   harnessId?: string,
 ): ModelDescriptor | undefined => {
-  const candidates = harnessModels(catalog, harnessId).filter((d) => d.modelID === ref.modelID);
-  return candidates.find((d) => d.providerID === ref.providerID) ?? candidates[0];
+  return harnessModels(catalog, harnessId).find((descriptor) =>
+    descriptor.providerID === ref.providerID && descriptor.modelID === ref.modelID);
 };
 
 /**

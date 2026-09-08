@@ -227,8 +227,10 @@ test("the selected model narrows what the harness offers", () => {
   assert.equal("image" in textOnly, false);
   const withImages = composerSupport(features, ["input:text", "input:image", "output:text"]);
   assert.equal(withImages.image, "native");
-  // Files are not a model input modality, so they follow the harness.
+  // File context is an engine/tool transport, not a direct model modality.
   assert.equal(textOnly.file, "native");
+  const withFiles = composerSupport(features, ["input:text", "input:file", "output:text"]);
+  assert.equal(withFiles.file, "native");
 });
 
 test("a remote project without materialization cannot offer file attachments", () => {

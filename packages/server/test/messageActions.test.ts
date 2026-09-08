@@ -28,6 +28,7 @@ function fakeRuntime(opts: { branchError?: string } = {}) {
   const rt: AgentRuntime = {
     capabilities: async () => ({
       streaming: true, permissions: true, questions: true, compaction: false, subagents: false, steering: false,
+      attachments: { modalities: { file: "native" } },
     }),
     models: async () => [],
     agents: async () => [],

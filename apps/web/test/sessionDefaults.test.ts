@@ -55,13 +55,20 @@ test("session defaults parser accepts only complete model references", () => {
 test("thinking preferences are model-scoped, corruption-safe, and deterministic", () => {
   const gpt = { providerID: "openai", modelID: "gpt-5" };
   const claude = { providerID: "anthropic", modelID: "claude-4" };
-  assert.equal(thinkingModelKey(gpt), "openai/gpt-5");
+  assert.equal(thinkingModelKey(gpt), "local/openai/gpt-5");
   assert.deepEqual(parseThinkingPrefs('{"openai/gpt-5":"high","bad":3,"":"low"}'), {
     "openai/gpt-5": "high",
   });
   assert.deepEqual(parseThinkingPrefs("not json"), {});
   assert.equal(
     serializeThinkingPrefs({ [thinkingModelKey(gpt)]: "high", [thinkingModelKey(claude)]: "low" }),
-    '{"anthropic/claude-4":"low","openai/gpt-5":"high"}',
+    '{"local/anthropic/claude-4":"low","local/openai/gpt-5":"high"}',
   );
+});
+
+test("session defaults preserve an aggregated catalog's harness identity", () => {
+  const selected = { harnessId: "cursor", providerID: "cursor", modelID: "same" };
+  assert.deepEqual(parseSessionDefaults(JSON.stringify({ defaultModel: selected })), {
+    defaultModel: selected,
+  });
 });

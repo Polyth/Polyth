@@ -319,11 +319,12 @@ test("text workflows reject reported non-text modalities and distinguish duplica
 
 test("composer config: versioned parse/serialize round-trip and corruption safety", () => {
   const cfg = withExplicitAgent(
-    withExplicitModel(emptyComposerConfig(), { providerID: "p", modelID: "m" }),
+    withExplicitModel(emptyComposerConfig(), { harnessId: "acp", providerID: "p", modelID: "m" }),
     "builder",
   );
   const parsed = parseComposerConfig(serializeComposerConfig(cfg));
   assert.ok(configEquals(parsed, cfg));
+  assert.equal(parsed.model?.harnessId, "acp");
   assert.deepEqual(parseComposerConfig(null), emptyComposerConfig());
   assert.deepEqual(parseComposerConfig("not json"), emptyComposerConfig());
   assert.deepEqual(parseComposerConfig('{"v":2,"profile":"x"}'), emptyComposerConfig());

@@ -34,12 +34,15 @@ const MODEL_LIST = {
   ],
 };
 
-const started = async () => {
+const started = async (modelListError?: Error) => {
   const f = fakeRpc();
   const turns: Record<string, unknown>[] = [];
   f.handle(async (method, params) => {
     if (method === "thread/start") return { thread: { id: "native" }, model: "gpt-5.5-codex", modelProvider: "openai" };
-    if (method === "model/list") return MODEL_LIST;
+    if (method === "model/list") {
+      if (modelListError) throw modelListError;
+      return MODEL_LIST;
+    }
     if (method === "turn/start") { turns.push(params); return { turn: { id: `t${turns.length}` } }; }
     return {};
   });
@@ -93,17 +96,16 @@ test("a variant the model does not advertise is rejected before the RPC", async 
   assert.equal(turns.length, 0, "an invalid variant never becomes a native turn");
 });
 
-test("a provider id that differs from the thread's provider is not a foreign model", async () => {
-  // `model/list` carries no provider field, so the catalog's providerID is a
-  // property of the thread. Rejecting on it produced false refusals.
+test("a provider id that differs from the normalized thread provider is rejected", async () => {
   const { rt, turns } = await started();
   const outcome = await rt.startTurnOperation!({
     sessionId: "canonical",
     text: "task",
     model: { providerID: "azure", modelID: "gpt-5.5-codex", variant: "high" },
   }, "submit");
-  assert.equal(outcome.kind, "confirmed");
-  assert.equal(turns[0]!.effort, "high");
+  assert.equal(outcome.kind, "rejected");
+  assert.equal(outcome.kind === "rejected" && outcome.code, "invalid-model");
+  assert.equal(turns.length, 0);
 });
 
 test("a model Codex does not have is rejected as an unknown model", async () => {
@@ -115,6 +117,28 @@ test("a model Codex does not have is rejected as an unknown model", async () => 
   }, "submit");
   assert.equal(outcome.kind, "rejected");
   assert.equal(outcome.kind === "rejected" && outcome.code, "invalid-model");
+});
+
+test("a model catalog failure rejects before native turn admission", async () => {
+  const { rt, turns } = await started(new Error("vendor-specific catalog failure"));
+  const outcome = await rt.startTurnOperation!({
+    sessionId: "canonical",
+    text: "task",
+    model: { providerID: "openai", modelID: "gpt-5.5-codex", variant: "high" },
+  }, "submit");
+  assert.equal(outcome.kind === "rejected" && outcome.code, "discovery-unavailable");
+  assert.match(outcome.kind === "rejected" ? outcome.message : "", /could not verify/i);
+  assert.doesNotMatch(outcome.kind === "rejected" ? outcome.message : "", /vendor-specific/i);
+  assert.equal(turns.length, 0);
+});
+
+test("a native-default turn does not require model discovery", async () => {
+  const { rt, turns } = await started(new Error("model list unavailable"));
+  const outcome = await rt.startTurnOperation!({ sessionId: "canonical", text: "task" }, "submit");
+  assert.equal(outcome.kind, "confirmed");
+  assert.equal(turns.length, 1);
+  assert.equal("model" in turns[0]!, false);
+  assert.equal("effort" in turns[0]!, false);
 });
 
 test("the catalog is fetched once per runtime, not per turn", async () => {

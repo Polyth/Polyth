@@ -439,15 +439,24 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
         return pending.finally(() => { if (modelCatalogPending === pending) modelCatalogPending = undefined; });
     };
     const start: NonNullable<AgentRuntime["startTurnOperation"]> = async (request: CanonicalTurnRequest, operationId: string) => {
-        // The model is identified by its Codex model id. `model/list` reports no
-        // provider, so a providerID that differs from the thread's provider is
-        // not evidence of a foreign model and must not reject the turn.
-        const selection = resolveModelSelection(
-            await catalog().catch(() => [] as ModelDescriptor[]),
-            request.model,
-            "codex",
-        );
-        if (!selection.ok) return { kind: "rejected", code: selection.code, message: selection.message };
+        // `model/list` omits provider, so catalog normalization above supplies
+        // the thread's canonical provider before strict generic validation.
+        let selectedVariant: string | undefined;
+        if (request.model) {
+            let available: ModelDescriptor[];
+            try {
+                available = await catalog();
+            } catch {
+                return {
+                    kind: "rejected",
+                    code: "discovery-unavailable",
+                    message: "Codex could not verify the available models for this session.",
+                };
+            }
+            const selection = resolveModelSelection(available, request.model, "codex");
+            if (!selection.ok) return { kind: "rejected", code: selection.code, message: selection.message };
+            selectedVariant = selection.variant;
+        }
         const delivered = composeTurnPrompt(request.text, request.attachments);
         const input: JsonObject[] = [{ type: "text", text: delivered.text }];
         for (const image of delivered.images) {
@@ -485,7 +494,7 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
                 ...(request.model ? { model: request.model.modelID } : {}),
                 // Reasoning effort is per-turn in App Server v2 (`thread/start`
                 // has no effort field). Omitting it keeps the native default.
-                ...(selection.variant ? { effort: selection.variant } : {}),
+                ...(selectedVariant ? { effort: selectedVariant } : {}),
             });
             if (typeof turn?.id !== "string" || !turn.id)
                 throw new Error("Native turn receipt is invalid");

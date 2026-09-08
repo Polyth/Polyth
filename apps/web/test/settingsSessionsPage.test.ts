@@ -182,3 +182,30 @@ test("model picker renders a contributed catalog header inside its overlay", asy
     container.remove();
   }
 });
+
+test("model picker returns the harness identity for colliding provider/model ids", async () => {
+  let picked: { harnessId?: string; providerID: string; modelID: string } | undefined;
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(createElement(ModelPicker, {
+        models: [
+          { harnessId: "acp-a", providerID: "shared", modelID: "same", name: "From A" },
+          { harnessId: "acp-b", providerID: "shared", modelID: "same", name: "From B" },
+        ],
+        value: { harnessId: "acp-a", providerID: "shared", modelID: "same" },
+        onPick: (model) => { picked = model; },
+      }));
+    });
+    await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
+    const rows = [...document.body.querySelectorAll<HTMLElement>('.model-picker-row[role="option"]')];
+    assert.equal(rows.length, 2);
+    await act(async () => { rows[1]!.click(); });
+    assert.deepEqual(picked, { harnessId: "acp-b", providerID: "shared", modelID: "same" });
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});

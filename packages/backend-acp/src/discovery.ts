@@ -11,7 +11,7 @@ import { acpModelDescriptors, parseSessionConfig } from "./sessionConfig.ts";
 
 export interface AcpDiscoveryProbe {
   /** Opens a connection, runs `session/new`, returns its raw result. */
-  open(): Promise<{ result: unknown; close(): Promise<void> }>;
+  open(signal?: AbortSignal): Promise<{ result: unknown; close(): Promise<void> }>;
 }
 
 export interface AcpDiscoveryOptions {
@@ -22,6 +22,7 @@ export interface AcpDiscoveryOptions {
   authFingerprint: string;
   probe: AcpDiscoveryProbe;
   ttlMs?: number;
+  timeoutMs?: number;
   now?: () => number;
 }
 
@@ -39,6 +40,7 @@ const cache = new Map<string, CacheEntry>();
 const DEFAULT_TTL_MS = 5 * 60_000;
 /** A refused sign-in is remembered longer: retrying cannot fix it. */
 const AUTH_TTL_MS = 60_000;
+const DEFAULT_TIMEOUT_MS = 10_000;
 
 const cacheKey = (options: AcpDiscoveryOptions): string =>
   JSON.stringify([options.harnessId, options.version, options.authFingerprint]);
@@ -67,8 +69,21 @@ export function discoverAcpModels(options: AcpDiscoveryOptions): Promise<AcpDisc
   if (entry?.pending) return entry.pending;
   const pending = (async (): Promise<AcpDiscoveryResult> => {
     let session: Awaited<ReturnType<AcpDiscoveryProbe["open"]>> | undefined;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    timer.unref();
     try {
-      session = await options.probe.open();
+      const opened = options.probe.open(controller.signal);
+      const timedOut = new Promise<never>((_resolve, reject) => {
+        controller.signal.addEventListener("abort", () => reject(Object.assign(
+          new Error("ACP model discovery timed out"),
+          { code: "discovery-unavailable" },
+        )), { once: true });
+      });
+      void opened.then((late) => {
+        if (controller.signal.aborted) void late.close().catch(() => {});
+      }, () => {});
+      session = await Promise.race([opened, timedOut]);
       const config = parseSessionConfig(session.result);
       return { state: "ready", models: acpModelDescriptors(config, options.harnessId) };
     } catch (error) {
@@ -79,6 +94,7 @@ export function discoverAcpModels(options: AcpDiscoveryOptions): Promise<AcpDisc
         reason: (error as { message?: string })?.message?.trim() || "the agent could not be started",
       };
     } finally {
+      clearTimeout(timer);
       await session?.close().catch(() => {});
     }
   })();

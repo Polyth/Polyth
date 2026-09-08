@@ -363,7 +363,7 @@ export function createSessionService(deps: {
    *  reuses the upload cap. */
   attachments?: {
     maxBytes: number;
-    stat(root: string, rel: string): Promise<{ kind: "file" | "dir"; size: number }>;
+    stat(root: string, rel: string, projectId?: string): Promise<{ kind: "file" | "dir"; size: number }>;
     materialize(input: {
       projectId: string;
       projectRoot: string;
@@ -3909,7 +3909,7 @@ export function createSessionService(deps: {
       try {
         stat = rel.startsWith("_inbox/")
           ? await deps.attachments.materialize({ projectId: proj.projectId, projectRoot, execRoot, rel })
-          : await deps.attachments.stat(execRoot, rel);
+          : await deps.attachments.stat(execRoot, rel, proj.projectId);
       } catch {
         console.warn(
           `[polyth] attachment prepare failed attachmentId=${ref.id} sessionId=${sessionId} `
@@ -4093,8 +4093,19 @@ export function createSessionService(deps: {
     // dropped on the way to the backend.
     let selectedModel: ModelDescriptor | undefined;
     if (model) {
+      let runtimeModels: ModelDescriptor[];
+      try {
+        runtimeModels = await rt.models();
+      } catch {
+        const harnessId = rt.harnessId ?? proj.resolvedHarnessId ?? "opencode";
+        const harnessName = deps.harnesses?.displayName?.(harnessId) ?? harnessId;
+        throw Object.assign(
+          new Error(`${harnessName} could not verify its available models.`),
+          { code: "discovery-unavailable" },
+        );
+      }
       const selection = resolveModelSelection(
-        await rt.models().catch(() => [] as ModelDescriptor[]),
+        runtimeModels,
         model,
         rt.harnessId ?? proj.resolvedHarnessId,
       );
@@ -4130,7 +4141,7 @@ export function createSessionService(deps: {
         if (plan.kind !== "text-projection") { forwarded.push(ref); continue; }
         const execRoot = proj.worktreePath ?? (await projects.get(proj.projectId))?.path;
         const bytes = execRoot && ref.path
-          ? await deps.attachments?.read?.(execRoot, ref.path).catch(() => undefined)
+          ? await deps.attachments?.read?.(execRoot, ref.path, proj.projectId).catch(() => undefined)
           : undefined;
         if (!bytes) {
           throw Object.assign(

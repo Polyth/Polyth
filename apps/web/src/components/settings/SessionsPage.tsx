@@ -28,10 +28,15 @@ export default function SessionsPage() {
   const defaultModel = (defaults.defaultModel
     ? textModels.find((model) =>
         model.providerID === defaults.defaultModel?.providerID
-        && model.modelID === defaults.defaultModel.modelID)
+        && model.modelID === defaults.defaultModel.modelID
+        && (!defaults.defaultModel.harnessId || model.harnessId === defaults.defaultModel.harnessId))
     : undefined) ?? textModels[0];
   const defaultModelRef = defaultModel
-    ? { providerID: defaultModel.providerID, modelID: defaultModel.modelID }
+    ? {
+        providerID: defaultModel.providerID,
+        modelID: defaultModel.modelID,
+        ...(defaultModel.harnessId ? { harnessId: defaultModel.harnessId } : {}),
+      }
     : undefined;
   const thinkingOptions = [...new Set(models.flatMap((model) => model.variants ?? []))];
   const [eligible, setEligible] = useState<number | null>(null);

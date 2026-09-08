@@ -141,14 +141,17 @@ test("sanitizeAttachments: typed rejections", () => {
 
 type Emit = (sessionId: string, ev: RuntimeEvent) => void;
 
-function fakeRuntime() {
+function fakeRuntime(fileSupport: "native" | "emulated" = "native") {
   const listeners = new Set<Emit>();
   const started: CanonicalTurnRequest[] = [];
   const emit = (sessionId: string, ev: RuntimeEvent) => {
     for (const l of listeners) l(sessionId, ev);
   };
   const rt: AgentRuntime = {
-    capabilities: async () => ({ streaming: true, permissions: true, questions: true, compaction: false, subagents: false, steering: true }),
+    capabilities: async () => ({
+      streaming: true, permissions: true, questions: true, compaction: false, subagents: false, steering: true,
+      attachments: { modalities: { file: fileSupport, url: "native" } },
+    }),
     models: async () => [],
     agents: async () => [],
     ensureSession: async (c) => `be_${c.sessionId}`,
@@ -175,7 +178,7 @@ const flush = () => new Promise((r) => setTimeout(r, 20));
 
 function makeService(
   fake: ReturnType<typeof fakeRuntime>,
-  opts: { withWorktree?: boolean; filesFor?: (projectId: string | null) => Promise<FileService> } = {},
+  opts: { withWorktree?: boolean; remote?: boolean; filesFor?: (projectId: string | null) => Promise<FileService> } = {},
 ) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-att-send-"));
   mkdirSync(join(dir, "docs"), { recursive: true });
@@ -185,7 +188,10 @@ function makeService(
   const worktree = mkdtempSync(join(tmpdir(), "polyth-att-wt-"));
   const store = createStore(join(dir, "s.db"));
   const files = createFileService();
-  const project: Project = { id: "p1", path: dir, name: "p", createdAt: 1 };
+  const project: Project = {
+    id: "p1", path: dir, name: "p", createdAt: 1,
+    ...(opts.remote ? { remote: { kind: "ssh" as const, connectionId: "remote-1" } } : {}),
+  };
   const projects: ProjectService = {
     list: async () => [project],
     get: async (id) => (id === "p1" ? project : undefined),
@@ -390,13 +396,14 @@ test("missing _inbox source → typed error with no path or _inbox in the messag
   await store.close();
 });
 
-test("remote/SSH project routes _inbox materialize through the remote FileService", async () => {
-  const fake = fakeRuntime();
+test("remote/SSH linked worktree routes inbox materialization and text projection through only the remote FileService", async () => {
+  const fake = fakeRuntime("emulated");
   // Stand-in for the remote host: a FileService rooted anywhere, wrapped so we
   // can assert every read/write for the staged file went through it (not local
   // disk). No SSH harness needed — filesFor is the seam that picks the store.
   const remoteImpl = createFileService();
   const calls: string[] = [];
+  const projectIds: Array<string | null> = [];
   const remote: FileService = new Proxy(remoteImpl, {
     get(target, prop: string) {
       const value = (target as unknown as Record<string, unknown>)[prop];
@@ -409,7 +416,8 @@ test("remote/SSH project routes _inbox materialize through the remote FileServic
   });
   const { sessions, store, dir, worktree } = makeService(fake, {
     withWorktree: true,
-    filesFor: async () => remote,
+    remote: true,
+    filesFor: async (projectId) => { projectIds.push(projectId); return remote; },
   });
   const body = "remote staged bytes";
   const rel = stageInbox(dir, "note.txt", body);
@@ -420,6 +428,9 @@ test("remote/SSH project routes _inbox materialize through the remote FileServic
 
   assert.equal(fake.started.length, 1);
   assert.ok(calls.includes("readRaw") && calls.includes("writeBytes"), "copy went through the remote FileService");
+  assert.ok(projectIds.length > 0 && projectIds.every((projectId) => projectId === "p1"), "the local store was never selected");
+  assert.match(fake.started[0]!.text, /remote staged bytes/);
+  assert.deepEqual(fake.started[0]!.attachments ?? [], []);
   assert.equal(statSync(join(worktree, rel)).size, body.length);
   await store.close();
 });

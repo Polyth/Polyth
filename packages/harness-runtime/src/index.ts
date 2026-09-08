@@ -41,6 +41,7 @@ export {
   composeProjectedPrompt,
   planAttachmentDelivery,
   projectAttachmentText,
+  materializeAttachmentText,
   TEXT_PROJECTION_MAX_BYTES,
   unsupportedAttachmentMessage,
   type AttachmentDeliveryInput,

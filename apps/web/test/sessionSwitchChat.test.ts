@@ -225,6 +225,7 @@ test("a hydrated session renders from cache while its suffix revalidates", async
   assert.equal(store.getState().activeSessionId, "parallel", "cached session activates synchronously");
   assert.equal(store.getState().activeView, "session", "cached chat is immediately usable");
   assert.deepEqual(requestedPaths, [
+    "/api/harnesses/sessions/parallel/features",
     "/api/sessions/parallel",
     "/api/sessions/parallel/events?afterSeq=0&prefetch=0",
   ]);
@@ -246,8 +247,9 @@ test("first-message session creation opens the chat instantly while revalidating
   assert.equal(store.getState().activeSessionId, "precache");
   assert.equal(store.getState().openingSessionId, null);
   assert.equal(store.getState().activeView, "session");
-  assert.deepEqual(requestedPaths.slice(0, 3), [
+  assert.deepEqual(requestedPaths.slice(0, 4), [
     "/api/sessions",
+    "/api/harnesses/sessions/precache/features",
     "/api/sessions/precache",
     "/api/sessions/precache/events?afterSeq=0&prefetch=0",
   ]);
@@ -284,6 +286,7 @@ test("tail prefetch dedupes and click paints its cache before reconcile resolves
   assert.equal(store.getState().activeSessionId, sessionId, "cached tail activates before reconcile");
   assert.deepEqual(store.getState().events[sessionId]?.map((event) => event.seq), [1]);
   assert.deepEqual(requestedPaths.slice(1), [
+    `/api/harnesses/sessions/${sessionId}/features`,
     `/api/sessions/${sessionId}/read`,
     `/api/sessions/${sessionId}`,
     `/api/sessions/${sessionId}/events?afterSeq=1&prefetch=0`,
@@ -310,6 +313,7 @@ test("a completed prefetch activates synchronously before SWR resolves", async (
   const opening = openSession(sessionId);
   assert.equal(store.getState().activeSessionId, sessionId, "completed prefetch paints cache synchronously");
   assert.deepEqual(requestedPaths, [
+    `/api/harnesses/sessions/${sessionId}/features`,
     `/api/sessions/${sessionId}`,
     `/api/sessions/${sessionId}/events?afterSeq=1&prefetch=0`,
   ]);

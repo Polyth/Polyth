@@ -114,7 +114,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
     // creation, then changed live with applyFlagSettings. `null` means "no
     // effort parameter", i.e. the model's own default.
     let appliedEffort: string | null | undefined;
-    const initialize = async (id: string, resume = false, effort?: string) => {
+    const initialize = async (id: string, resume = false, model?: string, effort?: string) => {
         if (query) {
             if (nativeId !== id)
                 throw Object.assign(new Error("Fresh native session requires a released process"), { code: "unsupported" });
@@ -133,6 +133,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
         try {
             query = sdk.query({ prompt: prompts(), options: { cwd: context.cwd, ...(resume ? { resume: id } : { sessionId: id }), pathToClaudeCodeExecutable: claudeExecutable(), permissionMode: "default", includePartialMessages: false,
                     ...(effort ? { effort: effort as EffortLevel } : {}),
+                    ...(model ? { model } : {}),
                     // Parallel subagents are not yet represented by this adapter.
                     disallowedTools: ["Agent", "Task", "AskUserQuestion"],
                     ...(overlay?.append ? { systemPrompt: { type: "preset" as const, preset: "claude_code" as const, append: overlay.append } } : {}),
@@ -302,7 +303,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
             if (!selection.ok) return { kind: "rejected", code: selection.code, message: selection.message };
             effort = selection.variant;
         }
-        const outcome = await mutate(operationId, async () => { const id = authority.receipts[operationId] ?? randomUUID(); await initialize(id, false, effort); createId = operationId; await authority.receipt(operationId, id); return { backendSessionId: id }; });
+        const outcome = await mutate(operationId, async () => { const id = authority.receipts[operationId] ?? randomUUID(); await initialize(id, false, request.model?.modelID, effort); createId = operationId; await authority.receipt(operationId, id); return { backendSessionId: id }; });
         return outcome.kind === "confirmed" ? { ...outcome, receipt: outcome.value.backendSessionId } : outcome;
     };
     /** Live session first (no spawn); otherwise a cached cold probe. */
@@ -342,12 +343,22 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                 return { kind: "rejected", code: "unsupported", message: "Claude Code supports idle turns on its native account" };
             // The live query already holds the catalog from `initialize`, so
             // validating a selection costs no process and no network call.
-            const selection = resolveModelSelection(
-                await catalog().catch(() => [] as ModelDescriptor[]),
-                request.model,
-                "claude",
-            );
-            if (!selection.ok) return { kind: "rejected", code: selection.code, message: selection.message };
+            let selectedVariant: string | undefined;
+            if (request.model) {
+                let available: ModelDescriptor[];
+                try {
+                    available = await catalog();
+                } catch {
+                    return {
+                        kind: "rejected",
+                        code: "discovery-unavailable",
+                        message: "Claude Code could not verify the available models for this session.",
+                    };
+                }
+                const selection = resolveModelSelection(available, request.model, "claude");
+                if (!selection.ok) return { kind: "rejected", code: selection.code, message: selection.message };
+                selectedVariant = selection.variant;
+            }
             const content: Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }> = [];
             const delivered = composeTurnPrompt(request.text, request.attachments);
             const readBytes = (path: string) => readFile(isAbsolute(path) ? path : join(context.cwd, path));
@@ -380,15 +391,15 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                 }
             }
             content.push({ type: "text", text: delivered.text });
-            if (request.model)
-                await query.setModel(request.model.modelID);
             try {
-                await applyEffort(selection.variant);
+                if (request.model)
+                    await query.setModel(request.model.modelID);
+                await applyEffort(selectedVariant);
             } catch {
                 return {
                     kind: "rejected",
                     code: "native-failure",
-                    message: "Claude Code did not accept the thinking level for this session.",
+                    message: "Claude Code did not accept the model or thinking level for this session.",
                 };
             }
             active = operationId;

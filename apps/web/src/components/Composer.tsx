@@ -166,6 +166,13 @@ async function loadComposerCatalog(projectId: string): Promise<ComposerCatalogRe
 const PROFILE_MISSING_NOTE = tr("composer.profileUnavailableChooseAnother");
 const MODEL_WARNING_DELAY_MS = 8_000;
 
+const modelIdentityMatches = (
+  candidate: ModelDescriptor,
+  ref: ModelRef & { harnessId?: string },
+): boolean => candidate.providerID === ref.providerID
+  && candidate.modelID === ref.modelID
+  && (!ref.harnessId || candidate.harnessId === ref.harnessId);
+
 type NewSessionTarget =
   | { kind: "main" }
   | { kind: "worktree"; path: string }
@@ -1113,8 +1120,7 @@ export default function Composer({
       reserved = true;
       const cfgSent = cfg;
       const selected = cfgSent.model ?? session?.model ?? preferredModel;
-      const descriptor = selected && chatModels.find((candidate) =>
-        candidate.providerID === selected.providerID && candidate.modelID === selected.modelID);
+      const descriptor = selected && chatModels.find((candidate) => modelIdentityMatches(candidate, selected));
       const thinking = resolveComposerThinking({
         ...(descriptor ? { descriptor } : {}),
         configThinking: cfgSent.thinking,
@@ -1230,8 +1236,7 @@ export default function Composer({
     const wire = wireProfileId(cfgSent);
     const selected = cfgSent.model ?? session?.model ?? preferredModel;
     const selectedDescriptor = selected
-      ? chatModels.find((candidate) =>
-          candidate.providerID === selected.providerID && candidate.modelID === selected.modelID)
+      ? chatModels.find((candidate) => modelIdentityMatches(candidate, selected))
       : undefined;
     const sentThinking = resolveComposerThinking({
       ...(selectedDescriptor ? { descriptor: selectedDescriptor } : {}),
@@ -1570,19 +1575,18 @@ export default function Composer({
   // ---- execution configuration projections ------------------------------------
   const agentValue = cfg.agent ?? "";
   const recommendedModel = session?.model && chatModels.some((candidate) =>
-    candidate.providerID === session.model?.providerID && candidate.modelID === session.model?.modelID)
+    modelIdentityMatches(candidate, session.model!))
     ? session.model
-    : preferredModel && chatModels.some((candidate) =>
-        candidate.providerID === preferredModel.providerID && candidate.modelID === preferredModel.modelID)
+    : preferredModel && chatModels.some((candidate) => modelIdentityMatches(candidate, preferredModel))
       ? preferredModel
       : chatModels[0];
-  const pickComposerModel = (ref?: ModelRef) => {
+  const pickComposerModel = (ref?: ModelRef & { harnessId?: string }) => {
     if (!ref) return;
     // A pending effort belongs to the old model. The selected model's saved
     // value is derived at send/render time, so never carry this one across.
     updateCfg(withModelForNextTurn(cfg, ref));
     const descriptor = routeCatalog.models.find((candidate) =>
-      candidate.providerID === ref.providerID && candidate.modelID === ref.modelID
+      modelIdentityMatches(candidate, ref)
       && (!effectiveDraftHarness || !candidate.harnessId || candidate.harnessId === effectiveDraftHarness));
     noteModelUsed(`${descriptor?.harnessId ? `${descriptor.harnessId}::` : ""}${ref.providerID}/${ref.modelID}`);
     if (!session && activeProjectId && descriptor?.harnessId) {
@@ -1648,8 +1652,7 @@ export default function Composer({
   const selectedModel = (() => {
     const nextTurn = cfg.model ?? session?.model ?? preferredModel;
     return nextTurn
-      ? chatModels.find((candidate) =>
-          candidate.providerID === nextTurn.providerID && candidate.modelID === nextTurn.modelID)
+      ? chatModels.find((candidate) => modelIdentityMatches(candidate, nextTurn))
       : undefined;
   })();
   // Same inputs the server admits with: harness support intersected with the
