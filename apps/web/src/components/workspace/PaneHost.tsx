@@ -205,8 +205,8 @@ const PaneHost = forwardRef<PaneHostHandle, PaneHostProps>(function PaneHost(
     open: openResource,
     close: (kind, resource, opts) => requestClose(tabId(kind, resource), opts),
     rename: renameResource,
-    activeTab: () => pane.tabs.find((t) => t.id === pane.activeId) ?? null,
-  }), [openResource, requestClose, renameResource, pane]);
+    activeTab: () => paneRef.current.tabs.find((t) => t.id === paneRef.current.activeId) ?? null,
+  }), [openResource, requestClose, renameResource]);
 
   const actions = useMemo<PaneActions>(() => ({
     closeSelf: (kind, resource) => { requestClose(tabId(kind, resource)); },

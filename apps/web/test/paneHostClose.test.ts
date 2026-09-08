@@ -198,6 +198,7 @@ test("PaneHost close during held save waits, then discards against the new basel
     await act(async () => { hostRef.current?.close(KIND, "note.ts"); });
     await flush(4);
     assert.ok(container.querySelector(".cm-editor"), "tab must stay open while save is unsettled");
+    assert.equal(documentSessionCount(), 1);
     assert.equal(hostRef.current?.activeTab()?.resource, "note.ts");
     await act(async () => { resolveAlert(true); });
     await flush(4);

@@ -539,6 +539,8 @@ test("rename during held save migrates retained editor state after the write set
     resetDocumentsForTest();
   }
 });
+
+test("language stale apply: delayed TypeScript load does not reconfigure YAML tab", async () => {
   resetBodies();
   resetDocumentsForTest();
   resetEditorRuntimeForTest();
