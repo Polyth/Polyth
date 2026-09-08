@@ -603,3 +603,276 @@ test("locale change while the editor is alive reconfigures search phrases", asyn
     resetDocumentsForTest();
   }
 });
+
+test("save baseline advances independently: in-flight save A, live B, undo to A clears dirty", async () => {
+  resetBodies();
+  resetDocumentsForTest();
+  resetEditorRuntimeForTest();
+  let releaseWrite!: () => void;
+  const { registerResourceProvider: reg } = await import("../../../apps/web/src/resources/providers.ts");
+  reg({
+    scheme,
+    describe: (ref) => ({ label: ref.locator, kind: "text" }),
+    read: async (ref) => ({ content: bodies.get(ref.locator) ?? "", revision: "1" }),
+    write: async (ref, content) => {
+      await new Promise<void>((resolve) => { releaseWrite = resolve; });
+      bodies.set(ref.locator, content);
+      return { revision: "2" };
+    },
+  });
+
+  const handle = openDocument(docRef("a.ts"));
+  await handle.load();
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => {
+      root.render(createElement(EditorRuntime, runtimeProps("a.ts", true)));
+    });
+    const view = EditorView.findFromDOM(host.querySelector(".cm-editor") as HTMLElement)!;
+    assert.equal(handle.getSnapshot().saved, "aaa");
+    view.dispatch({ changes: { from: 3, insert: "A" }, userEvent: "input.saveA" });
+    assert.equal(handle.getBuffer(), "aaaA");
+    const saving = handle.save();
+    view.dispatch({ changes: { from: 4, insert: "B" }, userEvent: "input.saveB" });
+    assert.equal(handle.getBuffer(), "aaaAB");
+    releaseWrite();
+    await saving;
+    assert.equal(handle.getSnapshot().saved, "aaaA");
+    assert.equal(handle.getBuffer(), "aaaAB");
+    assert.equal(handle.getSnapshot().dirty, true);
+    assert.notEqual(handle.autosaveDelay(true, 1500), null);
+    undo(view);
+    assert.equal(view.state.doc.toString(), "aaaA");
+    assert.equal(handle.getSnapshot().dirty, false);
+    redo(view);
+    assert.equal(handle.getSnapshot().dirty, true);
+    assert.equal(handle.getBuffer(), "aaaAB");
+  } finally {
+    await act(async () => { root.unmount(); });
+    host.remove();
+    resetEditorRuntimeForTest();
+    resetDocumentsForTest();
+    reg({
+      scheme,
+      describe: (ref) => ({ label: ref.locator, kind: "text" }),
+      read: async (ref) => ({ content: bodies.get(ref.locator) ?? "", revision: "1" }),
+      write: async (ref, content) => {
+        bodies.set(ref.locator, content);
+        return { revision: "2" };
+      },
+    });
+  }
+});
+
+function viewWrapEnabled(view: { dom: HTMLElement }): boolean {
+  return view.dom.classList.contains("cm-lineWrapping");
+}
+
+async function mountWithConfig(
+  path: string,
+  opts: { wrap?: boolean; ariaLabel?: string; groupId?: string; visible?: boolean } = {},
+) {
+  const handle = openDocument(docRef(path));
+  await handle.load();
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  const groupId = opts.groupId ?? GROUP;
+  const render = () => createElement(EditorRuntime, {
+    ...runtimeProps(path, opts.visible ?? true),
+    groupId,
+    wrap: opts.wrap,
+    ariaLabel: opts.ariaLabel,
+    authoritativeGeneration: handle.getSnapshot().authoritativeGeneration,
+  });
+  await act(async () => { root.render(render()); });
+  const view = () => EditorView.findFromDOM(host.querySelector(".cm-editor") as HTMLElement)!;
+  return {
+    handle,
+    host,
+    root,
+    view,
+    async rerender() { await act(async () => { root.render(render()); }); },
+  };
+}
+
+test("active discard preserves TypeScript, wrap=false, and aria-label", async () => {
+  resetBodies();
+  bodies.set("app.ts", "const x = 1;");
+  resetDocumentsForTest();
+  resetEditorRuntimeForTest();
+  const mounted = await mountWithConfig("app.ts", { wrap: false, ariaLabel: "test editor" });
+  try {
+    for (let i = 0; i < 200 && editorLanguageStatus(resourceKey(docRef("app.ts"))).label !== "TypeScript"; i++) {
+      await act(async () => { await Promise.resolve(); });
+    }
+    assert.equal(editorLanguageStatus(resourceKey(docRef("app.ts"))).label, "TypeScript");
+    assert.equal(viewWrapEnabled(mounted.view()), false);
+    assert.equal(mounted.view().contentDOM.getAttribute("aria-label"), "test editor");
+    mounted.view().dispatch({ changes: { from: mounted.view().state.doc.length, insert: "\n// edit" } });
+    mounted.handle.discard();
+    assert.equal(mounted.view().state.doc.toString(), "const x = 1;");
+    undo(mounted.view());
+    assert.equal(mounted.view().state.doc.toString(), "const x = 1;");
+    assert.equal(editorLanguageStatus(resourceKey(docRef("app.ts"))).label, "TypeScript");
+    assert.equal(viewWrapEnabled(mounted.view()), false);
+    assert.equal(mounted.view().contentDOM.getAttribute("aria-label"), "test editor");
+  } finally {
+    await act(async () => { mounted.root.unmount(); });
+    mounted.host.remove();
+    resetEditorRuntimeForTest();
+    resetDocumentsForTest();
+  }
+});
+
+test("inactive reload preserves binding config", async () => {
+  resetBodies();
+  bodies.set("app.ts", "const x = 1;");
+  resetDocumentsForTest();
+  resetEditorRuntimeForTest();
+  const handle = openDocument(docRef("app.ts"));
+  await handle.load();
+  const hostB = document.createElement("div");
+  document.body.appendChild(hostB);
+  const rootB = createRoot(hostB);
+  try {
+    await act(async () => {
+      rootB.render(createElement(EditorRuntime, {
+        ...runtimeProps("app.ts", true),
+        groupId: "g2",
+        wrap: false,
+        ariaLabel: "reload test",
+        authoritativeGeneration: handle.getSnapshot().authoritativeGeneration,
+      }));
+    });
+    const view = EditorView.findFromDOM(hostB.querySelector(".cm-editor") as HTMLElement)!;
+    view.dispatch({ changes: { from: view.state.doc.length, insert: "\n// edit" } });
+    bodies.set("app.ts", "const x = 2;");
+    await handle.reload();
+    await act(async () => {
+      rootB.render(createElement(EditorRuntime, {
+        ...runtimeProps("app.ts", true),
+        groupId: "g2",
+        wrap: false,
+        ariaLabel: "reload test",
+        authoritativeGeneration: handle.getSnapshot().authoritativeGeneration,
+      }));
+    });
+    const after = EditorView.findFromDOM(hostB.querySelector(".cm-editor") as HTMLElement)!;
+    assert.equal(after.state.doc.toString(), "const x = 2;");
+    undo(after);
+    assert.equal(after.state.doc.toString(), "const x = 2;");
+    assert.equal(viewWrapEnabled(after), false);
+    assert.equal(after.contentDOM.getAttribute("aria-label"), "reload test");
+  } finally {
+    await act(async () => { rootB.unmount(); });
+    hostB.remove();
+    resetEditorRuntimeForTest();
+    resetDocumentsForTest();
+  }
+});
+
+test("authoritative reset during delayed language load does not misconfigure editor", async () => {
+  resetBodies();
+  bodies.set("app.ts", "const x = 1;");
+  resetDocumentsForTest();
+  resetEditorRuntimeForTest();
+  holdLanguageLoadsForTest();
+  const mounted = await mountWithConfig("app.ts", { wrap: false, ariaLabel: "race test" });
+  try {
+    mounted.view().dispatch({ changes: { from: mounted.view().state.doc.length, insert: "\n// edit" } });
+    mounted.handle.discard();
+    releaseLanguageLoadsForTest();
+    for (let i = 0; i < 200 && editorLanguageStatus(resourceKey(docRef("app.ts"))).label !== "TypeScript"; i++) {
+      await act(async () => { await Promise.resolve(); });
+    }
+    assert.equal(mounted.view().state.doc.toString(), "const x = 1;");
+    assert.equal(editorLanguageStatus(resourceKey(docRef("app.ts"))).label, "TypeScript");
+    assert.equal(viewWrapEnabled(mounted.view()), false);
+    assert.equal(mounted.view().contentDOM.getAttribute("aria-label"), "race test");
+  } finally {
+    releaseLanguageLoadsForTest();
+    await act(async () => { mounted.root.unmount(); });
+    mounted.host.remove();
+    resetEditorRuntimeForTest();
+    resetDocumentsForTest();
+  }
+});
+
+test("same resource in two groups: one writable owner; g2 read-only; unmount g2 keeps source", async () => {
+  resetBodies();
+  resetDocumentsForTest();
+  resetEditorRuntimeForTest();
+  const resource = docRef("a.ts");
+  const handle = openDocument(resource);
+  await handle.load();
+  const host1 = document.createElement("div");
+  const host2 = document.createElement("div");
+  document.body.append(host1, host2);
+  const root1 = createRoot(host1);
+  const root2 = createRoot(host2);
+  try {
+    await act(async () => {
+      root1.render(createElement(EditorRuntime, { ...runtimeProps("a.ts", true), groupId: "g1" }));
+      root2.render(createElement(EditorRuntime, { ...runtimeProps("a.ts", true), groupId: "g2" }));
+    });
+    const v1 = EditorView.findFromDOM(host1.querySelector(".cm-editor") as HTMLElement)!;
+    const v2 = EditorView.findFromDOM(host2.querySelector(".cm-editor") as HTMLElement)!;
+    assert.equal(v2.state.readOnly, true);
+    v1.dispatch({ changes: { from: 3, insert: "X" } });
+    assert.equal(handle.getBuffer(), "aaaX");
+    v2.dispatch({ changes: { from: 3, insert: "Y" } });
+    assert.equal(handle.getBuffer(), "aaaX");
+    await act(async () => { root2.unmount(); });
+    assert.equal(handle.getBuffer(), "aaaX");
+    v1.dispatch({ changes: { from: 4, insert: "!" } });
+    assert.equal(handle.getBuffer(), "aaaX!");
+    await handle.save();
+    assert.equal(bodies.get("a.ts"), "aaaX!");
+    await act(async () => { root1.unmount(); });
+  } finally {
+    host1.remove();
+    host2.remove();
+    resetEditorRuntimeForTest();
+    resetDocumentsForTest();
+  }
+});
+
+test("rename README.md to README.txt drops markdown capability", async () => {
+  resetBodies();
+  bodies.set("README.md", "# Title\n");
+  resetDocumentsForTest();
+  resetEditorRuntimeForTest();
+  const refMd = docRef("README.md");
+  const refTxt = docRef("README.txt");
+  const handle = openDocument(refMd);
+  await handle.load();
+  const mounted = await mountWithConfig("README.md");
+  try {
+    for (let i = 0; i < 400 && editorLanguageStatus(resourceKey(refMd)).label !== "Markdown"; i++) {
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    }
+    assert.equal(editorLanguageStatus(resourceKey(refMd)).label, "Markdown");
+    handle.moveTo(refTxt);
+    await act(async () => {
+      mounted.root.render(createElement(EditorRuntime, {
+        ...runtimeProps("README.txt", true),
+        resource: refTxt,
+        path: "README.txt",
+        authoritativeGeneration: handle.getSnapshot().authoritativeGeneration,
+      }));
+    });
+    for (let i = 0; i < 200 && editorLanguageStatus(resourceKey(refTxt)).label === "Markdown"; i++) {
+      await act(async () => { await Promise.resolve(); });
+    }
+    assert.notEqual(editorLanguageStatus(resourceKey(refTxt)).label, "Markdown");
+    assert.equal(peekRetainedState(refMd), null);
+  } finally {
+    await act(async () => { mounted.root.unmount(); });
+    mounted.host.remove();
+    resetEditorRuntimeForTest();
+    resetDocumentsForTest();
+  }
+});

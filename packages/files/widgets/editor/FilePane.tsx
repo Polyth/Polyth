@@ -105,7 +105,6 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
     error: "",
     composing: false,
     saveCount: 0,
-    bufferVersion: 0,
     authoritativeGeneration: 0,
   };
   const doc = td?.doc ?? null;
@@ -577,6 +576,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
             wrap={wrap}
             ariaLabel={tr("editor.filepane.editValue", { path: doc.path })}
             visible={visible}
+            authoritativeGeneration={snap.authoritativeGeneration}
             onSave={onEditorSave}
             reveal={reveal}
             onRevealConsumed={() => setReveal(null)}

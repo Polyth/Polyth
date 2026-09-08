@@ -1,13 +1,32 @@
 import { createElement, Suspense, type ComponentType, type ReactNode } from "react";
-import type {
-  ResourceRef,
-  ResourceViewDefinition,
-  ResourceViewMatch,
-  Unregister,
-} from "@polyth/web-sdk";
+import type { ResourceRef, Unregister } from "@polyth/web-sdk";
 import { resourceKey } from "@polyth/web-sdk";
 import { getActiveProfileId } from "../workbench/store.ts";
 import { describeResource } from "./providers.ts";
+
+export type ResourceViewKind = "editor" | "viewer" | "diff";
+
+export interface ResourceViewMatch {
+  ref: ResourceRef;
+  descriptor: { label: string; kind: string };
+  profileId: string;
+}
+
+export interface ResourceViewProps {
+  ref: ResourceRef;
+  descriptor: { label: string; kind: string };
+  visible: boolean;
+  selection: { startLine: number; endLine: number; column?: number } | null;
+  onSelectionConsumed: () => void;
+}
+
+export interface ResourceViewDefinition {
+  id: string;
+  label: string;
+  kind: ResourceViewKind;
+  score(match: ResourceViewMatch): number;
+  component: ComponentType<ResourceViewProps>;
+}
 
 const views = new Map<string, ResourceViewDefinition>();
 let version = 0;
@@ -68,6 +87,7 @@ export interface EditorSurfaceProps {
   wrap?: boolean;
   ariaLabel?: string;
   visible: boolean;
+  authoritativeGeneration?: number;
   onSave?: () => void;
   onReady?: () => void;
   reveal?: { startLine: number; endLine: number } | null;

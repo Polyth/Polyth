@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useSyncExternalStore, type ReactElement } from "react";
-import { Compartment, EditorState, type Text } from "@codemirror/state";
+import { Compartment, EditorState, Text, type Text as CMText } from "@codemirror/state";
 import {
   EditorView, drawSelection, dropCursor, highlightActiveLine, highlightActiveLineGutter,
   highlightSpecialChars, keymap, lineNumbers,
@@ -28,6 +28,7 @@ interface EditorBinding {
   onSave?: () => void;
   generation: number;
   languageTicket: number;
+  ownsSource: boolean;
 }
 
 interface EditorGroup {
@@ -41,8 +42,11 @@ interface EditorGroup {
 interface RetainedState {
   state: EditorState;
   generation: number;
-  baseline: Text;
+  baseline: CMText;
   searchConfigured: boolean;
+  readOnly: boolean;
+  wrap: boolean;
+  ariaLabel?: string;
 }
 
 const groups = new Map<string, EditorGroup>();
@@ -138,9 +142,24 @@ function createState(doc: string, readOnly: boolean, wrap: boolean, ariaLabel?: 
   });
 }
 
-function freshRetained(text: string, readOnly: boolean, wrap: boolean, ariaLabel?: string, generation = 0): RetainedState {
+function freshRetained(
+  text: string,
+  readOnly: boolean,
+  wrap: boolean,
+  ariaLabel?: string,
+  generation = 0,
+  searchConfigured = false,
+): RetainedState {
   const state = createState(text, readOnly, wrap, ariaLabel);
-  return { state, generation, baseline: state.doc, searchConfigured: false };
+  return {
+    state,
+    generation,
+    baseline: state.doc,
+    searchConfigured,
+    readOnly,
+    wrap,
+    ariaLabel,
+  };
 }
 
 function retainedKey(ref: ResourceRef): string {
@@ -162,15 +181,25 @@ function getOrCreateGroup(groupId: string): EditorGroup {
       if (!active) return;
       const key = retainedKey(active.ref);
       let retained = states.get(key);
-      if (!retained) {
-        retained = { state: view.state, generation: active.generation, baseline: view.state.doc, searchConfigured: false };
-        states.set(key, retained);
-      } else {
-        retained.state = view.state;
-      }
-      if (!skip && tr.docChanged) {
-        const equivalent = view.state.doc.eq(retained.baseline);
-        peekDocument(active.ref)?.reportUserEdit(equivalent);
+      if (active.ownsSource) {
+        if (!retained) {
+          retained = {
+            state: view.state,
+            generation: active.generation,
+            baseline: view.state.doc,
+            searchConfigured: false,
+            readOnly: active.readOnly,
+            wrap: active.wrap,
+            ariaLabel: active.ariaLabel,
+          };
+          states.set(key, retained);
+        } else {
+          retained.state = view.state;
+        }
+        if (!skip && tr.docChanged) {
+          const equivalent = view.state.doc.eq(retained.baseline);
+          peekDocument(active.ref)?.reportUserEdit(equivalent);
+        }
       }
     },
   });
@@ -264,6 +293,9 @@ function resolveRetained(
 
 function applyBindingToView(group: EditorGroup, binding: EditorBinding): void {
   const retained = resolveRetained(binding.ref, binding.readOnly, binding.wrap, binding.ariaLabel);
+  retained.readOnly = binding.readOnly;
+  retained.wrap = binding.wrap;
+  retained.ariaLabel = binding.ariaLabel;
   if (group.view.state !== retained.state) {
     group.skip = true;
     group.view.setState(retained.state);
@@ -293,41 +325,54 @@ function bindingMatches(a: EditorBinding | null, b: EditorBinding): boolean {
 /** Persist the live view into retained state only when this binding owns it.
  *  Never recreate an evicted entry — close/delete must be able to drop state. */
 function persistOwnedView(group: EditorGroup, binding: EditorBinding): void {
-  if (!bindingMatches(group.active, binding)) return;
+  if (!binding.ownsSource || !bindingMatches(group.active, binding)) return;
   const existing = states.get(retainedKey(binding.ref));
   if (!existing) return;
   existing.state = group.view.state;
 }
 
-function resetRetainedState(ref: ResourceRef, text: string, generation: number, readOnly = false, wrap = true): void {
+function bindingConfigForReset(ref: ResourceRef): { readOnly: boolean; wrap: boolean; ariaLabel?: string } {
   const key = retainedKey(ref);
-  const fresh = freshRetained(text, readOnly, wrap, undefined, generation);
+  for (const group of groups.values()) {
+    if (group.active && resourceKey(group.active.ref) === key) {
+      return { readOnly: group.active.readOnly, wrap: group.active.wrap, ariaLabel: group.active.ariaLabel };
+    }
+  }
+  const existing = states.get(key);
+  if (existing) {
+    return { readOnly: existing.readOnly, wrap: existing.wrap, ariaLabel: existing.ariaLabel };
+  }
+  return { readOnly: false, wrap: true };
+}
+
+function resetRetainedState(ref: ResourceRef, text: string, generation: number): void {
+  const key = retainedKey(ref);
+  const existing = states.get(key);
+  const config = bindingConfigForReset(ref);
+  const fresh = freshRetained(
+    text,
+    config.readOnly,
+    config.wrap,
+    config.ariaLabel,
+    generation,
+    existing?.searchConfigured ?? false,
+  );
   states.set(key, fresh);
   for (const group of groups.values()) {
     if (group.active && resourceKey(group.active.ref) === key) {
       group.skip = true;
       group.view.setState(fresh.state);
       group.skip = false;
+      group.searchConfigured = fresh.searchConfigured;
     }
   }
 }
 
-function updateBaseline(ref: ResourceRef, text: string): void {
+function advanceSavedBaseline(ref: ResourceRef, savedText: string): void {
   const key = retainedKey(ref);
   const retained = states.get(key);
   if (!retained) return;
-  retained.baseline = retained.state.doc;
-  if (retained.state.doc.toString() !== text) {
-    const fresh = freshRetained(text, false, true, undefined, retained.generation);
-    states.set(key, fresh);
-    for (const group of groups.values()) {
-      if (group.active && resourceKey(group.active.ref) === key) {
-        group.skip = true;
-        group.view.setState(fresh.state);
-        group.skip = false;
-      }
-    }
-  }
+  retained.baseline = Text.of(savedText.split("\n"));
 }
 
 export function releaseEditorState(ref: ResourceRef): void {
@@ -438,8 +483,8 @@ registerDocumentEditorBridge({
   onAuthoritativeReset(ref, text, generation) {
     resetRetainedState(ref, text, generation);
   },
-  onSavedClean(ref, text) {
-    updateBaseline(ref, text);
+  onSavedBaselineAdvanced(ref, text) {
+    advanceSavedBaseline(ref, text);
   },
   onDocumentDeleted(ref) {
     releaseEditorState(ref);
@@ -479,18 +524,45 @@ export default function EditorRuntime(props: EditorSurfaceProps): ReactElement {
     if (!host) return;
 
     const handle = peekDocument(props.resource);
-    const generation = handle?.getSnapshot().authoritativeGeneration ?? 0;
+    const generation = props.authoritativeGeneration ?? handle?.getSnapshot().authoritativeGeneration ?? 0;
+    let releaseSource: (() => void) | null = null;
+    let ownsSource = false;
+    let readOnly = props.readOnly === true;
     const binding: EditorBinding = {
       groupId: props.groupId,
       ref: props.resource,
       path: props.path,
-      readOnly: props.readOnly === true,
+      readOnly,
       wrap: props.wrap !== false,
       ariaLabel: props.ariaLabel,
       onSave: props.onSave,
       generation,
       languageTicket: ++languageTicketCounter,
+      ownsSource: false,
     };
+
+    if (handle) {
+      const source = {
+        getText: () => {
+          const active = groups.get(props.groupId)?.active;
+          if (!active || resourceKey(active.ref) !== docKey) {
+            return states.get(docKey)?.state.doc.toString() ?? "";
+          }
+          const retained = states.get(docKey);
+          return (groups.get(props.groupId)?.view.state ?? retained?.state)?.doc.toString() ?? "";
+        },
+      };
+      const release = handle.attachSource(source);
+      if (release === null) {
+        ownsSource = false;
+        readOnly = true;
+      } else {
+        ownsSource = true;
+        releaseSource = release;
+      }
+    }
+    binding.ownsSource = ownsSource;
+    binding.readOnly = readOnly;
     bindingRef.current = binding;
 
     if (!props.visible) {
@@ -498,13 +570,13 @@ export default function EditorRuntime(props: EditorSurfaceProps): ReactElement {
       if (group) persistOwnedView(group, binding);
       if (group && bindingMatches(group.active, binding)) {
         if (group.view.dom.parentElement === host) host.removeChild(group.view.dom);
-        handle?.detachSource();
+        releaseSource?.();
         group.active = null;
       }
       return () => {
         const g = groups.get(props.groupId);
         if (g) persistOwnedView(g, binding);
-        peekDocument(binding.ref)?.detachSource();
+        releaseSource?.();
         if (g && bindingMatches(g.active, binding)) g.active = null;
         if (g?.view.dom.parentElement === host) host.removeChild(g.view.dom);
       };
@@ -518,24 +590,19 @@ export default function EditorRuntime(props: EditorSurfaceProps): ReactElement {
     }
 
     applyBindingToView(group, binding);
-    states.set(docKey, states.get(docKey) ?? { state: group.view.state, generation, baseline: group.view.state.doc, searchConfigured: false });
-
-    const existingSource = handle?.getSnapshot();
-    if (handle) {
-      handle.attachSource({
-        getText: () => {
-          const active = groups.get(props.groupId)?.active;
-          if (!active || resourceKey(active.ref) !== docKey) {
-            return states.get(docKey)?.state.doc.toString() ?? "";
-          }
-          const retained = states.get(docKey);
-          return (groups.get(props.groupId)?.view.state ?? retained?.state)?.doc.toString() ?? "";
-        },
-        resetAuthoritative: (text) => {
-          const snap = peekDocument(props.resource)?.getSnapshot();
-          resetRetainedState(props.resource, text, snap?.authoritativeGeneration ?? generation, binding.readOnly, binding.wrap);
-        },
-      });
+    if (ownsSource) {
+      const existing = states.get(docKey);
+      if (!existing) {
+        states.set(docKey, {
+          state: group.view.state,
+          generation,
+          baseline: group.view.state.doc,
+          searchConfigured: false,
+          readOnly: binding.readOnly,
+          wrap: binding.wrap,
+          ariaLabel: binding.ariaLabel,
+        });
+      }
     }
 
     if (props.reveal) {
@@ -584,7 +651,7 @@ export default function EditorRuntime(props: EditorSurfaceProps): ReactElement {
       const g = groups.get(props.groupId);
       if (!g) return;
       persistOwnedView(g, binding);
-      peekDocument(binding.ref)?.detachSource();
+      releaseSource?.();
       if (bindingMatches(g.active, binding)) g.active = null;
       if (g.view.dom.parentElement === host) host.removeChild(g.view.dom);
     };
@@ -600,6 +667,7 @@ export default function EditorRuntime(props: EditorSurfaceProps): ReactElement {
     props.onReady,
     props.reveal,
     props.onRevealConsumed,
+    props.authoritativeGeneration,
     docKey,
   ]);
 

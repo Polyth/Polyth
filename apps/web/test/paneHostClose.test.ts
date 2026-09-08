@@ -115,7 +115,7 @@ async function mountHost(): Promise<{
 async function openDirtyNote(
   hostRef: { current: import("../src/components/workspace/PaneHost.tsx").PaneHostHandle | null },
   container: HTMLElement,
-): Promise<EditorView> {
+): Promise<InstanceType<typeof EditorView>> {
   await act(async () => { hostRef.current?.open(KIND, "note.ts"); });
   const handle = openDocument(docRef("note.ts"));
   await handle.load();

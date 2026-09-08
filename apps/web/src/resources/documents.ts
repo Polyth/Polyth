@@ -54,7 +54,7 @@ const storeListeners = new Set<() => void>();
 
 export interface DocumentEditorBridge {
   onAuthoritativeReset(ref: ResourceRef, text: string, generation: number): void;
-  onSavedClean(ref: ResourceRef, text: string): void;
+  onSavedBaselineAdvanced(ref: ResourceRef, text: string): void;
   onDocumentDeleted(ref: ResourceRef): void;
   onDocumentMoved(from: ResourceRef, to: ResourceRef): void;
 }
@@ -85,7 +85,6 @@ function msg(err: unknown): string {
 function bumpAuthoritative(session: Session, text: string): void {
   session.authoritativeGeneration++;
   session.checkpoint = text;
-  session.source?.resetAuthoritative(text);
   editorBridge?.onAuthoritativeReset(session.ref, text, session.authoritativeGeneration);
 }
 
@@ -117,7 +116,6 @@ function snapshotOf(session: Session): ResourceDocumentSnapshot {
     error: session.error,
     composing: session.composing,
     saveCount: session.saveCount,
-    bufferVersion: session.bufferVersion,
     authoritativeGeneration: session.authoritativeGeneration,
   };
 }
@@ -155,13 +153,19 @@ function handleOf(session: Session): ResourceDocumentHandle {
     },
     getBuffer: () => getBuffer(session),
     attachSource: (source) => {
-      if (session.source !== null && session.source !== source) return;
-      session.checkpoint = getBuffer(session);
-      session.source = source;
-    },
-    detachSource: () => {
-      session.checkpoint = getBuffer(session);
-      session.source = null;
+      const release = () => {
+        if (session.source === source) {
+          session.checkpoint = getBuffer(session);
+          session.source = null;
+        }
+      };
+      if (session.source === null) {
+        session.checkpoint = getBuffer(session);
+        session.source = source;
+        return release;
+      }
+      if (session.source === source) return release;
+      return null;
     },
     markUserEdit: () => {
       reportUserEdit(session, false);
@@ -277,11 +281,9 @@ async function saveSession(session: Session, options: { force?: boolean } = {}):
     session.dirty = stillDirty;
     session.error = "";
     session.saveCount++;
+    editorBridge?.onSavedBaselineAdvanced(session.ref, content);
     if (stillDirty) armAutosave(session);
-    else {
-      clearAutosave(session);
-      editorBridge?.onSavedClean(session.ref, content);
-    }
+    else clearAutosave(session);
   } catch (err) {
     if (httpStatusOf(err) === 409) {
       session.live = conflictLiveFile(session.live ?? loadedLiveFile(session.revision));

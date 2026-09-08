@@ -51,10 +51,7 @@ test("document snapshot stays pull-based: keystrokes do not rewrite saved", asyn
   await handle.load();
   const saved = handle.getSnapshot().saved;
   let live = saved;
-  handle.attachSource({
-    getText: () => live,
-    resetAuthoritative: (text) => { live = text; },
-  });
+  handle.attachSource({ getText: () => live });
   live = " cons t a = 2;\n";
   handle.markUserEdit();
   const snap = handle.getSnapshot();
@@ -65,24 +62,35 @@ test("document snapshot stays pull-based: keystrokes do not rewrite saved", asyn
   assert.equal(handle.getSnapshot().saved, saved);
 });
 
-test("discard restores authoritative text through the attached source", async () => {
+test("attachSource lease: same source re-attach is idempotent; different source rejected", async () => {
+  resetDocumentsForTest();
+  const handle = openDocument(ref("a.ts"));
+  await handle.load();
+  const sourceA = { getText: () => "a" };
+  const sourceB = { getText: () => "b" };
+  const releaseA = handle.attachSource(sourceA);
+  assert.ok(releaseA);
+  const releaseA2 = handle.attachSource(sourceA);
+  assert.ok(releaseA2);
+  assert.equal(handle.attachSource(sourceB), null);
+  releaseA2?.();
+  assert.equal(handle.getBuffer(), "a");
+});
+
+test("discard does not mutate attached source; authoritative reset is editor-bridge owned", async () => {
   resetDocumentsForTest();
   const handle = openDocument(ref("a.ts"));
   await handle.load();
   const saved = handle.getSnapshot().saved;
   let live = saved;
-  let resets = 0;
-  handle.attachSource({
-    getText: () => live,
-    resetAuthoritative: (text) => { live = text; resets += 1; },
-  });
+  handle.attachSource({ getText: () => live });
   live = "edited";
   handle.markUserEdit();
+  const genBefore = handle.getSnapshot().authoritativeGeneration;
   handle.discard();
   assert.equal(handle.getSnapshot().dirty, false);
-  assert.equal(handle.getBuffer(), saved);
-  assert.equal(live, saved);
-  assert.equal(resets, 1);
+  assert.equal(handle.getSnapshot().authoritativeGeneration, genBefore + 1);
+  assert.equal(live, "edited", "document layer does not push authoritative text into the source");
 });
 
 test("fileRef identity is scheme/project/session/path", () => {
@@ -110,7 +118,7 @@ test("save failure keeps dirty state", async () => {
   writeImpl = async () => { throw new Error("disk full"); };
   const handle = openDocument(ref("a.ts"));
   await handle.load();
-  handle.attachSource({ getText: () => "edited", resetAuthoritative: () => {} });
+  handle.attachSource({ getText: () => "edited" });
   handle.markUserEdit();
   await handle.save();
   assert.equal(handle.getSnapshot().dirty, true);
@@ -132,7 +140,7 @@ test("409 conflict preserves buffer and marks live conflict", async () => {
   const handle = openDocument(ref("a.ts"));
   await handle.load();
   const live = "my edit";
-  handle.attachSource({ getText: () => live, resetAuthoritative: () => {} });
+  handle.attachSource({ getText: () => live });
   handle.markUserEdit();
   await handle.save();
   assert.equal(handle.getBuffer(), live);
@@ -157,10 +165,7 @@ test("edit during save keeps later buffer dirty after save resolves", async () =
   const handle = openDocument(ref("a.ts"));
   await handle.load();
   let live = "first";
-  handle.attachSource({
-    getText: () => live,
-    resetAuthoritative: (text) => { live = text; },
-  });
+  handle.attachSource({ getText: () => live });
   handle.markUserEdit();
   const saving = handle.save();
   live = "second";
@@ -169,6 +174,7 @@ test("edit during save keeps later buffer dirty after save resolves", async () =
   await saving;
   assert.equal(handle.getBuffer(), "second");
   assert.equal(handle.getSnapshot().dirty, true);
+  assert.equal(handle.getSnapshot().saved, "first");
   writeImpl = async (r, content) => {
     const revision = `r${files.size + 1}`;
     files.set(r.locator, { content, revision });
@@ -182,7 +188,7 @@ test("beforeunload guard blocks only unflushed dirty with autosave off", async (
   installDocumentUnloadGuard();
   const handle = openDocument(ref("a.ts"));
   await handle.load();
-  handle.attachSource({ getText: () => "edited", resetAuthoritative: () => {} });
+  handle.attachSource({ getText: () => "edited" });
   handle.reportUserEdit(false);
   assert.equal(anyUnflushedDirty(), true);
   const BlockedEvt = (dom as unknown as { Event: typeof Event }).Event;
