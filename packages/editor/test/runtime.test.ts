@@ -34,7 +34,6 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { undo } = await import("@codemirror/commands");
-const { resourceKey } = await import("@polyth/web-sdk");
 const { openDocument, resetDocumentsForTest } = await import("../../../apps/web/src/resources/documents.ts");
 const { registerResourceProvider } = await import("../../../apps/web/src/resources/providers.ts");
 const {
@@ -68,7 +67,8 @@ async function mount(path: string) {
   const root = createRoot(container);
   await act(async () => {
     root.render(createElement(EditorRuntime, {
-      docKey: resourceKey(docRef(path)),
+      groupId: "files",
+      ref: docRef(path),
       path,
       visible: true,
     }));
@@ -81,7 +81,8 @@ async function mount(path: string) {
       await nextHandle.load();
       await act(async () => {
         root.render(createElement(EditorRuntime, {
-          docKey: resourceKey(docRef(next)),
+          groupId: "files",
+          ref: docRef(next),
           path: next,
           visible: true,
         }));
@@ -106,10 +107,6 @@ test("one EditorView per group; tab A→B→A restores state; discard undo is a 
     const view = first.container.querySelector(".cm-content") as HTMLElement | null;
     assert.ok(view);
 
-    // User edit on A.
-    const cm = (first.container.querySelector(".cm-editor") as unknown as { cmView?: { view: import("@codemirror/view").EditorView } })
-      ?? null;
-    void cm;
     const { EditorView } = await import("@codemirror/view");
     const found = EditorView.findFromDOM(first.container.querySelector(".cm-editor") as HTMLElement);
     assert.ok(found, "EditorView.findFromDOM");

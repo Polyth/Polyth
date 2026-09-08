@@ -5,6 +5,7 @@ import type {
   ResourceViewMatch,
   Unregister,
 } from "@polyth/web-sdk";
+import { resourceKey } from "@polyth/web-sdk";
 import { getActiveProfileId } from "../workbench/store.ts";
 import { describeResource } from "./providers.ts";
 
@@ -60,7 +61,8 @@ export function resourceViewsVersion(): number {
 let editorSurface: ComponentType<EditorSurfaceProps> | null = null;
 
 export interface EditorSurfaceProps {
-  docKey: string;
+  groupId: string;
+  ref: ResourceRef;
   path: string;
   readOnly?: boolean;
   wrap?: boolean;
@@ -96,6 +98,6 @@ export function registerEditorSelection(reader: (docKey: string) => EditorSelect
   };
 }
 
-export function readEditorSelection(docKey: string): EditorSelection {
-  return selectionReader?.(docKey) ?? null;
+export function readEditorSelection(ref: ResourceRef): EditorSelection {
+  return selectionReader?.(resourceKey(ref)) ?? null;
 }
