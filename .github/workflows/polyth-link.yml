@@ -13,15 +13,17 @@ on:
       - "packages/contracts/**"
       - "packages/plugins/**"
       - "packages/terminal/**"
-      - "apps/mobile/**"
-      - "apps/desktop/**"
-      - "docs/architecture/polyth-link.md"
-      - "docs/protocols/polyth-link-v1.md"
-      - "docs/security/polyth-link-threat-model.md"
-      - "docs/mobile/polyth-link.md"
-      - "docs/operations/polyth-link-relay.md"
+      - "apps/mobile/src/runtime.ts"
+      - "apps/mobile/src/ConnectionScreen.tsx"
+      - "apps/mobile/src/nativeBridge.ts"
+      - "apps/mobile/test/**"
+      - "apps/desktop/build.ts"
+      - "apps/desktop/src/**"
+      - "apps/desktop/test/**"
       - ".github/workflows/polyth-link.yml"
   push:
+    branches:
+      - master
     paths:
       - "crates/**"
       - "Cargo.toml"
@@ -33,49 +35,62 @@ on:
       - "packages/contracts/**"
       - "packages/plugins/**"
       - "packages/terminal/**"
-      - "apps/mobile/**"
-      - "apps/desktop/**"
-      - "docs/architecture/polyth-link.md"
-      - "docs/protocols/polyth-link-v1.md"
-      - "docs/security/polyth-link-threat-model.md"
-      - "docs/mobile/polyth-link.md"
-      - "docs/operations/polyth-link-relay.md"
+      - "apps/mobile/src/runtime.ts"
+      - "apps/mobile/src/ConnectionScreen.tsx"
+      - "apps/mobile/src/nativeBridge.ts"
+      - "apps/mobile/test/**"
+      - "apps/desktop/build.ts"
+      - "apps/desktop/src/**"
+      - "apps/desktop/test/**"
       - ".github/workflows/polyth-link.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: polyth-link-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   rust:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+
       - uses: dtolnay/rust-toolchain@1.91.0
         with:
           components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --all-targets
-      - run: cargo build --release -p polyth-link-host -p polyth-link-client -p polyth-link-relay
 
-  node:
+  contracts:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+
       - uses: dtolnay/rust-toolchain@1.91.0
+
+      - uses: Swatinem/rust-cache@v2
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.22.0
+          node-version-file: .nvmrc
           cache: npm
-      - run: npm install
-      - run: cargo build -p polyth-link-core --bin polyth-link-ws-echo
-      # Full `npm test` is not a gate in this workflow: GitHub currently fails
-      # dozens of web/git/workflow tests that already fail on master (store
-      # document.title without happy-dom, Header source-scan strings, Playwright
-      # ffmpeg, git visual layout). The files below are the Polyth Link contract.
-      - run: node --experimental-strip-types --test packages/contracts/test/remoteAccess.test.ts packages/server/test/localAdmin.test.ts packages/server/test/remotePolicy.test.ts packages/server/test/remotePolicyHttp.test.ts packages/server/test/authIngress.test.ts packages/server/test/httpTunnel.test.ts packages/server/test/remotePolicyCoverage.test.ts packages/server/test/wsRemoteAuth.test.ts packages/server/test/auth.test.ts packages/server/test/packageDiscovery.test.ts packages/plugins/test/serverPackage.test.ts packages/terminal/test/wsCapability.test.ts packages/tunnel/test/*.test.ts packages/pairing-qr/test/*.test.ts apps/mobile/test/runtime.test.ts apps/mobile/test/connectionUi.test.ts apps/desktop/test/configuration.test.ts apps/desktop/test/serverPackages.test.ts apps/web/test/packageContainment.test.ts
-      - run: npm run build
-      - run: npx tsc --noEmit -p packages/contracts
-      - run: npx tsc --noEmit -p packages/plugins
-      - run: npx tsc --noEmit -p packages/server
-      - run: npx tsc --noEmit -p packages/tunnel
-      - run: npx tsc --noEmit -p packages/terminal
-      - run: npx tsc --noEmit -p apps/mobile
-      - run: npx tsc --noEmit -p apps/desktop
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Build ws-echo helper for contract tests
+        run: cargo build -p polyth-link-core --bin polyth-link-ws-echo
+
+      - name: Polyth Link contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t tests < <(node scripts/ci/select-tests.mjs polyth-link)
+          node --experimental-strip-types --test "${tests[@]}"

@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Resolve aligned release version metadata
+        run: node scripts/release-version.mjs
+
+      - name: Build web packages and shell
+        run: npm run build:web
+
+      - name: Typecheck TypeScript projects
+        shell: bash
+        run: |
+          set -euo pipefail
+          projects=(
+            packages/contracts
+            packages/plugins
+            packages/server
+            packages/tunnel
+            packages/terminal
+            apps/mobile
+            apps/desktop
+          )
+          for project in "${projects[@]}"; do
+            echo "::group::tsc $project"
+            npx tsc --noEmit -p "$project"
+            echo "::endgroup::"
+          done
+
+      # Generic CI owns stable repository tests. Polyth Link contract tests are
+      # selected by scripts/ci/select-tests.mjs and run only in polyth-link.yml.
+      - name: Run stable repository tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t tests < <(node scripts/ci/select-tests.mjs ci)
+          node --experimental-strip-types --test "${tests[@]}"

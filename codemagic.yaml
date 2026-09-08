@@ -1,0 +1,91 @@
+workflows:
+  ios-testflight:
+    name: Polyth iOS TestFlight
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+
+    inputs:
+      submitToBetaReview:
+        description: Submit the uploaded build to TestFlight beta review
+        type: boolean
+        default: false
+
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: "v*.*.*"
+          include: true
+      cancel_previous_builds: false
+
+    integrations:
+      app_store_connect: polyth-apple
+
+    environment:
+      groups:
+        - ios_config
+      node: 22.14.0
+      xcode: latest
+      vars:
+        XCODE_PROJECT: "App.xcodeproj"
+        XCODE_SCHEME: "App"
+        BUNDLE_ID: "com.polyth.mobile"
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.polyth.mobile
+
+    cache:
+      cache_paths:
+        - $HOME/.npm
+        - $HOME/Library/Caches/org.swift.swiftpm
+        - $HOME/Library/Developer/Xcode/DerivedData/CompilationCache.noindex
+
+    scripts:
+      - name: Install npm dependencies
+        script: |
+          set -euo pipefail
+          npm ci
+
+      - name: Resolve and validate release version
+        script: |
+          set -euo pipefail
+          node scripts/release-version.mjs
+        env:
+          CM_TAG: $CM_TAG
+
+      - name: Resolve iOS build number from App Store Connect
+        script: |
+          set -euo pipefail
+          bash scripts/ci/resolve-ios-build-number.sh
+
+      - name: Build web and sync iOS project
+        script: |
+          set -euo pipefail
+          npm run build:mobile
+
+      - name: Set up code signing
+        script: |
+          set -euo pipefail
+          cd apps/mobile/ios/App
+          xcode-project use-profiles
+
+      - name: Build signed IPA
+        script: |
+          set -euo pipefail
+          cd apps/mobile/ios/App
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME" \
+            --config Release \
+            --archive-xcargs \
+              "MARKETING_VERSION=$POLYTH_IOS_MARKETING_VERSION CURRENT_PROJECT_VERSION=$POLYTH_IOS_CURRENT_PROJECT_VERSION COMPILATION_CACHE_ENABLE_CACHING=True"
+
+    artifacts:
+      - apps/mobile/ios/App/build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: ${{ inputs.submitToBetaReview }}
+        submit_to_app_store: false

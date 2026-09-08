@@ -30,3 +30,12 @@ _inbox/
 /quotas.json
 /forbidden-config.json
 /.polyth-writer.lock
+# Signing and provisioning material (never commit values)
+*.jks
+*.keystore
+*.p12
+*.cer
+*.mobileprovision
+AuthKey_*.p8
+google-play-service-account.json
+play-console-service-account.json

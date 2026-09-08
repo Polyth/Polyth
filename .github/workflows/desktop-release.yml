@@ -2,52 +2,96 @@ name: Desktop builds
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "apps/desktop/**"
-      - "apps/web/**"
-      - "packages/**"
-      - "package*.json"
-      - ".github/workflows/desktop-release.yml"
+    inputs:
+      target:
+        description: Platform target
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - macos
+          - linux
+          - windows
   push:
     tags:
       - "v*"
+
+concurrency:
+  group: desktop-release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
 
 jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      is_tag_release: ${{ steps.set-matrix.outputs.is_tag_release }}
+    steps:
+      - id: detect-windows-signing
+        shell: bash
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          if [ -n "${WIN_CSC_LINK:-}" ] && [ -n "${WIN_CSC_KEY_PASSWORD:-}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - id: set-matrix
+        shell: bash
+        env:
+          TARGET: ${{ github.event_name == 'workflow_dispatch' && inputs.target || 'all' }}
+          WINDOWS_SIGNING_CONFIGURED: ${{ steps.detect-windows-signing.outputs.configured }}
+        run: |
+          set -euo pipefail
+          is_tag_release=false
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            is_tag_release=true
+          fi
+          echo "is_tag_release=${is_tag_release}" >> "$GITHUB_OUTPUT"
+
+          declare -a entries=()
+          add_entry() {
+            entries+=("$1")
+          }
+
+          if [[ "$is_tag_release" == true || "$TARGET" == "all" || "$TARGET" == "linux" ]]; then
+            add_entry '{"label":"Linux AppImage x64","os":"ubuntu-24.04","platform":"linux","arch":"x64","builder":"--linux AppImage --x64","e2e":true}'
+            add_entry '{"label":"Linux AppImage arm64","os":"ubuntu-24.04-arm","platform":"linux","arch":"arm64","builder":"--linux AppImage --arm64","e2e":false}'
+          fi
+          if [[ "$is_tag_release" == true || "$TARGET" == "all" || "$TARGET" == "macos" ]]; then
+            add_entry '{"label":"macOS universal DMG + update ZIP","os":"macos-14","platform":"darwin","arch":"universal","builder":"--mac dmg zip --universal","e2e":false}'
+          fi
+          if [[ "$TARGET" == "all" || "$TARGET" == "windows" ]]; then
+            if [[ "$is_tag_release" != true || "$WINDOWS_SIGNING_CONFIGURED" == "true" ]]; then
+              add_entry '{"label":"Windows NSIS x64","os":"windows-2025","platform":"win32","arch":"x64","builder":"--win nsis --x64","e2e":false}'
+              add_entry '{"label":"Windows NSIS arm64","os":"windows-2025","platform":"win32","arch":"arm64","builder":"--win nsis --arm64 --config.publish.channel=latest-arm64","e2e":false}'
+            fi
+          fi
+
+          if [[ ${#entries[@]} -eq 0 ]]; then
+            echo "No desktop matrix entries selected for target=${TARGET}" >&2
+            if [[ "$is_tag_release" == true && "$TARGET" == "all" && "$WINDOWS_SIGNING_CONFIGURED" != "true" ]]; then
+              echo "Tag release continues without Windows because signing secrets are not configured." >&2
+            fi
+            exit 1
+          fi
+
+          matrix_json="{\"include\":[$(IFS=,; echo "${entries[*]}")]}"
+          echo "matrix=${matrix_json}" >> "$GITHUB_OUTPUT"
+
   package:
     name: ${{ matrix.label }}
+    needs: plan
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - label: Linux AppImage x64
-            os: ubuntu-24.04
-            platform: linux
-            arch: x64
-            builder: --linux AppImage --x64
-          - label: Linux AppImage arm64
-            os: ubuntu-24.04-arm
-            platform: linux
-            arch: arm64
-            builder: --linux AppImage --arm64
-          - label: macOS universal DMG + update ZIP
-            os: macos-14
-            platform: darwin
-            arch: universal
-            builder: --mac dmg zip --universal
-          - label: Windows NSIS x64
-            os: windows-2025
-            platform: win32
-            arch: x64
-            builder: --win nsis --x64
-          - label: Windows NSIS arm64
-            os: windows-2025
-            platform: win32
-            arch: arm64
-            builder: --win nsis --arm64 --config.publish.channel=latest-arm64
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -71,21 +115,17 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.22.0
+          node-version-file: .nvmrc
           cache: npm
 
-      - name: Validate release tag matches desktop version
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        run: |
-          VERSION="$(node -p "require('./apps/desktop/package.json').version")"
-          test "$GITHUB_REF_NAME" = "v$VERSION" || {
-            echo "Release tag $GITHUB_REF_NAME does not match desktop version $VERSION" >&2
-            exit 1
-          }
+      - name: Resolve aligned release version
+        run: node scripts/release-version.mjs
+        env:
+          GITHUB_REF_TYPE: ${{ github.ref_type }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
 
       - name: Validate macOS release signing and notarization secrets
-        if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'darwin'
+        if: needs.plan.outputs.is_tag_release == 'true' && matrix.platform == 'darwin'
         shell: bash
         run: |
           for NAME in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
@@ -96,7 +136,7 @@ jobs:
           done
 
       - name: Validate Windows release signing secrets
-        if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'win32'
+        if: needs.plan.outputs.is_tag_release == 'true' && matrix.platform == 'win32'
         shell: bash
         run: |
           for NAME in WIN_CSC_LINK WIN_CSC_KEY_PASSWORD; do
@@ -136,17 +176,17 @@ jobs:
           POLYTH_TARGET_PLATFORM=darwin POLYTH_TARGET_ARCH=arm64 npm run desktop:download-opencode
 
       - name: Package unsigned validation artifact
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        if: needs.plan.outputs.is_tag_release != 'true'
         working-directory: apps/desktop
         run: npx electron-builder ${{ matrix.builder }} --publish never
 
       - name: Package and publish release artifact
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: needs.plan.outputs.is_tag_release == 'true'
         working-directory: apps/desktop
         run: npx electron-builder ${{ matrix.builder }} --publish always
 
       - name: End-to-end test packaged AppImage
-        if: matrix.platform == 'linux'
+        if: matrix.platform == 'linux' && matrix.e2e
         shell: bash
         run: |
           APPIMAGE="$(ls apps/desktop/release/*.AppImage | sed -n '1p')"
@@ -189,15 +229,11 @@ jobs:
           fi
           printf 'packaged %s\n' "${artifacts[@]}"
 
-      # Pull-request packaging already validates the binaries. Uploading the
-      # installers currently fails the job with GitHub's artifact storage quota
-      # even when the files exist (Windows/macOS both found files then failed
-      # CreateArtifact). Keep the glob list for tag uploads and for the
-      # desktop configuration contract.
       - uses: actions/upload-artifact@v4
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: needs.plan.outputs.is_tag_release != 'true'
         with:
           name: polyth-desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          retention-days: 7
           path: |
             apps/desktop/release/*.AppImage
             apps/desktop/release/*.dmg
