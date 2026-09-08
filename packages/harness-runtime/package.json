@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./features": "./src/features.ts"
   },
   "dependencies": {
     "@polyth/contracts": "0.1.0",

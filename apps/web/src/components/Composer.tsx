@@ -120,7 +120,7 @@ import { useRuntimeCatalog } from "@polyth/models/runtime-catalog";
 import { modelSupportsThinking } from "@polyth/models/model-presentation";
 import { resolveProjectModelDefault, useSessionDefaults } from "../sessionDefaults.ts";
 import { contextTokensUsed } from "../reduce.ts";
-import { effectiveAttachmentSupport, attachmentModality } from "@polyth/harness-runtime";
+import { effectiveAttachmentSupport, attachmentModality } from "@polyth/harness-runtime/features";
 import { getModelThinking, setModelThinking } from "../thinkingPrefs.ts";
 import { roleKind, useRolePrefs } from "../rolePrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";

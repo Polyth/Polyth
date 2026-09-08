@@ -3,7 +3,6 @@ import { exec } from "node:child_process";
 import { mkdir, readdir, readFile, realpath, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import type { RuntimeCommandDescriptor } from "@polyth/contracts";
 
 const execAsync = promisify(exec);
 const FILE_INCLUDE_MAX = 64 * 1024;
@@ -496,37 +495,4 @@ function expandSnippets(text: string, snipBy: Map<string, Snippet>): string {
   });
 }
 
-export const mergeCommandCatalog = (
-  polyth: readonly SlashCommand[],
-  native: readonly RuntimeCommandDescriptor[],
-): Array<SlashCommand | RuntimeCommandDescriptor> => [...polyth, ...native];
-
-const COMMAND_SCOPE_RANK: Record<CommandScope | "native", number> = {
-  project: 0,
-  user: 1,
-  builtin: 2,
-  native: 3,
-};
-
-/** Typed `/name` precedence when no explicit selection: project > user > builtin > native. */
-export const commandPrecedence = (
-  name: string,
-  catalog: readonly (SlashCommand | RuntimeCommandDescriptor)[],
-): SlashCommand | RuntimeCommandDescriptor | undefined => {
-  const normalized = name.replace(/^\//, "").toLowerCase();
-  let best: { item: SlashCommand | RuntimeCommandDescriptor; rank: number } | undefined;
-  for (const cmd of catalog) {
-    if ("owner" in cmd && cmd.owner === "native") {
-      const names = [cmd.name, ...(cmd.aliases ?? [])].map((n) => n.toLowerCase());
-      if (!names.includes(normalized)) continue;
-      const rank = COMMAND_SCOPE_RANK.native;
-      if (!best || rank < best.rank) best = { item: cmd, rank };
-      continue;
-    }
-    const polyth = cmd as SlashCommand;
-    if (polyth.name.toLowerCase() !== normalized) continue;
-    const rank = COMMAND_SCOPE_RANK[polyth.scope] ?? COMMAND_SCOPE_RANK.builtin;
-    if (!best || rank < best.rank) best = { item: polyth, rank };
-  }
-  return best?.item;
-};
+export { commandPrecedence, mergeCommandCatalog } from "./catalog.ts";

@@ -5,7 +5,7 @@
 // No DOM, no fetch, no send path — components project this module's decisions.
 import type { SlashCommand, SnippetDef, StrictListResult } from "@polyth/session/web-api";
 import type { RuntimeCommandDescriptor } from "@polyth/contracts";
-import { commandPrecedence } from "@polyth/commands";
+import { commandPrecedence } from "@polyth/commands/catalog";
 import { filterSnippets, type AutocompleteItem } from "../utils.ts";
 import { tr } from "../i18n/index.ts";
 
@@ -239,7 +239,7 @@ export function commandAutocomplete(
   return { kind: "cmd", options, status: null };
 }
 
-export { commandPrecedence, mergeCommandCatalog } from "@polyth/commands";
+export { commandPrecedence, mergeCommandCatalog } from "@polyth/commands/catalog";
 
 export function nativeCommandInput(
   text: string,
