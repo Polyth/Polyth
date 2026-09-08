@@ -273,8 +273,8 @@ async function saveSession(session: Session, options: { force?: boolean } = {}):
   session.live = beginLiveFileSave(session.live ?? loadedLiveFile(session.revision));
   let settle!: () => void;
   session.saveInFlight = new Promise<void>((resolve) => { settle = resolve; });
-  notify(session);
   try {
+    notify(session);
     try {
       const base = options.force ? undefined : session.revision;
       const res = await provider.write(session.ref, content, base);
