@@ -73,6 +73,11 @@ let writeImpl: (ref: { locator: string }, content: string) => Promise<{ revision
   return { revision: "2" };
 };
 
+let readImpl: (ref: { locator: string }) => Promise<{ content: string; revision: string }> = async (ref) => ({
+  content: bodies.get(ref.locator) ?? "",
+  revision: "1",
+});
+
 function restoreWriteImpl(): void {
   writeImpl = async (ref, content) => {
     bodies.set(ref.locator, content);
@@ -80,10 +85,14 @@ function restoreWriteImpl(): void {
   };
 }
 
+function restoreReadImpl(): void {
+  readImpl = async (ref) => ({ content: bodies.get(ref.locator) ?? "", revision: "1" });
+}
+
 registerResourceProvider({
   scheme,
   describe: (ref) => ({ label: ref.locator, kind: "text" }),
-  read: async (ref) => ({ content: bodies.get(ref.locator) ?? "", revision: "1" }),
+  read: async (ref) => readImpl(ref),
   write: async (ref, content) => writeImpl(ref, content),
   rename: async (ref, to) => {
     const content = bodies.get(ref.locator);
@@ -1098,6 +1107,77 @@ test("rename README.md to README.txt drops markdown capability", async () => {
   } finally {
     await act(async () => { mounted.root.unmount(); });
     mounted.host.remove();
+    resetEditorRuntimeForTest();
+    resetDocumentsForTest();
+  }
+});
+
+test("stale load after close/reopen does not reset the live EditorState", async () => {
+  resetBodies();
+  bodies.set("race.ts", "OLD");
+  resetDocumentsForTest();
+  resetEditorRuntimeForTest();
+  let first = true;
+  let releaseRead!: (result: { content: string; revision: string }) => void;
+  let startedRead!: () => void;
+  const started = new Promise<void>((resolve) => { startedRead = resolve; });
+  readImpl = async (ref) => {
+    if (first) {
+      first = false;
+      startedRead();
+      return await new Promise<{ content: string; revision: string }>((resolve) => { releaseRead = resolve; });
+    }
+    return { content: bodies.get(ref.locator) ?? "", revision: "2" };
+  };
+  const { registerResourceProvider: reg } = await import("../../../apps/web/src/resources/providers.ts");
+  const { deleteDocument } = await import("../../../apps/web/src/resources/documents.ts");
+  reg({
+    scheme,
+    describe: (ref) => ({ label: ref.locator, kind: "text" }),
+    read: async (ref) => readImpl(ref),
+    write: async (ref, content) => writeImpl(ref, content),
+    rename: async (ref, to) => {
+      const content = bodies.get(ref.locator);
+      if (content === undefined) throw new Error("missing");
+      bodies.delete(ref.locator);
+      bodies.set(to, content);
+      return { ...ref, locator: to };
+    },
+    remove: async (ref) => { bodies.delete(ref.locator); },
+  });
+  const raceRef = docRef("race.ts");
+  const s1 = openDocument(raceRef);
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  try {
+    await started;
+    deleteDocument(raceRef);
+    bodies.set("race.ts", "NEW");
+    const s2 = openDocument(raceRef);
+    await s2.load();
+    await act(async () => {
+      root.render(createElement(EditorRuntime, runtimeProps("race.ts", true)));
+    });
+    const view = EditorView.findFromDOM(host.querySelector(".cm-editor") as HTMLElement)!;
+    assert.equal(view.state.doc.toString(), "NEW");
+    view.dispatch({ changes: { from: 3, insert: "+edit" } });
+    assert.equal(s2.getBuffer(), "NEW+edit");
+    const gen = s2.getSnapshot().authoritativeGeneration;
+    const retainedGen = peekRetainedState(raceRef)?.generation;
+    releaseRead({ content: "OLD", revision: "1" });
+    await s1.load();
+    await act(async () => { await Promise.resolve(); });
+    assert.equal(s2.getSnapshot().saved, "NEW");
+    assert.equal(s2.getSnapshot().authoritativeGeneration, gen);
+    assert.equal(peekRetainedState(raceRef)?.generation, retainedGen);
+    assert.equal(view.state.doc.toString(), "NEW+edit");
+    undo(view);
+    assert.equal(view.state.doc.toString(), "NEW");
+  } finally {
+    await act(async () => { root.unmount(); });
+    host.remove();
+    restoreReadImpl();
     resetEditorRuntimeForTest();
     resetDocumentsForTest();
   }

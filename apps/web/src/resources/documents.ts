@@ -52,6 +52,13 @@ interface Session {
    */
   persistence: Promise<void> | null;
   closed: boolean;
+  /**
+   * Internal observation epoch. Advanced when an in-flight read/stat result
+   * must not publish. Not `authoritativeGeneration` (that resets EditorState).
+   */
+  observationEpoch: number;
+  /** Monotonic ticket so an older check cannot overwrite a newer one. */
+  latestCheckTicket: number;
   listeners: Set<() => void>;
 }
 
@@ -116,23 +123,40 @@ async function acquirePersistence(session: Session): Promise<() => void> {
   }
 }
 
-/** Claim+run synchronously when idle so existing tests keep a sync fast path. */
-function withPersistenceGate<T>(session: Session, run: () => T): T | Promise<T> {
-  const release = claimPersistence(session);
-  if (release) {
+/** Claim+run synchronously when idle. `run` MUST be synchronous. */
+function withPersistenceGate(session: Session, run: () => void): void | Promise<void> {
+  const finish = (release: () => void): void => {
     try {
-      return run();
+      const result: unknown = run();
+      if (result != null && typeof (result as { then?: unknown }).then === "function") {
+        throw new Error("withPersistenceGate run must be synchronous");
+      }
     } finally {
       release();
     }
+  };
+  const release = claimPersistence(session);
+  if (release) {
+    finish(release);
+    return;
   }
-  return acquirePersistence(session).then((rel) => {
-    try {
-      return run();
-    } finally {
-      rel();
-    }
-  });
+  return acquirePersistence(session).then((rel) => { finish(rel); });
+}
+
+function bumpObservation(session: Session): void {
+  session.observationEpoch++;
+}
+
+function isCurrentSession(
+  session: Session,
+  expectedRefKey?: string,
+  expectedEpoch?: number,
+): boolean {
+  if (session.closed) return false;
+  if (sessions.get(resourceKey(session.ref)) !== session) return false;
+  if (expectedRefKey !== undefined && resourceKey(session.ref) !== expectedRefKey) return false;
+  if (expectedEpoch !== undefined && session.observationEpoch !== expectedEpoch) return false;
+  return true;
 }
 
 function maybeArmAutosave(session: Session): void {
@@ -215,6 +239,7 @@ function handleOf(session: Session): ResourceDocumentHandle {
     },
     getBuffer: () => getBuffer(session),
     attachSource: (source) => {
+      if (!isCurrentSession(session)) return null;
       const release = () => {
         if (session.source === source) {
           session.checkpoint = getBuffer(session);
@@ -237,7 +262,7 @@ function handleOf(session: Session): ResourceDocumentHandle {
     },
     load: () => loadSession(session),
     setComposing: (composing) => {
-      if (session.composing === composing) return;
+      if (!isCurrentSession(session) || session.composing === composing) return;
       session.composing = composing;
       armAutosave(session);
     },
@@ -246,7 +271,7 @@ function handleOf(session: Session): ResourceDocumentHandle {
     check: () => checkSession(session),
     discard: () => discardSession(session),
     dismissNotice: () => {
-      if (!session.live) return;
+      if (!isCurrentSession(session) || !session.live) return;
       session.live = dismissLiveFileNotice(session.live);
       notify(session);
     },
@@ -264,6 +289,7 @@ function runDiscard(session: Session): void {
   session.dirty = false;
   session.bufferVersion++;
   if (session.live) session.live = restoreLiveFileBuffer(session.live);
+  bumpObservation(session);
   bumpAuthoritative(session, session.saved);
   clearAutosave(session);
   notify(session);
@@ -277,6 +303,7 @@ function discardSession(session: Session): void | Promise<void> {
 }
 
 function reportUserEdit(session: Session, equivalentToSaved: boolean): void {
+  if (session.closed || !isCurrentSession(session)) return;
   const wasDirty = session.dirty;
   session.bufferVersion++;
   if (equivalentToSaved) {
@@ -294,20 +321,26 @@ function reportUserEdit(session: Session, equivalentToSaved: boolean): void {
 }
 
 async function loadSession(session: Session): Promise<void> {
-  if (session.status === "ready") return;
+  if (session.closed || session.status === "ready") return;
   if (session.loading) return session.loading;
+  const refKey = resourceKey(session.ref);
+  const epoch = session.observationEpoch;
+  const readRef = session.ref;
   const run = (async () => {
-    const provider = getResourceProvider(session.ref.scheme);
+    const provider = getResourceProvider(readRef.scheme);
     if (!provider) {
+      if (!isCurrentSession(session, refKey, epoch)) return;
       session.status = "error";
-      session.error = `No provider for ${session.ref.scheme}`;
+      session.error = `No provider for ${readRef.scheme}`;
       notify(session);
       return;
     }
+    if (!isCurrentSession(session, refKey, epoch)) return;
     session.status = "loading";
     notify(session);
     try {
-      const got = await provider.read(session.ref);
+      const got = await provider.read(readRef);
+      if (!isCurrentSession(session, refKey, epoch)) return;
       session.saved = got.content;
       session.checkpoint = got.content;
       session.revision = got.revision;
@@ -318,12 +351,15 @@ async function loadSession(session: Session): Promise<void> {
       session.error = "";
       session.dirty = false;
       session.bufferVersion++;
+      bumpObservation(session);
       bumpAuthoritative(session, got.content);
+      notify(session);
     } catch (err) {
+      if (!isCurrentSession(session, refKey, epoch)) return;
       session.status = "error";
       session.error = msg(err);
+      notify(session);
     }
-    notify(session);
   })();
   session.loading = run;
   try {
@@ -338,14 +374,17 @@ async function saveSession(session: Session, options: { force?: boolean } = {}):
   if (!provider?.write || session.truncated || session.binary || session.closed) return;
   const release = claimPersistence(session);
   if (!release) return;
+  const refKey = resourceKey(session.ref);
+  const epoch = session.observationEpoch;
+  const writeRef = session.ref;
   const content = getBuffer(session);
   session.live = beginLiveFileSave(session.live ?? loadedLiveFile(session.revision));
   try {
     notify(session);
     try {
       const base = options.force ? undefined : session.revision;
-      const res = await provider.write(session.ref, content, base);
-      if (session.closed) return;
+      const res = await provider.write(writeRef, content, base);
+      if (!isCurrentSession(session, refKey, epoch)) return;
       const current = getBuffer(session);
       const stillDirty = current !== content;
       session.saved = content;
@@ -354,19 +393,21 @@ async function saveSession(session: Session, options: { force?: boolean } = {}):
       session.dirty = stillDirty;
       session.error = "";
       session.saveCount++;
+      bumpObservation(session);
       editorBridge?.onSavedBaselineAdvanced(session.ref, content);
       if (stillDirty) armAutosave(session);
       else clearAutosave(session);
     } catch (err) {
-      if (session.closed) return;
+      if (!isCurrentSession(session, refKey, epoch)) return;
       if (isConflictError(err)) {
         session.live = conflictLiveFile(session.live ?? loadedLiveFile(session.revision));
       } else {
         session.error = msg(err);
         session.live = failLiveFileSave(session.live ?? loadedLiveFile(session.revision));
       }
+      bumpObservation(session);
     }
-    if (!session.closed) notify(session);
+    if (isCurrentSession(session, refKey)) notify(session);
   } finally {
     release();
   }
@@ -378,10 +419,13 @@ async function reloadSession(session: Session): Promise<void> {
   if (!provider) return;
   const release = await acquirePersistence(session);
   try {
-    if (session.closed) return;
+    if (!isCurrentSession(session)) return;
+    const refKey = resourceKey(session.ref);
+    const epoch = session.observationEpoch;
+    const readRef = session.ref;
     try {
-      const got = await provider.read(session.ref);
-      if (session.closed) return;
+      const got = await provider.read(readRef);
+      if (!isCurrentSession(session, refKey, epoch)) return;
       session.saved = got.content;
       session.checkpoint = got.content;
       session.revision = got.revision;
@@ -392,31 +436,40 @@ async function reloadSession(session: Session): Promise<void> {
       session.error = "";
       session.status = "ready";
       session.bufferVersion++;
+      bumpObservation(session);
       bumpAuthoritative(session, got.content);
       clearAutosave(session);
     } catch (err) {
-      if (!session.closed) session.error = msg(err);
+      if (!isCurrentSession(session, refKey, epoch)) return;
+      session.error = msg(err);
     }
-    if (!session.closed) notify(session);
+    if (isCurrentSession(session, refKey)) notify(session);
   } finally {
     release();
   }
 }
 
 async function checkSession(session: Session): Promise<void> {
+  if (!isCurrentSession(session) || !session.live) return;
   const provider = getResourceProvider(session.ref.scheme);
-  if (!provider?.stat || !session.live) return;
+  if (!provider?.stat) return;
+  const refKey = resourceKey(session.ref);
+  const epoch = session.observationEpoch;
+  const ticket = ++session.latestCheckTicket;
+  const statRef = session.ref;
   try {
-    const stat = await provider.stat(session.ref);
+    const stat = await provider.stat(statRef);
+    if (!isCurrentSession(session, refKey, epoch) || session.latestCheckTicket !== ticket || !session.live) return;
     session.live = checkLiveFile(session.live, stat.kind === "missing"
       ? { kind: "deleted" }
       : { kind: "present", revision: stat.revision });
   } catch (err) {
+    if (!isCurrentSession(session, refKey, epoch) || session.latestCheckTicket !== ticket || !session.live) return;
     session.live = httpStatusOf(err) === 404
       ? checkLiveFile(session.live, { kind: "deleted" })
       : checkLiveFile(session.live, { kind: "failed", message: msg(err) });
   }
-  notify(session);
+  if (isCurrentSession(session, refKey, epoch) && session.latestCheckTicket === ticket) notify(session);
 }
 
 function applyMove(session: Session, to: ResourceRef): void {
@@ -429,8 +482,14 @@ function applyMove(session: Session, to: ResourceRef): void {
   sessions.delete(fromKey);
   session.ref = to;
   sessions.set(toKey, session);
+  bumpObservation(session);
   editorBridge?.onDocumentMoved(from, to);
   notify(session);
+  if (session.status !== "ready") {
+    session.loading = null;
+    session.status = "idle";
+    void loadSession(session);
+  }
 }
 
 function moveSession(session: Session, to: ResourceRef): void | Promise<void> {
@@ -445,6 +504,7 @@ function moveSession(session: Session, to: ResourceRef): void | Promise<void> {
 function dropSession(session: Session): void {
   if (session.closed) return;
   session.closed = true;
+  bumpObservation(session);
   clearAutosave(session);
   sessions.delete(resourceKey(session.ref));
   editorBridge?.onDocumentDeleted(session.ref);
@@ -475,6 +535,8 @@ function ensureSession(ref: ResourceRef): Session {
       loading: null,
       persistence: null,
       closed: false,
+      observationEpoch: 0,
+      latestCheckTicket: 0,
       listeners: new Set(),
     };
     sessions.set(key, session);
@@ -530,7 +592,7 @@ export async function renameDocument(from: ResourceRef, toLocator: string): Prom
     const provider = getResourceProvider(session.ref.scheme);
     if (!provider?.rename) throw new Error("Rename is not supported");
     const next = await provider.rename(session.ref, toLocator);
-    if (session.closed) throw new Error("document closed");
+    if (!isCurrentSession(session)) throw new Error("document closed");
     applyMove(session, next);
     maybeArmAutosave(session);
   } finally {
@@ -548,6 +610,7 @@ export async function removeDocument(ref: ResourceRef): Promise<void> {
     const provider = getResourceProvider(session.ref.scheme);
     if (!provider?.remove) throw new Error("Delete is not supported");
     await provider.remove(session.ref);
+    if (!isCurrentSession(session)) return;
     dropSession(session);
   } finally {
     release();
@@ -592,7 +655,7 @@ export function resetDocumentsForTest(): void {
 
 subscribeProviderUnload((scheme) => {
   for (const session of sessions.values()) {
-    if (session.ref.scheme !== scheme) continue;
+    if (session.closed || session.ref.scheme !== scheme) continue;
     if (session.dirty) {
       session.status = "error";
       session.error = "Provider unavailable";

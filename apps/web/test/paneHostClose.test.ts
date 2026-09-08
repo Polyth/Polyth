@@ -224,3 +224,48 @@ test("PaneHost close during held save waits, then discards against the new basel
     resetDocumentsForTest();
   }
 });
+
+test("PaneHost failed provider close keeps the tab open", async () => {
+  resetDocumentsForTest();
+  resetEditorRuntimeForTest();
+  const restore = registerPaneProvider({
+    kind: KIND,
+    dirty: (_scope, resource) => isDocumentDirty(docRef(resource)),
+    discard: (_scope, resource) => peekDocument(docRef(resource))?.discard(),
+    close: async () => { throw new Error("lifecycle failed"); },
+    component: () => createElement("div", { className: "fail-pane" }, "kept"),
+  });
+  const { hostRef, container, root } = await mountHost();
+  try {
+    await act(async () => { hostRef.current?.open(KIND, "kept.ts"); });
+    await flush(4);
+    assert.ok(container.querySelector(".fail-pane"));
+    await act(async () => { hostRef.current?.close(KIND, "kept.ts"); });
+    await flush(8);
+    assert.ok(container.querySelector(".fail-pane"), "failed close must keep the tab");
+    assert.equal(hostRef.current?.activeTab()?.resource, "kept.ts");
+  } finally {
+    restore();
+    registerPaneProvider({
+      kind: KIND,
+      dirty: (_scope, resource) => isDocumentDirty(docRef(resource)),
+      discard: (_scope, resource) => peekDocument(docRef(resource))?.discard(),
+      close: (_scope, resource) => deleteDocument(docRef(resource)),
+      component: ({ resource, visible }) => {
+        useEffect(() => {
+          void openDocument(docRef(resource)).load();
+        }, [resource]);
+        return createElement(EditorRuntime, {
+          groupId: "files",
+          resource: docRef(resource),
+          path: resource,
+          visible,
+        });
+      },
+    });
+    await act(async () => { root.unmount(); });
+    container.remove();
+    resetEditorRuntimeForTest();
+    resetDocumentsForTest();
+  }
+});

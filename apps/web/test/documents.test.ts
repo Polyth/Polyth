@@ -18,6 +18,7 @@ import {
   isDocumentDirty,
   openDocument,
   peekDocument,
+  registerDocumentEditorBridge,
   removeDocument,
   renameDocument,
   resetDocumentsForTest,
@@ -36,14 +37,18 @@ let writeImpl: (ref: { locator: string }, content: string) => Promise<{ revision
   return { revision };
 };
 
+let readImpl: (ref: { locator: string }) => Promise<{ content: string; revision: string }> = async (ref) => {
+  const got = files.get(ref.locator);
+  if (!got) throw new Error("missing");
+  return { ...got };
+};
+
+let statImpl: ((ref: { locator: string }) => Promise<{ revision: string } | null>) | null = null;
+
 registerResourceProvider({
   scheme,
   describe: (ref) => ({ label: ref.locator, kind: "text" }),
-  read: async (ref) => {
-    const got = files.get(ref.locator);
-    if (!got) throw new Error("missing");
-    return { ...got };
-  },
+  read: async (ref) => readImpl(ref),
   write: async (ref, content) => writeImpl(ref, content),
   rename: async (ref, to) => {
     const got = files.get(ref.locator);
@@ -55,6 +60,11 @@ registerResourceProvider({
   remove: async (ref) => {
     if (!files.has(ref.locator)) throw new Error("missing");
     files.delete(ref.locator);
+  },
+  stat: async (ref) => {
+    if (statImpl) return statImpl(ref);
+    const got = files.get(ref.locator);
+    return got ? { kind: "present" as const, revision: got.revision } : { kind: "missing" as const };
   },
 });
 
@@ -553,6 +563,244 @@ test("deleteDocument waits for in-flight save before dropping the session", asyn
     assert.equal(files.get("close.ts")?.content, "A");
   } finally {
     restoreWriteImpl();
+    resetDocumentsForTest();
+  }
+});
+
+function restoreReadImpl(): void {
+  readImpl = async (ref) => {
+    const got = files.get(ref.locator);
+    if (!got) throw new Error("missing");
+    return { ...got };
+  };
+}
+
+function restoreStatImpl(): void {
+  statImpl = null;
+}
+
+function holdFirstRead(): { started: Promise<void>; release: (result: { content: string; revision: string }) => void } {
+  let release!: (result: { content: string; revision: string }) => void;
+  let startedResolve!: () => void;
+  const started = new Promise<void>((resolve) => { startedResolve = resolve; });
+  let first = true;
+  readImpl = async (ref) => {
+    if (first) {
+      first = false;
+      startedResolve();
+      return await new Promise<{ content: string; revision: string }>((resolve) => { release = resolve; });
+    }
+    const got = files.get(ref.locator);
+    if (!got) throw new Error("missing");
+    return { ...got };
+  };
+  return { started, release: (result) => release(result) };
+}
+
+function holdNthStat(
+  n: number,
+  result: { kind: "present"; revision?: string } | { kind: "missing" },
+): { started: Promise<void>; release: () => void } {
+  let release!: () => void;
+  let startedResolve!: () => void;
+  const started = new Promise<void>((resolve) => { startedResolve = resolve; });
+  let calls = 0;
+  const prev = statImpl;
+  statImpl = async (ref) => {
+    calls++;
+    if (calls === n) {
+      startedResolve();
+      await new Promise<void>((resolve) => { release = resolve; });
+      return result;
+    }
+    if (prev) return prev(ref);
+    const got = files.get(ref.locator);
+    return got ? { kind: "present" as const, revision: got.revision } : { kind: "missing" as const };
+  };
+  return { started, release: () => release() };
+}
+
+test("stale load after close/reopen does not publish into the new session", async () => {
+  resetDocumentsForTest();
+  files.set("race.ts", { content: "OLD", revision: "r-old" });
+  let resets = 0;
+  let resetText = "";
+  const off = registerDocumentEditorBridge({
+    onAuthoritativeReset(_ref, text) {
+      resets += 1;
+      resetText = text;
+    },
+    onSavedBaselineAdvanced() {},
+    onDocumentDeleted() {},
+    onDocumentMoved() {},
+  });
+  const held = holdFirstRead();
+  const s1 = openDocument(ref("race.ts"));
+  try {
+    await held.started;
+    deleteDocument(ref("race.ts"));
+    assert.equal(documentSessionCount(), 0);
+    files.set("race.ts", { content: "NEW", revision: "r-new" });
+    const s2 = openDocument(ref("race.ts"));
+    await s2.load();
+    assert.equal(s2.getSnapshot().saved, "NEW");
+    assert.equal(s2.getSnapshot().revision, "r-new");
+    const gen = s2.getSnapshot().authoritativeGeneration;
+    assert.equal(resets, 1);
+    assert.equal(resetText, "NEW");
+    let live = "NEW";
+    s2.attachSource({ getText: () => live });
+    live = "NEW+edit";
+    s2.reportUserEdit(false);
+    held.release({ content: "OLD", revision: "r-old" });
+    await s1.load();
+    assert.equal(documentSessionCount(), 1);
+    assert.equal(peekDocument(ref("race.ts"))?.key, s2.key);
+    assert.equal(s2.getSnapshot().saved, "NEW");
+    assert.equal(s2.getBuffer(), "NEW+edit");
+    assert.equal(s2.getSnapshot().dirty, true);
+    assert.equal(s2.getSnapshot().revision, "r-new");
+    assert.equal(s2.getSnapshot().authoritativeGeneration, gen);
+    assert.equal(s2.getSnapshot().status, "ready");
+    assert.equal(s2.getSnapshot().error, "");
+    assert.equal(resets, 1);
+    assert.equal(resetText, "NEW");
+  } finally {
+    off();
+    restoreReadImpl();
+    resetDocumentsForTest();
+  }
+});
+
+test("stale load after identity move does not publish old-path content", async () => {
+  resetDocumentsForTest();
+  files.set("from.ts", { content: "ORIGIN", revision: "r1" });
+  const held = holdFirstRead();
+  const handle = openDocument(ref("from.ts"));
+  try {
+    await held.started;
+    await renameDocument(ref("from.ts"), "to.ts");
+    assert.equal(handle.ref.locator, "to.ts");
+    await handle.load();
+    assert.equal(handle.getSnapshot().saved, "ORIGIN");
+    held.release({ content: "STALE-FROM", revision: "r-stale" });
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(handle.getSnapshot().saved, "ORIGIN");
+    assert.equal(handle.getSnapshot().revision, "r1");
+    assert.equal(handle.ref.locator, "to.ts");
+    assert.notEqual(handle.getSnapshot().saved, "STALE-FROM");
+  } finally {
+    restoreReadImpl();
+    resetDocumentsForTest();
+  }
+});
+
+test("stale check after rename does not mark the new path deleted", async () => {
+  resetDocumentsForTest();
+  files.set("old.ts", { content: "O", revision: "r1" });
+  const handle = openDocument(ref("old.ts"));
+  try {
+    await handle.load();
+    handle.attachSource({ getText: () => "O" });
+    const held = holdNthStat(1, { kind: "missing" });
+    const checking = handle.check();
+    await held.started;
+    await renameDocument(ref("old.ts"), "new.ts");
+    assert.equal(handle.ref.locator, "new.ts");
+    held.release();
+    await checking;
+    assert.equal(handle.ref.locator, "new.ts");
+    assert.equal(files.has("new.ts"), true);
+    assert.notEqual(handle.getSnapshot().live?.kind, "deleted");
+    assert.notEqual(handle.getSnapshot().live?.kind, "external-change");
+    assert.notEqual(handle.getSnapshot().live?.kind, "conflict");
+    assert.equal(handle.getSnapshot().dirty, false);
+  } finally {
+    restoreStatImpl();
+    resetDocumentsForTest();
+  }
+});
+
+test("stale check after save does not invent external-change or block later saves", async () => {
+  resetDocumentsForTest();
+  setUiSettings({ editorAutosave: true });
+  files.set("rev.ts", { content: "O", revision: "r1" });
+  writeImpl = async (r, content) => {
+    files.set(r.locator, { content, revision: "r2" });
+    return { revision: "r2" };
+  };
+  const handle = openDocument(ref("rev.ts"));
+  try {
+    await handle.load();
+    assert.equal(handle.getSnapshot().revision, "r1");
+    let live = "O";
+    handle.attachSource({ getText: () => live });
+    const held = holdNthStat(1, { kind: "present", revision: "r1" });
+    const checking = handle.check();
+    await held.started;
+    live = "A";
+    handle.reportUserEdit(false);
+    await handle.save();
+    assert.equal(handle.getSnapshot().revision, "r2");
+    assert.equal(handle.getSnapshot().dirty, false);
+    held.release();
+    await checking;
+    assert.equal(handle.getSnapshot().revision, "r2");
+    assert.notEqual(handle.getSnapshot().live?.kind, "external-change");
+    assert.notEqual(handle.getSnapshot().live?.kind, "conflict");
+    live = "B";
+    handle.reportUserEdit(false);
+    assert.equal(handle.getSnapshot().dirty, true);
+    assert.notEqual(handle.autosaveDelay(true), null);
+    writeImpl = async (r, content) => {
+      files.set(r.locator, { content, revision: "r3" });
+      return { revision: "r3" };
+    };
+    await handle.save();
+    assert.equal(handle.getSnapshot().revision, "r3");
+    assert.equal(handle.getSnapshot().dirty, false);
+    assert.equal(files.get("rev.ts")?.content, "B");
+  } finally {
+    restoreWriteImpl();
+    restoreStatImpl();
+    resetDocumentsForTest();
+  }
+});
+
+test("older check cannot overwrite a newer check", async () => {
+  resetDocumentsForTest();
+  files.set("order.ts", { content: "O", revision: "r1" });
+  type StatResult = { kind: "present"; revision?: string } | { kind: "missing" };
+  const startWaiters = new Map<number, () => void>();
+  const held = new Map<number, (result: StatResult) => void>();
+  let calls = 0;
+  statImpl = async () => {
+    const n = ++calls;
+    startWaiters.get(n)?.();
+    return await new Promise<StatResult>((resolve) => { held.set(n, resolve); });
+  };
+  const waitFor = (n: number) => new Promise<void>((resolve) => {
+    if (calls >= n) { resolve(); return; }
+    startWaiters.set(n, resolve);
+  });
+  const handle = openDocument(ref("order.ts"));
+  try {
+    await handle.load();
+    const checking1 = handle.check();
+    await waitFor(1);
+    const checking2 = handle.check();
+    await waitFor(2);
+    held.get(2)!({ kind: "present", revision: "r1" });
+    await checking2;
+    assert.notEqual(handle.getSnapshot().live?.kind, "external-change");
+    held.get(1)!({ kind: "present", revision: "STALE" });
+    await checking1;
+    assert.notEqual(handle.getSnapshot().live?.kind, "external-change");
+    assert.notEqual(handle.getSnapshot().live?.kind, "conflict");
+    assert.equal(handle.getSnapshot().revision, "r1");
+  } finally {
+    restoreStatImpl();
     resetDocumentsForTest();
   }
 });
