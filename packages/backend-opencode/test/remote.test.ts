@@ -113,6 +113,7 @@ test("remote runtime boots serve on the host, attaches through the forward, and 
     assert.equal(fake.guardianStartCommands.length, 1);
     assert.equal(fake.serveStartCommands.length, 1);
     const cmd = fake.serveStartCommands[0]!;
+    const guardian = fake.guardianStartCommands[0]!;
     assert.ok(cmd.includes("cd '/home/dev/app'"), cmd);
     assert.ok(cmd.includes("setsid opencode serve --hostname 127.0.0.1 --port 37001"), cmd);
     assert.ok(
@@ -171,6 +172,7 @@ test("remote runtime boots serve on the host, attaches through the forward, and 
       cmd.includes("write_pf()"),
       "serve must write the process record atomically",
     );
+    assert.ok(cmd.includes('mktemp "$PF.tmp.XXXXXX"'), "publication uses a private temp file");
     assert.ok(
       cmd.includes("terminate_unpublished_child()"),
       "PF publication failure must reap the unpublished child directly",
@@ -182,6 +184,12 @@ test("remote runtime boots serve on the host, attaches through the forward, and 
     assert.ok(
       cmd.includes("POLYTH_RUNTIME_OWNED="),
       "a live serve-process record must fail closed rather than being killed",
+    );
+    assert.ok(
+      guardian.includes('tr "\\000" "\\n" < "/proc/$PF_PID/cmdline"')
+        && guardian.includes('mktemp "$PF.migrate.XXXXXX"')
+        && guardian.includes('mv "$MIG" "$PF"'),
+      "legacy migration must derive argv from the exact process and atomically replace the record",
     );
     // the forward targets the actual listen port
     assert.deepEqual(fake.forwards.map((f) => f.remotePort), [37001]);
@@ -751,6 +759,8 @@ test("incomplete serve-process record fails closed", async () => {
   const lock = await acquireRemoteRuntimeLock(fake.host, runtimeDir, "/home/dev/app");
   assert.equal(state.lockHeld, true);
   await lock.release();
+  assert.equal(state.lockHeld, false);
+  assert.equal(fake.guardianWrites.at(-1), "POLYTH_RELEASE\n");
 });
 
 test("stale controller metadata does not block a free flock", async () => {
@@ -849,6 +859,61 @@ test("live serve-process record without a port fails closed and does not start a
   );
   assert.equal(fake.serveStartCommands.length, serveBefore);
   assert.equal(state.lockHeld, false);
+  assert.equal(fake.guardianWrites.length, 0,
+    "terminal guardian errors must be observed through exit, not a doomed release write");
+  assert.deepEqual(state.killedPids, [], "an unprovable legacy record is never killed");
+});
+
+test("legacy five-field live record migrates an exact command-line port and is adopted", async () => {
+  const stub = await startStubServe();
+  const directory = await mkdtemp(join(tmpdir(), "polyth-remote-legacy-adopt-"));
+  const runtimeDir = "/var/lib/polyth/runtimes/legacy-adopt";
+  const fake = createFakeRemoteHost({ stubPort: stub.port, runtimeDir });
+  const state = fake.storageAt(runtimeDir);
+  state.lockHeld = false;
+  state.serveIdentity = {
+    token: "legacy-token",
+    pid: "4242",
+    start: "100",
+    exe: "/usr/bin/opencode",
+    cmd: "1:2",
+    argv: ["/usr/bin/opencode", "serve", "--hostname", "127.0.0.1", "--port", String(stub.port)],
+  };
+  state.serveLive = true;
+  state.dbKind = "file";
+  state.dbEntries = ["opencode.db"];
+  state.dbContent = "legacy-opencode-db";
+  state.metadataKind = "file";
+  state.metadata = JSON.stringify({
+    engine: "opencode",
+    version: "1.18.18",
+    binaryDigest: TEST_REMOTE_DIGEST,
+    protocolGeneration: 1,
+    storageId: "22222222-2222-4222-8222-222222222222",
+    binarySource: "path",
+    binaryPath: state.binaryPath,
+    runtimeAuthority: "owned:legacy",
+    runtimeLocation: { projectId: "dev@fake.example", cwd: "/home/dev/app" },
+    createdAt: new Date().toISOString(),
+    lastOpenedAt: new Date().toISOString(),
+  });
+  try {
+    const runtime = await createRemoteOpenCodeRuntime({
+      host: fake.host,
+      remotePath: "/home/dev/app",
+      runtimeDir,
+      leaseStateFile: join(directory, "legacy.lease.json"),
+      pickPort: () => 39999,
+      readyTimeoutMs: 5_000,
+      listenTimeoutMs: 5_000,
+    });
+    assert.equal(state.serveIdentity?.port, stub.port, "legacy record is upgraded to six fields");
+    assert.equal(fake.serveStartCommands.length, 0, "migration adopts instead of spawning");
+    await runtime.dispose();
+  } finally {
+    stub.server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("dispose releases the controller flock so the next create succeeds", async () => {
@@ -967,6 +1032,7 @@ test("PID reuse of a stale owner record does not kill the unrelated process", as
     start: "1",
     exe: "/usr/bin/opencode",
     cmd: "1:1",
+    argv: ["/usr/bin/opencode", "serve", "--port", "4999"],
   };
   const state = fake.storageAt(runtimeDir);
   state.lockHeld = false;
@@ -974,6 +1040,7 @@ test("PID reuse of a stale owner record does not kill the unrelated process", as
   state.serveIdentity = stale;
   const lock = await acquireRemoteRuntimeLock(fake.host, runtimeDir, "/home/dev/app");
   assert.equal(state.killedPids.length, 0);
+  assert.equal(state.serveIdentity?.port, undefined, "dead/PID-reused records are never migrated");
   assert.equal(state.lockHeld, true);
   await lock.release();
 });

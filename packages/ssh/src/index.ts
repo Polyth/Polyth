@@ -48,7 +48,7 @@ export type SshRunner = (
 export interface SshChild {
   onOutput(cb: (chunk: string) => void): Disposable;
   onExit(cb: (code: number | null) => void): Disposable;
-  write?(data: string): void;
+  write?(data: string): Promise<void>;
   kill(): void;
 }
 export type SshSpawner = (args: string[], opts?: { interactive?: boolean }) => SshChild;
@@ -206,41 +206,155 @@ const defaultRunner: SshRunner = (args, opts) =>
     }, opts.timeoutMs);
     child.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
     child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    child.stdout?.on("error", (err) => { stderr += String(err.message ?? err); settle(-1); });
+    child.stderr?.on("error", (err) => { stderr += String(err.message ?? err); settle(-1); });
     child.on("error", (err) => { stderr += String(err.message ?? err); settle(-1); });
     child.on("exit", (code) => settle(code ?? -1));
+    child.on("close", (code) => settle(code ?? -1));
   });
 
-const defaultSpawner: SshSpawner = (args, opts) => {
-  const child = spawn("ssh", args, {
-    stdio: [opts?.interactive ? "pipe" : "ignore", "pipe", "pipe"],
-  });
+const processInputError = (
+  code: "process-exited" | "stdin-closed" | "write-failed",
+  message: string,
+  cause?: unknown,
+): Error => Object.assign(
+  new Error(message, cause === undefined ? undefined : { cause }),
+  { code },
+);
+
+/** Own every terminal/error path of a spawned SSH channel. In particular,
+ * Writable.write() may return normally and emit EPIPE later; the callback and
+ * permanent stdin error listener jointly turn that into an observable promise
+ * rejection instead of an uncaught EventEmitter error. */
+export const createOwnedSshChild = (
+  child: ReturnType<typeof spawn>,
+): SshChild => {
   const outputs = new Set<(chunk: string) => void>();
   const exits = new Set<(code: number | null) => void>();
+  const pendingWrites = new Set<{
+    resolve(): void;
+    reject(error: Error): void;
+    settled: boolean;
+  }>();
+  let terminalCode: number | null | undefined;
+  let stdinOpen = child.stdin !== null;
+  let stdinFailure: Error | undefined;
+
+  const settleWrite = (
+    pending: { resolve(): void; reject(error: Error): void; settled: boolean },
+    error?: Error,
+  ): void => {
+    if (pending.settled) return;
+    pending.settled = true;
+    pendingWrites.delete(pending);
+    if (error) pending.reject(error);
+    else pending.resolve();
+  };
+  const closeInput = (error: Error): void => {
+    stdinOpen = false;
+    stdinFailure ??= error;
+    for (const pending of [...pendingWrites]) settleWrite(pending, error);
+  };
+  const settleExit = (code: number | null): void => {
+    if (terminalCode !== undefined) return;
+    terminalCode = code;
+    closeInput(processInputError(
+      "process-exited",
+      `SSH process exited${code === null ? "" : ` with code ${code}`}`,
+    ));
+    for (const cb of [...exits]) cb(code);
+    exits.clear();
+    outputs.clear();
+  };
+  const failTransport = (): void => {
+    if (terminalCode !== undefined) return;
+    try {
+      if (!child.killed) child.kill("SIGTERM");
+    } catch {
+      // settleExit below still owns the terminal callback when kill itself is
+      // unavailable (for example, a child that failed before spawn).
+    }
+    settleExit(-1);
+  };
   const onChunk = (chunk: Buffer) => {
+    if (terminalCode !== undefined) return;
     const text = chunk.toString();
-    for (const cb of outputs) cb(text);
+    for (const cb of [...outputs]) cb(text);
   };
   child.stdout?.on("data", onChunk);
   child.stderr?.on("data", onChunk);
-  child.on("error", () => { for (const cb of exits) cb(-1); });
-  child.on("exit", (code) => { for (const cb of exits) cb(code); });
+  child.stdout?.on("error", failTransport);
+  child.stderr?.on("error", failTransport);
+  child.on("error", failTransport);
+  child.on("exit", (code) => settleExit(code));
+  child.on("close", (code) => settleExit(code));
+  child.stdin?.on("error", (error) => {
+    closeInput(processInputError("write-failed", "SSH process input failed", error));
+  });
+  child.stdin?.on("close", () => {
+    closeInput(processInputError("stdin-closed", "SSH process input is closed"));
+  });
   return {
     onOutput(cb) {
+      if (terminalCode !== undefined) return { dispose: () => {} };
       outputs.add(cb);
       return { dispose: () => { outputs.delete(cb); } };
     },
     onExit(cb) {
+      if (terminalCode !== undefined) {
+        let active = true;
+        queueMicrotask(() => { if (active) cb(terminalCode!); });
+        return { dispose: () => { active = false; } };
+      }
       exits.add(cb);
       return { dispose: () => { exits.delete(cb); } };
     },
-    write(data) {
-      try { child.stdin?.write(data); } catch { /* process exited */ }
-    },
+    ...(child.stdin ? {
+      write(data: string): Promise<void> {
+        if (terminalCode !== undefined) {
+          return Promise.reject(processInputError(
+            "process-exited",
+            `SSH process already exited${terminalCode === null ? "" : ` with code ${terminalCode}`}`,
+          ));
+        }
+        const input = child.stdin;
+        if (!input || !stdinOpen || input.destroyed || input.writableEnded || !input.writable) {
+          return Promise.reject(stdinFailure ?? processInputError(
+            "stdin-closed",
+            "SSH process input is closed",
+          ));
+        }
+        return new Promise<void>((resolve, reject) => {
+          const pending = { resolve, reject, settled: false };
+          pendingWrites.add(pending);
+          try {
+            input.write(data, (error?: Error | null) => {
+              settleWrite(
+                pending,
+                error
+                  ? processInputError("write-failed", "SSH process input write failed", error)
+                  : undefined,
+              );
+            });
+          } catch (error) {
+            settleWrite(
+              pending,
+              processInputError("write-failed", "SSH process input write failed", error),
+            );
+          }
+        });
+      },
+    } : {}),
     kill() {
-      if (!child.killed) child.kill("SIGTERM");
+      if (terminalCode === undefined && !child.killed) child.kill("SIGTERM");
     },
   };
 };
+
+const defaultSpawner: SshSpawner = (args, opts) =>
+  createOwnedSshChild(spawn("ssh", args, {
+    stdio: [opts?.interactive ? "pipe" : "ignore", "pipe", "pipe"],
+  }));
 
 const defaultFreePort = (): Promise<number> =>
   new Promise((resolve, reject) => {

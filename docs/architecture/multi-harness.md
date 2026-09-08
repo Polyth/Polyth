@@ -8,7 +8,7 @@ Polyth owns the conversation, queue, project and worktree relationship. A harnes
 
 ```mermaid
 flowchart TD
-  UI[Package UI: harness picker, settings, Snapshot picker] --> SS[Space-scoped SessionService]
+  UI[Package UI: harness tabs in model picker, settings, Snapshot picker] --> SS[Space-scoped SessionService]
   SS <--> DB[Canonical SQLite events, projection, queue, durable operations]
   SS --> POOL[Session-aware runtime pool]
   POOL --> REG[HarnessRegistry: policy and provider factories]
@@ -126,6 +126,8 @@ Capabilities below describe the Polyth adapters, not everything each native prod
 | Grok Build | Official announcement describes ACP and headless CLI integration. [xAI announcement](https://x.ai/news/grok-build-cli) | Researched, not implemented. Exact stable ACP invocation/auth contracts were not verified sufficiently to ship a profile. |
 | Pi | Native `pi --mode rpc`. [Official RPC docs](https://pi.dev/docs/latest/rpc) | Researched, not implemented. A future package can reuse process ownership while translating its native RPC into `AgentRuntime`. |
 | OMP / oh-my-pi | Native `omp --mode rpc`, with its own RPC framing/version. [Repository RPC docs](https://github.com/can1357/oh-my-pi/blob/main/docs/rpc.md) | Researched, not implemented. Do not assume Pi-compatible framing or force it through ACP. |
+
+The composer has one model trigger. Its picker hosts the harness choices as tabs above the model catalog; changing tabs keeps the canonical session and changes the catalog/runtime route. Active-turn timing choices and transition controls retain the safe switch algorithm above, while the separate idle harness trigger is gone. On phones the same sheet also owns role, thinking, and profile controls.
 
 Settings provide enabled/priority preferences, detection refresh, official setup links, available verified install/sign-in commands and diagnostics. Commands are shown for explicit “Run command” confirmation and then run in the existing terminal UI. Detection refreshes after terminal exit/window focus. Missing or broken optional providers do not stop server boot. Cursor/fx remain deliberately outside Auto until native authentication can be verified.
 

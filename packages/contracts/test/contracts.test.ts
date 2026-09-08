@@ -46,6 +46,8 @@ test("composer-before is a first-class validated widget slot", () => {
   assert.equal(isUiSlot("session.footer"), true);
   assert.ok(UI_SLOTS.includes("composer.execution"));
   assert.equal(isUiSlot("composer.execution"), true);
+  assert.ok(UI_SLOTS.includes("modelPicker.header"));
+  assert.equal(isUiSlot("modelPicker.header"), true);
   assert.equal(isUiSlot("session.composer.after"), false);
 });
 

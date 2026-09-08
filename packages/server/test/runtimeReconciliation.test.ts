@@ -172,6 +172,101 @@ test("passive event-tail prefetch does not materialize a runtime", async () => {
   await store.close();
 });
 
+test("simultaneous session materialization joins one native attach flight", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-single-flight-"));
+  const endpoint = endpointFor(dir);
+  let materializations = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const runtime = runtimeWithSnapshot(endpoint, (binding) => ({
+    authorityId: binding.authorityId,
+    generation: binding.generation,
+    location: binding.location,
+    backendSessionId: binding.backendSessionId!,
+    reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+    state: { value: "idle", watermark: "single-flight" },
+    completeness: { events: "complete", permissions: "complete", questions: "complete" },
+    events: [],
+  }));
+  runtime.ensureSession = async (input) => {
+    materializations += 1;
+    await gate;
+    return input.backendSessionId!;
+  };
+  const { sessions, store, project } = makeHarness(runtime, dir);
+  const sessionId = "session-single-flight";
+  await store.upsertProjection({
+    id: sessionId,
+    projectId: project.id,
+    backendSessionId: "backend-single-flight",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-single-flight"),
+    title: "Single flight",
+    status: "idle",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+
+  const readers = Array.from({ length: 6 }, () => sessions.events(sessionId, 0));
+  await waitFor(() => materializations === 1);
+  release();
+  await Promise.all(readers);
+  assert.equal(materializations, 1);
+  await store.close();
+});
+
+test("materialization rejection backoff is bypassed by runtime generation change", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-generation-recovery-"));
+  let generation = 7;
+  const endpoint = endpointFor(dir);
+  let materializations = 0;
+  const runtime = runtimeWithSnapshot(endpoint, (binding) => ({
+    authorityId: binding.authorityId,
+    generation: binding.generation,
+    location: binding.location,
+    backendSessionId: binding.backendSessionId!,
+    reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+    state: { value: "idle", watermark: `generation-${binding.generation}` },
+    completeness: { events: "complete", permissions: "complete", questions: "complete" },
+    events: [],
+  }));
+  runtime.endpoint = async () => ({ ...endpoint, generation });
+  runtime.ensureSession = async (input) => {
+    materializations += 1;
+    if (generation === 7) {
+      throw Object.assign(new Error('runtime rejected "thread/resume": active writer'), {
+        code: "runtime-rejected",
+        rpcMethod: "thread/resume",
+        rpcCode: -32600,
+        remoteMessage: "active writer",
+      });
+    }
+    return input.backendSessionId!;
+  };
+  const { sessions, store, project } = makeHarness(runtime, dir);
+  const sessionId = "session-generation-recovery";
+  await store.upsertProjection({
+    id: sessionId,
+    projectId: project.id,
+    backendSessionId: "backend-generation-recovery",
+    runtimeBinding: persistedBindingFor(endpoint, "backend-generation-recovery"),
+    title: "Generation recovery",
+    status: "idle",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+
+  await Promise.all(Array.from({ length: 4 }, () => sessions.events(sessionId, 0)));
+  assert.equal(materializations, 1, "concurrent callers join the rejected flight");
+  await sessions.events(sessionId, 0);
+  assert.equal(materializations, 1, "same-generation reads observe bounded failure backoff");
+
+  generation = 8;
+  await sessions.events(sessionId, 0);
+  assert.equal(materializations, 2, "a new runtime generation retries immediately");
+  assert.equal((await store.projection(sessionId))?.runtimeBinding?.generation, 8);
+  await store.close();
+});
+
 test("materialization reconciles missed permission and question state before admission", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-pending-"));
   const endpoint = endpointFor(dir);

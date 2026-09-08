@@ -342,6 +342,8 @@ export async function acquireDataDirectoryLease(dataDir: string): Promise<DataDi
       env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
     },
   );
+  let holderInputError: Error | undefined;
+  holder.stdin.on("error", (error) => { holderInputError = error; });
 
   await new Promise<void>((resolveLock, rejectLock) => {
     let output = "";
@@ -367,6 +369,18 @@ export async function acquireDataDirectoryLease(dataDir: string): Promise<DataDi
     holder.stderr.on("data", (chunk: string) => {
       if (errorOutput.length < 4_096) errorOutput += chunk;
     });
+    holder.stdout.on("error", (error) => {
+      if (!settled) {
+        holder.kill();
+        finish(new Error(`Polyth writer lease output failed: ${error.message}`));
+      }
+    });
+    holder.stderr.on("error", (error) => {
+      if (!settled) {
+        holder.kill();
+        finish(new Error(`Polyth writer lease diagnostics failed: ${error.message}`));
+      }
+    });
     holder.once("error", (error) => {
       finish(new Error(`OS advisory locking is unavailable: ${error.message}`));
     });
@@ -385,17 +399,54 @@ export async function acquireDataDirectoryLease(dataDir: string): Promise<DataDi
   });
 
   let released = false;
+  const waitForHolderExit = (timeoutMs: number): Promise<void> =>
+    new Promise<void>((resolveExit, rejectExit) => {
+      if (holder.exitCode !== null || holder.signalCode !== null) {
+        resolveExit();
+        return;
+      }
+      let settled = false;
+      const finish = (error?: Error): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        holder.off("exit", onExit);
+        holder.off("close", onExit);
+        if (error) rejectExit(error);
+        else resolveExit();
+      };
+      const onExit = (): void => finish();
+      const timer = setTimeout(
+        () => finish(new Error("timed out releasing the Polyth writer lease")),
+        timeoutMs,
+      );
+      holder.once("exit", onExit);
+      holder.once("close", onExit);
+    });
   return {
     canonicalDataDir,
     async release() {
       if (released) return;
       released = true;
       if (holder.exitCode !== null || holder.signalCode !== null) return;
-      const exited = new Promise<void>((resolveExit) => {
-        holder.once("exit", () => resolveExit());
-      });
-      holder.stdin.end();
-      await exited;
+      if (!holderInputError && !holder.stdin.destroyed && !holder.stdin.writableEnded) {
+        holder.stdin.end();
+      } else {
+        holder.kill("SIGTERM");
+      }
+      try {
+        await waitForHolderExit(5_000);
+      } catch (error) {
+        holder.kill("SIGKILL");
+        try {
+          await waitForHolderExit(5_000);
+        } catch (killError) {
+          throw new AggregateError(
+            [error, killError],
+            "Polyth writer lease process could not be confirmed exited",
+          );
+        }
+      }
     },
   };
 }

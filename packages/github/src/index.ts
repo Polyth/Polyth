@@ -19,16 +19,21 @@ export type ExecFn = (
 
 const defaultExec: ExecFn = (bin, args, opts) =>
   new Promise((resolve, reject) => {
+    let inputError: Error | undefined;
     const child = execFile(
       bin,
       args,
       { cwd: opts.cwd, maxBuffer: 4 * 1024 * 1024, timeout: 20_000 },
       (error, stdout, stderr) => {
         if (error) reject(Object.assign(error, { stdout, stderr }));
+        else if (inputError) reject(Object.assign(inputError, { stdout, stderr }));
         else resolve({ stdout, stderr });
       },
     );
     if (opts.input !== undefined && child.stdin) {
+      // execFile's completion callback owns command failure, while stdin owns
+      // asynchronous write failures such as EPIPE.
+      child.stdin.on("error", (error) => { inputError = error; });
       child.stdin.write(opts.input);
       child.stdin.end();
     }

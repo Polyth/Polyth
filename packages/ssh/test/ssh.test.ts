@@ -1,9 +1,18 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { test } from "node:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createSshService, shq, type SshExecResult, type SshRunner, type SshSpawner } from "../src/index.ts";
+import { PassThrough, Writable } from "node:stream";
+import {
+  createOwnedSshChild,
+  createSshService,
+  shq,
+  type SshExecResult,
+  type SshRunner,
+  type SshSpawner,
+} from "../src/index.ts";
 
 interface Call { args: string[] }
 
@@ -38,6 +47,64 @@ function fakeRunner(handlers: {
 const tempFile = (): string => join(mkdtempSync(join(tmpdir(), "polyth-ssh-test-")), "ssh.json");
 
 const baseInput = { host: "build.example.com", user: "dev", port: 2222 } as const;
+
+const fakeSpawnedChild = (stdin: Writable) => {
+  const child = new EventEmitter() as EventEmitter & {
+    stdin: Writable;
+    stdout: PassThrough;
+    stderr: PassThrough;
+    killed: boolean;
+    kill(signal?: NodeJS.Signals): boolean;
+  };
+  child.stdin = stdin;
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.killed = false;
+  child.kill = () => {
+    child.killed = true;
+    queueMicrotask(() => child.emit("exit", null));
+    return true;
+  };
+  return child as unknown as Parameters<typeof createOwnedSshChild>[0];
+};
+
+test("owned SSH input turns asynchronous EPIPE into one observable terminal path", async () => {
+  const input = new Writable({
+    write(_chunk, _encoding, callback) {
+      const error = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+      setImmediate(() => {
+        callback(error);
+        input.emit("error", error);
+      });
+    },
+  });
+  const child = fakeSpawnedChild(input);
+  const handle = createOwnedSshChild(child);
+  let exits = 0;
+  handle.onExit(() => { exits += 1; });
+
+  await assert.rejects(
+    () => handle.write!("POLYTH_RELEASE\n"),
+    (error: Error & { code?: string }) => error.code === "write-failed",
+  );
+  child.emit("error", Object.assign(new Error("ssh failed"), { code: "EPIPE" }));
+  child.emit("exit", 1);
+  child.emit("close", 1);
+  assert.equal(exits, 1, "error/exit/close must settle the process only once");
+});
+
+test("owned SSH input rejects a control write when stdin is already destroyed", async () => {
+  const input = new PassThrough();
+  const child = fakeSpawnedChild(input);
+  const handle = createOwnedSshChild(child);
+  input.destroy();
+
+  await assert.rejects(
+    () => handle.write!("POLYTH_RELEASE\n"),
+    (error: Error & { code?: string }) => error.code === "stdin-closed",
+  );
+  child.emit("exit", 0);
+});
 
 test("connection CRUD round-trip persists across reload and stores no secrets", () => {
   const file = tempFile();
@@ -282,7 +349,7 @@ test("interactive host processes allocate an SSH TTY and forward terminal input"
     return {
       onOutput: () => ({ dispose: () => {} }),
       onExit: () => ({ dispose: () => {} }),
-      write: (data) => { writes.push(data); },
+      write: async (data) => { writes.push(data); },
       kill: () => {},
     };
   };
@@ -290,7 +357,7 @@ test("interactive host processes allocate an SSH TTY and forward terminal input"
   const conn = service.create({ host: "build.example" });
   const process = await service.host(conn.id).start("exec sh -i", { interactive: true });
 
-  process.write?.("echo ready\n");
+  await process.write?.("echo ready\n");
   assert.ok(spawned[0]!.includes("-tt"));
   assert.deepEqual(writes, ["echo ready\n"]);
 });

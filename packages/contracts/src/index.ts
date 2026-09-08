@@ -3471,8 +3471,10 @@ export interface RemoteProcessHandle {
   /** Combined stdout+stderr of the remote process, as it streams in. */
   onOutput(cb: (chunk: string) => void): Disposable;
   onExit(cb: (code: number | null) => void): Disposable;
-  /** Input for an interactive remote process, when the host supports it. */
-  write?(data: string): void;
+  /** Input for an interactive remote process, when the host supports it.
+   * Resolves only after the local transport accepts the write; rejects when
+   * the process has exited or its input channel can no longer accept data. */
+  write?(data: string): Promise<void>;
   /** Best-effort termination of the remote process. */
   kill(): Promise<void>;
 }
@@ -3610,7 +3612,7 @@ export interface TaskCompletedData extends TaskSelectedData {}
 export const UI_SLOTS = [
   "app.nav", "app.header.actions", "app.window.controls", "session.header.actions", "session.list.badges",
   "sidebar.footer",
-  "composer.leading", "composer.execution", "composer.trailing", "contextRail.tabs",
+  "composer.leading", "composer.execution", "composer.trailing", "modelPicker.header", "contextRail.tabs",
   "settings.pages", "settings.footer", "commandPalette.commands",
   // Widget definitions enter through the catalog/settings seams. The six
   // workspace slots are first-class placement targets alongside panel and

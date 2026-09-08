@@ -409,20 +409,27 @@ test("the composer is adaptive, with one primary action at a time", async () => 
   );
 });
 
-test("phone execution choices live behind one compact harness and model control", async () => {
+test("phone execution choices live behind the model picker with harness tabs", async () => {
   const composer = await read("../src/components/Composer.tsx");
   const harnessPicker = await read("../../../packages/harness-runtime/widgets/index.tsx");
+  const modelPicker = await read("../../../packages/models/widgets/ModelPicker.tsx");
+  const modelStyles = await read("../../../packages/models/widgets/styles.css");
   const effortMenu = await read("../src/components/EffortMenu.tsx");
   const miniWidgets = await read("../src/widgets/builtinMiniWidgets.tsx");
   const styles = await read("../src/styles.css");
 
-  // Phones expose one execution trigger; its sheet owns the model, role, and
-  // thinking controls. Desktop keeps the independent model control.
+  // Phones expose the model trigger; its sheet owns harness tabs plus role and
+  // thinking controls. Desktop keeps the same model control in the rail.
   assert.ok(!composer.includes('className="composer-config-top"'), "phones do not stack a second configuration row above the editor");
   assert.ok(composer.includes("{!phoneLayout && modelControl}"), "the desktop rail keeps the model control");
-  assert.ok(composer.includes("executionModelControl: modelControl"), "the harness sheet receives the model control");
-  assert.ok(harnessPicker.includes("`${currentName} · ${modelLabel}`"), "the phone trigger combines harness and model");
-  assert.ok(harnessPicker.includes('aria-label="Execution settings"'), "the phone sheet groups execution controls accessibly");
+  assert.ok(composer.includes("{phoneLayout && modelControl}"), "the collapsed phone rail keeps the model trigger available");
+  assert.ok(composer.includes('slot="modelPicker.header"'), "the model picker mounts the package header seam");
+  assert.ok(modelPicker.includes('className="model-picker-header"'), "the model picker renders contributed routing above its catalog");
+  assert.ok(harnessPicker.includes('slot: "modelPicker.header"'), "the harness package contributes to the model picker");
+  assert.ok(harnessPicker.includes("<Tabs tabs={tabs}"), "harness choices use the shared accessible tabs primitive");
+  assert.ok(!harnessPicker.includes("pkg-harnesses-trigger"), "there is no separate harness picker trigger");
+  assert.ok(harnessPicker.includes('aria-label="Execution settings"'), "the model sheet groups execution controls accessibly");
+  assert.match(modelStyles, /\.model-picker-trigger\s*\{[^}]*var\(--hit-min\)/s, "the phone model trigger keeps a coarse-pointer hit target");
   assert.ok(composer.includes("const effortControl"), "composer derives one effort control");
   assert.ok(composer.includes("modelSupportsThinking(selectedModel)"), "it only exists for models that report variants");
   assert.ok(composer.includes("cfg.thinking !== undefined"), "Auto suppresses saved and session thinking fallbacks");

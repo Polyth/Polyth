@@ -1743,18 +1743,8 @@ export default function Composer({
     if (getState().activeSessionId === target) requestComposerReplace("");
   };
   const thinkingVariants = selectedModel?.variants ?? [];
-  // Desktop renders these controls in the rail. On phones the harness package
-  // composes them into one execution sheet, so each control has one owner.
-  const modelControl = chatModels.length > 0 && (
-      <ModelPicker
-        models={chatModels}
-        value={cfg.model}
-        recommended={recommendedModel}
-        direction="up"
-        usage={model.contextUsage ? contextTokensUsed(model) : undefined}
-        onPick={pickComposerModel}
-      />
-  );
+  // On phones the model picker also owns the execution settings header, so
+  // each role/thinking/profile control still has one rendered owner.
   const effortControl = !noModels && modelSupportsThinking(selectedModel) ? (
     <EffortMenu
       variants={thinkingVariants}
@@ -1832,6 +1822,31 @@ export default function Composer({
     placeholder={profileItems.find((item) => item.id === profileValue)?.label ?? "Profile"}
     ariaLabel={`Select profile, current: ${profileItems.find((item) => item.id === profileValue)?.label ?? "Default"}`}
   />;
+  const phoneLayout = isPhone;
+  const executionPickerContext = {
+    sessionId: session?.id,
+    projectId: activeProjectId ?? undefined,
+    sessionStatus: session?.status,
+    harnessSelection: session?.harness,
+    resolvedHarnessId: session?.resolvedHarnessId ?? effectiveDraftHarness,
+    harnessTransition: session?.harnessTransition,
+    projectHarnessDefault: activeProject?.defaults?.harness,
+    executionAgentControl: agentControl,
+    executionEffortControl: effortControl,
+    executionProfileControl: profileControl,
+    phoneLayout,
+  };
+  const modelControl = activeProjectId ? (
+    <ModelPicker
+      models={chatModels}
+      value={cfg.model}
+      recommended={recommendedModel}
+      header={<SlotHost slot="modelPicker.header" context={executionPickerContext} />}
+      direction="up"
+      usage={model.contextUsage ? contextTokensUsed(model) : undefined}
+      onPick={pickComposerModel}
+    />
+  ) : null;
   const suggestionScopeId = session?.id ?? activeProjectId ?? "";
   const canGenerateNextAction = !!suggestionScopeId
     && !working
@@ -1887,19 +1902,12 @@ export default function Composer({
     setPromptRewrite(null);
     requestComposerReplace(rewrite.original);
   }, [promptRewrite, text]);
-  const phoneLayout = isPhone;
   // Composer controls are ordinary mini-widgets: one placement/visibility
   // system owns next action, Workflow, effort, and agent.
   const slotContext = {
-    sessionId: session?.id,
-    projectId: activeProjectId ?? undefined,
+    ...executionPickerContext,
     variant,
     working,
-    sessionStatus: session?.status,
-    harnessSelection: session?.harness,
-    resolvedHarnessId: session?.resolvedHarnessId,
-    harnessTransition: session?.harnessTransition,
-    projectHarnessDefault: activeProject?.defaults?.harness,
     autoApproveOn,
     autoApproveBusy,
     toggleAutoApprove,
@@ -1909,16 +1917,10 @@ export default function Composer({
     workflowDraftText: text,
     workflowAttachmentCount: attachments.length,
     consumeWorkflowDraft,
-    // The phone execution sheet owns effort and agent. Keep the ordinary
+    // The phone model sheet owns effort and agent. Keep the ordinary
     // composer widget contexts empty so neither control renders twice.
     composerEffortControl: phoneLayout ? null : effortControl,
     composerAgentControl: phoneLayout ? null : agentControl,
-    executionModelControl: modelControl,
-    executionAgentControl: agentControl,
-    executionEffortControl: effortControl,
-    executionProfileControl: profileControl,
-    executionModelLabel: selectedModel?.name ?? selectedModel?.modelID,
-    phoneLayout,
     canGenerateNextAction,
     canRevertSuggestion,
     suggestionBusy,
@@ -2180,6 +2182,7 @@ export default function Composer({
           {!phoneLayout && <CustomizeZoneButton slot="composer.leading" align="start" />}
         </span>
         <span className="composer-execution">
+          {phoneLayout && modelControl}
           <SlotHost slot="composer.execution" context={slotContext} />
         </span>
         <div className="composer-actions customize-zone">

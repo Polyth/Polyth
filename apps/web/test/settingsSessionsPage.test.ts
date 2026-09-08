@@ -36,6 +36,7 @@ const {
   activateProject, beginProjectListRequest, publishProjectList, setAgents, setModels, setSessions,
 } = await import("../src/store.ts");
 const { default: SessionsPage } = await import("../src/components/settings/SessionsPage.tsx");
+const { default: ModelPicker } = await import("../../../packages/models/widgets/ModelPicker.tsx");
 const { setRoleKind } = await import("../src/rolePrefs.ts");
 
 const session = (over: Partial<SessionProjection>): SessionProjection => ({
@@ -151,6 +152,31 @@ test("session defaults remain available when no project is active", async () => 
     assert.match(container.textContent ?? "", /Default Model/);
     assert.match(container.textContent ?? "", /Default Thinking/);
     assert.match(container.textContent ?? "", /Retention Period/);
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("model picker renders a contributed catalog header inside its overlay", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(createElement(ModelPicker, {
+        models: [{ providerID: "openai", modelID: "gpt-test", name: "GPT Test" }],
+        onPick: () => {},
+        header: createElement("div", { "data-test-harness-tabs": true }, "Auto · OpenCode  Codex"),
+      }));
+    });
+    assert.equal(document.body.querySelector("[data-test-harness-tabs]"), null, "the contribution stays lazy while the picker is closed");
+    await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
+    assert.equal(
+      document.body.querySelector("[data-test-harness-tabs]")?.textContent,
+      "Auto · OpenCode  Codex",
+    );
+    assert.ok(document.body.querySelector(".model-picker-header"), "the contribution precedes the model catalog");
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();

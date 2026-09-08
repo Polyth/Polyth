@@ -79,7 +79,7 @@ test("remote projects use an interactive shell on their assigned host", async ()
           exit = callback;
           return { dispose: () => { exit = undefined; } };
         },
-        write(data) {
+        async write(data) {
           writes.push(data);
           output?.(`remote: ${data}`);
         },

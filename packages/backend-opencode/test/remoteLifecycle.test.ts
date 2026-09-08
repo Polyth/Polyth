@@ -55,7 +55,7 @@ const acquiredGuardianHandle = (): RemoteProcessHandle => {
       exit.add(callback);
       return { dispose: () => { exit.delete(callback); } };
     },
-    write(data) {
+    async write(data) {
       if (String(data).includes("POLYTH_RELEASE")) finish();
     },
     async kill() { finish(); },
@@ -374,4 +374,3 @@ test("live remote adopt with engine digest mismatch does not quarantine", async 
   assert.equal(storage.quarantineCalls, 0);
   assert.equal(storage.dbContent, "live-engine-a-db");
 });
-

@@ -4,7 +4,31 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createStdioRpc } from "../src/rpc.ts";
-const script = `const {spawn}=require('node:child_process');const {createInterface}=require('node:readline');const child=spawn(process.execPath,['-e','process.on("SIGTERM",()=>{});setInterval(()=>{},1000)'],{stdio:'ignore',detached:true});createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(m.method==='hang')return;if(m.method==='malformed'){process.stdout.write('null\\n');return;}process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{child:child.pid}})+'\\n');});`;
+const script = `const {spawn}=require('node:child_process');const {createInterface}=require('node:readline');const child=spawn(process.execPath,['-e','process.on("SIGTERM",()=>{});setInterval(()=>{},1000)'],{stdio:'ignore',detached:true});createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(m.method==='hang')return;if(m.method==='malformed'){process.stdout.write('null\\n');return;}if(m.method==='thread/resume'){process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,error:{code:-32600,message:'thread already has an active writer',data:{detail:'conflict',token:'never-log-me'}}})+'\\n');return;}process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{child:child.pid}})+'\\n');});`;
+
+test("JSON-RPC rejections retain method, code, message, and sanitized data", async () => {
+    const rpc = await createStdioRpc({ command: process.execPath, args: ["-e", script], cwd: "/tmp" });
+    await assert.rejects(
+        rpc.request("thread/resume", { authorization: "request-params-must-not-leak" }),
+        (error: Error & {
+            code?: string;
+            rpcMethod?: string;
+            rpcCode?: number;
+            remoteMessage?: string;
+            rpcData?: { detail?: string; token?: string };
+        }) => {
+            assert.equal(error.code, "runtime-rejected");
+            assert.equal(error.rpcMethod, "thread/resume");
+            assert.equal(error.rpcCode, -32600);
+            assert.equal(error.remoteMessage, "thread already has an active writer");
+            assert.deepEqual(error.rpcData, { detail: "conflict", token: "[redacted]" });
+            assert.match(error.message, /runtime rejected "thread\/resume"/);
+            assert.doesNotMatch(JSON.stringify(error), /never-log-me|request-params-must-not-leak/);
+            return true;
+        },
+    );
+    await rpc.close();
+});
 test("stdio receipts survive restart; release kills the owned worker and its detached tool child", { skip: process.platform !== "linux" }, async () => {
     const dir = await mkdtemp(join(tmpdir(), "rpc-"));
     const file = join(dir, "state.json");

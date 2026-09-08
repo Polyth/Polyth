@@ -306,6 +306,12 @@ export function createTerminalService(opts: {
           };
           proc.stdout?.on("data", push);
           proc.stderr?.on("data", push);
+          proc.stdout?.on("error", () => emitExit(s, proc.exitCode));
+          proc.stderr?.on("error", () => emitExit(s, proc.exitCode));
+          // A command can exit between the running check in write() and the
+          // kernel accepting stdin. Own the pipe error so EPIPE is a terminal
+          // event for this session, never an uncaught process-wide error.
+          proc.stdin?.on("error", () => emitExit(s, proc.exitCode));
           s.proc = proc;
           s.pid = proc.pid;
         }
@@ -372,7 +378,9 @@ export function createTerminalService(opts: {
       if (!s || !s.running) return;
       try {
         if (s.pty) s.pty.write(data);
-        else if (s.remote?.write) s.remote.write(data);
+        else if (s.remote?.write) {
+          void s.remote.write(data).catch(() => emitExit(s, null));
+        }
         else s.proc?.stdin?.write(data);
       } catch { /* process gone */ }
     },

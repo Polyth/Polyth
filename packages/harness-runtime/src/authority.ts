@@ -107,15 +107,23 @@ export async function createProcessAuthority(file?: string, stable = false, proo
             // supervisor before it has proved descendants stopped. close() owns it.
             const { signal: _signal, ...spawnOptions } = options;
             child = spawn(process.env.POLYTH_PYTHON_BIN ?? "python3", ["-c", supervisorSource, config], { ...spawnOptions, detached: true, stdio: ["pipe", "pipe", "pipe", "pipe"] });
-            (child.stdio[3] as Duplex).on("error", () => { });
+            const gate = child.stdio[3] as Duplex;
+            const failGate = (): void => {
+                // The proof gate is part of ownership publication. If it
+                // disappears, never leave the supervisor waiting indefinitely.
+                if (child && child.exitCode === null && child.signalCode === null)
+                    child.kill("SIGKILL");
+            };
+            gate.on("error", failGate);
             state.pid = child.pid;
             state.startTime = child.pid ? identity(child.pid) : undefined;
             try {
                 persist();
-                (child.stdio[3] as Duplex).write("G");
+                gate.write("G", (error) => { if (error)
+                    failGate(); });
             }
             catch (error) {
-                (child.stdio[3] as Duplex).destroy();
+                gate.destroy();
                 throw error;
             }
             return child;

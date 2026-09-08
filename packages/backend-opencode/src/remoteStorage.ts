@@ -176,6 +176,8 @@ export interface RemoteRuntimeAdoption {
   /** Immutable identity of the adopted OpenCode serve process. */
   serveToken: string;
   port: number;
+  /** The guardian atomically upgraded a verified legacy five-field record. */
+  legacyMigrated?: boolean;
 }
 
 export interface RemoteRuntimeLockHandle {
@@ -187,8 +189,8 @@ export interface RemoteRuntimeLockHandle {
   release(): Promise<void>;
 }
 
-const LOCK_ACQUIRED_RE = /POLYTH_LOCK_ACQUIRED=1/;
-const LOCK_ERROR_RE = /POLYTH_LOCK_ERROR=([A-Za-z0-9._-]+)/;
+const LOCK_ACQUIRED_RE = /(?:^|\n)POLYTH_LOCK_ACQUIRED=1\r?\n/;
+const LOCK_ERROR_RE = /(?:^|\n)POLYTH_LOCK_ERROR=([A-Za-z0-9._-]+)\r?\n/;
 
 const lockUnavailable = (runtimeDir: string, error: string | undefined, fallback: string): Error => {
   if (error === "already-owned") {
@@ -239,6 +241,9 @@ const remoteLockGuardianCommand = (
     `CONTROLLER="$RUNTIME_DIR/${REMOTE_CONTROLLER_LOCK_FILE}"`,
     `PF=${pidFileExpr}`,
     'read_pf() { TAB=$(printf "\\t"); IFS="$TAB" read -r PF_TOK PF_PID PF_START PF_EXE PF_CMD PF_PORT < "$PF" || true; }',
+    'id_exact() { [ "$(oc_start "$PF_PID")" = "$PF_START" ] '
+      + '&& [ "$(oc_exe "$PF_PID")" = "$PF_EXE" ] '
+      + '&& [ "$(oc_cmd "$PF_PID")" = "$PF_CMD" ]; }',
     'id_state() {',
     '  if [ ! -e "$PF" ]; then echo missing; return; fi',
     '  if [ -L "$PF" ] || [ ! -f "$PF" ]; then echo incomplete; return; fi',
@@ -260,9 +265,50 @@ const remoteLockGuardianCommand = (
     "  done",
     "  exit 0",
     "}",
+    // Pre-ownership-v2 Polyth published exactly five fields and omitted the
+    // listen port. Migration is allowed only while holding the controller
+    // flock, around repeated exact /proc identity checks, and from the argv of
+    // that process. No port scan or process-name inference is permitted.
+    "migrate_legacy_port() {",
+    "  echo POLYTH_LEGACY_RECORD=1",
+    '  OLD_TOK=$PF_TOK; OLD_PID=$PF_PID; OLD_START=$PF_START; OLD_EXE=$PF_EXE; OLD_CMD=$PF_CMD',
+    '  id_exact || return 1',
+    '  ARGS=$(mktemp "$RUNTIME_DIR/.polyth-cmdline.XXXXXX") || return 1; MIG=',
+    '  tr "\\000" "\\n" < "/proc/$PF_PID/cmdline" > "$ARGS" 2>/dev/null || { rm -f "$ARGS"; return 1; }',
+    '  chmod 600 "$ARGS" 2>/dev/null || { rm -f "$ARGS"; return 1; }',
+    '  id_exact || { rm -f "$ARGS"; return 1; }',
+    "  PORT_VALUE=; PORT_COUNT=0; EXPECT_PORT=0; SERVE_COUNT=0",
+    "  while IFS= read -r ARG; do",
+    '    if [ "$EXPECT_PORT" = 1 ]; then PORT_VALUE=$ARG; PORT_COUNT=$((PORT_COUNT + 1)); EXPECT_PORT=0; continue; fi',
+    '    case "$ARG" in',
+    '      serve) SERVE_COUNT=$((SERVE_COUNT + 1)) ;;',
+    '      --port) EXPECT_PORT=1 ;;',
+    '      --port=*) PORT_VALUE=${ARG#--port=}; PORT_COUNT=$((PORT_COUNT + 1)) ;;',
+    "    esac",
+    '  done < "$ARGS"',
+    '  rm -f "$ARGS"',
+    '  [ "$EXPECT_PORT" = 0 ] && [ "$PORT_COUNT" = 1 ] && [ "$SERVE_COUNT" = 1 ] || return 1',
+    '  case "$PORT_VALUE" in ""|*[!0-9]*) return 1 ;; esac',
+    '  [ "${#PORT_VALUE}" -le 5 ] || return 1',
+    '  PORT_VALUE=$(expr "$PORT_VALUE" + 0 2>/dev/null) || return 1',
+    '  [ "$PORT_VALUE" -ge 1 ] && [ "$PORT_VALUE" -le 65535 ] || return 1',
+    '  read_pf',
+    '  [ "$PF_TOK" = "$OLD_TOK" ] && [ "$PF_PID" = "$OLD_PID" ] '
+      + '&& [ "$PF_START" = "$OLD_START" ] && [ "$PF_EXE" = "$OLD_EXE" ] '
+      + '&& [ "$PF_CMD" = "$OLD_CMD" ] && [ -z "$PF_PORT" ] || return 1',
+    '  id_exact || return 1',
+    '  MIG=$(mktemp "$PF.migrate.XXXXXX") || return 1',
+    '  printf "%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n" "$PF_TOK" "$PF_PID" "$PF_START" "$PF_EXE" "$PF_CMD" "$PORT_VALUE" > "$MIG" '
+      + '|| { rm -f "$MIG"; return 1; }',
+    '  chmod 600 "$MIG" 2>/dev/null || { rm -f "$MIG"; return 1; }',
+    '  id_exact || { rm -f "$MIG"; return 1; }',
+    '  mv "$MIG" "$PF" || { rm -f "$MIG"; return 1; }',
+    '  PF_PORT=$PORT_VALUE',
+    "  echo POLYTH_LEGACY_MIGRATED=1",
+    "}",
     "emit_adopt() {",
     "  read_pf",
-    '  if [ -z "$PF_PORT" ]; then echo POLYTH_LOCK_ERROR=listen-unknown; exit 78; fi',
+    '  if [ -z "$PF_PORT" ] && ! migrate_legacy_port; then echo POLYTH_LOCK_ERROR=listen-unknown; exit 78; fi',
     "  echo POLYTH_LOCK_ADOPTABLE=1",
     '  echo "POLYTH_ADOPT_PID=$PF_PID"',
     '  echo "POLYTH_ADOPT_START=$PF_START"',
@@ -314,37 +360,111 @@ export const withRemoteDeadline = <T>(
     );
   });
 
-const requestGuardianExit = (handle: RemoteProcessHandle): void => {
-  if (handle.write) handle.write("POLYTH_RELEASE\n");
-  else void handle.kill();
+const waitForGuardianExit = async (
+  lost: Promise<void>,
+  stillAlive: () => boolean,
+  timeoutMs: number,
+  label: string,
+): Promise<void> => {
+  if (!stillAlive()) return;
+  await withRemoteDeadline(lost, timeoutMs, label);
+  if (stillAlive()) throw unavailable(`${label} completed without process exit`);
+};
+
+const killGuardianAndConfirm = async (
+  handle: RemoteProcessHandle,
+  lost: Promise<void>,
+  stillAlive: () => boolean,
+  timeoutMs: number,
+): Promise<void> => {
+  if (!stillAlive()) return;
+  await withRemoteDeadline(handle.kill(), timeoutMs, "remote controller termination request");
+  await waitForGuardianExit(lost, stillAlive, timeoutMs, "remote controller termination");
 };
 
 const confirmGuardianExit = async (
   handle: RemoteProcessHandle,
   lost: Promise<void>,
-  stillHeld: () => boolean,
+  stillAlive: () => boolean,
+  exitCode: () => number | null | undefined,
   timeoutMs: number,
 ): Promise<void> => {
-  if (!stillHeld()) return;
-  let finished = false;
+  if (!stillAlive()) return;
+  let deliveryError: unknown;
   try {
-    await withRemoteDeadline(
-      new Promise<void>((resolveRelease) => {
-        void lost.then(() => {
-          finished = true;
-          resolveRelease();
-        });
-        requestGuardianExit(handle);
-      }),
-      timeoutMs,
-      "remote controller release",
-    );
+    if (handle.write) {
+      await withRemoteDeadline(
+        handle.write("POLYTH_RELEASE\n"),
+        timeoutMs,
+        "remote controller release delivery",
+      );
+    } else {
+      deliveryError = unavailable("remote controller has no interactive input channel");
+    }
   } catch (error) {
-    if (!stillHeld() || finished) return;
-    throw error;
+    deliveryError = error;
   }
-  if (stillHeld()) {
-    throw unavailable("remote runtime controller did not release the flock");
+  if (!stillAlive() && !deliveryError && exitCode() === 0) return;
+  if (!stillAlive()) {
+    throw unavailable(
+      `remote controller release was not confirmed (exit ${exitCode() ?? "killed"})`,
+      deliveryError,
+    );
+  }
+  if (!deliveryError) {
+    try {
+      await waitForGuardianExit(lost, stillAlive, timeoutMs, "remote controller release");
+      if (exitCode() === 0) return;
+      deliveryError = unavailable(
+        `remote controller release exited unsuccessfully (${exitCode() ?? "killed"})`,
+      );
+    } catch (error) {
+      deliveryError = error;
+    }
+  }
+  let killError: unknown;
+  try {
+    await killGuardianAndConfirm(handle, lost, stillAlive, timeoutMs);
+  } catch (error) {
+    killError = error;
+  }
+  // Killing the local SSH process fences this controller, but is not proof
+  // that the remote shell exited and released its flock. Only a delivered
+  // POLYTH_RELEASE followed by normal channel exit is release confirmation.
+  throw Object.assign(
+    new AggregateError(
+      [deliveryError, killError].filter(Boolean),
+      "remote runtime controller did not release the flock; termination could not be confirmed",
+    ),
+    { code: "unavailable" },
+  );
+};
+
+/** A terminal guardian error normally precedes process exit. Wait for that
+ * exit first; never send a release message into a guardian already tearing
+ * down. Escalate to terminating the SSH child only if it remains alive. */
+const confirmTerminalGuardianExit = async (
+  handle: RemoteProcessHandle,
+  lost: Promise<void>,
+  stillAlive: () => boolean,
+  timeoutMs: number,
+): Promise<void> => {
+  try {
+    await waitForGuardianExit(lost, stillAlive, timeoutMs, "failed remote controller exit");
+  } catch (exitError) {
+    let killError: unknown;
+    try {
+      await killGuardianAndConfirm(handle, lost, stillAlive, timeoutMs);
+    } catch (error) {
+      killError = error;
+    }
+    throw Object.assign(
+      new AggregateError(
+        [exitError, killError].filter(Boolean),
+        "failed remote controller could not be confirmed exited",
+      ),
+      { code: "unavailable" },
+    );
   }
 };
 
@@ -353,13 +473,15 @@ const stopLateGuardian = async (
   timeoutMs: number,
 ): Promise<void> => {
   let exited = false;
+  let exitCode: number | null | undefined;
   const lost = new Promise<void>((resolveLost) => {
-    handle.onExit(() => {
+    handle.onExit((code) => {
       exited = true;
+      exitCode = code;
       resolveLost();
     });
   });
-  await confirmGuardianExit(handle, lost, () => !exited, timeoutMs);
+  await confirmGuardianExit(handle, lost, () => !exited, () => exitCode, timeoutMs);
 };
 
 const acquisitionCleanupFailed = (error: Error, cleanupErr: unknown): Error => {
@@ -401,13 +523,17 @@ export const acquireRemoteRuntimeLock = async (
   return new Promise<RemoteRuntimeLockHandle>((resolve, reject) => {
     let buf = "";
     let settled = false;
-    let acquired = false;
+    let state: "starting" | "acquired" | "terminal-acquisition-error" | "exited" = "starting";
     let controllerAlive = true;
+    let guardianExitCode: number | null | undefined;
+    let legacyLogged = false;
+    let releaseFlight: Promise<void> | undefined;
     let lostResolve!: () => void;
     const lost = new Promise<void>((resolveLost) => { lostResolve = resolveLost; });
     const markLost = (): void => {
       if (!controllerAlive) return;
       controllerAlive = false;
+      state = "exited";
       lostResolve();
     };
     const parseAdoption = (): RemoteRuntimeAdoption | undefined => {
@@ -432,13 +558,31 @@ export const acquireRemoteRuntimeLock = async (
       ) {
         return undefined;
       }
-      return { pid, startIdentity, executable, command, serveToken, port };
+      return {
+        pid,
+        startIdentity,
+        executable,
+        command,
+        serveToken,
+        port,
+        ...(/POLYTH_LEGACY_MIGRATED=1/.test(buf) ? { legacyMigrated: true } : {}),
+      };
     };
-    const fail = (error: Error) => {
+    const fail = (error: Error, terminalError = false) => {
       if (settled) return;
       settled = true;
+      if (terminalError && state !== "exited") state = "terminal-acquisition-error";
       clearTimeout(timer);
-      void confirmGuardianExit(handle, lost, () => controllerAlive, timeoutMs).then(
+      const cleanup = terminalError
+        ? confirmTerminalGuardianExit(handle, lost, () => controllerAlive, timeoutMs)
+        : confirmGuardianExit(
+            handle,
+            lost,
+            () => controllerAlive,
+            () => guardianExitCode,
+            timeoutMs,
+          );
+      void cleanup.then(
         () => reject(error),
         (cleanupErr) => reject(acquisitionCleanupFailed(error, cleanupErr)),
       );
@@ -451,12 +595,22 @@ export const acquireRemoteRuntimeLock = async (
         return;
       }
       settled = true;
+      state = "acquired";
       clearTimeout(timer);
       resolve({
         ...(adoption ? { adoption } : {}),
         held: () => controllerAlive,
         lost,
-        release: () => confirmGuardianExit(handle, lost, () => controllerAlive, timeoutMs),
+        release: () => {
+          releaseFlight ??= confirmGuardianExit(
+            handle,
+            lost,
+            () => controllerAlive,
+            () => guardianExitCode,
+            timeoutMs,
+          );
+          return releaseFlight;
+        },
       });
     };
     const timer = setTimeout(
@@ -465,22 +619,40 @@ export const acquireRemoteRuntimeLock = async (
       )),
       timeoutMs,
     );
-    const outputSub = handle.onOutput((chunk) => {
+    let outputSub: { dispose(): void } | undefined;
+    let disposeOutputWhenRegistered = false;
+    outputSub = handle.onOutput((chunk) => {
       buf += chunk;
+      if (!legacyLogged && /POLYTH_LEGACY_RECORD=1/.test(buf)) {
+        legacyLogged = true;
+        console.log(`[polyth] runtime.remote.legacy-record.detected runtimeDir=${runtimeDir}`);
+      }
       const tagged = buf.match(LOCK_ERROR_RE)?.[1];
       if (tagged) {
-        fail(lockUnavailable(runtimeDir, tagged, tagged));
+        if (tagged === "verify-failed" || tagged === "identity-mismatch") {
+          console.warn(
+            `[polyth] runtime.remote.adoption.refused runtimeDir=${runtimeDir} `
+              + `reason=${tagged === "verify-failed" ? "identity-incomplete" : "identity-mismatch"}`,
+          );
+        } else if (tagged === "listen-unknown") {
+          console.warn(
+            `[polyth] runtime.remote.adoption.refused runtimeDir=${runtimeDir} reason=listen-unknown`,
+          );
+        }
+        fail(lockUnavailable(runtimeDir, tagged, tagged), true);
         return;
       }
       if (LOCK_ACQUIRED_RE.test(buf)) {
-        acquired = true;
-        outputSub.dispose();
+        if (outputSub) outputSub.dispose();
+        else disposeOutputWhenRegistered = true;
         succeed();
       }
     });
+    if (disposeOutputWhenRegistered) outputSub.dispose();
     handle.onExit((code) => {
+      guardianExitCode = code;
       markLost();
-      if (acquired || settled) return;
+      if (state === "acquired" || settled) return;
       const tagged = buf.match(LOCK_ERROR_RE)?.[1];
       fail(lockUnavailable(
         runtimeDir,

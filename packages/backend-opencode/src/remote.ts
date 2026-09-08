@@ -340,8 +340,9 @@ const startServe = async (
     'OC_EXE=$(oc_exe "$OC_PID")',
     'write_pf() { tok=$1; pid=$2; st=$3; ex=$4; cm=$5; po=$6; '
       + 'if [ -z "$tok" ] || [ -z "$pid" ] || [ -z "$st" ] || [ -z "$ex" ] || [ -z "$cm" ] || [ -z "$po" ]; then return 1; fi; '
-      + 'tmp="$PF.$$.$RANDOM.tmp"; '
+      + 'tmp=$(mktemp "$PF.tmp.XXXXXX") || return 1; '
       + 'printf "%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n" "$tok" "$pid" "$st" "$ex" "$cm" "$po" > "$tmp" || { rm -f "$tmp"; return 1; }; '
+      + 'chmod 600 "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }; '
       + 'mv "$tmp" "$PF" || { rm -f "$tmp"; return 1; }; }',
     `terminate_unpublished_child() { [ -z "$OC_PID" ] && return 0; `
       + 'kill -TERM "$OC_PID" 2>/dev/null || true; echo POLYTH_UNPUBLISHED_TERM=1; '
@@ -551,26 +552,52 @@ export const createRemoteOpenCodeRuntime = async (
   const lock = await acquireRemoteRuntimeLock(host, runtimeDir, remotePath, {
     timeoutMs: lifecycleTimeoutMs,
   });
+  console.log(`[polyth] runtime.controller.acquired runtimeDir=${runtimeDir}`);
   if (lock.adoption) {
+    if (lock.adoption.legacyMigrated) {
+      console.log(
+        `[polyth] runtime.remote.legacy-record.migrated runtimeDir=${runtimeDir} `
+          + `pid=${lock.adoption.pid} port=${lock.adoption.port}`,
+      );
+    }
     console.log(
       `[polyth] runtime.remote.adopt host=${host.label} runtimeDir=${runtimeDir} `
         + `pid=${lock.adoption.pid} port=${lock.adoption.port}`,
     );
   }
   let pendingAdoption = lock.adoption;
-  let lockHeld = true;
+  let controllerState: "held" | "releasing" | "released" | "lost" = "held";
   let publishedPort: number | undefined;
   let publishedServeToken: string | undefined;
   let committed = false;
+  let releaseLockFlight: Promise<void> | undefined;
   void lock.lost.then(() => {
-    if (lockHeld) {
+    if (controllerState === "held") {
+      controllerState = "lost";
       console.log(`[polyth] runtime.controller.lost runtimeDir=${runtimeDir}`);
     }
   });
-  const releaseLock = async (): Promise<void> => {
-    if (!lockHeld) return;
-    await lock.release();
-    lockHeld = false;
+  const releaseLock = (): Promise<void> => {
+    if (controllerState === "released" || controllerState === "lost") return Promise.resolve();
+    if (releaseLockFlight) return releaseLockFlight;
+    controllerState = "releasing";
+    releaseLockFlight = lock.release().then(
+      () => {
+        controllerState = "released";
+        console.log(`[polyth] runtime.controller.released runtimeDir=${runtimeDir}`);
+      },
+      (error: unknown) => {
+        if (lock.held()) {
+          controllerState = "held";
+          releaseLockFlight = undefined;
+        } else {
+          controllerState = "lost";
+          console.log(`[polyth] runtime.controller.lost runtimeDir=${runtimeDir}`);
+        }
+        throw error;
+      },
+    );
+    return releaseLockFlight;
   };
   let prepared: PreparedRemoteOpenCodeRuntime | undefined;
   try {

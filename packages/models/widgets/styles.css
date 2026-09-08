@@ -83,7 +83,7 @@ margin-left: 0;
 }
 /* ---- P2-W3A model picker: quiet chip trigger + one catalog surface ------- */
 .model-picker-trigger {
-max-width: 310px; gap: 6px;
+max-width: 310px; min-height: max(30px, var(--hit-min)); gap: 6px;
 }
 .model-trigger-logo {
 flex: none; color: var(--text-dim);
@@ -91,6 +91,13 @@ flex: none; color: var(--text-dim);
 /* Desktop popover (chrome from .ui-popover): search on top, one scroll list. */
 .model-pop {
   width: min(360px, calc(100vw - var(--space-6))); padding: var(--space-1); display: flex; flex-direction: column;
+}
+.model-picker-header {
+  min-width: 0;
+  padding: var(--space-1) var(--space-1) var(--space-2);
+}
+.model-sheet .model-picker-header {
+  padding: 0 var(--space-4) var(--space-2);
 }
 .model-pop-content { position: relative; }
 .model-pop-search {

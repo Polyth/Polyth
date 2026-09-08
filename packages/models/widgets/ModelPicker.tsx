@@ -179,6 +179,8 @@ interface ModelPickerProps {
   value?: ModelRef;
   recommended?: ModelRef;
   onPick: (model?: ModelRef) => void;
+  /** Package-contributed catalog routing shown above the model list. */
+  header?: ReactNode;
   /** Preferred opening side for the desktop popover (collision may flip it). */
   direction?: "up" | "down";
   /** Current session input tokens for the details context meter. */
@@ -191,6 +193,7 @@ export default function ModelPicker({
   value,
   recommended,
   onPick,
+  header,
   direction = "down",
   usage,
   className,
@@ -640,7 +643,9 @@ export default function ModelPicker({
             },
           } : {})}
         >
-        {detail ? detailsView : phone ? (
+        {detail ? detailsView : <>
+          {header && <div className="model-picker-header">{header}</div>}
+          {phone ? (
             <div role="listbox" aria-label={tr("modelpicker.models")}>
               {shownFavorites.length > 0 && (
                 <SheetSection title={tr("modelpicker.favorites")} count={favorites.length}>
@@ -687,7 +692,7 @@ export default function ModelPicker({
                 <p className="picker-more">{hiddenMatchCount} {tr("picker.moreRefineTheFilter")}</p>
               )}
             </div>
-        ) : (
+          ) : (
             <div className="model-pop-content">
               <div className="model-pop-search">
                 <TextInput
@@ -785,7 +790,8 @@ export default function ModelPicker({
                 </aside>
               )}
             </div>
-        )}
+          )}
+        </>}
       </ResponsiveOverlay>
     </span>
   );

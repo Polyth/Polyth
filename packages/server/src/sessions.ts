@@ -421,6 +421,26 @@ export function createSessionService(deps: {
   }
   const hooks = deps.hooks ?? {};
   const sessionRuntime = new Map<string, AgentRuntime>(); // sessionId -> runtime
+  type MaterializationFailure = {
+    runtime: AgentRuntime;
+    harnessId?: string;
+    backendSessionId?: string;
+    authorityId?: string;
+    generation?: number;
+    retryAt: number;
+    error: Error;
+  };
+  const materializationFlights = new Map<string, Promise<AgentRuntime>>();
+  const materializationFailures = new Map<string, MaterializationFailure>();
+  const materializationLoggedErrors = new WeakSet<Error>();
+  const MATERIALIZATION_REJECTION_BACKOFF_MS = 1_000;
+  const materializationLogText = (value: unknown): string => {
+    const text = String(value ?? "runtime rejected the request")
+      .replace(/[\u0000-\u001f\u007f]/g, " ")
+      .replace(/((?:authorization|cookie|credential|password|secret|token|api[-_ ]?key)\s*[=:]\s*)\S+/gi, "$1[redacted]")
+      .trim();
+    return text.length > 500 ? `${text.slice(0, 500)}…` : text;
+  };
   // Owned runtime identity breaks are recoverable without user action. The
   // implementation is assigned after the epoch helpers are declared; callers
   // can safely request recovery during attach/reconciliation.
@@ -3020,6 +3040,7 @@ export function createSessionService(deps: {
 
   const wire = (sessionId: string, rt: AgentRuntime) => {
     if (sessionRuntime.has(sessionId)) return;
+    materializationFailures.delete(sessionId);
     sessionRuntime.set(sessionId, rt);
     runtimes.bindSession?.(sessionId, rt);
     if (runtimeSubs.has(rt)) return;
@@ -3065,6 +3086,7 @@ export function createSessionService(deps: {
 
   const unwire = (sessionId: string) => {
     clearRuntimeFeatureState(sessionId);
+    materializationFailures.delete(sessionId);
     const rt = sessionRuntime.get(sessionId);
     if (!rt) return;
     sessionRuntime.delete(sessionId);
@@ -3087,7 +3109,7 @@ export function createSessionService(deps: {
   const runtimeFor = (projection: SessionProjection, cwd: string, targetHarnessId?: string): Promise<AgentRuntime> =>
     runtimes.forSession ? runtimes.forSession(projection, cwd, targetHarnessId) : runtimes.forProject(projection.projectId, cwd);
 
-  const ensureWired = async (
+  const materializeSession = async (
     sessionId: string,
     proj: SessionProjection,
     admittedPreparedOperationId?: string,
@@ -3097,6 +3119,21 @@ export function createSessionService(deps: {
       const project = await projects.get(proj.projectId);
       const cwd = proj.worktreePath ?? project?.path ?? process.cwd();
       rt = await runtimeFor(proj, cwd);
+      const endpoint = await (rt as ReliabilityRuntime).endpoint?.();
+      if (endpoint) rememberEndpoint(rt, endpoint);
+      const failed = materializationFailures.get(sessionId);
+      if (failed) {
+        const harnessId = rt.harnessId ?? proj.resolvedHarnessId;
+        const authorityId = endpoint?.authorityId ?? proj.runtimeBinding?.authorityId;
+        const generation = endpoint?.generation ?? proj.runtimeBinding?.generation;
+        const sameIncarnation = failed.runtime === rt
+          && failed.harnessId === harnessId
+          && failed.backendSessionId === proj.backendSessionId
+          && failed.authorityId === authorityId
+          && failed.generation === generation;
+        if (sameIncarnation && Date.now() < failed.retryAt) throw failed.error;
+        materializationFailures.delete(sessionId);
+      }
       let attachedProjection = proj;
       if (!proj.backendSessionId && (await store.events(sessionId)).some((event) => event.type === "session/snapshot-imported")) {
         let operation = (await durable.operations(sessionId)).find((op) => op.mutationKind === "session-create");
@@ -3181,7 +3218,52 @@ export function createSessionService(deps: {
         );
       } catch (error) {
         await updateProjectionQuietly(sessionId, { status: "unknown" });
-        throw error;
+        const failure = error instanceof Error ? error : new Error(String(error));
+        const details = failure as Error & {
+          code?: unknown;
+          rpcMethod?: unknown;
+          rpcCode?: unknown;
+          remoteMessage?: unknown;
+        };
+        if (
+          details.code === "runtime-rejected"
+          && typeof details.rpcMethod === "string"
+          && typeof details.rpcCode === "number"
+        ) {
+          let failedEndpoint = endpoint;
+          try {
+            failedEndpoint = await (rt as ReliabilityRuntime).endpoint?.() ?? endpoint;
+          } catch {
+            // The rejection remains authoritative; endpoint refresh failure
+            // merely means the persisted generation is the best fingerprint.
+          }
+          const failedHarnessId = rt.harnessId ?? attachedProjection.resolvedHarnessId;
+          const failedAuthorityId = failedEndpoint?.authorityId
+            ?? attachedProjection.runtimeBinding?.authorityId;
+          const failedGeneration = failedEndpoint?.generation
+            ?? attachedProjection.runtimeBinding?.generation;
+          materializationFailures.set(sessionId, {
+            runtime: rt,
+            ...(failedHarnessId ? { harnessId: failedHarnessId } : {}),
+            ...(attachedProjection.backendSessionId
+              ? { backendSessionId: attachedProjection.backendSessionId }
+              : {}),
+            ...(failedAuthorityId ? { authorityId: failedAuthorityId } : {}),
+            ...(failedGeneration !== undefined ? { generation: failedGeneration } : {}),
+            retryAt: Date.now() + MATERIALIZATION_REJECTION_BACKOFF_MS,
+            error: failure,
+          });
+          materializationLoggedErrors.add(failure);
+          console.warn(
+            `[polyth] runtime.materialization.rejected session=${materializationLogText(sessionId)} `
+              + `harness=${materializationLogText(rt.harnessId ?? attachedProjection.resolvedHarnessId ?? "unknown")} `
+              + `method=${materializationLogText(details.rpcMethod)} rpcCode=${details.rpcCode} `
+              + `message=${materializationLogText(
+                typeof details.remoteMessage === "string" ? details.remoteMessage : failure.message,
+              )}`,
+          );
+        }
+        throw failure;
       }
       if (rt.harnessId && !attachedProjection.runtimeLeg) {
         const history = await store.events(sessionId);
@@ -3203,6 +3285,25 @@ export function createSessionService(deps: {
       }
     }
     return rt;
+  };
+
+  const ensureWired = (
+    sessionId: string,
+    proj: SessionProjection,
+    admittedPreparedOperationId?: string,
+  ): Promise<AgentRuntime> => {
+    const wired = sessionRuntime.get(sessionId);
+    if (wired) return Promise.resolve(wired);
+    const existing = materializationFlights.get(sessionId);
+    if (existing) return existing;
+    const flight = materializeSession(sessionId, proj, admittedPreparedOperationId)
+      .finally(() => {
+        if (materializationFlights.get(sessionId) === flight) {
+          materializationFlights.delete(sessionId);
+        }
+      });
+    materializationFlights.set(sessionId, flight);
+    return flight;
   };
 
   const turnActive = (sessionId: string): boolean =>
@@ -6707,7 +6808,10 @@ export function createSessionService(deps: {
           try {
             await ensureWired(sessionId, projection);
           } catch (error) {
-            if ((error as { code?: unknown }).code !== "epoch-pending") {
+            if (
+              (error as { code?: unknown }).code !== "epoch-pending"
+              && (!(error instanceof Error) || !materializationLoggedErrors.has(error))
+            ) {
               console.warn(`[polyth] failed to materialize runtime session ${sessionId}`, error);
             }
           }

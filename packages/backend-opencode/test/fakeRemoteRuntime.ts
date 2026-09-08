@@ -31,6 +31,8 @@ export interface FakeRemoteServeIdentity {
   exe: string;
   cmd: string;
   port?: number;
+  /** Authoritative /proc/<pid>/cmdline arguments used by legacy migration tests. */
+  argv?: string[];
 }
 
 export type Deferred<T> = {
@@ -260,16 +262,44 @@ export const applyRemoteLockAcquire = (
     return { code: 78, stdout: "POLYTH_LOCK_ERROR=identity-mismatch\n", stderr: "" };
   }
   if (serve === "live") {
-    const identity = state.serveIdentity!;
-    const port = identity.port;
+    let identity = state.serveIdentity!;
+    let port = identity.port;
+    const legacyOutput: string[] = [];
     if (!Number.isInteger(port) || (port ?? 0) < 1 || (port ?? 0) > 65535) {
-      return { code: 78, stdout: "POLYTH_LOCK_ERROR=listen-unknown\n", stderr: "" };
+      legacyOutput.push("POLYTH_LEGACY_RECORD=1");
+      const argv = identity.argv ?? [];
+      const candidates: string[] = [];
+      let serveCount = 0;
+      for (let index = 0; index < argv.length; index += 1) {
+        const argument = argv[index]!;
+        if (argument === "serve") serveCount += 1;
+        if (argument === "--port") {
+          if (index + 1 < argv.length) candidates.push(argv[++index]!);
+        } else if (argument.startsWith("--port=")) {
+          candidates.push(argument.slice("--port=".length));
+        }
+      }
+      const recovered = candidates.length === 1 && /^\d{1,5}$/.test(candidates[0]!)
+        ? Number(candidates[0])
+        : 0;
+      if (serveCount !== 1 || recovered < 1 || recovered > 65535) {
+        return {
+          code: 78,
+          stdout: `${legacyOutput.join("\n")}\nPOLYTH_LOCK_ERROR=listen-unknown\n`,
+          stderr: "",
+        };
+      }
+      port = recovered;
+      identity = { ...identity, port };
+      state.serveIdentity = identity;
+      legacyOutput.push("POLYTH_LEGACY_MIGRATED=1");
     }
     const acquired = takeLock();
     if (acquired.code !== 0) return acquired;
     return {
       code: 0,
       stdout: [
+        ...legacyOutput,
         "POLYTH_LOCK_ADOPTABLE=1",
         `POLYTH_ADOPT_PID=${identity.pid}`,
         `POLYTH_ADOPT_START=${identity.start}`,
@@ -603,6 +633,7 @@ export interface FakeRemoteHost {
   startCommands: string[];
   serveStartCommands: string[];
   guardianStartCommands: string[];
+  guardianWrites: string[];
   killedHandles: number[];
   forwards: Array<{ remotePort: number; cancelled: boolean }>;
   reportedDbPath?: string;
@@ -653,6 +684,7 @@ export const createFakeRemoteHost = (script: FakeRemoteHostScript): FakeRemoteHo
 
   const execCalls: string[] = [];
   const startCommands: string[] = [];
+  const guardianWrites: string[] = [];
   const killedHandles: number[] = [];
   const forwards: Array<{ remotePort: number; cancelled: boolean }> = [];
   let serveProbeUnreachable = false;
@@ -728,8 +760,9 @@ export const createFakeRemoteHost = (script: FakeRemoteHostScript): FakeRemoteHo
           exits.add(cb);
           return { dispose: () => { exits.delete(cb); } };
         },
-        write(data) {
+        async write(data) {
           if (!isRemoteLockGuardianCommand(command)) return;
+          guardianWrites.push(data);
           if (!data.includes("POLYTH_RELEASE")) return;
           if (state.failControllerRelease) return;
           releaseThisGuardian();
@@ -861,6 +894,7 @@ export const createFakeRemoteHost = (script: FakeRemoteHostScript): FakeRemoteHo
     get guardianStartCommands() {
       return startCommands.filter(isRemoteLockGuardianCommand);
     },
+    guardianWrites,
     killedHandles,
     releaseHoldAfterLock() {
       releaseHold();
