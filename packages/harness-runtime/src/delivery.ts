@@ -4,8 +4,8 @@
 // emulated by a server-side text projection, or refused with a product-level
 // reason. Adapters never invent their own answer, so the UI can never show a
 // control whose attachment is dropped later.
+import { attachmentModality } from "@polyth/contracts";
 import type { AttachmentModality, AttachmentRef, FeatureSupport, TurnRejectionCode } from "@polyth/contracts";
-import { attachmentModality } from "./features.ts";
 
 export type AttachmentDeliveryPlan =
   /** Hand the ref to the adapter unchanged; the harness delivers it. */

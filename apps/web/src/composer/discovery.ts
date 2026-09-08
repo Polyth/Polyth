@@ -4,7 +4,7 @@
 // ids plus honest status copy, and contract-bounded model detail formatting.
 // No DOM, no fetch, no send path — components project this module's decisions.
 import type { SlashCommand, SnippetDef, StrictListResult } from "@polyth/session/web-api";
-import type { RuntimeCommandDescriptor } from "@polyth/contracts";
+import type { ModelDescriptor, ModelDiscoveryState, RuntimeCommandDescriptor } from "@polyth/contracts";
 import { commandPrecedence } from "@polyth/commands/catalog";
 import { filterSnippets, type AutocompleteItem } from "../utils.ts";
 import { tr } from "../i18n/index.ts";
@@ -27,6 +27,46 @@ export function catalogFromResult<T>(result: StrictListResult<T> | null): Catalo
   if (!result.ok) return { state: "unavailable", reason: result.reason };
   if (result.items.length === 0) return { state: "empty" };
   return { state: "available", items: result.items };
+}
+
+/**
+ * The models the current harness can actually route to, in one of the four
+ * honest states. A model is harness-qualified, so switching harness switches
+ * the catalog; "still discovering" and "this engine cannot answer" must never
+ * render as "this engine has no models".
+ */
+export function harnessModelCatalog(input: {
+  models: readonly ModelDescriptor[];
+  harnessId?: string;
+  discovery: ModelDiscoveryState;
+}): CatalogState<ModelDescriptor> {
+  const owned = input.harnessId
+    ? input.models.filter((model) => !model.harnessId || model.harnessId === input.harnessId)
+    : input.models;
+  const chat = owned.filter(modelSupportsTextWorkflow);
+  if (chat.length > 0) return { state: "available", items: chat };
+  if (input.discovery.state === "unavailable") {
+    return { state: "unavailable", reason: input.discovery.reason };
+  }
+  if (input.discovery.state === "pending") return { state: "loading" };
+  return { state: "empty" };
+}
+
+/**
+ * Whether the composer is missing a selectable model. An empty catalog plus
+ * `nativeDefault` means the engine owns a hidden native model — that is not
+ * an absence. Loading and unavailable always are, so they never wait behind
+ * an 8-second blank picker.
+ */
+export function composerModelAbsence(input: {
+  catalog: CatalogState<ModelDescriptor>;
+  nativeDefault: boolean;
+}): "none" | "loading" | "unavailable" | "empty" {
+  if (input.catalog.state === "available") return "none";
+  if (input.nativeDefault && input.catalog.state === "empty") return "none";
+  if (input.catalog.state === "loading") return "loading";
+  if (input.catalog.state === "unavailable") return "unavailable";
+  return "empty";
 }
 
 // ---------------------------------------------------------------- insertion

@@ -2,7 +2,7 @@
 // than session state: selecting a model should restore its last effort across
 // sessions and reloads, without creating a model-visible event.
 import type { ModelDescriptor, ModelRef } from "@polyth/contracts";
-import { resolveVariantPreference } from "@polyth/harness-runtime";
+import { resolveVariantPreference } from "@polyth/contracts";
 
 export const THINKING_PREFS_KEY = "polyth.thinkingPrefs.v1";
 

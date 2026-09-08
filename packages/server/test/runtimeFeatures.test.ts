@@ -136,8 +136,11 @@ test("declared attachment modalities fail closed before runtime admission", asyn
       }],
     }),
     (error: Error & { code?: string }) => {
-      assert.equal(error.code, "invalid-attachment");
-      assert.match(error.message, /Selected fake runtime\/model does not support url attachments/);
+      // A modality the harness declares unsupported is `unsupported` — the
+      // engine cannot do it. `invalid-attachment` is reserved for a ref that
+      // is itself unusable. The message names the engine, not the adapter.
+      assert.equal(error.code, "unsupported");
+      assert.match(error.message, /Link attachments are not supported by the .* engine\./);
       return true;
     },
   );

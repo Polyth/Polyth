@@ -90,8 +90,9 @@ export function useRuntimeCatalog(
             models: catalogModels,
             agents: catalog?.agents ?? catalog?.roles ?? [],
             // A harness without an enumerable catalog can still own a native
-            // default. Session creation remains the availability boundary.
-            nativeDefault: catalog?.models === undefined || catalog.models.length === 0,
+            // default — but only when discovery actually succeeded. An auth
+            // failure is not a hidden model.
+            nativeDefault: !reason && (catalog?.models === undefined || catalog.models.length === 0),
             ready: true,
             harnessId,
             discovery: catalogModels.length > 0

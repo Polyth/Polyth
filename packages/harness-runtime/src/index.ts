@@ -19,14 +19,24 @@ export {
 } from "./capabilities.ts";
 export type { LaunchOverlayRecord, LaunchOverlayStore } from "./capabilities.ts";
 export {
-  attachmentModality,
   composeTurnPrompt,
   deltaCost,
   deltaTokenUsage,
-  effectiveAttachmentSupport,
   isPlaceholderTitle,
   titleFromPrompt,
 } from "./features.ts";
+// The canonical model/attachment control rules live on the contract surface so
+// the browser can apply the same ones without importing this node-side
+// package. Adapters keep one import site by re-exporting them here.
+export {
+  attachmentModality,
+  effectiveAttachmentSupport,
+  findModelDescriptor,
+  harnessModels,
+  resolveModelSelection,
+  resolveVariantPreference,
+  type ModelSelection,
+} from "@polyth/contracts";
 export {
   composeProjectedPrompt,
   planAttachmentDelivery,
@@ -38,13 +48,6 @@ export {
   type TextProjection,
   type TextProjectionInput,
 } from "./delivery.ts";
-export {
-  findModelDescriptor,
-  harnessModels,
-  resolveModelSelection,
-  resolveVariantPreference,
-  type ModelSelection,
-} from "./models.ts";
 import type {
     AgentRuntime,
     HarnessAvailabilityState,

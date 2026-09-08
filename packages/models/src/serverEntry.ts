@@ -172,7 +172,16 @@ export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
     const discovery: ModelDiscoveryState = !modelResult.ok
       ? { state: "unavailable", reason: modelResult.reason }
       : models.length > 0 ? { state: "available" } : { state: "empty" };
-    request.json(200, { models, agents, capabilities, discovery, nativeDefault: models.length === 0, harnessId: runtime.harnessId }); return true;
+    request.json(200, {
+      models,
+      agents,
+      capabilities,
+      discovery,
+      // An empty successful catalog can mean "this engine has a hidden native
+      // model". A failed lookup is not that: it is unavailable.
+      nativeDefault: modelResult.ok && models.length === 0,
+      harnessId: runtime.harnessId,
+    }); return true;
   };
 }
 

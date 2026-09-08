@@ -5548,3 +5548,184 @@ export interface ChatWorkspaceFrameBus {
   onEvent(cb: (event: ChatWorkspaceTabEvent) => void): Disposable;
   setTabStream(spaceId: string | null, tabId: string, visible: boolean, quality?: number): void;
 }
+
+// ---------------------------------------------------------------------------
+// Canonical model + attachment control rules.
+//
+// These are pure decisions every layer has to agree on: which delivery
+// modality an attachment ref is, what the harness ∩ model ∩ remote-policy
+// intersection actually supports, and whether a (model, variant) pair is
+// sendable. They live on the contract surface because the browser, the
+// admission path and every adapter must apply the SAME rule — a composer that
+// offers what the send refuses, or a variant honoured on one path and dropped
+// on another, is the bug this prevents. `@polyth/harness-runtime` re-exports
+// them so adapters keep one import site.
+// ---------------------------------------------------------------------------
+
+const MODEL_INPUT_MODALITIES = new Set<AttachmentModality>(["image", "pdf", "audio"]);
+
+/** Classify one attachment ref into a delivery modality. */
+export const attachmentModality = (ref: AttachmentRef): AttachmentModality | undefined => {
+  if (ref.kind === "browser-context") {
+    const shot = ref.browserContext?.crop ?? ref.browserContext?.screenshot;
+    if (shot?.mime?.startsWith("image/")) return "image";
+    return undefined;
+  }
+  // Presentational `/api/files/raw` URLs on path attachments must not win over
+  // mime/kind. True link attachments use kind: "url".
+  if (ref.kind === "url") return "url";
+  if (ref.mime?.startsWith("image/") || ref.kind === "image") return "image";
+  if (ref.mime === "application/pdf") return "pdf";
+  if (ref.mime?.startsWith("audio/")) return "audio";
+  if (ref.path || ref.kind === "file" || ref.kind === "range") return "file";
+  if (ref.url) return "url";
+  return undefined;
+};
+
+const modalityFromCapability = (cap: string): AttachmentModality | undefined => {
+  if (cap === "input:image") return "image";
+  if (cap === "attachment" || cap === "input:file") return "file";
+  if (cap === "input:pdf") return "pdf";
+  if (cap === "input:audio") return "audio";
+  if (cap === "input:url") return "url";
+  return undefined;
+};
+
+const intersectSupport = (
+  a: FeatureSupport | undefined,
+  b: FeatureSupport | undefined,
+): FeatureSupport | undefined => {
+  if (a === "unsupported" || b === "unsupported") return "unsupported";
+  if (a === "emulated" || b === "emulated") return "emulated";
+  if (a === "native" && b === "native") return "native";
+  return undefined;
+};
+
+/** Intersection of harness capabilities, model capabilities, and remote policy. */
+export const effectiveAttachmentSupport = (
+  harness: RuntimeCapabilities,
+  modelCapabilities: readonly string[] | undefined,
+  remote: boolean,
+  materializeAvailable = false,
+): Partial<Record<AttachmentModality, FeatureSupport>> => {
+  const harnessModalities = harness.attachments?.modalities ?? {};
+  const modelModalities = new Map<AttachmentModality, FeatureSupport>();
+  for (const cap of modelCapabilities ?? []) {
+    const modality = modalityFromCapability(cap);
+    if (modality) modelModalities.set(modality, "native");
+  }
+  const result: Partial<Record<AttachmentModality, FeatureSupport>> = {};
+  const keys = new Set<AttachmentModality>([
+    ...Object.keys(harnessModalities) as AttachmentModality[],
+    ...modelModalities.keys(),
+  ]);
+  for (const modality of keys) {
+    const harnessSupport = harnessModalities[modality];
+    const modelSupport = modelModalities.get(modality);
+    if (!harnessSupport || harnessSupport === "unsupported") continue;
+    if (MODEL_INPUT_MODALITIES.has(modality)
+      && modelCapabilities !== undefined
+      && modelSupport === undefined) continue;
+    if (modelSupport === "unsupported") continue;
+    if (remote && (modality === "file" || modality === "pdf" || modality === "audio")) {
+      if (!materializeAvailable) continue;
+      const intersected = intersectSupport(harnessSupport, modelSupport ?? "native");
+      if (intersected) result[modality] = intersected === "native" ? "emulated" : intersected;
+      continue;
+    }
+    const intersected = intersectSupport(harnessSupport, modelSupport ?? "native");
+    if (intersected) result[modality] = intersected;
+  }
+  return result;
+};
+
+export type ModelSelection =
+  | {
+    ok: true;
+    /** Absent when the catalog could not answer for this harness. */
+    descriptor?: ModelDescriptor;
+    /** Absent means "use the backend's own default reasoning mode". */
+    variant?: string;
+  }
+  | { ok: false; code: Extract<TurnRejectionCode, "invalid-model" | "invalid-variant">; message: string };
+
+const belongsToHarness = (descriptor: ModelDescriptor, harnessId?: string): boolean =>
+  harnessId === undefined || descriptor.harnessId === undefined || descriptor.harnessId === harnessId;
+
+/** The models a harness can actually route to, in catalog order. */
+export const harnessModels = (
+  catalog: readonly ModelDescriptor[],
+  harnessId?: string,
+): ModelDescriptor[] => catalog.filter((descriptor) => belongsToHarness(descriptor, harnessId));
+
+/**
+ * Find the descriptor a ref names. `modelID` is the identity: providers report
+ * their own id inconsistently across harnesses (Codex `model/list` carries no
+ * provider at all), so a providerID mismatch narrows the search but never
+ * invalidates a model the harness demonstrably has.
+ */
+export const findModelDescriptor = (
+  catalog: readonly ModelDescriptor[],
+  ref: Pick<ModelRef, "providerID" | "modelID">,
+  harnessId?: string,
+): ModelDescriptor | undefined => {
+  const candidates = harnessModels(catalog, harnessId).filter((d) => d.modelID === ref.modelID);
+  return candidates.find((d) => d.providerID === ref.providerID) ?? candidates[0];
+};
+
+/**
+ * Validate a model + variant selection against a harness catalog.
+ *
+ * An empty catalog for the harness means "not discoverable right now", not
+ * "no such model": validation defers to the adapter rather than inventing a
+ * rejection the user cannot act on.
+ */
+export function resolveModelSelection(
+  catalog: readonly ModelDescriptor[],
+  ref: ModelRef | undefined,
+  harnessId?: string,
+): ModelSelection {
+  if (!ref) return { ok: true };
+  const known = harnessModels(catalog, harnessId);
+  const descriptor = findModelDescriptor(catalog, ref, harnessId);
+  const variant = ref.variant?.trim() ? ref.variant : undefined;
+  if (!descriptor) {
+    if (known.length === 0) return { ok: true, ...(variant ? { variant } : {}) };
+    return {
+      ok: false,
+      code: "invalid-model",
+      message: `${ref.modelID} is not available on this engine. Pick a model from the list.`,
+    };
+  }
+  if (!variant) return { ok: true, descriptor };
+  const variants = descriptor.variants ?? [];
+  if (!variants.includes(variant)) {
+    return {
+      ok: false,
+      code: "invalid-variant",
+      message: variants.length
+        ? `${descriptor.name} does not offer the "${variant}" thinking level. Choose one of: ${variants.join(", ")}.`
+        : `${descriptor.name} does not offer a thinking level.`,
+    };
+  }
+  return { ok: true, descriptor, variant };
+}
+
+/**
+ * Reconcile a remembered variant against the model that is actually selected.
+ * `reconciled` is true when the request could not be honoured, so the caller
+ * can show the effective value instead of keeping a stale one.
+ */
+export function resolveVariantPreference(
+  descriptor: Pick<ModelDescriptor, "variants" | "defaultVariant"> | undefined,
+  requested: string | undefined,
+): { variant?: string; reconciled: boolean } {
+  const variants = descriptor?.variants ?? [];
+  const wanted = requested?.trim() ? requested : undefined;
+  if (variants.length === 0) return { reconciled: wanted !== undefined };
+  if (wanted && variants.includes(wanted)) return { variant: wanted, reconciled: false };
+  const fallback = descriptor?.defaultVariant && variants.includes(descriptor.defaultVariant)
+    ? descriptor.defaultVariant
+    : undefined;
+  return { ...(fallback ? { variant: fallback } : {}), reconciled: wanted !== undefined };
+}

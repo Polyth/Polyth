@@ -3,26 +3,22 @@ import { exec } from "node:child_process";
 import { mkdir, readdir, readFile, realpath, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import type { CommandList, CommandScope, SlashCommand, Snippet } from "./catalog.ts";
 
-import type { CommandScope, SlashCommand } from "./catalog.ts";
-
-export type { CommandScope, SlashCommand } from "./catalog.ts";
-export { commandPrecedence, mergeCommandCatalog } from "./catalog.ts";
+// The catalog rules and types are browser-safe and live apart from this
+// filesystem/shell code; they stay part of this package's public surface.
+export {
+  commandPrecedence,
+  mergeCommandCatalog,
+  type CommandList,
+  type CommandScope,
+  type SlashCommand,
+  type Snippet,
+} from "./catalog.ts";
 
 const execAsync = promisify(exec);
 const FILE_INCLUDE_MAX = 64 * 1024;
 const SHELL_TIMEOUT_MS = 10_000;
-
-export interface Snippet {
-  alias: string;
-  text: string;
-  scope: CommandScope;
-}
-
-export interface CommandList {
-  commands: SlashCommand[];
-  snippets: Snippet[];
-}
 
 export type SkillScope = "project-opencode" | "user-opencode" | "project-claude" | "user-claude" | "project-agents" | "user-agents";
 

@@ -4,11 +4,10 @@ import {
   deltaCost,
   deltaTokenUsage,
   composeTurnPrompt,
-  effectiveAttachmentSupport,
   isPlaceholderTitle,
   titleFromPrompt,
-  attachmentModality,
 } from "../src/features.ts";
+import { attachmentModality, effectiveAttachmentSupport } from "@polyth/contracts";
 import { commandPrecedence, mergeCommandCatalog } from "@polyth/commands";
 import type { RuntimeCapabilities, RuntimeCommandDescriptor } from "@polyth/contracts";
 

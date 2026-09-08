@@ -68,10 +68,11 @@ import {
   ATTACHMENT_COMPAT_NOTE,
   catalogFromResult,
   commandAutocomplete,
+  composerModelAbsence,
+  harnessModelCatalog,
   mergeCommandCatalog,
   nativeCommandInput,
   fileAutocomplete,
-  modelSupportsTextWorkflow,
   OPEN_PROJECT_FIRST,
   planCommandInsert,
   planShellEntry,
@@ -121,7 +122,7 @@ import { useRuntimeCatalog } from "@polyth/models/runtime-catalog";
 import { modelSupportsThinking } from "@polyth/models/model-presentation";
 import { resolveProjectModelDefault, useSessionDefaults } from "../sessionDefaults.ts";
 import { contextTokensUsed } from "../reduce.ts";
-import { effectiveAttachmentSupport, attachmentModality } from "@polyth/harness-runtime";
+import { effectiveAttachmentSupport, attachmentModality } from "@polyth/contracts";
 import { getModelThinking, resolveComposerThinking, setModelThinking } from "../thinkingPrefs.ts";
 import { roleKind, useRolePrefs } from "../rolePrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
@@ -485,16 +486,18 @@ export default function Composer({
   const agents = catalogHarnessId
     ? routeCatalog.agents.filter((item) => !item.harnessId || item.harnessId === catalogHarnessId)
     : routeCatalog.agents;
-  const chatModels = models.filter(modelSupportsTextWorkflow);
   // The four honest states, so "still discovering" and "this engine is not
   // signed in" never render as "this engine has no models".
-  const modelCatalog: CatalogState<ModelDescriptor> = chatModels.length > 0
-    ? { state: "available", items: chatModels }
-    : routeCatalog.discovery.state === "unavailable"
-      ? { state: "unavailable", reason: routeCatalog.discovery.reason }
-      : routeCatalog.discovery.state === "pending"
-        ? { state: "loading" }
-        : { state: "empty" };
+  const modelCatalog: CatalogState<ModelDescriptor> = harnessModelCatalog({
+    models: routeCatalog.models,
+    ...(catalogHarnessId ? { harnessId: catalogHarnessId } : {}),
+    discovery: routeCatalog.discovery,
+  });
+  const chatModels = modelCatalog.state === "available" ? modelCatalog.items : [];
+  const modelAbsence = composerModelAbsence({
+    catalog: modelCatalog,
+    nativeDefault: routeCatalog.nativeDefault,
+  });
   const activeSessionSeq = useStore((s) => {
     const events = s.activeSessionId ? s.events[s.activeSessionId] : undefined;
     return events?.at(-1)?.seq ?? 0;
@@ -538,7 +541,7 @@ export default function Composer({
       setAbortPending(false);
     }
   }, [canStop]);
-  const noModels = chatModels.length === 0 && !routeCatalog.nativeDefault;
+  const noModels = modelAbsence !== "none";
   // The server-known cause, when there is one. "Check that the backend is
   // running" is a guess; this is what actually went wrong.
   const runtimeUnavailable = useStore((s) => s.runtimeUnavailable);
@@ -548,9 +551,15 @@ export default function Composer({
       setShowModelWarning(false);
       return;
     }
+    // Loading and a named failure must appear immediately. The delay only
+    // covers a still-empty catalog that may yet arrive from a cold backend.
+    if (modelAbsence === "loading" || modelAbsence === "unavailable") {
+      setShowModelWarning(true);
+      return;
+    }
     const timer = setTimeout(() => setShowModelWarning(true), MODEL_WARNING_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [noModels]);
+  }, [noModels, modelAbsence]);
   const widgetMode = variant === "widget";
   const shellLayout = useShellMode();
 
@@ -2058,11 +2067,15 @@ export default function Composer({
       {showModelWarning && (
         <div className="composer-note composer-runtime-unavailable" role="status">
           <span>
-            {(modelCatalog.state === "unavailable" ? modelCatalog.reason : undefined)
-              ?? runtimeUnavailable?.message
-              ?? tr("composer.noModelsAvailableCheckThatTheBackend")}
+            {modelAbsence === "loading"
+              ? tr("common.loading")
+              : (modelCatalog.state === "unavailable" ? modelCatalog.reason : undefined)
+                ?? runtimeUnavailable?.message
+                ?? tr("composer.noModelsAvailableCheckThatTheBackend")}
           </span>
-          <Button size="sm" onClick={retryModelConnection}>{tr("sidebar.reconnect")}</Button>
+          {modelAbsence !== "loading" && (
+            <Button size="sm" onClick={retryModelConnection}>{tr("sidebar.reconnect")}</Button>
+          )}
         </div>
       )}
       {profileMissing && (

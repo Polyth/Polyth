@@ -1,11 +1,4 @@
-import type {
-  AttachmentModality,
-  AttachmentRef,
-  FeatureSupport,
-  ModelDescriptor,
-  RuntimeCapabilities,
-  TokenUsage,
-} from "@polyth/contracts";
+import type { AttachmentRef, TokenUsage } from "@polyth/contracts";
 import { formatBrowserContextForModel } from "@polyth/contracts";
 
 const PLACEHOLDER_TITLES = new Set([
@@ -68,8 +61,6 @@ export const deltaCost = (
   return delta;
 };
 
-const MODEL_INPUT_MODALITIES = new Set<AttachmentModality>(["image", "pdf", "audio"]);
-
 const browserCapture = (ref: {
   kind?: string;
   browserContext?: {
@@ -81,33 +72,6 @@ const browserCapture = (ref: {
   const shot = ref.browserContext?.crop ?? ref.browserContext?.screenshot;
   if (!shot?.localPath || !shot.mime?.startsWith("image/")) return undefined;
   return { localPath: shot.localPath, mime: shot.mime };
-};
-
-/** Classify one attachment ref into a delivery modality. */
-export const attachmentModality = (ref: AttachmentRef): AttachmentModality | undefined => {
-  if (ref.kind === "browser-context") {
-    const shot = ref.browserContext?.crop ?? ref.browserContext?.screenshot;
-    if (shot?.mime?.startsWith("image/")) return "image";
-    return undefined;
-  }
-  // Presentational `/api/files/raw` URLs on path attachments must not win over
-  // mime/kind. True link attachments use kind: "url".
-  if (ref.kind === "url") return "url";
-  if (ref.mime?.startsWith("image/") || ref.kind === "image") return "image";
-  if (ref.mime === "application/pdf") return "pdf";
-  if (ref.mime?.startsWith("audio/")) return "audio";
-  if (ref.path || ref.kind === "file" || ref.kind === "range") return "file";
-  if (ref.url) return "url";
-  return undefined;
-};
-
-const modalityFromCapability = (cap: string): AttachmentModality | undefined => {
-  if (cap === "input:image") return "image";
-  if (cap === "attachment" || cap === "input:file") return "file";
-  if (cap === "input:pdf") return "pdf";
-  if (cap === "input:audio") return "audio";
-  if (cap === "input:url") return "url";
-  return undefined;
 };
 
 /** Merge browser-context text into the prompt and collect materialized captures. */
@@ -131,50 +95,3 @@ export const composeTurnPrompt = (
   };
 };
 
-const intersectSupport = (
-  a: FeatureSupport | undefined,
-  b: FeatureSupport | undefined,
-): FeatureSupport | undefined => {
-  if (a === "unsupported" || b === "unsupported") return "unsupported";
-  if (a === "emulated" || b === "emulated") return "emulated";
-  if (a === "native" && b === "native") return "native";
-  return undefined;
-};
-
-/** Intersection of harness capabilities, model capabilities, and remote policy. */
-export const effectiveAttachmentSupport = (
-  harness: RuntimeCapabilities,
-  modelCapabilities: readonly string[] | undefined,
-  remote: boolean,
-  materializeAvailable = false,
-): Partial<Record<AttachmentModality, FeatureSupport>> => {
-  const harnessModalities = harness.attachments?.modalities ?? {};
-  const modelModalities = new Map<AttachmentModality, FeatureSupport>();
-  for (const cap of modelCapabilities ?? []) {
-    const modality = modalityFromCapability(cap);
-    if (modality) modelModalities.set(modality, "native");
-  }
-  const result: Partial<Record<AttachmentModality, FeatureSupport>> = {};
-  const keys = new Set<AttachmentModality>([
-    ...Object.keys(harnessModalities) as AttachmentModality[],
-    ...modelModalities.keys(),
-  ]);
-  for (const modality of keys) {
-    const harnessSupport = harnessModalities[modality];
-    const modelSupport = modelModalities.get(modality);
-    if (!harnessSupport || harnessSupport === "unsupported") continue;
-    if (MODEL_INPUT_MODALITIES.has(modality)
-      && modelCapabilities !== undefined
-      && modelSupport === undefined) continue;
-    if (modelSupport === "unsupported") continue;
-    if (remote && (modality === "file" || modality === "pdf" || modality === "audio")) {
-      if (!materializeAvailable) continue;
-      const intersected = intersectSupport(harnessSupport, modelSupport ?? "native");
-      if (intersected) result[modality] = intersected === "native" ? "emulated" : intersected;
-      continue;
-    }
-    const intersected = intersectSupport(harnessSupport, modelSupport ?? "native");
-    if (intersected) result[modality] = intersected;
-  }
-  return result;
-};

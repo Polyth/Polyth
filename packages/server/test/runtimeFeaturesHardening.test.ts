@@ -482,7 +482,12 @@ test("send rejects a native command id removed from the refreshed catalog", asyn
   );
 });
 
-test("runtimeFeatures attachmentSupport is harness-only", async () => {
+// The payload is deliberately model-blind: a session has no "next turn model"
+// until the composer picks one, so the server publishes the harness support
+// plus the `remote`/`materializeAvailable` policy and the composer intersects
+// it with the selected model using the same shared rule. Baking one model's
+// answer in here is what made the composer and the send path disagree.
+test("runtimeFeatures attachmentSupport is harness-only, with the policy flags to narrow it", async () => {
   const f = fixture({
     models: async () => [
       {
@@ -506,4 +511,18 @@ test("runtimeFeatures attachmentSupport is harness-only", async () => {
   const features = await f.sessions.runtimeFeatures!(created.id);
   assert.equal(features.attachmentSupport.image, "native");
   assert.equal(features.attachmentSupport.pdf, "native");
+  // Without these the client cannot reproduce the server's own decision.
+  assert.equal(features.remote, false);
+  assert.equal(typeof features.materializeAvailable, "boolean");
+  // The shared rule, applied to the text-only model the turn actually used,
+  // is what removes image support — on the client and at admission alike.
+  assert.equal(
+    "image" in effectiveAttachmentSupport(
+      { ...features.capabilities, attachments: { modalities: features.attachmentSupport } },
+      ["input:text", "output:text"],
+      features.remote,
+      features.materializeAvailable,
+    ),
+    false,
+  );
 });

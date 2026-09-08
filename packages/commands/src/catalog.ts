@@ -1,3 +1,7 @@
+// The pure part of the command catalog: types plus the merge and precedence
+// rules. The browser needs these to render and resolve `/name`, while the rest
+// of this package reads the filesystem and shells out. Keeping them apart is
+// what lets the web bundle import the rules without pulling `node:*` in.
 import type { RuntimeCommandDescriptor } from "@polyth/contracts";
 
 export type CommandScope = "user" | "project" | "builtin";
@@ -14,6 +18,17 @@ export interface SlashCommand {
 }
 
 export type CatalogCommand = SlashCommand | RuntimeCommandDescriptor;
+
+export interface Snippet {
+  alias: string;
+  text: string;
+  scope: CommandScope;
+}
+
+export interface CommandList {
+  commands: SlashCommand[];
+  snippets: Snippet[];
+}
 
 export const mergeCommandCatalog = (
   polyth: readonly SlashCommand[],
