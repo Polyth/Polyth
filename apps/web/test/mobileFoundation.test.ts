@@ -54,7 +54,7 @@ test("specific phone and coarse-pointer fields retain the 16px iOS input guard",
   for (const selector of [
     ".composer-card textarea",
     ".sidebar-search input",
-    ".editor-ta",
+    ".editor-code",
     ".cm-textfield",
     ".browser-address input",
     ".term-search input",

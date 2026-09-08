@@ -68,7 +68,7 @@ async function mount(path: string) {
   await act(async () => {
     root.render(createElement(EditorRuntime, {
       groupId: "files",
-      ref: docRef(path),
+      resource: docRef(path),
       path,
       visible: true,
     }));
@@ -82,7 +82,7 @@ async function mount(path: string) {
       await act(async () => {
         root.render(createElement(EditorRuntime, {
           groupId: "files",
-          ref: docRef(next),
+          resource: docRef(next),
           path: next,
           visible: true,
         }));

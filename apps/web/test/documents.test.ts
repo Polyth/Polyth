@@ -1,16 +1,34 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Window } from "happy-dom";
+
+const dom = new Window({ url: "http://localhost:3000/" });
+Object.assign(globalThis, {
+  window: dom as unknown as typeof globalThis & Window,
+  document: dom.document as unknown as Document,
+});
+Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configurable: true });
+
 import {
+  anyUnflushedDirty,
   fileRef,
+  installDocumentUnloadGuard,
   openDocument,
   resetDocumentsForTest,
 } from "../src/resources/documents.ts";
 import { registerResourceProvider } from "../src/resources/providers.ts";
+import { setUiSettings } from "../src/uiPrefs.ts";
 
 const scheme = `doc-test-${process.pid}`;
 const files = new Map<string, { content: string; revision: string }>([
-  ["a.ts", { content: " cons t a = 1;\n", revision: "r1" }],
+  ["a.ts", { content: " const a = 1;\n", revision: "r1" }],
 ]);
+
+let writeImpl: (ref: { locator: string }, content: string) => Promise<{ revision: string }> = async (ref, content) => {
+  const revision = `r${files.size + 1}`;
+  files.set(ref.locator, { content, revision });
+  return { revision };
+};
 
 registerResourceProvider({
   scheme,
@@ -20,11 +38,7 @@ registerResourceProvider({
     if (!got) throw new Error("missing");
     return { ...got };
   },
-  write: async (ref, content) => {
-    const revision = `r${files.size + 1}`;
-    files.set(ref.locator, { content, revision });
-    return { revision };
-  },
+  write: async (ref, content) => writeImpl(ref, content),
 });
 
 function ref(path: string) {
@@ -74,4 +88,110 @@ test("discard restores authoritative text through the attached source", async ()
 test("fileRef identity is scheme/project/session/path", () => {
   assert.equal(fileRef("p", null, "src/a.ts").scheme, "file");
   assert.equal(fileRef("p", "s1", "src/a.ts").sessionId, "s1");
+});
+
+test("reportUserEdit toggles dirty without extra notify when already dirty", async () => {
+  resetDocumentsForTest();
+  const handle = openDocument(ref("a.ts"));
+  await handle.load();
+  let notifies = 0;
+  handle.subscribe(() => { notifies += 1; });
+  handle.reportUserEdit(false);
+  assert.equal(handle.getSnapshot().dirty, true);
+  const afterDirty = notifies;
+  handle.reportUserEdit(false);
+  assert.equal(notifies, afterDirty, "second dirty edit does not notify again");
+  handle.reportUserEdit(true);
+  assert.equal(handle.getSnapshot().dirty, false);
+});
+
+test("save failure keeps dirty state", async () => {
+  resetDocumentsForTest();
+  writeImpl = async () => { throw new Error("disk full"); };
+  const handle = openDocument(ref("a.ts"));
+  await handle.load();
+  handle.attachSource({ getText: () => "edited", resetAuthoritative: () => {} });
+  handle.markUserEdit();
+  await handle.save();
+  assert.equal(handle.getSnapshot().dirty, true);
+  assert.match(handle.getSnapshot().error, /disk full/);
+  writeImpl = async (r, content) => {
+    const revision = `r${files.size + 1}`;
+    files.set(r.locator, { content, revision });
+    return { revision };
+  };
+});
+
+test("409 conflict preserves buffer and marks live conflict", async () => {
+  resetDocumentsForTest();
+  writeImpl = async () => {
+    const err = new Error("conflict") as Error & { status: number };
+    err.status = 409;
+    throw err;
+  };
+  const handle = openDocument(ref("a.ts"));
+  await handle.load();
+  const live = "my edit";
+  handle.attachSource({ getText: () => live, resetAuthoritative: () => {} });
+  handle.markUserEdit();
+  await handle.save();
+  assert.equal(handle.getBuffer(), live);
+  assert.equal(handle.getSnapshot().dirty, true);
+  assert.equal(handle.getSnapshot().live?.kind, "conflict");
+  writeImpl = async (r, content) => {
+    const revision = `r${files.size + 1}`;
+    files.set(r.locator, { content, revision });
+    return { revision };
+  };
+});
+
+test("edit during save keeps later buffer dirty after save resolves", async () => {
+  resetDocumentsForTest();
+  let release!: () => void;
+  writeImpl = async (r, content) => {
+    await new Promise<void>((resolve) => { release = resolve; });
+    const revision = `r${files.size + 1}`;
+    files.set(r.locator, { content, revision });
+    return { revision };
+  };
+  const handle = openDocument(ref("a.ts"));
+  await handle.load();
+  let live = "first";
+  handle.attachSource({
+    getText: () => live,
+    resetAuthoritative: (text) => { live = text; },
+  });
+  handle.markUserEdit();
+  const saving = handle.save();
+  live = "second";
+  handle.markUserEdit();
+  release();
+  await saving;
+  assert.equal(handle.getBuffer(), "second");
+  assert.equal(handle.getSnapshot().dirty, true);
+  writeImpl = async (r, content) => {
+    const revision = `r${files.size + 1}`;
+    files.set(r.locator, { content, revision });
+    return { revision };
+  };
+});
+
+test("beforeunload guard blocks only unflushed dirty with autosave off", async () => {
+  resetDocumentsForTest();
+  setUiSettings({ editorAutosave: false });
+  installDocumentUnloadGuard();
+  const handle = openDocument(ref("a.ts"));
+  await handle.load();
+  handle.attachSource({ getText: () => "edited", resetAuthoritative: () => {} });
+  handle.reportUserEdit(false);
+  assert.equal(anyUnflushedDirty(), true);
+  const BlockedEvt = (dom as unknown as { Event: typeof Event }).Event;
+  const blocked = new BlockedEvt("beforeunload", { cancelable: true }) as BeforeUnloadEvent;
+  window.dispatchEvent(blocked);
+  assert.equal(blocked.defaultPrevented, true);
+  handle.reportUserEdit(true);
+  assert.equal(anyUnflushedDirty(), false);
+  const allowed = new BlockedEvt("beforeunload", { cancelable: true }) as BeforeUnloadEvent;
+  window.dispatchEvent(allowed);
+  assert.equal(allowed.defaultPrevented, false);
 });
