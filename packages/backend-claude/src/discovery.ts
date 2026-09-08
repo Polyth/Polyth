@@ -80,6 +80,13 @@ export function invalidateClaudeModelCache(options?: Pick<ClaudeDiscoveryOptions
   cache.delete(cacheKey(options as ClaudeDiscoveryOptions));
 }
 
+/** Warm-cache read: never spawns. Used at session create so a picker-warmed
+ *  catalog can validate effort without a second Claude process. */
+export function peekClaudeModels(options: Pick<ClaudeDiscoveryOptions, "executable" | "authFingerprint">): ModelDescriptor[] | undefined {
+  const entry = cache.get(cacheKey(options as ClaudeDiscoveryOptions));
+  return entry?.models;
+}
+
 export async function discoverClaudeModels(options: ClaudeDiscoveryOptions): Promise<ModelDescriptor[]> {
   const now = options.now ?? Date.now;
   const key = cacheKey(options);

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { randomUUID } from "node:crypto";
 import { createClaudeRuntime } from "../src/index.ts";
-import { claudeModelDescriptors, discoverClaudeModels, invalidateClaudeModelCache } from "../src/discovery.ts";
+import { claudeAuthFingerprint, claudeModelDescriptors, discoverClaudeModels, invalidateClaudeModelCache } from "../src/discovery.ts";
 import type { createProcessAuthority } from "@polyth/harness-runtime";
 
 const context = { spaceId: "s", projectId: "p", cwd: "/tmp", sessionId: "canonical" };
@@ -130,6 +130,26 @@ test("a variant on the first turn is applied at query creation", async () => {
     model: { providerID: "anthropic", modelID: "sonnet", variant: "high" },
   }, randomUUID());
   assert.equal(state.options!.effort, "high");
+});
+
+test("an invalid variant is refused at session create when the catalog is already warm", async () => {
+  invalidateClaudeModelCache();
+  const { sdk, state } = fakeSdk();
+  await discoverClaudeModels({
+    query: sdk.query as never,
+    cwd: "/tmp",
+    executable: "claude",
+    authFingerprint: claudeAuthFingerprint(),
+  });
+  const before = state.spawns;
+  const rt = await createClaudeRuntime(context, sdk, fakeAuthority());
+  const outcome = await rt.createSessionOperation!({
+    projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp",
+    model: { providerID: "anthropic", modelID: "haiku", variant: "high" },
+  }, randomUUID());
+  assert.equal(outcome.kind, "rejected");
+  assert.equal(outcome.kind === "rejected" && outcome.code, "invalid-variant");
+  assert.equal(state.spawns, before, "a refused create never opens a session query");
 });
 
 test("a changed variant is applied live, and an unchanged one is not re-applied", async () => {

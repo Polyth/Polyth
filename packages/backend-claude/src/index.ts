@@ -10,7 +10,7 @@ import {
     provisioningTarget,
     releaseCapabilityLaunch,
 } from "@polyth/harness-runtime";
-import { claudeAuthFingerprint, claudeModelDescriptors, discoverClaudeModels, invalidateClaudeModelCache } from "./discovery.ts";
+import { claudeAuthFingerprint, claudeModelDescriptors, discoverClaudeModels, invalidateClaudeModelCache, peekClaudeModels } from "./discovery.ts";
 import { claudeOverlays } from "./provisioner.ts";
 export { claudeOverlays, createClaudeProvisioner } from "./provisioner.ts";
 export { claudeAuthFingerprint, claudeModelDescriptors, discoverClaudeModels, invalidateClaudeModelCache } from "./discovery.ts";
@@ -292,7 +292,17 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
         return { kind: "unknown", operationId, message: "Claude Code did not confirm the operation" };
     } };
     const create: NonNullable<AgentRuntime["createSessionOperation"]> = async (request, operationId) => {
-        const outcome = await mutate(operationId, async () => { const id = authority.receipts[operationId] ?? randomUUID(); await initialize(id, false, request.model?.variant); createId = operationId; await authority.receipt(operationId, id); return { backendSessionId: id }; });
+        let effort: string | undefined;
+        if (request.model) {
+            const known = peekClaudeModels({
+                executable: claudeExecutable(),
+                authFingerprint: claudeAuthFingerprint(),
+            }) ?? [];
+            const selection = resolveModelSelection(known, request.model, "claude");
+            if (!selection.ok) return { kind: "rejected", code: selection.code, message: selection.message };
+            effort = selection.variant;
+        }
+        const outcome = await mutate(operationId, async () => { const id = authority.receipts[operationId] ?? randomUUID(); await initialize(id, false, effort); createId = operationId; await authority.receipt(operationId, id); return { backendSessionId: id }; });
         return outcome.kind === "confirmed" ? { ...outcome, receipt: outcome.value.backendSessionId } : outcome;
     };
     /** Live session first (no spawn); otherwise a cached cold probe. */
