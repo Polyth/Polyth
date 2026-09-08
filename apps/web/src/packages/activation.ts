@@ -116,13 +116,6 @@ export function createPackageActivation(
         return track(host.resources.registerProvider(provider));
       },
     },
-    resourceViews: {
-      ...host.resourceViews,
-      register: (definition) => {
-        if (disposed) return reject("resourceViews.register");
-        return track(host.resourceViews.register(definition));
-      },
-    },
   };
 
   return {

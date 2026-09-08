@@ -60,11 +60,6 @@ import {
   registerResourceProvider,
 } from "../resources/providers.ts";
 import {
-  listResourceViews,
-  registerResourceView,
-  resourceViewCandidates,
-} from "../resources/views.ts";
-import {
   activateWorkbenchProfile,
   getActiveProfileId,
   getActiveProfileSummary,
@@ -126,7 +121,6 @@ function openResource(ref: ResourceRef, options: OpenResourceOptions = {}): void
       endLine: options.selection.endLine,
       column: options.selection.column,
     } : undefined);
-    if (options.region) workbenchOpenSurface("files", { region: options.region, activate: options.focus !== false });
     return;
   }
   openWorkspacePane(ref.scheme, `${ref.scheme}:${ref.locator}`);
@@ -229,11 +223,6 @@ export const webPackageHost: WebPackageHost = {
       isDirty: isDocumentDirty,
       subscribe: subscribeDocuments,
     },
-  },
-  resourceViews: {
-    register: registerResourceView,
-    list: listResourceViews,
-    candidates: resourceViewCandidates,
   },
   ui: {
     icons: Icon,

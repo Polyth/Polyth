@@ -270,32 +270,6 @@ export interface ResourceProvider {
   rawUrl?(ref: ResourceRef): string;
 }
 
-export type ResourceViewKind = "editor" | "viewer" | "diff";
-
-export interface ResourceViewMatch {
-  ref: ResourceRef;
-  descriptor: ResourceDescriptor;
-  profileId: string;
-  purpose?: string;
-}
-
-export interface ResourceViewProps {
-  ref: ResourceRef;
-  descriptor: ResourceDescriptor;
-  visible: boolean;
-  selection: ResourceSelection | null;
-  onSelectionConsumed: () => void;
-}
-
-export interface ResourceViewDefinition {
-  id: string;
-  label: string;
-  kind: ResourceViewKind;
-  /** Suitability: <= 0 means cannot open. */
-  score(match: ResourceViewMatch): number;
-  component: ComponentType<ResourceViewProps>;
-}
-
 export type ResourceDocumentStatus = "idle" | "loading" | "ready" | "error";
 export type ResourceLiveKind =
   | "clean" | "dirty" | "saving" | "saved" | "external-change" | "conflict" | "deleted" | "check-failed";
@@ -313,8 +287,6 @@ export interface ResourceDocumentSnapshot {
   error: string;
   composing: boolean;
   saveCount: number;
-  /** Monotonic. Increments on user edits and authoritative resets. */
-  bufferVersion: number;
   /** Incremented on load, discard, and reload — invalidates retained editor state. */
   authoritativeGeneration: number;
 }
@@ -323,7 +295,6 @@ export interface ResourceDocumentSnapshot {
  *  into the document snapshot on every keystroke. */
 export interface ResourceTextSource {
   getText(): string;
-  resetAuthoritative(text: string): void;
 }
 
 export interface ResourceDocumentHandle {
@@ -333,8 +304,7 @@ export interface ResourceDocumentHandle {
   subscribe(listener: () => void): Unregister;
   /** Materialize current text. Call on save/preview/chat-insert, not per keystroke. */
   getBuffer(): string;
-  attachSource(source: ResourceTextSource): void;
-  detachSource(): void;
+  attachSource(source: ResourceTextSource): Unregister | null;
   /** User edited the attached source. First dirty transition notifies React. */
   markUserEdit(): void;
   /** Report edit equivalence to saved baseline without serializing on each keystroke. */
@@ -351,8 +321,6 @@ export interface ResourceDocumentHandle {
 }
 
 export interface OpenResourceOptions {
-  region?: WorkbenchRegion;
-  focus?: boolean;
   selection?: ResourceSelection;
 }
 
@@ -546,11 +514,6 @@ export interface WebPackageHost {
       isDirty(ref: ResourceRef): boolean;
       subscribe(listener: () => void): Unregister;
     };
-  };
-  resourceViews: {
-    register(definition: ResourceViewDefinition): Unregister;
-    list(): readonly ResourceViewDefinition[];
-    candidates(ref: ResourceRef): readonly ResourceViewDefinition[];
   };
   ui: {
     icons: Readonly<Record<string, () => ReactNode>>;

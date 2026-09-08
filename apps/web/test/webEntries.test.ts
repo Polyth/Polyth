@@ -182,11 +182,6 @@ const createHost = (): RecordingHost => {
         subscribe: () => () => {},
       },
     },
-    resourceViews: {
-      register: () => () => {},
-      list: () => [],
-      candidates: () => [],
-    },
     ui: { icons: {}, Dialog: () => null },
     errors: { friendly: () => "" },
   };
