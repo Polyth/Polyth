@@ -1501,12 +1501,17 @@ export async function boot(opts: BootOptions = {}) {
       console.warn("[polyth] capability overlay release on evict skipped", err);
     }
   });
-  openCodePool.onRestart?.(async () => { harnesses.invalidate({ harnessId: "opencode" }); });
+  // The server catalog cache and the harness snapshot cache both hold model
+  // lists, so they are invalidated as one: a stale half is what makes "only
+  // some models show up" survive until a restart.
+  let invalidateModelCatalog = (): void => {};
+  openCodePool.onRestart?.(async () => { harnesses.invalidate(); invalidateModelCatalog(); });
   const runtimeCatalog = createRuntimeCatalog({
     projects,
     runtimes,
-    onModelsInvalidated: () => harnesses.invalidate({ harnessId: "opencode" }),
+    onModelsInvalidated: () => harnesses.invalidate(),
   });
+  invalidateModelCatalog = () => runtimeCatalog.invalidateModels();
   services.provide(serverServiceKey<{
     invalidateModels(): void;
     models(): Promise<import("@polyth/contracts").ModelDescriptor[]>;
@@ -2032,6 +2037,8 @@ export async function boot(opts: BootOptions = {}) {
     harnesses: {
       staticFeatures: (harnessId) =>
         harnesses.providers().find((provider) => provider.descriptor.id === harnessId)?.staticFeatures,
+      displayName: (harnessId) =>
+        harnesses.providers().find((provider) => provider.descriptor.id === harnessId)?.descriptor.name,
     },
     admission: admissionBarrier,
     isShuttingDown,

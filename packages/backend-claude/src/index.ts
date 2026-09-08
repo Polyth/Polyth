@@ -1,18 +1,21 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
-import type { AgentRuntime, HarnessContext, JsonObject, ModelRef, MutationOutcome, RateLimitRetryHint, RuntimeCommandDescriptor, RuntimeEvent, RuntimeObservation, RuntimeSnapshot, TokenUsage } from "@polyth/contracts";
-import { composeTurnPrompt, createProcessAuthority, deltaCost, deltaTokenUsage, isPlaceholderTitle } from "@polyth/harness-runtime";
-import type { SDKUserMessage, Query, PermissionResult, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
+import type { AgentRuntime, HarnessContext, JsonObject, ModelDescriptor, ModelRef, MutationOutcome, RateLimitRetryHint, RuntimeCommandDescriptor, RuntimeEvent, RuntimeObservation, RuntimeSnapshot, TokenUsage } from "@polyth/contracts";
+import { attachmentModality, composeTurnPrompt, createProcessAuthority, deltaCost, deltaTokenUsage, isPlaceholderTitle, resolveModelSelection, unsupportedAttachmentMessage } from "@polyth/harness-runtime";
+import type { EffortLevel, SDKUserMessage, Query, PermissionResult, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import {
     acknowledgeCapabilityApplication,
     captureCapabilityLaunch,
     provisioningTarget,
     releaseCapabilityLaunch,
 } from "@polyth/harness-runtime";
+import { claudeAuthFingerprint, claudeModelDescriptors, discoverClaudeModels, invalidateClaudeModelCache } from "./discovery.ts";
 import { claudeOverlays } from "./provisioner.ts";
 export { claudeOverlays, createClaudeProvisioner } from "./provisioner.ts";
+export { claudeAuthFingerprint, claudeModelDescriptors, discoverClaudeModels, invalidateClaudeModelCache } from "./discovery.ts";
 type Sdk = Pick<typeof import("@anthropic-ai/claude-agent-sdk"), "query" | "getSessionInfo">;
+const claudeExecutable = (): string => process.env.POLYTH_CLAUDE_BIN ?? "claude";
 export const CLAUDE_CAPABILITIES = {
     streaming: false, permissions: true, questions: false, compaction: false, subagents: false,
     steering: false, resume: true, usage: true, cost: true, fork: false, mcp: true,
@@ -20,7 +23,9 @@ export const CLAUDE_CAPABILITIES = {
     attachments: { modalities: {
         image: "native" as const,
         pdf: "native" as const,
-        file: "unsupported" as const,
+        // The SDK's user content blocks cover image and document (PDF) only, so
+        // a text file is delivered by the server's prompt projection.
+        file: "emulated" as const,
         audio: "unsupported" as const,
         url: "unsupported" as const,
     } },
@@ -105,7 +110,11 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
         while (inputs.length)
             yield inputs.shift()!;
     } }
-    const initialize = async (id: string, resume = false) => {
+    // Effort is a session-level flag in the Agent SDK: set once at query
+    // creation, then changed live with applyFlagSettings. `null` means "no
+    // effort parameter", i.e. the model's own default.
+    let appliedEffort: string | null | undefined;
+    const initialize = async (id: string, resume = false, effort?: string) => {
         if (query) {
             if (nativeId !== id)
                 throw Object.assign(new Error("Fresh native session requires a released process"), { code: "unsupported" });
@@ -122,7 +131,8 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
             });
         }
         try {
-            query = sdk.query({ prompt: prompts(), options: { cwd: context.cwd, ...(resume ? { resume: id } : { sessionId: id }), pathToClaudeCodeExecutable: process.env.POLYTH_CLAUDE_BIN ?? "claude", permissionMode: "default", includePartialMessages: false,
+            query = sdk.query({ prompt: prompts(), options: { cwd: context.cwd, ...(resume ? { resume: id } : { sessionId: id }), pathToClaudeCodeExecutable: claudeExecutable(), permissionMode: "default", includePartialMessages: false,
+                    ...(effort ? { effort: effort as EffortLevel } : {}),
                     // Parallel subagents are not yet represented by this adapter.
                     disallowedTools: ["Agent", "Task", "AskUserQuestion"],
                     ...(overlay?.append ? { systemPrompt: { type: "preset" as const, preset: "claude_code" as const, append: overlay.append } } : {}),
@@ -137,6 +147,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                     },
                 } });
             await query.initializationResult();
+            if (effort) appliedEffort = effort;
         }
         catch (error) {
             if (staged) {
@@ -280,14 +291,32 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
     catch {
         return { kind: "unknown", operationId, message: "Claude Code did not confirm the operation" };
     } };
-    const create: NonNullable<AgentRuntime["createSessionOperation"]> = async (_request, operationId) => {
-        const outcome = await mutate(operationId, async () => { const id = authority.receipts[operationId] ?? randomUUID(); await initialize(id); createId = operationId; await authority.receipt(operationId, id); return { backendSessionId: id }; });
+    const create: NonNullable<AgentRuntime["createSessionOperation"]> = async (request, operationId) => {
+        const outcome = await mutate(operationId, async () => { const id = authority.receipts[operationId] ?? randomUUID(); await initialize(id, false, request.model?.variant); createId = operationId; await authority.receipt(operationId, id); return { backendSessionId: id }; });
         return outcome.kind === "confirmed" ? { ...outcome, receipt: outcome.value.backendSessionId } : outcome;
+    };
+    /** Live session first (no spawn); otherwise a cached cold probe. */
+    const catalog = async (): Promise<ModelDescriptor[]> => {
+        if (query) return claudeModelDescriptors(await query.supportedModels());
+        return discoverClaudeModels({
+            query: sdk.query as Parameters<typeof discoverClaudeModels>[0]["query"],
+            cwd: context.cwd,
+            executable: claudeExecutable(),
+            authFingerprint: claudeAuthFingerprint(),
+        });
+    };
+    /** Bring the session's effort in line with the turn's selection. */
+    const applyEffort = async (variant: string | undefined): Promise<void> => {
+        const desired = variant ?? null;
+        if (appliedEffort === desired) return;
+        if (appliedEffort === undefined && desired === null) return;
+        await query!.applyFlagSettings({ effortLevel: desired as EffortLevel | null });
+        appliedEffort = desired;
     };
     const runtime: AgentRuntime = {
         capabilities: async () => CLAUDE_CAPABILITIES,
         commands: async () => [...nativeCommands],
-        models: async () => query ? (await query.supportedModels()).map(m => ({ providerID: "anthropic", modelID: m.value, name: m.displayName, connected: true })) : [], agents: async () => [],
+        models: () => catalog(), agents: async () => [],
         createSessionOperation: create, resetSessionOperation: create,
         async ensureSession(input) { if (!input.backendSessionId)
             throw Object.assign(new Error("Operation-aware creation required"), { code: "unsupported" }); const info = await sdk.getSessionInfo(input.backendSessionId, { dir: context.cwd }); await initialize(input.backendSessionId, Boolean(info)); return nativeId; },
@@ -299,8 +328,16 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
             updatedAt: 0,
         })), history: async () => [],
         async startTurnOperation(request, operationId) {
-            if (!query || active || (request.model && request.model.providerID !== "anthropic"))
+            if (!query || active)
                 return { kind: "rejected", code: "unsupported", message: "Claude Code supports idle turns on its native account" };
+            // The live query already holds the catalog from `initialize`, so
+            // validating a selection costs no process and no network call.
+            const selection = resolveModelSelection(
+                await catalog().catch(() => [] as ModelDescriptor[]),
+                request.model,
+                "claude",
+            );
+            if (!selection.ok) return { kind: "rejected", code: selection.code, message: selection.message };
             const content: Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }> = [];
             const delivered = composeTurnPrompt(request.text, request.attachments);
             const readBytes = (path: string) => readFile(isAbsolute(path) ? path : join(context.cwd, path));
@@ -322,13 +359,28 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                         const data = await readBytes(path);
                         content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: data.toString("base64") } });
                     } else {
-                        return { kind: "rejected", code: "unsupported", message: "Unsupported attachment type for Claude Code" };
+                        // Text files arrive as a projected prompt section, so
+                        // anything left here has no Claude content block.
+                        return {
+                            kind: "rejected",
+                            code: "unsupported",
+                            message: unsupportedAttachmentMessage(attachmentModality(ref), "Claude Code"),
+                        };
                     }
                 }
             }
             content.push({ type: "text", text: delivered.text });
             if (request.model)
                 await query.setModel(request.model.modelID);
+            try {
+                await applyEffort(selection.variant);
+            } catch {
+                return {
+                    kind: "rejected",
+                    code: "native-failure",
+                    message: "Claude Code did not accept the thinking level for this session.",
+                };
+            }
             active = operationId;
             order++;
             return new Promise(resolve => { admission = () => resolve({ kind: "confirmed", value: { admissionId: operationId }, receipt: operationId }); inputs.push({ type: "user", uuid: operationId as SDKUserMessage["uuid"], session_id: nativeId, parent_tool_use_id: null, message: { role: "user", content: content as SDKUserMessage["message"]["content"] } }); wake?.(); });

@@ -599,6 +599,38 @@ export type RuntimeErrorCode =
   | "invalid-attachment"
   | "unsupported" | "unknown";
 
+/**
+ * Why a harness's model list looks the way it does. `empty` requires an
+ * authoritative answer of zero models; `pending` and `unavailable` must never
+ * be collapsed into it, or "still discovering" becomes "has no models".
+ */
+export type ModelDiscoveryState =
+  | { state: "available" }
+  | { state: "pending" }
+  | { state: "empty" }
+  | { state: "unavailable"; reason: string };
+
+/** Product-level rejection vocabulary for a refused turn or refused control.
+ *  Adapters, admission and the composer all speak these codes so the user sees
+ *  one message per real cause instead of adapter-development prose. */
+export type TurnRejectionCode =
+  /** The harness/model cannot do this at all. */
+  | "unsupported"
+  /** The attachment itself is the problem (unreadable, wrong shape, too big). */
+  | "invalid-attachment"
+  /** The requested model is not in this harness's catalog. */
+  | "invalid-model"
+  /** The requested reasoning variant is not advertised for this model. */
+  | "invalid-variant"
+  /** The harness could not be asked what it supports right now. */
+  | "discovery-unavailable"
+  /** The harness needs a native sign-in before it can answer. */
+  | "auth"
+  /** The native call was made and failed on the provider side. */
+  | "native-failure"
+  /** The runtime explicitly refused (already in MutationOutcome use). */
+  | "runtime-rejected";
+
 /** Provider capacity failure classification for an error turn/stopped. */
 export type RateLimitScope = "rate" | "quota" | "overloaded" | "unknown";
 
@@ -671,6 +703,23 @@ export interface RuntimeCommandDescriptor {
 }
 export interface RuntimeAttachmentSupport {
   modalities: Partial<Record<AttachmentModality, FeatureSupport>>;
+}
+
+/**
+ * What the server knows about the session's live runtime, as the composer
+ * consumes it. `attachmentSupport` is the harness level only; the composer
+ * intersects it with the next-turn model's capabilities using `remote` and
+ * `materializeAvailable` so both sides compute delivery from the same inputs.
+ */
+export interface RuntimeFeaturesDto {
+  capabilities: RuntimeCapabilities;
+  commands: RuntimeCommandDescriptor[];
+  contextWindow?: ContextWindowState;
+  attachmentSupport: Partial<Record<AttachmentModality, FeatureSupport>>;
+  /** The session's execution root lives on another host. */
+  remote: boolean;
+  /** Staged uploads can be copied into the execution root. */
+  materializeAvailable: boolean;
 }
 export interface RuntimeCommandSupport {
   discovery: FeatureSupport;
@@ -1477,12 +1526,7 @@ export interface SessionService {
   sync(projectId: string): Promise<SessionProjection[]>;
   snapshot(sessionId: string): Promise<SessionProjection>;
   /** Live runtime feature surface for composer/settings diagnostics. */
-  runtimeFeatures?(sessionId: string): Promise<{
-    capabilities: RuntimeCapabilities;
-    commands: RuntimeCommandDescriptor[];
-    contextWindow?: ContextWindowState;
-    attachmentSupport: Partial<Record<AttachmentModality, FeatureSupport>>;
-  }>;
+  runtimeFeatures?(sessionId: string): Promise<RuntimeFeaturesDto>;
   /** `page` (beforeSeq/limit) selects the newest events in the window so deep
    *  logs hydrate incrementally; implementations may ignore it. */
   events(sessionId: string, afterSeq?: number, page?: EventPage): Promise<SessionEvent[]>;
@@ -2567,7 +2611,7 @@ export type ResponseIntentSettlement =
   | { kind: "unknown"; code?: string; message: string }
   | { kind: "not-applied"; code?: string; message: string };
 
-export interface ModelDescriptor { /** Present in aggregated/prospective catalogs; runtime-local catalogs may omit it. */ harnessId?: string; providerID: string; modelID: string; name: string; providerName?: string; context?: number; cost?: { input: number; output: number }; /** Normalized values include `input:text`, `output:image`, `input:none`, `toolcall`, and `attachment`. */ capabilities?: string[]; /** Named reasoning variants reported by OpenCode (for example low/medium/high). */ variants?: string[]; /** Provider has live credentials (backend `connected[]`); undefined = unknown/assume connected. */ connected?: boolean }
+export interface ModelDescriptor { /** Present in aggregated/prospective catalogs; runtime-local catalogs may omit it. */ harnessId?: string; providerID: string; modelID: string; name: string; providerName?: string; context?: number; cost?: { input: number; output: number }; /** Normalized values include `input:text`, `output:image`, `input:none`, `toolcall`, and `attachment`. */ capabilities?: string[]; /** Named reasoning variants the backend advertises for this model (for example low/medium/high). A selected variant is `ModelRef.variant`; there is no parallel thinking field. */ variants?: string[]; /** The variant the backend applies when `ModelRef.variant` is absent, when it names one. */ defaultVariant?: string; /** Provider has live credentials (backend `connected[]`); undefined = unknown/assume connected. */ connected?: boolean }
 export interface AgentDescriptor {
   /** Present in aggregated/prospective catalogs; runtime-local catalogs may omit it. */
   harnessId?: string;

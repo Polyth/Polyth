@@ -1,13 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
-import type { AgentRuntime, CanonicalTurnRequest, HarnessContext, JsonObject, ModelRef, MutationOutcome, RateLimitRetryHint, RuntimeErrorCode, RuntimeEvent, RuntimeObservation, RuntimeSnapshot, TokenUsage } from "@polyth/contracts";
+import type { AgentRuntime, CanonicalTurnRequest, HarnessContext, JsonObject, ModelDescriptor, ModelRef, MutationOutcome, RateLimitRetryHint, RuntimeErrorCode, RuntimeEvent, RuntimeObservation, RuntimeSnapshot, TokenUsage } from "@polyth/contracts";
 import {
     acknowledgeCapabilityApplication,
+    attachmentModality,
     captureCapabilityLaunch,
     composeTurnPrompt,
     deltaTokenUsage,
     provisioningTarget,
     releaseCapabilityLaunch,
+    resolveModelSelection,
+    unsupportedAttachmentMessage,
     type RpcPeer,
 } from "@polyth/harness-runtime";
 import { codexOverlays } from "./provisioner.ts";
@@ -161,7 +164,9 @@ export const CODEX_CAPABILITIES = {
     attachments: { modalities: {
         image: "native" as const,
         url: "native" as const,
-        file: "unsupported" as const,
+        // App Server v2 input blocks carry text, localImage and image only, so
+        // a text file is delivered by the server's prompt projection.
+        file: "emulated" as const,
         pdf: "unsupported" as const,
         audio: "unsupported" as const,
     } },
@@ -373,9 +378,76 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
         });
         return outcome.kind === "confirmed" ? { ...outcome, receipt: nativeId } : outcome;
     };
-    const start: NonNullable<AgentRuntime["startTurnOperation"]> = (request: CanonicalTurnRequest, operationId: string) => {
-        if (request.model && request.model.providerID !== (nativeModel?.providerID ?? "openai"))
-            return Promise.resolve({ kind: "rejected", code: "unsupported", message: "Select a model from the Codex native route" });
+    // `model/list` is a cheap read on the already-open App Server connection,
+    // but a turn asks for it to validate the reasoning effort, so one snapshot
+    // per runtime (with in-flight dedupe) keeps sending free of extra RPCs.
+    let modelCatalog: ModelDescriptor[] | undefined;
+    let modelCatalogPending: Promise<ModelDescriptor[]> | undefined;
+    const reasoningEfforts = (value: unknown): string[] => {
+        if (!Array.isArray(value)) return [];
+        return value.flatMap((entry) => {
+            if (typeof entry === "string") return entry ? [entry] : [];
+            const effort = (entry as { reasoningEffort?: unknown } | null)?.reasoningEffort;
+            return typeof effort === "string" && effort ? [effort] : [];
+        });
+    };
+    const catalog = (): Promise<ModelDescriptor[]> => {
+        if (modelCatalog) return Promise.resolve(modelCatalog);
+        if (modelCatalogPending) return modelCatalogPending;
+        const pending = (async () => {
+            const { data } = await rpc.request<{
+                data: Array<{
+                    model: string;
+                    displayName?: string;
+                    hidden?: boolean;
+                    inputModalities?: string[];
+                    supportedReasoningEfforts?: unknown;
+                    defaultReasoningEffort?: string;
+                }>;
+            }>("model/list", {});
+            const models = (data ?? []).filter((m) => !m.hidden).map((m) => {
+                const variants = reasoningEfforts(m.supportedReasoningEfforts);
+                const defaultVariant = typeof m.defaultReasoningEffort === "string"
+                    && variants.includes(m.defaultReasoningEffort)
+                    ? m.defaultReasoningEffort
+                    : undefined;
+                return {
+                    // App Server v2 `model/list` carries no provider field; the
+                    // provider is a property of the thread, so use the live one
+                    // when the thread has reported it.
+                    providerID: nativeModel?.providerID ?? "openai",
+                    modelID: m.model,
+                    name: m.displayName || m.model,
+                    connected: true,
+                    capabilities: [
+                        ...(m.inputModalities ?? []).flatMap((modality) => {
+                            if (modality === "image") return ["input:image"];
+                            if (modality === "text") return ["input:text"];
+                            return [];
+                        }),
+                        "output:text",
+                        "toolcall",
+                    ],
+                    ...(variants.length ? { variants } : {}),
+                    ...(defaultVariant ? { defaultVariant } : {}),
+                } satisfies ModelDescriptor;
+            });
+            modelCatalog = models;
+            return models;
+        })();
+        modelCatalogPending = pending;
+        return pending.finally(() => { if (modelCatalogPending === pending) modelCatalogPending = undefined; });
+    };
+    const start: NonNullable<AgentRuntime["startTurnOperation"]> = async (request: CanonicalTurnRequest, operationId: string) => {
+        // The model is identified by its Codex model id. `model/list` reports no
+        // provider, so a providerID that differs from the thread's provider is
+        // not evidence of a foreign model and must not reject the turn.
+        const selection = resolveModelSelection(
+            await catalog().catch(() => [] as ModelDescriptor[]),
+            request.model,
+            "codex",
+        );
+        if (!selection.ok) return { kind: "rejected", code: selection.code, message: selection.message };
         const delivered = composeTurnPrompt(request.text, request.attachments);
         const input: JsonObject[] = [{ type: "text", text: delivered.text }];
         for (const image of delivered.images) {
@@ -387,18 +459,34 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
                 input.push({ type: "image", url: ref.url });
                 continue;
             }
-            if (ref.mime?.startsWith("image/") && ref.path) {
+            if (ref.mime?.startsWith("image/")) {
+                if (!ref.path) {
+                    return { kind: "rejected", code: "invalid-attachment", message: `${ref.name} could not be read as an image.` };
+                }
                 input.push({ type: "localImage", path: isAbsolute(ref.path) ? ref.path : join(context.cwd, ref.path) });
                 continue;
             }
-            const code = ref.mime?.startsWith("image/") ? "invalid-attachment" : "unsupported";
-            return Promise.resolve({ kind: "rejected", code, message: "Codex supports materialized image paths and HTTP image URLs only" });
+            // Text files are delivered by the server's prompt projection and
+            // never reach this loop; anything else has no Codex input block.
+            return {
+                kind: "rejected",
+                code: "unsupported",
+                message: unsupportedAttachmentMessage(attachmentModality(ref), "Codex"),
+            };
         }
         return mutate(operationId, async () => {
             if (request.model) nativeModel = request.model;
             const { turn } = await rpc.request<{
                 turn: Turn;
-            }>("turn/start", { threadId: nativeId, clientUserMessageId: operationId, input, ...(request.model ? { model: request.model.modelID } : {}) });
+            }>("turn/start", {
+                threadId: nativeId,
+                clientUserMessageId: operationId,
+                input,
+                ...(request.model ? { model: request.model.modelID } : {}),
+                // Reasoning effort is per-turn in App Server v2 (`thread/start`
+                // has no effort field). Omitting it keeps the native default.
+                ...(selection.variant ? { effort: selection.variant } : {}),
+            });
             if (typeof turn?.id !== "string" || !turn.id)
                 throw new Error("Native turn receipt is invalid");
             activeTurn = turn.id;
@@ -407,33 +495,7 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
     };
     const runtime: AgentRuntime = {
         capabilities: async () => CODEX_CAPABILITIES,
-        models: async () => (await rpc.request<{
-            data: Array<{
-                model: string;
-                displayName: string;
-                hidden?: boolean;
-                inputModalities?: string[];
-                supportedReasoningEfforts?: string[];
-                defaultReasoningEffort?: string;
-            }>;
-        }>("model/list", {})).data.filter((m) => !m.hidden).map((m) => ({
-            providerID: nativeModel?.providerID ?? "openai",
-            modelID: m.model,
-            name: m.displayName,
-            connected: true,
-            capabilities: [
-                ...(m.inputModalities ?? []).flatMap((modality) => {
-                    if (modality === "image") return ["input:image"];
-                    if (modality === "text") return ["input:text"];
-                    return [];
-                }),
-                "output:text",
-                "toolcall",
-            ],
-            ...(m.supportedReasoningEfforts?.length
-                ? { variants: m.supportedReasoningEfforts }
-                : {}),
-        })),
+        models: () => catalog(),
         agents: async () => [],
         async ensureSession(input) {
             if (!input.backendSessionId)

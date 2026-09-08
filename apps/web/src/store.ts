@@ -172,6 +172,9 @@ export interface AppState {
     commands: RuntimeCommandDescriptor[];
     contextWindow?: ContextWindowState;
     attachmentSupport: Partial<Record<AttachmentModality, FeatureSupport>>;
+    /** Older servers omit these; treated as false at the intersection. */
+    remote?: boolean;
+    materializeAvailable?: boolean;
   } | undefined>;
 }
 

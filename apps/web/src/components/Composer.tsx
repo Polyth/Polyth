@@ -106,6 +106,7 @@ import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.t
 import { isManagedIsolationBranch } from "@polyth/contracts";
 import type {
   DraftExecutionConfig,
+  ModelDescriptor,
   ModelRef,
   QueueItemDto,
   RuntimeCapabilities,
@@ -120,8 +121,8 @@ import { useRuntimeCatalog } from "@polyth/models/runtime-catalog";
 import { modelSupportsThinking } from "@polyth/models/model-presentation";
 import { resolveProjectModelDefault, useSessionDefaults } from "../sessionDefaults.ts";
 import { contextTokensUsed } from "../reduce.ts";
-import { effectiveAttachmentSupport, attachmentModality } from "@polyth/harness-runtime/features";
-import { getModelThinking, setModelThinking } from "../thinkingPrefs.ts";
+import { effectiveAttachmentSupport, attachmentModality } from "@polyth/harness-runtime";
+import { getModelThinking, resolveComposerThinking, setModelThinking } from "../thinkingPrefs.ts";
 import { roleKind, useRolePrefs } from "../rolePrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import {
@@ -485,6 +486,15 @@ export default function Composer({
     ? routeCatalog.agents.filter((item) => !item.harnessId || item.harnessId === catalogHarnessId)
     : routeCatalog.agents;
   const chatModels = models.filter(modelSupportsTextWorkflow);
+  // The four honest states, so "still discovering" and "this engine is not
+  // signed in" never render as "this engine has no models".
+  const modelCatalog: CatalogState<ModelDescriptor> = chatModels.length > 0
+    ? { state: "available", items: chatModels }
+    : routeCatalog.discovery.state === "unavailable"
+      ? { state: "unavailable", reason: routeCatalog.discovery.reason }
+      : routeCatalog.discovery.state === "pending"
+        ? { state: "loading" }
+        : { state: "empty" };
   const activeSessionSeq = useStore((s) => {
     const events = s.activeSessionId ? s.events[s.activeSessionId] : undefined;
     return events?.at(-1)?.seq ?? 0;
@@ -1096,12 +1106,12 @@ export default function Composer({
       const selected = cfgSent.model ?? session?.model ?? preferredModel;
       const descriptor = selected && chatModels.find((candidate) =>
         candidate.providerID === selected.providerID && candidate.modelID === selected.modelID);
-      const requestedThinking = cfgSent.thinking !== undefined
-        ? cfgSent.thinking
-        : getModelThinking(selected) ?? sessionDefaults.defaultThinking;
-      const thinking = typeof requestedThinking === "string" && descriptor?.variants?.includes(requestedThinking)
-        ? requestedThinking
-        : undefined;
+      const thinking = resolveComposerThinking({
+        ...(descriptor ? { descriptor } : {}),
+        configThinking: cfgSent.thinking,
+        ...(getModelThinking(selected) ? { savedThinking: getModelThinking(selected)! } : {}),
+        ...(sessionDefaults.defaultThinking ? { sessionDefault: sessionDefaults.defaultThinking } : {}),
+      }).variant;
       const selectedModel = selected && descriptor
         ? { providerID: selected.providerID, modelID: selected.modelID, ...(thinking ? { variant: thinking } : {}) }
         : undefined;
@@ -1192,7 +1202,9 @@ export default function Composer({
       // (backend still starting / restarting) surfaces the same guidance as
       // the composer banner instead of appearing to swallow the message.
       setUiError(
-        runtimeUnavailable?.message
+        // The engine's own reason beats a guess about the backend.
+        (modelCatalog.state === "unavailable" ? modelCatalog.reason : undefined)
+          ?? runtimeUnavailable?.message
           ?? tr("composer.noModelsAvailableCheckThatTheBackend"),
       );
       return;
@@ -1212,13 +1224,12 @@ export default function Composer({
       ? chatModels.find((candidate) =>
           candidate.providerID === selected.providerID && candidate.modelID === selected.modelID)
       : undefined;
-    const requestedThinking = cfgSent.thinking !== undefined
-      ? cfgSent.thinking
-      : getModelThinking(selected) ?? sessionDefaults.defaultThinking;
-    const sentThinking = typeof requestedThinking === "string"
-      && selectedDescriptor?.variants?.includes(requestedThinking)
-      ? requestedThinking
-      : undefined;
+    const sentThinking = resolveComposerThinking({
+      ...(selectedDescriptor ? { descriptor: selectedDescriptor } : {}),
+      configThinking: cfgSent.thinking,
+      ...(getModelThinking(selected) ? { savedThinking: getModelThinking(selected)! } : {}),
+      ...(sessionDefaults.defaultThinking ? { sessionDefault: sessionDefaults.defaultThinking } : {}),
+    }).variant;
     const sentModel = selected && selectedDescriptor
       ? {
           providerID: selected.providerID,
@@ -1632,6 +1643,10 @@ export default function Composer({
           candidate.providerID === nextTurn.providerID && candidate.modelID === nextTurn.modelID)
       : undefined;
   })();
+  // Same inputs the server admits with: harness support intersected with the
+  // next-turn model, under the project's real remote/materialize policy. A
+  // hardcoded `false` here is what let the composer offer an attachment the
+  // send then refused.
   const composerAttachmentSupport = runtimeFeatures
     ? effectiveAttachmentSupport(
         {
@@ -1639,17 +1654,17 @@ export default function Composer({
           attachments: { modalities: runtimeFeatures.attachmentSupport },
         },
         selectedModel?.capabilities,
-        false,
-        false,
+        runtimeFeatures.remote === true,
+        runtimeFeatures.materializeAvailable === true,
       )
     : undefined;
-  const requestedSelectedThinking = cfg.thinking !== undefined
-    ? cfg.thinking
-    : getModelThinking(selectedModel) ?? sessionDefaults.defaultThinking;
-  const selectedThinking = typeof requestedSelectedThinking === "string"
-    && selectedModel?.variants?.includes(requestedSelectedThinking)
-    ? requestedSelectedThinking
-    : undefined;
+  const thinkingResolution = resolveComposerThinking({
+    ...(selectedModel ? { descriptor: selectedModel } : {}),
+    configThinking: cfg.thinking,
+    ...(getModelThinking(selectedModel) ? { savedThinking: getModelThinking(selectedModel)! } : {}),
+    ...(sessionDefaults.defaultThinking ? { sessionDefault: sessionDefaults.defaultThinking } : {}),
+  });
+  const selectedThinking = thinkingResolution.variant;
   // Honest attachment note from the next-turn model's normalized capabilities:
   // `input:image`/`attachment` = supported (no note); an input report without
   // image support names the block when an image pill is pending; no report
@@ -1677,6 +1692,19 @@ export default function Composer({
     );
     return anySupported ? undefined : tr("composer.discovery.currentlyUnavailable");
   })();
+  // A variant remembered for one model can be meaningless on the next. Drop
+  // the stale value so the control shows the effective one instead of a
+  // preference that would be discarded at send.
+  const reconciledThinkingKey = thinkingResolution.reconciled && selectedModel
+    ? `${selectedModel.harnessId ?? ""}/${selectedModel.providerID}/${selectedModel.modelID}`
+    : "";
+  useEffect(() => {
+    if (!reconciledThinkingKey || !selectedModel) return;
+    if (getModelThinking(selectedModel)) setModelThinking(selectedModel, undefined);
+    if (typeof cfg.thinking === "string") {
+      updateCfg(selectedThinking ? withExplicitThinking(cfg, selectedThinking) : withAutoThinking(cfg));
+    }
+  }, [reconciledThinkingKey]);
   const pickThinking = (thinking: string | undefined) => {
     if (selectedModel) setModelThinking(selectedModel, thinking);
     updateCfg(thinking === undefined ? withAutoThinking(cfg) : withExplicitThinking(cfg, thinking));
@@ -2030,7 +2058,8 @@ export default function Composer({
       {showModelWarning && (
         <div className="composer-note composer-runtime-unavailable" role="status">
           <span>
-            {runtimeUnavailable?.message
+            {(modelCatalog.state === "unavailable" ? modelCatalog.reason : undefined)
+              ?? runtimeUnavailable?.message
               ?? tr("composer.noModelsAvailableCheckThatTheBackend")}
           </span>
           <Button size="sm" onClick={retryModelConnection}>{tr("sidebar.reconnect")}</Button>

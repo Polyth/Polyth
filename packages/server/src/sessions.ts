@@ -11,7 +11,7 @@ import type {
   AgentProfile, AgentRuntime, AttachmentRef, AttachmentModality, AutoAcceptSetting, CanonicalEventInput, ChildSnapshotResult, ClientSettingsDto, ContextWindowState, CreateSessionInput, DeliveryMode,
   Disposable, DurableOperation, HarnessSelection, HarnessTransition, ForkDraft, ForkResult, JsonObject, ModelRef, MutationOutcome, NotificationRecord,
   PersistedRuntimeBinding,
-  InstalledPluginDto, PackageDescriptorDto, QueueItemDto, RateLimitRetry, RateLimitRetryHint, RuntimeEvent,
+  InstalledPluginDto, ModelDescriptor, PackageDescriptorDto, QueueItemDto, RateLimitRetry, RateLimitRetryHint, RuntimeEvent,
   RuntimeEpochTransitionResult, TurnResumeCancelledData,
   ExecutionReleaseProof,
   RuntimeEpochFence,
@@ -22,11 +22,21 @@ import type {
   SessionService, SessionPersistence, UserTurnInput,
   RuntimeCapabilities,
   RuntimeCommandDescriptor,
+  RuntimeFeaturesDto,
   FeatureSupport,
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
 import { isolationBlocksUserMutation, isolationNeedsRecovery, isManagedIsolationBranch, normalizeIsolation, transitionIsolation } from "@polyth/contracts";
-import { isPlaceholderTitle, titleFromPrompt, effectiveAttachmentSupport, attachmentModality } from "@polyth/harness-runtime";
+import {
+  attachmentModality,
+  composeProjectedPrompt,
+  effectiveAttachmentSupport,
+  isPlaceholderTitle,
+  planAttachmentDelivery,
+  projectAttachmentText,
+  resolveModelSelection,
+  titleFromPrompt,
+} from "@polyth/harness-runtime";
 import type { AutoAcceptStore, PermissionService } from "@polyth/permissions";
 import { resolveAutoAccept } from "@polyth/permissions";
 import {
@@ -360,6 +370,8 @@ export function createSessionService(deps: {
       execRoot: string;
       rel: string;
     }): Promise<{ kind: "file"; size: number }>;
+    /** Guarded read of a prepared attachment, for emulated text delivery. */
+    read?(root: string, rel: string, projectId?: string): Promise<Uint8Array>;
   };
   /** Managed browser capture artifacts outside the project worktree. */
   browserArtifacts?: {
@@ -382,6 +394,8 @@ export function createSessionService(deps: {
   /** Harness registry lookup for static features on idle sessions. */
   harnesses?: {
     staticFeatures(harnessId: string): RuntimeCapabilities | undefined;
+    /** Product name for the harness, used in user-facing refusals. */
+    displayName?(harnessId: string): string | undefined;
   };
 }): RuntimeEpochSessionService {
   const { store, projects, permissions, runtimes, broadcast } = deps;
@@ -2141,12 +2155,7 @@ export function createSessionService(deps: {
   const resolveRuntimeFeatures = async (
     sessionId: string,
     proj: SessionProjection,
-  ): Promise<{
-    capabilities: RuntimeCapabilities;
-    commands: RuntimeCommandDescriptor[];
-    contextWindow?: ContextWindowState;
-    attachmentSupport: Partial<Record<AttachmentModality, FeatureSupport>>;
-  }> => {
+  ): Promise<RuntimeFeaturesDto> => {
     const rt = sessionRuntime.get(sessionId);
     const harnessId = proj.resolvedHarnessId ?? "opencode";
     let capabilities: RuntimeCapabilities;
@@ -2174,7 +2183,70 @@ export function createSessionService(deps: {
       commands,
       ...(contextWindow ? { contextWindow } : {}),
       attachmentSupport,
+      remote,
+      materializeAvailable: materialize,
     };
+  };
+
+  /**
+   * The delivery inputs for a turn, resolved without waking a runtime. Static
+   * harness capabilities plus the project's remote/materialize policy — the
+   * same inputs the composer is given, so a send cannot be refused by a rule
+   * the UI never saw.
+   */
+  const attachmentDeliveryInputs = async (proj: SessionProjection): Promise<{
+    capabilities: RuntimeCapabilities;
+    harnessId: string;
+    harnessName: string;
+    remote: boolean;
+    materializeAvailable: boolean;
+  }> => {
+    const harnessId = proj.resolvedHarnessId ?? "opencode";
+    const live = sessionRuntime.get(proj.id);
+    const capabilities = live
+      ? await cachedCapabilities(live)
+      : deps.harnesses?.staticFeatures(harnessId) ?? CONSERVATIVE_CAPABILITIES;
+    const project = await projects.get(proj.projectId);
+    return {
+      capabilities,
+      harnessId,
+      harnessName: deps.harnesses?.displayName?.(harnessId) ?? harnessId,
+      remote: Boolean(project?.remote),
+      materializeAvailable: Boolean(deps.attachments?.materialize),
+    };
+  };
+
+  /**
+   * Refuse an undeliverable attachment at send, before anything is
+   * materialized, logged or queued. The model is not known yet for a queued
+   * turn, so this is the harness-level answer; `admitTurnCoreUnfenced`
+   * re-checks with the resolved model right before dispatch.
+   */
+  const assertAttachmentsDeliverable = async (
+    proj: SessionProjection,
+    refs: readonly AttachmentRef[],
+    modelCapabilities?: readonly string[],
+  ): Promise<void> => {
+    if (refs.length === 0) return;
+    const inputs = await attachmentDeliveryInputs(proj);
+    const support = effectiveAttachmentSupport(
+      inputs.capabilities,
+      modelCapabilities,
+      inputs.remote,
+      inputs.materializeAvailable,
+    );
+    const supportDeclared = inputs.capabilities.attachments?.modalities !== undefined;
+    for (const ref of refs) {
+      const plan = planAttachmentDelivery({
+        ref,
+        support,
+        harnessName: inputs.harnessName,
+        supportDeclared,
+      });
+      if (plan.kind === "unsupported") {
+        throw Object.assign(new Error(plan.reason), { code: plan.code });
+      }
+    }
   };
 
   // ---- rate-limit auto-resume ------------------------------------------------
@@ -4016,31 +4088,68 @@ export function createSessionService(deps: {
     const agent = input.agent ?? cmdAgent ?? proj.agent;
     await requireLaunchModelForAutoAgent(rt, agent, model);
 
+    // Model + variant are validated here, before anything model-visible is
+    // appended: a variant the harness does not advertise must never be quietly
+    // dropped on the way to the backend.
+    let selectedModel: ModelDescriptor | undefined;
+    if (model) {
+      const selection = resolveModelSelection(
+        await rt.models().catch(() => [] as ModelDescriptor[]),
+        model,
+        rt.harnessId ?? proj.resolvedHarnessId,
+      );
+      if (!selection.ok) {
+        throw Object.assign(new Error(selection.message), { code: selection.code });
+      }
+      selectedModel = selection.descriptor;
+    }
+    // One delivery decision per attachment, shared with the send-time check.
+    // A `text-projection` plan is emulated HERE so the adapter only ever sees
+    // refs its harness can actually deliver.
+    let deliveredAttachments = input.attachments;
+    let projectedSections: string[] = [];
     if (input.attachments?.length) {
       const caps = await cachedCapabilities(rt);
-      const models = await rt.models().catch(() => []);
-      const selected = model
-        ? models.find((m) => m.providerID === model.providerID && m.modelID === model.modelID)
-        : undefined;
       const project = await projects.get(proj.projectId);
+      const harnessId = rt.harnessId ?? proj.resolvedHarnessId ?? "opencode";
+      const harnessName = deps.harnesses?.displayName?.(harnessId) ?? harnessId;
       const support = effectiveAttachmentSupport(
         caps,
-        selected?.capabilities,
+        selectedModel?.capabilities,
         Boolean(project?.remote),
         Boolean(deps.attachments?.materialize),
       );
-      const integrationDeclaresAttachments = caps.attachments?.modalities !== undefined;
+      const supportDeclared = caps.attachments?.modalities !== undefined;
+      const forwarded: AttachmentRef[] = [];
+      const sections: string[] = [];
       for (const ref of input.attachments) {
-        const modality = attachmentModality(ref);
-        if (modality && integrationDeclaresAttachments
-          && support[modality] !== "native" && support[modality] !== "emulated") {
-          const harnessId = rt.harnessId ?? proj.resolvedHarnessId ?? "runtime";
+        const plan = planAttachmentDelivery({ ref, support, harnessName, supportDeclared });
+        if (plan.kind === "unsupported") {
+          throw Object.assign(new Error(plan.reason), { code: plan.code });
+        }
+        if (plan.kind !== "text-projection") { forwarded.push(ref); continue; }
+        const execRoot = proj.worktreePath ?? (await projects.get(proj.projectId))?.path;
+        const bytes = execRoot && ref.path
+          ? await deps.attachments?.read?.(execRoot, ref.path).catch(() => undefined)
+          : undefined;
+        if (!bytes) {
           throw Object.assign(
-            new Error(`Selected ${harnessId} runtime/model does not support ${modality} attachments through the current integration.`),
+            new Error(`${ref.name} could not be read for this engine.`),
             { code: "invalid-attachment" },
           );
         }
+        const projection = projectAttachmentText({
+          path: ref.path!,
+          ...(ref.kind === "range" && ref.range ? { range: ref.range } : {}),
+          bytes,
+        });
+        if (!projection.ok) {
+          throw Object.assign(new Error(projection.reason), { code: projection.code });
+        }
+        sections.push(projection.section);
       }
+      deliveredAttachments = forwarded;
+      projectedSections = sections;
     }
     // Model-visible behavior instructions are logged BEFORE the turn that
     // first runs under a new revision (worst case after restart: one benign
@@ -4161,7 +4270,10 @@ export function createSessionService(deps: {
       async (operationId) => {
         const request = {
           sessionId,
-          text: recoveredUserText(text, recoveryContext || undefined),
+          text: composeProjectedPrompt(
+            recoveredUserText(text, recoveryContext || undefined),
+            projectedSections,
+          ),
           ...(nativeDescriptor ? {
             command: {
               id: nativeDescriptor.id,
@@ -4170,7 +4282,9 @@ export function createSessionService(deps: {
               ...(nativeCommand?.args ? { args: nativeCommand.args } : {}),
             },
           } : {}),
-          ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+          // Only the refs the harness itself can deliver. A projected text
+          // file is already in `text`; forwarding it too would duplicate it.
+          ...(deliveredAttachments?.length ? { attachments: deliveredAttachments } : {}),
           ...(model ? { model } : {}),
           ...(agent ? { agent } : {}),
         };
@@ -5629,6 +5743,14 @@ export function createSessionService(deps: {
       // reset, queueing, admission) so a bad ref can never dirty the durable
       // log.
       if (input.attachments !== undefined) {
+        // Compatibility first: an attachment this engine cannot deliver is
+        // refused here, before any `_inbox/*` bytes are copied into the
+        // execution root and before the turn can be queued.
+        const shaped = sanitizeAttachments(input.attachments, {
+          maxBytes: deps.attachments?.maxBytes ?? 20 * 1024 * 1024,
+          projectId: proj.projectId,
+        });
+        await assertAttachmentsDeliverable(proj, shaped);
         const prepared = await prepareAttachments(proj, input.attachments, sessionId);
         input = { ...input };
         if (prepared) input.attachments = prepared;

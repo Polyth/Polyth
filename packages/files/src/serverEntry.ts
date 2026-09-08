@@ -29,6 +29,9 @@ export interface AttachmentSourceService {
     execRoot: string;
     rel: string;
   }): Promise<{ kind: "file"; size: number }>;
+  /** Read an already-prepared attachment through the same guarded store, for
+   *  harnesses whose file delivery is emulated as prompt text. */
+  read(root: string, rel: string, projectId?: string): Promise<Uint8Array>;
 }
 
 interface SshTransportService {
@@ -85,6 +88,12 @@ export function createAttachmentSourceService(
       await fs.writeBytes(execRoot, rel, raw.data);
       const st = await fs.stat(execRoot, rel);
       return { kind: "file", size: st.size };
+    },
+    read: async (root, rel, projectId) => {
+      const fs = await filesFor(projectId ?? null);
+      // `readRaw` applies the same root confinement and MAX_RAW_BYTES cap as
+      // every other attachment read.
+      return (await fs.readRaw(root, rel)).data;
     },
   };
 }

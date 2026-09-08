@@ -27,6 +27,24 @@ export {
   isPlaceholderTitle,
   titleFromPrompt,
 } from "./features.ts";
+export {
+  composeProjectedPrompt,
+  planAttachmentDelivery,
+  projectAttachmentText,
+  TEXT_PROJECTION_MAX_BYTES,
+  unsupportedAttachmentMessage,
+  type AttachmentDeliveryInput,
+  type AttachmentDeliveryPlan,
+  type TextProjection,
+  type TextProjectionInput,
+} from "./delivery.ts";
+export {
+  findModelDescriptor,
+  harnessModels,
+  resolveModelSelection,
+  resolveVariantPreference,
+  type ModelSelection,
+} from "./models.ts";
 import type {
     AgentRuntime,
     HarnessAvailabilityState,

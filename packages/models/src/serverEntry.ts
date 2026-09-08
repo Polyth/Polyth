@@ -2,6 +2,7 @@ import type {
   AgentDescriptor,
   AgentProfile,
   ModelDescriptor,
+  ModelDiscoveryState,
   RouteHandler,
 } from "@polyth/contracts";
 import { localOnlyRemoteAccess, type ServerPackage, type ServerPackageHost } from "@polyth/plugins";
@@ -155,10 +156,23 @@ export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
     const runtime = host.runtimes.forSession
       ? await host.runtimes.forSession(session, session.worktreePath ?? project.path)
       : await host.runtimes.forProject(project.id, session.worktreePath ?? project.path);
-    const [rawModels, rawAgents, capabilities] = await Promise.all([runtime.models(), runtime.agents(), runtime.capabilities()]);
-    const models = rawModels.map((model) => ({ ...model, ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}) }));
+    // A harness whose discovery failed is reported as unavailable with the
+    // reason. Reporting it as an empty catalog would tell the user this engine
+    // has no models, which is a different and false claim.
+    const [modelResult, rawAgents, capabilities] = await Promise.all([
+      runtime.models().then(
+        (value) => ({ ok: true as const, value }),
+        (error: unknown) => ({ ok: false as const, reason: (error as { message?: string })?.message?.trim() || "model discovery failed" }),
+      ),
+      runtime.agents().catch(() => []),
+      runtime.capabilities(),
+    ]);
+    const models = (modelResult.ok ? modelResult.value : []).map((model) => ({ ...model, ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}) }));
     const agents = rawAgents.map((agent) => ({ ...agent, ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}) }));
-    request.json(200, { models, agents, capabilities, nativeDefault: models.length === 0, harnessId: runtime.harnessId }); return true;
+    const discovery: ModelDiscoveryState = !modelResult.ok
+      ? { state: "unavailable", reason: modelResult.reason }
+      : models.length > 0 ? { state: "available" } : { state: "empty" };
+    request.json(200, { models, agents, capabilities, discovery, nativeDefault: models.length === 0, harnessId: runtime.harnessId }); return true;
   };
 }
 
