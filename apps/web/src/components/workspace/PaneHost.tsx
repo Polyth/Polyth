@@ -79,6 +79,9 @@ const PaneHost = forwardRef<PaneHostHandle, PaneHostProps>(function PaneHost(
   const hostVisible = usePaneVisible();
   const scopeKey = paneStorageKey(projectId, sessionId);
   const [pane, setPane] = useState<PaneState>(emptyPane);
+  const paneRef = useRef(pane);
+  paneRef.current = pane;
+  const closingIds = useRef(new Set<string>());
   const [dragTab, setDragTab] = useState<string | null>(null);
   // Keep-alive is per visited tab: a restored-but-never-activated tab loads
   // nothing until first activation.
@@ -124,29 +127,61 @@ const PaneHost = forwardRef<PaneHostHandle, PaneHostProps>(function PaneHost(
     [projectId, sessionId],
   );
 
-  const requestClose = useCallback((id: string, opts: { force?: boolean } = {}): boolean => {
-    let closed = true;
-    setPane((p) => {
-      const t = p.tabs.find((x) => x.id === id);
-      if (!t) return p;
-      const scope = { projectId, sessionId };
-      const provider = getPaneProvider(t.kind);
-      if (!opts.force && isDirty(t)) {
-        closed = false;
-        void confirmAlert(tr("workspace.panehost.discardUnsavedChangesInValue", { title: t.title }), { title: tr("common.discardChanges"), confirmLabel: tr("common.discard") })
-          .then((confirmed) => {
-            if (!confirmed) return;
-            provider?.discard?.(scope, t.resource);
-            provider?.close?.(scope, t.resource);
-            setPane((current) => closeTab(markDirty(current, id, false), id, { force: true }).state);
-          });
-        return p;
-      }
-      provider?.close?.(scope, t.resource);
-      return closeTab(markDirty(p, id, false), id, { force: true }).state;
+  const finishClose = useCallback((id: string) => {
+    setPane((current) => {
+      if (!current.tabs.some((x) => x.id === id)) return current;
+      return closeTab(markDirty(current, id, false), id, { force: true }).state;
     });
-    return closed;
-  }, [isDirty, projectId, sessionId]);
+  }, []);
+
+  const requestClose = useCallback((id: string, opts: { force?: boolean } = {}): boolean => {
+    if (closingIds.current.has(id)) return false;
+    const t = paneRef.current.tabs.find((x) => x.id === id);
+    if (!t) return true;
+    const scope = { projectId, sessionId };
+    const provider = getPaneProvider(t.kind);
+    const needsGuard = !opts.force && isDirty(t);
+
+    const runClose = async (discardFirst: boolean) => {
+      closingIds.current.add(id);
+      try {
+        if (discardFirst) {
+          const confirmed = await confirmAlert(
+            tr("workspace.panehost.discardUnsavedChangesInValue", { title: t.title }),
+            { title: tr("common.discardChanges"), confirmLabel: tr("common.discard") },
+          );
+          if (!confirmed) return;
+          await provider?.discard?.(scope, t.resource);
+        }
+        await provider?.close?.(scope, t.resource);
+        finishClose(id);
+      } catch {
+        // Lifecycle failed — keep the tab so the error remains visible.
+      } finally {
+        closingIds.current.delete(id);
+      }
+    };
+
+    if (needsGuard) {
+      void runClose(true);
+      return false;
+    }
+
+    const closed = provider?.close?.(scope, t.resource);
+    if (closed != null && typeof (closed as Promise<void>).then === "function") {
+      closingIds.current.add(id);
+      void Promise.resolve(closed).then(() => {
+        finishClose(id);
+      }).catch(() => {
+        // keep the tab
+      }).finally(() => {
+        closingIds.current.delete(id);
+      });
+      return false;
+    }
+    finishClose(id);
+    return true;
+  }, [finishClose, isDirty, projectId, sessionId]);
 
   const openResource = useCallback((kind: string, resource: string, title?: string) => {
     setPane((p) => openTab(p, {

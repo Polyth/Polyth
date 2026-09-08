@@ -308,6 +308,22 @@ test("write with stale baseRevision rejects with conflict and keeps disk content
   });
 });
 
+test("write with baseRevision against a missing file conflicts and does not recreate", async () => {
+  await withRoot(async (root) => {
+    await writeFile(path.join(root, "gone.txt"), "v1");
+    const got = await files.read(root, "gone.txt");
+    await rm(path.join(root, "gone.txt"));
+    await assert.rejects(
+      files.write(root, "gone.txt", "resurrect", { baseRevision: got.revision! }),
+      (err: Error & { code?: string }) => err.code === "conflict",
+    );
+    await assert.rejects(readFile(path.join(root, "gone.txt"), "utf8"), (err: NodeJS.ErrnoException) => err.code === "ENOENT");
+    const res = await files.write(root, "gone.txt", "recreated");
+    assert.ok(res.revision);
+    assert.equal(await readFile(path.join(root, "gone.txt"), "utf8"), "recreated");
+  });
+});
+
 test("write without baseRevision still succeeds (explicit overwrite)", async () => {
   await withRoot(async (root) => {
     await writeFile(path.join(root, "a.txt"), "v1");

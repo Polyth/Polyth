@@ -36,9 +36,9 @@ export interface PaneProvider {
   /** Unsaved-state probe: drives the tab dirty marker and the close guard. */
   dirty?: (scope: PaneScope, resource: string) => boolean;
   /** Authoritative discard of unsaved edits (called before close on dirty tabs). */
-  discard?: (scope: PaneScope, resource: string) => void;
+  discard?: (scope: PaneScope, resource: string) => void | Promise<void>;
   /** Release document session and editor retained state when a tab closes. */
-  close?: (scope: PaneScope, resource: string) => void;
+  close?: (scope: PaneScope, resource: string) => void | Promise<void>;
   /** Change source for dirty/title updates (useSyncExternalStore shape). */
   subscribe?: (cb: () => void) => () => void;
   /** Resource body — a component, so it owns its hooks and state. */

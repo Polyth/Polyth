@@ -37,7 +37,7 @@ const { createRoot } = await import("react-dom/client");
 const { resourceKey } = await import("@polyth/web-sdk");
 const { undo, redo } = await import("@codemirror/commands");
 const { EditorView } = await import("@codemirror/view");
-const { openDocument, resetDocumentsForTest } = await import("../../../apps/web/src/resources/documents.ts");
+const { openDocument, renameDocument, resetDocumentsForTest } = await import("../../../apps/web/src/resources/documents.ts");
 const { setLocale } = await import("../../../apps/web/src/i18n/index.ts");
 const { registerResourceProvider } = await import("../../../apps/web/src/resources/providers.ts");
 const {
@@ -68,13 +68,32 @@ function resetBodies(): void {
   bodies.set("b.ts", "bbb");
 }
 
+let writeImpl: (ref: { locator: string }, content: string) => Promise<{ revision: string }> = async (ref, content) => {
+  bodies.set(ref.locator, content);
+  return { revision: "2" };
+};
+
+function restoreWriteImpl(): void {
+  writeImpl = async (ref, content) => {
+    bodies.set(ref.locator, content);
+    return { revision: "2" };
+  };
+}
+
 registerResourceProvider({
   scheme,
   describe: (ref) => ({ label: ref.locator, kind: "text" }),
   read: async (ref) => ({ content: bodies.get(ref.locator) ?? "", revision: "1" }),
-  write: async (ref, content) => {
-    bodies.set(ref.locator, content);
-    return { revision: "2" };
+  write: async (ref, content) => writeImpl(ref, content),
+  rename: async (ref, to) => {
+    const content = bodies.get(ref.locator);
+    if (content === undefined) throw new Error("missing");
+    bodies.delete(ref.locator);
+    bodies.set(to, content);
+    return { ...ref, locator: to };
+  },
+  remove: async (ref) => {
+    bodies.delete(ref.locator);
   },
 });
 
@@ -462,7 +481,64 @@ test("rename/move: retained state follows the new resource key", async () => {
   }
 });
 
-test("language stale apply: delayed TypeScript load does not reconfigure YAML tab", async () => {
+test("rename during held save migrates retained editor state after the write settles", async () => {
+  resetBodies();
+  bodies.set("old.ts", "O");
+  resetDocumentsForTest();
+  resetEditorRuntimeForTest();
+  const payloads: string[] = [];
+  let releaseFirst!: () => void;
+  writeImpl = async (r, content) => {
+    payloads.push(content);
+    if (payloads.length === 1) {
+      await new Promise<void>((resolve) => { releaseFirst = resolve; });
+    }
+    bodies.set(r.locator, content);
+    return { revision: `r${payloads.length + 1}` };
+  };
+  const from = docRef("old.ts");
+  const to = docRef("new.ts");
+  const handle = openDocument(from);
+  await handle.load();
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => {
+      root.render(createElement(EditorRuntime, { ...runtimeProps("old.ts", true), path: "old.ts" }));
+    });
+    const view = EditorView.findFromDOM(host.querySelector(".cm-editor") as HTMLElement)!;
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "A" }, userEvent: "input" });
+    const saving = handle.save();
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "B" }, userEvent: "input" });
+    let renamed = false;
+    const renaming = renameDocument(from, "new.ts").then(() => { renamed = true; });
+    await act(async () => { await Promise.resolve(); });
+    assert.equal(renamed, false);
+    assert.ok(peekRetainedState(from));
+    assert.equal(peekRetainedState(to), null);
+    assert.equal(bodies.has("old.ts"), true);
+    assert.equal(bodies.has("new.ts"), false);
+    releaseFirst();
+    await saving;
+    await renaming;
+    assert.equal(peekRetainedState(from), null);
+    assert.ok(peekRetainedState(to));
+    assert.equal(peekRetainedState(to)!.state.doc.toString(), "B");
+    assert.equal(bodies.get("new.ts"), "A");
+    assert.equal(bodies.has("old.ts"), false);
+    assert.equal(handle.getSnapshot().dirty, true);
+    await handle.save();
+    assert.equal(bodies.get("new.ts"), "B");
+    assert.equal(bodies.has("old.ts"), false);
+  } finally {
+    restoreWriteImpl();
+    await act(async () => { root.unmount(); });
+    host.remove();
+    resetEditorRuntimeForTest();
+    resetDocumentsForTest();
+  }
+});
   resetBodies();
   resetDocumentsForTest();
   resetEditorRuntimeForTest();

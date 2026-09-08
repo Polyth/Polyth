@@ -19,6 +19,7 @@ import { ChevronGlyph, FileTypeGlyph, FolderGlyph, fileTypeKeyOf } from "./edito
 import { confirmAlert, promptAlert } from "../../../apps/web/src/alerts.ts";
 import { desktopBridge } from "../../../apps/web/src/desktopBridge.ts";
 import "./editor/FilePane.tsx"; // registers the "file" pane provider
+import { peekFileDoc, removeDoc, renameDoc } from "./editor/fileDocs.ts";
 import "../../../apps/web/src/workspace/mainSlotPanes.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts"; // registers the "plugin" slot bridge
 import { BackIcon, IconButton, Menu, SearchIcon, Tabs, TextInput, type MenuEntry } from "../../../apps/web/src/components/ui/index.ts";
@@ -181,7 +182,11 @@ export default function EditorView() {
     const to = (await promptAlert(tr("editorview.renameOrMoveThisItem"), { title: tr("editorview.renameMoveTitle"), initialValue: entry.path, confirmLabel: tr("common.rename") }))?.trim();
     if (!to || to === entry.path) return;
     try {
-      await api.filesRename(projectId, entry.path, to, sid);
+      if (!entry.dir && projectId && peekFileDoc(projectId, sessionId, entry.path)) {
+        await renameDoc(projectId, sessionId, entry.path, to);
+      } else {
+        await api.filesRename(projectId, entry.path, to, sid);
+      }
       await Promise.all([loadDir(parentOf(entry.path)), loadDir(parentOf(to))]);
       if (!entry.dir) paneRef.current?.rename("file", entry.path, to, baseOf(to));
     } catch (err) {
@@ -193,7 +198,11 @@ export default function EditorView() {
     if (!projectId) return;
     if (!await confirmAlert(tr("editorview.deleteValueValue", { path: entry.path, value: entry.dir ? tr("editorview.andItsContents") : "" }), { title: tr("editorview.deleteItem"), confirmLabel: tr("common.delete") })) return;
     try {
-      await api.filesDelete(projectId, entry.path, sid);
+      if (!entry.dir && projectId && peekFileDoc(projectId, sessionId, entry.path)) {
+        await removeDoc(projectId, sessionId, entry.path);
+      } else {
+        await api.filesDelete(projectId, entry.path, sid);
+      }
       await loadDir(parentOf(entry.path));
       if (!entry.dir) paneRef.current?.close("file", entry.path, { force: true });
     } catch (err) {

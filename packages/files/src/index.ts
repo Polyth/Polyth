@@ -213,6 +213,8 @@ export function createFileService(): FileService {
             await fh.close();
           }
         }
+      } else if (opts.baseRevision !== undefined) {
+        throw Object.assign(new Error(`File no longer exists: ${rel}`), { code: "conflict" });
       }
       await mkdir(path.dirname(abs), { recursive: true });
       await writeFile(abs, content, "utf8");

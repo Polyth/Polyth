@@ -25,7 +25,7 @@ import {
 } from "../../../../apps/web/src/resources/views.ts";
 import {
   deleteDoc, docsVersion, fileResourceRef, installDocUnloadGuard,
-  isDocDirty, moveDoc, openFileDoc, peekFileDoc, subscribeDocs,
+  isDocDirty, openFileDoc, peekFileDoc, removeDoc, renameDoc, subscribeDocs,
 } from "./fileDocs.ts";
 import {
   Button,
@@ -297,8 +297,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
     }
     setBusy(true);
     try {
-      await api.filesRename(projectId, doc.path, to, sid);
-      moveDoc(projectId, sessionId, doc.path, to);
+      await renameDoc(projectId, sessionId, doc.path, to);
       actions?.renameSelf("file", doc.path, to, baseOf(to));
       setRenameTo(null);
       announceFilesChanged();
@@ -313,9 +312,8 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
     if (!doc) return;
     setBusy(true);
     try {
-      await api.filesDelete(projectId, doc.path, sid);
+      await removeDoc(projectId, sessionId, doc.path);
       setConfirmDel(false);
-      deleteDoc(projectId, sessionId, doc.path);
       actions?.closeSelf("file", doc.path);
       announceFilesChanged();
     } catch (err) {
@@ -662,12 +660,10 @@ export function registerFilePaneProvider(): () => void {
     title: baseOf,
     available: () => true,
     dirty: (scope, resourcePath) => isDocDirty(scope.projectId, scope.sessionId, resourcePath),
-    discard: (scope, resourcePath) => {
-      peekFileDoc(scope.projectId, scope.sessionId, resourcePath)?.handle.discard();
-    },
-    close: (scope, resourcePath) => {
-      deleteDoc(scope.projectId, scope.sessionId, resourcePath);
-    },
+    discard: (scope, resourcePath) =>
+      peekFileDoc(scope.projectId, scope.sessionId, resourcePath)?.handle.discard(),
+    close: (scope, resourcePath) =>
+      deleteDoc(scope.projectId, scope.sessionId, resourcePath),
     subscribe: subscribeDocs,
     component: FilePane,
   });

@@ -1,4 +1,4 @@
-import { httpStatusOf } from "@polyth/session/web-api";
+import { errorCodeOf, httpStatusOf } from "@polyth/session/web-api";
 import type {
   ResourceDocumentHandle,
   ResourceDocumentSnapshot,
@@ -45,8 +45,13 @@ interface Session {
   source: ResourceTextSource | null;
   autosaveTimer: ReturnType<typeof setTimeout> | null;
   loading: Promise<void> | null;
-  /** Physical in-flight provider.write. UI `live.kind` is not this lock. */
-  saveInFlight: Promise<void> | null;
+  /**
+   * Exclusive persistence/lifecycle lane for this document.
+   * UI `live.kind` is not this lock. One owner at a time: save, rename,
+   * delete, reload, discard, or session dispose.
+   */
+  persistence: Promise<void> | null;
+  closed: boolean;
   listeners: Set<() => void>;
 }
 
@@ -82,6 +87,61 @@ function notify(session: Session, store = true): void {
 
 function msg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** Sync try-claim. Null means the lane is busy or the session is gone. */
+function claimPersistence(session: Session): (() => void) | null {
+  if (session.closed || session.persistence) return null;
+  let settled = false;
+  let resolve!: () => void;
+  session.persistence = new Promise<void>((r) => { resolve = r; });
+  return () => {
+    if (settled) return;
+    settled = true;
+    session.persistence = null;
+    resolve();
+  };
+}
+
+/**
+ * Wait until the lane is free, then claim it. Rechecks after every waiter
+ * resume so another save cannot slip in between wait and the lifecycle op.
+ */
+async function acquirePersistence(session: Session): Promise<() => void> {
+  for (;;) {
+    if (session.closed) throw new Error("document closed");
+    const release = claimPersistence(session);
+    if (release) return release;
+    await session.persistence;
+  }
+}
+
+/** Claim+run synchronously when idle so existing tests keep a sync fast path. */
+function withPersistenceGate<T>(session: Session, run: () => T): T | Promise<T> {
+  const release = claimPersistence(session);
+  if (release) {
+    try {
+      return run();
+    } finally {
+      release();
+    }
+  }
+  return acquirePersistence(session).then((rel) => {
+    try {
+      return run();
+    } finally {
+      rel();
+    }
+  });
+}
+
+function maybeArmAutosave(session: Session): void {
+  if (session.closed || !session.dirty || !session.editing || session.composing) return;
+  armAutosave(session);
+}
+
+function isConflictError(err: unknown): boolean {
+  return httpStatusOf(err) === 409 || errorCodeOf(err) === "conflict";
 }
 
 function bumpAuthoritative(session: Session, text: string): void {
@@ -184,15 +244,7 @@ function handleOf(session: Session): ResourceDocumentHandle {
     save: (options) => saveSession(session, options),
     reload: () => reloadSession(session),
     check: () => checkSession(session),
-    discard: () => {
-      session.saved = session.saved;
-      session.dirty = false;
-      session.bufferVersion++;
-      if (session.live) session.live = restoreLiveFileBuffer(session.live);
-      bumpAuthoritative(session, session.saved);
-      clearAutosave(session);
-      notify(session);
-    },
+    discard: () => discardSession(session),
     dismissNotice: () => {
       if (!session.live) return;
       session.live = dismissLiveFileNotice(session.live);
@@ -206,6 +258,22 @@ function handleOf(session: Session): ResourceDocumentHandle {
     }, delayMs),
     moveTo: (ref) => moveSession(session, ref),
   };
+}
+
+function runDiscard(session: Session): void {
+  session.dirty = false;
+  session.bufferVersion++;
+  if (session.live) session.live = restoreLiveFileBuffer(session.live);
+  bumpAuthoritative(session, session.saved);
+  clearAutosave(session);
+  notify(session);
+}
+
+function discardSession(session: Session): void | Promise<void> {
+  if (session.closed) return;
+  return withPersistenceGate(session, () => {
+    if (!session.closed) runDiscard(session);
+  });
 }
 
 function reportUserEdit(session: Session, equivalentToSaved: boolean): void {
@@ -267,17 +335,17 @@ async function loadSession(session: Session): Promise<void> {
 
 async function saveSession(session: Session, options: { force?: boolean } = {}): Promise<void> {
   const provider = getResourceProvider(session.ref.scheme);
-  if (!provider?.write || session.truncated || session.binary) return;
-  if (session.saveInFlight) return;
+  if (!provider?.write || session.truncated || session.binary || session.closed) return;
+  const release = claimPersistence(session);
+  if (!release) return;
   const content = getBuffer(session);
   session.live = beginLiveFileSave(session.live ?? loadedLiveFile(session.revision));
-  let settle!: () => void;
-  session.saveInFlight = new Promise<void>((resolve) => { settle = resolve; });
   try {
     notify(session);
     try {
       const base = options.force ? undefined : session.revision;
       const res = await provider.write(session.ref, content, base);
+      if (session.closed) return;
       const current = getBuffer(session);
       const stillDirty = current !== content;
       session.saved = content;
@@ -290,41 +358,49 @@ async function saveSession(session: Session, options: { force?: boolean } = {}):
       if (stillDirty) armAutosave(session);
       else clearAutosave(session);
     } catch (err) {
-      if (httpStatusOf(err) === 409) {
+      if (session.closed) return;
+      if (isConflictError(err)) {
         session.live = conflictLiveFile(session.live ?? loadedLiveFile(session.revision));
       } else {
         session.error = msg(err);
         session.live = failLiveFileSave(session.live ?? loadedLiveFile(session.revision));
       }
     }
-    notify(session);
+    if (!session.closed) notify(session);
   } finally {
-    session.saveInFlight = null;
-    settle();
+    release();
   }
 }
 
 async function reloadSession(session: Session): Promise<void> {
+  if (session.closed) return;
   const provider = getResourceProvider(session.ref.scheme);
   if (!provider) return;
+  const release = await acquirePersistence(session);
   try {
-    const got = await provider.read(session.ref);
-    session.saved = got.content;
-    session.checkpoint = got.content;
-    session.revision = got.revision;
-    session.truncated = got.truncated === true;
-    session.binary = got.binary === true || got.tooLarge === true;
-    session.live = loadedLiveFile(got.revision);
-    session.dirty = false;
-    session.error = "";
-    session.status = "ready";
-    session.bufferVersion++;
-    bumpAuthoritative(session, got.content);
-    clearAutosave(session);
-  } catch (err) {
-    session.error = msg(err);
+    if (session.closed) return;
+    try {
+      const got = await provider.read(session.ref);
+      if (session.closed) return;
+      session.saved = got.content;
+      session.checkpoint = got.content;
+      session.revision = got.revision;
+      session.truncated = got.truncated === true;
+      session.binary = got.binary === true || got.tooLarge === true;
+      session.live = loadedLiveFile(got.revision);
+      session.dirty = false;
+      session.error = "";
+      session.status = "ready";
+      session.bufferVersion++;
+      bumpAuthoritative(session, got.content);
+      clearAutosave(session);
+    } catch (err) {
+      if (!session.closed) session.error = msg(err);
+    }
+    if (!session.closed) notify(session);
+  } finally {
+    release();
   }
-  notify(session);
 }
 
 async function checkSession(session: Session): Promise<void> {
@@ -343,7 +419,7 @@ async function checkSession(session: Session): Promise<void> {
   notify(session);
 }
 
-function moveSession(session: Session, to: ResourceRef): void {
+function applyMove(session: Session, to: ResourceRef): void {
   const fromKey = resourceKey(session.ref);
   const toKey = resourceKey(to);
   if (fromKey === toKey) return;
@@ -355,6 +431,24 @@ function moveSession(session: Session, to: ResourceRef): void {
   sessions.set(toKey, session);
   editorBridge?.onDocumentMoved(from, to);
   notify(session);
+}
+
+function moveSession(session: Session, to: ResourceRef): void | Promise<void> {
+  if (session.closed) return;
+  return withPersistenceGate(session, () => {
+    if (session.closed) return;
+    applyMove(session, to);
+    maybeArmAutosave(session);
+  });
+}
+
+function dropSession(session: Session): void {
+  if (session.closed) return;
+  session.closed = true;
+  clearAutosave(session);
+  sessions.delete(resourceKey(session.ref));
+  editorBridge?.onDocumentDeleted(session.ref);
+  notifyStore();
 }
 
 function ensureSession(ref: ResourceRef): Session {
@@ -379,7 +473,8 @@ function ensureSession(ref: ResourceRef): Session {
       source: null,
       autosaveTimer: null,
       loading: null,
-      saveInFlight: null,
+      persistence: null,
+      closed: false,
       listeners: new Set(),
     };
     sessions.set(key, session);
@@ -400,7 +495,9 @@ export function peekDocument(ref: ResourceRef): ResourceDocumentHandle | null {
 }
 
 export function isDocumentDirty(ref: ResourceRef): boolean {
-  return sessions.get(resourceKey(ref))?.dirty === true;
+  const session = sessions.get(resourceKey(ref));
+  if (!session || session.closed) return false;
+  return session.dirty === true || session.persistence != null;
 }
 
 export function setDocumentEditing(ref: ResourceRef, editing: boolean): void {
@@ -415,19 +512,52 @@ export function isDocumentEditing(ref: ResourceRef): boolean {
   return sessions.get(resourceKey(ref))?.editing !== false;
 }
 
-export function deleteDocument(ref: ResourceRef): void {
-  const key = resourceKey(ref);
-  const session = sessions.get(key);
-  if (!session) return;
-  clearAutosave(session);
-  sessions.delete(key);
-  editorBridge?.onDocumentDeleted(ref);
-  notifyStore();
+export function deleteDocument(ref: ResourceRef): void | Promise<void> {
+  const session = sessions.get(resourceKey(ref));
+  if (!session || session.closed) return;
+  return withPersistenceGate(session, () => {
+    dropSession(session);
+  });
+}
+
+/** Physical rename + identity move under exclusive persistence ownership. */
+export async function renameDocument(from: ResourceRef, toLocator: string): Promise<void> {
+  const session = sessions.get(resourceKey(from));
+  if (!session || session.closed) throw new Error("document closed");
+  const release = await acquirePersistence(session);
+  try {
+    if (session.closed) throw new Error("document closed");
+    const provider = getResourceProvider(session.ref.scheme);
+    if (!provider?.rename) throw new Error("Rename is not supported");
+    const next = await provider.rename(session.ref, toLocator);
+    if (session.closed) throw new Error("document closed");
+    applyMove(session, next);
+    maybeArmAutosave(session);
+  } finally {
+    release();
+  }
+}
+
+/** Physical delete + session drop under exclusive persistence ownership. */
+export async function removeDocument(ref: ResourceRef): Promise<void> {
+  const session = sessions.get(resourceKey(ref));
+  if (!session || session.closed) return;
+  const release = await acquirePersistence(session);
+  try {
+    if (session.closed) return;
+    const provider = getResourceProvider(session.ref.scheme);
+    if (!provider?.remove) throw new Error("Delete is not supported");
+    await provider.remove(session.ref);
+    dropSession(session);
+  } finally {
+    release();
+  }
 }
 
 export function anyUnflushedDirty(): boolean {
   const autosaveOn = getUiSettings().editorAutosave;
   for (const session of sessions.values()) {
+    if (session.persistence) return true;
     if (!session.dirty) continue;
     const delay = autosaveDelay(session.live ?? loadedLiveFile(session.revision), {
       enabled: autosaveOn,
@@ -452,7 +582,10 @@ export function installDocumentUnloadGuard(): void {
 }
 
 export function resetDocumentsForTest(): void {
-  for (const session of sessions.values()) clearAutosave(session);
+  for (const session of sessions.values()) {
+    session.closed = true;
+    clearAutosave(session);
+  }
   sessions.clear();
   storeVersion = 0;
 }

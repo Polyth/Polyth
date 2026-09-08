@@ -314,10 +314,10 @@ export interface ResourceDocumentHandle {
   save(options?: { force?: boolean }): Promise<void>;
   reload(): Promise<void>;
   check(): Promise<void>;
-  discard(): void;
+  discard(): void | Promise<void>;
   dismissNotice(): void;
   autosaveDelay(enabled: boolean, delayMs?: number): number | null;
-  moveTo(ref: ResourceRef): void;
+  moveTo(ref: ResourceRef): void | Promise<void>;
 }
 
 export interface OpenResourceOptions {

@@ -10,6 +10,8 @@ import {
   isDocumentEditing,
   openDocument,
   peekDocument,
+  removeDocument,
+  renameDocument,
   resetDocumentsForTest,
   setDocumentEditing,
   subscribeDocuments,
@@ -74,12 +76,20 @@ export function peekFileDoc(projectId: string, sessionId: string | null, path: s
   return handle ? asFileDoc(handle, path) : null;
 }
 
-export function deleteDoc(projectId: string, sessionId: string | null, path: string): void {
-  deleteDocument(fileRef(projectId, sessionId, path));
+export function deleteDoc(projectId: string, sessionId: string | null, path: string): void | Promise<void> {
+  return deleteDocument(fileRef(projectId, sessionId, path));
 }
 
-export function moveDoc(projectId: string, sessionId: string | null, from: string, to: string): void {
-  peekDocument(fileRef(projectId, sessionId, from))?.moveTo(fileRef(projectId, sessionId, to));
+export function moveDoc(projectId: string, sessionId: string | null, from: string, to: string): void | Promise<void> {
+  return peekDocument(fileRef(projectId, sessionId, from))?.moveTo(fileRef(projectId, sessionId, to));
+}
+
+export function renameDoc(projectId: string, sessionId: string | null, from: string, to: string): Promise<void> {
+  return renameDocument(fileRef(projectId, sessionId, from), to);
+}
+
+export function removeDoc(projectId: string, sessionId: string | null, path: string): Promise<void> {
+  return removeDocument(fileRef(projectId, sessionId, path));
 }
 
 export function isDocDirty(projectId: string, sessionId: string | null, path: string): boolean {

@@ -11,9 +11,15 @@ Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configura
 
 import {
   anyUnflushedDirty,
+  deleteDocument,
+  documentSessionCount,
   fileRef,
   installDocumentUnloadGuard,
+  isDocumentDirty,
   openDocument,
+  peekDocument,
+  removeDocument,
+  renameDocument,
   resetDocumentsForTest,
 } from "../src/resources/documents.ts";
 import { registerResourceProvider } from "../src/resources/providers.ts";
@@ -39,6 +45,17 @@ registerResourceProvider({
     return { ...got };
   },
   write: async (ref, content) => writeImpl(ref, content),
+  rename: async (ref, to) => {
+    const got = files.get(ref.locator);
+    if (!got) throw new Error("missing");
+    files.delete(ref.locator);
+    files.set(to, { ...got });
+    return { ...ref, locator: to };
+  },
+  remove: async (ref) => {
+    if (!files.has(ref.locator)) throw new Error("missing");
+    files.delete(ref.locator);
+  },
 });
 
 function ref(path: string) {
@@ -292,6 +309,248 @@ test("explicit save during an in-flight write does not start a second provider.w
     assert.equal(handle.getSnapshot().saved, "A");
     assert.equal(handle.getBuffer(), "C");
     assert.equal(handle.getSnapshot().dirty, true);
+  } finally {
+    restoreWriteImpl();
+    resetDocumentsForTest();
+  }
+});
+
+function holdFirstWrite(payloads: string[]): { release: () => void } {
+  let releaseFirst!: () => void;
+  writeImpl = async (r, content) => {
+    payloads.push(content);
+    if (payloads.length === 1) {
+      await new Promise<void>((resolve) => { releaseFirst = resolve; });
+    }
+    const revision = `r${payloads.length + 1}`;
+    files.set(r.locator, { content, revision });
+    return { revision };
+  };
+  return { release: () => releaseFirst() };
+}
+
+test("rename waits for in-flight save; later dirty buffer survives on the new path", async () => {
+  resetDocumentsForTest();
+  setUiSettings({ editorAutosave: true });
+  files.set("old.ts", { content: "O", revision: "r1" });
+  const payloads: string[] = [];
+  const held = holdFirstWrite(payloads);
+  const handle = openDocument(ref("old.ts"));
+  try {
+    await handle.load();
+    let live = "O";
+    handle.attachSource({ getText: () => live });
+    live = "A";
+    handle.reportUserEdit(false);
+    const saving = handle.save();
+    live = "B";
+    handle.reportUserEdit(false);
+    let renamed = false;
+    const renaming = renameDocument(ref("old.ts"), "new.ts").then(() => { renamed = true; });
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(renamed, false, "rename must not run while save is held");
+    assert.equal(files.has("old.ts"), true);
+    assert.equal(files.has("new.ts"), false);
+    held.release();
+    await saving;
+    await renaming;
+    assert.equal(files.has("old.ts"), false);
+    assert.equal(files.get("new.ts")?.content, "A");
+    assert.equal(handle.ref.locator, "new.ts");
+    assert.equal(handle.getBuffer(), "B");
+    assert.equal(handle.getSnapshot().dirty, true);
+    assert.equal(peekDocument(ref("old.ts")), null);
+    assert.ok(peekDocument(ref("new.ts")));
+    await handle.save();
+    assert.equal(files.get("new.ts")?.content, "B");
+    assert.equal(files.has("old.ts"), false);
+    assert.equal(handle.getSnapshot().dirty, false);
+  } finally {
+    restoreWriteImpl();
+    resetDocumentsForTest();
+  }
+});
+
+test("delete waits for in-flight save and does not resurrect the file", async () => {
+  resetDocumentsForTest();
+  setUiSettings({ editorAutosave: true });
+  files.set("file.ts", { content: "O", revision: "r1" });
+  const payloads: string[] = [];
+  const held = holdFirstWrite(payloads);
+  const handle = openDocument(ref("file.ts"));
+  try {
+    await handle.load();
+    let live = "O";
+    handle.attachSource({ getText: () => live });
+    live = "A";
+    handle.reportUserEdit(false);
+    const saving = handle.save();
+    let removed = false;
+    const deleting = removeDocument(ref("file.ts")).then(() => { removed = true; });
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(removed, false);
+    assert.equal(files.has("file.ts"), true);
+    held.release();
+    await saving;
+    await deleting;
+    assert.equal(files.has("file.ts"), false);
+    assert.equal(peekDocument(ref("file.ts")), null);
+    assert.equal(documentSessionCount(), 0);
+    await new Promise((resolve) => setTimeout(resolve, 1600));
+    assert.equal(files.has("file.ts"), false);
+    assert.equal(payloads.length, 1);
+  } finally {
+    restoreWriteImpl();
+    resetDocumentsForTest();
+  }
+});
+
+test("reload waits for in-flight save then resets to the saved payload", async () => {
+  resetDocumentsForTest();
+  files.set("rel.ts", { content: "O", revision: "r1" });
+  const payloads: string[] = [];
+  const held = holdFirstWrite(payloads);
+  const handle = openDocument(ref("rel.ts"));
+  try {
+    await handle.load();
+    let live = "O";
+    handle.attachSource({ getText: () => live });
+    live = "A";
+    handle.reportUserEdit(false);
+    const saving = handle.save();
+    live = "B";
+    handle.reportUserEdit(false);
+    let reloaded = false;
+    const reloading = handle.reload().then(() => { reloaded = true; });
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(reloaded, false);
+    assert.equal(handle.getBuffer(), "B");
+    held.release();
+    await saving;
+    await reloading;
+    assert.equal(handle.getSnapshot().saved, "A");
+    assert.equal(handle.getSnapshot().dirty, false);
+    assert.equal(files.get("rel.ts")?.content, "A");
+  } finally {
+    restoreWriteImpl();
+    resetDocumentsForTest();
+  }
+});
+
+test("discard waits for in-flight save then drops later edits against the new baseline", async () => {
+  resetDocumentsForTest();
+  files.set("dis.ts", { content: "O", revision: "r1" });
+  const payloads: string[] = [];
+  const held = holdFirstWrite(payloads);
+  const handle = openDocument(ref("dis.ts"));
+  try {
+    await handle.load();
+    let live = "O";
+    handle.attachSource({ getText: () => live });
+    live = "A";
+    handle.reportUserEdit(false);
+    const saving = handle.save();
+    live = "B";
+    handle.reportUserEdit(false);
+    const discarding = handle.discard();
+    assert.equal(discarding instanceof Promise, true);
+    held.release();
+    await saving;
+    await discarding;
+    assert.equal(files.get("dis.ts")?.content, "A");
+    assert.equal(handle.getSnapshot().saved, "A");
+    assert.equal(handle.getSnapshot().dirty, false);
+  } finally {
+    restoreWriteImpl();
+    resetDocumentsForTest();
+  }
+});
+
+test("failed save then rename still moves the existing file without pretending text was saved", async () => {
+  resetDocumentsForTest();
+  files.set("fail.ts", { content: "O", revision: "r1" });
+  writeImpl = async () => {
+    throw new Error("disk full");
+  };
+  const handle = openDocument(ref("fail.ts"));
+  try {
+    await handle.load();
+    let live = "O";
+    handle.attachSource({ getText: () => live });
+    live = "A";
+    handle.reportUserEdit(false);
+    await handle.save();
+    assert.equal(handle.getSnapshot().dirty, true);
+    assert.equal(handle.getSnapshot().error, "disk full");
+    assert.equal(files.get("fail.ts")?.content, "O");
+    await renameDocument(ref("fail.ts"), "renamed.ts");
+    assert.equal(files.has("fail.ts"), false);
+    assert.equal(files.get("renamed.ts")?.content, "O");
+    assert.equal(handle.ref.locator, "renamed.ts");
+    assert.equal(handle.getBuffer(), "A");
+    assert.equal(handle.getSnapshot().dirty, true);
+  } finally {
+    restoreWriteImpl();
+    resetDocumentsForTest();
+  }
+});
+
+test("isDocumentDirty includes an unresolved persistence operation", async () => {
+  resetDocumentsForTest();
+  files.set("guard.ts", { content: "O", revision: "r1" });
+  const payloads: string[] = [];
+  const held = holdFirstWrite(payloads);
+  const handle = openDocument(ref("guard.ts"));
+  try {
+    await handle.load();
+    let live = "O";
+    handle.attachSource({ getText: () => live });
+    live = "A";
+    handle.reportUserEdit(false);
+    const saving = handle.save();
+    live = "O";
+    handle.reportUserEdit(true);
+    assert.equal(handle.getSnapshot().dirty, false);
+    assert.equal(isDocumentDirty(ref("guard.ts")), true);
+    held.release();
+    await saving;
+    assert.equal(handle.getSnapshot().saved, "A");
+    assert.equal(handle.getBuffer(), "O");
+    assert.equal(handle.getSnapshot().dirty, true);
+    assert.equal(isDocumentDirty(ref("guard.ts")), true);
+  } finally {
+    restoreWriteImpl();
+    resetDocumentsForTest();
+  }
+});
+
+test("deleteDocument waits for in-flight save before dropping the session", async () => {
+  resetDocumentsForTest();
+  files.set("close.ts", { content: "O", revision: "r1" });
+  const payloads: string[] = [];
+  const held = holdFirstWrite(payloads);
+  const handle = openDocument(ref("close.ts"));
+  try {
+    await handle.load();
+    let live = "O";
+    handle.attachSource({ getText: () => live });
+    live = "A";
+    handle.reportUserEdit(false);
+    const saving = handle.save();
+    let dropped = false;
+    const dropping = Promise.resolve(deleteDocument(ref("close.ts"))).then(() => { dropped = true; });
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(dropped, false);
+    assert.equal(documentSessionCount(), 1);
+    held.release();
+    await saving;
+    await dropping;
+    assert.equal(documentSessionCount(), 0);
+    assert.equal(files.get("close.ts")?.content, "A");
   } finally {
     restoreWriteImpl();
     resetDocumentsForTest();

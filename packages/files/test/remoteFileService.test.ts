@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RemoteHost, RemoteProcessHandle } from "@polyth/contracts";
@@ -134,6 +134,25 @@ test("remote file service round-trips through a real remote shell", async () => 
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("remote write with baseRevision against a missing file conflicts and does not recreate", async () => {
+  const root = mkdtempSync(join(tmpdir(), "polyth-remote-missing-"));
+  try {
+    const host = bashHost(root);
+    const fs = createRemoteFileService(host);
+    const { revision } = await fs.write(root, "gone.txt", "v1");
+    rmSync(join(root, "gone.txt"));
+    await assert.rejects(
+      fs.write(root, "gone.txt", "resurrect", { baseRevision: revision }),
+      (err: Error) => (err as { code?: string }).code === "conflict",
+    );
+    assert.equal(existsSync(join(root, "gone.txt")), false);
+    await fs.write(root, "gone.txt", "recreated");
+    assert.equal(readFileSync(join(root, "gone.txt"), "utf8"), "recreated");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

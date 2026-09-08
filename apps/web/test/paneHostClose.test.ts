@@ -43,6 +43,7 @@ const {
   resetDocumentsForTest,
   documentSessionCount,
   peekDocument,
+  isDocumentDirty,
 } = await import("../src/resources/documents.ts");
 const { registerResourceProvider } = await import("../src/resources/providers.ts");
 const { registerPaneProvider } = await import("../src/workspace/paneProviders.ts");
@@ -55,12 +56,14 @@ const { resolveAlert } = await import("../src/alerts.ts");
 const scheme = `pane-host-${process.pid}`;
 const bodies = new Map<string, string>([["note.ts", "saved"]]);
 const KIND = "file";
+let holdWrite: Promise<void> | null = null;
 
 registerResourceProvider({
   scheme,
   describe: (ref) => ({ label: ref.locator, kind: "text" }),
   read: async (ref) => ({ content: bodies.get(ref.locator) ?? "", revision: "1" }),
   write: async (ref, content) => {
+    if (holdWrite) await holdWrite;
     bodies.set(ref.locator, content);
     return { revision: "2" };
   },
@@ -72,9 +75,9 @@ function docRef(path: string) {
 
 registerPaneProvider({
   kind: KIND,
-  dirty: (_scope, resource) => peekDocument(docRef(resource))?.getSnapshot().dirty === true,
-  discard: (_scope, resource) => { peekDocument(docRef(resource))?.discard(); },
-  close: (_scope, resource) => { deleteDocument(docRef(resource)); },
+  dirty: (_scope, resource) => isDocumentDirty(docRef(resource)),
+  discard: (_scope, resource) => peekDocument(docRef(resource))?.discard(),
+  close: (_scope, resource) => deleteDocument(docRef(resource)),
   component: ({ resource, visible }) => {
     useEffect(() => {
       void openDocument(docRef(resource)).load();
@@ -165,6 +168,55 @@ test("PaneHost close cancel leaves dirty buffer and tab in place", async () => {
     assert.equal(documentSessionCount(), 1);
     assert.ok(container.querySelector(".cm-editor"));
   } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+    resetEditorRuntimeForTest();
+    resetDocumentsForTest();
+  }
+});
+
+test("PaneHost close during held save waits, then discards against the new baseline", async () => {
+  resetDocumentsForTest();
+  resetEditorRuntimeForTest();
+  bodies.set("note.ts", "O");
+  let releaseWrite!: () => void;
+  holdWrite = new Promise<void>((resolve) => { releaseWrite = resolve; });
+  const { hostRef, container, root } = await mountHost();
+  try {
+    await act(async () => { hostRef.current?.open(KIND, "note.ts"); });
+    const handle = openDocument(docRef("note.ts"));
+    await handle.load();
+    await flush();
+    const view = EditorView.findFromDOM(container.querySelector(".cm-editor") as HTMLElement)!;
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "A" }, userEvent: "input" });
+    assert.equal(handle.getSnapshot().dirty, true);
+    const saving = handle.save();
+    undo(view);
+    assert.equal(view.state.doc.toString(), "O");
+    assert.equal(handle.getSnapshot().dirty, false);
+    assert.equal(isDocumentDirty(docRef("note.ts")), true);
+    await act(async () => { hostRef.current?.close(KIND, "note.ts"); });
+    await flush(4);
+    assert.ok(container.querySelector(".cm-editor"), "tab must stay open while save is unsettled");
+    assert.equal(hostRef.current?.activeTab()?.resource, "note.ts");
+    await act(async () => { resolveAlert(true); });
+    await flush(4);
+    assert.ok(container.querySelector(".cm-editor"), "tab must stay open until save and discard finish");
+    releaseWrite();
+    await saving;
+    await flush(12);
+    assert.equal(documentSessionCount(), 0);
+    assert.equal(bodies.get("note.ts"), "A");
+    assert.equal(container.querySelector(".cm-editor"), null);
+    await act(async () => { hostRef.current?.open(KIND, "note.ts"); });
+    await flush(8);
+    const reopened = EditorView.findFromDOM(container.querySelector(".cm-editor") as HTMLElement)!;
+    assert.equal(reopened.state.doc.toString(), "A");
+    undo(reopened);
+    assert.equal(reopened.state.doc.toString(), "A");
+  } finally {
+    holdWrite = null;
+    bodies.set("note.ts", "saved");
     await act(async () => { root.unmount(); });
     container.remove();
     resetEditorRuntimeForTest();

@@ -31,7 +31,7 @@ export function editLiveFile(state: LiveFileState): LiveFileState {
     return { ...state, dirty: true, noticeDismissed: false };
   }
   // Mid-flight keystrokes keep UI kind "saving" (Save button / autosaveDelay).
-  // Physical write serialization lives on Session.saveInFlight, not this kind.
+  // Physical write serialization lives on Session.persistence, not this kind.
   if (state.kind === "saving") {
     return { ...state, dirty: true, noticeDismissed: false };
   }

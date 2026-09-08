@@ -171,6 +171,9 @@ export function createRemoteFileService(host: RemoteHost): FileService {
       ].join("\n"));
       if (check.code !== 0) throw new Error(`cannot stat ${rel}: ${check.stderr.trim() || `exit ${check.code}`}`);
       const exists = /POLYTH_EXISTS=1/.test(check.stdout);
+      if (!exists && opts.baseRevision !== undefined) {
+        throw fail("conflict", `File no longer exists: ${rel}`);
+      }
       if (exists) {
         const statLine = check.stdout.match(/POLYTH_STAT=(\d+ \d+)/)?.[1];
         if (statLine) {
