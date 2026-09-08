@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createBrowserService, createFakeDriver } from "@polyth/browser";
 import {
+  BROWSER_TOOL_PATH,
   createBrowserToolBridge,
   createBrowserToolPluginSource,
   prepareBrowserToolEnvironment,
@@ -108,6 +109,55 @@ test("browser tool maps polyth-like actions onto the shared BrowserService", asy
   }
 });
 
+test("browser tool HTTP auth accepts agent-host header variants but stays local-only", async () => {
+  const browser = createBrowserService({
+    driver: createFakeDriver({ pages: { [HOME]: { title: "Home", text: "Welcome" } } }),
+    allowedOrigins: () => ["http://127.0.0.1:5173"],
+  });
+  const bridge = createBrowserToolBridge({ browser });
+  const registration = bridge.register({ projectId: "project-1", cwd: process.cwd() });
+
+  const call = async (
+    headers: Record<string, string>,
+    remoteAddress: string,
+  ): Promise<{ status: number; payload: unknown }> => {
+    let status = 0;
+    let payload: unknown;
+    await bridge.route({
+      req: { headers, socket: { remoteAddress } } as never,
+      path: BROWSER_TOOL_PATH,
+      method: "POST",
+      body: async () => ({ action: "browser.open", parameters: { url: HOME } }),
+      json: (code, body) => { status = code; payload = body; },
+    });
+    return { status, payload };
+  };
+
+  try {
+    const mappedIpv6 = await call(
+      { "x-polyth-browser-tool-token": registration.token },
+      "::ffff:7f00:1",
+    );
+    assert.equal(mappedIpv6.status, 200);
+    assert.equal((mappedIpv6.payload as { ok?: boolean }).ok, true);
+
+    const caseInsensitiveBearer = await call(
+      { authorization: `bearer ${registration.token}` },
+      "::1",
+    );
+    assert.equal(caseInsensitiveBearer.status, 200);
+
+    const nonLocal = await call(
+      { "x-polyth-browser-tool-token": registration.token },
+      "192.168.1.20",
+    );
+    assert.equal(nonLocal.status, 401);
+  } finally {
+    registration.dispose();
+    await browser.closeAll();
+  }
+});
+
 test("managed browser tool plugin merges with existing OpenCode plugins without persisting its token", async () => {
   const dir = await mkdtemp(join(tmpdir(), "polyth-browser-plugin-"));
   const originalFetch = globalThis.fetch;
@@ -177,6 +227,7 @@ test("managed browser tool plugin merges with existing OpenCode plugins without 
     assert.ok(request);
     assert.equal(request?.url, env.POLYTH_BROWSER_TOOL_URL);
     assert.equal(request?.init?.headers && (request.init.headers as Record<string, string>).authorization, "Bearer token-for-test");
+    assert.equal(request?.init?.headers && (request.init.headers as Record<string, string>)["x-polyth-browser-tool-token"], "token-for-test");
     const forwarded = JSON.parse(String(request?.init?.body)) as {
       action?: string;
       parameters?: Record<string, unknown>;

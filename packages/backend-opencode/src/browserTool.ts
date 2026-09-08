@@ -158,8 +158,32 @@ const slug = (value: unknown): string => {
 };
 
 const loopback = (address: string | undefined): boolean => {
-  const value = (address ?? "").toLowerCase();
-  return value === "127.0.0.1" || value === "::1" || value === "::ffff:127.0.0.1";
+  const value = (address ?? "").trim().toLowerCase().split("%", 1)[0] ?? "";
+  if (value === "127.0.0.1" || value === "::1" || value === "0:0:0:0:0:0:0:1") {
+    return true;
+  }
+  // Node normally formats IPv4-mapped IPv6 addresses as ::ffff:127.0.0.1,
+  // but some socket/proxy combinations keep the final IPv4 value in hex
+  // (for example ::ffff:7f00:1). Both are still the local machine.
+  if (!value.startsWith("::ffff:")) return false;
+  const mapped = value.slice("::ffff:".length);
+  if (mapped === "127.0.0.1") return true;
+  const parts = mapped.split(":");
+  if (parts.length !== 2 || !parts.every((part) => /^[0-9a-f]{1,4}$/.test(part))) return false;
+  return Number.parseInt(parts[0]!, 16) === 0x7f00
+    && Number.parseInt(parts[1]!, 16) === 0x0001;
+};
+
+const browserTokenFrom = (req: IncomingMessage): string[] => {
+  const candidates: string[] = [];
+  const privateHeader = req.headers["x-polyth-browser-tool-token"];
+  if (typeof privateHeader === "string" && privateHeader.trim()) candidates.push(privateHeader.trim());
+  const authorization = req.headers.authorization;
+  if (typeof authorization === "string") {
+    const match = authorization.match(/^Bearer\s+(.+)$/i);
+    if (match?.[1]?.trim()) candidates.push(match[1].trim());
+  }
+  return candidates;
 };
 
 const sameToken = (provided: string, expected: string): boolean => {
@@ -365,11 +389,9 @@ export function createBrowserToolBridge(options: {
         rc.json(405, { error: "method-not-allowed" });
         return true;
       }
-      const header = rc.req.headers.authorization;
-      const provided = typeof header === "string" && header.startsWith("Bearer ")
-        ? header.slice("Bearer ".length)
-        : "";
-      const registration = [...registrations.keys()].find((token) => sameToken(provided, token));
+      const registration = browserTokenFrom(rc.req).flatMap((provided) =>
+        [...registrations.keys()].filter((token) => sameToken(provided, token)),
+      )[0];
       if (!registration || !loopback(rc.req.socket.remoteAddress)) {
         rc.json(401, { error: "unauthorized" });
         return true;
@@ -462,7 +484,16 @@ export function createBrowserToolPluginSource(): string {
         try {
           const response = await fetch(endpoint, {
             method: "POST",
-            headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+            // Keep the dedicated header alongside Authorization. Some agent
+            // hosts reserve/replace Authorization for their own transport;
+            // the private header makes this local bridge independent of that
+            // unrelated auth plumbing while the server still requires the
+            // same high-entropy token and a loopback socket.
+            headers: {
+              authorization: "Bearer " + token,
+              "x-polyth-browser-tool-token": token,
+              "content-type": "application/json",
+            },
             body: JSON.stringify({
               action: requestedAction,
               parameters: resolvedParameters,
