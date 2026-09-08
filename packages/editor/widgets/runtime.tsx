@@ -196,7 +196,7 @@ function getOrCreateGroup(groupId: string): EditorGroup {
         } else {
           retained.state = view.state;
         }
-        if (!skip && tr.docChanged) {
+        if (!skip && tr.docChanged && ownsWritableDocument(active)) {
           const equivalent = view.state.doc.eq(retained.baseline);
           peekDocument(active.ref)?.reportUserEdit(equivalent);
         }
@@ -210,7 +210,7 @@ function getOrCreateGroup(groupId: string): EditorGroup {
     if (!active) return;
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
       event.preventDefault();
-      active.onSave?.();
+      if (ownsWritableDocument(active)) active.onSave?.();
     }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
       event.preventDefault();
@@ -223,11 +223,11 @@ function getOrCreateGroup(groupId: string): EditorGroup {
   });
   view.dom.addEventListener("compositionstart", () => {
     const active = groups.get(groupId)?.active;
-    if (active) peekDocument(active.ref)?.setComposing(true);
+    if (active && ownsWritableDocument(active)) peekDocument(active.ref)?.setComposing(true);
   });
   view.dom.addEventListener("compositionend", () => {
     const active = groups.get(groupId)?.active;
-    if (active) peekDocument(active.ref)?.setComposing(false);
+    if (active && ownsWritableDocument(active)) peekDocument(active.ref)?.setComposing(false);
   });
 
   group = { id: groupId, view, skip: false, active: null, searchConfigured: false };
@@ -320,6 +320,10 @@ function bindingMatches(a: EditorBinding | null, b: EditorBinding): boolean {
     && a.groupId === b.groupId
     && resourceKey(a.ref) === resourceKey(b.ref)
     && a.generation === b.generation;
+}
+
+function ownsWritableDocument(binding: EditorBinding): boolean {
+  return binding.ownsSource && !binding.readOnly;
 }
 
 /** Persist the live view into retained state only when this binding owns it.

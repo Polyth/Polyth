@@ -873,6 +873,121 @@ test("same resource in two groups: one writable owner; g2 read-only; unmount g2 
   }
 });
 
+test("non-owner group cannot save or toggle composing", async () => {
+  resetBodies();
+  resetDocumentsForTest();
+  resetEditorRuntimeForTest();
+  const resource = docRef("a.ts");
+  const handle = openDocument(resource);
+  await handle.load();
+  const host1 = document.createElement("div");
+  const host2 = document.createElement("div");
+  document.body.append(host1, host2);
+  const root1 = createRoot(host1);
+  const root2 = createRoot(host2);
+  const g1Saves: string[] = [];
+  const g2Saves: string[] = [];
+  const KeyEvt = (dom as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent;
+  const CompEvt = (dom as unknown as { CompositionEvent: typeof CompositionEvent }).CompositionEvent;
+  try {
+    await act(async () => {
+      root1.render(createElement(EditorRuntime, {
+        ...runtimeProps("a.ts", true, () => g1Saves.push("g1")),
+        groupId: "g1",
+      }));
+      root2.render(createElement(EditorRuntime, {
+        ...runtimeProps("a.ts", true, () => g2Saves.push("g2")),
+        groupId: "g2",
+      }));
+    });
+    const v1 = EditorView.findFromDOM(host1.querySelector(".cm-editor") as HTMLElement)!;
+    const v2 = EditorView.findFromDOM(host2.querySelector(".cm-editor") as HTMLElement)!;
+    assert.equal(v2.state.readOnly, true);
+    v2.dom.dispatchEvent(new KeyEvt("keydown", { key: "s", ctrlKey: true, bubbles: true }));
+    assert.deepEqual(g2Saves, []);
+    assert.deepEqual(g1Saves, []);
+    assert.equal(handle.getSnapshot().composing, false);
+    v2.dom.dispatchEvent(new CompEvt("compositionstart", { bubbles: true }));
+    assert.equal(handle.getSnapshot().composing, false);
+    v2.dom.dispatchEvent(new CompEvt("compositionend", { bubbles: true }));
+    assert.equal(handle.getSnapshot().composing, false);
+    v1.dom.dispatchEvent(new KeyEvt("keydown", { key: "s", ctrlKey: true, bubbles: true }));
+    assert.deepEqual(g1Saves, ["g1"]);
+    assert.deepEqual(g2Saves, []);
+    await act(async () => { root2.unmount(); });
+    v1.dispatch({ changes: { from: 3, insert: "Z" } });
+    assert.equal(handle.getBuffer(), "aaaZ");
+    await act(async () => { root1.unmount(); });
+    const lease = handle.attachSource({ getText: () => "leased" });
+    assert.ok(lease, "unmounting the owner releases the source lease");
+    lease?.();
+  } finally {
+    host1.remove();
+    host2.remove();
+    resetEditorRuntimeForTest();
+    resetDocumentsForTest();
+  }
+});
+
+test("Mod-S during an in-flight write does not start a second provider.write", async () => {
+  resetBodies();
+  resetDocumentsForTest();
+  resetEditorRuntimeForTest();
+  const payloads: string[] = [];
+  let releaseWrite!: () => void;
+  const { registerResourceProvider: reg } = await import("../../../apps/web/src/resources/providers.ts");
+  reg({
+    scheme,
+    describe: (ref) => ({ label: ref.locator, kind: "text" }),
+    read: async (ref) => ({ content: bodies.get(ref.locator) ?? "", revision: "1" }),
+    write: async (ref, content) => {
+      payloads.push(content);
+      if (payloads.length === 1) {
+        await new Promise<void>((resolve) => { releaseWrite = resolve; });
+      }
+      bodies.set(ref.locator, content);
+      return { revision: String(payloads.length + 1) };
+    },
+  });
+  const handle = openDocument(docRef("a.ts"));
+  await handle.load();
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  const KeyEvt = (dom as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent;
+  try {
+    await act(async () => {
+      root.render(createElement(EditorRuntime, runtimeProps("a.ts", true, () => { void handle.save(); })));
+    });
+    const view = EditorView.findFromDOM(host.querySelector(".cm-editor") as HTMLElement)!;
+    view.dispatch({ changes: { from: 3, insert: "A" } });
+    const saving = handle.save();
+    view.dispatch({ changes: { from: 4, insert: "C" } });
+    view.dom.dispatchEvent(new KeyEvt("keydown", { key: "s", ctrlKey: true, bubbles: true }));
+    assert.equal(payloads.length, 1);
+    assert.equal(payloads[0], "aaaA");
+    releaseWrite();
+    await saving;
+    assert.equal(handle.getSnapshot().saved, "aaaA");
+    assert.equal(handle.getBuffer(), "aaaAC");
+    assert.equal(handle.getSnapshot().dirty, true);
+  } finally {
+    await act(async () => { root.unmount(); });
+    host.remove();
+    resetEditorRuntimeForTest();
+    resetDocumentsForTest();
+    reg({
+      scheme,
+      describe: (ref) => ({ label: ref.locator, kind: "text" }),
+      read: async (ref) => ({ content: bodies.get(ref.locator) ?? "", revision: "1" }),
+      write: async (ref, content) => {
+        bodies.set(ref.locator, content);
+        return { revision: "2" };
+      },
+    });
+  }
+});
+
 test("rename README.md to README.txt drops markdown capability", async () => {
   resetBodies();
   bodies.set("README.md", "# Title\n");
