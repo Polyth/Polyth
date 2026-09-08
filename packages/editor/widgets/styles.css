@@ -8,8 +8,10 @@
 }
 .editor-code .cm-editor {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   height: 100%;
+  max-width: 100%;
 }
 @media (max-width: 480px), (pointer: coarse) {
   .cm-textfield,

@@ -177,7 +177,7 @@ flex: 1;
 padding: var(--space-1) var(--control-pad-x);
 }
 .editor-body {
-flex: 1; min-height: 0; overflow: auto; background: var(--sunken);
+flex: 1; min-width: 0; min-height: 0; overflow: auto; background: var(--sunken);
 }
 .editor-media {
 display: flex; align-items: center; justify-content: center; padding: var(--space-3);
@@ -202,7 +202,7 @@ white-space: pre-wrap; overflow-wrap: anywhere;
 margin: 0; border: none; border-radius: 0; background: transparent; padding: 8px 14px; font-size: var(--font-meta);
 }
 .editor-edit {
-flex: 1; min-height: 0; display: flex; background: var(--sunken);
+flex: 1; min-width: 0; min-height: 0; display: flex; background: var(--sunken);
 }
 .editor-edit .editor-code {
 flex: 1; min-width: 0; min-height: 0;
@@ -476,7 +476,7 @@ min-width: 0; max-width: 100%;
 }
 .editor-body,
 .files-viewer-wrap {
-max-width: 100%; overscroll-behavior-inline: contain;
+min-width: 0; max-width: 100%; overscroll-behavior-inline: contain;
 }
 .editor-plain {
 width: max-content; min-width: 100%;
