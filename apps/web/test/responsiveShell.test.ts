@@ -22,7 +22,12 @@ const read = (rel: string) =>
 // ---- pure width classifier -------------------------------------------------
 
 test("boundaries are the literal compact and phone contracts", () => {
-  assert.equal(COMPACT_MAX_WIDTH, 820);
+  // 960, not 820: the persistent navigator only holds when a comfortable
+  // workspace survives beside it — SIDEBAR_DEFAULT_WIDTH 332 + ~620–628px ≈ 960
+  // (rendered: ~621px workspace / ~517px conversation lane at 961px). Portrait
+  // tablets (≤834) and half-width windows sit in the drawer shell; landscape
+  // tablets (≥1080) keep the persistent nav.
+  assert.equal(COMPACT_MAX_WIDTH, 960);
   assert.equal(PHONE_MAX_WIDTH, 480);
   assert.equal(PHONE_LANDSCAPE_MAX_HEIGHT, 480);
 });
@@ -37,8 +42,13 @@ test("width classification is exact at and around every boundary", () => {
   assert.equal(shellModeForWidth(600), "compact");
   assert.equal(shellModeForWidth(768), "compact");
   assert.equal(shellModeForWidth(820), "compact");
-  assert.equal(shellModeForWidth(821), "wide");
-  assert.equal(shellModeForWidth(1000), "wide");
+  assert.equal(shellModeForWidth(834), "compact", "11\" iPad portrait is single-stage, not persistent-nav");
+  assert.equal(shellModeForWidth(900), "compact", "half of a 1920 desktop stays a drawer shell");
+  assert.equal(shellModeForWidth(959), "compact");
+  assert.equal(shellModeForWidth(960), "compact");
+  assert.equal(shellModeForWidth(961), "wide", "first persistent-nav width: ~621px workspace survives the 332px navigator");
+  assert.equal(shellModeForWidth(1024), "wide");
+  assert.equal(shellModeForWidth(1080), "wide", "smallest landscape tablet keeps the persistent navigator");
   assert.equal(shellModeForWidth(1280), "wide");
 });
 
@@ -56,8 +66,12 @@ test("short coarse-pointer viewports use the phone shell in landscape", () => {
   assert.equal(shellModeForViewport(932, 430, true), "phone", "large landscape phone");
   assert.equal(shellModeForViewport(844, 390, true), "phone", "standard landscape phone");
   assert.equal(shellModeForViewport(821, 480, true), "phone", "height boundary is inclusive");
-  assert.equal(shellModeForViewport(932, 481, true), "wide", "tall coarse viewport stays wide");
-  assert.equal(shellModeForViewport(932, 430, false), "wide", "short desktop window stays wide");
+  assert.equal(shellModeForViewport(932, 481, true), "compact",
+    "one row taller than the landscape-phone height: not phone; 932 < 960 so compact, not wide");
+  assert.equal(shellModeForViewport(1000, 481, true), "wide", "tall coarse viewport past the seam stays wide");
+  assert.equal(shellModeForViewport(932, 430, false), "compact",
+    "short fine-pointer window: the coarse landscape-phone rule does not fire; 932 < 960 so compact");
+  assert.equal(shellModeForViewport(1400, 430, false), "wide", "short fine-pointer window past the seam stays wide");
   assert.equal(shellModeForViewport(768, 430, false), "compact", "short fine-pointer compact window stays compact");
 });
 
@@ -92,7 +106,8 @@ test("responsiveShell.ts is the sole JavaScript breakpoint seam", async () => {
 
 test("CSS carries the same literal width/height contracts", async () => {
   const css = await read("../src/styles.css");
-  assert.ok(css.includes("(max-width: 820px)"), "compact boundary present in CSS");
+  assert.ok(css.includes("(max-width: 960px)"), "compact boundary (COMPACT_MAX_WIDTH) present in CSS");
+  assert.ok(css.includes("(min-width: 961px)"), "wide-side twin (COMPACT_MAX_WIDTH + 1) present in CSS");
   assert.ok(css.includes("(max-width: 480px)"), "phone boundary present in CSS");
   assert.ok(css.includes("(max-height: 600px)"), "short-height contract present in CSS");
   assert.match(

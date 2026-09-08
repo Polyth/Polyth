@@ -188,5 +188,5 @@ test("phone touch targets and bottom sheets retain audit geometry", async () => 
   assert.match(css, /\.composer-mobile \.composer-config \.config-chip,[\s\S]*?\.composer-mobile \.composer-config \.picker-chip\s*\{[^}]*min-height:\s*var\(--tap\)/);
   assert.match(css, /\.panel-sheet \.rail-body\s*\{[^}]*padding-bottom:\s*calc\(10px \+ env\(safe-area-inset-bottom, 0px\)\)/s);
   assert.match(css, /\.package-tour-skips\s*\{[^}]*padding:[^;]*env\(safe-area-inset-bottom, 0px\)/s);
-  assert.match(css, /@media \(max-width: 820px\)[\s\S]*?\.pane-tab-close\s*\{[^}]*min-width:\s*var\(--tap\)[^}]*min-height:\s*var\(--tap\)/s);
+  assert.match(css, /@media \(max-width: 960px\)[\s\S]*?\.pane-tab-close\s*\{[^}]*min-width:\s*var\(--tap\)[^}]*min-height:\s*var\(--tap\)/s);
 });

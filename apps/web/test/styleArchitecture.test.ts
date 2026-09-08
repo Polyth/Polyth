@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
+import { COMPACT_MAX_WIDTH } from "../src/responsiveShell.ts";
 
 const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
 
@@ -122,5 +123,59 @@ test("mobile Canvas chrome uses the shared tap target", async () => {
   assert.match(
     styles,
     /@media \(max-width: 760px\)\s*\{\s*\.widget-canvas-grid[\s\S]*?\.widget-menu-trigger\s*\{\s*min-height:\s*var\(--tap\)/,
+  );
+});
+
+test("tablet-class width is a container-query layout state, not a media pile", async () => {
+  const styles = await read("../src/styles.css");
+
+  assert.match(
+    styles,
+    /\.app-shell\s*\{[^}]*container:\s*app-shell\s*\/\s*inline-size/,
+    ".app-shell is the shell container the tablet band queries",
+  );
+  // The band's lower bound must sit exactly one pixel above the compact seam
+  // (COMPACT_MAX_WIDTH + 1 = 961): below it the navigator is already a drawer
+  // (the compact shell owns the layout), so the band and the compact rules can
+  // neither overlap nor leave a gap. That guarantees the two rule sets tile
+  // cleanly — it does NOT make 960 -> 961 geometrically continuous: at 961 the
+  // persistent navigator and a reserved launcher lane enter flow and the
+  // primary workspace drops from the full width to ~621px in one pixel. The
+  // seam is placed where both sides are usable, not eliminated; see
+  // docs/dev/tablet-ux.md. What this test pins is only that a drawer-nav shell
+  // hands off to a persistent-nav shell whose idle rail is a bounded floating
+  // cluster, with no width where both or neither apply.
+  const bandMin = COMPACT_MAX_WIDTH + 1;
+  const band = new RegExp(
+    `@container app-shell \\(min-width: ${bandMin}px\\) and \\(max-width: 1400px\\)\\s*\\{`,
+  );
+  assert.match(styles, band, "the tablet band starts one pixel above the compact seam");
+  const bandBlock = styles.slice(styles.search(band));
+  const bandBody = bandBlock.slice(0, bandBlock.indexOf("\n}\n") + 3);
+
+  // Open/closed is the semantic `.railbar-open` class (React `rail` state), not
+  // `:has(.rail)`: a visited keep-alive surface leaves `.rail` mounted-but-
+  // hidden after close, so a `:has(.rail)` guard would latch the shell into the
+  // open layout for the rest of the session (regression: keepAliveRailState).
+  assert.match(
+    bandBody,
+    /\.railbar:not\(\.railbar-open\)\s*\{[^}]*height:\s*auto/,
+    "the idle cluster keys off .railbar-open, the authoritative open state",
+  );
+  assert.doesNotMatch(
+    bandBody,
+    /:has\(\.rail\)/,
+    "the band must not reverse-engineer rail state from .rail DOM presence",
+  );
+  // Many packages + short viewport: the cluster is height-bounded and scrolls.
+  assert.match(
+    bandBody,
+    /\.railbar:not\(\.railbar-open\)\s*\{[^}]*max-height:/,
+    "the floating cluster is bounded so a long plugin list scrolls, not overflows",
+  );
+  assert.match(
+    bandBody,
+    /\.app-shell:not\(:has\(\.railbar-open\)\)[\s\S]*?padding-inline-end:/,
+    "chat surfaces reserve a lane for the affordance so nothing renders beneath it",
   );
 });

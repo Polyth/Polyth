@@ -27,7 +27,7 @@ import {
 import { useGitStatus } from "../../../../packages/git/widgets/gitStatusStore.ts";
 import { gitChangedFiles } from "../pendingChanges.ts";
 import {
-  CHAT_FLOOR, clampDockWidth, decideDock, listSurfaces, paneDockEdge, slotSurfaces, useSurfaceVersion, visibleSurfaces,
+  CHAT_FLOOR, clampDockWidth, decideDock, keptSurfaces, listSurfaces, paneDockEdge, slotSurfaces, useSurfaceVersion, visibleSurfaces,
   type DockGeometry, type RailSurface, type RailSurfaceContext,
 } from "../surfaces.ts";
 import { clampRailWidth, railWidthOf, setRailWidth } from "../railPrefs.ts";
@@ -300,8 +300,7 @@ export default function ContextRail() {
   useEffect(() => {
     if (rail !== null && known && open === null) setRailPlugin(null);
   }, [rail, known, open]);
-  const kept = surfaces.filter((s) =>
-    s.id === rail || (s.presentation?.keepAlive === true && visited.includes(s.id)));
+  const kept = keptSurfaces(surfaces, rail, visited);
 
   // ---- geometry: measured post-sidebar workspace (Chat + pane + chrome) --------
   const railbarRef = useRef<HTMLElement>(null);

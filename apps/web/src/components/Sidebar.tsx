@@ -160,7 +160,8 @@ export default function Sidebar() {
       return latest(b.id) - latest(a.id) || (a.name || a.path).localeCompare(b.name || b.path);
     });
   }, [attentionOnly, projectOrder, projects, query, sessions, sort]);
-  // UX-A390: below 821px the sidebar is a modal drawer. It never opens by
+  // UX-A390: below the compact seam (COMPACT_MAX_WIDTH) the sidebar is a modal
+  // drawer — every portrait tablet and small window included. It never opens by
   // itself when the viewport shrinks — wide visibility is not a persisted
   // drawer-open preference.
   const mode = useShellMode();
