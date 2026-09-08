@@ -201,3 +201,99 @@ test("beforeunload guard blocks only unflushed dirty with autosave off", async (
   window.dispatchEvent(allowed);
   assert.equal(allowed.defaultPrevented, false);
 });
+
+function restoreWriteImpl(): void {
+  writeImpl = async (r, content) => {
+    const revision = `r${files.size + 1}`;
+    files.set(r.locator, { content, revision });
+    return { revision };
+  };
+}
+
+test("saveInFlight serializes writes after undo-to-baseline during a held save", async () => {
+  resetDocumentsForTest();
+  setUiSettings({ editorAutosave: true });
+  files.set("serial.ts", { content: "O", revision: "r1" });
+  const payloads: string[] = [];
+  let releaseFirst!: () => void;
+  writeImpl = async (r, content) => {
+    payloads.push(content);
+    if (payloads.length === 1) {
+      await new Promise<void>((resolve) => { releaseFirst = resolve; });
+    }
+    const revision = `r${payloads.length + 1}`;
+    files.set(r.locator, { content, revision });
+    return { revision };
+  };
+  const handle = openDocument(ref("serial.ts"));
+  try {
+    await handle.load();
+    let live = "O";
+    handle.attachSource({ getText: () => live });
+    live = "A";
+    handle.reportUserEdit(false);
+    const saving = handle.save();
+    assert.equal(payloads.length, 1);
+    live = "O";
+    handle.reportUserEdit(true);
+    assert.equal(handle.getBuffer(), "O");
+    assert.equal(payloads.length, 1);
+    live = "C";
+    handle.reportUserEdit(false);
+    await new Promise((resolve) => setTimeout(resolve, 1600));
+    assert.equal(payloads.length, 1, "autosave must not start a second provider write");
+    assert.equal(handle.getBuffer(), "C");
+    assert.equal(handle.getSnapshot().dirty, true);
+    releaseFirst();
+    await saving;
+    assert.equal(handle.getSnapshot().saved, "A");
+    assert.equal(handle.getBuffer(), "C");
+    assert.equal(handle.getSnapshot().dirty, true);
+    await handle.save();
+    assert.equal(payloads.length, 2);
+    assert.equal(payloads[1], "C");
+    assert.equal(handle.getSnapshot().saved, "C");
+    assert.equal(handle.getSnapshot().dirty, false);
+  } finally {
+    restoreWriteImpl();
+    resetDocumentsForTest();
+  }
+});
+
+test("explicit save during an in-flight write does not start a second provider.write", async () => {
+  resetDocumentsForTest();
+  files.set("manual.ts", { content: "O", revision: "r1" });
+  const payloads: string[] = [];
+  let releaseFirst!: () => void;
+  writeImpl = async (r, content) => {
+    payloads.push(content);
+    if (payloads.length === 1) {
+      await new Promise<void>((resolve) => { releaseFirst = resolve; });
+    }
+    const revision = `r${payloads.length + 1}`;
+    files.set(r.locator, { content, revision });
+    return { revision };
+  };
+  const handle = openDocument(ref("manual.ts"));
+  try {
+    await handle.load();
+    let live = "O";
+    handle.attachSource({ getText: () => live });
+    live = "A";
+    handle.reportUserEdit(false);
+    const saving = handle.save();
+    live = "C";
+    handle.reportUserEdit(false);
+    await handle.save();
+    assert.equal(payloads.length, 1);
+    assert.equal(payloads[0], "A");
+    releaseFirst();
+    await saving;
+    assert.equal(handle.getSnapshot().saved, "A");
+    assert.equal(handle.getBuffer(), "C");
+    assert.equal(handle.getSnapshot().dirty, true);
+  } finally {
+    restoreWriteImpl();
+    resetDocumentsForTest();
+  }
+});

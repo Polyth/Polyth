@@ -30,9 +30,8 @@ export function editLiveFile(state: LiveFileState): LiveFileState {
   if (state.kind === "conflict" || state.kind === "external-change" || state.kind === "deleted") {
     return { ...state, dirty: true, noticeDismissed: false };
   }
-  // Mid-flight save: keep kind "saving" so a concurrent autosave/manual save
-  // stays blocked, but mark dirty so completeLiveFileSave(stillDirty) lands
-  // back on dirty after the in-flight write settles.
+  // Mid-flight keystrokes keep UI kind "saving" (Save button / autosaveDelay).
+  // Physical write serialization lives on Session.saveInFlight, not this kind.
   if (state.kind === "saving") {
     return { ...state, dirty: true, noticeDismissed: false };
   }

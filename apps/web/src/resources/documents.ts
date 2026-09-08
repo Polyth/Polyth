@@ -45,6 +45,8 @@ interface Session {
   source: ResourceTextSource | null;
   autosaveTimer: ReturnType<typeof setTimeout> | null;
   loading: Promise<void> | null;
+  /** Physical in-flight provider.write. UI `live.kind` is not this lock. */
+  saveInFlight: Promise<void> | null;
   listeners: Set<() => void>;
 }
 
@@ -266,33 +268,40 @@ async function loadSession(session: Session): Promise<void> {
 async function saveSession(session: Session, options: { force?: boolean } = {}): Promise<void> {
   const provider = getResourceProvider(session.ref.scheme);
   if (!provider?.write || session.truncated || session.binary) return;
-  if (session.live?.kind === "saving") return;
+  if (session.saveInFlight) return;
   const content = getBuffer(session);
   session.live = beginLiveFileSave(session.live ?? loadedLiveFile(session.revision));
+  let settle!: () => void;
+  session.saveInFlight = new Promise<void>((resolve) => { settle = resolve; });
   notify(session);
   try {
-    const base = options.force ? undefined : session.revision;
-    const res = await provider.write(session.ref, content, base);
-    const current = getBuffer(session);
-    const stillDirty = current !== content;
-    session.saved = content;
-    session.revision = res.revision;
-    session.live = completeLiveFileSave(session.live, res.revision ?? session.revision ?? "", stillDirty);
-    session.dirty = stillDirty;
-    session.error = "";
-    session.saveCount++;
-    editorBridge?.onSavedBaselineAdvanced(session.ref, content);
-    if (stillDirty) armAutosave(session);
-    else clearAutosave(session);
-  } catch (err) {
-    if (httpStatusOf(err) === 409) {
-      session.live = conflictLiveFile(session.live ?? loadedLiveFile(session.revision));
-    } else {
-      session.error = msg(err);
-      session.live = failLiveFileSave(session.live ?? loadedLiveFile(session.revision));
+    try {
+      const base = options.force ? undefined : session.revision;
+      const res = await provider.write(session.ref, content, base);
+      const current = getBuffer(session);
+      const stillDirty = current !== content;
+      session.saved = content;
+      session.revision = res.revision;
+      session.live = completeLiveFileSave(session.live, res.revision ?? session.revision ?? "", stillDirty);
+      session.dirty = stillDirty;
+      session.error = "";
+      session.saveCount++;
+      editorBridge?.onSavedBaselineAdvanced(session.ref, content);
+      if (stillDirty) armAutosave(session);
+      else clearAutosave(session);
+    } catch (err) {
+      if (httpStatusOf(err) === 409) {
+        session.live = conflictLiveFile(session.live ?? loadedLiveFile(session.revision));
+      } else {
+        session.error = msg(err);
+        session.live = failLiveFileSave(session.live ?? loadedLiveFile(session.revision));
+      }
     }
+    notify(session);
+  } finally {
+    session.saveInFlight = null;
+    settle();
   }
-  notify(session);
 }
 
 async function reloadSession(session: Session): Promise<void> {
@@ -370,6 +379,7 @@ function ensureSession(ref: ResourceRef): Session {
       source: null,
       autosaveTimer: null,
       loading: null,
+      saveInFlight: null,
       listeners: new Set(),
     };
     sessions.set(key, session);
