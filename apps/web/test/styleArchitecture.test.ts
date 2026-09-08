@@ -137,9 +137,13 @@ test("tablet-class width is a container-query layout state, not a media pile", a
   // The band's lower bound must sit exactly one pixel above the compact seam:
   // below it the navigator is already a drawer (the compact shell owns the
   // layout), so the band and the compact rules can neither overlap nor leave a
-  // gap. This is the structural guarantee that 900 -> 901 is not a cliff — it
-  // is a drawer-nav shell handing off to a persistent-nav shell whose idle
-  // rail is a floating cluster, not a third column.
+  // gap. That guarantees the two rule sets tile cleanly — it does NOT make
+  // 900 -> 901 geometrically continuous: at 901 the persistent navigator and a
+  // reserved launcher lane enter flow and the primary workspace drops from the
+  // full width to ~561px in one pixel. The seam is placed, not eliminated; see
+  // docs/dev/tablet-ux.md. What this test pins is only that a drawer-nav shell
+  // hands off to a persistent-nav shell whose idle rail is a bounded floating
+  // cluster, with no width where both or neither apply.
   const bandMin = COMPACT_MAX_WIDTH + 1;
   const band = new RegExp(
     `@container app-shell \\(min-width: ${bandMin}px\\) and \\(max-width: 1400px\\)\\s*\\{`,

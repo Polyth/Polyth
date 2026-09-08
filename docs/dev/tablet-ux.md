@@ -32,17 +32,18 @@ contract; the CSS twins them with `(max-width: …px)` / `(max-width: 480px)`.
 ## The two gaps
 
 **1. The compact-shell boundary sat at 820.** `≤ 820` = drawer navigator;
-`≥ 821` = a permanent 272px navigator. An ~834px portrait iPad — or a
-half-snapped desktop window — therefore got a persistent navigator with a
-cramped workspace beside it: the "desktop squeezed into a tablet" the spec
-names outright. 820 was never a space decision, just the old phone-vs-not line.
+`≥ 821` = a permanent navigator (`SIDEBAR_DEFAULT_WIDTH` 332px, user-resizable
+280–440). An ~834px portrait iPad — or a half-snapped desktop window —
+therefore got a persistent navigator with a cramped workspace beside it: the
+"desktop squeezed into a tablet" the spec names outright. 820 was never a space
+decision, just the old phone-vs-not line.
 
 **2. The idle right rail read as a third column.** On the wide shell
 `.railbar` is **already `position: absolute; inset-inline-end: 0`** — out of
 flow, zero layout width — but its `.rail-icon-col.plugin-strip` (~44px) is
 full-height and floats over the conversation's gutter. Fine at desktop widths
-where the gutter is wide; at tablet-class widths the 272px navigator squeezes
-the gutter below the strip width and the strip **overlaps chat text**.
+where the gutter is wide; at tablet-class widths the persistent navigator
+squeezes the gutter below the strip width and the strip **overlaps chat text**.
 
 Nothing else in the spec needs new architecture — the pane model already does
 overlay / pin / split / focus, and the compact shell already does the whole
@@ -54,24 +55,43 @@ No new `ShellMode`, no parallel components, no device detection. Two seams move.
 
 ### A. Compact-shell boundary 820 → 900 (`responsiveShell.ts`)
 
-`COMPACT_MAX_WIDTH` is now `900`. The persistent 272px navigator only earns its
-place when ~628px of usable workspace survive beside it (roughly `2 ×
-CHAT_FLOOR` — enough for chat with real gutters, or a usable editor/diff).
-Below that the existing `compact` shell owns the layout: navigator as a drawer,
-panels as sheets, panes full-screen — the spec's single-stage portrait
-composition, already built, now reached at the widths that need it.
+`COMPACT_MAX_WIDTH` is now `900`. The persistent navigator only earns its place
+when a usable primary workspace still survives beside it. Below 900 the existing
+`compact` shell owns the layout: navigator as a drawer, panels as sheets, panes
+full-screen — the spec's single-stage portrait composition, already built, now
+reached at the widths that need it.
 
 - Every portrait iPad (768 / 810 / 820 / 834) → drawer navigator, single stage.
 - Every landscape iPad (1080 / 1180 / 1194 / 1366) → persistent navigator.
-- Half-snapped desktop windows below 900 → drawer navigator (a space decision,
-  not a regression: 272 + <628 is not a usable two-column split).
+- Half-snapped desktop windows below 900 → drawer navigator.
 - The CSS twins (`(max-width: 820px)` → `900`, `(min-width: 821px)` → `901`,
   the one `(max-width: 1100px) and (min-width: 821px)` header rule → `901`) and
   `sidebarPresentation.ts` `SIDEBAR_NARROW_QUERY` move with the constant.
-- `responsiveShell.test.ts` still pins the literal and the boundary matrix —
-  updated to 900, with `834` and `1080` as named portrait/landscape anchors.
-  The `0…2000` monotonic sweep still guarantees no rank regression, so the one
-  transition (900 → 901) is a single-step compact→wide hand-off, not a cliff.
+- `responsiveShell.test.ts` pins the literal and the boundary matrix — updated
+  to 900, with `834` and `1080` as named portrait/landscape anchors.
+
+**The 900 → 901 seam is a real geometric step, not a smooth ramp.** Shell-mode
+classification is monotonic (`compact` → `wide`, one rank change, no
+regression), but the *layout* changes hard across that one pixel. Measured, at
+viewport height 900 with the default navigator width:
+
+| | 900px (compact) | 901px (wide) |
+|---|---|---|
+| primary workspace | 900px | ~561px |
+| conversation content lane | ~876px | ~457px |
+| navigator | drawer (0 layout width) | persistent, `SIDEBAR_DEFAULT_WIDTH` 332px (user-resizable 280–440) |
+| idle tool rail | none | floating cluster + ~80px reserved right lane |
+
+So one pixel of container growth brings ~332px of navigator chrome plus an
+~80px launcher lane into flow and roughly halves the conversation lane. The
+seam sits at 900 anyway because the alternative — keeping the pre-PR 820 line —
+put that same step at a width where *less* workspace survived it, and because
+every portrait tablet now lands cleanly on the drawer shell instead of a
+squeezed persistent-nav column. It is a relocated seam, placed where the wide
+shell it hands to is at least usable (see "Known limitations"), not an
+eliminated one. `CHAT_FLOOR` is 320px; the ~457px conversation lane at 901 is
+~1.4× that — usable, narrower than the 768px `--chat-measure` target until the
+viewport reaches ~1270px.
 
 ### B. Idle right rail → floating cluster (`styles.css`, one container query)
 
@@ -149,16 +169,35 @@ composition, already built, now reached at the widths that need it.
   and a keep-alive open→close→reopen at ~1180. The pure classifier, the
   container-query bound, and the keep-alive lifecycle are covered by the
   node-test suite above; the live gate confirms pixel geometry only.
-- **900 is still a single boundary, not a per-component decision.** It is now
-  placed at a defensible content width (272 nav + ~628 workspace) rather than
-  the old phone line, and the monotonic sweep proves the hand-off is single-
-  step. Making each region (navigator, tool pane) decide from its own inline
-  size would remove the last snap entirely but needs the navigator out of the
-  `shellMode` React branch — a larger change with no user-visible win over a
-  well-placed constant. Not done.
+- **900 is still a single boundary, not a per-component decision, and the
+  900 → 901 layout step is real.** The seam is placed at a width where the wide
+  shell it hands to is at least usable — but at 901 the primary workspace is
+  ~561px and the conversation lane ~457px (see the table in "The two gaps"),
+  and the 901–~1000px band is the weakest wide layout: usable, no overflow,
+  timeline and composer stay mutually aligned, but the conversation sits ~28px
+  left of the workspace centre (the reserved launcher lane adds ~56px more
+  right padding than left) and is well below its `--chat-measure` target.
+  Making each region (navigator, tool pane) decide from its own inline size
+  would let the navigator collapse or overlay near the seam and soften the
+  step, but needs the navigator out of the `shellMode` React branch — a larger
+  change deferred to a follow-up. Options if the 901–1000 band proves too tight
+  in real use: nudge `COMPACT_MAX_WIDTH` up toward ~960 (332 nav + ~2×
+  `CHAT_FLOOR`) so half-snapped windows get the drawer shell, or give the
+  persistent navigator a collapsed rail state below ~1100px.
+- **Second seam at 1400 → 1401.** Leaving the container-query band, the idle
+  rail reverts from the floating cluster to the permanent full-height strip and
+  the conversation's reserved right padding drops ~55px (content widens).
+  Primary workspace width itself stays continuous across this seam. Milder than
+  the 900 step and only affects the idle (no rail open) state.
 - **Wide header tool rail** (`CapabilityNav`) still shows in the band and
   duplicates the floating cluster's launchers. Hide it in the band if it reads
   heavy after real use.
+- **Live tablet gate.** `responsiveShell.live.ts` covers 390/1280 only. When a
+  live harness is available, extend it with tablet widths (834/900/901/1024/
+  1194/1366): assert no document overflow, `.railbar` bounded within
+  `.app-shell`, `.railbar` scrollHeight > clientHeight with many tools at a
+  short viewport, conversation region not intersecting the cluster, and the
+  keep-alive open→close→reopen `.railbar-open` lifecycle in the real DOM.
 - **Navigator / header / composer chrome** on tablet: the spec's asks (§1 no
   persistent bulk actions, compact search; header not an icon graveyard;
   compact idle composer) are already met by existing `selectMode` /
@@ -175,8 +214,10 @@ composition, already built, now reached at the widths that need it.
   The idle composer and the thin activity strip already exist; the wide header's
   tool rail is desktop-intentional. Revisit only if the band still feels heavy
   after the rail change.
-- **No navigator rebuild.** 272px is already inside the spec's 280–310 target,
-  and the selection / search chrome complaints (§1) are already addressed in
+- **No navigator rebuild.** `SIDEBAR_DEFAULT_WIDTH` (332px) is just above the
+  spec's 280–310 target and the min (280) is inside it; the width is
+  user-resizable 280–440. The selection / search chrome complaints (§1) are
+  already addressed in
   `Sidebar.tsx` (`selectMode`, `searchOpen`). Portrait tablets now reach that
   navigator as the compact drawer, so it is a full-height single-stage surface,
   not a squeezed column.
