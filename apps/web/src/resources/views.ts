@@ -62,7 +62,7 @@ let editorSurface: ComponentType<EditorSurfaceProps> | null = null;
 
 export interface EditorSurfaceProps {
   groupId: string;
-  ref: ResourceRef;
+  resource: ResourceRef;
   path: string;
   readOnly?: boolean;
   wrap?: boolean;

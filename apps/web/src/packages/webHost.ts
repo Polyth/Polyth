@@ -78,13 +78,30 @@ import {
   workbenchSwapSurfaces,
 } from "../workbench/store.ts";
 import {
+  CONVERSATION_PROFILE,
+  CONVERSATION_PROFILE_ID,
   listWorkbenchProfileSummaries,
+  profileSummary,
   registerWorkbenchProfile,
 } from "../workbench/profiles.ts";
 
 installDefaultHandoffTargets();
 /** WorkbenchHost is not live — ContextRail remains the presentation authority. */
 const WORKBENCH_HOST_LIVE = false;
+
+function publicWorkbenchProfileId(): string {
+  return WORKBENCH_HOST_LIVE ? getActiveProfileId() : CONVERSATION_PROFILE_ID;
+}
+
+function publicWorkbenchProfileSummary() {
+  return WORKBENCH_HOST_LIVE ? getActiveProfileSummary() : profileSummary(CONVERSATION_PROFILE);
+}
+
+function publicWorkbenchSnapshot() {
+  const snap = workbenchSnapshot();
+  if (WORKBENCH_HOST_LIVE) return snap;
+  return { ...snap, activeProfile: CONVERSATION_PROFILE_ID };
+}
 
 const snapshot = (): WebStoreSnapshot => {
   const state = getState();
@@ -94,7 +111,7 @@ const snapshot = (): WebStoreSnapshot => {
     activeView: state.activeView,
     overlay: state.overlay,
     railPlugin: state.railPlugin,
-    workbenchProfile: getActiveProfileId(),
+    workbenchProfile: publicWorkbenchProfileId(),
     settings: { ...state.settings },
   };
 };
@@ -190,8 +207,8 @@ export const webPackageHost: WebPackageHost = {
       list: listWorkbenchProfileSummaries,
     },
     activateProfile: (profileId) => WORKBENCH_HOST_LIVE ? activateWorkbenchProfile(profileId) : false,
-    getActiveProfile: getActiveProfileSummary,
-    getSnapshot: workbenchSnapshot,
+    getActiveProfile: publicWorkbenchProfileSummary,
+    getSnapshot: publicWorkbenchSnapshot,
     subscribe: subscribeWorkbench,
     openSurface: workbenchOpenSurface,
     closeSurface: (surfaceId) => { workbenchCloseSurface(surfaceId); },

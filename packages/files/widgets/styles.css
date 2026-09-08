@@ -478,9 +478,6 @@ min-width: 0; max-width: 100%;
 .files-viewer-wrap {
 max-width: 100%; overscroll-behavior-inline: contain;
 }
-.editor-ta {
-max-width: 100%; overflow: auto; overscroll-behavior: contain;
-}
 .editor-plain {
 width: max-content; min-width: 100%;
 }

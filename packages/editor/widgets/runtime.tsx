@@ -42,6 +42,7 @@ interface RetainedState {
   state: EditorState;
   generation: number;
   baseline: Text;
+  searchConfigured: boolean;
 }
 
 const groups = new Map<string, EditorGroup>();
@@ -59,6 +60,10 @@ const phrasesComp = new Compartment();
 const labelComp = new Compartment();
 
 let searchModule: Promise<typeof import("@codemirror/search")> | null = null;
+let searchImportOverride: (() => Promise<typeof import("@codemirror/search")>) | null = null;
+let searchImportFailOnce = false;
+let languageLoadGate: Promise<void> | null = null;
+let releaseLanguageLoadGate: (() => void) | null = null;
 let languageTicketCounter = 0;
 
 function bumpLanguageStatus(): void {
@@ -125,7 +130,7 @@ function createState(doc: string, readOnly: boolean, wrap: boolean, ariaLabel?: 
 
 function freshRetained(text: string, readOnly: boolean, wrap: boolean, ariaLabel?: string, generation = 0): RetainedState {
   const state = createState(text, readOnly, wrap, ariaLabel);
-  return { state, generation, baseline: state.doc };
+  return { state, generation, baseline: state.doc, searchConfigured: false };
 }
 
 function retainedKey(ref: ResourceRef): string {
@@ -148,7 +153,7 @@ function getOrCreateGroup(groupId: string): EditorGroup {
       const key = retainedKey(active.ref);
       let retained = states.get(key);
       if (!retained) {
-        retained = { state: view.state, generation: active.generation, baseline: view.state.doc };
+        retained = { state: view.state, generation: active.generation, baseline: view.state.doc, searchConfigured: false };
         states.set(key, retained);
       } else {
         retained.state = view.state;
@@ -191,33 +196,40 @@ function getOrCreateGroup(groupId: string): EditorGroup {
   return group;
 }
 
+async function loadSearchModule(): Promise<typeof import("@codemirror/search")> {
+  if (searchImportFailOnce) {
+    searchImportFailOnce = false;
+    throw new Error("search import failed");
+  }
+  if (searchImportOverride) return searchImportOverride();
+  searchModule ??= import("@codemirror/search");
+  return searchModule;
+}
+
 async function ensureSearch(group: EditorGroup, findNext = false): Promise<void> {
+  const active = group.active;
+  const retained = active ? states.get(retainedKey(active.ref)) : null;
   try {
-    if (!group.searchConfigured) {
-      searchModule ??= import("@codemirror/search");
-      const search = await searchModule;
+    if (!retained?.searchConfigured) {
+      const search = await loadSearchModule();
       group.view.dispatch({
         effects: searchComp.reconfigure([
           search.search({ top: true }),
           keymap.of(search.searchKeymap.filter((binding) => ["Mod-f", "F3", "Escape"].includes(binding.key ?? ""))),
         ]),
       });
+      if (retained) retained.searchConfigured = true;
       group.searchConfigured = true;
       search.openSearchPanel(group.view);
       return;
     }
-    if (findNext) {
-      searchModule ??= import("@codemirror/search");
-      const search = await searchModule;
-      search.findNext(group.view);
-    } else {
-      searchModule ??= import("@codemirror/search");
-      const search = await searchModule;
-      search.openSearchPanel(group.view);
-    }
+    const search = await loadSearchModule();
+    if (findNext) search.findNext(group.view);
+    else search.openSearchPanel(group.view);
   } catch {
     searchModule = null;
     group.searchConfigured = false;
+    if (retained) retained.searchConfigured = false;
   }
 }
 
@@ -246,6 +258,7 @@ function applyBindingToView(group: EditorGroup, binding: EditorBinding): void {
     group.skip = true;
     group.view.setState(retained.state);
     group.skip = false;
+    group.searchConfigured = retained.searchConfigured;
   }
   group.view.dispatch({
     effects: [
@@ -338,6 +351,48 @@ export function resetEditorRuntimeForTest(): void {
   languageStatus.clear();
   languageStatusVersion = 0;
   searchModule = null;
+  searchImportOverride = null;
+  searchImportFailOnce = false;
+  languageLoadGate = null;
+  releaseLanguageLoadGate = null;
+}
+
+export function holdLanguageLoadsForTest(): void {
+  languageLoadGate = new Promise<void>((resolve) => {
+    releaseLanguageLoadGate = resolve;
+  });
+}
+
+export function releaseLanguageLoadsForTest(): void {
+  releaseLanguageLoadGate?.();
+  languageLoadGate = null;
+  releaseLanguageLoadGate = null;
+}
+
+export function setSearchImportForTest(
+  override: (() => Promise<typeof import("@codemirror/search")>) | null,
+  failOnce = false,
+): void {
+  searchImportOverride = override;
+  searchImportFailOnce = failOnce;
+  searchModule = null;
+}
+
+export function openSearchForTest(groupId: string): Promise<void> {
+  const group = groups.get(groupId);
+  if (!group) return Promise.resolve();
+  return ensureSearch(group);
+}
+
+export function editorGroupSearchConfigured(groupId: string): boolean {
+  const group = groups.get(groupId);
+  if (!group?.active) return group?.searchConfigured === true;
+  const retained = states.get(retainedKey(group.active.ref));
+  return retained?.searchConfigured === true;
+}
+
+export function peekRetainedState(ref: ResourceRef): RetainedState | null {
+  return states.get(retainedKey(ref)) ?? null;
 }
 
 export function editorSelection(docKey: string): { text: string; startLine: number; endLine: number } | null {
@@ -395,7 +450,7 @@ registerDocumentEditorBridge({
 export default function EditorRuntime(props: EditorSurfaceProps): ReactElement {
   const hostRef = useRef<HTMLDivElement>(null);
   const bindingRef = useRef<EditorBinding | null>(null);
-  const docKey = resourceKey(props.ref);
+  const docKey = resourceKey(props.resource);
 
   const languageLabel = useSyncExternalStore(
     subscribeLanguageStatus,
@@ -407,11 +462,11 @@ export default function EditorRuntime(props: EditorSurfaceProps): ReactElement {
     const host = hostRef.current;
     if (!host) return;
 
-    const handle = peekDocument(props.ref);
+    const handle = peekDocument(props.resource);
     const generation = handle?.getSnapshot().authoritativeGeneration ?? 0;
     const binding: EditorBinding = {
       groupId: props.groupId,
-      ref: props.ref,
+      ref: props.resource,
       path: props.path,
       readOnly: props.readOnly === true,
       wrap: props.wrap !== false,
@@ -425,7 +480,7 @@ export default function EditorRuntime(props: EditorSurfaceProps): ReactElement {
     if (!props.visible) {
       const group = groups.get(props.groupId);
       if (group && bindingMatches(group.active, binding)) {
-        states.set(docKey, { state: group.view.state, generation, baseline: states.get(docKey)?.baseline ?? group.view.state.doc });
+        states.set(docKey, { state: group.view.state, generation, baseline: states.get(docKey)?.baseline ?? group.view.state.doc, searchConfigured: states.get(docKey)?.searchConfigured ?? false });
         if (group.view.dom.parentElement === host) host.removeChild(group.view.dom);
         handle?.detachSource();
         group.active = null;
@@ -441,7 +496,7 @@ export default function EditorRuntime(props: EditorSurfaceProps): ReactElement {
     }
 
     applyBindingToView(group, binding);
-    states.set(docKey, states.get(docKey) ?? { state: group.view.state, generation, baseline: group.view.state.doc });
+    states.set(docKey, states.get(docKey) ?? { state: group.view.state, generation, baseline: group.view.state.doc, searchConfigured: false });
 
     const existingSource = handle?.getSnapshot();
     if (handle) {
@@ -455,8 +510,8 @@ export default function EditorRuntime(props: EditorSurfaceProps): ReactElement {
           return (groups.get(props.groupId)?.view.state ?? retained?.state)?.doc.toString() ?? "";
         },
         resetAuthoritative: (text) => {
-          const snap = peekDocument(props.ref)?.getSnapshot();
-          resetRetainedState(props.ref, text, snap?.authoritativeGeneration ?? generation, binding.readOnly, binding.wrap);
+          const snap = peekDocument(props.resource)?.getSnapshot();
+          resetRetainedState(props.resource, text, snap?.authoritativeGeneration ?? generation, binding.readOnly, binding.wrap);
         },
       });
     }
@@ -474,7 +529,9 @@ export default function EditorRuntime(props: EditorSurfaceProps): ReactElement {
 
     const language = languageOf(props.path);
     const ticket = `${props.groupId}:${docKey}:${generation}:${binding.languageTicket}`;
-    void (language ? language.load() : Promise.resolve([] as const)).then(async (extension) => {
+    void (async () => {
+      if (languageLoadGate) await languageLoadGate;
+      const extension = language ? await language.load() : [];
       const active = groups.get(props.groupId)?.active;
       const currentTicket = active
         ? `${active.groupId}:${resourceKey(active.ref)}:${active.generation}:${active.languageTicket}`
@@ -494,7 +551,7 @@ export default function EditorRuntime(props: EditorSurfaceProps): ReactElement {
           effects: [languageComp.reconfigure([]), syntaxComp.reconfigure([])],
         });
       }
-    }).catch(() => {
+    })().catch(() => {
       languageStatus.set(docKey, { label: `${language?.label ?? PLAIN_TEXT_LABEL} · ${PLAIN_TEXT_LABEL}`, fallback: true });
       bumpLanguageStatus();
     });
@@ -510,6 +567,7 @@ export default function EditorRuntime(props: EditorSurfaceProps): ReactElement {
         state: g.view.state,
         generation: current.generation,
         baseline: states.get(key)?.baseline ?? g.view.state.doc,
+        searchConfigured: states.get(key)?.searchConfigured ?? false,
       });
       if (bindingMatches(g.active, current)) {
         peekDocument(current.ref)?.detachSource();
@@ -519,7 +577,7 @@ export default function EditorRuntime(props: EditorSurfaceProps): ReactElement {
     };
   }, [
     props.groupId,
-    props.ref,
+    props.resource,
     props.visible,
     props.path,
     props.readOnly,

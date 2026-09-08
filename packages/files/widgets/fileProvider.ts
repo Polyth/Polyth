@@ -13,11 +13,21 @@ const MEDIA_EXT: Record<string, MediaKind> = {
   ".pdf": "pdf",
 };
 
+const TEXT_EXT = new Set([
+  "js", "jsx", "ts", "tsx", "json", "yaml", "yml", "md", "markdown", "txt", "css", "html", "svg", "xml",
+  "toml", "ini", "sh", "bash", "zsh", "cjs", "mjs", "cts", "mts", "map", "env", "rs", "go", "py", "rb",
+  "java", "kt", "c", "h", "cpp", "hpp", "cs", "sql", "graphql", "vue", "svelte", "lock",
+]);
+
 function fileKindOf(path: string): ResourceKind {
-  const ext = path.toLowerCase().match(/\.[^.]+$/)?.[0] ?? "";
+  const base = (path.split("/").pop() ?? path).toLowerCase();
+  if (base === ".gitignore") return "text";
+  const ext = base.match(/\.[^.]+$/)?.[0] ?? "";
   if (MEDIA_EXT[ext]) return "binary";
   if (!ext) return "unknown";
-  return "text";
+  const bare = ext.slice(1);
+  if (TEXT_EXT.has(bare)) return "text";
+  return "unknown";
 }
 
 export const fileResourceProvider: ResourceProvider = {

@@ -411,7 +411,7 @@ export function deleteDocument(ref: ResourceRef): void {
   notifyStore();
 }
 
-function anyUnflushedDirty(): boolean {
+export function anyUnflushedDirty(): boolean {
   const autosaveOn = getUiSettings().editorAutosave;
   for (const session of sessions.values()) {
     if (!session.dirty) continue;

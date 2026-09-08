@@ -4,7 +4,7 @@
 // the "file" pane provider. Live text lives in the editor runtime (pull
 // model); this pane is chrome + preview. Keep-alive (hidden, inert) is
 // PaneHost; revision polling pauses while hidden.
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { api } from "@polyth/session/web-api";
 import { clearEditorLocation, useStore } from "../../../../apps/web/src/store.ts";
 import { MarkdownDoc } from "../../../../apps/web/src/markdown.tsx";
@@ -91,10 +91,6 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
 
   useEffect(() => {
     void openFileDoc(projectId, sessionId, path).load();
-  }, [projectId, sessionId, path]);
-
-  useEffect(() => () => {
-    deleteDoc(projectId, sessionId, path);
   }, [projectId, sessionId, path]);
 
   const td = peekFileDoc(projectId, sessionId, path);
@@ -252,6 +248,16 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
     await td.handle.save(opts);
     if (td.handle.getSnapshot().live?.kind === "saved") setFlash("Saved ✓");
   };
+
+  const dirtyRef = useRef(dirty);
+  const readOnlyRef = useRef(readOnly);
+  dirtyRef.current = dirty;
+  readOnlyRef.current = readOnly;
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  const onEditorSave = useCallback(() => {
+    if (dirtyRef.current && !readOnlyRef.current) void saveRef.current();
+  }, []);
 
   const reload = async () => {
     if (!td) return;
@@ -565,13 +571,13 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
         <div className="editor-edit">
           <EditorSurfaceSlot
             groupId={FILES_GROUP_ID}
-            ref={resourceRef}
+            resource={resourceRef}
             path={doc.path}
             readOnly={readOnly}
             wrap={wrap}
             ariaLabel={tr("editor.filepane.editValue", { path: doc.path })}
             visible={visible}
-            onSave={() => { if (dirty && !readOnly) void save(); }}
+            onSave={onEditorSave}
             reveal={reveal}
             onRevealConsumed={() => setReveal(null)}
           />
