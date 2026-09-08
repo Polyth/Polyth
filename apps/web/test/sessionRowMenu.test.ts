@@ -46,7 +46,7 @@ const mediaQueryList = (key: "compact" | "phone") => ({
 Object.defineProperty(dom, "matchMedia", {
   configurable: true,
   value: (query: string) =>
-    mediaQueryList(query.includes("820") ? "compact" : "phone"),
+    mediaQueryList(query.includes("900") ? "compact" : "phone"),
 });
 let copiedText = "";
 Object.defineProperty(dom.navigator, "clipboard", {

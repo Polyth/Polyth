@@ -78,7 +78,7 @@ test("sidebar geometry uses independent type roles and density controls rows", a
     "swipe-revealed quick actions align to the row's right edge");
   assert.match(css, /\.session-menu-trigger\s*\{[\s\S]*?right:\s*4px;[\s\S]*?width:\s*32px;[\s\S]*?border:\s*0;/,
     "session and project action columns share a clean edge without a button outline");
-  assert.match(css, /@media \(max-width:\s*820px\)[\s\S]*?\.project-new-session,\s*\.project-menu-btn\s*\{\s*width:\s*var\(--tap\);\s*height:\s*var\(--tap\);/,
+  assert.match(css, /@media \(max-width:\s*900px\)[\s\S]*?\.project-new-session,\s*\.project-menu-btn\s*\{\s*width:\s*var\(--tap\);\s*height:\s*var\(--tap\);/,
     "mobile project actions grow to the session menu touch target");
   assert.match(css, /\.sidebar \.project-card-shell,\s*\.sidebar \.project-card,\s*\.sidebar \.session-row,[\s\S]*?min-height:\s*var\(--tap\);/,
     "mobile project rows cannot be shorter than their touch controls");

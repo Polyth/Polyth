@@ -6,9 +6,10 @@
 // narrow breakpoint the CSS hides it unless the drawer is open.
 import { useSyncExternalStore } from "react";
 
-/** Keep in sync with the `@media (max-width: 820px)` rule in styles.css that
- *  hides the sidebar in favour of the drawer (guarded by a regression test). */
-export const SIDEBAR_NARROW_QUERY = "(max-width: 820px)";
+/** Keep in sync with the compact `@media (max-width: 900px)` rule in styles.css
+ *  (COMPACT_MAX_WIDTH in responsiveShell.ts) that hides the sidebar in favour of
+ *  the drawer (guarded by a regression test). */
+export const SIDEBAR_NARROW_QUERY = "(max-width: 900px)";
 
 /** Pure presentation rule: expanded on desktop always; on narrow viewports
  *  only while the drawer is open. */

@@ -22,7 +22,10 @@ const read = (rel: string) =>
 // ---- pure width classifier -------------------------------------------------
 
 test("boundaries are the literal compact and phone contracts", () => {
-  assert.equal(COMPACT_MAX_WIDTH, 820);
+  // 900, not 820: the persistent navigator only holds when ~272 + ~628px of
+  // workspace survive beside it. Portrait tablets (≤834) and small windows sit
+  // in the drawer shell; landscape tablets (≥1080) keep the persistent nav.
+  assert.equal(COMPACT_MAX_WIDTH, 900);
   assert.equal(PHONE_MAX_WIDTH, 480);
   assert.equal(PHONE_LANDSCAPE_MAX_HEIGHT, 480);
 });
@@ -37,8 +40,11 @@ test("width classification is exact at and around every boundary", () => {
   assert.equal(shellModeForWidth(600), "compact");
   assert.equal(shellModeForWidth(768), "compact");
   assert.equal(shellModeForWidth(820), "compact");
-  assert.equal(shellModeForWidth(821), "wide");
-  assert.equal(shellModeForWidth(1000), "wide");
+  assert.equal(shellModeForWidth(834), "compact", "11\" iPad portrait is single-stage, not persistent-nav");
+  assert.equal(shellModeForWidth(900), "compact");
+  assert.equal(shellModeForWidth(901), "wide");
+  assert.equal(shellModeForWidth(1024), "wide");
+  assert.equal(shellModeForWidth(1080), "wide", "smallest landscape tablet keeps the persistent navigator");
   assert.equal(shellModeForWidth(1280), "wide");
 });
 
@@ -92,7 +98,7 @@ test("responsiveShell.ts is the sole JavaScript breakpoint seam", async () => {
 
 test("CSS carries the same literal width/height contracts", async () => {
   const css = await read("../src/styles.css");
-  assert.ok(css.includes("(max-width: 820px)"), "compact boundary present in CSS");
+  assert.ok(css.includes("(max-width: 900px)"), "compact boundary present in CSS");
   assert.ok(css.includes("(max-width: 480px)"), "phone boundary present in CSS");
   assert.ok(css.includes("(max-height: 600px)"), "short-height contract present in CSS");
   assert.match(

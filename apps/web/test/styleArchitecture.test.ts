@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
+import { COMPACT_MAX_WIDTH } from "../src/responsiveShell.ts";
 
 const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
 
@@ -133,18 +134,43 @@ test("tablet-class width is a container-query layout state, not a media pile", a
     /\.app-shell\s*\{[^}]*container:\s*app-shell\s*\/\s*inline-size/,
     ".app-shell is the shell container the tablet band queries",
   );
-  // The launcher strip collapses to a floating cluster only while no pane or
-  // panel is open; opening a tool still runs the dynamic/pinned/fullscreen
-  // pane model unchanged.
-  const band = /@container app-shell \(min-width: 821px\) and \(max-width: 1400px\)\s*\{/;
-  assert.match(styles, band, "the tablet band is bounded to the wide shell");
+  // The band's lower bound must sit exactly one pixel above the compact seam:
+  // below it the navigator is already a drawer (the compact shell owns the
+  // layout), so the band and the compact rules can neither overlap nor leave a
+  // gap. This is the structural guarantee that 900 -> 901 is not a cliff — it
+  // is a drawer-nav shell handing off to a persistent-nav shell whose idle
+  // rail is a floating cluster, not a third column.
+  const bandMin = COMPACT_MAX_WIDTH + 1;
+  const band = new RegExp(
+    `@container app-shell \\(min-width: ${bandMin}px\\) and \\(max-width: 1400px\\)\\s*\\{`,
+  );
+  assert.match(styles, band, "the tablet band starts one pixel above the compact seam");
+  const bandBlock = styles.slice(styles.search(band));
+  const bandBody = bandBlock.slice(0, bandBlock.indexOf("\n}\n") + 3);
+
+  // Open/closed is the semantic `.railbar-open` class (React `rail` state), not
+  // `:has(.rail)`: a visited keep-alive surface leaves `.rail` mounted-but-
+  // hidden after close, so a `:has(.rail)` guard would latch the shell into the
+  // open layout for the rest of the session (regression: keepAliveRailState).
   assert.match(
-    styles,
-    new RegExp(band.source + /[\s\S]*?\.railbar:not\(:has\(\.rail\)\)\s*\{[^}]*height:\s*auto/.source),
+    bandBody,
+    /\.railbar:not\(\.railbar-open\)\s*\{[^}]*height:\s*auto/,
+    "the idle cluster keys off .railbar-open, the authoritative open state",
+  );
+  assert.doesNotMatch(
+    bandBody,
+    /:has\(\.rail\)/,
+    "the band must not reverse-engineer rail state from .rail DOM presence",
+  );
+  // Many packages + short viewport: the cluster is height-bounded and scrolls.
+  assert.match(
+    bandBody,
+    /\.railbar:not\(\.railbar-open\)\s*\{[^}]*max-height:/,
+    "the floating cluster is bounded so a long plugin list scrolls, not overflows",
   );
   assert.match(
-    styles,
-    new RegExp(band.source + /[\s\S]*?\.app-shell:not\(:has\(\.rail\)\)[\s\S]*?padding-inline-end:/.source),
+    bandBody,
+    /\.app-shell:not\(:has\(\.railbar-open\)\)[\s\S]*?padding-inline-end:/,
     "chat surfaces reserve a lane for the affordance so nothing renders beneath it",
   );
 });

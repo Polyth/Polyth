@@ -160,6 +160,21 @@ export function visibleSurfaces(
   return surfaces.filter((s) => s.visible === undefined || s.visible(ctx));
 }
 
+/** Surfaces that must stay mounted for this render: the open one, plus any
+ *  keep-alive surface already visited. A visited keep-alive surface stays in
+ *  this list after `rail` goes null (its `.rail` node lives on, merely hidden)
+ *  — so "in keptSurfaces" is NOT "open". The open/closed UI state is `rail`
+ *  (mirrored to the `.railbar-open` class); CSS must key off that, never off
+ *  `.rail` presence. */
+export function keptSurfaces(
+  surfaces: RailSurface[],
+  rail: string | null,
+  visited: readonly string[],
+): RailSurface[] {
+  return surfaces.filter((s) =>
+    s.id === rail || (s.presentation?.keepAlive === true && visited.includes(s.id)));
+}
+
 // ---- workspace/context split (UX-PANE-MODEL) ---------------------------------
 
 export function isWorkspaceSurface(s: RailSurface): boolean {
