@@ -39,7 +39,7 @@ const mediaQueryList = (key: "compact" | "phone") => ({
 Object.defineProperty(dom, "matchMedia", {
   configurable: true,
   value: (query: string) =>
-    mediaQueryList(query.includes("900") ? "compact" : "phone"),
+    mediaQueryList(query.includes("960") ? "compact" : "phone"),
 });
 
 register("./tsxHooks.mjs", import.meta.url);

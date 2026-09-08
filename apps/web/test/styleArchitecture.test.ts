@@ -134,13 +134,14 @@ test("tablet-class width is a container-query layout state, not a media pile", a
     /\.app-shell\s*\{[^}]*container:\s*app-shell\s*\/\s*inline-size/,
     ".app-shell is the shell container the tablet band queries",
   );
-  // The band's lower bound must sit exactly one pixel above the compact seam:
-  // below it the navigator is already a drawer (the compact shell owns the
-  // layout), so the band and the compact rules can neither overlap nor leave a
-  // gap. That guarantees the two rule sets tile cleanly — it does NOT make
-  // 900 -> 901 geometrically continuous: at 901 the persistent navigator and a
-  // reserved launcher lane enter flow and the primary workspace drops from the
-  // full width to ~561px in one pixel. The seam is placed, not eliminated; see
+  // The band's lower bound must sit exactly one pixel above the compact seam
+  // (COMPACT_MAX_WIDTH + 1 = 961): below it the navigator is already a drawer
+  // (the compact shell owns the layout), so the band and the compact rules can
+  // neither overlap nor leave a gap. That guarantees the two rule sets tile
+  // cleanly — it does NOT make 960 -> 961 geometrically continuous: at 961 the
+  // persistent navigator and a reserved launcher lane enter flow and the
+  // primary workspace drops from the full width to ~621px in one pixel. The
+  // seam is placed where both sides are usable, not eliminated; see
   // docs/dev/tablet-ux.md. What this test pins is only that a drawer-nav shell
   // hands off to a persistent-nav shell whose idle rail is a bounded floating
   // cluster, with no width where both or neither apply.

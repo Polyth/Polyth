@@ -10,7 +10,7 @@ import { SIDEBAR_NARROW_QUERY, sidebarExpanded } from "../src/sidebarPresentatio
 
 test("sidebarExpanded reports the presentation, not the drawer flag", () => {
   // Desktop: always expanded — even with the drawer flag false (the audited
-  // 1280×900 case: 272px visible sidebar, sidebarOpen === false).
+  // 1280×900 case: the persistent navigator is visible, sidebarOpen === false).
   assert.equal(sidebarExpanded(false, false), true);
   assert.equal(sidebarExpanded(false, true), true);
   // Narrow viewport: the CSS hides the sidebar unless the drawer is open.
