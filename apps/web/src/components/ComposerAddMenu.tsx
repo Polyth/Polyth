@@ -4,8 +4,8 @@
 // component owns no parser, no send path, and appends no session event —
 // every activation delegates to an existing composer seam.
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { addMenuRows, type AddMenuAction, type CatalogState } from "../composer/discovery.ts";
-import type { SlashCommand, SnippetDef } from "@polyth/session/web-api";
+import { addMenuRows, type AddMenuAction, type CatalogState, type ComposerCommand } from "../composer/discovery.ts";
+import type { SnippetDef } from "@polyth/session/web-api";
 import { parseGithubUrl, type GithubAttachResult } from "@polyth/github/attachments";
 import { useEscape } from "../useEscape.ts";
 import { Icon } from "../icons.tsx";
@@ -21,8 +21,9 @@ export interface ComposerAddMenuProps {
   hasSession: boolean;
   goalsEnabled: boolean;
   draftText: string;
-  commands: CatalogState<SlashCommand>;
+  commands: CatalogState<ComposerCommand>;
   snippets: CatalogState<SnippetDef>;
+  uploadDisabledReason?: string;
   /** Menu opens upward from the docked composer, downward from the hero. */
   direction: "up" | "down";
   onUpload: () => void;
@@ -74,6 +75,7 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
     draftText: props.draftText,
     commands: props.commands,
     snippets: props.snippets,
+    ...(props.uploadDisabledReason ? { uploadDisabledReason: props.uploadDisabledReason } : {}),
   });
 
   const activate = (action: AddMenuAction) => {

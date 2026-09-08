@@ -11,6 +11,7 @@ export {
 } from "./trustedServerEntry.ts";
 export {
   createServerServiceRegistry,
+  bindPackageServices,
   discoverServerPackages,
   INFRASTRUCTURE_PACKAGE_DIRS,
   loadServerPackage,
@@ -48,3 +49,4 @@ export {
   type BackgroundWorkTransition,
 } from "./backgroundWork.ts";
 export { atomicWrite, atomicWriteSync } from "./atomicWrite.ts";
+export { readSpaceEnabled, writeSpaceEnabled } from "./spaceEnabled.ts";

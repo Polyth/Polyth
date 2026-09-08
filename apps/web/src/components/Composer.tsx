@@ -32,7 +32,7 @@ import {
   type SnippetDef,
   type Worktree,
 } from "@polyth/session/web-api";
-import { loadDraft, saveDraft, syncDraftToServer, flushDraftToServer, type AutocompleteItem } from "../utils.ts";
+import { loadDraft, saveDraft, syncDraftToServer, flushDraftToServer } from "../utils.ts";
 import {
   canApplyNextAction,
   canRevertPromptRewrite,
@@ -65,9 +65,10 @@ import {
 import { activeToken, completeToken, shellCommand, type PromptToken } from "../composer/language.ts";
 import {
   ATTACHMENT_COMPAT_NOTE,
-  attachmentCompatibility,
   catalogFromResult,
   commandAutocomplete,
+  mergeCommandCatalog,
+  nativeCommandInput,
   fileAutocomplete,
   modelSupportsTextWorkflow,
   OPEN_PROJECT_FIRST,
@@ -76,7 +77,9 @@ import {
   planSigilInsert,
   snippetAutocomplete,
   type AutocompleteViewState,
+  type AutocompleteOption,
   type CatalogState,
+  type ComposerCommand,
   type InsertPlan,
 } from "../composer/discovery.ts";
 import {
@@ -103,6 +106,8 @@ import type {
   DraftExecutionConfig,
   ModelRef,
   QueueItemDto,
+  RuntimeCapabilities,
+  RuntimeCommandDescriptor,
   SessionProjection,
 } from "@polyth/contracts";
 import { agentPickerDefaultLabel } from "../composerDefaults.ts";
@@ -113,6 +118,7 @@ import { useRuntimeCatalog } from "@polyth/models/runtime-catalog";
 import { modelSupportsThinking } from "@polyth/models/model-presentation";
 import { resolveProjectModelDefault, useSessionDefaults } from "../sessionDefaults.ts";
 import { contextTokensUsed } from "../reduce.ts";
+import { effectiveAttachmentSupport, attachmentModality } from "@polyth/harness-runtime";
 import { getModelThinking, setModelThinking } from "../thinkingPrefs.ts";
 import { roleKind, useRolePrefs } from "../rolePrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
@@ -903,6 +909,9 @@ export default function Composer({
   );
   const [catalog, setCatalog] = useState<ComposerCatalogResult | null>(null);
   const catalogSeq = useRef(0);
+  const runtimeFeatures = useStore((s) => session?.id ? s.runtimeFeatures[session.id] : undefined);
+  const nativeCommandsRevision = session?.nativeCommandsRevision ?? 0;
+  const selectedCommandRef = useRef<ComposerCommand | undefined>(undefined);
 
   useEffect(() => {
     const seq = ++catalogSeq.current;
@@ -913,9 +922,23 @@ export default function Composer({
     });
   }, [activeProjectId]);
 
-  const commandCatalog: CatalogState<SlashCommand> = !activeProjectId
+  useEffect(() => {
+    selectedCommandRef.current = undefined;
+  }, [session?.id, session?.resolvedHarnessId, nativeCommandsRevision]);
+
+  const polythCommandCatalog: CatalogState<SlashCommand> = !activeProjectId
     ? { state: "unavailable", reason: OPEN_PROJECT_FIRST }
     : catalogFromResult(catalog?.commands ?? null);
+  const nativeCommands = runtimeFeatures?.commands ?? [];
+  const commandCatalog: CatalogState<ComposerCommand> = (() => {
+    if (polythCommandCatalog.state === "available") {
+      return { state: "available", items: mergeCommandCatalog(polythCommandCatalog.items, nativeCommands) };
+    }
+    if (nativeCommands.length > 0) {
+      return { state: "available", items: mergeCommandCatalog([], nativeCommands) };
+    }
+    return polythCommandCatalog;
+  })();
   const snippetCatalog: CatalogState<SnippetDef> = !activeProjectId
     ? { state: "unavailable", reason: OPEN_PROJECT_FIRST }
     : catalogFromResult(catalog?.snippets ?? null);
@@ -1201,6 +1224,9 @@ export default function Composer({
           ...(sentThinking ? { variant: sentThinking } : {}),
         }
       : undefined;
+    const selectedNativeCommand = command === null && commandCatalog.state === "available"
+      ? nativeCommandInput(t, commandCatalog.items, selectedCommandRef.current)
+      : undefined;
     const selectedProfileId = cfgSent.profile.kind === "id" ? cfgSent.profile.id : undefined;
     const selectedProfile = selectedProfileId
       ? profiles.find((profile) => profile.id === selectedProfileId)
@@ -1227,6 +1253,7 @@ export default function Composer({
           cfgSent.agent,
           {
             targetSessionId,
+            ...(selectedNativeCommand ? { command: selectedNativeCommand } : {}),
             ...(atts.length > 0 ? { attachments: atts } : {}),
             ...(delivery ? { delivery } : {}),
             dismissPending: true,
@@ -1324,21 +1351,23 @@ export default function Composer({
     }
     setAcToken(null);
     acTokenRef.current = null;
+    selectedCommandRef.current = undefined;
   }, [
     text, attachments, cfg, profileMissing, noModels, runtimeUnavailable, working, activeProjectId, queueEdit, queueEditSaving,
     emptySteerItem, steerQueuedItem, promptHistoryNav,
     session?.model, session?.status, session?.runtimeControl, preferredModel,
     sessionDefaults.defaultThinking, chatModels, creatingSession, newSessionTarget,
-    newSessionAutoApprove, newSessionGoal, newSessionIntent,
+    newSessionAutoApprove, newSessionGoal, newSessionIntent, commandCatalog,
     draftExecution, profiles, activeProject?.defaults?.harness,
   ]);
 
-  const applyCompletion = useCallback((item: AutocompleteItem) => {
+  const applyCompletion = useCallback((item: AutocompleteOption) => {
     const token = acTokenRef.current;
     const h = inputRef.current;
     if (!token || !h) return false;
     const cur = h.getText();
     const r = completeToken(cur, token, item.value);
+    selectedCommandRef.current = token.kind === "command" ? item.command : undefined;
     // replaceText fires onTextChange, which re-derives the token/popup state.
     h.replaceText(r.text, { anchor: r.caret });
     h.focus();
@@ -1593,13 +1622,24 @@ export default function Composer({
   const activeAgentLabel = agentItems.find((item) => item.id === agentValue)?.label
     ?? agentBadgeLabel(activeAgent);
 
-  const selectedModel = cfg.model
-    ? chatModels.find((candidate) =>
-        candidate.providerID === cfg.model?.providerID && candidate.modelID === cfg.model?.modelID)
-    : recommendedModel
+  const selectedModel = (() => {
+    const nextTurn = cfg.model ?? session?.model ?? preferredModel;
+    return nextTurn
       ? chatModels.find((candidate) =>
-          candidate.providerID === recommendedModel.providerID && candidate.modelID === recommendedModel.modelID)
+          candidate.providerID === nextTurn.providerID && candidate.modelID === nextTurn.modelID)
       : undefined;
+  })();
+  const composerAttachmentSupport = runtimeFeatures
+    ? effectiveAttachmentSupport(
+        {
+          ...runtimeFeatures.capabilities,
+          attachments: { modalities: runtimeFeatures.attachmentSupport },
+        },
+        selectedModel?.capabilities,
+        false,
+        false,
+      )
+    : undefined;
   const requestedSelectedThinking = cfg.thinking !== undefined
     ? cfg.thinking
     : getModelThinking(selectedModel) ?? sessionDefaults.defaultThinking;
@@ -1612,15 +1652,27 @@ export default function Composer({
   // image support names the block when an image pill is pending; no report
   // keeps the legacy "not reported" line.
   const attachNote = (() => {
-    if (attachments.length === 0 || !selectedModel) return null;
-    const compatibility = attachmentCompatibility(selectedModel);
-    if (compatibility === "supported") return null;
-    if (compatibility === "unsupported"
-      && attachments.some((attachment) =>
-        attachment.kind === "image" || attachment.mime.startsWith("image/"))) {
-      return tr("composer.discovery.attachmentImagesNotSupported");
+    if (attachments.length === 0) return null;
+    if (!composerAttachmentSupport) return ATTACHMENT_COMPAT_NOTE;
+    for (const attachment of attachments) {
+      const modality = attachmentModality(attachment);
+      if (!modality) continue;
+      const level = composerAttachmentSupport[modality];
+      if (level === "native" || level === "emulated") continue;
+      if (modality === "image") return tr("composer.discovery.attachmentImagesNotSupported");
+      if (modality === "pdf") return tr("composer.discovery.currentlyUnavailable");
+      if (modality === "audio") return tr("composer.discovery.currentlyUnavailable");
+      if (modality === "file") return tr("composer.discovery.currentlyUnavailable");
+      return tr("composer.discovery.currentlyUnavailable");
     }
-    return ATTACHMENT_COMPAT_NOTE;
+    return null;
+  })();
+  const uploadDisabledReason = (() => {
+    if (!composerAttachmentSupport) return undefined;
+    const anySupported = Object.values(composerAttachmentSupport).some(
+      (level) => level === "native" || level === "emulated",
+    );
+    return anySupported ? undefined : tr("composer.discovery.currentlyUnavailable");
   })();
   const pickThinking = (thinking: string | undefined) => {
     if (selectedModel) setModelThinking(selectedModel, thinking);
@@ -2106,6 +2158,7 @@ export default function Composer({
             draftText={text}
             commands={commandCatalog}
             snippets={snippetCatalog}
+            {...(uploadDisabledReason ? { uploadDisabledReason } : {})}
             direction="up"
             onUpload={openAttachmentPicker}
             onInsertMention={menuMention}

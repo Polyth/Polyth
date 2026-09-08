@@ -1,7 +1,6 @@
 // Global behavior instructions (WP9). The server owns the canonical revisioned
-// copy under its data directory; the backend adapter is the only component
-// that projects the text into backend configuration. Writes are atomic and a
-// failed apply rolls the canonical copy back, so file and backend never split.
+// copy under its data directory. Harness projectors consume the decorated
+// effective text; a failed target must not roll the canonical file back.
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -14,11 +13,6 @@ export interface BehaviorState {
   pathLabel: string;
 }
 
-export interface BehaviorApplier {
-  applyBehavior(text: string): Promise<number>;
-  behaviorPath(): string;
-}
-
 export interface BehaviorService {
   get(): Promise<BehaviorState>;
   put(text: string, expectedRevision: string): Promise<BehaviorState>;
@@ -27,6 +21,8 @@ export interface BehaviorService {
   refresh(): Promise<void>;
   /** Current revision+digest for the model-visible instructions-applied event. */
   current(): Promise<{ revision: string; digest: string } | null>;
+  /** Decorated model-visible text (favorites + Secure Safe). */
+  effectiveText(): Promise<string>;
 }
 
 const MAX_BYTES = 256 * 1024;
@@ -41,7 +37,8 @@ Before delegating work, evaluate the task and explicitly choose the best-fit age
 export function createBehaviorService(opts: {
   file: string;
   policyFile?: string;
-  applier?: BehaviorApplier;
+  /** Fired after canonical persistence. Projector failure must not roll the file back. */
+  onChanged?: () => Promise<void>;
   /** Server-owned instructions appended at apply/digest time but not exposed
    *  as editable behavior text. */
   decorate?(text: string): string;
@@ -57,7 +54,7 @@ export function createBehaviorService(opts: {
     }
   };
 
-  const pathLabel = opts.applier ? "global AGENTS.md" : "global AGENTS.md (backend not attached)";
+  const pathLabel = "global behavior";
   const readPolicy = async (): Promise<{ enabled: boolean }> => {
     if (!opts.policyFile) return { enabled: false };
     try {
@@ -79,7 +76,11 @@ export function createBehaviorService(opts: {
     return `${base}${base ? "\n\n" : ""}${favoriteSubagentRoutingSection}\n`;
   };
   const apply = async (): Promise<void> => {
-    if (opts.applier) await opts.applier.applyBehavior(await effective(await readText()));
+    try {
+      await opts.onChanged?.();
+    } catch {
+      // Canonical desired state is not hostage to a projector.
+    }
   };
 
   return {
@@ -101,40 +102,21 @@ export function createBehaviorService(opts: {
         throw Object.assign(new Error("behavior text changed since you loaded it"), { code: "conflict" });
       }
       await atomicWrite(opts.file, text);
-      if (opts.applier) {
-        try {
-          await opts.applier.applyBehavior(await effective(text));
-        } catch (err) {
-          // Canonical copy must match what the backend actually runs with.
-          await atomicWrite(opts.file, before);
-          throw Object.assign(
-            new Error(`backend apply failed, change rolled back: ${(err as Error).message}`),
-            { code: "conflict" },
-          );
-        }
-      }
+      await apply();
       return { text, revision: behaviorRevision(text), pathLabel };
     },
 
     subagentPolicy: readPolicy,
 
     async putSubagentPolicy(enabled: boolean): Promise<{ enabled: boolean }> {
-      const before = await readPolicy();
       const next = { enabled };
       await writePolicy(next);
-      try {
-        await apply();
-      } catch (err) {
-        await writePolicy(before);
-        throw Object.assign(
-          new Error(`backend apply failed, change rolled back: ${(err as Error).message}`),
-          { code: "conflict" },
-        );
-      }
+      await apply();
       return next;
     },
 
     refresh: apply,
+    effectiveText: async () => effective(await readText()),
 
     async current(): Promise<{ revision: string; digest: string } | null> {
       const text = await effective(await readText());

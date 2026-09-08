@@ -1,8 +1,53 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { AgentRuntime, HarnessContext, JsonObject, ModelRef, MutationOutcome, RuntimeEvent, RuntimeObservation, RuntimeSnapshot } from "@polyth/contracts";
-import { createProcessAuthority } from "@polyth/harness-runtime";
+import { readFile } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
+import type { AgentRuntime, HarnessContext, JsonObject, ModelRef, MutationOutcome, RateLimitRetryHint, RuntimeCommandDescriptor, RuntimeEvent, RuntimeObservation, RuntimeSnapshot, TokenUsage } from "@polyth/contracts";
+import { composeTurnPrompt, createProcessAuthority, deltaCost, deltaTokenUsage, isPlaceholderTitle } from "@polyth/harness-runtime";
 import type { SDKUserMessage, Query, PermissionResult, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
+import {
+    acknowledgeCapabilityApplication,
+    captureCapabilityLaunch,
+    provisioningTarget,
+    releaseCapabilityLaunch,
+} from "@polyth/harness-runtime";
+import { claudeOverlays } from "./provisioner.ts";
+export { claudeOverlays, createClaudeProvisioner } from "./provisioner.ts";
 type Sdk = Pick<typeof import("@anthropic-ai/claude-agent-sdk"), "query" | "getSessionInfo">;
+export const CLAUDE_CAPABILITIES = {
+    streaming: false, permissions: true, questions: false, compaction: false, subagents: false,
+    steering: false, resume: true, usage: true, cost: true, fork: false, mcp: true,
+    title: "native" as const,
+    attachments: { modalities: {
+        image: "native" as const,
+        pdf: "native" as const,
+        file: "unsupported" as const,
+        audio: "unsupported" as const,
+        url: "unsupported" as const,
+    } },
+    commands: { discovery: "native" as const, invoke: "raw-native-input" as const },
+    contextOccupancy: "native" as const,
+};
+const usageFromModelUsage = (usage: Record<string, { inputTokens?: number; outputTokens?: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number }>): TokenUsage => {
+    let input = 0; let output = 0; let cacheRead = 0; let cacheWrite = 0;
+    for (const row of Object.values(usage)) {
+        input += row.inputTokens ?? 0;
+        output += row.outputTokens ?? 0;
+        cacheRead += row.cacheReadInputTokens ?? 0;
+        cacheWrite += row.cacheCreationInputTokens ?? 0;
+    }
+    return { input, output, ...(cacheRead ? { cacheRead } : {}), ...(cacheWrite ? { cacheWrite } : {}) };
+};
+const toNativeCommands = (commands: Array<{ name: string; description?: string; argumentHint?: string }>): RuntimeCommandDescriptor[] =>
+    commands.map((cmd) => ({
+        id: `native:claude:${cmd.name}`,
+        name: cmd.name,
+        ...(cmd.description ? { description: cmd.description } : {}),
+        ...(cmd.argumentHint ? { argumentHint: cmd.argumentHint, acceptsArguments: true } : {}),
+        owner: "native",
+        harnessId: "claude",
+        invocation: "raw-native-input",
+        availability: "session",
+    }));
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 /** The SDK owns its protocol; Polyth owns the SDK's native child process and
  * records only public dialogue/tool outcomes. It never consumes thinking. */
@@ -23,6 +68,13 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
     const listeners = new Set<(sid: string, event: RuntimeEvent) => void>();
     const observations = new Set<(sid: string, event: RuntimeObservation) => void>();
     const lifecycle = new Set<Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]>();
+    let lastUsage: TokenUsage | undefined;
+    let lastCost: number | undefined;
+    let lastResultId = "";
+    let lastContextResultId = "";
+    let lastTitle = "";
+    let pendingRetry: RateLimitRetryHint | undefined;
+    const nativeCommands: RuntimeCommandDescriptor[] = [];
     const permissions = new Map<string, {
         resolve(result: PermissionResult): void;
         input: Record<string, unknown>;
@@ -60,25 +112,77 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
             return;
         }
         nativeId = id;
-        query = sdk.query({ prompt: prompts(), options: { cwd: context.cwd, ...(resume ? { resume: id } : { sessionId: id }), pathToClaudeCodeExecutable: process.env.POLYTH_CLAUDE_BIN ?? "claude", permissionMode: "default", includePartialMessages: false,
-                // Parallel subagents are not yet represented by this adapter.
-                disallowedTools: ["Agent", "Task", "AskUserQuestion"],
-                spawnClaudeCodeProcess(options) { const child = authority.spawn(options.command, options.args, { cwd: options.cwd, env: options.env, signal: options.signal }); child.stderr!.resume(); return child as SpawnedProcess; },
-                canUseTool: async (tool, input, options) => {
-                    markAccepted();
-                    const requestId = (options as {
-                        toolUseID?: string;
-                    }).toolUseID ?? randomUUID();
-                    return new Promise<PermissionResult>(resolve => { permissions.set(requestId, { resolve, input, tool }); emit({ type: "permission/requested", requestId, permission: tool, patterns: [String(input.command ?? input.file_path ?? tool)] }, requestId); options.signal.addEventListener("abort", () => { permissions.delete(requestId); resolve({ behavior: "deny", message: "Cancelled" }); }, { once: true }); });
-                },
-            } });
-        await query.initializationResult();
+        const staged = claudeOverlays.peek(context, "claude");
+        const overlay = staged?.value;
+        const launchTarget = provisioningTarget(context, "claude");
+        if (staged) {
+            captureCapabilityLaunch({
+                target: launchTarget,
+                desiredRevision: staged.desiredRevision,
+            });
+        }
+        try {
+            query = sdk.query({ prompt: prompts(), options: { cwd: context.cwd, ...(resume ? { resume: id } : { sessionId: id }), pathToClaudeCodeExecutable: process.env.POLYTH_CLAUDE_BIN ?? "claude", permissionMode: "default", includePartialMessages: false,
+                    // Parallel subagents are not yet represented by this adapter.
+                    disallowedTools: ["Agent", "Task", "AskUserQuestion"],
+                    ...(overlay?.append ? { systemPrompt: { type: "preset" as const, preset: "claude_code" as const, append: overlay.append } } : {}),
+                    ...(overlay?.mcpServers ? { mcpServers: overlay.mcpServers } : {}),
+                    spawnClaudeCodeProcess(options) { const child = authority.spawn(options.command, options.args, { cwd: options.cwd, env: options.env, signal: options.signal }); child.stderr!.resume(); return child as SpawnedProcess; },
+                    canUseTool: async (tool, input, options) => {
+                        markAccepted();
+                        const requestId = (options as {
+                            toolUseID?: string;
+                        }).toolUseID ?? randomUUID();
+                        return new Promise<PermissionResult>(resolve => { permissions.set(requestId, { resolve, input, tool }); emit({ type: "permission/requested", requestId, permission: tool, patterns: [String(input.command ?? input.file_path ?? tool)] }, requestId); options.signal.addEventListener("abort", () => { permissions.delete(requestId); resolve({ behavior: "deny", message: "Cancelled" }); }, { once: true }); });
+                    },
+                } });
+            await query.initializationResult();
+        }
+        catch (error) {
+            if (staged) {
+                releaseCapabilityLaunch({
+                    target: launchTarget,
+                    desiredRevision: staged.desiredRevision,
+                });
+            }
+            throw error;
+        }
+        if (staged) {
+            claudeOverlays.consumeIfRevision(context, "claude", staged.desiredRevision);
+            acknowledgeCapabilityApplication({
+                target: provisioningTarget(context, "claude", { authorityId: authority.authorityId, generation: authority.generation }),
+                desiredRevision: staged.desiredRevision,
+                capabilityIds: staged.capabilityIds,
+                outcome: "applied",
+                reason: "Claude Agent SDK initialized with the staged overlay",
+            });
+        }
         void (async () => {
             try {
                 for await (const message of query!) {
                     if ("parent_tool_use_id" in message && message.parent_tool_use_id)
                         continue;
-                    if (message.type === "system" && message.subtype === "init") nativeModel = { providerID: "anthropic", modelID: message.model };
+                    if (message.type === "system" && message.subtype === "commands_changed") {
+                        nativeCommands.splice(0, nativeCommands.length, ...toNativeCommands(message.commands));
+                        emit({ type: "runtime/commands-changed", commands: [...nativeCommands] }, message.uuid + ":commands");
+                    }
+                    if (message.type === "rate_limit_event") {
+                        const info = message.rate_limit_info;
+                        if (info.status === "rejected" && info.resetsAt) {
+                            pendingRetry = {
+                                scope: "rate",
+                                resetAt: info.resetsAt > 1e12 ? info.resetsAt : info.resetsAt * 1000,
+                                retryable: true,
+                            };
+                        }
+                    }
+                    if (message.type === "system" && message.subtype === "init") {
+                        nativeModel = { providerID: "anthropic", modelID: message.model };
+                        void query?.supportedCommands?.().then((cmds) => {
+                            nativeCommands.splice(0, nativeCommands.length, ...toNativeCommands(cmds));
+                            if (nativeCommands.length) emit({ type: "runtime/commands-changed", commands: [...nativeCommands] }, "init:commands");
+                        }).catch(() => {});
+                    }
                     if (message.type === "assistant") {
                         if (message.message.model) nativeModel = { providerID: "anthropic", modelID: message.message.model };
                         markAccepted();
@@ -102,7 +206,63 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                         const turnId = active;
                         active = "";
                         order++;
-                        emit({ type: "turn/stopped", turnId, reason: message.is_error ? "error" : "completed", ...(message.is_error ? { error: "Claude Code turn failed" } : {}) }, turnId + ":stop");
+                        const resultId = message.uuid;
+                        if (message.modelUsage && resultId !== lastResultId) {
+                            const cumulative = usageFromModelUsage(message.modelUsage);
+                            const rebased = lastUsage !== undefined && cumulative.input < lastUsage.input;
+                            const tokens = rebased ? cumulative : deltaTokenUsage(lastUsage, cumulative);
+                            const cost = rebased ? message.total_cost_usd : deltaCost(lastCost, message.total_cost_usd);
+                            const hasUsage = tokens.input > 0 || tokens.output > 0 || (tokens.cacheRead ?? 0) > 0;
+                            if (hasUsage || cost !== undefined) {
+                                lastUsage = cumulative;
+                                lastCost = message.total_cost_usd;
+                                lastResultId = resultId;
+                                emit({
+                                    type: "usage/recorded",
+                                    model: nativeModel ?? { providerID: "anthropic", modelID: "unknown" },
+                                    tokens,
+                                    ...(cost !== undefined ? { cost, costSource: "derived" } : {}),
+                                }, resultId + ":usage");
+                            }
+                        }
+                        lastContextResultId = resultId;
+                        const contextResultId = resultId;
+                        void query?.getContextUsage?.({ detail: "summary" }).then((usage) => {
+                            if (contextResultId !== lastContextResultId) return;
+                            emit({
+                                type: "context/updated",
+                                source: "native",
+                                updatedAt: Date.now(),
+                                usedTokens: usage.totalTokens,
+                                limitTokens: usage.maxTokens,
+                                remainingTokens: usage.maxTokens - usage.totalTokens,
+                                fraction: usage.maxTokens > 0 ? usage.totalTokens / usage.maxTokens : undefined,
+                            }, resultId + ":context");
+                        }).catch(() => {});
+                        void sdk.getSessionInfo(nativeId, { dir: context.cwd }).then((info) => {
+                            if (!info) return;
+                            const title = info.customTitle || info.summary;
+                            if (title && !isPlaceholderTitle(title)) {
+                                lastTitle = title;
+                                emit({ type: "session/title-generated", title }, resultId + ":title");
+                            }
+                        }).catch(() => {});
+                        const errorText = message.is_error && message.subtype !== "success"
+                            ? ((message as { errors?: string[] }).errors?.[0] ?? "Claude Code turn failed")
+                            : undefined;
+                        const authFailed = Boolean(errorText && /authentication_failed/i.test(errorText));
+                        const retry = message.is_error ? pendingRetry : undefined;
+                        pendingRetry = undefined;
+                        emit({
+                            type: "turn/stopped",
+                            turnId,
+                            reason: message.is_error ? "error" : "completed",
+                            ...(retry ? { retry } : {}),
+                            ...(message.is_error ? {
+                                error: errorText,
+                                code: authFailed ? "auth-expired" : retry ? "rate-limited" : /rate.?limit|overloaded/i.test(errorText ?? "") ? "rate-limited" : "unknown",
+                            } : {}),
+                        }, turnId + ":stop");
                     }
                 }
             }
@@ -125,20 +285,53 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
         return outcome.kind === "confirmed" ? { ...outcome, receipt: outcome.value.backendSessionId } : outcome;
     };
     const runtime: AgentRuntime = {
-        capabilities: async () => ({ streaming: false, permissions: true, questions: false, compaction: false, subagents: false, steering: false, resume: false, usage: false, cost: false, fork: false, mcp: true }),
+        capabilities: async () => CLAUDE_CAPABILITIES,
+        commands: async () => [...nativeCommands],
         models: async () => query ? (await query.supportedModels()).map(m => ({ providerID: "anthropic", modelID: m.value, name: m.displayName, connected: true })) : [], agents: async () => [],
         createSessionOperation: create, resetSessionOperation: create,
         async ensureSession(input) { if (!input.backendSessionId)
             throw Object.assign(new Error("Operation-aware creation required"), { code: "unsupported" }); const info = await sdk.getSessionInfo(input.backendSessionId, { dir: context.cwd }); await initialize(input.backendSessionId, Boolean(info)); return nativeId; },
-        sessions: async () => Object.entries(authority.receipts).map(([operationId, id]) => ({ id, operationId, title: "Claude Code session", createdAt: 0, updatedAt: 0 })), history: async () => [],
+        sessions: async () => Object.entries(authority.receipts).map(([operationId, id]) => ({
+            id,
+            operationId,
+            title: lastTitle || "Claude Code session",
+            createdAt: 0,
+            updatedAt: 0,
+        })), history: async () => [],
         async startTurnOperation(request, operationId) {
-            if (!query || active || request.attachments?.length || (request.model && request.model.providerID !== "anthropic"))
-                return { kind: "rejected", code: "unsupported", message: "Claude Code supports idle text turns on its native account" };
+            if (!query || active || (request.model && request.model.providerID !== "anthropic"))
+                return { kind: "rejected", code: "unsupported", message: "Claude Code supports idle turns on its native account" };
+            const content: Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }> = [];
+            const delivered = composeTurnPrompt(request.text, request.attachments);
+            const readBytes = (path: string) => readFile(isAbsolute(path) ? path : join(context.cwd, path));
+            for (const image of delivered.images) {
+                const data = await readBytes(image.localPath);
+                content.push({ type: "image", source: { type: "base64", media_type: image.mime, data: data.toString("base64") } });
+            }
+            if (request.attachments?.length) {
+                for (const ref of request.attachments) {
+                    if (ref.kind === "browser-context") continue;
+                    if (ref.mime?.startsWith("image/")) {
+                        const path = ref.path;
+                        if (!path) return { kind: "rejected", code: "invalid-attachment", message: "Image attachment requires a materialized path" };
+                        const data = await readBytes(path);
+                        content.push({ type: "image", source: { type: "base64", media_type: ref.mime ?? "image/png", data: data.toString("base64") } });
+                    } else if (ref.mime === "application/pdf") {
+                        const path = ref.path;
+                        if (!path) return { kind: "rejected", code: "invalid-attachment", message: "PDF attachment requires a materialized path" };
+                        const data = await readBytes(path);
+                        content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: data.toString("base64") } });
+                    } else {
+                        return { kind: "rejected", code: "unsupported", message: "Unsupported attachment type for Claude Code" };
+                    }
+                }
+            }
+            content.push({ type: "text", text: delivered.text });
             if (request.model)
                 await query.setModel(request.model.modelID);
             active = operationId;
             order++;
-            return new Promise(resolve => { admission = () => resolve({ kind: "confirmed", value: { admissionId: operationId }, receipt: operationId }); inputs.push({ type: "user", uuid: operationId as SDKUserMessage["uuid"], session_id: nativeId, parent_tool_use_id: null, message: { role: "user", content: request.text } }); wake?.(); });
+            return new Promise(resolve => { admission = () => resolve({ kind: "confirmed", value: { admissionId: operationId }, receipt: operationId }); inputs.push({ type: "user", uuid: operationId as SDKUserMessage["uuid"], session_id: nativeId, parent_tool_use_id: null, message: { role: "user", content: content as SDKUserMessage["message"]["content"] } }); wake?.(); });
         },
         startTurn: async () => { throw new Error("Operation-aware admission required"); },
         abort: async () => { await query?.interrupt(); },

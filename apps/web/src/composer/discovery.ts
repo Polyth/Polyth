@@ -4,7 +4,9 @@
 // ids plus honest status copy, and contract-bounded model detail formatting.
 // No DOM, no fetch, no send path — components project this module's decisions.
 import type { SlashCommand, SnippetDef, StrictListResult } from "@polyth/session/web-api";
-import { filterCommands, filterSnippets, type AutocompleteItem } from "../utils.ts";
+import type { RuntimeCommandDescriptor } from "@polyth/contracts";
+import { commandPrecedence } from "@polyth/commands";
+import { filterSnippets, type AutocompleteItem } from "../utils.ts";
 import { tr } from "../i18n/index.ts";
 
 // ---------------------------------------------------------------- catalogs
@@ -122,6 +124,7 @@ export function addMenuRows(input: {
   draftText: string;
   commands: CatalogState<unknown>;
   snippets: CatalogState<unknown>;
+  uploadDisabledReason?: string;
 }): AddMenuRow[] {
   const needsProject = input.hasProject ? undefined : OPEN_PROJECT_FIRST;
   const shellBlock = needsProject
@@ -131,7 +134,9 @@ export function addMenuRows(input: {
     {
       id: "upload", kind: "item", label: tr("composer.discovery.uploadFiles"), action: "upload",
       description: tr("composer.discovery.copiesFilesIntoThisProjectSInbox"),
-      ...(needsProject ? { disabledReason: needsProject } : {}),
+      ...(needsProject || input.uploadDisabledReason
+        ? { disabledReason: needsProject ?? input.uploadDisabledReason }
+        : {}),
     },
     {
       id: "mention", kind: "item", label: tr("composer.discovery.mentionProjectFile"), action: "mention", hint: "@",
@@ -179,7 +184,12 @@ export function autocompleteOptionId(kind: "cmd" | "snip" | "file", identity: st
   return `composer-ac-${kind}-${safe}`;
 }
 
-export interface AutocompleteOption extends AutocompleteItem { id: string }
+export type ComposerCommand = SlashCommand | RuntimeCommandDescriptor;
+
+export interface AutocompleteOption extends AutocompleteItem {
+  id: string;
+  command?: ComposerCommand;
+}
 
 export interface AutocompleteViewState {
   kind: "cmd" | "snip" | "file";
@@ -189,7 +199,7 @@ export interface AutocompleteViewState {
 }
 
 export function commandAutocomplete(
-  catalog: CatalogState<SlashCommand>, query: string,
+  catalog: CatalogState<ComposerCommand>, query: string,
 ): AutocompleteViewState {
   if (catalog.state === "loading") {
     return { kind: "cmd", options: [], status: { text: tr("composer.discovery.loadingCommands") } };
@@ -200,12 +210,57 @@ export function commandAutocomplete(
   if (catalog.state === "empty") {
     return { kind: "cmd", options: [], status: { text: tr("composer.discovery.noCommandsAvailable") } };
   }
-  const options = filterCommands(catalog.items, query)
-    .map((o) => ({ ...o, id: autocompleteOptionId("cmd", o.label.slice(1)) }));
+  const normalized = query.toLowerCase();
+  const options = catalog.items
+    .filter((command) => {
+      const description = command.description ?? "";
+      return command.name.toLowerCase().includes(normalized)
+        || description.toLowerCase().includes(normalized)
+        || ("aliases" in command && command.aliases?.some((alias) => alias.toLowerCase().includes(normalized)));
+    })
+    .map((command) => {
+      const native = "invocation" in command;
+      const identity = command.id
+        ?? `polyth:${"scope" in command ? command.scope : "builtin"}:${command.name}`;
+      const detail = native
+        ? [command.description, `native · ${command.harnessId}`].filter(Boolean).join(" · ")
+        : [command.description, "scope" in command ? command.scope : undefined].filter(Boolean).join(" · ");
+      return {
+        label: `/${command.name}`,
+        detail,
+        value: `/${command.name} `,
+        id: autocompleteOptionId("cmd", identity),
+        command,
+      };
+    });
   if (options.length === 0) {
     return { kind: "cmd", options, status: { text: tr("composer.discovery.noCommandsMatch", { query }) } };
   }
   return { kind: "cmd", options, status: null };
+}
+
+export { commandPrecedence, mergeCommandCatalog } from "@polyth/commands";
+
+export function nativeCommandInput(
+  text: string,
+  catalog: readonly ComposerCommand[],
+  selected?: ComposerCommand,
+): { id: string; args?: string } | undefined {
+  const firstLine = text.split("\n", 1)[0] ?? "";
+  const match = firstLine.match(/^\/([A-Za-z0-9_-]+)(?:[ \t]+(.*))?$/);
+  if (!match) return undefined;
+  const name = match[1]!;
+  const selectedMatch = selected && "invocation" in selected
+    && selected.name.toLowerCase() === name.toLowerCase()
+    ? selected
+    : undefined;
+  const winner = selectedMatch ?? commandPrecedence(name, catalog);
+  if (!winner || !("invocation" in winner)) return undefined;
+  const args = match[2]?.trim();
+  return {
+    id: winner.id,
+    ...(args ? { args } : {}),
+  };
 }
 
 export function snippetAutocomplete(
@@ -303,16 +358,3 @@ export function modelDisplayName(
 
 export const ATTACHMENT_COMPAT_NOTE =
   tr("composer.discovery.attachmentCompatibilityNotReported");
-
-/** Honest attachment compatibility from normalized `ModelDescriptor.capabilities`:
- *  `input:image` or the legacy `attachment` flag = supported; an explicit input
- *  report without them = unsupported; no report = unknown (older provider).
- *  Send stays backend-governed — this only drives the composer's note. */
-export type AttachmentCompatibility = "supported" | "unsupported" | "unknown";
-
-export function attachmentCompatibility(m: { capabilities?: string[] }): AttachmentCompatibility {
-  const capabilities = m.capabilities ?? [];
-  if (capabilities.includes("input:image") || capabilities.includes("attachment")) return "supported";
-  if (capabilities.some((capability) => capability.startsWith("input:"))) return "unsupported";
-  return "unknown";
-}

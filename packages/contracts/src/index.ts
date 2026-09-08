@@ -591,6 +591,14 @@ export interface RuntimeRestartRecoveredData {
 
 export interface TurnStartedData { turnId: string; model?: ModelRef; agent?: string }
 
+export type TelemetryQuality = "native" | "derived" | "estimated" | "unknown";
+export type FeatureSupport = "native" | "emulated" | "unsupported";
+export type AttachmentModality = "image" | "file" | "pdf" | "audio" | "url";
+export type RuntimeErrorCode =
+  | "rate-limited" | "quota-exhausted" | "overloaded" | "auth-expired"
+  | "invalid-attachment"
+  | "unsupported" | "unknown";
+
 /** Provider capacity failure classification for an error turn/stopped. */
 export type RateLimitScope = "rate" | "quota" | "overloaded" | "unknown";
 
@@ -601,6 +609,10 @@ export interface RateLimitRetryHint {
   provider?: string;
   /** Provider-advised wait in seconds, when it could be parsed from the error. */
   retryAfterSec?: number;
+  /** Absolute ms epoch when the provider window resets. */
+  resetAt?: number;
+  /** Default true when omitted; false = never auto-retry. */
+  retryable?: boolean;
 }
 
 /** Resume guidance the server attaches to an error turn/stopped when the
@@ -616,6 +628,7 @@ export interface TurnStoppedData {
   turnId: string;
   reason: "completed" | "aborted" | "error";
   error?: string;
+  code?: RuntimeErrorCode;
   retry?: RateLimitRetry;
 }
 
@@ -626,7 +639,43 @@ export interface TurnResumeCancelledData {
   reason: "user" | "model-switch" | "resumed";
 }
 export interface TokenUsage { input: number; output: number; reasoning?: number; cacheRead?: number; cacheWrite?: number }
-export interface UsageRecordedData { model: ModelRef; tokens: TokenUsage; cost?: number }
+export interface UsageRecordedData {
+  model: ModelRef;
+  tokens: TokenUsage;
+  cost?: number;
+  costSource?: TelemetryQuality;
+}
+export interface ContextWindowState {
+  limitTokens?: number;
+  usedTokens?: number;
+  remainingTokens?: number;
+  fraction?: number;
+  source: TelemetryQuality;
+  updatedAt: number;
+  compaction?: { active?: boolean; lastAt?: number };
+  /** Invalidates occupancy when the harness or runtime generation changes. */
+  harnessId?: string;
+  generation?: number;
+}
+export interface RuntimeCommandDescriptor {
+  id: string;
+  name: string;
+  description?: string;
+  owner: "native";
+  harnessId: string;
+  acceptsArguments?: boolean;
+  argumentHint?: string;
+  aliases?: string[];
+  availability?: "session" | "runtime" | "static";
+  invocation: "raw-native-input";
+}
+export interface RuntimeAttachmentSupport {
+  modalities: Partial<Record<AttachmentModality, FeatureSupport>>;
+}
+export interface RuntimeCommandSupport {
+  discovery: FeatureSupport;
+  invoke: "raw-native-input" | "unsupported";
+}
 export interface GoalAttachedData { objective: string; budgetTokens?: number; maxContinuations?: number }
 export interface GoalAuditData { verdict: "keep" | "done" | "stuck"; consecutiveStuck: number; note?: string }
 export interface ContextPinnedData { sourceEventSeq: number }
@@ -954,6 +1003,7 @@ export interface SessionRef { id: string }
 export interface TurnRef { turnId: string }
 export interface UserTurnInput {
   text: string;
+  command?: { id: string; args?: string };
   /** Keep this model-visible prompt out of ordinary user chat bubbles. */
   githubConflictResolution?: boolean;
   /** Accept OpenCode's generated title for this first prompt when the session
@@ -1144,6 +1194,8 @@ export interface SessionResumeState {
   provider?: string;
   /** Provider-advised wait in seconds, when the error carried one. */
   retryAfterSec?: number;
+  /** Absolute ms epoch when the provider window resets. */
+  resetAt?: number;
   /** 1 on the first limit hit for this message, incremented on repeats. */
   attempt: number;
   /** seq of the user/message that will be re-sent. */
@@ -1160,10 +1212,17 @@ export interface SessionProjection {
   /** Owning Space, denormalized from the project so listing/broadcast filters
    *  never need a project join. Backfilled by session-store migration v10. */
   spaceId?: string;
-  title: string; status: SessionStatus;
+  title: string;
+  /** How the current title was chosen; O(1) precedence without log scans. */
+  titleSource?: "manual" | "native" | "polyth" | "placeholder";
+  status: SessionStatus;
   model?: ModelRef; agent?: string;
   createdAt: number; updatedAt: number;
   lastTurnAt?: number; tokenTotals?: TokenUsage; costTotal?: number;
+  /** Live context occupancy from runtime telemetry; never inferred from tokenTotals. */
+  contextWindow?: ContextWindowState;
+  /** Bumps when the in-memory native command catalog changes. */
+  nativeCommandsRevision?: number;
   worktreePath?: string;
   /** Isolation lifecycle; independent of `status`. */
   isolation?: SessionIsolation;
@@ -1331,6 +1390,13 @@ export interface SessionService {
   list(projectId?: string): Promise<SessionProjection[]>;
   sync(projectId: string): Promise<SessionProjection[]>;
   snapshot(sessionId: string): Promise<SessionProjection>;
+  /** Live runtime feature surface for composer/settings diagnostics. */
+  runtimeFeatures?(sessionId: string): Promise<{
+    capabilities: RuntimeCapabilities;
+    commands: RuntimeCommandDescriptor[];
+    contextWindow?: ContextWindowState;
+    attachmentSupport: Partial<Record<AttachmentModality, FeatureSupport>>;
+  }>;
   /** `page` (beforeSeq/limit) selects the newest events in the window so deep
    *  logs hydrate incrementally; implementations may ignore it. */
   events(sessionId: string, afterSeq?: number, page?: EventPage): Promise<SessionEvent[]>;
@@ -2428,7 +2494,23 @@ export interface AgentDescriptor {
   /** Role-specific model override. */
   model?: ModelRef;
 }
-export interface RuntimeCapabilities { streaming: boolean; permissions: boolean; questions: boolean; compaction: boolean; subagents: boolean; steering?: boolean; resume?: boolean; usage?: boolean; cost?: boolean; fork?: boolean; mcp?: boolean }
+export interface RuntimeCapabilities {
+  streaming: boolean;
+  permissions: boolean;
+  questions: boolean;
+  compaction: boolean;
+  subagents: boolean;
+  steering?: boolean;
+  resume?: boolean;
+  usage?: boolean;
+  cost?: boolean;
+  fork?: boolean;
+  mcp?: boolean;
+  title?: FeatureSupport;
+  attachments?: RuntimeAttachmentSupport;
+  commands?: RuntimeCommandSupport;
+  contextOccupancy?: TelemetryQuality;
+}
 
 // Harnesses construct AgentRuntime; they never own canonical sessions.
 export type HarnessSelection = { mode: "auto" } | { mode: "pinned"; harnessId: string };
@@ -2561,8 +2643,222 @@ export interface HarnessContext {
   model?: ModelRef;
   remote?: boolean;
 }
+
+/** What Polyth wants an agent to have. Distinct from RuntimeCapabilities, which
+ * describe execution features of a live AgentRuntime. */
+export type AgentCapabilityKind =
+  | "instruction"
+  | "mcp-server"
+  | "tool"
+  | "skill"
+  | "context"
+  | "extension";
+export type AgentCapabilityScope = "deployment" | "space" | "project" | "session";
+/** How a harness actually delivers a capability. `unsupported` is explicit. */
+export type CapabilityProjectionMode =
+  | "native"
+  | "mcp"
+  | "prompt"
+  | "filesystem"
+  | "config"
+  | "emulated"
+  | "unsupported";
+export type CapabilityMutability =
+  | "immediate"
+  | "session-create"
+  | "requires-restart"
+  | "immutable";
+export type CapabilityProvisionStatus =
+  | "applied"
+  | "pending"
+  | "pending-restart"
+  | "degraded"
+  | "unsupported"
+  | "failed"
+  | "unverifiable";
+
+export interface AgentCapabilitySupport {
+  modes: readonly CapabilityProjectionMode[];
+  mutability: CapabilityMutability;
+  /** False when this kind cannot safely leave the local host. Default true for local. */
+  remote?: boolean;
+  /** Where this harness materializes the capability. A desired scope narrower
+   * than this is unsupported rather than collapsed onto a wider config file. */
+  configScope?: AgentCapabilityScope;
+}
+
+/** Who owns volatile application state. Independent of `configScope`. */
+export type HarnessCapabilityTargetLifetime = "session" | "physical-runtime";
+
+export interface HarnessCapabilitySupport {
+  harnessId: string;
+  /** Defaults to `session`. OpenCode project overlays use `physical-runtime`. */
+  targetLifetime?: HarnessCapabilityTargetLifetime;
+  kinds: { [K in AgentCapabilityKind]?: AgentCapabilitySupport };
+}
+
+/** Fields shared by every capability descriptor. `spaceId`/`projectId` filter
+ * resolution when a contribution is not deployment-wide. */
+export interface AgentCapabilityBase {
+  id: string;
+  owner: string;
+  scope: AgentCapabilityScope;
+  revision: string;
+  spaceId?: string;
+  projectId?: string;
+}
+
+/** Serializable desired-state descriptor. Executors and secret values never appear. */
+export type AgentCapabilityDescriptor =
+  | (AgentCapabilityBase & {
+      kind: "instruction";
+      title?: string;
+      text: string;
+    })
+  | (AgentCapabilityBase & {
+      kind: "mcp-server";
+      name: string;
+      enabled: boolean;
+      transport: McpTransport;
+      raw?: JsonObject;
+    })
+  | (AgentCapabilityBase & {
+      kind: "tool";
+      name: string;
+      description: string;
+      inputSchema: JsonObject;
+      trust: TrustClass;
+      mutating: boolean;
+    })
+  | (AgentCapabilityBase & {
+      kind: "skill";
+      name: string;
+      title: string;
+      description: string;
+      instructions: string;
+    })
+  | (AgentCapabilityBase & {
+      kind: "context";
+      title: string;
+      text: string;
+    })
+  | (AgentCapabilityBase & {
+      kind: "extension";
+      namespace: string;
+      schemaVersion: string;
+      value: JsonValue;
+    });
+
+export interface AgentCapabilityContribution {
+  descriptor: AgentCapabilityDescriptor;
+  /** Trusted in-process handler. Never serialized; never sent to a model. */
+  execute?: ToolExecutor;
+}
+
+export interface HarnessCapabilityRecord {
+  capabilityId: string;
+  kind: AgentCapabilityKind;
+  owner: string;
+  desiredRevision: string;
+  appliedRevision?: string;
+  mode: CapabilityProjectionMode;
+  status: CapabilityProvisionStatus;
+  mutability?: CapabilityMutability;
+  /** Sanitized reason. Must never contain secret values or full prompts. */
+  reason?: string;
+}
+
+export interface HarnessProvisioningPlan {
+  harnessId: string;
+  desiredRevision: string;
+  items: Array<{
+    capability: AgentCapabilityDescriptor;
+    mode: CapabilityProjectionMode;
+    mutability: CapabilityMutability;
+  }>;
+  /** Controller-owned revision retention set for physical-runtime cleanup. */
+  keepRevisions?: readonly string[];
+}
+
+export interface HarnessProvisioningResult {
+  harnessId: string;
+  desiredRevision: string;
+  records: HarnessCapabilityRecord[];
+}
+
+/** Resolves secret handles at the trusted apply boundary only. */
+export interface CapabilitySecretResolver {
+  mcpSecrets(serverId: string): Record<string, string>;
+}
+
+/** Identity of a native materialization target. Desired state may be Space or
+ * project scoped; application state is always this target. */
+export interface HarnessProvisioningTarget {
+  spaceId: string;
+  projectId: string;
+  cwd: string;
+  harnessId: string;
+  sessionId?: string;
+  authorityId?: string;
+  generation?: number;
+}
+
+/** Native admission acknowledgement. `applied` requires evidence the current
+ * target is using the revision; `unverifiable` means the native create API
+ * accepted the payload without authoritative readback. */
+export interface HarnessCapabilityApplicationReceipt {
+  target: HarnessProvisioningTarget;
+  desiredRevision: string;
+  capabilityIds: string[];
+  outcome: Extract<CapabilityProvisionStatus, "applied" | "unverifiable" | "failed">;
+  reason?: string;
+}
+
+/** Durable negative intent for a retired native MCP name. Canonical deletion
+ * must win over backend discovery after restart. */
+export interface McpTombstone {
+  name: string;
+  revision: number;
+  retiredAt: number;
+}
+
+export interface HarnessProvisioner {
+  support(context: HarnessContext): HarnessCapabilitySupport | Promise<HarnessCapabilitySupport>;
+  apply(
+    context: HarnessContext,
+    plan: HarnessProvisioningPlan,
+    secrets: CapabilitySecretResolver,
+  ): Promise<HarnessProvisioningResult>;
+  /** Drop launch overlays and other volatile target state. Never deletes
+   * user-owned backend configuration. */
+  release?(context: HarnessContext, options?: { keepRevisions?: readonly string[] }): void;
+}
+
+export interface AgentCapabilityContributionRegistry {
+  register(owner: string, contribution: AgentCapabilityContribution): Disposable;
+  list(): AgentCapabilityContribution[];
+  /** Descriptors visible in this Space/project/session. Executors stay behind the registry. */
+  resolve(context: HarnessContext): AgentCapabilityDescriptor[];
+  contribution(capabilityId: string): AgentCapabilityContribution | undefined;
+  executor(capabilityId: string): ToolExecutor | undefined;
+}
+
+export interface HarnessCapabilityStatusDto {
+  harnessId: string;
+  desiredRevision: string;
+  records: HarnessCapabilityRecord[];
+  target?: HarnessProvisioningTarget;
+}
+
+/** Read-only diagnostics for desired vs applied capability state. */
+export interface HarnessProvisioningQuery {
+  status(context: HarnessContext, harnessId?: string): HarnessCapabilityStatusDto[];
+}
+
 export interface HarnessProvider {
   descriptor: HarnessDescriptor;
+  /** Static capability surface for idle/unwired sessions; no process start. */
+  staticFeatures?: RuntimeCapabilities;
   probe(context: HarnessContext): Promise<HarnessProbe>;
   /** Prospective metadata. Implementations must not create a native execution
    * session merely to answer this call. Expensive discovery is requested only
@@ -2572,11 +2868,15 @@ export interface HarnessProvider {
    * authority over validation and native config ownership. */
   applyControl?(context: HarnessContext, controlId: string, value: JsonValue): Promise<void>;
   createRuntime(context: HarnessContext): Promise<AgentRuntime>;
+  /** Backend-owned projector. Absence means every Polyth capability is unsupported. */
+  provisioner?: HarnessProvisioner;
   source?: SessionSourceProvider;
 }
 export interface HarnessRegistry {
   register(provider: HarnessProvider): Disposable;
   providers(): HarnessProvider[];
+  /** Exact Map lookup — no probe, policy, or auto-select. */
+  get(id: string): HarnessProvider | undefined;
   probe(context: HarnessContext): Promise<HarnessProbe[]>;
   resolve(context: HarnessContext, selection: HarnessSelection, stickyId?: string): Promise<HarnessProvider>;
   snapshots(context: HarnessContext, options?: { harnessId?: string; force?: boolean; detail?: boolean }): Promise<HarnessSnapshot[]>;
@@ -2670,6 +2970,7 @@ export interface RuntimeSessionMessage { role: "user" | "assistant"; text: strin
 export interface CanonicalTurnRequest {
   sessionId: string;       // canonical session id; adapter maps to backend id
   text: string;
+  command?: { id: string; owner: "native"; name: string; args?: string };
   /** Already persisted in the user/message event before startTurn is called. */
   attachments?: AttachmentRef[];
   model?: ModelRef;
@@ -2730,8 +3031,10 @@ export type RuntimeEvent =
   | ({ type: "secret/requested" } & SecretRequestData)
   | { type: "session/compacted"; backendEventId?: string }
   | { type: "compaction/part-recorded"; partId: string; messageId?: string; auto?: boolean }
-  | { type: "turn/stopped"; turnId?: string; reason: "completed" | "aborted" | "error"; error?: string; retry?: RateLimitRetryHint }
-  | { type: "usage/recorded"; model: ModelRef; tokens: TokenUsage; cost?: number }
+  | ({ type: "context/updated" } & ContextWindowState)
+  | { type: "runtime/commands-changed"; commands: RuntimeCommandDescriptor[] }
+  | { type: "turn/stopped"; turnId?: string; reason: "completed" | "aborted" | "error"; error?: string; code?: RuntimeErrorCode; retry?: RateLimitRetryHint }
+  | ({ type: "usage/recorded" } & UsageRecordedData)
   // Full revisioned snapshots (WP8): replay-deterministic task/subagent state.
   | { type: "task/snapshot"; listId: string; revision: number; items: Array<{ id: string; text: string; status: TaskItemStatus }> }
   | { type: "subagent/snapshot"; revision: number; agents: Array<{ sessionId: string; label: string; status: string; currentTask?: string }> };
@@ -2857,6 +3160,14 @@ export interface AgentRuntime {
   onObservation?(cb: (sessionId: string, observation: RuntimeObservation) => void): Disposable;
   onLifecycle?(cb: (notification: RuntimeLifecycleNotification) => void): Disposable;
   onEvent(cb: (sessionId: string, ev: RuntimeEvent) => void): Disposable;
+  /** Native slash-command catalog for this session, when discovery is supported. */
+  commands?(sessionId: string): Promise<RuntimeCommandDescriptor[]>;
+  /** Request context compaction when the runtime exposes a real API. */
+  compact?(sessionId: string): Promise<void>;
+  compactOperation?(
+    sessionId: string,
+    operationId: string,
+  ): Promise<MutationOutcome<Record<string, never>>>;
   dispose(): Promise<void>;
 }
 
@@ -2866,8 +3177,18 @@ export interface ToolDefinition {
   name: string; description: string;
   inputSchema: JsonObject;      // JSON schema
   trust: TrustClass;
+  /** Namespaced contribution id when this tool is package-published. */
+  id?: string;
+  mutating?: boolean;
 }
-export interface ToolExecutionContext { sessionId: string; projectId: string; cwd: string; signal?: AbortSignal }
+export interface ToolExecutionContext {
+  sessionId: string;
+  projectId: string;
+  cwd: string;
+  signal?: AbortSignal;
+  /** Grant Space. Handlers must not trust a model-supplied space id. */
+  spaceId?: string;
+}
 export type ToolExecutor = (input: JsonObject, ctx: ToolExecutionContext) => Promise<{ output: string; metadata?: JsonObject }>;
 
 export type ToolGuardVerdict =
@@ -3902,7 +4223,8 @@ export type OpenCodePendingChangeKind =
   | "mcp"
   | "plugins"
   | "provider-visibility"
-  | "provider-config";
+  | "provider-config"
+  | "runtime-capabilities";
 
 export interface OpenCodePendingChangeDto {
   id: string;

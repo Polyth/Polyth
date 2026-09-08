@@ -65,6 +65,11 @@ if (process.platform === "win32") {
   }
 }
 
+await copyFile(
+  join(here, "..", "..", "packages", "server", "src", "agentToolsMcp.mjs"),
+  join(dist, "agentToolsMcp.mjs"),
+);
+
 await Promise.all([
   build({
     entryPoints: [join(here, "src", "main.ts")],

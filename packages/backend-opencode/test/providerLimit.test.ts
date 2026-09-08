@@ -21,7 +21,12 @@ test("Anthropic 429 rate limit with retry-after header", () => {
     },
     NOW,
   );
-  assert.deepEqual(result, { scope: "rate", provider: "anthropic", retryAfterSec: 42 });
+  assert.deepEqual(result, {
+    scope: "rate",
+    provider: "anthropic",
+    retryAfterSec: 42,
+    resetAt: NOW + 42_000,
+  });
 });
 
 test("Anthropic 529 overloaded_error", () => {
@@ -54,7 +59,12 @@ test("OpenAI 'Please try again in 20s' message wait", () => {
     "Rate limit reached for gpt-4o. Please try again in 20s.",
     NOW,
   );
-  assert.deepEqual(result, { scope: "rate", provider: "openai", retryAfterSec: 20 });
+  assert.deepEqual(result, {
+    scope: "rate",
+    provider: "openai",
+    retryAfterSec: 20,
+    resetAt: NOW + 20_000,
+  });
 });
 
 test("Google RESOURCE_EXHAUSTED with retryDelay", () => {

@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import ProviderLogo from "../../../../packages/models/widgets/ProviderLogo.tsx";
 import type { ContextGauge } from "../reduce.ts";
+import { formatContextPercent } from "../reduce.ts";
 import type { ContextIndicatorMode } from "../uiPrefs.ts";
 
 export default function ContextIndicator({
@@ -16,7 +17,8 @@ export default function ContextIndicator({
   providerName?: string;
   active: boolean;
 }) {
-  const label = gauge.known ? `Context ${gauge.percent}%` : "Context usage unavailable";
+  const percentLabel = formatContextPercent(gauge);
+  const label = percentLabel ? `Context ${percentLabel}` : "Context usage unavailable";
   return (
     <span
       className={`context-indicator ${mode} ${gauge.level}${active ? " active" : ""}`}

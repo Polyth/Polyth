@@ -214,13 +214,15 @@ export type ContextGauge =
       contextTokens: number;
       percent: number;
       level: "green" | "yellow" | "red";
+      quality: "native" | "derived" | "estimated";
     }
   | {
       known: false;
       inputTokens: number;
-      contextTokens: null;
-      percent: null;
-      level: "unknown";
+      contextTokens: number | null;
+      percent: number | null;
+      level: "unknown" | "fraction";
+      quality?: "unknown" | "fraction";
     };
 
 /** Provider capacity stop with a scheduled server-side auto-resume. Present
@@ -358,10 +360,54 @@ export function contextTokensUsed(model: Partial<Pick<RenderModel, "contextUsage
 export function contextGauge(
   model: Partial<Pick<RenderModel, "contextUsage" | "totals">>,
   contextTokens?: number,
+  occupancy?: { limitTokens?: number; usedTokens?: number; fraction?: number; source?: string } | null,
 ): ContextGauge {
+  if (occupancy?.source === "unknown") {
+    return {
+      known: false,
+      inputTokens: occupancy.usedTokens ?? 0,
+      contextTokens: occupancy.limitTokens ?? null,
+      percent: occupancy.fraction !== undefined ? Math.round(occupancy.fraction * 100) : null,
+      level: occupancy.fraction !== undefined ? "fraction" : "unknown",
+      quality: occupancy.fraction !== undefined ? "fraction" : "unknown",
+    };
+  }
+  if (occupancy?.source === "native" || occupancy?.source === "derived") {
+    const limit = occupancy.limitTokens ?? contextTokens;
+    const used = occupancy.usedTokens;
+    if (limit && used !== undefined) {
+      const percent = Math.min(100, Math.max(0, Math.round((used / limit) * 100)));
+      return { known: true, inputTokens: used, contextTokens: limit, percent, level: percent < 70 ? "green" : percent < 90 ? "yellow" : "red", quality: occupancy.source };
+    }
+    if (occupancy.fraction !== undefined) {
+      const percent = Math.min(100, Math.max(0, Math.round(occupancy.fraction * 100)));
+      return { known: true, inputTokens: used ?? 0, contextTokens: limit ?? 0, percent, level: percent < 70 ? "green" : percent < 90 ? "yellow" : "red", quality: occupancy.source };
+    }
+    return {
+      known: false,
+      inputTokens: used ?? 0,
+      contextTokens: limit ?? null,
+      percent: null,
+      level: "unknown",
+      quality: "unknown",
+    };
+  }
+  if (occupancy?.source === "estimated" && occupancy.usedTokens !== undefined && (occupancy.limitTokens ?? contextTokens)) {
+    const limit = occupancy.limitTokens ?? contextTokens!;
+    const percent = Math.min(100, Math.max(0, Math.round((occupancy.usedTokens / limit) * 100)));
+    return { known: true, inputTokens: occupancy.usedTokens, contextTokens: limit, percent, level: percent < 70 ? "green" : percent < 90 ? "yellow" : "red", quality: "estimated" };
+  }
+  if (occupancy && (occupancy.usedTokens === undefined || !occupancy.limitTokens)) {
+    const inputTokens = contextTokensUsed(model);
+    if (model.contextUsage && contextTokens) {
+      const percent = Math.min(100, Math.max(0, Math.round((inputTokens / contextTokens) * 100)));
+      return { known: true, inputTokens, contextTokens, percent, level: percent < 70 ? "green" : percent < 90 ? "yellow" : "red", quality: "estimated" };
+    }
+    return { known: false, inputTokens, contextTokens: null, percent: null, level: "unknown", quality: "unknown" };
+  }
   const inputTokens = contextTokensUsed(model);
   if (!Number.isFinite(contextTokens) || !contextTokens || contextTokens <= 0) {
-    return { known: false, inputTokens, contextTokens: null, percent: null, level: "unknown" };
+    return { known: false, inputTokens, contextTokens: null, percent: null, level: "unknown", quality: "unknown" };
   }
   const percent = Math.min(100, Math.max(0, Math.round((inputTokens / contextTokens) * 100)));
   return {
@@ -370,7 +416,16 @@ export function contextGauge(
     contextTokens,
     percent,
     level: percent < 70 ? "green" : percent < 90 ? "yellow" : "red",
+    quality: "estimated",
   };
+}
+
+/** Percent label for context UI: estimated values carry a ~ prefix. */
+export function formatContextPercent(gauge: ContextGauge): string | null {
+  if (gauge.percent === null) return null;
+  if (!gauge.known && gauge.quality !== "fraction") return null;
+  const prefix = gauge.quality === "estimated" ? "~" : "";
+  return `${prefix}${gauge.percent}%`;
 }
 
 function str(d: JsonObject, k: string): string | undefined {

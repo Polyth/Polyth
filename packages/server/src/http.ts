@@ -18,6 +18,7 @@ import {
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
 import type { RuntimePool } from "./sessions.ts";
+import { parseTurnCommand } from "./turnCommand.ts";
 import {
   parseSpaceCookie,
   spaceCookieHeader,
@@ -598,8 +599,10 @@ async function dispatchHttp(
       if (m && method === "POST") {
         const b = await loadBody();
         const delivery = b.delivery;
+        const validCommand = b.command !== undefined ? parseTurnCommand(b.command) : undefined;
         return json(res, 200, await space().sessions.send(m[1]!, {
           text: String(b.text ?? ""),
+          ...(validCommand ? { command: validCommand } : {}),
           ...(b.autoTitle === true ? { autoTitle: true } : {}),
           // sanitized + existence-checked inside the session service (F2)
           ...(Array.isArray(b.attachments) ? { attachments: b.attachments as never } : {}),

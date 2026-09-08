@@ -16,10 +16,10 @@ const mem = new Map<string, string>();
 
 const {
   ATTACHMENT_COMPAT_NOTE, CATALOG_LOADING, OPEN_PROJECT_FIRST, OPEN_SESSION_FIRST,
-  SHELL_DRAFT_BLOCK, addMenuRows, attachmentCompatibility, autocompleteOptionId, catalogFromResult,
-  commandAutocomplete, contextTokensLabel, fileAutocomplete, modelDetail,
+  SHELL_DRAFT_BLOCK, addMenuRows, autocompleteOptionId, catalogFromResult,
+  commandAutocomplete, commandPrecedence, contextTokensLabel, fileAutocomplete, mergeCommandCatalog, modelDetail,
   modelDisplayName, modelSupportsTextWorkflow, planCommandInsert, planShellEntry,
-  planSigilInsert, snippetAutocomplete,
+  nativeCommandInput, planSigilInsert, snippetAutocomplete,
 } = await import("../src/composer/discovery.ts");
 const { activeToken, composerMode } = await import("../src/composer/language.ts");
 const {
@@ -193,6 +193,60 @@ test("command autocomplete states carry the exact honest copy", () => {
   assert.equal(hit.options[0]?.label, "/plan");
 });
 
+test("native command merge preserves colliding rows, exact ids, and Polyth precedence", () => {
+  const polyth = [
+    { ...cmd("review"), id: "polyth:project:review", owner: "project" as const },
+  ];
+  const native = [{
+    id: "native:codex:review",
+    name: "review",
+    description: "Native review",
+    owner: "native" as const,
+    harnessId: "codex",
+    invocation: "raw-native-input" as const,
+  }];
+  const merged = mergeCommandCatalog(polyth, native);
+  const options = commandAutocomplete({ state: "available", items: merged }, "review").options;
+  assert.equal(options.length, 2);
+  assert.equal(new Set(options.map((option) => option.id)).size, 2);
+  assert.deepEqual(options.map((option) => option.command?.id), [
+    "polyth:project:review",
+    "native:codex:review",
+  ]);
+  assert.equal(commandPrecedence("review", merged), polyth[0]);
+  assert.equal(commandPrecedence("native-only", mergeCommandCatalog([], [{
+    ...native[0]!,
+    id: "native:codex:native-only",
+    name: "native-only",
+  }]))?.id, "native:codex:native-only");
+  assert.equal(nativeCommandInput("/review src", merged), undefined, "typed collision keeps project precedence");
+  assert.deepEqual(nativeCommandInput("/review src", merged, native[0]), {
+    id: "native:codex:review",
+    args: "src",
+  });
+});
+
+test("nativeCommandInput clears stale selection when the edited token no longer matches", () => {
+  const native = [{
+    id: "native:codex:review",
+    name: "review",
+    owner: "native" as const,
+    harnessId: "codex",
+    invocation: "raw-native-input" as const,
+  }, {
+    id: "native:codex:other",
+    name: "other",
+    owner: "native" as const,
+    harnessId: "codex",
+    invocation: "raw-native-input" as const,
+  }];
+  const catalog = mergeCommandCatalog([], native);
+  assert.deepEqual(nativeCommandInput("/other args", catalog, native[0]), {
+    id: "native:codex:other",
+    args: "args",
+  });
+});
+
 test("snippet autocomplete: empty state offers snippet creation; failure does not", () => {
   const empty = snippetAutocomplete({ state: "empty" }, "");
   assert.equal(empty.status?.text, tr("composer.discovery.noSnippetsYet"));
@@ -259,17 +313,6 @@ test("text workflows reject reported non-text modalities and distinguish duplica
   assert.equal(modelDisplayName(catalog[0]!, catalog), "Nano Banana · google/nano-v1");
   assert.equal(modelDisplayName(catalog[1]!, catalog), "nano   banana · vertex/nano-v2-preview");
   assert.equal(modelDisplayName(catalog[2]!, catalog), "GPT");
-});
-
-test("attachment compatibility is honest: image/attachment capability = supported, input report without image = unsupported, no report = unknown", () => {
-  assert.equal(attachmentCompatibility({ capabilities: ["input:text", "input:image", "output:text"] }), "supported");
-  assert.equal(attachmentCompatibility({ capabilities: ["attachment", "toolcall"] }), "supported", "legacy attachment flag");
-  assert.equal(attachmentCompatibility({ capabilities: ["input:image"] }), "supported");
-  assert.equal(attachmentCompatibility({ capabilities: ["input:text", "output:text"] }), "unsupported", "explicit report without image");
-  assert.equal(attachmentCompatibility({ capabilities: ["input:none", "output:text"] }), "unsupported");
-  assert.equal(attachmentCompatibility({}), "unknown", "older provider without modality report");
-  assert.equal(attachmentCompatibility({ capabilities: ["toolcall"] }), "unknown", "toolcall alone is not a modality report");
-  assert.equal(attachmentCompatibility({ capabilities: ["output:image"] }), "unknown", "output modality never implies input support");
 });
 
 // ---------------------------------------------------------------- configuration

@@ -1,4 +1,4 @@
-import { createProcessAuthority } from "@polyth/harness-runtime";
+import { acknowledgeCapabilityApplication, captureCapabilityLaunch, createProcessAuthority, releaseCapabilityLaunch } from "@polyth/harness-runtime";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -26,6 +26,7 @@ import {
   prepareBrowserToolEnvironment,
   type OpenCodeBrowserToolConfig,
 } from "./browserTool.ts";
+import { applyOpenCodeLaunchOverlay, peekOpenCodeLaunchOverlay } from "./provisioner.ts";
 import {
   createDurableOwnedRuntimeState,
   ownedRuntimeIdentityKey,
@@ -483,6 +484,7 @@ const createOwnedLease = async (
 
 export interface OwnedLocalEndpointOptions {
   projectId?: string;
+  spaceId?: string;
   cwd: string;
   port?: number;
   hostname?: string;
@@ -544,24 +546,52 @@ const startLocalChildOnce = async (
   if (configDir) env.OPENCODE_CONFIG_DIR = configDir;
   env.OPENCODE_DB = runtime.dbPath;
   env[OPENCODE_UPDATE_DISABLE_ENV] = "true";
-  if (options.browserTool) {
-    env = await prepareBrowserToolEnvironment(options.browserTool, env);
+  const overlay = peekOpenCodeLaunchOverlay({
+    cwd: resolve(options.cwd),
+    ...(options.spaceId ? { spaceId: options.spaceId } : {}),
+    ...(options.projectId ? { projectId: options.projectId } : {}),
+  });
+  const launchCapture = options.projectId && overlay?.desiredRevision
+    ? {
+        target: {
+          harnessId: "opencode" as const,
+          spaceId: options.spaceId ?? "",
+          projectId: options.projectId,
+          cwd: resolve(options.cwd),
+        },
+        desiredRevision: overlay.desiredRevision,
+      }
+    : undefined;
+  // Capture before any await: the overlay (and its tool token / secret files)
+  // is already the revision this spawn will use.
+  if (launchCapture) captureCapabilityLaunch(launchCapture);
+  let authority: Awaited<ReturnType<typeof createProcessAuthority>> | undefined;
+  let child: ChildProcess;
+  try {
+    env = applyOpenCodeLaunchOverlay(env, overlay);
+    if (options.browserTool) {
+      env = await prepareBrowserToolEnvironment(options.browserTool, env);
+    }
+    // The token is not an OpenCode credential. It lets child wrappers and
+    // diagnostics identify the exact Polyth-owned instance.
+    env.POLYTH_OPENCODE_INSTANCE_TOKEN = instanceToken;
+    authority = !options.spawn && process.platform === "linux" ? await createProcessAuthority(`${pidFile}.supervisor.json`, false, incarnation) : undefined;
+    const spawnProcess = options.spawn ?? (authority ? authority.spawn : spawn);
+    child = spawnProcess(
+      runtime.binary.executablePath,
+      ["serve", "--hostname", hostname, "--port", String(port)],
+      {
+        cwd: resolve(options.cwd),
+        detached: process.platform === "linux",
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+  } catch (error) {
+    if (launchCapture) releaseCapabilityLaunch(launchCapture);
+    if (authority) await authority.close();
+    throw error;
   }
-  // The token is not an OpenCode credential. It lets child wrappers and
-  // diagnostics identify the exact Polyth-owned instance.
-  env.POLYTH_OPENCODE_INSTANCE_TOKEN = instanceToken;
-  const authority = !options.spawn && process.platform === "linux" ? await createProcessAuthority(`${pidFile}.supervisor.json`, false, incarnation) : undefined;
-  const spawnProcess = options.spawn ?? (authority ? authority.spawn : spawn);
-  const child = spawnProcess(
-    runtime.binary.executablePath,
-    ["serve", "--hostname", hostname, "--port", String(port)],
-    {
-      cwd: resolve(options.cwd),
-      detached: process.platform === "linux",
-      env,
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
 
   let buffer = "";
   let timer: NodeJS.Timeout | undefined;
@@ -605,8 +635,27 @@ const startLocalChildOnce = async (
     child.stderr?.resume();
     await runtime.secureDatabaseFiles();
     await writePidRecord(pidFile, instanceToken, child, readIdentity);
+    if (options.projectId) {
+      acknowledgeCapabilityApplication({
+        target: {
+          harnessId: "opencode",
+          spaceId: options.spaceId ?? "",
+          projectId: options.projectId,
+          cwd: resolve(options.cwd),
+          authorityId: incarnation.authorityId,
+          generation: incarnation.generation,
+        },
+        desiredRevision: overlay?.desiredRevision ?? "",
+        capabilityIds: overlay?.capabilityIds ?? [],
+        outcome: "unverifiable",
+        reason: overlay
+          ? "OpenCode process started with the private launch overlay"
+          : "OpenCode process started",
+      });
+    }
     return { child, port: actualPort, hostname, ...(authority ? { authority } : {}) };
   } catch (error) {
+    if (launchCapture) releaseCapabilityLaunch(launchCapture);
     if (authority) await authority.close();
     else await terminateChild(child, options.gracefulStopMs ?? 3_000);
     throw error;

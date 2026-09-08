@@ -1003,14 +1003,21 @@ test("session.updated revisions ignore the embedded OpenCode version so titles a
 
 test("session compaction and compaction parts translate to canonical runtime events", () => {
   const st = createTranslateState();
-  assert.deepEqual(
-    translateOcEvent({
-      id: "evt_compacted",
-      type: "session.compacted",
-      properties: { sessionID: "ses_1" },
-    }, st),
-    [{ type: "session/compacted", backendEventId: "evt_compacted" }],
-  );
+  const compacted = translateOcEvent({
+    id: "evt_compacted",
+    type: "session.compacted",
+    properties: { sessionID: "ses_1" },
+  }, st);
+  assert.deepEqual(compacted[0], {
+    type: "session/compacted",
+    backendEventId: "evt_compacted",
+  });
+  assert.equal(compacted[1]?.type, "context/updated");
+  if (compacted[1]?.type === "context/updated") {
+    assert.equal(compacted[1].source, "unknown");
+    assert.equal(compacted[1].compaction?.active, false);
+    assert.equal(compacted[1].compaction?.lastAt, compacted[1].updatedAt);
+  }
   const part = {
     type: "message.part.updated",
     properties: {

@@ -8,17 +8,21 @@ import { join } from "node:path";
 
 import { createStore } from "@polyth/session";
 import type { AgentRuntime, Project, ProjectService, RuntimeEvent } from "@polyth/contracts";
+import { titleFromPrompt } from "@polyth/harness-runtime";
 import { createSessionService, type Broadcaster } from "../src/sessions.ts";
 import { createProjectService } from "../src/projects.ts";
 import type { PermissionService } from "@polyth/permissions";
 
-function fakeRuntime(generatedTitle?: string, polledTitle?: string, polledTitleAfter = 0): AgentRuntime {
+function fakeRuntime(generatedTitle?: string, polledTitle?: string, polledTitleAfter = 0, harnessId = "opencode"): AgentRuntime {
   const listeners = new Set<(sessionId: string, ev: RuntimeEvent) => void>();
   let sessionId = "";
   let sessionReads = 0;
   return {
-    harnessId: "opencode",
-    capabilities: async () => ({ streaming: true, permissions: true, questions: true, compaction: false, subagents: false }),
+    harnessId,
+    capabilities: async () => ({
+      streaming: true, permissions: true, questions: true, compaction: false, subagents: false,
+      title: "native",
+    }),
     models: async () => [],
     agents: async () => [],
     ensureSession: async (c) => `be_${c.sessionId}`,
@@ -33,9 +37,7 @@ function fakeRuntime(generatedTitle?: string, polledTitle?: string, polledTitleA
       sessionId = req.sessionId;
       for (const listener of listeners) {
         listener(req.sessionId, { type: "turn/started", turnId: "t1" });
-        if (generatedTitle || polledTitle) {
-          listener(req.sessionId, { type: "turn/stopped", reason: "completed" });
-        }
+        listener(req.sessionId, { type: "turn/stopped", reason: "completed" });
         if (generatedTitle) {
           listener(req.sessionId, {
             type: "session/title-generated",
@@ -59,6 +61,7 @@ function makeService(opts: {
   generatedTitle?: string;
   polledTitle?: string;
   polledTitleAfter?: number;
+  harnessId?: string;
 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-orgsvc-"));
   const store = createStore(join(dir, "s.db"));
@@ -78,7 +81,7 @@ function makeService(opts: {
     runtimes: {
       forProject: async (_projectId, cwd) => {
         opts.onRuntimeCwd?.(cwd);
-        return fakeRuntime(opts.generatedTitle, opts.polledTitle, opts.polledTitleAfter);
+        return fakeRuntime(opts.generatedTitle, opts.polledTitle, opts.polledTitleAfter, opts.harnessId);
       },
     },
   });
@@ -325,4 +328,34 @@ test("project PATCH updates metadata and merges defaults; bad values rejected", 
   // persisted across a reload
   const reloaded = createProjectService(dir);
   assert.equal((await reloaded.get(p.id))!.name, "renamed");
+});
+
+test("auto title falls back to prompt when native title never arrives", async () => {
+  const prompt = "Add auth middleware to the API";
+  const { sessions, store } = makeService({ harnessId: "claude" });
+  const { id } = await sessions.create({ projectId: "p1" });
+  await sessions.send(id, { text: prompt, autoTitle: true });
+  const started = Date.now();
+  while ((await sessions.snapshot(id)).title !== titleFromPrompt(prompt)) {
+    if (Date.now() - started > 15_000) throw new Error("timed out waiting for fallback title");
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  const meta = (await store.events(id)).find((e) => e.type === "session/metadata-changed");
+  assert.deepEqual(meta?.data, { title: titleFromPrompt(prompt), source: "polyth" });
+});
+
+test("native title polling works for any harness with title native", async () => {
+  const generatedTitle = "Claude session title";
+  const { sessions } = makeService({ polledTitle: generatedTitle, harnessId: "claude" });
+  const { id } = await sessions.create({ projectId: "p1" });
+  await sessions.send(id, { text: "Name this session", autoTitle: true });
+  await waitForTitle(sessions, id, generatedTitle);
+});
+
+test("manual title prevents native overwrite", async () => {
+  const { sessions } = makeService({ generatedTitle: "Generated replacement", polledTitle: "Polled title" });
+  const { id } = await sessions.create({ projectId: "p1", title: "Manual title" });
+  await sessions.send(id, { text: "Do not rename", autoTitle: true });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal((await sessions.snapshot(id)).title, "Manual title");
 });

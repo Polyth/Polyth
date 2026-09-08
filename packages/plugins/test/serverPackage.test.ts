@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  bindPackageServices,
   createServerServiceRegistry,
   discoverServerPackages,
   loadServerPackage,
@@ -162,4 +163,29 @@ test("service registry provides once, resolves by key id, and reports missing se
   assert.throws(() => services.require(serverServiceKey("missing")), /not provided/);
   assert.throws(() => services.provide(key, { ping: () => "again" }), /already provided/);
   assert.deepEqual(services.ids(), ["polyth.service.git"]);
+});
+
+test("bindPackageServices forces capability owner to the package id", () => {
+  const registered: Array<{ owner: string; descriptorOwner: string }> = [];
+  const registry = {
+    register(owner: string, contribution: { descriptor: { owner: string } }) {
+      registered.push({ owner, descriptorOwner: contribution.descriptor.owner });
+      return { dispose() {} };
+    },
+    list: () => [],
+    resolve: () => [],
+    executor: (_id?: string) => undefined,
+  };
+  const services = createServerServiceRegistry();
+  services.provide(serverServiceKey("harness.capabilities"), registry);
+  bindPackageServices(services, "example-feature")
+    .require(serverServiceKey<typeof registry>("harness.capabilities"))
+    .register("polyth", { descriptor: { owner: "polyth" } });
+  assert.deepEqual(registered, [{ owner: "example-feature", descriptorOwner: "example-feature" }]);
+  assert.equal(
+    bindPackageServices(services, "example-feature")
+      .require(serverServiceKey<typeof registry>("harness.capabilities"))
+      .executor("other.tool"),
+    undefined,
+  );
 });

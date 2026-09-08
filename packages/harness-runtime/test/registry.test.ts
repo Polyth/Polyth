@@ -38,6 +38,22 @@ test("factory fallback is before native creation only; persisted routes remain e
     assert.notEqual(one, two);
     await pool.dispose();
 });
+test("beforeCreate runs once inside the coalesced creation flight", async () => {
+    const r = createHarnessRegistry();
+    const seen: string[] = [];
+    r.register(provider("a", 0));
+    const pool = createHarnessPool({
+        registry: r,
+        legacyHarnessId: "a",
+        context: async (projectId, cwd, sessionId) => ({ ...context, projectId, sessionId, cwd: cwd!, spaceId: projectId }),
+        beforeCreate: async (p, ctx) => { seen.push(`${p.descriptor.id}:${ctx.projectId}`); },
+    });
+    const projection = { id: "s", projectId: "p", title: "s", createdAt: 0, updatedAt: 0, status: "idle" } as SessionProjection;
+    await pool.forSession({ ...projection, resolvedHarnessId: "a" }, "/tmp");
+    await pool.forSession({ ...projection, resolvedHarnessId: "a" }, "/tmp");
+    assert.deepEqual(seen, ["a:p"]);
+    await pool.dispose();
+});
 
 test("shared physical runtimes are cached per session and forgotten by session id", async () => {
     let physical = 0;
@@ -89,6 +105,20 @@ test("harness pool dispose surfaces runtime disposal failures", async () => {
     });
     await pool.forSession({ id: "s", projectId: "p", title: "s", createdAt: 0, updatedAt: 0, status: "idle" } as SessionProjection, "/tmp");
     await assert.rejects(() => pool.dispose(), /kill failed/);
+});
+
+test("registry.get is exact lookup without probe", async () => {
+  const r = createHarnessRegistry();
+  let probed = false;
+  const p = provider("opencode", 0);
+  p.probe = async () => {
+    probed = true;
+    return { harnessId: "opencode", installed: true, authenticated: true, healthy: true };
+  };
+  r.register(p);
+  assert.equal(r.get("opencode")?.descriptor.id, "opencode");
+  assert.equal(r.get("missing"), undefined);
+  assert.equal(probed, false);
 });
 
 test("snapshots are cached by target, retain last-good discovery, and invalidate explicitly", async () => {

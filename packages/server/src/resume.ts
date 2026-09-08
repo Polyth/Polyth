@@ -15,6 +15,8 @@ import type { RateLimitRetryHint, SessionResumeState } from "@polyth/contracts";
 export const RESUME_FALLBACK_BACKOFF_SEC = [30, 60, 120, 300, 600, 900] as const;
 /** Floor for a provider-advised wait so a "0s"/"1s" hint can't spin. */
 export const RESUME_MIN_WAIT_SEC = 5;
+/** Buffer after an absolute reset timestamp before retrying. */
+export const RESUME_RESET_BUFFER_MS = 2000;
 /** setTimeout's max delay; longer waits re-arm on the way down. */
 const MAX_TIMER_MS = 2_147_483_647;
 
@@ -46,6 +48,8 @@ export interface PlanResumeInput {
   hint: RateLimitRetryHint;
   /** seq of the user/message that will be re-sent. */
   userMessageSeq: number;
+  /** Canonical session id for resume state derivation. */
+  sessionId?: string;
   /** Existing resume state for the SAME message, when the previous stop was
    *  also an uncleared limit stop — drives the attempt counter. */
   previous?: { attempt: number; userMessageSeq: number };
@@ -53,24 +57,43 @@ export interface PlanResumeInput {
 }
 
 export const planResume = (
-  { hint, userMessageSeq, previous, now }: PlanResumeInput,
-): SessionResumeState => {
+  { hint, userMessageSeq, sessionId, previous, now }: PlanResumeInput,
+): SessionResumeState | null => {
+  if (hint.retryable === false) return null;
+
   const attempt = previous && previous.userMessageSeq === userMessageSeq
     ? previous.attempt + 1
     : 1;
-  const hinted = typeof hint.retryAfterSec === "number" && hint.retryAfterSec > 0
-    ? hint.retryAfterSec
-    : 0;
-  const waitSec = hinted > 0
-    ? Math.max(RESUME_MIN_WAIT_SEC, hinted)
-    : RESUME_FALLBACK_BACKOFF_SEC[
+
+  const minResumeAt = now + RESUME_MIN_WAIT_SEC * 1000;
+  let resumeAt: number;
+  let retryAfterSec: number | undefined;
+  let resetAt: number | undefined;
+
+  if (typeof hint.resetAt === "number" && hint.resetAt > 0) {
+    resetAt = hint.resetAt;
+    resumeAt = Math.max(minResumeAt, hint.resetAt + RESUME_RESET_BUFFER_MS);
+  } else {
+    const hinted = typeof hint.retryAfterSec === "number" && hint.retryAfterSec > 0
+      ? hint.retryAfterSec
+      : 0;
+    if (hinted > 0) {
+      retryAfterSec = hinted;
+      resumeAt = now + Math.max(RESUME_MIN_WAIT_SEC, hinted) * 1000;
+    } else {
+      const waitSec = RESUME_FALLBACK_BACKOFF_SEC[
         Math.min(attempt - 1, RESUME_FALLBACK_BACKOFF_SEC.length - 1)
       ] ?? RESUME_FALLBACK_BACKOFF_SEC[RESUME_FALLBACK_BACKOFF_SEC.length - 1]!;
+      resumeAt = now + waitSec * 1000;
+    }
+  }
+
   return {
-    resumeAt: now + waitSec * 1000,
+    resumeAt,
     scope: hint.scope,
     ...(hint.provider ? { provider: hint.provider } : {}),
-    ...(hinted > 0 ? { retryAfterSec: hinted } : {}),
+    ...(retryAfterSec !== undefined ? { retryAfterSec } : {}),
+    ...(resetAt !== undefined ? { resetAt } : {}),
     attempt,
     userMessageSeq,
   };

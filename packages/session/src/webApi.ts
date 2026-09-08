@@ -45,6 +45,8 @@ import type {
   ProjectPatch,
   QueueItemDto,
   RuntimeDiagnosticsDto,
+  RuntimeCapabilities,
+  RuntimeCommandDescriptor,
   RuntimeSession,
   SecureSafeCreateInput,
   SecureSafeEntryDto,
@@ -356,6 +358,8 @@ export interface SlashCommand {
   agent?: string;
   model?: string;
   scope: "user" | "project" | "builtin";
+  id?: string;
+  owner?: "builtin" | "user" | "project";
 }
 export interface SnippetDef {
   alias: string;
@@ -656,8 +660,15 @@ export const api = {
 
   // agentProfileId: string selects a profile, null explicitly clears the
   // session's stored profile, omitted inherits it (UX-COMPOSER-DISC).
-  sendMessage: (id: string, body: { text: string; autoTitle?: boolean; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; delivery?: string; dismissPending?: boolean; agentProfileId?: string | null }) =>
+  sendMessage: (id: string, body: { text: string; command?: { id: string; args?: string }; autoTitle?: boolean; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; delivery?: string; dismissPending?: boolean; agentProfileId?: string | null }) =>
     jfetch<SendResult>(`/api/sessions/${id}/message`, json("POST", body)),
+  runtimeFeatures: (id: string) =>
+    jfetch<{
+      capabilities: RuntimeCapabilities;
+      commands: RuntimeCommandDescriptor[];
+      contextWindow?: import("@polyth/contracts").ContextWindowState;
+      attachmentSupport: Partial<Record<import("@polyth/contracts").AttachmentModality, import("@polyth/contracts").FeatureSupport>>;
+    }>(`/api/harnesses/sessions/${encodeURIComponent(id)}/features`),
   abort: (id: string) => jfetch<void>(`/api/sessions/${id}/abort`, { method: "POST" }),
   /** Drop a pending rate-limit auto-resume; the session stays failed. */
   cancelResume: (id: string) =>

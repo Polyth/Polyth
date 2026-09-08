@@ -140,6 +140,46 @@ export const parseRetryAfterSec = (
   return 0;
 };
 
+/** Absolute reset timestamp in ms when parseable from structured fields or message. */
+export const parseResetAt = (
+  message: string,
+  data: Record<string, unknown> | undefined,
+  now: number,
+): number | undefined => {
+  for (const key of ["resetAt", "reset_at", "resetsAt", "resets_at"]) {
+    const raw = data?.[key];
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      return raw > 1e12 ? raw : raw * 1000;
+    }
+    if (typeof raw === "string") {
+      const parsed = Date.parse(raw);
+      if (Number.isFinite(parsed)) return parsed;
+      const num = Number(raw);
+      if (Number.isFinite(num)) return num > 1e12 ? num : num * 1000;
+    }
+  }
+  const headers = data?.responseHeaders ?? data?.headers ?? data?.response_headers;
+  for (const resetHeader of ["x-ratelimit-reset-requests", "x-ratelimit-reset-tokens", "x-ratelimit-reset"]) {
+    const value = headerValue(headers, resetHeader);
+    if (value === undefined) continue;
+    if (/^\d{9,13}(?:\.\d+)?$/.test(value.trim())) {
+      const epoch = Number(value);
+      return epoch > 1e12 ? epoch : epoch * 1000;
+    }
+  }
+  const epochMatch = message.match(/reset[^0-9]{0,16}([0-9]{10,13})/i);
+  if (epochMatch?.[1]) {
+    const epoch = Number(epochMatch[1]);
+    return epoch > 1e12 ? epoch : epoch * 1000;
+  }
+  const isoMatch = message.match(/reset[^0-9]{0,16}(\d{4}-\d{2}-\d{2}[T ][0-9:.]+Z?)/i);
+  if (isoMatch?.[1]) {
+    const at = Date.parse(isoMatch[1]);
+    if (Number.isFinite(at)) return at;
+  }
+  return undefined;
+};
+
 const scopeOf = (
   haystack: string,
   statusCode: number | undefined,
@@ -214,10 +254,13 @@ export const classifyProviderLimit = (
   const provider = providerId ?? (sniffed ? canonicalProvider(sniffed) : undefined);
 
   const retryAfterSec = parseRetryAfterSec(message, data, now);
+  const resetAt = parseResetAt(message, data, now)
+    ?? (retryAfterSec > 0 ? now + retryAfterSec * 1000 : undefined);
   return {
     scope,
     ...(provider ? { provider } : {}),
     ...(retryAfterSec > 0 ? { retryAfterSec } : {}),
+    ...(resetAt !== undefined ? { resetAt } : {}),
   };
 };
 

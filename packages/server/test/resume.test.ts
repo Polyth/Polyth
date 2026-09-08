@@ -26,28 +26,60 @@ test("planResume honours a provider-advised wait in full", () => {
   });
 });
 
+test("planResume honours retryAfterSec 90", () => {
+  const state = planResume({
+    hint: { scope: "rate", retryAfterSec: 90 },
+    userMessageSeq: 1,
+    now: NOW,
+  });
+  assert.ok(state);
+  assert.equal(state!.resumeAt, NOW + 90_000);
+});
+
+test("planResume uses resetAt with buffer", () => {
+  const resetAt = NOW + 60_000;
+  const state = planResume({
+    hint: { scope: "rate", resetAt },
+    userMessageSeq: 2,
+    now: NOW,
+  });
+  assert.ok(state);
+  assert.equal(state!.resetAt, resetAt);
+  assert.equal(state!.resumeAt, resetAt + 2000);
+});
+
+test("planResume returns null when retryable is false", () => {
+  assert.equal(
+    planResume({ hint: { scope: "rate", retryable: false }, userMessageSeq: 1, now: NOW }),
+    null,
+  );
+});
+
 test("planResume floors a tiny advised wait so it cannot hot-loop", () => {
   const state = planResume({
     hint: { scope: "rate", retryAfterSec: 1 },
     userMessageSeq: 3,
     now: NOW,
   });
-  assert.equal(state.resumeAt, NOW + RESUME_MIN_WAIT_SEC * 1000);
+  assert.ok(state);
+  assert.equal(state!.resumeAt, NOW + RESUME_MIN_WAIT_SEC * 1000);
 });
 
 test("planResume escalates the backoff across attempts when no wait is advised", () => {
   const first = planResume({ hint: { scope: "overloaded" }, userMessageSeq: 5, now: NOW });
-  assert.equal(first.attempt, 1);
-  assert.equal(first.resumeAt, NOW + RESUME_FALLBACK_BACKOFF_SEC[0]! * 1000);
+  assert.ok(first);
+  assert.equal(first!.attempt, 1);
+  assert.equal(first!.resumeAt, NOW + RESUME_FALLBACK_BACKOFF_SEC[0]! * 1000);
 
   const second = planResume({
     hint: { scope: "overloaded" },
     userMessageSeq: 5,
-    previous: { attempt: first.attempt, userMessageSeq: 5 },
+    previous: { attempt: first!.attempt, userMessageSeq: 5 },
     now: NOW,
   });
-  assert.equal(second.attempt, 2);
-  assert.equal(second.resumeAt, NOW + RESUME_FALLBACK_BACKOFF_SEC[1]! * 1000);
+  assert.ok(second);
+  assert.equal(second!.attempt, 2);
+  assert.equal(second!.resumeAt, NOW + RESUME_FALLBACK_BACKOFF_SEC[1]! * 1000);
 });
 
 test("planResume resets the attempt counter for a different message", () => {
@@ -57,7 +89,8 @@ test("planResume resets the attempt counter for a different message", () => {
     previous: { attempt: 4, userMessageSeq: 5 },
     now: NOW,
   });
-  assert.equal(state.attempt, 1);
+  assert.ok(state);
+  assert.equal(state!.attempt, 1);
 });
 
 test("Command Code rate-limit notices retain their provider wait", () => {

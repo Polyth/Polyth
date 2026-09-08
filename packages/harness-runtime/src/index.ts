@@ -1,5 +1,32 @@
 export { createProcessAuthority } from "./authority.ts";
 export { createStdioRpc, type RpcPeer } from "./rpc.ts";
+export {
+  acknowledgeCapabilityApplication,
+  captureCapabilityLaunch,
+  capabilityRevision,
+  createCapabilityContributionRegistry,
+  createLaunchOverlayStore,
+  desiredBundleRevision,
+  mcpNativeNameCollision,
+  overlayKey,
+  planHarnessCapabilities,
+  provisioningTarget,
+  provisioningTargetKey,
+  releaseCapabilityLaunch,
+  semanticCapabilityRevision,
+  setCapabilityLaunchSink,
+  setCapabilityReceiptSink,
+} from "./capabilities.ts";
+export type { LaunchOverlayRecord, LaunchOverlayStore } from "./capabilities.ts";
+export {
+  attachmentModality,
+  composeTurnPrompt,
+  deltaCost,
+  deltaTokenUsage,
+  effectiveAttachmentSupport,
+  isPlaceholderTitle,
+  titleFromPrompt,
+} from "./features.ts";
 import type {
     AgentRuntime,
     HarnessAvailabilityState,
@@ -12,6 +39,14 @@ import type {
     SessionProjection,
 } from "@polyth/contracts";
 export const harnessError = (code: string, message: string): Error => Object.assign(new Error(message), { code });
+
+export function harnessProviderById(registry: HarnessRegistry, id: string): HarnessProvider {
+  const provider = registry.get(id);
+  if (!provider) {
+    throw harnessError("runtime-unavailable", `Harness ${id} is not registered`);
+  }
+  return provider;
+}
 export type HarnessPreferences = Record<string, {
     enabled?: boolean;
     priority?: number;
@@ -74,6 +109,9 @@ export function createHarnessRegistry() {
                 } } };
         },
         providers: list,
+        get(id: string) {
+            return providers.get(id);
+        },
         probe: (context: HarnessContext) => Promise.all(list().map((provider) => probeOne(provider, context))),
         async snapshots(context: HarnessContext, options: { harnessId?: string; force?: boolean; detail?: boolean } = {}) {
             const preferences = await policy(context);
@@ -262,6 +300,8 @@ export function createHarnessPool(options: {
     registry: HarnessRegistry;
     context(projectId: string, cwd?: string, sessionId?: string): Promise<HarnessContext>;
     legacyHarnessId: string;
+    /** Runs before a new runtime is constructed. Provisioning uses this hook. */
+    beforeCreate?: (provider: HarnessProvider, context: HarnessContext) => Promise<void>;
 }) {
     const cached = new Map<string, HarnessCacheEntry>();
     const get = async (context: HarnessContext, provider: HarnessProvider) => {
@@ -269,15 +309,17 @@ export function createHarnessPool(options: {
         const key = harnessCacheKey(context.spaceId, context.projectId, context.cwd, sessionId, provider.descriptor.id);
         let entry = cached.get(key);
         if (!entry) {
-            const pending = provider.createRuntime(context).then((runtime) => {
+            const created: HarnessCacheEntry = { sessionId, pending: Promise.resolve(undefined as unknown as AgentRuntime) };
+            created.pending = (async () => {
+                await options.beforeCreate?.(provider, context);
+                const runtime = await provider.createRuntime(context);
                 Object.defineProperty(runtime, "harnessId", { value: provider.descriptor.id, configurable: true });
-                const current = cached.get(key);
-                if (current?.pending === pending) current.runtime = runtime;
+                if (cached.get(key) === created) created.runtime = runtime;
                 return runtime;
-            });
-            entry = { sessionId, pending };
+            })();
+            entry = created;
             cached.set(key, entry);
-            pending.catch(() => { if (cached.get(key)?.pending === pending) cached.delete(key); });
+            created.pending.catch(() => { if (cached.get(key) === created) cached.delete(key); });
         }
         return entry.pending;
     };

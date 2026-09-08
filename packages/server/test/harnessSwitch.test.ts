@@ -52,7 +52,22 @@ function fixture(path = ":memory:") {
       const runtime: AgentRuntime & { complete(): void; requests: CanonicalTurnRequest[]; harnessId: string } = {
         harnessId: id,
         requests: [],
-        capabilities: async () => ({ streaming: true, permissions: false, questions: false, compaction: false, subagents: false, resume: true }),
+        capabilities: async () => ({
+          streaming: true,
+          permissions: false,
+          questions: false,
+          compaction: false,
+          subagents: false,
+          resume: true,
+          commands: { discovery: "native", invoke: "raw-native-input" },
+        }),
+        commands: async () => [{
+          id: `native:${id}:status`,
+          name: "status",
+          owner: "native",
+          harnessId: id,
+          invocation: "raw-native-input",
+        }],
         models: async () => [], agents: async () => [],
         ensureSession: async (input) => nativeId = input.backendSessionId ?? nativeId,
         createSessionOperation: create, resetSessionOperation: create,
@@ -147,6 +162,15 @@ test("active switch waits for completion; queued admission uses the new harness"
   await until(async () => f.engines.at(-1)?.requests.some((r) => r.text.endsWith("next")) ?? false);
   assert.equal(f.engines.at(-1)!.harnessId, "fake-b");
   f.engines.at(-1)!.complete(); await f.idle(id);
+  await f.close();
+});
+
+test("runtime features follow the newly selected harness", async () => {
+  const f = fixture();
+  const { id } = await f.sessions.create({ projectId: "p" });
+  assert.equal((await f.sessions.runtimeFeatures!(id)).commands[0]?.harnessId, "fake-a");
+  await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" });
+  assert.equal((await f.sessions.runtimeFeatures!(id)).commands[0]?.harnessId, "fake-b");
   await f.close();
 });
 

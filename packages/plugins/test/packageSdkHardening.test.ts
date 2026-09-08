@@ -3,12 +3,13 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { packDirectory } from "@polyth/package-sdk/manifest";
+import { packDirectory, PACKAGE_CAPABILITY_NAMES } from "@polyth/package-sdk/manifest";
 import { createPluginRegistry } from "../src/managedRegistry.ts";
 import { connectionAuthorization, setTokenConnection } from "../src/connections.ts";
 import { createOauthTx, consumeOauthTx } from "../src/oauthTx.ts";
 import { writeSpaceEnabled } from "../src/spaceEnabled.ts";
 import { grantCapabilities } from "../src/grants.ts";
+import { invokePackageRpc } from "../src/packageRpc.ts";
 import { memoryOpaqueVault, testSpaceStorage } from "./helpers.ts";
 
 function writeSandbox(dir: string, over: {
@@ -360,4 +361,36 @@ test("oauth transactions are bounded to one live tx per connection", () => {
   assert.throws(() => consumeOauthTx({ oauthTxId: first.oauthTxId, spaceId: "spc_a" }), /invalid/);
   const live = consumeOauthTx({ oauthTxId: second.oauthTxId, spaceId: "spc_a" });
   assert.equal(live.verifier, "two");
+});
+
+test("sandbox Package SDK cannot reach the trusted harness capability registry", async () => {
+  assert.equal((PACKAGE_CAPABILITY_NAMES as readonly string[]).includes("harness.capabilities"), false);
+  assert.equal((PACKAGE_CAPABILITY_NAMES as readonly string[]).includes("agent.tool"), false);
+  const storage = testSpaceStorage(join(mkdtempSync(join(tmpdir(), "polyth-sandbox-cap-")), "space"));
+  await assert.rejects(
+    () => invokePackageRpc({
+      space: {
+        spaceId: "spc_a",
+        spaceSlug: "a",
+        userId: "usr",
+        role: "owner",
+        deployment: "local-trusted",
+        storageDir: storage.root,
+      },
+      storage,
+      sessions: {} as never,
+      projects: {} as never,
+      appendEvent: async () => ({}),
+      manifest: {
+        manifestVersion: 1,
+        id: "com-example-demo",
+        version: "1.0.0",
+        display: { name: "Demo", description: "Demo" },
+        runtime: { kind: "sandboxed", ui: { entry: "ui.ts" } },
+        capabilities: [{ name: "ui.render" }],
+      },
+      enabled: true,
+    }, "harness.capabilities.register", { execute: () => ({ output: "nope" }) }),
+    /unknown method/,
+  );
 });

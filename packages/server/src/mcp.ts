@@ -1,34 +1,42 @@
-// Server-owned MCP configuration (WP9, hardened in P1). Entries persist in the
-// data dir as two files: mcp.json (structure, safe to read back) and
-// mcp-secrets.json (values, never returned by any API and never logged). The
-// backend adapter is the only component that applies entries to the runtime; a
-// failed apply rolls the stored list back so config and runtime never diverge.
+// Space-owned MCP configuration. Entries persist in Space storage as two files:
+// mcp.json (structure + tombstones, safe to read back) and mcp-secrets.json
+// (values, never returned by any API and never logged).
+// Canonical desired state is authoritative; harness projectors reconcile
+// independently and a failed target must not roll the store back.
 // Importing entries from an existing backend config is READ-ONLY discovery: it
-// never triggers a backend write. User mutations apply a patch batch that
-// names exactly the Polyth-managed entries, so unsupported entries and unknown
-// fields in the backend config always survive.
-import { mkdirSync, readFileSync } from "node:fs";
+// never triggers a backend write. Tombstones win over backend discovery.
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { atomicWriteSync } from "@polyth/plugins";
+import { createSpaceStorage } from "@polyth/tenancy";
 import { access } from "node:fs/promises";
 import { constants } from "node:fs";
-import { delimiter, dirname, isAbsolute, join } from "node:path";
+import { delimiter, isAbsolute, join } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { McpServerDto, McpStatus, McpTransport } from "@polyth/contracts";
+import type {
+  DeploymentProfile,
+  McpServerDto,
+  McpStatus,
+  McpTombstone,
+  McpTransport,
+  SpaceContext,
+} from "@polyth/contracts";
 
-export interface McpApplier {
-  applyMcp(entries: Array<{
-    name: string;
-    transport:
-      | { kind: "stdio"; command: string; args: string[]; env: Record<string, string> }
-      | { kind: "http"; url: string; headers: Record<string, string> };
-    enabled: boolean;
-    /** Opaque unowned fields retained from an imported backend entry. */
-    raw?: Record<string, unknown>;
-  }> & {
-    /** All managed names (enabled, disabled, and retired). Rides on the array
-     * so intermediate appliers that forward/clone one argument keep it. */
-    managedNames?: string[];
-  }): Promise<void>;
+/** Trusted MCP payload for harness projectors. Secret values are present only
+ * here, never in DTOs or capability descriptors. */
+export interface McpProjectorServer {
+  id: string;
+  name: string;
+  enabled: boolean;
+  transport: McpTransport;
+  raw?: Record<string, unknown>;
+  revision: number;
+}
+
+export interface McpProjectionState {
+  servers: McpProjectorServer[];
+  retiredNames: string[];
+  tombstones: McpTombstone[];
+  secretsFor(id: string): Record<string, string>;
 }
 
 export interface McpCreateInput {
@@ -53,12 +61,14 @@ export interface McpPatchInput {
 }
 
 export interface McpConfigService {
-  list(): McpServerDto[];
-  create(input: McpCreateInput): Promise<McpServerDto>;
-  update(id: string, patch: McpPatchInput, expectedRevision: number): Promise<McpServerDto>;
-  remove(id: string): Promise<boolean>;
+  list(space: SpaceContext): McpServerDto[];
+  create(space: SpaceContext, input: McpCreateInput): Promise<McpServerDto>;
+  update(space: SpaceContext, id: string, patch: McpPatchInput, expectedRevision: number): Promise<McpServerDto>;
+  remove(space: SpaceContext, id: string): Promise<boolean>;
   /** Reachability probe; never launches anything through a shell. */
-  test(id: string): Promise<{ ok: boolean; message: string }>;
+  test(space: SpaceContext, id: string): Promise<{ ok: boolean; message: string }>;
+  /** Desired-state snapshot for harness projectors. Secret values stay here. */
+  projection(space: SpaceContext): McpProjectionState;
 }
 
 /** MCP entry fields Polyth owns; every other field of an imported entry is
@@ -131,6 +141,18 @@ interface StoredServer {
   raw?: Record<string, unknown>;
 }
 
+interface StoredDocument {
+  version: 2;
+  servers: StoredServer[];
+  tombstones: McpTombstone[];
+}
+
+interface SpaceMcpState {
+  servers: StoredServer[];
+  secrets: Record<string, Record<string, string>>;
+  tombstones: McpTombstone[];
+}
+
 const err = (code: string, message: string) => Object.assign(new Error(message), { code });
 
 const validateTransport = (t: McpTransport): void => {
@@ -165,92 +187,148 @@ async function commandExists(command: string): Promise<boolean> {
   return false;
 }
 
-export function createMcpConfigService(opts: { file: string; applier?: McpApplier }): McpConfigService {
-  mkdirSync(dirname(opts.file), { recursive: true });
-  const secretsFile = opts.file.replace(/\.json$/, "-secrets.json");
+const loadJson = <T>(path: string, fallback: T): T => {
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as T;
+  } catch {
+    return fallback;
+  }
+};
 
-  const load = <T>(path: string, fallback: T): T => {
-    try {
-      return JSON.parse(readFileSync(path, "utf8")) as T;
-    } catch {
-      return fallback;
-    }
+const parseDocument = (raw: unknown): { servers: StoredServer[]; tombstones: McpTombstone[] } => {
+  if (Array.isArray(raw)) {
+    return { servers: raw as StoredServer[], tombstones: [] };
+  }
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const doc = raw as { servers?: StoredServer[]; tombstones?: McpTombstone[] };
+    return {
+      servers: Array.isArray(doc.servers) ? doc.servers : [],
+      tombstones: Array.isArray(doc.tombstones) ? doc.tombstones : [],
+    };
+  }
+  return { servers: [], tombstones: [] };
+};
+
+export function createMcpConfigService(opts: {
+  /** Deployment data dir. Used only for one-time local-trusted default-Space adoption. */
+  dataDir: string;
+  deployment: DeploymentProfile;
+  defaultSpaceId?: string;
+  /** Fired after canonical persistence. Projector failure must not roll the store back. */
+  onChanged?: (space: SpaceContext) => Promise<void>;
+}): McpConfigService {
+  mkdirSync(opts.dataDir, { recursive: true });
+  const cache = new Map<string, SpaceMcpState>();
+  const migrated = new Set<string>();
+
+  const filesFor = (space: SpaceContext) => {
+    const storage = createSpaceStorage(space.storageDir);
+    return {
+      servers: storage.path("mcp.json"),
+      secrets: storage.path("mcp-secrets.json"),
+    };
   };
 
-  let servers: StoredServer[] = load<StoredServer[]>(opts.file, []);
-  // secrets: { [serverId]: { [keyName]: value } }
-  let secrets: Record<string, Record<string, string>> = load(secretsFile, {});
-  // Names retired by rename/removal this process: the applier must still drop
-  // them from the backend config even though they are no longer stored. Kept
-  // in managedNames (not as entries) so only owned names are ever touched.
-  const retired = new Set<string>();
+  const adoptLegacy = (space: SpaceContext): void => {
+    if (migrated.has(space.spaceId)) return;
+    migrated.add(space.spaceId);
+    const files = filesFor(space);
+    if (existsSync(files.servers) || existsSync(files.secrets)) return;
+    const legacyServers = join(opts.dataDir, "mcp.json");
+    const legacySecrets = join(opts.dataDir, "mcp-secrets.json");
+    if (!existsSync(legacyServers) && !existsSync(legacySecrets)) return;
+    // Fail closed unless this is the local default Space. Never fan out to
+    // every Space, and never guess ownership on hosted deployments.
+    if (opts.deployment !== "local-trusted") return;
+    if (!opts.defaultSpaceId || space.spaceId !== opts.defaultSpaceId) return;
+    const parsed = parseDocument(loadJson<unknown>(legacyServers, []));
+    const secrets = loadJson<Record<string, Record<string, string>>>(legacySecrets, {});
+    const document: StoredDocument = { version: 2, servers: parsed.servers, tombstones: parsed.tombstones };
+    mkdirSync(space.storageDir, { recursive: true });
+    atomicWriteSync(files.servers, JSON.stringify(document, null, 2));
+    atomicWriteSync(files.secrets, JSON.stringify(secrets), 0o600);
+  };
 
-  const persist = () => {
-    atomicWriteSync(opts.file, JSON.stringify(servers, null, 2));
-    atomicWriteSync(secretsFile, JSON.stringify(secrets), 0o600);
+  const load = (space: SpaceContext): SpaceMcpState => {
+    adoptLegacy(space);
+    const cached = cache.get(space.spaceId);
+    if (cached) return cached;
+    const files = filesFor(space);
+    const parsed = parseDocument(loadJson<unknown>(files.servers, { version: 2, servers: [], tombstones: [] }));
+    const state: SpaceMcpState = {
+      servers: parsed.servers,
+      tombstones: parsed.tombstones,
+      secrets: loadJson(files.secrets, {}),
+    };
+    cache.set(space.spaceId, state);
+    return state;
+  };
+
+  const persist = (space: SpaceContext, state: SpaceMcpState) => {
+    const files = filesFor(space);
+    const document: StoredDocument = { version: 2, servers: state.servers, tombstones: state.tombstones };
+    atomicWriteSync(files.servers, JSON.stringify(document, null, 2));
+    atomicWriteSync(files.secrets, JSON.stringify(state.secrets), 0o600);
   };
 
   const toDto = (s: StoredServer): McpServerDto => ({
     id: s.id,
     name: s.name,
-    transport: s.transport,
+    transport: structuredClone(s.transport),
     enabled: s.enabled,
     status: s.status,
     ...(s.lastError ? { lastError: s.lastError } : {}),
     revision: s.revision,
   });
 
-  const applyAll = async (): Promise<void> => {
-    if (!opts.applier) return;
-    // F10: disabled servers are REMOVED from the applied config (not written
-    // with enabled:false) so the backend cannot start or list them at all.
-    // The applier patches only the names listed in managedNames — unsupported
-    // entries and unknown fields in the backend config are never touched.
-    const entries = servers.filter((s) => s.enabled).map((s) => ({
-      name: s.name,
-      enabled: s.enabled,
-      ...(s.raw && Object.keys(s.raw).length ? { raw: structuredClone(s.raw) } : {}),
-      transport: s.transport.kind === "stdio"
-        ? {
-            kind: "stdio" as const,
-            command: s.transport.command,
-            args: s.transport.args,
-            env: Object.fromEntries(s.transport.envKeys.map((k) => [k, secrets[s.id]?.[k] ?? ""])),
-          }
-        : {
-            kind: "http" as const,
-            url: s.transport.url,
-            headers: Object.fromEntries(s.transport.headersSecretRefs.map((k) => [k, secrets[s.id]?.[k] ?? ""])),
-          },
-    }));
-    const managedNames = [...new Set([...servers.map((s) => s.name), ...retired])];
-    await opts.applier.applyMcp(Object.assign(entries, { managedNames }));
+  const projection = (space: SpaceContext): McpProjectionState => {
+    const state = load(space);
+    return {
+      servers: state.servers.map((s) => ({
+        id: s.id,
+        name: s.name,
+        enabled: s.enabled,
+        transport: structuredClone(s.transport),
+        revision: s.revision,
+        ...(s.raw && Object.keys(s.raw).length ? { raw: structuredClone(s.raw) } : {}),
+      })),
+      retiredNames: state.tombstones.map((row) => row.name),
+      tombstones: state.tombstones.map((row) => ({ ...row })),
+      secretsFor: (id) => ({ ...(state.secrets[id] ?? {}) }),
+    };
   };
 
-  /** Mutate under a snapshot; failed apply restores stored state exactly. */
-  const commit = async <T>(mutate: () => T): Promise<T> => {
-    const beforeServers = structuredClone(servers);
-    const beforeSecrets = structuredClone(secrets);
-    const out = mutate();
+  const commit = async <T>(space: SpaceContext, mutate: (state: SpaceMcpState) => T): Promise<T> => {
+    const state = load(space);
+    const out = mutate(state);
+    persist(space, state);
     try {
-      await applyAll();
-    } catch (e) {
-      servers = beforeServers;
-      secrets = beforeSecrets;
-      persist();
-      throw err("conflict", `backend apply failed, change rolled back: ${(e as Error).message}`);
+      await opts.onChanged?.(space);
+    } catch {
+      // Desired state is canonical. Provisioning status is recorded elsewhere.
     }
-    persist();
     return out;
   };
 
-  return {
-    list: () => servers.map(toDto),
+  const retire = (state: SpaceMcpState, name: string, revision: number) => {
+    state.tombstones = [
+      ...state.tombstones.filter((row) => row.name !== name),
+      { name, revision, retiredAt: Date.now() },
+    ];
+  };
 
-    async create(input: McpCreateInput): Promise<McpServerDto> {
+  return {
+    list: (space) => load(space).servers.map(toDto),
+    projection,
+
+    async create(space: SpaceContext, input: McpCreateInput): Promise<McpServerDto> {
       const name = (input.name ?? "").trim();
       if (!name || name.length > 64) throw err("invalid-input", "server name required (≤64 chars)");
-      if (servers.some((s) => s.name === name)) throw err("conflict", `an MCP server named "${name}" already exists`);
+      const state = load(space);
+      if (input.origin === "backend-import" && state.tombstones.some((row) => row.name === name)) {
+        throw err("conflict", `MCP server "${name}" was deleted and must not be re-imported from backend config`);
+      }
+      if (state.servers.some((s) => s.name === name)) throw err("conflict", `an MCP server named "${name}" already exists`);
       validateTransport(input.transport);
       const row: StoredServer = {
         id: randomUUID(),
@@ -262,66 +340,70 @@ export function createMcpConfigService(opts: { file: string; applier?: McpApplie
         ...(input.raw && Object.keys(input.raw).length ? { raw: structuredClone(input.raw) } : {}),
       };
       if (input.origin === "backend-import") {
-        // Import/seed is READ-ONLY discovery (invariant 11): the entry already
-        // exists in the backend config, so adopting it must not write that
-        // config back — no applyMcp, only the Polyth store is updated.
-        servers.push(row);
-        if (input.secrets) secrets[row.id] = { ...input.secrets };
-        persist();
+        state.servers.push(row);
+        if (input.secrets) state.secrets[row.id] = { ...input.secrets };
+        persist(space, state);
         return toDto(row);
       }
-      return commit(() => {
-        servers.push(row);
-        if (input.secrets) secrets[row.id] = { ...input.secrets };
+      return commit(space, (next) => {
+        next.tombstones = next.tombstones.filter((row) => row.name !== name);
+        next.servers.push(row);
+        if (input.secrets) next.secrets[row.id] = { ...input.secrets };
         return toDto(row);
       });
     },
 
-    async update(id: string, patch: McpPatchInput, expectedRevision: number): Promise<McpServerDto> {
-      const row = servers.find((s) => s.id === id);
+    async update(space: SpaceContext, id: string, patch: McpPatchInput, expectedRevision: number): Promise<McpServerDto> {
+      const state = load(space);
+      const row = state.servers.find((s) => s.id === id);
       if (!row) throw err("not-found", "mcp server not found");
       if (row.revision !== expectedRevision) throw err("conflict", "entry changed since you loaded it");
       if (patch.name !== undefined) {
         const name = patch.name.trim();
         if (!name || name.length > 64) throw err("invalid-input", "server name required (≤64 chars)");
-        if (servers.some((s) => s.id !== id && s.name === name)) throw err("conflict", `an MCP server named "${name}" already exists`);
+        if (state.servers.some((s) => s.id !== id && s.name === name)) throw err("conflict", `an MCP server named "${name}" already exists`);
       }
       if (patch.transport !== undefined) validateTransport(patch.transport);
-      return commit(() => {
-        if (patch.name !== undefined && patch.name.trim() !== row.name) {
-          retired.add(row.name);
-          row.name = patch.name.trim();
+      return commit(space, (next) => {
+        const current = next.servers.find((s) => s.id === id)!;
+        if (patch.name !== undefined && patch.name.trim() !== current.name) {
+          retire(next, current.name, current.revision);
+          next.tombstones = next.tombstones.filter((row) => row.name !== patch.name!.trim());
+          current.name = patch.name.trim();
         }
-        if (patch.transport !== undefined) row.transport = patch.transport;
+        if (patch.transport !== undefined) current.transport = patch.transport;
         if (patch.enabled !== undefined) {
-          row.enabled = patch.enabled;
-          row.status = patch.enabled ? "starting" : "disabled";
+          current.enabled = patch.enabled;
+          current.status = patch.enabled ? "starting" : "disabled";
         }
-        if (patch.secrets) secrets[id] = { ...(secrets[id] ?? {}), ...patch.secrets };
-        row.revision += 1;
-        return toDto(row);
+        if (patch.secrets) next.secrets[id] = { ...(next.secrets[id] ?? {}), ...patch.secrets };
+        current.revision += 1;
+        return toDto(current);
       });
     },
 
-    async remove(id: string): Promise<boolean> {
-      const i = servers.findIndex((s) => s.id === id);
+    async remove(space: SpaceContext, id: string): Promise<boolean> {
+      const state = load(space);
+      const i = state.servers.findIndex((s) => s.id === id);
       if (i < 0) return false;
-      return commit(() => {
-        retired.add(servers[i]!.name);
-        servers.splice(i, 1);
-        delete secrets[id];
+      return commit(space, (next) => {
+        const current = next.servers[i]!;
+        retire(next, current.name, current.revision);
+        next.servers.splice(i, 1);
+        delete next.secrets[id];
         return true;
       });
     },
 
-    async test(id: string): Promise<{ ok: boolean; message: string }> {
-      const row = servers.find((s) => s.id === id);
+    async test(space: SpaceContext, id: string): Promise<{ ok: boolean; message: string }> {
+      const state = load(space);
+      const row = state.servers.find((s) => s.id === id);
       if (!row) throw err("not-found", "mcp server not found");
       const set = (status: McpStatus, lastError?: string) => {
         row.status = status;
         if (lastError) row.lastError = lastError;
         else delete row.lastError;
-        persist();
+        persist(space, state);
       };
       if (row.transport.kind === "stdio") {
         const found = await commandExists(row.transport.command);

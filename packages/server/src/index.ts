@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createHarnessPool, createHarnessRegistry } from "@polyth/harness-runtime";
+import { createCapabilityContributionRegistry, createHarnessPool, createHarnessRegistry } from "@polyth/harness-runtime";
 import { createContext, loadPlugin } from "@polyth/kernel";
 import {
   activePinnedMessages,
@@ -48,6 +48,7 @@ import {
   type OpenCodeAdapterOptions,
 } from "@polyth/backend-opencode";
 import {
+  bindPackageServices,
   createServerServiceRegistry,
   discoverServerPackages,
   PairedSocketRegistry,
@@ -90,6 +91,8 @@ import { queueRoutes } from "./routes/queue.ts";
 import { createBehaviorService } from "./behavior.ts";
 import { createClientSettings } from "./clientSettings.ts";
 import { createMcpConfigService, mcpEntriesFromBackendConfig } from "./mcp.ts";
+import { createCapabilityProvisioningController, reconcilePinnedHarness } from "./capabilityProvisioning.ts";
+import { AGENT_TOOLS_PATH, createAgentToolBridge } from "./agentTools.ts";
 import { createSecureSafeService, secureSafeBehaviorSection } from "./secureSafe.ts";
 import { createModelVisibilityService } from "./modelVisibility.ts";
 import { createVoiceSettings } from "./voice.ts";
@@ -112,7 +115,7 @@ import { createWsGateway, type WsGateway } from "./ws.ts";
 import { createTrackWorkflow, type TrackWorkflow, type TrackWorkflowDeps } from "./tracks.ts";
 import { createRouteRegistry } from "./routeRegistry.ts";
 import { createPackageLifecycle } from "./packageLifecycle.ts";
-import { createDeferredConfigApplier, createOpenCodePendingService } from "./opencodePending.ts";
+import { createDeferredConfigApplier, createOpenCodePendingService, physicalRestartKeysFor } from "./opencodePending.ts";
 import { agentSessionRoutes, type AgentGoalService } from "./routes/agentSessions.ts";
 import { runtimeEpochRoutes } from "./routes/runtimeEpoch.ts";
 import { runtimeDiagnosticsRoutes } from "./routes/runtimeDiagnostics.ts";
@@ -447,6 +450,7 @@ export async function boot(opts: BootOptions = {}) {
     ?? discoveredPackageManifests.map((pkg) => pkg.descriptor);
   const routeRegistry = createRouteRegistry();
   const packageLifecycle = createPackageLifecycle(routeRegistry);
+  let capabilityController: ReturnType<typeof createCapabilityProvisioningController> | null = null;
 
   // Sessions and package transitions can emit before WS attaches. This box
   // starts forwarding as soon as the live broadcaster is installed.
@@ -465,7 +469,14 @@ export async function boot(opts: BootOptions = {}) {
     onSetEnabled: (id, enabled) => enabled
       ? packageLifecycle.enable(id)
       : packageLifecycle.disable(id),
-    onChanged: (pkg) => broadcast.packageChanged?.(pkg),
+    onChanged: (pkg) => {
+      broadcast.packageChanged?.(pkg);
+      if (capabilityController) {
+        void capabilityController.reconcileAllActiveTargets().catch((error) => {
+          console.warn("[polyth] capability reconcile after package change failed", error);
+        });
+      }
+    },
   });
 
   // --- kernel composition root
@@ -520,6 +531,8 @@ export async function boot(opts: BootOptions = {}) {
   const services = createServerServiceRegistry();
   const harnesses = createHarnessRegistry();
   services.provide(serverServiceKey("harnesses"), harnesses);
+  const capabilityContributions = createCapabilityContributionRegistry();
+  services.provide(serverServiceKey("harness.capabilities"), capabilityContributions);
   const provideService = <T,>(name: string, service: T): void =>
     services.provide(serverServiceKey<T>(name), service);
   const svc = <T,>(name: string): T | undefined => services.get(serverServiceKey<T>(name));
@@ -624,11 +637,14 @@ export async function boot(opts: BootOptions = {}) {
         sessionIdMap,
       });
     }
+    const project = await projects.get(projectId);
+    const spaceId = project ? spaceGateway.resolveInternal(project.spaceId).spaceId : undefined;
     const browserTool = browserToolBridge?.register({ projectId, cwd });
     try {
       const localStateKey = openCodeRuntimeId(projectId, cwd);
       const runtime = await createOpenCodeRuntime({
         projectId, cwd, sessionIdMap,
+        ...(spaceId ? { spaceId } : {}),
         ...(opts.opencode?.port ? { port: opts.opencode.port } : {}),
         ...(opts.opencode?.bin ? { bin: opts.opencode.bin } : {}),
         ...(opts.opencode?.binarySource
@@ -1124,6 +1140,7 @@ export async function boot(opts: BootOptions = {}) {
         withConfigRestart,
       });
     }
+    stampRuntimeIdentity(facade, projectId, cwd);
     occupancyByFacade.set(facade, occupancy);
     return {
       facade,
@@ -1136,6 +1153,11 @@ export async function boot(opts: BootOptions = {}) {
         );
       },
     };
+  };
+
+  const stampRuntimeIdentity = (runtime: AgentRuntime, projectId: string, cwd: string) => {
+    Object.defineProperty(runtime, "projectId", { value: projectId, configurable: true });
+    Object.defineProperty(runtime, "cwd", { value: cwd, configurable: true });
   };
 
   type RuntimeRestartFingerprint = {
@@ -1152,9 +1174,10 @@ export async function boot(opts: BootOptions = {}) {
     reason: `session ${sessionId} restart reconciliation is not initialized`,
   });
 
-  const captureRuntimeRestartState = async (): Promise<RuntimeRestartState> => {
+  const captureRuntimeRestartState = async (keys?: ReadonlySet<string>): Promise<RuntimeRestartState> => {
     const state: RuntimeRestartState = new Map();
-    await settleAllOrThrow([...runtimeRestarters].map(async ([key, restarter]) => {
+    const entries = keys ? [...runtimeRestarters].filter(([key]) => keys.has(key)) : [...runtimeRestarters];
+    await settleAllOrThrow(entries.map(async ([key, restarter]) => {
       const endpoint = await restarter.runtime.endpoint?.();
       if (!endpoint) {
         throw Object.assign(
@@ -1172,8 +1195,9 @@ export async function boot(opts: BootOptions = {}) {
 
   const restartRuntimeEntries = async (
     expected?: RuntimeRestartState,
+    keys?: ReadonlySet<string>,
   ): Promise<number> => {
-    const entries = [...runtimeRestarters];
+    const entries = keys ? [...runtimeRestarters].filter(([key]) => keys.has(key)) : [...runtimeRestarters];
     const restarted = await settleAllOrThrow(entries.map(async ([key, restarter]) => {
       const prior = expected?.get(key);
       if (expected && !prior) {
@@ -1306,6 +1330,22 @@ export async function boot(opts: BootOptions = {}) {
       }
       const record = await runtimeDiagnostics.observe(key, { projectId, cwd: dir }, () =>
         openCodeRuntimes.acquire(key, async (occupancy) => withSpawnSlot(async () => {
+          // Physical creation flight. Harness-cache beforeCreate may have run
+          // before this acquire waited out a previous dispose; that dispose's
+          // onEvict drops the overlay. Reconcile here so spawn sees the overlay
+          // for THIS generation.
+          if (capabilityController) {
+            const project = await projects.get(projectId);
+            const space = spaceGateway.resolveInternal(project?.spaceId);
+            const context = {
+              projectId,
+              spaceId: space.spaceId,
+              space,
+              cwd: dir,
+              remote: Boolean(project?.remote),
+            };
+            await reconcilePinnedHarness(capabilityController, harnesses, "opencode", context);
+          }
           const configRestartable = !(await projects.get(projectId))?.remote;
           const spawn = async () => {
             const built = facadeFor(
@@ -1375,6 +1415,10 @@ export async function boot(opts: BootOptions = {}) {
       const space = spaceGateway.resolveInternal(project?.spaceId);
       return { projectId, spaceId: space.spaceId, space, cwd: await cwdFor(projectId, cwd), sessionId, remote: Boolean(project?.remote) };
     },
+    async beforeCreate(provider, context) {
+      if (!capabilityController) return;
+      await capabilityController.reconcile(provider, context);
+    },
   });
   const runtimes: RuntimePool = {
     ...harnessPool,
@@ -1385,7 +1429,31 @@ export async function boot(opts: BootOptions = {}) {
     bindSession: openCodePool.bindSession,
     unbindSession: openCodePool.unbindSession,
   };
-  openCodePool.onEvict?.((runtime) => harnessPool.forgetRuntime(runtime));
+  openCodePool.onEvict?.(async (runtime) => {
+    try {
+      harnessPool.forgetRuntime(runtime);
+    } catch (err) {
+      console.warn("[polyth] harness pool forgetRuntime on evict skipped", err);
+    }
+    if (!capabilityController) return;
+    const projectId = (runtime as AgentRuntime & { projectId?: string }).projectId;
+    const cwd = (runtime as AgentRuntime & { cwd?: string }).cwd;
+    if (!projectId || !cwd) return;
+    try {
+      const project = await projects.get(projectId);
+      const space = spaceGateway.resolveInternal(project?.spaceId);
+      // Physical OpenCode eviction — not a session occupancy release.
+      capabilityController.release({
+        spaceId: space.spaceId,
+        space,
+        projectId,
+        cwd,
+        remote: Boolean(project?.remote),
+      }, "opencode");
+    } catch (err) {
+      console.warn("[polyth] capability overlay release on evict skipped", err);
+    }
+  });
   openCodePool.onRestart?.(async () => { harnesses.invalidate({ harnessId: "opencode" }); });
   const runtimeCatalog = createRuntimeCatalog({
     projects,
@@ -1428,13 +1496,17 @@ export async function boot(opts: BootOptions = {}) {
 
   // --- WP9: behavior instructions, MCP config, managed plugins (adapter-applied)
   const pendingOpenCode = createOpenCodePendingService({
-    canRestart: async (captured) => {
+    canRestart: async (captured, keys) => {
       const expected = captured as RuntimeRestartState | undefined;
       const assessments = await settleAllOrThrow((await store.projections()).map(async (projection) => {
         const project = await projects.get(projection.projectId);
         const cwd = projection.worktreePath ?? project?.path ?? process.cwd();
         const connectionId = project?.remote?.kind === "ssh" ? project.remote.connectionId : undefined;
         const key = sharedRuntimePoolKey(projection.projectId, cwd, connectionId);
+        // A scoped restart (runtime-capabilities for one physical target)
+        // must not be blocked by an unrelated project's live session — only
+        // sessions on the restarting target(s) need to be safety-checked.
+        if (keys && !keys.has(key)) return { safe: true as const };
         const restarter = runtimeRestarters.get(key);
         if (!restarter) return { safe: true as const };
         const fingerprint = expected?.get(key);
@@ -1456,8 +1528,8 @@ export async function boot(opts: BootOptions = {}) {
     },
     withAdmissionBarrier: (action) =>
       admissionBarrier.run(() => withRuntimeReplacementInterlock(action)),
-    captureRestartState: captureRuntimeRestartState,
-    restart: (state) => restartRuntimeEntries(state as RuntimeRestartState | undefined),
+    captureRestartState: (keys) => captureRuntimeRestartState(keys),
+    restart: (state, keys) => restartRuntimeEntries(state as RuntimeRestartState | undefined, keys),
   });
   const configApplier = createDeferredConfigApplier(directConfigApplier, pendingOpenCode);
   const secureSafe = createSecureSafeService({
@@ -1469,23 +1541,32 @@ export async function boot(opts: BootOptions = {}) {
     const section = secureSafeBehaviorSection(`${dataDir}/forbidden-config.json`, secureSafe.manifest());
     return `${base}${base ? "\n\n" : ""}${section}\n`;
   };
+  const reconcileLive = async (): Promise<void> => {
+    if (!capabilityController) return;
+    await capabilityController.reconcileAllActiveTargets();
+  };
   const behavior = createBehaviorService({
     file: `${dataDir}/behavior.md`,
     policyFile: `${dataDir}/behavior-policy.json`,
-    applier: configApplier,
+    onChanged: reconcileLive,
     decorate: decorateBehavior,
   });
   refreshSafeBehavior = async () => {
-    if (configApplier.configAuthority?.().kind === "read-only") return;
     try {
-      await behavior.refresh();
+      await reconcileLive();
     } catch (err) {
       console.warn("[polyth] Secure Safe behavior refresh skipped", err);
     }
   };
   await secureSafe.syncForbiddenConfig();
-  await refreshSafeBehavior();
-  const mcp = createMcpConfigService({ file: `${dataDir}/mcp.json`, applier: configApplier });
+  const mcp = createMcpConfigService({
+    dataDir,
+    deployment: spaceGateway.deployment,
+    defaultSpaceId: spaceGateway.resolveInternal().spaceId,
+    onChanged: async (space) => {
+      await capabilityController?.reconcileSpace(space);
+    },
+  });
 
   // Provider/model visibility: seeds from opencode.json (disabled_providers +
   // provider blacklists), then mirrors every toggle back to it.
@@ -1494,20 +1575,110 @@ export async function boot(opts: BootOptions = {}) {
   services.provide(serverServiceKey<typeof visibility>("models.visibility"), visibility);
 
   // An empty Polyth MCP store adopts whatever OpenCode already has configured,
-  // so the settings page reflects reality instead of an empty list.
-  if (mcp.list().length === 0) {
+  // so the settings page reflects reality instead of an empty list. Adoption is
+  // default-Space + local-trusted only.
+  const defaultSpace = spaceGateway.resolveInternal();
+  if (spaceGateway.deployment === "local-trusted" && mcp.list(defaultSpace).length === 0) {
     try {
       for (const entry of mcpEntriesFromBackendConfig(await configApplier.readConfig())) {
-        await mcp.create(entry).catch((err: unknown) =>
+        await mcp.create(defaultSpace, entry).catch((err: unknown) =>
           console.warn(`[polyth] MCP seed skipped for "${entry.name}"`, err));
       }
     } catch (err) {
       console.warn("[polyth] MCP seed from backend config skipped", err);
     }
   }
-  // Boot reconciliation happens before any runtime can be created. From this
-  // point on, user mutations are staged until the unified apply/restart action.
-  configApplier.enableStaging();
+  const agentTools = createAgentToolBridge({
+    executor: (id) => capabilityContributions.executor(id),
+    contribution: (id) => capabilityContributions.contribution(id),
+    authorize: (tool, grant) => {
+      const ownerAllowed = (() => {
+        if (tool.owner === "polyth") return true;
+        try {
+          const space = spaceGateway.resolveInternal(grant.spaceId);
+          const context = {
+            spaceId: grant.spaceId,
+            projectId: grant.projectId,
+            cwd: grant.cwd,
+            space,
+            ...(grant.sessionId ? { sessionId: grant.sessionId } : {}),
+          };
+          const managed = svc<import("@polyth/plugins").PluginRegistry>("plugins.managed");
+          if (managed?.has(tool.owner)) {
+            const storage = createSpaceStorage(space.storageDir);
+            if (managed.detail(tool.owner, storage).runtimeKind === "sandboxed") return false;
+            return managed.isEnabled(tool.owner, storage);
+          }
+          const known = packageRegistry.get(tool.owner);
+          return known ? known.enabled : true;
+        } catch {
+          return false;
+        }
+      })();
+      if (!ownerAllowed) return "deny";
+      const permissions = svc<{
+        evaluate(permission: string, patterns: string[], projectId?: string, sessionId?: string): "allow" | "deny" | "ask";
+      }>("permissions");
+      if (tool.trust === "pure" && tool.mutating === false) {
+        return permissions?.evaluate("package-tool", [tool.id], grant.projectId, grant.sessionId) === "deny"
+          ? "deny"
+          : "allow";
+      }
+      const verdict = permissions?.evaluate("package-tool", [tool.id], grant.projectId, grant.sessionId) ?? "ask";
+      if (verdict === "allow") return "allow";
+      if (verdict === "deny") return "deny";
+      return "permission-required";
+    },
+  });
+  capabilityController = createCapabilityProvisioningController({
+    contributions: capabilityContributions,
+    harnesses,
+    behavior,
+    mcp,
+    file: `${dataDir}/capability-status.json`,
+    contributionAllowed: (owner, context) => {
+      if (owner === "polyth") return true;
+      const managed = svc<import("@polyth/plugins").PluginRegistry>("plugins.managed");
+      if (managed?.has(owner)) {
+        if (!context.space) return false;
+        const storage = createSpaceStorage(context.space.storageDir);
+        const detail = managed.detail(owner, storage);
+        if (detail.runtimeKind === "sandboxed") return false;
+        return managed.isEnabled(owner, storage);
+      }
+      const known = packageRegistry.get(owner);
+      return known ? known.enabled : true;
+    },
+    onOpenCodeCapabilityRestart: (context, desiredRevision) => {
+      // Stage synchronously. pending-restart is only raised for a live
+      // physical generation, so `runtimeRestarters` already holds the exact
+      // pool key (local or remote). An async `projects.get` here used to
+      // leave applyAndRestart racing an empty queue.
+      const fallback = sharedRuntimePoolKey(context.projectId, context.cwd);
+      pendingOpenCode.stage({
+        id: `runtime-capabilities:${context.spaceId}:${context.projectId}:${context.cwd}`,
+        kind: "runtime-capabilities",
+        label: "OpenCode runtime capabilities",
+        desiredRevision,
+        restartKeys: physicalRestartKeysFor(
+          runtimeRestarters.keys(),
+          context.projectId,
+          context.cwd,
+          fallback,
+        ),
+        apply: async () => {},
+      });
+    },
+    onOpenCodeCapabilitySettled: (input) => {
+      pendingOpenCode.settleRuntimeCapabilities(input);
+    },
+    tools: agentTools,
+    toolsEndpoint: () => `http://127.0.0.1:${port}${AGENT_TOOLS_PATH}`,
+  });
+  provideService("harness.provisioning", {
+    status: (context: import("@polyth/contracts").HarnessContext, harnessId?: string) =>
+      capabilityController!.status(context, harnessId),
+  });
 
   // Infrastructure seams consumed by discovered packages.
   provideService("secure-safe", secureSafe);
@@ -1672,6 +1843,7 @@ export async function boot(opts: BootOptions = {}) {
   const hostFor = (id: string): ServerPackageHost => ({
     ...packageHost,
     pluginId: id,
+    services: bindPackageServices(services, id),
     ...(id === "plugins" ? { packageSpaces } : {}),
   });
 
@@ -1811,9 +1983,55 @@ export async function boot(opts: BootOptions = {}) {
 
   const sessions = createSessionService({
     store, projects, runtimes, broadcast, queue: store, org: store, profiles: store, behavior, secureSafe,
+    harnesses: {
+      staticFeatures: (harnessId) =>
+        harnesses.providers().find((provider) => provider.descriptor.id === harnessId)?.staticFeatures,
+    },
     admission: admissionBarrier,
     isShuttingDown,
     permissions: requireSvc<SessionDeps["permissions"]>("permissions"),
+    instructionProvisioned: async (sessionId, harnessId) => {
+      if (!capabilityController) return false;
+      const proj = await store.projection(sessionId);
+      if (!proj) return false;
+      const project = await projects.get(proj.projectId);
+      const space = spaceGateway.resolveInternal(project?.spaceId);
+      return capabilityController.instructionState({
+        space,
+        spaceId: space.spaceId,
+        projectId: proj.projectId,
+        cwd: proj.worktreePath ?? project?.path ?? process.cwd(),
+        sessionId,
+        remote: Boolean(project?.remote),
+      }, harnessId);
+    },
+    onSessionReleased: async ({ sessionId, projectId, cwd }) => {
+      const project = await projects.get(projectId);
+      const space = spaceGateway.resolveInternal(project?.spaceId);
+      // Session occupancy ended. Physical-runtime targets stay until eviction.
+      capabilityController?.release({
+        spaceId: space.spaceId,
+        space,
+        projectId,
+        cwd,
+        sessionId,
+        remote: Boolean(project?.remote),
+      });
+    },
+    onHarnessTargetReleased: async ({ sessionId, projectId, cwd, harnessId }) => {
+      const project = await projects.get(projectId);
+      const space = spaceGateway.resolveInternal(project?.spaceId);
+      // Session released this harness's execution occupancy. Physical OpenCode
+      // overlays remain while sibling sessions still occupy the runtime.
+      capabilityController?.release({
+        spaceId: space.spaceId,
+        space,
+        projectId,
+        cwd,
+        sessionId,
+        remote: Boolean(project?.remote),
+      }, harnessId);
+    },
     ...(gitService ? { worktrees: gitService.worktrees } : {}),
     ...(terminalService ? {
       shell: terminalService,
@@ -2047,6 +2265,7 @@ export async function boot(opts: BootOptions = {}) {
     request.path.startsWith("/api/mcp/") ? settingsRoute(request) : false);
 
   const staticCoreRoutes: RouteHandler[] = [
+    async (request) => agentTools.route(request),
     authRoutes(auth),
     spaceRoutes({
       store: spaceGateway.store,
@@ -2181,6 +2400,15 @@ export async function boot(opts: BootOptions = {}) {
   };
   attachHttpChannels(httpServerContext);
   await packageLifecycle.startEnabled(packageRegistry);
+  try {
+    await refreshSafeBehavior();
+  } catch (err) {
+    console.warn("[polyth] initial capability reconcile skipped", err);
+  }
+  // User mutations from this point stage until the unified apply/restart
+  // action. Boot reconciliation above wrote immediately so a no-op MCP apply
+  // cannot enqueue a spurious pending restart.
+  configApplier.enableStaging();
   // Providers register in package lifecycle hooks; warm only after discovery.
   void runtimeCatalog.models().catch(() => {});
 
@@ -2252,6 +2480,7 @@ export async function boot(opts: BootOptions = {}) {
       if (harnessErrors) {
         console.error("[polyth] harness runtime disposal failed during shutdown", harnessErrors);
       }
+      capabilityController?.dispose();
       await svc<SshTransportService>("ssh")?.disconnectAll().catch(() => {});
       await root.dispose();
       await store.close();

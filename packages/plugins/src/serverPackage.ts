@@ -10,6 +10,7 @@ import { isAbsolute, join, resolve, sep, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
 import { cap } from "@polyth/contracts";
 import type {
+  AgentCapabilityContributionRegistry,
   AgentRuntime,
   AuthPrincipal,
   AuthResolution,
@@ -185,6 +186,46 @@ export function createServerServiceRegistry(): ServerServiceRegistry {
       return services.get(key.id) as T;
     },
     ids: () => [...services.keys()].sort(),
+  };
+}
+
+const CAPABILITY_SERVICE = serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities");
+
+/** Bind capability registration to the receiving package id so a plugin cannot
+ * self-assert `owner: "polyth"` or harvest another package's namespace. */
+export function bindPackageServices(
+  services: ServerServiceRegistry,
+  pluginId: string,
+): ServerServiceRegistry {
+  const wrap = <T>(key: CapabilityKey<T>, value: T): T => {
+    if (key.id !== CAPABILITY_SERVICE.id) return value;
+    const registry = value as AgentCapabilityContributionRegistry;
+    const bound: AgentCapabilityContributionRegistry = {
+      register(_owner, contribution) {
+        return registry.register(pluginId, {
+          ...contribution,
+          descriptor: { ...contribution.descriptor, owner: pluginId },
+        });
+      },
+      list: () => registry.list().filter((item) => item.descriptor.owner === pluginId),
+      resolve: (context) => registry.resolve(context).filter((item) => item.owner === pluginId),
+      contribution: (id) => registry.contribution(id)?.descriptor.owner === pluginId
+        ? registry.contribution(id)
+        : undefined,
+      executor: (_id) => undefined,
+    };
+    return bound as T;
+  };
+  return {
+    provide: (key, service) => services.provide(key, service),
+    get(key) {
+      const value = services.get(key);
+      return value === undefined ? undefined : wrap(key, value);
+    },
+    require(key) {
+      return wrap(key, services.require(key));
+    },
+    ids: () => services.ids(),
   };
 }
 
@@ -452,7 +493,12 @@ export async function loadServerPackage(
     );
   }
 
-  const pkg = await (loaded.default as ServerPackageFactory)(host);
+  const pkg = await (loaded.default as ServerPackageFactory)({
+    ...host,
+    ...(host.services
+      ? { services: bindPackageServices(host.services, host.pluginId) }
+      : {}),
+  });
   if (!pkg || typeof pkg !== "object" || Array.isArray(pkg)) {
     throw err("invalid-input", `registerPackage for "${discovered.id}" must return a ServerPackage object`);
   }

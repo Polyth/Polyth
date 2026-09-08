@@ -3,6 +3,7 @@ import { exec } from "node:child_process";
 import { mkdir, readdir, readFile, realpath, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import type { RuntimeCommandDescriptor } from "@polyth/contracts";
 
 const execAsync = promisify(exec);
 const FILE_INCLUDE_MAX = 64 * 1024;
@@ -17,6 +18,8 @@ export interface SlashCommand {
   agent?: string;
   model?: string;
   scope: CommandScope;
+  id?: string;
+  owner?: "builtin" | "user" | "project";
 }
 
 export interface Snippet {
@@ -108,6 +111,12 @@ const BUILTINS: SlashCommand[] = [
   },
 ];
 
+const identifyCommand = (command: SlashCommand): SlashCommand => ({
+  ...command,
+  id: `polyth:${command.scope}:${command.name}`,
+  owner: command.scope,
+});
+
 const NAME_RE = /^[A-Za-z0-9_-]+$/;
 const SKILL_NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SKILL_SCOPES: SkillScope[] = [
@@ -147,7 +156,9 @@ export function createCommandService(opts: CommandServiceOptions = {}): CommandS
       for (const s of userSnips) snipBy.set(s.alias, s);
       for (const s of projSnips) snipBy.set(s.alias, s);
 
-      const commands = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+      const commands = [...byName.values()]
+        .map(identifyCommand)
+        .sort((a, b) => a.name.localeCompare(b.name));
       const snippets = [...snipBy.values()].sort((a, b) => a.alias.localeCompare(b.alias));
       return { commands, snippets };
     },
@@ -484,3 +495,38 @@ function expandSnippets(text: string, snipBy: Map<string, Snippet>): string {
     return pre + snip.text;
   });
 }
+
+export const mergeCommandCatalog = (
+  polyth: readonly SlashCommand[],
+  native: readonly RuntimeCommandDescriptor[],
+): Array<SlashCommand | RuntimeCommandDescriptor> => [...polyth, ...native];
+
+const COMMAND_SCOPE_RANK: Record<CommandScope | "native", number> = {
+  project: 0,
+  user: 1,
+  builtin: 2,
+  native: 3,
+};
+
+/** Typed `/name` precedence when no explicit selection: project > user > builtin > native. */
+export const commandPrecedence = (
+  name: string,
+  catalog: readonly (SlashCommand | RuntimeCommandDescriptor)[],
+): SlashCommand | RuntimeCommandDescriptor | undefined => {
+  const normalized = name.replace(/^\//, "").toLowerCase();
+  let best: { item: SlashCommand | RuntimeCommandDescriptor; rank: number } | undefined;
+  for (const cmd of catalog) {
+    if ("owner" in cmd && cmd.owner === "native") {
+      const names = [cmd.name, ...(cmd.aliases ?? [])].map((n) => n.toLowerCase());
+      if (!names.includes(normalized)) continue;
+      const rank = COMMAND_SCOPE_RANK.native;
+      if (!best || rank < best.rank) best = { item: cmd, rank };
+      continue;
+    }
+    const polyth = cmd as SlashCommand;
+    if (polyth.name.toLowerCase() !== normalized) continue;
+    const rank = COMMAND_SCOPE_RANK[polyth.scope] ?? COMMAND_SCOPE_RANK.builtin;
+    if (!best || rank < best.rank) best = { item: polyth, rank };
+  }
+  return best?.item;
+};

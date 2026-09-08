@@ -4,7 +4,8 @@ import { promisify } from "node:util";
 import type { HarnessProvider, HarnessRegistry } from "@polyth/contracts";
 import { createProcessAuthority } from "@polyth/harness-runtime";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
-import { createClaudeRuntime } from "./index.ts";
+import { createClaudeRuntime, CLAUDE_CAPABILITIES } from "./index.ts";
+import { createClaudeProvisioner } from "./provisioner.ts";
 const exec = promisify(execFile);
 // Optional SDK is loaded only by this package, never a server boot prerequisite.
 const loadSdk = () => import("@anthropic-ai/claude-agent-sdk");
@@ -12,6 +13,7 @@ export default function registerPackage(host: ServerPackageHost) {
     const registry = host.services.require(serverServiceKey<HarnessRegistry>("harnesses"));
     const provider: HarnessProvider = {
         descriptor: { id: "claude", name: "Claude Code", integration: "Agent SDK", priority: 20, setupUrl: "https://code.claude.com/docs/en/setup", installCommand: "curl -fsSL https://claude.ai/install.sh | bash", signInCommand: "claude auth login" },
+        staticFeatures: CLAUDE_CAPABILITIES,
         async probe(context) {
             if (context.remote || process.platform !== "linux")
                 return { harnessId: "claude", installed: false, healthy: false, authenticated: "unknown", message: "Local Linux runtimes are supported" };
@@ -44,6 +46,7 @@ export default function registerPackage(host: ServerPackageHost) {
                 throw error;
             }
         },
+        provisioner: createClaudeProvisioner(),
     };
     let registration: ReturnType<HarnessRegistry["register"]> | undefined;
     return { remoteAccess: localOnlyRemoteAccess(["backend-claude"]), onEnable() { registration = registry.register(provider); }, onDisable() { registration?.dispose(); } };

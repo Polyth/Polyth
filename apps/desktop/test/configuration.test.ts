@@ -46,6 +46,7 @@ test("desktop packaging covers each supported updater target", async () => {
   assert.equal(pkg.build.extraResources.some(({ to }) => to === "opencode"), true);
   assert.equal(pkg.build.extraResources.some(({ to }) => to === "packages"), true);
   assert.equal(pkg.build.extraResources.some(({ to }) => to === "polyth-link"), true);
+  assert.equal(pkg.build.extraResources.some(({ to }) => to === "server/agentToolsMcp.mjs"), true);
 });
 
 test("release workflow builds all platforms and uploads updater metadata", async () => {

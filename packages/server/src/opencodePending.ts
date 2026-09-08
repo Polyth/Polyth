@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type {
   OpenCodePendingChangeDto,
   OpenCodePendingChangeKind,
@@ -8,31 +9,80 @@ import {
   inspectProviderEntry,
   normalizePluginEntries,
   projectConfig,
+  projectManagedMcp,
   type BackendConfigApplier,
+  type McpApplyBatch,
   type McpApplyEntry,
   type ProviderVisibilityApply,
   type StagedProviderOp,
 } from "@polyth/backend-opencode";
 
-interface PendingTask extends OpenCodePendingChangeDto {
+export interface PendingTask extends OpenCodePendingChangeDto {
   apply(): Promise<void>;
   onApplied?(): void;
+  /** Desired capability bundle this restart task belongs to. Internal only. */
+  desiredRevision?: string;
+  /** Physical runtime pool keys (see `sharedRuntimePoolKey`) this task's
+   * restart applies to. Internal only — never exposed on the public DTO.
+   * Only meaningful when every staged task is `kind: "runtime-capabilities"`;
+   * any other kind in the batch means a shared config write (plugins, MCP,
+   * provider config, …) that every OpenCode runtime must observe, so the
+   * restart stays global. */
+  restartKeys?: string[];
 }
 
 export interface OpenCodePendingService {
   stage(task: PendingTask): void;
+  settleRuntimeCapabilities(input: {
+    spaceId: string;
+    projectId: string;
+    cwd: string;
+    desiredRevision: string;
+  }): void;
   list(): OpenCodePendingResponseDto;
   applyAndRestart(): Promise<{ applied: number; restarted: number }>;
 }
 
+/** A batch restarts only the union of its tasks' `restartKeys` when every
+ * task is `runtime-capabilities` and every task actually declares a scope.
+ * Any other kind, or a runtime-capabilities task with no declared scope,
+ * restarts globally — narrowing scope must never be inferred as a fallback,
+ * only declared explicitly by the staging site. */
+export function restartScopeFor(batch: readonly PendingTask[]): ReadonlySet<string> | undefined {
+  if (batch.length === 0) return undefined;
+  const keys = new Set<string>();
+  for (const task of batch) {
+    if (task.kind !== "runtime-capabilities") return undefined;
+    if (!task.restartKeys || task.restartKeys.length === 0) return undefined;
+    for (const key of task.restartKeys) keys.add(key);
+  }
+  return keys;
+}
+
+/** Pick the live physical pool keys for a Space/project/cwd restart.
+ * Prefer exact restarters already installed for that project+cwd (including
+ * remote `opencode:<connectionId>:…` keys). Fall back to the local key so
+ * staging stays synchronous — a pending-restart must be visible to
+ * `applyAndRestart` on the same turn as reconcile, not after a `projects.get`. */
+export function physicalRestartKeysFor(
+  restarterKeys: Iterable<string>,
+  projectId: string,
+  cwd: string,
+  fallback: string,
+): string[] {
+  const suffix = `:${projectId}:${cwd}`;
+  const matched = [...restarterKeys].filter((key) => key.endsWith(suffix));
+  return matched.length > 0 ? matched : [fallback];
+}
+
 export function createOpenCodePendingService(opts: {
-  canRestart?(state?: unknown): Promise<{ safe: true } | { safe: false; reason: string }>;
+  canRestart?(state?: unknown, keys?: ReadonlySet<string>): Promise<{ safe: true } | { safe: false; reason: string }>;
   /** One critical section spanning safety, writes, replacement, and
    * reconciliation. The server admission gate and owned lifecycle generation
    * installation locks are held for its full lifetime. */
   withAdmissionBarrier?<T>(action: () => Promise<T>): Promise<T>;
-  captureRestartState?(): Promise<unknown>;
-  restart(state?: unknown): Promise<number>;
+  captureRestartState?(keys?: ReadonlySet<string>): Promise<unknown>;
+  restart(state?: unknown, keys?: ReadonlySet<string>): Promise<number>;
 }): OpenCodePendingService {
   const tasks = new Map<string, PendingTask>();
   let applying = false;
@@ -40,6 +90,13 @@ export function createOpenCodePendingService(opts: {
   return {
     stage(task) {
       tasks.set(task.id, task);
+    },
+
+    settleRuntimeCapabilities(input) {
+      const id = `runtime-capabilities:${input.spaceId}:${input.projectId}:${input.cwd}`;
+      const task = tasks.get(id);
+      if (task?.desiredRevision !== input.desiredRevision) return;
+      tasks.delete(id);
     },
 
     list() {
@@ -56,18 +113,19 @@ export function createOpenCodePendingService(opts: {
       applying = true;
       try {
         const apply = async () => {
+          const keys = restartScopeFor(batch);
           // Capture only after admission, runtime creation, and owned lifecycle
           // generation installation are fenced. Generation inequality alone
           // cannot prove whether a successor loaded pre- or post-write config.
-          const restartState = await opts.captureRestartState?.();
-          const safety = await opts.canRestart?.(restartState);
+          const restartState = await opts.captureRestartState?.(keys);
+          const safety = await opts.canRestart?.(restartState, keys);
           if (safety && !safety.safe) {
             throw Object.assign(new Error(`OpenCode restart deferred: ${safety.reason}`), {
               code: "restart-deferred",
             });
           }
           for (const task of batch) await task.apply();
-          const restarted = await opts.restart(restartState);
+          const restarted = await opts.restart(restartState, keys);
           for (const task of batch) {
             if (tasks.get(task.id) !== task) continue;
             tasks.delete(task.id);
@@ -190,11 +248,15 @@ export function createDeferredConfigApplier(
     // logged at admission time, so they do not require a process restart.
     applyBehavior: (text) => actual.applyBehavior(text),
 
-    applyMcp(entries: McpApplyEntry[]) {
+    applyMcp(entries: McpApplyBatch) {
       if (!staging) return actual.applyMcp(entries);
-      const desired = structuredClone(entries);
-      stage("mcp", "mcp", "MCP servers", async () => { await actual.applyMcp(desired); });
-      return Promise.resolve();
+      const desired = Object.assign(structuredClone([...entries]) as McpApplyEntry[], {
+        managedNames: [...(entries.managedNames ?? [])],
+      }) as McpApplyBatch;
+      return actual.readConfig().then((existing) => {
+        if (isDeepStrictEqual(existing, projectManagedMcp(existing, desired))) return;
+        stage("mcp", "mcp", "MCP servers", async () => { await actual.applyMcp(desired); });
+      });
     },
 
     applyProviderVisibility(value: ProviderVisibilityApply) {

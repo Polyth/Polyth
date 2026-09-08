@@ -5,6 +5,8 @@ import {
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { createOpenCodeHarness } from "./harness.ts";
+import { createOpenCodeProvisioner } from "./provisioner.ts";
+import type { BackendConfigApplier } from "./config.ts";
 import { createProviderAuthController } from "./providerAuth.ts";
 import { providerAuthRoutes } from "./providerAuthRoutes.ts";
 import { localOpenCodeAuthContext } from "./providerAuthTarget.ts";
@@ -30,7 +32,12 @@ export default function registerPackage(host: ServerPackageHost) {
     ): import("@polyth/contracts").AvailableProviderDescriptor[];
   }>("models.visibility"));
 
-  const registration = registry.register(createOpenCodeHarness(pool));
+  const harness = createOpenCodeHarness(pool);
+  const applier = host.services.get(serverServiceKey<BackendConfigApplier>("plugins.config"));
+  if (applier && typeof applier.applyBehavior === "function" && typeof applier.applyMcp === "function") {
+    harness.provisioner = createOpenCodeProvisioner(applier);
+  }
+  const registration = registry.register(harness);
   const openCodeRuntime = (space: SpaceContext): Promise<AgentRuntime> =>
     pool(localOpenCodeAuthContext(space, host.storageDir));
   const auth = createProviderAuthController({

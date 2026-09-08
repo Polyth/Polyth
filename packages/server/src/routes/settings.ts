@@ -123,12 +123,12 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
 
     // ---- MCP servers ------------------------------------------------------------
     if (path === "/api/mcp/servers" && method === "GET") {
-      rc.json(200, deps.mcp.list());
+      rc.json(200, deps.mcp.list(rc.space));
       return true;
     }
     if (path === "/api/mcp/servers" && method === "POST") {
       const b = await rc.body();
-      rc.json(200, await deps.mcp.create({
+      rc.json(200, await deps.mcp.create(rc.space, {
         name: String(b.name ?? ""),
         transport: parseTransport(b.transport),
         ...(parseSecrets(b.secrets) ? { secrets: parseSecrets(b.secrets)! } : {}),
@@ -139,7 +139,7 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
     let m = path.match(/^\/api\/mcp\/servers\/([^/]+)$/);
     if (m && method === "PATCH") {
       const b = await rc.body();
-      rc.json(200, await deps.mcp.update(m[1]!, {
+      rc.json(200, await deps.mcp.update(rc.space, m[1]!, {
         ...(b.name !== undefined ? { name: String(b.name) } : {}),
         ...(b.transport !== undefined ? { transport: parseTransport(b.transport) } : {}),
         ...(parseSecrets(b.secrets) ? { secrets: parseSecrets(b.secrets)! } : {}),
@@ -148,14 +148,14 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
       return true;
     }
     if (m && method === "DELETE") {
-      rc.json(200, { ok: await deps.mcp.remove(m[1]!) });
+      rc.json(200, { ok: await deps.mcp.remove(rc.space, m[1]!) });
       return true;
     }
     // F10 names this "probe"; "test" remains as the original spelling. Both hit
     // the same reachability check, which stores status/lastError on the entry.
     m = path.match(/^\/api\/mcp\/servers\/([^/]+)\/(?:test|probe)$/);
     if (m && method === "POST") {
-      rc.json(200, await deps.mcp.test(m[1]!));
+      rc.json(200, await deps.mcp.test(rc.space, m[1]!));
       return true;
     }
     m = path.match(/^\/api\/mcp\/servers\/([^/]+)\/authorize$/);

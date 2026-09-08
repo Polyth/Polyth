@@ -21,7 +21,7 @@ import { ComposeIcon, GlassIsland, IconButton, LayersIcon, MenuIcon } from "../u
 import Sheet, { SheetRow, SheetSection } from "./Sheet.tsx";
 import WorkspacePanel from "./WorkspacePanel.tsx";
 import { PROMPT_VISIBILITY_EVENT, promptIsVisible } from "../../promptVisibility.ts";
-import { contextGauge, type ContextGauge } from "../../reduce.ts";
+import { contextGauge, formatContextPercent, type ContextGauge } from "../../reduce.ts";
 import { useUiSettings } from "../../uiPrefs.ts";
 import ContextIndicator from "../ContextIndicator.tsx";
 
@@ -95,6 +95,7 @@ function IslandOverview({
   gauge: ContextGauge;
   onClose: () => void;
 }) {
+  const contextPercent = formatContextPercent(gauge);
   return (
     <Sheet
       title={tr("mobile.island.overview")}
@@ -105,7 +106,7 @@ function IslandOverview({
       <div className="mobile-island-now">
         <strong className="mobile-island-session">{title}</strong>
         <div className="mobile-island-context">
-          <strong>Context{gauge.known ? ` · ${gauge.percent}%` : ""}</strong>
+          <strong>Context{contextPercent ? ` · ${contextPercent}` : ""}</strong>
           <span>{gauge.known ? `${fmtTokens(gauge.inputTokens)} / ${fmtTokens(gauge.contextTokens)} tokens` : "Model context metadata is unavailable."}</span>
         </div>
         {prompt
@@ -222,7 +223,7 @@ export default function MobileSessionHeader() {
   const sessionStatus = session ? resolveSessionStatus(session) : null;
   const activeModel = model.contextUsage?.model ?? model.turn?.model ?? session?.model;
   const descriptor = activeModel ? models.find((item) => item.providerID === activeModel.providerID && item.modelID === activeModel.modelID) : undefined;
-  const gauge = contextGauge(model, descriptor?.context);
+  const gauge = contextGauge(model, descriptor?.context, session?.contextWindow ?? null);
 
   return <>
     <div className="mobile-session-floats" aria-label="Workspace navigation">

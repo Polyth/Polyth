@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { HarnessRegistry, HarnessSelection, JsonValue, RouteHandler } from "@polyth/contracts";
+import type { HarnessProvisioningQuery, HarnessRegistry, HarnessSelection, JsonValue, RouteHandler } from "@polyth/contracts";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { createHarnessRegistry, type HarnessPreferences, harnessError } from "./index.ts";
 export function readHarnessSelection(value: unknown): HarnessSelection {
@@ -77,6 +77,20 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
             request.json(200, registry.providers().map((provider) => ({ ...provider.descriptor, enabled: preferences[provider.descriptor.id]?.enabled ?? true, priority: preferences[provider.descriptor.id]?.priority ?? provider.descriptor.priority, ...probes.find((p) => p.harnessId === provider.descriptor.id) })));
             return true;
         }
+        if (request.path === "/api/harnesses/capabilities" && request.method === "GET") {
+            const projectId = request.url.searchParams.get("projectId");
+            const project = projectId ? await scoped.projects.get(projectId) : (await scoped.projects.list())[0];
+            if (projectId && !project)
+                throw harnessError("not-found", "project not found");
+            const query = host.services.get(serverServiceKey<HarnessProvisioningQuery>("harness.provisioning"));
+            if (!query) {
+                request.json(200, []);
+                return true;
+            }
+            const context = { space: request.space, spaceId: request.space.spaceId, projectId: project?.id ?? "__default__", cwd: project?.path ?? process.cwd(), remote: Boolean(project?.remote) };
+            request.json(200, query.status(context));
+            return true;
+        }
         const control = request.path.match(/^\/api\/harnesses\/([a-z][a-z0-9-]*)\/controls\/([^/]+)$/);
         if (control && request.method === "POST") {
             const provider = registry.providers().find((candidate) => candidate.descriptor.id === control[1]);
@@ -104,6 +118,14 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
                 throw harnessError("not-found", "project not found");
             const ref = await scoped.sessions.create({ projectId: project.id, harness: readHarnessSelection(input.selection) });
             request.json(200, await scoped.sessions.snapshot(ref.id));
+            return true;
+        }
+        const featuresMatch = request.path.match(/^\/api\/harnesses\/sessions\/([^/]+)\/features$/);
+        if (featuresMatch && request.method === "GET") {
+            const features = scoped.sessions.runtimeFeatures;
+            if (!features)
+                throw harnessError("unsupported", "runtime features are unavailable");
+            request.json(200, await features(featuresMatch[1]!));
             return true;
         }
         const match = request.path.match(/^\/api\/harnesses\/sessions\/([^/]+)$/);

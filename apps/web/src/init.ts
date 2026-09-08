@@ -24,6 +24,7 @@ import { tr } from "./i18n/index.ts";
 import { desktopBridge } from "./desktopBridge.ts";
 import { clearSendFailure, reportSendFailure } from "./sendFailure.ts";
 import { markSessionPerformance } from "./sessionPerformance.ts";
+import { shouldRefreshRuntimeFeatures } from "./runtimeFeaturesSync.ts";
 
 let sync: SyncClient | null = null;
 let syncStatus: SyncStatus = "disconnected";
@@ -35,6 +36,51 @@ let runtimeCatalogHydrated = false;
 let runtimeCatalogPolicy: "browser" | "pending" | "project" | "interaction" = "browser";
 let openSessionGeneration = 0;
 const hydratedSessions = new Set<string>();
+const runtimeFeaturesInFlight = new Map<string, Promise<void>>();
+const runtimeFeaturesDirty = new Set<string>();
+
+async function loadRuntimeFeaturesForSession(sessionId: string): Promise<void> {
+  const existing = runtimeFeaturesInFlight.get(sessionId);
+  if (existing) {
+    runtimeFeaturesDirty.add(sessionId);
+    return existing;
+  }
+  const run = (async () => {
+    do {
+      runtimeFeaturesDirty.delete(sessionId);
+      try {
+        store.setRuntimeFeatures(sessionId, await api.runtimeFeatures(sessionId));
+      } catch {
+        store.setRuntimeFeatures(sessionId, undefined);
+      }
+    } while (runtimeFeaturesDirty.has(sessionId));
+  })();
+  runtimeFeaturesInFlight.set(sessionId, run);
+  try {
+    await run;
+  } finally {
+    runtimeFeaturesInFlight.delete(sessionId);
+  }
+}
+
+function pruneRuntimeFeatures(sessions: readonly { id: string }[]): void {
+  const live = new Set(sessions.map((session) => session.id));
+  const stale = Object.keys(store.getState().runtimeFeatures).filter((id) => !live.has(id));
+  for (const id of stale) store.clearRuntimeFeatures(id);
+}
+
+function handleProjectionUpdate(incoming: SessionProjection): void {
+  const prev = store.getState().sessions.find((session) => session.id === incoming.id);
+  const features = store.getState().runtimeFeatures;
+  const hasLoaded = hydratedSessions.has(incoming.id)
+    || runtimeFeaturesInFlight.has(incoming.id)
+    || Object.prototype.hasOwnProperty.call(features, incoming.id);
+  if (shouldRefreshRuntimeFeatures(prev, incoming, hasLoaded)) {
+    void loadRuntimeFeaturesForSession(incoming.id);
+  }
+  store.upsertSession(incoming);
+  pruneRuntimeFeatures(store.getState().sessions);
+}
 
 function hydrateRuntimeCatalog(): void {
   if (runtimeCatalogHydrated) return;
@@ -489,7 +535,7 @@ function startSync(): void {
       pending.push(...msg.events);
       scheduleFlush();
     } else if (msg.type === "projection") {
-      store.upsertSession(msg.session);
+      handleProjectionUpdate(msg.session);
       // The user just watched a turn end in the active session — the tail is
       // read. (Streaming "working" broadcasts are skipped; leaving mid-stream
       // leaves the cursor behind, which is exactly the unread-bold state.)
@@ -498,7 +544,7 @@ function startSync(): void {
         && msg.session.id === store.getState().activeSessionId
       ) markActiveSessionRead();
     } else if (msg.type === "projections") {
-      store.upsertSessions(msg.sessions);
+      for (const session of msg.sessions) handleProjectionUpdate(session);
     } else if (msg.type === "notification/added") {
       // NTF-01: global inbox rows bypass the session event batch entirely —
       // they are derived state, never part of any session's log or reducer.
@@ -733,9 +779,10 @@ export async function openSession(
   // metadata and the append-only suffix revalidate. A first open remains in
   // the loading state so an incomplete WS fragment can never masquerade as the
   // full log.
-  if (useCachedView) {
+    if (useCachedView) {
     if (cachedSession.projectId !== before.activeProjectId) store.activateProject(cachedSession.projectId);
     store.activateSession(cachedSessionId);
+    void loadRuntimeFeaturesForSession(cachedSessionId);
     if (opts.showChat !== false) store.showSessionChat();
     // Claim takeover: this open owns navigation now. A superseded first
     // open's loading claim must not survive it — a leaked claim renders every
@@ -795,6 +842,7 @@ export async function openSession(
     if (!userNavigatedAway()) {
       if (session.projectId !== store.getState().activeProjectId) store.activateProject(session.projectId);
       store.activateSession(resolvedSessionId);
+      void loadRuntimeFeaturesForSession(resolvedSessionId);
       if (opts.showChat !== false) store.showSessionChat();
       scheduleAutoBackfill(resolvedSessionId, generation);
       markActiveSessionRead();
@@ -1116,6 +1164,7 @@ export async function restoreSession(sessionId: string): Promise<void> {
 export async function deleteSession(sessionId: string): Promise<void> {
   const proj = store.getState().sessions.find((s) => s.id === sessionId)?.projectId;
   await api.deleteSession(sessionId);
+  store.clearRuntimeFeatures(sessionId);
   if (store.getState().activeSessionId === sessionId) store.activateSession(null);
   if (proj) void refreshSessions(proj);
 }
@@ -1132,6 +1181,8 @@ export interface SendOptions {
   agentProfileId?: string | null;
   /** Composer pills (F2); validated + persisted server-side before the model sees them. */
   attachments?: AttachmentRef[];
+  /** Exact native command selected by the composer catalog. */
+  command?: { id: string; args?: string };
 }
 
 /** Returns true when the server accepted the message (callers that persist
@@ -1149,6 +1200,7 @@ export async function sendMessage(text: string, model?: JsonObject, agent?: stri
   try {
     await api.sendMessage(id, {
       text, model, agent, ...(autoTitle ? { autoTitle: true } : {}),
+      ...(opts?.command ? { command: opts.command } : {}),
       ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
       ...(opts?.delivery ? { delivery: opts.delivery } : {}),
       ...(opts?.dismissPending ? { dismissPending: true } : {}),

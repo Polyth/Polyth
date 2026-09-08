@@ -7,7 +7,7 @@ import { useActiveModel, useStore } from "../store.ts";
 import { firstUserTextCached, lastUserTextCached } from "../utils.ts";
 import { Icon } from "../icons.tsx";
 import { Popover } from "./ui/index.ts";
-import { contextGauge } from "../reduce.ts";
+import { contextGauge, formatContextPercent } from "../reduce.ts";
 import { useUiSettings } from "../uiPrefs.ts";
 import ContextIndicator from "./ContextIndicator.tsx";
 
@@ -29,7 +29,8 @@ export default function DesktopSessionStatus() {
   const prompt = lastUserTextCached(session ? events[session.id] : undefined);
   const activeModel = model.contextUsage?.model ?? model.turn?.model ?? session?.model;
   const descriptor = activeModel ? models.find((item) => item.providerID === activeModel.providerID && item.modelID === activeModel.modelID) : undefined;
-  const gauge = contextGauge(model, descriptor?.context);
+  const gauge = contextGauge(model, descriptor?.context, session?.contextWindow ?? null);
+  const contextPercent = formatContextPercent(gauge);
 
   if (!session || !status) return null;
 
@@ -57,7 +58,7 @@ export default function DesktopSessionStatus() {
           <div><strong>{title}</strong><small>{status.label}</small></div>
         </header>
         <section className="session-context-details">
-          <h3>Context{gauge.known ? ` · ${gauge.percent}%` : ""}</h3>
+          <h3>Context{contextPercent ? ` · ${contextPercent}` : ""}</h3>
           <p>{gauge.known ? `${fmtTokens(gauge.inputTokens)} / ${fmtTokens(gauge.contextTokens)} tokens` : "Model context metadata is unavailable."}</p>
         </section>
         <section>

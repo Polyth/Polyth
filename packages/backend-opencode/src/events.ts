@@ -420,6 +420,12 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
       type: "session/compacted",
       ...(ev.id ? { backendEventId: ev.id } : {}),
     });
+    out.push({
+      type: "context/updated",
+      source: "unknown",
+      updatedAt: Date.now(),
+      compaction: { active: false, lastAt: Date.now() },
+    });
     return out;
   }
 

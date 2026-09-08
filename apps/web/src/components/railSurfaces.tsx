@@ -11,7 +11,7 @@
 import { useActiveModel, useStore } from "../store.ts";
 import { fmtCost, fmtTokens } from "../format.ts";
 import type { SessionEvent } from "@polyth/contracts";
-import { contextGauge } from "../reduce.ts";
+import { contextGauge, formatContextPercent } from "../reduce.ts";
 import { RAIL_ICONS } from "../railIcons.ts";
 import {
   registerSurface,
@@ -84,7 +84,8 @@ function ContextView() {
     ? models.find((candidate) =>
         candidate.providerID === activeModel.providerID && candidate.modelID === activeModel.modelID)
     : undefined;
-  const gauge = contextGauge(model, descriptor?.context);
+  const gauge = contextGauge(model, descriptor?.context, session.contextWindow ?? null);
+  const contextPercent = formatContextPercent(gauge);
 
   return (
     <div>
@@ -111,9 +112,9 @@ function ContextView() {
       <div className="stat-row context-estimate-row">
         <span className="k">{tr("railsurfaces.contextEstimate")}</span>
         <span className="mono">
-          {gauge.known
-            ? `${fmtTokens(gauge.inputTokens)} / ${fmtTokens(gauge.contextTokens)} (${gauge.percent}%)`
-            : tr("railsurfaces.unknown")}
+          {contextPercent && gauge.known
+            ? `${fmtTokens(gauge.inputTokens)} / ${fmtTokens(gauge.contextTokens)} (${contextPercent})`
+            : contextPercent ?? tr("railsurfaces.unknown")}
         </span>
       </div>
       <div

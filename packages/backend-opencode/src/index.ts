@@ -77,6 +77,7 @@ import { completeSmallModelDirect } from "./smallModel.ts";
 
 export interface OpenCodeAdapterOptions {
   projectId?: string;
+  spaceId?: string;
   cwd: string;
   port?: number;
   hostname?: string;
@@ -97,9 +98,20 @@ export interface OpenCodeAdapterOptions {
 export {
   createConfigApplier,
   normalizePluginEntries,
+  projectManagedMcp,
+  stripJsonc,
 } from "./config.ts";
+export {
+  applyOpenCodeLaunchOverlay,
+  createOpenCodeProvisioner,
+  peekOpenCodeLaunchOverlay,
+  polythSkillId,
+} from "./provisioner.ts";
+export { createOpenCodeHarness } from "./harness.ts";
+export type { OpenCodeLaunchOverlay } from "./provisioner.ts";
 export type {
   BackendConfigApplier,
+  McpApplyBatch,
   McpApplyEntry,
   ProviderVisibilityApply,
 } from "./config.ts";
@@ -216,15 +228,34 @@ export type {
   ProtocolSelection,
 } from "./protocol.ts";
 
-const CAPABILITIES: RuntimeCapabilities = {
+export const CAPABILITIES: RuntimeCapabilities = {
   streaming: true,
   permissions: true,
   questions: true,
   compaction: true,
   subagents: true,
+  // Process can consume MCP at startup. Provisioning mutability is separate
+  // (requires-restart) and lives on HarnessCapabilitySupport.
+  mcp: true,
   // live steering: a prompt posted to a busy session joins the active turn;
   // steer() reports false on rejection so callers can fall back to queueing
   steering: true,
+  resume: true,
+  usage: true,
+  cost: true,
+  fork: true,
+  title: "native",
+  attachments: {
+    modalities: {
+      image: "native",
+      file: "native",
+      url: "emulated",
+      pdf: "native",
+      audio: "unsupported",
+    },
+  },
+  commands: { discovery: "unsupported", invoke: "unsupported" },
+  contextOccupancy: "unknown",
 };
 
 type Listener = (sessionId: string, ev: RuntimeEvent) => void;
@@ -1072,6 +1103,7 @@ export const createOpenCodeRuntime = async (
 ): Promise<AgentRuntime> => {
   const lease = await createOwnedLocalEndpointLease({
     projectId: opts.projectId,
+    ...(opts.spaceId ? { spaceId: opts.spaceId } : {}),
     cwd: opts.cwd,
     port: opts.port,
     hostname: opts.hostname,

@@ -1,10 +1,12 @@
-import type { AgentRuntime, HarnessContext, HarnessProvider } from "@polyth/contracts";
+import type { AgentRuntime, HarnessContext, HarnessProvider, RuntimeCapabilities } from "@polyth/contracts";
+import { CAPABILITIES } from "./index.ts";
 import { inspectOpenCodeEngine, resolveOpenCodeBinary } from "./runtimeStorage.ts";
 /** The composition root supplies its managed pool (config/restart interlocks).
  * Vendor discovery and native history stay in this package. */
 export function createOpenCodeHarness(runtime: (context: HarnessContext) => Promise<AgentRuntime>): HarnessProvider {
     return {
         descriptor: { id: "opencode", name: "OpenCode", integration: "HTTP / SSE", priority: 0, setupUrl: "https://opencode.ai/docs/", installCommand: "npm install -g opencode-ai" },
+        staticFeatures: CAPABILITIES,
         async probe(context) {
             if (context.remote)
                 return { harnessId: "opencode", installed: true, authenticated: "unknown", healthy: true };

@@ -1,10 +1,13 @@
 // SessionService: canonical session orchestration.
-// Runtime events -> appended to durable session log FIRST -> then broadcast/projections.
+// Canonical runtime events are appended to the durable session log FIRST, then
+// broadcast and folded into projections. Live context occupancy and native
+// command catalogs stay in session-scoped memory and are overlaid onto client
+// projections; they are not durable history.
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { continuityWorkspace } from "./continuityWorkspace.ts";
 import type {
-  AgentProfile, AgentRuntime, AttachmentRef, AutoAcceptSetting, CanonicalEventInput, ChildSnapshotResult, ClientSettingsDto, CreateSessionInput, DeliveryMode,
+  AgentProfile, AgentRuntime, AttachmentRef, AttachmentModality, AutoAcceptSetting, CanonicalEventInput, ChildSnapshotResult, ClientSettingsDto, ContextWindowState, CreateSessionInput, DeliveryMode,
   Disposable, DurableOperation, HarnessSelection, HarnessTransition, ForkDraft, ForkResult, JsonObject, ModelRef, MutationOutcome, NotificationRecord,
   PersistedRuntimeBinding,
   InstalledPluginDto, PackageDescriptorDto, QueueItemDto, RateLimitRetry, RateLimitRetryHint, RuntimeEvent,
@@ -16,9 +19,13 @@ import type {
   SecretRequestData, SecretResolvedData, SecureSafeKind, SecureSafeService,
   RuntimeSession, SendResult, SessionDebugDto, SessionDebugEndpointDto, SessionEvent, SessionFolderDto, SessionForkedData, SessionIsolation, SessionOrganizePatch, SessionProjection, SessionRef,
   SessionService, SessionPersistence, UserTurnInput,
+  RuntimeCapabilities,
+  RuntimeCommandDescriptor,
+  FeatureSupport,
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
 import { isolationBlocksUserMutation } from "@polyth/contracts";
+import { isPlaceholderTitle, titleFromPrompt, effectiveAttachmentSupport, attachmentModality } from "@polyth/harness-runtime";
 import type { AutoAcceptStore, PermissionService } from "@polyth/permissions";
 import { resolveAutoAccept } from "@polyth/permissions";
 import {
@@ -314,6 +321,23 @@ export function createSessionService(deps: {
   /** Global behavior instructions (WP9): revision+digest logged before a turn
    *  starts under a newly applied revision, keeping replay reproducible. */
   behavior?: { current(): Promise<{ revision: string; digest: string } | null> };
+  /** True when the session's harness actually received the current instructions. */
+  instructionProvisioned?: (sessionId: string, harnessId?: string) => Promise<boolean | {
+    provisioned: boolean;
+    contributions?: string[];
+    verification?: "applied" | "unverifiable";
+  }>;
+  /** Drop volatile provisioning state after the canonical session is gone. */
+  onSessionReleased?: (info: { sessionId: string; projectId: string; cwd: string }) => void | Promise<void>;
+  /** Drop volatile provisioning for one session-lifetime harness after this
+   *  session released its execution occupancy. Physical-runtime targets are
+   *  released only when the physical runtime is evicted. */
+  onHarnessTargetReleased?: (info: {
+    sessionId: string;
+    projectId: string;
+    cwd: string;
+    harnessId: string;
+  }) => void | Promise<void>;
   /** Server-only credential vault. Values enter through replySecret and never
    *  enter session events, runtime question metadata, or public DTOs. */
   secureSafe?: SecureSafeService;
@@ -358,6 +382,10 @@ export function createSessionService(deps: {
   /** Hard ceiling for one runtime tool execution. A hung tool is aborted and
    * recorded as a model-visible tool/error. Defaults to ten minutes. */
   toolExecutionTimeoutMs?: number;
+  /** Harness registry lookup for static features on idle sessions. */
+  harnesses?: {
+    staticFeatures(harnessId: string): RuntimeCapabilities | undefined;
+  };
 }): RuntimeEpochSessionService {
   const { store, projects, permissions, runtimes, broadcast } = deps;
   const durable = store as SessionPersistence & RuntimeDurability;
@@ -443,7 +471,47 @@ export function createSessionService(deps: {
   // OpenCode publishes the semantic title it generated from the prompt — or
   // until an explicit rename supersedes it.
   const autoTitleRequested = new Set<string>();
-  const titleRefreshInFlight = new Set<string>();
+  const autoTitlePrompt = new Map<string, string>();
+  const titleFallbackTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  type RuntimeFeatureState = {
+    harnessId: string;
+    generation: number;
+    commands?: RuntimeCommandDescriptor[];
+    contextWindow?: ContextWindowState;
+    nativeCommandsRevision: number;
+  };
+  const runtimeFeatureState = new Map<string, RuntimeFeatureState>();
+  const matchingCommandCatalog = (
+    sessionId: string,
+    harnessId: string | undefined,
+    generation: number | undefined,
+  ): RuntimeCommandDescriptor[] | undefined => {
+    const state = runtimeFeatureState.get(sessionId);
+    if (
+      !state
+      || state.commands === undefined
+      || !harnessId
+      || generation === undefined
+      || state.harnessId !== harnessId
+      || state.generation !== generation
+    ) {
+      return undefined;
+    }
+    return state.commands;
+  };
+  const capabilitiesCache = new WeakMap<AgentRuntime, {
+    generation: number;
+    capabilities: RuntimeCapabilities;
+  }>();
+  const CONSERVATIVE_CAPABILITIES: RuntimeCapabilities = {
+    streaming: false,
+    permissions: false,
+    questions: false,
+    compaction: false,
+    subagents: false,
+    title: "unsupported",
+    contextOccupancy: "unknown",
+  };
   const broadcastTail = async <T>(
     sessionId: string,
     action: () => Promise<T>,
@@ -676,14 +744,6 @@ export function createSessionService(deps: {
       }
     }
     return ids;
-  };
-
-  const isPlaceholderTitle = (title: string, sessionId: string): boolean => {
-    const value = title.trim().toLowerCase();
-    return value === "" || value === "new session" || value === "untitled session"
-      || value === "untitled" || value === "(untitled)" || value === "(untitled session)"
-      || /^new session - \d{4}-\d{2}-\d{2}t/.test(value)
-      || title.trim() === sessionId || title.trim().startsWith("ses_") || /^[0-9a-f-]{8,}$/i.test(title.trim());
   };
 
   const secureSafeKind = (value: unknown): SecureSafeKind | undefined =>
@@ -950,6 +1010,23 @@ export function createSessionService(deps: {
   // transaction when the store supports it) and broadcast the exact committed
   // projection — a callback can no longer read, await, and then overwrite
   // fields a later callback already changed.
+  const overlayProjection = (proj: SessionProjection): SessionProjection => {
+    const live = runtimeFeatureState.get(proj.id);
+    const { contextWindow: _durableCw, nativeCommandsRevision: _durableNcr, ...base } = proj;
+    if (!live) return base;
+    if (proj.resolvedHarnessId && live.harnessId !== proj.resolvedHarnessId) return base;
+    if (proj.runtimeBinding && live.generation !== proj.runtimeBinding.generation) return base;
+    return {
+      ...base,
+      ...(live.contextWindow ? { contextWindow: live.contextWindow } : {}),
+      nativeCommandsRevision: live.nativeCommandsRevision,
+    };
+  };
+
+  const publishProjection = (proj: SessionProjection): void => {
+    broadcast.projection(overlayProjection(proj));
+  };
+
   const applyProjection = async (
     sessionId: string, patch: (current: SessionProjection) => SessionProjection,
   ): Promise<SessionProjection | undefined> => {
@@ -962,7 +1039,7 @@ export function createSessionService(deps: {
       next = patch(current);
       await store.upsertProjection(next);
     }
-    if (next) broadcast.projection(next);
+    if (next) publishProjection(next);
     return next;
   };
 
@@ -1922,47 +1999,156 @@ export function createSessionService(deps: {
     return resolveAutoAccept(sessionId, (x) => deps.autoAccept!.get(x), (x) => parents.get(x));
   };
 
-  // SSE is preferred, but some OpenCode providers only expose the generated
-  // title through /session. At most four reads over 11 seconds per turn avoid
-  // a background poll while covering its delayed title write.
-  function refreshGeneratedTitle(sessionId: string, runtime: AgentRuntime): void {
-    if (titleRefreshInFlight.has(sessionId)) return;
-    titleRefreshInFlight.add(sessionId);
-    const delays = [0, 1_000, 3_000, 7_000] as const;
-    const attempt = async (index: number): Promise<void> => {
-      if (!autoTitleRequested.has(sessionId)) {
-        titleRefreshInFlight.delete(sessionId);
-        return;
-      }
-      const current = await store.projection(sessionId);
-      if (!current?.backendSessionId) {
-        titleRefreshInFlight.delete(sessionId);
-        return;
-      }
-      try {
-        const title = (await runtime.sessions()).find((session) => session.id === current.backendSessionId)?.title;
-        // Timestamp titles are OpenCode's failed auto-title. Treating them as
-        // real titles leaves the backend placeholder as the visible name;
-        // skipping keeps the request pending for the next interval while a
-        // retry (or a later turn) may still produce a semantic title.
-        if (title
-          && !isPlaceholderTitle(title, current.backendSessionId)
-          && !/^new session - \d{4}-\d{2}-\d{2}t/i.test(title)) {
-          await onRuntimeEvent(sessionId, { type: "session/title-generated", title });
-          titleRefreshInFlight.delete(sessionId);
-          return;
-        }
-      } catch {
-        // Retry on the next bounded interval; SSE can still settle the title.
-      }
-      if (index === delays.length - 1) {
-        titleRefreshInFlight.delete(sessionId);
-        return;
-      }
-      setTimeout(() => { void attempt(index + 1); }, delays[index + 1]);
+  const clearTitleFallbackTimer = (sessionId: string): void => {
+    const timer = titleFallbackTimers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      titleFallbackTimers.delete(sessionId);
+    }
+  };
+
+  const clearRuntimeFeatureState = (sessionId: string): void => {
+    runtimeFeatureState.delete(sessionId);
+    autoTitlePrompt.delete(sessionId);
+    autoTitleRequested.delete(sessionId);
+    clearTitleFallbackTimer(sessionId);
+  };
+
+  const upsertRuntimeFeatureState = (
+    sessionId: string,
+    patch: Partial<RuntimeFeatureState> & Pick<RuntimeFeatureState, "harnessId" | "generation">,
+  ): RuntimeFeatureState => {
+    const prev = runtimeFeatureState.get(sessionId);
+    const sameGeneration = prev !== undefined
+      && prev.harnessId === patch.harnessId
+      && prev.generation === patch.generation;
+    const next: RuntimeFeatureState = {
+      harnessId: patch.harnessId,
+      generation: patch.generation,
+      nativeCommandsRevision: patch.nativeCommandsRevision
+        ?? (sameGeneration ? prev.nativeCommandsRevision : 0),
+      ...(patch.commands !== undefined
+        ? { commands: patch.commands }
+        : sameGeneration && prev.commands !== undefined ? { commands: prev.commands } : {}),
+      ...(patch.contextWindow !== undefined
+        ? { contextWindow: patch.contextWindow }
+        : sameGeneration && prev.contextWindow ? { contextWindow: prev.contextWindow } : {}),
     };
-    void attempt(0);
+    runtimeFeatureState.set(sessionId, next);
+    return next;
+  };
+
+  const armTitleFallbackTimer = (sessionId: string): void => {
+    clearTitleFallbackTimer(sessionId);
+    if (!autoTitleRequested.has(sessionId)) return;
+    titleFallbackTimers.set(sessionId, setTimeout(() => {
+      titleFallbackTimers.delete(sessionId);
+      void applyPromptTitleFallback(sessionId);
+    }, 12_000));
+  };
+
+  async function applyPromptTitleFallback(sessionId: string): Promise<void> {
+    if (!autoTitleRequested.has(sessionId)) return;
+    const proj = await store.projection(sessionId);
+    if (!proj || !isPlaceholderTitle(proj.title, sessionId)
+      || proj.titleSource === "manual" || proj.titleSource === "native") {
+      autoTitleRequested.delete(sessionId);
+      autoTitlePrompt.delete(sessionId);
+      return;
+    }
+    const prompt = autoTitlePrompt.get(sessionId) ?? "";
+    const fallback = prompt.trim() ? titleFromPrompt(prompt) : "";
+    if (!fallback || isPlaceholderTitle(fallback, sessionId)) {
+      autoTitleRequested.delete(sessionId);
+      autoTitlePrompt.delete(sessionId);
+      return;
+    }
+    await appendAndBroadcast(
+      sessionId,
+      "session/metadata-changed",
+      { title: fallback, source: "polyth" },
+      { ignorable: true },
+    );
+    await applyProjection(sessionId, (current) => {
+      if (
+        !isPlaceholderTitle(current.title, sessionId)
+        || current.titleSource === "manual"
+        || current.titleSource === "native"
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        title: fallback,
+        titleSource: "polyth",
+        updatedAt: Date.now(),
+      };
+    });
+    autoTitleRequested.delete(sessionId);
+    autoTitlePrompt.delete(sessionId);
   }
+
+  const cachedCapabilities = async (runtime: AgentRuntime): Promise<RuntimeCapabilities> => {
+    const endpoint = await runtime.endpoint?.().catch(() => undefined);
+    const generation = endpoint?.generation ?? 0;
+    const hit = capabilitiesCache.get(runtime);
+    if (hit && hit.generation === generation) return hit.capabilities;
+    const capabilities = await runtime.capabilities();
+    capabilitiesCache.set(runtime, { generation, capabilities });
+    return capabilities;
+  };
+
+  const projectionContextWindow = (
+    sessionId: string,
+    proj: SessionProjection,
+  ): ContextWindowState | undefined => {
+    const window = runtimeFeatureState.get(sessionId)?.contextWindow;
+    if (!window) return undefined;
+    const binding = proj.runtimeBinding;
+    if (!binding) return window;
+    if (window.harnessId && window.harnessId !== proj.resolvedHarnessId) return undefined;
+    if (window.generation !== undefined && window.generation !== binding.generation) return undefined;
+    return window;
+  };
+
+  const resolveRuntimeFeatures = async (
+    sessionId: string,
+    proj: SessionProjection,
+  ): Promise<{
+    capabilities: RuntimeCapabilities;
+    commands: RuntimeCommandDescriptor[];
+    contextWindow?: ContextWindowState;
+    attachmentSupport: Partial<Record<AttachmentModality, FeatureSupport>>;
+  }> => {
+    const rt = sessionRuntime.get(sessionId);
+    const harnessId = proj.resolvedHarnessId ?? "opencode";
+    let capabilities: RuntimeCapabilities;
+    let commands: RuntimeCommandDescriptor[];
+    if (rt) {
+      capabilities = await cachedCapabilities(rt);
+      commands = matchingCommandCatalog(sessionId, rt.harnessId ?? harnessId, proj.runtimeBinding?.generation)
+        ?? (rt.commands ? await rt.commands(sessionId).catch(() => []) : []);
+    } else {
+      capabilities = deps.harnesses?.staticFeatures(harnessId) ?? CONSERVATIVE_CAPABILITIES;
+      commands = matchingCommandCatalog(sessionId, harnessId, proj.runtimeBinding?.generation) ?? [];
+    }
+    const project = await projects.get(proj.projectId);
+    const remote = Boolean(project?.remote);
+    const materialize = Boolean(deps.attachments?.materialize);
+    const attachmentSupport = effectiveAttachmentSupport(
+      capabilities,
+      undefined,
+      remote,
+      materialize,
+    );
+    const contextWindow = projectionContextWindow(sessionId, proj);
+    return {
+      capabilities,
+      commands,
+      ...(contextWindow ? { contextWindow } : {}),
+      attachmentSupport,
+    };
+  };
 
   // ---- rate-limit auto-resume ------------------------------------------------
   // A provider capacity stop (rate limit / quota / overload) is recoverable:
@@ -2000,6 +2186,34 @@ export function createSessionService(deps: {
     return undefined;
   };
 
+  const plannedResumeState = async (
+    sessionId: string,
+    hint: RateLimitRetryHint,
+    events: readonly SessionEvent[],
+  ) => {
+    const last = lastUserMessage(events);
+    if (!last) return undefined;
+    const previous = (await store.projection(sessionId))?.resume;
+    return planResume({
+      hint,
+      userMessageSeq: last.seq,
+      sessionId,
+      ...(previous
+        ? { previous: { attempt: previous.attempt, userMessageSeq: previous.userMessageSeq } }
+        : {}),
+      now: Date.now(),
+    }) ?? undefined;
+  };
+
+  const retryFromResumeState = (state: NonNullable<Awaited<ReturnType<typeof plannedResumeState>>>): RateLimitRetry => ({
+    scope: state.scope,
+    ...(state.provider ? { provider: state.provider } : {}),
+    ...(state.retryAfterSec ? { retryAfterSec: state.retryAfterSec } : {}),
+    ...(state.resetAt ? { resetAt: state.resetAt } : {}),
+    resumeAt: state.resumeAt,
+    attempt: state.attempt,
+  });
+
   /** Compute + persist the resume plan for a limit stop and arm the timer.
    *  Returns the plan so the caller can embed it in the turn/stopped event. */
   const scheduleResume = async (
@@ -2007,26 +2221,11 @@ export function createSessionService(deps: {
     hint: RateLimitRetryHint,
     events: readonly SessionEvent[],
   ): Promise<RateLimitRetry | undefined> => {
-    const last = lastUserMessage(events);
-    if (!last) return undefined;
-    const previous = (await store.projection(sessionId))?.resume;
-    const state = planResume({
-      hint,
-      userMessageSeq: last.seq,
-      ...(previous
-        ? { previous: { attempt: previous.attempt, userMessageSeq: previous.userMessageSeq } }
-        : {}),
-      now: Date.now(),
-    });
+    const state = await plannedResumeState(sessionId, hint, events);
+    if (!state) return undefined;
     await applyProjection(sessionId, (current) => ({ ...current, resume: state, updatedAt: Date.now() }));
     resumeScheduler.arm(sessionId, state.resumeAt);
-    return {
-      scope: state.scope,
-      ...(state.provider ? { provider: state.provider } : {}),
-      ...(state.retryAfterSec ? { retryAfterSec: state.retryAfterSec } : {}),
-      resumeAt: state.resumeAt,
-      attempt: state.attempt,
-    };
+    return retryFromResumeState(state);
   };
 
   /** Drop a pending resume (user cancel, model switch, superseded, resumed). */
@@ -2272,7 +2471,7 @@ export function createSessionService(deps: {
             };
             await store.upsertProjection(projection);
             await appendAndBroadcast(childId, "session/imported", { backendSessionId: child.id }, { ignorable: true });
-            broadcast.projection(projection);
+            publishProjection(projection);
             await ensureWired(childId, projection);
             canonicalByBackend.set(child.id, childId);
           }
@@ -2356,22 +2555,23 @@ export function createSessionService(deps: {
         }
         break;
       case "session/title-generated": {
-        // The first user prompt already makes the session legible in every
-        // surface that reads the log; a semantic title that fails to materialize
-        // is a naming bug only when OpenCode can do better than the raw prompt.
-        if (!autoTitleRequested.has(sessionId)) break;
         const current = await store.projection(sessionId);
-        if (!current || !isPlaceholderTitle(current.title, sessionId)) {
-          if (sideEffects) autoTitleRequested.delete(sessionId);
+        if (!current) break;
+        const source = current.titleSource;
+        const auto = autoTitleRequested.has(sessionId);
+        const placeholder = isPlaceholderTitle(current.title, sessionId);
+        if (source === "manual") break;
+        if (!auto && source !== "polyth" && !placeholder) break;
+        if (!placeholder && source !== "polyth") {
+          if (sideEffects) {
+            autoTitleRequested.delete(sessionId);
+            autoTitlePrompt.delete(sessionId);
+            clearTitleFallbackTimer(sessionId);
+          }
           break;
         }
         const title = ev.title.trim().slice(0, 200);
         if (!title || isPlaceholderTitle(title, sessionId)) break;
-        // "New session - <iso>" is OpenCode's failure mode (timestamp title
-        // replaces the auto-title that never ran, e.g. a bad small model).
-        // Persisting it as the visible title defeats the prompt-derived
-        // fallback, so keep those names in backend territory only.
-        if (/^new session - \d{4}-\d{2}-\d{2}t/i.test(title)) break;
         await persist(
           sessionId,
           "session/metadata-changed",
@@ -2382,9 +2582,20 @@ export function createSessionService(deps: {
           const applied = await applyRuntimeProjection(
             sessionId,
             runtimeEventSeq,
-            (current) => ({ ...current, title, updatedAt: Date.now() }),
+            (proj) => proj.titleSource === "manual"
+              ? proj
+              : {
+                ...proj,
+                title,
+                titleSource: "native",
+                updatedAt: Date.now(),
+              },
           );
-          if (applied) autoTitleRequested.delete(sessionId);
+          if (applied) {
+            autoTitleRequested.delete(sessionId);
+            autoTitlePrompt.delete(sessionId);
+            clearTitleFallbackTimer(sessionId);
+          }
         }
         break;
       }
@@ -2395,14 +2606,24 @@ export function createSessionService(deps: {
         const effectiveReason = ev.reason === "error" && interruptQueued ? "aborted" : ev.reason;
         // A provider capacity stop is recoverable: plan the auto-resume before
         // persisting so its resumeAt/attempt travel with the terminal event
-        // (the UI renders a countdown instead of a generic failure).
-        const retry = sideEffects && !observationReplay && effectiveReason === "error" && ev.retry
-          ? await scheduleResume(sessionId, ev.retry, await store.events(sessionId))
-          : undefined;
+        // (the UI renders a countdown instead of a generic failure). Capture
+        // (no side effects) still embeds the planned retry; observation replay
+        // then arms the durable timer.
+        let retry: RateLimitRetry | undefined;
+        if (effectiveReason === "error" && ev.retry) {
+          const eventsForResume = await store.events(sessionId);
+          if (sideEffects) {
+            retry = await scheduleResume(sessionId, ev.retry, eventsForResume);
+          } else {
+            const state = await plannedResumeState(sessionId, ev.retry, eventsForResume);
+            retry = state ? retryFromResumeState(state) : undefined;
+          }
+        }
         await persist(sessionId, "turn/stopped", {
           turnId: ev.turnId ?? lastTurnId.get(sessionId) ?? ev.type,
           reason: effectiveReason,
           ...(ev.error ? { error: ev.error } : {}),
+          ...(ev.code ? { code: ev.code } : {}),
           ...(retry ? { retry: retry as unknown as JsonObject } : {}),
         }, { ignorable: true });
         if (sideEffects) {
@@ -2427,12 +2648,15 @@ export function createSessionService(deps: {
           if (applied) {
             lastTurnId.delete(sessionId);
             admitting.delete(sessionId);
-            // OpenCode can publish its generated session title after the
-            // terminal status event. Keep this one-shot request alive until a
-            // title update (or a later send) settles it.
+            // Native title push is the primary path; one grace timer covers late arrivals.
             const titleRuntime = sessionRuntime.get(sessionId);
             if (titleRuntime && autoTitleRequested.has(sessionId)) {
-              refreshGeneratedTitle(sessionId, titleRuntime);
+              void cachedCapabilities(titleRuntime).then((caps) => {
+                if (caps.title === "native") armTitleFallbackTimer(sessionId);
+                else void applyPromptTitleFallback(sessionId);
+              }).catch(() => { void applyPromptTitleFallback(sessionId); });
+            } else if (autoTitleRequested.has(sessionId)) {
+              armTitleFallbackTimer(sessionId);
             }
             const current = await store.projection(sessionId);
             if (current?.harnessTransition && !deps.isShuttingDown?.()) {
@@ -2549,26 +2773,84 @@ export function createSessionService(deps: {
       case "usage/recorded": {
         const { type: _t, ...uData } = ev;
         await persist(sessionId, "usage/recorded", uData as unknown as JsonObject, { ignorable: true });
-        // Token/cost increments are read-modify-written inside one projection
-        // patch so back-to-back callbacks apply exactly once each.
         if (sideEffects) {
           const applied = await applyRuntimeProjection(
             sessionId,
             runtimeEventSeq,
-            (proj) => ({
-              ...proj,
-              tokenTotals: {
-                input: (proj.tokenTotals?.input ?? 0) + ev.tokens.input,
-                output: (proj.tokenTotals?.output ?? 0) + ev.tokens.output,
-                ...(ev.tokens.reasoning ? { reasoning: (proj.tokenTotals?.reasoning ?? 0) + ev.tokens.reasoning } : {}),
-                ...(ev.tokens.cacheRead !== undefined ? { cacheRead: (proj.tokenTotals?.cacheRead ?? 0) + ev.tokens.cacheRead } : {}),
-                ...(ev.tokens.cacheWrite !== undefined ? { cacheWrite: (proj.tokenTotals?.cacheWrite ?? 0) + ev.tokens.cacheWrite } : {}),
-              },
-              costTotal: (proj.costTotal ?? 0) + (ev.cost ?? 0),
-              updatedAt: Date.now(),
-            }),
+            (proj) => {
+              const next: SessionProjection = {
+                ...proj,
+                tokenTotals: {
+                  input: (proj.tokenTotals?.input ?? 0) + ev.tokens.input,
+                  output: (proj.tokenTotals?.output ?? 0) + ev.tokens.output,
+                  ...(ev.tokens.reasoning ? { reasoning: (proj.tokenTotals?.reasoning ?? 0) + ev.tokens.reasoning } : {}),
+                  ...(ev.tokens.cacheRead !== undefined ? { cacheRead: (proj.tokenTotals?.cacheRead ?? 0) + ev.tokens.cacheRead } : {}),
+                  ...(ev.tokens.cacheWrite !== undefined ? { cacheWrite: (proj.tokenTotals?.cacheWrite ?? 0) + ev.tokens.cacheWrite } : {}),
+                },
+                ...(ev.cost !== undefined
+                  ? { costTotal: (proj.costTotal ?? 0) + ev.cost }
+                  : {}),
+                updatedAt: Date.now(),
+              };
+              return next;
+            },
           );
           if (applied) hooks.onUsage?.(sessionId, ev.tokens);
+        }
+        break;
+      }
+      case "context/updated": {
+        if (sideEffects) {
+          const proj = await store.projection(sessionId);
+          const binding = proj?.runtimeBinding;
+          const harnessId = sessionRuntime.get(sessionId)?.harnessId ?? proj?.resolvedHarnessId ?? "";
+          const generation = binding?.generation ?? 0;
+          const usedTokens = ev.usedTokens;
+          const limitTokens = ev.limitTokens;
+          const remainingTokens = ev.remainingTokens ?? (
+            limitTokens !== undefined && usedTokens !== undefined
+              ? Math.max(0, limitTokens - usedTokens)
+              : undefined
+          );
+          const fraction = ev.fraction ?? (
+            limitTokens !== undefined && limitTokens > 0 && usedTokens !== undefined
+              ? usedTokens / limitTokens
+              : undefined
+          );
+          const state: ContextWindowState = {
+            source: ev.source,
+            updatedAt: ev.updatedAt,
+            ...(usedTokens !== undefined ? { usedTokens } : {}),
+            ...(limitTokens !== undefined ? { limitTokens } : {}),
+            ...(remainingTokens !== undefined ? { remainingTokens } : {}),
+            ...(fraction !== undefined ? { fraction } : {}),
+            ...(ev.compaction ? { compaction: ev.compaction } : {}),
+            ...(harnessId ? { harnessId } : {}),
+            ...(generation !== undefined ? { generation } : {}),
+          };
+          upsertRuntimeFeatureState(sessionId, {
+            harnessId,
+            generation,
+            contextWindow: state,
+          });
+          if (proj) publishProjection(proj);
+        }
+        break;
+      }
+      case "runtime/commands-changed": {
+        if (sideEffects) {
+          const proj = await store.projection(sessionId);
+          const rt = sessionRuntime.get(sessionId);
+          const harnessId = rt?.harnessId ?? proj?.resolvedHarnessId ?? "";
+          const generation = proj?.runtimeBinding?.generation ?? 0;
+          const prev = runtimeFeatureState.get(sessionId);
+          upsertRuntimeFeatureState(sessionId, {
+            harnessId,
+            generation,
+            commands: [...ev.commands],
+            nativeCommandsRevision: (prev?.nativeCommandsRevision ?? 0) + 1,
+          });
+          if (proj) publishProjection(proj);
         }
         break;
       }
@@ -2580,6 +2862,23 @@ export function createSessionService(deps: {
           data as unknown as JsonObject,
           { ignorable: true, producerPlugin: sessionRuntime.get(sessionId)?.harnessId ? `backend-${sessionRuntime.get(sessionId)!.harnessId}` : "runtime" },
         );
+        if (sideEffects) {
+          const proj = await store.projection(sessionId);
+          const harnessId = sessionRuntime.get(sessionId)?.harnessId ?? proj?.resolvedHarnessId ?? "";
+          const generation = proj?.runtimeBinding?.generation ?? 0;
+          upsertRuntimeFeatureState(sessionId, {
+            harnessId,
+            generation,
+            contextWindow: {
+              source: "unknown",
+              updatedAt: Date.now(),
+              compaction: { active: false, lastAt: Date.now() },
+              ...(harnessId ? { harnessId } : {}),
+              ...(generation !== undefined ? { generation } : {}),
+            },
+          });
+          if (proj) publishProjection(proj);
+        }
         break;
       }
       case "compaction/part-recorded": {
@@ -2672,7 +2971,16 @@ export function createSessionService(deps: {
     let persistedIndex = 0;
     for (let index = 0; index < observation.events.length; index += 1) {
       const expectedCount = batches[index]!.length;
-      if (expectedCount === 0) continue;
+      if (expectedCount === 0) {
+        // Projection-only telemetry (context/updated, runtime/commands-changed)
+        // never becomes a canonical row. Still apply side effects after ingest
+        // records the observation identity, otherwise occupancy and native
+        // catalogs die once adapters emit through onObservation.
+        await onRuntimeEvent(sessionId, observation.events[index]!, {
+          persist: async () => undefined as unknown as SessionEvent,
+        });
+        continue;
+      }
       const runtimeEventSeq = Math.max(
         ...ingested.events
           .slice(persistedIndex, persistedIndex + expectedCount)
@@ -2756,6 +3064,7 @@ export function createSessionService(deps: {
   };
 
   const unwire = (sessionId: string) => {
+    clearRuntimeFeatureState(sessionId);
     const rt = sessionRuntime.get(sessionId);
     if (!rt) return;
     sessionRuntime.delete(sessionId);
@@ -2763,7 +3072,6 @@ export function createSessionService(deps: {
     clearSessionToolWatchdogs(sessionId);
     turnReply.delete(sessionId);
     behaviorLogged.delete(sessionId);
-    autoTitleRequested.delete(sessionId);
     for (const wired of sessionRuntime.values()) if (wired === rt) return;
     for (const subscription of runtimeSubs.get(rt) ?? []) subscription.dispose();
     runtimeSubs.delete(rt);
@@ -2837,7 +3145,7 @@ export function createSessionService(deps: {
             status: "reconciling",
           };
           await store.upsertProjection(attachedProjection);
-          broadcast.projection(attachedProjection);
+          publishProjection(attachedProjection);
         } else {
           await updateProjectionQuietly(sessionId, { status: "unknown" });
           throw Object.assign(new Error("backend session creation outcome is unknown"), {
@@ -3557,25 +3865,82 @@ export function createSessionService(deps: {
     let raw = input.text;
     let cmdAgent: string | undefined;
     let cmdModel: { providerID: string; modelID: string } | undefined;
-    if (deps.expand) {
+    const nativeCommand = input.command;
+    let nativeDescriptor: RuntimeCommandDescriptor | undefined;
+    if (nativeCommand) {
+      const commandCaps = await cachedCapabilities(rt);
+      const invoke = commandCaps.commands?.invoke;
+      if (invoke !== "raw-native-input") {
+        throw Object.assign(new Error("Native harness commands are not supported by this runtime"), { code: "unsupported" });
+      }
+      const catalog = matchingCommandCatalog(
+        sessionId,
+        rt.harnessId ?? proj.resolvedHarnessId,
+        proj.runtimeBinding?.generation,
+      ) ?? (rt.commands ? await rt.commands(sessionId).catch(() => []) : []);
+      nativeDescriptor = catalog.find((command) => command.id === nativeCommand.id);
+      if (!nativeDescriptor) {
+        throw Object.assign(new Error("Native command is not available in this session"), { code: "unsupported" });
+      }
+    }
+    if (!nativeCommand && deps.expand) {
       try {
         const r = await deps.expand(proj.projectId, input.text);
         text = r.text; raw = r.raw; cmdAgent = r.agent; cmdModel = r.model;
       } catch (err) {
         console.error("[polyth] command expansion failed", err);
       }
+    } else if (nativeDescriptor) {
+      raw = input.text;
+      if (nativeCommand!.args) text = `/${nativeDescriptor.name} ${nativeCommand!.args}`;
+      else text = `/${nativeDescriptor.name}`;
     }
     const model = input.model ?? cmdModel ?? proj.model;
     const agent = input.agent ?? cmdAgent ?? proj.agent;
     await requireLaunchModelForAutoAgent(rt, agent, model);
+
+    if (input.attachments?.length) {
+      const caps = await cachedCapabilities(rt);
+      const models = await rt.models().catch(() => []);
+      const selected = model
+        ? models.find((m) => m.providerID === model.providerID && m.modelID === model.modelID)
+        : undefined;
+      const project = await projects.get(proj.projectId);
+      const support = effectiveAttachmentSupport(
+        caps,
+        selected?.capabilities,
+        Boolean(project?.remote),
+        Boolean(deps.attachments?.materialize),
+      );
+      const integrationDeclaresAttachments = caps.attachments?.modalities !== undefined;
+      for (const ref of input.attachments) {
+        const modality = attachmentModality(ref);
+        if (modality && integrationDeclaresAttachments
+          && support[modality] !== "native" && support[modality] !== "emulated") {
+          const harnessId = rt.harnessId ?? proj.resolvedHarnessId ?? "runtime";
+          throw Object.assign(
+            new Error(`Selected ${harnessId} runtime/model does not support ${modality} attachments through the current integration.`),
+            { code: "invalid-attachment" },
+          );
+        }
+      }
+    }
     // Model-visible behavior instructions are logged BEFORE the turn that
     // first runs under a new revision (worst case after restart: one benign
     // re-append, which replay tooling dedupes by revision).
     if (deps.behavior) {
       const cur = await deps.behavior.current().catch(() => null);
-      if (cur && behaviorLogged.get(sessionId) !== cur.revision) {
+      const snapshot = !deps.instructionProvisioned
+        ? true
+        : await deps.instructionProvisioned(sessionId, proj.resolvedHarnessId).catch(() => false);
+      const live = snapshot === true || (typeof snapshot === "object" && snapshot.provisioned);
+      const contributions = typeof snapshot === "object" ? snapshot.contributions : undefined;
+      const verification = typeof snapshot === "object" ? snapshot.verification : undefined;
+      if (cur && live && behaviorLogged.get(sessionId) !== cur.revision) {
         await appendAndBroadcast(sessionId, "behavior/instructions-applied", {
           revision: cur.revision, digest: cur.digest, scope: "global",
+          ...(contributions?.length ? { contributions } : {}),
+          ...(verification ? { verification } : {}),
         }, { ignorable: true });
         behaviorLogged.set(sessionId, cur.revision);
       }
@@ -3667,14 +4032,27 @@ export function createSessionService(deps: {
     }
 
     admitting.add(sessionId);
-    if (input.autoTitle && isPlaceholderTitle(proj.title, sessionId)) autoTitleRequested.add(sessionId);
-    else autoTitleRequested.delete(sessionId);
+    if (input.autoTitle && isPlaceholderTitle(proj.title, sessionId)) {
+      autoTitleRequested.add(sessionId);
+      if (input.text.trim()) autoTitlePrompt.set(sessionId, input.text);
+    } else {
+      autoTitleRequested.delete(sessionId);
+      autoTitlePrompt.delete(sessionId);
+    }
     const outcome = await runPreparedOperation<{ admissionId?: string }, void>(
       operation,
-      (operationId) => {
+      async (operationId) => {
         const request = {
           sessionId,
           text: recoveredUserText(text, recoveryContext || undefined),
+          ...(nativeDescriptor ? {
+            command: {
+              id: nativeDescriptor.id,
+              owner: "native" as const,
+              name: nativeDescriptor.name,
+              ...(nativeCommand?.args ? { args: nativeCommand.args } : {}),
+            },
+          } : {}),
           ...(input.attachments?.length ? { attachments: input.attachments } : {}),
           ...(model ? { model } : {}),
           ...(agent ? { agent } : {}),
@@ -3985,7 +4363,7 @@ export function createSessionService(deps: {
         lastTurnId.delete(sessionId);
         admitting.delete(sessionId);
         unwire(sessionId);
-        broadcast.projection(result.projection);
+        publishProjection(result.projection);
         return result;
   };
 
@@ -4586,6 +4964,15 @@ export function createSessionService(deps: {
       lastTurnId.delete(sessionId);
       admitting.delete(sessionId);
       runtimes.forgetSession?.(sessionId);
+      const releasedHarnessId = projection.resolvedHarnessId ?? old.harnessId;
+      if (releasedHarnessId) {
+        await deps.onHarnessTargetReleased?.({
+          sessionId,
+          projectId: projection.projectId,
+          cwd,
+          harnessId: releasedHarnessId,
+        });
+      }
       projection = (await store.projection(sessionId))!;
     }
     if (deps.isShuttingDown?.()) return (await store.projection(sessionId))!;
@@ -4677,7 +5064,7 @@ export function createSessionService(deps: {
       projection: { ...projection, ...patch }, expectedSeq: await store.latestSeq(sessionId),
     });
     events.forEach((event) => broadcast.event(event));
-    broadcast.projection((await store.projection(sessionId))!);
+    publishProjection((await store.projection(sessionId))!);
   };
 
   const service: RuntimeEpochSessionService = {
@@ -4934,6 +5321,7 @@ export function createSessionService(deps: {
         ...(input.parentId ? { parentId: input.parentId } : {}),
         ...(inheritedAutoAccept ? { autoAccept: true } : {}),
         title: input.title || "New session",
+        titleSource: input.title && !isPlaceholderTitle(input.title, sessionId) ? "manual" : "placeholder",
         ...(input.worktreePath ? {
           worktreePath: input.worktreePath,
           worktreeId: input.worktreePath,
@@ -4961,7 +5349,7 @@ export function createSessionService(deps: {
           ignorable: true,
         },
       }));
-      broadcast.projection(projection);
+      publishProjection(projection);
       try {
         rt ??= await runtimeFor(projection, cwd);
       } catch (error) {
@@ -5008,7 +5396,7 @@ export function createSessionService(deps: {
       };
       await store.upsertProjection(completed);
       wire(sessionId, rt);
-      broadcast.projection(completed);
+      publishProjection(completed);
       if (typeof (rt as ReliabilityRuntime).reconcile === "function") {
         await reconcileSession(
           sessionId,
@@ -5032,6 +5420,7 @@ export function createSessionService(deps: {
     async send(sessionId, input: UserTurnInput): Promise<SendResult> {
       let proj = await store.projection(sessionId);
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      if (input.autoResume !== true) await clearResume(sessionId, "user");
       let stoppedTurnRecorded = hasPersistedStoppedTurn(await store.events(sessionId));
       const delivery: DeliveryMode = input.delivery ?? "normal";
       // Attachments are prepared (existence-checked, `_inbox/*` materialized
@@ -5801,7 +6190,7 @@ export function createSessionService(deps: {
         // reflects only the committed transaction.
         for (const ev of published.events) broadcast.event(ev);
         broadcast.event(published.marker);
-        broadcast.projection(projection);
+        publishProjection(projection);
         if (typeof (rt as ReliabilityRuntime).reconcile === "function") {
           await reconcileSession(
             forkId,
@@ -5904,11 +6293,12 @@ export function createSessionService(deps: {
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
       if (proj.status === "archived") return; // idempotent: no duplicate events
       await appendAndBroadcast(sessionId, "session/archived", {}, { ignorable: true });
-      await updateProjection(sessionId, { status: "archived" });
-      // Release the dispatch slot when idle. A mid-turn archive stays wired:
-      // model-visible content must keep landing in the log until the turn
-      // stops; ensureWired re-wires lazily after a restore.
+      // Release the dispatch slot when idle so the archived projection
+      // broadcast overlays empty live occupancy/commands. A mid-turn archive
+      // stays wired: model-visible content must keep landing in the log until
+      // the turn stops; ensureWired re-wires lazily after a restore.
       if (!turnActive(sessionId)) unwire(sessionId);
+      await updateProjection(sessionId, { status: "archived" });
     },
     async restore(sessionId) {
       const proj = await store.projection(sessionId);
@@ -6040,6 +6430,11 @@ export function createSessionService(deps: {
         if (outcome.kind === "confirmed") {
           await durable.retireDeletionTombstone(sessionId, { kind: "confirmed" });
         }
+        try {
+          await deps.onSessionReleased?.({ sessionId, projectId: proj.projectId, cwd });
+        } catch {
+          // Provisioning cleanup must not revive a deleted session.
+        }
       });
     },
 
@@ -6052,8 +6447,10 @@ export function createSessionService(deps: {
         // A manual rename settles the naming intent: a later (or delayed)
         // OpenCode title event must not overwrite the user's explicit choice.
         autoTitleRequested.delete(sessionId);
+        autoTitlePrompt.delete(sessionId);
+        clearTitleFallbackTimer(sessionId);
         await appendAndBroadcast(sessionId, "session/metadata-changed", { title: t }, { ignorable: true });
-        await updateProjection(sessionId, { title: t });
+        await updateProjection(sessionId, { title: t, titleSource: "manual" });
       });
     },
 
@@ -6100,7 +6497,7 @@ export function createSessionService(deps: {
       if (patch.folderId === null) delete merged.folderId;
       if (patch.pinned === null) delete merged.pinned;
       await store.upsertProjection(merged);
-      broadcast.projection(merged);
+      publishProjection(merged);
     },
 
     async markWorktreeMissing(projectId, worktreePath) {
@@ -6118,7 +6515,7 @@ export function createSessionService(deps: {
             : {}),
         };
         await store.upsertProjection(next);
-        broadcast.projection(next);
+        publishProjection(next);
       }
     },
 
@@ -6215,7 +6612,7 @@ export function createSessionService(deps: {
       if (!projection) return;
       const counts = await deps.org?.attentionFor([sessionId]).catch(() => undefined);
       const attention = counts?.[sessionId];
-      broadcast.projection(attention ? { ...projection, attention } : projection);
+      publishProjection(attention ? { ...projection, attention } : projection);
     },
 
     async list(projectId) {
@@ -6230,12 +6627,15 @@ export function createSessionService(deps: {
         await settleDelegatedChild(projection.id);
         return (await store.projection(projection.id)) ?? projection;
       }));
-      if (!deps.org || settled.length === 0) return settled;
+      if (!deps.org || settled.length === 0) return settled.map(overlayProjection);
       // Attention badges derive from durable events on every read (WP5).
       const counts = await deps.org.attentionFor(settled.map((p) => p.id)).catch(() => ({} as Record<string, { questions: number; permissions: number; unread: number }>));
       return settled.map((p) => {
         const c = counts[p.id];
-        return c ? { ...p, attention: { questions: c.questions, permissions: c.permissions, unread: c.unread } } : p;
+        const withAttention = c
+          ? { ...p, attention: { questions: c.questions, permissions: c.permissions, unread: c.unread } }
+          : p;
+        return overlayProjection(withAttention);
       });
     },
     async sync(projectId) {
@@ -6245,7 +6645,7 @@ export function createSessionService(deps: {
       if (items.length > 0) {
         await this.importBackendSessions!(projectId, items.map((r) => r.id));
       }
-      return store.projections(projectId);
+      return (await store.projections(projectId)).map(overlayProjection);
     },
     async backendSessions(projectId) {
       const { items, total } = await backendSessionScan(projectId);
@@ -6274,9 +6674,9 @@ export function createSessionService(deps: {
         // lazily in events() the first time the session is opened.
         await store.upsertProjection(projection);
         await appendAndBroadcast(id, "session/imported", { backendSessionId: remote.id }, { ignorable: true });
-        broadcast.projection(projection);
+        publishProjection(projection);
         await ensureWired(id, projection);
-        out.push((await store.projection(id)) ?? projection);
+        out.push(overlayProjection((await store.projection(id)) ?? projection));
       }
       return out;
     },
@@ -6290,7 +6690,12 @@ export function createSessionService(deps: {
         await settleDelegatedChild(sessionId);
         p = (await store.projection(sessionId)) ?? p;
       }
-      return p;
+      return overlayProjection(p);
+    },
+    async runtimeFeatures(sessionId) {
+      const p = await store.projection(sessionId);
+      if (!p) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      return resolveRuntimeFeatures(sessionId, p);
     },
     async events(sessionId, afterSeq, page) {
       const interactiveRead = afterSeq === 0

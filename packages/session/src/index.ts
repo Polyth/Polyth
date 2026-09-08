@@ -1610,6 +1610,7 @@ export function createStore(dbPath: string): Store {
           model: undefined,
           agent: undefined,
           agentProfileId: undefined,
+          contextWindow: undefined,
         } : projection.runtimeLeg ? { runtimeLeg: { ...projection.runtimeLeg, id: randomUUID(), nativeSessionId: replacement.backendSessionId, startedAt: Date.now(), canonicalThroughSeq: 0, bootstrap: "continuity" as const } } : {}),
         backendSessionId: replacement.backendSessionId,
         runtimeBinding: replacement,

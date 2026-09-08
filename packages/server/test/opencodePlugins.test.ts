@@ -8,8 +8,18 @@ import type { RouteRequest } from "../src/http.ts";
 import { createDeferredConfigApplier, createOpenCodePendingService } from "../src/opencodePending.ts";
 import { opencodePendingRoutes } from "../src/routes/opencodePending.ts";
 import { opencodePluginRoutes } from "../../plugins/src/serverEntry.ts";
+import type { SpaceContext } from "@polyth/contracts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "polyth-oc-plugins-"));
+
+const spaceOf = (dir: string, deployment: SpaceContext["deployment"] = "local-trusted"): SpaceContext => ({
+  spaceId: "spc_local",
+  spaceSlug: "local",
+  userId: "usr_test",
+  role: "owner",
+  deployment,
+  storageDir: dir,
+});
 
 const harness = (dir: string) => {
   let restarts = 0;
@@ -29,6 +39,7 @@ const harness = (dir: string) => {
       url,
       path: url.pathname,
       method,
+      space: spaceOf(dir),
       body: async () => input,
       json: (code, value) => {
         status = code;

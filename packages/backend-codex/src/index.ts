@@ -1,6 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { AgentRuntime, CanonicalTurnRequest, HarnessContext, JsonObject, ModelRef, MutationOutcome, RuntimeEvent, RuntimeObservation, RuntimeSnapshot } from "@polyth/contracts";
-import type { RpcPeer } from "@polyth/harness-runtime";
+import { isAbsolute, join } from "node:path";
+import type { AgentRuntime, CanonicalTurnRequest, HarnessContext, JsonObject, ModelRef, MutationOutcome, RateLimitRetryHint, RuntimeErrorCode, RuntimeEvent, RuntimeObservation, RuntimeSnapshot, TokenUsage } from "@polyth/contracts";
+import {
+    acknowledgeCapabilityApplication,
+    captureCapabilityLaunch,
+    composeTurnPrompt,
+    deltaTokenUsage,
+    provisioningTarget,
+    releaseCapabilityLaunch,
+    type RpcPeer,
+} from "@polyth/harness-runtime";
+import { codexOverlays } from "./provisioner.ts";
 // These are the small provider-local fields used from App Server v2. The
 // installed CLI can generate its full schema; it is not a core Polyth contract.
 type Item = {
@@ -24,6 +34,7 @@ type Turn = {
     items?: Item[];
     error?: {
         message?: string;
+        codexErrorInfo?: unknown;
     };
 };
 type Thread = {
@@ -58,7 +69,105 @@ const eventFor = (item: Item): RuntimeEvent | undefined => {
     // Reasoning, hook prompts and provider system instructions are excluded.
     return undefined;
 };
-const stopped = (turn: Turn): RuntimeEvent => ({ type: "turn/stopped", turnId: turn.id, reason: turn.status === "failed" ? "error" : turn.status === "interrupted" ? "aborted" : "completed", ...(turn.status === "failed" ? { error: "Codex turn failed" } : {}) });
+const timestampMs = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) && value > 0
+        ? value < 1e12 ? value * 1000 : value
+        : undefined;
+const usageBreakdown = (value: unknown): TokenUsage | undefined => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const row = value as Record<string, unknown>;
+    const number = (key: string): number => typeof row[key] === "number" ? Math.max(0, row[key] as number) : 0;
+    return {
+        input: number("inputTokens"),
+        output: number("outputTokens"),
+        cacheRead: number("cachedInputTokens"),
+        cacheWrite: number("cacheWriteInputTokens"),
+        reasoning: number("reasoningOutputTokens"),
+    };
+};
+const classifyFailure = (
+    turn: Turn,
+    resetAt?: number,
+): { error: string; code: RuntimeErrorCode; retry?: RateLimitRetryHint } => {
+    const error = turn.error?.message?.trim() || "Codex turn failed";
+    const info = turn.error?.codexErrorInfo;
+    const kind = typeof info === "string"
+        ? info
+        : info && typeof info === "object" && !Array.isArray(info)
+            ? String((info as { type?: unknown; kind?: unknown; code?: unknown }).type
+                ?? (info as { kind?: unknown }).kind
+                ?? (info as { code?: unknown }).code ?? "")
+            : "";
+    if (kind) {
+        switch (kind) {
+            case "Unauthorized":
+                return { error, code: "auth-expired" };
+            case "rate_limit":
+            case "RateLimitExceeded":
+                return { error, code: "rate-limited", retry: { scope: "rate", ...(resetAt ? { resetAt } : {}) } };
+            case "UsageLimitExceeded":
+                return { error, code: "quota-exhausted", retry: { scope: "quota", ...(resetAt ? { resetAt } : {}) } };
+            case "ContextWindowExceeded":
+            case "BadRequest":
+            case "SandboxError":
+            case "InternalServerError":
+            case "Other":
+                return { error, code: "unknown" };
+            case "ResponseTooManyFailedAttempts":
+            case "ResponseStreamDisconnected":
+            case "ResponseStreamConnectionFailed":
+            case "HttpConnectionFailed":
+                return { error, code: "overloaded", retry: { scope: "overloaded" } };
+            default:
+                break;
+        }
+    }
+    const structuredText = info === undefined ? "" : JSON.stringify(info).toLowerCase();
+    const fallback = error.toLowerCase();
+    const matches = (pattern: RegExp): boolean =>
+        pattern.test(structuredText) || (!structuredText || !/auth|quota|rate|limit|overload|capacity/.test(structuredText)) && pattern.test(fallback);
+    if (matches(/auth|unauthori[sz]ed|credential|token.?expired/)) {
+        return { error, code: "auth-expired" };
+    }
+    if (matches(/quota|insufficient.?quota/)) {
+        return { error, code: "quota-exhausted", retry: { scope: "quota", ...(resetAt ? { resetAt } : {}) } };
+    }
+    if (matches(/rate.?limit|too.?many.?requests/)) {
+        return { error, code: "rate-limited", retry: { scope: "rate", ...(resetAt ? { resetAt } : {}) } };
+    }
+    if (matches(/overload|capacity|temporarily.?unavailable/)) {
+        return { error, code: "overloaded", retry: { scope: "overloaded" } };
+    }
+    return { error, code: "unknown" };
+};
+const stopped = (turn: Turn, resetAt?: number): RuntimeEvent => {
+    if (turn.status === "failed") {
+        const failure = classifyFailure(turn, resetAt);
+        return { type: "turn/stopped", turnId: turn.id, reason: "error", ...failure };
+    }
+    return {
+        type: "turn/stopped",
+        turnId: turn.id,
+        reason: turn.status === "interrupted" ? "aborted" : "completed",
+    };
+};
+export const CODEX_CAPABILITIES = {
+    streaming: true, permissions: true, questions: false, compaction: true, subagents: false,
+    steering: true, resume: true, usage: true, cost: false,
+    // Polyth branchSession needs canonical history; Codex thread/fork copies native history only.
+    fork: false as const,
+    mcp: true,
+    title: "native" as const,
+    attachments: { modalities: {
+        image: "native" as const,
+        url: "native" as const,
+        file: "unsupported" as const,
+        pdf: "unsupported" as const,
+        audio: "unsupported" as const,
+    } },
+    commands: { discovery: "unsupported" as const, invoke: "unsupported" as const },
+    contextOccupancy: "native" as const,
+};
 export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer): Promise<AgentRuntime> {
     const sid = context.sessionId ?? "";
     let nativeId = "";
@@ -67,6 +176,11 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
     let connected = true;
     let order = 0;
     let reconciliationOrdinal = 0;
+    let lastRateLimitResetAt: number | undefined;
+    let lastUsageCumulative: TokenUsage | undefined;
+    let lastUsageDigest = "";
+    let lastUsageTurnId = "";
+    let sessionTitle = "Codex session";
     const listeners = new Set<(id: string, event: RuntimeEvent) => void>();
     const observations = new Set<(id: string, event: RuntimeObservation) => void>();
     const lifecycle = new Set<Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]>();
@@ -92,20 +206,92 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
     rpc.onClose(() => { connected = false; for (const cb of lifecycle)
         cb({ type: "stream-disconnected", authorityId: endpoint.authorityId, generation: endpoint.generation }); });
     rpc.onNotification((method, params) => {
+        if (method === "account/rateLimits/updated") {
+            const primary = params.rateLimits?.primary;
+            const resetAt = timestampMs(primary?.resetsAt);
+            if (resetAt) lastRateLimitResetAt = resetAt;
+            return;
+        }
         if (params.threadId !== nativeId)
             return;
+        if (method === "thread/name/updated") {
+            const title = typeof params.threadName === "string" ? params.threadName.trim() : "";
+            if (title && !/^codex session$/i.test(title) && !/^new session/i.test(title)) {
+                sessionTitle = title;
+                emit({ type: "session/title-generated", title }, `${params.threadId}:title:${title}`);
+            }
+        }
+        if (method === "thread/tokenUsage/updated") {
+            const turnId = typeof params.turnId === "string" ? params.turnId : "";
+            const cumulative = usageBreakdown(params.tokenUsage?.last);
+            if (turnId && cumulative) {
+                if (turnId !== lastUsageTurnId) {
+                    lastUsageTurnId = turnId;
+                    lastUsageCumulative = undefined;
+                    lastUsageDigest = "";
+                }
+                const usageKey = `${turnId}:${digest(cumulative)}`;
+                if (usageKey !== lastUsageDigest) {
+                    lastUsageDigest = usageKey;
+                    const rebased = lastUsageCumulative !== undefined && cumulative.input < lastUsageCumulative.input;
+                    const tokens = rebased ? cumulative : deltaTokenUsage(lastUsageCumulative, cumulative);
+                    lastUsageCumulative = cumulative;
+                    emit({
+                        type: "usage/recorded",
+                        model: nativeModel ?? { providerID: "openai", modelID: "unknown" },
+                        tokens,
+                    }, `${usageKey}:usage`);
+                }
+            }
+            const totalTokens = params.tokenUsage?.total?.totalTokens;
+            const limitTokens = params.tokenUsage?.modelContextWindow;
+            if (typeof totalTokens === "number" || typeof limitTokens === "number") {
+                emit({
+                    type: "context/updated",
+                    source: "native",
+                    updatedAt: Date.now(),
+                    ...(typeof totalTokens === "number" ? { usedTokens: totalTokens } : {}),
+                    ...(typeof limitTokens === "number" ? { limitTokens } : {}),
+                    ...(typeof totalTokens === "number" && typeof limitTokens === "number"
+                        ? {
+                            remainingTokens: Math.max(0, limitTokens - totalTokens),
+                            fraction: limitTokens > 0 ? totalTokens / limitTokens : undefined,
+                        }
+                        : {}),
+                }, `${turnId || params.threadId}:context`);
+            }
+        }
         if (method === "turn/started") {
             activeTurn = params.turn.id;
             emit({ type: "turn/started", turnId: activeTurn, ...(nativeModel ? { model: nativeModel } : {}) }, activeTurn + ":start");
         }
         if (method === "turn/completed") {
             activeTurn = "";
+            lastUsageDigest = "";
+            lastUsageTurnId = "";
+            lastUsageCumulative = undefined;
             order++;
-            emit(stopped(params.turn), params.turn.id + ":stop");
+            const resetAt = lastRateLimitResetAt && lastRateLimitResetAt > Date.now()
+                ? lastRateLimitResetAt
+                : undefined;
+            const event = stopped(params.turn, resetAt);
+            if (event.type === "turn/stopped" && (event.code === "rate-limited" || event.code === "quota-exhausted")) {
+                lastRateLimitResetAt = undefined;
+            }
+            emit(event, params.turn.id + ":stop");
         }
         if (method === "item/agentMessage/delta")
             emit({ type: "assistant/chunk", partId: params.itemId, text: params.delta }, params.itemId + ":chunk:" + (++order));
         if (method === "item/completed" || (method === "item/started" && params.item?.type !== "agentMessage")) {
+            if (method === "item/completed" && params.item?.type === "contextCompaction") {
+                emit({ type: "session/compacted" }, `${params.item.id}:compacted`);
+                emit({
+                    type: "context/updated",
+                    source: "unknown",
+                    updatedAt: Date.now(),
+                    compaction: { active: false, lastAt: Date.now() },
+                }, `${params.item.id}:context`);
+            }
             const event = eventFor(params.item);
             if (event)
                 emit(event, params.item.id);
@@ -137,12 +323,51 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
                 nativeId = rpc.receipts[operationId]!;
                 return { backendSessionId: nativeId };
             }
-            const result = await rpc.request<{ thread: Thread; model?: string; modelProvider?: string }>("thread/start", { cwd: context.cwd, approvalPolicy: "on-request", sandbox: "workspace-write", ...(input.model ? { model: input.model.modelID, modelProvider: input.model.providerID } : {}) });
+            const staged = codexOverlays.peek(context, "codex");
+            const overlay = staged?.value;
+            const config = overlay?.mcpServers ? { mcp_servers: overlay.mcpServers } : undefined;
+            const launchTarget = provisioningTarget(context, "codex");
+            if (staged) {
+                captureCapabilityLaunch({
+                    target: launchTarget,
+                    desiredRevision: staged.desiredRevision,
+                });
+            }
+            let result: { thread: Thread; model?: string; modelProvider?: string };
+            try {
+                result = await rpc.request<{ thread: Thread; model?: string; modelProvider?: string }>("thread/start", {
+                    cwd: context.cwd,
+                    approvalPolicy: "on-request",
+                    sandbox: "workspace-write",
+                    ...(overlay?.developerInstructions ? { developerInstructions: overlay.developerInstructions } : {}),
+                    ...(config ? { config } : {}),
+                    ...(input.model ? { model: input.model.modelID, modelProvider: input.model.providerID } : {}),
+                });
+                if (typeof result.thread?.id !== "string" || !result.thread.id)
+                    throw new Error("Native thread receipt is invalid");
+            }
+            catch (error) {
+                if (staged) {
+                    releaseCapabilityLaunch({
+                        target: launchTarget,
+                        desiredRevision: staged.desiredRevision,
+                    });
+                }
+                throw error;
+            }
             const { thread } = result;
             if (result.model && result.modelProvider) nativeModel = { modelID: result.model, providerID: result.modelProvider };
-            if (typeof thread?.id !== "string" || !thread.id)
-                throw new Error("Native thread receipt is invalid");
             nativeId = thread.id;
+            if (staged) {
+                codexOverlays.consumeIfRevision(context, "codex", staged.desiredRevision);
+                acknowledgeCapabilityApplication({
+                    target: provisioningTarget(context, "codex"),
+                    desiredRevision: staged.desiredRevision,
+                    capabilityIds: staged.capabilityIds,
+                    outcome: "unverifiable",
+                    reason: "Codex thread/start accepted the overlay; native application is unverifiable",
+                });
+            }
             await rpc.receipt(operationId, nativeId);
             return { backendSessionId: nativeId };
         });
@@ -151,13 +376,29 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
     const start: NonNullable<AgentRuntime["startTurnOperation"]> = (request: CanonicalTurnRequest, operationId: string) => {
         if (request.model && request.model.providerID !== (nativeModel?.providerID ?? "openai"))
             return Promise.resolve({ kind: "rejected", code: "unsupported", message: "Select a model from the Codex native route" });
-        if (request.attachments?.length)
-            return Promise.resolve({ kind: "rejected", code: "unsupported", message: "Codex attachment translation is not implemented" });
+        const delivered = composeTurnPrompt(request.text, request.attachments);
+        const input: JsonObject[] = [{ type: "text", text: delivered.text }];
+        for (const image of delivered.images) {
+            input.push({ type: "localImage", path: image.localPath });
+        }
+        for (const ref of request.attachments ?? []) {
+            if (ref.kind === "browser-context") continue;
+            if ((ref.kind === "url" || /^https?:\/\//i.test(ref.url ?? "")) && ref.url) {
+                input.push({ type: "image", url: ref.url });
+                continue;
+            }
+            if (ref.mime?.startsWith("image/") && ref.path) {
+                input.push({ type: "localImage", path: isAbsolute(ref.path) ? ref.path : join(context.cwd, ref.path) });
+                continue;
+            }
+            const code = ref.mime?.startsWith("image/") ? "invalid-attachment" : "unsupported";
+            return Promise.resolve({ kind: "rejected", code, message: "Codex supports materialized image paths and HTTP image URLs only" });
+        }
         return mutate(operationId, async () => {
             if (request.model) nativeModel = request.model;
             const { turn } = await rpc.request<{
                 turn: Turn;
-            }>("turn/start", { threadId: nativeId, clientUserMessageId: operationId, input: [{ type: "text", text: request.text, text_elements: [] }], ...(request.model ? { model: request.model.modelID } : {}) });
+            }>("turn/start", { threadId: nativeId, clientUserMessageId: operationId, input, ...(request.model ? { model: request.model.modelID } : {}) });
             if (typeof turn?.id !== "string" || !turn.id)
                 throw new Error("Native turn receipt is invalid");
             activeTurn = turn.id;
@@ -165,14 +406,34 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
         });
     };
     const runtime: AgentRuntime = {
-        capabilities: async () => ({ streaming: true, permissions: true, questions: false, compaction: false, subagents: false, steering: false, resume: true, usage: false, cost: false, fork: false, mcp: true }),
+        capabilities: async () => CODEX_CAPABILITIES,
         models: async () => (await rpc.request<{
             data: Array<{
                 model: string;
                 displayName: string;
                 hidden?: boolean;
+                inputModalities?: string[];
+                supportedReasoningEfforts?: string[];
+                defaultReasoningEffort?: string;
             }>;
-        }>("model/list", {})).data.filter((m) => !m.hidden).map((m) => ({ providerID: nativeModel?.providerID ?? "openai", modelID: m.model, name: m.displayName, connected: true })),
+        }>("model/list", {})).data.filter((m) => !m.hidden).map((m) => ({
+            providerID: nativeModel?.providerID ?? "openai",
+            modelID: m.model,
+            name: m.displayName,
+            connected: true,
+            capabilities: [
+                ...(m.inputModalities ?? []).flatMap((modality) => {
+                    if (modality === "image") return ["input:image"];
+                    if (modality === "text") return ["input:text"];
+                    return [];
+                }),
+                "output:text",
+                "toolcall",
+            ],
+            ...(m.supportedReasoningEfforts?.length
+                ? { variants: m.supportedReasoningEfforts }
+                : {}),
+        })),
         agents: async () => [],
         async ensureSession(input) {
             if (!input.backendSessionId)
@@ -185,7 +446,23 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
             return nativeId;
         },
         createSessionOperation: create, resetSessionOperation: create,
-        sessions: async () => Object.entries(rpc.receipts).map(([operationId, id]) => ({ operationId, id, title: "Codex session", createdAt: 0, updatedAt: 0 })),
+        sessions: async () => {
+            if (nativeId) {
+                try {
+                    const thread = await read(nativeId);
+                    if (thread.name) sessionTitle = thread.name;
+                } catch {
+                    // Receipt-backed listing keeps the last known title when read fails.
+                }
+            }
+            return Object.entries(rpc.receipts).map(([operationId, id]) => ({
+                operationId,
+                id,
+                title: sessionTitle,
+                createdAt: 0,
+                updatedAt: 0,
+            }));
+        },
         history: async () => (await read(nativeId)).turns?.flatMap((turn) => (turn.items ?? []).flatMap((item) => item.type === "agentMessage" && item.text ? [{ role: "assistant" as const, text: item.text }] : [])) ?? [],
         startTurnOperation: start,
         async startTurn(request) { const outcome = await start(request, randomUUID()); if (outcome.kind !== "confirmed")
@@ -193,6 +470,31 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
         async abort() { if (activeTurn)
             await rpc.request("turn/interrupt", { threadId: nativeId, turnId: activeTurn }); },
         abortOperation: (_id, operationId) => mutate(operationId, async () => { await runtime.abort(sid); return {}; }),
+        async steer(_id, text) {
+            if (!activeTurn) return false;
+            await rpc.request("turn/steer", {
+                threadId: nativeId,
+                expectedTurnId: activeTurn,
+                input: [{ type: "text", text }],
+            });
+            return true;
+        },
+        steerOperation: (_id, text, operationId) => mutate(operationId, async () => {
+            if (!activeTurn) throw Object.assign(new Error("No active Codex turn"), { code: "runtime-rejected" });
+            await rpc.request("turn/steer", {
+                threadId: nativeId,
+                expectedTurnId: activeTurn,
+                input: [{ type: "text", text }],
+            });
+            return {};
+        }),
+        async compact() {
+            await rpc.request("thread/compact/start", { threadId: nativeId });
+        },
+        compactOperation: (_id, operationId) => mutate(operationId, async () => {
+            await rpc.request("thread/compact/start", { threadId: nativeId });
+            return {};
+        }),
         async replyPermission(_id, requestId, reply) { const request = pending.get(requestId); if (!request)
             throw Object.assign(new Error("permission is no longer pending"), { code: "not-found" }); pending.delete(requestId); request.resolve({ decision: reply === "reject" ? "decline" : reply === "always" ? "acceptForSession" : "accept" }); },
         replyPermissionOperation: (_id, requestId, reply, operationId) => mutate(operationId, async () => { await runtime.replyPermission(sid, requestId, reply); return {}; }),
@@ -214,7 +516,7 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
                         events.push({ entityKey: item.id, revision: digest(event), event });
                 }
                 if (turn.status !== "inProgress") {
-                    const event = stopped(turn);
+                    const event = stopped(turn, lastRateLimitResetAt);
                     events.push({ entityKey: turn.id + ":stop", revision: digest(event), event });
                 }
             }

@@ -21,6 +21,7 @@ test("context gauge measures the last request's prompt footprint, not the lifeti
     contextTokens: null,
     percent: null,
     level: "unknown",
+    quality: "unknown",
   });
   // 20k fresh + 40k cache-read + 4k cache-write = 64k resident of a 128k window.
   assert.deepEqual(contextGauge(withSample({ input: 20_000, cacheRead: 40_000, cacheWrite: 4_000 }), 128_000), {
@@ -29,6 +30,7 @@ test("context gauge measures the last request's prompt footprint, not the lifeti
     contextTokens: 128_000,
     percent: 50,
     level: "green",
+    quality: "estimated",
   });
 });
 
@@ -41,6 +43,7 @@ test("context gauge is empty until the first usage sample arrives", () => {
     contextTokens: 128_000,
     percent: 0,
     level: "green",
+    quality: "estimated",
   });
 });
 
@@ -50,6 +53,99 @@ test("context gauge clamps overflow and applies warning thresholds", () => {
   assert.equal(contextGauge(withSample({ input: 90 }), 100).level, "red");
   const overflow = contextGauge(withSample({ input: 250 }), 100);
   assert.equal(overflow.known && overflow.percent, 100);
+});
+
+test("explicit unknown occupancy never falls back to the last-turn heuristic", () => {
+  assert.deepEqual(
+    contextGauge(
+      withSample({ input: 80_000, cacheRead: 20_000 }),
+      200_000,
+      { source: "unknown" },
+    ),
+    {
+      known: false,
+      inputTokens: 0,
+      contextTokens: null,
+      percent: null,
+      level: "unknown",
+      quality: "unknown",
+    },
+  );
+});
+
+test("fraction-only native occupancy uses native quality without token counts", () => {
+  assert.deepEqual(
+    contextGauge(withSample({ input: 80_000 }), 200_000, { source: "native", fraction: 0.72 }),
+    {
+      known: true,
+      inputTokens: 0,
+      contextTokens: 200_000,
+      percent: 72,
+      level: "yellow",
+      quality: "native",
+    },
+  );
+});
+
+test("estimated vs native occupancy quality distinguishes heuristic from provider counts", () => {
+  assert.deepEqual(
+    contextGauge(withSample({ input: 50_000 }), 100_000, { source: "estimated", usedTokens: 50_000, limitTokens: 100_000 }),
+    {
+      known: true,
+      inputTokens: 50_000,
+      contextTokens: 100_000,
+      percent: 50,
+      level: "green",
+      quality: "estimated",
+    },
+  );
+  assert.deepEqual(
+    contextGauge(withSample({ input: 50_000 }), 100_000, { source: "native", usedTokens: 50_000, limitTokens: 100_000 }),
+    {
+      known: true,
+      inputTokens: 50_000,
+      contextTokens: 100_000,
+      percent: 50,
+      level: "green",
+      quality: "native",
+    },
+  );
+});
+
+test("incomplete native occupancy does not fall back to last-turn usage", () => {
+  assert.deepEqual(
+    contextGauge(
+      withSample({ input: 80_000, cacheRead: 20_000 }),
+      200_000,
+      { source: "native", limitTokens: 200_000 },
+    ),
+    {
+      known: false,
+      inputTokens: 0,
+      contextTokens: 200_000,
+      percent: null,
+      level: "unknown",
+      quality: "unknown",
+    },
+  );
+});
+
+test("unknown occupancy with fraction may show percent but not last-turn heuristic tokens", () => {
+  assert.deepEqual(
+    contextGauge(
+      withSample({ input: 80_000, cacheRead: 20_000 }),
+      200_000,
+      { source: "unknown", fraction: 0.72 },
+    ),
+    {
+      known: false,
+      inputTokens: 0,
+      contextTokens: null,
+      percent: 72,
+      level: "fraction",
+      quality: "fraction",
+    },
+  );
 });
 
 test("usage replay tracks the latest sample for context, and the running sum for lifetime totals", () => {

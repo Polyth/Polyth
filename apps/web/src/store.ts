@@ -6,6 +6,11 @@ import type {
   EditorLocation,
   ModelDescriptor,
   Project,
+  RuntimeCapabilities,
+  RuntimeCommandDescriptor,
+  ContextWindowState,
+  AttachmentModality,
+  FeatureSupport,
   RuntimeUnavailableReport,
   SessionEvent,
   SessionProjection,
@@ -152,6 +157,13 @@ export interface AppState {
   editorLocation: EditorLocation | null;
   /** File requested by a changed-file jump into the Changes rail. */
   gitDiffPath: string | null;
+  /** Server-resolved runtime feature surface keyed by session id. */
+  runtimeFeatures: Record<string, {
+    capabilities: RuntimeCapabilities;
+    commands: RuntimeCommandDescriptor[];
+    contextWindow?: ContextWindowState;
+    attachmentSupport: Partial<Record<AttachmentModality, FeatureSupport>>;
+  } | undefined>;
 }
 
 let state: AppState = {
@@ -180,6 +192,7 @@ let state: AppState = {
   editorFile: null,
   editorLocation: null,
   gitDiffPath: null,
+  runtimeFeatures: {},
 };
 
 const listeners = new Set<() => void>();
@@ -349,7 +362,15 @@ export function setSessions(projectId: string, sessions: SessionProjection[]): v
     return cur ? preserveTitle(cur, p) : p;
   });
   const others = state.sessions.filter((s) => s.projectId !== projectId);
-  set({ sessions: others.length === 0 ? merged : [...others, ...merged] });
+  const nextSessions = others.length === 0 ? merged : [...others, ...merged];
+  set({ sessions: nextSessions });
+  const live = new Set(nextSessions.map((session) => session.id));
+  const stale = Object.keys(state.runtimeFeatures).filter((id) => !live.has(id));
+  if (stale.length > 0) {
+    const nextFeatures = { ...state.runtimeFeatures };
+    for (const id of stale) delete nextFeatures[id];
+    set({ runtimeFeatures: nextFeatures });
+  }
 }
 export function setModels(models: ModelDescriptor[]): void {
   // A usable catalog is proof the runtime came back; a stale reason next to a
@@ -952,4 +973,21 @@ export function seedSessionCache(p: SessionProjection): void {
     ? state.events
     : { ...state.events, [p.id]: [] };
   set({ sessions, events });
+}
+
+export function setRuntimeFeatures(
+  sessionId: string,
+  features: AppState["runtimeFeatures"][string],
+): void {
+  set({ runtimeFeatures: { ...state.runtimeFeatures, [sessionId]: features } });
+}
+
+export function clearRuntimeFeatures(sessionId?: string): void {
+  if (!sessionId) {
+    set({ runtimeFeatures: {} });
+    return;
+  }
+  const next = { ...state.runtimeFeatures };
+  delete next[sessionId];
+  set({ runtimeFeatures: next });
 }

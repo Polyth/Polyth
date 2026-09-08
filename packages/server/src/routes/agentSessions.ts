@@ -18,6 +18,7 @@ import type {
 } from "@polyth/contracts";
 import { deriveMessages, planRuntimeEpochRecovery, sessionDebugObservability } from "@polyth/session";
 import type { SpaceServicesFor } from "../spaceScope.ts";
+import { parseTurnCommand } from "../turnCommand.ts";
 
 const SESSION_STATUSES = new Set([
   "idle", "working", "waiting", "finished", "failed", "archived",
@@ -124,6 +125,14 @@ const modelInput = (value: unknown): ModelRef | undefined => {
   return { providerID: raw.providerID, modelID: raw.modelID };
 };
 
+const commandInput = (value: unknown): UserTurnInput["command"] | undefined => {
+  try {
+    return parseTurnCommand(value);
+  } catch (error) {
+    return invalid((error as Error).message);
+  }
+};
+
 const messageInput = (body: Record<string, unknown>): UserTurnInput => {
   if (typeof body.text !== "string") return invalid("text must be a string");
   if (body.attachments !== undefined && !Array.isArray(body.attachments)) {
@@ -140,8 +149,10 @@ const messageInput = (body: Record<string, unknown>): UserTurnInput => {
   }
   const model = modelInput(body.model);
   const agent = optionalString(body, "agent");
+  const command = commandInput(body.command);
   return {
     text: body.text,
+    ...(command ? { command } : {}),
     ...(body.autoTitle === true ? { autoTitle: true } : {}),
     ...(Array.isArray(body.attachments) ? { attachments: body.attachments as never } : {}),
     ...(model ? { model } : {}),

@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { createStore } from "@polyth/session";
 import type {
   AgentRuntime, Project, ProjectService, RuntimeEndpoint, RuntimeEvent,
-  RuntimeSessionBinding, RuntimeSnapshot,
+  RuntimeObservation, RuntimeSessionBinding, RuntimeSnapshot,
 } from "@polyth/contracts";
 import { createSessionService, type Broadcaster } from "../src/sessions.ts";
 import type { PermissionService } from "@polyth/permissions";
@@ -20,6 +20,7 @@ const flush = () => new Promise((r) => setTimeout(r, 20));
 
 function harness(existingDbPath?: string) {
   const listeners = new Set<(sessionId: string, ev: RuntimeEvent) => void>();
+  const observers = new Set<(sessionId: string, observation: RuntimeObservation) => void>();
   const startedTexts: string[] = [];
   const emit = (sessionId: string, ev: RuntimeEvent) => {
     for (const l of listeners) l(sessionId, ev);
@@ -67,6 +68,7 @@ function harness(existingDbPath?: string) {
       events: [],
     }),
     onEvent(cb) { listeners.add(cb); return { dispose: () => listeners.delete(cb) }; },
+    onObservation(cb) { observers.add(cb); return { dispose: () => observers.delete(cb) }; },
     dispose: async () => {},
   };
 
@@ -93,7 +95,25 @@ function harness(existingDbPath?: string) {
     store, projects, permissions, broadcast, queue: store,
     runtimes: { forProject: async () => rt },
   });
-  return { sessions, store, emit, startedTexts, dbPath };
+  const observe = (sessionId: string, event: RuntimeEvent, ordinal: number) => {
+    const observation: RuntimeObservation = {
+      channel: "sse",
+      entityKey: `${event.type}:${"turnId" in event ? event.turnId : "x"}`,
+      identity: {
+        authorityId: endpoint.authorityId,
+        generation: endpoint.generation,
+        location: endpoint.location,
+        backendSessionId: `be_${sessionId}`,
+        artifactKind: "turn",
+        entityId: "turnId" in event && event.turnId ? String(event.turnId) : event.type,
+        revision: `retry-${Date.now()}-${Math.random()}`,
+      },
+      reconciliationOrdinal: ordinal,
+      events: [event],
+    };
+    for (const cb of observers) cb(sessionId, observation);
+  };
+  return { sessions, store, emit, observe, startedTexts, dbPath, endpoint };
 }
 
 const LIMIT_STOP: Extract<RuntimeEvent, { type: "turn/stopped" }> = {
@@ -124,6 +144,29 @@ test("a rate-limit stop plans a resume on the projection and the terminal event"
   const retry = (stop!.data as { retry?: { resumeAt?: number; attempt?: number } }).retry;
   assert.equal(retry?.attempt, 1);
   assert.ok((retry?.resumeAt ?? 0) > Date.now());
+  await h.store.close();
+});
+
+test("observation-path rate-limit stop still plans a durable resume", async () => {
+  const h = harness();
+  const { id } = await h.sessions.create({ projectId: "p1", title: "T" });
+  await h.sessions.send(id, { text: "keep going" });
+  await flush();
+  const reconciliation = await h.store.reconciliation(id);
+  assert.ok(reconciliation, "wired session should have a reconciliation ordinal");
+  h.observe(id, LIMIT_STOP, reconciliation.ordinal);
+  const started = Date.now();
+  while (!(await h.store.projection(id))?.resume) {
+    if (Date.now() - started > 2000) throw new Error("timed out waiting for observation resume");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const proj = await h.store.projection(id);
+  assert.equal(proj?.status, "failed");
+  assert.equal(proj!.resume!.scope, "rate");
+  const stop = (await h.store.events(id)).findLast((event) => event.type === "turn/stopped");
+  const retry = (stop!.data as { retry?: { resumeAt?: number; attempt?: number } }).retry;
+  assert.equal(retry?.attempt, 1);
+  assert.ok((retry?.resumeAt ?? 0) > Date.now() - 1000);
   await h.store.close();
 });
 
@@ -163,6 +206,23 @@ test("resumeNow re-sends the last user message and switches the session model", 
   const um = (await h.store.events(id)).filter((e) => e.type === "user/message");
   assert.equal(um.length, 2);
   assert.equal((um[1]!.data as { autoResume?: boolean }).autoResume, true);
+  await h.store.close();
+});
+
+test("a new user send clears the pending resume before admitting the superseding turn", async () => {
+  const h = harness();
+  const { id } = await h.sessions.create({ projectId: "p1", title: "T" });
+  await h.sessions.send(id, { text: "original" });
+  await flush();
+  h.emit(id, LIMIT_STOP);
+  await flush();
+  assert.ok((await h.store.projection(id))?.resume);
+
+  await h.sessions.send(id, { text: "superseding turn" });
+  await flush();
+  assert.deepEqual(h.startedTexts, ["original", "superseding turn"]);
+  assert.equal((await h.store.projection(id))?.resume, undefined);
+  await assert.rejects(() => h.sessions.resumeNow!(id), /no pending resume|no-resume/);
   await h.store.close();
 });
 

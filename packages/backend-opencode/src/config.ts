@@ -306,6 +306,26 @@ const patchedMcpEntry = (existingRaw: unknown, e: McpApplyEntry): Record<string,
   };
 };
 
+export function projectManagedMcp(
+  existing: Record<string, unknown>,
+  entries: McpApplyBatch,
+): Record<string, unknown> {
+  const blockRaw = existing.mcp;
+  const block: Record<string, unknown> =
+    blockRaw && typeof blockRaw === "object" && !Array.isArray(blockRaw)
+      ? { ...(blockRaw as Record<string, unknown>) }
+      : {};
+  const desiredNames = new Set(entries.map((e) => e.name));
+  for (const name of entries.managedNames ?? []) {
+    if (!desiredNames.has(name)) delete block[name];
+  }
+  for (const e of entries) block[e.name] = patchedMcpEntry(block[e.name], e);
+  const next: Record<string, unknown> = { ...existing };
+  if (Object.keys(block).length > 0) next.mcp = block;
+  else delete next.mcp;
+  return next;
+};
+
 export function createConfigApplier(opts: ConfigApplierOptions = {}): BackendConfigApplier {
   const dir = opts.configDir ?? defaultConfigDir();
   mkdirSync(dir, { recursive: true });
@@ -624,22 +644,7 @@ export function createConfigApplier(opts: ConfigApplierOptions = {}): BackendCon
     async applyMcp(entries: McpApplyBatch): Promise<void> {
       assertWritable("applyMcp");
       const existing = await readExisting();
-      const blockRaw = existing.mcp;
-      const block: Record<string, unknown> =
-        blockRaw && typeof blockRaw === "object" && !Array.isArray(blockRaw)
-          ? { ...(blockRaw as Record<string, unknown>) }
-          : {};
-
-      const desiredNames = new Set(entries.map((e) => e.name));
-      for (const name of entries.managedNames ?? []) {
-        if (!desiredNames.has(name)) delete block[name];
-      }
-      for (const e of entries) block[e.name] = patchedMcpEntry(block[e.name], e);
-
-      const next: Record<string, unknown> = { ...existing };
-      if (Object.keys(block).length > 0) next.mcp = block;
-      else delete next.mcp;
-      await writeConfigIfChanged(existing, next);
+      await writeConfigIfChanged(existing, projectManagedMcp(existing, entries));
     },
   };
 }

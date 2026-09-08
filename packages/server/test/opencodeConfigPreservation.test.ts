@@ -1,21 +1,24 @@
 // P1 config preservation (Agent H), server side: boot-time discovery of
 // existing OpenCode configuration is READ-ONLY (an empty Polyth MCP store
 // never calls applyMcp and never rewrites opencode.json), managed MCP edits
-// patch only owned names/fields, and a read-only RuntimeConfigAuthority makes
-// every store mutation fail closed with a clean rollback.
+// patch only owned names/fields through the OpenCode provisioner, and a
+// read-only RuntimeConfigAuthority makes the projector fail without rolling
+// canonical MCP state back.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createConfigApplier } from "@polyth/backend-opencode";
-import { createMcpConfigService, mcpEntriesFromBackendConfig, type McpApplier } from "../src/mcp.ts";
+import { createConfigApplier, createOpenCodeProvisioner, peekOpenCodeLaunchOverlay } from "@polyth/backend-opencode";
+import { createCapabilityContributionRegistry } from "@polyth/harness-runtime";
+import { createMcpConfigService, mcpEntriesFromBackendConfig } from "../src/mcp.ts";
+import { createBehaviorService } from "../src/behavior.ts";
 import { createModelVisibilityService } from "../src/modelVisibility.ts";
+import { createCapabilityProvisioningController } from "../src/capabilityProvisioning.ts";
+import type { AgentRuntime, HarnessProvider, SpaceContext } from "@polyth/contracts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "polyth-cfg-srv-"));
 
-// Unknown-fields regression fixture (required): unrelated provider metadata
-// that must survive every MCP/visibility operation the server performs.
 const PROVIDER_FIXTURE = {
   custom: {
     npm: "future-provider",
@@ -59,46 +62,93 @@ const backendDocument = (): Record<string, unknown> => structuredClone({
   plugin: ["keep-plugin"],
 });
 
+const contextOf = (space: SpaceContext, cwd: string) => ({
+  spaceId: space.spaceId,
+  projectId: "p",
+  cwd,
+  space,
+});
+
 interface Harness {
   configFile: string;
+  projectConfig: string;
   originalBytes: string;
   applier: ReturnType<typeof createConfigApplier>;
   applyMcpCalls: number;
   mcp: ReturnType<typeof createMcpConfigService>;
+  space: SpaceContext;
+  project: () => Promise<void>;
 }
 
-/** Mirrors the boot flow in packages/server/src/index.ts: build the applier,
- * seed visibility, then adopt existing backend MCP entries into an empty
- * Polyth store via mcp.create. */
-const bootSeed = async (): Promise<Harness> => {
+const bootSeed = async (authority?: { kind: "read-only" } | { kind: "writable"; targetId: string }): Promise<Harness> => {
   const configDir = tmp();
   const dataDir = tmp();
+  const projectDir = tmp();
+  const space: SpaceContext = {
+    spaceId: "space",
+    spaceSlug: "space",
+    userId: "usr",
+    role: "owner",
+    deployment: "local-trusted",
+    storageDir: dataDir,
+  };
   const configFile = join(configDir, "opencode.json");
   writeFileSync(configFile, `${JSON.stringify(backendDocument(), null, 2)}\n`);
   const originalBytes = readFileSync(configFile, "utf8");
 
-  const applier = createConfigApplier({ configDir });
-  const harness: Harness = { configFile, originalBytes, applier, applyMcpCalls: 0, mcp: undefined as never };
-  const countingApplier: McpApplier & { readConfig(): Promise<Record<string, unknown>> } = {
-    applyMcp: (entries) => {
+  const applier = createConfigApplier({ configDir, ...(authority ? { authority } : {}) });
+  const harness: Harness = {
+    configFile,
+    projectConfig: join(projectDir, ".opencode", "opencode.json"),
+    originalBytes,
+    applier,
+    applyMcpCalls: 0,
+    mcp: undefined as never,
+    space,
+    project: async () => {},
+  };
+  const counting = {
+    ...applier,
+    applyMcp: (entries: Parameters<typeof applier.applyMcp>[0]) => {
       harness.applyMcpCalls += 1;
       return applier.applyMcp(entries);
     },
-    readConfig: () => applier.readConfig(),
   };
 
   const visibility = createModelVisibilityService({
     file: join(dataDir, "model-visibility.json"),
-    applier: { readConfig: countingApplier.readConfig, applyProviderVisibility: (v) => applier.applyProviderVisibility(v) },
+    applier: { readConfig: () => counting.readConfig(), applyProviderVisibility: (v) => applier.applyProviderVisibility(v) },
   });
   await visibility.seed();
 
-  const mcp = createMcpConfigService({ file: join(dataDir, "mcp.json"), applier: countingApplier });
-  assert.equal(mcp.list().length, 0, "store starts empty");
-  for (const entry of mcpEntriesFromBackendConfig(await countingApplier.readConfig())) {
-    await mcp.create(entry);
+  const mcp = createMcpConfigService({ dataDir, deployment: "local-trusted", defaultSpaceId: space.spaceId });
+  assert.equal(mcp.list(space).length, 0, "store starts empty");
+  for (const entry of mcpEntriesFromBackendConfig(await counting.readConfig())) {
+    await mcp.create(space, entry);
   }
+  const behavior = createBehaviorService({ file: join(dataDir, "behavior.md") });
+  const provider: HarnessProvider = {
+    descriptor: { id: "opencode", name: "OpenCode", priority: 0, integration: "test" },
+    probe: async () => ({ harnessId: "opencode", installed: true, authenticated: true, healthy: true }),
+    createRuntime: async () => ({ dispose: async () => {} }) as AgentRuntime,
+    provisioner: createOpenCodeProvisioner(counting),
+  };
+  const controller = createCapabilityProvisioningController({
+    contributions: createCapabilityContributionRegistry(),
+    harnesses: {
+      register: () => ({ dispose() {} }),
+      providers: () => [provider],
+      probe: async () => [],
+      resolve: async () => provider,
+    },
+    behavior,
+    mcp,
+    file: join(dataDir, "capability-status.json"),
+  });
   harness.mcp = mcp;
+  harness.project = async () => {
+    await controller.reconcile(provider, contextOf(space, projectDir));
+  };
   return harness;
 };
 
@@ -107,66 +157,72 @@ test("empty-store discovery performs zero backend writes and zero applyMcp calls
   assert.equal(h.applyMcpCalls, 0, "discovery never calls applyMcp");
   assert.equal(readFileSync(h.configFile, "utf8"), h.originalBytes, "opencode.json bytes preserved");
   assert.deepEqual(
-    h.mcp.list().map((s) => `${s.name}:${s.enabled}`).sort(),
+    h.mcp.list(h.space).map((s) => `${s.name}:${s.enabled}`).sort(),
     ["ctx:true", "web:false"],
     "supported entries adopted, unsupported ones left alone",
   );
-  // Secrets from the imported config are stored write-only, never in a DTO
-  // and never in the structure file.
-  const serialized = JSON.stringify(h.mcp.list());
+  const serialized = JSON.stringify(h.mcp.list(h.space));
   assert.doesNotMatch(serialized, /secret-env-value|secret-token/);
 });
 
 test("managed MCP edits preserve unsupported entries and unknown fields", async () => {
   const h = await bootSeed();
-  const ctx = h.mcp.list().find((s) => s.name === "ctx")!;
-  await h.mcp.update(ctx.id, {
+  const ctx = h.mcp.list(h.space).find((s) => s.name === "ctx")!;
+  await h.mcp.update(h.space, ctx.id, {
     transport: { kind: "stdio", command: "ctx", args: ["--stdio", "--v2"], envKeys: ["KEY"] },
   }, ctx.revision);
-  assert.equal(h.applyMcpCalls, 1, "the user edit is the first backend apply");
+  await h.project();
+  assert.equal(h.applyMcpCalls, 0, "Space MCP is not written through the persistent applier");
 
-  const cfg = JSON.parse(readFileSync(h.configFile, "utf8")) as Record<string, unknown>;
-  const mcpBlock = cfg.mcp as Record<string, Record<string, unknown>>;
-  // Edited entry: owned fields updated, unknown fields intact, secret restored
-  // from the write-only store.
-  const ctxApplied = mcpBlock.ctx!;
-  assert.deepEqual(ctxApplied.command, ["ctx", "--stdio", "--v2"]);
-  assert.equal(ctxApplied.timeout, 30);
-  assert.deepEqual(ctxApplied.futureMcpField, { keep: "me" });
-  assert.deepEqual(ctxApplied.environment, { KEY: "secret-env-value" });
-  // Unsupported entry untouched.
-  assert.deepEqual(mcpBlock["sse-thing"], { type: "sse", url: "https://sse.example", futureShape: { v: 2 } });
-  // Disabled managed entry is absent from the applied config (F10)…
-  assert.equal("web" in mcpBlock, false);
-  // …and everything unowned elsewhere in the document survives verbatim.
-  assert.deepEqual(cfg.provider, structuredClone(PROVIDER_FIXTURE));
-  assert.deepEqual(cfg.disabled_providers, ["azure"]);
-  assert.deepEqual(cfg.plugin, ["keep-plugin"]);
-  assert.equal(cfg.theme, "dark");
+  const global = JSON.parse(readFileSync(h.configFile, "utf8")) as Record<string, unknown>;
+  const globalMcp = global.mcp as Record<string, Record<string, unknown>>;
+  assert.equal("ctx" in globalMcp, true, "user global MCP is left in place");
+  assert.deepEqual(globalMcp["sse-thing"], { type: "sse", url: "https://sse.example", futureShape: { v: 2 } });
+  assert.deepEqual(global.provider, structuredClone(PROVIDER_FIXTURE));
+  assert.deepEqual(global.disabled_providers, ["azure"]);
+  assert.deepEqual(global.plugin, ["keep-plugin"]);
+  assert.equal(global.theme, "dark");
+  assert.equal(existsSync(h.projectConfig), false, "project OpenCode config is never created");
 
-  // Re-enabling restores the entry including its retained unknown fields.
-  const web = h.mcp.list().find((s) => s.name === "web")!;
-  await h.mcp.update(web.id, { enabled: true }, web.revision);
-  const after = (JSON.parse(readFileSync(h.configFile, "utf8")) as Record<string, unknown>)
-    .mcp as Record<string, Record<string, unknown>>;
-  assert.deepEqual(after.web, {
-    notes: "disabled but present",
-    type: "remote",
-    url: "https://x.example/mcp",
-    enabled: true,
-    headers: { Authorization: "Bearer secret-token" },
+  const overlay = peekOpenCodeLaunchOverlay({
+    cwd: h.projectConfig.replace(/\/\.opencode\/opencode\.json$/, ""),
+    spaceId: h.space.spaceId,
+    projectId: "p",
   });
+  assert.ok(overlay);
+  assert.match(overlay.configContent, /"ctx"/);
+  assert.doesNotMatch(overlay.configContent, /secret-env-value|secret-token/);
+
+  const web = h.mcp.list(h.space).find((s) => s.name === "web")!;
+  await h.mcp.update(h.space, web.id, { enabled: true }, web.revision);
+  await h.project();
+  const after = peekOpenCodeLaunchOverlay({
+    cwd: h.projectConfig.replace(/\/\.opencode\/opencode\.json$/, ""),
+    spaceId: h.space.spaceId,
+    projectId: "p",
+  });
+  assert.match(after!.configContent, /"web"/);
 });
 
-test("removing a managed entry deletes only that entry from the backend config", async () => {
+test("removing a managed entry does not delete user OpenCode config by name", async () => {
   const h = await bootSeed();
-  const ctx = h.mcp.list().find((s) => s.name === "ctx")!;
-  assert.equal(await h.mcp.remove(ctx.id), true);
+  const ctx = h.mcp.list(h.space).find((s) => s.name === "ctx")!;
+  assert.equal(await h.mcp.remove(h.space, ctx.id), true);
+  await h.project();
 
-  const mcpBlock = (JSON.parse(readFileSync(h.configFile, "utf8")) as Record<string, unknown>)
+  const globalMcp = (JSON.parse(readFileSync(h.configFile, "utf8")) as Record<string, unknown>)
     .mcp as Record<string, Record<string, unknown>>;
-  assert.equal("ctx" in mcpBlock, false, "removed managed entry gone");
-  assert.deepEqual(mcpBlock["sse-thing"], { type: "sse", url: "https://sse.example", futureShape: { v: 2 } });
+  assert.equal("ctx" in globalMcp, true, "user global MCP remains; tombstones omit shadow entries from the private overlay");
+  assert.deepEqual(globalMcp["sse-thing"], { type: "sse", url: "https://sse.example", futureShape: { v: 2 } });
+  assert.equal(existsSync(h.projectConfig), false);
+  const overlay = peekOpenCodeLaunchOverlay({
+    cwd: h.projectConfig.replace(/\/\.opencode\/opencode\.json$/, ""),
+    spaceId: h.space.spaceId,
+    projectId: "p",
+  });
+  assert.ok(overlay, "empty overlay still admits the current desired bundle");
+  assert.deepEqual(overlay.capabilityIds, []);
+  assert.equal(overlay.configContent, "");
 });
 
 test("model-visibility seed is read-only and toggles preserve provider metadata", async () => {
@@ -194,39 +250,14 @@ test("model-visibility seed is read-only and toggles preserve provider metadata"
   assert.deepEqual(unowned, structuredClone(PROVIDER_FIXTURE.custom), "fixture metadata untouched by the toggle");
 });
 
-test("read-only config authority refuses writes; store mutations roll back cleanly", async () => {
-  const configDir = tmp();
-  const dataDir = tmp();
-  const configFile = join(configDir, "opencode.json");
-  writeFileSync(configFile, `${JSON.stringify(backendDocument(), null, 2)}\n`);
-  const originalBytes = readFileSync(configFile, "utf8");
+test("read-only config authority refuses writes; canonical MCP is kept", async () => {
+  const h = await bootSeed({ kind: "read-only" });
+  assert.equal(h.mcp.list(h.space).length, 2, "read-only discovery still adopts entries");
+  assert.equal(readFileSync(h.configFile, "utf8"), h.originalBytes);
 
-  // Seed with a read-only-authority applier: discovery must still succeed
-  // because it never writes.
-  const readOnly = createConfigApplier({ configDir, authority: { kind: "read-only" } });
-  const mcp = createMcpConfigService({ file: join(dataDir, "mcp.json"), applier: readOnly });
-  for (const entry of mcpEntriesFromBackendConfig(await readOnly.readConfig())) {
-    await mcp.create(entry);
-  }
-  assert.equal(mcp.list().length, 2, "read-only discovery still adopts entries");
-  assert.equal(readFileSync(configFile, "utf8"), originalBytes);
-
-  // A user mutation must fail closed and roll the store back.
-  const ctx = mcp.list().find((s) => s.name === "ctx")!;
-  await assert.rejects(
-    () => mcp.update(ctx.id, { enabled: false }, ctx.revision),
-    /rolled back/,
-  );
-  assert.equal(mcp.list().find((s) => s.name === "ctx")!.enabled, true, "store state rolled back");
-  assert.equal(readFileSync(configFile, "utf8"), originalBytes, "backend config untouched");
-
-  // Visibility toggles fail closed the same way.
-  const visibility = createModelVisibilityService({
-    file: join(dataDir, "model-visibility.json"),
-    applier: { readConfig: () => readOnly.readConfig(), applyProviderVisibility: (v) => readOnly.applyProviderVisibility(v) },
-  });
-  await visibility.seed();
-  await assert.rejects(() => visibility.setProviderEnabled("custom", false), /rolled back/);
-  assert.deepEqual(visibility.state().disabledProviders, ["azure"], "visibility state rolled back");
-  assert.equal(readFileSync(configFile, "utf8"), originalBytes);
+  const ctx = h.mcp.list(h.space).find((s) => s.name === "ctx")!;
+  await h.mcp.update(h.space, ctx.id, { enabled: false }, ctx.revision);
+  assert.equal(h.mcp.list(h.space).find((s) => s.name === "ctx")!.enabled, false, "canonical desired state is kept");
+  await h.project();
+  assert.equal(readFileSync(h.configFile, "utf8"), h.originalBytes, "backend config untouched");
 });

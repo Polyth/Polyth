@@ -44,6 +44,10 @@
     ],
     "extraResources": [
       {
+        "from": "../../packages/server/src/agentToolsMcp.mjs",
+        "to": "server/agentToolsMcp.mjs"
+      },
+      {
         "from": "../web/dist",
         "to": "web",
         "filter": [

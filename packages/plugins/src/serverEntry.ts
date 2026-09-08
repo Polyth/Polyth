@@ -47,6 +47,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           return safe?.putOpaque ? safe : undefined;
         },
       });
+      host.services.provide(serverServiceKey<PluginRegistry>("plugins.managed"), registry);
       const handlers = [
         pluginAssetRoutes({ plugins: registry }),
         opencodePluginRoutes(host.services.require(

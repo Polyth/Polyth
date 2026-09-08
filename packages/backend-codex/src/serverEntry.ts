@@ -4,7 +4,8 @@ import { promisify } from "node:util";
 import type { HarnessContext, HarnessProvider, HarnessRegistry } from "@polyth/contracts";
 import { createStdioRpc } from "@polyth/harness-runtime";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
-import { createCodexRuntime, type Thread } from "./index.ts";
+import { createCodexRuntime, CODEX_CAPABILITIES, type Thread } from "./index.ts";
+import { createCodexProvisioner } from "./provisioner.ts";
 const exec = promisify(execFile);
 export async function connectCodex(context: HarnessContext, stateFile?: string) {
     const rpc = await createStdioRpc({ command: process.env.POLYTH_CODEX_BIN ?? "codex", args: ["app-server"], cwd: context.cwd, stateFile, stableAuthority: true });
@@ -22,6 +23,7 @@ export default function registerPackage(host: ServerPackageHost) {
     const registry = host.services.require(serverServiceKey<HarnessRegistry>("harnesses"));
     const provider: HarnessProvider = {
         descriptor: { id: "codex", name: "Codex", integration: "App Server", priority: 10, setupUrl: "https://developers.openai.com/codex/cli/", installCommand: "npm install -g @openai/codex", signInCommand: "codex login" },
+        staticFeatures: CODEX_CAPABILITIES,
         async probe(context) {
             if (context.remote || process.platform !== "linux")
                 return { harnessId: "codex", installed: false, authenticated: "unknown", healthy: false, message: "This adapter currently supports local Linux runtimes" };
@@ -55,6 +57,7 @@ export default function registerPackage(host: ServerPackageHost) {
             const stateFile = host.spaceStorage(context.space).path(`runtime/codex/${key}.json`);
             return createCodexRuntime(context, await connectCodex(context, stateFile));
         },
+        provisioner: createCodexProvisioner(),
         source: {
             async list(context) {
                 const rpc = await connectCodex(context);
