@@ -836,6 +836,12 @@ export function createStore(dbPath: string): Store {
       sqliteExec("ALTER TABLE labels ADD COLUMN space_id TEXT");
       sqliteExec("CREATE INDEX IF NOT EXISTS idx_labels_space ON labels (space_id, position)");
     },
+    // v12: authoritative profile routes are harness-qualified. Existing rows
+    // remain NULL because their origin cannot be proven from provider/model
+    // strings alone; new exact profiles always write a harness id.
+    () => {
+      sqliteExec("ALTER TABLE agent_profiles ADD COLUMN harness_id TEXT");
+    },
   ];
   for (let v = getVersion(); v < MIGRATIONS.length; v++) {
     transaction(() => {
@@ -3260,6 +3266,7 @@ export function createStore(dbPath: string): Store {
 
   interface ProfileRow {
     id: string; name: string; provider_id: string; model_id: string;
+    harness_id: string | null;
     agent: string | null; mode: string | null; thinking: string | null;
     features: string; notes: string | null; icon: string | null; color: string | null;
     revision: number; created_at: number; updated_at: number;
@@ -3267,6 +3274,7 @@ export function createStore(dbPath: string): Store {
   const rowToProfile = (r: ProfileRow): AgentProfile => ({
     id: r.id,
     name: r.name,
+    ...(r.harness_id ? { harnessId: r.harness_id } : {}),
     providerID: r.provider_id,
     modelID: r.model_id,
     ...(r.agent ? { agent: r.agent } : {}),
@@ -3312,10 +3320,10 @@ export function createStore(dbPath: string): Store {
     const id = randomUUID();
     const now = Date.now();
     sqlitePrepare(
-      `INSERT INTO agent_profiles (id, name, provider_id, model_id, agent, mode, thinking, features, notes, icon, color, revision, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+      `INSERT INTO agent_profiles (id, name, harness_id, provider_id, model_id, agent, mode, thinking, features, notes, icon, color, revision, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
     ).run(
-      id, name, input.providerID, input.modelID,
+      id, name, input.harnessId ?? "opencode", input.providerID, input.modelID,
       input.agent ?? null, input.mode ?? null, input.thinking ?? null,
       JSON.stringify(input.features ?? {}), input.notes ?? null, input.icon ?? null, input.color ?? null,
       now, now,
@@ -3335,10 +3343,11 @@ export function createStore(dbPath: string): Store {
       const name = patch.name !== undefined ? patch.name.trim() : row.name;
       if (!name || name.length > 80) throw Object.assign(new Error("profile name required (≤80 chars)"), { code: "invalid-input" });
       sqlitePrepare(
-        `UPDATE agent_profiles SET name = ?, provider_id = ?, model_id = ?, agent = ?, mode = ?, thinking = ?,
+        `UPDATE agent_profiles SET name = ?, harness_id = ?, provider_id = ?, model_id = ?, agent = ?, mode = ?, thinking = ?,
          features = ?, notes = ?, icon = ?, color = ?, revision = revision + 1, updated_at = ? WHERE id = ?`,
       ).run(
         name,
+        patch.harnessId ?? row.harness_id,
         patch.providerID ?? row.provider_id,
         patch.modelID ?? row.model_id,
         patch.agent !== undefined ? patch.agent || null : row.agent,

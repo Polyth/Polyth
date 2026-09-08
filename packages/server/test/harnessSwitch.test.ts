@@ -102,7 +102,7 @@ function fixture(path = ":memory:") {
       engines.push(runtime); return runtime;
     },
   });
-  registry.register(provider("fake-a")); registry.register(provider("fake-b"));
+  registry.register(provider("fake-a")); registry.register(provider("fake-b")); registry.register(provider("fake-c"));
   const pool = createHarnessPool({ registry, legacyHarnessId: "fake-a", context: async (projectId, cwd, sessionId) => ({ projectId, cwd: cwd ?? "/same/worktree", sessionId, spaceId: "space-a" }) });
   const projects = { get: async () => ({ id: "p", name: "p", path: "/same/worktree", spaceId: "space-a", createdAt: 0 }), list: async () => [] } as unknown as ProjectService;
   const makeSessions = () => createSessionService({ store, projects, runtimes: pool, permissions: { evaluate: () => "ask" } as unknown as PermissionService, broadcast: { event() {}, projection() {} }, queue: store, isShuttingDown: () => shuttingDown });
@@ -211,7 +211,9 @@ test("crash after target creation before atomic route publication resumes its ex
   const originalTransition = f.store.transitionRuntimeEpoch;
   f.store.transitionRuntimeEpoch = async () => { throw new Error("simulated crash before publication"); };
   await assert.rejects(f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" }), /simulated crash/);
-  assert.equal((await f.store.projection(id))!.harnessTransition?.phase, "released");
+  const failed = (await f.store.projection(id))!.harnessTransition;
+  assert.equal(failed?.phase, "failed");
+  assert.equal(failed?.error?.stage, "publishing-route");
   assert.equal(f.nativeCreates.length, 2); f.store.transitionRuntimeEpoch = originalTransition;
   await f.restart();
   const result = await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" });
@@ -219,6 +221,81 @@ test("crash after target creation before atomic route publication resumes its ex
   await f.sessions.send(id, { text: "One prompt" });
   assert.equal((await f.store.events(id)).filter((e) => e.type === "user/message").length, 1);
   f.engines.at(-1)!.complete(); await f.idle(id); await f.close(); await rm(dir, { recursive: true, force: true });
+});
+
+test("a failed target can be replaced after release without restoring old authority", async () => {
+  const f = fixture(); const { id } = await f.sessions.create({ projectId: "p" });
+  const originalTransition = f.store.transitionRuntimeEpoch;
+  f.store.transitionRuntimeEpoch = async () => { throw new Error("target publication failed"); };
+  await assert.rejects(
+    f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" }),
+    /target publication failed/,
+  );
+  const failed = (await f.store.projection(id))!;
+  assert.equal(failed.harnessTransition?.phase, "failed");
+  assert.equal(failed.harnessTransition?.released?.authorityId, failed.runtimeBinding?.authorityId);
+
+  f.store.transitionRuntimeEpoch = originalTransition;
+  const recovered = await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-a" });
+  assert.equal(recovered.harnessTransition, undefined);
+  assert.equal(recovered.resolvedHarnessId, "fake-a");
+  assert.notEqual(recovered.backendSessionId, failed.backendSessionId);
+  assert.equal((await f.store.events(id)).filter((event) => event.type === "harness/switch-retargeted").length, 1);
+  await f.close();
+});
+
+test("a requested switch can be cancelled while the old harness still owns execution", async () => {
+  const f = fixture(); const { id } = await f.sessions.create({ projectId: "p" });
+  await f.sessions.send(id, { text: "keep working" });
+  const pending = await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" });
+  assert.equal(pending.harnessTransition?.phase, "requested");
+  const cancelled = await f.sessions.cancelHarnessSwitch!(id);
+  assert.equal(cancelled.harnessTransition, undefined);
+  f.engines[0]!.complete(); await f.idle(id);
+  assert.equal((await f.store.projection(id))!.resolvedHarnessId, "fake-a");
+  assert.equal(f.engines.length, 1);
+  assert.equal((await f.store.events(id)).filter((event) => event.type === "harness/switched").length, 0);
+  await f.close();
+});
+
+test("retargeting a requested switch back to the current harness cancels without releasing authority", async () => {
+  const f = fixture(); const { id } = await f.sessions.create({ projectId: "p" });
+  await f.sessions.send(id, { text: "active" });
+  await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" });
+  const retained = await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-a" });
+  assert.equal(retained.harnessTransition, undefined);
+  f.engines[0]!.complete(); await f.idle(id);
+  assert.equal(f.engines.length, 1);
+  assert.equal((await f.store.projection(id))!.resolvedHarnessId, "fake-a");
+  await f.close();
+});
+
+test("retargeting before release changes the destination without creating either target early", async () => {
+  const f = fixture(); const { id } = await f.sessions.create({ projectId: "p" });
+  await f.sessions.send(id, { text: "active" });
+  await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" });
+  const retargeted = await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-c" });
+  assert.equal(retargeted.harnessTransition?.phase, "requested");
+  assert.equal(retargeted.harnessTransition?.targetHarnessId, "fake-c");
+  assert.equal(f.engines.length, 1, "prospective targets are not started before release");
+  f.engines[0]!.complete();
+  await until(async () => (await f.store.projection(id))?.resolvedHarnessId === "fake-c");
+  assert.equal(f.engines.at(-1)!.harnessId, "fake-c");
+  assert.equal(f.engines.some((runtime) => runtime.harnessId === "fake-b"), false);
+  await f.close();
+});
+
+test("changing Auto pinning while it resolves to the sticky harness does not create a runtime leg", async () => {
+  const f = fixture(); const { id } = await f.sessions.create({ projectId: "p" });
+  const initial = (await f.store.projection(id))!;
+  const pinned = await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-a" });
+  const automatic = await f.sessions.switchHarness!(id, { mode: "auto" });
+  assert.equal(pinned.resolvedHarnessId, "fake-a");
+  assert.equal(automatic.resolvedHarnessId, "fake-a");
+  assert.equal(automatic.runtimeLeg?.id, initial.runtimeLeg?.id);
+  assert.equal(f.engines.length, 1);
+  assert.equal((await f.store.events(id)).filter((event) => event.type === "harness/switched").length, 0);
+  await f.close();
 });
 
 test("a deferred switch can be escalated to stop-now; continuity redacts environment secrets and reasoning", async () => {

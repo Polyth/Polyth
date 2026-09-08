@@ -9,7 +9,7 @@ import { useActiveModel } from "../../../apps/web/src/store.ts";
 /** Widget-areas (WA4): the pending-approval banner as a placeable widget, so
  * it can sit in the composer area (or anywhere) instead of only inline in the
  * timeline. Renders nothing when no approval is pending. */
-function PendingPermissionsWidget({ context: _context }: { context: WidgetRenderContext }) {
+function PendingPermissionsWidget() {
   const model = useActiveModel();
   const pending = model.permissions.filter((request) => request.status === "pending");
   return createElement(PermissionBanner, { permissions: pending });
@@ -47,9 +47,7 @@ export default defineWebPackage((host) => () => {
       slot: "session.timeline.after",
       id: "permissions.requests",
       order: 20,
-      render: (context) => createElement(PermissionBanner, {
-        permissions: Array.isArray(context.permissions) ? context.permissions : [],
-      }),
+      render: () => createElement(PendingPermissionsWidget),
     }),
     host.widgets.registerPlugin({
       id: "permissions",
@@ -84,7 +82,7 @@ export default defineWebPackage((host) => () => {
         defaultVisible: false,
         recommended: true,
         order: 15,
-        render: (context) => createElement(PendingPermissionsWidget, { context }),
+        render: () => createElement(PendingPermissionsWidget),
       }],
     }),
   ];

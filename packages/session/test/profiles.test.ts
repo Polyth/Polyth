@@ -24,12 +24,21 @@ test("profile create/list/get round-trips all fields", async () => {
   assert.ok(p.id);
   assert.equal(p.revision, 1);
   assert.equal(p.agent, "review");
+  assert.equal(p.harnessId, "opencode");
   assert.deepEqual(p.features, { web: true });
 
   const listed = await store.profileList();
   assert.equal(listed.length, 1);
   assert.deepEqual(await store.profileGet(p.id), listed[0]);
   assert.equal(await store.profileGet("nope"), undefined);
+});
+
+test("new profiles persist explicit harness identity and can change it deliberately", async () => {
+  const store = freshStore();
+  const profile = await store.profileCreate({ name: "Codex review", harnessId: "codex", providerID: "openai", modelID: "gpt-5", features: {} });
+  assert.equal(profile.harnessId, "codex");
+  const updated = await store.profileUpdate(profile.id, { harnessId: "opencode" }, profile.revision);
+  assert.equal(updated.harnessId, "opencode");
 });
 
 test("profile update bumps revision, rejects stale revision and empty name", async () => {

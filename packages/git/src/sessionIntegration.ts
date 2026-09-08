@@ -757,6 +757,7 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         const created = await deps.sessions.create({
           id: sessionId,
           projectId: project.id,
+          ...(input.harness ? { harness: input.harness } : {}),
           ...(input.title ? { title: input.title } : {}),
           ...(input.model ? { model: input.model } : {}),
           ...(input.agent ? { agent: input.agent } : {}),

@@ -409,17 +409,20 @@ test("the composer is adaptive, with one primary action at a time", async () => 
   );
 });
 
-test("model leads the phone composer while effort stays a configurable draggable slider", async () => {
+test("phone execution choices live behind one compact harness and model control", async () => {
   const composer = await read("../src/components/Composer.tsx");
+  const harnessPicker = await read("../../../packages/harness-runtime/widgets/index.tsx");
   const effortMenu = await read("../src/components/EffortMenu.tsx");
   const miniWidgets = await read("../src/widgets/builtinMiniWidgets.tsx");
   const styles = await read("../src/styles.css");
 
-  // Model remains above the phone editor. Effort is an ordinary composer
-  // mini-widget, so it can be hidden or moved without another preference.
-  assert.ok(composer.includes('className="composer-config-top"'), "phones get a config header above the editor");
-  assert.ok(composer.includes("{phoneLayout && modelControl"), "the model header is phone-only");
+  // Phones expose one execution trigger; its sheet owns the model, role, and
+  // thinking controls. Desktop keeps the independent model control.
+  assert.ok(!composer.includes('className="composer-config-top"'), "phones do not stack a second configuration row above the editor");
   assert.ok(composer.includes("{!phoneLayout && modelControl}"), "the desktop rail keeps the model control");
+  assert.ok(composer.includes("executionModelControl: modelControl"), "the harness sheet receives the model control");
+  assert.ok(harnessPicker.includes("`${currentName} · ${modelLabel}`"), "the phone trigger combines harness and model");
+  assert.ok(harnessPicker.includes('aria-label="Execution settings"'), "the phone sheet groups execution controls accessibly");
   assert.ok(composer.includes("const effortControl"), "composer derives one effort control");
   assert.ok(composer.includes("modelSupportsThinking(selectedModel)"), "it only exists for models that report variants");
   assert.ok(composer.includes("cfg.thinking !== undefined"), "Auto suppresses saved and session thinking fallbacks");
@@ -450,10 +453,11 @@ test("model leads the phone composer while effort stays a configurable draggable
 
   const css = await readWebStyles();
   const section = css.slice(css.indexOf("UX-MOBILE-01 — mobile-first new chat"));
+  const harnessStyles = await read("../../../packages/harness-runtime/widgets/styles.css");
   assert.match(
-    section,
-    /\.composer-mobile \.composer-config-top \{\s*display:\s*flex;/,
-    "the phone header row lays the controls out above the editor",
+    harnessStyles,
+    /\.pkg-harnesses-mobile-config > div \{[^}]*grid-template-columns:/s,
+    "the execution sheet aligns its labelled controls without a horizontal rail",
   );
   const at = section.search(/\.composer-mobile \.composer-config \.config-chip,\s*\n\s*\.composer-mobile \.composer-config \.picker-chip/);
   assert.ok(at > 0, "every config chip shares the same touch box");

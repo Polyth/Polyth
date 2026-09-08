@@ -12,7 +12,8 @@
     "@polyth/outbound": "0.1.0",
     "@polyth/plugins": "0.1.0",
     "@polyth/harness-runtime": "0.1.0",
-    "@polyth/models": "0.1.0"
+    "@polyth/models": "0.1.0",
+    "@polyth/session": "0.1.0"
   },
   "polyth": {
     "serverEntry": "./src/serverEntry.ts",

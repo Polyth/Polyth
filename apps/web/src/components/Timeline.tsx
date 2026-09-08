@@ -65,7 +65,9 @@ import { publishPromptVisibility } from "../promptVisibility.ts";
 import AttachmentPills from "./AttachmentPills.tsx";
 import CopyButton from "./CopyButton.tsx";
 import SelectionMenu from "./SelectionMenu.tsx";
-import SlotHost from "./slots/SlotHost.ts";
+import SlotHost, { useSlotVersion } from "./slots/SlotHost.ts";
+import { listSlots } from "../slots.ts";
+import { mergeTimelineEntries } from "../timelineEvents.ts";
 import type {
   AssistantMsg,
   GithubConflictMsg,
@@ -680,7 +682,8 @@ function AssistantAgentHeader({
   const modelRef = turn?.model ?? m.model ?? session?.model;
   const descriptor = modelRef
     ? models.find((candidate) =>
-        candidate.providerID === modelRef.providerID && candidate.modelID === modelRef.modelID)
+        candidate.providerID === modelRef.providerID && candidate.modelID === modelRef.modelID
+        && (!candidate.harnessId || !m.harnessId || candidate.harnessId === m.harnessId))
     : undefined;
   const modelName = descriptor?.name
     ?? (modelRef ? `${modelRef.providerID}/${modelRef.modelID}` : "Unknown model");
@@ -752,6 +755,9 @@ function AssistantAgentHeader({
         <details className="response-footer-metadata">
           <summary aria-label={tr("timeline.showResponseMetadata")} title={tr("timeline.responseMetadata")}><Icon.chevronDown /></summary>
           <div className="response-footer-metadata-grid">
+            {(m.harnessId ?? turn?.harnessId) && <><span>Harness</span><strong>{m.harnessId ?? turn?.harnessId}</strong></>}
+            {(m.profileId ?? turn?.profileId) && <><span>Profile</span><code>{m.profileId ?? turn?.profileId}</code></>}
+            {(m.runtimeLegId ?? turn?.runtimeLegId) && <><span>Runtime leg</span><code>{m.runtimeLegId ?? turn?.runtimeLegId}</code></>}
             <span>{tr("timeline.agent")}</span><strong>{agentName}</strong>
             <span>{tr("timeline.completed")}</span><time dateTime={timeIso(assistantTime(m))}>{timeShort(assistantTime(m))}</time>
             {hasUsage && <><span>{tr("timeline.input")}</span><strong>{fmtTokens(usage.input)}</strong><span>{tr("timeline.output")}</span><strong>{fmtTokens(usage.output)}</strong></>}
@@ -1594,6 +1600,8 @@ export default function Timeline({
   const atBottom = useRef(true);
   const prefs = useUiSettings();
   const sessionId = useStore((s) => s.activeSessionId);
+  const sessionEvents = useStore((s) => s.activeSessionId ? s.events[s.activeSessionId] ?? [] : []);
+  useSlotVersion();
   // L13 windowing: only the last `limit` rows render (see timelineWindow.ts).
   const initialLimit = initialTimelineWindow(
     typeof document !== "undefined" && document.body.dataset.desktopLowResource === "true",
@@ -1907,6 +1915,25 @@ export default function Timeline({
   // above), and a jump to a hidden prompt grows the window first.
   const start = windowStart(rows.length, limit);
   const shownRows = start > 0 ? rows.slice(start) : rows;
+  const timelineEventTypes = new Set(listSlots("session.timeline.event").flatMap((item) => {
+    const value = item.meta?.eventTypes;
+    return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+  }));
+  const firstShownSeq = shownRows[0]
+    ? shownRows[0].kind === "activity"
+      ? Math.min(...shownRows[0].items.map((item) => item.eventSeq))
+      : shownRows[0].eventSeq
+    : 0;
+  const chronologicalRows = mergeTimelineEntries(
+    shownRows.map((row) => ({
+      id: row.id,
+      seq: row.kind === "activity" ? Math.min(...row.items.map((item) => item.eventSeq)) : row.eventSeq,
+      row,
+    })),
+    sessionEvents,
+    timelineEventTypes,
+    start === 0 ? 0 : firstShownSeq,
+  );
   const latestRowId = shownRows[shownRows.length - 1]?.id;
   const latestAssistantId = [...shownRows].reverse().find((row) => row.kind === "assistant")?.id;
   const latestActivityId = [...shownRows].reverse().find((row) => row.kind === "activity")?.id;
@@ -2175,8 +2202,16 @@ export default function Timeline({
               {olderBusy ? tr("timeline.loadingEarlierHistory") : tr("timeline.loadEarlierHistory")}</Button>
           </div>
         )}
-        {shownRows.map((r) => (
-          r.kind === "activity"
+        {chronologicalRows.map((entry) => {
+          if (entry.kind === "timeline-event") {
+            return <SlotHost
+              key={entry.id}
+              slot="session.timeline.event"
+              context={{ ...slotSummary, event: entry.event }}
+            />;
+          }
+          const r = entry.row;
+          return r.kind === "activity"
             ? <ActivityRow
                 key={r.id}
                 rev={activityRev(r)}
@@ -2205,8 +2240,8 @@ export default function Timeline({
                 revert={revertOk}
                 fork={forkOk}
               />
-            )
-        ))}
+            );
+        })}
         {model.workflowRun && <WorkflowTimelineCard run={model.workflowRun} />}
         {/* The dock confirmation sits OUTSIDE the collapsible tail: it must be
             visible even while the reverted items stay folded away. */}

@@ -10,6 +10,7 @@ import type {
 } from "@polyth/web-sdk";
 import { Icon } from "../icons.tsx";
 import Dialog from "../components/a11y/Dialog.tsx";
+import SlotHost from "../components/slots/SlotHost.ts";
 import { friendlyError } from "../settings.ts";
 import {
   getState,
@@ -20,8 +21,9 @@ import {
   setOverlay,
   setRailPlugin,
   subscribeStore,
+  upsertSession,
 } from "../store.ts";
-import { registerSlot } from "../slots.ts";
+import { listSlots, registerSlot } from "../slots.ts";
 import { notifyCapabilities, registerCapability, type CapabilityDescriptor } from "../capabilities.ts";
 import { registerSurface, type RailSurface } from "../surfaces.ts";
 import { registerSettingsItems } from "../settings/registry.ts";
@@ -34,6 +36,12 @@ import {
 } from "../widgets/catalog.ts";
 import { registerWebReducer } from "./reducers.ts";
 import { registerProjectContext } from "./projectContext.ts";
+import {
+  clearDraftExecutionConfig,
+  readDraftExecutionConfig,
+  subscribeDraftExecutionConfig,
+  updateDraftExecutionConfig,
+} from "../executionDraft.ts";
 
 const snapshot = (): WebStoreSnapshot => {
   const state = getState();
@@ -51,6 +59,7 @@ export const webPackageHost: WebPackageHost = {
   slots: {
     register: ({ slot, id, render, order, meta, ownerPackageId }) =>
       registerSlot(slot, id, render, order, meta, ownerPackageId),
+    list: (slot) => listSlots(slot).map(({ id, order, meta }) => ({ id, order, ...(meta ? { meta } : {}) })),
   },
   widgets: {
     register: (pluginId: string, definition: WidgetDefinition) =>
@@ -95,6 +104,15 @@ export const webPackageHost: WebPackageHost = {
     subscribe: subscribeStore,
     select: (selector) => selector(snapshot()),
   },
+  executionDraft: {
+    get: readDraftExecutionConfig,
+    update: updateDraftExecutionConfig,
+    clear: clearDraftExecutionConfig,
+    subscribe: subscribeDraftExecutionConfig,
+  },
+  sessions: {
+    upsert: upsertSession,
+  },
   navigation: {
     setActiveView: (view) => setActiveView(view as never),
     openSettingsPage,
@@ -106,6 +124,7 @@ export const webPackageHost: WebPackageHost = {
   ui: {
     icons: Icon,
     Dialog,
+    Slot: SlotHost,
   },
   errors: {
     friendly: friendlyError,

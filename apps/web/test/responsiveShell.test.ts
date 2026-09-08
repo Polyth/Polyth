@@ -314,24 +314,12 @@ test("Settings uses the current desktop workbench and workspace customizer", asy
   assert.ok(!settings.includes('className="modal-foot"'), "Settings does not render the save-and-Done footer");
 });
 
-test("pending OpenCode changes render in the pinned Settings footer with an opaque restart overlay", async () => {
-  const settings = await read("../src/components/SettingsView.tsx");
-  const restart = await read("../src/components/OpenCodeRestartControl.tsx");
-  const css = await read("../src/styles.css");
-  assert.match(
-    settings,
-    /<div className="nav-foot">\s*<SlotHost slot="settings\.footer" \/>/,
-    "Settings owns the restart-control host at the start of its pinned navigation footer",
-  );
-  assert.ok(
-    restart.includes('registerSlot("settings.footer", "opencode.apply-restart"'),
-    "the restart control no longer contributes to the main app sidebar",
-  );
-  assert.match(
-    css,
-    /\.opencode-restart-overlay\s*\{[^}]*background:\s*rgba\(0,\s*0,\s*0,\s*\.78\)/,
-    "the restart overlay strongly obscures the UI underneath",
-  );
+test("pending OpenCode changes render in the OpenCode Runtime detail", async () => {
+  const runtime = await read("../../../packages/opencode/widgets/index.tsx");
+  const bootstrap = await read("../src/bootstrap.tsx");
+  assert.ok(runtime.includes('sectionId: "runtime", label: "Runtime"'), "OpenCode contributes its Runtime section");
+  assert.ok(runtime.includes("api.opencodeApplyRestart()"), "the Runtime section applies staged OpenCode changes");
+  assert.ok(!bootstrap.includes("installOpenCodeRestartControl"), "OpenCode restart is no longer installed into a global footer");
 });
 
 test("open rails remain visible in every workspace mode", async () => {

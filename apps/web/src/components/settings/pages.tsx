@@ -5,7 +5,6 @@ import {
   activateProject,
   applyProjectUpsert,
   openSettingsPage,
-  setAgents,
   setUiError,
   updateSettings,
   useStore,
@@ -29,8 +28,9 @@ import {
 } from "../../theme.ts";
 import type { AssistSettingsDto } from "@polyth/session/web-api";
 import type {
-  AgentDescriptor,
   AgentProfile,
+  HarnessSelection,
+  HarnessSnapshot,
   McpServerDto,
   McpTransport,
   ModelRef,
@@ -842,6 +842,8 @@ export function ProjectsPage() {
   const activeProjectId = useStore((s) => s.activeProjectId);
   const models = useStore((s) => s.models).filter(modelSupportsTextWorkflow);
   const sessionDefaults = useSessionDefaults();
+  const profiles = useProfiles();
+  const [harnesses, setHarnesses] = useState<Record<string, HarnessSnapshot[]>>({});
   const [picking, setPicking] = useState(false);
   const globalModel = resolveSessionDefaultModel(null, sessionDefaults.defaultModel, models[0]);
   const globalModelName = globalModel
@@ -849,6 +851,20 @@ export function ProjectsPage() {
         model.providerID === globalModel.providerID && model.modelID === globalModel.modelID)?.name
       ?? globalModel.modelID
     : "No model available";
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all(projects.map(async (project) => [project.id, await api.harnessSnapshots(project.id)] as const))
+      .then((entries) => { if (!cancelled) setHarnesses(Object.fromEntries(entries)); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [projects.map((project) => project.id).join("|")]);
+  const saveExecution = async (projectId: string, patch: { harness?: HarnessSelection | null; agentProfileId?: string | null }) => {
+    try {
+      applyProjectUpsert(await api.patchProject(projectId, { defaults: patch }));
+    } catch (error) {
+      setUiError(friendlyError("Couldn’t save project execution defaults", error));
+    }
+  };
   const saveModel = async (projectId: string, model?: ModelRef) => {
     if (!model) return;
     try {
@@ -928,6 +944,28 @@ export function ProjectsPage() {
               label={tr("settings.pages.rememberModelSelectionForValue", { project: p.name || p.path })}
             />
           </div>
+          <div className="project-settings-options" data-settings-item="projects.executionHarness">
+            <div><strong>Default harness</strong><span>Choose an execution engine for new conversations in this project.</span></div>
+            <Select
+              label="Default harness"
+              value={p.defaults?.harness === null || p.defaults?.harness === undefined ? "inherit" : p.defaults.harness.mode === "auto" ? "auto" : p.defaults.harness.harnessId}
+              options={[
+                { value: "inherit", label: "Inherit global default" },
+                { value: "auto", label: "Auto" },
+                ...(harnesses[p.id] ?? []).map((snapshot) => ({ value: snapshot.identity.id, label: snapshot.identity.name, detail: snapshot.availability.state === "ready" ? "Ready" : "Setup may be required" })),
+              ]}
+              onChange={(value) => void saveExecution(p.id, { harness: value === "inherit" ? null : value === "auto" ? { mode: "auto" } : { mode: "pinned", harnessId: value } })}
+            />
+          </div>
+          <div className="project-settings-options" data-settings-item="projects.executionProfile">
+            <div><strong>Default profile</strong><span>Applied when a new conversation does not choose another profile.</span></div>
+            <Select
+              label="Default profile"
+              value={p.defaults?.agentProfileId ?? ""}
+              options={[{ value: "", label: "None" }, ...profiles.map((profile) => ({ value: profile.id, label: profile.name, detail: profile.harnessId ?? "Legacy harness" }))]}
+              onChange={(value) => void saveExecution(p.id, { agentProfileId: value || null })}
+            />
+          </div>
           {projectRemembersModelSelection(p.defaults) && (
             <div className="project-settings-options project-settings-model">
               <div>
@@ -966,159 +1004,42 @@ export function ProjectsPage() {
   );
 }
 
-function RoleEditor({ role, onClose }: { role: AgentDescriptor; onClose: () => void }) {
-  const models = useStore((state) => state.models).filter(modelSupportsTextWorkflow);
-  const agents = useStore((state) => state.agents);
-  const defaults = useSessionDefaults();
-  const defaultModel = resolveSessionDefaultModel(null, defaults.defaultModel, models[0]);
-  const [prompt, setPrompt] = useState(role.prompt ?? "");
-  const [model, setModel] = useState<ModelRef | undefined>(role.model ?? defaultModel);
-  const [mode, setMode] = useState<AgentDescriptor["mode"]>(role.mode === "all" ? "primary" : role.mode);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const save = async () => {
-    setBusy(true);
-    setError("");
-    try {
-      const selectedModel = mode === "auto" ? undefined : model ?? defaultModel;
-      const saved = await api.saveRole(role.name, {
-        prompt,
-        ...(selectedModel ? { model: selectedModel } : {}),
-        mode,
-      });
-      setAgents(agents.map((candidate) => candidate.name === saved.name ? saved : candidate));
-      onClose();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Dialog
-      title={`${tr("settings.pages.editRole")} ${role.name}`}
-      onClose={onClose}
-      className="role-editor"
-      initialFocus="textarea"
-      footer={(
-        <>
-          <Button size="sm" onClick={onClose}>{tr("common.cancel")}</Button>
-          <Button size="sm" variant="primary" busy={busy} onClick={() => void save()}>{tr("settings.pages.saveRole")}</Button>
-        </>
-      )}
-    >
-      <div className="role-editor-body">
-        <label>
-          <span>{tr("settings.pages.usage")}</span>
-          <Seg value={mode} options={[
-            ["primary", tr("settings.pages.mainAgent")],
-            ["subagent", tr("settings.pages.subagent2")],
-            ["auto", "Auto"],
-          ]} onChange={(next) => { setMode(next); if (next === "auto") setModel(undefined); }} />
-          <small>{tr("settings.pages.mainAgentsCanLeadSessionsSubagentsAre")}</small>
-        </label>
-        <label>
-          <span>{tr("settings.pages.providerModel")}</span>
-          {mode === "auto" ? (
-            <span className="mono profile-model-locked">Model supplied by launching agent</span>
-          ) : (
-            <ModelPicker direction="down" models={models} value={model} recommended={defaultModel} onPick={setModel} />
-          )}
-          <small>{tr("settings.pages.usesTheSameSearchablePickerAndFavorites")}</small>
-        </label>
-        <label>
-          <span>{tr("settings.pages.systemPrompt")}</span>
-          <Textarea rows={12} value={prompt} placeholder={tr("settings.pages.instructionsThatDefineThisRoleSBehavior")} onChange={(event) => setPrompt(event.target.value)} />
-        </label>
-        {error && <div className="form-error">{error}</div>}
-      </div>
-    </Dialog>
-  );
-}
-
-export function AgentsPage() {
-  const agents = useStore((s) => s.agents);
-  const models = useStore((s) => s.models).filter(modelSupportsTextWorkflow);
-  const defaults = useSessionDefaults();
+/** Polyth execution presets. Native harness roles live inside their harness
+ * detail page; profiles may reference one, but are never presented as roles. */
+export function ProfilesPage() {
   const profiles = useProfiles();
-  const [editingRole, setEditingRole] = useState<AgentDescriptor | null>(null);
   const [editing, setEditing] = useState<AgentProfile | null>(null);
   const [creating, setCreating] = useState(false);
   const [repairsFor, setRepairsFor] = useState<Record<string, string>>({});
-  const configurableAgents = agents.filter((agent) => agent.name.toLowerCase() !== "compaction");
-  const defaultModel = resolveSessionDefaultModel(null, defaults.defaultModel, models[0]);
-  const modelLabel = (model?: ModelRef) => {
-    const resolved = model ?? defaultModel;
-    if (!resolved) return tr("settings.pages.noModelAvailable");
-    return models.find((candidate) =>
-      candidate.providerID === resolved.providerID && candidate.modelID === resolved.modelID)?.name
-      ?? resolved.modelID;
-  };
-  const checkProfile = async (p: AgentProfile) => {
-    const r = await api.validateProfile(p.id).catch(() => null);
-    setRepairsFor((m) => ({
-      ...m,
-      [p.id]: !r ? "check failed" : !r.checked ? "backend unavailable — not checked" : r.valid ? "valid ✓" : r.repairs.map((x) => x.reason).join("; "),
+  const checkProfile = async (profile: AgentProfile) => {
+    const result = await api.validateProfile(profile.id).catch(() => null);
+    setRepairsFor((current) => ({
+      ...current,
+      [profile.id]: !result ? "Check failed" : !result.checked ? "Harness unavailable — not checked" : result.valid ? "Valid ✓" : result.repairs.map((repair) => repair.reason).join("; "),
     }));
   };
-  return (
-    <>
-      <PageHead title={tr("settings.pages.roles")} blurb={tr("settings.pages.shapeHowEachOpencodeRoleWorksIts")} />
-      {agents.length === 0 ? (
-        <EmptyState title={tr("settings.pages.noAgentsReported")} body={tr("settings.pages.theBackendDidNotReportAgentPresets")} />
-      ) : (
-        <div className="role-card-grid">
-          {configurableAgents.map((agent) => (
-            <article key={agent.name} className="role-card">
-              <header><span className="role-card-icon">{agent.name.slice(0, 1).toUpperCase()}</span><div><strong>{agent.name}</strong><span className={`tag role-kind ${agent.mode}`}>{agent.mode === "subagent" ? tr("settings.pages.subagent2") : agent.mode === "auto" ? "Auto" : tr("settings.pages.mainAgent")}</span></div></header>
-              <p>{agent.description || tr("settings.pages.configurableOpenCodeRole")}</p>
-              <div className="role-card-meta">
-                <span><b>{tr("settings.pages.model")}</b>{agent.mode === "auto" ? "Supplied by launching agent" : modelLabel(agent.model)}</span>
-                <span><b>{tr("settings.pages.prompt")}</b>{agent.prompt?.trim() ? `${agent.prompt.trim().slice(0, 72)}${agent.prompt.trim().length > 72 ? "…" : ""}` : tr("settings.pages.opencodeDefault")}</span>
-              </div>
-              <Button size="sm" onClick={() => setEditingRole(agent)}>{tr("settings.pages.editRole2")}</Button>
-            </article>
-          ))}
-        </div>
-      )}
-      {editingRole && <RoleEditor role={editingRole} onClose={() => setEditingRole(null)} />}
-      <div className="stat-label stat-label-row" data-settings-item="agents.profiles">
-        <span>{tr("settings.pages.agentProfiles")}{profiles.length})</span>
-        <span className="header-spacer" />
-        <Button size="sm" onClick={() => setCreating(true)}>{tr("settings.pages.profile")}</Button>
+  return <>
+    <PageHead title="Profiles" blurb="Bundle a harness, model, native role, thinking level, and feature choices for repeatable execution." />
+    <div className="stat-label stat-label-row" data-settings-item="profiles.list">
+      <span>{profiles.length} profile{profiles.length === 1 ? "" : "s"}</span>
+      <span className="header-spacer" />
+      <Button size="sm" onClick={() => setCreating(true)}>New profile</Button>
+    </div>
+    {profiles.length === 0 && <EmptyState title="No profiles yet" body="Create a profile for execution choices you use together." />}
+    {profiles.map((profile) => <div key={profile.id} className="set-row">
+      <div className="set-row-text">
+        <div className="set-row-label"><span className="profile-avatar" style={{ background: profile.color ?? "var(--blue)" }} />{profile.name}</div>
+        <div className="set-row-hint mono">{profile.harnessId ?? "Legacy harness"} · {profile.providerID}/{profile.modelID}{profile.agent ? ` · ${profile.agent}` : ""}{profile.thinking ? ` · Think ${profile.thinking}` : ""}</div>
+        {repairsFor[profile.id] && <div className="set-row-hint">{repairsFor[profile.id]}</div>}
       </div>
-      {profiles.length === 0 && (
-        <EmptyState title={tr("settings.pages.noProfilesYet")} body={tr("settings.pages.aProfileBundlesModelAgentAndOptions")} />
-      )}
-      {profiles.map((p) => (
-        <div key={p.id} className="set-row">
-          <div className="set-row-text">
-            <div className="set-row-label">
-              <span className="profile-avatar" style={{ background: p.color ?? "var(--blue)" }} />
-              {p.name}
-            </div>
-            <div className="set-row-hint mono">
-              {p.providerID}/{p.modelID}{p.agent ? ` · ${p.agent}` : ""}{p.thinking ? tr("settings.pages.thinkValue", { thinking: p.thinking }) : ""}
-            </div>
-            {repairsFor[p.id] && <div className="set-row-hint">{repairsFor[p.id]}</div>}
-          </div>
-          <div className="set-row-control">
-            <Button size="sm" onClick={() => void checkProfile(p)}>{tr("settings.pages.validate")}</Button>
-            <Button size="sm" onClick={() => setEditing(p)}>{tr("common.edit")}</Button>
-            <Button size="sm" variant="danger"
-              onClick={() => { void confirmAlert(tr("settings.pages.deleteProfileValue", { name: p.name }), { title: tr("settings.pages.deleteProfile"), confirmLabel: tr("common.delete") }).then((ok) => { if (ok) void api.deleteProfile(p.id).then(() => refreshProfiles()); }); }}>
-              {tr("common.delete")}</Button>
-          </div>
-        </div>
-      ))}
-      {(editing || creating) && (
-        <AgentProfileForm
-          {...(editing ? { existing: editing } : {})}
-          onClose={() => { setEditing(null); setCreating(false); }}
-        />
-      )}
-    </>
-  );
+      <div className="set-row-control">
+        <Button size="sm" onClick={() => void checkProfile(profile)}>Validate</Button>
+        <Button size="sm" onClick={() => setEditing(profile)}>Edit</Button>
+        <Button size="sm" variant="danger" onClick={() => { void confirmAlert(`Delete profile ${profile.name}?`, { title: "Delete profile", confirmLabel: tr("common.delete") }).then((ok) => { if (ok) void api.deleteProfile(profile.id).then(() => refreshProfiles()); }); }}>Delete</Button>
+      </div>
+    </div>)}
+    {(editing || creating) && <AgentProfileForm {...(editing ? { existing: editing } : {})} onClose={() => { setEditing(null); setCreating(false); }} />}
+  </>;
 }
 
 function McpServerForm({ existing, onDone }: { existing?: McpServerDto; onDone: () => void }) {
@@ -1279,7 +1200,7 @@ function McpImportForm({ existingNames, onDone }: { existingNames: string[]; onD
   );
 }
 
-export function McpPage() {
+export function McpPage({ embedded = false }: { embedded?: boolean }) {
   const [servers, setServers] = useState<McpServerDto[]>([]);
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -1296,7 +1217,8 @@ export function McpPage() {
 
   return (
     <>
-      <PageHead title={tr("settings.pages.mcp")} blurb={tr("settings.pages.modelContextProtocolServersAppliedToThe")} />
+      {!embedded && <PageHead title={tr("settings.pages.mcp")} blurb={tr("settings.pages.modelContextProtocolServersAppliedToThe")} />}
+      {embedded && <div className="stat-label">OpenCode MCP servers</div>}
       <div className="mcp-list" data-settings-item="mcp.servers">
         {servers.length === 0 && !adding && (
           <EmptyState title={tr("settings.pages.noMcpServersConfigured")} body={tr("settings.pages.addAStdioOrHttpServerThe")} />

@@ -448,8 +448,16 @@ export function isolationRoutes(deps: {
       const input = await body();
       const projectId = String(input.projectId ?? "").trim();
       if (!projectId) throw Object.assign(new Error("projectId required"), { code: "invalid-input" });
+      const rawHarness = input.harness as { mode?: unknown; harnessId?: unknown } | undefined;
+      const harness = rawHarness?.mode === "auto"
+        ? { mode: "auto" as const }
+        : rawHarness?.mode === "pinned" && typeof rawHarness.harnessId === "string" && /^[a-z][a-z0-9-]*$/.test(rawHarness.harnessId)
+          ? { mode: "pinned" as const, harnessId: rawHarness.harnessId }
+          : undefined;
+      if (input.harness !== undefined && !harness) throw Object.assign(new Error("invalid harness selection"), { code: "invalid-input" });
       json(200, await isolation.createIsolatedSession({
         projectId,
+        ...(harness ? { harness } : {}),
         ...(typeof input.title === "string" ? { title: input.title } : {}),
         ...(input.model && typeof input.model === "object" ? { model: input.model as CreateIsolatedSessionInput["model"] } : {}),
         ...(typeof input.agent === "string" ? { agent: input.agent } : {}),

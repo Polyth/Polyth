@@ -32,21 +32,20 @@ export default function registerPackage(host: ServerPackageHost) {
             catch {
                 return { harnessId: "codex", installed: false, authenticated: "unknown", healthy: false };
             }
+            // Version detection stays cheap and process-free. Authentication
+            // and catalog inspection happen only when Codex detail is opened.
+            return { harnessId: "codex", installed: true, authenticated: "unknown", healthy: true, state: "unknown", version };
+        },
+        async discover(context) {
+            const runtime = await createCodexRuntime(context, await connectCodex(context));
             try {
-                const rpc = await connectCodex(context);
-                try {
-                    const auth = await rpc.request<{
-                        account: unknown;
-                        requiresOpenaiAuth: boolean;
-                    }>("account/read", { refreshToken: false });
-                    return { harnessId: "codex", installed: true, authenticated: Boolean(auth.account) || !auth.requiresOpenaiAuth, healthy: true, version };
-                }
-                finally {
-                    await rpc.close();
-                }
+                const [models, agents, capabilities] = await Promise.all([
+                    runtime.models(), runtime.agents(), runtime.capabilities(),
+                ]);
+                return { state: "ready", authenticated: true, capabilities, catalog: { models, agents } };
             }
-            catch {
-                return { harnessId: "codex", installed: true, authenticated: "unknown", healthy: false, version, message: "Codex App Server probe failed" };
+            finally {
+                await runtime.dispose();
             }
         },
         async createRuntime(context) {

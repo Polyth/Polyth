@@ -24,7 +24,7 @@ const OTTO_PLUGIN_EXAMPLE = `{
   "plugin": ["@otto-assistant/opencode-claude"]
 }`;
 
-function OpenCodePluginsSection() {
+export function OpenCodePluginsSection() {
   const [plugins, setPlugins] = useState<OpenCodePluginEntryDto[]>([]);
   const [text, setText] = useState("");
   const [preview, setPreview] = useState<OpenCodePluginPreviewDto | null>(null);
@@ -594,7 +594,6 @@ export default function PluginsPage() {
   return (
     <div className="pkg-plugins">
       <PageHead title={tr("packages.plugins.pageTitle")} blurb={tr("packages.plugins.pageBlurb")} />
-      <OpenCodePluginsSection />
       <ManagedPluginsSection />
     </div>
   );

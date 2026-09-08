@@ -2,7 +2,7 @@
 // action (provider/model immutable there) or opened blank from settings.
 // Validation repairs render visibly; applying them is an explicit click.
 import { useEffect, useState } from "react";
-import type { AgentProfile } from "@polyth/contracts";
+import type { AgentDescriptor, AgentProfile, HarnessSnapshot, ModelDescriptor } from "@polyth/contracts";
 import { THINKING_LEVELS } from "@polyth/models";
 import { api } from "@polyth/session/web-api";
 import { useStore } from "../store.ts";
@@ -14,7 +14,7 @@ import { Button, Dialog, Select, Textarea, TextInput } from "./ui/index.ts";
 export interface ProfileFormProps {
   /** Existing profile to edit, or a seed for a new one. */
   existing?: AgentProfile;
-  seed?: { providerID: string; modelID: string; name?: string };
+  seed?: { harnessId?: string; providerID: string; modelID: string; name?: string };
   /** Model identity is immutable when opened from the pin flow. */
   lockModel?: boolean;
   onClose: () => void;
@@ -25,8 +25,50 @@ export interface ProfileFormProps {
 interface Repair { field: string; from: string; to: string; reason: string }
 
 export default function AgentProfileForm({ existing, seed, lockModel, onClose, onSaved }: ProfileFormProps) {
-  const agents = useStore((s) => s.agents);
-  const models = useStore((s) => s.models);
+  const globalAgents = useStore((s) => s.agents);
+  const globalModels = useStore((s) => s.models);
+  const activeProjectId = useStore((s) => s.activeProjectId);
+  const activeHarnessId = useStore((s) =>
+    s.sessions.find((session) => session.id === s.activeSessionId)?.resolvedHarnessId);
+  const inferredHarnessId = existing?.harnessId
+    ?? seed?.harnessId
+    ?? globalModels.find((model) => model.providerID === seed?.providerID && model.modelID === seed?.modelID)?.harnessId
+    ?? activeHarnessId
+    ?? "opencode";
+  const [harnessId, setHarnessId] = useState(inferredHarnessId);
+  const [harnesses, setHarnesses] = useState<HarnessSnapshot[]>([]);
+  const [nativeCatalog, setNativeCatalog] = useState<{
+    harnessId: string;
+    models: ModelDescriptor[];
+    agents: AgentDescriptor[];
+  }>();
+  useEffect(() => {
+    let cancelled = false;
+    void api.harnessSnapshots(activeProjectId ?? undefined).then((rows) => {
+      if (!cancelled) setHarnesses(rows);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [activeProjectId]);
+  useEffect(() => {
+    let cancelled = false;
+    setNativeCatalog(undefined);
+    void api.harnessSnapshots(activeProjectId ?? undefined, true, harnessId).then((rows) => {
+      if (cancelled) return;
+      const catalog = rows[0]?.catalog;
+      setNativeCatalog({
+        harnessId,
+        models: catalog?.models ?? [],
+        agents: catalog?.agents ?? catalog?.roles ?? [],
+      });
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [activeProjectId, harnessId]);
+  const models = nativeCatalog?.harnessId === harnessId
+    ? nativeCatalog.models
+    : globalModels.filter((model) => model.harnessId === harnessId);
+  const agents = nativeCatalog?.harnessId === harnessId
+    ? nativeCatalog.agents
+    : globalAgents.filter((item) => item.harnessId === harnessId);
   const textModels = models.filter(modelSupportsTextWorkflow);
   const [name, setName] = useState(existing?.name ?? seed?.name ?? "");
   const [providerID, setProviderID] = useState(existing?.providerID ?? seed?.providerID ?? "");
@@ -63,7 +105,7 @@ export default function AgentProfileForm({ existing, seed, lockModel, onClose, o
     setBusy(true);
     setError("");
     try {
-      const base = { name: name.trim(), providerID, modelID, color, features: existing?.features ?? {} };
+      const base = { name: name.trim(), harnessId, providerID, modelID, color, features: existing?.features ?? {} };
       const saved = existing
         ? await api.updateProfile(existing.id, {
             ...base,
@@ -98,8 +140,13 @@ export default function AgentProfileForm({ existing, seed, lockModel, onClose, o
   const modelValue = `${providerID}/${modelID}`;
   const agentOptions = [
     { value: "", label: tr("agentprofileform.default") },
-    ...agents.map((item) => ({ value: item.name, label: item.name })),
+    ...agents.filter((item) => !item.harnessId || item.harnessId === harnessId)
+      .map((item) => ({ value: item.name, label: item.name })),
   ];
+  const harnessOptions = [...new Map([
+    [harnessId, harnesses.find((row) => row.identity.id === harnessId)?.identity.name ?? harnessId],
+    ...harnesses.map((row) => [row.identity.id, row.identity.name] as const),
+  ]).entries()].map(([value, label]) => ({ value, label }));
   const thinkingOptions = THINKING_LEVELS.map((level) => ({
     value: level,
     label: level || tr("agentprofileform.default"),
@@ -136,10 +183,18 @@ export default function AgentProfileForm({ existing, seed, lockModel, onClose, o
     >
       <div className="profile-form-body">
         <label>
+          Harness<Select label="Harness" value={harnessId} options={harnessOptions} disabled={lockModel} onChange={(value) => {
+            setHarnessId(value);
+            setProviderID("");
+            setModelID("");
+            setAgent("");
+          }} />
+        </label>
+        <label>
           {tr("agentprofileform.name")}<TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder={tr("agentprofileform.eGFastReviewer")} />
         </label>
         <label>
-          {tr("agentprofileform.model")}{lockModel || existing ? (
+          {tr("agentprofileform.model")}{lockModel ? (
             <span className="mono profile-model-locked">{providerID}/{modelID}</span>
           ) : (
             <Select

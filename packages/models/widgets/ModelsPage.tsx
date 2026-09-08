@@ -2,7 +2,7 @@
 // Status is derived (Ready / Needs setup / Disabled) and is never
 // the same thing as the enable toggle. Model search is local to a card.
 import { useEffect, useMemo, useState } from "react";
-import { deriveProviderStatus, filterProviderModels, isFavorite, orderProviders } from "@polyth/models";
+import { deriveProviderStatus, filterProviderModels, isFavorite, modelKey, orderProviders } from "@polyth/models";
 import {
   reorderModelProviders,
   setModelProviderExpanded,
@@ -397,7 +397,8 @@ export default function ModelsPage() {
                     <p className="provider-empty-models">{tr("settings.modelspage.noMatches")}</p>
                   )}
                   {visibleModels.map((m) => {
-                    const fav = isFavorite(prefs, m.key);
+                    const favoriteKey = modelKey({ harnessId: "opencode", providerID: m.providerID, modelID: m.modelID });
+                    const fav = isFavorite(prefs, favoriteKey);
                     const displayName = modelDisplayName(m, catalogModels);
                     return (
                       <div key={m.key} className={`set-model-row ${m.enabled ? "" : "model-disabled"}`}>
@@ -408,7 +409,7 @@ export default function ModelsPage() {
                           className={`model-star-btn ${fav ? "on" : ""}`}
                           pressed={fav}
                           label={fav ? tr("settings.modelspage.removeFavorite") : tr("settings.modelspage.addFavorite")}
-                          onClick={() => toggleModelFavorite(m.key)}
+                          onClick={() => toggleModelFavorite(favoriteKey)}
                         />
                         <span className="set-model-name" title={displayName}>{displayName}</span>
                         {m.context !== undefined && <span className="set-model-ctx mono">{fmtContext(m.context)}</span>}

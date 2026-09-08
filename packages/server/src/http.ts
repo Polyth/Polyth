@@ -546,8 +546,18 @@ async function dispatchHttp(
       }
       if (path === "/api/sessions" && method === "POST") {
         const b = await loadBody();
+        const rawHarness = b.harness as { mode?: unknown; harnessId?: unknown } | undefined;
+        const harness = rawHarness?.mode === "auto"
+          ? { mode: "auto" as const }
+          : rawHarness?.mode === "pinned" && typeof rawHarness.harnessId === "string" && /^[a-z][a-z0-9-]*$/.test(rawHarness.harnessId)
+            ? { mode: "pinned" as const, harnessId: rawHarness.harnessId }
+            : undefined;
+        if (b.harness !== undefined && !harness) {
+          throw Object.assign(new Error("invalid harness selection"), { code: "invalid-input" });
+        }
         const ref = await space().sessions.create({
           projectId: String(b.projectId),
+          ...(harness ? { harness } : {}),
           ...(b.title ? { title: String(b.title) } : {}),
           ...(b.model ? { model: b.model as { providerID: string; modelID: string } } : {}),
           ...(b.agent ? { agent: String(b.agent) } : {}),

@@ -13,6 +13,7 @@ export interface ModelPrefs {
 }
 
 export interface ModelLike {
+  harnessId?: string;
   providerID: string;
   modelID: string;
   name?: string;
@@ -20,7 +21,7 @@ export interface ModelLike {
 
 export const MODEL_PREFS_KEY = "polyth.modelPrefs";
 
-export const modelKey = (m: ModelLike): string => `${m.providerID}/${m.modelID}`;
+export const modelKey = (m: ModelLike): string => `${m.harnessId ? `${m.harnessId}::` : ""}${m.providerID}/${m.modelID}`;
 
 export function defaultModelPrefs(): ModelPrefs {
   return { favorites: [], sort: "provider", recents: [], providerOrder: [], expandedProviders: [] };
@@ -30,11 +31,14 @@ export function parseModelPrefs(raw: string | null): ModelPrefs {
   try {
     const data = JSON.parse(raw ?? "") as Partial<ModelPrefs>;
     const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+    // Favorites predate harness support and were exclusively populated by
+    // OpenCode's provider catalog. Their origin is therefore known.
+    const modelKeys = (v: unknown): string[] => strs(v).map((key) => key.includes("::") ? key : `opencode::${key}`);
     const sort: ModelSort = data.sort === "name" || data.sort === "recent" ? data.sort : "provider";
     return {
-      favorites: [...new Set(strs(data.favorites))],
+      favorites: [...new Set(modelKeys(data.favorites))],
       sort,
-      recents: [...new Set(strs(data.recents))].slice(0, 20),
+      recents: [...new Set(modelKeys(data.recents))].slice(0, 20),
       providerOrder: [...new Set(strs(data.providerOrder))].slice(0, 100),
       expandedProviders: [...new Set(strs(data.expandedProviders))].slice(0, 100),
     };
@@ -149,6 +153,7 @@ export function filterModels<T extends ModelLike>(models: readonly T[], query: s
 // ---------------------------------------------------------------- agent profiles (WP8)
 
 export interface ProfileLike {
+  harnessId?: string;
   providerID: string;
   modelID: string;
   agent?: string;
@@ -165,21 +170,28 @@ export const THINKING_LEVELS = ["", "default", "low", "medium", "high"] as const
 export function validateProfile(
   profile: ProfileLike,
   models: readonly ModelLike[],
-  agents: readonly { name: string }[],
+  agents: readonly { name: string; harnessId?: string }[],
 ): { valid: boolean; checked: boolean; repairs: ProfileRepair[] } {
   if (models.length === 0) return { valid: true, checked: false, repairs: [] };
   const repairs: ProfileRepair[] = [];
-  const key = modelKey(profile);
-  if (!models.some((m) => modelKey(m) === key)) {
-    const fallback = models[0]!;
+  const scopedModels = profile.harnessId
+    ? models.filter((model) => model.harnessId === profile.harnessId)
+    : models;
+  const scopedAgents = profile.harnessId
+    ? agents.filter((agent) => agent.harnessId === profile.harnessId)
+    : agents;
+  if (scopedModels.length === 0) return { valid: true, checked: false, repairs: [] };
+  const key = `${profile.providerID}/${profile.modelID}`;
+  if (!scopedModels.some((m) => m.providerID === profile.providerID && m.modelID === profile.modelID)) {
+    const fallback = scopedModels[0]!;
     repairs.push({
       field: "model",
       from: key,
-      to: modelKey(fallback),
+      to: `${fallback.providerID}/${fallback.modelID}`,
       reason: "model is no longer available from any provider",
     });
   }
-  if (profile.agent && agents.length > 0 && !agents.some((a) => a.name === profile.agent)) {
+  if (profile.agent && agents.length > 0 && !scopedAgents.some((a) => a.name === profile.agent)) {
     repairs.push({ field: "agent", from: profile.agent, to: "", reason: "agent preset is not available" });
   }
   if (profile.thinking !== undefined && !THINKING_LEVELS.includes(profile.thinking as typeof THINKING_LEVELS[number])) {

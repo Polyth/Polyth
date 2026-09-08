@@ -1386,7 +1386,12 @@ export async function boot(opts: BootOptions = {}) {
     unbindSession: openCodePool.unbindSession,
   };
   openCodePool.onEvict?.((runtime) => harnessPool.forgetRuntime(runtime));
-  const runtimeCatalog = createRuntimeCatalog({ projects, runtimes });
+  openCodePool.onRestart?.(async () => { harnesses.invalidate({ harnessId: "opencode" }); });
+  const runtimeCatalog = createRuntimeCatalog({
+    projects,
+    runtimes,
+    onModelsInvalidated: () => harnesses.invalidate({ harnessId: "opencode" }),
+  });
   services.provide(serverServiceKey<{
     invalidateModels(): void;
     models(): Promise<import("@polyth/contracts").ModelDescriptor[]>;
@@ -1507,7 +1512,6 @@ export async function boot(opts: BootOptions = {}) {
   // Infrastructure seams consumed by discovered packages.
   provideService("secure-safe", secureSafe);
   provideService("plugins.config", configApplier);
-  provideService("models.visibility", visibility);
   provideService("models.invalidate-catalog", () => { runtimeCatalog.invalidateModels(); });
   // The probe stays bound here so no feature package ever imports
   // backend-opencode; routes consuming it never learn OpenCode specifics.
@@ -2013,8 +2017,10 @@ export async function boot(opts: BootOptions = {}) {
     broadcastClientSettings: (state) => broadcast.clientSettingsChanged?.(state),
     saveRole: async (name, role) => {
       await configApplier.applyAgent(name, role);
-      const current = (await runtimeCatalog.agents()).find((agent) => agent.name === name);
+      const current = (await runtimeCatalog.agents()).find((agent) =>
+        agent.name === name && (!agent.harnessId || agent.harnessId === "opencode"));
       const saved = {
+        harnessId: "opencode",
         name,
         ...(current?.description ? { description: current.description } : {}),
         mode: role.mode,

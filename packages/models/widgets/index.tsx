@@ -1,4 +1,26 @@
 import "./styles.css";
 import { defineWebPackage } from "@polyth/web-sdk";
 import ModelsPage from "./ModelsPage.tsx";
-export default defineWebPackage((host) => () => { const off = [host.settings.registerPage({ id: "models", packageId: "models", label: "Providers & Models", group: "Engineering", icon: "◈", order: 20, component: ModelsPage }), host.capabilities.register({ id: "models-agents", label: "Models & agents", plainDescription: "Choose which model and agent Polyth uses.", keywords: ["model", "agent", "profile", "provider"], standardTier: "technical", standardRank: 32, open: () => host.navigation.openSettingsPage("models"), available: () => true })]; return () => off.toReversed().forEach((dispose) => dispose()); });
+
+export default defineWebPackage((host) => () => {
+  const off = [
+    host.slots.register({
+      id: "opencode.providers-models",
+      slot: "settings.harness.detail",
+      order: 10,
+      meta: { harnessId: "opencode", sectionId: "providers-models", label: "Providers & Models" },
+      render: (context) => context.harnessId === "opencode" && context.sectionId === "providers-models" ? <ModelsPage /> : null,
+    }),
+    host.capabilities.register({
+      id: "models-agents",
+      label: "Models & providers",
+      plainDescription: "Choose models and configure OpenCode providers.",
+      keywords: ["model", "profile", "provider", "OpenCode"],
+      standardTier: "technical",
+      standardRank: 32,
+      open: () => host.navigation.openSettingsPage("harnesses"),
+      available: () => true,
+    }),
+  ];
+  return () => off.toReversed().forEach((dispose) => dispose());
+});

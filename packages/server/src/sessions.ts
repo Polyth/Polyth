@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { continuityWorkspace } from "./continuityWorkspace.ts";
 import type {
   AgentProfile, AgentRuntime, AttachmentRef, AutoAcceptSetting, CanonicalEventInput, ChildSnapshotResult, ClientSettingsDto, CreateSessionInput, DeliveryMode,
-  Disposable, DurableOperation, HarnessSelection, ForkDraft, ForkResult, JsonObject, ModelRef, MutationOutcome, NotificationRecord,
+  Disposable, DurableOperation, HarnessSelection, HarnessTransition, ForkDraft, ForkResult, JsonObject, ModelRef, MutationOutcome, NotificationRecord,
   PersistedRuntimeBinding,
   InstalledPluginDto, PackageDescriptorDto, QueueItemDto, RateLimitRetry, RateLimitRetryHint, RuntimeEvent,
   RuntimeEpochTransitionResult, TurnResumeCancelledData,
@@ -2324,7 +2324,16 @@ export function createSessionService(deps: {
     switch (ev.type) {
       case "turn/started":
         // Runtime turn models must not replace the user's session choice.
-        await persist(sessionId, "turn/started", { turnId: ev.turnId, ...(ev.model ? { model: ev.model } : {}) } as unknown as JsonObject, { ignorable: true });
+        {
+          const execution = await store.projection(sessionId);
+          await persist(sessionId, "turn/started", {
+            turnId: ev.turnId,
+            ...(ev.model ? { model: ev.model } : {}),
+            ...(execution?.resolvedHarnessId ? { harnessId: execution.resolvedHarnessId } : {}),
+            ...(execution?.runtimeLeg?.id ? { runtimeLegId: execution.runtimeLeg.id } : {}),
+            ...(execution?.agentProfileId ? { profileId: execution.agentProfileId } : {}),
+          } as unknown as JsonObject, { ignorable: true });
+        }
         if (sideEffects) {
           const applied = await applyRuntimeProjection(
             sessionId,
@@ -4529,12 +4538,13 @@ export function createSessionService(deps: {
 
   /** Called under the existing session lock. Release is idempotent against an
    * exact binding; target creation uses the existing durable mutation journal. */
-  const finishHarnessSwitchUnderLock = async (sessionId: string): Promise<SessionProjection> => {
+  const finishHarnessSwitchUnderLock = async (sessionId: string, retryFailed = false): Promise<SessionProjection> => {
     let projection = await store.projection(sessionId);
     if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
     let transition = projection.harnessTransition;
     if (!transition) return projection;
     if (deps.isShuttingDown?.()) return projection;
+    if (transition.phase === "failed" && !retryFailed) return projection;
     let oldBinding = projection.runtimeBinding;
     if (!oldBinding || !runtimes.forSession) throw Object.assign(new Error("runtime binding unavailable"), { code: "unsupported" });
     const cwd = projection.worktreePath ?? (await projects.get(projection.projectId))?.path ?? process.cwd();
@@ -4579,56 +4589,84 @@ export function createSessionService(deps: {
       projection = (await store.projection(sessionId))!;
     }
     if (deps.isShuttingDown?.()) return (await store.projection(sessionId))!;
-    // The old execution incarnation is durably released BEFORE a target runtime can exist.
-    const target = await runtimeFor(projection, cwd, transition.targetHarnessId);
-    const events = await store.events(sessionId);
-    const intent = events.findLast((event) => event.type === "harness/native-create-requested" && event.data.transitionId === transition!.id);
-    let operation = intent ? (await durable.operations(sessionId)).find((op) => op.ownerEventSeq === intent.seq) : undefined;
-    if (!operation) {
-      operation = (await broadcastTail(sessionId, () => durable.prepareOperation({
-        sessionId,
-        mutationKind: "session-reset",
-        intentEvent: { type: "harness/native-create-requested", data: { transitionId: transition!.id, harnessId: transition!.targetHarnessId }, ignorable: true },
-      }))).operation;
-    }
-    if (operation.state === "prepared") {
-      const request = { projectId: projection.projectId, sessionId, title: projection.title, cwd };
-      const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(operation,
-        (id) => target.resetSessionOperation ? target.resetSessionOperation(request, id)
-          : target.createSessionOperation ? target.createSessionOperation(request, id)
-          : target.ensureSession(request),
-        (backendSessionId) => ({ backendSessionId }),
-        async (result) => {
-          await settleOperation(operation!, result.kind === "confirmed" ? { ...result, receipt: result.value.backendSessionId } : result);
-        });
-      if (outcome.kind !== "confirmed") throw outcomeError(outcome);
-      operation = (await durable.operation(operation.operationId))!;
-    }
-    if (operation.state !== "confirmed" || !operation.receipt) {
-      // A lost create response is recovered ONLY by a stable operation receipt.
-      const matches = (await target.sessions()).filter((item) => item.operationId === operation!.operationId);
-      if (operation.state === "unknown" && matches.length === 1) {
-        await broadcastTail(sessionId, () => durable.settleOperation(operation!.operationId, { kind: "confirmed", receipt: matches[0]!.id }));
-        operation = (await durable.operation(operation.operationId))!;
-      } else throw Object.assign(new Error("Target session creation is unresolved; no request was replayed"), { code: "outcome-unknown" });
-    }
-    const profile = projection.agentProfileId ? await deps.profiles?.profileGet(projection.agentProfileId) : undefined;
-    const agentIntent = profile ? [profile.name, profile.notes].filter(Boolean).join(": ") : projection.runtimeLeg?.agentIntent ?? projection.agent;
-      if (transition.phase !== "released") {
-        throw Object.assign(new Error("release proof was not persisted"), { code: "stale-evidence" });
+    let stage: "starting-target" | "creating-native-session" | "publishing-route" = "starting-target";
+    try {
+      // The old execution incarnation is durably released BEFORE a target
+      // runtime can exist. A failed target remains recoverable from this proof.
+      const target = await runtimeFor(projection, cwd, transition.targetHarnessId);
+      stage = "creating-native-session";
+      const events = await store.events(sessionId);
+      const intent = events.findLast((event) => event.type === "harness/native-create-requested" && event.data.transitionId === transition!.id);
+      let operation = intent ? (await durable.operations(sessionId)).find((op) => op.ownerEventSeq === intent.seq) : undefined;
+      if (!operation) {
+        operation = (await broadcastTail(sessionId, () => durable.prepareOperation({
+          sessionId,
+          mutationKind: "session-reset",
+          intentEvent: { type: "harness/native-create-requested", data: { transitionId: transition!.id, harnessId: transition!.targetHarnessId }, ignorable: true },
+        }))).operation;
       }
+      if (operation.state === "prepared") {
+        const request = { projectId: projection.projectId, sessionId, title: projection.title, cwd };
+        const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(operation,
+          (id) => target.resetSessionOperation ? target.resetSessionOperation(request, id)
+            : target.createSessionOperation ? target.createSessionOperation(request, id)
+            : target.ensureSession(request),
+          (backendSessionId) => ({ backendSessionId }),
+          async (result) => {
+            await settleOperation(operation!, result.kind === "confirmed" ? { ...result, receipt: result.value.backendSessionId } : result);
+          });
+        if (outcome.kind !== "confirmed") throw outcomeError(outcome);
+        operation = (await durable.operation(operation.operationId))!;
+      }
+      if (operation.state !== "confirmed" || !operation.receipt) {
+        // A lost create response is recovered ONLY by a stable operation receipt.
+        const matches = (await target.sessions()).filter((item) => item.operationId === operation!.operationId);
+        if (operation.state === "unknown" && matches.length === 1) {
+          await broadcastTail(sessionId, () => durable.settleOperation(operation!.operationId, { kind: "confirmed", receipt: matches[0]!.id }));
+          operation = (await durable.operation(operation.operationId))!;
+        } else throw Object.assign(new Error("Target session creation is unresolved; no request was replayed"), { code: "outcome-unknown" });
+      }
+      const profile = projection.agentProfileId ? await deps.profiles?.profileGet(projection.agentProfileId) : undefined;
+      const agentIntent = profile ? [profile.name, profile.notes].filter(Boolean).join(": ") : projection.runtimeLeg?.agentIntent ?? projection.agent;
+      stage = "publishing-route";
       await transitionRuntimeEpochUnderLock(sessionId, target, {
-      resetOperationId: operation.operationId,
-      reason: "harness-switch",
-      authorityDisposition: { kind: "session-execution-released", ...transition.released },
-      harness: {
-        transitionId: transition.id,
-        selection: transition.selection,
-        leg: { id: transition.id, harnessId: transition.targetHarnessId, nativeSessionId: operation.receipt!, startedAt: Date.now(), canonicalThroughSeq: 0, bootstrap: "continuity", ...(agentIntent ? { agentIntent } : {}) },
-      },
-    });
-    projection = (await store.projection(sessionId))!;
-    return establishFreshRuntimeEpochUnderLock(sessionId, projection, target, operation.operationId);
+        resetOperationId: operation.operationId,
+        reason: "harness-switch",
+        authorityDisposition: { kind: "session-execution-released", ...transition.released },
+        harness: {
+          transitionId: transition.id,
+          selection: transition.selection,
+          leg: { id: transition.id, harnessId: transition.targetHarnessId, nativeSessionId: operation.receipt!, startedAt: Date.now(), canonicalThroughSeq: 0, bootstrap: "continuity", ...(agentIntent ? { agentIntent } : {}) },
+        },
+      });
+      projection = (await store.projection(sessionId))!;
+      return establishFreshRuntimeEpochUnderLock(sessionId, projection, target, operation.operationId);
+    } catch (error) {
+      const current = await store.projection(sessionId);
+      const active = current?.harnessTransition;
+      if (active?.id === transition.id && active.phase !== "requested") {
+        const failed: HarnessTransition = {
+          ...active,
+          phase: "failed",
+          attempt: (active.attempt ?? 0) + 1,
+          lastAttemptAt: Date.now(),
+          error: {
+            stage,
+            ...((error as { code?: unknown }).code ? { code: String((error as { code?: unknown }).code) } : {}),
+            message: error instanceof Error ? error.message : String(error),
+          },
+        };
+        await commitHarnessIntent(sessionId, { harnessTransition: failed }, "harness/switch-failed", {
+          transitionId: transition.id,
+          targetHarnessId: transition.targetHarnessId,
+          stage,
+          attempt: failed.attempt!,
+          ...(failed.error?.code ? { code: failed.error.code } : {}),
+          message: failed.error!.message,
+        });
+      }
+      throw error;
+    }
   };
 
   const commitHarnessIntent = async (sessionId: string, patch: Partial<SessionProjection>, type: string, data: JsonObject) => {
@@ -4656,11 +4694,52 @@ export function createSessionService(deps: {
         if (selection.mode !== "auto" && (selection.mode !== "pinned" || !/^[a-z][a-z0-9-]*$/.test(selection.harnessId))) throw Object.assign(new Error("invalid harness selection"), { code: "invalid-input" });
         if (projection.harnessTransition) {
           const pending = projection.harnessTransition;
-          if (JSON.stringify(pending.selection) !== JSON.stringify(selection)) throw Object.assign(new Error("Finish the pending harness switch first"), { code: "conflict" });
-          if (timing === "stop-now" && pending.phase === "requested" && pending.timing !== timing) {
+          const changedTarget = JSON.stringify(pending.selection) !== JSON.stringify(selection);
+          if (changedTarget) {
+            const cwd = projection.worktreePath ?? (await projects.get(projection.projectId))?.path ?? process.cwd();
+            const targetHarnessId = await runtimes.resolve(projection, cwd, selection);
+            if (pending.phase === "requested") {
+              if (targetHarnessId === projection.resolvedHarnessId) {
+                await commitHarnessIntent(sessionId, { harness: selection, harnessTransition: undefined }, "harness/switch-cancelled", {
+                  transitionId: pending.id,
+                  targetHarnessId,
+                  reason: "retargeted-to-current-harness",
+                  selection: { ...selection },
+                });
+                return (await store.projection(sessionId))!;
+              } else {
+                const retargeted: HarnessTransition = { ...pending, selection, targetHarnessId, timing };
+                await commitHarnessIntent(sessionId, { harnessTransition: retargeted }, "harness/switch-retargeted", {
+                  transitionId: pending.id,
+                  targetHarnessId,
+                  timing,
+                  selection: { ...selection },
+                });
+              }
+            } else {
+              // Previous authority remains released. A fresh transition id
+              // gives the alternate target its own non-replayable create
+              // operation while retaining the exact release proof.
+              const retargeted: HarnessTransition = {
+                id: randomUUID(),
+                selection,
+                targetHarnessId,
+                timing,
+                phase: "released",
+                released: pending.released,
+              };
+              await commitHarnessIntent(sessionId, { harnessTransition: retargeted }, "harness/switch-retargeted", {
+                previousTransitionId: pending.id,
+                transitionId: retargeted.id,
+                targetHarnessId,
+                selection: { ...selection },
+                previousAuthorityReleased: true,
+              });
+            }
+          } else if (timing === "stop-now" && pending.phase === "requested" && pending.timing !== timing) {
             await commitHarnessIntent(sessionId, { harnessTransition: { ...pending, timing } }, "harness/switch-updated", { transitionId: pending.id, timing });
           }
-          return finishHarnessSwitchUnderLock(sessionId);
+          return finishHarnessSwitchUnderLock(sessionId, pending.phase !== "requested");
         }
         const cwd = projection.worktreePath ?? (await projects.get(projection.projectId))?.path ?? process.cwd();
         const targetHarnessId = await runtimes.resolve(projection, cwd, selection);
@@ -4673,6 +4752,23 @@ export function createSessionService(deps: {
           harnessTransition: { id: randomUUID(), selection, targetHarnessId, timing, phase: "requested" },
         }, "harness/switch-requested", { targetHarnessId, timing, selection: { ...selection } });
         return finishHarnessSwitchUnderLock(sessionId);
+      });
+    },
+
+    async cancelHarnessSwitch(sessionId) {
+      return withSessionLock(sessionId, async () => {
+        const projection = await store.projection(sessionId);
+        if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        const transition = projection.harnessTransition;
+        if (!transition) return projection;
+        if (transition.phase !== "requested") {
+          throw Object.assign(new Error("The previous harness has already stopped; choose a target to continue"), { code: "already-released" });
+        }
+        await commitHarnessIntent(sessionId, { harnessTransition: undefined }, "harness/switch-cancelled", {
+          transitionId: transition.id,
+          targetHarnessId: transition.targetHarnessId,
+        });
+        return (await store.projection(sessionId))!;
       });
     },
 
@@ -4783,6 +4879,23 @@ export function createSessionService(deps: {
     async create(input: CreateSessionInput): Promise<SessionRef> {
       const project = await projects.get(input.projectId);
       if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
+      const projectProfileId = project.defaults?.agentProfileId ?? undefined;
+      const projectProfile = projectProfileId ? await deps.profiles?.profileGet(projectProfileId) : undefined;
+      // Stored profiles from before harness qualification retain a NULL
+      // harness. Their original catalog was OpenCode-owned, so preserve that
+      // compatibility without rewriting the row until the user edits it.
+      const projectProfileHarnessId = projectProfile ? projectProfile.harnessId ?? "opencode" : undefined;
+      const requestedHarness = input.harness;
+      const harness = requestedHarness?.mode === "pinned"
+        ? requestedHarness
+        : projectProfileHarnessId
+          ? { mode: "pinned" as const, harnessId: projectProfileHarnessId }
+          : requestedHarness ?? project.defaults?.harness ?? { mode: "auto" as const };
+      const compatibleProjectProfile = projectProfile && (harness.mode === "auto"
+        || projectProfileHarnessId === harness.harnessId)
+        ? projectProfile
+        : undefined;
+      input = { ...input, harness };
       let worktree: { path: string; branch: string | null } | undefined;
       if (input.worktreePath && deps.worktrees) {
         const requested = resolve(input.worktreePath);
@@ -4830,6 +4943,7 @@ export function createSessionService(deps: {
         ...(input.isolation ? { isolation: input.isolation } : {}),
         ...(input.model ? { model: input.model } : {}),
         ...(input.agent ? { agent: input.agent } : {}),
+        ...(compatibleProjectProfile ? { agentProfileId: compatibleProjectProfile.id } : {}),
         createdAt: now, updatedAt: now,
         status: "reconciling",
       };
@@ -5211,6 +5325,14 @@ export function createSessionService(deps: {
           throw Object.assign(new Error("agent profile not found"), { code: "not-found" });
         }
         if (profile) {
+          const activeHarnessId = rt.harnessId ?? proj.resolvedHarnessId;
+          const profileHarnessId = profile.harnessId ?? "opencode";
+          if (activeHarnessId && profileHarnessId !== activeHarnessId) {
+            throw Object.assign(
+              new Error(`Profile ${profile.name} requires ${profileHarnessId}; this conversation is using ${activeHarnessId}`),
+              { code: "profile-harness-mismatch", requiredHarnessId: profileHarnessId },
+            );
+          }
           profileModel = { providerID: profile.providerID, modelID: profile.modelID };
           profileAgent = profile.agent;
           input = {

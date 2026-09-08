@@ -64,7 +64,7 @@ test("parse round-trips and rejects garbage", () => {
   assert.deepEqual(parseModelPrefs("{nope"), defaultModelPrefs());
   const p = toggleFavorite(defaultModelPrefs(), "openai/gpt-5");
   const back = parseModelPrefs(serializeModelPrefs({ ...p, sort: "name" }));
-  assert.deepEqual(back.favorites, ["openai/gpt-5"]);
+  assert.deepEqual(back.favorites, ["opencode::openai/gpt-5"]);
   assert.equal(back.sort, "name");
   assert.equal(parseModelPrefs('{"sort":"bogus"}').sort, "provider");
 });
@@ -195,10 +195,17 @@ test("parseModelPrefs sanitizes, deduplicates, and caps persisted keys", () => {
     sort: "recent",
   }));
 
-  assert.deepEqual(parsed.favorites, ["p/a", "p/b"]);
+  assert.deepEqual(parsed.favorites, ["opencode::p/a", "opencode::p/b"]);
   assert.equal(parsed.recents.length, 20);
   assert.equal(new Set(parsed.recents).size, parsed.recents.length);
-  assert.deepEqual(parsed.recents.slice(0, 3), ["p/repeated", "p/m0", "p/m1"]);
+  assert.deepEqual(parsed.recents.slice(0, 3), ["opencode::p/repeated", "opencode::p/m0", "opencode::p/m1"]);
+});
+
+test("authoritative model keys remain distinct across harnesses", () => {
+  assert.equal(modelKey({ ...MODELS[0]!, harnessId: "opencode" }), "opencode::openai/gpt-5");
+  assert.equal(modelKey({ ...MODELS[0]!, harnessId: "codex" }), "codex::openai/gpt-5");
+  const parsed = parseModelPrefs(JSON.stringify({ favorites: ["codex::openai/gpt-5"] }));
+  assert.deepEqual(parsed.favorites, ["codex::openai/gpt-5"]);
 });
 
 test("favorite and recent updates are immutable and preserve ordering", () => {
@@ -289,6 +296,21 @@ test("validateProfile proposes repairs but never silently mutates", () => {
   assert.equal(broken.repairs[0]!.from, "gone/dead");
   assert.equal(broken.repairs[1]!.to, "");
   assert.equal(broken.repairs[2]!.to, "default");
+});
+
+test("a harness-bound profile only validates against the exact harness catalog", () => {
+  const models = [
+    { harnessId: "opencode", providerID: "shared", modelID: "same", name: "OpenCode model" },
+    { harnessId: "codex", providerID: "codex", modelID: "native", name: "Codex model" },
+    { providerID: "shared", modelID: "same", name: "Unqualified legacy model" },
+  ];
+  const result = validateProfile(
+    { harnessId: "codex", providerID: "shared", modelID: "same", agent: "build" },
+    models,
+    [{ harnessId: "opencode", name: "build" }],
+  );
+  assert.equal(result.valid, false);
+  assert.deepEqual(result.repairs.map((repair) => repair.field), ["model", "agent"]);
 });
 
 test("planFavoriteMigration is idempotent and skips vanished models", () => {

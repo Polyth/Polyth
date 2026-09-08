@@ -17,13 +17,14 @@ import type { PermissionService } from "@polyth/permissions";
 
 type Emit = (sessionId: string, ev: RuntimeEvent) => void;
 
-function fakeRuntime() {
+function fakeRuntime(harnessId?: string) {
   const listeners = new Set<Emit>();
   const started: CanonicalTurnRequest[] = [];
   const emit = (sessionId: string, ev: RuntimeEvent) => {
     for (const l of listeners) l(sessionId, ev);
   };
   const rt: AgentRuntime = {
+    ...(harnessId ? { harnessId } : {}),
     capabilities: async () => ({ streaming: true, permissions: true, questions: true, compaction: false, subagents: false }),
     models: async () => [],
     agents: async () => [],
@@ -192,6 +193,19 @@ test("an explicitly requested unknown profile fails without recording anything",
   assert.equal(fake.started.length, 0);
   assert.equal((await store.projection(id))?.agentProfileId, undefined, "unknown id never persisted");
   assert.equal((await store.events(id)).filter((e) => e.type === "user/message").length, 0);
+  await store.close();
+});
+
+test("a legacy unqualified profile cannot execute under a non-OpenCode harness", async () => {
+  const fake = fakeRuntime("codex");
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await assert.rejects(
+    () => sessions.send(id, { text: "go", agentProfileId: "prof-1" }),
+    (error: Error & { code?: string }) => error.code === "profile-harness-mismatch",
+  );
+  assert.equal(fake.started.length, 0);
+  assert.equal((await store.events(id)).some((event) => event.type === "user/message"), false);
   await store.close();
 });
 

@@ -82,6 +82,7 @@ import {
 import {
   loadComposerConfig, saveComposerConfig, consumeComposerConfig, wireProfileId,
   withAutoThinking, withExplicitAgent, withExplicitThinking, withModelForNextTurn,
+  withProfile, withProfileNone,
   type ComposerConfig,
 } from "../composerConfig.ts";
 import { shouldHandlePromptHistoryKey } from "../composer/history.ts";
@@ -99,6 +100,7 @@ import { noteModelUsed } from "@polyth/models/web-prefs";
 import { getUiSettings, setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
 import type {
+  DraftExecutionConfig,
   ModelRef,
   QueueItemDto,
   SessionProjection,
@@ -114,6 +116,13 @@ import { contextTokensUsed } from "../reduce.ts";
 import { getModelThinking, setModelThinking } from "../thinkingPrefs.ts";
 import { roleKind, useRolePrefs } from "../rolePrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
+import {
+  clearDraftExecutionConfig,
+  emptyDraftExecutionConfig,
+  readDraftExecutionConfig,
+  subscribeDraftExecutionConfig,
+  updateDraftExecutionConfig,
+} from "../executionDraft.ts";
 import { dismissKeyboard, useViewportMetrics } from "../mobileViewport.ts";
 import { tr } from "../i18n/index.ts";
 import SessionContextBar, {
@@ -429,16 +438,44 @@ export default function Composer({
   const [newSessionAutoApprove, setNewSessionAutoApprove] = useState(false);
   const [newSessionGoal, setNewSessionGoal] = useState(false);
   const [creatingSession, setCreatingSession] = useState(false);
+  const activeProjectId = useStore((s) => s.activeProjectId);
+  const [draftExecution, setDraftExecution] = useState<DraftExecutionConfig>(() =>
+    activeProjectId ? readDraftExecutionConfig(activeProjectId) : emptyDraftExecutionConfig());
+  useEffect(() => {
+    const refresh = () => setDraftExecution(activeProjectId
+      ? readDraftExecutionConfig(activeProjectId)
+      : emptyDraftExecutionConfig());
+    refresh();
+    return subscribeDraftExecutionConfig(refresh);
+  }, [activeProjectId]);
   const profiles = useProfiles();
   const globalModels = useStore((s) => s.models);
   const globalAgents = useStore((s) => s.agents);
+  const activeProject = useStore((s) =>
+    s.projectRegistry.projects.find((candidate) => candidate.id === s.activeProjectId));
   const rolePrefs = useRolePrefs();
   const settings = useStore((s) => s.settings);
   const sessionDefaults = useSessionDefaults();
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
-  const routeCatalog = useRuntimeCatalog(session, globalModels, globalAgents);
-  const models = routeCatalog.models;
-  const agents = routeCatalog.agents;
+  const selectedDraftHarness = !session
+    ? draftExecution.harnessSelection.mode === "pinned"
+      ? draftExecution.harnessSelection.harnessId
+      : !draftExecution.harnessSelectionExplicit && activeProject?.defaults?.harness?.mode === "pinned"
+        ? activeProject.defaults.harness.harnessId
+        : undefined
+    : undefined;
+  const routeCatalog = useRuntimeCatalog(session, globalModels, globalAgents, {
+    projectId: activeProjectId ?? undefined,
+    harnessId: selectedDraftHarness,
+  });
+  const catalogHarnessId = session?.resolvedHarnessId ?? routeCatalog.harnessId ?? selectedDraftHarness;
+  const effectiveDraftHarness = session ? undefined : catalogHarnessId;
+  const models = catalogHarnessId
+    ? routeCatalog.models.filter((item) => !item.harnessId || item.harnessId === catalogHarnessId)
+    : routeCatalog.models;
+  const agents = catalogHarnessId
+    ? routeCatalog.agents.filter((item) => !item.harnessId || item.harnessId === catalogHarnessId)
+    : routeCatalog.agents;
   const chatModels = models.filter(modelSupportsTextWorkflow);
   const activeSessionSeq = useStore((s) => {
     const events = s.activeSessionId ? s.events[s.activeSessionId] : undefined;
@@ -541,7 +578,6 @@ export default function Composer({
   const sendShortcut = isPhone ? settings.mobileSendShortcut : settings.desktopSendShortcut;
   const sendKey = sendShortcut === "none" ? `${modKeyLabel()}↵` : sendShortcut === "shift-enter" ? "⇧↵" : "↵";
   const uiPrefs = useUiSettings();
-  const activeProjectId = useStore((s) => s.activeProjectId);
   const promptHistoryNav = usePromptHistory({
     sessionId: session?.id ?? null,
     projectId: activeProjectId,
@@ -569,17 +605,67 @@ export default function Composer({
   const [cfg, setCfg] = useState<ComposerConfig>(() => loadComposerConfig(session?.id ?? null));
   const priorRoute = useRef({ sessionId: session?.id, harnessId: session?.resolvedHarnessId });
   useEffect(() => {
+    if (!routeCatalog.ready) return;
     if (priorRoute.current.sessionId === session?.id && priorRoute.current.harnessId !== session?.resolvedHarnessId) {
-      const next: ComposerConfig = { profile: { kind: "inherit" } };
+      const harnessId = session?.resolvedHarnessId;
+      const compatibleModel = cfg.model && routeCatalog.models.some((model) =>
+        model.providerID === cfg.model?.providerID
+        && model.modelID === cfg.model?.modelID
+        && (!harnessId || model.harnessId === harnessId));
+      const compatibleAgent = cfg.agent && routeCatalog.agents.some((agent) =>
+        agent.name === cfg.agent && (!harnessId || agent.harnessId === harnessId));
+      const profileId = cfg.profile.kind === "id" ? cfg.profile.id : undefined;
+      const compatibleProfile = !profileId || profiles.some((profile) =>
+        profile.id === profileId && (!harnessId || profile.harnessId === harnessId));
+      const next: ComposerConfig = {
+        profile: compatibleProfile ? cfg.profile : { kind: "inherit" },
+        ...(compatibleModel ? { model: cfg.model } : {}),
+        ...(compatibleAgent ? { agent: cfg.agent } : {}),
+        ...(compatibleModel && cfg.thinking !== undefined ? { thinking: cfg.thinking } : {}),
+      };
       saveComposerConfig(session?.id, next);
       setCfg(next);
     }
     priorRoute.current = { sessionId: session?.id, harnessId: session?.resolvedHarnessId };
-  }, [session?.id, session?.resolvedHarnessId]);
+  }, [session?.id, session?.resolvedHarnessId, cfg, routeCatalog.ready, routeCatalog.models, routeCatalog.agents, profiles]);
   const updateCfg = useCallback((next: ComposerConfig) => {
     setCfg(next);
     saveComposerConfig(sessionIdRef.current, next);
   }, []);
+  const priorDraftHarness = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (session) {
+      priorDraftHarness.current = undefined;
+      return;
+    }
+    if (!effectiveDraftHarness) {
+      priorDraftHarness.current = undefined;
+      return;
+    }
+    if (!routeCatalog.ready) return;
+    if (priorDraftHarness.current === effectiveDraftHarness) return;
+    priorDraftHarness.current = effectiveDraftHarness;
+    const compatibleModel = cfg.model && routeCatalog.models.some((model) =>
+      (!model.harnessId || model.harnessId === effectiveDraftHarness)
+      && model.providerID === cfg.model?.providerID
+      && model.modelID === cfg.model?.modelID);
+    const compatibleAgent = cfg.agent && routeCatalog.agents.some((agent) =>
+      (!agent.harnessId || agent.harnessId === effectiveDraftHarness) && agent.name === cfg.agent);
+    const draftProfileId = cfg.profile.kind === "id" ? cfg.profile.id : undefined;
+    const compatibleProfile = !draftProfileId || profiles.some((profile) =>
+      profile.id === draftProfileId && (profile.harnessId ?? "opencode") === effectiveDraftHarness);
+    const next: ComposerConfig = {
+      profile: compatibleProfile ? cfg.profile : { kind: "inherit" },
+      ...(compatibleModel ? { model: cfg.model } : {}),
+      ...(compatibleAgent ? { agent: cfg.agent } : {}),
+      ...(compatibleModel && cfg.thinking !== undefined ? { thinking: cfg.thinking } : {}),
+    };
+    if (!compatibleProfile && draftProfileId && activeProjectId) {
+      updateDraftExecutionConfig(activeProjectId, { profileId: undefined });
+    }
+    saveComposerConfig(null, next);
+    setCfg(next);
+  }, [session, effectiveDraftHarness, cfg, routeCatalog.ready, routeCatalog.models, routeCatalog.agents, profiles, activeProjectId]);
 
   // Save the live composer text to the local draft store and the server, on
   // focus loss / session switch / unmount — never while typing (a server
@@ -809,8 +895,6 @@ export default function Composer({
   // ---- capability catalogs (UX-COMPOSER-DISC) --------------------------------
   // Strict independent command/snippet outcomes; an HTTP failure is
   // `unavailable`, never a successful empty list.
-  const activeProject = useStore((s) =>
-    s.projectRegistry.projects.find((candidate) => candidate.id === s.activeProjectId));
   const globalDefaultModel = sessionDefaults.defaultModel ?? parseModelRef(settings.defaultModel);
   const preferredModel = resolveProjectModelDefault(
     activeProject?.defaults,
@@ -1117,6 +1201,18 @@ export default function Composer({
           ...(sentThinking ? { variant: sentThinking } : {}),
         }
       : undefined;
+    const selectedProfileId = cfgSent.profile.kind === "id" ? cfgSent.profile.id : undefined;
+    const selectedProfile = selectedProfileId
+      ? profiles.find((profile) => profile.id === selectedProfileId)
+      : undefined;
+    const modelHarnessId = selectedDescriptor?.harnessId ?? draftExecution.model?.harnessId;
+    const creationHarness = selectedProfile
+      ? { mode: "pinned" as const, harnessId: selectedProfile.harnessId ?? "opencode" }
+      : modelHarnessId
+        ? { mode: "pinned" as const, harnessId: modelHarnessId }
+        : draftExecution.harnessSelectionExplicit
+          ? draftExecution.harnessSelection
+          : activeProject?.defaults?.harness ?? undefined;
     const deliver = (targetSessionId: string) => command !== null
       ? api.runShell(targetSessionId, command).then(() => {
           promptHistoryNav.reload();
@@ -1165,7 +1261,10 @@ export default function Composer({
         let created: string;
         if (newSessionTarget.kind === "new-worktree") {
           created = await startIsolatedSession(activeProjectId, {
+            harness: creationHarness,
             ...(newSessionIntent?.title ? { title: newSessionIntent.title } : {}),
+            ...(sentModel ? { model: sentModel } : {}),
+            ...(cfgSent.agent ? { agent: cfgSent.agent } : {}),
             ...(newSessionTarget.base ? { targetBranch: newSessionTarget.base } : {}),
             precache: true,
           });
@@ -1184,12 +1283,16 @@ export default function Composer({
             )).path;
           }
           created = await createSession(activeProjectId, {
+            harness: creationHarness,
             ...(newSessionIntent?.title ? { title: newSessionIntent.title } : {}),
+            ...(sentModel ? { model: sentModel } : {}),
+            ...(cfgSent.agent ? { agent: cfgSent.agent } : {}),
             ...(worktreePath ? { worktreePath } : {}),
             precache: true,
           });
         }
         clearNewSessionDraft(activeProjectId);
+        clearDraftExecutionConfig(activeProjectId);
         if (newSessionAutoApprove) await api.autoAcceptSet(created, "on");
         if (newSessionGoal) await api.goalAttach(created, t);
         await deliver(created);
@@ -1227,6 +1330,7 @@ export default function Composer({
     session?.model, session?.status, session?.runtimeControl, preferredModel,
     sessionDefaults.defaultThinking, chatModels, creatingSession, newSessionTarget,
     newSessionAutoApprove, newSessionGoal, newSessionIntent,
+    draftExecution, profiles, activeProject?.defaults?.harness,
   ]);
 
   const applyCompletion = useCallback((item: AutocompleteItem) => {
@@ -1425,7 +1529,17 @@ export default function Composer({
     // A pending effort belongs to the old model. The selected model's saved
     // value is derived at send/render time, so never carry this one across.
     updateCfg(withModelForNextTurn(cfg, ref));
-    noteModelUsed(`${ref.providerID}/${ref.modelID}`);
+    const descriptor = routeCatalog.models.find((candidate) =>
+      candidate.providerID === ref.providerID && candidate.modelID === ref.modelID
+      && (!effectiveDraftHarness || !candidate.harnessId || candidate.harnessId === effectiveDraftHarness));
+    noteModelUsed(`${descriptor?.harnessId ? `${descriptor.harnessId}::` : ""}${ref.providerID}/${ref.modelID}`);
+    if (!session && activeProjectId && descriptor?.harnessId) {
+      updateDraftExecutionConfig(activeProjectId, {
+        harnessSelection: { mode: "pinned", harnessId: descriptor.harnessId },
+        harnessSelectionExplicit: true,
+        model: { ...ref, harnessId: descriptor.harnessId },
+      });
+    }
     if (activeProjectId) {
       void rememberProjectModelSelection(activeProjectId, ref).catch((error) => {
         setUiError(friendlyError(tr("composer.couldnTRememberTheProjectModel"), error));
@@ -1457,7 +1571,20 @@ export default function Composer({
       group: "",
     })),
   ];
-  const pickAgent = (id: string) => updateCfg(withExplicitAgent(cfg, id || undefined));
+  const pickAgent = (id: string) => {
+    updateCfg(withExplicitAgent(cfg, id || undefined));
+    if (!session && activeProjectId && !id) {
+      updateDraftExecutionConfig(activeProjectId, { agent: undefined });
+    } else if (!session && activeProjectId) {
+      const descriptor = routeCatalog.agents.find((candidate) => candidate.name === id
+        && (!effectiveDraftHarness || !candidate.harnessId || candidate.harnessId === effectiveDraftHarness));
+      if (descriptor?.harnessId) updateDraftExecutionConfig(activeProjectId, {
+        harnessSelection: { mode: "pinned", harnessId: descriptor.harnessId },
+        harnessSelectionExplicit: true,
+        agent: { harnessId: descriptor.harnessId, agent: id },
+      });
+    }
+  };
   const activeAgent = cfg.agent
     ?? session?.agent
     ?? sessionDefaults.defaultAgent
@@ -1498,6 +1625,9 @@ export default function Composer({
   const pickThinking = (thinking: string | undefined) => {
     if (selectedModel) setModelThinking(selectedModel, thinking);
     updateCfg(thinking === undefined ? withAutoThinking(cfg) : withExplicitThinking(cfg, thinking));
+    if (!session && activeProjectId) updateDraftExecutionConfig(activeProjectId, {
+      ...(thinking ? { thinking } : { thinking: undefined }),
+    });
   };
   const preserveKeyboard = isPhone && keyboardOpen
     ? () => inputRef.current?.focus()
@@ -1559,10 +1689,8 @@ export default function Composer({
     if (getState().activeSessionId === target) requestComposerReplace("");
   };
   const thinkingVariants = selectedModel?.variants ?? [];
-  // UX-MOBILE: phones render model + reasoning effort in a header row above
-  // the editor (where the effort track has room to drag); the desktop rail
-  // keeps the same controls under the text. One element, one owner — only
-  // the placement differs.
+  // Desktop renders these controls in the rail. On phones the harness package
+  // composes them into one execution sheet, so each control has one owner.
   const modelControl = chatModels.length > 0 && (
       <ModelPicker
         models={chatModels}
@@ -1595,6 +1723,61 @@ export default function Composer({
       ariaLabel={tr("composer.selectAgentModeCurrentValue", { value: activeAgentLabel })}
     />
   ) : <span className="agent-type-badge">{activeAgentLabel}</span>;
+  const profileHarnessId = session?.resolvedHarnessId ?? effectiveDraftHarness;
+  const compatibleProfiles = profiles.filter((profile) => !profileHarnessId
+    || (profile.harnessId ?? "opencode") === profileHarnessId);
+  const inheritedProfile = activeProject?.defaults?.agentProfileId
+    ? profiles.find((profile) => profile.id === activeProject.defaults?.agentProfileId)
+    : undefined;
+  const profileItems: PickerItem[] = [
+    { id: "", label: inheritedProfile ? `Default: ${inheritedProfile.name}` : "Default", group: "" },
+    { id: "__none", label: "None", group: "" },
+    ...compatibleProfiles.map((profile) => ({
+      id: profile.id,
+      label: profile.name,
+      detail: `${profile.harnessId ?? "OpenCode (legacy)"} · ${profile.providerID}/${profile.modelID}`,
+      group: "",
+    })),
+  ];
+  const profileValue = cfg.profile.kind === "id"
+    ? cfg.profile.id
+    : cfg.profile.kind === "none" ? "__none" : "";
+  const pickProfile = (id: string) => {
+    if (!id) {
+      updateCfg({ ...cfg, profile: { kind: "inherit" } });
+      if (!session && activeProjectId) updateDraftExecutionConfig(activeProjectId, { profileId: undefined });
+      return;
+    }
+    if (id === "__none") {
+      updateCfg(withProfileNone(cfg));
+      if (!session && activeProjectId) updateDraftExecutionConfig(activeProjectId, { profileId: undefined });
+      return;
+    }
+    const profile = profiles.find((candidate) => candidate.id === id);
+    if (!profile) return;
+    const harnessId = profile.harnessId ?? "opencode";
+    updateCfg(withProfile(cfg, id));
+    if (!session && activeProjectId) updateDraftExecutionConfig(activeProjectId, {
+      harnessSelection: { mode: "pinned", harnessId },
+      harnessSelectionExplicit: true,
+      profileId: id,
+      model: { harnessId, providerID: profile.providerID, modelID: profile.modelID },
+      ...(profile.agent ? { agent: { harnessId, agent: profile.agent } } : { agent: undefined }),
+      ...(profile.thinking ? { thinking: profile.thinking } : { thinking: undefined }),
+    });
+  };
+  const profileControl = <Picker
+    className="composer-profile-chip"
+    label="Profile"
+    mobileSheet
+    direction="up"
+    items={profileItems}
+    value={profileValue}
+    searchable={compatibleProfiles.length > 8}
+    onPick={pickProfile}
+    placeholder={profileItems.find((item) => item.id === profileValue)?.label ?? "Profile"}
+    ariaLabel={`Select profile, current: ${profileItems.find((item) => item.id === profileValue)?.label ?? "Default"}`}
+  />;
   const suggestionScopeId = session?.id ?? activeProjectId ?? "";
   const canGenerateNextAction = !!suggestionScopeId
     && !working
@@ -1658,6 +1841,11 @@ export default function Composer({
     projectId: activeProjectId ?? undefined,
     variant,
     working,
+    sessionStatus: session?.status,
+    harnessSelection: session?.harness,
+    resolvedHarnessId: session?.resolvedHarnessId,
+    harnessTransition: session?.harnessTransition,
+    projectHarnessDefault: activeProject?.defaults?.harness,
     autoApproveOn,
     autoApproveBusy,
     toggleAutoApprove,
@@ -1667,11 +1855,16 @@ export default function Composer({
     workflowDraftText: text,
     workflowAttachmentCount: attachments.length,
     consumeWorkflowDraft,
-    // On phones effort has a dedicated slot beside the model selector above
-    // the editor. Keep the widget context empty there so the same control is
-    // not rendered a second time in the bottom rail.
+    // The phone execution sheet owns effort and agent. Keep the ordinary
+    // composer widget contexts empty so neither control renders twice.
     composerEffortControl: phoneLayout ? null : effortControl,
-    composerAgentControl: agentControl,
+    composerAgentControl: phoneLayout ? null : agentControl,
+    executionModelControl: modelControl,
+    executionAgentControl: agentControl,
+    executionEffortControl: effortControl,
+    executionProfileControl: profileControl,
+    executionModelLabel: selectedModel?.name ?? selectedModel?.modelID,
+    phoneLayout,
     canGenerateNextAction,
     canRevertSuggestion,
     suggestionBusy,
@@ -1804,12 +1997,6 @@ export default function Composer({
       {attachments.length > 0 && !noModels && attachNote && (
         <div className="composer-attach-note">{attachNote}</div>
       )}
-      {phoneLayout && modelControl && (
-        <div className="composer-config-top">
-          {modelControl}
-          {effortControl}
-        </div>
-      )}
       <div className="composer-input">
         {shellMode && <div className="composer-mode-label">{tr("composer.shellCommandPermissionCheckedOutputAddedTo")}</div>}
         <AdaptiveTextInput
@@ -1936,6 +2123,9 @@ export default function Composer({
           {/* Phones cannot hover to arm a zone; inline edit pencils are just
               clutter there, so composer customization stays in Settings. */}
           {!phoneLayout && <CustomizeZoneButton slot="composer.leading" align="start" />}
+        </span>
+        <span className="composer-execution">
+          <SlotHost slot="composer.execution" context={slotContext} />
         </span>
         <div className="composer-actions customize-zone">
           <span className="composer-extensions">

@@ -44,7 +44,7 @@ test("all browser feature packages own a canonical web entry", () => {
   const browserFeatures = featureManifests()
     .filter(({ manifest }) => manifest.polyth?.webEntry !== undefined);
 
-  assert.equal(browserFeatures.length, 27);
+  assert.equal(browserFeatures.length, 28);
   for (const { id, dir, manifest } of browserFeatures) {
     assert.equal(
       manifest.polyth?.webEntry,

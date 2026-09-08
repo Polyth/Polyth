@@ -170,8 +170,8 @@ test("the phone session island combines recents, tasks, and requests", () => {
   assert.doesNotMatch(mobileHeader, /count=\{tasks\.length\}|count=\{recent\.length\}/);
   assert.match(sheet, /origin = "bottom"/);
   assert.match(sheet, /sheet-origin-top/);
-  // The pill dropped the "SESSION ·" / "TASK ·" kind prefix; a status glyph
-  // (spinner, done dot, or tone dot) now carries the state instead.
+  // The pill dropped the "SESSION ·" / "TASK ·" kind prefix; a live status
+  // glyph now carries the state instead.
   assert.doesNotMatch(mobileHeader, /mobile-island-kind/);
   assert.match(mobileHeader, /mobile-island-live/);
   assert.match(css, /\.mobile-island-diff \.add/);

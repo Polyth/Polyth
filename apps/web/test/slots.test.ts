@@ -236,6 +236,7 @@ test("timeline after-slot summary keeps only pending permissions and secrets", a
 test("contracts expose the runtime slot vocabulary used for validation", () => {
   assert.ok(UI_SLOTS.length >= 19);
   assert.ok(isUiSlot("composer.leading"));
+  assert.ok(isUiSlot("composer.execution"));
   assert.ok(isUiSlot("session.timeline.after"));
   assert.ok(isUiSlot("session.composer.before"));
   assert.ok(isUiSlot("widget.catalog"));

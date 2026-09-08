@@ -1,7 +1,9 @@
 import type { ComponentType, ReactNode } from "react";
 import type {
+  DraftExecutionConfig,
   JsonObject,
   SessionEvent,
+  SessionProjection,
   UiSlot,
   WidgetKind,
   PanelItemSize,
@@ -233,6 +235,7 @@ export interface WebDialogProps {
 export interface WebPackageHost {
   slots: {
     register(registration: SlotRegistration): Unregister;
+    list(slot: UiSlot): Array<{ id: string; order: number; meta?: Readonly<Record<string, unknown>> }>;
   };
   widgets: {
     register(pluginId: string, definition: WidgetDefinition): Unregister;
@@ -262,6 +265,15 @@ export interface WebPackageHost {
     subscribe(listener: () => void): Unregister;
     select<T>(selector: (snapshot: WebStoreSnapshot) => T): T;
   };
+  executionDraft: {
+    get(projectId: string): DraftExecutionConfig;
+    update(projectId: string, patch: Partial<DraftExecutionConfig>): DraftExecutionConfig;
+    clear(projectId: string): void;
+    subscribe(listener: () => void): Unregister;
+  };
+  sessions: {
+    upsert(session: SessionProjection): void;
+  };
   navigation: {
     setActiveView(view: string): void;
     openSettingsPage(pageId: string): void;
@@ -273,6 +285,7 @@ export interface WebPackageHost {
   ui: {
     icons: Readonly<Record<string, () => ReactNode>>;
     Dialog: ComponentType<WebDialogProps>;
+    Slot: ComponentType<{ slot: UiSlot; context?: Record<string, unknown>; customizable?: boolean }>;
   };
   errors: {
     friendly(action: string, cause: unknown): string;

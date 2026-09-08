@@ -25,6 +25,7 @@ export interface RuntimeCatalog {
 export function createRuntimeCatalog(deps: {
   projects: ProjectService;
   runtimes: RuntimePool;
+  onModelsInvalidated?(): void;
 }): RuntimeCatalog {
   let models: ModelDescriptor[] | undefined;
   let agents: AgentDescriptor[] | undefined;
@@ -83,8 +84,11 @@ export function createRuntimeCatalog(deps: {
     if (models) return Promise.resolve(models);
     if (modelsPending) return modelsPending;
     const loading = incremental<ModelDescriptor>(
-      (runtime) => runtime.models(),
-      (model) => `${model.providerID}/${model.modelID}`,
+      async (runtime) => (await runtime.models()).map((model) => ({
+        ...model,
+        ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}),
+      })),
+      (model) => `${model.harnessId ?? "legacy"}/${model.providerID}/${model.modelID}`,
     );
     const pending = loading.first;
     modelsPending = pending;
@@ -103,8 +107,11 @@ export function createRuntimeCatalog(deps: {
     if (agents) return Promise.resolve(agents);
     if (agentsPending) return agentsPending;
     const loading = incremental<AgentDescriptor>(
-      (runtime) => runtime.agents(),
-      (agent) => agent.name,
+      async (runtime) => (await runtime.agents()).map((agent) => ({
+        ...agent,
+        ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}),
+      })),
+      (agent) => `${agent.harnessId ?? "legacy"}/${agent.name}`,
     );
     const pending = loading.first;
     agentsPending = pending;
@@ -126,10 +133,13 @@ export function createRuntimeCatalog(deps: {
       models = undefined;
       modelsPending = undefined;
       modelAttempts = 0;
+      deps.onModelsInvalidated?.();
     },
     patchAgent(agent) {
       if (!agents) return;
-      const index = agents.findIndex((candidate) => candidate.name === agent.name);
+      const harnessId = agent.harnessId ?? "legacy";
+      const index = agents.findIndex((candidate) =>
+        (candidate.harnessId ?? "legacy") === harnessId && candidate.name === agent.name);
       agents = index < 0
         ? [...agents, agent]
         : agents.map((candidate, at) => at === index ? agent : candidate);

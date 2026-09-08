@@ -42,6 +42,7 @@ export function createPackageActivation(
   const scoped: WebPackageHost = {
     ...host,
     slots: {
+      list: host.slots.list,
       register: (registration) => {
         if (disposed) return reject("slots.register");
         return track(host.slots.register({ ...registration, ownerPackageId }));

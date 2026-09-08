@@ -41,6 +41,27 @@ test("runtime catalog single-flights and reuses expensive OpenCode discovery", a
   assert.equal((await catalog.agents())[0]?.mode, "subagent");
 });
 
+test("agent patches keep same-name roles isolated by harness", async () => {
+  const opencode = {
+    harnessId: "opencode",
+    agents: async () => [{ name: "build", mode: "primary" as const }],
+  } as AgentRuntime;
+  const codex = {
+    harnessId: "codex",
+    agents: async () => [{ name: "build", mode: "primary" as const }],
+  } as AgentRuntime;
+  const catalog = createRuntimeCatalog({
+    projects: projectsOf(["opencode", "codex"]),
+    runtimes: { forProject: async (id: string) => id === "opencode" ? opencode : codex },
+  });
+
+  await catalog.agents();
+  catalog.patchAgent({ harnessId: "opencode", name: "build", mode: "subagent" });
+  const agents = await catalog.agents();
+  assert.equal(agents.find((agent) => agent.harnessId === "opencode")?.mode, "subagent");
+  assert.equal(agents.find((agent) => agent.harnessId === "codex")?.mode, "primary");
+});
+
 test("returns the first useful catalog without waiting for every runtime", async () => {
   let releaseSlow!: () => void;
   const slow = new Promise<void>((resolve) => { releaseSlow = resolve; });

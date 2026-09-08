@@ -605,16 +605,16 @@ test("model preference wrapper updates and persists favorites, sort, and recents
       setItem(key: string, value: string) { values.set(key, value); },
     },
   });
-  const key = "test-provider/test-model";
+  const key = "opencode::test-provider/test-model";
   if (getModelPrefs().favorites.includes(key)) toggleModelFavorite(key);
 
   toggleModelFavorite(key);
-  noteModelUsed("other/model");
+  noteModelUsed("opencode::other/model");
   noteModelUsed(key);
   setModelSort("recent");
 
   assert.equal(getModelPrefs().favorites.includes(key), true);
-  assert.deepEqual(getModelPrefs().recents.slice(0, 2), [key, "other/model"]);
+  assert.deepEqual(getModelPrefs().recents.slice(0, 2), [key, "opencode::other/model"]);
   assert.equal(getModelPrefs().sort, "recent");
   assert.deepEqual(parseModelPrefs(values.get(MODEL_PREFS_KEY) ?? null), getModelPrefs());
 });

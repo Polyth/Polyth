@@ -111,6 +111,7 @@ function scopeSessions(
       return base.create(input);
     },
     switchHarness: base.switchHarness ? (sessionId, selection, timing) => guarded(() => base.switchHarness!(g(sessionId), selection, timing)) : undefined,
+    cancelHarnessSwitch: base.cancelHarnessSwitch ? (sessionId) => guarded(() => base.cancelHarnessSwitch!(g(sessionId))) : undefined,
     send: (sessionId, input) => guarded(() => base.send(g(sessionId), input)),
     abort: (sessionId) => guarded(() => base.abort(g(sessionId))),
     fork: (sessionId, atSeq) => guarded(() => base.fork(g(sessionId), atSeq)),

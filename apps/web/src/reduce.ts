@@ -53,6 +53,9 @@ export interface AssistantMsg {
   finalized: boolean; // assistant/message seen
   model?: ModelRef;
   agent?: string;
+  harnessId?: string;
+  runtimeLegId?: string;
+  profileId?: string;
   tokens?: TokenUsage;
   cost?: number;
   undone?: boolean;
@@ -239,6 +242,9 @@ export interface TurnState {
   status: "working" | "stopped" | "aborted" | "failed";
   model?: ModelRef;
   agent?: string;
+  harnessId?: string;
+  runtimeLegId?: string;
+  profileId?: string;
   reason?: string;
   error?: string;
   /** Set when `status === "failed"` because the provider is rate-limited. */
@@ -559,6 +565,9 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           time: ev.time,
           ...(model.turn?.model ? { model: model.turn.model } : {}),
           ...(model.turn?.agent ? { agent: model.turn.agent } : {}),
+          ...(model.turn?.harnessId ? { harnessId: model.turn.harnessId } : {}),
+          ...(model.turn?.runtimeLegId ? { runtimeLegId: model.turn.runtimeLegId } : {}),
+          ...(model.turn?.profileId ? { profileId: model.turn.profileId } : {}),
         };
         pushAssistant(model, m);
       }
@@ -588,11 +597,17 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           time: ev.time,
           ...(model.turn?.model ? { model: model.turn.model } : {}),
           ...(model.turn?.agent ? { agent: model.turn.agent } : {}),
+          ...(model.turn?.harnessId ? { harnessId: model.turn.harnessId } : {}),
+          ...(model.turn?.runtimeLegId ? { runtimeLegId: model.turn.runtimeLegId } : {}),
+          ...(model.turn?.profileId ? { profileId: model.turn.profileId } : {}),
         };
         pushAssistant(model, m);
       }
       if (!m.model && model.turn?.model) m.model = model.turn.model;
       if (!m.agent && model.turn?.agent) m.agent = model.turn.agent;
+      if (!m.harnessId && model.turn?.harnessId) m.harnessId = model.turn.harnessId;
+      if (!m.runtimeLegId && model.turn?.runtimeLegId) m.runtimeLegId = model.turn.runtimeLegId;
+      if (!m.profileId && model.turn?.profileId) m.profileId = model.turn.profileId;
       // Chunks make an answer visible before its canonical message row exists.
       // Actions such as pinning must nevertheless target that final row: the
       // server deliberately rejects transient `assistant/chunk` events.
@@ -923,6 +938,9 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         status: "working",
         model: turnModel,
         agent: str(d, "agent"),
+        harnessId: str(d, "harnessId"),
+        runtimeLegId: str(d, "runtimeLegId"),
+        profileId: str(d, "profileId"),
         startedAt: ev.time,
       };
       // Keep the previous sample's footprint so the gauge doesn't collapse to

@@ -11,17 +11,35 @@ export function createOpenCodeHarness(runtime: (context: HarnessContext) => Prom
             try {
                 const binary = await resolveOpenCodeBinary();
                 const identity = await inspectOpenCodeEngine(binary.executablePath);
-                try {
-                    const models = await (await runtime(context)).models();
-                    return { harnessId: "opencode", installed: true, authenticated: models.some((model) => model.connected), healthy: true, version: identity.version };
-                }
-                catch {
-                    return { harnessId: "opencode", installed: true, authenticated: "unknown", healthy: false, version: identity.version, message: "The native OpenCode endpoint is unavailable" };
-                }
+                // Detection is intentionally process-free. Provider/model setup
+                // belongs to lazy detail discovery; opening chat must not boot a
+                // runtime merely to populate a cosmetic settings count.
+                return { harnessId: "opencode", installed: true, authenticated: "unknown", healthy: true, state: "unknown", version: identity.version };
             }
             catch {
                 return { harnessId: "opencode", installed: false, authenticated: "unknown", healthy: false, message: "Install OpenCode to enable this harness" };
             }
+        },
+        async discover(context) {
+            const engine = await runtime(context);
+            const [models, agents, capabilities] = await Promise.all([
+                engine.models(),
+                engine.agents(),
+                engine.capabilities(),
+            ]);
+            const providers = [...new Map(models.map((model) => [model.providerID, {
+                id: model.providerID,
+                name: model.providerName ?? model.providerID,
+                connected: models.some((candidate) => candidate.providerID === model.providerID && candidate.connected === true),
+            }])).values()];
+            const hasUsableModel = models.some((model) => model.connected !== false);
+            return {
+                state: hasUsableModel ? "ready" : "setup-required",
+                authenticated: hasUsableModel ? true : "unknown",
+                ...(!hasUsableModel ? { message: "Configure an OpenCode provider before starting a conversation" } : {}),
+                capabilities,
+                catalog: { providers, models, agents, roles: agents },
+            };
         },
         createRuntime: runtime,
         source: {

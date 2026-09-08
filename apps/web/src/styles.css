@@ -548,63 +548,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 
 .side-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-3) var(--space-1) var(--space-2) var(--space-2); }
 
-.opencode-restart-control {
-  flex: none;
-  width: 100%;
-}
-.opencode-restart-button {
-  width: 100%;
-  min-height: 40px;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 8px 10px;
-  border: 1px solid var(--accent-line);
-  border-radius: var(--radius-card);
-  background: var(--accent-wash);
-  color: var(--text);
-  font-size: 12.5px;
-  font-weight: 650;
-  text-align: left;
-}
-.opencode-restart-button:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
-.opencode-restart-button:disabled { cursor: wait; opacity: .72; }
-.opencode-restart-icon { color: var(--accent); font-size: 20px; line-height: 1; }
-.opencode-restart-count {
-  min-width: 20px;
-  height: 20px;
-  margin-left: auto;
-  display: grid;
-  place-items: center;
-  border-radius: var(--radius-round);
-  background: var(--accent);
-  color: var(--accent-ink);
-  font-size: var(--font-meta);
-  font-weight: 800;
-}
-.opencode-restart-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 10000;
-  display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: 14px;
-  background: rgba(0, 0, 0, .78);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 650;
-  letter-spacing: .01em;
-  cursor: wait;
-}
-.opencode-restart-mark { width: clamp(120px, 18vw, 156px); height: clamp(120px, 18vw, 156px); }
-.opencode-restart-mark svg { display: block; width: 100%; height: 100%; overflow: visible; }
-@media (prefers-reduced-motion: reduce) {
-.opencode-restart-mark .restart-state,
-  .opencode-restart-mark .restart-p { animation-duration: 16s; }
-}
-
-
 /* Title-first project tree. Indents are absolute within the sidebar content. */
 .project-card-shell {
   position: relative;
@@ -1635,6 +1578,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   padding: 6px 10px 10px;
 }
 .composer-leading-zone,
+.composer-execution,
 .composer-actions,
 .composer-primary,
 .composer-extensions {
@@ -1645,6 +1589,13 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   flex: none;
   min-width: 0;
   gap: var(--space-1);
+}
+.composer-execution {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
 }
 .composer-leading-zone > *,
 .composer-actions > *,
@@ -7624,8 +7575,9 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   .composer-mobile.composer-collapsed .composer-actions > :is(.composer-extensions, .composer-next-action) { display: none; }
   .composer-mobile.composer-collapsed .composer-add { order: 1; }
   .composer-mobile.composer-collapsed .composer-input { order: 2; flex: 1 1 auto; min-width: 0; }
-  .composer-mobile.composer-collapsed .composer-mobile-extensions { order: 3; }
-  .composer-mobile.composer-collapsed .composer-primary { order: 4; }
+  .composer-mobile.composer-collapsed .composer-execution { order: 3; flex: 0 1 40vw; max-width: 40vw; }
+  .composer-mobile.composer-collapsed .composer-mobile-extensions { order: 4; }
+  .composer-mobile.composer-collapsed .composer-primary { order: 5; }
   .composer-mobile.composer-collapsed .composer-card textarea {
     min-height: 44px;
     max-height: 44px;
@@ -7682,48 +7634,6 @@ display: none;
     font-size: 12px;
   }
   .composer-mobile .composer-agent-chip .picker-chip { max-width: 20vw; }
-  /* Model + reasoning effort lead the phone composer above the editor, where
-     the effort track has room to drag. The chip keeps its touch box; the
-     effort control keeps the desktop anatomy — label, live value, track —
-     stretched across the remaining header width. */
-  .composer-mobile .composer-config-top {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    min-width: 0;
-    padding: var(--space-3) var(--space-4) var(--space-2);
-  }
-  .composer-mobile.composer-collapsed .composer-config-top { display: none; }
-  .composer-mobile .composer-config-top > .model-picker {
-    flex: 3 1 0;
-    min-width: 0;
-  }
-  .composer-mobile .composer-config-top .model-picker-trigger {
-    width: 100%;
-    max-width: none;
-  }
-  .composer-mobile .composer-config-top .config-chip,
-  .composer-mobile .composer-config-top .picker-chip {
-    min-height: var(--tap);
-    font-size: 12px;
-  }
-  /* The active model is the one config value worth reading at a glance — give
-     its trigger a legible body-size, medium-weight label. */
-  .composer-mobile .composer-config-top .model-picker-trigger {
-    font-size: var(--font-input);
-  }
-  .composer-mobile .composer-config-top .model-trigger-name {
-    font-size: var(--font-input);
-    font-weight: 600;
-    letter-spacing: 0;
-  }
-  .composer-mobile .composer-config-top .composer-effort-control {
-    flex: 2 1 0;
-    min-width: 0;
-    min-height: var(--tap);
-    grid-template-columns: 1fr;
-  }
-  .composer-mobile .composer-config-top .composer-effort-track input { min-width: 0; }
   .composer-mobile .composer-card textarea {
     min-height: 26px;
     /* §20: grows with the text, then scrolls internally. The font-scaled token

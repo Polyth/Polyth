@@ -90,3 +90,69 @@ test("harness pool dispose surfaces runtime disposal failures", async () => {
     await pool.forSession({ id: "s", projectId: "p", title: "s", createdAt: 0, updatedAt: 0, status: "idle" } as SessionProjection, "/tmp");
     await assert.rejects(() => pool.dispose(), /kill failed/);
 });
+
+test("snapshots are cached by target, retain last-good discovery, and invalidate explicitly", async () => {
+    const registry = createHarnessRegistry();
+    let discoveries = 0;
+    let failDiscovery = false;
+    registry.register({
+        descriptor: { id: "catalog", name: "Catalog", integration: "test", priority: 4, setupUrl: "https://example.invalid/setup" },
+        probe: async () => ({ harnessId: "catalog", installed: true, authenticated: true, healthy: true }),
+        discover: async () => {
+            discoveries += 1;
+            if (failDiscovery)
+                throw new Error("temporary outage");
+            return { catalog: { models: [{ providerID: "p", modelID: "m", name: "Model" }] } };
+        },
+        createRuntime: async () => ({ dispose: async () => { } } as AgentRuntime),
+    });
+    registry.configurePolicy(async () => ({ catalog: { enabled: true, priority: 2 } }));
+    const first = (await registry.snapshots(context, { detail: true }))[0]!;
+    const cached = (await registry.snapshots(context, { detail: true }))[0]!;
+    assert.equal(discoveries, 1);
+    assert.equal(cached.context.revision, first.context.revision);
+    assert.equal(first.policy.priority, 2);
+    assert.equal(first.setup?.setupUrl, "https://example.invalid/setup");
+    assert.equal(first.catalog?.models?.[0]?.harnessId, "catalog");
+
+    const probeRefresh = (await registry.snapshots(context, { force: true }))[0]!;
+    assert.equal(discoveries, 1);
+    assert.equal(probeRefresh.catalog?.models?.[0]?.modelID, "m");
+
+    failDiscovery = true;
+    const stale = (await registry.snapshots(context, { detail: true, force: true }))[0]!;
+    assert.equal(stale.availability.state, "degraded");
+    assert.equal(stale.stale, true);
+    assert.equal(stale.catalog?.models?.[0]?.modelID, "m");
+
+    failDiscovery = false;
+    registry.invalidate({ projectId: context.projectId, harnessId: "catalog" });
+    const refreshed = (await registry.snapshots(context, { detail: true }))[0]!;
+    assert.equal(discoveries, 3);
+    assert.notEqual(refreshed.context.revision, stale.context.revision);
+});
+
+test("execution resolution refines unknown readiness without probing native details during listing", async () => {
+    const registry = createHarnessRegistry();
+    let discoveries = 0;
+    registry.register({
+        descriptor: { id: "setup", name: "Setup", integration: "test", priority: 0 },
+        probe: async () => ({ harnessId: "setup", installed: true, authenticated: "unknown", healthy: true, state: "unknown" }),
+        discover: async () => {
+            discoveries += 1;
+            return { state: "setup-required", authenticated: "unknown" };
+        },
+        createRuntime: async () => ({ dispose: async () => { } } as AgentRuntime),
+    });
+    registry.register(provider("ready", 1));
+
+    await registry.probe(context);
+    assert.equal(discoveries, 0);
+    assert.equal((await registry.resolve(context, { mode: "auto" })).descriptor.id, "ready");
+    assert.equal(discoveries, 1);
+    await assert.rejects(
+        registry.resolve(context, { mode: "pinned", harnessId: "setup" }),
+        { code: "runtime-unavailable" },
+    );
+    assert.equal(discoveries, 2);
+});

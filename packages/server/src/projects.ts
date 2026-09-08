@@ -185,6 +185,16 @@ export function createProjectService(dataDir: string): ProjectRegistry {
           ) {
             throw Object.assign(new Error("rememberModelSelection must be boolean"), { code: "invalid-input" });
           }
+          const harness = patch.defaults.harness;
+          if (harness !== undefined && harness !== null && (
+            !harness || typeof harness !== "object"
+            || (harness.mode !== "auto" && (harness.mode !== "pinned" || typeof harness.harnessId !== "string" || !/^[a-z][a-z0-9-]*$/.test(harness.harnessId)))
+          )) {
+            throw Object.assign(new Error("defaults.harness must be inherit, Auto, or a registered harness selection"), { code: "invalid-input" });
+          }
+          if (patch.defaults.agentProfileId !== undefined && patch.defaults.agentProfileId !== null && typeof patch.defaults.agentProfileId !== "string") {
+            throw Object.assign(new Error("defaults.agentProfileId must be a profile id or null"), { code: "invalid-input" });
+          }
           // shallow-merge defaults so a partial patch never wipes other defaults
           project.defaults = { ...project.defaults, ...patch.defaults };
         }

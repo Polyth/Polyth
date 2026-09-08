@@ -883,6 +883,26 @@ export interface PromptHistoryDto {
   entries: PromptHistoryEntryDto[];
 }
 export interface ModelRef { providerID: string; modelID: string; variant?: string }
+/** Model identity once it crosses a harness boundary. Runtime-local APIs may
+ * keep using ModelRef because their harness is already fixed by the runtime. */
+export interface HarnessModelRef extends ModelRef { harnessId: string }
+export interface HarnessAgentRef { harnessId: string; agent: string }
+
+/** Browser-local execution choices for a conversation that does not exist
+ * yet. The server receives these atomically when the first send materializes
+ * the canonical session. */
+export interface DraftExecutionConfig {
+  harnessSelection: HarnessSelection;
+  /** Browser-only intent bit: distinguishes untouched Auto from a user who
+   * explicitly chose Auto over a project default. */
+  harnessSelectionExplicit?: boolean;
+  model?: HarnessModelRef;
+  profileId?: string;
+  agent?: HarnessAgentRef;
+  thinking?: string;
+  mode?: string;
+  features?: Record<string, boolean>;
+}
 
 // Model-visible derivation: these types feed deriveMessages()
 export const MODEL_VISIBLE_TYPES = [
@@ -1057,6 +1077,7 @@ export interface SessionIsolation {
 
 export interface CreateIsolatedSessionInput {
   projectId: string;
+  harness?: HarnessSelection;
   title?: string;
   model?: ModelRef;
   agent?: string;
@@ -1277,6 +1298,8 @@ export interface SessionDebugDto {
 
 export interface SessionService {
   switchHarness?(sessionId: string, selection: HarnessSelection, timing?: "after-turn" | "stop-now"): Promise<SessionProjection>;
+  /** Cancel is valid only while the previous runtime still owns authority. */
+  cancelHarnessSwitch?(sessionId: string): Promise<SessionProjection>;
   create(input: CreateSessionInput): Promise<SessionRef>;
   /** Result carries turnId for admitted turns or queueId+queued for deferred delivery. */
   send(sessionId: string, input: UserTurnInput): Promise<SendResult>;
@@ -2392,8 +2415,10 @@ export type ResponseIntentSettlement =
   | { kind: "unknown"; code?: string; message: string }
   | { kind: "not-applied"; code?: string; message: string };
 
-export interface ModelDescriptor { providerID: string; modelID: string; name: string; providerName?: string; context?: number; cost?: { input: number; output: number }; /** Normalized values include `input:text`, `output:image`, `input:none`, `toolcall`, and `attachment`. */ capabilities?: string[]; /** Named reasoning variants reported by OpenCode (for example low/medium/high). */ variants?: string[]; /** Provider has live credentials (backend `connected[]`); undefined = unknown/assume connected. */ connected?: boolean }
+export interface ModelDescriptor { /** Present in aggregated/prospective catalogs; runtime-local catalogs may omit it. */ harnessId?: string; providerID: string; modelID: string; name: string; providerName?: string; context?: number; cost?: { input: number; output: number }; /** Normalized values include `input:text`, `output:image`, `input:none`, `toolcall`, and `attachment`. */ capabilities?: string[]; /** Named reasoning variants reported by OpenCode (for example low/medium/high). */ variants?: string[]; /** Provider has live credentials (backend `connected[]`); undefined = unknown/assume connected. */ connected?: boolean }
 export interface AgentDescriptor {
+  /** Present in aggregated/prospective catalogs; runtime-local catalogs may omit it. */
+  harnessId?: string;
   name: string;
   description?: string;
   /** `auto` delegates model selection to the agent that launches this role. */
@@ -2418,6 +2443,17 @@ export interface HarnessDescriptor {
   installCommand?: string;
   signInCommand?: string;
 }
+export type HarnessAvailabilityState =
+  | "not-installed"
+  | "starting"
+  | "ready"
+  | "setup-required"
+  | "auth-required"
+  | "partially-configured"
+  | "degraded"
+  | "offline"
+  | "incompatible"
+  | "unknown";
 export interface HarnessProbe {
   harnessId: string;
   installed: boolean;
@@ -2425,6 +2461,94 @@ export interface HarnessProbe {
   healthy: boolean;
   version?: string;
   message?: string;
+  /** Legacy providers may omit this; the registry derives it conservatively. */
+  state?: HarnessAvailabilityState;
+}
+export type HarnessControlKind = "toggle" | "select" | "text" | "action";
+export type HarnessControlScope = "draft" | "session" | "project" | "harness";
+export type HarnessControlPlacement =
+  | "composer-primary"
+  | "composer-more"
+  | "harness-overview"
+  | "harness-settings";
+export type HarnessControlApplySemantics =
+  | "live"
+  | "next-turn"
+  | "restart-required"
+  | "new-session-only"
+  | "read-only";
+export interface HarnessControlDescriptor {
+  id: string;
+  label: string;
+  description?: string;
+  kind: HarnessControlKind;
+  scope: HarnessControlScope;
+  placement?: HarnessControlPlacement;
+  priority?: number;
+  applySemantics: HarnessControlApplySemantics;
+  danger?: "none" | "confirm" | "destructive";
+  available?: boolean;
+  unavailableReason?: string;
+  choices?: Array<{ value: string; label: string; description?: string }>;
+  value?: JsonValue;
+}
+export interface HarnessDiscovery {
+  /** Readiness learned during lazy native discovery. This refines the cheap
+   * probe without requiring every harness to start while chat is opening. */
+  state?: HarnessAvailabilityState;
+  authenticated?: boolean | "unknown";
+  message?: string;
+  capabilities?: RuntimeCapabilities;
+  catalog?: {
+    providers?: Array<{ id: string; name: string; connected?: boolean }>;
+    models?: ModelDescriptor[];
+    agents?: AgentDescriptor[];
+    roles?: AgentDescriptor[];
+    modes?: string[];
+    features?: string[];
+  };
+  controls?: HarnessControlDescriptor[];
+  restartRequired?: boolean;
+  pendingChanges?: number;
+  native?: JsonValue;
+}
+export interface HarnessSnapshot {
+  identity: {
+    id: string;
+    name: string;
+    integration: string;
+    version?: string;
+  };
+  availability: HarnessProbe & { state: HarnessAvailabilityState; checkedAt: number };
+  policy: {
+    enabled: boolean;
+    priority: number;
+    autoSelect: boolean;
+  };
+  setup?: {
+    installCommand?: string;
+    signInCommand?: string;
+    setupUrl?: string;
+  };
+  capabilities?: RuntimeCapabilities;
+  catalog?: HarnessDiscovery["catalog"];
+  configuration?: {
+    controls: HarnessControlDescriptor[];
+    restartRequired?: boolean;
+    pendingChanges?: number;
+  };
+  context: {
+    spaceId: string;
+    projectId: string;
+    cwd: string;
+    remote?: boolean;
+    revision: string;
+    fetchedAt: number;
+  };
+  stale?: boolean;
+  refreshing?: boolean;
+  message?: string;
+  native?: JsonValue;
 }
 export interface HarnessContext {
   /** Server-validated context for provider-owned per-Space storage. */
@@ -2440,6 +2564,13 @@ export interface HarnessContext {
 export interface HarnessProvider {
   descriptor: HarnessDescriptor;
   probe(context: HarnessContext): Promise<HarnessProbe>;
+  /** Prospective metadata. Implementations must not create a native execution
+   * session merely to answer this call. Expensive discovery is requested only
+   * for a selected detail surface. */
+  discover?(context: HarnessContext): Promise<HarnessDiscovery>;
+  /** Applies one descriptor-declared, UI-safe native control. Providers retain
+   * authority over validation and native config ownership. */
+  applyControl?(context: HarnessContext, controlId: string, value: JsonValue): Promise<void>;
   createRuntime(context: HarnessContext): Promise<AgentRuntime>;
   source?: SessionSourceProvider;
 }
@@ -2448,6 +2579,8 @@ export interface HarnessRegistry {
   providers(): HarnessProvider[];
   probe(context: HarnessContext): Promise<HarnessProbe[]>;
   resolve(context: HarnessContext, selection: HarnessSelection, stickyId?: string): Promise<HarnessProvider>;
+  snapshots(context: HarnessContext, options?: { harnessId?: string; force?: boolean; detail?: boolean }): Promise<HarnessSnapshot[]>;
+  invalidate(context?: Partial<Pick<HarnessContext, "spaceId" | "projectId" | "cwd">> & { harnessId?: string }): void;
 }
 export interface RuntimeLeg {
   id: string;
@@ -2479,8 +2612,19 @@ export type HarnessTransition = {
   targetHarnessId: string;
   timing: "after-turn" | "stop-now";
 } & (
-  | { phase: "requested" }
-  | { phase: "released"; released: ExecutionReleaseProof }
+  | { phase: "requested"; attempt?: number; lastAttemptAt?: number }
+  | { phase: "released"; released: ExecutionReleaseProof; attempt?: number; lastAttemptAt?: number }
+  | {
+      phase: "failed";
+      released: ExecutionReleaseProof;
+      attempt: number;
+      lastAttemptAt: number;
+      error: {
+        stage: "starting-target" | "creating-native-session" | "publishing-route";
+        code?: string;
+        message: string;
+      };
+    }
 );
 export interface SourceRecord { role: "user" | "assistant"; text: string; time?: number }
 export interface SourceSession { ref: string; title: string; updatedAt?: number }
@@ -2740,7 +2884,9 @@ export interface PermissionGuard {
 // ---------------------------------------------------------------- projects
 
 export interface ProjectDefaults {
-  agentProfileId?: string;
+  agentProfileId?: string | null;
+  /** null/absence inherits global Auto ordering. */
+  harness?: HarnessSelection | null;
   agent?: string | null;
   /** null explicitly inherits the browser's global session default. */
   model?: ModelRef | null;
@@ -3143,7 +3289,7 @@ export interface TaskCompletedData extends TaskSelectedData {}
 export const UI_SLOTS = [
   "app.nav", "app.header.actions", "app.window.controls", "session.header.actions", "session.list.badges",
   "sidebar.footer",
-  "composer.leading", "composer.trailing", "contextRail.tabs",
+  "composer.leading", "composer.execution", "composer.trailing", "contextRail.tabs",
   "settings.pages", "settings.footer", "commandPalette.commands",
   // Widget definitions enter through the catalog/settings seams. The six
   // workspace slots are first-class placement targets alongside panel and
@@ -3161,7 +3307,8 @@ export const UI_SLOTS = [
   "sidebar.toolbar", "composer.meta", "composer.pending",
   // project creation sources beyond the local folder picker (e.g. SSH remotes)
   "project.create.options",
-  "session.timeline.before", "session.timeline.after", "session.composer.before",
+  "session.timeline.before", "session.timeline.event", "session.timeline.after", "session.composer.before",
+  "settings.harness.detail",
   "session.footer",
   // Fresh-session widgets (starters, recents, or a plugin replacement). This
   // is deliberately a slot rather than a SessionHero import: idle-screen
@@ -3399,6 +3546,8 @@ export interface SubagentSnapshotData {
 export interface AgentProfile {
   id: string;
   name: string;
+  /** Absent means a legacy profile whose origin is not known. */
+  harnessId?: string;
   providerID: string;
   modelID: string;
   agent?: string;
@@ -3412,7 +3561,7 @@ export interface AgentProfile {
   createdAt: number;
   updatedAt: number;
 }
-export interface AgentProfileSeed { providerID: string; modelID: string; name?: string }
+export interface AgentProfileSeed { harnessId?: string; providerID: string; modelID: string; name?: string }
 export interface AgentProfileRepair { field: string; from: string; to: string; reason: string }
 
 // ---------------------------------------------------------------- system info (WP9)

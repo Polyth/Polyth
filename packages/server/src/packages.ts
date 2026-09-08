@@ -23,7 +23,7 @@ export const BUILTIN_PACKAGES = [
   { id: "sessions", name: "Sessions", description: "Session defaults and retention preferences.", core: true, enabled: true, settingsGroup: "Workspace", hasSettings: true },
   { id: "access", name: "Access", description: "Application access and authentication.", core: true, enabled: true, settingsGroup: "System", hasSettings: true },
   { id: "about", name: "About", description: "Application version and system information.", core: true, enabled: true, settingsGroup: "System", hasSettings: true },
-  { id: "mcp", name: "MCP", description: "Model Context Protocol server configuration.", core: false, enabled: true, settingsGroup: "Engineering", icon: "🔌", hasSettings: true },
+  { id: "mcp", name: "MCP", description: "Model Context Protocol server configuration.", core: false, enabled: true, settingsGroup: "Engineering", icon: "🔌", hasSettings: false },
   { id: "integrations", name: "Integrations", description: "External service integrations.", core: false, enabled: true, settingsGroup: "Workspace", icon: "🔗", hasSettings: true },
 ] as const satisfies readonly PackageDescriptorDto[];
 

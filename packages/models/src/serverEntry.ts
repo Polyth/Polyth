@@ -33,6 +33,7 @@ export function profileRoutes(deps: {
     input: Record<string, unknown>,
   ): Partial<Omit<AgentProfile, "id" | "revision" | "createdAt" | "updatedAt">> => ({
     ...(typeof input.name === "string" ? { name: input.name } : {}),
+    ...(typeof input.harnessId === "string" ? { harnessId: input.harnessId } : {}),
     ...(typeof input.providerID === "string" ? { providerID: input.providerID } : {}),
     ...(typeof input.modelID === "string" ? { modelID: input.modelID } : {}),
     ...(optional(input.agent) !== undefined ? { agent: optional(input.agent)! } : {}),
@@ -58,6 +59,10 @@ export function profileRoutes(deps: {
       const input = await body();
       json(200, await deps.store.profileCreate({
         name: String(input.name ?? ""),
+        // This endpoint historically described OpenCode models. Keeping that
+        // default preserves old clients while every updated profile editor
+        // sends an explicit harness identity.
+        harnessId: typeof input.harnessId === "string" ? input.harnessId : "opencode",
         providerID: String(input.providerID ?? ""),
         modelID: String(input.modelID ?? ""),
         features: input.features && typeof input.features === "object"
@@ -150,7 +155,9 @@ export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
     const runtime = host.runtimes.forSession
       ? await host.runtimes.forSession(session, session.worktreePath ?? project.path)
       : await host.runtimes.forProject(project.id, session.worktreePath ?? project.path);
-    const [models, agents, capabilities] = await Promise.all([runtime.models(), runtime.agents(), runtime.capabilities()]);
+    const [rawModels, rawAgents, capabilities] = await Promise.all([runtime.models(), runtime.agents(), runtime.capabilities()]);
+    const models = rawModels.map((model) => ({ ...model, ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}) }));
+    const agents = rawAgents.map((agent) => ({ ...agent, ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}) }));
     request.json(200, { models, agents, capabilities, nativeDefault: models.length === 0, harnessId: runtime.harnessId }); return true;
   };
 }
@@ -158,13 +165,25 @@ export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   const listModels = () => aggregate(
     host,
-    async (projectId) => (await host.runtimes.forProject(projectId)).models(),
-    (model) => `${model.providerID}/${model.modelID}`,
+    async (projectId) => {
+      const runtime = await host.runtimes.forProject(projectId);
+      return (await runtime.models()).map((model) => ({
+        ...model,
+        ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}),
+      }));
+    },
+    (model) => `${model.harnessId ?? "legacy"}/${model.providerID}/${model.modelID}`,
   );
   const listAgents = () => aggregate(
     host,
-    async (projectId) => (await host.runtimes.forProject(projectId)).agents(),
-    (agent) => agent.name,
+    async (projectId) => {
+      const runtime = await host.runtimes.forProject(projectId);
+      return (await runtime.agents()).map((agent) => ({
+        ...agent,
+        ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}),
+      }));
+    },
+    (agent) => `${agent.harnessId ?? "legacy"}/${agent.name}`,
   );
   const profiles = profileRoutes({
     store: host.store as unknown as ProfileStore,

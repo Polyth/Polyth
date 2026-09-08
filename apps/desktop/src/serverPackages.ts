@@ -44,6 +44,8 @@ import backendOpencode from "../../../packages/backend-opencode/src/serverEntry.
 
 import harnessRuntime from "../../../packages/harness-runtime/src/serverEntry.ts";
 
+import opencode from "../../../packages/opencode/src/serverEntry.ts";
+
 import sessionImport from "../../../packages/session-import/src/serverEntry.ts";
 
 type Descriptor = Omit<PackageDescriptorDto, "id">;
@@ -75,8 +77,9 @@ export const desktopServerPackages = [
   entry("home-assistant", { name: "Home Assistant", description: "Home Assistant entities and controls.", core: false, enabled: false, settingsGroup: "Customize", icon: "🏠", hasSettings: true }, homeAssistant),
   entry("hotkeys", { name: "Shortcuts", description: "Keyboard shortcut configuration and runtime registration.", core: true, enabled: true, settingsGroup: "Workspace", icon: "⌨", hasSettings: true }, hotkeys),
   entry("knowledge", { name: "Knowledge", description: "Project notes, plans, and reusable context.", core: false, enabled: true, settingsGroup: "Workspace", icon: "📚", hasSettings: false }, knowledge),
-  entry("models", { name: "Providers & Models", description: "Model providers, visibility, and defaults.", core: true, enabled: true, settingsGroup: "Engineering", hasSettings: true }, models),
+  entry("models", { name: "Models", description: "Harness-qualified model selection, presentation, and favorites.", core: true, enabled: true, settingsGroup: "Engineering", hasSettings: false }, models),
   entry("multirun", { name: "Multirun", description: "Run prompts across multiple models.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⑂", hasSettings: false }, multirun),
+  entry("opencode", {"name": "OpenCode", "description": "OpenCode-native roles and runtime configuration surfaces.", "core": true, "enabled": true, "hasSettings": false}, opencode),
   entry("permissions", { name: "Permissions", description: "Tool permission review and policy enforcement.", core: true, enabled: true, hasSettings: false }, permissions),
   entry("plugins", { name: "Plugins", description: "Managed plugin installation and configuration.", core: false, enabled: true, settingsGroup: "Customize", icon: "🧩", hasSettings: true }, plugins),
   entry("schedule", { name: "Schedule", description: "Schedule recurring and one-time agent tasks.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⏱", hasSettings: false }, schedule),

@@ -7,7 +7,7 @@ import { friendlyError } from "./settings.ts";
 import { formatAppUrl, parseAppUrl, settingsPageFromSearch } from "./router.ts";
 import * as store from "./store.ts";
 import { resolveActiveProjectId } from "./projectRegistry.ts";
-import type { AttachmentRef, JsonObject, ModelRef, Project, ProjectCloneInput, ProjectPatch, SessionEvent, SessionProjection } from "@polyth/contracts";
+import type { AttachmentRef, HarnessSelection, JsonObject, ModelRef, Project, ProjectCloneInput, ProjectPatch, SessionEvent, SessionProjection } from "@polyth/contracts";
 import { suggestWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks, registerServiceWorker } from "./push.ts";
 import { notificationCentre } from "./notificationCentre.ts";
@@ -916,6 +916,7 @@ export async function removeProject(id: string): Promise<void> {
 }
 
 export interface CreateSessionOptions {
+  harness?: HarnessSelection;
   title?: string;
   model?: ModelRef;
   agent?: string;
@@ -925,12 +926,35 @@ export interface CreateSessionOptions {
 }
 
 export interface IsolatedSessionOptions {
+  harness?: HarnessSelection;
   title?: string;
   model?: ModelRef;
   agent?: string;
   targetBranch?: string;
   sourceSessionId?: string;
   precache?: boolean;
+}
+
+function compatibleCreationDefaults(
+  project: Project | undefined,
+  options: Pick<CreateSessionOptions, "harness" | "model" | "agent">,
+): { model?: ModelRef; agent?: string } {
+  const defaults = getSessionDefaults();
+  const candidateModel = options.model ?? resolveProjectModelDefault(project?.defaults, defaults.defaultModel);
+  const candidateAgent = options.agent ?? project?.defaults?.agent ?? defaults.defaultAgent;
+  const pinnedHarness = options.harness?.mode === "pinned" ? options.harness.harnessId : undefined;
+  if (!pinnedHarness) return {
+    ...(candidateModel ? { model: candidateModel } : {}),
+    ...(candidateAgent ? { agent: candidateAgent } : {}),
+  };
+  const state = store.getState();
+  const model = candidateModel && state.models.some((item) =>
+    item.harnessId === pinnedHarness
+    && item.providerID === candidateModel.providerID
+    && item.modelID === candidateModel.modelID) ? candidateModel : undefined;
+  const agent = candidateAgent && state.agents.some((item) =>
+    item.harnessId === pinnedHarness && item.name === candidateAgent) ? candidateAgent : undefined;
+  return { ...(model ? { model } : {}), ...(agent ? { agent } : {}) };
 }
 
 /** Create a session in a Polyth-managed isolated workspace and open it. */
@@ -940,14 +964,10 @@ export async function startIsolatedSession(
 ): Promise<string> {
   const { precache = false, ...input } = opts;
   const project = store.getState().projectRegistry.projects.find((candidate) => candidate.id === projectId);
-  const defaults = getSessionDefaults();
-  const model = opts.model ?? resolveProjectModelDefault(
-    project?.defaults,
-    defaults.defaultModel,
-  );
-  const agent = opts.agent ?? project?.defaults?.agent ?? defaults.defaultAgent;
+  const { model, agent } = compatibleCreationDefaults(project, opts);
   const { id: sessionId } = await api.createIsolatedSession({
     projectId,
+    ...(input.harness ? { harness: input.harness } : {}),
     ...(input.title ? { title: input.title } : {}),
     ...(model ? { model } : {}),
     ...(agent ? { agent } : {}),
@@ -962,6 +982,7 @@ export async function startIsolatedSession(
     status: "idle",
     createdAt: now,
     updatedAt: now,
+    ...(input.harness ? { harness: input.harness } : {}),
     ...(model ? { model } : {}),
     ...(agent ? { agent } : {}),
   });
@@ -1009,12 +1030,7 @@ export async function createDefaultWorktree(
 export async function createSession(projectId: string, opts: CreateSessionOptions = {}): Promise<string> {
   const { precache = false, ...input } = opts;
   const project = store.getState().projectRegistry.projects.find((candidate) => candidate.id === projectId);
-  const defaults = getSessionDefaults();
-  const model = opts.model ?? resolveProjectModelDefault(
-    project?.defaults,
-    defaults.defaultModel,
-  );
-  const agent = opts.agent ?? project?.defaults?.agent ?? defaults.defaultAgent;
+  const { model, agent } = compatibleCreationDefaults(project, opts);
   if (!opts.worktreePath && project?.defaults?.worktreeBehavior === "fresh-worktree") {
     return startIsolatedSession(projectId, {
       ...(opts.title ? { title: opts.title } : {}),
@@ -1044,6 +1060,7 @@ export async function createSession(projectId: string, opts: CreateSessionOption
     status: "idle",
     createdAt: now,
     updatedAt: now,
+    ...(input.harness ? { harness: input.harness } : {}),
     ...(model ? { model } : {}),
     ...(agent ? { agent } : {}),
     ...(worktreePath ? { worktreePath } : {}),
