@@ -4,22 +4,14 @@ import { mkdir, readdir, readFile, realpath, rm, unlink, writeFile } from "node:
 import path from "node:path";
 import { promisify } from "node:util";
 
+import type { CommandScope, SlashCommand } from "./catalog.ts";
+
+export type { CommandScope, SlashCommand } from "./catalog.ts";
+export { commandPrecedence, mergeCommandCatalog } from "./catalog.ts";
+
 const execAsync = promisify(exec);
 const FILE_INCLUDE_MAX = 64 * 1024;
 const SHELL_TIMEOUT_MS = 10_000;
-
-export type CommandScope = "user" | "project" | "builtin";
-
-export interface SlashCommand {
-  name: string;
-  description: string;
-  prompt: string;
-  agent?: string;
-  model?: string;
-  scope: CommandScope;
-  id?: string;
-  owner?: "builtin" | "user" | "project";
-}
 
 export interface Snippet {
   alias: string;
@@ -494,5 +486,3 @@ function expandSnippets(text: string, snipBy: Map<string, Snippet>): string {
     return pre + snip.text;
   });
 }
-
-export { commandPrecedence, mergeCommandCatalog } from "./catalog.ts";

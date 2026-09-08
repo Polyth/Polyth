@@ -23,6 +23,7 @@ import {
   renameDocument,
   resetDocumentsForTest,
 } from "../src/resources/documents.ts";
+import type { ResourceStat } from "@polyth/web-sdk";
 import { registerResourceProvider } from "../src/resources/providers.ts";
 import { setUiSettings } from "../src/uiPrefs.ts";
 
@@ -43,7 +44,7 @@ let readImpl: (ref: { locator: string }) => Promise<{ content: string; revision:
   return { ...got };
 };
 
-let statImpl: ((ref: { locator: string }) => Promise<{ revision: string } | null>) | null = null;
+let statImpl: ((ref: { locator: string }) => Promise<ResourceStat>) | null = null;
 
 registerResourceProvider({
   scheme,

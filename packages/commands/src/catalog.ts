@@ -1,18 +1,26 @@
 import type { RuntimeCommandDescriptor } from "@polyth/contracts";
 
-type PolythCatalogCommand = {
-  name: string;
-  scope: "user" | "project" | "builtin";
-};
+export type CommandScope = "user" | "project" | "builtin";
 
-type CatalogEntry = PolythCatalogCommand | RuntimeCommandDescriptor;
+export interface SlashCommand {
+  name: string;
+  description: string;
+  prompt: string;
+  agent?: string;
+  model?: string;
+  scope: CommandScope;
+  id?: string;
+  owner?: "builtin" | "user" | "project";
+}
+
+export type CatalogCommand = SlashCommand | RuntimeCommandDescriptor;
 
 export const mergeCommandCatalog = (
-  polyth: readonly PolythCatalogCommand[],
+  polyth: readonly SlashCommand[],
   native: readonly RuntimeCommandDescriptor[],
-): CatalogEntry[] => [...polyth, ...native];
+): CatalogCommand[] => [...polyth, ...native];
 
-const COMMAND_SCOPE_RANK: Record<PolythCatalogCommand["scope"] | "native", number> = {
+const COMMAND_SCOPE_RANK: Record<CommandScope | "native", number> = {
   project: 0,
   user: 1,
   builtin: 2,
@@ -22,10 +30,10 @@ const COMMAND_SCOPE_RANK: Record<PolythCatalogCommand["scope"] | "native", numbe
 /** Typed `/name` precedence when no explicit selection: project > user > builtin > native. */
 export const commandPrecedence = (
   name: string,
-  catalog: readonly CatalogEntry[],
-): CatalogEntry | undefined => {
+  catalog: readonly CatalogCommand[],
+): CatalogCommand | undefined => {
   const normalized = name.replace(/^\//, "").toLowerCase();
-  let best: { item: CatalogEntry; rank: number } | undefined;
+  let best: { item: CatalogCommand; rank: number } | undefined;
   for (const cmd of catalog) {
     if ("owner" in cmd && cmd.owner === "native") {
       const names = [cmd.name, ...(cmd.aliases ?? [])].map((n) => n.toLowerCase());
@@ -34,7 +42,7 @@ export const commandPrecedence = (
       if (!best || rank < best.rank) best = { item: cmd, rank };
       continue;
     }
-    const polyth = cmd as PolythCatalogCommand;
+    const polyth = cmd as SlashCommand;
     if (polyth.name.toLowerCase() !== normalized) continue;
     const rank = COMMAND_SCOPE_RANK[polyth.scope] ?? COMMAND_SCOPE_RANK.builtin;
     if (!best || rank < best.rank) best = { item: polyth, rank };

@@ -187,6 +187,7 @@ const GENERIC_PACKAGE_IMPORTERS = new Set([
   "components/ContextRail.tsx",
   "components/Header.tsx",
   "components/Timeline.tsx",
+  "composer/discovery.ts",
   "i18n/index.ts",
   "i18n/types.ts",
   "profiles.ts",
