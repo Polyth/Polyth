@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createCapabilityContributionRegistry, createHarnessPool, createHarnessRegistry } from "@polyth/harness-runtime";
+import { createCapabilityContributionRegistry, createHarnessPool, createHarnessRegistry, releaseProcessExecution } from "@polyth/harness-runtime";
 import { createContext, loadPlugin } from "@polyth/kernel";
 import {
   activePinnedMessages,
@@ -25,6 +25,7 @@ import {
   SERVER_CAPABILITY_IDS,
   type AgentRuntime,
   type Disposable,
+  type HarnessProvider,
   type PackageDescriptorDto,
   type RemoteHost,
   type RuntimeEndpoint,
@@ -1444,6 +1445,20 @@ export async function boot(opts: BootOptions = {}) {
   };
   services.provide(serverServiceKey("opencode.runtime"), (context: import("@polyth/contracts").HarnessContext) =>
     openCodePool.forProject(context.projectId, context.cwd));
+  services.provide(
+    serverServiceKey<NonNullable<HarnessProvider["releaseExecution"]>>("opencode.runtime.release-execution"),
+    async (context, binding, operationId) => {
+      if (context.remote || process.platform !== "linux") {
+        return { kind: "rejected", code: "unsupported", message: "local Linux runtime authority required" };
+      }
+      const localStateKey = openCodeRuntimeId(context.projectId, context.cwd);
+      return releaseProcessExecution(
+        join(openCodeRuntimesDir, localStateKey, "opencode.pid.json.supervisor.json"),
+        binding,
+        operationId,
+      );
+    },
+  );
   services.provide(serverServiceKey<{
     onRestart(listener: (runtime: AgentRuntime) => void | Promise<void>): Disposable;
   }>("opencode.runtime.events"), {
@@ -2086,9 +2101,7 @@ export async function boot(opts: BootOptions = {}) {
       }, harnessId);
     },
     ...(gitService ? { worktrees: gitService.worktrees } : {}),
-    ...(terminalService ? {
-      shell: terminalService,
-    } : {}),
+    ...(terminalService ? { shell: terminalService } : {}),
     // F18: server-owned per-session auto-accept policy (nearest-parent
     // resolution for subagents; session-scoped only, never a global default).
     ...(autoAcceptStore ? { autoAccept: autoAcceptStore } : {}),

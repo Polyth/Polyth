@@ -444,6 +444,8 @@ export const pt: GitMessages = {
   "isolation.discardConfirm": "As alterações não fundidas deste espaço isolado serão perdidas.",
   "isolation.discardTitle": "Descartar espaço isolado",
   "isolation.discard": "Descartar",
+  "isolation.finishWithoutCleanup": "Concluir e preservar o espaço",
+  "isolation.finishWithoutCleanupConfirm": "O espaço e o ramo não verificados serão preservados e deixarão de ser geridos por esta sessão.",
   "isolation.dirtyTarget": "{branch} tem alterações locais. Faça commit ou descarte-as antes de integrar esta sessão.",
   "isolation.missingWorkspace": "O espaço isolado já não está disponível.",
   "isolation.workInIsolation": "Trabalhar em isolamento",

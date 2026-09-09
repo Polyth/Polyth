@@ -1,0 +1,201 @@
+{
+  "schemaVersion": 1,
+  "repository": "otto-assistant/polyth",
+  "baseline": "d70f875ecb919a0a7d59488fc7ddafc47915b558",
+  "reviewDate": "2026-09-09",
+  "meaning": "Git blob equality only detects drift; reviewCoverage qualifies what was actually inspected. No runtime verification is implied.",
+  "sources": [
+    {
+      "path": "package.json",
+      "gitBlob": "dae6c75776881599207071186cf073fce83e1e0e",
+      "reviewCoverage": "full",
+      "observation": "Root commands and workspace declarations"
+    },
+    {
+      "path": "Cargo.toml",
+      "gitBlob": "033450a225fd6884cc7e7338378a9eb88fa2385a",
+      "reviewCoverage": "full",
+      "observation": "Rust workspace and dependency declarations"
+    },
+    {
+      "path": "packages/plugins/src/index.ts",
+      "gitBlob": "55cf127dd431afb55b19a2dd5a62e8c6ff8162dd",
+      "reviewCoverage": "full",
+      "observation": "Supported server exports"
+    },
+    {
+      "path": "packages/plugins/src/serverPackage.ts",
+      "gitBlob": "0675df31903ff215b17ffc8cc27de627fa18a64e",
+      "reviewCoverage": "lines 1-280",
+      "observation": "Server lifecycle, lazy dependency resolution, scoped services, remote policy"
+    },
+    {
+      "path": "packages/example-feature/src/serverEntry.ts",
+      "gitBlob": "a40ce72a13b010aa53ee3fd43ea66f18b5439775",
+      "reviewCoverage": "full",
+      "observation": "Discovered server package; not a web package template"
+    },
+    {
+      "path": "packages/web-sdk/src/index.ts",
+      "gitBlob": "e9d3a1bbe9bad1c2ebaa7755f0691f7d89ddc59d",
+      "reviewCoverage": "lines 1-160",
+      "observation": "Widget and workbench contracts; remaining APIs not exhaustively reviewed"
+    },
+    {
+      "path": "packages/usage/widgets/index.tsx",
+      "gitBlob": "d51d6542c1f76829f05eea0e6cdb7441f70fc65f",
+      "reviewCoverage": "full",
+      "observation": "Concrete web registration and reverse-order disposal example"
+    },
+    {
+      "path": "packages/commands/package.json",
+      "gitBlob": "0e02f51a0f05774e309f1b1745c29a0b4c54f249",
+      "reviewCoverage": "full",
+      "observation": "Explicit browser catalog subpath; root is not browser-safe by default"
+    },
+    {
+      "path": "packages/backend-codex/src/index.ts",
+      "gitBlob": "145c4c2bab1a429886d961e7a1e15dd1eb466d76",
+      "reviewCoverage": "lines 1-275",
+      "observation": "Declared capabilities, event normalization, usage; declaration is not device/live evidence"
+    },
+    {
+      "path": "apps/web/test/packageContainment.test.ts",
+      "gitBlob": "84f642fb52f8757e164b2dca53ed2c8793041786",
+      "reviewCoverage": "lines 1-265",
+      "observation": "Import allowlists, package ownership and editor lazy boundary"
+    },
+    {
+      "path": "apps/mobile/package.json",
+      "gitBlob": "d4f6c954e820777e392eb39d6aae8faf8442895b",
+      "reviewCoverage": "full",
+      "observation": "Capacitor dependency and command declarations"
+    },
+    {
+      "path": "apps/mobile/src/nativeBridge.ts",
+      "gitBlob": "b8cbc70f53bbb6f0db2533f640af7adc05be76ae",
+      "reviewCoverage": "lines 1-165",
+      "observation": "Native file picker, local notifications, foreground and deep-link listeners"
+    },
+    {
+      "path": "apps/mobile/src/polythLink.ts",
+      "gitBlob": "f45c6eb21a0c358ec997d884dc8a35819ff86bf2",
+      "reviewCoverage": "full",
+      "observation": "Native link interface and default MissingNativeCore"
+    },
+    {
+      "path": "apps/mobile/src/runtime.ts",
+      "gitBlob": "b831a27e64c0167e85874c7b48722375b207eb92",
+      "reviewCoverage": "tree-only",
+      "observation": "Located entry point; implementation not reviewed in this audit"
+    },
+    {
+      "path": "apps/mobile/src/ConnectionScreen.tsx",
+      "gitBlob": "6efd0e71adff82bcba999558971ceac3ae8e250e",
+      "reviewCoverage": "tree-only",
+      "observation": "Located connection UI; implementation not reviewed in this audit"
+    },
+    {
+      "path": "apps/mobile/capacitor.config.ts",
+      "gitBlob": "73c7c266aed740fac870df8d270985a2944a18ab",
+      "reviewCoverage": "tree-only",
+      "observation": "Located native config; verify current settings before editing"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "gitBlob": "2495bde30c600b20ee60bd46614b0fb2bb7afc1d",
+      "reviewCoverage": "full",
+      "observation": "Actual generic CI ownership, selected typechecks and stable-test selector"
+    },
+    {
+      "path": "scripts/ci/select-tests.mjs",
+      "gitBlob": "1e37e1e9517d03ec116f8fb48c19a79f94fa2131",
+      "reviewCoverage": "full",
+      "observation": "CI versus Link test ownership and explicit baseline exclusion"
+    },
+    {
+      "path": ".github/workflows/android-release.yml",
+      "gitBlob": "74213521e79a520090a14abf768aaa4c4d0f59b7",
+      "reviewCoverage": "tree-only",
+      "observation": "Release workflow exists; read before release edits"
+    },
+    {
+      "path": ".github/workflows/desktop-release.yml",
+      "gitBlob": "4d51656189002ff6cd3c4409cf2c34b11d596a04",
+      "reviewCoverage": "tree-only",
+      "observation": "Release workflow exists; not audited end to end"
+    },
+    {
+      "path": ".github/workflows/polyth-link.yml",
+      "gitBlob": "d753eca09f3c8a50121a5e8debea4f1e78cc304d",
+      "reviewCoverage": "tree-only",
+      "observation": "Dedicated Link validation exists"
+    },
+    {
+      "path": "codemagic.yaml",
+      "gitBlob": "f61f85412e25e4be459c687da34a25abded1915f",
+      "reviewCoverage": "tree-only",
+      "observation": "iOS pipeline entry; read before editing"
+    },
+    {
+      "path": "docs/dev/styles.md",
+      "gitBlob": "3937209c521d40ce637608970d078fa159969bcb",
+      "reviewCoverage": "partial: ownership and principal token sections",
+      "observation": "Design constraints; do not duplicate the token catalog"
+    },
+    {
+      "path": "docs/dev/ui.md",
+      "gitBlob": "ba6cecfa9ce4549e999852e92b0e45cf340bcdf1",
+      "reviewCoverage": "tree-only",
+      "observation": "Existing specialist guide retained; resolve actual APIs against web-sdk"
+    },
+    {
+      "path": "docs/dev/components.md",
+      "gitBlob": "afc0835c49a27bcbe35dbec24d403443a7cbdbf2",
+      "reviewCoverage": "tree-only",
+      "observation": "Existing component guide retained"
+    },
+    {
+      "path": "docs/dev/widgets.md",
+      "gitBlob": "8e5c0694b99100aea2900fec37514dbe75497363",
+      "reviewCoverage": "tree-only",
+      "observation": "Existing widget guide retained"
+    },
+    {
+      "path": "docs/dev/architecture.md",
+      "gitBlob": "da823a5c6f47940a66a4a2f37cdb21ac4b193f64",
+      "reviewCoverage": "tree-only",
+      "observation": "Deep reference retained; not guaranteed current"
+    },
+    {
+      "path": "docs/dev/desktop.md",
+      "gitBlob": "a7058ce15243ec6a8547e75a2adde7e9f7036177",
+      "reviewCoverage": "tree-only",
+      "observation": "Desktop specialist guide retained"
+    },
+    {
+      "path": "docs/architecture/multi-harness.md",
+      "gitBlob": "ea904d307a05e6247395fe7c373be22930f89282",
+      "reviewCoverage": "partial: architecture and matrix through verification section",
+      "observation": "Useful design but historical capability matrix contradicts current Codex declaration"
+    },
+    {
+      "path": "docs/architecture/polyth-link.md",
+      "gitBlob": "54bdb199113ad9dc7b34eb541585d572f9a99e3a",
+      "reviewCoverage": "full",
+      "observation": "Trust boundaries and explicit native production-pairing limitation"
+    },
+    {
+      "path": "docs/architecture/spaces-and-tenancy.md",
+      "gitBlob": "9b3bdf96bb379a122dd2c350fafe680f4992f01b",
+      "reviewCoverage": "tree-only",
+      "observation": "Security design entry point; host scope seam verified separately"
+    },
+    {
+      "path": ".opencode/opencode.json",
+      "gitBlob": "287aff19af1aaaffeb0ab634a920154a102ebb04",
+      "reviewCoverage": "full",
+      "observation": "Machine-specific MCP config preserved, not executed"
+    }
+  ]
+}

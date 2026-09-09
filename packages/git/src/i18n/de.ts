@@ -444,6 +444,8 @@ export const de: GitMessages = {
   "isolation.discardConfirm": "Nicht gemergte Änderungen in diesem isolierten Arbeitsbereich gehen verloren.",
   "isolation.discardTitle": "Isolierten Arbeitsbereich verwerfen",
   "isolation.discard": "Verwerfen",
+  "isolation.finishWithoutCleanup": "Abschließen und Arbeitsbereich behalten",
+  "isolation.finishWithoutCleanupConfirm": "Der nicht überprüfte Arbeitsbereich und Branch bleiben erhalten und werden nicht mehr von dieser Sitzung verwaltet.",
   "isolation.dirtyTarget": "{branch} hat lokale Änderungen. Committe oder verwirf sie, bevor du diese Sitzung integrierst.",
   "isolation.missingWorkspace": "Der isolierte Arbeitsbereich ist nicht mehr verfügbar.",
   "isolation.workInIsolation": "Isoliert arbeiten",

@@ -444,6 +444,8 @@ export const ar: GitMessages = {
   "isolation.discardConfirm": "ستُفقد التغييرات غير المدمجة في هذه المساحة المعزولة.",
   "isolation.discardTitle": "تجاهل المساحة المعزولة",
   "isolation.discard": "تجاهل",
+  "isolation.finishWithoutCleanup": "إنهاء مساحة العمل والاحتفاظ بها",
+  "isolation.finishWithoutCleanupConfirm": "سيتم الاحتفاظ بمساحة العمل والفرع غير المتحقق منهما ولن تديرهما هذه الجلسة بعد الآن.",
   "isolation.dirtyTarget": "لدى {branch} تغييرات محلية. ثبّتها أو تجاهلها قبل دمج هذه الجلسة.",
   "isolation.missingWorkspace": "المساحة المعزولة لم تعد متاحة.",
   "isolation.workInIsolation": "العمل بمعزل",

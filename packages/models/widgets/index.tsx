@@ -18,7 +18,7 @@ export default defineWebPackage((host) => () => {
       keywords: ["model", "profile", "provider", "OpenCode"],
       standardTier: "technical",
       standardRank: 32,
-      open: () => host.navigation.openSettingsPage("harnesses"),
+      open: () => host.navigation.openSettingsPage("opencode"),
       available: () => true,
     }),
   ];

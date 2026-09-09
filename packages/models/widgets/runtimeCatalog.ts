@@ -25,15 +25,6 @@ const snapshotUnavailableReason = (snapshot: HarnessSnapshot | undefined): strin
         ? `${snapshot.identity.name} is not installed`
         : `${snapshot.identity.name} is ${state}`);
 };
-const prospectiveCandidate = (snapshot: HarnessSnapshot): boolean => {
-  const state = snapshot.availability.state;
-  return snapshot.policy.enabled
-    && snapshot.policy.autoSelect
-    && snapshot.availability.installed
-    && snapshot.availability.healthy
-    && snapshot.availability.authenticated !== false
-    && (state === "ready" || state === "unknown");
-};
 export function useRuntimeCatalog(
   session: SessionProjection | null,
   models: ModelDescriptor[],
@@ -67,24 +58,27 @@ export function useRuntimeCatalog(
   useEffect(() => {
     if (session?.harnessTransition) return;
     if (!session?.id && !prospective?.projectId) return;
-    let cancelled = false;
+    const controller = new AbortController();
     const request = session?.id
-      ? api.get<Catalog>(`/api/runtime-catalog?sessionId=${encodeURIComponent(session.id)}`)
+      ? api.get<Catalog>(`/api/runtime-catalog?sessionId=${encodeURIComponent(session.id)}`, { signal: controller.signal })
       : (async (): Promise<Catalog> => {
-          let harnessId = prospective!.harnessId;
-          if (!harnessId) {
-            const snapshots = await api.get<HarnessSnapshot[]>(`/api/harnesses/snapshots?projectId=${encodeURIComponent(prospective!.projectId!)}`);
-            harnessId = snapshots
-              .filter(prospectiveCandidate)
-              .toSorted((left, right) => left.policy.priority - right.policy.priority || left.identity.id.localeCompare(right.identity.id))[0]
-              ?.identity.id;
-          }
-          if (!harnessId) {
+          const query = new URLSearchParams({
+            projectId: prospective!.projectId!,
+            detail: "1",
+            ...(prospective!.harnessId
+              ? { harnessId: prospective!.harnessId }
+              : { auto: "1" }),
+          });
+          // One request only. For Auto, the server selects from cheap cached
+          // summaries and then details just that harness, reusing singleflight.
+          const snapshots = await api.get<HarnessSnapshot[]>(`/api/harnesses/snapshots?${query}`, { signal: controller.signal });
+          const snapshot = snapshots[0];
+          const harnessId = snapshot?.identity.id ?? prospective!.harnessId;
+          if (!snapshot || !harnessId) {
             return { ...unavailable, ready: true, discovery: { state: "unavailable", reason: "No engine is ready for this project" } };
           }
-          const snapshots = await api.get<HarnessSnapshot[]>(`/api/harnesses/snapshots?projectId=${encodeURIComponent(prospective!.projectId!)}&harnessId=${encodeURIComponent(harnessId)}&detail=1`);
-          const catalog = snapshots[0]?.catalog;
-          const reason = snapshotUnavailableReason(snapshots[0]);
+          const catalog = snapshot.catalog;
+          const reason = snapshotUnavailableReason(snapshot);
           const catalogModels = catalog?.models ?? [];
           return {
             models: catalogModels,
@@ -102,8 +96,11 @@ export function useRuntimeCatalog(
                 : { state: "empty" },
           };
         })();
-    void request.then((catalog) => { if (!cancelled) setResult({ key, catalog: { ...catalog, discovery: catalog.discovery ?? (catalog.models.length ? { state: "available" } : { state: "empty" }), ready: true } }); }).catch((error: unknown) => {
-      if (cancelled) return;
+    void request.then((catalog) => {
+      if (controller.signal.aborted) return;
+      setResult({ key, catalog: { ...catalog, discovery: catalog.discovery ?? (catalog.models.length ? { state: "available" } : { state: "empty" }), ready: true } });
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted) return;
       setResult({
         key,
         catalog: {
@@ -114,7 +111,7 @@ export function useRuntimeCatalog(
         },
       });
     });
-    return () => { cancelled = true; };
+    return () => controller.abort();
   }, [key, session?.id, session?.harnessTransition, prospective?.projectId, prospective?.harnessId]);
   return !key
     ? { models, agents, nativeDefault: false, ready: true, discovery: models.length > 0 ? { state: "available" } : { state: "empty" } }

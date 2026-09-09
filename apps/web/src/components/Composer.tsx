@@ -280,8 +280,9 @@ function useComposerLocation(session: SessionProjection | null): {
     || "";
 
   const branchChoices = useMemo<LocationChoice[]>(() => {
-    const linkedBranches = new Set(worktrees.map((worktree) => worktree.branch).filter(Boolean));
-    const localBranches = branches.branches.filter((candidate) => !candidate.remote && !isManagedIsolationBranch(candidate.name));
+    const userWorktrees = worktrees.filter((worktree) => !worktree.branch?.startsWith("polyth/isolate/"));
+    const linkedBranches = new Set(userWorktrees.map((worktree) => worktree.branch).filter(Boolean));
+    const localBranches = branches.branches.filter((candidate) => !candidate.remote && !candidate.name.startsWith("polyth/isolate/"));
     // Branches that only exist on a remote, keyed by the local name a checkout
     // would create. `ref` (e.g. `origin/foo`) is the start point.
     const localNames = new Set(localBranches.map((candidate) => candidate.name));
@@ -309,7 +310,7 @@ function useComposerLocation(session: SessionProjection | null): {
           target: { kind: "new-worktree", base: currentBranchName },
         });
       }
-      for (const worktree of worktrees) {
+      for (const worktree of userWorktrees) {
         const name = worktree.branch;
         if (!name || isManagedIsolationBranch(name) || seen.has(name)) continue;
         seen.add(name);

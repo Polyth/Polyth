@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { HarnessProvisioningQuery, HarnessRegistry, HarnessSelection, JsonValue, RouteHandler } from "@polyth/contracts";
+import type { HarnessProvisioningQuery, HarnessRegistry, HarnessSelection, HarnessSnapshot, JsonValue, RouteHandler } from "@polyth/contracts";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { createHarnessRegistry, type HarnessPreferences, harnessError } from "./index.ts";
 export function readHarnessSelection(value: unknown): HarnessSelection {
@@ -26,6 +26,15 @@ async function readPreferences(file: string): Promise<HarnessPreferences> {
         throw error;
     }
 }
+const prospectiveCandidate = (snapshot: HarnessSnapshot): boolean => {
+    const state = snapshot.availability.state;
+    return snapshot.policy.enabled
+        && snapshot.policy.autoSelect
+        && snapshot.availability.installed
+        && snapshot.availability.healthy
+        && snapshot.availability.authenticated !== false
+        && (state === "ready" || state === "unknown");
+};
 export function harnessRoutes(host: ServerPackageHost): RouteHandler {
     return async (request) => {
         if (!request.path.startsWith("/api/harnesses"))
@@ -61,13 +70,30 @@ export function harnessRoutes(host: ServerPackageHost): RouteHandler {
         };
         if (request.path === "/api/harnesses/snapshots" && request.method === "GET") {
             const context = await contextForRequest();
-            const harnessId = request.url.searchParams.get("harnessId") ?? undefined;
+            let harnessId = request.url.searchParams.get("harnessId") ?? undefined;
             if (harnessId && !registry.providers().some((provider) => provider.descriptor.id === harnessId))
                 throw harnessError("not-found", "harness not found");
+            const detail = request.url.searchParams.get("detail") === "1";
+            const force = request.url.searchParams.get("force") === "1";
+            // Draft catalog callers used to perform a client-side waterfall:
+            // cheap snapshots -> choose Auto -> second detail request. Keep Auto
+            // selection server-side so there is one network round-trip and the
+            // second phase reuses the same snapshot cache/singleflight entry.
+            if (!harnessId && request.url.searchParams.get("auto") === "1") {
+                const summaries = await registry.snapshots(context, { force });
+                harnessId = summaries
+                    .filter(prospectiveCandidate)
+                    .toSorted((left, right) => left.policy.priority - right.policy.priority || left.identity.id.localeCompare(right.identity.id))[0]
+                    ?.identity.id;
+                if (!harnessId) {
+                    request.json(200, []);
+                    return true;
+                }
+            }
             request.json(200, await registry.snapshots(context, {
                 ...(harnessId ? { harnessId } : {}),
-                detail: request.url.searchParams.get("detail") === "1",
-                force: request.url.searchParams.get("force") === "1",
+                detail,
+                force,
             }));
             return true;
         }

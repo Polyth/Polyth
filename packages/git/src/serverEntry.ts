@@ -401,21 +401,29 @@ export function gitRoutes(deps: {
         await git.setIdentity(root, { name: String(input.name ?? ""), email: String(input.email ?? "") });
         json(200, await git.identity(root));
         return true;
-      case "/api/worktrees":
+      case "/api/worktrees": {
+        const branch = String(input.branch ?? "");
+        if (isManagedBranch(branch)) {
+          throw Object.assign(new Error("managed isolation branches cannot be used for ordinary worktrees"), {
+            code: "invalid-input",
+          });
+        }
         json(200, await git.worktrees.create(root, {
-          branch: String(input.branch ?? ""),
+          branch,
           ...(input.path ? { path: String(input.path) } : {}),
           ...(input.base ? { base: String(input.base) } : {}),
         }));
         return true;
+      }
       case "/api/worktrees/remove": {
         const worktreePath = String(input.path ?? "");
-        const sessions = await deps.sessions.list(projectId);
-        if (sessions.some((session) => session.isolation && resolve(session.isolation.worktreePath) === resolve(worktreePath))) {
-          throw Object.assign(new Error("Merge back or discard the isolated session before removing its workspace."), { code: "conflict" });
-        }
-        if (await readManagedMarker(git, worktreePath)) {
-          throw Object.assign(new Error("Managed workspaces must be removed through their session lifecycle."), { code: "conflict" });
+        const activeIsolation = (await deps.sessions.list(projectId)).find((session) =>
+          session.isolation?.kind === "git-worktree"
+          && resolve(session.isolation.worktreePath) === resolve(worktreePath));
+        if (activeIsolation) {
+          throw Object.assign(new Error("merge or discard the isolated session before removing its workspace"), {
+            code: "conflict",
+          });
         }
         const deleteBranch = input.deleteBranch === true;
         const force = input.force === true;
@@ -508,6 +516,10 @@ export function isolationRoutes(deps: {
       json(200, await isolation.discard(sessionId));
       return true;
     }
+    if (action === "abandon") {
+      json(200, await isolation.abandonCleanup(sessionId));
+      return true;
+    }
     if (action === "resolve") {
       json(200, await isolation.resolveWithAgent(sessionId));
       return true;
@@ -551,7 +563,7 @@ export const GIT_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["POST"], path: "/api/isolation/:sessionId/merge", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/isolation/:sessionId/keep", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/isolation/:sessionId/discard", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
-    { methods: ["POST"], path: "/api/isolation/:sessionId/recover", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/isolation/:sessionId/abandon", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/isolation/:sessionId/resolve", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
   ],
 };
@@ -565,7 +577,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   return {
     remoteAccess: GIT_REMOTE_ACCESS,
     routes: async (request) => routes ? routes(request) : false,
-    onEnable() {
+    async onEnable() {
       const commitMessage = createCommitMessageGenerator({
         diff: (root, opts) => git.diff(root, opts),
         runtime: async (root) => {
@@ -617,10 +629,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         append,
       });
       const isolationHandler = isolationRoutes({ isolation });
+      await isolation.recoverAll();
       routes ??= async (request) => (await isolationHandler(request)) || (await gitHandler(request));
-      void isolation.recoverAll().catch((error: unknown) => {
-        console.error("[polyth] isolation recovery failed", error);
-      });
     },
   };
 }

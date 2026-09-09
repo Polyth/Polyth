@@ -387,6 +387,7 @@ function sharedFixture() {
   let sharedDisposed = 0;
   const provider = (id: string, shared: boolean): HarnessProvider => ({
     descriptor: { id, name: id, integration: "fake", priority: id === "fake-a" ? 0 : id === "fake-b" ? 1 : 2 },
+    runtimeLifetime: shared ? "workspace" : "session",
     probe: async () => ({ harnessId: id, installed: true, authenticated: true, healthy: true }),
     async createRuntime(context: HarnessContext) {
       const sessionId = context.sessionId!;

@@ -88,6 +88,133 @@ test("shared physical runtimes are cached per session and forgotten by session i
     assert.equal(physical, 1);
 });
 
+test("retiring a per-session runtime disposes it once and a new cwd gets a fresh runtime", async () => {
+    let created = 0;
+    const disposed: number[] = [];
+    const r = createHarnessRegistry();
+    r.register({
+        descriptor: { id: "native", name: "native", priority: 0, integration: "test" },
+        probe: async () => ({ harnessId: "native", installed: true, authenticated: true, healthy: true }),
+        createRuntime: async () => {
+            const id = ++created;
+            return { dispose: async () => { disposed.push(id); } } as AgentRuntime;
+        },
+    });
+    const pool = createHarnessPool({
+        registry: r,
+        legacyHarnessId: "native",
+        context: async (projectId, cwd, sessionId) => ({ ...context, projectId, sessionId, cwd: cwd!, spaceId: projectId }),
+    });
+    const projection = { id: "s", projectId: "p", title: "s", createdAt: 0, updatedAt: 0, status: "idle" } as SessionProjection;
+    const old = await pool.forSession(projection, "/old");
+    await pool.retireSession("s");
+    assert.deepEqual(disposed, [1]);
+    const fresh = await pool.forSession(projection, "/new");
+    assert.notEqual(fresh, old);
+    assert.equal(created, 2);
+    await pool.dispose();
+    assert.deepEqual(disposed, [1, 2]);
+});
+
+test("retiring one lease never disposes a shared workspace runtime", async () => {
+    let disposals = 0;
+    const shared = { dispose: async () => { disposals += 1; } } as AgentRuntime;
+    const r = createHarnessRegistry();
+    r.register({
+        descriptor: { id: "shared", name: "shared", priority: 0, integration: "test" },
+        runtimeLifetime: "workspace",
+        probe: async () => ({ harnessId: "shared", installed: true, authenticated: true, healthy: true }),
+        createRuntime: async () => shared,
+    });
+    const pool = createHarnessPool({
+        registry: r,
+        legacyHarnessId: "shared",
+        context: async (projectId, cwd, sessionId) => ({ ...context, projectId, sessionId, cwd: cwd!, spaceId: projectId }),
+    });
+    const projection = (id: string) => ({ id, projectId: "p", title: id, createdAt: 0, updatedAt: 0, status: "idle" }) as SessionProjection;
+    await Promise.all([pool.forSession(projection("s1"), "/same"), pool.forSession(projection("s2"), "/same")]);
+    await pool.retireSession("s1");
+    assert.equal(disposals, 0);
+    assert.equal(await pool.forSession(projection("s2"), "/same"), shared);
+    await pool.retireSession("s2");
+    assert.equal(disposals, 0);
+    await pool.dispose();
+    assert.equal(disposals, 0);
+});
+
+test("retiring a session does not await an unrelated pending factory", async () => {
+    let releasePending!: (runtime: AgentRuntime) => void;
+    const pending = new Promise<AgentRuntime>((resolve) => { releasePending = resolve; });
+    const disposed: string[] = [];
+    const r = createHarnessRegistry();
+    r.register({
+        descriptor: { id: "native", name: "native", priority: 0, integration: "test" },
+        probe: async () => ({ harnessId: "native", installed: true, authenticated: true, healthy: true }),
+        createRuntime: async (context) => context.sessionId === "hung"
+            ? pending
+            : ({ dispose: async () => { disposed.push(context.sessionId!); } } as AgentRuntime),
+    });
+    const pool = createHarnessPool({
+        registry: r,
+        legacyHarnessId: "native",
+        context: async (projectId, cwd, sessionId) => ({ ...context, projectId, sessionId, cwd: cwd!, spaceId: projectId }),
+    });
+    const projection = (id: string) => ({ id, projectId: "p", title: id, createdAt: 0, updatedAt: 0, status: "idle" }) as SessionProjection;
+    void pool.forSession(projection("hung"), "/hung");
+    await pool.forSession(projection("ready"), "/ready");
+    await pool.retireSession("ready");
+    assert.deepEqual(disposed, ["ready"]);
+    releasePending({ dispose: async () => {} } as AgentRuntime);
+    await pool.retireSession("hung");
+});
+
+test("failed per-session disposal remains retryable", async () => {
+    let attempts = 0;
+    const r = createHarnessRegistry();
+    r.register({
+        descriptor: { id: "native", name: "native", priority: 0, integration: "test" },
+        probe: async () => ({ harnessId: "native", installed: true, authenticated: true, healthy: true }),
+        createRuntime: async () => ({
+            dispose: async () => {
+                attempts += 1;
+                if (attempts === 1) throw new Error("injected disposal failure");
+            },
+        }) as AgentRuntime,
+    });
+    const pool = createHarnessPool({
+        registry: r,
+        legacyHarnessId: "native",
+        context: async (projectId, cwd, sessionId) => ({ ...context, projectId, sessionId, cwd: cwd!, spaceId: projectId }),
+    });
+    const projection = { id: "s", projectId: "p", title: "s", createdAt: 0, updatedAt: 0, status: "idle" } as SessionProjection;
+    await pool.forSession(projection, "/old");
+    await assert.rejects(() => pool.retireSession("s"), /injected disposal failure/);
+    await pool.retireSession("s");
+    assert.equal(attempts, 2);
+});
+
+test("one runtime facade cannot be reused across workspace locations", async () => {
+    const shared = { dispose: async () => {} } as AgentRuntime;
+    const r = createHarnessRegistry();
+    r.register({
+        descriptor: { id: "shared", name: "shared", priority: 0, integration: "test" },
+        runtimeLifetime: "workspace",
+        probe: async () => ({ harnessId: "shared", installed: true, authenticated: true, healthy: true }),
+        createRuntime: async () => shared,
+    });
+    const pool = createHarnessPool({
+        registry: r,
+        legacyHarnessId: "shared",
+        context: async (projectId, cwd, sessionId) => ({ ...context, projectId, sessionId, cwd: cwd!, spaceId: projectId }),
+    });
+    const projection = (id: string) => ({ id, projectId: "p", title: id, createdAt: 0, updatedAt: 0, status: "idle" }) as SessionProjection;
+    await pool.forSession(projection("s1"), "/one");
+    await assert.rejects(
+        () => pool.forSession(projection("s2"), "/two"),
+        /reused one runtime facade across workspace locations/,
+    );
+});
+
 test("harness pool dispose surfaces runtime disposal failures", async () => {
     const r = createHarnessRegistry();
     r.register({

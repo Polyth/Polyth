@@ -100,6 +100,7 @@ export interface GitService {
   commit(root: string, message: string): Promise<{ sha: string }>;
   branches(root: string): Promise<GitBranches>;
   createBranch(root: string, name: string, from?: string): Promise<void>;
+  renameBranch(root: string, from: string, to: string): Promise<void>;
   checkout(root: string, name: string): Promise<void>;
   log(root: string, limit?: number): Promise<GitCommit[]>;
   /** History with parent SHAs and ref decorations, paginated for the graph view. */
@@ -125,15 +126,14 @@ export interface GitService {
   fingerprint(root: string): Promise<string>;
   /** True when `root` has commits or a dirty tree not contained in `againstRef`. */
   hasUniqueChanges(root: string, againstRef: string): Promise<boolean>;
-  /**
-   * Snapshot the working tree through a temporary index and an unreferenced
-   * commit object. Preserves the source HEAD and index, respects gitignore,
-   * and never invokes commit hooks or signing.
-   */
+  workingTreeMatches(root: string, commit: string): Promise<boolean>;
+  /** Snapshot HEAD plus the working tree without changing HEAD or the real index. */
   snapshotCommit(root: string, message: string, identity?: { name: string; email: string }): Promise<{ sha: string; created: boolean }>;
   mergeSquash(root: string, ref: string): Promise<{ ok: true } | { ok: false; conflicted: string[] }>;
   abortMerge(root: string): Promise<void>;
   commitWithIdentity(root: string, message: string, identity?: { name: string; email: string }): Promise<{ sha: string }>;
+  /** Commit the current index as a child of HEAD without moving HEAD or running hooks/signing. */
+  commitStagedTree(root: string, message: string, identity?: { name: string; email: string }): Promise<{ sha: string }>;
   mergeFfOnly(root: string, sha: string): Promise<void>;
   /** Compare-and-swap a ref. Returns false when `expectedOldSha` no longer matches. */
   updateRef(root: string, ref: string, newSha: string, expectedOldSha: string): Promise<boolean>;
@@ -438,6 +438,23 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
   const configValue = async (root: string, key: string): Promise<string> =>
     (await run(root, ["config", "--local", "--get", key], true)).stdout.trim();
 
+  const commitTree = async (
+    root: string,
+    tree: string,
+    parent: string,
+    message: string,
+    identity?: { name: string; email: string },
+  ): Promise<string> => {
+    const name = identity?.name.trim() || (await service.identity(root)).name || "Polyth";
+    const email = identity?.email.trim() || (await service.identity(root)).email || "polyth@localhost";
+    const result = await run(root, [
+      "-c", `user.name=${name}`,
+      "-c", `user.email=${email}`,
+      "commit-tree", tree, "-p", parent, "-F", "-",
+    ], { input: `${message.trim()}\n` });
+    return result.stdout.trim();
+  };
+
   const parseStatus = (raw: string): Omit<GitStatus, "branch" | "ahead" | "behind" | "upstream" | "clean"> => {
     const staged: GitFileEntry[] = [];
     const unstaged: GitFileEntry[] = [];
@@ -612,6 +629,10 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       await run(root, from ? ["branch", name, from] : ["branch", name]);
     },
 
+    async renameBranch(root, from, to) {
+      await run(root, ["branch", "-m", from, to]);
+    },
+
     async checkout(root, name) {
       await run(root, ["checkout", name]);
     },
@@ -754,7 +775,8 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
     },
 
     async commonDir(root) {
-      return (await run(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"])).stdout.trim();
+      const r = await run(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"], true);
+      return (r.code === 0 && r.stdout.trim()) || (await service.gitDir(root));
     },
 
     async stageAll(root) {
@@ -799,25 +821,42 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       return ahead.code === 0 && Number(ahead.stdout.trim()) > 0;
     },
 
-    async snapshotCommit(root, message, identity) {
-      const head = await service.revParse(root, "HEAD");
-      const temporary = await mkdtemp(join(tmpdir(), "polyth-git-index-"));
-      const env = { GIT_INDEX_FILE: join(temporary, "index") };
+    async workingTreeMatches(root, commit) {
+      assertRev(commit, "commit");
+      const temp = await mkdtemp(join(tmpdir(), "polyth-git-index-"));
+      const index = join(temp, "index");
+      const env = { GIT_INDEX_FILE: index };
       try {
+        await run(root, ["read-tree", "HEAD"], { env });
+        await run(root, ["add", "-A", "--"], { env });
+        const workingTree = (await run(root, ["write-tree"], { env })).stdout.trim();
+        const expected = (await run(root, ["rev-parse", `${commit}^{tree}`])).stdout.trim();
+        return workingTree === expected;
+      } finally {
+        await rm(temp, { recursive: true, force: true });
+      }
+    },
+
+    async snapshotCommit(root, message, identity) {
+      if (!message.trim()) throw Object.assign(new Error("commit message is empty"), { code: "invalid-input" });
+      const temp = await mkdtemp(join(tmpdir(), "polyth-git-index-"));
+      const index = join(temp, "index");
+      const env = { GIT_INDEX_FILE: index };
+      try {
+        const head = (await run(root, ["rev-parse", "HEAD"])).stdout.trim();
         await run(root, ["read-tree", head], { env });
+        // A private index combines HEAD with the complete working tree. This
+        // honours ignore rules while leaving the user's index byte-for-byte alone.
         await run(root, ["add", "-A", "--"], { env });
         const tree = (await run(root, ["write-tree"], { env })).stdout.trim();
-        const oldTree = (await run(root, ["rev-parse", `${head}^{tree}`])).stdout.trim();
-        if (tree === oldTree) return { sha: head, created: false };
-        const author = identity ?? await service.identity(root);
-        const sha = (await run(root, [
-          "-c", `user.name=${author.name.trim() || "Polyth"}`,
-          "-c", `user.email=${author.email.trim() || "polyth@localhost"}`,
-          "-c", "commit.gpgsign=false", "commit-tree", tree, "-p", head,
-        ], { input: message, env })).stdout.trim();
-        return { sha, created: true };
+        const headTree = (await run(root, ["rev-parse", `${head}^{tree}`])).stdout.trim();
+        if (tree === headTree) return { sha: head, created: false };
+        return {
+          sha: await commitTree(root, tree, head, message, identity),
+          created: true,
+        };
       } finally {
-        await rm(temporary, { recursive: true, force: true });
+        await rm(temp, { recursive: true, force: true });
       }
     },
 
@@ -849,6 +888,13 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       await run(root, ["-c", `user.name=${name}`, "-c", `user.email=${email}`, "commit", "-m", message]);
       const { stdout } = await run(root, ["rev-parse", "HEAD"]);
       return { sha: stdout.trim() };
+    },
+
+    async commitStagedTree(root, message, identity) {
+      if (!message.trim()) throw Object.assign(new Error("commit message is empty"), { code: "invalid-input" });
+      const tree = (await run(root, ["write-tree"])).stdout.trim();
+      const parent = (await run(root, ["rev-parse", "HEAD"])).stdout.trim();
+      return { sha: await commitTree(root, tree, parent, message, identity) };
     },
 
     async mergeFfOnly(root, sha) {

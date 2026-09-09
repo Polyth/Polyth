@@ -1,0 +1,397 @@
+{
+  "schemaVersion": 1,
+  "repository": "otto-assistant/polyth",
+  "baseline": "d70f875ecb919a0a7d59488fc7ddafc47915b558",
+  "preparedDate": "2026-09-09",
+  "purpose": "Agent documentation, shared skills and bounded knowledge tools. No application runtime changes.",
+  "fileCountIncludingManifest": 78,
+  "replacedFileCount": 8,
+  "canonicalSkillCount": 27,
+  "files": [
+    {
+      "path": ".agents/skills/polyth-architecture/SKILL.md",
+      "sha256": "7b9c856b037f87a253e24b8798b5b89668b8aaae1834edd9003d8f5c75cc81ea",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-build-release/SKILL.md",
+      "sha256": "223f0e80c4adefc5b2c3a21541f91d9d11ce86235af32887dc5bed10b9e6248a",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-contracts/SKILL.md",
+      "sha256": "7d928708b650ae1e1a80d58ed0a0ef8f0141798786edc46aab3e4a245561b5a8",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-debug/SKILL.md",
+      "sha256": "c835a30bd530b069ef52a26d9a79f489cbcc84308bc3d82818c19862059a26db",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-design/SKILL.md",
+      "sha256": "643c0c6ca196b7a504356ea87398a8a7be905d7b36e65e366c3298271aa53f0e",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-desktop/SKILL.md",
+      "sha256": "53cffc5e98259c8aeb72839738d307bfa2d1335708bb92d8f87951081e189733",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-files-editor/SKILL.md",
+      "sha256": "01d2020c8c5b05140bdeaf2407505ab5a8274baa88ca24a7f009ec8cd1135ad2",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-harnesses/SKILL.md",
+      "sha256": "4b59b05c050445da38010b9563972d9aaf1389fb339846059a01e538c7819749",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-integrations/SKILL.md",
+      "sha256": "193a1aa8bbb4a1ee5ea8fa327ef7ebeb42b8e9707a7282efd53dc9e6836a3c86",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-knowledge/SKILL.md",
+      "sha256": "842280a2ec2627b4affc2225424db644ec185d1350cb641c7dad0c73e4653173",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-link/SKILL.md",
+      "sha256": "622cb4b30a74dcc78764eaeea1fc2fe65043771e0ad2d49ad798fc2e880e1eee",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-live-control/SKILL.md",
+      "sha256": "fa18ac2c31cb11dc14c343ed77ae885a08f4fe70f2994046235eb22b80664b2c",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-mobile/SKILL.md",
+      "sha256": "3f30549b819fa14b5b2d4072e4c5fd992021df8c9d115ad834b7ac59cfbc762a",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-models/SKILL.md",
+      "sha256": "f8ead9a7a9694e291e6cb570d5fa7959b8311da63401ef6ce5c9bdd0e8a59eb2",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-orchestration/SKILL.md",
+      "sha256": "799fedcefc5accd74dd62d0137a6395d634d375a0df24d13dc0b9bad2fe209db",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-orientation/SKILL.md",
+      "sha256": "160038f2975d7e7d33304084c47919ed9f274051e0e9c03d28a882a522a13669",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-packages/SKILL.md",
+      "sha256": "b78f402f99f11c1af2ee4cf11f9ea43bc420c41b4233c07de16c8bcbc87fb6e6",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-performance/SKILL.md",
+      "sha256": "eb7fcf09283c9dffee4e8e82ee11ec9377ae65de9869c034f0e654115d0cc7a9",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-refactor/SKILL.md",
+      "sha256": "c1be737b5347070f61db3fec56438afb63cce1033a9a0c9958004d1d6f3332bf",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-review/SKILL.md",
+      "sha256": "0cf9cea671292a135b561dfd3a43c08e048ce16996a4031f351e1f34d8468eeb",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-security/SKILL.md",
+      "sha256": "f1ed30f92de21bc6abcd1ae8a0f8d713e35833d7eb4b7f1487df6de348217f25",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-sessions/SKILL.md",
+      "sha256": "bac3335ca6a5794b54d7cca8a97bdabe811a2b04d1a37e59251d62c36c6876f6",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-snapshot/SKILL.md",
+      "sha256": "b9bcaa6636cf7df2a3fa564e10e0de6c996f481cef3a911da51ba2605309deca",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-storage/SKILL.md",
+      "sha256": "52e00df63928ca7d063471d3a7fd3ebcfb827d327fdef625a9165bf6300f6622",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-testing/SKILL.md",
+      "sha256": "925a7ffc847703334ff3d216cf0761be5b0ebd39f2ab11a39342956197d783c4",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-voice/SKILL.md",
+      "sha256": "b16271cd4836d6c36280281d149a32d2722dc26ca2d86775082e71adf30c8f29",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".agents/skills/polyth-web-ui/SKILL.md",
+      "sha256": "e22da5b22438b4a421773a98535aea137f9a952119668c4658678b6b93b7b98d",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".claude/skills/polyth-guide/SKILL.md",
+      "sha256": "0a85534f027cf0b2d98da7de9bde520ab05a4c871e59374184112bca4d39f46b",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".cursor/agents/delivery-orchestrator.md",
+      "sha256": "bb01e3e2c72f721ad0a9a23627c297de74664620fe1181762b8e7da9b455fbed",
+      "originalGitBlob": "10f5e2cc34808999887171298fde96e3c224c96b"
+    },
+    {
+      "path": ".cursor/agents/explorer.md",
+      "sha256": "1ff8f79d6c152db44c6c9f98aa95f8576062b0ab7c3e2b7be1af4e8dc2249a06",
+      "originalGitBlob": "2f52cd7b98bc911159f27498db9e21ef5dee1ceb"
+    },
+    {
+      "path": ".cursor/agents/implementer.md",
+      "sha256": "27a0558268ceb1dc008033be36050df90dbfc8f1f0ab1b1e75c8c4a10df1a136",
+      "originalGitBlob": "c67b0bb61a22142590ecb7e2b9bed91116ee735a"
+    },
+    {
+      "path": ".cursor/agents/verifier.md",
+      "sha256": "db3fc7d69f0e05193ade5f5c53595dbb9b83ddf50213f8df4147ce97c194a926",
+      "originalGitBlob": "dd8ea9d3eb4e3440fa9c6b6115ede3caa3466461"
+    },
+    {
+      "path": ".cursor/rules/polyth-native.mdc",
+      "sha256": "932b9a44ee0260fd9002aa9d8e67b1cd6f30b04cfa388bb024c85125539bbee1",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".cursor/rules/polyth-security.mdc",
+      "sha256": "3cd09df2dd081007fdefcd2b8befa852277644d1dc40ec5e6157ca67709644e9",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".cursor/rules/polyth-ui.mdc",
+      "sha256": "58eae8df0a9b473fae993793efc9fa7cab65c148c1c690d43d60aece39c35ca2",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".cursor/rules/polyth.mdc",
+      "sha256": "6eeca809989048a48ea95ae9e1a99a170da622fc10586156de5f3c91a95824eb",
+      "originalGitBlob": "b2284ea99b28b45449e55c3156deee6cc5bb51e3"
+    },
+    {
+      "path": ".github/copilot-instructions.md",
+      "sha256": "a8b7afc66614b1579ce2d729f28843f07e3cfb584941ecf5dc32febd6c107909",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".github/workflows/agent-knowledge.yml",
+      "sha256": "96b15f4456455675e24970a1665ffa2bd488b258ba3769ad55145c073a6e863a",
+      "originalGitBlob": null
+    },
+    {
+      "path": ".opencode/skill/polyth-control/SKILL.md",
+      "sha256": "876a09f8b90e5ec78fa182579ef38af3bf09f652e8f8dd4a302cfd7905d76fb4",
+      "originalGitBlob": "902895ced07a507782c846acf90dbb44a577232b"
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "5039907715bbadd3107e89209c1827e2e29441d83c7e4a93c9da9f9d5ce3c393",
+      "originalGitBlob": "7bfaf65496697c86f329e34b5e799e03b781f395"
+    },
+    {
+      "path": "CLAUDE.md",
+      "sha256": "fb31fb34a44829e8ecf627e675f5d37af73a877ed44b930bab73cd8cefe308de",
+      "originalGitBlob": null
+    },
+    {
+      "path": "CONTRIBUTING_AGENT_OVERVIEW.md",
+      "sha256": "7964262ab72013e815a045d6252d0ff5fb30deddc890736f3e8884aa09adb1cc",
+      "originalGitBlob": null
+    },
+    {
+      "path": "GEMINI.md",
+      "sha256": "7698fcd14f725af7fd898837be48a5d82e68fecc8e7354398675d8d911d4345c",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/AUDIT.uk.md",
+      "sha256": "5792f37db6d74fc7aea582f0173d61ccc18db0e497dd76d3b07461586171a0f5",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/CHATGPT.md",
+      "sha256": "4d9d9f91214c966d041c92affe6e4674e5047baae55cb49173e50c0fd882a1d9",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/INSTALL.uk.md",
+      "sha256": "ea0408e84e8bc61e5783b7dfd81bb3d9680880c3b68341b8d91f0a676af52ec2",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/README.md",
+      "sha256": "6acd9dc8fc94c3e5a388cbb9ec0350a255f998b39cc324af80c13ce46fc7d9d9",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/VERIFICATION.uk.md",
+      "sha256": "ff6d50dd1d7a6c063a23693093c1be0e721461e42544d43e455ca4fed11cb0b3",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/architecture.md",
+      "sha256": "4aa5d5560ba01b81acf211deb13ee3af1f4d4502f37698a61977a93f883082c2",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/client-compatibility.md",
+      "sha256": "5503640913721e0244f093c0f171cb17fcc5d25ae81e95e856bb3a488625e36f",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/commands.md",
+      "sha256": "3d6d9e1c92bf46da3ce04e2c9730107bb1bcadebf23ad25deeb1538034408bbb",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/debug-playbook.md",
+      "sha256": "00689b40fcc2173245a19a4337aae1d5122d695a7e0cfd0e03147464ac148192",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/evidence.json",
+      "sha256": "944e9b1864d1f1f22ae6b1cfa4a5858f3d53aa0d20272fdf7cfc2069b1f35e02",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/evidence.md",
+      "sha256": "a084381689fcad80037edaeac438b5d037aa3a0134ad206a393511b037c0d2e9",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/known-drift.md",
+      "sha256": "fe0db6dc214b29df73daab41b8f8d41dc8e2acb1f211a70d5d84e6ae65cdfdb4",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/maintenance.md",
+      "sha256": "f5ea87af76c151c72acca13486ab3416782ef665de05a4d0d75ab1042a2197da",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/mobile-matrix.md",
+      "sha256": "4df1b89d297b11a6436f5ce30d0b3280acbbacf2a924b47e85649e0127210c6a",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/orchestration.md",
+      "sha256": "b1f0af66162d0e5af1d26d1aaff49fd9a1fcb6a99dbbfdc320bf2016b10f7f28",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/performance.md",
+      "sha256": "808900f3974d4517bd8ed4849545bf9d125d6045afd23e3797d3222c7521820e",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/replaced-files.json",
+      "sha256": "897571bd65fe86336f0be82e841b6fc90731e07850f25b1c880ba38fad9f1f6a",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/security.md",
+      "sha256": "1e0de50464baae124018be713471978559a7cdf4eac177c08d615d695ce5c0a7",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/task-map.json",
+      "sha256": "9263ef28a6bb89fc96e38ecf8ad85957798920f8b524202c40a88adddab5c3ce",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/templates/adr.md",
+      "sha256": "80dc21caf87bfff00716d8f4e9cbaec8427bf0417be147551e1ec83797d35424",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/templates/evidence.md",
+      "sha256": "fa1bc5410acbf5fa9d2f9b21f82840f97b0e68504b2b4d15b4bd941ebf206539",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/templates/handoff.md",
+      "sha256": "95d1b7383592413fe1a34674f0cc07818b83e29f2ca1ed05e24faf52f197311d",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/templates/incident.md",
+      "sha256": "c90891c6ab481ffeb7b4a7b63399bc5cd682e6df916b8bcd77c26b234d730fc8",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/templates/migration.md",
+      "sha256": "c449be4569fa6eb3928fea5561a8ab05d30654d26ec0645df769681b6bf1bdc2",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/templates/task.md",
+      "sha256": "38dcb2d65e25e1b082d143df13599ab3ff0fdafa2b3764f25cd6c71ffc10ce6f",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/templates/ui-acceptance.md",
+      "sha256": "dd8ff790672c10a1252f66f970fac16cf1cbe995d7e0d3d7c6bade9d84be5aea",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/tooling.md",
+      "sha256": "a0ae43165debfaa25ec58091e99f5288eafddd9c07d1caf502a0ca142547af15",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/ui-checklist.md",
+      "sha256": "411b3b20e5e810bba65986e4b40451d5a70baae0ec20cb23f74ff965a2f65ee2",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/agents/verification.md",
+      "sha256": "8e64cf69b44fa7c4db2f7c07417a900fcca844ffe922229daa2f24f746f82bd6",
+      "originalGitBlob": null
+    },
+    {
+      "path": "docs/dev/README.md",
+      "sha256": "fa7cee45a5e0b7a2ac9109655fd921aa049eb6412d3b9831f12079615d1f8ab3",
+      "originalGitBlob": "19dba6151be8bf2a0fac10fcbd0aef3671c6cf03"
+    },
+    {
+      "path": "scripts/agent-kit-install.py",
+      "sha256": "06e9a0dfe082151ea1e31394a33788dc302147bd679f278c27f28a8d8a008735",
+      "originalGitBlob": null
+    },
+    {
+      "path": "scripts/agent-kit.mjs",
+      "sha256": "3422020486b1e76049f201d06823530affbc4944067f1f20c2bb3d6380f76326",
+      "originalGitBlob": null
+    },
+    {
+      "path": "scripts/test/agent-kit.test.ts",
+      "sha256": "2c94331eb511a090b6d7bfd4645f78bf9311ab2d2f5d4cfcdd3d649b8fb592ea",
+      "originalGitBlob": null
+    },
+    {
+      "path": "scripts/test/agent_kit_install_test.py",
+      "sha256": "3fe9f026c1ce1b6509a18f5cd353c9c5259b4b3bcae104759a929b4e70b7d8c8",
+      "originalGitBlob": null
+    }
+  ]
+}

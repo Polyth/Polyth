@@ -444,6 +444,8 @@ export const pl: GitMessages = {
   "isolation.discardConfirm": "Niescalone zmiany w tej izolowanej przestrzeni zostaną utracone.",
   "isolation.discardTitle": "Odrzuć izolowaną przestrzeń",
   "isolation.discard": "Odrzuć",
+  "isolation.finishWithoutCleanup": "Zakończ i zachowaj obszar",
+  "isolation.finishWithoutCleanupConfirm": "Niezweryfikowany obszar i gałąź zostaną zachowane i nie będą już zarządzane przez tę sesję.",
   "isolation.dirtyTarget": "{branch} ma lokalne zmiany. Zatwierdź je lub odrzuć przed integracją tej sesji.",
   "isolation.missingWorkspace": "Izolowana przestrzeń nie jest już dostępna.",
   "isolation.workInIsolation": "Pracuj w izolacji",

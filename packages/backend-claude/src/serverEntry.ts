@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { HarnessProvider, HarnessRegistry } from "@polyth/contracts";
-import { createProcessAuthority } from "@polyth/harness-runtime";
+import { createProcessAuthority, releaseProcessExecution } from "@polyth/harness-runtime";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { claudeAuthFingerprint, createClaudeRuntime, discoverClaudeModels, invalidateClaudeModelCache, CLAUDE_CAPABILITIES } from "./index.ts";
 import { createClaudeProvisioner } from "./provisioner.ts";
@@ -12,6 +12,10 @@ const loadSdk = () => import("@anthropic-ai/claude-agent-sdk");
 export default function registerPackage(host: ServerPackageHost) {
     const registry = host.services.require(serverServiceKey<HarnessRegistry>("harnesses"));
     let lastAuthenticated: boolean | undefined;
+    const stateFile = (context: Parameters<HarnessProvider["createRuntime"]>[0]) => {
+        const key = createHash("sha256").update(JSON.stringify([context.projectId, context.cwd, context.sessionId ?? "catalog"])).digest("hex");
+        return host.spaceStorage(context.space!).path(`runtime/claude/${key}.json`);
+    };
     const provider: HarnessProvider = {
         descriptor: { id: "claude", name: "Claude Code", integration: "Agent SDK", priority: 20, setupUrl: "https://code.claude.com/docs/en/setup", installCommand: "curl -fsSL https://claude.ai/install.sh | bash", signInCommand: "claude auth login" },
         staticFeatures: CLAUDE_CAPABILITIES,
@@ -63,8 +67,7 @@ export default function registerPackage(host: ServerPackageHost) {
         async createRuntime(context) {
             if (!context.space || context.remote || process.platform !== "linux")
                 throw Object.assign(new Error("Local Linux Space context required"), { code: "unsupported" });
-            const key = createHash("sha256").update(JSON.stringify([context.projectId, context.cwd, context.sessionId ?? "catalog"])).digest("hex");
-            const authority = await createProcessAuthority(host.spaceStorage(context.space).path(`runtime/claude/${key}.json`));
+            const authority = await createProcessAuthority(stateFile(context));
             try {
                 return await createClaudeRuntime(context, await loadSdk(), authority);
             }
@@ -72,6 +75,11 @@ export default function registerPackage(host: ServerPackageHost) {
                 await authority.close();
                 throw error;
             }
+        },
+        async releaseExecution(context, binding, operationId) {
+            if (!context.space || context.remote || process.platform !== "linux")
+                return { kind: "rejected", code: "unsupported", message: "Local Linux Space context required" };
+            return releaseProcessExecution(stateFile(context), binding, operationId);
         },
         provisioner: createClaudeProvisioner(),
     };
