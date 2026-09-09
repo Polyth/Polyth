@@ -62,6 +62,20 @@ private final class PolythLinkKeychain {
             throw PolythLinkFailure(code: "pairing-storage-failed")
         }
     }
+
+    func hostIDs() throws -> Set<String> {
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching([
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecReturnAttributes: true,
+            kSecMatchLimit: kSecMatchLimitAll,
+        ] as CFDictionary, &result)
+        if status == errSecItemNotFound { return [] }
+        guard status == errSecSuccess else { throw PolythLinkFailure(code: "pairing-storage-failed") }
+        let rows = result as? [[String: Any]] ?? []
+        return Set(rows.compactMap { $0[kSecAttrAccount as String] as? String })
+    }
 }
 
 private struct PairingSecretRecord {
@@ -207,12 +221,30 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
     ]
 
     private let queue = DispatchQueue(label: "com.polyth.mobile.polyth-link", qos: .userInitiated)
+    private let controlQueue = DispatchQueue(label: "com.polyth.mobile.polyth-link.control", qos: .userInitiated)
     private let keychain = PolythLinkKeychain()
+    private let attemptsLock = NSLock()
+    private let clientLock = NSLock()
     private var attempts: [String: PairingSecretRecord] = [:]
     private var clientHandle: UInt64 = 0
+    private let lastConnectionKey = "polyth-link.last-connection-id"
+
+    override public func load() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(restoreLoopbackTransport),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+    }
 
     deinit {
-        if clientHandle != 0 { polythLinkClientFree(clientHandle) }
+        NotificationCenter.default.removeObserver(self)
+        clientLock.lock()
+        let handle = clientHandle
+        clientHandle = 0
+        clientLock.unlock()
+        if handle != 0 { polythLinkClientFree(handle) }
     }
 
     private func trusted(_ call: CAPPluginCall) -> Bool {
@@ -223,6 +255,11 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
             return false
         }
         return true
+    }
+
+    private func loopbackContent() -> Bool {
+        guard let url = webView?.url else { return false }
+        return url.scheme?.lowercased() == "http" && url.host == "127.0.0.1"
     }
 
     private func reject(_ call: CAPPluginCall, _ error: Error) {
@@ -239,6 +276,8 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func ensureClient() throws -> UInt64 {
+        clientLock.lock()
+        defer { clientLock.unlock() }
         if clientHandle != 0 { return clientHandle }
         let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             .appendingPathComponent("PolythLink", isDirectory: true)
@@ -315,6 +354,83 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
         return result
     }
 
+    private func setAttempt(_ attemptID: String, _ record: PairingSecretRecord) {
+        attemptsLock.lock()
+        attempts[attemptID] = record
+        attemptsLock.unlock()
+    }
+
+    private func removeAttempt(_ attemptID: String) -> PairingSecretRecord? {
+        attemptsLock.lock()
+        defer { attemptsLock.unlock() }
+        return attempts.removeValue(forKey: attemptID)
+    }
+
+    private func attemptHostIDs() -> Set<String> {
+        attemptsLock.lock()
+        defer { attemptsLock.unlock() }
+        return Set(attempts.values.map(\.hostID))
+    }
+
+    private func listAndCleanOrphans() throws -> [[String: Any]] {
+        guard let connections = try invoke("connections.list", [:]) as? [[String: Any]] else {
+            throw PolythLinkFailure(code: "transport-protocol-error")
+        }
+        var keep = Set(connections.compactMap { $0["hostEndpointId"] as? String })
+        keep.formUnion(attemptHostIDs())
+        for hostID in try keychain.hostIDs() where !keep.contains(hostID) {
+            try keychain.delete(hostID)
+        }
+        return connections
+    }
+
+    private func hasConnectionMetadata(_ hostID: String) throws -> Bool {
+        guard let connections = try invoke("connections.list", [:]) as? [[String: Any]] else {
+            throw PolythLinkFailure(code: "transport-protocol-error")
+        }
+        return connections.contains { ($0["hostEndpointId"] as? String) == hostID }
+    }
+
+    private func rememberTransport(_ connectionID: String) {
+        UserDefaults.standard.set(connectionID, forKey: lastConnectionKey)
+    }
+
+    private func forgetTransport(_ connectionID: String) {
+        if UserDefaults.standard.string(forKey: lastConnectionKey) == connectionID {
+            UserDefaults.standard.removeObject(forKey: lastConnectionKey)
+        }
+    }
+
+    @objc private func restoreLoopbackTransport() {
+        guard loopbackContent(),
+              let connectionID = UserDefaults.standard.string(forKey: lastConnectionKey),
+              !connectionID.isEmpty else { return }
+        controlQueue.async {
+            do {
+                let status = try self.object(self.invoke("status", ["connectionId": connectionID]))
+                if status["state"] as? String == "connected" { return }
+                guard var secret = try self.keychain.load(connectionID) else {
+                    throw PolythLinkFailure(code: "host-identity-unavailable")
+                }
+                defer { secret.resetBytes(in: 0..<secret.count) }
+                let result = try self.object(self.invoke("connect", ["connectionId": connectionID], secret: secret))
+                guard let bootstrap = (result["bootstrapUrl"] as? String) ?? (result["bootstrap"] as? String),
+                      let url = URL(string: bootstrap) else {
+                    throw PolythLinkFailure(code: "proxy-bootstrap-invalid")
+                }
+                DispatchQueue.main.async {
+                    if self.loopbackContent() { self.webView?.load(URLRequest(url: url)) }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    if self.loopbackContent(), let bundled = URL(string: "capacitor://localhost") {
+                        self.webView?.load(URLRequest(url: bundled))
+                    }
+                }
+            }
+        }
+    }
+
     private func presentPairingScanner(_ call: CAPPluginCall) {
         DispatchQueue.main.async {
             guard var presenter = self.bridge?.viewController else {
@@ -357,7 +473,7 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
                 do {
                     let result = try self.object(self.invoke("pairing.begin", ["ticket": raw, "label": label], secret: secret))
                     guard let attemptID = result["attemptId"] as? String else { throw PolythLinkFailure(code: "transport-protocol-error") }
-                    self.attempts[attemptID] = PairingSecretRecord(hostID: hostID, createdForAttempt: created)
+                    self.setAttempt(attemptID, PairingSecretRecord(hostID: hostID, createdForAttempt: created))
                     call.resolve(result)
                 } catch {
                     if created { try? self.keychain.delete(hostID) }
@@ -372,7 +488,10 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
         queue.async {
             do {
                 let result = try self.object(self.invoke("pairing.confirm", ["attemptId": attemptID]))
-                self.attempts.removeValue(forKey: attemptID)
+                _ = self.removeAttempt(attemptID)
+                if let connectionID = result["connectionId"] as? String, !connectionID.isEmpty {
+                    self.rememberTransport(connectionID)
+                }
                 call.resolve(result)
             } catch { self.reject(call, error) }
         }
@@ -380,10 +499,14 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func cancelPairing(_ call: CAPPluginCall) {
         guard trusted(call), let attemptID = require(call, "attemptId", code: "pairing-invalid") else { return }
-        queue.async {
+        controlQueue.async {
             do {
                 _ = try self.invoke("pairing.cancel", ["attemptId": attemptID])
-                if let record = self.attempts.removeValue(forKey: attemptID), record.createdForAttempt { try self.keychain.delete(record.hostID) }
+                if let record = self.removeAttempt(attemptID),
+                   record.createdForAttempt,
+                   try !self.hasConnectionMetadata(record.hostID) {
+                    try self.keychain.delete(record.hostID)
+                }
                 call.resolve(["ok": true])
             } catch { self.reject(call, error) }
         }
@@ -393,7 +516,7 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
         guard trusted(call) else { return }
         queue.async {
             do {
-                guard var connections = try self.invoke("connections.list", [:]) as? [[String: Any]] else { throw PolythLinkFailure(code: "transport-protocol-error") }
+                var connections = try self.listAndCleanOrphans()
                 for index in connections.indices {
                     let hostID = connections[index]["hostEndpointId"] as? String ?? ""
                     var secret: Data?
@@ -414,23 +537,32 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
             do {
                 guard var secret = try self.keychain.load(connectionID) else { throw PolythLinkFailure(code: "host-identity-unavailable") }
                 defer { secret.resetBytes(in: 0..<secret.count) }
-                call.resolve(try self.object(self.invoke("connect", ["connectionId": connectionID], secret: secret)))
+                let result = try self.object(self.invoke("connect", ["connectionId": connectionID], secret: secret))
+                self.rememberTransport(connectionID)
+                call.resolve(result)
             } catch { self.reject(call, error) }
         }
     }
 
     @objc func disconnect(_ call: CAPPluginCall) {
         guard trusted(call), let connectionID = require(call, "connectionId", code: "device-unknown") else { return }
-        queue.async { do { _ = try self.invoke("disconnect", ["connectionId": connectionID]); call.resolve(["ok": true]) } catch { self.reject(call, error) } }
+        controlQueue.async {
+            do {
+                _ = try self.invoke("disconnect", ["connectionId": connectionID])
+                self.forgetTransport(connectionID)
+                call.resolve(["ok": true])
+            } catch { self.reject(call, error) }
+        }
     }
 
     @objc func forgetConnection(_ call: CAPPluginCall) {
         guard trusted(call), let connectionID = require(call, "connectionId", code: "device-unknown") else { return }
-        queue.async {
+        controlQueue.async {
             do {
                 _ = try self.invoke("disconnect", ["connectionId": connectionID])
                 try self.keychain.delete(connectionID)
                 _ = try self.invoke("forget", ["connectionId": connectionID])
+                self.forgetTransport(connectionID)
                 call.resolve(["ok": true])
             } catch { self.reject(call, error) }
         }
