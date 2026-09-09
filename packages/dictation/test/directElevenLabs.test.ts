@@ -58,7 +58,13 @@ test("ElevenLabs direct transport uses a single-use token and never exposes the 
     language: "uk-UA",
     context: {
       language: "uk-UA",
-      keywords: ["Polyth", "worktree"],
+      keywords: [
+        "Polyth",
+        "worktree",
+        "worktree",
+        "very-long-project-symbol-that-must-be-truncated",
+        ...Array.from({ length: 60 }, (_, index) => `term-${index}`),
+      ],
       glossary: { harness: "agent harness" },
     },
     fetchFn,
@@ -79,7 +85,11 @@ test("ElevenLabs direct transport uses a single-use token and never exposes the 
   assert.equal(providerUrl.searchParams.get("model_id"), "scribe_v2_realtime");
   assert.equal(providerUrl.searchParams.get("audio_format"), "pcm_16000");
   assert.equal(providerUrl.searchParams.get("language_code"), "uk");
-  assert.ok(providerUrl.searchParams.getAll("keyterms").includes("Polyth"));
+  const terms = providerUrl.searchParams.getAll("keyterms");
+  assert.ok(terms.includes("Polyth"));
+  assert.equal(terms.filter((term) => term === "worktree").length, 1);
+  assert.equal(terms.length, 50);
+  assert.ok(terms.every((term) => term.length <= 20));
   assert.equal(urls[0]!.includes("api-key"), false);
 
   captureOptions!.onChunk(new Uint8Array([1, 0, 2, 0]));
