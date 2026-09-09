@@ -8,6 +8,8 @@ apps/desktop/build/icon.png
 apps/desktop/resources/opencode/*/opencode
 apps/desktop/resources/opencode/*/opencode.exe
 apps/desktop/resources/opencode/*/provenance.json
+apps/mobile/ios/App/CapApp-SPM/PolythLinkCore.xcframework
+apps/mobile/android/app/src/main/jniLibs
 *.db
 *.db-wal
 *.db-shm
