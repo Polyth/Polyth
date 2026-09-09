@@ -24,6 +24,8 @@ import { createOpenAIRealtimeSttAdapter } from "./openaiRealtime.ts";
 import { createLocalModelManager } from "./localModels.ts";
 import { localModelRoutes } from "./localModelRoutes.ts";
 import { createLocalNemotronSttAdapter } from "./localNemotron.ts";
+import { createLocalRuntimeManager, SHERPA_RUNTIME_VERSION } from "./localRuntime.ts";
+import { localRuntimeRoutes } from "./localRuntimeRoutes.ts";
 
 interface VoiceEngineSettings {
   baseUrl: string;
@@ -133,6 +135,7 @@ const MAX_SPEAK_CHARS = 8_000;
 const providerAvailability = (
   voice: VoiceSettingsService,
   localModelInstalled?: (id: string) => boolean,
+  localRuntimeInstalled?: () => boolean,
 ) => {
   const settings = voice.get();
   const selected = settings.dictation.provider;
@@ -153,8 +156,15 @@ const providerAvailability = (
       if (!available) reason = selected === provider.id ? "OpenAI-compatible STT base URL is missing" : "not selected";
     } else if (provider.id === "local-nemotron") {
       const model = settings.dictation.localModel || "nemotron-3.5-streaming-0.6b-80ms";
-      available = selected === provider.id && !!localModelInstalled?.(model);
-      if (!available) reason = selected === provider.id ? "local model is not downloaded" : "not selected";
+      const modelReady = !!localModelInstalled?.(model);
+      const runtimeReady = !!localRuntimeInstalled?.();
+      available = selected === provider.id && modelReady && runtimeReady;
+      if (!available) {
+        reason = selected !== provider.id ? "not selected"
+          : !runtimeReady ? "local sherpa runtime is not downloaded"
+            : !modelReady ? "local model is not downloaded"
+              : undefined;
+      }
     } else if (provider.id === "web-speech") {
       available = selected === provider.id;
     } else {
@@ -169,6 +179,7 @@ export function voiceRoutes(deps: {
   fetchFn?: typeof fetch;
   summarize?: (text: string) => Promise<string>;
   localModelInstalled?: (id: string) => boolean;
+  localRuntimeInstalled?: () => boolean;
 }): RouteHandler {
   const fetchFn = deps.fetchFn ?? fetch;
   return async (request) => {
@@ -194,7 +205,7 @@ export function voiceRoutes(deps: {
       return true;
     }
     if (path === "/api/voice/providers" && method === "GET") {
-      json(200, { providers: providerAvailability(deps.voice, deps.localModelInstalled) });
+      json(200, { providers: providerAvailability(deps.voice, deps.localModelInstalled, deps.localRuntimeInstalled) });
       return true;
     }
     if (path === "/api/dictation/token" && method === "POST") {
@@ -332,21 +343,30 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     serverServiceKey<VoiceSettingsService>("voice.settings"),
   );
   const modelsRoot = join(host.storageDir, "models");
+  const runtimeRoot = join(host.storageDir, "runtime");
   const localModels = createLocalModelManager({ root: modelsRoot });
+  const localRuntime = createLocalRuntimeManager({ root: runtimeRoot });
+  const runtimePath = () => join(runtimeRoot, `sherpa-onnx-node-${SHERPA_RUNTIME_VERSION}`);
   let localAdapter: SttAdapter | null = null;
-  let localAdapterPath = "";
+  let localAdapterKey = "";
 
   const installedLocalModel = (id: string): string | null => {
     const path = join(modelsRoot, id);
     return existsSync(path) ? path : null;
   };
+  const installedLocalRuntime = (): string | null => {
+    const path = runtimePath();
+    return existsSync(path) ? path : null;
+  };
 
   const localNemotronAdapter = (id: string): SttAdapter | null => {
-    const path = installedLocalModel(id);
-    if (!path) return null;
-    if (!localAdapter || localAdapterPath !== path) {
-      localAdapter = createLocalNemotronSttAdapter({ modelDir: path });
-      localAdapterPath = path;
+    const modelDir = installedLocalModel(id);
+    const runtimeDir = installedLocalRuntime();
+    if (!modelDir || !runtimeDir) return null;
+    const key = `${runtimeDir}\0${modelDir}`;
+    if (!localAdapter || localAdapterKey !== key) {
+      localAdapter = createLocalNemotronSttAdapter({ modelDir, runtimeDir });
+      localAdapterKey = key;
     }
     return localAdapter;
   };
@@ -399,7 +419,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       }
       return null;
     },
-    unavailableReason: "selected dictation provider is unavailable, missing credentials, or its local model is not installed",
+    unavailableReason: "selected dictation provider is unavailable, missing credentials, or its local model/runtime is not installed",
   });
   host.services.provide(serverServiceKey<DictationService>("dictation"), dictation);
   let routes: RouteHandler | null = null;
@@ -409,9 +429,11 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     onEnable() {
       const dictationRoute = dictationRoutes(dictation);
       const modelRoute = localModelRoutes(localModels);
+      const runtimeRoute = localRuntimeRoutes(localRuntime);
       const voiceRoute = voiceRoutes({
         voice,
         localModelInstalled: (id) => !!installedLocalModel(id),
+        localRuntimeInstalled: () => !!installedLocalRuntime(),
         summarize: async (text) => {
           const runtime = await host.runtimes.forProject("__default__");
           return host.oneShot(runtime, {
@@ -426,6 +448,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         },
       });
       routes ??= async (request) => {
+        if (await runtimeRoute(request)) return true;
         if (await modelRoute(request)) return true;
         if (await dictationRoute(request)) return true;
         return voiceRoute(request);
