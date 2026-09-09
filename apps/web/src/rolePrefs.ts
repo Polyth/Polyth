@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { AgentDescriptor } from "@polyth/contracts";
+import { accountStorageGet, accountStorageSet } from "./accountStorage.ts";
 
 export type RoleKind = "main" | "subagent";
 export const ROLE_PREFS_KEY = "polyth.rolePrefs";
@@ -15,9 +16,7 @@ function parse(raw: string | null): Record<string, RoleKind> {
   }
 }
 
-let state = (() => {
-  try { return parse(localStorage.getItem(ROLE_PREFS_KEY)); } catch { return {}; }
-})();
+let state = parse(accountStorageGet(ROLE_PREFS_KEY));
 const listeners = new Set<() => void>();
 
 export function roleKind(agent: AgentDescriptor, prefs: Record<string, RoleKind> = state): RoleKind {
@@ -26,7 +25,7 @@ export function roleKind(agent: AgentDescriptor, prefs: Record<string, RoleKind>
 
 export function setRoleKind(name: string, kind: RoleKind): void {
   state = { ...state, [name]: kind };
-  try { localStorage.setItem(ROLE_PREFS_KEY, JSON.stringify(state)); } catch { /* private mode */ }
+  accountStorageSet(ROLE_PREFS_KEY, JSON.stringify(state));
   for (const listener of [...listeners]) listener();
 }
 
