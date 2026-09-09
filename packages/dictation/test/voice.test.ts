@@ -7,6 +7,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createVoiceSettings } from "../../server/src/voice.ts";
+import { ProviderRegistry } from "../src/providers.ts";
 import { voiceRoutes } from "../src/serverEntry.ts";
 import type { RouteRequest } from "../../server/src/http.ts";
 
@@ -17,6 +18,9 @@ test("voice settings: round-trip persists refs, validates URLs and env names", (
   const svc = createVoiceSettings({ file, env: { WHISPER_KEY: "secret-value" } });
 
   assert.deepEqual(svc.get().stt, { baseUrl: "", model: "", language: "", apiKeyEnv: "" });
+  assert.equal(svc.get().dictation.localModel, "nemotron-3.5-streaming-0.6b-560ms");
+  assert.equal(svc.get().dictation.processingPolicy, "prefer-cloud");
+  assert.equal(svc.get().dictation.fallbackProvider, undefined);
 
   const saved = svc.put({
     stt: { baseUrl: "http://127.0.0.1:8000/v1", model: "whisper-1", language: "en", apiKeyEnv: "WHISPER_KEY" },
@@ -26,18 +30,15 @@ test("voice settings: round-trip persists refs, validates URLs and env names", (
   assert.equal(svc.resolveKey("stt"), "secret-value");
   assert.equal(svc.resolveKey("tts"), undefined);
 
-  // the file on disk holds the ref, never the value
   const onDisk = readFileSync(file, "utf8");
   assert.match(onDisk, /WHISPER_KEY/);
   assert.doesNotMatch(onDisk, /secret-value/);
 
-  // reload from disk keeps the settings
   const reloaded = createVoiceSettings({ file, env: {} });
   assert.equal(reloaded.get().tts.model, "tts-1");
 
   assert.throws(() => svc.put({ stt: { baseUrl: "ftp://x" } }), /http\(s\)/);
   assert.throws(() => svc.put({ stt: { baseUrl: "not a url" } }), /invalid/);
-  // a pasted secret VALUE is refused as a ref
   assert.throws(() => svc.put({ tts: { apiKeyEnv: "sk-abc!*" } }), /environment variable NAME/);
 });
 
@@ -49,6 +50,7 @@ function harness(opts: {
   const voice = createVoiceSettings({ file: join(tmp(), "voice.json"), env: opts.env ?? {} });
   const routes = voiceRoutes({
     voice,
+    providers: new ProviderRegistry(),
     ...(opts.fetchFn ? { fetchFn: opts.fetchFn } : {}),
     ...(opts.summarize ? { summarize: opts.summarize } : {}),
   });
@@ -85,6 +87,79 @@ test("GET /api/settings/voice exposes refs + configured flags, never key values"
   assert.doesNotMatch(JSON.stringify(r.payload), /super-secret/);
 });
 
+test("ElevenLabs direct token is forbidden by local processing policies before any upstream call", async () => {
+  let fetches = 0;
+  const { voice, call } = harness({
+    env: { ELEVENLABS_API_KEY: "long-lived-secret" },
+    fetchFn: (async () => {
+      fetches++;
+      return new Response(JSON.stringify({ token: "should-not-happen" }), { status: 200 });
+    }) as typeof fetch,
+  });
+  voice.put({
+    dictation: {
+      provider: "elevenlabs",
+      transport: "direct-browser",
+      processingPolicy: "local-only",
+      apiKeyEnv: "ELEVENLABS_API_KEY",
+    },
+  });
+  const result = await call("POST", "/api/dictation/token", { provider: "elevenlabs" });
+  assert.equal(result.status, 400);
+  assert.equal(fetches, 0);
+  assert.doesNotMatch(JSON.stringify(result.payload), /long-lived-secret/);
+});
+
+test("ElevenLabs direct token is minted server-side without echoing the long-lived key", async () => {
+  const upstreamKeys: string[] = [];
+  const { voice, call } = harness({
+    env: { ELEVENLABS_API_KEY: "long-lived-secret" },
+    fetchFn: (async (_url, init) => {
+      upstreamKeys.push(String((init?.headers as Record<string, string>)?.["xi-api-key"] ?? ""));
+      return new Response(JSON.stringify({ token: "single-use-token" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch,
+  });
+  voice.put({
+    dictation: {
+      provider: "elevenlabs",
+      transport: "direct-browser",
+      processingPolicy: "prefer-cloud",
+      apiKeyEnv: "ELEVENLABS_API_KEY",
+    },
+  });
+  const result = await call("POST", "/api/dictation/token", { provider: "elevenlabs" });
+  assert.equal(result.status, 200);
+  assert.deepEqual(upstreamKeys, ["long-lived-secret"]);
+  assert.deepEqual(result.payload, { provider: "elevenlabs", token: "single-use-token", expiresInSeconds: 900 });
+  assert.doesNotMatch(JSON.stringify(result.payload), /long-lived-secret/);
+});
+
+test("a cloud fallback provider cannot mint a direct token while local is primary", async () => {
+  let fetches = 0;
+  const { voice, call } = harness({
+    env: { ELEVENLABS_API_KEY: "fallback-secret" },
+    fetchFn: (async () => {
+      fetches++;
+      return new Response(JSON.stringify({ token: "unexpected" }), { status: 200 });
+    }) as typeof fetch,
+  });
+  voice.put({
+    dictation: {
+      provider: "local-nemotron",
+      transport: "local-worker",
+      processingPolicy: "prefer-local",
+      fallbackProvider: "elevenlabs",
+      fallbackApiKeyEnv: "ELEVENLABS_API_KEY",
+    },
+  });
+  const result = await call("POST", "/api/dictation/token", { provider: "elevenlabs" });
+  assert.equal(result.status, 400);
+  assert.equal(fetches, 0);
+});
+
 test("tts/speak is an honest 503 unconfigured, proxies standard fields when set", async () => {
   const unset = harness({});
   const off = await unset.call("POST", "/api/tts/speak", { text: "hi" });
@@ -114,7 +189,6 @@ test("tts/speak is an honest 503 unconfigured, proxies standard fields when set"
   assert.equal(sent.length, 1);
   assert.equal(sent[0]?.url, "https://tts.example/v1/audio/speech");
   assert.equal(sent[0]?.auth, "Bearer resolved-key");
-  // standard fields only — nothing non-OpenAI leaks to the upstream server
   assert.deepEqual(Object.keys(JSON.parse(sent[0]!.body)).sort(), ["input", "model", "response_format", "voice"]);
   assert.equal(JSON.parse(sent[0]!.body).voice, "nova");
 

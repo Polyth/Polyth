@@ -5,7 +5,20 @@ import {
   type SttAdapter, type SttStream,
 } from "@polyth/dictation";
 
-/** Fake STT: decodes each PCM chunk as UTF-8 words; finalize joins them. */
+/** Test-only PCM fixture: each ASCII byte becomes the low byte of one s16le
+ * sample so the service still receives structurally valid PCM16. */
+const chunk = (s: string): Uint8Array => {
+  const text = Buffer.from(s, "utf8");
+  const pcm = new Uint8Array(text.byteLength * 2);
+  for (let i = 0; i < text.byteLength; i++) pcm[i * 2] = text[i]!;
+  return pcm;
+};
+const decodeChunk = (pcm: Uint8Array): string => {
+  const bytes = Buffer.allocUnsafe(pcm.byteLength / 2);
+  for (let i = 0; i < bytes.byteLength; i++) bytes[i] = pcm[i * 2]!;
+  return bytes.toString("utf8");
+};
+
 function fakeAdapter(): SttAdapter & { pushed: Uint8Array[] } {
   const pushed: Uint8Array[] = [];
   return {
@@ -16,7 +29,7 @@ function fakeAdapter(): SttAdapter & { pushed: Uint8Array[] } {
       return {
         push(pcm) {
           pushed.push(pcm);
-          words.push(Buffer.from(pcm).toString("utf8"));
+          words.push(decodeChunk(pcm));
         },
         partial: () => words.join(" "),
         finalize: async () => words.join(" ").trim(),
@@ -24,8 +37,6 @@ function fakeAdapter(): SttAdapter & { pushed: Uint8Array[] } {
     },
   };
 }
-
-const chunk = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, "utf8"));
 
 test("no adapter: capability is honest, create refuses", () => {
   const svc = createDictationService({ adapter: null, unavailableReason: "no engine" });
@@ -51,24 +62,41 @@ test("duplicate chunks re-ack without re-transcribing", async () => {
   const d = svc.create({});
   await svc.push(d.id, 1, chunk("alpha"));
   await svc.push(d.id, 2, chunk("beta"));
-  // client replays 1..2 after a reconnect
   const dup1 = await svc.push(d.id, 1, chunk("alpha"));
   const dup2 = await svc.push(d.id, 2, chunk("beta"));
   assert.equal(dup1.duplicate, true);
   assert.equal(dup2.duplicate, true);
-  assert.equal(dup1.ack, 2); // ack reports the high-water mark
-  assert.equal(adapter.pushed.length, 2); // adapter saw each chunk exactly once
+  assert.equal(dup1.ack, 2);
+  assert.equal(adapter.pushed.length, 2);
   const r3 = await svc.push(d.id, 3, chunk("gamma"));
   assert.equal(r3.transcript?.text, "alpha beta gamma");
 });
 
-test("small out-of-order jump rejects the chunk but keeps recording", async () => {
-  const svc = createDictationService({ adapter: fakeAdapter() });
+test("out-of-order chunks are buffered and drained in order", async () => {
+  const adapter = fakeAdapter();
+  const svc = createDictationService({ adapter });
   const d = svc.create({});
   await svc.push(d.id, 1, chunk("a"));
-  await assert.rejects(() => svc.push(d.id, 3, chunk("c")), /expected seq 2/);
-  assert.equal(svc.get(d.id)!.status, "recording");
-  await svc.push(d.id, 2, chunk("b")); // recovery works
+  const third = await svc.push(d.id, 3, chunk("c"));
+  assert.equal(third.ack, 1);
+  assert.equal(third.buffered, true);
+  assert.equal(adapter.pushed.length, 1);
+  const second = await svc.push(d.id, 2, chunk("b"));
+  assert.equal(second.ack, 3);
+  assert.equal(second.transcript?.text, "a b c");
+  assert.equal(adapter.pushed.length, 3);
+});
+
+test("duplicate out-of-order chunk is suppressed before drain", async () => {
+  const adapter = fakeAdapter();
+  const svc = createDictationService({ adapter });
+  const d = svc.create({});
+  await svc.push(d.id, 2, chunk("b"));
+  const duplicate = await svc.push(d.id, 2, chunk("b"));
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(duplicate.ack, 0);
+  await svc.push(d.id, 1, chunk("a"));
+  assert.equal(adapter.pushed.length, 2);
 });
 
 test("seq gap beyond the cap fails the dictation", async () => {
@@ -79,11 +107,33 @@ test("seq gap beyond the cap fails the dictation", async () => {
   assert.equal(svc.get(d.id)!.status, "failed");
 });
 
+test("bounded reorder buffer fails rather than silently dropping audio", async () => {
+  const svc = createDictationService({ adapter: fakeAdapter(), maxBufferedChunks: 1 });
+  const d = svc.create({});
+  await svc.push(d.id, 2, chunk("b"));
+  await assert.rejects(() => svc.push(d.id, 3, chunk("c")), /reorder buffer overflowed/);
+  assert.equal(svc.get(d.id)!.status, "failed");
+});
+
 test("byte cap fails the dictation", async () => {
   const svc = createDictationService({ adapter: fakeAdapter(), maxBytes: 10 });
   const d = svc.create({});
-  await assert.rejects(() => svc.push(d.id, 1, new Uint8Array(11)), /audio cap/);
+  await assert.rejects(() => svc.push(d.id, 1, new Uint8Array(12)), /audio cap/);
   assert.equal(svc.get(d.id)!.status, "failed");
+});
+
+test("odd byte chunks fail explicit pcm16 validation", async () => {
+  const svc = createDictationService({ adapter: fakeAdapter() });
+  const d = svc.create({});
+  await assert.rejects(() => svc.push(d.id, 1, new Uint8Array(3)), /whole 16-bit samples/);
+});
+
+test("finalize refuses missing buffered audio", async () => {
+  const svc = createDictationService({ adapter: fakeAdapter() });
+  const d = svc.create({});
+  await svc.push(d.id, 2, chunk("b"));
+  await assert.rejects(() => svc.finalize(d.id), /missing audio/);
+  assert.equal(svc.get(d.id)!.status, "recording");
 });
 
 test("finalize happens exactly once; repeat calls return the same result", async () => {
@@ -97,15 +147,15 @@ test("finalize happens exactly once; repeat calls return the same result", async
   };
   const svc = createDictationService({ adapter });
   const d = svc.create({});
-  await svc.push(d.id, 1, chunk("x"));
+  await svc.push(d.id, 1, chunk("xx"));
   const [a, b] = await Promise.all([svc.finalize(d.id), svc.finalize(d.id)]);
   const c = await svc.finalize(d.id);
   assert.equal(finalizeCalls, 1);
   assert.equal(a.transcript, "final text");
   assert.equal(b.status, "done");
   assert.equal(c.transcript, "final text");
-  // pushing after finalize is rejected
-  await assert.rejects(() => svc.push(d.id, 2, chunk("y")), /dictation is/);
+  assert.ok(typeof c.timing.finalMs === "number");
+  await assert.rejects(() => svc.push(d.id, 2, chunk("yy")), /dictation is/);
 });
 
 test("cancel removes the session", () => {
@@ -119,19 +169,19 @@ test("cancel removes the session", () => {
 
 test("chunk buffer assigns sequential seqs and replays unacked in order", () => {
   const buf = createChunkBuffer();
-  assert.equal(buf.push(chunk("a")), 1);
-  assert.equal(buf.push(chunk("b")), 2);
-  assert.equal(buf.push(chunk("c")), 3);
+  assert.equal(buf.push(chunk("aa")), 1);
+  assert.equal(buf.push(chunk("bb")), 2);
+  assert.equal(buf.push(chunk("cc")), 3);
   buf.ack(1);
   const replay = buf.unacked();
   assert.deepEqual(replay.map((c) => c.seq), [2, 3]);
-  assert.equal(Buffer.from(replay[0]!.pcm).toString(), "b");
+  assert.equal(decodeChunk(replay[0]!.pcm), "bb");
 });
 
 test("chunk buffer ack is idempotent and tolerates high acks", () => {
   const buf = createChunkBuffer();
-  buf.push(chunk("a"));
-  buf.push(chunk("b"));
+  buf.push(chunk("aa"));
+  buf.push(chunk("bb"));
   buf.ack(5);
   buf.ack(5);
   assert.deepEqual(buf.unacked(), []);
@@ -142,7 +192,7 @@ test("chunk buffer bounds retention and counts dropped audio", () => {
   const buf = createChunkBuffer({ maxBytes: 8 });
   buf.push(new Uint8Array(4));
   buf.push(new Uint8Array(4));
-  buf.push(new Uint8Array(4)); // evicts the first
+  buf.push(new Uint8Array(4));
   assert.equal(buf.dropped(), 1);
   assert.deepEqual(buf.unacked().map((c) => c.seq), [2, 3]);
   assert.ok(buf.bytes() <= 8);
