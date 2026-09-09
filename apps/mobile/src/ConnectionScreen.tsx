@@ -7,6 +7,7 @@ import {
   checkPolythHost,
   forgetMobileHost,
   isPairingDeepLink,
+  mobileDeepLinkPath,
   navigateToMobileHost,
   rememberMobileHost,
   type MobileHost,
@@ -219,9 +220,17 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
   useEffect(() => {
     let handle: { remove: () => Promise<void> } | undefined;
     void App.addListener("appUrlOpen", ({ url: opened }) => {
-      if (!isPairingDeepLink(opened)) return;
-      rememberPendingPairingLink(opened);
-      setTicket(opened);
+      if (isPairingDeepLink(opened)) {
+        rememberPendingPairingLink(opened);
+        setTicket(opened);
+        return;
+      }
+      if (mobileDeepLinkPath(opened)) {
+        // Native capture retains this URL until the bundled origin consumes it.
+        // Reload so prepareMobileLaunch() can attach the path to the server the
+        // user explicitly chooses instead of the previously active server.
+        location.reload();
+      }
     }).then((next) => { handle = next; });
     return () => { void handle?.remove(); };
   }, []);
