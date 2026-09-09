@@ -6,7 +6,6 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@polyth/dictation": "0.1.0",
     "@polyth/secure-safe": "0.1.0",
     "@polyth/ssh": "0.1.0",
     "@polyth/workflow": "0.1.0",
