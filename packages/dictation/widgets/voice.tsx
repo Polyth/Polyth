@@ -1,6 +1,6 @@
-// Voice glue: a placeable mic mini-widget (Web Speech dictation) and optional
-// read-aloud of assistant replies. Logic lives in
-// @polyth/dictation; this file owns DOM/store wiring only.
+// Voice glue: a placeable mic mini-widget and optional read-aloud of assistant
+// replies. Provider transport lives behind @polyth/dictation; this file owns
+// DOM/store wiring and deliberately bounded lexical context only.
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   VOICE_PREFS_KEY,
@@ -10,6 +10,7 @@ import {
   serializeVoicePrefs,
   speakableText,
   speechSupport,
+  type DictationContext,
   type SpeechRecognitionLike,
   type VoicePrefs,
 } from "@polyth/dictation";
@@ -53,8 +54,6 @@ export function useVoicePrefs(): VoicePrefs {
 
 // ---- text-to-speech ----------------------------------------------------------
 
-// F8: one WebAudio pipeline for the server engine — pitch maps to
-// playbackRate and volume to a gain node. Only one clip plays at a time.
 let audioCtx: AudioContext | null = null;
 let serverSource: AudioBufferSourceNode | null = null;
 
@@ -85,7 +84,7 @@ function speakBrowser(text: string): void {
   if (!synth) return;
   synth.cancel();
   const u = new SpeechSynthesisUtterance(text);
-  u.lang = voicePrefs.lang;
+  u.lang = voicePrefs.lang === "auto" ? navigator.language : voicePrefs.lang;
   u.rate = voicePrefs.rate;
   u.pitch = voicePrefs.pitch;
   u.volume = voicePrefs.volume;
@@ -99,15 +98,12 @@ function speakBrowser(text: string): void {
 export function speak(text: string): void {
   if (!text.trim()) return;
   if (voicePrefs.ttsEngine === "server") {
-    // server clip fails soft back to the browser engine so replies still play
     void speakServer(text).catch(() => speakBrowser(text));
   } else {
     speakBrowser(text);
   }
 }
 
-/** F8: summarize-speak — long replies go through the Small Model first and
- *  fall back to the raw text whenever the summarize endpoint declines. */
 export function speakReply(text: string): void {
   if (!voicePrefs.summarize || text.length < 400) {
     speak(text);
@@ -123,7 +119,6 @@ export function stopSpeaking(): void {
   stopServerAudio();
 }
 
-/** Speak the newest assistant reply in the active session (palette command). */
 export function readLastReply(): void {
   const s = getState();
   const events = s.activeSessionId ? s.events[s.activeSessionId] ?? [] : [];
@@ -136,11 +131,51 @@ export function readLastReply(): void {
   }
 }
 
+// ---- bounded provider context ------------------------------------------------
+
+const basename = (path: string | null | undefined): string =>
+  path?.split(/[\\/]/).filter(Boolean).pop() ?? "";
+
+function currentDictationContext(language: string): Partial<DictationContext> {
+  const state = getState();
+  const session = state.activeSessionId
+    ? state.sessions.find((item) => item.id === state.activeSessionId)
+    : undefined;
+  const events = state.activeSessionId ? state.events[state.activeSessionId] ?? [] : [];
+  const commands = state.activeSessionId
+    ? state.runtimeFeatures[state.activeSessionId]?.commands ?? []
+    : [];
+
+  const keywords = [
+    session?.title ?? "",
+    state.gitBranch,
+    basename(session?.worktreePath),
+    basename(state.editorFile),
+    ...commands.slice(0, 24).map((command) => command.name),
+  ].filter(Boolean);
+
+  const recentChat = events.slice(-8).flatMap((event) => {
+    if (event.type !== "user/message" && event.type !== "assistant/message") return [];
+    const text = String((event.data as { text?: unknown }).text ?? "").trim();
+    return text ? [text.slice(0, 600)] : [];
+  }).join("\n").slice(-3_000);
+
+  const lexicalContext = [
+    session?.title ? `Session: ${session.title}` : "",
+    session?.worktreePath ? `Worktree: ${session.worktreePath}` : "",
+    state.gitBranch ? `Branch: ${state.gitBranch}` : "",
+    state.editorFile ? `Open file: ${state.editorFile}` : "",
+    recentChat ? `Recent conversation:\n${recentChat}` : "",
+  ].filter(Boolean).join("\n");
+
+  return {
+    language: language || "auto",
+    ...(keywords.length ? { keywords } : {}),
+    ...(lexicalContext ? { lexicalContext } : {}),
+  };
+}
+
 // ---- mic button (composer.leading) -------------------------------------------
-// UX-COMPOSER-DISC: the slot never disappears while the control can explain
-// itself. Availability, lifecycle, and failure are visible named states —
-// never a claim inferred from a settings toggle alone. Transcripts stay
-// drafts (composer insert); nothing here sends or appends a session event.
 
 type MicPhase = "idle" | "starting" | "listening" | "transcribing";
 
@@ -164,8 +199,6 @@ function MicButton() {
     streamRef.current?.cancel();
   }, []);
 
-  // Server capability is a live probe, not an assumption from preferences.
-  // Presets affect placement only; they never gate voice availability.
   useEffect(() => {
     if (!prefs.dictation || !serverStt) {
       setCapability(null);
@@ -176,7 +209,6 @@ function MicButton() {
     return () => { cancelled = true; };
   }, [prefs.dictation, serverStt]);
 
-  // The four truthful availability states (plus checking) for the idle control.
   const availability: { available: boolean; reason?: string; settings?: boolean } =
     !prefs.dictation ? { available: false, reason: tr("voice.dictationOff"), settings: true }
     : serverStt && capability === null ? { available: false, reason: tr("voice.checkingMicrophone") }
@@ -197,7 +229,6 @@ function MicButton() {
     : availability.available ? null
     : availability.reason ?? null;
 
-  // Announce each state transition exactly once (never per render).
   const lastAnnounced = useRef<string | null>(null);
   useEffect(() => {
     if (status && status !== lastAnnounced.current) announce(status);
@@ -212,7 +243,6 @@ function MicButton() {
   const stop = () => {
     recRef.current?.stop();
     recRef.current = null;
-    // server engine: finalize, show Transcribing…, insert the final transcript
     const stream = streamRef.current;
     streamRef.current = null;
     if (stream) {
@@ -220,8 +250,6 @@ function MicButton() {
       void stream.stop()
         .then((text) => {
           setPhase("idle");
-          // draft insert only — the IME-safe composer command returns focus
-          // to the editor; nothing auto-sends
           if (text.trim()) requestComposerInsert(text.trim());
         })
         .catch(fail);
@@ -237,7 +265,7 @@ function MicButton() {
       return;
     }
     const rec = new Ctor();
-    rec.lang = prefs.lang;
+    rec.lang = prefs.lang === "auto" ? navigator.language : prefs.lang;
     rec.continuous = true;
     rec.interimResults = false;
     let transcript = "";
@@ -262,16 +290,17 @@ function MicButton() {
   const startServer = async () => {
     setPhase("starting");
     try {
+      const language = prefs.lang || "auto";
       streamRef.current = await startStreamingDictation({
         ...(getState().activeSessionId ? { sessionId: getState().activeSessionId! } : {}),
-        language: prefs.lang.split("-")[0] ?? prefs.lang,
+        language,
+        ...(prefs.contextInjection ? { context: currentDictationContext(language) } : {}),
         onError: fail,
       });
       setPhase("listening");
     } catch (err) {
-      // mic denied or server capability lost — fall back to the browser engine
       streamRef.current = null;
-      if (support.stt) startBrowser();
+      if (prefs.cloudFallback && support.stt) startBrowser();
       else fail(err);
     }
   };
@@ -340,15 +369,10 @@ const VOICE_WIDGET_PLUGIN = defineWidgetPlugin({
   }],
 });
 
-/** Register the mic widget + auto read-aloud of newly completed replies.
- *  A later call replaces the previous install. Disable removes runtime
- *  contributions without losing saved preferences. */
 export function installVoice(host: WebPackageHost): () => void {
   uninstallVoice?.();
   const unregisterWidget = host.widgets.registerPlugin(VOICE_WIDGET_PLUGIN);
 
-  // Auto-TTS: speak assistant/message events as they land in the active
-  // session. Sessions are primed on first sight so history is never read.
   const spoken = new Map<string, number>();
   const check = () => {
     const s = getState();
