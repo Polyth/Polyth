@@ -42,6 +42,12 @@ test("radius compatibility names only alias the canonical semantic scale", async
   }
 });
 
+test("settings right pane uses the active theme surface", async () => {
+  const styles = await read("../src/styles.css");
+
+  assert.match(styles, /\.settings-pane\s*\{[^}]*background:\s*var\(--bg\)/s);
+});
+
 test("runtime CSS does not introduce unscaled radius literals", async () => {
   const [core, mobile, entries] = await Promise.all([
     read("../src/styles.css"),

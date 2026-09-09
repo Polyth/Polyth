@@ -2798,7 +2798,15 @@ html[data-density="compact"] .set-row { padding: 6px 0; }
 .settings-nav-item { text-align: left; border: none; border-radius: calc(var(--radius-control) - 2px); padding: 6px 10px; font-size: var(--font-body); color: var(--muted); }
 .settings-nav-item:hover { color: var(--text); background: var(--elevated); }
 .settings-nav-item.active { background: var(--accent-wash); color: var(--text); }
-.settings-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.settings-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  /* Keep the focused page on the active theme surface instead of letting the
+     shell's neutral glass material wash the whole right side into gray. */
+  background: var(--bg);
+}
 .settings-pane-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 18px 10px; border-bottom: 1px solid var(--border-soft);
