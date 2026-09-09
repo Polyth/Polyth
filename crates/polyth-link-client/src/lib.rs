@@ -5,12 +5,14 @@ include!("runtime.rs");
 /// duration of an operation; the secret is never serialized through this API.
 pub struct NativeClient {
     state: Arc<Mutex<ClientState>>,
+    operation: Mutex<()>,
 }
 
 impl NativeClient {
     pub fn new(data_dir: PathBuf, web_dist: Option<PathBuf>) -> Self {
         Self {
             state: Arc::new(Mutex::new(new_state(data_dir, web_dist))),
+            operation: Mutex::new(()),
         }
     }
 
@@ -20,6 +22,7 @@ impl NativeClient {
         params: Value,
         identity_secret: Option<&[u8]>,
     ) -> Result<Value, String> {
+        let _operation = self.operation.lock().await;
         if method == "connections.list" {
             if identity_secret.is_some() {
                 return Err(LinkError::PairingInvalid.code().to_string());
@@ -47,6 +50,27 @@ impl NativeClient {
         dispatch(self.state.clone(), method, params)
             .await
             .map_err(str::to_string)
+    }
+
+    /// Stop every in-flight pairing and live tunnel owned by this native
+    /// client. The operation gate makes handle destruction wait for a current
+    /// native call instead of leaving its loopback listener alive.
+    pub async fn shutdown(&self) {
+        let _operation = self.operation.lock().await;
+        let (pairing, sessions) = {
+            let mut state = self.state.lock().await;
+            (
+                std::mem::take(&mut state.pairing),
+                std::mem::take(&mut state.sessions),
+            )
+        };
+        for (_, attempt) in pairing {
+            attempt.connection.close(0u32.into(), b"client-free");
+            attempt.endpoint.close().await;
+        }
+        for (_, session) in sessions {
+            close_session(session, b"client-free").await;
+        }
     }
 }
 
@@ -155,5 +179,13 @@ mod native_tests {
         assert!(!text.contains("deviceId"));
         assert!(!text.contains("directAddresses"));
         assert!(!text.contains("relayUrls"));
+    }
+
+    #[tokio::test]
+    async fn native_shutdown_is_idempotent_without_live_state() {
+        let dir = tempdir().unwrap();
+        let client = NativeClient::new(dir.path().to_path_buf(), None);
+        client.shutdown().await;
+        client.shutdown().await;
     }
 }
