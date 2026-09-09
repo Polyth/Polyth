@@ -32,8 +32,16 @@ function endpointField(value: unknown): string | undefined {
 
 function addressField(value: unknown): string | undefined {
   const address = stringField(value, 96);
-  if (!address || /[\s/@?#\\]/u.test(address)) return undefined;
+  if (!address || /[\s/@?#\\,]/u.test(address)) return undefined;
   return address;
+}
+
+function addressFields(value: unknown): string[] {
+  if (typeof value !== "string") return [];
+  return value
+    .split(/[\s,]+/u)
+    .map(addressField)
+    .filter((item): item is string => Boolean(item));
 }
 
 function portField(value: unknown): number | null | undefined {
@@ -52,7 +60,7 @@ export function normalizeDiscoveredPolyth(value: unknown): DiscoveredPolyth | un
   if (!endpoint || !serviceName || !hostLabel || raw.protocolVersion !== 1 || port === undefined) return undefined;
 
   const addresses = Array.isArray(raw.addresses)
-    ? Array.from(new Set(raw.addresses.map(addressField).filter((item): item is string => Boolean(item)))).slice(0, 16)
+    ? Array.from(new Set(raw.addresses.flatMap(addressFields))).slice(0, 16)
     : [];
 
   return {
