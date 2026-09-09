@@ -235,6 +235,14 @@ export function migrateDictationPreferences(input: unknown): DictationPreference
     transport = "server-proxy";
   }
 
+  // Persisted settings may outlive an experimental transport. Never leave the
+  // picker in an impossible state: prefer auto when supported, then the first
+  // concrete transport advertised by the current provider.
+  const supportedTransports = providerCapabilities(provider)?.transports ?? ["auto"];
+  if (!supportedTransports.includes(transport)) {
+    transport = supportedTransports.includes("auto") ? "auto" : supportedTransports[0] ?? "auto";
+  }
+
   const language = typeof raw.language === "string" && raw.language.trim()
     ? raw.language.trim()
     : typeof raw.lang === "string" && raw.lang.trim()
