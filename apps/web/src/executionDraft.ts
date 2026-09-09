@@ -1,4 +1,9 @@
 import type { DraftExecutionConfig, HarnessSelection } from "@polyth/contracts";
+import {
+  accountStorageGet,
+  accountStorageRemove,
+  accountStorageSet,
+} from "./accountStorage.ts";
 
 const PREFIX = "polyth.executionDraft.v1.";
 const listeners = new Set<() => void>();
@@ -19,7 +24,7 @@ export function emptyDraftExecutionConfig(): DraftExecutionConfig {
 
 export function readDraftExecutionConfig(projectId: string): DraftExecutionConfig {
   try {
-    const input = JSON.parse(localStorage.getItem(PREFIX + projectId) ?? "null") as Record<string, unknown> | null;
+    const input = JSON.parse(accountStorageGet(PREFIX + projectId) ?? "null") as Record<string, unknown> | null;
     if (!input) return emptyDraftExecutionConfig();
     const model = input.model as { harnessId?: unknown; providerID?: unknown; modelID?: unknown; variant?: unknown } | undefined;
     const agent = input.agent as { harnessId?: unknown; agent?: unknown } | undefined;
@@ -51,16 +56,13 @@ export function readDraftExecutionConfig(projectId: string): DraftExecutionConfi
 }
 
 export function writeDraftExecutionConfig(projectId: string, config: DraftExecutionConfig): void {
-  try {
-    const empty = config.harnessSelection.mode === "auto"
-      && !config.harnessSelectionExplicit
-      && !config.model && !config.profileId && !config.agent && !config.thinking && !config.mode
-      && !Object.keys(config.features ?? {}).length;
-    if (empty) localStorage.removeItem(PREFIX + projectId);
-    else localStorage.setItem(PREFIX + projectId, JSON.stringify(config));
-  } catch {
-    // Browser-local draft state is best-effort, like the prompt draft.
-  }
+  const key = PREFIX + projectId;
+  const empty = config.harnessSelection.mode === "auto"
+    && !config.harnessSelectionExplicit
+    && !config.model && !config.profileId && !config.agent && !config.thinking && !config.mode
+    && !Object.keys(config.features ?? {}).length;
+  if (empty) accountStorageRemove(key);
+  else accountStorageSet(key, JSON.stringify(config));
   for (const listener of [...listeners]) listener();
 }
 
@@ -71,7 +73,7 @@ export function updateDraftExecutionConfig(projectId: string, patch: Partial<Dra
 }
 
 export function clearDraftExecutionConfig(projectId: string): void {
-  try { localStorage.removeItem(PREFIX + projectId); } catch { /* best effort */ }
+  accountStorageRemove(PREFIX + projectId);
   for (const listener of [...listeners]) listener();
 }
 
