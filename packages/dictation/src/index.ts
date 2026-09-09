@@ -4,6 +4,7 @@ import {
   DEFAULT_DICTATION_PREFERENCES,
   migrateDictationPreferences,
   type DictationLatencyPreference,
+  type DictationProcessingPolicy,
   type DictationProviderId,
   type DictationTransport,
 } from "./providers.ts";
@@ -76,6 +77,9 @@ export interface VoicePrefs {
   dictationModel?: string;
   localModel?: string;
   contextInjection: boolean;
+  processingPolicy: DictationProcessingPolicy;
+  fallbackProvider?: DictationProviderId;
+  /** @deprecated compatibility mirror; processingPolicy owns routing. */
   cloudFallback: boolean;
   latencyPreference: DictationLatencyPreference;
 }
@@ -98,6 +102,7 @@ export function defaultVoicePrefs(): VoicePrefs {
     dictationProvider: DEFAULT_DICTATION_PREFERENCES.provider,
     dictationTransport: DEFAULT_DICTATION_PREFERENCES.transport,
     contextInjection: DEFAULT_DICTATION_PREFERENCES.contextInjection,
+    processingPolicy: DEFAULT_DICTATION_PREFERENCES.processingPolicy,
     cloudFallback: DEFAULT_DICTATION_PREFERENCES.cloudFallback,
     latencyPreference: DEFAULT_DICTATION_PREFERENCES.latencyPreference,
   };
@@ -133,6 +138,8 @@ export function parseVoicePrefs(raw: string | null): VoicePrefs {
       ...(dictation.model ? { dictationModel: dictation.model } : {}),
       ...(dictation.localModel ? { localModel: dictation.localModel } : {}),
       contextInjection: dictation.contextInjection,
+      processingPolicy: dictation.processingPolicy,
+      ...(dictation.fallbackProvider ? { fallbackProvider: dictation.fallbackProvider } : {}),
       cloudFallback: dictation.cloudFallback,
       latencyPreference: dictation.latencyPreference,
     };
