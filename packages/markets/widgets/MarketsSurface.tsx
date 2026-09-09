@@ -3,13 +3,14 @@ import type {
   MarketCandleSeries,
   MarketDataResult,
   MarketFundamentals,
+  MarketNewsItem,
   MarketQuote,
   MarketRange,
   MarketSearchResult,
 } from "../src/types.ts";
 import { marketsApi } from "./api.ts";
 import { buildCloseLine } from "./chart.ts";
-import { buildMarketHandoffText } from "./context.ts";
+import { buildMarketHandoffText, researchContextFromSnapshot } from "./context.ts";
 import { getMarketSymbol, selectMarketSymbol, subscribeMarketSymbol } from "./selection.ts";
 import { useMarketWatchlists } from "./watchlistHooks.ts";
 
@@ -42,6 +43,7 @@ const percent = (value?: number): string => value === undefined
   : `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 
 const abortError = (cause: unknown): boolean => cause instanceof DOMException && cause.name === "AbortError";
+const errorMessage = (cause: unknown): string => cause instanceof Error ? cause.message : String(cause);
 
 export interface MarketHandoffOption {
   id: string;
@@ -64,6 +66,7 @@ export default function MarketsSurface({ active = true, handoffOptions = [] }: M
   const [quote, setQuote] = useState<MarketDataResult<MarketQuote> | null>(null);
   const [fundamentals, setFundamentals] = useState<MarketDataResult<MarketFundamentals> | null>(null);
   const [candles, setCandles] = useState<MarketDataResult<MarketCandleSeries> | null>(null);
+  const [news, setNews] = useState<MarketDataResult<MarketNewsItem[]> | null>(null);
   const [assetError, setAssetError] = useState<string | null>(null);
   const [chartError, setChartError] = useState<string | null>(null);
   const [assetLoading, setAssetLoading] = useState(false);
@@ -71,6 +74,7 @@ export default function MarketsSurface({ active = true, handoffOptions = [] }: M
   const [refresh, setRefresh] = useState(0);
   const [handoffOpen, setHandoffOpen] = useState(false);
   const [handoffBusy, setHandoffBusy] = useState(false);
+  const [handoffError, setHandoffError] = useState<string | null>(null);
   const watchlists = useMarketWatchlists(active);
 
   useEffect(() => setQuery(symbol), [symbol]);
@@ -107,20 +111,18 @@ export default function MarketsSurface({ active = true, handoffOptions = [] }: M
     void Promise.allSettled([
       marketsApi.quotes([symbol], controller.signal),
       marketsApi.fundamentals(symbol, controller.signal),
-    ]).then(([quoteResult, fundamentalsResult]) => {
+      marketsApi.news(symbol, controller.signal),
+    ]).then(([quoteResult, fundamentalsResult, newsResult]) => {
       if (controller.signal.aborted) return;
       const failures: string[] = [];
       if (quoteResult.status === "fulfilled" && quoteResult.value.items[0]) {
         setQuote(quoteResult.value.items[0]);
       } else {
         setQuote(null);
-        failures.push(quoteResult.status === "rejected" ? String(quoteResult.reason) : "Quote unavailable");
+        failures.push(quoteResult.status === "rejected" ? errorMessage(quoteResult.reason) : "Quote unavailable");
       }
-      if (fundamentalsResult.status === "fulfilled") {
-        setFundamentals(fundamentalsResult.value);
-      } else {
-        setFundamentals(null);
-      }
+      setFundamentals(fundamentalsResult.status === "fulfilled" ? fundamentalsResult.value : null);
+      setNews(newsResult.status === "fulfilled" ? newsResult.value : null);
       setAssetError(failures[0] ?? null);
       setAssetLoading(false);
     });
@@ -137,7 +139,7 @@ export default function MarketsSurface({ active = true, handoffOptions = [] }: M
       .catch((cause) => {
         if (abortError(cause)) return;
         setCandles(null);
-        setChartError(cause instanceof Error ? cause.message : String(cause));
+        setChartError(errorMessage(cause));
       })
       .finally(() => {
         if (!controller.signal.aborted) setChartLoading(false);
@@ -174,15 +176,24 @@ export default function MarketsSurface({ active = true, handoffOptions = [] }: M
   const sendHandoff = async (option: MarketHandoffOption) => {
     if (handoffBusy) return;
     setHandoffBusy(true);
+    setHandoffError(null);
     try {
-      await option.send(buildMarketHandoffText({
-        symbol,
-        range,
-        ...(quote?.data ? { quote: quote.data } : {}),
-        ...(fundamentals?.data ? { fundamentals: fundamentals.data } : {}),
-        ...(candles?.data ? { candles: candles.data } : {}),
-      }));
+      let context;
+      try {
+        context = await marketsApi.context(symbol, range);
+      } catch {
+        context = researchContextFromSnapshot({
+          symbol,
+          range,
+          ...(quote?.data ? { quote: quote.data } : {}),
+          ...(fundamentals?.data ? { fundamentals: fundamentals.data } : {}),
+          ...(candles?.data ? { candles: candles.data } : {}),
+        });
+      }
+      await option.send(buildMarketHandoffText(context));
       setHandoffOpen(false);
+    } catch (cause) {
+      setHandoffError(errorMessage(cause));
     } finally {
       setHandoffBusy(false);
     }
@@ -265,6 +276,7 @@ export default function MarketsSurface({ active = true, handoffOptions = [] }: M
                     {option.label}
                   </button>
                 ))}
+                {handoffError && <small className="markets-handoff-error" role="status">{handoffError}</small>}
               </div>
             )}
           </div>
@@ -324,6 +336,23 @@ export default function MarketsSurface({ active = true, handoffOptions = [] }: M
         <div className="markets-meta">
           <span>{fundamentals?.data.sector ?? quote?.data.assetType ?? "Market data"}</span>
           <span>{quote ? `${quote.data.source} · ${quote.data.freshness}` : "Sources use fallback providers"}</span>
+        </div>
+
+        <div className="markets-news">
+          <div className="markets-news-header">
+            <strong>News</strong>
+            <span>{news?.data.length ? `${news.data.length} recent` : "Yahoo + Google News"}</span>
+          </div>
+          <div className="markets-news-list">
+            {(news?.data ?? []).slice(0, 8).map((item) => (
+              <a key={`${item.source}:${item.url}`} href={item.url} target="_blank" rel="noreferrer">
+                <strong>{item.title}</strong>
+                <span>{item.publisher}{item.publishedAt ? ` · ${new Date(item.publishedAt).toLocaleString()}` : ""}</span>
+              </a>
+            ))}
+            {assetLoading && !news && <div className="markets-news-empty">Loading news…</div>}
+            {!assetLoading && (news?.data.length ?? 0) === 0 && <div className="markets-news-empty">No recent stories available.</div>}
+          </div>
         </div>
       </section>
     </div>

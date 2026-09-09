@@ -1,5 +1,5 @@
 import type { WidgetRenderContext } from "@polyth/web-sdk";
-import { useMarketWatchlists, useQuoteBatch } from "./watchlistHooks.ts";
+import { useMarketNews, useMarketWatchlists, useQuoteBatch } from "./watchlistHooks.ts";
 
 const fmtPrice = (value: number, currency?: string): string => {
   try {
@@ -72,6 +72,25 @@ export function MarketWatchlistWidget({ context, onOpen }: {
         );
       })}
       {(active.symbols.length > symbols.length) && <small>+{active.symbols.length - symbols.length} more</small>}
+    </div>
+  );
+}
+
+export function MarketNewsWidget({ context }: { context: WidgetRenderContext }) {
+  const symbol = configSymbol(context);
+  const news = useMarketNews(symbol, !context.editing);
+  const items = news.result?.data.slice(0, 5) ?? [];
+  if (news.loading && items.length === 0) return <div className="markets-widget-empty">Loading {symbol} news…</div>;
+  if (news.error && items.length === 0) return <div className="markets-widget-empty">News unavailable</div>;
+  if (items.length === 0) return <div className="markets-widget-empty">No recent {symbol} news.</div>;
+  return (
+    <div className="markets-news-widget">
+      {items.map((item) => (
+        <a key={`${item.source}:${item.url}`} href={item.url} target="_blank" rel="noreferrer">
+          <strong>{item.title}</strong>
+          <span>{item.publisher}{item.publishedAt ? ` · ${new Date(item.publishedAt).toLocaleDateString()}` : ""}</span>
+        </a>
+      ))}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { MarketDataResult, MarketQuote } from "../src/types.ts";
+import type { MarketDataResult, MarketNewsItem, MarketQuote } from "../src/types.ts";
 import type { MarketWatchlists } from "../src/watchlists.ts";
 import { marketsApi } from "./api.ts";
 
@@ -101,4 +101,28 @@ export function useQuoteBatch(symbols: readonly string[], active = true, refresh
 
   const quotes = useMemo(() => new Map(items.map((item) => [item.data.symbol, item])), [items]);
   return { items, quotes, errors, loading };
+}
+
+export function useMarketNews(symbol: string, active = true) {
+  const [result, setResult] = useState<MarketDataResult<MarketNewsItem[]> | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!active || !symbol) return;
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+    void marketsApi.news(symbol, controller.signal)
+      .then(setResult)
+      .catch((cause) => {
+        if (!aborted(cause)) setError(message(cause));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [active, symbol]);
+
+  return { result, loading, error };
 }

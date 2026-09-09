@@ -5,7 +5,7 @@ import { buildMarketHandoffText } from "../widgets/context.ts";
 test("market handoff context stays compact and labels time-sensitive evidence", () => {
   const text = buildMarketHandoffText({
     symbol: "NVDA",
-    range: "1M",
+    generatedAt: "2026-09-09T20:00:00.000Z",
     quote: {
       symbol: "NVDA",
       currency: "USD",
@@ -27,22 +27,29 @@ test("market handoff context stays compact and labels time-sensitive evidence", 
       source: "tradingview",
       freshness: "delayed",
     },
-    candles: {
-      symbol: "NVDA",
+    performance: {
       range: "1M",
-      candles: [
-        { time: 1, open: 160, high: 162, low: 159, close: 160 },
-        { time: 2, open: 180, high: 182, low: 179, close: 180 },
-      ],
-      asOf: "2026-09-09T20:00:00.000Z",
+      firstClose: 160,
+      lastClose: 180,
+      changePercent: 12.5,
       source: "yahoo",
       freshness: "delayed",
     },
+    news: [{
+      title: "Nvidia launches new product",
+      url: "https://example.com/news",
+      publisher: "Example",
+      publishedAt: "2026-09-09T19:00:00.000Z",
+      symbol: "NVDA",
+      source: "google-news",
+    }],
+    errors: [],
   });
   assert.match(text, /Market research context — NVDA/);
   assert.match(text, /Today: \+3\.21%/);
-  assert.match(text, /1M return from available candles: \+12\.50%/);
-  assert.match(text, /Data sources: nasdaq, tradingview, yahoo/);
-  assert.match(text, /Use current web research/);
-  assert.doesNotMatch(text, /160,162,159/);
+  assert.match(text, /1M return: \+12\.50%/);
+  assert.match(text, /Nvidia launches new product/);
+  assert.match(text, /Data sources: nasdaq, tradingview, yahoo, google-news/);
+  assert.match(text, /Verify time-sensitive claims/);
+  assert.doesNotMatch(text, /160,180/);
 });

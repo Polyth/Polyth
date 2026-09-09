@@ -1,4 +1,10 @@
-import type { MarketCandleSeries, MarketFundamentals, MarketQuote, MarketRange } from "../src/types.ts";
+import type {
+  MarketCandleSeries,
+  MarketFundamentals,
+  MarketQuote,
+  MarketRange,
+  MarketResearchContext,
+} from "../src/types.ts";
 
 export interface MarketHandoffSnapshot {
   symbol: string;
@@ -11,30 +17,52 @@ export interface MarketHandoffSnapshot {
 const num = (value: number | undefined, digits = 2): string => value === undefined ? "unknown" : value.toLocaleString("en-US", { maximumFractionDigits: digits });
 const pct = (value: number | undefined): string => value === undefined ? "unknown" : `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 
-export function buildMarketHandoffText(snapshot: MarketHandoffSnapshot): string {
-  const quote = snapshot.quote;
-  const fundamentals = snapshot.fundamentals;
-  const candles = snapshot.candles?.candles ?? [];
-  const first = candles[0]?.close;
-  const last = candles.at(-1)?.close;
-  const rangeReturn = first !== undefined && last !== undefined && first !== 0
-    ? ((last - first) / first) * 100
+export function researchContextFromSnapshot(snapshot: MarketHandoffSnapshot): MarketResearchContext {
+  const firstClose = snapshot.candles?.candles[0]?.close;
+  const lastClose = snapshot.candles?.candles.at(-1)?.close;
+  const performance = snapshot.candles && firstClose !== undefined && lastClose !== undefined && firstClose !== 0
+    ? {
+        range: snapshot.range,
+        firstClose,
+        lastClose,
+        changePercent: ((lastClose - firstClose) / firstClose) * 100,
+        source: snapshot.candles.source,
+        freshness: snapshot.candles.freshness,
+      }
     : undefined;
+  return {
+    symbol: snapshot.symbol,
+    generatedAt: new Date().toISOString(),
+    ...(snapshot.quote ? { quote: snapshot.quote } : {}),
+    ...(snapshot.fundamentals ? { fundamentals: snapshot.fundamentals } : {}),
+    ...(performance ? { performance } : {}),
+    news: [],
+    errors: [],
+  };
+}
+
+export function buildMarketHandoffText(context: MarketResearchContext): string {
+  const quote = context.quote;
+  const fundamentals = context.fundamentals;
   const sources = [...new Set([
     quote?.source,
     fundamentals?.source,
-    snapshot.candles?.source,
+    context.performance?.source,
+    ...context.news.map((item) => item.source),
   ].filter((source): source is string => !!source))];
+  const news = context.news.slice(0, 6).map((item, index) =>
+    `${index + 1}. ${item.title} — ${item.publisher}${item.publishedAt ? ` (${item.publishedAt})` : ""}`);
 
   return [
-    `Market research context — ${snapshot.symbol}`,
+    `Market research context — ${context.symbol}`,
+    `Generated: ${context.generatedAt}`,
     quote?.asOf ? `Quote as of: ${quote.asOf}` : "Quote as of: unavailable",
     "",
     "Price",
     `- Last: ${num(quote?.price, 4)}${quote?.currency ? ` ${quote.currency}` : ""}`,
     `- Today: ${pct(quote?.changePercent)}${quote?.change !== undefined ? ` (${num(quote.change, 4)})` : ""}`,
     `- Previous close: ${num(quote?.previousClose, 4)}`,
-    `- ${snapshot.range} return from available candles: ${pct(rangeReturn)}`,
+    `- ${context.performance?.range ?? "Selected range"} return: ${pct(context.performance?.changePercent)}`,
     "",
     "Fundamentals",
     `- Market cap: ${num(fundamentals?.marketCap, 0)}`,
@@ -45,9 +73,13 @@ export function buildMarketHandoffText(snapshot: MarketHandoffSnapshot): string 
     `- Sector: ${fundamentals?.sector ?? "unknown"}`,
     `- Industry: ${fundamentals?.industry ?? "unknown"}`,
     "",
-    `Data sources: ${sources.length ? sources.join(", ") : "unknown"}`,
-    `Freshness: ${quote?.freshness ?? snapshot.candles?.freshness ?? fundamentals?.freshness ?? "unknown"}`,
+    "Recent news",
+    ...(news.length ? news : ["No news was available from the configured market feeds."]),
     "",
-    "Analyze what is materially notable about this asset now: explain the recent move, valuation/fundamental context, concrete risks, and what is worth watching next. Use current web research to verify time-sensitive causes or news; do not infer a causal story from price movement alone.",
+    `Data sources: ${sources.length ? sources.join(", ") : "unknown"}`,
+    `Freshness: ${quote?.freshness ?? context.performance?.freshness ?? fundamentals?.freshness ?? "unknown"}`,
+    ...(context.errors.length ? ["", `Partial data errors: ${context.errors.join(" | ")}`] : []),
+    "",
+    "Analyze what is materially notable about this asset now: explain the recent move, valuation/fundamental context, concrete risks, and what is worth watching next. Verify time-sensitive claims against current sources before relying on them; do not infer a causal story from price movement alone.",
   ].join("\n");
 }

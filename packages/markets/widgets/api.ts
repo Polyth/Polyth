@@ -3,8 +3,10 @@ import type {
   MarketCandleSeries,
   MarketDataResult,
   MarketFundamentals,
+  MarketNewsItem,
   MarketQuote,
   MarketRange,
+  MarketResearchContext,
   MarketSearchResult,
 } from "../src/types.ts";
 import type { MarketWatchlists } from "../src/watchlists.ts";
@@ -29,6 +31,12 @@ export const marketsApi = {
   },
   fundamentals(symbol: string, signal?: AbortSignal): Promise<MarketDataResult<MarketFundamentals>> {
     return transport.get(`/api/markets/fundamentals?symbol=${encodeURIComponent(symbol)}`, { signal });
+  },
+  news(symbol: string, signal?: AbortSignal): Promise<MarketDataResult<MarketNewsItem[]>> {
+    return transport.get(`/api/markets/news?symbol=${encodeURIComponent(symbol)}`, { signal });
+  },
+  context(symbol: string, range: MarketRange, signal?: AbortSignal): Promise<MarketResearchContext> {
+    return transport.get(`/api/markets/context?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}`, { signal });
   },
   watchlists(signal?: AbortSignal): Promise<MarketWatchlists> {
     return transport.get("/api/markets/watchlists", { signal });

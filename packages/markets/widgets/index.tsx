@@ -1,10 +1,11 @@
 import "./styles.css";
 import "./integration.css";
 import "./widgetStyles.css";
+import "./news.css";
 import { createElement, useSyncExternalStore } from "react";
 import { defineWebPackage, type WebPackageHost } from "@polyth/web-sdk";
 import MarketsSurface, { type MarketHandoffOption } from "./MarketsSurface.tsx";
-import { MarketAssetWidget, MarketWatchlistWidget } from "./MarketWidgets.tsx";
+import { MarketAssetWidget, MarketNewsWidget, MarketWatchlistWidget } from "./MarketWidgets.tsx";
 import { selectMarketSymbol } from "./selection.ts";
 
 function HostedMarketsSurface({ host, active }: { host: WebPackageHost; active?: boolean }) {
@@ -38,7 +39,7 @@ export default defineWebPackage((host) => () => {
     host.surfaces.register({
       id: "markets",
       title: "Markets",
-      description: "Research prices, charts, fundamentals, and market context.",
+      description: "Research prices, charts, fundamentals, news, and market context.",
       capabilityId: "markets",
       order: 52,
       component: (props) => createElement(HostedMarketsSurface, { host, active: props?.active }),
@@ -107,6 +108,31 @@ export default defineWebPackage((host) => () => {
           defaultVisible: false,
           render: (context) => <MarketWatchlistWidget context={context} onOpen={openSymbol} />,
         },
+        {
+          id: "markets.news",
+          title: "Market news",
+          description: "Recent stories for one market symbol from aggregated RSS feeds.",
+          kind: "widget",
+          defaultSlot: "workspace.right",
+          supportedSlots: ["workspace.main", "workspace.right", "workspace.bottom", "workspace.floating"],
+          recommendedSize: { w: 5, h: 6 },
+          minSize: { w: 4, h: 3 },
+          maxSize: { w: 9, h: 12 },
+          audience: "standard",
+          scope: "workspace",
+          resizable: true,
+          duplicatable: true,
+          floating: true,
+          recommended: true,
+          defaultVisible: false,
+          settingsSchema: {
+            type: "object",
+            properties: {
+              symbol: { type: "string", title: "Symbol", default: "SPY" },
+            },
+          },
+          render: (context) => <MarketNewsWidget context={context} />,
+        },
       ],
     }),
     host.workbench.profiles.register({
@@ -125,8 +151,8 @@ export default defineWebPackage((host) => () => {
     host.capabilities.register({
       id: "markets",
       label: "Markets",
-      plainDescription: "Research stocks, ETFs, and market data.",
-      keywords: ["market", "stocks", "finance", "quote", "investing", "research"],
+      plainDescription: "Research stocks, ETFs, market news, and financial context.",
+      keywords: ["market", "stocks", "finance", "quote", "investing", "research", "news"],
       standardTier: "more",
       standardRank: 22,
       open: () => host.navigation.openWorkspacePane("markets"),
