@@ -35,10 +35,12 @@ export function authRoutes(auth: AuthService): RouteHandler {
         return true;
       }
       const b = await rc.body();
+      const accountId = typeof b.accountId === "string" && b.accountId ? b.accountId : undefined;
       const r = auth.login(
         String(b.password ?? ""),
         rc.req.socket?.remoteAddress,
         String(rc.req.headers["user-agent"] ?? ""),
+        accountId,
       );
       if (!r.ok) {
         if (r.retryAfterSec !== undefined) rc.res.setHeader("retry-after", String(r.retryAfterSec));
@@ -64,7 +66,12 @@ export function authRoutes(auth: AuthService): RouteHandler {
 
     if (path === "/api/auth/logout-all" && method === "POST") {
       rc.requireCapability(REMOTE_CAPABILITY.authSessionsManage);
-      auth.logoutAll();
+      const userId = auth.userIdForPrincipal(principal);
+      if (!userId) {
+        rc.json(401, { error: "unauthorized", message: "authentication required" });
+        return true;
+      }
+      auth.logoutAll(userId);
       rc.res.setHeader("set-cookie", clearAuthCookieHeader({ name: cookieName, secure }));
       rc.json(200, { ok: true });
       return true;
@@ -72,14 +79,20 @@ export function authRoutes(auth: AuthService): RouteHandler {
 
     if (path === "/api/auth/sessions" && method === "GET") {
       rc.requireCapability(REMOTE_CAPABILITY.authSessionsManage);
-      rc.json(200, auth.listSessions(auth.tokenOf(reqLike)));
+      const userId = auth.userIdForPrincipal(principal);
+      if (!userId) {
+        rc.json(401, { error: "unauthorized", message: "authentication required" });
+        return true;
+      }
+      rc.json(200, auth.listSessions(auth.tokenOf(reqLike), userId));
       return true;
     }
 
     const m = path.match(/^\/api\/auth\/sessions\/([^/]+)$/);
     if (m && method === "DELETE") {
       rc.requireCapability(REMOTE_CAPABILITY.authSessionsManage);
-      if (!auth.revoke(m[1]!)) {
+      const userId = auth.userIdForPrincipal(principal);
+      if (!userId || !auth.revoke(m[1]!, userId)) {
         rc.json(404, { error: "not-found", message: "unknown device session" });
         return true;
       }
