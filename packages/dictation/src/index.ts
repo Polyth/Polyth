@@ -25,6 +25,10 @@ export {
   type ElevenLabsSttOptions,
 } from "./elevenlabs.ts";
 export {
+  createWisprSttAdapter,
+  type WisprSttOptions,
+} from "./wispr.ts";
+export {
   createDeepgramSttAdapter,
   type DeepgramSttOptions,
 } from "./deepgram.ts";
