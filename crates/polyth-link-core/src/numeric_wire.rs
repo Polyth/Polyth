@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
+use zeroize::Zeroizing;
 
 use crate::errors::LinkError;
 use crate::limits::Limits;
@@ -51,7 +52,7 @@ pub async fn write_numeric<W: AsyncWrite + Unpin>(
     writer: &mut W,
     message: &NumericWireMessage,
 ) -> Result<(), LinkError> {
-    let payload = encode_numeric_message(message)?;
+    let payload = Zeroizing::new(encode_numeric_message(message)?);
     write_all(writer, &(payload.len() as u32).to_be_bytes()).await?;
     write_all(writer, &payload).await
 }
@@ -59,7 +60,11 @@ pub async fn write_numeric<W: AsyncWrite + Unpin>(
 pub async fn read_numeric<R: AsyncRead + Unpin>(
     reader: &mut R,
 ) -> Result<NumericWireMessage, LinkError> {
-    let payload = read_len_prefixed(reader, Limits::v1().control_message_bytes).await?;
+    let payload = Zeroizing::new(read_len_prefixed(
+        reader,
+        Limits::v1().control_message_bytes,
+    )
+    .await?);
     decode_numeric_message(&payload)
 }
 
