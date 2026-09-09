@@ -126,8 +126,11 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
     }
 
     // ---- MCP servers ------------------------------------------------------------
+    // Space is the broader existing scope. Supplying a stable project ID asks
+    // the service for that project's effective set (Space + project override).
+    const projectId = rc.url.searchParams.get("projectId") || undefined;
     if (path === "/api/mcp/servers" && method === "GET") {
-      rc.json(200, deps.mcp.list(rc.space));
+      rc.json(200, deps.mcp.list(rc.space, projectId));
       return true;
     }
     if (path === "/api/mcp/servers" && method === "POST") {
@@ -137,7 +140,7 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
         transport: parseTransport(b.transport),
         ...(parseSecrets(b.secrets) ? { secrets: parseSecrets(b.secrets)! } : {}),
         ...(b.enabled === false ? { enabled: false } : {}),
-      }));
+      }, projectId));
       return true;
     }
     let m = path.match(/^\/api\/mcp\/servers\/([^/]+)$/);
@@ -148,18 +151,18 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
         ...(b.transport !== undefined ? { transport: parseTransport(b.transport) } : {}),
         ...(parseSecrets(b.secrets) ? { secrets: parseSecrets(b.secrets)! } : {}),
         ...(typeof b.enabled === "boolean" ? { enabled: b.enabled } : {}),
-      }, Number(b.expectedRevision ?? 0)));
+      }, Number(b.expectedRevision ?? 0), projectId));
       return true;
     }
     if (m && method === "DELETE") {
-      rc.json(200, { ok: await deps.mcp.remove(rc.space, m[1]!) });
+      rc.json(200, { ok: await deps.mcp.remove(rc.space, m[1]!, projectId) });
       return true;
     }
     // F10 names this "probe"; "test" remains as the original spelling. Both hit
     // the same reachability check, which stores status/lastError on the entry.
     m = path.match(/^\/api\/mcp\/servers\/([^/]+)\/(?:test|probe)$/);
     if (m && method === "POST") {
-      rc.json(200, await deps.mcp.test(rc.space, m[1]!));
+      rc.json(200, await deps.mcp.test(rc.space, m[1]!, projectId));
       return true;
     }
     m = path.match(/^\/api\/mcp\/servers\/([^/]+)\/authorize$/);

@@ -1,1 +1,1 @@
-{"name":"@polyth/contracts","version":"0.1.0","type":"module","exports":{".":"./src/index.ts"}}
+{"name":"@polyth/contracts","version":"0.1.0","type":"module","exports":{".":"./src/index.ts","./capability-installations":"./src/capabilityInstallations.ts"}}

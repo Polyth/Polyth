@@ -557,7 +557,10 @@ export async function boot(opts: BootOptions = {}) {
   const admissionBarrier = createRuntimeAdmissionBarrier({
     isShuttingDown,
   });
-  const projects = createProjectService(dataDir);
+  let cleanupProjectCapabilities: (project: import("@polyth/contracts").Project) => void | Promise<void> = () => {};
+  const projects = createProjectService(dataDir, {
+    onRemoved: (project) => cleanupProjectCapabilities(project),
+  });
   root.provide(CAP.projects, projects);
 
   // --- tenancy boundary. Built as early as possible so that package hosts,
@@ -1630,10 +1633,22 @@ export async function boot(opts: BootOptions = {}) {
     dataDir,
     deployment: spaceGateway.deployment,
     defaultSpaceId: spaceGateway.resolveInternal().spaceId,
+    assertProject: (space, projectId) => {
+      if (projects.spaceOfProject(projectId) !== space.spaceId) {
+        throw Object.assign(new Error("project not found"), { code: "not-found" });
+      }
+    },
     onChanged: async (space) => {
       await capabilityController?.reconcileSpace(space);
     },
   });
+  cleanupProjectCapabilities = (project) => {
+    if (!project.spaceId) return;
+    const space = spaceGateway.resolveInternal(project.spaceId);
+    mcp.removeProject(space, project.id);
+    svc<{ removeProject(space: import("@polyth/contracts").SpaceContext, projectId: string): void }>("skills")
+      ?.removeProject(space, project.id);
+  };
 
   // Provider/model visibility: seeds from opencode.json (disabled_providers +
   // provider blacklists), then mirrors every toggle back to it.
@@ -1744,6 +1759,8 @@ export async function boot(opts: BootOptions = {}) {
   provideService("harness.provisioning", {
     status: (context: import("@polyth/contracts").HarnessContext, harnessId?: string) =>
       capabilityController!.status(context, harnessId),
+    reconcileSpace: (space: Pick<import("@polyth/contracts").SpaceContext, "spaceId">) =>
+      capabilityController!.reconcileSpace(space),
   });
 
   // Infrastructure seams consumed by discovered packages.

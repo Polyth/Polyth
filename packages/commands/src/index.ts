@@ -58,7 +58,7 @@ export interface CommandService {
   removeCommand(root: string, scope: WriteScope, name: string): Promise<boolean>;
   saveSnippet(root: string, scope: WriteScope, snippet: { alias: string; text: string }): Promise<void>;
   removeSnippet(root: string, scope: WriteScope, alias: string): Promise<boolean>;
-  listSkills(root: string): Promise<AgentSkill[]>;
+  listSkills(root: string, options?: { includeUser?: boolean }): Promise<AgentSkill[]>;
   saveSkill(root: string, scope: SkillScope, skill: { name: string; description: string; instructions: string }): Promise<void>;
   removeSkill(root: string, scope: SkillScope, name: string): Promise<boolean>;
 }
@@ -239,9 +239,10 @@ export function createCommandService(opts: CommandServiceOptions = {}): CommandS
       }
     },
 
-    async listSkills(root) {
-      const skills = await Promise.all(SKILL_SCOPES.map(async (scope) =>
-        loadSkills(skillDirFor(root, scope), scope)));
+    async listSkills(root, options = {}) {
+      const scopes = SKILL_SCOPES.filter((scope) => options.includeUser !== false || !scope.startsWith("user-"));
+      const skills = await Promise.all(scopes.map(async (scope) =>
+        loadSkills(skillDirFor(root, scope), scope, scope.startsWith("user-") ? homeOf() : root)));
       return skills.flat().sort((a, b) => a.name.localeCompare(b.name) || a.scope.localeCompare(b.scope));
     },
 
@@ -325,9 +326,11 @@ async function loadSnippets(dir: string, scope: CommandScope): Promise<Snippet[]
   return out;
 }
 
-async function loadSkills(dir: string, scope: SkillScope): Promise<AgentSkill[]> {
+async function loadSkills(dir: string, scope: SkillScope, base: string): Promise<AgentSkill[]> {
   let entries: string[] = [];
   try {
+    const rel = path.relative(await realpath(base), await realpath(dir));
+    if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return [];
     entries = (await readdir(dir, { withFileTypes: true }))
       .filter((entry) => entry.isDirectory() && SKILL_NAME_RE.test(entry.name))
       .map((entry) => entry.name);
@@ -337,10 +340,10 @@ async function loadSkills(dir: string, scope: SkillScope): Promise<AgentSkill[]>
   const skills: AgentSkill[] = [];
   for (const name of entries) {
     try {
-      const parsed = parseSkill(await readFile(path.join(dir, name, "SKILL.md"), "utf8"));
+      const parsed = parseSkill(await readInside(base, path.relative(base, path.join(dir, name, "SKILL.md")), 1024 * 1024));
       if (parsed.name === name && parsed.description) skills.push({ ...parsed, scope });
     } catch {
-      // A partial or malformed skill must not hide the rest of the catalog.
+      // A partial, malformed or escaped skill must not hide the rest of the catalog.
     }
   }
   return skills;
