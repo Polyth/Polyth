@@ -1,3 +1,9 @@
+import {
+  activeBrowserAccountId,
+  normalizeAccountId,
+  setActiveBrowserAccount,
+} from "./accountStorage.ts";
+
 export interface AccountChoice {
   id: string;
   name: string;
@@ -39,23 +45,15 @@ const json = (method: string, body?: Record<string, unknown>): RequestInit => ({
   ...(body ? { body: JSON.stringify(body) } : {}),
 });
 
-export async function loginAccounts(): Promise<AccountChoice[]> {
-  const response = await fetch("/api/auth/status");
-  if (!response.ok) return [];
-  const body = await response.json().catch(() => ({})) as { accounts?: unknown };
-  if (!Array.isArray(body.accounts)) return [];
-  return body.accounts.flatMap((account) => {
-    if (!account || typeof account !== "object") return [];
-    const row = account as { id?: unknown; name?: unknown };
-    return typeof row.id === "string" && typeof row.name === "string"
-      ? [{ id: row.id, name: row.name }]
-      : [];
-  });
-}
+export const currentBrowserAccountId = (): string => activeBrowserAccountId();
 
-export async function loginAccount(accountId: string, password: string): Promise<AccountLoginResult> {
+export async function loginAccount(account: string, password: string): Promise<AccountLoginResult> {
+  const accountId = normalizeAccountId(account);
   const response = await fetch("/api/auth/login", json("POST", { accountId, password }));
-  if (response.ok) return { ok: true };
+  if (response.ok) {
+    setActiveBrowserAccount(accountId);
+    return { ok: true };
+  }
   const body = await response.json().catch(() => ({})) as {
     error?: string;
     message?: string;
