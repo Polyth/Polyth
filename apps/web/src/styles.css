@@ -11029,9 +11029,6 @@ html[data-font] body :is(
 .task-list li.failed { background: var(--red-wash); color: var(--text-dim); }
 .task-list li.failed .task-list-item-mark { color: var(--red); }
 
-/* Approval cards keep their pill risk badge inside the chat column; card
-   geometry, actions, and container-query stacking are package-owned. */
-.permission-toast .permission-risk { border-radius: var(--radius-round); }
 /* A working turn keeps the compact round arrow — the pulse is the only
    "agent is busy" signal, no space-hungry label. */
 .jump-latest.agent-working {

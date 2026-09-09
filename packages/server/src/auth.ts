@@ -122,9 +122,11 @@ export type PairedDeviceResolver = (
 ) => AuthPrincipal | null;
 
 export interface AuthServiceOptions {
-  /** Persistence file (data/auth.json): password hash + remembered sessions. */
+  /** Persistence file (data/auth.json): password hashes + remembered sessions. */
   file: string;
-  /** Plaintext password from POLYTH_UI_PASSWORD — hashed at boot, never stored. */
+  /** Stable bootstrap owner used to adopt legacy password/session state. */
+  ownerUserId?: string;
+  /** Plaintext password from POLYTH_UI_PASSWORD — owner-only, hashed at boot, never stored. */
   envPassword?: string | undefined;
   /** POLYTH_UI_PASSWORD_LOCALHOST=optional — public-http loopback skips auth. */
   localhostOptional?: boolean;
@@ -154,13 +156,21 @@ export interface AuthService {
   cookieName(): string;
   resolve(request: AuthRequestLike, ingress: RequestIngress): AuthResolution;
   requireCapability(principal: AuthPrincipal, capability: string): void;
+  /** Server-owned user identity carried by a resolved principal. */
+  userIdForPrincipal(principal: AuthPrincipal): string | undefined;
+  /** Accounts with usable credentials on this server. */
+  accountIds(): string[];
+  hasCredential(userId: string): boolean;
+  setPassword(userId: string, password: string): void;
+  /** Removes credentials and remembered sessions, but never tenant data. */
+  removeAccount(userId: string): boolean;
   /** null = request may proceed; otherwise the 401 to answer with. */
   gate(request: AuthRequestLike, ingress: RequestIngress): GateDenial | null;
-  login(password: string, remoteAddr: string | undefined, userAgent?: string): LoginResult;
+  login(password: string, remoteAddr: string | undefined, userAgent?: string, userId?: string): LoginResult;
   logout(token: string | null): void;
-  logoutAll(): void;
-  listSessions(currentToken: string | null): AuthDeviceDto[];
-  revoke(id: string): boolean;
+  logoutAll(userId?: string): void;
+  listSessions(currentToken: string | null, userId?: string): AuthDeviceDto[];
+  revoke(id: string, userId?: string): boolean;
   tokenOf(req: AuthRequestLike): string | null;
   attachPairedDeviceResolver(resolver: PairedDeviceResolver): void;
   statusDto(resolution: AuthResolution): AuthStatusDto;
@@ -182,8 +192,14 @@ export const UNTRUSTED_INGRESS_HEADERS = [
   "x-polyth-link-device",
 ] as const;
 
+interface StoredCredential {
+  userId: string;
+  passwordHash: string;
+}
+
 interface StoredSession {
   id: string;
+  userId: string;
   tokenHash: string;
   createdAt: number;
   lastSeenAt: number;
@@ -191,9 +207,14 @@ interface StoredSession {
 }
 
 interface AuthFile {
+  version: number;
+  /** Legacy bootstrap-owner hash. Kept readable for backwards compatibility. */
   passwordHash: string | null;
+  credentials: StoredCredential[];
   sessions: StoredSession[];
 }
+
+type IdentifiedPrincipal = AuthPrincipal & { userId?: string };
 
 export const isLoopbackAddress = (addr: string | undefined): boolean =>
   !!addr && (addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1");
@@ -265,37 +286,62 @@ export function clearAuthCookieHeader(opts: { name: string; secure: boolean }): 
 }
 
 const ANONYMOUS: AuthPrincipal = { kind: "anonymous" };
-const LOCAL_USER: AuthPrincipal = { kind: "local-user", trustedLoopback: true };
 
 export function createAuthService(opts: AuthServiceOptions): AuthService {
   const now = opts.now ?? Date.now;
   const ttl = opts.sessionTtlMs ?? 30 * 24 * 60 * 60_000;
   const limiter = opts.limiter ?? createLoginRateLimiter({ now });
   const cookieName = opts.cookieName ?? AUTH_COOKIE;
+  const ownerUserId = opts.ownerUserId ?? "usr_owner";
+  const localUser = { kind: "local-user", trustedLoopback: true, userId: ownerUserId } as AuthPrincipal;
   let pairedResolver: PairedDeviceResolver | undefined = opts.resolvePairedDevice;
 
-  let stored: AuthFile = { passwordHash: null, sessions: [] };
+  let stored: AuthFile = { version: 2, passwordHash: null, credentials: [], sessions: [] };
+  let adoptedLegacySessions = false;
   try {
-    const raw = JSON.parse(readFileSync(opts.file, "utf8")) as Partial<AuthFile>;
+    const raw = JSON.parse(readFileSync(opts.file, "utf8")) as Partial<AuthFile> & {
+      sessions?: Array<Partial<StoredSession>>;
+    };
     stored = {
+      version: 2,
       passwordHash: typeof raw.passwordHash === "string" ? raw.passwordHash : null,
+      credentials: Array.isArray(raw.credentials)
+        ? raw.credentials.filter((credential): credential is StoredCredential =>
+            !!credential && typeof credential.userId === "string" && typeof credential.passwordHash === "string")
+        : [],
       sessions: Array.isArray(raw.sessions)
-        ? raw.sessions.filter((s): s is StoredSession =>
-            !!s && typeof s.id === "string" && typeof s.tokenHash === "string" &&
-            typeof s.createdAt === "number" && typeof s.lastSeenAt === "number")
-            .map((s) => ({ ...s, label: typeof s.label === "string" ? s.label : "" }))
+        ? raw.sessions.filter((session) =>
+            !!session && typeof session.id === "string" && typeof session.tokenHash === "string"
+            && typeof session.createdAt === "number" && typeof session.lastSeenAt === "number")
+            .map((session) => {
+              const userId = typeof session.userId === "string" && session.userId ? session.userId : ownerUserId;
+              if (session.userId !== userId) adoptedLegacySessions = true;
+              return {
+                id: session.id!,
+                userId,
+                tokenHash: session.tokenHash!,
+                createdAt: session.createdAt!,
+                lastSeenAt: session.lastSeenAt!,
+                label: typeof session.label === "string" ? session.label : "",
+              };
+            })
         : [],
     };
   } catch { /* first boot or unreadable — start clean */ }
 
-  // Env password wins but is never written to disk: removing the variable
-  // returns to the stored hash (or to auth-off) without editing auth.json.
+  // Env password wins for the bootstrap owner but is never written to disk:
+  // removing the variable returns to the stored owner hash/credential.
   const envHash = opts.envPassword ? hashPassword(opts.envPassword) : null;
-  const effectiveHash = (): string | null => envHash ?? stored.passwordHash;
+  const credentialHash = (userId: string): string | null => {
+    if (userId === ownerUserId && envHash) return envHash;
+    const account = stored.credentials.find((credential) => credential.userId === userId);
+    if (account) return account.passwordHash;
+    return userId === ownerUserId ? stored.passwordHash : null;
+  };
 
   const purge = (): void => {
     const t = now();
-    stored.sessions = stored.sessions.filter((s) => t - s.lastSeenAt < ttl);
+    stored.sessions = stored.sessions.filter((session) => t - session.lastSeenAt < ttl);
   };
 
   const save = (): void => {
@@ -304,22 +350,26 @@ export function createAuthService(opts: AuthServiceOptions): AuthService {
     atomicWriteSync(opts.file, `${JSON.stringify(stored, null, 2)}\n`, 0o600);
   };
   purge();
+  if (adoptedLegacySessions) save();
 
   const sessionFor = (token: string | null): StoredSession | null => {
     if (!token) return null;
     const hash = sha256(token);
-    const s = stored.sessions.find((x) => x.tokenHash === hash);
-    if (!s) return null;
-    if (now() - s.lastSeenAt >= ttl) return null;
-    return s;
+    const session = stored.sessions.find((candidate) => candidate.tokenHash === hash);
+    if (!session) return null;
+    if (now() - session.lastSeenAt >= ttl) return null;
+    return session;
   };
+
+  const sessionById = (id: string): StoredSession | undefined =>
+    stored.sessions.find((session) => session.id === id);
 
   // lastSeen writes are throttled: an active tab polls constantly and must not
   // turn every request into a disk write.
-  const touch = (s: StoredSession): void => {
+  const touch = (session: StoredSession): void => {
     const t = now();
-    if (t - s.lastSeenAt < 60_000) return;
-    s.lastSeenAt = t;
+    if (t - session.lastSeenAt < 60_000) return;
+    session.lastSeenAt = t;
     save();
   };
 
@@ -328,27 +378,26 @@ export function createAuthService(opts: AuthServiceOptions): AuthService {
     const session = sessionFor(token);
     if (session) {
       touch(session);
-      const principal: AuthPrincipal = {
+      const principal = {
         kind: "ui-session",
         sessionId: session.id,
         rememberedDeviceId: session.id,
-      };
+        userId: session.userId,
+      } as AuthPrincipal;
       return { principal, authenticated: true };
     }
-    if (!effectiveHash()) {
-      if (ingress.loopback) {
-        return { principal: LOCAL_USER, authenticated: true };
-      }
+    if (!svc.enabled()) {
+      if (ingress.loopback) return { principal: localUser, authenticated: true };
       return { principal: ANONYMOUS, authenticated: false };
     }
     if (opts.localhostOptional && ingress.loopback) {
-      return { principal: LOCAL_USER, authenticated: true };
+      return { principal: localUser, authenticated: true };
     }
     return { principal: ANONYMOUS, authenticated: false };
   };
 
   const svc: AuthService = {
-    enabled: () => effectiveHash() !== null,
+    enabled: () => Boolean(envHash || stored.passwordHash || stored.credentials.length > 0),
     cookieName: () => cookieName,
 
     attachPairedDeviceResolver(resolver) {
@@ -359,6 +408,13 @@ export function createAuthService(opts: AuthServiceOptions): AuthService {
       if (ingress.kind === "polyth-link") {
         const paired = pairedResolver?.(ingress) ?? null;
         if (paired && paired.kind === "paired-device" && paired.connectionId === ingress.connectionId) {
+          const userId = (paired as IdentifiedPrincipal).userId;
+          // Secondary account credentials are the durable existence check for
+          // that account. Removing the account invalidates all of its paired
+          // channels immediately; legacy/owner pairings retain compatibility.
+          if (userId && userId !== ownerUserId && !credentialHash(userId)) {
+            return { principal: ANONYMOUS, authenticated: false };
+          }
           return { principal: paired, authenticated: true };
         }
         return { principal: ANONYMOUS, authenticated: false };
@@ -374,6 +430,52 @@ export function createAuthService(opts: AuthServiceOptions): AuthService {
 
     requireCapability(principal, capability) {
       requirePrincipalCapability(principal, capability);
+    },
+
+    userIdForPrincipal(principal) {
+      const direct = (principal as IdentifiedPrincipal).userId;
+      if (typeof direct === "string" && direct) return direct;
+      if (principal.kind === "local-user") return ownerUserId;
+      if (principal.kind === "ui-session") return sessionById(principal.sessionId)?.userId ?? ownerUserId;
+      // Pairing rows created before account ownership existed belonged to the
+      // only account Polyth had. New pairings carry userId from the tunnel store.
+      if (principal.kind === "paired-device") return ownerUserId;
+      return undefined;
+    },
+
+    accountIds() {
+      const ids = new Set(stored.credentials.map((credential) => credential.userId));
+      if (credentialHash(ownerUserId)) ids.add(ownerUserId);
+      return [...ids];
+    },
+
+    hasCredential: (userId) => credentialHash(userId) !== null,
+
+    setPassword(userId, password) {
+      if (!userId) throw Object.assign(new Error("user id is required"), { code: "invalid-input" });
+      if (!password || password.length > 1024) {
+        throw Object.assign(new Error("password must be 1-1024 characters"), { code: "invalid-input" });
+      }
+      const passwordHash = hashPassword(password);
+      const existing = stored.credentials.find((credential) => credential.userId === userId);
+      if (existing) existing.passwordHash = passwordHash;
+      else stored.credentials.push({ userId, passwordHash });
+      // A managed owner credential supersedes the legacy stored hash. The env
+      // password, when present, intentionally continues to override both.
+      if (userId === ownerUserId) stored.passwordHash = null;
+      save();
+    },
+
+    removeAccount(userId) {
+      const credentialsBefore = stored.credentials.length;
+      const sessionsBefore = stored.sessions.length;
+      stored.credentials = stored.credentials.filter((credential) => credential.userId !== userId);
+      stored.sessions = stored.sessions.filter((session) => session.userId !== userId);
+      if (userId === ownerUserId && !envHash) stored.passwordHash = null;
+      const changed = credentialsBefore !== stored.credentials.length
+        || sessionsBefore !== stored.sessions.length;
+      if (changed) save();
+      return changed;
     },
 
     gate(request, ingress) {
@@ -392,10 +494,15 @@ export function createAuthService(opts: AuthServiceOptions): AuthService {
 
     tokenOf: (req) => parseCookieToken(req.headers.cookie, cookieName),
 
-    login(password, remoteAddr, userAgent) {
-      const hash = effectiveHash();
+    login(password, remoteAddr, userAgent, userId = ownerUserId) {
+      const hash = credentialHash(userId);
       if (!hash) {
-        return { ok: false, status: 400, error: "auth-disabled", message: "no UI password is configured" };
+        return {
+          ok: false,
+          status: svc.enabled() ? 401 : 400,
+          error: svc.enabled() ? "invalid-password" : "auth-disabled",
+          message: svc.enabled() ? "wrong account or password" : "no UI password is configured",
+        };
       }
       const key = rateKeyFor(remoteAddr);
       const rate = limiter.check(key);
@@ -408,13 +515,14 @@ export function createAuthService(opts: AuthServiceOptions): AuthService {
       }
       if (!verifyPassword(password, hash)) {
         limiter.fail(key);
-        return { ok: false, status: 401, error: "invalid-password", message: "wrong password" };
+        return { ok: false, status: 401, error: "invalid-password", message: "wrong account or password" };
       }
       limiter.succeed(key);
       const token = randomBytes(32).toString("hex");
       const t = now();
       stored.sessions.push({
         id: sha256(token).slice(0, 12),
+        userId,
         tokenHash: sha256(token),
         createdAt: t,
         lastSeenAt: t,
@@ -428,30 +536,40 @@ export function createAuthService(opts: AuthServiceOptions): AuthService {
       if (!token) return;
       const hash = sha256(token);
       const before = stored.sessions.length;
-      stored.sessions = stored.sessions.filter((s) => s.tokenHash !== hash);
+      stored.sessions = stored.sessions.filter((session) => session.tokenHash !== hash);
       if (stored.sessions.length !== before) save();
     },
 
-    logoutAll() {
+    logoutAll(userId) {
       if (stored.sessions.length === 0) return;
-      stored.sessions = [];
-      save();
+      const before = stored.sessions.length;
+      stored.sessions = userId
+        ? stored.sessions.filter((session) => session.userId !== userId)
+        : [];
+      if (stored.sessions.length !== before) save();
     },
 
-    listSessions(currentToken) {
+    listSessions(currentToken, userId) {
       purge();
       const currentHash = currentToken ? sha256(currentToken) : null;
+      const current = sessionFor(currentToken);
+      const targetUserId = userId ?? current?.userId;
       return stored.sessions
-        .map((s) => ({
-          id: s.id, createdAt: s.createdAt, lastSeenAt: s.lastSeenAt, label: s.label,
-          current: s.tokenHash === currentHash,
+        .filter((session) => !targetUserId || session.userId === targetUserId)
+        .map((session) => ({
+          id: session.id,
+          createdAt: session.createdAt,
+          lastSeenAt: session.lastSeenAt,
+          label: session.label,
+          current: session.tokenHash === currentHash,
         }))
         .sort((a, b) => b.lastSeenAt - a.lastSeenAt);
     },
 
-    revoke(id) {
+    revoke(id, userId) {
       const before = stored.sessions.length;
-      stored.sessions = stored.sessions.filter((s) => s.id !== id);
+      stored.sessions = stored.sessions.filter((session) =>
+        session.id !== id || (userId !== undefined && session.userId !== userId));
       if (stored.sessions.length !== before) {
         save();
         return true;

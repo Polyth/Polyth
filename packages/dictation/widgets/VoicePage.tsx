@@ -1,30 +1,160 @@
-// Voice settings: dictation (speech→text) and read-aloud (text→speech).
-// F8 adds engine pickers (browser | server), the server endpoint settings
-// (URL/model + API-key env REFERENCE, saved explicitly — the target host is
-// always visible here), pitch/volume, and summarize-speak.
-import { useEffect, useState } from "react";
-import { speechSupport } from "@polyth/dictation";
+// Voice settings: provider-neutral dictation + read-aloud. Provider/model names
+// are capability data, while user-facing common labels continue to use the
+// package's existing i18n keys.
+import { useEffect, useMemo, useState } from "react";
+import {
+  DEFAULT_LOCAL_MODEL_ID,
+  providerCapabilities,
+  providerCatalog,
+  speechSupport,
+  type DictationLatencyPreference,
+  type DictationProcessingPolicy,
+  type DictationProviderId,
+  type DictationTransport,
+} from "@polyth/dictation";
 import { api, type VoiceSettingsDto } from "@polyth/session/web-api";
 import { setVoicePrefs, speak, stopSpeaking, useVoicePrefs } from "./voice.tsx";
 import { EmptyState, PageHead, Row, Seg, Toggle } from "../../../apps/web/src/components/settings/parts.tsx";
 import { formatNumber, tr } from "../../../apps/web/src/i18n/index.ts";
 import { Button, Select, StopIcon, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 
-const LANGS = ["en-US", "en-GB", "de-DE", "fr-FR", "es-ES", "it-IT", "pt-BR", "ja-JP", "ko-KR", "zh-CN"];
+const LANGS = ["auto", "uk-UA", "en-US", "en-GB", "de-DE", "fr-FR", "es-ES", "it-IT", "pt-BR", "ja-JP", "ko-KR", "zh-CN"];
 
-function ServerEndpointForm({ server, onSaved }: { server: VoiceSettingsDto; onSaved: (s: VoiceSettingsDto) => void }) {
+interface DictationSettingsDto {
+  provider: DictationProviderId;
+  transport: DictationTransport;
+  model: string;
+  localModel: string;
+  language: string;
+  contextInjection: boolean;
+  processingPolicy: DictationProcessingPolicy;
+  fallbackProvider?: DictationProviderId;
+  fallbackApiKeyEnv: string;
+  /** Compatibility mirror for older servers/clients. */
+  cloudFallback: boolean;
+  latencyPreference: DictationLatencyPreference;
+  apiKeyEnv: string;
+}
+
+type ServerVoiceSettings = VoiceSettingsDto & {
+  dictation: DictationSettingsDto;
+  dictationKeyConfigured?: boolean;
+  fallbackKeyConfigured?: boolean;
+};
+
+interface ProviderView {
+  id: DictationProviderId;
+  label: string;
+  transports: readonly DictationTransport[];
+  defaultModel?: string;
+  available: boolean;
+  reason?: string;
+  local: boolean;
+  publicApi: boolean;
+  extension?: boolean;
+}
+
+interface LocalModelView {
+  id: string;
+  label: string;
+  preset?: "ultra" | "fast" | "balanced" | "accurate";
+  state: "missing" | "downloading" | "installed" | "failed";
+  downloadedBytes: number;
+  totalBytes: number;
+  languages: readonly string[];
+  error?: string;
+}
+
+interface LocalRuntimeView {
+  state: "missing" | "downloading" | "installed" | "failed" | "unsupported";
+  version: string;
+  platform: string;
+  arch: string;
+  downloadedBytes: number;
+  totalBytes?: number;
+  error?: string;
+}
+
+const providerEnv = (provider: DictationProviderId): string => {
+  switch (provider) {
+    case "elevenlabs": return "ELEVENLABS_API_KEY";
+    case "openai-live":
+    case "openai-transcribe":
+    case "openai-compatible": return "OPENAI_API_KEY";
+    case "deepgram": return "DEEPGRAM_API_KEY";
+    case "speechmatics": return "SPEECHMATICS_API_KEY";
+    case "wispr": return "WISPR_API_KEY";
+    default: return "";
+  }
+};
+
+const fetchJson = async <T,>(path: string, init?: RequestInit): Promise<T> => {
+  const response = await fetch(path, init);
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as { message?: string; error?: string };
+    throw new Error(body.message ?? body.error ?? `HTTP ${response.status}`);
+  }
+  return response.json() as Promise<T>;
+};
+
+const policyOptions = (provider: DictationProviderId): DictationProcessingPolicy[] => {
+  if (provider === "web-speech") return ["browser-fallback"];
+  const capability = providerCapabilities(provider);
+  return capability?.local
+    ? ["local-only", "prefer-local", "auto-fallback"]
+    : ["prefer-cloud", "auto-fallback", "browser-fallback"];
+};
+
+const processingDescription = (
+  settings: DictationSettingsDto,
+  providers: ProviderView[],
+): string => {
+  const selected = providers.find((item) => item.id === settings.provider)?.label
+    ?? providerCapabilities(settings.provider)?.label
+    ?? settings.provider;
+  const fallback = settings.fallbackProvider
+    ? providers.find((item) => item.id === settings.fallbackProvider)?.label
+      ?? providerCapabilities(settings.fallbackProvider)?.label
+      ?? settings.fallbackProvider
+    : "";
+  switch (settings.processingPolicy) {
+    case "local-only":
+      return "Audio stays on this Polyth host. Cloud fallback is disabled.";
+    case "prefer-local":
+      return fallback
+        ? `Audio is processed locally first; ${fallback} is used only after a recoverable local failure.`
+        : "Audio is processed locally. No cloud fallback provider is configured.";
+    case "prefer-cloud":
+      return `Audio is processed by ${selected}. No secondary provider is selected implicitly.`;
+    case "auto-fallback":
+      return providerCapabilities(settings.provider)?.local
+        ? fallback
+          ? `Audio starts locally; one recoverable failure may switch to ${fallback} using bounded in-memory replay.`
+          : "Audio starts locally. No secondary cloud provider is configured."
+        : `Audio starts with ${selected}; local Nemotron is the only automatic secondary path when it is installed.`;
+    case "browser-fallback":
+      return settings.provider === "web-speech"
+        ? "Audio is processed by the browser Web Speech engine."
+        : `Audio starts with ${selected}; Web Speech may be used only if that route is unavailable and this browser supports it.`;
+  }
+};
+
+function ServerEndpointForm({ server, onSaved }: { server: ServerVoiceSettings; onSaved: (s: ServerVoiceSettings) => void }) {
   const [stt, setStt] = useState(server.stt);
   const [tts, setTts] = useState(server.tts);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [saveFailed, setSaveFailed] = useState(false);
 
+  useEffect(() => { setStt(server.stt); setTts(server.tts); }, [server]);
+
   const save = async () => {
     setBusy(true);
     setMsg("");
     setSaveFailed(false);
     try {
-      const saved = await api.voiceSettingsSave({ stt, tts });
+      const next = { stt, tts, dictation: server.dictation };
+      const saved = await api.voiceSettingsSave(next) as ServerVoiceSettings;
       onSaved(saved);
       setStt(saved.stt);
       setTts(saved.tts);
@@ -43,11 +173,11 @@ function ServerEndpointForm({ server, onSaved }: { server: VoiceSettingsDto; onS
       <div className="mcp-form-row">
         <TextInput value={stt.baseUrl} placeholder={tr("settings.voicepage.httpsHostV1EmptyBrowserOnly")}
           onChange={(e) => setStt({ ...stt, baseUrl: e.target.value })} aria-label={tr("settings.voicepage.sttBaseUrl")} />
-        <TextInput value={stt.model} placeholder={tr("settings.voicepage.modelWhisper1")} style={{ maxWidth: 140 }}
+        <TextInput value={stt.model} placeholder={tr("settings.voicepage.modelWhisper1")} style={{ maxWidth: 180 }}
           onChange={(e) => setStt({ ...stt, model: e.target.value })} aria-label={tr("settings.voicepage.sttModel")} />
       </div>
       <div className="mcp-form-row">
-        <TextInput value={stt.language} placeholder={tr("settings.voicepage.languageEn")} style={{ maxWidth: 120 }}
+        <TextInput value={stt.language} placeholder={tr("settings.voicepage.languageEn")} style={{ maxWidth: 140 }}
           onChange={(e) => setStt({ ...stt, language: e.target.value })} aria-label={tr("settings.voicepage.sttLanguage")} />
         <TextInput value={stt.apiKeyEnv} placeholder={tr("settings.voicepage.apiKeyEnvVarNameEG")}
           onChange={(e) => setStt({ ...stt, apiKeyEnv: e.target.value })} aria-label={tr("settings.voicepage.sttApiKeyEnvVar")} />
@@ -57,11 +187,11 @@ function ServerEndpointForm({ server, onSaved }: { server: VoiceSettingsDto; onS
       <div className="mcp-form-row">
         <TextInput value={tts.baseUrl} placeholder={tr("settings.voicepage.httpsHostV1EmptyBrowserOnly")}
           onChange={(e) => setTts({ ...tts, baseUrl: e.target.value })} aria-label={tr("settings.voicepage.ttsBaseUrl")} />
-        <TextInput value={tts.model} placeholder={tr("settings.voicepage.modelTts1")} style={{ maxWidth: 140 }}
+        <TextInput value={tts.model} placeholder={tr("settings.voicepage.modelTts1")} style={{ maxWidth: 180 }}
           onChange={(e) => setTts({ ...tts, model: e.target.value })} aria-label={tr("settings.voicepage.ttsModel")} />
       </div>
       <div className="mcp-form-row">
-        <TextInput value={tts.voice} placeholder={tr("settings.voicepage.voiceAlloy")} style={{ maxWidth: 120 }}
+        <TextInput value={tts.voice} placeholder={tr("settings.voicepage.voiceAlloy")} style={{ maxWidth: 140 }}
           onChange={(e) => setTts({ ...tts, voice: e.target.value })} aria-label={tr("settings.voicepage.ttsVoice")} />
         <TextInput value={tts.apiKeyEnv} placeholder={tr("settings.voicepage.apiKeyEnvVarName")}
           onChange={(e) => setTts({ ...tts, apiKeyEnv: e.target.value })} aria-label={tr("settings.voicepage.ttsApiKeyEnvVar")} />
@@ -69,8 +199,322 @@ function ServerEndpointForm({ server, onSaved }: { server: VoiceSettingsDto; onS
 
       {msg && <div className={saveFailed ? "form-error" : "form-success"}>{msg}</div>}
       <div className="mcp-form-row">
-        <span className="muted voice-form-note">
-          {tr("settings.voicepage.keysAreReadFromTheServerS")}</span>
+        <span className="muted voice-form-note">{tr("settings.voicepage.keysAreReadFromTheServerS")}</span>
+        <span className="header-spacer" />
+        <Button size="sm" variant="primary" busy={busy} onClick={() => void save()}>{tr("settings.voicepage.saveServerSettings")}</Button>
+      </div>
+    </div>
+  );
+}
+
+function DictationProviderForm({
+  server,
+  providers,
+  models,
+  runtime,
+  onSaved,
+  onRefreshProviders,
+  onRefreshModels,
+}: {
+  server: ServerVoiceSettings;
+  providers: ProviderView[];
+  models: LocalModelView[];
+  runtime: LocalRuntimeView | null;
+  onSaved: (settings: ServerVoiceSettings) => void;
+  onRefreshProviders: () => Promise<void>;
+  onRefreshModels: () => Promise<void>;
+}) {
+  const [value, setValue] = useState<DictationSettingsDto>(server.dictation);
+  const [busy, setBusy] = useState(false);
+  const [modelBusy, setModelBusy] = useState(false);
+  const [runtimeBusy, setRuntimeBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => setValue(server.dictation), [server]);
+
+  const capability = providerCapabilities(value.provider);
+  const providerView = providers.find((item) => item.id === value.provider);
+  const localModel = models.find((item) => item.id === (value.localModel || DEFAULT_LOCAL_MODEL_ID))
+    ?? models.find((item) => item.id === DEFAULT_LOCAL_MODEL_ID)
+    ?? models[0];
+  const transportOptions = capability?.transports ?? ["auto"];
+  const policies = policyOptions(value.provider);
+  const needsFallbackProvider = Boolean(capability?.local)
+    && (value.processingPolicy === "prefer-local" || value.processingPolicy === "auto-fallback");
+  const fallbackCandidates = providerCatalog().filter((provider) =>
+    !provider.local && provider.id !== value.provider,
+  );
+  const fallbackView = value.fallbackProvider
+    ? providers.find((item) => item.id === value.fallbackProvider)
+    : undefined;
+
+  const changeProvider = (provider: DictationProviderId) => {
+    const nextCapability = providerCapabilities(provider);
+    const preferredTransport: DictationTransport = provider === "web-speech" ? "direct-browser"
+      : provider === "local-nemotron" ? "local-worker" : "auto";
+    const processingPolicy: DictationProcessingPolicy = provider === "web-speech"
+      ? "browser-fallback"
+      : nextCapability?.local ? "local-only" : "prefer-cloud";
+    setValue((current) => ({
+      ...current,
+      provider,
+      transport: nextCapability?.transports.includes(preferredTransport) ? preferredTransport : nextCapability?.transports[0] ?? "auto",
+      model: nextCapability?.defaultModel ?? "",
+      localModel: provider === "local-nemotron" ? current.localModel || DEFAULT_LOCAL_MODEL_ID : current.localModel,
+      apiKeyEnv: providerEnv(provider),
+      processingPolicy,
+      fallbackProvider: undefined,
+      fallbackApiKeyEnv: "",
+      cloudFallback: false,
+    }));
+  };
+
+  const changePolicy = (processingPolicy: DictationProcessingPolicy) => {
+    const keepFallback = Boolean(capability?.local)
+      && (processingPolicy === "prefer-local" || processingPolicy === "auto-fallback");
+    setValue((current) => ({
+      ...current,
+      processingPolicy,
+      ...(keepFallback ? {} : { fallbackProvider: undefined, fallbackApiKeyEnv: "" }),
+      cloudFallback: keepFallback && Boolean(current.fallbackProvider),
+    }));
+  };
+
+  const changeFallback = (fallbackProvider: string) => {
+    const provider = fallbackProvider ? fallbackProvider as DictationProviderId : undefined;
+    setValue((current) => ({
+      ...current,
+      ...(provider ? { fallbackProvider: provider } : { fallbackProvider: undefined }),
+      fallbackApiKeyEnv: provider ? providerEnv(provider) : "",
+      cloudFallback: Boolean(provider)
+        && (current.processingPolicy === "prefer-local" || current.processingPolicy === "auto-fallback"),
+    }));
+  };
+
+  const save = async () => {
+    setBusy(true);
+    setMsg("");
+    setFailed(false);
+    try {
+      const cloudFallback = Boolean(value.fallbackProvider)
+        && (value.processingPolicy === "prefer-local" || value.processingPolicy === "auto-fallback");
+      const dictation = { ...value, cloudFallback };
+      const next = { stt: server.stt, tts: server.tts, dictation };
+      const saved = await api.voiceSettingsSave(next) as ServerVoiceSettings;
+      onSaved(saved);
+      setValue(saved.dictation);
+      setVoicePrefs({
+        sttEngine: saved.dictation.provider === "web-speech" ? "browser" : "server",
+        dictationProvider: saved.dictation.provider,
+        dictationTransport: saved.dictation.transport,
+        dictationModel: saved.dictation.model || undefined,
+        localModel: saved.dictation.localModel || undefined,
+        lang: saved.dictation.language || "auto",
+        contextInjection: saved.dictation.contextInjection,
+        processingPolicy: saved.dictation.processingPolicy,
+        fallbackProvider: saved.dictation.fallbackProvider,
+        cloudFallback: saved.dictation.cloudFallback,
+        latencyPreference: saved.dictation.latencyPreference,
+      });
+      await Promise.all([onRefreshProviders(), onRefreshModels()]);
+      setMsg(tr("settings.voicepage.savedCapabilityUpdated"));
+    } catch (error) {
+      setFailed(true);
+      setMsg(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const modelAction = async (action: "download" | "delete") => {
+    if (!localModel) return;
+    setModelBusy(true);
+    setFailed(false);
+    setMsg("");
+    try {
+      await fetchJson(
+        `/api/dictation/models/${encodeURIComponent(localModel.id)}${action === "download" ? "/download" : ""}`,
+        { method: action === "download" ? "POST" : "DELETE" },
+      );
+      await Promise.all([onRefreshModels(), onRefreshProviders()]);
+    } catch (error) {
+      setFailed(true);
+      setMsg(error instanceof Error ? error.message : String(error));
+    } finally {
+      setModelBusy(false);
+    }
+  };
+
+  const runtimeAction = async (action: "download" | "delete") => {
+    setRuntimeBusy(true);
+    setFailed(false);
+    setMsg("");
+    try {
+      await fetchJson("/api/dictation/runtime", { method: action === "download" ? "POST" : "DELETE" });
+      await Promise.all([onRefreshModels(), onRefreshProviders()]);
+    } catch (error) {
+      setFailed(true);
+      setMsg(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRuntimeBusy(false);
+    }
+  };
+
+  const progress = localModel && localModel.totalBytes > 0
+    ? Math.min(100, Math.round((localModel.downloadedBytes / localModel.totalBytes) * 100))
+    : 0;
+  const runtimeProgress = runtime?.totalBytes
+    ? Math.min(100, Math.round((runtime.downloadedBytes / runtime.totalBytes) * 100))
+    : 0;
+
+  return (
+    <div className="mcp-form" data-settings-item="voice.dictation-provider">
+      <div className="stat-label">{tr("settings.voicepage.dictationEngine")}</div>
+      <div className="mcp-form-row">
+        <Select
+          value={value.provider}
+          label={capability?.label ?? value.provider}
+          options={providerCatalog().map((provider) => ({ value: provider.id, label: provider.label }))}
+          onChange={(provider) => changeProvider(provider as DictationProviderId)}
+        />
+        <Select
+          value={value.transport}
+          label={value.transport}
+          options={transportOptions.map((transport) => ({ value: transport, label: transport }))}
+          onChange={(transport) => setValue({ ...value, transport: transport as DictationTransport })}
+        />
+      </div>
+      <div className="mcp-form-row">
+        <TextInput
+          value={value.model}
+          placeholder={capability?.defaultModel ?? "model"}
+          onChange={(event) => setValue({ ...value, model: event.target.value })}
+          aria-label={tr("settings.voicepage.sttModel")}
+        />
+        <Select
+          value={value.language || "auto"}
+          label={value.language || "auto"}
+          options={[value.language || "auto", ...LANGS.filter((language) => language !== value.language)].map((language) => ({ value: language, label: language }))}
+          onChange={(language) => setValue({ ...value, language })}
+        />
+      </div>
+      {!capability?.local && value.provider !== "web-speech" && (
+        <TextInput
+          value={value.apiKeyEnv}
+          placeholder={tr("settings.voicepage.apiKeyEnvVarName")}
+          onChange={(event) => setValue({ ...value, apiKeyEnv: event.target.value })}
+          aria-label={tr("settings.voicepage.sttApiKeyEnvVar")}
+        />
+      )}
+
+      <div className="stat-label">Audio processing</div>
+      <div className="mcp-form-row">
+        <Select
+          value={value.processingPolicy}
+          label={value.processingPolicy}
+          options={policies.map((policy) => ({ value: policy, label: policy }))}
+          onChange={(policy) => changePolicy(policy as DictationProcessingPolicy)}
+        />
+        <Toggle on={value.contextInjection} onChange={(contextInjection) => setValue({ ...value, contextInjection })} label="Context injection" />
+        <Select
+          value={value.latencyPreference}
+          label={value.latencyPreference}
+          options={["lowest", "balanced", "quality"].map((latency) => ({ value: latency, label: latency }))}
+          onChange={(latencyPreference) => setValue({ ...value, latencyPreference: latencyPreference as DictationLatencyPreference })}
+        />
+      </div>
+      <div className="muted voice-form-note">{processingDescription(value, providers)}</div>
+
+      {needsFallbackProvider && (
+        <div className="mcp-form-row">
+          <Select
+            value={value.fallbackProvider ?? ""}
+            label={value.fallbackProvider
+              ? providerCapabilities(value.fallbackProvider)?.label ?? value.fallbackProvider
+              : "No cloud fallback"}
+            options={[
+              { value: "", label: "No cloud fallback" },
+              ...fallbackCandidates.map((provider) => ({ value: provider.id, label: provider.label })),
+            ]}
+            onChange={changeFallback}
+          />
+          {value.fallbackProvider && (
+            <TextInput
+              value={value.fallbackApiKeyEnv}
+              placeholder={providerEnv(value.fallbackProvider)}
+              onChange={(event) => setValue({ ...value, fallbackApiKeyEnv: event.target.value })}
+              aria-label="Fallback provider API key env var"
+            />
+          )}
+        </div>
+      )}
+      {fallbackView?.reason && <div className={fallbackView.available ? "form-success" : "muted"}>Fallback: {fallbackView.reason}</div>}
+      {providerView?.reason && <div className={providerView.available ? "form-success" : "muted"}>{providerView.reason}</div>}
+      {capability?.publicApi === false && <div className="muted">No verified public Voice Interface API contract is built in. A private provider adapter may register through the dictation provider registry.</div>}
+
+      {value.provider === "local-nemotron" && (
+        <>
+          <div className="mcp-form" data-settings-item="voice.local-runtime">
+            <div className="stat-label">Local ASR runtime{runtime ? ` · sherpa-onnx ${runtime.version}` : ""}</div>
+            {runtime ? (
+              <>
+                <div className="mcp-form-row">
+                  <span className="muted">
+                    {runtime.state} · {runtime.platform}/{runtime.arch}
+                    {runtime.state === "downloading" && runtime.totalBytes ? ` · ${runtimeProgress}%` : ""}
+                  </span>
+                  <span className="header-spacer" />
+                  {runtime.state === "installed" ? (
+                    <Button size="sm" variant="danger" busy={runtimeBusy} onClick={() => void runtimeAction("delete")}>Delete</Button>
+                  ) : runtime.state !== "unsupported" ? (
+                    <Button size="sm" busy={runtimeBusy} disabled={runtime.state === "downloading"} onClick={() => void runtimeAction("download")}>
+                      {runtime.state === "failed" ? "Retry" : "Download"}
+                    </Button>
+                  ) : null}
+                </div>
+                {runtime.state === "downloading" && runtime.totalBytes && (
+                  <progress value={runtime.downloadedBytes} max={runtime.totalBytes} />
+                )}
+                {runtime.error && <div className={runtime.state === "unsupported" ? "muted" : "form-error"}>{runtime.error}</div>}
+                <div className="muted">Explicit download only · native runtime stays isolated from the main server process</div>
+              </>
+            ) : <div className="muted">Checking local runtime…</div>}
+          </div>
+
+          {localModel && (
+            <div className="mcp-form" data-settings-item="voice.local-model">
+              <div className="stat-label">Local model preset</div>
+              <div className="mcp-form-row">
+                <Select
+                  value={value.localModel || DEFAULT_LOCAL_MODEL_ID}
+                  label={localModel.label}
+                  options={models.map((model) => ({ value: model.id, label: model.label }))}
+                  onChange={(localModelId) => setValue({ ...value, localModel: localModelId })}
+                />
+                <span className="muted">{localModel.state}{localModel.state === "downloading" ? ` · ${progress}%` : ""}</span>
+                {localModel.state === "installed" ? (
+                  <Button size="sm" variant="danger" busy={modelBusy} onClick={() => void modelAction("delete")}>Delete</Button>
+                ) : (
+                  <Button size="sm" busy={modelBusy} disabled={localModel.state === "downloading"} onClick={() => void modelAction("download")}>
+                    {localModel.state === "failed" ? "Retry" : "Download"}
+                  </Button>
+                )}
+              </div>
+              {localModel.state === "downloading" && <progress value={localModel.downloadedBytes} max={localModel.totalBytes} />}
+              {localModel.error && <div className="form-error">{localModel.error}</div>}
+              <div className="muted">
+                Explicit download only · {Math.round(localModel.totalBytes / (1024 * 1024))} MiB · Ukrainian supported
+                {localModel.preset === "balanced" ? " · default until Polyth has comparative end-to-end benchmarks" : ""}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {msg && <div className={failed ? "form-error" : "form-success"}>{msg}</div>}
+      <div className="mcp-form-row">
+        <span className="muted voice-form-note">{tr("settings.voicepage.keysAreReadFromTheServerS")}</span>
         <span className="header-spacer" />
         <Button size="sm" variant="primary" busy={busy} onClick={() => void save()}>{tr("settings.voicepage.saveServerSettings")}</Button>
       </div>
@@ -83,15 +527,40 @@ export default function VoicePage() {
   const support = speechSupport(typeof window !== "undefined" ? window : undefined);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [streaming, setStreaming] = useState<{ available: boolean; engine?: string; reason?: string } | null>(null);
-  const [server, setServer] = useState<VoiceSettingsDto | null>(null);
+  const [server, setServer] = useState<ServerVoiceSettings | null>(null);
+  const [providers, setProviders] = useState<ProviderView[]>([]);
+  const [models, setModels] = useState<LocalModelView[]>([]);
+  const [runtime, setRuntime] = useState<LocalRuntimeView | null>(null);
   const [ttsTestMsg, setTtsTestMsg] = useState("");
   const [ttsTestFailed, setTtsTestFailed] = useState(false);
 
-  const refreshCapability = () => void api.dictationCapability().then(setStreaming);
+  const refreshCapability = () => void api.dictationCapability().then(setStreaming).catch(() => setStreaming(null));
+  const refreshProviders = async () => {
+    const result = await fetchJson<{ providers: ProviderView[] }>("/api/voice/providers");
+    setProviders(result.providers);
+  };
+  const refreshModels = async () => {
+    const result = await fetchJson<{ models: LocalModelView[]; runtime?: LocalRuntimeView }>("/api/dictation/models");
+    setModels(result.models);
+    setRuntime(result.runtime ?? null);
+  };
+
   useEffect(() => {
     refreshCapability();
-    void api.voiceSettings().then(setServer).catch(() => setServer(null));
+    void api.voiceSettings().then((value) => setServer(value as ServerVoiceSettings)).catch(() => setServer(null));
+    void refreshProviders().catch(() => setProviders([]));
+    void refreshModels().catch(() => { setModels([]); setRuntime(null); });
   }, []);
+
+  const downloading = useMemo(
+    () => models.some((model) => model.state === "downloading") || runtime?.state === "downloading",
+    [models, runtime?.state],
+  );
+  useEffect(() => {
+    if (!downloading) return;
+    const timer = window.setInterval(() => void refreshModels().catch(() => {}), 1_000);
+    return () => window.clearInterval(timer);
+  }, [downloading]);
 
   useEffect(() => {
     if (!support.tts) return;
@@ -116,30 +585,27 @@ export default function VoicePage() {
   return (
     <div className="pkg-dictation">
       <PageHead title={tr("settings.voicepage.voice")} blurb={tr("settings.voicepage.dictationAndReadAloudBrowserEnginesBy")} />
-      {!support.stt && !support.tts && (
+      {!support.stt && !support.tts && !streaming?.available && (
         <EmptyState title={tr("settings.voicepage.speechIsNotSupportedInThisBrowser")} body={tr("settings.voicepage.dictationNeedsTheWebSpeechApiChrome")} />
       )}
-      <Row label={tr("settings.voicepage.dictation")} hint={support.stt || streaming?.available ? tr("settings.voicepage.showsTheMicButtonInTheComposer") : tr("settings.voicepage.notSupportedInThisBrowser")} itemId="voice.dictation">
-        <Toggle on={prefs.dictation} onChange={(v) => setVoicePrefs({ dictation: v })} label={tr("settings.voicepage.dictation")} />
+      <Row label={tr("settings.voicepage.dictation")} hint={support.stt || streaming?.available ? tr("settings.voicepage.showsTheMicButtonInTheComposer") : streaming?.reason ?? tr("settings.voicepage.notSupportedInThisBrowser")} itemId="voice.dictation">
+        <Toggle on={prefs.dictation} onChange={(dictation) => setVoicePrefs({ dictation })} label={tr("settings.voicepage.dictation")} />
       </Row>
-      <Row
-        label={tr("settings.voicepage.dictationEngine")}
-        hint={streaming?.available
-          ? tr("settings.voicepage.serverTranscriptionViaValueWithReconnectSafe", { engine: streaming.engine })
-          : streaming?.reason ?? tr("settings.voicepage.browserEngineFallback")}
-        itemId="voice.streaming"
-      >
-        <Seg
-          value={prefs.sttEngine}
-          options={[
-            ["browser", tr("packages.onboarding.tours.builtin.browser")],
-            ["server", tr("ssh.sshprojectsource.server")],
-          ]}
-          onChange={(v) => setVoicePrefs({ sttEngine: v })}
+
+      {server && (
+        <DictationProviderForm
+          server={server}
+          providers={providers}
+          models={models}
+          runtime={runtime}
+          onSaved={(saved) => { setServer(saved); refreshCapability(); }}
+          onRefreshProviders={refreshProviders}
+          onRefreshModels={refreshModels}
         />
-      </Row>
+      )}
+
       <Row label={tr("settings.voicepage.readRepliesAloud")} hint={tr("settings.voicepage.speaksEachCompletedAssistantReplyInThe")}>
-        <Toggle on={prefs.tts} onChange={(v) => setVoicePrefs({ tts: v })} label={tr("settings.voicepage.readRepliesAloud")} />
+        <Toggle on={prefs.tts} onChange={(tts) => setVoicePrefs({ tts })} label={tr("settings.voicepage.readRepliesAloud")} />
       </Row>
       <Row
         label={tr("settings.voicepage.readAloudEngine")}
@@ -154,11 +620,11 @@ export default function VoicePage() {
             ["browser", tr("packages.onboarding.tours.builtin.browser")],
             ["server", tr("ssh.sshprojectsource.server")],
           ]}
-          onChange={(v) => setVoicePrefs({ ttsEngine: v })}
+          onChange={(ttsEngine) => setVoicePrefs({ ttsEngine })}
         />
       </Row>
       <Row label={tr("settings.voicepage.summarizeBeforeSpeaking")} hint={tr("settings.voicepage.longRepliesAreCondensedByTheSmall")} itemId="voice.summarize">
-        <Toggle on={prefs.summarize} onChange={(v) => setVoicePrefs({ summarize: v })} label={tr("settings.voicepage.summarizeBeforeSpeaking")} />
+        <Toggle on={prefs.summarize} onChange={(summarize) => setVoicePrefs({ summarize })} label={tr("settings.voicepage.summarizeBeforeSpeaking")} />
       </Row>
       <Row label={tr("settings.voicepage.language")} hint={tr("settings.voicepage.usedForBothRecognitionAndSpeech")}>
         <Select
@@ -171,56 +637,34 @@ export default function VoicePage() {
       <Row label={tr("settings.voicepage.speechRate")} hint={tr("settings.voicepage.value", {
         value: formatNumber(prefs.rate, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
       })}>
-        <input
-          type="range" min={0.5} max={2} step={0.1} value={prefs.rate}
-          onChange={(e) => setVoicePrefs({ rate: Number(e.target.value) })}
-        />
+        <input type="range" min={0.5} max={2} step={0.1} value={prefs.rate} onChange={(e) => setVoicePrefs({ rate: Number(e.target.value) })} />
       </Row>
       <Row label={tr("settings.voicepage.pitch")} hint={tr("settings.voicepage.value", {
         value: formatNumber(prefs.pitch, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
       })} itemId="voice.pitch">
-        <input
-          type="range" min={0.5} max={2} step={0.1} value={prefs.pitch}
-          onChange={(e) => setVoicePrefs({ pitch: Number(e.target.value) })}
-        />
+        <input type="range" min={0.5} max={2} step={0.1} value={prefs.pitch} onChange={(e) => setVoicePrefs({ pitch: Number(e.target.value) })} />
       </Row>
       <Row label={tr("settings.voicepage.volume")} hint={`${Math.round(prefs.volume * 100)}%`} itemId="voice.volume">
-        <input
-          type="range" min={0} max={1} step={0.05} value={prefs.volume}
-          onChange={(e) => setVoicePrefs({ volume: Number(e.target.value) })}
-        />
+        <input type="range" min={0} max={1} step={0.05} value={prefs.volume} onChange={(e) => setVoicePrefs({ volume: Number(e.target.value) })} />
       </Row>
       {voices.length > 0 && (
         <Row label={tr("settings.voicepage.browserVoice")}>
           <Select
             value={prefs.voice ?? ""}
             label={prefs.voice || tr("settings.voicepage.default")}
-            options={[
-              { value: "", label: tr("settings.voicepage.default") },
-              ...voices.map((voice) => ({ value: voice.name, label: voice.name })),
-            ]}
+            options={[{ value: "", label: tr("settings.voicepage.default") }, ...voices.map((voice) => ({ value: voice.name, label: voice.name }))]}
             onChange={(voice) => setVoicePrefs({ voice: voice || undefined })}
           />
         </Row>
       )}
       <Row label={tr("settings.voicepage.test")}>
-        <Button
-          size="sm"
-          onClick={() => speak(tr("settings.voicepage.voiceCheckSample"))}
-        >
-          {tr("settings.voicepage.speakSample")}
-        </Button>
+        <Button size="sm" onClick={() => speak(tr("settings.voicepage.voiceCheckSample"))}>{tr("settings.voicepage.speakSample")}</Button>
         {server?.ttsConfigured && <Button size="sm" onClick={() => void testServerTts()}>{tr("settings.voicepage.testServerTts")}</Button>}
         <Button size="sm" variant="danger" iconStart={StopIcon} onClick={stopSpeaking}>{tr("common.stop")}</Button>
         {ttsTestMsg && <span className={ttsTestFailed ? "form-error" : "muted"}>{ttsTestMsg}</span>}
       </Row>
 
-      {server && (
-        <ServerEndpointForm
-          server={server}
-          onSaved={(s) => { setServer(s); refreshCapability(); }}
-        />
-      )}
+      {server && <ServerEndpointForm server={server} onSaved={(saved) => { setServer(saved); refreshCapability(); }} />}
     </div>
   );
 }

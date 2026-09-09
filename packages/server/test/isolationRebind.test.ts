@@ -4,14 +4,11 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { AgentRuntime, Project, ProjectService, RuntimeEndpoint, RuntimeEvent, RuntimeLifecycleNotification } from "@polyth/contracts";
+import type { AgentRuntime, Project, ProjectService, RuntimeEndpoint, RuntimeEvent, SessionIsolation } from "@polyth/contracts";
 import { createGitService } from "@polyth/git";
 import { createIsolationService } from "../../git/src/sessionIntegration.ts";
 import { createStore } from "@polyth/session";
-import { createSessionService, type Broadcaster, type RuntimePool } from "../src/sessions.ts";
-import { createHarnessPool, createHarnessRegistry } from "@polyth/harness-runtime";
-import { createEpochRuntime } from "./runtimeReliabilityHelpers.ts";
-import { createSharedRuntimeOccupancy } from "../src/runtimeOccupancy.ts";
+import { createSessionService, type Broadcaster } from "../src/sessions.ts";
 import type { PermissionService } from "@polyth/permissions";
 
 type Emit = (sessionId: string, ev: RuntimeEvent) => void;
@@ -39,10 +36,10 @@ const repo = (): string => {
   return dir;
 };
 
-const endpoint = (cwd: string): RuntimeEndpoint => ({
-  authorityId: "owned:iso-test",
+const endpoint = (cwd: string, authorityId = "owned:iso-test", generation = 1): RuntimeEndpoint => ({
+  authorityId,
   continuity: "verified",
-  generation: 1,
+  generation,
   url: "http://127.0.0.1:9",
   location: { directory: cwd },
   control: { kind: "owned", instanceToken: "iso" },
@@ -50,16 +47,106 @@ const endpoint = (cwd: string): RuntimeEndpoint => ({
   authentication: { kind: "none" },
 });
 
-function fakeRuntime() {
+interface FakeControl {
+  failRelease: boolean;
+  failEpoch: boolean;
+  endpointAuthority?: string;
+  endpointGeneration?: number;
+  acceptReleasedAuthority?: boolean;
+}
+
+function fakeRuntime(
+  control: FakeControl,
+  released: string[],
+  cwd: () => string,
+) {
   const listeners = new Set<Emit>();
-  const lifecycle = new Set<(event: RuntimeLifecycleNotification) => void>();
+  const resets: string[] = [];
+  const ensureCalls: string[] = [];
+  const attached = new Set<string>();
+  let lastCreateOperationId: string | undefined;
+  let lastResetOperationId: string | undefined;
   const rt: AgentRuntime & { resetSession?: AgentRuntime["resetSession"] } = {
     capabilities: async () => ({
       streaming: true, permissions: true, questions: true, compaction: false, subagents: false, steering: false,
     }),
     models: async () => [],
     agents: async () => [],
-    ensureSession: async (c) => `be_${c.sessionId}`,
+    ensureSession: async (c) => {
+      const backendSessionId = c.backendSessionId ?? `be_${c.sessionId}`;
+      ensureCalls.push(backendSessionId);
+      attached.add(backendSessionId);
+      return backendSessionId;
+    },
+    createSessionOperation: async (c, operationId) => {
+      const backendSessionId = c.backendSessionId ?? `be_${c.sessionId}`;
+      ensureCalls.push(backendSessionId);
+      attached.add(backendSessionId);
+      lastCreateOperationId = operationId;
+      return { kind: "confirmed", value: { backendSessionId }, receipt: backendSessionId };
+    },
+    releaseExecution: async (binding, operationId) => {
+      released.push(binding.location.directory);
+      if (!attached.has(binding.backendSessionId)) {
+        return { kind: "rejected", code: "not-attached", message: "exact backend session is not attached" };
+      }
+      if (binding.authorityId !== (control.endpointAuthority ?? "owned:iso-test")
+        && !control.acceptReleasedAuthority) {
+        return { kind: "rejected", code: "authority-mismatch", message: "prior authority receipt is unavailable" };
+      }
+      if (control.failRelease) return { kind: "unknown", operationId, message: "release failed" };
+      return {
+        kind: "confirmed",
+        value: {
+          authorityId: binding.authorityId,
+          generation: binding.generation,
+          backendSessionId: binding.backendSessionId,
+        },
+      };
+    },
+    endpoint: async () => endpoint(
+      cwd(),
+      control.endpointAuthority ?? "owned:iso-test",
+      control.endpointGeneration ?? 1,
+    ),
+    resetSessionOperation: async (_request, operationId) => {
+      resets.push(operationId);
+      if (control.failEpoch) return { kind: "rejected", code: "injected", message: "epoch failed" };
+      lastResetOperationId = operationId;
+      return {
+          kind: "confirmed",
+          value: { backendSessionId: `be_${operationId}` },
+          receipt: `be_${operationId}`,
+        };
+    },
+    protocol: async () => "legacy",
+    reconcile: async (binding) => ({
+      ...endpoint(
+        cwd(),
+        control.endpointAuthority ?? "owned:iso-test",
+        control.endpointGeneration ?? 1,
+      ),
+      backendSessionId: binding.backendSessionId,
+      reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+      state: {
+        value: "idle",
+        comparison: { domain: "fake-runtime", order: 1 },
+        ...((lastResetOperationId ?? lastCreateOperationId)
+          ? { causalOperationId: lastResetOperationId ?? lastCreateOperationId }
+          : {}),
+      },
+      completeness: { events: "complete", permissions: "complete", questions: "complete" },
+      permissions: [],
+      questions: [],
+      events: [],
+      ...(lastResetOperationId ? {
+        acceptedOperations: [{
+          operationId: lastResetOperationId,
+          mutationKind: "session-reset",
+          receipt: `be_${lastResetOperationId}`,
+        }],
+      } : {}),
+    }),
     sessions: async () => [],
     history: async () => [],
     startTurn: async () => {},
@@ -70,13 +157,12 @@ function fakeRuntime() {
       listeners.add(cb);
       return { dispose: () => listeners.delete(cb) };
     },
-    onLifecycle(cb) { lifecycle.add(cb); return { dispose: () => { lifecycle.delete(cb); } }; },
     dispose: async () => {},
   };
-  return { rt, emitLifecycle: (event: RuntimeLifecycleNotification) => { for (const listener of lifecycle) listener(event); }, emit: (sessionId: string, event: RuntimeEvent) => { for (const listener of listeners) listener(sessionId, event); } };
+  return { rt, resets, ensureCalls };
 }
 
-const make = (root: string, pool?: RuntimePool) => {
+const make = (root: string) => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-iso-db-"));
   dirs.push(dir);
   const store = createStore(join(dir, "s.db"));
@@ -97,24 +183,20 @@ const make = (root: string, pool?: RuntimePool) => {
   const cwds: string[] = [];
   const released: string[] = [];
   const closed: string[] = [];
-  const ctrl = {
+  const ctrl: FakeControl & { failClose: boolean; failCreate: string | false } = {
     failClose: false,
     failRelease: false,
-    failCreate: false as string | boolean,
+    failCreate: false as string | false,
     failEpoch: false,
   };
-  const fake = fakeRuntime();
+  const fake = fakeRuntime(ctrl, released, () => cwds.at(-1) ?? root);
   const sessions = createSessionService({
     store, projects, permissions, broadcast, queue: store,
     worktrees: { list: (path) => git.worktrees.list(path) },
-    runtimes: pool ?? {
-      releaseSession: async (sessionId) => {
-        released.push((await store.projection(sessionId))!.worktreePath!);
-        if (ctrl.failRelease) throw new Error("release failed");
-      },
+    runtimes: {
       forProject: async (_projectId, cwd) => {
         if (cwd) cwds.push(cwd);
-        if (ctrl.failCreate === true || (typeof ctrl.failCreate === "string" && cwd && resolve(cwd) === resolve(ctrl.failCreate))) {
+        if (ctrl.failCreate && cwd && resolve(cwd) === resolve(ctrl.failCreate)) {
           throw new Error("runtime create failed");
         }
         return fake.rt;
@@ -131,7 +213,7 @@ const make = (root: string, pool?: RuntimePool) => {
       if (ctrl.failClose) throw new Error("close failed");
     },
   });
-  return { sessions, isolation, cwds, released, closed, ctrl, fake, project, store };
+  return { sessions, isolation, cwds, released, closed, ctrl, fake, project, store, projects, permissions, broadcast };
 };
 
 test("merge into project root rebinds runtime cwd to the repository", async () => {
@@ -176,6 +258,313 @@ test("merge into another worktree rebinds runtime cwd to that checkout", async (
   assert.equal(resolve(cwds.at(-1)!), resolve(featureWt));
 });
 
+test("retry after a completed destination epoch does not reset that epoch twice", async () => {
+  const root = repo();
+  const { isolation, sessions, fake } = make(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const initial = await sessions.snapshot(created.id);
+  const identity = initial.isolation!;
+  const pending = {
+    ...identity,
+    state: "rebind-pending",
+    resultCommit: runGit(root, "rev-parse", "HEAD"),
+  } as SessionIsolation;
+  const atDestination = await sessions.rebindWorkspace!(created.id, {
+    worktreePath: null,
+    branch: "main",
+    isolation: pending,
+  });
+  const resetCount = fake.resets.length;
+  assert.equal(atDestination.isolation?.state, "rebind-pending");
+  await sessions.rebindWorkspace!(created.id, {
+    worktreePath: null,
+    branch: "main",
+    isolation: { ...pending, state: "cleanup-pending" },
+  });
+  assert.equal(fake.resets.length, resetCount);
+});
+
+test("restart reattaches the exact persisted backend session before releasing it", async () => {
+  const root = repo();
+  const initial = make(root);
+  const created = await initial.isolation.createIsolatedSession({ projectId: "p1" });
+  const beforeRestart = await initial.sessions.snapshot(created.id);
+  const source = beforeRestart.isolation!.worktreePath;
+  writeFileSync(join(source, "restart.txt"), "r\n");
+
+  const restartedCwds: string[] = [];
+  const restartedReleases: string[] = [];
+  const restartedControl: FakeControl = {
+    failRelease: false,
+    failEpoch: false,
+    endpointAuthority: "owned:after-restart",
+    endpointGeneration: 2,
+    acceptReleasedAuthority: true,
+  };
+  const restartedRuntime = fakeRuntime(restartedControl, restartedReleases, () => restartedCwds.at(-1) ?? root);
+  const restartedSessions = createSessionService({
+    store: initial.store,
+    projects: initial.projects,
+    permissions: initial.permissions,
+    broadcast: initial.broadcast,
+    queue: initial.store,
+    worktrees: { list: (path) => git.worktrees.list(path) },
+    runtimes: {
+      forProject: async (_projectId, cwd) => {
+        if (cwd) restartedCwds.push(cwd);
+        return restartedRuntime.rt;
+      },
+    },
+  });
+  const restartedIsolation = createIsolationService({
+    git,
+    sessions: restartedSessions,
+    projects: initial.projects,
+    append: async () => undefined,
+    closeWorkspaceProcesses: async () => undefined,
+  });
+
+  const merged = await restartedIsolation.mergeBack(created.id);
+  assert.equal(merged.finalized, true);
+  assert.equal(restartedRuntime.ensureCalls[0], beforeRestart.backendSessionId);
+  assert.deepEqual(restartedReleases.map((path) => resolve(path)), [resolve(source)]);
+  assert.equal(readFileSync(join(root, "restart.txt"), "utf8"), "r\n");
+  assert.equal(existsSync(source), false);
+});
+
+test("restart can discard a vanished workspace through durable authority release", async () => {
+  const root = repo();
+  const initial = make(root);
+  const created = await initial.isolation.createIsolatedSession({ projectId: "p1" });
+  const beforeRestart = await initial.sessions.snapshot(created.id);
+  const source = beforeRestart.isolation!.worktreePath;
+  rmSync(source, { recursive: true, force: true });
+
+  const targetCwds: string[] = [];
+  const authorityReleases: string[] = [];
+  const targetRuntime = fakeRuntime(initial.ctrl, [], () => targetCwds.at(-1) ?? root);
+  const restartedSessions = createSessionService({
+    store: initial.store,
+    projects: initial.projects,
+    permissions: initial.permissions,
+    broadcast: initial.broadcast,
+    queue: initial.store,
+    worktrees: { list: (path) => git.worktrees.list(path) },
+    runtimes: {
+      forProject: async (_projectId, cwd) => {
+        if (cwd && !existsSync(cwd)) throw new Error("runtime cwd is missing");
+        if (cwd) targetCwds.push(cwd);
+        return targetRuntime.rt;
+      },
+      releaseSessionExecution: async (_projection, binding) => {
+        authorityReleases.push(binding.location.directory);
+        return {
+          kind: "confirmed",
+          value: {
+            authorityId: binding.authorityId,
+            generation: binding.generation,
+            backendSessionId: binding.backendSessionId!,
+          },
+        };
+      },
+    },
+  });
+  const restartedIsolation = createIsolationService({
+    git,
+    sessions: restartedSessions,
+    projects: initial.projects,
+    append: async () => undefined,
+    closeWorkspaceProcesses: async () => undefined,
+  });
+
+  const discarded = await restartedIsolation.discard(created.id);
+  assert.equal(discarded.isolation, undefined);
+  assert.equal(discarded.worktreePath, undefined);
+  assert.deepEqual(authorityReleases.map((path) => resolve(path)), [resolve(source)]);
+  assert.equal(targetCwds.some((path) => resolve(path) === resolve(source)), false);
+  assert.equal(existsSync(source), false);
+  assert.ok((await git.branches(root)).branches.some((item) => item.name === beforeRestart.isolation!.worktreeBranch));
+});
+
+test("ordinary rebind never authority-fences another session on a shared runtime", async () => {
+  const root = repo();
+  const initial = make(root);
+  const a = await initial.sessions.create({ projectId: "p1", title: "A" });
+  const b = await initial.sessions.create({ projectId: "p1", title: "B" });
+  const destination = mkdtempSync(join(tmpdir(), "polyth-shared-dest-"));
+  dirs.push(destination);
+
+  const cwds: string[] = [];
+  const shared = fakeRuntime(initial.ctrl, [], () => cwds.at(-1) ?? root);
+  let authorityReleaseCalls = 0;
+  const restarted = createSessionService({
+    store: initial.store,
+    projects: initial.projects,
+    permissions: initial.permissions,
+    broadcast: initial.broadcast,
+    queue: initial.store,
+    worktrees: { list: (path) => git.worktrees.list(path) },
+    runtimes: {
+      forProject: async (_projectId, cwd) => {
+        if (cwd) cwds.push(cwd);
+        return shared.rt;
+      },
+      releaseSessionExecution: async () => {
+        authorityReleaseCalls += 1;
+        throw new Error("shared authority must not be fenced");
+      },
+    },
+  });
+  await restarted.send(b.id, { text: "keep B wired" });
+  const rebound = await restarted.rebindWorkspace!(a.id, {
+    worktreePath: destination,
+    branch: "other",
+  });
+
+  assert.equal(authorityReleaseCalls, 0);
+  assert.equal(resolve(rebound.worktreePath!), resolve(destination));
+  assert.equal((await restarted.snapshot(b.id)).backendSessionId, (await initial.sessions.snapshot(b.id)).backendSessionId);
+  await restarted.send(b.id, { text: "B still uses the shared facade" });
+});
+
+test("legacy source dependents block authority fencing and worktree deletion", async () => {
+  const root = repo();
+  const initial = make(root);
+  const a = await initial.isolation.createIsolatedSession({ projectId: "p1", title: "isolated A" });
+  const isolatedA = await initial.sessions.snapshot(a.id);
+  const source = isolatedA.isolation!.worktreePath;
+  writeFileSync(join(source, "from-a.txt"), "a\n");
+  const b = await initial.sessions.create({ projectId: "p1", title: "legacy B" });
+  const ordinaryB = await initial.sessions.snapshot(b.id);
+  await initial.store.upsertProjection({
+    ...ordinaryB,
+    worktreePath: source,
+    worktreeId: source,
+    worktreeState: "ready",
+    branch: isolatedA.isolation!.worktreeBranch,
+    runtimeBinding: ordinaryB.runtimeBinding
+      ? { ...ordinaryB.runtimeBinding, location: { directory: source } }
+      : undefined,
+  });
+
+  const cwds: string[] = [];
+  const shared = fakeRuntime(initial.ctrl, [], () => cwds.at(-1) ?? root);
+  let authorityReleaseCalls = 0;
+  const restarted = createSessionService({
+    store: initial.store,
+    projects: initial.projects,
+    permissions: initial.permissions,
+    broadcast: initial.broadcast,
+    queue: initial.store,
+    worktrees: { list: (path) => git.worktrees.list(path) },
+    runtimes: {
+      forProject: async (_projectId, cwd) => {
+        if (cwd) cwds.push(cwd);
+        return shared.rt;
+      },
+      releaseSessionExecution: async () => {
+        authorityReleaseCalls += 1;
+        throw new Error("legacy dependent makes authority release unsafe");
+      },
+    },
+  });
+  const restartedIsolation = createIsolationService({
+    git,
+    sessions: restarted,
+    projects: initial.projects,
+    append: async () => undefined,
+    closeWorkspaceProcesses: async () => undefined,
+  });
+
+  const merged = await restartedIsolation.mergeBack(a.id);
+  assert.equal(merged.finalized, false);
+  assert.equal(merged.session.isolation?.state, "cleanup-pending");
+  assert.equal(authorityReleaseCalls, 0);
+  assert.equal(existsSync(source), true);
+  assert.equal(readFileSync(join(source, "from-a.txt"), "utf8"), "a\n");
+  assert.equal((await restartedIsolation.getStatus(a.id)).actions?.canAbandon, false);
+  const branchBeforeRejectedAbandon = runGit(source, "rev-parse", "--abbrev-ref", "HEAD");
+  await assert.rejects(
+    () => restartedIsolation.abandonCleanup(a.id),
+    /another session still depends/,
+  );
+  assert.equal(runGit(source, "rev-parse", "--abbrev-ref", "HEAD"), branchBeforeRejectedAbandon);
+
+  const liveB = await restarted.snapshot(b.id);
+  const movedB: typeof liveB = {
+    ...liveB,
+    branch: "main",
+    runtimeBinding: liveB.runtimeBinding
+      ? { ...liveB.runtimeBinding, location: { directory: root } }
+      : undefined,
+  };
+  delete movedB.worktreePath;
+  delete movedB.worktreeId;
+  delete movedB.worktreeState;
+  await initial.store.upsertProjection(movedB);
+  const recovered = await restartedIsolation.recoverSession(await restarted.snapshot(a.id));
+  assert.equal(recovered.isolation, undefined);
+  assert.equal(existsSync(source), false);
+});
+
+test("ordinary create and fork cannot depend on an isolation-managed workspace", async () => {
+  const root = repo();
+  const { isolation, sessions } = make(root);
+  const owner = await isolation.createIsolatedSession({ projectId: "p1" });
+  const isolated = await sessions.snapshot(owner.id);
+  await assert.rejects(
+    () => sessions.create({ projectId: "p1", worktreePath: isolated.isolation!.worktreePath }),
+    /canonical session|active isolation reserves this workspace/,
+  );
+  runGit(isolated.isolation!.worktreePath, "branch", "-m", "externally-renamed-isolation");
+  await assert.rejects(
+    () => sessions.create({ projectId: "p1", worktreePath: isolated.isolation!.worktreePath }),
+    /canonical session|active isolation reserves this workspace/,
+  );
+  await assert.rejects(
+    () => sessions.fork(owner.id),
+    /isolated sessions cannot be forked/,
+  );
+  assert.equal(existsSync(isolated.isolation!.worktreePath), true);
+});
+
+test("another project's root cannot claim an active isolation workspace", async () => {
+  const root = repo();
+  const { isolation, sessions, projects, project } = make(root);
+  const owner = await isolation.createIsolatedSession({ projectId: "p1" });
+  const source = (await sessions.snapshot(owner.id)).isolation!.worktreePath;
+  const other: Project = { ...project, id: "p2", name: "other", path: source };
+  projects.get = async (id) => id === "p1" ? project : id === "p2" ? other : undefined;
+  projects.list = async () => [project, other];
+
+  await assert.rejects(
+    () => sessions.create({ projectId: "p2", title: "must not share isolation" }),
+    /active isolation reserves this workspace/,
+  );
+  assert.equal(existsSync(source), true);
+});
+
+test("real session persistence repairs legacy pre-publication merging state", async () => {
+  const root = repo();
+  const { isolation, sessions, store } = make(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const current = await sessions.snapshot(created.id);
+  await store.upsertProjection({
+    ...current,
+    isolation: {
+      ...current.isolation!,
+      state: "merging",
+      conflict: { message: "legacy stale payload", files: [] },
+    } as unknown as SessionIsolation,
+  });
+
+  const recovered = await isolation.recover(created.id);
+  assert.equal(recovered.isolation?.state, "active");
+  assert.equal(recovered.isolation?.publish, undefined);
+  assert.equal(recovered.isolation?.conflict, undefined);
+  assert.equal((await sessions.snapshot(created.id)).isolation?.state, "active");
+});
+
 test("runtime release failure keeps the isolated workspace", async () => {
   const root = repo();
   const { isolation, sessions, ctrl } = make(root);
@@ -187,7 +576,7 @@ test("runtime release failure keeps the isolated workspace", async () => {
   assert.equal(result.ok, true);
   assert.equal(result.finalized, false);
   const pending = await sessions.snapshot(created.id);
-  assert.notEqual(pending.isolation?.rebound, true);
+  assert.equal(pending.isolation?.state, "rebind-pending");
   assert.equal(pending.worktreePath, wt);
   assert.equal(existsSync(wt), true);
   ctrl.failRelease = false;
@@ -209,7 +598,7 @@ test("target runtime creation failure does not mark rebound", async () => {
   assert.equal(result.ok, true);
   assert.equal(result.finalized, false);
   const pending = await sessions.snapshot(created.id);
-  assert.notEqual(pending.isolation?.rebound, true);
+  assert.equal(pending.isolation?.state, "rebind-pending");
   assert.equal(existsSync(wt), true);
   ctrl.failCreate = false;
   const recovered = await isolation.recoverSession(await sessions.snapshot(created.id));
@@ -217,277 +606,23 @@ test("target runtime creation failure does not mark rebound", async () => {
   assert.equal(existsSync(wt), false);
 });
 
-test("unknown runtime epoch outcome preserves source and cannot be bypassed by losing capabilities", async () => {
+test("runtime epoch failure leaves source recoverable", async () => {
   const root = repo();
-  const { isolation, sessions, fake } = make(root);
+  const { isolation, sessions, ctrl } = make(root);
   const created = await isolation.createIsolatedSession({ projectId: "p1" });
   const wt = (await sessions.snapshot(created.id)).isolation!.worktreePath;
   writeFileSync(join(wt, "epoch.txt"), "e\n");
-  fake.rt.endpoint = async () => endpoint(root);
-  fake.rt.resetSession = async () => {
-    throw new Error("epoch failed");
-  };
+  ctrl.failEpoch = true;
   const result = await isolation.mergeBack(created.id);
   assert.equal(result.ok, true);
   assert.equal(result.finalized, false);
   const pending = await sessions.snapshot(created.id);
-  assert.notEqual(pending.isolation?.rebound, true);
+  assert.equal(pending.isolation?.state, "rebind-pending");
   assert.equal(existsSync(wt), true);
-  fake.rt.endpoint = undefined;
-  fake.rt.resetSession = undefined;
+  ctrl.failEpoch = false;
   const recovered = await isolation.recoverSession(await sessions.snapshot(created.id));
-  assert.equal(recovered.isolation?.state, "rebind-pending");
-  assert.equal(existsSync(wt), true);
+  assert.equal(recovered.isolation, undefined);
+  assert.equal(existsSync(wt), false);
   assert.equal(recovered.id, created.id);
-});
-
-
-function pooledRuntimes(shared: boolean) {
-  const registry = createHarnessRegistry();
-  const created: Array<ReturnType<typeof fakeRuntime> & { cwd: string; disposals: number }> = [];
-  const occupancies = new Map<AgentRuntime, ReturnType<typeof createSharedRuntimeOccupancy>>();
-  registry.register({
-    descriptor: { id: "test-harness", name: "Test", priority: 0, integration: "test" },
-    probe: async () => ({ harnessId: "test-harness", installed: true, healthy: true, authenticated: true }),
-    createRuntime: async (context) => {
-      const existing = shared && created.find(item => item.cwd === context.cwd && !item.disposals);
-      if (existing) return existing.rt;
-      const fake = { ...fakeRuntime(), cwd: context.cwd, disposals: 0 };
-      fake.rt.dispose = async () => { fake.disposals++; };
-      if (shared) occupancies.set(fake.rt, createSharedRuntimeOccupancy(context.cwd));
-      created.push(fake);
-      return fake.rt;
-    },
-  });
-  const pool = createHarnessPool({
-    registry, legacyHarnessId: "test-harness",
-    context: async (projectId, cwd, sessionId) => ({ spaceId: "test", projectId, cwd: cwd!, sessionId }),
-    releaseRuntime: async (runtime, dispose) => {
-      const occupancy = occupancies.get(runtime)?.snapshot();
-      if (occupancy && (occupancy.bindings || occupancy.executions)) return;
-      await dispose();
-    },
-  });
-  return { created, pool: {
-    ...pool,
-    bindSession: (sessionId: string, runtime: AgentRuntime) => occupancies.get(runtime)?.acquireBinding(sessionId),
-    unbindSession: (sessionId: string, runtime: AgentRuntime) => occupancies.get(runtime)?.releaseBinding(sessionId),
-  } };
-}
-
-for (const shared of [true, false]) test(`${shared ? "shared" : "per-session"} runtime release preserves canonical session and rejects old callbacks`, async () => {
-  const root = repo();
-  const { pool, created } = pooledRuntimes(shared);
-  const { sessions, store } = make(root, pool);
-  const first = await sessions.create({ projectId: "p1" });
-  const second = shared ? await sessions.create({ projectId: "p1" }) : undefined;
-  const source = created[0]!;
-  const before = await store.events(first.id);
-  const dest = mkdtempSync(join(tmpdir(), "polyth-runtime-dest-"));
-  dirs.push(dest);
-  await sessions.rebindWorkspace!(first.id, { worktreePath: dest, branch: "main" });
-  const after = await sessions.snapshot(first.id);
-  assert.equal(after.id, first.id);
-  assert.equal(after.worktreePath, dest);
-  assert.equal(after.runtimeBinding?.location.directory, dest);
-  assert.equal(source.disposals, shared ? 0 : 1);
-  assert.equal(created.at(-1)!.cwd, dest);
-  source.emit(first.id, { type: "session/title-generated", title: "stale source title" } as RuntimeEvent);
-  if (second) source.emit(second.id, { type: "session/title-generated", title: "remaining session works" } as RuntimeEvent);
-  await new Promise(resolve => setTimeout(resolve, 20));
-  assert.notEqual((await sessions.snapshot(first.id)).title, "stale source title");
-  if (second) assert.equal((await sessions.snapshot(second.id)).title, "remaining session works");
-  assert.deepEqual((await store.events(first.id)).slice(0, before.length), before);
-  await pool.dispose();
-  assert.equal(source.disposals, 1);
-});
-
-test("pending isolation blocks admission, shell execution, and canonical deletion", async () => {
-  const root = repo();
-  const { sessions, isolation, store } = make(root);
-  const created = await isolation.createIsolatedSession({ projectId: "p1" });
-  const projection = await sessions.snapshot(created.id);
-  await sessions.patchIsolation!(created.id, { ...projection.isolation!, state: "merging" });
-  const before = await store.events(created.id);
-  await assert.rejects(sessions.send(created.id, { text: "must not run" }), { code: "conflict" });
-  await assert.rejects(sessions.runShell!(created.id, "touch forbidden"), { code: "conflict" });
-  await assert.rejects(sessions.delete!(created.id), { code: "conflict" });
-  assert.deepEqual(await store.events(created.id), before);
-  assert.equal(existsSync(projection.isolation!.worktreePath), true);
-});
-
-
-test("native per-session rebind creates a fresh durable epoch and next execution uses destination", async () => {
-  const root = repo();
-  const registry = createHarnessRegistry();
-  const instances: Array<{ cwd: string; disposed: number; submitted: string[]; runtime: AgentRuntime }> = [];
-  registry.register({
-    descriptor: { id: "native", name: "Native", priority: 0, integration: "test" },
-    probe: async () => ({ harnessId: "native", installed: true, healthy: true, authenticated: true }),
-    createRuntime: async (context) => {
-      const submitted: string[] = [];
-      const runtime = createEpochRuntime({ ...endpoint(context.cwd), authorityId: `owned:${context.cwd}` }, submitted, `native-${instances.length}`);
-      const item = { cwd: context.cwd, disposed: 0, submitted, runtime };
-      runtime.dispose = async () => { item.disposed++; };
-      instances.push(item);
-      return runtime;
-    },
-  });
-  const pool = createHarnessPool({ registry, legacyHarnessId: "native", context: async (projectId, cwd, sessionId) => ({ spaceId: "test", projectId, cwd: cwd!, sessionId }) });
-  const { sessions, store } = make(root, pool);
-  const created = await sessions.create({ projectId: "p1" });
-  const before = await sessions.snapshot(created.id);
-  assert.equal(before.status, "idle");
-  const dest = mkdtempSync(join(tmpdir(), "polyth-native-dest-"));
-  dirs.push(dest);
-  const rebound = await sessions.rebindWorkspace!(created.id, { worktreePath: dest, branch: "main" });
-  assert.equal(rebound.status, "idle");
-  assert.equal(rebound.runtimeBinding?.location.directory, dest);
-  assert.equal(rebound.runtimeBinding?.epoch, (before.runtimeBinding?.epoch ?? 0) + 1);
-  assert.notEqual(rebound.backendSessionId, before.backendSessionId);
-  const repeated = await sessions.rebindWorkspace!(created.id, { worktreePath: dest, branch: "main" });
-  assert.equal(repeated.backendSessionId, rebound.backendSessionId);
-  assert.equal(repeated.runtimeBinding?.epoch, rebound.runtimeBinding?.epoch);
-  assert.equal(instances[0]!.disposed, 1);
-  assert.ok((await store.events(created.id)).some(event => event.type === "runtime/epoch-replaced"));
-  await sessions.send(created.id, { text: "execute at destination" });
-  assert.equal(instances[0]!.submitted.length, 0);
-  assert.ok(instances[1]!.submitted.some(text => text.includes("execute at destination")));
-  await pool.dispose();
-  assert.equal(instances[0]!.disposed, 1);
-});
-
-test("ordinary create and fork cannot acquire another session's isolation workspace", async () => {
-  const root = repo();
-  const { sessions, isolation } = make(root);
-  const created = await isolation.createIsolatedSession({ projectId: "p1" });
-  const isolated = await sessions.snapshot(created.id);
-  await assert.rejects(sessions.create({ projectId: "p1", worktreePath: isolated.worktreePath }), { code: "conflict" });
-  await assert.rejects(sessions.fork(created.id), { code: "conflict" });
-  assert.equal((await sessions.list("p1")).length, 1);
-});
-
-
-test("callbacks queued before rebind cannot mutate even a reused facade after its wiring changes", async () => {
-  const root = repo();
-  const { sessions, store, fake } = make(root);
-  const created = await sessions.create({ projectId: "p1" });
-  const dest = mkdtempSync(join(tmpdir(), "polyth-stale-dest-"));
-  dirs.push(dest);
-  const read = store.projection.bind(store);
-  let entered!: () => void;
-  let proceed!: () => void;
-  const enteredGate = new Promise<void>(resolve => { entered = resolve; });
-  const gate = new Promise<void>(resolve => { proceed = resolve; });
-  let fence = true;
-  store.projection = async (sessionId) => {
-    const projection = await read(sessionId);
-    if (fence) { fence = false; entered(); await gate; }
-    return projection;
-  };
-  const rebinding = sessions.rebindWorkspace!(created.id, { worktreePath: dest });
-  await enteredGate;
-  fake.emit(created.id, { type: "session/title-generated", title: "old queued title" });
-  fake.emitLifecycle({ type: "stream-disconnected" } as RuntimeLifecycleNotification);
-  proceed();
-  await rebinding;
-  await new Promise(resolve => setTimeout(resolve, 20));
-  const projection = await sessions.snapshot(created.id);
-  assert.notEqual(projection.title, "old queued title");
-  assert.equal(projection.status, "idle");
-  assert.equal(projection.runtimeBinding?.location.directory, dest);
-});
-
-
-for (const phase of ["runtime startup", "native creation outcome"]) test(`failed ${phase} preserves a durably created isolation source`, async () => {
-  const root = repo();
-  const { sessions, isolation, ctrl, fake } = make(root);
-  if (phase === "runtime startup") ctrl.failCreate = true;
-  else fake.rt.ensureSession = async () => { throw new Error("native receipt lost"); };
-  const created = await isolation.createIsolatedSession({ projectId: "p1" });
-  const retained = await sessions.snapshot(created.id);
-  assert.ok(retained);
-  assert.ok(retained.isolation);
-  assert.equal(retained.status, phase === "runtime startup" ? "failed" : "unknown");
-  assert.equal(existsSync(retained.isolation.worktreePath), true);
-  assert.ok((await git.worktrees.list(root)).some(worktree => worktree.path === retained.isolation!.worktreePath));
-});
-
-
-test("malformed isolation stays fenced and missing-workspace notification preserves its recovery evidence", async () => {
-  const root = repo();
-  const { sessions, isolation, store } = make(root);
-  const created = await isolation.createIsolatedSession({ projectId: "p1" });
-  const projection = await sessions.snapshot(created.id);
-  const malformed = { ...projection.isolation!, state: "active", publish: { resultCommit: "must retain evidence" } };
-  await store.upsertProjection({ ...projection, isolation: malformed as typeof projection.isolation });
-  await assert.rejects(sessions.send(created.id, { text: "must not execute malformed state" }), { code: "conflict" });
-  await sessions.markWorktreeMissing!("p1", projection.worktreePath!);
-  const marked = await sessions.snapshot(created.id);
-  assert.deepEqual(marked.isolation, malformed);
-  await assert.rejects(sessions.patchIsolation!(created.id, null), { code: "conflict" });
-  await assert.rejects(sessions.runShell!(created.id, "must-not-run"), { code: "conflict" });
-});
-
-
-for (const interruption of ["none", "before-native-call", "before-native-call-generation-change", "after-native-receipt"]) test(`discard retries rejected initial creation at destination (${interruption})`, async () => {
-  const root = repo();
-  const registry = createHarnessRegistry();
-  let unavailable = true;
-  const submissions: string[] = [];
-  const native = createEpochRuntime({ ...endpoint(root), authorityId: "owned:restored" }, submissions, "restored-native");
-  let nativeCreates = 0;
-  native.createSessionOperation = async () => {
-    nativeCreates++;
-    return { kind: "confirmed", value: { backendSessionId: "restored-native" }, receipt: "restored-native" };
-  };
-  registry.register({
-    descriptor: { id: "native", name: "Native", priority: 0, integration: "test" },
-    probe: async () => ({ harnessId: "native", installed: true, healthy: true, authenticated: true }),
-    createRuntime: async () => { if (unavailable) throw new Error("runtime not installed yet"); return native; },
-  });
-  const pool = createHarnessPool({ registry, legacyHarnessId: "native", context: async (projectId, cwd, sessionId) => ({ spaceId: "test", projectId, cwd: cwd!, sessionId }) });
-  const { sessions, isolation, store } = make(root, pool);
-  const created = await isolation.createIsolatedSession({ projectId: "p1" });
-  const failed = await sessions.snapshot(created.id);
-  assert.equal(failed.status, "failed");
-  assert.equal(failed.backendSessionId, undefined);
-  const source = failed.worktreePath!;
-  const initialEvents = await store.events(created.id);
-  unavailable = false;
-  const claim = store.claimOperation.bind(store);
-  const patch = store.patchProjection.bind(store);
-  let interrupted = false;
-  store.claimOperation = async (operationId) => {
-    if (interruption.startsWith("before-native-call") && !interrupted) { interrupted = true; throw new Error("interrupted before native create"); }
-    return claim(operationId);
-  };
-  store.patchProjection = (sessionId, apply) => patch(sessionId, current => {
-    const projection = apply(current);
-    if (interruption === "after-native-receipt" && projection.backendSessionId === "restored-native" && !interrupted) {
-      interrupted = true; throw new Error("interrupted before binding publication");
-    }
-    return projection;
-  });
-  let discarded = await isolation.discard(created.id);
-  if (interruption !== "none") {
-    assert.equal(interrupted, true);
-    assert.equal(discarded.isolation?.state, "rebind-pending");
-    assert.equal(existsSync(source), true);
-    if (interruption === "before-native-call-generation-change") {
-      native.endpoint = async () => ({ ...endpoint(root), authorityId: "owned:restored", generation: 2 });
-    }
-    discarded = await isolation.recoverSession(discarded);
-  }
-  assert.equal(nativeCreates, 1);
-  assert.equal(discarded.id, created.id);
-  assert.equal(discarded.isolation, undefined);
-  assert.equal(discarded.status, "idle");
-  assert.equal(discarded.runtimeBinding?.location.directory, root);
-  assert.equal(discarded.backendSessionId, "restored-native");
-  assert.equal(existsSync(source), false);
-  assert.deepEqual((await store.events(created.id)).slice(0, initialEvents.length), initialEvents);
-  await sessions.send(created.id, { text: "work in restored destination" });
-  assert.ok(submissions.some(text => text.includes("work in restored destination")));
-  await pool.dispose();
+  assert.equal(recovered.branch, "main");
 });

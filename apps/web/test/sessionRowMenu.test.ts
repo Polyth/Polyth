@@ -12,7 +12,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
 import { Window } from "happy-dom";
-import type { SessionProjection, WorkspaceLabel } from "@polyth/contracts";
+import type { SessionIsolation, SessionProjection, WorkspaceLabel } from "@polyth/contracts";
 import { readFile } from "node:fs/promises";
 
 const dom = new Window();
@@ -328,6 +328,108 @@ test("pinned chats are first across worktrees and their menu offers Unpin", asyn
     const items = menuItems().map((item) => item.textContent?.trim());
     assert.ok(items.includes("Unpin"), `pinned row offers Unpin (got: ${items.join(", ")})`);
     assert.ok(!items.includes("Pin to top"), "pinned row does not offer Pin to top");
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+const gitIsolation = (over: Partial<SessionIsolation> = {}): SessionIsolation => ({
+  kind: "git-worktree",
+  worktreePath: "/repo-isolated",
+  worktreeBranch: "polyth/isolate/abc",
+  targetBranch: "main",
+  targetPath: "/repo",
+  originPath: "/repo",
+  baseCommit: "base",
+  createdAt: "today",
+  state: "active",
+  ...over,
+});
+
+test("isolated sessions sit with main sessions, not worktree groups", async () => {
+  activateProject("p1");
+  setSessions("p1", [
+    session({ id: "s-main", title: "Main session" }),
+    session({
+      id: "s-worktree",
+      title: "User worktree session",
+      worktreePath: "/repo-feature",
+      branch: "feature/recent",
+    }),
+    session({
+      id: "s-isolated",
+      title: "Isolated session",
+      worktreePath: "/repo-isolated",
+      branch: "polyth/isolate/abc",
+      isolation: gitIsolation(),
+    }),
+    session({
+      id: "s-isolated-pin",
+      title: "Pinned isolated",
+      worktreePath: "/repo-isolated-pin",
+      branch: "polyth/isolate/pin",
+      isolation: gitIsolation({
+        worktreePath: "/repo-isolated-pin",
+        worktreeBranch: "polyth/isolate/pin",
+      }),
+      pinned: { position: 0 },
+    }),
+  ]);
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(SessionList, { projectId: "p1" })); });
+
+    const isolated = rowOf(container, "Isolated session");
+    assert.equal(isolated.closest(".session-worktree-group"), null, "isolated rows are not worktree-grouped");
+    assert.ok(isolated.closest(".session-worktree-sessions"), "isolated rows share the main session list");
+    assert.equal(container.querySelector('[data-worktree="/repo-isolated"]'), null);
+    assert.equal(
+      [...container.querySelectorAll(".session-worktree-name")].some((el) =>
+        (el.textContent ?? "").includes("polyth/isolate/")),
+      false,
+      "no isolate-branch worktree group chrome",
+    );
+    assert.ok(container.querySelector('[data-worktree="/repo-feature"]'), "user worktrees still group");
+
+    await act(async () => {
+      isolated.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
+    });
+    const items = menuItems().map((item) => item.textContent?.trim());
+    assert.equal(items.includes("Delete"), false, "isolated rows omit Delete");
+    assert.equal(items.includes("Fork"), false, "isolated rows omit Fork");
+    await act(async () => {
+      document.activeElement!.dispatchEvent(new KeyboardEventCtor("keydown", {
+        key: "Escape", bubbles: true, cancelable: true,
+      }));
+    });
+
+    const pinnedIsolated = rowOf(container, "Pinned isolated");
+    assert.equal(pinnedIsolated.querySelector(".session-worktree-label"), null);
+    assert.doesNotMatch(pinnedIsolated.textContent ?? "", /polyth\/isolate/);
+    assert.doesNotMatch(
+      pinnedIsolated.querySelector<HTMLButtonElement>(".session-btn")?.title ?? "",
+      /polyth\/isolate/,
+    );
+
+    await act(async () => {
+      root.render(createElement(SessionList, {
+        projectId: "p1",
+        searchMode: true,
+        searchProjectName: "Acme",
+      }));
+    });
+    const searchIsolated = rowOf(container, "Isolated session");
+    const context = searchIsolated.querySelector(".session-search-context")?.textContent ?? "";
+    assert.match(context, /Acme/);
+    assert.doesNotMatch(context, /polyth\/isolate/);
+    assert.doesNotMatch(context, /\/repo-isolated/);
+    assert.match(
+      rowOf(container, "User worktree session").querySelector(".session-search-context")?.textContent ?? "",
+      /feature\/recent/,
+    );
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();

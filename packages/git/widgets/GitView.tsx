@@ -286,6 +286,7 @@ export default function GitView() {
   const [tab, setTab] = useState<GitTab>("changes");
   const [branches, setBranches] = useState<GitBranches>({ current: null, branches: [] });
   const [trees, setTrees] = useState<Worktree[]>([]);
+  const visibleTrees = trees.filter((tree) => !tree.branch?.startsWith("polyth/isolate/"));
   const [graph, setGraph] = useState<GitGraphEntry[]>([]);
   const [stashes, setStashes] = useState<GitStash[]>([]);
   const [graphDone, setGraphDone] = useState(false);
@@ -1080,6 +1081,7 @@ export default function GitView() {
                 const normalized = branchQuery.trim().toLowerCase();
                 const rows = branches.branches.filter((branch) =>
                   !branch.current
+                  && !branch.name.startsWith("polyth/isolate/")
                   && Boolean(branch.remote) === remote
                   && (!remote || (branch.name !== branch.remote && !branch.name.endsWith("/HEAD")))
                   && (!normalized || branch.name.toLowerCase().includes(normalized)));
@@ -1119,10 +1121,10 @@ export default function GitView() {
               })}
             </section>
             <section className="git-resource-card">
-              <div className="stat-label">{tr("gitview.worktreesValue", { count: trees.length })}</div>
-              {!loadError && trees.length === 0 && <EmptyState title={tr("gitview.noLinkedWorktrees")} description={tr("gitview.newSessionsCurrentlyRunInThe")} />}
+              <div className="stat-label">{tr("gitview.worktreesValue", { count: visibleTrees.length })}</div>
+              {!loadError && visibleTrees.length === 0 && <EmptyState title={tr("gitview.noLinkedWorktrees")} description={tr("gitview.newSessionsCurrentlyRunInThe")} />}
               <div className="git-worktree-list">
-                {trees.map((tree) => (
+                {visibleTrees.map((tree) => (
                   <article key={tree.path} className="git-wt-card">
                     <div className="git-wt-copy">
                       <strong className="mono">{tree.branch ?? tr("gitview.detachedHead")}</strong>

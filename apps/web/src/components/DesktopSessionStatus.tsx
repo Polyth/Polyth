@@ -45,7 +45,7 @@ export default function DesktopSessionStatus() {
       title={status.label}
       onClick={() => setOpen((value) => !value)}
     >
-      <ContextIndicator gauge={gauge} mode={ui.contextIndicatorMode} providerID={activeModel?.providerID} providerName={descriptor?.providerName} active={status.kind === "working"} />
+      <ContextIndicator gauge={gauge} mode={ui.contextIndicatorMode} providerID={activeModel?.providerID} providerName={descriptor?.providerName} harnessId={descriptor?.harnessId ?? session.resolvedHarnessId} active={status.kind === "working"} />
       <span className="desktop-session-status-mask">
         <span className="desktop-session-status-copy"><span>{title}</span></span>
       </span>

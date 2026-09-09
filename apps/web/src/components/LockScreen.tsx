@@ -1,13 +1,14 @@
-// F16 lock screen: shown before the app boots when the server requires a UI
-// password (and again if the device session is revoked mid-use). Static
-// assets are public, so this shell always renders; every /api call behind it
-// stays 401 until login mints the polyth_auth cookie.
+// Shown before the app boots when the server requires authentication (and
+// again if the current device session is revoked mid-use). Static assets are
+// public; every protected /api call stays 401 until login mints the httpOnly
+// account-bound polyth_auth cookie.
 import { useEffect, useRef, useState } from "react";
-import { api } from "@polyth/session/web-api";
+import { currentBrowserAccountId, loginAccount } from "../accounts.ts";
 import { tr } from "../i18n/index.ts";
 import { Button, TextInput } from "./ui/index.ts";
 
 export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
+  const [accountId, setAccountId] = useState(currentBrowserAccountId);
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [retryAt, setRetryAt] = useState<number | null>(null);
@@ -15,7 +16,9 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
   const [tick, setTick] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  useEffect(() => {
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
 
   // Countdown re-render while rate-limited; the disabled state lifts itself.
   useEffect(() => {
@@ -30,13 +33,17 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (busy || locked || !password) return;
+    if (busy || locked || !accountId.trim() || !password) return;
     setBusy(true);
     setError(null);
     try {
-      const r = await api.authLogin(password);
+      const r = await loginAccount(accountId, password);
       if (r.ok) {
-        onUnlocked();
+        // Preference modules cache account-scoped state at import time. Reload
+        // after authentication so the newly authenticated account owns the
+        // first real application render instead of inheriting the prior user.
+        if (typeof window !== "undefined") window.location.reload();
+        else onUnlocked();
         return;
       }
       if (r.error === "rate-limited" && r.retryAfterSec) {
@@ -45,7 +52,7 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
       } else if (r.error === "invalid-password") {
         setError(tr("lockscreen.wrongPassword"));
       } else {
-        setError(r.message);
+        setError(r.message ?? tr("lockscreen.wrongPassword"));
       }
       setPassword("");
     } catch {
@@ -60,7 +67,18 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
       <form className="lock-card" onSubmit={submit}>
         <span className="welcome-mark">{tr("lockscreen.p")}</span>
         <h1>{tr("lockscreen.polythIsLocked")}</h1>
-        <p className="lock-hint">{tr("lockscreen.enterTheUiPasswordToContinue")}</p>
+        <p className="lock-hint">Sign in to this Polyth server.</p>
+        <TextInput
+          value={accountId}
+          placeholder="Account"
+          autoComplete="username"
+          aria-label="Account"
+          disabled={locked || busy}
+          onChange={(e) => {
+            setAccountId(e.target.value);
+            setError(null);
+          }}
+        />
         <TextInput
           ref={inputRef}
           type="password"
@@ -77,7 +95,7 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
             {error}{locked && ` Try again in ${secondsLeft}s.`}
           </p>
         )}
-        <Button variant="primary" className="lock-submit" type="submit" busy={busy} disabled={locked || !password}>
+        <Button variant="primary" className="lock-submit" type="submit" busy={busy} disabled={locked || !accountId.trim() || !password}>
           {busy ? tr("lockscreen.checking") : locked ? tr("lockscreen.lockedValueS", { secondsLeft: secondsLeft }) : tr("lockscreen.unlock")}
         </Button>
       </form>

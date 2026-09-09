@@ -61,11 +61,11 @@ A crash after target creation but before publication resumes the recorded receip
 
 ### Local execution ownership
 
-All four implemented runtime families use the same Linux process authority. A small Python 3 supervisor installs `PR_SET_CHILD_SUBREAPER`; a separate owner pipe gates native launch until Polyth persists the authority ledger. Closing that pipe on a Polyth crash triggers shutdown. The supervisor kills and reaps its descendants, including detached/double-forked tools, and writes an exact release receipt only after the descendant set is empty.
+All four implemented runtime families use the same Linux process authority. A small bundled Polyth supervisor installs `PR_SET_CHILD_SUBREAPER`; a separate owner pipe gates native launch until Polyth persists the authority ledger. Closing that pipe on a Polyth crash triggers shutdown. The supervisor kills and reaps its descendants, including detached/double-forked tools, and writes an exact release receipt only after the descendant set is empty.
 
 PID start-time checks prevent signalling a reused PID. Killing the supervisor before it writes a release receipt leaves execution outcome unknown and blocks replacement. OpenCode's native endpoint incarnation is also recorded in this ledger, allowing old release evidence to survive a server restart.
 
-This proof covers owned local process descendants. Borrowed endpoints, SSH execution and non-Linux switching do not gain a fictional shutdown guarantee. Existing OpenCode operation on those platforms remains available, but cross-harness switching requires a supported release proof. Python 3 is an execution-supervision dependency on Linux; `POLYTH_PYTHON_BIN` can select its executable.
+This proof covers owned local process descendants. Borrowed endpoints, SSH execution and non-Linux switching do not gain a fictional shutdown guarantee. Existing OpenCode operation on those platforms remains available, but cross-harness switching requires a supported release proof. The bundled supervisor is Linux-specific; no equivalent release proof is claimed on macOS or Windows.
 
 ## Exactly what continuity transfers
 

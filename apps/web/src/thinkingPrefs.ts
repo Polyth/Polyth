@@ -1,8 +1,13 @@
-// Per-model reasoning-effort choices. These are a local UI preference rather
-// than session state: selecting a model should restore its last effort across
-// sessions and reloads, without creating a model-visible event.
+// Per-model reasoning-effort choices. These are a browser-local account
+// preference rather than session state: selecting a model restores its last
+// effort across sessions and reloads without crossing account boundaries.
 import type { ModelDescriptor, ModelRef } from "@polyth/contracts";
 import { resolveVariantPreference } from "@polyth/contracts";
+import {
+  accountStorageGet,
+  accountStorageRemove,
+  accountStorageSet,
+} from "./accountStorage.ts";
 
 export const THINKING_PREFS_KEY = "polyth.thinkingPrefs.v2";
 
@@ -56,11 +61,7 @@ export function serializeThinkingPrefs(prefs: ThinkingPrefs): string {
   ));
 }
 
-function read(): ThinkingPrefs {
-  try { return parseThinkingPrefs(localStorage.getItem(THINKING_PREFS_KEY)); } catch { return {}; }
-}
-
-let prefs = read();
+let prefs = parseThinkingPrefs(accountStorageGet(THINKING_PREFS_KEY));
 
 export function getModelThinking(model?: ThinkingModelRef): string | undefined {
   return model ? prefs[thinkingModelKey(model)] : undefined;
@@ -76,10 +77,6 @@ export function setModelThinking(
   if (effort) next[key] = effort;
   else delete next[key];
   prefs = next;
-  try {
-    if (Object.keys(prefs).length === 0) localStorage.removeItem(THINKING_PREFS_KEY);
-    else localStorage.setItem(THINKING_PREFS_KEY, serializeThinkingPrefs(prefs));
-  } catch {
-    // private mode / quota — selecting an effort must still work this turn
-  }
+  if (Object.keys(prefs).length === 0) accountStorageRemove(THINKING_PREFS_KEY);
+  else accountStorageSet(THINKING_PREFS_KEY, serializeThinkingPrefs(prefs));
 }

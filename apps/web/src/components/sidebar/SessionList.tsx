@@ -44,6 +44,10 @@ import { useShellMode } from "../../responsiveShell.ts";
 
 const INITIAL_VISIBLE_SESSIONS = 6;
 const INLINE_LABEL_LIMIT = 6;
+const isManagedIsolationBranch = (branch: string | null | undefined): boolean =>
+  branch?.startsWith("polyth/isolate/") === true;
+const isIsolatedSession = (session: Pick<SessionProjection, "isolation" | "branch">): boolean =>
+  session.isolation?.kind === "git-worktree" || isManagedIsolationBranch(session.branch);
 
 export function sessionActivityLabel(
   s: Pick<SessionProjection, "createdAt" | "lastTurnAt" | "updatedAt" | "status" | "attention">,
@@ -252,7 +256,6 @@ function SessionRow({
   };
 
   const performDelete = () => {
-    if (s.isolation) return;
     const label = s.title || tr("sidebar.sessionlist.session");
     void deleteSession(s.id)
       .then(() => {
@@ -278,7 +281,6 @@ function SessionRow({
   // Shift-hover quick delete: deliberate (modifier held), so it skips the
   // confirmation unless the session is still active.
   const shiftQuickDelete = async () => {
-    if (s.isolation) return;
     if (needsDestructiveConfirm(s)) {
       const label = s.title || tr("sidebar.sessionlist.session");
       const activity = ` ${tr("sidebar.sessionlist.theAgentIsStillRunningOr")}`;
@@ -350,12 +352,11 @@ function SessionRow({
       }));
   const menuEntries: MenuEntry[] = [
     { id: "rename", label: tr("common.rename"), onSelect: () => { setTitle(s.title); setRenaming(true); } },
-    {
+    ...(!s.isolation ? [{
       id: "fork",
-      disabled: !!s.isolation,
       label: tr("sidebar.sessionlist.fork"),
       onSelect: () => void forkSession(s.id).catch((e) => setUiError(friendlyError(tr("common.error"), e))),
-    },
+    } satisfies MenuEntry] : []),
     { id: "copy-id", label: tr("sidebar.sessionlist.copySessionId"), onSelect: () => void copySessionId() },
     {
       id: "pin",
@@ -370,7 +371,9 @@ function SessionRow({
           onSelect: () => void restoreSession(s.id).then(onChanged).catch((e) => setUiError(friendlyError(tr("common.error"), e))),
         }
       : { id: "archive", label: tr("common.archive"), onSelect: () => void quickArchive() },
-    { id: "delete", label: s.isolation ? tr("isolation.finishBeforeDelete") : tr("common.delete"), disabled: !!s.isolation, danger: true, onSelect: () => void quickDelete() },
+    ...(!s.isolation
+      ? [{ id: "delete", label: tr("common.delete"), danger: true, onSelect: () => void quickDelete() } satisfies MenuEntry]
+      : []),
     ...(labels.length > 0 ? [{ heading: tr("sidebar.sessionlist.labels") }] : []),
     ...labelEntries,
   ];
@@ -477,6 +480,10 @@ function SessionRow({
                 {pinnedWorktreeLabel.length <= 12 && <span>{pinnedWorktreeLabel}</span>}
               </span>
             )}
+            <SlotHost
+              slot="session.list.badges"
+              context={{ sessionId: s.id, questions: s.attention?.questions ?? 0, permissions: s.attention?.permissions ?? 0 }}
+            />
           </span>
           {contextLabel && <span className="session-search-context">{contextLabel}</span>}
           <span className="session-status-zone">
@@ -493,10 +500,6 @@ function SessionRow({
             {!opening && (rowStatus.kind === "regular" || rowStatus.kind === "unread") && activityLabel && (
               <span className="session-time">{activityLabel}</span>
             )}
-            <SlotHost
-              slot="session.list.badges"
-              context={{ sessionId: s.id, questions: s.attention?.questions ?? 0, permissions: s.attention?.permissions ?? 0 }}
-            />
           </span>
         </button>
       )}
@@ -589,13 +592,12 @@ function SessionRow({
               onClick={quickArchive}
             ><Icon.download /></button>
           )}
-          <button
+          {!s.isolation && <button
             className="session-quick-btn danger"
-            disabled={!!s.isolation}
-            title={s.isolation ? tr("isolation.finishBeforeDelete") : tr("sidebar.sessionlist.deleteValue", { value: s.title || tr("sidebar.sessionlist.session") })}
+            title={tr("sidebar.sessionlist.deleteValue", { value: s.title || tr("sidebar.sessionlist.session") })}
             aria-label={tr("sidebar.sessionlist.deleteValue", { value: s.title || tr("sidebar.sessionlist.session") })}
             onClick={shiftQuick && swipeX === null && !swipeRevealed ? shiftQuickDelete : quickDelete}
-          >✕</button>
+          >✕</button>}
         </span>
       )}
     </div>
@@ -720,7 +722,9 @@ export default function SessionList({
   const matchingActive = projectSessions.filter((s) => s.status !== "archived" && matchesFilters(s));
   const mainWorktree = worktrees.find((worktree) => worktree.isMain);
   const worktreeKey = (session: SessionProjection): string =>
-    !session.worktreePath || session.worktreePath === mainWorktree?.path ? "__main__" : session.worktreePath;
+    !session.worktreePath || session.worktreePath === mainWorktree?.path || isIsolatedSession(session)
+      ? "__main__"
+      : session.worktreePath;
   // Pinned chats belong to one project-level section, rather than their
   // individual worktree buckets. This keeps them at the top even when their
   // worktree is collapsed or appears later in the list.
@@ -943,7 +947,12 @@ export default function SessionList({
     <div className="session-org">
       {pinned.length > 0 && (
         <div className="session-pinned" aria-label="Pinned chats">
-          {pinned.map((session) => row(session, true, undefined, worktreeNameForSession(session)))}
+          {pinned.map((session) => row(
+            session,
+            true,
+            undefined,
+            isIsolatedSession(session) ? undefined : worktreeNameForSession(session),
+          ))}
         </div>
       )}
       {mainSessions.length > 0 && (
@@ -953,6 +962,8 @@ export default function SessionList({
       )}
       {worktreeGroups.map((group) => {
         const isCollapsed = collapsed.has(group.key);
+        const managedIsolation = isManagedIsolationBranch(group.worktree?.branch)
+          || group.sessions.some((session) => session.isolation?.kind === "git-worktree");
         return (
           <div key={group.key} className="session-worktree-group" data-worktree={group.key}>
             <div className="session-worktree-head">
@@ -976,7 +987,7 @@ export default function SessionList({
                 <Icon.branch />
                 <span className="session-worktree-name">{group.label}</span>
               </button>
-              <span className="session-worktree-actions">
+              {!managedIsolation && <span className="session-worktree-actions">
                 <button
                   title={tr("sidebar.sessionlist.newSessionInValue", { label: group.label })}
                   aria-label={tr("sidebar.sessionlist.newSessionInValue", { label: group.label })}
@@ -985,7 +996,6 @@ export default function SessionList({
                 {group.worktree && !group.worktree.isMain && (
                   <button
                     className="danger"
-                    disabled={group.sessions.some((session) => !!session.isolation)}
                     title={tr("sidebar.sessionlist.deleteValueWorktreeAndIts", { label: group.label })}
                     aria-label={tr("sidebar.sessionlist.deleteValueWorktreeAndAll", { label: group.label })}
                     onClick={() => {
@@ -996,7 +1006,7 @@ export default function SessionList({
                     }}
                   ><Icon.trash /></button>
                 )}
-              </span>
+              </span>}
             </div>
             {!isCollapsed && (
               <div className="session-worktree-sessions">

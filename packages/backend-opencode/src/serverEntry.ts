@@ -1,9 +1,10 @@
-import type { AgentRuntime, HarnessContext, HarnessRegistry, ModelDescriptor, SpaceContext } from "@polyth/contracts";
+import type { AgentRuntime, HarnessContext, HarnessProvider, HarnessRegistry, ModelDescriptor, SpaceContext } from "@polyth/contracts";
 import {
   localOnlyRemoteAccess,
   serverServiceKey,
   type ServerPackageHost,
 } from "@polyth/plugins";
+import { configureOpenCodeCapabilityDelivery } from "./capabilityDelivery.ts";
 import { createOpenCodeHarness } from "./harness.ts";
 import { createOpenCodeProvisioner } from "./provisioner.ts";
 import type { BackendConfigApplier } from "./config.ts";
@@ -15,6 +16,9 @@ export default function registerPackage(host: ServerPackageHost) {
   const registry = host.services.require(serverServiceKey<HarnessRegistry>("harnesses"));
   const pool = host.services.require(
     serverServiceKey<(context: HarnessContext) => Promise<AgentRuntime>>("opencode.runtime"),
+  );
+  const releaseExecution = host.services.get(
+    serverServiceKey<NonNullable<HarnessProvider["releaseExecution"]>>("opencode.runtime.release-execution"),
   );
   const events = host.services.get(serverServiceKey<{
     onRestart(listener: (runtime: AgentRuntime) => void | Promise<void>): { dispose(): void };
@@ -32,7 +36,12 @@ export default function registerPackage(host: ServerPackageHost) {
     ): import("@polyth/contracts").AvailableProviderDescriptor[];
   }>("models.visibility"));
 
-  const harness = createOpenCodeHarness(pool);
+  const runtime = async (context: HarnessContext): Promise<AgentRuntime> => {
+    const engine = await pool(context);
+    if (!context.remote) configureOpenCodeCapabilityDelivery(engine, context);
+    return engine;
+  };
+  const harness = createOpenCodeHarness(runtime, releaseExecution);
   const applier = host.services.get(serverServiceKey<BackendConfigApplier>("plugins.config"));
   if (applier && typeof applier.applyBehavior === "function" && typeof applier.applyMcp === "function") {
     harness.provisioner = createOpenCodeProvisioner(applier);
@@ -44,6 +53,12 @@ export default function registerPackage(host: ServerPackageHost) {
     runtime: openCodeRuntime,
     invalidateModels: () => catalog?.invalidateModels(),
   });
+  const authRoutes = providerAuthRoutes({
+    auth,
+    runtime: openCodeRuntime,
+    ...(catalog ? { catalog } : {}),
+    ...(visibility ? { visibility } : {}),
+  });
   const restart = events?.onRestart?.(async (runtime) => {
     const endpoint = await runtime.endpoint?.();
     auth.notifyRuntimeChange(endpoint);
@@ -51,12 +66,21 @@ export default function registerPackage(host: ServerPackageHost) {
 
   return {
     remoteAccess: localOnlyRemoteAccess(["backend-opencode"]),
-    routes: providerAuthRoutes({
-      auth,
-      runtime: openCodeRuntime,
-      ...(catalog ? { catalog } : {}),
-      ...(visibility ? { visibility } : {}),
-    }),
+    routes: async (request) => {
+      // OpenCode provider administration must not wait for generic multi-harness
+      // catalog aggregation. Query the host-global OpenCode authority directly.
+      if (request.path === "/api/opencode/providers" && request.method === "GET") {
+        if (request.url.searchParams.get("refresh") === "1") catalog?.invalidateModels();
+        const runtime = await openCodeRuntime(request.space);
+        const models = (await runtime.models()).map((model) => ({
+          ...model,
+          harnessId: "opencode",
+        }));
+        request.json(200, visibility?.catalog(models) ?? []);
+        return true;
+      }
+      return authRoutes(request);
+    },
     onDisable: () => {
       restart?.dispose();
       registration.dispose();

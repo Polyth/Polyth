@@ -62,6 +62,7 @@ body[data-dictate="false"] .mic-control .mic-btn {
 
 @media (pointer: coarse) {
   .mic-control .mic-btn,
+  .mic-control .mic-cancel,
   .mic-control .mic-retry,
   .mic-control .mic-settings {
     min-width: var(--tap);
@@ -88,8 +89,8 @@ body[data-dictate="false"] .mic-control .mic-btn {
     padding: 0;
   }
 
-  /* Dictation inserts into the draft; once text exists the draft owns the
-     compact leading slot and the mic yields until it is cleared. */
+  /* Final dictation inserts into the draft; once text exists the draft owns
+     the compact leading slot and the mic yields until it is cleared. */
   .composer-mobile.composer-has-draft .composer-mobile-extensions .mic-btn {
     display: none;
   }

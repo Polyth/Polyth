@@ -748,6 +748,7 @@ function AssistantAgentHeader({
         <ProviderLogo
           providerID={descriptor?.providerID ?? modelRef?.providerID}
           providerName={descriptor?.providerName}
+          harnessId={descriptor?.harnessId ?? m.harnessId ?? turn?.harnessId}
           className="response-footer-mark"
         />
         <span className="response-footer-model">{modelName}</span>
@@ -1797,6 +1798,8 @@ export default function Timeline({
   // the panel.
   const sessionStatus = useStore((s) =>
     s.activeSessionId === null ? undefined : s.sessions.find((x) => x.id === s.activeSessionId)?.status);
+  const isolated = useStore((s) =>
+    s.activeSessionId !== null && s.sessions.find((x) => x.id === s.activeSessionId)?.isolation?.kind === "git-worktree");
   const sessionActive = sessionStatus === "working" || sessionStatus === "waiting";
   // Paginated hydration caches only the newest window; true while the server
   // still holds events OLDER than the cached window (primitive selector, so
@@ -1839,9 +1842,8 @@ export default function Timeline({
   const revertOk = revertPending
     ? { enabled: false as const, reason: "Revert unavailable while another revert is being applied" }
     : revertAvailability(guards);
-  const isolated = useStore((s) => !!s.sessions.find((x) => x.id === s.activeSessionId)?.isolation);
   const forkOk = isolated
-    ? { enabled: false as const, reason: tr("isolation.nestedUnsupported") }
+    ? { enabled: false as const, reason: "Fork is unavailable while this session is isolated" }
     : forkAvailability(guards);
 
   const visibleMessages = useMemo(() => model.messages.filter((message) => !message.undone && !blankAssistant(message)), [model]);

@@ -53,7 +53,7 @@ export default function WorktreeSessionDialog() {
   }, [request?.projectId, request?.worktreePath]);
 
   const checkedOut = useMemo(
-    () => worktrees.filter((item) => !!item.branch),
+    () => worktrees.filter((item) => !!item.branch && !item.branch.startsWith("polyth/isolate/")),
     [worktrees],
   );
 

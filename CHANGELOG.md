@@ -294,16 +294,17 @@ commits, and the L-queue packages started landing.
 
 ### Added — L12: server auto-accept and web push notifications (F18)
 
-- Per-session auto-accept policy owned by the server (OC#2158): `on`, `off`,
+- Per-session auto-accept policy owned by the canonical session (OC#2158): `on`, `off`,
   or `inherit` (the default), resolved to the nearest ancestor with an
   explicit setting — subagents inherit, a child's `off` opts out, the root
-  default is off, never global. Explicit choices persist in
-  `data/auto-accept.json`; GET/PATCH
+  default is off, never global. Explicit choices persist on the session
+  projection (older `data/auto-accept.json` entries migrate once); GET/PATCH
   `/api/sessions/:id/permissions/auto-accept`.
-- Policy-approved requests append `permission/requested` +
-  `permission/resolved{reply:"once", auto:true}` back-to-back, so the event
-  log stays truthful while no banner or notification ever fires; deny rules
-  still win. Enabling reconciles already-pending requests and returns the
+- Policy-approved requests persist `permission/requested`, a durable response
+  intent, and `permission/resolved{reply:"once", auto:true}` without publishing
+  an actionable request, so the event log stays truthful while no banner or
+  notification fires; deny rules still win. Enabling reconciles already-pending
+  live or reconnected requests and returns the
   session to `working`; composer-shell confirmations stay manual. A loud
   pulsing header chip shows while the effective policy is on.
 - Web push (OC#944/OC#199): VAPID (RFC 8292) + aes128gcm payload encryption

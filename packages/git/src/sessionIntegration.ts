@@ -5,18 +5,17 @@
 // - one immutable origin: repo + local targetBranch + originPath checkout + baseCommit
 // - after merge/discard, session.branch, cwd, runtime cwd, and checked-out branch agree
 // - a result commit is never published twice
-// - destructive cleanup runs only when durable isolation is cleanup-pending && rebound
+// - destructive cleanup runs only after rebind durably reaches cleanup-pending
 //   AND the session workspace is the origin checkout — never "not source anymore"
 // - user-owned worktrees are never deleted (session-specific marker + branch prefix)
 // - one mutating lifecycle op per session; one ref publication per repo+branch
 // - GET status is observational; recovery is a write path
 // - integration worktrees are pruned only for that session
-// - target + receipt updates are atomic and use expected-old-SHA
+// - target updates use expected-old-SHA / ff-only
 // - conflicts happen in a detached integration worktree, never the user checkout
 // - restart never treats ambiguous irreversible work as "not done"
-// - after publication, failures retain a resumable publication/rebind/cleanup phase
+// - after publication, failures are finalization-pending, not "merge failed"
 import { existsSync } from "node:fs";
-import { isDeepStrictEqual } from "node:util";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type {
@@ -33,24 +32,39 @@ import type {
   SessionProjection,
   SessionRef,
 } from "@polyth/contracts";
-import { isolationBlocksUserMutation, isolationNeedsRecovery, normalizeIsolation, transitionIsolation, isManagedIsolationBranch } from "@polyth/contracts";
+import {
+  isolationBlocksUserMutation,
+  isolationNeedsRecovery,
+  normalizeIsolation as normalizeIsolationContract,
+  transitionIsolation as transitionIsolationContract,
+} from "@polyth/contracts";
 import { buildLocalConflictResolutionPrompt, type GitService } from "./index.ts";
 import {
   createManagedWorktrees,
+  isolateBranchName,
   isManagedBranch,
   readManagedMarker,
   type ManagedWorktreeService,
 } from "./managedWorktrees.ts";
 
-const MAX_PUBLISH_RETRIES = 3;
+const MAX_PUBLISH_RETRIES = 8;
 const SNAPSHOT_MESSAGE = "polyth: snapshot isolated workspace";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 const USER_OPS = {
   keep: new Set<IsolationState>(["active", "merge-ready", "conflict"]),
   merge: new Set<IsolationState>(["active", "merge-ready", "conflict"]),
   resolve: new Set<IsolationState>(["conflict"]),
   discard: new Set<IsolationState>(["active", "merge-ready", "conflict", "missing"]),
+} as const;
+
+const NO_ACTIONS = {
+  canReview: false,
+  canMerge: false,
+  canKeep: false,
+  canResolve: false,
+  canDiscard: false,
+  canRecover: false,
+  canAbandon: false,
 } as const;
 
 export const isolationLog = (event: string, data: JsonObject): void => {
@@ -121,8 +135,11 @@ const lastCompletedTurn = (events: readonly SessionEvent[]): SessionEvent | unde
   return undefined;
 };
 
-const isolationOf = (session: SessionProjection): SessionIsolation | null =>
-  session.isolation?.kind === "git-worktree" ? normalizeIsolation(session.isolation) : null;
+const isolationOf = (session: SessionProjection): SessionIsolation | null => {
+  const value = session.isolation;
+  if (!value || typeof value !== "object" || value.kind !== "git-worktree") return null;
+  return normalizeIsolationContract(value);
+};
 
 const targetRefName = (branch: string): string =>
   branch.startsWith("refs/") ? branch : `refs/heads/${branch.replace(/^refs\/heads\//, "")}`;
@@ -134,6 +151,38 @@ const samePath = (a: string, b: string): boolean => resolve(a) === resolve(b);
 
 const shortSha = (sha: string): string => sha.slice(0, 7);
 
+type IsolationTransition =
+  | { phase: "active" | "merge-ready" | "missing" | "unowned" | "corrupt"; dismissedRevision?: string }
+  | { phase: "conflict"; conflict: { message: string; files: string[] } }
+  | { phase: "publishing"; publish: IsolationPublishIntent }
+  | { phase: "rebind-pending" | "cleanup-pending"; resultCommit?: string; sourceSnapshotSha?: string };
+
+/** Adapter for the package's phase vocabulary. The contracts helper is the
+ * only constructor for newly persisted lifecycle states. */
+const transitionIsolation = (
+  isolation: SessionIsolation,
+  transition: IsolationTransition,
+): SessionIsolation => {
+  if (transition.phase === "conflict") {
+    return transitionIsolationContract(isolation, { state: "conflict", conflict: transition.conflict });
+  }
+  if (transition.phase === "publishing") {
+    return transitionIsolationContract(isolation, { state: "publishing", publish: transition.publish });
+  }
+  if (transition.phase === "rebind-pending" || transition.phase === "cleanup-pending") {
+    return transitionIsolationContract(isolation, {
+      state: transition.phase,
+      ...(transition.resultCommit ? { resultCommit: transition.resultCommit } : {}),
+      ...(transition.sourceSnapshotSha ? { sourceSnapshotSha: transition.sourceSnapshotSha } : {}),
+    });
+  }
+  return transitionIsolationContract(isolation, {
+    state: transition.phase,
+    ...("dismissedRevision" in transition && transition.dismissedRevision
+      ? { dismissedRevision: transition.dismissedRevision }
+      : {}),
+  });
+};
 
 const sessionLocks = createKeyedLock();
 const branchLocks = createKeyedLock();
@@ -162,9 +211,6 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     if (!deps.sessions.patchIsolation) throw err("unsupported", "session isolation persistence is unavailable");
     return deps.sessions.patchIsolation(sessionId, isolation);
   };
-
-  const branchKey = async (isolation: SessionIsolation): Promise<string> =>
-    `${await git.commonDir(isolation.targetPath)}::${localBranchName(isolation.targetBranch)}`;
 
   const projectOf = async (projectId: string) => {
     const project = await deps.projects.get(projectId);
@@ -197,14 +243,16 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
   const resolveOriginCheckout = async (
     project: { id: string; path: string },
     input: CreateIsolatedSessionInput,
-  ): Promise<{ branch: string; originPath: string; head: string; sourceSessionId?: string }> => {
+  ): Promise<{ branch: string; originPath: string; head: string; startPoint: string; sourceSessionId?: string }> => {
     let source: SessionProjection | undefined;
     if (input.sourceSessionId) {
       source = await deps.sessions.snapshot(input.sourceSessionId).catch(() => undefined);
       if (!source) throw err("not-found", "source session was not found");
-      if (source.isolation) throw err("invalid-input", "Nested isolation is not supported. Return the source session first.");
       if (source.projectId !== project.id) {
         throw err("invalid-input", "source session does not belong to this project");
+      }
+      if (isolationOf(source)) {
+        throw err("invalid-input", "nested session isolation is not supported");
       }
     }
     const list = await git.worktrees.list(project.path);
@@ -215,8 +263,10 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         "Work in isolation needs a local checkout of that branch. Check it out first.",
       );
     }
-    if (isManagedIsolationBranch(requested)) throw err("invalid-input", "Managed isolation branches cannot be isolation origins.");
     const wanted = requested ? localBranchName(requested) : undefined;
+    if (wanted && isManagedBranch(wanted)) {
+      throw err("invalid-input", "managed isolation branches cannot be used as an origin");
+    }
     const sourceCwd = source?.worktreePath ?? (wanted ? undefined : project.path);
     const fromPath = sourceCwd
       ? list.find((item) => samePath(item.path, sourceCwd))
@@ -228,13 +278,15 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     if (!checkout?.branch) {
       throw err("invalid-input", "Work in isolation needs a checkout of a local branch.");
     }
+    if (isManagedBranch(checkout.branch)) {
+      throw err("invalid-input", "managed isolation branches cannot be used as an origin");
+    }
     if (wanted && checkout.branch !== wanted) {
       throw err(
         "invalid-input",
         `Work in isolation needs a checkout of ${wanted}.`,
       );
     }
-    if (isManagedIsolationBranch(checkout.branch)) throw err("invalid-input", "Managed isolation branches cannot be isolation origins.");
     const originPath = resolve(checkout.path);
     const head = await git.revParse(originPath, "HEAD");
     const sourceCwdResolved = source ? resolve(source.worktreePath ?? project.path) : undefined;
@@ -242,19 +294,56 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       branch: checkout.branch,
       originPath,
       head,
+      startPoint: checkout.branch,
       ...(source && sourceCwdResolved && samePath(sourceCwdResolved, originPath)
         ? { sourceSessionId: source.id }
         : {}),
     };
   };
 
+  const checkoutMatchesTarget = async (
+    path: string,
+    branch: string,
+    isolation: SessionIsolation,
+  ): Promise<boolean> => {
+    if (!existsSync(path)) return false;
+    try {
+      if ((await git.branches(path)).current !== branch) return false;
+      return samePath(await git.commonDir(path), await git.commonDir(isolation.targetPath));
+    } catch {
+      return false;
+    }
+  };
+
   const inspectTarget = async (isolation: SessionIsolation) => {
     const branch = localBranchName(isolation.targetBranch);
     const list = await git.worktrees.list(isolation.targetPath);
     const preferred = isolation.originPath
-      ? list.find((item) => samePath(item.path, isolation.originPath!) && item.branch === branch)
+      ? list.find((item) => samePath(item.path, isolation.originPath!))
       : undefined;
-    const checkout = preferred ?? list.find((item) => item.branch === branch) ?? null;
+    if (isolation.originPath && preferred?.branch !== branch) {
+      throw err(
+        "conflict",
+        `origin workspace for ${isolation.targetBranch} is not checked out at ${isolation.originPath}`,
+      );
+    }
+    // A recorded origin is immutable. Never silently publish through another
+    // checkout if it disappears between admission and compare-and-swap.
+    const checkout = isolation.originPath
+      ? preferred ?? null
+      : list.find((item) => item.branch === branch) ?? null;
+    if (isolation.originPath && !checkout) {
+      throw err(
+        "conflict",
+        `origin workspace for ${isolation.targetBranch} is not checked out at ${isolation.originPath}`,
+      );
+    }
+    if (checkout && !await checkoutMatchesTarget(checkout.path, branch, isolation)) {
+      throw err(
+        "conflict",
+        `origin workspace for ${isolation.targetBranch} is not the recorded repository checkout`,
+      );
+    }
     const liveHead = checkout
       ? await git.revParse(checkout.path, "HEAD")
       : await git.revParse(isolation.targetPath, branch);
@@ -273,7 +362,8 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     const branch = localBranchName(isolation.targetBranch);
     if (isolation.originPath) {
       const origin = list.find((item) => samePath(item.path, isolation.originPath!));
-      if (origin?.branch === branch && existsSync(origin.path) && (await git.branches(origin.path)).current === branch) {
+      if (origin?.branch === branch
+        && await checkoutMatchesTarget(origin.path, branch, isolation)) {
         return { path: resolve(origin.path), isProjectRoot: samePath(origin.path, projectRoot) };
       }
       throw err(
@@ -282,7 +372,7 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       );
     }
     const checkout = list.find((item) => item.branch === branch);
-    if (!checkout || !existsSync(checkout.path)) {
+    if (!checkout || !await checkoutMatchesTarget(checkout.path, branch, isolation)) {
       throw err("conflict", `no checkout of ${isolation.targetBranch} to return this session to`);
     }
     return { path: resolve(checkout.path), isProjectRoot: samePath(checkout.path, projectRoot) };
@@ -295,8 +385,18 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     const isolation = isolationOf(session);
     if (!isolation) return null;
     const targetBranch = isolation.targetBranch;
-    if (["missing", "unowned", "corrupt"].includes(isolation.state)) {
-      return { eligible: false, hasChanges: false, targetBranch, targetDirty: false, revision: "", reason: isolation.state as "missing" | "unowned" | "corrupt" };
+    if (isolation.state === "missing") {
+      return { eligible: false, hasChanges: false, targetBranch, targetDirty: false, revision: "", reason: "missing" };
+    }
+    if (isolation.state === "unowned" || isolation.state === "corrupt") {
+      return {
+        eligible: false,
+        hasChanges: false,
+        targetBranch,
+        targetDirty: false,
+        revision: "",
+        reason: isolation.state,
+      };
     }
     if (isolationNeedsRecovery(isolation.state)) {
       return { eligible: false, hasChanges: true, targetBranch, targetDirty: false, revision: "", reason: "merging" };
@@ -304,8 +404,20 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     if (isolationBlocksUserMutation(session.status)) {
       return { eligible: false, hasChanges: false, targetBranch, targetDirty: false, revision: "", reason: "working" };
     }
-    const problem = await sourceState(session.id, isolation);
-    if (problem) return { eligible: false, hasChanges: false, targetBranch, targetDirty: false, revision: "", reason: problem };
+    const source = await inspectSource(session.id, isolation);
+    if (source.status === "missing") {
+      return { eligible: false, hasChanges: false, targetBranch, targetDirty: false, revision: "", reason: "missing" };
+    }
+    if (source.status === "unowned") {
+      return {
+        eligible: false,
+        hasChanges: false,
+        targetBranch,
+        targetDirty: false,
+        revision: "",
+        reason: source.reason === "marker-corrupt" ? "corrupt" : "unowned",
+      };
+    }
     const revision = await git.fingerprint(isolation.worktreePath);
     let targetHead = isolation.baseCommit;
     try { targetHead = await git.revParse(isolation.targetPath, isolation.targetBranch); } catch { /* keep base */ }
@@ -316,9 +428,6 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       checkout: null,
       path: isolation.targetPath,
     }));
-    try { await destinationFor(session, isolation); } catch {
-      return { eligible: false, hasChanges, targetBranch, targetDirty: target.dirty, revision, reason: "destination-unavailable" };
-    }
     if (!hasChanges) {
       return { eligible: false, hasChanges: false, targetBranch, targetDirty: target.dirty, revision, reason: "no-changes" };
     }
@@ -333,8 +442,7 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       const reason = stopped?.data && typeof stopped.data === "object"
         ? (stopped.data as { reason?: unknown }).reason
         : undefined;
-      if (events && stopped?.type === "turn/stopped" && reason === "completed"
-        && stopped.seq > (events.findLast((event) => event.type === "isolation/conflict")?.seq ?? 0)) {
+      if (events && stopped?.type === "turn/stopped" && reason === "completed") {
         return { eligible: true, hasChanges: true, targetBranch, targetDirty: false, revision };
       }
       return {
@@ -364,12 +472,13 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     isolation: SessionIsolation,
     suggestion: IsolationSuggestionDto | null,
   ): IsolationState => {
-    if (suggestion?.eligible) return "merge-ready";
     if (isolation.state === "merge-ready" && suggestion?.reason === "no-changes") return "active";
     if (
       (isolation.state === "active" || isolation.state === "merge-ready" || isolation.state === "conflict")
-      && (suggestion?.reason === "missing" || suggestion?.reason === "unowned" || suggestion?.reason === "corrupt")
-    ) return suggestion.reason;
+      && suggestion?.reason === "missing"
+    ) return "missing";
+    if (suggestion?.reason === "corrupt") return "corrupt";
+    if (suggestion?.reason === "unowned") return "unowned";
     return isolation.state;
   };
 
@@ -381,35 +490,71 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
   const ownedRef = (sessionId: string, isolation: SessionIsolation) => ({
     sessionId,
     worktreePath: isolation.worktreePath,
-    worktreeBranch: isolation.worktreeBranch,
+    worktreeBranch: isolation.worktreeBranch || isolateBranchName(sessionId),
     targetPath: isolation.targetPath,
     targetBranch: isolation.targetBranch,
     baseCommit: isolation.baseCommit,
   });
 
-  const sourceState = async (sessionId: string, isolation: SessionIsolation) => {
-    const result = await managed.inspectOwned(isolation.targetPath, ownedRef(sessionId, isolation));
-    if (result.status === "owned") return null;
-    if (result.status === "missing") return "missing" as const;
-    return result.reason === "marker-corrupt" ? "corrupt" as const : "unowned" as const;
+  const inspectSource = (sessionId: string, isolation: SessionIsolation) =>
+    managed.inspectOwned(isolation.targetPath, ownedRef(sessionId, isolation));
+
+  const assertOwnedSource = async (sessionId: string, isolation: SessionIsolation) => {
+    const inspection = await inspectSource(sessionId, isolation);
+    if (inspection.status === "owned") return inspection.worktree;
+    if (inspection.status === "missing") {
+      throw err("not-found", "the isolated workspace is no longer available");
+    }
+    throw err(
+      "conflict",
+      `refusing to use an isolated workspace whose ownership is not proven (${inspection.reason})`,
+    );
   };
 
-  const assertSource = async (sessionId: string, isolation: SessionIsolation, allowMissing = false) => {
-    const problem = await sourceState(sessionId, isolation);
-    if (problem && !(allowMissing && problem === "missing")) {
-      throw err(problem === "missing" ? "not-found" : "conflict", `isolated workspace is ${problem}; ownership must be restored before continuing`);
+  const sourceRequiresPreservation = async (
+    isolation: SessionIsolation,
+    source: Awaited<ReturnType<typeof inspectSource>>,
+  ): Promise<boolean> => {
+    if (source.status !== "owned") return true;
+    if (!isolation.sourceSnapshotSha) return false;
+    try {
+      return !(await git.workingTreeMatches(isolation.worktreePath, isolation.sourceSnapshotSha));
+    } catch {
+      // An explicit abandonment is non-destructive. If the source cannot be
+      // compared reliably, preserving it is safer than leaving the canonical
+      // session permanently wedged in cleanup-pending.
+      return true;
     }
+  };
+
+  const sourceDependents = async (
+    sessionId: string,
+    isolation: SessionIsolation,
+  ): Promise<SessionProjection[]> => {
+    const dependents: SessionProjection[] = [];
+    for (const candidate of await deps.sessions.list()) {
+      if (candidate.id === sessionId) continue;
+      const project = candidate.worktreePath
+        ? undefined
+        : await deps.projects.get(candidate.projectId);
+      const cwd = candidate.worktreePath ?? project?.path;
+      if ((cwd && samePath(cwd, isolation.worktreePath))
+        || (candidate.runtimeBinding?.location.directory
+          && samePath(candidate.runtimeBinding.location.directory, isolation.worktreePath))) {
+        dependents.push(candidate);
+      }
+    }
+    return dependents;
   };
 
   const finishCleanup = async (sessionId: string): Promise<SessionProjection> => {
     const session = await deps.sessions.snapshot(sessionId);
     const isolation = isolationOf(session);
     if (!isolation) return session;
-    if (isolation.state !== "cleanup-pending" || isolation.rebound !== true) {
+    if (isolation.state !== "cleanup-pending") {
       isolationLog("cleanup-skipped", {
         sessionId,
         state: isolation.state,
-        rebound: false,
       });
       return session;
     }
@@ -448,19 +593,33 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       worktreePath: isolation.worktreePath,
     });
     if (deps.testHooks?.beforeCleanup) await deps.testHooks.beforeCleanup();
+    const ownership = await inspectSource(session.id, isolation).catch(() => ({ status: "missing" as const }));
+    if (ownership.status !== "owned") {
+      isolationLog("cleanup-unowned", {
+        sessionId: session.id,
+        worktreePath: isolation.worktreePath,
+        reason: ownership.status === "missing" ? "missing" : ownership.reason,
+        retained: true,
+      });
+      // Discard is an explicit abandonment action. Rebind the canonical
+      // session, preserve every unproven path/ref, then release the unusable
+      // isolation record. Published merges keep cleanup-pending so their
+      // incomplete cleanup remains explicit and retryable.
+      if (!isolation.resultCommit) return persist(session.id, null);
+      return session;
+    }
+    const dependents = await sourceDependents(session.id, isolation);
+    if (dependents.length) {
+      isolationLog("cleanup-failed", {
+        sessionId: session.id,
+        reason: "source-has-dependent-sessions",
+        dependentSessionIds: dependents.map((candidate) => candidate.id).join(","),
+        worktreePath: isolation.worktreePath,
+        retained: true,
+      });
+      return session;
+    }
     try {
-      await assertSource(session.id, isolation, true);
-      for (const other of await deps.sessions.list()) {
-        if (other.id === session.id) continue;
-        const otherCwd = other.worktreePath ?? (await deps.projects.get(other.projectId))?.path;
-        if (otherCwd && samePath(otherCwd, isolation.worktreePath)) {
-          throw err("conflict", "another session still uses the isolated workspace");
-        }
-      }
-      if (isolation.sourceRevision && existsSync(isolation.worktreePath)
-        && await git.fingerprint(isolation.worktreePath) !== isolation.sourceRevision) {
-        throw err("conflict", "isolated workspace changed after the operation; preserve and review the new work before cleanup");
-      }
       await closeProcesses(isolation.worktreePath);
     } catch (error) {
       isolationLog("cleanup-failed", {
@@ -470,9 +629,16 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       });
       return session;
     }
-    if (isolation.sourceRevision && existsSync(isolation.worktreePath)
-      && await git.fingerprint(isolation.worktreePath) !== isolation.sourceRevision) {
-      isolationLog("cleanup-failed", { sessionId, reason: "source-changed-during-process-close" });
+    // Process shutdown may flush buffered output. Compare only after every
+    // Polyth-owned writer is closed, immediately before managed deletion.
+    if (isolation.sourceSnapshotSha
+      && !(await git.workingTreeMatches(isolation.worktreePath, isolation.sourceSnapshotSha))) {
+      isolationLog("cleanup-failed", {
+        sessionId: session.id,
+        reason: "source-changed-after-snapshot",
+        worktreePath: isolation.worktreePath,
+        retained: true,
+      });
       return session;
     }
     const result = await managed.removeOwned(project.path, ownedRef(session.id, isolation));
@@ -482,7 +648,11 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         reason: result.reason,
         worktreePath: isolation.worktreePath,
       });
-      return persist(session.id, transitionIsolation(isolation, { state: "cleanup-pending", rebound: true, ...(isolation.resultCommit ? { resultCommit: isolation.resultCommit } : {}), ...(isolation.sourceRevision ? { sourceRevision: isolation.sourceRevision } : {}) }));
+      return persist(session.id, transitionIsolation(isolation, {
+        phase: "cleanup-pending",
+        ...(isolation.resultCommit ? { resultCommit: isolation.resultCommit } : {}),
+        ...(isolation.sourceSnapshotSha ? { sourceSnapshotSha: isolation.sourceSnapshotSha } : {}),
+      }));
     }
     await managed.pruneIntegrationsForSession(project.path, session.id).catch((error: unknown) => {
       isolationLog("cleanup-failed", {
@@ -530,13 +700,60 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     }
   };
 
-  const publicationState = async (isolation: SessionIsolation, intent: IsolationPublishIntent) => {
+  const continueAfterPublish = async (
+    session: SessionProjection,
+    isolation: SessionIsolation,
+    resultCommit: string,
+    sourceSnapshotSha: string,
+  ): Promise<SessionProjection> => {
+    const pending = transitionIsolation(isolation, { phase: "rebind-pending", resultCommit, sourceSnapshotSha });
+    let current = await persist(session.id, pending);
+    try {
+      const cleanup = transitionIsolation(pending, { phase: "cleanup-pending", resultCommit, sourceSnapshotSha });
+      current = await rebindToTarget(current, isolation, cleanup);
+    } catch (error) {
+      isolationLog("session-rebind-failed", {
+        sessionId: session.id,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return deps.sessions.snapshot(session.id);
+    }
+    await notice(session.id, "isolation/merged", {
+      targetBranch: isolation.targetBranch,
+      commit: resultCommit,
+    });
+    return finishCleanup(session.id);
+  };
+
+  const publicationBindingError = (
+    session: SessionProjection,
+    isolation: SessionIsolation,
+  ): string | null => {
+    const intent = isolation.publish;
+    if (!intent?.receiptRef) return null;
+    if (intent.receiptRef !== `refs/polyth/isolation/${session.id}`) {
+      return "publication receipt does not belong to this session";
+    }
+    if (isolation.originPath && !samePath(intent.checkoutPath!, isolation.originPath)) {
+      return "publication checkout does not match the immutable origin";
+    }
+    return null;
+  };
+
+  const publicationState = async (
+    sessionId: string,
+    isolation: SessionIsolation,
+    intent: IsolationPublishIntent,
+  ) => {
     if (intent.receiptRef) {
+      if (intent.receiptRef !== `refs/polyth/isolation/${sessionId}`) return "unknown" as const;
       try {
         const receipt = await git.readRef(isolation.targetPath, intent.receiptRef);
         if (receipt === null) return "unpublished" as const;
         return receipt === intent.resultCommit ? "published" as const : "unknown" as const;
-      } catch { return "unknown" as const; }
+      } catch {
+        return "unknown" as const;
+      }
     }
     let live: string;
     try {
@@ -546,42 +763,65 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     }
     if (live === intent.resultCommit) return "published" as const;
     if (await git.isAncestor(isolation.targetPath, intent.resultCommit, live)) return "published" as const;
-    if (live === intent.expectedTargetSha) return "unknown" as const; // legacy records have no atomic non-publication proof
+    // Legacy records have no atomic receipt, so a target reset to the old SHA
+    // is indistinguishable from a publication that never happened.
+    if (live === intent.expectedTargetSha) return "unknown" as const;
     return "target-moved" as const;
   };
 
+  const assertPublicationBinding = async (
+    session: SessionProjection,
+    isolation: SessionIsolation,
+  ): Promise<void> => {
+    const intent = isolation.publish;
+    if (!intent?.receiptRef) return;
+    const bindingError = publicationBindingError(session, isolation);
+    if (bindingError) throw err("corrupt-isolation", bindingError);
+    const destination = await destinationFor(session, isolation);
+    if (!samePath(intent.checkoutPath!, destination.path)) {
+      throw err("corrupt-isolation", "publication checkout does not match the verified destination");
+    }
+  };
+
   const recoverMerging = async (session: SessionProjection, isolation: SessionIsolation): Promise<SessionProjection> => {
+    await assertPublicationBinding(session, isolation);
+    await managed.pruneIntegrationsForSession(isolation.targetPath, session.id).catch((error: unknown) => {
+      isolationLog("cleanup-failed", {
+        sessionId: session.id,
+        stage: "integrations",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    });
     if (!isolation.publish) {
-      return persist(session.id, transitionIsolation(isolation, { state: "merge-ready" }));
+      isolationLog("recovery", { sessionId: session.id, merging: "abandoned-before-publish" });
+      return persist(session.id, transitionIsolation(isolation, { phase: "merge-ready" }));
     }
-    if (isolation.publish.targetRef !== targetRefName(isolation.targetBranch)
-      || (isolation.publish.receiptRef && isolation.publish.receiptRef !== `refs/polyth/isolation/${session.id}`)
-      || (isolation.publish.checkoutPath && !samePath(isolation.publish.checkoutPath, isolation.originPath ?? isolation.targetPath))) {
-      throw err("conflict", "publication identity is corrupt; automatic recovery is unsafe");
-    }
-    const reality = await publicationState(isolation, isolation.publish);
+    const reality = await publicationState(session.id, isolation, isolation.publish);
     isolationLog("recovery", { sessionId: session.id, merging: reality, resultCommit: isolation.publish.resultCommit });
     if (reality === "published") {
-      await syncPublication(isolation, isolation.publish);
-      const pending = await persist(session.id, transitionIsolation(isolation, { state: "rebind-pending", resultCommit: isolation.publish.resultCommit,
-        ...(isolation.publish.sourceRevision ? { sourceRevision: isolation.publish.sourceRevision } : {}) }));
-      await managed.pruneIntegrationsForSession(isolation.targetPath, session.id);
-      return pending;
+      if (isolation.publish.receiptRef && isolation.publish.checkoutPath) {
+        await git.syncPublishedCheckout(isolation.publish.checkoutPath, {
+          branch: isolation.targetBranch,
+          expectedHead: isolation.publish.expectedTargetSha,
+          resultCommit: isolation.publish.resultCommit,
+        });
+      }
+      return continueAfterPublish(session, isolation, isolation.publish.resultCommit, isolation.publish.snapshotSha);
     }
-    if (reality === "unknown" || reality === "target-moved") return session;
-    await managed.pruneIntegrationsForSession(isolation.targetPath, session.id);
-    return persist(session.id, transitionIsolation(isolation, { state: "merge-ready" }));
+    if (reality === "unknown") return session;
+    return persist(session.id, transitionIsolation(isolation, { phase: "merge-ready" }));
   };
 
   const recoverCleanup = async (session: SessionProjection, isolation: SessionIsolation): Promise<SessionProjection> => {
+    if (isolation.state === "cleanup-pending") return finishCleanup(session.id);
     try {
-      if (isolation.rebound === true) return await finishCleanup(session.id);
-      const rebound = await rebindToTarget(session, isolation, isolation);
-      await persist(session.id, transitionIsolation(isolation, { state: "cleanup-pending", rebound: true, ...(isolation.resultCommit ? { resultCommit: isolation.resultCommit } : {}), ...(isolation.sourceRevision ? { sourceRevision: isolation.sourceRevision } : {}) }));
-      await notice(session.id, isolation.resultCommit ? "isolation/merged" : "isolation/discarded", {
-        targetBranch: isolation.targetBranch, ...(isolation.resultCommit ? { commit: isolation.resultCommit } : {}),
+      const cleanup = transitionIsolation(isolation, {
+        phase: "cleanup-pending",
+        ...(isolation.resultCommit ? { resultCommit: isolation.resultCommit } : {}),
+        ...(isolation.sourceSnapshotSha ? { sourceSnapshotSha: isolation.sourceSnapshotSha } : {}),
       });
-      return await finishCleanup(rebound.id);
+      const rebound = await rebindToTarget(session, isolation, cleanup);
+      return finishCleanup(rebound.id);
     } catch (error) {
       isolationLog("session-rebind-failed", {
         sessionId: session.id,
@@ -593,46 +833,66 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
   };
 
   const recoverSessionLocked = async (session: SessionProjection): Promise<SessionProjection> => {
-    const isolation = isolationOf(session);
+    let isolation = isolationOf(session);
     if (!isolation) return session;
+    // Corruption may encode ambiguous publication evidence. Never rewrite or
+    // activate it merely because the source workspace still looks healthy.
+    if (isolation.state === "corrupt") return session;
+    if (JSON.stringify(session.isolation) !== JSON.stringify(isolation)) {
+      session = await persist(session.id, isolation);
+      isolation = isolationOf(session)!;
+    }
     isolationLog("recovery", {
       sessionId: session.id,
       projectId: session.projectId,
       state: isolation.state,
     });
     if (isolation.state === "merging" || isolation.state === "publishing") {
-      const recovered = await withBranchLock(await branchKey(isolation), () => recoverMerging(session, isolation));
-      const pending = isolationOf(recovered);
-      return pending?.state === "rebind-pending" ? recoverCleanup(recovered, pending) : recovered;
+      return recoverMerging(session, isolation);
     }
-    if (isolation.state === "cleanup-pending" || isolation.state === "rebind-pending") return recoverCleanup(session, isolation);
-    if (isolation.state === "corrupt" && !isDeepStrictEqual(isolation, session.isolation)) return session;
-    const problem = await sourceState(session.id, isolation);
-    if (problem) return persist(session.id, transitionIsolation(isolation, { state: problem }));
-    const active = isolation.state === "missing" || isolation.state === "unowned" || isolation.state === "corrupt"
-      ? transitionIsolation(isolation, { state: "active" }) : isolation;
-    const suggestion = await suggestionFor({ ...session, isolation: active }, await deps.readEvents?.(session.id));
-    const next = suggestion?.eligible ? transitionIsolation(active, { state: "merge-ready" }) : active;
-    if (JSON.stringify(next) !== JSON.stringify(session.isolation)) return persist(session.id, next);
+    if (isolation.state === "rebind-pending" || isolation.state === "cleanup-pending") return recoverCleanup(session, isolation);
+    const ownership = await inspectSource(session.id, isolation).catch(() => ({ status: "missing" as const }));
+    // Resource health is observational. Persisting it would overwrite the
+    // durable lifecycle (especially conflict details) with filesystem state.
+    if (ownership.status === "missing" || ownership.status === "unowned") return session;
+    if (isolation.state === "missing" || isolation.state === "unowned") {
+      return persist(session.id, transitionIsolation(isolation, { phase: "active" }));
+    }
+    if (deps.readEvents && (isolation.state === "active" || isolation.state === "conflict")) {
+      const suggestion = await suggestionFor(session, await deps.readEvents(session.id));
+      if (suggestion?.eligible) {
+        return persist(session.id, transitionIsolation(isolation, { phase: "merge-ready" }));
+      }
+    }
     return session;
   };
 
-  const syncPublication = async (isolation: SessionIsolation, intent: IsolationPublishIntent): Promise<void> => {
-    if (!intent.receiptRef || !intent.checkoutPath) return; // legacy ff-only publication synchronized the checkout
-    await git.syncPublishedCheckout(intent.checkoutPath, {
-      branch: isolation.targetBranch, expectedHead: intent.expectedTargetSha, resultCommit: intent.resultCommit,
-    });
-  };
-
-  const publish = async (isolation: SessionIsolation, intent: IsolationPublishIntent): Promise<"published" | "target-moved"> => {
+  const publish = async (
+    isolation: SessionIsolation,
+    intent: IsolationPublishIntent,
+  ): Promise<"published" | "target-moved"> => {
     const target = await inspectTarget(isolation);
-    if (target.dirty) throw err("conflict", `${isolation.targetBranch} has local changes.`);
+    if (target.dirty) {
+      throw err(
+        "conflict",
+        `${isolation.targetBranch} has local changes. Commit or discard them before integrating this session.`,
+      );
+    }
     if (target.liveHead !== intent.expectedTargetSha) return "target-moved";
-    const published = await git.publishRef(isolation.targetPath, {
-      targetRef: intent.targetRef, expectedHead: intent.expectedTargetSha,
-      newSha: intent.resultCommit, receiptRef: intent.receiptRef!,
+    if (!intent.receiptRef) throw err("corrupt-isolation", "publication receipt is missing");
+    const updated = await git.publishRef(isolation.targetPath, {
+      targetRef: intent.targetRef,
+      expectedHead: intent.expectedTargetSha,
+      newSha: intent.resultCommit,
+      receiptRef: intent.receiptRef,
     });
-    return published ? "published" : "target-moved";
+    if (!updated) return "target-moved";
+    isolationLog("published", {
+      targetBranch: isolation.targetBranch,
+      commit: intent.resultCommit,
+      mode: "atomic-ref-with-receipt",
+    });
+    return "published";
   };
 
   const integrateOnce = async (
@@ -696,9 +956,8 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       const message = session.title?.trim() && session.title !== "New session"
         ? session.title.trim()
         : `Merge isolated session into ${isolation.targetBranch}`;
-      const committed = await managed.snapshot(integrationPath, message);
-      // Keep prepared objects reachable across a crash before/after intent persistence.
-      if (!await git.updateRef(integrationPath, "HEAD", committed.sha, targetHead)) throw err("conflict", "integration HEAD changed");
+      const identity = await git.identity(isolation.targetPath);
+      const committed = await git.commitStagedTree(integrationPath, message, identity);
       const intent: IsolationPublishIntent = {
         expectedTargetSha: targetHead,
         resultCommit: committed.sha,
@@ -708,15 +967,15 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         checkoutPath: (await destinationFor(session, isolation)).path,
         sourceRevision,
       };
-      await persist(session.id, transitionIsolation(isolation, { state: "publishing", publish: intent }));
+      await persist(session.id, transitionIsolation(isolation, { phase: "publishing", publish: intent }));
       if (deps.testHooks?.beforePublish) await deps.testHooks.beforePublish();
-      await assertSource(session.id, isolation);
-      await destinationFor(session, isolation);
-      if (await git.fingerprint(isolation.worktreePath) !== sourceRevision) throw err("conflict", "isolated workspace changed during integration; try again");
+      if (!(await git.workingTreeMatches(isolation.worktreePath, isolatedHead))) {
+        await persist(session.id, transitionIsolation(isolation, { phase: "merge-ready" }));
+        throw err("conflict", "isolated workspace changed after its merge snapshot; review and merge again");
+      }
       const outcome = await publish(isolation, intent);
       if (deps.testHooks?.afterPublish) await deps.testHooks.afterPublish();
       if (outcome === "target-moved") {
-        await persist(session.id, transitionIsolation(isolation, { state: "merging" }));
         isolationLog("target-changed", {
           sessionId: session.id,
           projectId: session.projectId,
@@ -725,12 +984,14 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         });
         return { kind: "retry" };
       }
-      await syncPublication(isolation, intent);
-      await persist(session.id, transitionIsolation(isolation, { state: "rebind-pending", resultCommit: committed.sha, sourceRevision }));
+      await git.syncPublishedCheckout(intent.checkoutPath!, {
+        branch: isolation.targetBranch,
+        expectedHead: intent.expectedTargetSha,
+        resultCommit: intent.resultCommit,
+      });
       return { kind: "merged", sha: committed.sha, expectedHead: targetHead };
     } finally {
-      const current = isolationOf(await deps.sessions.snapshot(session.id));
-      if (current?.state !== "publishing") await managed.discardIntegration(isolation.targetPath, integrationPath, session.id);
+      await managed.discardIntegration(isolation.targetPath, integrationPath, session.id);
     }
   };
 
@@ -743,83 +1004,135 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       const origin = await resolveOriginCheckout(project, input);
       const sessionId = randomUUID();
       if (!UUID_RE.test(sessionId)) throw err("invalid-input", "session id is invalid");
-      const worktree = await managed.create({
-        root: project.path,
-        sessionId,
-        targetBranch: origin.branch,
-        targetPath: project.path,
-        base: origin.head,
-      });
-      const isolation: SessionIsolation = {
-        kind: "git-worktree",
-        state: "active",
-        createdAt: worktree.meta.createdAt,
-        worktreePath: worktree.path,
-        worktreeBranch: worktree.branch,
-        targetPath: resolve(project.path),
-        targetBranch: origin.branch,
-        originPath: origin.originPath,
-        baseCommit: origin.head,
-        ...(origin.sourceSessionId ? { sourceSessionId: origin.sourceSessionId } : {}),
-      };
-      try {
-        const created = await deps.sessions.create({
-          id: sessionId,
-          projectId: project.id,
-          ...(input.harness ? { harness: input.harness } : {}),
-          ...(input.title ? { title: input.title } : {}),
-          ...(input.model ? { model: input.model } : {}),
-          ...(input.agent ? { agent: input.agent } : {}),
-          worktreePath: worktree.path,
-          isolation,
+      return withSession(sessionId, async () => {
+        const worktree = await managed.create({
+          root: project.path,
+          sessionId,
+          targetBranch: origin.branch,
+          targetPath: project.path,
+          base: origin.startPoint,
         });
-        if (created.id !== sessionId) {
-          throw err("conflict", "session identity does not match the managed workspace");
-        }
-        isolationLog("created", {
-          sessionId: created.id,
-          projectId: project.id,
+        const isolation: SessionIsolation = {
+          kind: "git-worktree",
+          state: "active",
+          createdAt: worktree.meta.createdAt,
+          worktreePath: worktree.path,
+          worktreeBranch: worktree.branch,
+          targetPath: resolve(project.path),
           targetBranch: origin.branch,
           originPath: origin.originPath,
           baseCommit: origin.head,
-        });
-        return created;
-      } catch (error) {
-        // Session creation persists canonical identity before native startup.
-        // A failed/unknown startup does not return ownership to this creator.
+          ...(origin.sourceSessionId ? { sourceSessionId: origin.sourceSessionId } : {}),
+        };
         try {
-          const canonical = await deps.sessions.snapshot(sessionId);
-          isolationLog("creation-pending", { sessionId, state: canonical.status, message: String(error) });
-          return { id: canonical.id };
-        } catch (lookupError) {
-          if ((lookupError as { code?: unknown })?.code !== "not-found") {
-            isolationLog("creation-pending", { sessionId, stage: "projection-lookup", message: String(lookupError) });
-            throw error;
-          }
-        }
-        await managed.removeOwned(project.path, ownedRef(sessionId, isolation)).catch((cleanupError: unknown) => {
-          isolationLog("cleanup-failed", {
-            sessionId,
-            stage: "create-rollback",
-            message: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+          const created = await deps.sessions.create({
+            id: sessionId,
+            projectId: project.id,
+            ...(input.harness ? { harness: input.harness } : {}),
+            ...(input.title ? { title: input.title } : {}),
+            ...(input.model ? { model: input.model } : {}),
+            ...(input.agent ? { agent: input.agent } : {}),
+            worktreePath: worktree.path,
+            isolation,
           });
-        });
-        throw error;
-      }
+          if (created.id !== sessionId) {
+            throw err("conflict", "session identity does not match the managed workspace");
+          }
+          isolationLog("created", {
+            sessionId: created.id,
+            projectId: project.id,
+            targetBranch: origin.branch,
+            originPath: origin.originPath,
+            baseCommit: origin.head,
+          });
+          return created;
+        } catch (error) {
+          await managed.removeOwned(project.path, ownedRef(sessionId, isolation)).catch((cleanupError: unknown) => {
+            isolationLog("cleanup-failed", {
+              sessionId,
+              stage: "create-rollback",
+              message: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+            });
+          });
+          throw error;
+        }
+      });
     },
 
     async getStatus(sessionId: string, events?: readonly SessionEvent[]): Promise<IsolationStatusDto> {
       const session = await deps.sessions.snapshot(sessionId);
       const isolation = isolationOf(session);
-      if (!isolation) return { isolation: null, suggestion: null, effectiveState: null };
+      if (!isolation) return { isolation: null, suggestion: null, effectiveState: null, actions: NO_ACTIONS };
       if (isolationNeedsRecovery(isolation.state)) {
-        return { isolation, suggestion: null, effectiveState: isolation.state };
+        if ((isolation.state === "merging" || isolation.state === "publishing")
+          && publicationBindingError(session, isolation)) {
+          return { isolation, suggestion: null, effectiveState: "corrupt", actions: NO_ACTIONS };
+        }
+        let canAbandon = false;
+        if (isolation.state === "cleanup-pending") {
+          const source = await inspectSource(session.id, isolation).catch(() => ({ status: "missing" as const }));
+          const hasDependents = (await sourceDependents(session.id, isolation)).length > 0;
+          try {
+            const project = await projectOf(session.projectId);
+            const destination = await destinationFor(session, isolation);
+            const cwd = session.worktreePath ?? project.path;
+            canAbandon = samePath(cwd, destination.path)
+              && !hasDependents
+              && await sourceRequiresPreservation(isolation, source);
+          } catch { /* destination is not safe */ }
+        }
+        return {
+          isolation,
+          suggestion: null,
+          effectiveState: isolation.state,
+          actions: { ...NO_ACTIONS, canRecover: true, canAbandon },
+        };
       }
-      const suggestion = await suggestionFor(session, events ?? await deps.readEvents?.(sessionId)).catch((): IsolationSuggestionDto => ({
-        eligible: false, hasChanges: false, targetBranch: isolation.targetBranch,
-        targetDirty: false, revision: "", reason: "unowned",
-      }));
-      return { isolation, suggestion, effectiveState: derivedState(isolation, suggestion) };
+      const durableEvents = events ?? await deps.readEvents?.(sessionId);
+      let suggestion: IsolationSuggestionDto | null;
+      try {
+        suggestion = await suggestionFor(session, durableEvents);
+      } catch {
+        return {
+          isolation,
+          suggestion: {
+            eligible: false,
+            hasChanges: false,
+            targetBranch: isolation.targetBranch,
+            targetDirty: false,
+            revision: "",
+            reason: "unowned",
+          },
+          effectiveState: "unowned",
+          actions: NO_ACTIONS,
+        };
+      }
+      const effectiveState = derivedState(isolation, suggestion);
+      let destinationReady = true;
+      try { await destinationFor(session, isolation); } catch { destinationReady = false; }
+      if (!destinationReady && suggestion?.eligible) {
+        suggestion = { ...suggestion, eligible: false, reason: "destination-unavailable" };
+      }
+      const blocked = isolationBlocksUserMutation(session.status);
+      const sourceReady = effectiveState !== "missing" && effectiveState !== "unowned" && effectiveState !== "corrupt";
+      const hasChanges = suggestion?.hasChanges === true;
+      const targetReady = suggestion?.targetDirty !== true && suggestion?.reason !== "dirty-target";
+      const conflict = isolation.state === "conflict";
+      return {
+        isolation,
+        suggestion,
+        effectiveState,
+        actions: {
+          canReview: sourceReady,
+          canMerge: !blocked && sourceReady && destinationReady && targetReady && hasChanges && !conflict,
+          canKeep: !blocked && sourceReady && USER_OPS.keep.has(isolation.state),
+          canResolve: !blocked && sourceReady && isolation.state === "conflict",
+          canDiscard: !blocked && destinationReady
+            && (effectiveState === "missing" || (sourceReady && USER_OPS.discard.has(effectiveState))),
+          canRecover: false,
+          canAbandon: false,
+        },
+      };
     },
 
     async keepIsolated(sessionId: string): Promise<SessionProjection> {
@@ -827,15 +1140,16 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         const { session, isolation } = await load(sessionId);
         assertNotBusy(session);
         assertOp(isolation.state, "keep");
-        await assertSource(sessionId, isolation);
+        if (!existsSync(isolation.worktreePath)) {
+          throw err("not-found", "the isolated workspace is no longer available");
+        }
+        await assertOwnedSource(sessionId, isolation);
         const revision = await git.fingerprint(isolation.worktreePath);
         isolationLog("keep-isolated", { sessionId, revision });
-        return persist(sessionId, {
-          ...transitionIsolation(isolation, isolation.state === "conflict"
-            ? { state: "conflict", conflict: isolation.conflict }
-            : { state: "active" }),
+        return persist(sessionId, transitionIsolation(isolation, {
+          phase: "active",
           dismissedRevision: revision,
-        });
+        }));
       });
     },
 
@@ -845,17 +1159,14 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         if (!session) return null;
         const isolation = isolationOf(session);
         if (!isolation || isolationNeedsRecovery(isolation.state)) return session;
-        if (["missing", "unowned", "corrupt"].includes(isolation.state)) return session;
-        const suggestion = await suggestionFor(session, events ?? await deps.readEvents?.(sessionId));
-        if (suggestion?.reason === "missing" || suggestion?.reason === "unowned" || suggestion?.reason === "corrupt") {
-          isolationLog("worktree-missing", { sessionId, projectId: session.projectId });
-          return persist(sessionId, transitionIsolation(isolation, { state: suggestion.reason }));
-        }
+        if (isolation.state === "missing") return session;
+        const suggestion = await suggestionFor(session, events);
+        if (suggestion?.reason === "missing") return session;
         if (suggestion?.eligible && isolation.state !== "merge-ready") {
-          return persist(sessionId, transitionIsolation(isolation, { state: "merge-ready" }));
+          return persist(sessionId, transitionIsolation(isolation, { phase: "merge-ready" }));
         }
         if (!suggestion?.eligible && isolation.state === "merge-ready" && suggestion?.reason === "no-changes") {
-          return persist(sessionId, transitionIsolation(isolation, { state: "active" }));
+          return persist(sessionId, transitionIsolation(isolation, { phase: "active" }));
         }
         return session;
       });
@@ -874,18 +1185,17 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
           isolation = recovered;
         }
         if (isolationNeedsRecovery(isolation.state)) {
-          if (isolation.resultCommit) return publishedResult(isolation, session);
-          throw err("conflict", "Publication outcome needs recovery before another merge can start.");
+          return publishedResult(isolation, session);
         }
         if (isolation.state === "missing" || !existsSync(isolation.worktreePath)) {
-          if (isolation.state !== "missing") {
-            await persist(sessionId, transitionIsolation(isolation, { state: "missing" }));
-          }
           throw err("not-found", "the isolated workspace is no longer available");
         }
         assertNotBusy(session);
         assertOp(isolation.state, "merge");
-        await assertSource(sessionId, isolation);
+        await assertOwnedSource(sessionId, isolation);
+        // Publication is only admitted when the canonical session has a
+        // concrete, branch-correct return workspace. A later disappearance is
+        // still recoverable through cleanup-pending without republishing.
         await destinationFor(session, isolation);
         const targetHead = await git.revParse(isolation.targetPath, isolation.targetBranch);
         if (!(await git.hasUniqueChanges(isolation.worktreePath, targetHead))) {
@@ -903,22 +1213,23 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
           projectId: session.projectId,
           targetBranch: isolation.targetBranch,
         });
-        const lockKey = await branchKey(isolation);
-        const outcome = await withBranchLock(lockKey, async () => {
+        const snap = await managed.snapshot(
+          isolation.worktreePath,
+          `${SNAPSHOT_MESSAGE} (${sessionId.slice(0, 8)})`,
+        );
+        const sourceRevision = await git.fingerprint(isolation.worktreePath);
+        isolationLog("snapshot-created", { sessionId, sha: snap.sha, created: snap.created });
+        const lockKey = `${resolve(await git.commonDir(isolation.targetPath))}::${targetRefName(isolation.targetBranch)}`;
+        const published = await withBranchLock(lockKey, async (): Promise<
+          | { kind: "published"; sha: string }
+          | { kind: "pending"; result: IsolationMergeResultDto }
+        > => {
           ({ session, isolation } = await load(sessionId));
           assertNotBusy(session);
           assertOp(isolation.state, "merge");
-          await assertSource(sessionId, isolation);
+          await assertOwnedSource(sessionId, isolation);
           await destinationFor(session, isolation);
-          await persist(sessionId, transitionIsolation(isolation, { state: "merging" }));
           try {
-            const sourceRevision = await git.fingerprint(isolation.worktreePath);
-            const snap = await managed.snapshot(
-              isolation.worktreePath,
-              `${SNAPSHOT_MESSAGE} (${sessionId.slice(0, 8)})`,
-            );
-            if (await git.fingerprint(isolation.worktreePath) !== sourceRevision) throw err("conflict", "isolated workspace changed during snapshot; try again");
-            isolationLog("snapshot-created", { sessionId, sha: snap.sha, created: snap.created });
             let attempt = 0;
             while (attempt < MAX_PUBLISH_RETRIES) {
               attempt += 1;
@@ -926,12 +1237,13 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
               const result = await integrateOnce(session, isolation, snap.sha, sourceRevision);
               if (result.kind === "retry") continue;
               if (result.kind === "empty") {
-                await persist(sessionId, transitionIsolation(isolation, { state: "active" }));
+                await persist(sessionId, transitionIsolation(isolation, { phase: "active" }));
                 throw err("invalid-input", `No isolated changes to merge into ${isolation.targetBranch}.`);
               }
               if (result.kind === "conflict") {
                 await persist(sessionId, transitionIsolation(isolation, {
-                  state: "conflict", conflict: { message: result.message, files: result.files },
+                  phase: "conflict",
+                  conflict: { message: result.message, files: result.files },
                 }));
                 await notice(sessionId, "isolation/conflict", {
                   targetBranch: isolation.targetBranch,
@@ -939,42 +1251,53 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
                 });
                 throw Object.assign(err("conflict", result.message), { files: result.files });
               }
-              return { interrupted: false };
+              return { kind: "published", sha: result.sha };
             }
-            await persist(sessionId, transitionIsolation(isolation, { state: "merge-ready" }));
+            await persist(sessionId, transitionIsolation(isolation, { phase: "merge-ready" }));
             throw err("conflict", `${isolation.targetBranch} changed during integration; try again.`);
           } catch (error) {
             const current = await deps.sessions.snapshot(sessionId).catch(() => session);
             const iso = isolationOf(current);
             if (iso?.publish) {
-              const reality = await publicationState(iso, iso.publish);
-              if (reality === "published") {
-                return { interrupted: true };
+              const reality = await publicationState(current.id, iso, iso.publish);
+              if (reality === "published" || reality === "unknown") {
+                return { kind: "pending", result: publishedResult(iso, current) };
               }
+              await persist(sessionId, transitionIsolation(iso, { phase: "merge-ready" }));
             }
-            if ((iso?.state === "cleanup-pending" || iso?.state === "rebind-pending") && iso.resultCommit) {
-              return { interrupted: true };
-            }
-            if (iso?.state === "merging" && !iso.publish) {
-              try {
-                await persist(sessionId, transitionIsolation(iso, { state: "merge-ready" }));
-              } catch (persistError) {
-                isolationLog("recovery-failed", {
-                  sessionId,
-                  stage: "revert-merging",
-                  message: persistError instanceof Error ? persistError.message : String(persistError),
-                });
-              }
+            if ((iso?.state === "rebind-pending" || iso?.state === "cleanup-pending") && iso.resultCommit) {
+              return { kind: "pending", result: publishedResult(iso, current) };
             }
             throw error;
           }
         });
-        const current = await deps.sessions.snapshot(sessionId);
-        const pending = isolationOf(current)!;
-        if (outcome.interrupted) return publishedResult(pending, current);
-        // Native runtime creation/replay may perform provider I/O, outside the branch lock.
-        const finalized = await recoverCleanup(current, pending);
-        return publishedResult(pending, finalized);
+        if (published.kind === "pending") return published.result;
+        let cleaned: SessionProjection;
+        try {
+          cleaned = await continueAfterPublish(session, isolation, published.sha, snap.sha);
+        } catch (error) {
+          isolationLog("finalization-failed", {
+            sessionId,
+            commit: published.sha,
+            message: error instanceof Error ? error.message : String(error),
+          });
+          const current = await deps.sessions.snapshot(sessionId);
+          return publishedResult(isolationOf(current) ?? isolation, current);
+        }
+        isolationLog("published", {
+          sessionId,
+          projectId: session.projectId,
+          targetBranch: isolation.targetBranch,
+          commit: published.sha,
+          finalized: !isolationOf(cleaned),
+        });
+        return {
+          ok: true as const,
+          commit: published.sha,
+          targetBranch: isolation.targetBranch,
+          session: cleaned,
+          finalized: !isolationOf(cleaned),
+        };
       });
     },
 
@@ -983,7 +1306,10 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         const { session, isolation } = await load(sessionId);
         assertNotBusy(session);
         assertOp(isolation.state, "resolve");
-        await assertSource(sessionId, isolation);
+        if (!existsSync(isolation.worktreePath)) {
+          throw err("not-found", "the isolated workspace is no longer available");
+        }
+        await assertOwnedSource(sessionId, isolation);
         let targetHead = isolation.baseCommit;
         try { targetHead = await git.revParse(isolation.targetPath, isolation.targetBranch); } catch { /* keep base */ }
         const files = isolation.conflict?.files ?? [];
@@ -1034,10 +1360,66 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         assertNotBusy(session);
         assertOp(isolation.state, "discard");
         isolationLog("discard", { sessionId, projectId: session.projectId });
-        await assertSource(sessionId, isolation, true);
-        await destinationFor(session, isolation);
-        const pending = transitionIsolation(isolation, { state: "rebind-pending", ...(existsSync(isolation.worktreePath) ? { sourceRevision: await git.fingerprint(isolation.worktreePath) } : {}) });
-        return recoverCleanup(await persist(sessionId, pending), pending);
+        const pending = transitionIsolation(isolation, { phase: "rebind-pending" });
+        await persist(sessionId, pending);
+        try {
+          const cleanup = transitionIsolation(pending, { phase: "cleanup-pending" });
+          await rebindToTarget(session, isolation, cleanup);
+        } catch (error) {
+          isolationLog("session-rebind-failed", {
+            sessionId,
+            discard: true,
+            message: error instanceof Error ? error.message : String(error),
+          });
+          throw error;
+        }
+        await notice(sessionId, "isolation/discarded", {
+          targetBranch: isolation.targetBranch,
+        });
+        return finishCleanup(sessionId);
+      });
+    },
+
+    async abandonCleanup(sessionId: string): Promise<SessionProjection> {
+      return withSession(sessionId, async () => {
+        const { session, isolation } = await load(sessionId);
+        assertNotBusy(session);
+        if (isolation.state !== "cleanup-pending") {
+          throw err("conflict", "isolation cleanup is not pending");
+        }
+        const project = await projectOf(session.projectId);
+        const destination = await destinationFor(session, isolation);
+        const cwd = session.worktreePath ?? project.path;
+        if (!samePath(cwd, destination.path)) {
+          throw err("conflict", "session has not completed its destination rebind");
+        }
+        const source = await inspectSource(session.id, isolation).catch(() => ({ status: "missing" as const }));
+        const hasDependents = (await sourceDependents(session.id, isolation)).length > 0;
+        if (hasDependents) {
+          throw err("conflict", "another session still depends on the isolated workspace; move or delete it before finishing cleanup");
+        }
+        const preserveSource = await sourceRequiresPreservation(isolation, source);
+        if (!preserveSource) {
+          throw err("conflict", "isolated workspace ownership is healthy; retry cleanup instead");
+        }
+        const relinquished = source.status === "owned"
+          ? await managed.relinquishOwned(project.path, ownedRef(session.id, isolation))
+          : undefined;
+        isolationLog("cleanup-abandoned", {
+          sessionId,
+          worktreePath: isolation.worktreePath,
+          reason: source.status === "owned"
+            ? "source-changed-after-snapshot"
+            : source.status === "missing" ? "missing" : source.reason,
+          retained: true,
+          ...(relinquished ? { preservedBranch: relinquished.branch } : {}),
+        });
+        await notice(sessionId, "isolation/cleanup-abandoned", {
+          worktreePath: isolation.worktreePath,
+          targetBranch: isolation.targetBranch,
+          ...(relinquished ? { preservedBranch: relinquished.branch } : {}),
+        });
+        return persist(sessionId, null);
       });
     },
 
@@ -1050,7 +1432,6 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     async recoverSession(session: SessionProjection): Promise<SessionProjection> {
       return withSession(session.id, async () => {
         const current = await deps.sessions.snapshot(session.id).catch(() => session);
-        assertNotBusy(current);
         return recoverSessionLocked(current);
       });
     },
@@ -1077,11 +1458,26 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         }
       }
       for (const root of repos) {
+        await managed.recoverCreations(root).catch((error: unknown) => {
+          isolationLog("creation-recovery-failed", {
+            repository: root,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
         const leftovers = await git.worktrees.list(root).catch(() => []);
         for (const wt of leftovers) {
           if (wt.isMain) continue;
           const marker = await readManagedMarker(git, wt.path);
-          if (!marker || marker === "corrupt" || marker.kind !== "integration") continue;
+          if (!marker || marker === "corrupt") continue;
+          if (marker.kind !== "integration") {
+            await withSession(marker.sessionId, async () => {
+              const fresh = await deps.sessions.snapshot(marker.sessionId).catch(() => undefined);
+              // An unknown marker can belong to another Space or server. No
+              // durable local tombstone means ownership is not proven here.
+              if (!fresh) return;
+            });
+            continue;
+          }
           await withSession(marker.sessionId, async () => {
             const snap = await deps.sessions.snapshot(marker.sessionId).catch(() => undefined);
             // A marker from another server/Space is not our orphan to prune.

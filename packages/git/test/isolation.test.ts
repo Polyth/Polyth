@@ -13,13 +13,13 @@ import type {
   SessionProjection,
   SessionRef,
 } from "@polyth/contracts";
-import { transitionIsolation } from "@polyth/contracts";
 import { createGitService, type GitService } from "../src/index.ts";
 import {
   createManagedWorktrees,
   isolateBranchName,
   isManagedBranch,
   MANAGED_BRANCH_PREFIX,
+  readManagedMarker,
   type ManagedWorktreeService,
 } from "../src/managedWorktrees.ts";
 import {
@@ -66,6 +66,20 @@ const completedTurn = (sessionId: string): SessionEvent => ({
 
 const cloneIsolation = (isolation: SessionIsolation | undefined): SessionIsolation | undefined =>
   isolation ? JSON.parse(JSON.stringify(isolation)) as SessionIsolation : undefined;
+
+const isolationState = (
+  isolation: SessionIsolation,
+  state: SessionIsolation["state"],
+  fields: Record<string, unknown> = {},
+): SessionIsolation => {
+  const next = cloneIsolation(isolation) as SessionIsolation & Record<string, unknown>;
+  delete next.conflict;
+  delete next.publish;
+  delete next.resultCommit;
+  delete next.dismissedRevision;
+  delete next.rebound;
+  return Object.assign(next, fields, { state }) as SessionIsolation;
+};
 
 interface SessionHarness extends IsolationSessionApi {
   events: SessionEvent[];
@@ -154,6 +168,7 @@ const harness = (root: string, opts?: {
   git?: GitService;
   managed?: ManagedWorktreeService;
   testHooks?: IsolationTestHooks;
+  closeWorkspaceProcesses?: (cwd: string) => Promise<void>;
 }) => {
   const sessions = makeSessions();
   const closeCalls: string[] = [];
@@ -178,8 +193,10 @@ const harness = (root: string, opts?: {
         v: 1,
       });
     },
+    readEvents: async () => [...sessions.events],
     closeWorkspaceProcesses: async (cwd) => {
       closeCalls.push(cwd);
+      await opts?.closeWorkspaceProcesses?.(cwd);
       if (ctrl.failClose) throw new Error("close failed");
     },
     ...(opts?.testHooks ? { testHooks: opts.testHooks } : {}),
@@ -364,10 +381,10 @@ test("conflict then resolve with agent then merge succeeds", async () => {
   sessions.sendImpl = async (sessionId) => {
     const current = await sessions.snapshot(sessionId);
     const path = current.isolation!.worktreePath;
-    // The merge attempt preserved dirty source state: the agent must explicitly
-    // commit its work before merging the target and resolving conflicts.
+    // The resolver may deliberately checkpoint before merging. Isolation's
+    // own snapshot must leave this dirty source untouched.
     runGit(path, "add", "-A");
-    runGit(path, "commit", "-qm", "save isolated work");
+    runGit(path, "commit", "-qm", "checkpoint isolated changes");
     try {
       runGit(path, "merge", "--no-edit", current.isolation!.targetBranch);
     } catch {
@@ -509,19 +526,223 @@ test("user-created worktrees and branches are never deleted", async () => {
   assert.ok(branches.branches.some((item) => item.name === "user-feature"));
 });
 
-test("disappearing worktree becomes a recoverable missing state", async () => {
+test("disappearing worktree derives missing health without overwriting lifecycle", async () => {
   const root = repo();
   const { isolation, sessions } = harness(root);
   const created = await isolation.createIsolatedSession({ projectId: "p1" });
   const session = await sessions.snapshot(created.id);
   rmSync(session.isolation!.worktreePath, { recursive: true, force: true });
   const recovered = await isolation.recoverSession(await sessions.snapshot(created.id));
-  assert.equal(recovered.isolation?.state, "missing");
+  assert.equal(recovered.isolation?.state, "active");
+  assert.equal((await isolation.getStatus(created.id)).effectiveState, "missing");
   assert.equal(recovered.id, created.id);
   await assert.rejects(() => isolation.mergeBack(created.id), /no longer available/);
+  const discarded = await isolation.discard(created.id);
+  assert.equal(discarded.isolation, undefined);
+  assert.equal(discarded.worktreePath, undefined);
+  assert.ok((await git.branches(root)).branches.some((item) => item.name === session.isolation!.worktreeBranch));
 });
 
-test("corrupted managed marker is not deleted and metadata is kept", async () => {
+test("startup recovery normalizes legacy pre-publication state and quarantines unknown state", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const session = await sessions.snapshot(created.id);
+  sessions.projections.set(created.id, {
+    ...session,
+    isolation: {
+      ...session.isolation,
+      state: "merging",
+      rebound: true,
+      conflict: { message: "stale", files: [] },
+    } as unknown as SessionIsolation,
+  });
+  const normalized = await isolation.recoverSession(await sessions.snapshot(created.id));
+  assert.equal(normalized.isolation?.state, "active");
+  assert.equal(normalized.isolation?.publish, undefined);
+  assert.equal(normalized.isolation?.conflict, undefined);
+  assert.equal("rebound" in normalized.isolation!, false);
+
+  sessions.projections.set(created.id, {
+    ...normalized,
+    isolation: { ...normalized.isolation, state: "future-state" } as unknown as SessionIsolation,
+  });
+  const rawUnknown = (await sessions.snapshot(created.id)).isolation;
+  const unknownStatus = await isolation.getStatus(created.id);
+  assert.equal(unknownStatus.effectiveState, "corrupt");
+  assert.deepEqual(unknownStatus.actions, {
+    canReview: false, canMerge: false, canKeep: false, canResolve: false,
+    canDiscard: false, canRecover: false, canAbandon: false,
+  });
+  assert.deepEqual((await isolation.recover(created.id)).isolation, rawUnknown);
+  assert.deepEqual((await sessions.snapshot(created.id)).isolation, rawUnknown);
+  assert.equal(existsSync(session.isolation!.worktreePath), true);
+});
+
+test("a present but malformed publication intent is quarantined instead of treated as unpublished", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const session = await sessions.snapshot(created.id);
+  const before = runGit(root, "rev-parse", "main");
+  sessions.projections.set(created.id, {
+    ...session,
+    isolation: {
+      ...session.isolation,
+      state: "merging",
+      publish: {
+        expectedTargetSha: before,
+        resultCommit: "not-a-commit",
+        snapshotSha: before,
+        targetRef: "refs/heads/main",
+      },
+    } as unknown as SessionIsolation,
+  });
+
+  const malformed = (await sessions.snapshot(created.id)).isolation;
+  const status = await isolation.getStatus(created.id);
+  assert.equal(status.effectiveState, "corrupt");
+  assert.equal(status.actions?.canDiscard, false);
+  assert.deepEqual((await isolation.recover(created.id)).isolation, malformed);
+  await assert.rejects(() => isolation.discard(created.id), /cannot discard from corrupt/);
+  assert.equal(runGit(root, "rev-parse", "main"), before);
+  assert.equal(existsSync(session.isolation!.worktreePath), true);
+});
+
+test("corrupt labeled publication evidence is never erased by resource repair", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const session = await sessions.snapshot(created.id);
+  const malformed = {
+    ...session.isolation!,
+    state: "corrupt",
+    publish: {
+      expectedTargetSha: "old",
+      resultCommit: "published",
+      snapshotSha: "snapshot",
+      targetRef: "refs/heads/main",
+    },
+  } as unknown as SessionIsolation;
+  sessions.projections.set(created.id, { ...session, isolation: malformed });
+
+  const recovered = await isolation.recover(created.id);
+  assert.deepEqual(recovered.isolation, malformed);
+  assert.deepEqual((await sessions.snapshot(created.id)).isolation, malformed);
+  await assert.rejects(() => isolation.discard(created.id), /cannot discard from corrupt/);
+  assert.equal(existsSync(session.isolation!.worktreePath), true);
+});
+
+test("publication recovery rejects a receipt owned by another canonical session", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const session = await sessions.snapshot(created.id);
+  const source = session.isolation!;
+  writeFileSync(join(source.worktreePath, "never-published.txt"), "private\n");
+  const snapshot = await isolation.managed.snapshot(source.worktreePath, "test snapshot");
+  const head = runGit(root, "rev-parse", "main");
+  const foreignReceipt = `refs/polyth/isolation/${randomUUID()}`;
+  runGit(root, "update-ref", foreignReceipt, head);
+  const publishing = isolationState(source, "publishing", {
+    publish: {
+      expectedTargetSha: head,
+      resultCommit: head,
+      snapshotSha: snapshot.sha,
+      targetRef: "refs/heads/main",
+      receiptRef: foreignReceipt,
+      checkoutPath: root,
+      sourceRevision: await git.fingerprint(source.worktreePath),
+    },
+  });
+  sessions.projections.set(created.id, { ...session, isolation: publishing });
+
+  const status = await isolation.getStatus(created.id);
+  assert.equal(status.effectiveState, "corrupt");
+  assert.deepEqual(status.actions, {
+    canReview: false, canMerge: false, canKeep: false, canResolve: false,
+    canDiscard: false, canRecover: false, canAbandon: false,
+  });
+  await assert.rejects(() => isolation.recover(created.id), /receipt does not belong/);
+  assert.equal(sessions.rebindCalls, 0);
+  assert.deepEqual((await sessions.snapshot(created.id)).isolation, publishing);
+  assert.equal(existsSync(source.worktreePath), true);
+  assert.equal(existsSync(join(root, "never-published.txt")), false);
+});
+
+test("publication recovery rejects an origin path replaced by another repository", async () => {
+  const root = repo();
+  runGit(root, "branch", "feature");
+  const featurePath = mkdtempSync(join(tmpdir(), "polyth-replaced-origin-"));
+  dirs.push(featurePath);
+  rmSync(featurePath, { recursive: true, force: true });
+  await git.worktrees.create(root, { branch: "feature", path: featurePath });
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1", targetBranch: "feature" });
+  const session = await sessions.snapshot(created.id);
+  const source = session.isolation!;
+  writeFileSync(join(source.worktreePath, "private-source.txt"), "private\n");
+  const snapshot = await isolation.managed.snapshot(source.worktreePath, "test snapshot");
+  const head = runGit(root, "rev-parse", "feature");
+  const receiptRef = `refs/polyth/isolation/${created.id}`;
+  runGit(root, "update-ref", receiptRef, head);
+  const publishing = isolationState(source, "publishing", {
+    publish: {
+      expectedTargetSha: head,
+      resultCommit: head,
+      snapshotSha: snapshot.sha,
+      targetRef: "refs/heads/feature",
+      receiptRef,
+      checkoutPath: featurePath,
+      sourceRevision: await git.fingerprint(source.worktreePath),
+    },
+  });
+  sessions.projections.set(created.id, { ...session, isolation: publishing });
+
+  rmSync(featurePath, { recursive: true, force: true });
+  execFileSync("git", ["clone", "-q", "--", root, featurePath], { stdio: "pipe" });
+  runGit(featurePath, "switch", "-q", "-c", "feature", "origin/feature");
+  assert.notEqual(resolve(await git.commonDir(featurePath)), resolve(await git.commonDir(root)));
+
+  await assert.rejects(() => isolation.recover(created.id), /recorded repository checkout|not checked out/);
+  assert.equal(sessions.rebindCalls, 0);
+  assert.deepEqual((await sessions.snapshot(created.id)).isolation, publishing);
+  assert.equal(existsSync(source.worktreePath), true);
+  assert.equal(existsSync(join(featurePath, "private-source.txt")), false);
+});
+
+test("status fails closed without persisting when Git ownership cannot be read", async () => {
+  const root = repo();
+  let unreadable = false;
+  const guarded: GitService = {
+    ...git,
+    worktrees: {
+      ...git.worktrees,
+      list: async (path) => {
+        if (unreadable) throw new Error("inventory unavailable");
+        return git.worktrees.list(path);
+      },
+    },
+  };
+  const { isolation, sessions } = harness(root, { git: guarded });
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const writes = sessions.persistCalls;
+  unreadable = true;
+
+  const status = await isolation.getStatus(created.id);
+  assert.equal(status.effectiveState, "unowned");
+  assert.equal(status.suggestion?.eligible, false);
+  assert.deepEqual(status.actions, {
+    canReview: false, canMerge: false, canKeep: false, canResolve: false,
+    canDiscard: false, canRecover: false, canAbandon: false,
+  });
+  assert.equal(sessions.persistCalls, writes);
+  await assert.rejects(() => isolation.mergeBack(created.id), /inventory unavailable/);
+  unreadable = false;
+  assert.equal((await isolation.getStatus(created.id)).effectiveState, "active");
+});
+
+test("corrupted managed marker cannot be published or deleted", async () => {
   const root = repo();
   const { isolation, sessions } = harness(root);
   const created = await isolation.createIsolatedSession({ projectId: "p1" });
@@ -531,9 +752,8 @@ test("corrupted managed marker is not deleted and metadata is kept", async () =>
   const gitDir = await git.gitDir(wt);
   writeFileSync(join(gitDir, "polyth-managed.json"), "{not-json");
   const before = runGit(root, "rev-parse", "HEAD");
-  await assert.rejects(() => isolation.mergeBack(created.id), /ownership must be restored/);
+  await assert.rejects(() => isolation.mergeBack(created.id), /ownership is not proven/);
   assert.equal(runGit(root, "rev-parse", "HEAD"), before);
-  assert.equal((await isolation.getStatus(created.id)).effectiveState, "corrupt");
   assert.equal(existsSync(wt), true);
   assert.equal(isManagedBranch(session.isolation!.worktreeBranch), true);
 });
@@ -548,8 +768,9 @@ test("cleanup-pending recovery finishes worktree removal", async () => {
   assert.equal(merged.session.isolation, undefined);
   const leftover = await isolation.createIsolatedSession({ projectId: "p1", title: "leftover" });
   const pending = await sessions.snapshot(leftover.id);
-  await sessions.patchIsolation!(leftover.id, transitionIsolation(pending.isolation!, { state: "cleanup-pending", rebound: true }));
-  await sessions.rebindWorkspace!(leftover.id, { worktreePath: null, branch: "main", isolation: transitionIsolation(pending.isolation!, { state: "cleanup-pending", rebound: true }) });
+  const cleanup = isolationState(pending.isolation!, "cleanup-pending");
+  await sessions.patchIsolation!(leftover.id, cleanup);
+  await sessions.rebindWorkspace!(leftover.id, { worktreePath: null, branch: "main", isolation: cleanup });
   const recovered = await isolation.recoverSession(await sessions.snapshot(leftover.id));
   assert.equal(recovered.isolation, undefined);
   assert.equal(existsSync(pending.isolation!.worktreePath), false);
@@ -560,11 +781,12 @@ test("failed cleanup can be retried", async () => {
   const { isolation, sessions } = harness(root);
   const created = await isolation.createIsolatedSession({ projectId: "p1" });
   const session = await sessions.snapshot(created.id);
-  await sessions.patchIsolation!(created.id, transitionIsolation(session.isolation!, { state: "cleanup-pending", rebound: true }));
+  const cleanup = isolationState(session.isolation!, "cleanup-pending");
+  await sessions.patchIsolation!(created.id, cleanup);
   await sessions.rebindWorkspace!(created.id, {
     worktreePath: null,
     branch: "main",
-    isolation: transitionIsolation(session.isolation!, { state: "cleanup-pending", rebound: true }),
+    isolation: cleanup,
   });
   const first = await isolation.recoverSession(await sessions.snapshot(created.id));
   assert.equal(first.isolation, undefined);
@@ -620,6 +842,29 @@ test("crash before publication leaves the target unchanged", async () => {
   assert.equal(readFileSync(join(root, "not-yet.txt"), "utf8"), "n\n");
 });
 
+test("source edits after snapshot block publication and are never deleted", async () => {
+  const root = repo();
+  let source = "";
+  const hooks: IsolationTestHooks = {
+    beforePublish: async () => {
+      writeFileSync(join(source, "late.txt"), "late\n");
+    },
+  };
+  const { isolation, sessions } = harness(root, { testHooks: hooks });
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  source = (await sessions.snapshot(created.id)).isolation!.worktreePath;
+  writeFileSync(join(source, "snapshotted.txt"), "snapshot\n");
+  const before = runGit(root, "rev-parse", "HEAD");
+  await assert.rejects(() => isolation.mergeBack(created.id), /changed after its merge snapshot/);
+  assert.equal(runGit(root, "rev-parse", "HEAD"), before);
+  assert.equal(existsSync(join(source, "late.txt")), true);
+  assert.equal((await sessions.snapshot(created.id)).isolation?.state, "merge-ready");
+  hooks.beforePublish = undefined;
+  const merged = await isolation.mergeBack(created.id);
+  assert.equal(merged.finalized, true);
+  assert.equal(readFileSync(join(root, "late.txt"), "utf8"), "late\n");
+});
+
 test("rebind failure keeps the source workspace for retry", async () => {
   const root = repo();
   const { isolation, sessions } = harness(root);
@@ -632,7 +877,6 @@ test("rebind failure keeps the source workspace for retry", async () => {
   assert.equal(failedMerge.finalized, false);
   const failed = await sessions.snapshot(created.id);
   assert.equal(failed.isolation?.state, "rebind-pending");
-  assert.notEqual(failed.isolation?.rebound, true);
   assert.ok(failed.isolation?.resultCommit);
   assert.equal(existsSync(wt), true);
   assert.equal(failed.worktreePath, wt);
@@ -679,6 +923,68 @@ test("orphan integration worktrees are pruned on recovery", async () => {
   assert.equal(existsSync(path), false);
 });
 
+test("startup never prunes an integration owned by an unknown canonical session", async () => {
+  const root = repo();
+  const managed = createManagedWorktrees(git);
+  const { isolation } = harness(root, { managed });
+  const foreignId = randomUUID();
+  const path = await managed.createIntegrationWorkspace({
+    root,
+    sessionId: foreignId,
+    startPoint: runGit(root, "rev-parse", "HEAD"),
+  });
+  await isolation.recoverAll();
+  assert.equal(existsSync(path), true);
+  await managed.discardIntegration(root, path, foreignId);
+});
+
+test("startup never deletes an isolated workspace owned by an unknown canonical session", async () => {
+  const root = repo();
+  const managed = createManagedWorktrees(git);
+  const { isolation, sessions } = harness(root, { managed });
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const source = (await sessions.snapshot(created.id)).isolation!;
+  sessions.projections.delete(created.id);
+  await isolation.recoverAll();
+  assert.equal(existsSync(source.worktreePath), true);
+  await managed.removeOwned(root, {
+    sessionId: created.id,
+    worktreePath: source.worktreePath,
+    worktreeBranch: source.worktreeBranch,
+  });
+});
+
+test("cleanup preserves another project's canonical session using the source as its root", async () => {
+  const root = repo();
+  const sessions = makeSessions();
+  let sourcePath = "";
+  const isolation = createIsolationService({
+    git,
+    sessions,
+    projects: {
+      get: async (id) => id === "p1"
+        ? { id, path: root }
+        : id === "p2" && sourcePath ? { id, path: sourcePath } : undefined,
+    },
+    append: async () => undefined,
+  });
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  sourcePath = (await sessions.snapshot(created.id)).isolation!.worktreePath;
+  writeFileSync(join(sourcePath, "shared.txt"), "shared\n");
+  const dependent = await sessions.create({ projectId: "p2" });
+
+  const merged = await isolation.mergeBack(created.id);
+  assert.equal(merged.finalized, false);
+  assert.equal(merged.session.isolation?.state, "cleanup-pending");
+  assert.equal(existsSync(sourcePath), true);
+  assert.equal((await sessions.snapshot(dependent.id)).projectId, "p2");
+
+  sessions.projections.delete(dependent.id);
+  const cleaned = await isolation.recover(created.id);
+  assert.equal(cleaned.isolation, undefined);
+  assert.equal(existsSync(sourcePath), false);
+});
+
 test("withBranchLock serializes and does not leak map entries", async () => {
   const order: number[] = [];
   await Promise.all([
@@ -696,19 +1002,26 @@ test("mutating isolation from merging is rejected", async () => {
   const { isolation, sessions } = harness(root);
   const created = await isolation.createIsolatedSession({ projectId: "p1" });
   const session = await sessions.snapshot(created.id);
-  await sessions.patchIsolation!(created.id, transitionIsolation(session.isolation!, { state: "merging" }));
+  await sessions.patchIsolation!(created.id, isolationState(session.isolation!, "merging", {
+    publish: {
+      expectedTargetSha: session.isolation!.baseCommit,
+      resultCommit: session.isolation!.baseCommit,
+      snapshotSha: session.isolation!.baseCommit,
+      targetRef: "refs/heads/main",
+    },
+  }));
   await assert.rejects(() => isolation.keepIsolated(created.id), /cannot keep/);
   await assert.rejects(() => isolation.discard(created.id), /cannot discard/);
 });
 
-test("ambiguous publication is left merging, never treated as unpublished", async () => {
+test("ambiguous publication is left publishing, never treated as unpublished", async () => {
   const root = repo();
   const { isolation, sessions } = harness(root);
   const created = await isolation.createIsolatedSession({ projectId: "p1" });
   const session = await sessions.snapshot(created.id);
   const head = runGit(root, "rev-parse", "HEAD");
-  await sessions.patchIsolation!(created.id, transitionIsolation({ ...session.isolation!, targetBranch: "does-not-exist" }, {
-    state: "publishing",
+  await sessions.patchIsolation!(created.id, isolationState(session.isolation!, "merging", {
+    targetBranch: "does-not-exist",
     publish: {
       expectedTargetSha: head,
       resultCommit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -758,6 +1071,159 @@ test("unknown sourceSessionId is rejected", async () => {
   );
 });
 
+test("nested isolation is rejected through both source session and managed branch inputs", async () => {
+  const root = repo();
+  const { isolation } = harness(root);
+  const first = await isolation.createIsolatedSession({ projectId: "p1" });
+  await assert.rejects(
+    () => isolation.createIsolatedSession({ projectId: "p1", sourceSessionId: first.id }),
+    /nested session isolation is not supported/,
+  );
+  const firstStatus = await isolation.getStatus(first.id);
+  await assert.rejects(
+    () => isolation.createIsolatedSession({ projectId: "p1", targetBranch: firstStatus.isolation!.worktreeBranch }),
+    /managed isolation branches cannot be used as an origin/,
+  );
+});
+
+test("another session's managed workspace can never be used as merge input", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const a = await isolation.createIsolatedSession({ projectId: "p1", title: "A" });
+  const b = await isolation.createIsolatedSession({ projectId: "p1", title: "B" });
+  const sessionA = await sessions.snapshot(a.id);
+  const sessionB = await sessions.snapshot(b.id);
+  writeFileSync(join(sessionB.isolation!.worktreePath, "from-b.txt"), "b\n");
+  await sessions.patchIsolation!(a.id, isolationState(sessionA.isolation!, "active", {
+    worktreePath: sessionB.isolation!.worktreePath,
+    worktreeBranch: sessionB.isolation!.worktreeBranch,
+  }));
+  const before = runGit(root, "rev-parse", "main");
+  await assert.rejects(() => isolation.mergeBack(a.id), /ownership is not proven/);
+  assert.equal(runGit(root, "rev-parse", "main"), before);
+  assert.equal(existsSync(join(root, "from-b.txt")), false);
+});
+
+test("marker identity mismatch blocks publication", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const session = await sessions.snapshot(created.id);
+  writeFileSync(join(session.isolation!.worktreePath, "blocked.txt"), "x\n");
+  const markerPath = join(await git.gitDir(session.isolation!.worktreePath), "polyth-managed.json");
+  const marker = JSON.parse(readFileSync(markerPath, "utf8")) as Record<string, unknown>;
+  writeFileSync(markerPath, JSON.stringify({ ...marker, sessionId: randomUUID() }));
+  const before = runGit(root, "rev-parse", "main");
+  await assert.rejects(() => isolation.mergeBack(created.id), /ownership is not proven/);
+  assert.equal(runGit(root, "rev-parse", "main"), before);
+});
+
+test("origin branch change refuses publication before the target ref moves", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const session = await sessions.snapshot(created.id);
+  writeFileSync(join(session.isolation!.worktreePath, "not-published.txt"), "x\n");
+  runGit(root, "switch", "-c", "other");
+  const before = runGit(root, "rev-parse", "main");
+  await assert.rejects(() => isolation.mergeBack(created.id), /origin workspace/);
+  assert.equal(runGit(root, "rev-parse", "main"), before);
+  assert.equal(existsSync(join(root, "not-published.txt")), false);
+});
+
+test("origin checkout disappearing at the publication boundary cannot fall back to another ref update", async () => {
+  const root = repo();
+  runGit(root, "branch", "feature");
+  const featureWt = mkdtempSync(join(tmpdir(), "polyth-feature-publish-race-"));
+  dirs.push(featureWt);
+  rmSync(featureWt, { recursive: true, force: true });
+  await git.worktrees.create(root, { branch: "feature", path: featureWt });
+  const before = runGit(root, "rev-parse", "feature");
+  const hooks: IsolationTestHooks = {
+    beforePublish: async () => {
+      await git.worktrees.remove(root, { path: featureWt, force: true });
+    },
+  };
+  const { isolation, sessions } = harness(root, { testHooks: hooks });
+  const created = await isolation.createIsolatedSession({ projectId: "p1", targetBranch: "feature" });
+  writeFileSync(join((await sessions.snapshot(created.id)).isolation!.worktreePath, "race.txt"), "x\n");
+  await assert.rejects(() => isolation.mergeBack(created.id), /origin workspace/);
+  assert.equal(runGit(root, "rev-parse", "feature"), before);
+  assert.equal((await sessions.snapshot(created.id)).isolation?.state, "merge-ready");
+});
+
+test("post-publication destination loss is explicit and recovery never republishes", async () => {
+  const root = repo();
+  runGit(root, "branch", "feature");
+  const featureWt = mkdtempSync(join(tmpdir(), "polyth-feature-return-"));
+  dirs.push(featureWt);
+  rmSync(featureWt, { recursive: true, force: true });
+  await git.worktrees.create(root, { branch: "feature", path: featureWt });
+  let removed = false;
+  const hooks: IsolationTestHooks = {
+    afterPublish: async () => {
+      if (removed) return;
+      removed = true;
+      await git.worktrees.remove(root, { path: featureWt, deleteBranch: false, force: true });
+    },
+  };
+  const { isolation, sessions } = harness(root, { testHooks: hooks });
+  const created = await isolation.createIsolatedSession({ projectId: "p1", targetBranch: "feature" });
+  const source = (await sessions.snapshot(created.id)).isolation!.worktreePath;
+  writeFileSync(join(source, "published-once.txt"), "once\n");
+  const result = await isolation.mergeBack(created.id);
+  assert.equal(result.finalized, false);
+  assert.equal((await sessions.snapshot(created.id)).isolation?.state, "publishing");
+  assert.equal(existsSync(source), true);
+  const published = runGit(root, "rev-parse", "feature");
+  await git.worktrees.create(root, { branch: "feature", path: featureWt });
+  const recovered = await isolation.recoverSession(await sessions.snapshot(created.id));
+  assert.equal(recovered.isolation, undefined);
+  assert.equal(runGit(root, "rev-parse", "feature"), published);
+  assert.equal(readFileSync(join(featureWt, "published-once.txt"), "utf8"), "once\n");
+  assert.equal(existsSync(source), false);
+});
+
+test("publication receipt survives a target reset without duplicate publication", async () => {
+  const root = repo();
+  const before = runGit(root, "rev-parse", "HEAD");
+  const hooks: IsolationTestHooks = {
+    afterPublish: async () => { throw new Error("crash after atomic publication"); },
+  };
+  const { isolation, sessions } = harness(root, { testHooks: hooks });
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const source = (await sessions.snapshot(created.id)).isolation!;
+  writeFileSync(join(source.worktreePath, "published.txt"), "published\n");
+  const result = await isolation.mergeBack(created.id);
+  assert.equal(result.finalized, false);
+  assert.equal(result.session.isolation?.state, "publishing");
+  const commit = result.commit;
+  assert.equal(runGit(root, "rev-parse", `refs/polyth/isolation/${created.id}`), commit);
+
+  runGit(root, "reset", "--hard", before);
+  await assert.rejects(() => isolation.recover(created.id), /checkout|branch|changed/i);
+  assert.equal(runGit(root, "rev-parse", "HEAD"), before);
+  assert.equal((await sessions.snapshot(created.id)).isolation?.state, "publishing");
+
+  runGit(root, "reset", "--hard", commit);
+  const recovered = await isolation.recover(created.id);
+  assert.equal(recovered.isolation, undefined);
+  assert.equal(recovered.id, created.id);
+  assert.equal(runGit(root, "rev-parse", "HEAD"), commit);
+});
+
+test("startup recovery repairs merge-ready from durable turn events", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const source = (await sessions.snapshot(created.id)).isolation!.worktreePath;
+  writeFileSync(join(source, "ready-after-restart.txt"), "ready\n");
+  sessions.events.push(completedTurn(created.id));
+  assert.equal((await sessions.snapshot(created.id)).isolation?.state, "active");
+  await isolation.recoverAll();
+  assert.equal((await sessions.snapshot(created.id)).isolation?.state, "merge-ready");
+});
+
 test("discard returns the session to the origin checkout", async () => {
   const root = repo();
   runGit(root, "branch", "feature");
@@ -791,7 +1257,7 @@ test("notice append failure after publish does not report merge failure", async 
   assert.equal(merged.session.isolation, undefined);
 });
 
-test("cleanup failure after rebind keeps rebound true and retries cleanup only", async () => {
+test("cleanup failure after rebind retries cleanup without rebinding", async () => {
   const root = repo();
   const hooks: IsolationTestHooks = {
     beforeCleanup: async () => {
@@ -807,7 +1273,6 @@ test("cleanup failure after rebind keeps rebound true and retries cleanup only",
   assert.equal(published.finalized, false);
   const pending = await sessions.snapshot(created.id);
   assert.equal(pending.isolation?.state, "cleanup-pending");
-  assert.equal(pending.isolation?.rebound, true);
   await assertBoundTo(pending, root, root, "main");
   assert.equal(existsSync(wt), true);
   const rebinds = sessions.rebindCalls;
@@ -816,6 +1281,67 @@ test("cleanup failure after rebind keeps rebound true and retries cleanup only",
   assert.equal(sessions.rebindCalls, rebinds);
   assert.equal(recovered.isolation, undefined);
   assert.equal(existsSync(wt), false);
+});
+
+test("a source write after publication is preserved and can be explicitly abandoned", async () => {
+  const root = repo();
+  let source = "";
+  const hooks: IsolationTestHooks = {
+    beforeCleanup: async () => {
+      writeFileSync(join(source, "arrived-after-publish.txt"), "preserve me\n");
+    },
+  };
+  const { isolation, sessions } = harness(root, { testHooks: hooks });
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  source = (await sessions.snapshot(created.id)).isolation!.worktreePath;
+  writeFileSync(join(source, "published-before-late-write.txt"), "published\n");
+
+  const merged = await isolation.mergeBack(created.id);
+  assert.equal(merged.ok, true);
+  assert.equal(merged.finalized, false);
+  assert.equal(merged.session.isolation?.state, "cleanup-pending");
+  assert.equal(readFileSync(join(root, "published-before-late-write.txt"), "utf8"), "published\n");
+  assert.equal(existsSync(join(root, "arrived-after-publish.txt")), false);
+  assert.equal(readFileSync(join(source, "arrived-after-publish.txt"), "utf8"), "preserve me\n");
+
+  const status = await isolation.getStatus(created.id);
+  assert.equal(status.actions?.canAbandon, true);
+  const abandoned = await isolation.abandonCleanup(created.id);
+  assert.equal(abandoned.isolation, undefined);
+  assert.equal(abandoned.worktreePath, undefined);
+  assert.equal(existsSync(source), true);
+  assert.equal(readFileSync(join(source, "arrived-after-publish.txt"), "utf8"), "preserve me\n");
+  assert.equal(await readManagedMarker(git, source), null);
+  const preservedBranch = (await git.worktrees.list(root)).find((item) => resolve(item.path) === resolve(source))?.branch;
+  assert.match(preservedBranch ?? "", /^polyth-preserved\//);
+
+  sessions.projections.delete(created.id);
+  await isolation.recoverAll();
+  assert.equal(existsSync(source), true);
+  assert.equal(readFileSync(join(source, "arrived-after-publish.txt"), "utf8"), "preserve me\n");
+  assert.ok((await git.branches(root)).branches.some((item) => item.name === preservedBranch));
+});
+
+test("a file flushed while source processes close is preserved", async () => {
+  const root = repo();
+  let source = "";
+  const { isolation, sessions } = harness(root, {
+    closeWorkspaceProcesses: async (cwd) => {
+      if (resolve(cwd) === resolve(source)) {
+        writeFileSync(join(cwd, "flushed-during-close.txt"), "late flush\n");
+      }
+    },
+  });
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  source = (await sessions.snapshot(created.id)).isolation!.worktreePath;
+  writeFileSync(join(source, "published.txt"), "published\n");
+
+  const merged = await isolation.mergeBack(created.id);
+  assert.equal(merged.finalized, false);
+  assert.equal(merged.session.isolation?.state, "cleanup-pending");
+  assert.equal(readFileSync(join(source, "flushed-during-close.txt"), "utf8"), "late flush\n");
+  assert.equal((await isolation.getStatus(created.id)).actions?.canAbandon, true);
+  assert.equal(existsSync(join(root, "flushed-during-close.txt")), false);
 });
 
 test("source process close failure does not delete the isolated workspace", async () => {
@@ -830,7 +1356,6 @@ test("source process close failure does not delete the isolated workspace", asyn
   assert.equal(published.finalized, false);
   const pending = await ctx.sessions.snapshot(created.id);
   assert.equal(pending.isolation?.state, "cleanup-pending");
-  assert.equal(pending.isolation?.rebound, true);
   assert.equal(existsSync(wt), true);
   ctx.ctrl.failClose = false;
   const recovered = await ctx.isolation.recoverSession(await ctx.sessions.snapshot(created.id));
@@ -854,7 +1379,7 @@ test("busy runtime states block merge resolve and discard", async () => {
   sessions.projections.set(created.id, {
     ...conflicted,
     status: "working",
-    isolation: transitionIsolation(conflicted.isolation!, { state: "conflict", conflict: { message: "x", files: ["README.md"] } }),
+    isolation: isolationState(conflicted.isolation!, "conflict", { conflict: { message: "x", files: ["README.md"] } }),
   });
   await assert.rejects(() => isolation.resolveWithAgent(created.id), /still running/);
 });
@@ -864,8 +1389,8 @@ test("resolve with agent cannot start twice while a turn is running", async () =
   const { isolation, sessions } = harness(root);
   const created = await isolation.createIsolatedSession({ projectId: "p1" });
   const current = await sessions.snapshot(created.id);
-  await sessions.patchIsolation!(created.id, transitionIsolation(current.isolation!, {
-    state: "conflict", conflict: { message: "conflict", files: ["README.md"] },
+  await sessions.patchIsolation!(created.id, isolationState(current.isolation!, "conflict", {
+    conflict: { message: "conflict", files: ["README.md"] },
   }));
   let sends = 0;
   sessions.sendImpl = async () => {
@@ -881,7 +1406,7 @@ test("resolve with agent cannot start twice while a turn is running", async () =
   assert.equal(sends, 1);
 });
 
-test("corrupted isolation pointing at another session does not delete it", async () => {
+test("published cleanup can be explicitly abandoned without deleting unproven resources", async () => {
   const root = repo();
   const { isolation, sessions } = harness(root);
   const a = await isolation.createIsolatedSession({ projectId: "p1", title: "A" });
@@ -893,10 +1418,23 @@ test("corrupted isolation pointing at another session does not delete it", async
   await sessions.rebindWorkspace!(a.id, {
     worktreePath: null,
     branch: "main",
-    isolation: transitionIsolation({ ...sessionA.isolation!, worktreePath: bPath, worktreeBranch: bBranch }, { state: "cleanup-pending", rebound: true }),
+    isolation: isolationState(sessionA.isolation!, "cleanup-pending", {
+      worktreePath: bPath,
+      worktreeBranch: bBranch,
+      resultCommit: runGit(root, "rev-parse", "HEAD"),
+    }),
   });
+  // The resource remains on disk but its owning canonical session is gone, so
+  // no live session depends on it and explicit non-destructive abandonment is safe.
+  sessions.projections.delete(b.id);
   const recovered = await isolation.recoverSession(await sessions.snapshot(a.id));
   assert.equal(recovered.isolation?.state, "cleanup-pending");
+  const status = await isolation.getStatus(a.id);
+  assert.equal(status.actions?.canAbandon, true);
+  const abandoned = await isolation.abandonCleanup(a.id);
+  assert.equal(abandoned.isolation, undefined);
+  assert.equal(abandoned.worktreePath, undefined);
+  assert.equal(abandoned.branch, "main");
   assert.equal(existsSync(bPath), true);
   assert.equal(existsSync(sessionA.isolation!.worktreePath), true);
   assert.ok((await git.branches(root)).branches.some((item) => item.name === bBranch));
@@ -978,282 +1516,23 @@ test("GET status during merge does not mutate refs or worktrees", async () => {
   const root = repo();
   let resume!: () => void;
   const hold = new Promise<void>((resolveHold) => { resume = resolveHold; });
-  let reached!: () => void;
-  const started = new Promise<void>((resolve) => { reached = resolve; });
   const hooks: IsolationTestHooks = {
-    afterIntegrationCreated: async () => { reached(); await hold; },
+    afterIntegrationCreated: async () => { await hold; },
   };
   const { isolation, sessions } = harness(root, { testHooks: hooks });
   const created = await isolation.createIsolatedSession({ projectId: "p1" });
   writeFileSync(join((await sessions.snapshot(created.id)).isolation!.worktreePath, "g.txt"), "g\n");
   const merge = isolation.mergeBack(created.id);
-  await started;
+  await new Promise((r) => setTimeout(r, 40));
   const persists = sessions.persistCalls;
   const rebinds = sessions.rebindCalls;
   const beforeHead = runGit(root, "rev-parse", "HEAD");
   const status = await isolation.getStatus(created.id);
-  assert.equal(status.isolation?.state, "merging");
+  assert.equal(status.isolation?.state, "active");
   assert.equal(sessions.persistCalls, persists);
   assert.equal(sessions.rebindCalls, rebinds);
   assert.equal(runGit(root, "rev-parse", "HEAD"), beforeHead);
   resume();
   const merged = await merge;
   assert.equal(merged.ok, true);
-});
-
-for (const change of ["other-session", "session-marker", "branch-marker", "missing-marker", "listed-branch"] as const) {
-  test(`source ownership ${change} cannot publish or close another workspace`, async () => {
-    const root = repo();
-    const { isolation, sessions, closeCalls } = harness(root);
-    const a = await isolation.createIsolatedSession({ projectId: "p1" });
-    const original = await sessions.snapshot(a.id);
-    const source = original.isolation!;
-    writeFileSync(join(source.worktreePath, "owned.txt"), "owned\n");
-    if (change === "other-session") {
-      const b = await isolation.createIsolatedSession({ projectId: "p1" });
-      const other = (await sessions.snapshot(b.id)).isolation!;
-      await sessions.patchIsolation!(a.id, { ...source, worktreePath: other.worktreePath, worktreeBranch: other.worktreeBranch });
-    } else if (change === "listed-branch") {
-      runGit(source.worktreePath, "checkout", "--detach");
-    } else {
-      const markerPath = join(await git.gitDir(source.worktreePath), "polyth-managed.json");
-      const marker = JSON.parse(readFileSync(markerPath, "utf8"));
-      if (change === "missing-marker") rmSync(markerPath);
-      else {
-        if (change === "session-marker") marker.sessionId = randomUUID();
-        else marker.worktreeBranch = "user-branch";
-        writeFileSync(markerPath, JSON.stringify(marker));
-      }
-    }
-    const head = runGit(root, "rev-parse", "HEAD");
-    await assert.rejects(() => isolation.mergeBack(a.id), /ownership/);
-    await assert.rejects(() => isolation.discard(a.id), /ownership/);
-    assert.equal(runGit(root, "rev-parse", "HEAD"), head);
-    assert.equal(existsSync(source.worktreePath), true);
-    assert.deepEqual(closeCalls, []);
-  });
-}
-
-test("nested isolation rejects both direct managed branch and source session", async () => {
-  const root = repo();
-  const { isolation, sessions } = harness(root);
-  const source = await isolation.createIsolatedSession({ projectId: "p1" });
-  const branch = (await sessions.snapshot(source.id)).isolation!.worktreeBranch;
-  for (const targetBranch of [branch, `refs/heads/${branch}`]) {
-    await assert.rejects(() => isolation.createIsolatedSession({ projectId: "p1", targetBranch }), /Managed isolation branches/);
-  }
-  await assert.rejects(() => isolation.createIsolatedSession({ projectId: "p1", targetBranch: "main", sourceSessionId: source.id }), /Nested isolation/);
-  assert.equal((await sessions.list()).length, 1);
-});
-
-for (const situation of ["origin-changed", "origin-removed", "target-elsewhere", "not-checked-out"] as const) {
-  test(`destination ${situation} prevents publication and preserves source`, async () => {
-    const root = repo();
-    const origin = join(root, "..", `polyth-origin-${randomUUID()}`);
-    dirs.push(origin);
-    await git.worktrees.create(root, { branch: "feature", path: origin });
-    const { isolation, sessions } = harness(root);
-    const created = await isolation.createIsolatedSession({ projectId: "p1", targetBranch: "feature" });
-    const source = (await sessions.snapshot(created.id)).isolation!;
-    writeFileSync(join(source.worktreePath, "work.txt"), "preserved\n");
-    const before = runGit(root, "rev-parse", "feature");
-    if (situation === "origin-removed") await git.worktrees.remove(root, { path: origin });
-    else runGit(origin, "checkout", "--detach");
-    if (situation === "target-elsewhere") runGit(root, "checkout", "feature");
-    const head = runGit(source.worktreePath, "rev-parse", "HEAD");
-    await assert.rejects(() => isolation.mergeBack(created.id), /origin workspace/);
-    assert.equal(runGit(root, "rev-parse", "feature"), before);
-    assert.equal(runGit(source.worktreePath, "rev-parse", "HEAD"), head);
-    assert.equal((await isolation.getStatus(created.id)).suggestion?.reason, "destination-unavailable");
-    assert.equal(readFileSync(join(source.worktreePath, "work.txt"), "utf8"), "preserved\n");
-  });
-}
-
-test("publication receipt survives reset to old target without duplicate publication", async () => {
-  const root = repo();
-  const before = runGit(root, "rev-parse", "HEAD");
-  const hooks: IsolationTestHooks = { afterPublish: async () => { throw new Error("crash after atomic publication"); } };
-  const { isolation, sessions } = harness(root, { testHooks: hooks });
-  const created = await isolation.createIsolatedSession({ projectId: "p1" });
-  const source = (await sessions.snapshot(created.id)).isolation!;
-  writeFileSync(join(source.worktreePath, "published.txt"), "published\n");
-  const result = await isolation.mergeBack(created.id);
-  const commit = result.commit;
-  assert.equal(runGit(root, "rev-parse", `refs/polyth/isolation/${created.id}`), commit);
-  runGit(root, "reset", "--hard", before);
-  await assert.rejects(() => isolation.recover(created.id), /checkout|branch|changed/i);
-  assert.equal(runGit(root, "rev-parse", "HEAD"), before);
-  assert.equal((await sessions.snapshot(created.id)).isolation?.state, "publishing");
-  // The user restores the published result. Recovery synchronizes and returns
-  // the canonical session; it never repeats the target mutation.
-  runGit(root, "reset", "--hard", commit);
-  const recovered = await isolation.recover(created.id);
-  assert.equal(recovered.isolation, undefined);
-  assert.equal(recovered.id, created.id);
-  assert.equal(runGit(root, "rev-parse", "HEAD"), commit);
-});
-
-test("post-publication origin loss stays explicit until the origin is restored", async () => {
-  const root = repo();
-  const hooks: IsolationTestHooks = { afterPublish: async () => { runGit(root, "checkout", "--detach"); } };
-  const { isolation, sessions } = harness(root, { testHooks: hooks });
-  const created = await isolation.createIsolatedSession({ projectId: "p1" });
-  const source = (await sessions.snapshot(created.id)).isolation!;
-  writeFileSync(join(source.worktreePath, "survives.txt"), "s\n");
-  const result = await isolation.mergeBack(created.id);
-  assert.equal(result.finalized, false);
-  assert.equal(result.session.isolation?.state, "publishing");
-  assert.equal(existsSync(source.worktreePath), true);
-  await assert.rejects(() => isolation.recover(created.id), /checkout|branch/i);
-  runGit(root, "checkout", "main");
-  // The simulated crash left the old index; safe recovery applies the result.
-  const recovered = await isolation.recover(created.id);
-  assert.equal(recovered.isolation, undefined);
-  assert.equal(readFileSync(join(root, "survives.txt"), "utf8"), "s\n");
-});
-
-test("external source edit during publication cannot be lost to cleanup", async () => {
-  const root = repo();
-  let sourcePath = "";
-  const hooks: IsolationTestHooks = { afterPublish: async () => { writeFileSync(join(sourcePath, "later.txt"), "late\n"); } };
-  const { isolation, sessions } = harness(root, { testHooks: hooks });
-  const created = await isolation.createIsolatedSession({ projectId: "p1" });
-  sourcePath = (await sessions.snapshot(created.id)).isolation!.worktreePath;
-  writeFileSync(join(sourcePath, "included.txt"), "included\n");
-  const result = await isolation.mergeBack(created.id);
-  assert.equal(result.finalized, false);
-  assert.equal(result.session.isolation?.state, "cleanup-pending");
-  assert.equal(result.session.worktreePath, undefined);
-  assert.equal(readFileSync(join(sourcePath, "later.txt"), "utf8"), "late\n");
-  assert.equal(existsSync(join(root, "later.txt")), false);
-  assert.equal(readFileSync(join(root, "included.txt"), "utf8"), "included\n");
-});
-
-test("startup repairs lost merge-ready projection from durable stopped event", async () => {
-  const root = repo();
-  const { isolation, sessions } = harness(root);
-  const created = await isolation.createIsolatedSession({ projectId: "p1" });
-  writeFileSync(join((await sessions.snapshot(created.id)).isolation!.worktreePath, "ready.txt"), "ready\n");
-  sessions.events.push(completedTurn(created.id));
-  const restarted = createIsolationService({ git, sessions, projects: { get: async () => ({ id: "p1", path: root }) },
-    append: async () => {}, readEvents: async (id) => sessions.events.filter((event) => event.sessionId === id) });
-  const persists = sessions.persistCalls;
-  assert.equal((await restarted.getStatus(created.id)).suggestion?.eligible, true);
-  assert.equal(sessions.persistCalls, persists);
-  await restarted.recoverAll();
-  assert.equal((await sessions.snapshot(created.id)).isolation?.state, "merge-ready");
-});
-
-test("runtime rebind does not hold the target branch publication lock", async () => {
-  const root = repo();
-  const { isolation, sessions } = harness(root);
-  const a = await isolation.createIsolatedSession({ projectId: "p1" });
-  const b = await isolation.createIsolatedSession({ projectId: "p1" });
-  for (const item of [a, b]) writeFileSync(join((await sessions.snapshot(item.id)).isolation!.worktreePath, `${item.id}.txt`), "x\n");
-  let entered!: () => void;
-  let release!: () => void;
-  const started = new Promise<void>((resolve) => { entered = resolve; });
-  const hold = new Promise<void>((resolve) => { release = resolve; });
-  const rebind = sessions.rebindWorkspace!;
-  sessions.rebindWorkspace = async (id, input) => { if (id === a.id) { entered(); await hold; } return rebind(id, input); };
-  const merging = isolation.mergeBack(a.id);
-  await started;
-  try {
-    const second = await isolation.mergeBack(b.id);
-    assert.equal(second.finalized, true);
-  } finally { release(); }
-  assert.equal((await merging).finalized, true);
-});
-
-test("corrupt labeled publication evidence is never erased by resource repair", async () => {
-  const root = repo();
-  const { isolation, sessions } = harness(root);
-  const created = await isolation.createIsolatedSession({ projectId: "p1" });
-  const session = await sessions.snapshot(created.id);
-  const malformed = { ...session.isolation!, state: "corrupt", publish: { expectedTargetSha: "old", resultCommit: "published", snapshotSha: "snap", targetRef: "refs/heads/main" } } as unknown as SessionIsolation;
-  sessions.projections.set(created.id, { ...session, isolation: malformed });
-  const recovered = await isolation.recover(created.id);
-  assert.deepEqual(recovered.isolation, malformed);
-  assert.deepEqual((await sessions.snapshot(created.id)).isolation, malformed);
-  await assert.rejects(() => isolation.discard(created.id), /cannot discard/);
-});
-
-test("terminal close flushing new files preserves source after publication", async () => {
-  const root = repo();
-  const sessions = makeSessions();
-  const isolation = createIsolationService({ git, sessions, projects: { get: async () => ({ id: "p1", path: root }) },
-    append: async () => {}, closeWorkspaceProcesses: async (cwd) => { writeFileSync(join(cwd, "flushed.txt"), "late write\n"); } });
-  const created = await isolation.createIsolatedSession({ projectId: "p1" });
-  const source = (await sessions.snapshot(created.id)).isolation!;
-  writeFileSync(join(source.worktreePath, "done.txt"), "done\n");
-  const result = await isolation.mergeBack(created.id);
-  assert.equal(result.finalized, false);
-  assert.equal(result.session.isolation?.state, "cleanup-pending");
-  assert.equal(readFileSync(join(source.worktreePath, "flushed.txt"), "utf8"), "late write\n");
-});
-
-test("startup never prunes integration owned by an unknown canonical session", async () => {
-  const root = repo();
-  const managed = createManagedWorktrees(git);
-  const { isolation } = harness(root, { managed });
-  const foreignId = randomUUID();
-  const foreignPath = await managed.createIntegrationWorkspace({ root, sessionId: foreignId, startPoint: "main" });
-  await isolation.recoverAll();
-  assert.equal(existsSync(foreignPath), true);
-  await managed.discardIntegration(root, foreignPath, foreignId);
-});
-
-test("discard rebind failure uses the same recoverable finalization as merge", async () => {
-  const root = repo();
-  const { isolation, sessions } = harness(root);
-  const created = await isolation.createIsolatedSession({ projectId: "p1" });
-  const source = (await sessions.snapshot(created.id)).isolation!;
-  writeFileSync(join(source.worktreePath, "discard.txt"), "discard only after return\n");
-  sessions.failRebind = true;
-  const pending = await isolation.discard(created.id);
-  assert.equal(pending.isolation?.state, "rebind-pending");
-  assert.equal(pending.worktreePath, source.worktreePath);
-  assert.equal(existsSync(source.worktreePath), true);
-  sessions.failRebind = false;
-  const done = await isolation.recover(created.id);
-  assert.equal(done.id, created.id);
-  assert.equal(done.isolation, undefined);
-  assert.equal(existsSync(source.worktreePath), false);
-});
-
-test("unreadable repository status is observational and cannot enable source mutations", async () => {
-  const root = repo();
-  let unreadable = false;
-  const guarded: GitService = { ...git, worktrees: { ...git.worktrees, list: async (cwd) => {
-    if (unreadable) throw new Error("repository temporarily unavailable");
-    return git.worktrees.list(cwd);
-  } } };
-  const { isolation, sessions } = harness(root, { git: guarded });
-  const created = await isolation.createIsolatedSession({ projectId: "p1" });
-  const before = sessions.persistCalls;
-  unreadable = true;
-  const status = await isolation.getStatus(created.id);
-  assert.equal(status.effectiveState, "unowned");
-  assert.equal(status.suggestion?.eligible, false);
-  assert.equal(sessions.persistCalls, before);
-  await assert.rejects(() => isolation.mergeBack(created.id), /repository temporarily unavailable/);
-  unreadable = false;
-  assert.equal((await isolation.getStatus(created.id)).effectiveState, "active");
-});
-
-test("cleanup preserves another project's canonical session using the source as its root", async () => {
-  const root = repo();
-  const sessions = makeSessions();
-  let sourcePath = "";
-  const isolation = createIsolationService({ git, sessions,
-    projects: { get: async (id) => ({ id, path: id === "p1" ? root : sourcePath }) }, append: async () => {} });
-  const created = await isolation.createIsolatedSession({ projectId: "p1" });
-  sourcePath = (await sessions.snapshot(created.id)).isolation!.worktreePath;
-  writeFileSync(join(sourcePath, "shared.txt"), "s\n");
-  const other = await sessions.create({ projectId: "p2" });
-  const merged = await isolation.mergeBack(created.id);
-  assert.equal(merged.finalized, false);
-  assert.equal(merged.session.isolation?.state, "cleanup-pending");
-  assert.equal(existsSync(sourcePath), true);
-  assert.equal((await sessions.snapshot(other.id)).projectId, "p2");
 });

@@ -241,6 +241,7 @@ export default function PendingChangesBar() {
         icon={<ProviderLogo
           providerID={descriptor?.providerID ?? modelRef?.providerID}
           providerName={descriptor?.providerName}
+          harnessId={descriptor?.harnessId ?? session?.resolvedHarnessId}
           size="regular"
         />}
         model={modelName}

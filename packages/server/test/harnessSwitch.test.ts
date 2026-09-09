@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { mkdtempSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AgentRuntime, CanonicalTurnRequest, HarnessContext, HarnessProvider, ProjectService, RuntimeEvent, RuntimeSnapshot } from "@polyth/contracts";
-import type { PermissionService } from "@polyth/permissions";
+import { createAutoAcceptStore, type PermissionService } from "@polyth/permissions";
 import { createStore } from "@polyth/session";
 import { createHarnessPool, createHarnessRegistry } from "@polyth/harness-runtime";
 import { createSessionService } from "../src/sessions.ts";
@@ -22,13 +23,21 @@ function fixture(path = ":memory:") {
   let shuttingDown = false;
   const beginShutdown = () => { shuttingDown = true; };
   const registry = createHarnessRegistry();
-  const engines: Array<AgentRuntime & { complete(): void; requests: CanonicalTurnRequest[]; harnessId: string }> = [];
+  type FakeEngine = AgentRuntime & {
+    complete(): void;
+    requestPermission(requestId: string): void;
+    requests: CanonicalTurnRequest[];
+    permissionReplies: Array<{ requestId: string; reply: string }>;
+    harnessId: string;
+  };
+  const engines: FakeEngine[] = [];
   const executing = new Set<string>();
   let releaseUnknown = false;
   let createUnknown = false;
   let exposeReceipt = true;
   let abortStops = false;
   const nativeCreates: string[] = [];
+  const broadcasts: string[] = [];
   const provider = (id: string): HarnessProvider => ({
     descriptor: { id, name: id, integration: "fake", priority: id === "fake-a" ? 0 : 1 },
     probe: async () => ({ harnessId: id, installed: true, authenticated: true, healthy: true }),
@@ -41,6 +50,7 @@ function fixture(path = ":memory:") {
       let nativeId = "";
       let order = 0;
       let lastCreateId = "";
+      const nativePermissions = new Map<string, { permission: string; patterns: string[] }>();
       const accepted: NonNullable<RuntimeSnapshot["acceptedOperations"]> = [];
       const create = async (request: { sessionId: string }, operationId: string) => {
         assert.equal(executing.size, 0, "no target native session while previous engine can execute");
@@ -49,12 +59,13 @@ function fixture(path = ":memory:") {
         if (createUnknown) return { kind: "unknown" as const, operationId, message: "response lost" };
         return { kind: "confirmed" as const, value: { backendSessionId: nativeId }, receipt: nativeId };
       };
-      const runtime: AgentRuntime & { complete(): void; requests: CanonicalTurnRequest[]; harnessId: string } = {
+      const runtime: FakeEngine = {
         harnessId: id,
         requests: [],
+        permissionReplies: [],
         capabilities: async () => ({
           streaming: true,
-          permissions: false,
+          permissions: true,
           questions: false,
           compaction: false,
           subagents: false,
@@ -76,7 +87,9 @@ function fixture(path = ":memory:") {
         reconcile: async (binding) => ({
           ...endpoint, backendSessionId: binding.backendSessionId!, reconciliationOrdinal: binding.reconciliationOrdinal ?? 0,
           state: { value: executing.has(authorityId) ? "running" : "idle", comparison: { domain: authorityId, order: ++order }, causalOperationId: lastCreateId },
-          completeness: { events: "complete", permissions: "complete", questions: "complete" }, permissions: [], questions: [], events: [], acceptedOperations: accepted,
+          completeness: { events: "complete", permissions: "complete", questions: "complete" },
+          permissions: [...nativePermissions].map(([requestId, request]) => ({ requestId, ...request, revision: "pending" })),
+          questions: [], events: [], acceptedOperations: accepted,
         }),
         async startTurnOperation(request, operationId) {
           runtime.requests.push(request); executing.add(authorityId); order++;
@@ -85,6 +98,10 @@ function fixture(path = ":memory:") {
           return { kind: "confirmed", value: {}, receipt: operationId };
         },
         startTurn: async () => {},
+        requestPermission(requestId) {
+          nativePermissions.set(requestId, { permission: "bash", patterns: ["git status"] });
+          emit({ type: "permission/requested", requestId, permission: "bash", patterns: ["git status"] });
+        },
         complete() { emit({ type: "assistant/message", partId: randomUUID(), text: `confirmed answer from ${id}` }); executing.delete(authorityId); order++; emit({ type: "turn/stopped", reason: "completed" }); },
         abort: async () => {},
         abortOperation: async () => {
@@ -110,7 +127,11 @@ function fixture(path = ":memory:") {
             },
           };
         },
-        replyPermission: async () => {}, replyQuestion: async () => {},
+        replyPermission: async (_sessionId, requestId, reply) => {
+          nativePermissions.delete(requestId);
+          runtime.permissionReplies.push({ requestId, reply });
+        },
+        replyQuestion: async () => {},
         onEvent: (cb) => { listeners.add(cb); return { dispose: () => { listeners.delete(cb); } }; },
         dispose: async () => {},
       };
@@ -120,10 +141,22 @@ function fixture(path = ":memory:") {
   registry.register(provider("fake-a")); registry.register(provider("fake-b")); registry.register(provider("fake-c"));
   const pool = createHarnessPool({ registry, legacyHarnessId: "fake-a", context: async (projectId, cwd, sessionId) => ({ projectId, cwd: cwd ?? "/same/worktree", sessionId, spaceId: "space-a" }) });
   const projects = { get: async () => ({ id: "p", name: "p", path: "/same/worktree", spaceId: "space-a", createdAt: 0 }), list: async () => [] } as unknown as ProjectService;
-  const makeSessions = () => createSessionService({ store, projects, runtimes: pool, permissions: { evaluate: () => "ask" } as unknown as PermissionService, broadcast: { event() {}, projection() {} }, queue: store, isShuttingDown: () => shuttingDown });
+  const autoAcceptPath = path === ":memory:"
+    ? join(mkdtempSync(join(tmpdir(), "harness-auto-accept-")), "auto-accept.json")
+    : `${path}.auto-accept.json`;
+  const makeSessions = () => createSessionService({
+    store,
+    projects,
+    runtimes: pool,
+    permissions: { evaluate: () => "ask" } as unknown as PermissionService,
+    autoAccept: createAutoAcceptStore(autoAcceptPath),
+    broadcast: { event(event) { broadcasts.push(event.type); }, projection() {} },
+    queue: store,
+    isShuttingDown: () => shuttingDown,
+  });
   let sessions = makeSessions();
   const drain = () => new Promise((resolve) => setTimeout(resolve, 40));
-  return { get store() { return store; }, get sessions() { return sessions; }, engines, nativeCreates, beginShutdown,
+  return { get store() { return store; }, get sessions() { return sessions; }, engines, nativeCreates, broadcasts, beginShutdown,
     async idle(id: string) { await until(async () => { const events = await store.events(id); return (await store.projection(id))?.status === "idle" && (events.findLast(e => e.type === "turn/stopped")?.seq ?? 0) > (events.findLast(e => e.type === "user/message")?.seq ?? 0); }); },
     async close() { await drain(); detach.forEach((off) => off()); await store.close(); },
     async restart() { await drain(); detach.forEach((off) => off()); await store.close(); store = createStore(path); sessions = makeSessions(); }, setReleaseUnknown(value: boolean) { releaseUnknown = value; }, setCreateUnknown(value: boolean, receipt = true) { createUnknown = value; exposeReceipt = receipt; }, setAbortStops(value: boolean) { abortStops = value; } };
@@ -174,6 +207,32 @@ test("runtime features follow the newly selected harness", async () => {
   await f.close();
 });
 
+test("Auto-Approve remains authoritative across every registered harness and switching off restores prompts", async () => {
+  const f = fixture();
+  const { id } = await f.sessions.create({ projectId: "p" });
+  await f.sessions.autoAcceptSet!(id, "on");
+
+  for (const harnessId of ["fake-a", "fake-b", "fake-c"]) {
+    if ((await f.store.projection(id))?.resolvedHarnessId !== harnessId) {
+      await f.sessions.switchHarness!(id, { mode: "pinned", harnessId });
+    }
+    const engine = f.engines.at(-1)!;
+    const requestId = `permission-${harnessId}`;
+    engine.requestPermission(requestId);
+    await until(async () => engine.permissionReplies.some((reply) => reply.requestId === requestId));
+    assert.deepEqual(engine.permissionReplies.at(-1), { requestId, reply: "once" });
+    assert.equal((await f.store.projection(id))?.autoAccept, true);
+  }
+
+  await f.sessions.autoAcceptSet!(id, "off");
+  const current = f.engines.at(-1)!;
+  current.requestPermission("permission-manual");
+  await until(async () => (await f.store.projection(id))?.status === "waiting");
+  assert.equal(current.permissionReplies.some((reply) => reply.requestId === "permission-manual"), false);
+  assert.deepEqual(await f.sessions.autoAcceptGet!(id), { setting: "off", effective: false });
+  await f.close();
+});
+
 test("stop-now cannot start B on an abort acknowledgement or unknown release", async () => {
   const f = fixture(); const { id } = await f.sessions.create({ projectId: "p" });
   await f.sessions.send(id, { text: "mutating" });
@@ -215,6 +274,33 @@ test("synchronized native history resumes after disk/server restart without a se
   assert.equal(f.nativeCreates.length, 1); assert.equal(f.engines[0]!.requests.length, 2);
   f.engines[0]!.complete(); await f.idle(id);
   await f.close(); await rm(dir, { recursive: true, force: true });
+});
+
+test("resumed job restores Auto-Approve and drains a permission missed while disconnected", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "harness-permission-restart-"));
+  const f = fixture(join(dir, "events.db"));
+  const { id } = await f.sessions.create({ projectId: "p" });
+  await f.sessions.autoAcceptSet!(id, "on");
+  await f.restart();
+
+  const resumedEngine = f.engines[0]!;
+  resumedEngine.requestPermission("permission-during-disconnect");
+  f.broadcasts.length = 0;
+  await f.sessions.send(id, { text: "resume" });
+  await until(async () => resumedEngine.permissionReplies.some(
+    (reply) => reply.requestId === "permission-during-disconnect",
+  ));
+
+  assert.deepEqual(await f.sessions.autoAcceptGet!(id), { setting: "on", effective: true });
+  assert.equal(f.broadcasts.includes("permission/requested"), false);
+  assert.ok((await f.store.events(id)).some((event) =>
+    event.type === "permission/resolved"
+    && (event.data as { requestId?: string; auto?: boolean }).requestId === "permission-during-disconnect"
+    && (event.data as { auto?: boolean }).auto === true));
+  resumedEngine.complete();
+  await f.idle(id);
+  await f.close();
+  await rm(dir, { recursive: true, force: true });
 });
 
 test("canonical dialogue added outside the active native leg forces a fresh leg on the same harness", async () => {
@@ -387,6 +473,7 @@ function sharedFixture() {
   let sharedDisposed = 0;
   const provider = (id: string, shared: boolean): HarnessProvider => ({
     descriptor: { id, name: id, integration: "fake", priority: id === "fake-a" ? 0 : id === "fake-b" ? 1 : 2 },
+    runtimeLifetime: shared ? "workspace" : "session",
     probe: async () => ({ harnessId: id, installed: true, authenticated: true, healthy: true }),
     async createRuntime(context: HarnessContext) {
       const sessionId = context.sessionId!;

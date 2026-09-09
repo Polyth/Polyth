@@ -13,15 +13,17 @@
   "scripts": {
     "check:node": "node scripts/check-node.mjs",
     "preinstall": "node scripts/check-node.mjs",
+    "build:supervisor": "node packages/harness-runtime/build-supervisor.mjs",
     "prebuild": "node scripts/check-node.mjs",
+    "prebuild:web": "npm run build:supervisor",
     "build:web": "node --experimental-strip-types apps/web/buildPackages.ts && node --experimental-strip-types apps/web/build.ts",
     "build:desktop": "npm run build:web && npm --workspace @polyth/desktop run build",
     "build": "npm run build:web",
-    "prestart": "node scripts/check-node.mjs",
+    "prestart": "node scripts/check-node.mjs && npm run build:supervisor",
     "start": "node --experimental-strip-types packages/server/src/index.ts",
     "predev": "node scripts/check-node.mjs",
     "dev": "npm run build:web && node --experimental-strip-types packages/server/src/index.ts",
-    "prewatch": "node scripts/check-node.mjs",
+    "prewatch": "node scripts/check-node.mjs && npm run build:supervisor",
     "watch": "node --experimental-strip-types scripts/supervisor.ts",
     "watch:public": "HOST=0.0.0.0 PORT=4400 npm run watch",
     "build:link": "cargo build -p polyth-link-host -p polyth-link-client -p polyth-link-relay",
@@ -35,7 +37,7 @@
     "mobile:open:android": "npm --workspace @polyth/mobile run open:android",
     "mobile:open:ios": "npm --workspace @polyth/mobile run open:ios",
     "mobile:build:android": "npm run build:web && npm --workspace @polyth/mobile run sync && npm --workspace @polyth/mobile run build:android",
-    "pretest": "node scripts/check-node.mjs",
+    "pretest": "node scripts/check-node.mjs && npm run build:supervisor",
     "test": "node --experimental-strip-types --test packages/*/test/*.test.ts apps/*/test/*.test.ts scripts/test/*.test.ts"
   },
   "devDependencies": {

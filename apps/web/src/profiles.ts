@@ -1,23 +1,20 @@
-// Client cache for server-owned agent profiles (WP8), plus the one-time
-// favorites→profiles migration. The server record is the source of truth;
-// this module only mirrors it for pickers and settings.
+// Client cache for server-owned agent presets. The authenticated server record
+// is authoritative and account-scoped; this module only mirrors the current
+// account for composer and Settings surfaces.
 import { useSyncExternalStore } from "react";
 import type { AgentProfile, ModelDescriptor } from "@polyth/contracts";
-import { planFavoriteMigration } from "@polyth/models";
 import { api } from "@polyth/session/web-api";
-import { getModelPrefs } from "@polyth/models/web-prefs";
 
 let profiles: AgentProfile[] = [];
 let loaded = false;
 const listeners = new Set<() => void>();
-const emit = () => { for (const l of [...listeners]) l(); };
+const emit = () => { for (const listener of [...listeners]) listener(); };
 
 export function getProfiles(): AgentProfile[] {
   return profiles;
 }
 
-/** True once the authoritative profile list has loaded at least once —
- *  "profile deleted" states must never fire on the initial empty mirror. */
+/** True once the authoritative preset list has loaded at least once. */
 export function profilesLoaded(): boolean {
   return loaded;
 }
@@ -31,31 +28,19 @@ export async function refreshProfiles(): Promise<AgentProfile[]> {
 
 export function useProfiles(): AgentProfile[] {
   return useSyncExternalStore(
-    (cb) => {
-      listeners.add(cb);
+    (callback) => {
+      listeners.add(callback);
       if (!loaded) void refreshProfiles();
-      return () => { listeners.delete(cb); };
+      return () => { listeners.delete(callback); };
     },
     getProfiles,
   );
 }
 
-const MIGRATION_FLAG = "polyth.profiles.favoritesMigrated";
-
-/** Migrate model favorites into minimal profiles exactly once. Idempotent on
- *  both sides: the plan skips provider/model pairs that already have a profile,
- *  and the local flag stops repeat attempts. Favorites keep working as before. */
-export async function migrateFavoritesOnce(models: readonly ModelDescriptor[]): Promise<void> {
-  try {
-    if (localStorage.getItem(MIGRATION_FLAG) === "1") return;
-  } catch { return; }
-  if (models.length === 0) return; // adapter absent: retry next boot
-  const existing = loaded ? profiles : await refreshProfiles();
-  const plan = planFavoriteMigration(getModelPrefs(), models, existing);
-  for (const seed of plan) {
-    await api.createProfile({ name: seed.name, providerID: seed.providerID, modelID: seed.modelID, features: {} })
-      .catch(() => {}); // partial failure: flag stays unset, next boot retries
-  }
-  try { localStorage.setItem(MIGRATION_FLAG, "1"); } catch { /* private mode */ }
-  if (plan.length > 0) await refreshProfiles();
+/** Compatibility-only cleanup for an old Composer call site. Favorites are
+ * model-picker preferences, never agent presets, so this function deliberately
+ * cannot create or update server records. # ponytail: remove with the stale
+ * Composer import when that large owner is next edited. */
+export async function migrateFavoritesOnce(_models: readonly ModelDescriptor[]): Promise<void> {
+  try { localStorage.removeItem("polyth.profiles.favoritesMigrated"); } catch { /* private mode */ }
 }

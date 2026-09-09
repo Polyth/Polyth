@@ -1054,6 +1054,8 @@ export const api = {
     jfetch<SessionProjection>(`/api/isolation/${encodeURIComponent(sessionId)}/discard`, json("POST", {})),
   isolationRecover: (sessionId: string) =>
     jfetch<SessionProjection>(`/api/isolation/${encodeURIComponent(sessionId)}/recover`, json("POST", {})),
+  isolationAbandon: (sessionId: string) =>
+    jfetch<SessionProjection>(`/api/isolation/${encodeURIComponent(sessionId)}/abandon`, json("POST", {})),
   isolationResolve: (sessionId: string) =>
     jfetch<{ sessionId: string }>(`/api/isolation/${encodeURIComponent(sessionId)}/resolve`, json("POST", {})),
 

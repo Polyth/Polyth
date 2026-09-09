@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { HarnessContext, HarnessProvider, HarnessRegistry } from "@polyth/contracts";
-import { createStdioRpc } from "@polyth/harness-runtime";
+import { createStdioRpc, releaseProcessExecution } from "@polyth/harness-runtime";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { createCodexRuntime, CODEX_CAPABILITIES, type Thread } from "./index.ts";
 import { createCodexProvisioner } from "./provisioner.ts";
@@ -21,6 +21,10 @@ export async function connectCodex(context: HarnessContext, stateFile?: string) 
 }
 export default function registerPackage(host: ServerPackageHost) {
     const registry = host.services.require(serverServiceKey<HarnessRegistry>("harnesses"));
+    const stateFile = (context: HarnessContext) => {
+        const key = createHash("sha256").update(JSON.stringify([context.projectId, context.cwd, context.sessionId ?? "catalog"])).digest("hex");
+        return host.spaceStorage(context.space!).path(`runtime/codex/${key}.json`);
+    };
     const provider: HarnessProvider = {
         descriptor: { id: "codex", name: "Codex", integration: "App Server", priority: 10, setupUrl: "https://developers.openai.com/codex/cli/", installCommand: "npm install -g @openai/codex", signInCommand: "codex login" },
         staticFeatures: CODEX_CAPABILITIES,
@@ -53,9 +57,12 @@ export default function registerPackage(host: ServerPackageHost) {
         async createRuntime(context) {
             if (!context.space || context.remote || process.platform !== "linux")
                 throw Object.assign(new Error("Local Space context required"), { code: "unsupported" });
-            const key = createHash("sha256").update(JSON.stringify([context.projectId, context.cwd, context.sessionId ?? "catalog"])).digest("hex");
-            const stateFile = host.spaceStorage(context.space).path(`runtime/codex/${key}.json`);
-            return createCodexRuntime(context, await connectCodex(context, stateFile));
+            return createCodexRuntime(context, await connectCodex(context, stateFile(context)));
+        },
+        async releaseExecution(context, binding, operationId) {
+            if (!context.space || context.remote || process.platform !== "linux")
+                return { kind: "rejected", code: "unsupported", message: "Local Linux Space context required" };
+            return releaseProcessExecution(stateFile(context), binding, operationId);
         },
         provisioner: createCodexProvisioner(),
         source: {

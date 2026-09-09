@@ -444,6 +444,8 @@ export const bg: GitMessages = {
   "isolation.discardConfirm": "Неслетите промени в това изолирано пространство ще бъдат загубени.",
   "isolation.discardTitle": "Отхвърли изолираното пространство",
   "isolation.discard": "Отхвърли",
+  "isolation.finishWithoutCleanup": "Завърши и запази пространството",
+  "isolation.finishWithoutCleanupConfirm": "Непровереното пространство и клон ще бъдат запазени и тази сесия повече няма да ги управлява.",
   "isolation.dirtyTarget": "{branch} има локални промени. Комитирай или отхвърли ги преди да интегрираш тази сесия.",
   "isolation.missingWorkspace": "Изолираното пространство вече не е налично.",
   "isolation.workInIsolation": "Работа в изолация",

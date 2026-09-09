@@ -6,6 +6,7 @@
 // an explicit per-row details view, never on the row itself.
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
@@ -14,7 +15,9 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
+import { createPortal } from "react-dom";
 import type { ModelDescriptor, ModelRef } from "@polyth/contracts";
 import { isFavorite, modelKey, orderProviders } from "@polyth/models";
 import {
@@ -42,6 +45,7 @@ import {
   SheetSection,
   TextInput,
 } from "@polyth/web/ui";
+import { useEscape } from "../../../apps/web/src/useEscape.ts";
 import { Icon } from "@polyth/web/icons";
 import ProviderLogo from "./ProviderLogo.tsx";
 import { getLocale, tr } from "@polyth/web/i18n";
@@ -57,8 +61,121 @@ import {
 
 const MAX_RENDERED_MODELS = 200;
 const MODEL_PICKER_DRAG_TYPE = "application/x-polyth-model-picker";
+const DETAILS_PANEL_WIDTH = 272;
 type ModelPickerDragKind = "favorite" | "provider";
 type ModelPickerDrag = { kind: ModelPickerDragKind; id: string };
+
+function unanimousHarnessId(models: readonly ModelDescriptor[]): string | undefined {
+  const harnessId = models[0]?.harnessId;
+  return harnessId && models.every((model) => model.harnessId === harnessId) ? harnessId : undefined;
+}
+
+function visibleBand() {
+  const vv = typeof window !== "undefined" ? window.visualViewport : null;
+  if (vv) {
+    return {
+      top: vv.offsetTop,
+      bottom: vv.offsetTop + vv.height,
+      left: vv.offsetLeft,
+      right: vv.offsetLeft + vv.width,
+    };
+  }
+  return { top: 0, bottom: window.innerHeight, left: 0, right: window.innerWidth };
+}
+
+/** Adjacent details surface: beside the picker shell, aligned to the active row. */
+function AdjacentDetailsPanel({
+  open,
+  anchor,
+  pickerShellRef,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  anchor: HTMLElement | null;
+  pickerShellRef: RefObject<HTMLElement | null>;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<{ left: number; top: number; ready: boolean }>({
+    left: 0,
+    top: 0,
+    ready: false,
+  });
+  useEscape(open, onClose);
+
+  useLayoutEffect(() => {
+    if (!open || !anchor) {
+      setPosition({ left: 0, top: 0, ready: false });
+      return;
+    }
+    const update = () => {
+      const pickerShell = pickerShellRef.current;
+      if (!pickerShell) return;
+      const band = visibleBand();
+      const margin = 8;
+      const gap = 8;
+      const pickerRect = pickerShell.getBoundingClientRect();
+      const rowRect = anchor.getBoundingClientRect();
+      const panelRect = panelRef.current?.getBoundingClientRect();
+      const panelWidth = panelRect?.width || DETAILS_PANEL_WIDTH;
+      const panelHeight = panelRect?.height || 260;
+      let left = pickerRect.right + gap;
+      if (left + panelWidth > band.right - margin) {
+        left = Math.max(margin, pickerRect.left - gap - panelWidth);
+      }
+      const top = Math.min(
+        Math.max(band.top + margin, rowRect.top - 8),
+        band.bottom - margin - panelHeight,
+      );
+      setPosition((previous) => (
+        previous.ready && previous.left === left && previous.top === top
+          ? previous
+          : { left, top, ready: true }
+      ));
+    };
+    update();
+    const frame = requestAnimationFrame(update);
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    window.visualViewport?.addEventListener("resize", update);
+    window.visualViewport?.addEventListener("scroll", update);
+    const observer = typeof ResizeObserver === "undefined"
+      ? undefined
+      : new ResizeObserver(update);
+    const shell = pickerShellRef.current;
+    if (shell) observer?.observe(shell);
+    observer?.observe(anchor);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+      window.visualViewport?.removeEventListener("resize", update);
+      window.visualViewport?.removeEventListener("scroll", update);
+      observer?.disconnect();
+    };
+  }, [open, anchor, pickerShellRef]);
+
+  if (!open || !anchor || typeof document === "undefined") return null;
+
+  return createPortal(
+    <aside
+      ref={panelRef}
+      className="model-details-panel"
+      aria-live="polite"
+      style={{
+        top: position.top,
+        left: position.left,
+        visibility: position.ready ? undefined : "hidden",
+      }}
+      onMouseEnter={(event) => event.stopPropagation()}
+    >
+      {children}
+    </aside>,
+    document.body,
+  );
+}
 
 /** Explicit phone details route. Desktop uses the compact hover card below. */
 function ModelDetails({
@@ -112,6 +229,7 @@ function ModelDetails({
         <ProviderLogo
           providerID={model.providerID}
           providerName={model.providerName}
+          harnessId={model.harnessId}
           className="model-row-provider-logo"
         />
         <div className="model-details-title">
@@ -152,7 +270,7 @@ function ModelHoverDetails({ model, favorite }: { model: ModelDescriptor; favori
   return (
     <div className="model-hover-details">
       <header>
-        <ProviderLogo providerID={model.providerID} providerName={model.providerName} className="model-row-provider-logo" />
+        <ProviderLogo providerID={model.providerID} providerName={model.providerName} harnessId={model.harnessId} className="model-row-provider-logo" />
         <div><strong>{model.name}</strong><small>{model.providerName ?? model.providerID}</small></div>
         <FavoriteIcon className={`model-hover-star${favorite ? " on" : ""}`} aria-label={favorite ? tr("modelpicker.removeFavorite") : tr("modelpicker.addFavorite")} />
       </header>
@@ -208,13 +326,14 @@ export default function ModelPicker({
   );
   const [editing, setEditing] = useState(false);
   const [detail, setDetail] = useState<ModelDescriptor | null>(null);
+  const [detailAnchor, setDetailAnchor] = useState<HTMLElement | null>(null);
   const [active, setActive] = useState(0);
   const [showDetails, setShowDetails] = useState(false);
-  const [detailPosition, setDetailPosition] = useState<{ left: number; top: number } | null>(null);
   const [dragging, setDragging] = useState<ModelPickerDrag | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const pickerShellRef = useRef<HTMLDivElement>(null);
 
   const current = value
     ? models.find((model) => modelKey(model) === modelKey(value))
@@ -320,23 +439,17 @@ export default function ModelPicker({
       ?.scrollIntoView({ block: "nearest" });
   }, [open, phone, activeKey]);
 
-  const placeDetails = (element: HTMLElement) => {
-    const rect = element.getBoundingClientRect();
-    const width = 272;
-    const left = rect.right + 8 + width <= window.innerWidth - 12
-      ? rect.right + 8
-      : Math.max(12, rect.left - width - 8);
-    setDetailPosition({ left, top: Math.min(Math.max(12, rect.top - 8), window.innerHeight - 260) });
+  const closeDetails = () => {
+    setDetail(null);
+    setDetailAnchor(null);
+    setShowDetails(false);
   };
-
-  useEffect(() => {
-    if (!showDetails || !activeKey || phone) return;
-    const element = document.getElementById(`model-option-${activeKey}`);
-    if (element) placeDetails(element);
-    // `placeDetails` is intentionally not a dependency: it is a local layout
-    // helper and including it would re-position on every state update.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showDetails, activeKey, phone]);
+  const hoverDetailsModel = showDetails && activeIndex >= 0 ? flatRows[activeIndex] : null;
+  const hoverDetailsAnchor = hoverDetailsModel && !detail
+    ? document.getElementById(`model-option-${modelKey(hoverDetailsModel)}`)
+    : null;
+  const detailsOpen = Boolean(detail) || Boolean(hoverDetailsModel && hoverDetailsAnchor && !phone);
+  const detailsAnchor = detail ? detailAnchor : hoverDetailsAnchor;
 
   // Keep the familiar command-palette slash shortcut local to this open
   // picker; never steal text typed into another control.
@@ -356,9 +469,8 @@ export default function ModelPicker({
     setOpen(false);
     dispatchPicker({ type: "reset" });
     setEditing(false);
-    setDetail(null);
+    closeDetails();
     setActive(0);
-    setShowDetails(false);
   };
   const choose = (model: ModelDescriptor) => {
     if (phone) tapFeedback();
@@ -462,7 +574,9 @@ export default function ModelPicker({
       tabIndex={variant === "row" ? -1 : undefined}
       onClick={(event) => {
         event.stopPropagation();
+        setShowDetails(false);
         setDetail(model);
+        setDetailAnchor(event.currentTarget.closest<HTMLElement>(".sheet-row, .model-picker-row") ?? event.currentTarget);
       }}
     />
   );
@@ -492,7 +606,12 @@ export default function ModelPicker({
         onClick={() => choose(model)}
           onMouseEnter={(event: MouseEvent<HTMLDivElement>) => {
             const index = flatRowIndex.get(key);
-            if (index !== undefined) { setActive(index); setShowDetails(true); placeDetails(event.currentTarget); }
+            if (index !== undefined) {
+              setDetail(null);
+              setDetailAnchor(null);
+              setActive(index);
+              setShowDetails(true);
+            }
         }}
         {...(favoriteDrag ? {
           draggable: !phone && !q,
@@ -512,7 +631,7 @@ export default function ModelPicker({
         } : {})}
       >
         <span className={`model-picker-grip${favoriteDrag ? "" : " spacer"}`} aria-hidden="true">{favoriteDrag ? "⠿" : ""}</span>
-        <ProviderLogo providerID={model.providerID} providerName={model.providerName} className="model-row-provider-logo" />
+        <ProviderLogo providerID={model.providerID} providerName={model.providerName} harnessId={model.harnessId} className="model-row-provider-logo" />
         <span className="model-picker-copy">
           <strong>
             {model.name}
@@ -522,6 +641,7 @@ export default function ModelPicker({
           </strong>
         </span>
         {capabilityIcons(model)}
+        {infoButton(model)}
         {star(model)}
       </div>
     );
@@ -539,7 +659,7 @@ export default function ModelPicker({
       key={`${group}:${modelKey(model)}`}
       title={model.name}
       icon={(
-        <>{editing && group === "favorites" && <span className="model-sheet-grip" aria-hidden="true">⠿</span>}<ProviderLogo providerID={model.providerID} providerName={model.providerName} className="model-row-provider-logo" /></>
+        <>{editing && group === "favorites" && <span className="model-sheet-grip" aria-hidden="true">⠿</span>}<ProviderLogo providerID={model.providerID} providerName={model.providerName} harnessId={model.harnessId} className="model-row-provider-logo" /></>
       )}
       selected={isSelected(model)}
       onClick={() => choose(model)}
@@ -592,6 +712,7 @@ export default function ModelPicker({
         <ProviderLogo
           providerID={selectedModel.providerID}
           providerName={selectedModel.providerName}
+          harnessId={selectedModel.harnessId}
           size="compact"
           className="model-trigger-logo"
         />
@@ -601,14 +722,24 @@ export default function ModelPicker({
     </button>
   );
 
-  const detailsView = detail && (
-    <ModelDetails
-      model={detail}
-      selected={isSelected(detail)}
-      {...(usage !== undefined ? { usage } : {})}
-      onUse={() => choose(detail)}
-      onBack={() => setDetail(null)}
-    />
+  const detailsPanelModel = detail ?? hoverDetailsModel;
+  const detailsPanelContent = detailsPanelModel && (
+    detail
+      ? (
+        <ModelDetails
+          model={detail}
+          selected={isSelected(detail)}
+          {...(usage !== undefined ? { usage } : {})}
+          onUse={() => choose(detail)}
+          onBack={closeDetails}
+        />
+      )
+      : (
+        <ModelHoverDetails
+          model={detailsPanelModel}
+          favorite={isFavorite(prefs, modelKey(detailsPanelModel))}
+        />
+      )
   );
 
   return (
@@ -616,7 +747,7 @@ export default function ModelPicker({
       {trigger}
       <ResponsiveOverlay
           open={open}
-          title={detail ? detail.name : tr("modelpicker.model")}
+          title={tr("modelpicker.model")}
           onClose={close}
           anchorRef={triggerRef}
           restoreFocusRef={triggerRef}
@@ -624,21 +755,19 @@ export default function ModelPicker({
           align="start"
           className={phone ? "model-sheet" : "model-pop"}
           popoverOverflow="visible"
-          initialFocus={!phone && !detail ? ".model-pop-search input" : undefined}
+          initialFocus={!phone ? ".model-pop-search input" : undefined}
           sheetSize="tall"
-          {...(!detail ? {
-            sheetSearch: {
-              value: pickerState.query,
-              onChange: (query: string) => {
-                dispatchPicker({ type: "search", query });
-                setActive(0);
-                setShowDetails(false);
-              },
-              placeholder: tr("modelpicker.searchModels"),
-              ariaLabel: tr("modelpicker.searchModels"),
+          sheetSearch={{
+            value: pickerState.query,
+            onChange: (query: string) => {
+              dispatchPicker({ type: "search", query });
+              setActive(0);
+              closeDetails();
             },
-          } : {})}
-          {...(!detail && favorites.length > 1 ? {
+            placeholder: tr("modelpicker.searchModels"),
+            ariaLabel: tr("modelpicker.searchModels"),
+          }}
+          {...(favorites.length > 1 ? {
             sheetAction: {
               label: editing ? tr("common.done") : tr("common.edit"),
               pressed: editing,
@@ -646,7 +775,7 @@ export default function ModelPicker({
             },
           } : {})}
         >
-        {detail ? detailsView : <>
+        <div ref={pickerShellRef} className="model-picker-shell">
           {header && <div className="model-picker-header">{header}</div>}
           {phone ? (
             <div role="listbox" aria-label={tr("modelpicker.models")}>
@@ -677,6 +806,7 @@ export default function ModelPicker({
                         <ProviderLogo
                           providerID={provider.id}
                           providerName={provider.name}
+                          harnessId={unanimousHarnessId(provider.models)}
                           className="model-provider-logo"
                         />
                         <span>{provider.name}</span>
@@ -710,7 +840,7 @@ export default function ModelPicker({
                   onChange={(event) => {
                     dispatchPicker({ type: "search", query: event.target.value });
                     setActive(0);
-                    setShowDetails(false);
+                    closeDetails();
                   }}
                   onKeyDown={onSearchKey}
                 />
@@ -767,6 +897,7 @@ export default function ModelPicker({
                         <ProviderLogo
                           providerID={provider.id}
                           providerName={provider.name}
+                          harnessId={unanimousHarnessId(provider.models)}
                           className="model-provider-logo"
                         />
                         <strong>{provider.name}</strong>
@@ -787,15 +918,18 @@ export default function ModelPicker({
               <footer className="model-picker-shortcuts" aria-label="Keyboard shortcuts">
                 <span>↑↓ Navigate</span><span>Enter Select</span><span>/ Search</span>
               </footer>
-              {showDetails && activeIndex >= 0 && flatRows[activeIndex] && (
-                <aside className="model-hover-card" aria-live="polite" style={detailPosition ?? undefined} onMouseEnter={() => setActive(activeIndex)}>
-                  <ModelHoverDetails model={flatRows[activeIndex]!} favorite={isFavorite(prefs, modelKey(flatRows[activeIndex]!))} />
-                </aside>
-              )}
             </div>
           )}
-        </>}
+        </div>
       </ResponsiveOverlay>
+      <AdjacentDetailsPanel
+        open={open && detailsOpen}
+        anchor={detailsAnchor}
+        pickerShellRef={pickerShellRef}
+        onClose={closeDetails}
+      >
+        {detailsPanelContent}
+      </AdjacentDetailsPanel>
     </span>
   );
 }

@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cloneRepository, createGitService, normalizeRepositoryUrl, pathsUnder } from "../src/index.ts";
+import { createManagedWorktrees, isolateBranchName, isolateWorktreePath } from "../src/managedWorktrees.ts";
 
 const git = createGitService();
 const dirs: string[] = [];
@@ -634,6 +635,188 @@ test("snapshotCommit captures untracked files and respects gitignore", async () 
   writeFileSync(join(dir, "tracked.txt"), "keep2\n");
   const fp2 = await git.fingerprint(dir);
   assert.notEqual(fp1, fp2);
+});
+
+test("snapshotCommit preserves HEAD and index while bypassing hooks and signing", async () => {
+  const dir = repo();
+  const g = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" }).toString();
+  writeFileSync(join(dir, "mixed.txt"), "base\n");
+  writeFileSync(join(dir, "delete-me.txt"), "delete\n");
+  writeFileSync(join(dir, "script.sh"), "#!/bin/sh\nexit 0\n");
+  g("add", ".");
+  g("commit", "-qm", "fixture");
+
+  writeFileSync(join(dir, "mixed.txt"), "staged\n");
+  g("add", "mixed.txt");
+  writeFileSync(join(dir, "mixed.txt"), "working\n");
+  rmSync(join(dir, "delete-me.txt"));
+  writeFileSync(join(dir, "untracked.txt"), "new\n");
+  writeFileSync(join(dir, ".gitignore"), "ignored.txt\n");
+  writeFileSync(join(dir, "ignored.txt"), "ignore\n");
+  chmodSync(join(dir, "script.sh"), 0o755);
+  symlinkSync("mixed.txt", join(dir, "link-to-mixed"));
+
+  const gitDir = g("rev-parse", "--git-dir").trim();
+  const indexPathRaw = g("rev-parse", "--git-path", "index").trim();
+  const indexPath = indexPathRaw.startsWith("/") ? indexPathRaw : join(dir, indexPathRaw);
+  const hooks = join(dir, gitDir, "hooks");
+  const hookSentinel = join(dir, "hook-ran");
+  for (const name of ["pre-commit", "commit-msg"]) {
+    const hook = join(hooks, name);
+    writeFileSync(hook, `#!/bin/sh\ntouch ${JSON.stringify(hookSentinel)}\nexit 1\n`);
+    chmodSync(hook, 0o755);
+  }
+  g("config", "commit.gpgsign", "true");
+
+  const beforeHead = g("rev-parse", "HEAD").trim();
+  const beforeIndex = readFileSync(indexPath);
+  const beforeStatus = g("status", "--porcelain=v1", "-uall");
+  const beforeStaged = g("diff", "--cached", "--binary");
+  const beforeUnstaged = g("diff", "--binary");
+  const snapshot = await git.snapshotCommit(dir, "internal snapshot", { name: "Polyth", email: "polyth@local" });
+
+  assert.equal(g("rev-parse", "HEAD").trim(), beforeHead);
+  assert.deepEqual(readFileSync(indexPath), beforeIndex);
+  assert.equal(g("status", "--porcelain=v1", "-uall"), beforeStatus);
+  assert.equal(g("diff", "--cached", "--binary"), beforeStaged);
+  assert.equal(g("diff", "--binary"), beforeUnstaged);
+  assert.equal(existsSync(hookSentinel), false);
+  assert.equal(g("show", `${snapshot.sha}:mixed.txt`), "working\n");
+  assert.throws(() => g("cat-file", "-e", `${snapshot.sha}:delete-me.txt`));
+  assert.equal(g("show", `${snapshot.sha}:untracked.txt`), "new\n");
+  assert.throws(() => g("cat-file", "-e", `${snapshot.sha}:ignored.txt`));
+  assert.match(g("ls-tree", snapshot.sha, "script.sh"), /^100755 /);
+  assert.match(g("ls-tree", snapshot.sha, "link-to-mixed"), /^120000 /);
+});
+
+test("commonDir resolves the same absolute Git directory from a linked worktree", async () => {
+  const dir = repo();
+  const linked = mkdtempSync(join(tmpdir(), "polyth-common-dir-"));
+  dirs.push(linked);
+  rmSync(linked, { recursive: true, force: true });
+  await git.worktrees.create(dir, { branch: "linked", path: linked, base: "HEAD" });
+  const fromRoot = await git.commonDir(dir);
+  const fromLinked = await git.commonDir(linked);
+  assert.equal(fromLinked, fromRoot);
+  assert.equal(fromRoot.startsWith("/"), true);
+  assert.equal(fromRoot.includes("--absolute-git-common-dir"), false);
+});
+
+test("managed isolation creation rolls back when ownership establishment fails", async () => {
+  const dir = repo();
+  const sessionId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const path = isolateWorktreePath(dir, sessionId);
+  let created = false;
+  const failing = {
+    ...git,
+    worktrees: {
+      ...git.worktrees,
+      async create(root: string, input: { branch: string; path: string; base?: string }) {
+        const result = await git.worktrees.create(root, input);
+        created = true;
+        return result;
+      },
+    },
+    async revParse(root: string, rev: string) {
+      if (created && root === path && rev === "HEAD") throw new Error("injected rev-parse failure");
+      return git.revParse(root, rev);
+    },
+  } satisfies typeof git;
+  await assert.rejects(() => createManagedWorktrees(failing).create({
+    root: dir,
+    sessionId,
+    targetBranch: "main",
+    targetPath: dir,
+  }), /injected rev-parse failure/);
+  assert.equal(existsSync(path), false);
+  assert.throws(() => execFileSync("git", ["show-ref", "--verify", `refs/heads/${isolateBranchName(sessionId)}`], { cwd: dir }));
+});
+
+test("throwing create adopts and rolls back an exact clean managed resource", async () => {
+  const dir = repo();
+  const sessionId = "dddddddd-eeee-4fff-8aaa-bbbbbbbbbbbb";
+  const path = isolateWorktreePath(dir, sessionId);
+  const failing = {
+    ...git,
+    worktrees: {
+      ...git.worktrees,
+      async create(root: string, input: { branch: string; path: string; base?: string }) {
+        await git.worktrees.create(root, input);
+        throw new Error("injected failure after git created the worktree");
+      },
+    },
+  } satisfies typeof git;
+
+  await assert.rejects(() => createManagedWorktrees(failing).create({
+    root: dir,
+    sessionId,
+    targetBranch: "main",
+    targetPath: dir,
+  }), /injected failure/);
+  assert.equal(existsSync(path), false);
+  assert.equal(await createManagedWorktrees(git).recoverCreations(dir), 0);
+  assert.throws(() => execFileSync("git", ["show-ref", "--verify", `refs/heads/${isolateBranchName(sessionId)}`], { cwd: dir }));
+});
+
+test("durable creation receipt recovers when rollback itself fails", async () => {
+  const dir = repo();
+  const sessionId = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
+  const path = isolateWorktreePath(dir, sessionId);
+  let created = false;
+  let createdGitDirReads = 0;
+  const failing = {
+    ...git,
+    worktrees: {
+      ...git.worktrees,
+      async create(root: string, input: { branch: string; path: string; base?: string }) {
+        const result = await git.worktrees.create(root, input);
+        created = true;
+        return result;
+      },
+      async remove() { throw new Error("injected rollback failure"); },
+    },
+    async gitDir(root: string) {
+      if (created && root === path && ++createdGitDirReads > 1) throw new Error("injected marker failure");
+      return git.gitDir(root);
+    },
+  } satisfies typeof git;
+  await assert.rejects(() => createManagedWorktrees(failing).create({
+    root: dir,
+    sessionId,
+    targetBranch: "main",
+    targetPath: dir,
+  }), /creation and rollback failed/);
+  assert.equal(existsSync(path), true);
+  assert.equal(await createManagedWorktrees(git).recoverCreations(dir), 1);
+  assert.equal(existsSync(path), false);
+  assert.throws(() => execFileSync("git", ["show-ref", "--verify", `refs/heads/${isolateBranchName(sessionId)}`], { cwd: dir }));
+});
+
+test("detached integration creation rolls back when marker writing fails", async () => {
+  const dir = repo();
+  let integrationPath = "";
+  let integrationGitDirReads = 0;
+  const failing = {
+    ...git,
+    worktrees: {
+      ...git.worktrees,
+      async addDetached(root: string, path: string, ref: string) {
+        integrationPath = path;
+        return git.worktrees.addDetached(root, path, ref);
+      },
+    },
+    async gitDir(root: string) {
+      if (root === integrationPath && ++integrationGitDirReads > 1) throw new Error("injected integration marker failure");
+      return git.gitDir(root);
+    },
+  } satisfies typeof git;
+  await assert.rejects(() => createManagedWorktrees(failing).createIntegrationWorkspace({
+    root: dir,
+    sessionId: "cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa",
+    startPoint: "HEAD",
+  }), /injected integration marker failure/);
+  assert.equal(existsSync(integrationPath), false);
+  assert.equal((await git.worktrees.list(dir)).some((item) => item.path === integrationPath), false);
 });
 
 test("fingerprint is content-sensitive without reading files in Node", async () => {

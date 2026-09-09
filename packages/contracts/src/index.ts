@@ -1127,12 +1127,12 @@ export type IsolationState =
   | "merge-ready"
   | "merging"
   | "publishing"
-  | "rebind-pending"
-  | "unowned"
-  | "corrupt"
   | "conflict"
+  | "rebind-pending"
   | "cleanup-pending"
-  | "missing";
+  | "missing"
+  | "unowned"
+  | "corrupt";
 
 /**
  * Durable publication intent. Persisted BEFORE the irreversible target-ref
@@ -1143,7 +1143,7 @@ export interface IsolationPublishIntent {
   resultCommit: string;
   snapshotSha: string;
   targetRef: string;
-  /** Atomic Git receipt, absent only in legacy records. */
+  /** Atomic Git receipt fields written by the earlier lifecycle implementation. */
   receiptRef?: string;
   checkoutPath?: string;
   sourceRevision?: string;
@@ -1160,7 +1160,7 @@ export interface IsolationPublishIntent {
  * is checked out somewhere; the session never claims that branch while
  * running in a different workspace.
  */
-export interface IsolationOrigin {
+export interface SessionIsolationIdentity {
   kind: "git-worktree";
   createdAt: string;
   worktreePath: string;
@@ -1171,68 +1171,152 @@ export interface IsolationOrigin {
   originPath?: string;
   baseCommit: string;
   sourceSessionId?: string;
-  dismissedRevision?: string;
 }
 
-type IsolationLifecycleFields = {
-  conflict?: { message: string; files: string[] };
-  publish?: IsolationPublishIntent;
-  resultCommit?: string;
-  rebound?: boolean;
-  sourceRevision?: string;
-};
-type IsolationPhase<T extends Partial<IsolationLifecycleFields> & { state: IsolationState }> =
-  T & { [K in Exclude<keyof IsolationLifecycleFields, keyof T>]?: never };
+/** Backward-compatible name retained for public consumers. */
+export type IsolationOrigin = SessionIsolationIdentity;
 
-/** Only state-valid recovery payloads can be written. Legacy JSON is normalized on read. */
+/** State-specific durable payload. Optional `never` fields keep property reads
+ * ergonomic while rejecting contradictory new writes at compile time. */
 export type IsolationLifecycle =
-  | IsolationPhase<{ state: "active" | "merge-ready" | "merging" | "missing" | "unowned" | "corrupt" }>
-  | IsolationPhase<{ state: "conflict"; conflict: { message: string; files: string[] } }>
-  | IsolationPhase<{ state: "publishing"; publish: IsolationPublishIntent }>
-  | IsolationPhase<{ state: "rebind-pending"; resultCommit?: string; sourceRevision?: string; rebound?: false }>
-  | IsolationPhase<{ state: "cleanup-pending"; resultCommit?: string; sourceRevision?: string; rebound: true }>;
+  | {
+      state: "active" | "merge-ready" | "missing" | "unowned" | "corrupt";
+      /** Fingerprint of HEAD + dirty tree when the user chose Keep isolated. */
+      dismissedRevision?: string;
+      conflict?: never;
+      publish?: never;
+      resultCommit?: never;
+      sourceSnapshotSha?: never;
+    }
+  | {
+      state: "conflict";
+      conflict: { message: string; files: string[] };
+      dismissedRevision?: never;
+      publish?: never;
+      resultCommit?: never;
+      sourceSnapshotSha?: never;
+    }
+  | {
+      /** Legacy name normalized to `publishing` on read. */
+      state: "merging";
+      /** Persisted before the irreversible target-ref update. */
+      publish: IsolationPublishIntent;
+      dismissedRevision?: never;
+      conflict?: never;
+      resultCommit?: never;
+      sourceSnapshotSha?: never;
+    }
+  | {
+      /** Canonical state persisted before the irreversible target-ref update. */
+      state: "publishing";
+      publish: IsolationPublishIntent;
+      dismissedRevision?: never;
+      conflict?: never;
+      resultCommit?: never;
+      sourceSnapshotSha?: never;
+      sourceRevision?: never;
+      rebound?: never;
+    }
+  | {
+      state: "rebind-pending" | "cleanup-pending";
+      /** Published commit SHA; absent for discard cleanup. */
+      resultCommit?: string;
+      /** Exact source snapshot integrated before publication. */
+      sourceSnapshotSha?: string;
+      /** Legacy fingerprint retained so an in-flight record remains recoverable. */
+      sourceRevision?: string;
+      /** `false` is a legacy rebind-pending encoding; cleanup may omit it. */
+      rebound?: true;
+      dismissedRevision?: never;
+      conflict?: never;
+      publish?: never;
+    }
+;
 
-export type SessionIsolation = IsolationOrigin & IsolationLifecycle;
+export type SessionIsolation = SessionIsolationIdentity & IsolationLifecycle;
 
-/** Replacing a lifecycle always drops fields belonging to the previous phase. */
-export function transitionIsolation(isolation: IsolationOrigin, phase: IsolationLifecycle): SessionIsolation {
-  const { conflict: _conflict, publish: _publish, resultCommit: _result, rebound: _rebound,
-    state: _state, sourceRevision: _revision, ...origin } = isolation as SessionIsolation;
-  return { ...origin, ...phase } as SessionIsolation;
+/** Replacing a lifecycle always strips payload owned by the previous phase. */
+export function transitionIsolation(
+  isolation: SessionIsolationIdentity,
+  phase: IsolationLifecycle,
+): SessionIsolation {
+  const raw = isolation as unknown as SessionIsolationIdentity & Record<string, unknown>;
+  const {
+    state: _state,
+    conflict: _conflict,
+    publish: _publish,
+    resultCommit: _result,
+    sourceSnapshotSha: _snapshot,
+    sourceRevision: _revision,
+    rebound: _rebound,
+    dismissedRevision: _dismissed,
+    ...identity
+  } = raw;
+  return { ...identity, ...phase } as SessionIsolation;
 }
 
-/** Additive, non-destructive normalization of PR #128 records; unknown payloads fail closed. */
+/** Normalize legacy records without mutating their input; malformed data fails closed. */
 export function normalizeIsolation(value: SessionIsolation): SessionIsolation {
-  const raw = value as IsolationOrigin & IsolationLifecycleFields & { state: string };
+  const raw = value as unknown as SessionIsolationIdentity & Record<string, unknown>;
   const corrupt = () => transitionIsolation(value, { state: "corrupt" });
+  const commit = (part: unknown): part is string =>
+    typeof part === "string" && /^[0-9a-f]{40,64}$/i.test(part);
   if (![raw.createdAt, raw.worktreePath, raw.worktreeBranch, raw.targetPath, raw.targetBranch, raw.baseCommit]
     .every((part) => typeof part === "string" && part.length > 0)) return corrupt();
   if (raw.originPath !== undefined && typeof raw.originPath !== "string") return corrupt();
-  if (raw.sourceRevision !== undefined && typeof raw.sourceRevision !== "string") return corrupt();
-  const intent = raw.publish;
-  if (intent) {
-    if (![intent.expectedTargetSha, intent.resultCommit, intent.snapshotSha, intent.targetRef]
-      .every((part) => typeof part === "string" && part.length > 0)) return corrupt();
-    if ([intent.receiptRef, intent.checkoutPath, intent.sourceRevision].some((part) => part !== undefined && (typeof part !== "string" || !part))) return corrupt();
-    if (intent.receiptRef && (!intent.checkoutPath || !intent.sourceRevision)) return corrupt();
-    if ((raw.state !== "merging" && raw.state !== "publishing") || raw.rebound || raw.resultCommit) return corrupt();
-    return transitionIsolation(value, { state: "publishing", publish: intent });
+  if (raw.sourceSessionId !== undefined && typeof raw.sourceSessionId !== "string") return corrupt();
+  const state = raw.state;
+  // The original implementation persisted `merging` before it had any
+  // irreversible intent. Restarting that exact legacy shape is safely active.
+  if (state === "merging" && raw.publish === undefined) {
+    if (raw.resultCommit !== undefined || raw.sourceSnapshotSha !== undefined
+      || raw.sourceRevision !== undefined) return corrupt();
+    return transitionIsolation(value, { state: "active" });
   }
-  if (raw.state === "publishing") return corrupt();
-  if (raw.state === "cleanup-pending" || raw.state === "rebind-pending") {
-    if (raw.resultCommit !== undefined && typeof raw.resultCommit !== "string") return corrupt();
-    return transitionIsolation(value, raw.rebound === true
-      ? { state: "cleanup-pending", rebound: true, ...(raw.resultCommit ? { resultCommit: raw.resultCommit } : {}), ...(raw.sourceRevision ? { sourceRevision: raw.sourceRevision } : {}) }
-      : { state: "rebind-pending", ...(raw.resultCommit ? { resultCommit: raw.resultCommit } : {}), ...(raw.sourceRevision ? { sourceRevision: raw.sourceRevision } : {}) });
+  if (state === "merging" || state === "publishing") {
+    const intent = raw.publish as Partial<IsolationPublishIntent> | undefined;
+    if (!intent || ![intent.expectedTargetSha, intent.resultCommit, intent.snapshotSha].every(commit)
+      || typeof intent.targetRef !== "string"
+      || intent.targetRef !== `refs/heads/${String(raw.targetBranch).replace(/^refs\/heads\//, "")}`) return corrupt();
+    const receiptFields = [intent.receiptRef, intent.checkoutPath, intent.sourceRevision];
+    if (receiptFields.some((part) => part !== undefined)
+      && !receiptFields.every((part) => typeof part === "string" && part.length > 0)) return corrupt();
+    if (intent.receiptRef !== undefined && !intent.receiptRef.startsWith("refs/polyth/isolation/")) return corrupt();
+    return transitionIsolation(value, { state: "publishing", publish: intent as IsolationPublishIntent });
   }
-  if (raw.resultCommit || raw.rebound !== undefined) return corrupt();
-  if (raw.state === "conflict") {
-    if (!raw.conflict || typeof raw.conflict.message !== "string" || !Array.isArray(raw.conflict.files)
-      || !raw.conflict.files.every((file) => typeof file === "string")) return corrupt();
-    return transitionIsolation(value, { state: "conflict", conflict: raw.conflict });
+  if (state === "conflict") {
+    if (raw.publish !== undefined || raw.resultCommit !== undefined || raw.sourceSnapshotSha !== undefined
+      || raw.sourceRevision !== undefined || raw.rebound !== undefined || raw.dismissedRevision !== undefined) return corrupt();
+    const conflict = raw.conflict as { message?: unknown; files?: unknown } | undefined;
+    if (!conflict || typeof conflict.message !== "string" || !Array.isArray(conflict.files)
+      || !conflict.files.every((file) => typeof file === "string")) return corrupt();
+    return transitionIsolation(value, { state: "conflict", conflict: { message: conflict.message, files: conflict.files as string[] } });
   }
-  if (["active", "merge-ready", "merging", "missing", "unowned", "corrupt"].includes(raw.state)) {
-    return transitionIsolation(value, { state: raw.state as "active" | "merge-ready" | "merging" | "missing" | "unowned" | "corrupt" });
+  if (state === "rebind-pending" || state === "cleanup-pending") {
+    if (raw.publish !== undefined || raw.conflict !== undefined || raw.dismissedRevision !== undefined) return corrupt();
+    if (raw.sourceRevision !== undefined && typeof raw.sourceRevision !== "string") return corrupt();
+    if (raw.resultCommit !== undefined && !commit(raw.resultCommit)) return corrupt();
+    if (raw.sourceSnapshotSha !== undefined && !commit(raw.sourceSnapshotSha)) return corrupt();
+    if (state === "rebind-pending" && raw.rebound !== undefined) return corrupt();
+    if (state === "cleanup-pending" && raw.rebound !== undefined
+      && raw.rebound !== true && raw.rebound !== false) return corrupt();
+    const nextState = state === "cleanup-pending" && raw.rebound === false ? "rebind-pending" : state;
+    return transitionIsolation(value, {
+      state: nextState,
+      ...(typeof raw.resultCommit === "string" ? { resultCommit: raw.resultCommit } : {}),
+      ...(typeof raw.sourceSnapshotSha === "string" ? { sourceSnapshotSha: raw.sourceSnapshotSha } : {}),
+      ...(typeof raw.sourceRevision === "string" ? { sourceRevision: raw.sourceRevision } : {}),
+      ...(nextState === "cleanup-pending" && raw.rebound === true ? { rebound: true as const } : {}),
+    });
+  }
+  if (["active", "merge-ready", "missing", "unowned", "corrupt"].includes(String(state))) {
+    if (raw.conflict !== undefined || raw.publish !== undefined || raw.resultCommit !== undefined
+      || raw.rebound !== undefined || raw.sourceRevision !== undefined || raw.sourceSnapshotSha !== undefined
+      || raw.dismissedRevision !== undefined && typeof raw.dismissedRevision !== "string") return corrupt();
+    return transitionIsolation(value, {
+      state: state as "active" | "merge-ready" | "missing" | "unowned" | "corrupt",
+      ...(typeof raw.dismissedRevision === "string" ? { dismissedRevision: raw.dismissedRevision } : {}),
+    });
   }
   return corrupt();
 }
@@ -1249,7 +1333,8 @@ export function isolationActions(status: IsolationStatusDto, sessionStatus?: Ses
   const active = state === "active" || state === "merge-ready" || state === "conflict";
   return {
     canReview: active,
-    canMerge: active && !blocked && status.suggestion?.hasChanges === true && !status.suggestion.targetDirty && status.suggestion.reason !== "destination-unavailable",
+    canMerge: active && !blocked && status.suggestion?.hasChanges === true && !status.suggestion.targetDirty
+      && status.suggestion.reason !== "destination-unavailable",
     canKeep: active && !blocked,
     canResolve: state === "conflict" && !blocked && status.suggestion?.reason !== "destination-unavailable",
     canDiscard: (active || state === "missing") && !blocked && status.suggestion?.reason !== "destination-unavailable",
@@ -1294,6 +1379,15 @@ export interface IsolationStatusDto {
   suggestion: IsolationSuggestionDto | null;
   /** Derived from Git + persisted isolation without writing. */
   effectiveState?: IsolationState | null;
+  actions?: {
+    canReview: boolean;
+    canMerge: boolean;
+    canKeep: boolean;
+    canResolve: boolean;
+    canDiscard: boolean;
+    canRecover: boolean;
+    canAbandon: boolean;
+  };
 }
 
 export interface IsolationMergeResultDto {
@@ -1394,6 +1488,9 @@ export interface SessionProjection {
   /** F18: effective auto-accept policy (own setting or nearest parent's) —
    *  drives the loud header indicator. Never a global default. */
   autoAccept?: boolean;
+  /** Explicit durable choice owned by this canonical session. Absent means
+   *  inherit, preserving projections written before this field existed. */
+  autoAcceptSetting?: "on" | "off";
   /** Per-session composer draft text, persisted server-side so it syncs
    *  across clients. Cleared on send. */
   draft?: string;
@@ -2576,6 +2673,8 @@ export type ResponseIntentInput =
       requestId: string;
       reply: "once" | "always" | "reject";
       scope?: "session" | "project";
+      /** Durable provenance for a server-side Auto-Approve decision. */
+      auto?: boolean;
     }
   | {
       kind: "question";
@@ -2987,6 +3086,10 @@ export interface HarnessProvisioningQuery {
 
 export interface HarnessProvider {
   descriptor: HarnessDescriptor;
+  /** Ownership of the runtime returned by createRuntime. Session runtimes are
+   * disposed when that canonical session releases its lease. Workspace
+   * runtimes are shared infrastructure and are retired by their owning pool. */
+  runtimeLifetime?: "session" | "workspace";
   /** Static capability surface for idle/unwired sessions; no process start. */
   staticFeatures?: RuntimeCapabilities;
   probe(context: HarnessContext): Promise<HarnessProbe>;
@@ -2998,6 +3101,9 @@ export interface HarnessProvider {
    * authority over validation and native config ownership. */
   applyControl?(context: HarnessContext, controlId: string, value: JsonValue): Promise<void>;
   createRuntime(context: HarnessContext): Promise<AgentRuntime>;
+  /** Release/fence a persisted execution without constructing a runtime in
+   * its workspace. Required for recovery when that workspace vanished. */
+  releaseExecution?(context: HarnessContext, binding: RuntimeSessionBinding, operationId: string): Promise<MutationOutcome<ExecutionReleaseProof>>;
   /** Backend-owned projector. Absence means every Polyth capability is unsupported. */
   provisioner?: HarnessProvisioner;
   source?: SessionSourceProvider;

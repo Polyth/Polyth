@@ -11,6 +11,7 @@ import type {
 import { createApiTransport, defineWebPackage, type WebPackageHost } from "@polyth/web-sdk";
 import { Button, Dialog, Notice, Select, Switch, Tabs, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 import MoveControls from "../../../apps/web/src/components/MoveControls.tsx";
+import ProviderLogo from "../../models/widgets/ProviderLogo.tsx";
 
 const api = createApiTransport();
 
@@ -121,7 +122,6 @@ function HarnessTabs({
   projectHarnessDefault,
   agentControl,
   effortControl,
-  profileControl,
   phoneLayout,
 }: {
   host: WebPackageHost;
@@ -134,7 +134,6 @@ function HarnessTabs({
   projectHarnessDefault?: HarnessSelection | null;
   agentControl?: ReactNode;
   effortControl?: ReactNode;
-  profileControl?: ReactNode;
   phoneLayout?: boolean;
 }) {
   const { rows, error, loading } = useHarnesses(projectId);
@@ -230,36 +229,36 @@ function HarnessTabs({
   };
 
   const activeSelection = choice ?? transition?.selection ?? selection;
-  const requestedTab = activeSelection.mode === "pinned" ? activeSelection.harnessId : "auto";
   const ordered = rows.toSorted((a, b) => a.policy.priority - b.policy.priority || a.identity.name.localeCompare(b.identity.name));
-  const activeTab = requestedTab === "auto" || ordered.some((row) => row.identity.id === requestedTab)
+  const firstExecutable = ordered.find(canExecute) ?? ordered[0];
+  const resolvedTab = resolvedHarnessId && ordered.some((row) => row.identity.id === resolvedHarnessId)
+    ? resolvedHarnessId
+    : firstExecutable?.identity.id;
+  const requestedTab = activeSelection.mode === "pinned" ? activeSelection.harnessId : resolvedTab;
+  const activeTab = requestedTab && ordered.some((row) => row.identity.id === requestedTab)
     ? requestedTab
-    : "auto";
-  const resolvedName = rows.find((row) => row.identity.id === resolvedHarnessId)?.identity.name;
-  const tabs = [
-    {
-      id: "auto",
-      label: resolvedName && activeSelection.mode === "auto" ? `Auto · ${resolvedName}` : "Auto",
-      disabled: (busy || Boolean(transition)) && activeTab !== "auto",
-    },
-    ...ordered.map((row) => ({
-      id: row.identity.id,
-      label: row.identity.name,
-      disabled: activeTab !== row.identity.id && (busy || Boolean(transition) || !canExecute(row)),
-    })),
-  ];
+    : resolvedTab ?? "";
+  const tabs = ordered.map((row) => ({
+    id: row.identity.id,
+    label: <>
+      <ProviderLogo providerID={row.identity.id} providerName={row.identity.name} size="compact" />
+      {row.identity.name}
+    </>,
+    disabled: activeTab !== row.identity.id && (busy || Boolean(transition) || !canExecute(row)),
+  }));
   const activeRow = ordered.find((row) => row.identity.id === activeTab);
+  const committedTab = selection.mode === "pinned"
+    ? selection.harnessId
+    : resolvedTab;
   const chooseTab = (id: string) => {
-    const next: HarnessSelection = id === "auto" ? { mode: "auto" } : { mode: "pinned", harnessId: id };
-    const committed = selection.mode === "pinned" ? selection.harnessId : "auto";
-    if (!choice && !transition && id === committed) return;
+    const next: HarnessSelection = { mode: "pinned", harnessId: id };
+    if (!choice && !transition && id === committedTab) return;
     choose(next);
   };
 
   return <section className="pkg-harnesses pkg-harnesses-picker-tabs" aria-label="Execution harness" aria-busy={busy || loading}>
     <div className="pkg-harnesses-picker-tabs-head">
       <Tabs tabs={tabs} value={activeTab} onChange={chooseTab} label="Execution harness" size="sm" className="pkg-harnesses-tablist" />
-      <Button size="sm" variant="ghost" className="pkg-harnesses-manage" onClick={() => host.navigation.openSettingsPage("harnesses")}>Manage…</Button>
     </div>
     {choice ? <div className="pkg-harnesses-timing">
         <Button block variant="quiet" className="pkg-harnesses-timing-choice" busy={busy} onClick={() => void perform(choice, "after-turn")}><span className="pkg-harnesses-timing-choice-copy"><strong>After this response</strong><small>Let the current harness finish normally.</small></span></Button>
@@ -267,21 +266,19 @@ function HarnessTabs({
         <Button size="sm" variant="ghost" onClick={() => setChoice(undefined)}>Back</Button>
       </div> : <>
         {transition?.phase === "requested" && <div className="pkg-harnesses-transition" role="status">
-          <span>Waiting for current response · Will run with {target?.identity.name ?? transition.targetHarnessId}</span>
+          <span>Waiting for current response · Will run with <ProviderLogo providerID={target?.identity.id ?? transition.targetHarnessId} providerName={target?.identity.name} size="compact" />{target?.identity.name ?? transition.targetHarnessId}</span>
           <Button size="sm" busy={busy} onClick={() => void perform(transition.selection, "stop-now")}>Switch now</Button>
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => void cancel()}>Cancel</Button>
         </div>}
-        {transition?.phase === "released" && <div className="pkg-harnesses-transition" role="status">Starting {target?.identity.name ?? transition.targetHarnessId}…</div>}
+        {transition?.phase === "released" && <div className="pkg-harnesses-transition" role="status"><ProviderLogo providerID={target?.identity.id ?? transition.targetHarnessId} providerName={target?.identity.name} size="compact" />Starting {target?.identity.name ?? transition.targetHarnessId}…</div>}
         {transition?.phase === "failed" && <Notice tone="error" role="alert" heading={`${target?.identity.name ?? transition.targetHarnessId} couldn't start`} actions={<Button size="sm" busy={busy} onClick={() => void perform(transition.selection, "after-turn")}>Retry</Button>}>
           The previous harness stopped safely. {transition.error?.message ?? "Choose another harness tab to continue."}
         </Notice>}
-        {activeRow && !canExecute(activeRow) && !transition && <p className="pkg-harnesses-picker-state" role="status">{availabilityLabel(activeRow)}. Open Manage to finish setup.</p>}
-        {phoneLayout && (agentControl || effortControl || profileControl) && <section className="pkg-harnesses-mobile-config" aria-label="Execution settings">
+        {activeRow && !canExecute(activeRow) && !transition && <p className="pkg-harnesses-picker-state" role="status">{availabilityLabel(activeRow)}. Open Harnesses in Settings to finish setup.</p>}
+        {phoneLayout && (agentControl || effortControl) && <section className="pkg-harnesses-mobile-config" aria-label="Execution settings">
           {agentControl && <div><span>Role</span>{agentControl}</div>}
           {effortControl && <div><span>Thinking</span>{effortControl}</div>}
-          {profileControl && <div><span>Profile</span>{profileControl}</div>}
         </section>}
-        {!phoneLayout && profileControl && <section className="pkg-harnesses-mobile-config" aria-label="Execution profile"><div><span>Profile</span>{profileControl}</div></section>}
       </>}
     {(failure || error) && <Notice tone="error" role="alert">{failure || error}</Notice>}
     <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
@@ -331,11 +328,11 @@ function HarnessTransitionStatus({
 
   return <div className="pkg-harnesses pkg-harnesses-transition-status">
     {transition.phase === "requested" && <div className="pkg-harnesses-transition" role="status">
-      <span>{resolvedHarnessId ?? "Current"} → {transition.targetHarnessId} after this response</span>
+      <span><ProviderLogo providerID={resolvedHarnessId} size="compact" />{resolvedHarnessId ?? "Current"} → <ProviderLogo providerID={transition.targetHarnessId} size="compact" />{transition.targetHarnessId} after this response</span>
       <Button size="sm" busy={busy} onClick={() => void update("stop-now")}>Switch now</Button>
       <Button size="sm" variant="ghost" disabled={busy} onClick={() => void cancel()}>Cancel</Button>
     </div>}
-    {transition.phase === "released" && <div className="pkg-harnesses-transition" role="status">Starting {transition.targetHarnessId}…</div>}
+    {transition.phase === "released" && <div className="pkg-harnesses-transition" role="status"><ProviderLogo providerID={transition.targetHarnessId} size="compact" />Starting {transition.targetHarnessId}…</div>}
     {transition.phase === "failed" && <Notice tone="error" role="alert" heading={`${transition.targetHarnessId} couldn't start`} actions={<Button size="sm" busy={busy} onClick={() => void update("after-turn")}>Retry</Button>}>
       {transition.error?.message ?? "Open the model picker to choose another harness."}
     </Notice>}
@@ -414,7 +411,7 @@ function HarnessSettings({ host }: { host: WebPackageHost }) {
 
   if (detail) return <div className="pkg-harnesses pkg-harnesses-settings pkg-harnesses-detail">
     <Button size="sm" variant="ghost" onClick={() => setDetailId(undefined)}>‹ Harnesses</Button>
-    <header><h2>{detail.identity.name}</h2><p>{availabilityLabel(detail)}{detail.identity.version ? ` · ${detail.identity.version}` : ""}</p></header>
+    <header><h2><ProviderLogo providerID={detail.identity.id} providerName={detail.identity.name} size="regular" />{detail.identity.name}</h2><p>{availabilityLabel(detail)}{detail.identity.version ? ` · ${detail.identity.version}` : ""}</p></header>
     <nav className="pkg-harnesses-tabs" aria-label={`${detail.identity.name} settings`}>
       {[{ id: "overview", label: "Overview", order: -1 }, ...contributed].map((section) => <Button key={section.id} size="sm" variant={sectionId === section.id ? "quiet" : "ghost"} aria-pressed={sectionId === section.id} onClick={() => setSectionId(section.id)}>{section.label}</Button>)}
     </nav>
@@ -434,7 +431,7 @@ function HarnessSettings({ host }: { host: WebPackageHost }) {
     {!loading && !rows.some(canExecute) && <Notice>Set up a harness below to start a conversation.</Notice>}
     <div className="pkg-harnesses-list">
       {ordered.map((row, index) => <article className={`pkg-harnesses-row${dragged === row.identity.id ? " dragging" : ""}`} key={row.identity.id} draggable={!busy} onDragStart={(event: DragEvent<HTMLElement>) => { setDragged(row.identity.id); event.dataTransfer.setData("text/plain", row.identity.id); }} onDragEnd={() => setDragged(undefined)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const id = event.dataTransfer.getData("text/plain") || dragged; if (id) move(id, index); setDragged(undefined); }}>
-        <button type="button" className="pkg-harnesses-row-main" onClick={() => openDetail(row.identity.id)}><span className="pkg-harnesses-drag" aria-hidden="true">⠿</span><span><strong>{row.identity.name}</strong><small>{row.identity.integration}{row.identity.version ? ` · ${row.identity.version}` : ""}</small></span><span className="pkg-harnesses-status">{availabilityLabel(row)}</span></button>
+        <button type="button" className="pkg-harnesses-row-main" onClick={() => openDetail(row.identity.id)}><span className="pkg-harnesses-drag" aria-hidden="true">⠿</span><span><ProviderLogo providerID={row.identity.id} providerName={row.identity.name} size="regular" /><span><strong>{row.identity.name}</strong><small>{row.identity.integration}{row.identity.version ? ` · ${row.identity.version}` : ""}</small></span></span><span className="pkg-harnesses-status">{availabilityLabel(row)}</span></button>
         <MoveControls label={row.identity.name} index={index} count={ordered.length} onMove={(next) => move(row.identity.id, next)} />
         <div className="pkg-harnesses-availability"><span><strong>Available for new sessions</strong><small>Existing conversations are unaffected.</small></span><Switch label={`Allow ${row.identity.name} for new sessions`} checked={row.policy.enabled} disabled={busy} onChange={(enabled) => toggle(row.identity.id, enabled)} /></div>
         {setupLabel(row) && <div className="pkg-harnesses-setup-actions">
@@ -454,7 +451,7 @@ function SwitchMarker({ event }: { event: SessionEvent }) {
   const closed = event.data.closedLeg as Record<string, unknown> | undefined;
   const leg = event.data.leg as Record<string, unknown> | undefined;
   return <details className="pkg-harnesses-switch-marker">
-    <summary><span>{from} → {to} · continued here</span></summary>
+    <summary><span><ProviderLogo providerID={from} size="compact" />{from} → <ProviderLogo providerID={to} size="compact" />{to} · continued here</span></summary>
     <dl><dt>Started</dt><dd><time dateTime={new Date(event.time).toISOString()}>{new Date(event.time).toLocaleTimeString()}</time></dd><dt>Continuity</dt><dd>Canonical Polyth history</dd>{Boolean(closed?.nativeSessionId) && <><dt>Previous native session</dt><dd>{String(closed!.nativeSessionId)}</dd></>}{Boolean(leg?.nativeSessionId) && <><dt>New native session</dt><dd>{String(leg!.nativeSessionId)}</dd></>}{Boolean(leg?.bootstrap) && <><dt>Bootstrap</dt><dd>{String(leg!.bootstrap)}</dd></>}</dl>
   </details>;
 }
@@ -462,7 +459,8 @@ function SwitchMarker({ event }: { event: SessionEvent }) {
 export default defineWebPackage((host) => () => {
   const off = [
     host.settings.registerPage({ id: "harnesses", packageId: "harness-runtime", label: "Harnesses", group: "Engineering", order: 15, component: () => <HarnessSettings host={host}/> }),
-    host.slots.register({ id: "harnesses.model-tabs", slot: "modelPicker.header", order: 10, render: (props) => <HarnessTabs host={host} projectId={props.projectId as string | undefined} sessionId={props.sessionId as string | undefined} sessionStatus={props.sessionStatus as string | undefined} harnessSelection={props.harnessSelection as HarnessSelection | undefined} resolvedHarnessId={props.resolvedHarnessId as string | undefined} transition={props.harnessTransition as HarnessTransition | undefined} projectHarnessDefault={props.projectHarnessDefault as HarnessSelection | null | undefined} agentControl={props.executionAgentControl as ReactNode} effortControl={props.executionEffortControl as ReactNode} profileControl={props.executionProfileControl as ReactNode} phoneLayout={props.phoneLayout === true} /> }),
+    host.slots.register({ id: "harnesses.model-tabs", slot: "modelPicker.header", order: 10, render: (props) => <HarnessTabs host={host} projectId={props.projectId as string | undefined} sessionId={props.sessionId as string | undefined} sessionStatus={props.sessionStatus as string | undefined} harnessSelection={props.harnessSelection as HarnessSelection | undefined} resolvedHarnessId={props.resolvedHarnessId as string | undefined} transition={props.harnessTransition as HarnessTransition | undefined} projectHarnessDefault={props.projectHarnessDefault as HarnessSelection | null | undefined} agentControl={props.executionAgentControl as ReactNode} effortControl={props.executionEffortControl as ReactNode} phoneLayout={props.phoneLayout === true} /> }),
+    host.slots.register({ id: "harnesses.agent-preset", slot: "composer.execution", order: 5, render: (props) => <>{props.executionProfileControl as ReactNode}</> }),
     host.slots.register({ id: "harnesses.transition", slot: "composer.execution", order: 10, render: (props) => <HarnessTransitionStatus host={host} sessionId={props.sessionId as string | undefined} resolvedHarnessId={props.resolvedHarnessId as string | undefined} transition={props.harnessTransition as HarnessTransition | undefined} /> }),
     host.slots.register({ id: "harnesses.switch-marker", slot: "session.timeline.event", meta: { eventTypes: ["harness/switched"] }, render: (props) => <SwitchMarker event={props.event as SessionEvent} /> }),
   ];

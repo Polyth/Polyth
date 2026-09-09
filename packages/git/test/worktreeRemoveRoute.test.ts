@@ -17,6 +17,7 @@ function makeHarness(opts: {
   onMark?: () => Promise<void>;
   sessions?: SessionProjection[];
 }) {
+  const createCalls: Array<{ branch: string; path?: string; base?: string }> = [];
   const removeCalls: Array<{
     path: string;
     deleteBranch: boolean;
@@ -26,6 +27,10 @@ function makeHarness(opts: {
   const markCalls: Array<{ projectId: string; path: string }> = [];
   const git = {
     worktrees: {
+      create: async (_root: string, input: { branch: string; path?: string; base?: string }) => {
+        createCalls.push(input);
+        return { path: input.path ?? "/repo-worktrees/new", branch: input.branch, head: "abc", isMain: false };
+      },
       list: async () => opts.list().map((tree) => ({
         path: tree.path, branch: tree.branch, head: "abc", isMain: false,
       })),
@@ -57,24 +62,63 @@ function makeHarness(opts: {
     git,
     commitMessage: async () => "",
   });
-  const call = async (body: Record<string, unknown> = { projectId: "p1", path: WT }) => {
+  const call = async (
+    body: Record<string, unknown> = { projectId: "p1", path: WT },
+    path = "/api/worktrees/remove",
+  ) => {
     let status = 0;
     let payload: unknown;
     const handled = await routes({
       req: {}, res: {},
-      url: new URL("http://x/api/worktrees/remove"),
-      path: "/api/worktrees/remove",
+      url: new URL(`http://x${path}`),
+      path,
       method: "POST",
       body: async () => body,
       json: (code: number, data: unknown) => { status = code; payload = data; },
     } as never);
     return { handled, status, payload };
   };
-  return { call, removeCalls, markCalls };
+  return { call, createCalls, removeCalls, markCalls };
 }
 
 const present = () => [{ path: WT, branch: "wt/one" }];
 const absent = () => [] as Array<{ path: string; branch: string | null }>;
+
+test("active isolation workspace cannot be removed through the generic route", async () => {
+  const { call, removeCalls, markCalls } = makeHarness({
+    list: present,
+    sessions: [{
+      id: "s1", projectId: "p1", title: "t", status: "idle",
+      createdAt: 1, updatedAt: 1, worktreePath: WT, branch: "polyth/isolate/s1",
+      isolation: {
+        kind: "git-worktree",
+        state: "active",
+        worktreePath: WT,
+        worktreeBranch: "polyth/isolate/s1",
+        targetPath: "/repo",
+        targetBranch: "main",
+        baseCommit: "abc",
+        createdAt: new Date(1).toISOString(),
+      },
+    } as SessionProjection],
+  });
+
+  await assert.rejects(
+    () => call(),
+    (err: Error & { code?: string }) => err.code === "conflict",
+  );
+  assert.equal(removeCalls.length, 0);
+  assert.equal(markCalls.length, 0);
+});
+
+test("managed isolation branch cannot be created through the generic route", async () => {
+  const { call, createCalls } = makeHarness({ list: absent });
+  await assert.rejects(
+    () => call({ projectId: "p1", branch: "polyth/isolate/s1" }, "/api/worktrees"),
+    (err: Error & { code?: string }) => err.code === "invalid-input",
+  );
+  assert.equal(createCalls.length, 0);
+});
 
 test("Git success plus mark-missing failure still reports worktree removal success", async () => {
   const { call, removeCalls, markCalls } = makeHarness({

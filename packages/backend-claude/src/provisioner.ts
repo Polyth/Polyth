@@ -7,6 +7,7 @@ import type {
   HarnessProvisioningPlan,
 } from "@polyth/contracts";
 import { mcpNativeNameCollision, createLaunchOverlayStore, type LaunchOverlayStore } from "@polyth/harness-runtime";
+import { renderCapabilityText } from "@polyth/harness-runtime/capability-text";
 
 export interface ClaudeLaunchOverlay {
   append?: string;
@@ -30,8 +31,8 @@ const support = (_context: HarnessContext): HarnessCapabilitySupport => ({
     instruction: { modes: ["native"], mutability: "session-create", configScope: "session" },
     "mcp-server": { modes: ["native"], mutability: "session-create", remote: false, configScope: "session" },
     tool: { modes: ["mcp"], mutability: "session-create", remote: false, configScope: "session" },
-    skill: { modes: ["unsupported"], mutability: "immutable" },
-    context: { modes: ["unsupported"], mutability: "immutable" },
+    skill: { modes: ["prompt"], mutability: "session-create", remote: false, configScope: "session" },
+    context: { modes: ["prompt"], mutability: "session-create", remote: false, configScope: "session" },
     extension: { modes: ["unsupported"], mutability: "immutable" },
   },
 });
@@ -56,9 +57,6 @@ const staged = (plan: HarnessProvisioningPlan): HarnessCapabilityRecord[] =>
     const collision = mcpNativeNameCollision(plan.items, item.capability.id);
     if (collision) return record(item, "failed", collision);
     if (item.mode === "unsupported") {
-      if (item.capability.kind === "skill") {
-        return record(item, "unsupported", "Claude Agent SDK supports skills, but Polyth does not yet provide a safe private portable skill-source projection for this adapter");
-      }
       return record(item, "unsupported", "Claude Agent SDK has no verified projection");
     }
     return record(item, "pending", "Staged for the next Claude native session");
@@ -76,12 +74,8 @@ export function createClaudeProvisioner(): HarnessProvisioner {
         };
       }
       const overlay: ClaudeLaunchOverlay = {};
-      const instructions = plan.items.filter((item) => item.capability.kind === "instruction" && item.mode !== "unsupported");
-      if (instructions.length) {
-        overlay.append = instructions
-          .map((item) => item.capability.kind === "instruction" ? item.capability.text : "")
-          .join("\n\n");
-      }
+      const append = renderCapabilityText(plan);
+      if (append) overlay.append = append;
       overlay.mcpServers = {};
       for (const item of plan.items) {
         if (item.capability.kind !== "mcp-server" || item.mode === "unsupported" || !item.capability.enabled) continue;

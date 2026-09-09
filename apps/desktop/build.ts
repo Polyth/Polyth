@@ -13,6 +13,21 @@ await mkdir(dist, { recursive: true });
 await mkdir(join(here, "build"), { recursive: true });
 await copyFile(join(here, "..", "web", "icon-512.png"), join(here, "build", "icon.png"));
 
+const supervisorResources = join(here, "resources", "runtime-supervisor");
+await mkdir(supervisorResources, { recursive: true });
+if (process.platform === "linux") {
+  const target = `linux-${process.arch}`;
+  const builder = join(here, "..", "..", "packages", "harness-runtime", "build-supervisor.mjs");
+  const built = spawnSync(process.execPath, [builder, `--target=${target}`], { stdio: "inherit" });
+  if (built.status !== 0) throw new Error(`failed to build the Polyth runtime supervisor for ${target}`);
+  const targetDir = join(supervisorResources, target);
+  await mkdir(targetDir, { recursive: true });
+  await copyFile(
+    join(here, "..", "..", "packages", "harness-runtime", "native", "bin", target, "polyth-supervisor"),
+    join(targetDir, "polyth-supervisor"),
+  );
+}
+
 const linkHostName = process.platform === "win32" ? "polyth-link-host.exe" : "polyth-link-host";
 const linkHostSrc = join(here, "..", "..", "target", "release", linkHostName);
 const linkHostDir = join(here, "resources", "polyth-link");

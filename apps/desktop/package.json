@@ -78,6 +78,13 @@
         ]
       },
       {
+        "from": "resources/runtime-supervisor",
+        "to": "runtime-supervisor",
+        "filter": [
+          "linux-*/polyth-supervisor"
+        ]
+      },
+      {
         "from": "build/icon.png",
         "to": "icon.png"
       }

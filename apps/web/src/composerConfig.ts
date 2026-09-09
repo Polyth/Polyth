@@ -1,17 +1,21 @@
 // UX-COMPOSER-DISC: one versioned browser-local record for the composer's
-// pending execution configuration (profile / model / agent / thinking), keyed per
-// canonical session with "" for the no-session hero composer. Profile and
-// explicit overrides clear each other so the visible Profile value never
-// claims an unmodified bundle. The record survives reload and never crosses
-// sessions; it is consumed after a send only when it still equals what was
-// sent.
+// pending execution configuration (preset / model / agent / thinking), keyed
+// per account and canonical session with "" for the no-session hero composer.
+// Explicit overrides clear presets so the visible Preset value never claims an
+// unmodified bundle. The record survives reload and never crosses sessions or
+// accounts; it is consumed after a send only when it still equals what was sent.
 import type { ModelRef } from "@polyth/contracts";
+import {
+  accountStorageGet,
+  accountStorageRemove,
+  accountStorageSet,
+} from "./accountStorage.ts";
 
 type ComposerModelRef = ModelRef & { harnessId?: string };
 
-/** `inherit`: no local choice — the session's stored profile (if any) applies.
- *  `none`: explicit None — the send clears the stored profile.
- *  `id`: an explicitly selected stored profile. */
+/** `inherit`: no local choice — the session's stored preset (if any) applies.
+ *  `none`: explicit None — the send clears the stored preset.
+ *  `id`: an explicitly selected stored preset. */
 export type ProfileChoice =
   | { kind: "inherit" }
   | { kind: "none" }
@@ -81,37 +85,30 @@ export function serializeComposerConfig(cfg: ComposerConfig): string {
 }
 
 export function loadComposerConfig(sessionId: string | null | undefined): ComposerConfig {
-  try {
-    return parseComposerConfig(localStorage.getItem(keyOf(sessionId)));
-  } catch {
-    return emptyComposerConfig();
-  }
+  return parseComposerConfig(accountStorageGet(keyOf(sessionId)));
 }
 
 export function saveComposerConfig(sessionId: string | null | undefined, cfg: ComposerConfig): void {
-  try {
-    if (isDefaultComposerConfig(cfg)) localStorage.removeItem(keyOf(sessionId));
-    else localStorage.setItem(keyOf(sessionId), serializeComposerConfig(cfg));
-  } catch {
-    // private mode / quota — pending configuration is best-effort like drafts
-  }
+  const key = keyOf(sessionId);
+  if (isDefaultComposerConfig(cfg)) accountStorageRemove(key);
+  else accountStorageSet(key, serializeComposerConfig(cfg));
 }
 
 // ------------------------------------------------------------- transitions
 
-/** Selecting a profile clears explicit model and agent overrides. */
+/** Selecting a preset clears explicit model and agent overrides. */
 export function withProfile(cfg: ComposerConfig, id: string): ComposerConfig {
   void cfg;
   return { profile: { kind: "id", id } };
 }
 
-/** Explicit None clears only the profile selection; overrides survive. */
+/** Explicit None clears only the preset selection; overrides survive. */
 export function withProfileNone(cfg: ComposerConfig): ComposerConfig {
   return { ...cfg, profile: { kind: "none" } };
 }
 
-/** An explicit model clears the selected profile (the bundle no longer
- *  applies unmodified). Clearing the override (undefined) keeps the profile. */
+/** An explicit model clears the selected preset (the bundle no longer
+ *  applies unmodified). Clearing the override (undefined) keeps the preset. */
 export function withExplicitModel(cfg: ComposerConfig, model: ComposerModelRef | undefined): ComposerConfig {
   if (!model) {
     const next: ComposerConfig = { profile: cfg.profile };
@@ -131,7 +128,7 @@ export function withModelForNextTurn(cfg: ComposerConfig, model: ComposerModelRe
   return withExplicitThinking(withExplicitModel(cfg, model), undefined);
 }
 
-/** An explicit agent clears the selected profile, mirroring the model rule. */
+/** An explicit agent clears the selected preset, mirroring the model rule. */
 export function withExplicitAgent(cfg: ComposerConfig, agent: string | undefined): ComposerConfig {
   const next: ComposerConfig = {
     profile: agent && cfg.profile.kind === "id" ? { kind: "none" } : cfg.profile,
@@ -142,7 +139,7 @@ export function withExplicitAgent(cfg: ComposerConfig, agent: string | undefined
   return next;
 }
 
-/** Thinking is an explicit per-turn override. Selecting it clears a profile
+/** Thinking is an explicit per-turn override. Selecting it clears a preset
  * bundle because the bundle no longer applies unmodified. */
 export function withExplicitThinking(cfg: ComposerConfig, thinking: string | undefined): ComposerConfig {
   const next: ComposerConfig = {
@@ -172,12 +169,9 @@ export function wireProfileId(cfg: ComposerConfig): string | null | undefined {
 }
 
 /** After the authoritative send recorded the configuration, drop the local
- *  pending record — but only when it still equals what was sent. */
+ * pending record — but only when it still equals what was sent. */
 export function consumeComposerConfig(sessionId: string | null | undefined, sent: ComposerConfig): void {
-  try {
-    const current = parseComposerConfig(localStorage.getItem(keyOf(sessionId)));
-    if (configEquals(current, sent)) localStorage.removeItem(keyOf(sessionId));
-  } catch {
-    // best-effort
-  }
+  const key = keyOf(sessionId);
+  const current = parseComposerConfig(accountStorageGet(key));
+  if (configEquals(current, sent)) accountStorageRemove(key);
 }

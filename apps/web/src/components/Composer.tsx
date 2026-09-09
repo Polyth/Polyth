@@ -85,7 +85,7 @@ import {
   type InsertPlan,
 } from "../composer/discovery.ts";
 import {
-  loadComposerConfig, saveComposerConfig, consumeComposerConfig, wireProfileId,
+  loadComposerConfig, saveComposerConfig, consumeComposerConfig,
   withAutoThinking, withExplicitAgent, withExplicitThinking, withModelForNextTurn,
   withProfile, withProfileNone,
   type ComposerConfig,
@@ -280,8 +280,9 @@ function useComposerLocation(session: SessionProjection | null): {
     || "";
 
   const branchChoices = useMemo<LocationChoice[]>(() => {
-    const linkedBranches = new Set(worktrees.map((worktree) => worktree.branch).filter(Boolean));
-    const localBranches = branches.branches.filter((candidate) => !candidate.remote && !isManagedIsolationBranch(candidate.name));
+    const userWorktrees = worktrees.filter((worktree) => !worktree.branch?.startsWith("polyth/isolate/"));
+    const linkedBranches = new Set(userWorktrees.map((worktree) => worktree.branch).filter(Boolean));
+    const localBranches = branches.branches.filter((candidate) => !candidate.remote && !candidate.name.startsWith("polyth/isolate/"));
     // Branches that only exist on a remote, keyed by the local name a checkout
     // would create. `ref` (e.g. `origin/foo`) is the start point.
     const localNames = new Set(localBranches.map((candidate) => candidate.name));
@@ -309,7 +310,7 @@ function useComposerLocation(session: SessionProjection | null): {
           target: { kind: "new-worktree", base: currentBranchName },
         });
       }
-      for (const worktree of worktrees) {
+      for (const worktree of userWorktrees) {
         const name = worktree.branch;
         if (!name || isManagedIsolationBranch(name) || seen.has(name)) continue;
         seen.add(name);
@@ -474,9 +475,14 @@ export default function Composer({
   const settings = useStore((s) => s.settings);
   const sessionDefaults = useSessionDefaults();
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
+  const draftProfile = !session && draftExecution.profileId
+    ? profiles.find((profile) => profile.id === draftExecution.profileId)
+    : undefined;
   const selectedDraftHarness = !session
     ? draftExecution.harnessSelection.mode === "pinned"
       ? draftExecution.harnessSelection.harnessId
+      : !draftExecution.harnessSelectionExplicit && draftProfile
+        ? draftProfile.harnessId ?? "opencode"
       : !draftExecution.harnessSelectionExplicit && activeProject?.defaults?.harness?.mode === "pinned"
         ? activeProject.defaults.harness.harnessId
         : undefined
@@ -637,6 +643,14 @@ export default function Composer({
   // through composerConfig transitions so profile and explicit overrides
   // clear each other.
   const [cfg, setCfg] = useState<ComposerConfig>(() => loadComposerConfig(session?.id ?? null));
+  const effectiveProfileId = cfg.profile.kind === "id"
+    ? cfg.profile.id
+    : cfg.profile.kind === "none"
+      ? undefined
+      : session?.agentProfileId ?? draftExecution.profileId;
+  const effectiveProfile = effectiveProfileId
+    ? profiles.find((profile) => profile.id === effectiveProfileId)
+    : undefined;
   const priorRoute = useRef({ sessionId: session?.id, harnessId: session?.resolvedHarnessId });
   useEffect(() => {
     if (!routeCatalog.ready) return;
@@ -1057,9 +1071,10 @@ export default function Composer({
 
   // A selected profile that was deleted after selection blocks Send with a
   // visible state; it is never silently substituted.
+  const explicitProfileId = cfg.profile.kind === "id" ? cfg.profile.id : (!session ? draftExecution.profileId : undefined);
   const profileMissing = profilesLoaded()
-    && cfg.profile.kind === "id"
-    && !profiles.some((p) => cfg.profile.kind === "id" && p.id === cfg.profile.id);
+    && !!explicitProfileId
+    && !profiles.some((p) => p.id === explicitProfileId);
 
   const beginQueuedEdit = useCallback((item: QueueItemDto) => {
     if (queueEditRef.current || queueEditStarting) {
@@ -1119,18 +1134,32 @@ export default function Composer({
       const current = await api.queueEditStart(target, item.id);
       reserved = true;
       const cfgSent = cfg;
-      const selected = cfgSent.model ?? session?.model ?? preferredModel;
+      const selectedProfileId = cfgSent.profile.kind === "id"
+        ? cfgSent.profile.id
+        : cfgSent.profile.kind === "inherit"
+          ? session?.agentProfileId ?? draftExecution.profileId
+          : undefined;
+      const selectedProfile = selectedProfileId
+        ? profiles.find((profile) => profile.id === selectedProfileId)
+        : undefined;
+      const selected = cfgSent.model ?? session?.model ?? (selectedProfile
+        ? { providerID: selectedProfile.providerID, modelID: selectedProfile.modelID }
+        : preferredModel);
       const descriptor = selected && chatModels.find((candidate) => modelIdentityMatches(candidate, selected));
       const thinking = resolveComposerThinking({
         ...(descriptor ? { descriptor } : {}),
-        configThinking: cfgSent.thinking,
+        configThinking: cfgSent.thinking ?? selectedProfile?.thinking,
         ...(getModelThinking(selected) ? { savedThinking: getModelThinking(selected)! } : {}),
         ...(sessionDefaults.defaultThinking ? { sessionDefault: sessionDefaults.defaultThinking } : {}),
       }).variant;
       const selectedModel = selected && descriptor
         ? { providerID: selected.providerID, modelID: selected.modelID, ...(thinking ? { variant: thinking } : {}) }
         : undefined;
-      const profile = wireProfileId(cfgSent);
+      const profile = cfgSent.profile.kind === "none"
+        ? null
+        : selectedProfile
+          ? selectedProfile.id
+          : undefined;
       const ok = await sendMessage(current.text, selectedModel, cfgSent.agent, {
         targetSessionId: target,
         delivery: "steer",
@@ -1233,14 +1262,28 @@ export default function Composer({
     if (command === null && recalled) clearAttachments(target);
     const delivery = working ? deliveryOverride ?? getUiSettings().followUpBehavior : undefined;
     const cfgSent = cfg;
-    const wire = wireProfileId(cfgSent);
-    const selected = cfgSent.model ?? session?.model ?? preferredModel;
+    const selectedProfileId = cfgSent.profile.kind === "id"
+      ? cfgSent.profile.id
+      : cfgSent.profile.kind === "inherit"
+        ? session?.agentProfileId ?? draftExecution.profileId
+        : undefined;
+    const selectedProfile = selectedProfileId
+      ? profiles.find((profile) => profile.id === selectedProfileId)
+      : undefined;
+    const wire = cfgSent.profile.kind === "none"
+      ? null
+      : selectedProfile
+        ? selectedProfile.id
+        : undefined;
+    const selected = cfgSent.model ?? session?.model ?? (selectedProfile
+      ? { providerID: selectedProfile.providerID, modelID: selectedProfile.modelID }
+      : preferredModel);
     const selectedDescriptor = selected
       ? chatModels.find((candidate) => modelIdentityMatches(candidate, selected))
       : undefined;
     const sentThinking = resolveComposerThinking({
       ...(selectedDescriptor ? { descriptor: selectedDescriptor } : {}),
-      configThinking: cfgSent.thinking,
+      configThinking: cfgSent.thinking ?? selectedProfile?.thinking,
       ...(getModelThinking(selected) ? { savedThinking: getModelThinking(selected)! } : {}),
       ...(sessionDefaults.defaultThinking ? { sessionDefault: sessionDefaults.defaultThinking } : {}),
     }).variant;
@@ -1253,10 +1296,6 @@ export default function Composer({
       : undefined;
     const selectedNativeCommand = command === null && commandCatalog.state === "available"
       ? nativeCommandInput(t, commandCatalog.items, selectedCommandRef.current)
-      : undefined;
-    const selectedProfileId = cfgSent.profile.kind === "id" ? cfgSent.profile.id : undefined;
-    const selectedProfile = selectedProfileId
-      ? profiles.find((profile) => profile.id === selectedProfileId)
       : undefined;
     const modelHarnessId = selectedDescriptor?.harnessId ?? draftExecution.model?.harnessId;
     const creationHarness = selectedProfile
@@ -1650,7 +1689,9 @@ export default function Composer({
     ?? agentBadgeLabel(activeAgent);
 
   const selectedModel = (() => {
-    const nextTurn = cfg.model ?? session?.model ?? preferredModel;
+    const nextTurn = cfg.model ?? session?.model ?? (effectiveProfile
+      ? { providerID: effectiveProfile.providerID, modelID: effectiveProfile.modelID }
+      : preferredModel);
     return nextTurn
       ? chatModels.find((candidate) => modelIdentityMatches(candidate, nextTurn))
       : undefined;
@@ -1811,9 +1852,7 @@ export default function Composer({
   const profileHarnessId = session?.resolvedHarnessId ?? effectiveDraftHarness;
   const compatibleProfiles = profiles.filter((profile) => !profileHarnessId
     || (profile.harnessId ?? "opencode") === profileHarnessId);
-  const inheritedProfile = activeProject?.defaults?.agentProfileId
-    ? profiles.find((profile) => profile.id === activeProject.defaults?.agentProfileId)
-    : undefined;
+  const inheritedProfile = effectiveProfile;
   const profileItems: PickerItem[] = [
     { id: "", label: inheritedProfile ? `Default: ${inheritedProfile.name}` : "Default", group: "" },
     { id: "__none", label: "None", group: "" },

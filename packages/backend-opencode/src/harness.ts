@@ -3,9 +3,13 @@ import { CAPABILITIES } from "./index.ts";
 import { inspectOpenCodeEngine, resolveOpenCodeBinary } from "./runtimeStorage.ts";
 /** The composition root supplies its managed pool (config/restart interlocks).
  * Vendor discovery and native history stay in this package. */
-export function createOpenCodeHarness(runtime: (context: HarnessContext) => Promise<AgentRuntime>): HarnessProvider {
+export function createOpenCodeHarness(
+    runtime: (context: HarnessContext) => Promise<AgentRuntime>,
+    releaseExecution?: NonNullable<HarnessProvider["releaseExecution"]>,
+): HarnessProvider {
     return {
         descriptor: { id: "opencode", name: "OpenCode", integration: "HTTP / SSE", priority: 0, setupUrl: "https://opencode.ai/docs/", installCommand: "npm install -g opencode-ai" },
+        runtimeLifetime: "workspace",
         staticFeatures: CAPABILITIES,
         async probe(context) {
             if (context.remote)
@@ -29,11 +33,27 @@ export function createOpenCodeHarness(runtime: (context: HarnessContext) => Prom
                 engine.agents(),
                 engine.capabilities(),
             ]);
-            const providers = [...new Map(models.map((model) => [model.providerID, {
-                id: model.providerID,
-                name: model.providerName ?? model.providerID,
-                connected: models.some((candidate) => candidate.providerID === model.providerID && candidate.connected === true),
-            }])).values()];
+            // Provider projection is on the interactive catalog path. Build it
+            // in one pass instead of scanning the full model list for every
+            // model (the previous map(... models.some(...)) was O(n²)).
+            const providerMap = new Map<string, { id: string; name: string; connected: boolean }>();
+            for (const model of models) {
+                const current = providerMap.get(model.providerID);
+                if (current) {
+                    if (model.connected === true) current.connected = true;
+                    // Preserve the old projection's ability to surface a
+                    // provider display name even when only a later model row
+                    // carries it.
+                    if (current.name === current.id && model.providerName) current.name = model.providerName;
+                    continue;
+                }
+                providerMap.set(model.providerID, {
+                    id: model.providerID,
+                    name: model.providerName ?? model.providerID,
+                    connected: model.connected === true,
+                });
+            }
+            const providers = [...providerMap.values()];
             const hasUsableModel = models.some((model) => model.connected !== false);
             return {
                 state: hasUsableModel ? "ready" : "setup-required",
@@ -44,6 +64,7 @@ export function createOpenCodeHarness(runtime: (context: HarnessContext) => Prom
             };
         },
         createRuntime: runtime,
+        ...(releaseExecution ? { releaseExecution } : {}),
         source: {
             async list(context) {
                 const engine = await runtime(context);
