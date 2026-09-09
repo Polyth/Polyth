@@ -54,18 +54,27 @@ test("remembered authentication aligns browser account scope before bootstrap", 
   const previousFetch = globalThis.fetch;
   try {
     setActiveBrowserAccount("usr_owner");
-    globalThis.fetch = async () => new Response(JSON.stringify({
-      required: true,
-      authorized: true,
-      scope: "ui-session",
-      accountId: "usr_alice",
-    }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
+    globalThis.fetch = async (input) => {
+      const path = String(input);
+      if (path === "/api/auth/status") {
+        return new Response(JSON.stringify({
+          required: true,
+          authorized: true,
+          scope: "ui-session",
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (path === "/api/auth/accounts") {
+        return new Response(JSON.stringify({
+          currentAccountId: "usr_alice",
+          canManage: false,
+          accounts: [{ id: "usr_alice", name: "Alice", current: true }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      throw new Error(`unexpected fetch ${path}`);
+    };
 
     const status = await prefetchAuthStatus();
-    assert.equal(status.accountId, "usr_alice");
+    assert.equal(status.authorized, true);
     assert.equal(activeBrowserAccountId(), "usr_alice");
     assert.equal(await consumeAuthPrefetch(), status);
   } finally {
@@ -74,11 +83,16 @@ test("remembered authentication aligns browser account scope before bootstrap", 
   }
 });
 
-test("agent presets stay outside the model-picker header", () => {
-  const source = readFileSync(new URL("../src/components/Composer.tsx", import.meta.url), "utf8");
-  assert.doesNotMatch(source, /executionProfileControl/);
-  assert.doesNotMatch(source, /migrateFavoritesOnce/);
-  assert.match(source, /label="Preset"/);
-  assert.match(source, /\{phoneLayout && profileControl\}/);
-  assert.match(source, /\{!phoneLayout && profileControl\}/);
+test("agent presets stay separate from the harness/model picker", () => {
+  const harnessPicker = readFileSync(
+    new URL("../../../packages/harness-runtime/widgets/index.tsx", import.meta.url),
+    "utf8",
+  );
+  const miniWidgets = readFileSync(new URL("../src/widgets/builtinMiniWidgets.tsx", import.meta.url), "utf8");
+  const sessionPackage = readFileSync(new URL("../../../packages/session/package.json", import.meta.url), "utf8");
+
+  assert.doesNotMatch(harnessPicker, /executionProfileControl/);
+  assert.match(miniWidgets, /id: "composer\.preset"/);
+  assert.match(miniWidgets, /context\.executionProfileControl/);
+  assert.match(sessionPackage, /webApiAccountScoped\.ts/);
 });
