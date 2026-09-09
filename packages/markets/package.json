@@ -3,10 +3,12 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./widgets": "./widgets/index.tsx"
   },
   "polyth": {
     "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
     "descriptor": {
       "name": "Markets",
       "description": "Fast market research, watchlists, and agent-ready financial context.",
@@ -18,6 +20,10 @@
     }
   },
   "dependencies": {
-    "@polyth/plugins": "0.1.0"
+    "@polyth/plugins": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
   }
 }
