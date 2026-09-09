@@ -43,6 +43,7 @@ function providerLogoClassNames(): string[] {
     resolve(import.meta.dirname, "../../../packages/usage/widgets"),
     resolve(import.meta.dirname, "../../../packages/fusion/widgets"),
     resolve(import.meta.dirname, "../../../packages/multirun/widgets"),
+    resolve(import.meta.dirname, "../../../packages/harness-runtime/widgets"),
   ]) {
     visit(directory);
   }
@@ -117,6 +118,23 @@ test("known providers render decorative monochrome SVG marks", async () => {
   assert.match(kimiEndpoint, /data-provider="zai"/);
 });
 
+test("registered harness identities reuse the shared provider marks", async () => {
+  const harnesses = [
+    { providerID: "claude", providerName: "Claude Code", provider: "claude" },
+    { providerID: "opencode", providerName: "OpenCode", provider: "opencode" },
+    { providerID: "codex", providerName: "Codex", provider: "openai" },
+    { providerID: "cursor", providerName: "Cursor", provider: "cursor" },
+  ];
+  for (const { provider, ...props } of harnesses) {
+    const html = await render(props);
+    assert.match(html, new RegExp(`data-provider="${provider}"`));
+    assert.match(html, /<svg\b/);
+    assert.match(html, /(?:fill|stroke)="currentColor"/);
+    assert.doesNotMatch(html, /#[\da-f]{3,8}\b/i);
+    assert.match(html, /aria-hidden="true"/);
+  }
+});
+
 test("OpenCode variants use the OpenCode brand mark", async () => {
   const variants: Array<{ props: ProviderLogoProps; provider: string }> = [
     { props: { providerID: "opencode-zen" }, provider: "opencode-zen" },
@@ -164,6 +182,7 @@ test("provider surfaces use ProviderLogo without brand palette rules", () => {
   const projectUsage = source("../../../packages/usage/widgets/usage/projectUi.tsx");
   const usageWidget = source("../../../packages/usage/widgets/usagePlugin.tsx");
   const fusion = source("../../../packages/fusion/widgets/FusionView.tsx");
+  const harnesses = source("../../../packages/harness-runtime/widgets/index.tsx");
 
   assert.doesNotMatch(logo, /#[\da-f]{3,8}\b/i);
   assert.doesNotMatch(
@@ -214,7 +233,11 @@ test("provider surfaces use ProviderLogo without brand palette rules", () => {
     projectUsage,
     usageWidget,
     fusion,
+    harnesses,
   })) {
     assert.match(contents, /<ProviderLogo/, `${name} renders provider logos`);
   }
+  assert.match(harnesses, /providerID=\{row\.identity\.id\}/);
+  assert.match(harnesses, /providerID=\{detail\.identity\.id\}/);
+  assert.match(harnesses, /providerName=\{row\.identity\.name\}/);
 });
