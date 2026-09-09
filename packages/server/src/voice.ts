@@ -6,7 +6,9 @@ import { dirname } from "node:path";
 import { atomicWriteSync } from "@polyth/plugins";
 import {
   DEFAULT_LOCAL_MODEL_ID,
+  isCloudDictationProvider,
   type DictationLatencyPreference,
+  type DictationProcessingPolicy,
   type DictationProviderId,
   type DictationTransport,
 } from "@polyth/dictation";
@@ -33,6 +35,10 @@ export interface VoiceDictationSettings {
   localModel: string;
   language: string;
   contextInjection: boolean;
+  processingPolicy: DictationProcessingPolicy;
+  fallbackProvider?: DictationProviderId;
+  fallbackApiKeyEnv: string;
+  /** @deprecated compatibility mirror; processingPolicy owns routing. */
   cloudFallback: boolean;
   latencyPreference: DictationLatencyPreference;
   /** Env-var reference for the selected cloud provider; never the key value. */
@@ -49,6 +55,7 @@ export interface VoiceSettingsService {
   get(): VoiceSettings;
   put(next: unknown): VoiceSettings;
   resolveKey(section: "stt" | "tts" | "dictation"): string | undefined;
+  resolveDictationProviderKey(provider: DictationProviderId): string | undefined;
 }
 
 const err = (code: string, message: string): Error => Object.assign(new Error(message), { code });
@@ -59,6 +66,9 @@ const DICTATION_PROVIDERS = new Set<DictationProviderId>([
 ]);
 const DICTATION_TRANSPORTS = new Set<DictationTransport>(["auto", "direct-browser", "server-proxy", "local-worker"]);
 const LATENCY = new Set<DictationLatencyPreference>(["lowest", "balanced", "quality"]);
+const PROCESSING_POLICIES = new Set<DictationProcessingPolicy>([
+  "local-only", "prefer-local", "prefer-cloud", "auto-fallback", "browser-fallback",
+]);
 
 const defaults = (): VoiceSettings => ({
   stt: { baseUrl: "", model: "", language: "", apiKeyEnv: "" },
@@ -70,6 +80,8 @@ const defaults = (): VoiceSettings => ({
     localModel: DEFAULT_LOCAL_MODEL_ID,
     language: "auto",
     contextInjection: true,
+    processingPolicy: "prefer-cloud",
+    fallbackApiKeyEnv: "",
     cloudFallback: false,
     latencyPreference: "lowest",
     apiKeyEnv: "ELEVENLABS_API_KEY",
@@ -106,6 +118,14 @@ const providerDefaultEnv = (provider: DictationProviderId): string => {
     case "openai-compatible": return "OPENAI_API_KEY";
     default: return "";
   }
+};
+
+const derivedPolicy = (provider: DictationProviderId, legacyCloudFallback: boolean): DictationProcessingPolicy => {
+  if (provider === "web-speech") return "browser-fallback";
+  if (provider === "local-nemotron" || provider === "local-parakeet") {
+    return legacyCloudFallback ? "prefer-local" : "local-only";
+  }
+  return "prefer-cloud";
 };
 
 export function createVoiceSettings(opts: { file: string; env?: Record<string, string | undefined> }): VoiceSettingsService {
@@ -145,6 +165,26 @@ export function createVoiceSettings(opts: { file: string; env?: Record<string, s
     const explicitEnv = str(r.dictation?.apiKeyEnv, 128);
     const apiKeyEnv = explicitEnv || (!hasDictation && legacyStt.apiKeyEnv ? legacyStt.apiKeyEnv : providerDefaultEnv(provider));
 
+    const legacyCloudFallback = bool(r.dictation?.cloudFallback, false);
+    const requestedPolicy = str(r.dictation?.processingPolicy, 32) as DictationProcessingPolicy;
+    const processingPolicy = PROCESSING_POLICIES.has(requestedPolicy)
+      ? requestedPolicy
+      : derivedPolicy(provider, legacyCloudFallback);
+    const requestedFallback = str(r.dictation?.fallbackProvider, 64) as DictationProviderId;
+    let fallbackProvider = DICTATION_PROVIDERS.has(requestedFallback)
+      && isCloudDictationProvider(requestedFallback)
+      && requestedFallback !== provider
+        ? requestedFallback
+        : undefined;
+    if (!fallbackProvider && legacyCloudFallback && (provider === "local-nemotron" || provider === "local-parakeet")) {
+      fallbackProvider = "elevenlabs";
+    }
+    const fallbackApiKeyEnv = fallbackProvider
+      ? str(r.dictation?.fallbackApiKeyEnv, 128) || providerDefaultEnv(fallbackProvider)
+      : "";
+    const cloudFallback = Boolean(fallbackProvider)
+      && (processingPolicy === "prefer-local" || processingPolicy === "auto-fallback");
+
     const out: VoiceSettings = {
       stt: legacyStt,
       tts: {
@@ -160,7 +200,10 @@ export function createVoiceSettings(opts: { file: string; env?: Record<string, s
         localModel: str(r.dictation?.localModel) || d.dictation.localModel,
         language,
         contextInjection: bool(r.dictation?.contextInjection, d.dictation.contextInjection),
-        cloudFallback: bool(r.dictation?.cloudFallback, d.dictation.cloudFallback),
+        processingPolicy,
+        ...(fallbackProvider ? { fallbackProvider } : {}),
+        fallbackApiKeyEnv,
+        cloudFallback,
         latencyPreference: LATENCY.has(requestedLatency) ? requestedLatency : d.dictation.latencyPreference,
         apiKeyEnv,
       },
@@ -170,6 +213,7 @@ export function createVoiceSettings(opts: { file: string; env?: Record<string, s
     checkEnvRef(out.stt.apiKeyEnv, "speech-to-text");
     checkEnvRef(out.tts.apiKeyEnv, "text-to-speech");
     checkEnvRef(out.dictation.apiKeyEnv, "dictation");
+    checkEnvRef(out.dictation.fallbackApiKeyEnv, "dictation fallback");
     return out;
   };
 
@@ -196,6 +240,15 @@ export function createVoiceSettings(opts: { file: string; env?: Record<string, s
     },
     resolveKey(section) {
       const ref = settings[section].apiKeyEnv;
+      const value = ref ? env[ref] : undefined;
+      return value || undefined;
+    },
+    resolveDictationProviderKey(provider) {
+      const ref = provider === settings.dictation.provider
+        ? settings.dictation.apiKeyEnv
+        : provider === settings.dictation.fallbackProvider
+          ? settings.dictation.fallbackApiKeyEnv
+          : "";
       const value = ref ? env[ref] : undefined;
       return value || undefined;
     },
