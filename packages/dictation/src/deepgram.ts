@@ -72,6 +72,18 @@ const keyterms = (context?: DictationContext): string[] => {
   return result;
 };
 
+const deepgramLanguage = (language?: string): string => {
+  const value = language?.trim();
+  if (!value || value.toLowerCase() === "auto") {
+    // Deepgram streaming currently has no detect_language. `multi` is its
+    // explicit multilingual mode, not generic language auto-detection.
+    return "multi";
+  }
+  // Nova-3 documents Ukrainian as `uk`; Polyth's UI stores BCP-47 `uk-UA`.
+  if (/^uk(?:[-_]ua)?$/i.test(value)) return "uk";
+  return value;
+};
+
 export function createDeepgramSttAdapter(options: DeepgramSttOptions): SttAdapter {
   if (!options.apiKey.trim()) throw new DictationError("invalid_credentials", "Deepgram API key is missing");
   return {
@@ -100,7 +112,7 @@ function openDeepgramStream(
   url.searchParams.set("smart_format", "true");
   url.searchParams.set("punctuate", "true");
   url.searchParams.set("endpointing", String(options.endpointingMs ?? 300));
-  url.searchParams.set("language", !language || language === "auto" ? "multi" : language);
+  url.searchParams.set("language", deepgramLanguage(language));
   for (const term of keyterms(context)) url.searchParams.append("keyterm", term);
 
   const connect = options.connect ?? ((socketUrl, headers) => new WebSocket(socketUrl, { headers }) as unknown as SocketLike);
@@ -196,9 +208,10 @@ function openDeepgramStream(
       });
       await send(JSON.stringify({ type: "Finalize" }));
       const timeoutMs = options.finalTimeoutMs ?? FINAL_TIMEOUT_MS;
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
       const timeout = new Promise<never>((_, rejectTimeout) => {
-        const timer = setTimeout(() => rejectTimeout(new DictationError("network_error", "Timed out waiting for Deepgram final transcript")), timeoutMs);
-        timer.unref?.();
+        timeoutId = setTimeout(() => rejectTimeout(new DictationError("network_error", "Timed out waiting for Deepgram final transcript")), timeoutMs);
+        timeoutId.unref?.();
       });
       try {
         const text = await Promise.race([final, timeout]);
@@ -207,6 +220,7 @@ function openDeepgramStream(
         }
         return text;
       } finally {
+        if (timeoutId) clearTimeout(timeoutId);
         if (!closed && socket.readyState === WebSocket.OPEN) socket.close(1000, "dictation finalized");
       }
     },
