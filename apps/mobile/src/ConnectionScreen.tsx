@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "@capacitor/app";
 import { Haptics, ImpactStyle } from "@capacitor/haptics";
@@ -46,6 +46,7 @@ function connectionLabel(host: MobileHost): string {
 function trustedConnectionDetail(connection: ConnectionMetadata): string {
   if (connection.revoked) return "Revoked";
   if (!connection.hasSecureIdentity) return "Secure identity unavailable — pair again";
+  if (connection.pairingState === "prepared") return "Pairing interrupted — verify host approval to recover";
   if (connection.lastTransport) return `Last connected via ${connection.lastTransport}`;
   return "Paired securely";
 }
@@ -68,6 +69,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
   const [scanning, setScanning] = useState(false);
   const [cameraPermission, setCameraPermission] = useState<"unknown" | "prompt" | "granted" | "denied">("unknown");
   const [developer, setDeveloper] = useState(false);
+  const cancelledAttempts = useRef(new Set<string>());
 
   useEffect(() => {
     void SplashScreen.hide();
@@ -237,24 +239,45 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
 
   const confirm = async () => {
     if (!attemptId) return;
+    const currentAttempt = attemptId;
     setBusy(true);
+    setError("");
     setStage("Waiting for approval on your computer…");
     try {
-      const launched = await polythLink().confirmPairing(attemptId);
+      const launched = await polythLink().confirmPairing(currentAttempt);
+      cancelledAttempts.current.delete(currentAttempt);
       setStage("Connected");
       location.replace(bootstrapUrlWithNext(launched.bootstrapUrl, launch.deepLinkPath));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      if (!cancelledAttempts.current.delete(currentAttempt)) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
     } finally {
       setBusy(false);
     }
+  };
+
+  const cancelPair = () => {
+    if (!attemptId) return;
+    const currentAttempt = attemptId;
+    cancelledAttempts.current.add(currentAttempt);
+    void polythLink().cancelPairing(currentAttempt).catch((cause: unknown) => {
+      cancelledAttempts.current.delete(currentAttempt);
+      setError(cause instanceof Error ? cause.message : String(cause));
+    });
+    setBusy(false);
+    setPhrase(null);
+    setAttemptId(null);
+    setStage("Connect to your Polyth");
   };
 
   const reconnectTrusted = async (connection: ConnectionMetadata) => {
     if (connection.revoked || !connection.hasSecureIdentity) return;
     setBusy(true);
     setError("");
-    setStage(`Connecting to ${connection.hostLabel || "your Polyth"}…`);
+    setStage(connection.pairingState === "prepared"
+      ? `Checking interrupted pairing with ${connection.hostLabel || "your Polyth"}…`
+      : `Connecting to ${connection.hostLabel || "your Polyth"}…`);
     try {
       const launched = await polythLink().connect(connection.id);
       location.replace(bootstrapUrlWithNext(launched.bootstrapUrl, launch.deepLinkPath));
@@ -314,7 +337,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
 
         {nativeAvailable && trusted.length > 0 && (
           <section className="mobile-connect-recents" aria-labelledby="mobile-trusted-title">
-            <h2 id="mobile-trusted-title">Trusted Polyth hosts</h2>
+            <h2 id="mobile-trusted-title">Polyth Link hosts</h2>
             {trusted.map((connection) => (
               <article key={connection.id}>
                 <button
@@ -409,12 +432,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
                 <button type="button" className="mobile-connect-primary" disabled={busy} onClick={() => void confirm()}>
                   The words match
                 </button>
-                <button type="button" className="mobile-connect-test" disabled={busy} onClick={() => {
-                  if (attemptId) void polythLink().cancelPairing(attemptId).catch(() => undefined);
-                  setPhrase(null);
-                  setAttemptId(null);
-                  setStage("Connect to your Polyth");
-                }}>
+                <button type="button" className="mobile-connect-test" disabled={!attemptId} onClick={cancelPair}>
                   Cancel
                 </button>
               </>
