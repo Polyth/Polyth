@@ -6,6 +6,7 @@ import {
   DictationError,
   createChunkBuffer,
   encodeDictationAudioFrame,
+  type DictationContext,
 } from "@polyth/dictation";
 import { api } from "@polyth/session/web-api";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
@@ -19,13 +20,16 @@ export interface StreamingDictation {
 export async function startStreamingDictation(opts: {
   sessionId?: string;
   language?: string;
+  context?: Partial<DictationContext>;
   onPartial?: (text: string) => void;
   onError?: (message: string) => void;
 }): Promise<StreamingDictation> {
-  const dto = await api.dictationCreate({
+  const createInput = {
     ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
     ...(opts.language ? { language: opts.language } : {}),
-  });
+    ...(opts.context ? { context: opts.context } : {}),
+  };
+  const dto = await api.dictationCreate(createInput);
 
   const buffer = createChunkBuffer();
   let ws: WebSocket | null = null;
@@ -63,8 +67,6 @@ export async function startStreamingDictation(opts: {
     ws = sock;
     sock.onopen = () => {
       if (!active || ws !== sock) return;
-      // Replay every unacked frame. The server suppresses duplicates and ACKs
-      // only the highest contiguous sequence.
       for (const chunk of buffer.unacked()) send(chunk);
     };
     sock.onmessage = (e: MessageEvent) => {
@@ -129,8 +131,6 @@ export async function startStreamingDictation(opts: {
     throw error;
   }
 
-  // Mobile WebViews commonly suspend audio when backgrounded. Suspend the
-  // worklet too, then resume it without inventing silent PCM on return.
   const onVisibility = () => {
     if (!active || !capture) return;
     if (document.visibilityState === "hidden") void capture.pause().catch(() => {});
@@ -161,8 +161,6 @@ export async function startStreamingDictation(opts: {
         throw error;
       }
 
-      // Let reconnect/ACK finish, but never finalize a transcript after known
-      // missing audio. The caller keeps the original draft on this failure.
       const deadline = Date.now() + 4_000;
       while (buffer.unacked().length > 0 && Date.now() < deadline && !failed) {
         await new Promise((resolve) => setTimeout(resolve, 50));
