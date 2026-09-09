@@ -228,6 +228,12 @@ const providerAvailability = (
   });
 };
 
+const tokenFailure = (status: number): { status: number; code: string } => status === 429
+  ? { status: 429, code: "rate_limited" }
+  : status === 401 || status === 403
+    ? { status: 401, code: "invalid_credentials" }
+    : { status: 502, code: "provider_unavailable" };
+
 export function voiceRoutes(deps: {
   voice: VoiceSettingsService;
   providers: ProviderRegistry;
@@ -274,13 +280,12 @@ export function voiceRoutes(deps: {
       const input = await request.body();
       const provider = String(input.provider ?? settings.provider) as DictationProviderId;
       const directCloudAllowed = settings.processingPolicy === "prefer-cloud"
-        || settings.processingPolicy === "auto-fallback"
         || settings.processingPolicy === "browser-fallback";
-      const directProvider = provider === "elevenlabs" || provider === "wispr";
+      const directProvider = provider === "elevenlabs" || provider === "wispr" || provider === "deepgram";
       if (!directProvider || settings.provider !== provider || !directCloudAllowed) {
         json(400, {
           error: "provider_unavailable",
-          message: "Direct dictation tokens require the requested provider to be the selected cloud provider and a cloud-processing policy",
+          message: "Direct dictation tokens require the requested provider to be the selected cloud provider and a direct-compatible cloud-processing policy",
         });
         return true;
       }
@@ -296,12 +301,8 @@ export function voiceRoutes(deps: {
             headers: { "xi-api-key": key },
           });
           if (!response.ok) {
-            const code = response.status === 401 || response.status === 403 ? "invalid_credentials"
-              : response.status === 429 ? "rate_limited" : "provider_unavailable";
-            json(response.status === 429 ? 429 : response.status === 401 || response.status === 403 ? 401 : 502, {
-              error: code,
-              message: `ElevenLabs token request failed: HTTP ${response.status}`,
-            });
+            const failure = tokenFailure(response.status);
+            json(failure.status, { error: failure.code, message: `ElevenLabs token request failed: HTTP ${response.status}` });
             return true;
           }
           const payload = await response.json() as { token?: unknown };
@@ -310,6 +311,33 @@ export function voiceRoutes(deps: {
             return true;
           }
           json(200, { provider: "elevenlabs", token: payload.token, expiresInSeconds: 900 });
+          return true;
+        }
+
+        if (provider === "deepgram") {
+          const response = await fetchFn("https://api.deepgram.com/v1/auth/grant", {
+            method: "POST",
+            headers: {
+              authorization: `Token ${key}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ ttl_seconds: 60 }),
+          });
+          if (!response.ok) {
+            const failure = tokenFailure(response.status);
+            json(failure.status, { error: failure.code, message: `Deepgram token request failed: HTTP ${response.status}` });
+            return true;
+          }
+          const payload = await response.json() as { access_token?: unknown; expires_in?: unknown };
+          if (typeof payload.access_token !== "string" || !payload.access_token) {
+            json(502, { error: "protocol_error", message: "Deepgram token response did not include an access token" });
+            return true;
+          }
+          json(200, {
+            provider: "deepgram",
+            token: payload.access_token,
+            expiresInSeconds: typeof payload.expires_in === "number" ? payload.expires_in : 60,
+          });
           return true;
         }
 
@@ -330,12 +358,8 @@ export function voiceRoutes(deps: {
           body: JSON.stringify({ client_id: clientId, duration_secs: 900 }),
         });
         if (!response.ok) {
-          const code = response.status === 401 || response.status === 403 ? "invalid_credentials"
-            : response.status === 429 ? "rate_limited" : "provider_unavailable";
-          json(response.status === 429 ? 429 : response.status === 401 || response.status === 403 ? 401 : 502, {
-            error: code,
-            message: `Wispr Flow token request failed: HTTP ${response.status}`,
-          });
+          const failure = tokenFailure(response.status);
+          json(failure.status, { error: failure.code, message: `Wispr Flow token request failed: HTTP ${response.status}` });
           return true;
         }
         const payload = await response.json() as { access_token?: unknown; expires_in?: unknown };
