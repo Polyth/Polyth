@@ -311,6 +311,34 @@ test("add menu: truthful rows, four-state details, ARIA, and no invented capabil
   await closePage(page);
 });
 
+test("desktop Add menu: inner press stays open; outside pointer press dismisses immediately", async () => {
+  const page = await openApp();
+  try {
+    await openAddMenu(page);
+    const group = addMenu(page).locator(".add-menu-group").first();
+    const groupBox = await group.boundingBox();
+    assert.ok(groupBox, "Add menu group has a pointer target");
+
+    // A press in non-action menu chrome must not look like an outside press.
+    await page.mouse.click(groupBox!.x + 4, groupBox!.y + groupBox!.height / 2);
+    await page.waitForSelector("#composer-add-menu", { state: "visible" });
+
+    const input = editor(page);
+    const inputBox = await input.boundingBox();
+    assert.ok(inputBox, "composer editor has an outside pointer target");
+    await page.mouse.move(inputBox!.x + inputBox!.width / 2, inputBox!.y + inputBox!.height / 2);
+    await page.mouse.down();
+
+    // This is intentionally asserted before pointer-up/click: desktop menus
+    // must dismiss on the outside press itself, not wait for a click catcher.
+    await page.waitForSelector("#composer-add-menu", { state: "detached" });
+    await page.mouse.up();
+    await page.waitForFunction(() => document.activeElement?.classList.contains("composer-add-trigger") === true);
+  } finally {
+    await closePage(page);
+  }
+});
+
 test("menu insertion equals typed sigils; the popup is an honest combobox", async () => {
   const page = await openApp();
   const before = await eventCount(SESSIONS.main);

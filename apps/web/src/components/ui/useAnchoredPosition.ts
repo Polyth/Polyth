@@ -19,6 +19,8 @@ export interface AnchoredPositionOptions {
   margin?: number;
   /** Preferred vertical side (default down). */
   side?: AnchoredSide;
+  /** Keep the opening anchor rectangle during content-driven layout changes. */
+  stableAnchor?: boolean;
 }
 
 export interface AnchoredPosition {
@@ -51,7 +53,7 @@ export function useAnchoredPosition(
   open: boolean,
   anchorRef: RefObject<HTMLElement | null>,
   surfaceRef: RefObject<HTMLElement | null>,
-  { align = "start", gap = 6, margin = 8, side = "down" }: AnchoredPositionOptions = {},
+  { align = "start", gap = 6, margin = 8, side = "down", stableAnchor = false }: AnchoredPositionOptions = {},
 ): AnchoredPosition {
   const [position, setPosition] = useState<AnchoredPosition>(INITIAL);
 
@@ -61,12 +63,15 @@ export function useAnchoredPosition(
       return;
     }
 
+    let openingAnchor: DOMRect | undefined;
     const update = () => {
       const anchor = anchorRef.current;
       const surface = surfaceRef.current;
       if (!anchor || !surface) return;
       const band = visibleBand();
-      const anchorRect = anchor.getBoundingClientRect();
+      const anchorRect = stableAnchor
+        ? (openingAnchor ??= anchor.getBoundingClientRect())
+        : anchor.getBoundingClientRect();
       const surfaceRect = surface.getBoundingClientRect();
 
       const below = band.bottom - anchorRect.bottom - gap - margin;
@@ -121,7 +126,7 @@ export function useAnchoredPosition(
       window.visualViewport?.removeEventListener("scroll", update);
       observer?.disconnect();
     };
-  }, [open, anchorRef, surfaceRef, align, gap, margin, side]);
+  }, [open, anchorRef, surfaceRef, align, gap, margin, side, stableAnchor]);
 
   return position;
 }

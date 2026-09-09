@@ -7,13 +7,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createStore } from "@polyth/session";
-import type { AgentRuntime, Project, ProjectService, RuntimeEvent } from "@polyth/contracts";
+import type { AgentRuntime, FeatureSupport, Project, ProjectService, RuntimeEvent, SessionEvent, SessionProjection } from "@polyth/contracts";
 import { titleFromPrompt } from "@polyth/harness-runtime";
 import { createSessionService, type Broadcaster } from "../src/sessions.ts";
 import { createProjectService } from "../src/projects.ts";
 import type { PermissionService } from "@polyth/permissions";
 
-function fakeRuntime(generatedTitle?: string, polledTitle?: string, polledTitleAfter = 0, harnessId = "opencode"): AgentRuntime {
+function fakeRuntime(generatedTitle?: string, polledTitle?: string, polledTitleAfter = 0, harnessId = "opencode", titleSupport: FeatureSupport = "native"): AgentRuntime {
   const listeners = new Set<(sessionId: string, ev: RuntimeEvent) => void>();
   let sessionId = "";
   let sessionReads = 0;
@@ -21,7 +21,7 @@ function fakeRuntime(generatedTitle?: string, polledTitle?: string, polledTitleA
     harnessId,
     capabilities: async () => ({
       streaming: true, permissions: true, questions: true, compaction: false, subagents: false,
-      title: "native",
+      title: titleSupport,
     }),
     models: async () => [],
     agents: async () => [],
@@ -62,6 +62,7 @@ function makeService(opts: {
   polledTitle?: string;
   polledTitleAfter?: number;
   harnessId?: string;
+  titleSupport?: FeatureSupport;
 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-orgsvc-"));
   const store = createStore(join(dir, "s.db"));
@@ -74,18 +75,23 @@ function makeService(opts: {
     remove: async () => {},
   };
   const permissions = { evaluate: () => "ask", addRule: () => {}, rules: () => [] } as unknown as PermissionService;
-  const broadcast: Broadcaster = { event: () => {}, projection: () => {} };
+  const broadcastEvents: SessionEvent[] = [];
+  const broadcastProjections: SessionProjection[] = [];
+  const broadcast: Broadcaster = {
+    event: (event) => { broadcastEvents.push(event); },
+    projection: (projection) => { broadcastProjections.push(projection); },
+  };
   const sessions = createSessionService({
     store, projects, permissions, broadcast, queue: store, org: store,
     ...(opts.worktrees ? { worktrees: opts.worktrees } : {}),
     runtimes: {
       forProject: async (_projectId, cwd) => {
         opts.onRuntimeCwd?.(cwd);
-        return fakeRuntime(opts.generatedTitle, opts.polledTitle, opts.polledTitleAfter, opts.harnessId);
+        return fakeRuntime(opts.generatedTitle, opts.polledTitle, opts.polledTitleAfter, opts.harnessId, opts.titleSupport);
       },
     },
   });
-  return { sessions, store, dir };
+  return { sessions, store, dir, broadcastEvents, broadcastProjections };
 }
 
 async function waitForTitle(
@@ -134,6 +140,27 @@ test("auto title persists OpenCode's generated title after its source prompt", a
   assert.equal(events.filter((event) => event.type === "session/metadata-changed").length, 1);
   assert.deepEqual(events[titleIndex]!.data, { title: generatedTitle, source: "opencode" });
   assert.equal(events[titleIndex]!.producerPlugin, "backend-opencode");
+});
+
+test("Codex prompt title is persisted then broadcast when native generation is unavailable", async () => {
+  const prompt = "Repair Codex session naming";
+  const { sessions, store, broadcastEvents, broadcastProjections } = makeService({
+    harnessId: "codex",
+    titleSupport: "emulated",
+  });
+  const { id } = await sessions.create({ projectId: "p1" });
+
+  await sessions.send(id, { text: prompt, autoTitle: true });
+  await waitForTitle(sessions, id, titleFromPrompt(prompt));
+
+  const events = await store.events(id);
+  const promptIndex = events.findIndex((event) => event.type === "user/message");
+  const titleIndex = events.findIndex((event) => event.type === "session/metadata-changed");
+  assert.ok(titleIndex > promptIndex, "the durable title must follow its source prompt");
+  assert.deepEqual(events[titleIndex]?.data, { title: titleFromPrompt(prompt), source: "polyth" });
+  assert.ok(broadcastEvents.some((event) => event.seq === events[titleIndex]?.seq));
+  assert.equal(broadcastProjections.findLast((projection) => projection.id === id)?.title, titleFromPrompt(prompt));
+  await store.close();
 });
 
 test("auto title falls back to OpenCode's session list when its title event is absent", async () => {

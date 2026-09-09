@@ -27,6 +27,8 @@ export interface ResponsiveOverlayProps {
   anchorRef?: RefObject<HTMLElement | null>;
   align?: AnchoredAlign;
   side?: AnchoredSide;
+  /** Preserve an open popover when its trigger changes width or position. */
+  stableAnchor?: boolean;
   className?: string;
   initialFocus?: string;
   /** Desktop popover overflow policy. */
@@ -52,6 +54,7 @@ export default function ResponsiveOverlay({
   anchorRef,
   align = "start",
   side = "down",
+  stableAnchor = false,
   className,
   initialFocus,
   popoverOverflow,
@@ -92,6 +95,7 @@ export default function ResponsiveOverlay({
         anchorRef={anchorRef}
         align={align}
         side={side}
+        stableAnchor={stableAnchor}
         ariaLabel={title}
         {...(initialFocus !== undefined ? { initialFocus } : {})}
         {...(popoverOverflow !== undefined ? { overflow: popoverOverflow } : {})}

@@ -98,12 +98,22 @@ export function createHarnessRegistry() {
     const snapshots = new Map<string, {
         current?: HarnessSnapshot;
         lastGood?: HarnessSnapshot;
-        pending?: Promise<HarnessSnapshot>;
+        pending?: {
+            detail: boolean;
+            generation: number;
+            promise: Promise<HarnessSnapshot>;
+        };
         /** Last successful detail/discovery verification for current metadata. */
         detailedAt?: number;
+        /** Snapshot revision whose auth/state was positively verified. Catalog
+         * freshness alone is never execution-readiness proof. */
+        readinessRevision?: string;
+        /** Invalidations and forced refreshes fence older asynchronous writes. */
+        generation: number;
     }>();
     let revision = 0;
     const SNAPSHOT_TTL_MS = 15_000;
+    const DETAIL_TTL_MS = 5 * 60_000;
     const snapshotKey = (context: HarnessContext, harnessId: string) => JSON.stringify([
         context.spaceId,
         context.projectId,
@@ -146,23 +156,39 @@ export function createHarnessRegistry() {
                 : list();
             return Promise.all(selected.map(async (provider) => {
                 const key = snapshotKey(context, provider.descriptor.id);
-                const entry = snapshots.get(key) ?? {};
+                const entry = snapshots.get(key) ?? { generation: 0 };
                 snapshots.set(key, entry);
-                const fresh = entry.current
-                    && Date.now() - entry.current.context.fetchedAt < SNAPSHOT_TTL_MS
-                    && (!options.detail
-                        || provider.discover === undefined
-                        || (entry.detailedAt !== undefined && entry.detailedAt >= entry.current.context.fetchedAt));
-                if (!options.force && fresh)
+                const generation = options.force ? ++entry.generation : entry.generation;
+                // A forced probe can reflect an auth/config/runtime change.
+                // Keep the old catalog only as presentation fallback while
+                // making the next detail caller revalidate it.
+                if (options.force)
+                    entry.detailedAt = undefined;
+                const now = Date.now();
+                const summaryFresh = entry.current
+                    && now - entry.current.context.fetchedAt < SNAPSHOT_TTL_MS;
+                const detailFresh = entry.current
+                    && (provider.discover === undefined
+                        || (entry.detailedAt !== undefined && now - entry.detailedAt < DETAIL_TTL_MS));
+                const needsDetail = Boolean(options.detail && provider.discover
+                    && (options.force || !detailFresh));
+                if (!options.force && entry.pending && (!needsDetail || entry.pending.detail))
+                    return entry.pending.promise;
+                if (!options.force && summaryFresh && (!options.detail || detailFresh))
                     return entry.current!;
-                if (!options.force && entry.pending)
-                    return entry.pending;
-                const pending = (async (): Promise<HarnessSnapshot> => {
+
+                const refresh = async (
+                    detail: boolean,
+                    generation: number,
+                    knownProbe?: HarnessProbe,
+                ): Promise<HarnessSnapshot> => {
+                    const currentAtStart = entry.current;
+                    const lastGoodAtStart = entry.lastGood;
                     const checkedAt = Date.now();
-                    const probe = await probeOne(provider, context);
+                    const probe = knownProbe ?? await probeOne(provider, context);
                     let discovery;
                     let discoveryError: unknown;
-                    if (options.detail && provider.discover) {
+                    if (detail && provider.discover) {
                         try {
                             discovery = await provider.discover(context);
                         }
@@ -182,13 +208,13 @@ export function createHarnessRegistry() {
                         state,
                         checkedAt,
                     };
-                    const lastGood = entry.lastGood;
+                    const lastGood = lastGoodAtStart;
                     const degraded = discoveryError !== undefined || state === "offline" || state === "degraded";
                     // A cheap probe refresh must not erase metadata previously
                     // obtained by an explicit detail discovery. During an outage,
                     // use only the last successful snapshot as the fallback.
-                    const retained = !options.detail
-                        ? entry.current ?? lastGood
+                    const retained = !detail
+                        ? currentAtStart ?? lastGood
                         : degraded ? lastGood : undefined;
                     const discoveredCatalog = discovery?.catalog ? {
                         ...discovery.catalog,
@@ -245,33 +271,59 @@ export function createHarnessRegistry() {
                             ? { native: discovery.native }
                             : retained?.native !== undefined ? { native: retained.native } : {}),
                     };
-                    entry.current = snapshot;
-                    if (options.detail && provider.discover && discoveryError === undefined)
-                        entry.detailedAt = checkedAt;
-                    if (!degraded && (state === "ready" || state === "unknown" || state === "partially-configured"))
-                        entry.lastGood = snapshot;
+                    if (entry.generation === generation && snapshots.get(key) === entry) {
+                        entry.current = snapshot;
+                        if (detail && provider.discover && discoveryError === undefined)
+                            entry.detailedAt = checkedAt;
+                        entry.readinessRevision = state !== "unknown"
+                            && availability.authenticated !== "unknown"
+                            ? snapshot.context.revision
+                            : undefined;
+                        if (!degraded && (state === "ready" || state === "unknown" || state === "partially-configured"))
+                            entry.lastGood = snapshot;
+                    }
                     return snapshot;
-                })();
-                entry.pending = pending;
-                return pending.finally(() => {
+                };
+                const previous = !options.force && needsDetail && entry.pending && !entry.pending.detail
+                    ? entry.pending
+                    : undefined;
+                const pending = {} as NonNullable<typeof entry.pending>;
+                const work = previous
+                    ? previous.promise.then((summary) => refresh(
+                        true,
+                        generation,
+                        summary.availability as HarnessProbe,
+                    ))
+                    : refresh(needsDetail, generation);
+                pending.detail = needsDetail;
+                pending.generation = generation;
+                pending.promise = work.finally(() => {
                     if (entry.pending === pending)
                         entry.pending = undefined;
                 });
+                entry.pending = pending;
+                return pending.promise;
             }));
         },
-        invalidate(match: Partial<Pick<HarnessContext, "spaceId" | "projectId" | "cwd">> & { harnessId?: string } = {}) {
+        invalidate(match: Partial<Pick<HarnessContext, "spaceId" | "projectId" | "cwd" | "remote">> & { harnessId?: string } = {}) {
             for (const [key, entry] of snapshots) {
-                const [spaceId, projectId, cwd, , harnessId] = JSON.parse(key) as [string, string, string, boolean, string];
+                const [spaceId, projectId, cwd, remote, harnessId] = JSON.parse(key) as [string, string, string, boolean, string];
                 if (match.spaceId !== undefined && match.spaceId !== spaceId)
                     continue;
                 if (match.projectId !== undefined && match.projectId !== projectId)
                     continue;
                 if (match.cwd !== undefined && match.cwd !== cwd)
                     continue;
+                if (match.remote !== undefined && match.remote !== remote)
+                    continue;
                 if (match.harnessId !== undefined && match.harnessId !== harnessId)
                     continue;
+                entry.generation += 1;
                 entry.current = undefined;
+                entry.lastGood = undefined;
                 entry.detailedAt = undefined;
+                entry.readinessRevision = undefined;
+                entry.pending = undefined;
             }
         },
         async resolve(context: HarnessContext, selection: HarnessSelection, stickyId?: string) {
@@ -292,15 +344,14 @@ export function createHarnessRegistry() {
                     // context. Re-running probe/discover here was the main warm
                     // harness-switch tax and could start OpenCode just to select
                     // a runtime that was already known-good.
-                    const detailed = provider.discover === undefined
-                        || (cache?.detailedAt !== undefined && cache.detailedAt >= current.context.fetchedAt);
-                    if (detailed || (cachedProbe.state !== "unknown" && cachedProbe.authenticated !== "unknown"))
+                    const readinessVerified = provider.discover === undefined
+                        || cache?.readinessRevision === current.context.revision;
+                    if (readinessVerified)
                         return provider;
                 }
                 let probe = await probeOne(provider, context);
                 if (!runnable(probe))
                     continue;
-                // Cheap probes deliberately avoid starting native runtimes.
                 // At the actual execution boundary, refine unknown readiness
                 // so Auto cannot select a harness that discovery identifies as
                 // unauthenticated or setup-incomplete.
@@ -315,7 +366,7 @@ export function createHarnessRegistry() {
                         };
                         if (cache?.current) {
                             const checkedAt = Date.now();
-                            cache.current = {
+                            const refined = {
                                 ...cache.current,
                                 availability: { ...cache.current.availability, ...probe, checkedAt },
                                 context: {
@@ -324,6 +375,11 @@ export function createHarnessRegistry() {
                                     fetchedAt: checkedAt,
                                 },
                             };
+                            cache.current = refined;
+                            cache.readinessRevision = probe.state !== "unknown"
+                                && probe.authenticated !== "unknown"
+                                ? refined.context.revision
+                                : undefined;
                             // This path verified execution readiness only. It did
                             // not materialize catalog/capabilities/configuration,
                             // so a later detail=1 request must still discover them.

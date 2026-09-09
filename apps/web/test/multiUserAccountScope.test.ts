@@ -94,7 +94,6 @@ test("agent presets stay separate from the harness/model picker", () => {
   const preset = harness.split("\n").find((line) => line.includes('id: "harnesses.agent-preset"')) ?? "";
   assert.ok(modelHeader);
   assert.equal(modelHeader.includes("executionProfileControl"), false);
-  assert.ok(preset.includes('slot: "composer.execution"'));
-  assert.ok(preset.includes("executionProfileControl"));
+  assert.equal(preset, "", "profile selection has been removed from execution controls");
   assert.match(sessionPackage, /webApiAccountScoped\.ts/);
 });

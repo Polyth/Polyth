@@ -1,5 +1,5 @@
 import "./styles.css";
-import { useEffect, useState, type DragEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import type {
   HarnessControlDescriptor,
   HarnessSelection,
@@ -12,6 +12,8 @@ import { createApiTransport, defineWebPackage, type WebPackageHost } from "@poly
 import { Button, Dialog, Notice, Select, Switch, Tabs, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 import MoveControls from "../../../apps/web/src/components/MoveControls.tsx";
 import ProviderLogo from "../../models/widgets/ProviderLogo.tsx";
+import { invalidateRuntimeCatalogs, peekHarnessSnapshots, readHarnessSnapshots, useCatalogRevision } from "@polyth/models/runtime-catalog";
+import { activeBrowserAccountId } from "@polyth/web/account-storage";
 
 const api = createApiTransport();
 
@@ -45,26 +47,33 @@ const setupLabel = (row: HarnessSnapshot): string | undefined => {
   return undefined;
 };
 
-function useHarnesses(projectId?: string | null) {
-  const [rows, setRows] = useState<HarnessSnapshot[]>([]);
+function useHarnesses(projectId?: string | null, spaceId?: string) {
+  const revision = useCatalogRevision();
+  const key = JSON.stringify([activeBrowserAccountId(), spaceId ?? "page", projectId ?? "", revision]);
+  const [result, setResult] = useState<{ key: string; rows: HarnessSnapshot[] }>();
+  const requestSeq = useRef(0);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const refresh = async (force = false, detail = false) => {
+  const refresh = useCallback(async (force = false, detail = false) => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     try {
-      const query = new URLSearchParams();
-      if (projectId) query.set("projectId", projectId);
-      if (force) query.set("force", "1");
-      if (detail) query.set("detail", "1");
-      setRows(await api.get<HarnessSnapshot[]>(`/api/harnesses/snapshots?${query}`));
+      const rows = await readHarnessSnapshots({ projectId, spaceId, force, detail });
+      if (seq !== requestSeq.current) return;
+      setResult({ key, rows });
       setError("");
     } catch (cause) {
+      if (seq !== requestSeq.current) return;
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
-  };
-  useEffect(() => { void refresh(); }, [projectId]);
+  }, [key, projectId, spaceId]);
+  useEffect(() => {
+    void refresh();
+    return () => { requestSeq.current++; };
+  }, [refresh]);
+  const rows = result?.key === key ? result.rows : peekHarnessSnapshots({ projectId, spaceId }) ?? [];
   return { rows, error, loading, refresh };
 }
 
@@ -123,6 +132,7 @@ function HarnessTabs({
   agentControl,
   effortControl,
   phoneLayout,
+  spaceId,
 }: {
   host: WebPackageHost;
   projectId?: string;
@@ -135,8 +145,9 @@ function HarnessTabs({
   agentControl?: ReactNode;
   effortControl?: ReactNode;
   phoneLayout?: boolean;
+  spaceId?: string;
 }) {
-  const { rows, error, loading } = useHarnesses(projectId);
+  const { rows, error, loading } = useHarnesses(projectId, spaceId);
   const [choice, setChoice] = useState<HarnessSelection>();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
@@ -240,10 +251,10 @@ function HarnessTabs({
     : resolvedTab ?? "";
   const tabs = ordered.map((row) => ({
     id: row.identity.id,
-    label: <>
+    label: <span title={row.identity.name}>
       <ProviderLogo providerID={row.identity.id} providerName={row.identity.name} size="compact" />
-      {row.identity.name}
-    </>,
+      <span className="sr-only">{row.identity.name}</span>
+    </span>,
     disabled: activeTab !== row.identity.id && (busy || Boolean(transition) || !canExecute(row)),
   }));
   const activeRow = ordered.find((row) => row.identity.id === activeTab);
@@ -459,10 +470,12 @@ function SwitchMarker({ event }: { event: SessionEvent }) {
 export default defineWebPackage((host) => () => {
   const off = [
     host.settings.registerPage({ id: "harnesses", packageId: "harness-runtime", label: "Harnesses", group: "Engineering", order: 15, component: () => <HarnessSettings host={host}/> }),
-    host.slots.register({ id: "harnesses.model-tabs", slot: "modelPicker.header", order: 10, render: (props) => <HarnessTabs host={host} projectId={props.projectId as string | undefined} sessionId={props.sessionId as string | undefined} sessionStatus={props.sessionStatus as string | undefined} harnessSelection={props.harnessSelection as HarnessSelection | undefined} resolvedHarnessId={props.resolvedHarnessId as string | undefined} transition={props.harnessTransition as HarnessTransition | undefined} projectHarnessDefault={props.projectHarnessDefault as HarnessSelection | null | undefined} agentControl={props.executionAgentControl as ReactNode} effortControl={props.executionEffortControl as ReactNode} phoneLayout={props.phoneLayout === true} /> }),
-    host.slots.register({ id: "harnesses.agent-preset", slot: "composer.execution", order: 5, render: (props) => <>{props.executionProfileControl as ReactNode}</> }),
+    host.slots.register({ id: "harnesses.model-tabs", slot: "modelPicker.header", order: 10, render: (props) => <HarnessTabs host={host} spaceId={props.spaceId as string | undefined} projectId={props.projectId as string | undefined} sessionId={props.sessionId as string | undefined} sessionStatus={props.sessionStatus as string | undefined} harnessSelection={props.harnessSelection as HarnessSelection | undefined} resolvedHarnessId={props.resolvedHarnessId as string | undefined} transition={props.harnessTransition as HarnessTransition | undefined} projectHarnessDefault={props.projectHarnessDefault as HarnessSelection | null | undefined} agentControl={props.executionAgentControl as ReactNode} effortControl={props.executionEffortControl as ReactNode} phoneLayout={props.phoneLayout === true} /> }),
     host.slots.register({ id: "harnesses.transition", slot: "composer.execution", order: 10, render: (props) => <HarnessTransitionStatus host={host} sessionId={props.sessionId as string | undefined} resolvedHarnessId={props.resolvedHarnessId as string | undefined} transition={props.harnessTransition as HarnessTransition | undefined} /> }),
     host.slots.register({ id: "harnesses.switch-marker", slot: "session.timeline.event", meta: { eventTypes: ["harness/switched"] }, render: (props) => <SwitchMarker event={props.event as SessionEvent} /> }),
   ];
-  return () => off.toReversed().forEach((dispose) => dispose());
+  return () => {
+    off.toReversed().forEach((dispose) => dispose());
+    invalidateRuntimeCatalogs();
+  };
 });

@@ -46,3 +46,22 @@ export function providerIsExpanded(inputs: ProviderExpansionInputs): boolean {
   if (inputs.persistedExpanded) return true;
   return inputs.selectedProvider;
 }
+import type { ModelDescriptor, ModelRef } from "@polyth/contracts";
+
+/** Session ModelRef predates harness qualification. Match it inside the
+ * current catalog without discarding an explicit, qualified selection. */
+export function pickerModelMatches(model: ModelDescriptor, ref: ModelRef & { harnessId?: string }): boolean {
+  return model.providerID === ref.providerID && model.modelID === ref.modelID
+    && (!ref.harnessId || (model.harnessId ?? "opencode") === ref.harnessId);
+}
+
+export function pickerCatalogModels(models: readonly ModelDescriptor[], harnessId?: string): ModelDescriptor[] {
+  return models.filter((model) => (!harnessId || (model.harnessId ?? "opencode") === harnessId)
+    && ((model.harnessId ?? harnessId ?? "opencode") !== "opencode" || model.connected !== false));
+}
+
+export function flatModelCatalog(models: readonly ModelDescriptor[], harnessId?: string): boolean {
+  const owner = harnessId ?? models[0]?.harnessId;
+  return Boolean(owner && owner !== "opencode"
+    && models.every((model) => model.harnessId === owner));
+}

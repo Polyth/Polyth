@@ -161,7 +161,11 @@ export const CODEX_CAPABILITIES = {
     // Polyth branchSession needs canonical history; Codex thread/fork copies native history only.
     fork: false as const,
     mcp: true,
-    title: "native" as const,
+    // App Server reports names set on a thread, but it does not promise to
+    // generate a semantic title for a new thread. Let the canonical session
+    // layer persist its prompt-derived fallback without waiting on a native
+    // event that may never arrive; an actual name update can still refine it.
+    title: "emulated" as const,
     attachments: { modalities: {
         image: "native" as const,
         url: "native" as const,
@@ -249,12 +253,15 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
                     }, `${usageKey}:usage`);
                 }
             }
-            const totalTokens = params.tokenUsage?.total?.totalTokens;
+            // `total` is lifetime thread usage and can legitimately exceed a
+            // model window after several turns. `last` is the current model
+            // request/response footprint used by Codex for window occupancy.
+            const occupiedTokens = params.tokenUsage?.last?.totalTokens;
             const limitTokens = params.tokenUsage?.modelContextWindow;
-            if (typeof totalTokens === "number" || typeof limitTokens === "number") {
+            if (typeof occupiedTokens === "number" || typeof limitTokens === "number") {
                 emit({ type: "context/updated", ...contextWindowTelemetry({
                     source: "native",
-                    usedTokens: totalTokens,
+                    usedTokens: occupiedTokens,
                     limitTokens,
                 }) }, `${turnId || params.threadId}:context`);
             }

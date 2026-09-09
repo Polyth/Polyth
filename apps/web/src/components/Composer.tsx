@@ -87,7 +87,6 @@ import {
 import {
   loadComposerConfig, saveComposerConfig, consumeComposerConfig,
   withAutoThinking, withExplicitAgent, withExplicitThinking, withModelForNextTurn,
-  withProfile, withProfileNone,
   type ComposerConfig,
 } from "../composerConfig.ts";
 import { shouldHandlePromptHistoryKey } from "../composer/history.ts";
@@ -104,6 +103,7 @@ import { announce } from "./a11y/live.tsx";
 import { noteModelUsed } from "@polyth/models/web-prefs";
 import { getUiSettings, setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
+import { useSpaces } from "../spaces.ts";
 import { isManagedIsolationBranch } from "@polyth/contracts";
 import type {
   DraftExecutionConfig,
@@ -467,6 +467,7 @@ export default function Composer({
     return subscribeDraftExecutionConfig(refresh);
   }, [activeProjectId]);
   const profiles = useProfiles();
+  const spaceId = useSpaces().activeSpaceId ?? undefined;
   const globalModels = useStore((s) => s.models);
   const globalAgents = useStore((s) => s.agents);
   const activeProject = useStore((s) =>
@@ -488,6 +489,7 @@ export default function Composer({
         : undefined
     : undefined;
   const routeCatalog = useRuntimeCatalog(session, globalModels, globalAgents, {
+    spaceId,
     projectId: activeProjectId ?? undefined,
     harnessId: selectedDraftHarness,
   });
@@ -656,10 +658,10 @@ export default function Composer({
     if (!routeCatalog.ready) return;
     if (priorRoute.current.sessionId === session?.id && priorRoute.current.harnessId !== session?.resolvedHarnessId) {
       const harnessId = session?.resolvedHarnessId;
-      const compatibleModel = cfg.model && routeCatalog.models.some((model) =>
-        model.providerID === cfg.model?.providerID
-        && model.modelID === cfg.model?.modelID
-        && (!harnessId || model.harnessId === harnessId));
+      // Catalog discovery may be partial or unavailable. The explicit route
+      // identity, not membership in that response, decides compatibility.
+      const compatibleModel = cfg.model && (!harnessId
+        || (cfg.model.harnessId ?? "opencode") === harnessId);
       const compatibleAgent = cfg.agent && routeCatalog.agents.some((agent) =>
         agent.name === cfg.agent && (!harnessId || agent.harnessId === harnessId));
       const profileId = cfg.profile.kind === "id" ? cfg.profile.id : undefined;
@@ -693,10 +695,8 @@ export default function Composer({
     if (!routeCatalog.ready) return;
     if (priorDraftHarness.current === effectiveDraftHarness) return;
     priorDraftHarness.current = effectiveDraftHarness;
-    const compatibleModel = cfg.model && routeCatalog.models.some((model) =>
-      (!model.harnessId || model.harnessId === effectiveDraftHarness)
-      && model.providerID === cfg.model?.providerID
-      && model.modelID === cfg.model?.modelID);
+    const compatibleModel = cfg.model
+      && (cfg.model.harnessId ?? "opencode") === effectiveDraftHarness;
     const compatibleAgent = cfg.agent && routeCatalog.agents.some((agent) =>
       (!agent.harnessId || agent.harnessId === effectiveDraftHarness) && agent.name === cfg.agent);
     const draftProfileId = cfg.profile.kind === "id" ? cfg.profile.id : undefined;
@@ -1613,9 +1613,8 @@ export default function Composer({
 
   // ---- execution configuration projections ------------------------------------
   const agentValue = cfg.agent ?? "";
-  const recommendedModel = session?.model && chatModels.some((candidate) =>
-    modelIdentityMatches(candidate, session.model!))
-    ? session.model
+  const recommendedModel = session?.model
+    ? { ...session.model, ...(session.resolvedHarnessId ? { harnessId: session.resolvedHarnessId } : {}) }
     : preferredModel && chatModels.some((candidate) => modelIdentityMatches(candidate, preferredModel))
       ? preferredModel
       : chatModels[0];
@@ -1849,61 +1848,9 @@ export default function Composer({
       ariaLabel={tr("composer.selectAgentModeCurrentValue", { value: activeAgentLabel })}
     />
   ) : <span className="agent-type-badge">{activeAgentLabel}</span>;
-  const profileHarnessId = session?.resolvedHarnessId ?? effectiveDraftHarness;
-  const compatibleProfiles = profiles.filter((profile) => !profileHarnessId
-    || (profile.harnessId ?? "opencode") === profileHarnessId);
-  const inheritedProfile = effectiveProfile;
-  const profileItems: PickerItem[] = [
-    { id: "", label: inheritedProfile ? `Default: ${inheritedProfile.name}` : "Default", group: "" },
-    { id: "__none", label: "None", group: "" },
-    ...compatibleProfiles.map((profile) => ({
-      id: profile.id,
-      label: profile.name,
-      detail: `${profile.harnessId ?? "OpenCode (legacy)"} · ${profile.providerID}/${profile.modelID}`,
-      group: "",
-    })),
-  ];
-  const profileValue = cfg.profile.kind === "id"
-    ? cfg.profile.id
-    : cfg.profile.kind === "none" ? "__none" : "";
-  const pickProfile = (id: string) => {
-    if (!id) {
-      updateCfg({ ...cfg, profile: { kind: "inherit" } });
-      if (!session && activeProjectId) updateDraftExecutionConfig(activeProjectId, { profileId: undefined });
-      return;
-    }
-    if (id === "__none") {
-      updateCfg(withProfileNone(cfg));
-      if (!session && activeProjectId) updateDraftExecutionConfig(activeProjectId, { profileId: undefined });
-      return;
-    }
-    const profile = profiles.find((candidate) => candidate.id === id);
-    if (!profile) return;
-    const harnessId = profile.harnessId ?? "opencode";
-    updateCfg(withProfile(cfg, id));
-    if (!session && activeProjectId) updateDraftExecutionConfig(activeProjectId, {
-      harnessSelection: { mode: "pinned", harnessId },
-      harnessSelectionExplicit: true,
-      profileId: id,
-      model: { harnessId, providerID: profile.providerID, modelID: profile.modelID },
-      ...(profile.agent ? { agent: { harnessId, agent: profile.agent } } : { agent: undefined }),
-      ...(profile.thinking ? { thinking: profile.thinking } : { thinking: undefined }),
-    });
-  };
-  const profileControl = <Picker
-    className="composer-profile-chip"
-    label="Profile"
-    mobileSheet
-    direction="up"
-    items={profileItems}
-    value={profileValue}
-    searchable={compatibleProfiles.length > 8}
-    onPick={pickProfile}
-    placeholder={profileItems.find((item) => item.id === profileValue)?.label ?? "Profile"}
-    ariaLabel={`Select profile, current: ${profileItems.find((item) => item.id === profileValue)?.label ?? "Default"}`}
-  />;
   const phoneLayout = isPhone;
   const executionPickerContext = {
+    spaceId,
     sessionId: session?.id,
     projectId: activeProjectId ?? undefined,
     sessionStatus: session?.status,
@@ -1913,12 +1860,12 @@ export default function Composer({
     projectHarnessDefault: activeProject?.defaults?.harness,
     executionAgentControl: agentControl,
     executionEffortControl: effortControl,
-    executionProfileControl: profileControl,
     phoneLayout,
   };
   const modelControl = activeProjectId ? (
     <ModelPicker
       models={chatModels}
+      harnessId={catalogHarnessId}
       value={cfg.model}
       recommended={recommendedModel}
       header={<SlotHost slot="modelPicker.header" context={executionPickerContext} />}

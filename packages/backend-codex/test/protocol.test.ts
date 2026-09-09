@@ -191,6 +191,47 @@ test("Codex create receipt replay does not capture or consume a staged overlay",
     }
 });
 
+test("Codex reports prompt titles as emulated instead of waiting for native generation", async () => {
+    const f = fakeRpc();
+    const rt = await createCodexRuntime(context, f.rpc);
+    assert.equal((await rt.capabilities()).title, "emulated");
+    await rt.dispose();
+});
+
+test("Codex separates lifetime token totals from current context occupancy", async () => {
+    const f = fakeRpc();
+    f.handle(async (method) => {
+        if (method === "thread/start") return { thread: { id: "native" } };
+        if (method === "thread/read") {
+            return { thread: { id: "native", status: { type: "idle" }, historyMode: "legacy", turns: [] } };
+        }
+        return {};
+    });
+    const rt = await createCodexRuntime(context, f.rpc);
+    const events: RuntimeEvent[] = [];
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    await rt.reconcile!({ ...binding, reconciliationOrdinal: 4 });
+    rt.onObservation!((_sid, observation) => events.push(...observation.events));
+
+    f.emit("thread/tokenUsage/updated", {
+        threadId: "native",
+        turnId: "turn-3",
+        tokenUsage: {
+            total: { totalTokens: 604_900, inputTokens: 580_000, outputTokens: 24_900 },
+            last: { totalTokens: 84_200, inputTokens: 80_000, outputTokens: 4_200 },
+            modelContextWindow: 258_400,
+        },
+    });
+
+    const occupancy = events.findLast((event) => event.type === "context/updated");
+    assert.equal(occupancy?.usedTokens, 84_200);
+    assert.equal(occupancy?.limitTokens, 258_400);
+    assert.ok((occupancy?.fraction ?? 1) < 1);
+    const usage = events.findLast((event) => event.type === "usage/recorded");
+    assert.equal(usage?.tokens.input, 80_000);
+    await rt.dispose();
+});
+
 test("Codex maps native titles, delta usage, occupancy, attachments, compaction, steering, and rate reset", async () => {
     const f = fakeRpc();
     f.handle(async (method) => {
@@ -208,15 +249,15 @@ test("Codex maps native titles, delta usage, occupancy, attachments, compaction,
     assert.ok(events.some((event) => event.type === "session/title-generated" && event.title === "Native title"));
     assert.equal((await rt.sessions())[0]?.title, "Read title");
 
-    const usage = (turnId: string, totalTokens: number, inputTokens: number) => f.emit(
+    const usage = (turnId: string, lifetimeTokens: number, inputTokens: number) => f.emit(
         "thread/tokenUsage/updated",
         {
             threadId: "native",
             turnId,
             tokenUsage: {
-                total: { totalTokens },
+                total: { totalTokens: lifetimeTokens },
                 last: {
-                    totalTokens: inputTokens,
+                    totalTokens: inputTokens + 8,
                     inputTokens,
                     cachedInputTokens: 3,
                     cacheWriteInputTokens: 2,
@@ -235,8 +276,9 @@ test("Codex maps native titles, delta usage, occupancy, attachments, compaction,
     assert.deepEqual(usageEvents.map((event) => event.tokens.input), [100, 100, 40]);
     assert.equal(usageEvents.reduce((sum, event) => sum + event.tokens.input, 0), 240);
     const occupancy = events.findLast((event) => event.type === "context/updated" && event.source === "native");
-    assert.equal(occupancy?.usedTokens, 340);
+    assert.equal(occupancy?.usedTokens, 48);
     assert.equal(occupancy?.limitTokens, 200);
+    assert.equal(occupancy?.fraction, 0.24);
 
     await rt.startTurnOperation!({
         sessionId: "canonical",

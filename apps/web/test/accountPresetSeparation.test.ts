@@ -16,8 +16,9 @@ test("model picker has no account or preset ownership", () => {
   assert.ok(modelHeaderRegistration, "harness model-picker header contribution exists");
   assert.equal(modelHeaderRegistration.includes("executionProfileControl"), false, "preset is not injected into model picker");
   const presetRegistration = harness.split("\n").find((line) => line.includes('id: "harnesses.agent-preset"')) ?? "";
-  assert.ok(presetRegistration.includes('slot: "composer.execution"'));
-  assert.ok(presetRegistration.includes("executionProfileControl"));
+  assert.equal(presetRegistration, "", "profile selection is no longer contributed to the composer");
+  const composer = source("apps/web/src/components/Composer.tsx");
+  assert.doesNotMatch(composer, /executionProfileControl|composer-profile-chip/);
 });
 
 test("legacy favorites migration cannot manufacture agent presets", () => {
@@ -27,9 +28,9 @@ test("legacy favorites migration cannot manufacture agent presets", () => {
   assert.equal(profiles.includes("@polyth/models/web-prefs"), false);
 });
 
-test("project profile defaults stay account-local", () => {
+test("project settings hide profile selection while existing execution data stays compatible", () => {
   const settings = source("apps/web/src/components/settings/pages.tsx");
-  assert.ok(settings.includes("updateDraftExecutionConfig"));
+  assert.doesNotMatch(settings, /projects\.executionProfile|label="Default profile"/);
   assert.equal(settings.includes("saveExecution(p.id, { agentProfileId"), false);
 
   const composer = source("apps/web/src/components/Composer.tsx");

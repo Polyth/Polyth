@@ -11,6 +11,7 @@ import {
   useModelPrefs,
 } from "./modelPrefs.ts";
 import { setModels, useStore } from "../../../apps/web/src/store.ts";
+import { invalidateRuntimeCatalogs } from "./runtimeCatalog.ts";
 import {
   api,
   type AvailableProviderDto,
@@ -89,7 +90,10 @@ export default function ModelsPage() {
   );
 
   const refreshCatalog = () =>
-    loadOpenCodeProviders().then(setProviders).catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    loadOpenCodeProviders().then((catalog) => {
+      setProviders(catalog);
+      invalidateRuntimeCatalogs();
+    }).catch((e) => setError(e instanceof Error ? e.message : String(e)));
 
   const loadProviderOptions = async (opts: { force?: boolean; quiet?: boolean } = {}) => {
     if (options.loading) return;
@@ -192,6 +196,7 @@ export default function ModelsPage() {
       : []);
     const otherHarnesses = globalModels.filter((model) => model.harnessId && model.harnessId !== "opencode");
     setModels([...otherHarnesses, ...enabled]);
+    invalidateRuntimeCatalogs();
   };
 
   const reconcile = (catalog: ProviderCatalogDto[], state: VisibilityStateDto) =>
