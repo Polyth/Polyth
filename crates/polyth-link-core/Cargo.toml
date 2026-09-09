@@ -23,6 +23,7 @@ zeroize.workspace = true
 ciborium.workspace = true
 rand.workspace = true
 tokio.workspace = true
+opaque-ke = "4.0.1"
 url = "2.5.4"
 qrcode = "0.14.1"
 httparse = "1.10.1"
