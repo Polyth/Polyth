@@ -10,17 +10,19 @@ import { customProviderRoutes } from "./customProviderRoutes.ts";
 import { validateProfile } from "./index.ts";
 
 interface ProfileStore {
-  profileList(): Promise<AgentProfile[]>;
-  profileGet(id: string): Promise<AgentProfile | undefined>;
+  profileList(userId?: string): Promise<AgentProfile[]>;
+  profileGet(id: string, userId?: string): Promise<AgentProfile | undefined>;
   profileCreate(
     input: Omit<AgentProfile, "id" | "revision" | "createdAt" | "updatedAt">,
+    userId?: string,
   ): Promise<AgentProfile>;
   profileUpdate(
     id: string,
     patch: Partial<Omit<AgentProfile, "id" | "revision" | "createdAt" | "updatedAt">>,
     expectedRevision: number,
+    userId?: string,
   ): Promise<AgentProfile>;
-  profileRemove(id: string): Promise<boolean>;
+  profileRemove(id: string, userId?: string): Promise<boolean>;
 }
 
 export function profileRoutes(deps: {
@@ -50,10 +52,12 @@ export function profileRoutes(deps: {
     ...(optional(input.color) !== undefined ? { color: optional(input.color)! } : {}),
   });
 
-  return async ({ path, method, body, json }) => {
+  return async (request) => {
+    const { path, method, body, json } = request;
     if (!path.startsWith("/api/agent-profiles")) return false;
+    const userId = request.space.userId;
     if (path === "/api/agent-profiles" && method === "GET") {
-      json(200, await deps.store.profileList());
+      json(200, await deps.store.profileList(userId));
       return true;
     }
     if (path === "/api/agent-profiles" && method === "POST") {
@@ -75,12 +79,12 @@ export function profileRoutes(deps: {
         ...(input.notes ? { notes: String(input.notes) } : {}),
         ...(input.icon ? { icon: String(input.icon) } : {}),
         ...(input.color ? { color: String(input.color) } : {}),
-      }));
+      }, userId));
       return true;
     }
     let match = path.match(/^\/api\/agent-profiles\/([^/]+)\/validate$/);
     if (match && method === "POST") {
-      const profile = await deps.store.profileGet(match[1]!);
+      const profile = await deps.store.profileGet(match[1]!, userId);
       if (!profile) {
         json(404, { error: "not-found" });
         return true;
@@ -94,7 +98,7 @@ export function profileRoutes(deps: {
     }
     match = path.match(/^\/api\/agent-profiles\/([^/]+)$/);
     if (match && method === "GET") {
-      const profile = await deps.store.profileGet(match[1]!);
+      const profile = await deps.store.profileGet(match[1]!, userId);
       if (!profile) {
         json(404, { error: "not-found" });
         return true;
@@ -108,11 +112,12 @@ export function profileRoutes(deps: {
         match[1]!,
         patchOf(input),
         Number(input.expectedRevision ?? 0),
+        userId,
       ));
       return true;
     }
     if (match && method === "DELETE") {
-      const removed = await deps.store.profileRemove(match[1]!);
+      const removed = await deps.store.profileRemove(match[1]!, userId);
       json(removed ? 200 : 404, removed ? { ok: true } : { error: "not-found" });
       return true;
     }
