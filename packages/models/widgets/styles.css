@@ -90,21 +90,46 @@ flex: none; color: var(--text-dim);
 }
 /* Desktop popover (chrome from .ui-popover): search on top, one scroll list. */
 .model-pop {
-  width: min(360px, calc(100vw - var(--space-6))); padding: var(--space-1); display: flex; flex-direction: column;
+  width: min(360px, calc(100vw - var(--space-6)));
+  min-width: min(360px, calc(100vw - var(--space-6)));
+  height: min(560px, 72vh);
+  min-height: min(560px, 72vh);
+  max-height: min(560px, 72vh);
+  padding: var(--space-1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.model-picker-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 .model-picker-header {
+  flex: none;
   min-width: 0;
+  min-height: 4.5rem;
   padding: var(--space-1) var(--space-1) var(--space-2);
 }
 .model-sheet .model-picker-header {
   padding: 0 var(--space-4) var(--space-2);
 }
-.model-pop-content { position: relative; }
+.model-pop-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
 .model-pop-search {
 padding: 2px 2px 6px;
 }
 .model-picker-list {
-  max-height: min(440px, 56vh); overflow-y: auto; min-height: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 .model-picker-shortcuts {
   display: flex; gap: var(--space-2); padding: var(--space-2) var(--space-2) var(--space-1);
@@ -239,9 +264,8 @@ color: var(--text); background: var(--surface-overlay);
 .model-row-info svg {
 width: 14px; height: 14px;
 }
-/* One details surface only: desktop keeps it adjacent to the active row;
-   phones use the sheet's explicit details route. */
-.model-hover-card {
+/* Adjacent details panel: portaled beside the picker shell, never inside it. */
+.model-details-panel {
   position: fixed; z-index: var(--z-tooltip); top: 0; left: 0;
   width: min(272px, calc(100vw - var(--space-6))); max-height: min(430px, 56vh); overflow-y: auto;
   padding: var(--space-3); border: 1px solid var(--material-glass-border); border-radius: var(--radius-surface);
@@ -269,9 +293,8 @@ width: 14px; height: 14px;
 .model-details {
 display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-1);
 }
-.model-sheet .model-details {
-min-height: 100%;
-  padding: var(--space-2) var(--space-4) var(--space-4);
+.model-details-panel .model-details {
+  padding: 0;
 }
 .model-details-back {
 align-self: flex-start;

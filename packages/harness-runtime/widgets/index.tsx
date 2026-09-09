@@ -231,39 +231,36 @@ function HarnessTabs({
   };
 
   const activeSelection = choice ?? transition?.selection ?? selection;
-  const requestedTab = activeSelection.mode === "pinned" ? activeSelection.harnessId : "auto";
   const ordered = rows.toSorted((a, b) => a.policy.priority - b.policy.priority || a.identity.name.localeCompare(b.identity.name));
-  const activeTab = requestedTab === "auto" || ordered.some((row) => row.identity.id === requestedTab)
+  const firstExecutable = ordered.find(canExecute) ?? ordered[0];
+  const resolvedTab = resolvedHarnessId && ordered.some((row) => row.identity.id === resolvedHarnessId)
+    ? resolvedHarnessId
+    : firstExecutable?.identity.id;
+  const requestedTab = activeSelection.mode === "pinned" ? activeSelection.harnessId : resolvedTab;
+  const activeTab = requestedTab && ordered.some((row) => row.identity.id === requestedTab)
     ? requestedTab
-    : "auto";
-  const resolvedName = rows.find((row) => row.identity.id === resolvedHarnessId)?.identity.name;
-  const tabs = [
-    {
-      id: "auto",
-      label: resolvedName && activeSelection.mode === "auto" ? `Auto · ${resolvedName}` : "Auto",
-      disabled: (busy || Boolean(transition)) && activeTab !== "auto",
-    },
-    ...ordered.map((row) => ({
-      id: row.identity.id,
-      label: <>
-        <ProviderLogo providerID={row.identity.id} providerName={row.identity.name} size="compact" />
-        {row.identity.name}
-      </>,
-      disabled: activeTab !== row.identity.id && (busy || Boolean(transition) || !canExecute(row)),
-    })),
-  ];
+    : resolvedTab ?? "";
+  const tabs = ordered.map((row) => ({
+    id: row.identity.id,
+    label: <>
+      <ProviderLogo providerID={row.identity.id} providerName={row.identity.name} size="compact" />
+      {row.identity.name}
+    </>,
+    disabled: activeTab !== row.identity.id && (busy || Boolean(transition) || !canExecute(row)),
+  }));
   const activeRow = ordered.find((row) => row.identity.id === activeTab);
+  const committedTab = selection.mode === "pinned"
+    ? selection.harnessId
+    : resolvedTab;
   const chooseTab = (id: string) => {
-    const next: HarnessSelection = id === "auto" ? { mode: "auto" } : { mode: "pinned", harnessId: id };
-    const committed = selection.mode === "pinned" ? selection.harnessId : "auto";
-    if (!choice && !transition && id === committed) return;
+    const next: HarnessSelection = { mode: "pinned", harnessId: id };
+    if (!choice && !transition && id === committedTab) return;
     choose(next);
   };
 
   return <section className="pkg-harnesses pkg-harnesses-picker-tabs" aria-label="Execution harness" aria-busy={busy || loading}>
     <div className="pkg-harnesses-picker-tabs-head">
       <Tabs tabs={tabs} value={activeTab} onChange={chooseTab} label="Execution harness" size="sm" className="pkg-harnesses-tablist" />
-      <Button size="sm" variant="ghost" className="pkg-harnesses-manage" onClick={() => host.navigation.openSettingsPage("harnesses")}>Manage…</Button>
     </div>
     {choice ? <div className="pkg-harnesses-timing">
         <Button block variant="quiet" className="pkg-harnesses-timing-choice" busy={busy} onClick={() => void perform(choice, "after-turn")}><span className="pkg-harnesses-timing-choice-copy"><strong>After this response</strong><small>Let the current harness finish normally.</small></span></Button>
@@ -279,7 +276,7 @@ function HarnessTabs({
         {transition?.phase === "failed" && <Notice tone="error" role="alert" heading={`${target?.identity.name ?? transition.targetHarnessId} couldn't start`} actions={<Button size="sm" busy={busy} onClick={() => void perform(transition.selection, "after-turn")}>Retry</Button>}>
           The previous harness stopped safely. {transition.error?.message ?? "Choose another harness tab to continue."}
         </Notice>}
-        {activeRow && !canExecute(activeRow) && !transition && <p className="pkg-harnesses-picker-state" role="status">{availabilityLabel(activeRow)}. Open Manage to finish setup.</p>}
+        {activeRow && !canExecute(activeRow) && !transition && <p className="pkg-harnesses-picker-state" role="status">{availabilityLabel(activeRow)}. Open Harnesses in Settings to finish setup.</p>}
         {phoneLayout && (agentControl || effortControl || profileControl) && <section className="pkg-harnesses-mobile-config" aria-label="Execution settings">
           {agentControl && <div><span>Role</span>{agentControl}</div>}
           {effortControl && <div><span>Thinking</span>{effortControl}</div>}

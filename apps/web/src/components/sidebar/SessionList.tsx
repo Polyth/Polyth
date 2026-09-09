@@ -46,6 +46,8 @@ const INITIAL_VISIBLE_SESSIONS = 6;
 const INLINE_LABEL_LIMIT = 6;
 const isManagedIsolationBranch = (branch: string | null | undefined): boolean =>
   branch?.startsWith("polyth/isolate/") === true;
+const isIsolatedSession = (session: Pick<SessionProjection, "isolation" | "branch">): boolean =>
+  session.isolation?.kind === "git-worktree" || isManagedIsolationBranch(session.branch);
 
 export function sessionActivityLabel(
   s: Pick<SessionProjection, "createdAt" | "lastTurnAt" | "updatedAt" | "status" | "attention">,
@@ -478,6 +480,10 @@ function SessionRow({
                 {pinnedWorktreeLabel.length <= 12 && <span>{pinnedWorktreeLabel}</span>}
               </span>
             )}
+            <SlotHost
+              slot="session.list.badges"
+              context={{ sessionId: s.id, questions: s.attention?.questions ?? 0, permissions: s.attention?.permissions ?? 0 }}
+            />
           </span>
           {contextLabel && <span className="session-search-context">{contextLabel}</span>}
           <span className="session-status-zone">
@@ -494,10 +500,6 @@ function SessionRow({
             {!opening && (rowStatus.kind === "regular" || rowStatus.kind === "unread") && activityLabel && (
               <span className="session-time">{activityLabel}</span>
             )}
-            <SlotHost
-              slot="session.list.badges"
-              context={{ sessionId: s.id, questions: s.attention?.questions ?? 0, permissions: s.attention?.permissions ?? 0 }}
-            />
           </span>
         </button>
       )}
@@ -720,7 +722,9 @@ export default function SessionList({
   const matchingActive = projectSessions.filter((s) => s.status !== "archived" && matchesFilters(s));
   const mainWorktree = worktrees.find((worktree) => worktree.isMain);
   const worktreeKey = (session: SessionProjection): string =>
-    !session.worktreePath || session.worktreePath === mainWorktree?.path ? "__main__" : session.worktreePath;
+    !session.worktreePath || session.worktreePath === mainWorktree?.path || isIsolatedSession(session)
+      ? "__main__"
+      : session.worktreePath;
   // Pinned chats belong to one project-level section, rather than their
   // individual worktree buckets. This keeps them at the top even when their
   // worktree is collapsed or appears later in the list.
@@ -943,7 +947,12 @@ export default function SessionList({
     <div className="session-org">
       {pinned.length > 0 && (
         <div className="session-pinned" aria-label="Pinned chats">
-          {pinned.map((session) => row(session, true, undefined, worktreeNameForSession(session)))}
+          {pinned.map((session) => row(
+            session,
+            true,
+            undefined,
+            isIsolatedSession(session) ? undefined : worktreeNameForSession(session),
+          ))}
         </div>
       )}
       {mainSessions.length > 0 && (

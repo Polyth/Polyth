@@ -72,7 +72,7 @@ export function createPermissionService(dataDir: string): PermissionService {
   };
 }
 
-// ---- F18: per-session auto-accept policy -------------------------------------
+// ---- F18: auto-accept resolution + legacy persistence ------------------------
 
 /** "inherit" (default) defers to the nearest ancestor with an explicit
  *  setting; "off" is a child's explicit opt-out from an inherited "on". */
@@ -99,12 +99,14 @@ export function resolveAutoAccept(
 }
 
 export interface AutoAcceptStore {
+  /** Legacy lookup used only when an older projection has no explicit field. */
   get(sessionId: string): AutoAcceptSetting;
   /** "inherit" removes the record — only explicit choices persist. */
   set(sessionId: string, setting: AutoAcceptSetting): void;
 }
 
-/** Persistent explicit-settings map (<file> holds only "on"/"off" entries). */
+/** Compatibility store for pre-projection explicit settings. Current servers
+ * migrate entries into the canonical session projection and clear this file. */
 export function createAutoAcceptStore(file: string): AutoAcceptStore {
   const settings = new Map<string, "on" | "off">();
   try {

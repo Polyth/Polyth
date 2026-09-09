@@ -109,6 +109,8 @@ test("session projection new fields are optional to old clients", () => {
   const withNew: SessionProjection = {
     ...oldShape,
     attention: { questions: 1, permissions: 0, unread: 2 },
+    autoAccept: true,
+    autoAcceptSetting: "on",
     labelIds: ["l1"], folderId: "f1", branch: "main", worktreeState: "ready", agentProfileId: "ap1",
     isolation: {
       kind: "git-worktree",
@@ -124,6 +126,8 @@ test("session projection new fields are optional to old clients", () => {
   };
   const parsed = JSON.parse(JSON.stringify(withNew)) as SessionProjection;
   assert.equal(parsed.attention?.questions, 1);
+  assert.equal(parsed.autoAccept, true);
+  assert.equal(parsed.autoAcceptSetting, "on");
   assert.equal(parsed.isolation?.kind, "git-worktree");
   assert.equal(parsed.isolation?.targetBranch, "main");
   const deliveries: DeliveryMode[] = ["normal", "steer", "queue", "interrupt"];

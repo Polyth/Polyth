@@ -204,7 +204,9 @@ are the only public `/api` paths — login mints an httpOnly SameSite=Strict
 `Retry-After` when the IP window locks; POST `logout` / `logout-all`, GET
 `sessions` device list, DELETE `sessions/:id` per-device revoke),
 `/api/sessions/:id/permissions/auto-accept` (F18: GET `{setting, effective}`,
-PATCH `{setting: on|off|inherit}` — enabling reconciles pending requests),
+PATCH `{setting: on|off|inherit}` — the explicit setting is stored on the
+canonical session projection; enabling reconciles live and reconnected pending
+requests through the same server resolver),
 `/api/push/key` (VAPID public key + subscription count), `/api/push/subscribe`
 (POST registers the browser's PushSubscription, DELETE removes by endpoint),
 `/api/push/test` (POST sends a test notification to every subscription; never

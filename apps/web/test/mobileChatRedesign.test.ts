@@ -427,7 +427,11 @@ test("phone execution choices live behind the model picker with harness tabs", a
   assert.ok(modelPicker.includes('className="model-picker-header"'), "the model picker renders contributed routing above its catalog");
   assert.ok(harnessPicker.includes('slot: "modelPicker.header"'), "the harness package contributes to the model picker");
   assert.ok(harnessPicker.includes("<Tabs tabs={tabs}"), "harness choices use the shared accessible tabs primitive");
+  assert.ok(!harnessPicker.includes("pkg-harnesses-manage"), "the picker header does not expose harness Manage");
+  assert.ok(!harnessPicker.includes('id: "auto"'), "the picker header does not expose an Auto harness tab");
   assert.ok(!harnessPicker.includes("pkg-harnesses-trigger"), "there is no separate harness picker trigger");
+  assert.ok(modelPicker.includes("AdjacentDetailsPanel"), "model details render in an adjacent panel");
+  assert.ok(!modelPicker.includes("{detail ? detailsView"), "the picker shell never swaps to an in-overlay details page");
   assert.ok(harnessPicker.includes('aria-label="Execution settings"'), "the model sheet groups execution controls accessibly");
   assert.match(modelStyles, /\.model-picker-trigger\s*\{[^}]*var\(--hit-min\)/s, "the phone model trigger keeps a coarse-pointer hit target");
   assert.ok(composer.includes("const effortControl"), "composer derives one effort control");

@@ -4,7 +4,7 @@
 // reconciles already-pending requests; composer-shell confirmations stay manual.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -43,8 +43,8 @@ function fakeRuntime() {
 
 const flush = () => new Promise((r) => setTimeout(r, 25));
 
-function harness(opts: { permission?: "allow" | "deny" | "ask" } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), "polyth-aa-"));
+function harness(opts: { permission?: "allow" | "deny" | "ask"; dir?: string } = {}) {
+  const dir = opts.dir ?? mkdtempSync(join(tmpdir(), "polyth-aa-"));
   const store = createStore(join(dir, "s.db"));
   const project: Project = { id: "p1", path: dir, name: "p", createdAt: 1 };
   const projects: ProjectService = {
@@ -62,7 +62,11 @@ function harness(opts: { permission?: "allow" | "deny" | "ask" } = {}) {
   const attention: Array<{ sessionId: string; kind: string }> = [];
   const stopped: Array<{ sessionId: string; reason: string }> = [];
   const statuses: string[] = [];
-  const broadcast: Broadcaster = { event: () => {}, projection: (projection) => statuses.push(projection.status) };
+  const broadcasts: string[] = [];
+  const broadcast: Broadcaster = {
+    event: (event) => broadcasts.push(event.type),
+    projection: (projection) => statuses.push(projection.status),
+  };
   const fake = fakeRuntime();
   const sessions = createSessionService({
     store, projects, permissions, broadcast, queue: store,
@@ -74,16 +78,17 @@ function harness(opts: { permission?: "allow" | "deny" | "ask" } = {}) {
     },
     shell: { run: async () => ({ output: "ok", exitCode: 0, timedOut: false, truncated: false }) },
   });
-  return { sessions, store, fake, attention, stopped, statuses };
+  return { sessions, store, fake, attention, stopped, statuses, broadcasts };
 }
 
 test("auto-accept on: request resolves with auto:true, runtime replied, no notify", async () => {
-  const { sessions, store, fake, attention } = harness();
+  const { sessions, store, fake, attention, broadcasts } = harness();
   const { id } = await sessions.create({ projectId: "p1", title: "T" });
 
   const r = await sessions.autoAcceptSet!(id, "on");
   assert.deepEqual(r, { setting: "on", effective: true });
   assert.equal((await store.projection(id))?.autoAccept, true);
+  assert.equal((await store.projection(id))?.autoAcceptSetting, "on");
 
   fake.emit(id, { type: "permission/requested", requestId: "per_1", permission: "edit", patterns: ["src/*"] });
   await flush();
@@ -104,10 +109,20 @@ test("auto-accept on: request resolves with auto:true, runtime replied, no notif
     ],
   );
   assert.equal(durableIntent.every((event) => event.ignorable === true), true);
+  assert.deepEqual(durableIntent[0]?.data, {
+    requestId: "per_1",
+    reply: "once",
+    auto: true,
+  });
   assert.deepEqual(res!.data, { requestId: "per_1", reply: "once", auto: true });
   assert.deepEqual(fake.permissionReplies, [{ requestId: "per_1", reply: "once" }]);
   assert.notEqual((await store.projection(id))?.status, "waiting");
   assert.equal(attention.length, 0); // auto-accepted cards never notify
+  assert.equal(
+    broadcasts.includes("permission/requested"),
+    false,
+    "an automatically resolved request is never published as a permission window",
+  );
 });
 
 test("deny rules beat auto-accept", async () => {
@@ -178,6 +193,82 @@ test("enabling reconciles pending requests and leaves idle when no turn is activ
   // disabling flips the flag back and new requests wait again
   await sessions.autoAcceptSet!(id, "off");
   assert.equal((await store.projection(id))?.autoAccept, false);
+
+  fake.emit(id, { type: "permission/requested", requestId: "per_3", permission: "edit", patterns: ["c"] });
+  await flush();
+  assert.equal((await store.projection(id))?.status, "waiting");
+  assert.equal(
+    (await store.events(id)).some((event) =>
+      event.type === "permission/requested"
+      && (event.data as { requestId?: string }).requestId === "per_3"),
+    true,
+  );
+  assert.equal(
+    (await store.events(id)).some((event) =>
+      event.type === "permission/resolved"
+      && (event.data as { requestId?: string }).requestId === "per_3"),
+    false,
+    "turning Auto-Approve off restores prompting for future requests immediately",
+  );
+});
+
+test("enabling drains a stale queued request even when projection status is not waiting", async () => {
+  const { sessions, store, fake } = harness();
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await store.append(id, "permission/requested", {
+    requestId: "per_stale",
+    permission: "bash",
+    patterns: ["npm test"],
+  }, { ignorable: true });
+  await store.upsertProjection({ ...(await store.projection(id))!, status: "idle" });
+
+  await sessions.autoAcceptSet!(id, "on");
+  await flush();
+
+  assert.deepEqual(fake.permissionReplies, [{ requestId: "per_stale", reply: "once" }]);
+  assert.ok((await store.events(id)).some((event) =>
+    event.type === "permission/resolved"
+    && (event.data as { requestId?: string; auto?: boolean }).requestId === "per_stale"
+    && (event.data as { auto?: boolean }).auto === true));
+});
+
+test("setting survives a server reload and resumed job uses it", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-aa-restart-"));
+  const first = harness({ dir });
+  const { id } = await first.sessions.create({ projectId: "p1", title: "T" });
+  await first.sessions.autoAcceptSet!(id, "on");
+  await first.store.close();
+
+  const resumed = harness({ dir });
+  assert.deepEqual(await resumed.sessions.autoAcceptGet!(id), { setting: "on", effective: true });
+  assert.equal((await resumed.store.projection(id))?.autoAcceptSetting, "on");
+  await resumed.sessions.send(id, { text: "continue" });
+  resumed.fake.emit(id, {
+    type: "permission/requested",
+    requestId: "per_resumed",
+    permission: "bash",
+    patterns: ["git status"],
+  });
+  await flush();
+
+  assert.deepEqual(resumed.fake.permissionReplies, [{ requestId: "per_resumed", reply: "once" }]);
+  assert.equal(resumed.broadcasts.includes("permission/requested"), false);
+  await resumed.store.close();
+});
+
+test("legacy JSON setting migrates once into canonical session persistence", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-aa-migrate-"));
+  const original = harness({ dir });
+  const { id } = await original.sessions.create({ projectId: "p1", title: "T" });
+  await original.store.close();
+  createAutoAcceptStore(join(dir, "auto-accept.json")).set(id, "on");
+
+  const migrated = harness({ dir });
+  await waitFor(async () => (await migrated.store.projection(id))?.autoAcceptSetting === "on");
+
+  assert.deepEqual(await migrated.sessions.autoAcceptGet!(id), { setting: "on", effective: true });
+  assert.doesNotMatch(readFileSync(join(dir, "auto-accept.json"), "utf8"), new RegExp(id));
+  await migrated.store.close();
 });
 
 test("enabling reconciles pending requests back to working while a turn is active", async () => {
@@ -333,7 +424,7 @@ test("WS23: turn/stopped with an open permission stays waiting then idles", asyn
   await store.close();
 });
 
-test("WS23: child auto-accept closes parent mirror waiting status", async () => {
+test("child auto-accept never creates a duplicate parent permission path", async () => {
   const { sessions, store, fake } = harness();
   const { id: parent } = await sessions.create({ projectId: "p1", title: "Parent" });
   await sessions.autoAcceptSet!(parent, "on");
@@ -353,9 +444,9 @@ test("WS23: child auto-accept closes parent mirror waiting status", async () => 
     (await store.events(child)).some((e) => e.type === "permission/resolved"));
 
   assert.notEqual((await store.projection(child))?.status, "waiting");
-  assert.ok((await store.events(parent)).some((e) =>
-    e.type === "permission/resolved"
-    && (e.data as { requestId?: string }).requestId === "per_mirror"));
+  assert.equal((await store.events(parent)).some((e) =>
+    (e.type === "permission/requested" || e.type === "permission/resolved")
+    && (e.data as { requestId?: string }).requestId === "per_mirror"), false);
   assert.notEqual((await store.projection(parent))?.status, "waiting");
   await store.close();
 });
