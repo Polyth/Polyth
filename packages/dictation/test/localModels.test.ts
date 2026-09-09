@@ -22,7 +22,7 @@ test("Nemotron catalog pins every verified multilingual latency preset", () => {
     ],
   );
   for (const model of models) assert.ok(model.languages.includes("uk-UA"));
-  assert.equal(DEFAULT_LOCAL_MODEL_ID, "nemotron-3.5-streaming-0.6b-80ms");
+  assert.equal(DEFAULT_LOCAL_MODEL_ID, "nemotron-3.5-streaming-0.6b-560ms");
 });
 
 test("constructing or inspecting the model manager never downloads implicitly", async () => {
@@ -68,6 +68,33 @@ test("download refuses insufficient disk before touching the network", async () 
     );
     assert.equal(fetches, 0);
     assert.equal((await manager.status(DEFAULT_LOCAL_MODEL_ID)).state, "failed");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cancelAll aborts explicit downloads without deleting the resumable partial state", async () => {
+  const root = mkdtempSync(join(tmpdir(), "polyth-local-asr-"));
+  try {
+    const fetchFn = ((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      const abort = () => reject(new DOMException("Aborted", "AbortError"));
+      if (init?.signal?.aborted) abort();
+      else init?.signal?.addEventListener("abort", abort, { once: true });
+    })) as typeof fetch;
+    const manager = createLocalModelManager({
+      root,
+      availableBytes: async () => Number.MAX_SAFE_INTEGER,
+      fetchFn,
+    });
+    const download = manager.download(DEFAULT_LOCAL_MODEL_ID);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal((await manager.status(DEFAULT_LOCAL_MODEL_ID)).state, "downloading");
+    await manager.cancelAll();
+    await assert.rejects(
+      () => download,
+      (error: unknown) => (error as { code?: string }).code === "session_expired",
+    );
+    assert.notEqual((await manager.status(DEFAULT_LOCAL_MODEL_ID)).state, "downloading");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
