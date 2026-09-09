@@ -2262,6 +2262,7 @@ export const uk: AppMessages = {
   "workspace.builtinsurfaces.restoreAndContinue": "Відновити та продовжити",
   "workspace.builtinsurfaces.schedule": "Розклад",
   "workspace.builtinsurfaces.session": "Сесія",
+  "workspace.builtinsurfaces.spawningAgent": "Запуск агента…",
   "workspace.builtinsurfaces.startATaskOrContinueWhereYou": "Розпочніть завдання або продовжте з того місця, де ви зупинилися.",
   "workspace.builtinsurfaces.thisSessionIsArchivedAndReadOnly": "Цей сеанс архівовано та доступний лише для читання. Відновіть його, щоб продовжити розмову.",
   "workspace.builtinsurfaces.walkthrough": "AI-розбір",

@@ -4,8 +4,12 @@ import {
 } from "react";
 import {
   activateProject,
+  beginSessionSpawn,
+  bindSessionSpawn,
   clearNewSessionDraft,
+  finishSessionSpawn,
   getState,
+  isActiveSessionSpawning,
   lastSeq,
   openSettingsPage,
   setUiError,
@@ -455,7 +459,7 @@ export default function Composer({
   const [autoApproveBusy, setAutoApproveBusy] = useState(false);
   const [newSessionAutoApprove, setNewSessionAutoApprove] = useState(false);
   const [newSessionGoal, setNewSessionGoal] = useState(false);
-  const [creatingSession, setCreatingSession] = useState(false);
+  const creatingSession = useStore(isActiveSessionSpawning);
   const activeProjectId = useStore((s) => s.activeProjectId);
   const [draftExecution, setDraftExecution] = useState<DraftExecutionConfig>(() =>
     activeProjectId ? readDraftExecutionConfig(activeProjectId) : emptyDraftExecutionConfig());
@@ -1331,7 +1335,7 @@ export default function Composer({
             // put them back, and restore the exact draft only when the user
             // has not already started a replacement while the request ran.
             for (const attachment of atts) addAttachment(targetSessionId, attachment);
-            if (sessionIdRef.current === targetSessionId
+            if (getState().activeSessionId === targetSessionId
               && !(inputRef.current?.getText() ?? "").trim()) {
               setText(t);
               inputRef.current?.replaceText(t);
@@ -1349,7 +1353,7 @@ export default function Composer({
     if (target) {
       void deliver(target);
     } else if (activeProjectId) {
-      setCreatingSession(true);
+      const spawnRequestId = beginSessionSpawn(activeProjectId);
       void (async () => {
         let created: string;
         if (newSessionTarget.kind === "new-worktree") {
@@ -1384,6 +1388,7 @@ export default function Composer({
             precache: true,
           });
         }
+        bindSessionSpawn(spawnRequestId, created);
         clearNewSessionDraft(activeProjectId);
         clearDraftExecutionConfig(activeProjectId);
         if (newSessionAutoApprove) await api.autoAcceptSet(created, "on");
@@ -1399,15 +1404,19 @@ export default function Composer({
           // session creation must never lose the typed prompt or its pills.
           // Restore only while still on the fresh-session surface — never into
           // another session's draft.
-          if (sessionIdRef.current === null) {
-            if (!(inputRef.current?.getText() ?? "").trim()) {
-              setText(t);
-              inputRef.current?.replaceText(t);
-            }
+          const current = getState();
+          if (current.sessionSpawn?.requestId === spawnRequestId
+            && current.activeProjectId === activeProjectId
+            && current.activeSessionId === null) {
+            startNewSession(activeProjectId, {
+              draft: t,
+              ...(newSessionIntent?.title ? { title: newSessionIntent.title } : {}),
+              ...(newSessionIntent?.worktreePath ? { worktreePath: newSessionIntent.worktreePath } : {}),
+            });
             for (const attachment of atts) addAttachment(null, attachment);
           }
         })
-        .finally(() => setCreatingSession(false));
+        .finally(() => finishSessionSpawn(spawnRequestId));
     }
     setText("");
     inputRef.current?.replaceText("");
@@ -1991,7 +2000,7 @@ export default function Composer({
         <GlassDock className="composer-card">
           <div className="session-loading" role="status">
             <span className="ui-spinner ui-spinner--sm" aria-hidden="true" />
-            <span>{tr("workspace.builtinsurfaces.loadingSession")}</span>
+            <span>{tr("workspace.builtinsurfaces.spawningAgent")}</span>
           </div>
         </GlassDock>
       </div>

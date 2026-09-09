@@ -88,6 +88,12 @@ export interface NewSessionIntent {
   worktreePath?: string;
 }
 
+export interface SessionSpawn {
+  requestId: number;
+  projectId: string;
+  sessionId: string | null;
+}
+
 // A new chat is intentionally not a session yet, so keep its work locally
 // rather than creating a visible empty session. One shelf per project lets the
 // user return via New session after visiting another surface.
@@ -153,6 +159,8 @@ export interface AppState {
   overlay: Overlay;
   worktreeSessionRequest: WorktreeSessionRequest | null;
   newSessionIntent: NewSessionIntent | null;
+  /** First-send session creation currently waiting for its native agent. */
+  sessionSpawn: SessionSpawn | null;
   paletteMode: PaletteMode;
   railPlugin: RailPlugin | null;
   paneMode: PaneMode;
@@ -189,6 +197,7 @@ let state: AppState = {
   overlay: null,
   worktreeSessionRequest: null,
   newSessionIntent: null,
+  sessionSpawn: null,
   paletteMode: "all",
   railPlugin: getRailPrefs().lastOpen, // F17: last-open surface survives reload
   paneMode: "dynamic",
@@ -794,6 +803,31 @@ export function startNewSession(
     newSessionIntent: intent,
   });
   showSessionChat();
+}
+
+let nextSessionSpawnRequestId = 0;
+
+export function beginSessionSpawn(projectId: string): number {
+  const requestId = ++nextSessionSpawnRequestId;
+  set({ sessionSpawn: { requestId, projectId, sessionId: null } });
+  return requestId;
+}
+
+export function bindSessionSpawn(requestId: number, sessionId: string): void {
+  if (state.sessionSpawn?.requestId !== requestId) return;
+  set({ sessionSpawn: { ...state.sessionSpawn, sessionId } });
+}
+
+export function finishSessionSpawn(requestId: number): void {
+  if (state.sessionSpawn?.requestId === requestId) set({ sessionSpawn: null });
+}
+
+export function isActiveSessionSpawning(current: AppState): boolean {
+  const spawn = current.sessionSpawn;
+  if (!spawn || spawn.projectId !== current.activeProjectId) return false;
+  return spawn.sessionId === null
+    ? current.activeSessionId === null
+    : spawn.sessionId === current.activeSessionId;
 }
 
 /** A session switch always lands in that session's chat. Non-pinned workspace

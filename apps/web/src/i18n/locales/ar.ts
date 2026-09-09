@@ -2262,6 +2262,7 @@ export const ar: AppMessages = {
   "workspace.builtinsurfaces.restoreAndContinue": "استعد واستمر",
   "workspace.builtinsurfaces.schedule": "جدول",
   "workspace.builtinsurfaces.session": "حصة",
+  "workspace.builtinsurfaces.spawningAgent": "جارٍ تشغيل الوكيل…",
   "workspace.builtinsurfaces.startATaskOrContinueWhereYou": "ابدأ مهمة أو تابع من حيث توقفت.",
   "workspace.builtinsurfaces.thisSessionIsArchivedAndReadOnly": "هذه الجلسة مؤرشفة ومتاحة للقراءة فقط. قم باستعادتها لمتابعة المحادثة.",
   "workspace.builtinsurfaces.walkthrough": "شرح تفصيلي",

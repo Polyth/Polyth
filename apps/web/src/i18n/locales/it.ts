@@ -2262,6 +2262,7 @@ export const it: AppMessages = {
   "workspace.builtinsurfaces.restoreAndContinue": "Ripristina e continua",
   "workspace.builtinsurfaces.schedule": "Programma",
   "workspace.builtinsurfaces.session": "Sessione",
+  "workspace.builtinsurfaces.spawningAgent": "Avvio dell’agente…",
   "workspace.builtinsurfaces.startATaskOrContinueWhereYou": "Inizia un'attività o continua da dove avevi interrotto.",
   "workspace.builtinsurfaces.thisSessionIsArchivedAndReadOnly": "Questa sessione è archiviata e di sola lettura. Ripristinala per continuare la conversazione.",
   "workspace.builtinsurfaces.walkthrough": "Procedura dettagliata",

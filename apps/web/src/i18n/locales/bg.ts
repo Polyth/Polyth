@@ -2262,6 +2262,7 @@ export const bg: AppMessages = {
   "workspace.builtinsurfaces.restoreAndContinue": "Възстановяване и продължаване",
   "workspace.builtinsurfaces.schedule": "График",
   "workspace.builtinsurfaces.session": "Сесия",
+  "workspace.builtinsurfaces.spawningAgent": "Стартиране на агента…",
   "workspace.builtinsurfaces.startATaskOrContinueWhereYou": "Започнете задача или продължете оттам, където сте спрели.",
   "workspace.builtinsurfaces.thisSessionIsArchivedAndReadOnly": "Тази сесия е архивирана и е само за четене. Възстановете я, за да продължите разговора.",
   "workspace.builtinsurfaces.walkthrough": "Ръководство",

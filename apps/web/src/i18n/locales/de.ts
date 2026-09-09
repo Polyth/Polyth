@@ -2262,6 +2262,7 @@ export const de: AppMessages = {
   "workspace.builtinsurfaces.restoreAndContinue": "Wiederherstellen und fortfahren",
   "workspace.builtinsurfaces.schedule": "Zeitplan",
   "workspace.builtinsurfaces.session": "Sitzung",
+  "workspace.builtinsurfaces.spawningAgent": "Agent wird gestartet…",
   "workspace.builtinsurfaces.startATaskOrContinueWhereYou": "Beginnen Sie eine Aufgabe oder machen Sie dort weiter, wo Sie aufgehört haben.",
   "workspace.builtinsurfaces.thisSessionIsArchivedAndReadOnly": "Diese Sitzung ist archiviert und schreibgeschützt. Stellen Sie sie wieder her, um die Unterhaltung fortzusetzen.",
   "workspace.builtinsurfaces.walkthrough": "Öffnen",

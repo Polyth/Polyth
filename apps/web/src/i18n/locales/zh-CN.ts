@@ -2262,6 +2262,7 @@ export const zhCN: AppMessages = {
   "workspace.builtinsurfaces.restoreAndContinue": "恢复并继续",
   "workspace.builtinsurfaces.schedule": "日程",
   "workspace.builtinsurfaces.session": "会话",
+  "workspace.builtinsurfaces.spawningAgent": "正在启动代理…",
   "workspace.builtinsurfaces.startATaskOrContinueWhereYou": "开始一项任务，或者继续你上次中断的地方。",
   "workspace.builtinsurfaces.thisSessionIsArchivedAndReadOnly": "本次会话已存档且为只读。请恢复会话以继续对话。",
   "workspace.builtinsurfaces.walkthrough": "导读",

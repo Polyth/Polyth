@@ -40,6 +40,7 @@ import {
   setModelSort,
   toggleModelFavorite,
 } from "@polyth/models/web-prefs";
+import { accountStorageKey } from "../src/accountStorage.ts";
 import {
   UI_DEFAULTS,
   UI_SETTINGS_KEY,
@@ -616,7 +617,7 @@ test("model preference wrapper updates and persists favorites, sort, and recents
   assert.equal(getModelPrefs().favorites.includes(key), true);
   assert.deepEqual(getModelPrefs().recents.slice(0, 2), [key, "opencode::other/model"]);
   assert.equal(getModelPrefs().sort, "recent");
-  assert.deepEqual(parseModelPrefs(values.get(MODEL_PREFS_KEY) ?? null), getModelPrefs());
+  assert.deepEqual(parseModelPrefs(values.get(accountStorageKey(MODEL_PREFS_KEY)) ?? null), getModelPrefs());
 });
 
 test("parseUiSettings defaults invalid values and sanitizes MCP servers", () => {
@@ -1658,6 +1659,7 @@ test("session surface: unresolved replay is loading, never the fresh-session her
   // Genuinely fresh states keep the hero.
   assert.equal(sessionSurfaceKind(null, null, fresh, null), "hero");
   assert.equal(sessionSurfaceKind("s1", null, fresh, idle), "hero");
+  assert.equal(sessionSurfaceKind(null, null, fresh, null, true), "session");
 
   // Any in-flight open turns a would-be hero into the loading row — the boot
   // deep-link case has no active session yet, the reload case reopens its own.

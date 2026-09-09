@@ -2265,6 +2265,7 @@ export const en = {
   "workspace.builtinsurfaces.restoreAndContinue": "Restore and continue",
   "workspace.builtinsurfaces.schedule": "Schedule",
   "workspace.builtinsurfaces.session": "Session",
+  "workspace.builtinsurfaces.spawningAgent": "Spawning agent…",
   "workspace.builtinsurfaces.startATaskOrContinueWhereYou": "Start a task or continue where you left off.",
   "workspace.builtinsurfaces.thisSessionIsArchivedAndReadOnly": "This session is archived and read-only. Restore it to continue the conversation.",
   "workspace.builtinsurfaces.walkthrough": "Walkthrough",

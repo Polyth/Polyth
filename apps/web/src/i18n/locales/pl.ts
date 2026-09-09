@@ -2262,6 +2262,7 @@ export const pl: AppMessages = {
   "workspace.builtinsurfaces.restoreAndContinue": "Przywróć i kontynuuj",
   "workspace.builtinsurfaces.schedule": "Harmonogram",
   "workspace.builtinsurfaces.session": "Sesja",
+  "workspace.builtinsurfaces.spawningAgent": "Uruchamianie agenta…",
   "workspace.builtinsurfaces.startATaskOrContinueWhereYou": "Rozpocznij zadanie lub kontynuuj od miejsca, w którym skończyłeś.",
   "workspace.builtinsurfaces.thisSessionIsArchivedAndReadOnly": "Ta sesja jest zarchiwizowana i dostępna tylko do odczytu. Przywróć ją, aby kontynuować rozmowę.",
   "workspace.builtinsurfaces.walkthrough": "Przewodnik",
