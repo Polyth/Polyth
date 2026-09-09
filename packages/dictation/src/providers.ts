@@ -127,7 +127,7 @@ export interface ProviderCapabilities {
   vocabulary: boolean;
   timestamps: boolean;
   transports: readonly DictationTransport[];
-  /** "*" means provider-managed language detection/catalog. */
+  /** "*" means the provider owns a broader language catalog than Polyth enumerates. */
   languages: readonly string[];
   audioFormats: readonly ProviderAudioFormat[];
   defaultModel?: string;
@@ -177,7 +177,7 @@ const CATALOG: readonly ProviderCapabilities[] = [
     id: "wispr", label: "Wispr Flow", streaming: true,
     partials: true, commits: true, finalOnly: false, manualCommit: true, vadCommit: false,
     languageAutoDetection: true, languageHints: true, contextualPrompting: true, vocabulary: true,
-    timestamps: false, transports: ["auto", "direct-browser"],
+    timestamps: false, transports: ["auto", "direct-browser", "server-proxy"],
     languages: ["*"], audioFormats: WAV_16K, context: true, local: false,
     localModelDownloadRequired: false, ephemeralClientAuth: true, publicApi: true,
   },
@@ -200,9 +200,12 @@ const CATALOG: readonly ProviderCapabilities[] = [
   {
     id: "deepgram", label: "Deepgram Nova-3", streaming: true,
     partials: true, commits: true, finalOnly: false, manualCommit: true, vadCommit: true,
-    languageAutoDetection: true, languageHints: true, contextualPrompting: true, vocabulary: true,
+    // Current Deepgram docs explicitly exclude detect_language from streaming.
+    // language=multi is multilingual transcription, not generic language detection
+    // and does not currently include every monolingual Nova-3 language (notably uk).
+    languageAutoDetection: false, languageHints: true, contextualPrompting: true, vocabulary: true,
     timestamps: true, transports: ["auto", "server-proxy"],
-    languages: ["*", "uk"], audioFormats: RAW_16K, defaultModel: "nova-3", context: true, local: false,
+    languages: ["*", "uk", "multi"], audioFormats: RAW_16K, defaultModel: "nova-3", context: true, local: false,
     localModelDownloadRequired: false, ephemeralClientAuth: true, publicApi: true,
   },
   {
