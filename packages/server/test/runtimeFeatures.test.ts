@@ -219,6 +219,7 @@ test("occupancy-unknown compaction keeps unknown window instead of deleting it",
     limitTokens: 200_000,
   });
   await flush();
+  assert.equal((await f.sessions.runtimeFeatures!(id)).telemetry?.context.status, "reported");
   f.emit(id, { type: "session/compacted" });
   f.emit(id, { type: "context/updated", source: "unknown", updatedAt: Date.now(), compaction: { active: false, lastAt: Date.now() } });
   await flush();

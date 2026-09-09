@@ -10,6 +10,7 @@ import type {
   MultirunDto,
   MultirunRunDto,
   RateLimitScope,
+  RuntimeFeaturesDto,
   SessionEvent,
   TokenUsage,
   WorkflowRunDto,
@@ -418,6 +419,41 @@ export function contextGauge(
     level: percent < 70 ? "green" : percent < 90 ? "yellow" : "red",
     quality: "estimated",
   };
+}
+
+export type ContextTelemetryStatus =
+  | NonNullable<RuntimeFeaturesDto["telemetry"]>["context"]["status"]
+  | "unknown";
+
+/** Older servers may omit telemetry; keep that distinct from an explicit
+ * unsupported/unavailable response while preserving their legacy gauge. */
+export function contextTelemetryStatus(
+  telemetry: RuntimeFeaturesDto["telemetry"] | undefined,
+): ContextTelemetryStatus {
+  return telemetry?.context.status ?? "unknown";
+}
+
+/** Runtime telemetry is authoritative for whether a context gauge is honest.
+ * Do not turn a missing Cursor sample into a model-metadata estimate. */
+export function contextGaugeForTelemetry(
+  model: Parameters<typeof contextGauge>[0],
+  contextTokens: Parameters<typeof contextGauge>[1],
+  occupancy: Parameters<typeof contextGauge>[2],
+  telemetryStatus: ContextTelemetryStatus,
+): ContextGauge {
+  if (telemetryStatus === "unavailable" || telemetryStatus === "unsupported") {
+    return contextGauge(model, undefined, { source: "unknown" });
+  }
+  return contextGauge(model, contextTokens, occupancy);
+}
+
+export function contextTelemetryNotice(
+  telemetryStatus: ContextTelemetryStatus,
+  gauge: ContextGauge,
+): string | undefined {
+  if (telemetryStatus === "unsupported") return tr("composer.contextWindowUnsupported");
+  if (telemetryStatus === "unavailable") return tr("composer.contextWindowUnavailable");
+  return gauge.known ? undefined : tr("railsurfaces.modelContextMetadataIsUnavailable");
 }
 
 /** Percent label for context UI: estimated values carry a ~ prefix. */

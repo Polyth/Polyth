@@ -162,6 +162,7 @@ export const uk: AppMessages = {
   "composer.contextWindow": "Контекстне вікно",
   "composer.contextWindowDetails": "Деталі контекстного вікна",
   "composer.contextWindowUnavailable": "Контекстне вікно недоступне",
+  "composer.contextWindowUnsupported": "Цей harness не підтримує телеметрію контекстного вікна",
   "composer.couldnTAttachTheGoal": "Не додаємо цілі",
   "composer.couldNotAttach": "Не вдалося прикріпити: {reason}",
   "composer.couldNotAttachValue": "Не вдалося долучити {name}: {reason}",

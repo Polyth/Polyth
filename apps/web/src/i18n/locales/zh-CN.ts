@@ -162,6 +162,7 @@ export const zhCN: AppMessages = {
   "composer.contextWindow": "上下文窗口",
   "composer.contextWindowDetails": "上下文窗口详情",
   "composer.contextWindowUnavailable": "上下文窗口不可用",
+  "composer.contextWindowUnsupported": "此 harness 不支持上下文窗口遥测",
   "composer.couldnTAttachTheGoal": "无法附加目标",
   "composer.couldNotAttach": "无法附加： {reason}",
   "composer.couldNotAttachValue": "无法附加{name} ： {reason}",

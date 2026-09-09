@@ -1,7 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { JsonObject, SessionEvent } from "@polyth/contracts";
-import { buildModel, contextGauge, contextTokensUsed } from "../src/reduce.ts";
+import {
+  buildModel,
+  contextGauge,
+  contextGaugeForTelemetry,
+  contextTelemetryNotice,
+  contextTelemetryStatus,
+  contextTokensUsed,
+} from "../src/reduce.ts";
 
 /** A render-model shape carrying only what the gauge reads: a latest usage
  *  sample plus a (deliberately large, and ignored) lifetime input total. */
@@ -128,6 +135,48 @@ test("incomplete native occupancy does not fall back to last-turn usage", () => 
       quality: "unknown",
     },
   );
+});
+
+test("explicit telemetry states do not masquerade as zero or estimated context", () => {
+  const reportedZero = contextGaugeForTelemetry(
+    withSample(),
+    200_000,
+    { source: "native", usedTokens: 0, limitTokens: 200_000 },
+    "reported",
+  );
+  assert.deepEqual(reportedZero, {
+    known: true,
+    inputTokens: 0,
+    contextTokens: 200_000,
+    percent: 0,
+    level: "green",
+    quality: "native",
+  });
+  assert.equal(contextTelemetryNotice("reported", reportedZero), undefined);
+
+  const unsupported = contextTelemetryStatus({
+    usage: { status: "unsupported" },
+    context: { status: "unsupported" },
+  });
+  assert.equal(unsupported, "unsupported");
+  const gauge = contextGaugeForTelemetry(withSample({ input: 80_000 }), 200_000, null, unsupported);
+  assert.equal(gauge.known, false);
+  assert.equal(gauge.inputTokens, 0);
+  assert.equal(contextTelemetryNotice(unsupported, gauge), "Context window unsupported by this harness");
+
+  const unavailable = contextTelemetryStatus({
+    usage: { status: "reported" },
+    context: { status: "unavailable" },
+  });
+  assert.equal(unavailable, "unavailable");
+  assert.equal(
+    contextTelemetryNotice(
+      unavailable,
+      contextGaugeForTelemetry(withSample({ input: 12_000 }), 128_000, null, unavailable),
+    ),
+    "Context window unavailable",
+  );
+  assert.equal(contextTelemetryStatus(undefined), "unknown");
 });
 
 test("unknown occupancy with fraction may show percent but not last-turn heuristic tokens", () => {

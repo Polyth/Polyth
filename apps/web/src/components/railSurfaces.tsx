@@ -11,7 +11,12 @@
 import { useActiveModel, useStore } from "../store.ts";
 import { fmtCost, fmtTokens } from "../format.ts";
 import type { SessionEvent } from "@polyth/contracts";
-import { contextGauge, formatContextPercent } from "../reduce.ts";
+import {
+  contextGaugeForTelemetry,
+  contextTelemetryNotice,
+  contextTelemetryStatus,
+  formatContextPercent,
+} from "../reduce.ts";
 import { RAIL_ICONS } from "../railIcons.ts";
 import {
   registerSurface,
@@ -58,6 +63,7 @@ function ContextView() {
   const packageContext = useProjectContextSnapshots(projectId);
   const models = useStore((s) => s.models);
   const model = useActiveModel();
+  const runtimeFeatures = useStore((s) => s.activeSessionId ? s.runtimeFeatures[s.activeSessionId] : undefined);
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? NO_EVENTS);
   if (!session) {
     if (packageContext.length === 0) {
@@ -84,8 +90,10 @@ function ContextView() {
     ? models.find((candidate) =>
         candidate.providerID === activeModel.providerID && candidate.modelID === activeModel.modelID)
     : undefined;
-  const gauge = contextGauge(model, descriptor?.context, session.contextWindow ?? null);
+  const telemetryStatus = contextTelemetryStatus(runtimeFeatures?.telemetry);
+  const gauge = contextGaugeForTelemetry(model, descriptor?.context, session.contextWindow ?? null, telemetryStatus);
   const contextPercent = formatContextPercent(gauge);
+  const contextNotice = contextTelemetryNotice(telemetryStatus, gauge);
 
   return (
     <div>
@@ -112,7 +120,9 @@ function ContextView() {
       <div className="stat-row context-estimate-row">
         <span className="k">{tr("railsurfaces.contextEstimate")}</span>
         <span className="mono">
-          {contextPercent && gauge.known
+          {contextNotice
+            ? tr("railsurfaces.unknown")
+            : contextPercent && gauge.known
             ? `${fmtTokens(gauge.inputTokens)} / ${fmtTokens(gauge.contextTokens)} (${contextPercent})`
             : contextPercent ?? tr("railsurfaces.unknown")}
         </span>
@@ -127,7 +137,7 @@ function ContextView() {
       >
         <span style={{ width: `${gauge.known ? gauge.percent : 0}%` }} />
       </div>
-      {!gauge.known && <div className="muted context-estimate-note">{tr("railsurfaces.modelContextMetadataIsUnavailable")}</div>}
+      {contextNotice && <div className="muted context-estimate-note">{contextNotice}</div>}
       <div className="stat-row">
         <span className="k">{tr("railsurfaces.cost")}</span>
         <span className="mono">{model.totals.cost > 0 ? fmtCost(model.totals.cost) : "—"}</span>

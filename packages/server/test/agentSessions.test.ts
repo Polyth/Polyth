@@ -31,6 +31,7 @@ type Emit = (sessionId: string, event: RuntimeEvent) => void;
 
 function fakeRuntime(agentCatalog: AgentDescriptor[] = [], harnessId?: string) {
   const listeners = new Set<Emit>();
+  const callbacks: Emit[] = [];
   const ensured: string[] = [];
   const permissionReplies: Array<{ sessionId: string; requestId: string; reply: string }> = [];
   const questionReplies: Array<{ sessionId: string; requestId: string; answers: unknown }> = [];
@@ -71,11 +72,12 @@ function fakeRuntime(agentCatalog: AgentDescriptor[] = [], harnessId?: string) {
     },
     onEvent(callback) {
       listeners.add(callback);
-      return { dispose: () => listeners.delete(callback) };
+      callbacks.push(callback);
+      return { dispose: () => { listeners.delete(callback); } };
     },
     dispose: async () => {},
   };
-  return { runtime, emit, ensured, permissionReplies, questionReplies, aborted };
+  return { runtime, emit, callbacks, ensured, permissionReplies, questionReplies, aborted };
 }
 
 function fakeGoals(): AgentGoalService {
@@ -181,6 +183,7 @@ async function makeApp(
   const port = (server.address() as { port: number }).port;
   return {
     base: `http://127.0.0.1:${port}`,
+    store,
     sessions,
     runtime,
     runtimesByHarness,
@@ -197,7 +200,7 @@ test("agent session.create preserves explicit Claude, Cursor, and Codex harness 
   try {
     for (const harnessId of harnessIds) {
       const created = await jsonFetch<{
-        session: { harness?: { mode: string; harnessId?: string }; resolvedHarnessId?: string };
+        session: { id: string; harness?: { mode: string; harnessId?: string }; resolvedHarnessId?: string };
       }>(app.base, "/api/agent/sessions", jsonRequest("POST", {
         projectId: "p1",
         harness: { mode: "pinned", harnessId },
@@ -206,7 +209,35 @@ test("agent session.create preserves explicit Claude, Cursor, and Codex harness 
       assert.deepEqual(created.body.session.harness, { mode: "pinned", harnessId });
       assert.equal(created.body.session.resolvedHarnessId, harnessId);
       assert.equal(app.runtimesByHarness.get(harnessId)?.ensured.length, 1);
+      const createdEvent = (await app.store.events(created.body.session.id))
+        .find((event) => event.type === "session/created");
+      assert.deepEqual((createdEvent?.data as { harness?: unknown }).harness, {
+        mode: "pinned",
+        harnessId,
+      });
     }
+  } finally {
+    await app.close();
+  }
+});
+
+test("a late event from a prior wire generation cannot enter after reattach", async () => {
+  const app = await makeApp();
+  try {
+    const created = await app.sessions.create({ projectId: "p1", title: "Reattach" });
+    const staleCallback = app.runtime.callbacks[0];
+    assert.ok(staleCallback);
+    await app.sessions.archive(created.id);
+    await app.sessions.restore(created.id);
+    await app.sessions.events(created.id, 0);
+
+    staleCallback(created.id, { type: "assistant/message", partId: "stale", text: "old epoch" });
+    app.runtime.emit(created.id, { type: "assistant/message", partId: "fresh", text: "new epoch" });
+    await settle();
+
+    const events = await app.store.events(created.id);
+    assert.equal(events.some((event) => (event.data as { text?: string }).text === "old epoch"), false);
+    assert.equal(events.filter((event) => (event.data as { text?: string }).text === "new epoch").length, 1);
   } finally {
     await app.close();
   }

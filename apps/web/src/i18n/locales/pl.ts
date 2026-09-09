@@ -162,6 +162,7 @@ export const pl: AppMessages = {
   "composer.contextWindow": "Okno kontekstowe",
   "composer.contextWindowDetails": "Szczegóły okna kontekstowego",
   "composer.contextWindowUnavailable": "Okno kontekstowe niedostępne",
+  "composer.contextWindowUnsupported": "Ten harness nie obsługuje telemetrii okna kontekstowego",
   "composer.couldnTAttachTheGoal": "Nie mogłem przymocować bramki",
   "composer.couldNotAttach": "Nie można dołączyć: {reason}",
   "composer.couldNotAttachValue": "Nie można dołączyć {name}: {reason}",

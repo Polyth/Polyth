@@ -162,6 +162,7 @@ export const ar: AppMessages = {
   "composer.contextWindow": "نافذة السياق",
   "composer.contextWindowDetails": "تفاصيل نافذة السياق",
   "composer.contextWindowUnavailable": "نافذة السياق غير متاحة",
+  "composer.contextWindowUnsupported": "لا يدعم هذا الـ harness قياس نافذة السياق عن بُعد",
   "composer.couldnTAttachTheGoal": "لم يتمكن من ربط الهدف",
   "composer.couldNotAttach": "تعذر الإرفاق: {reason}",
   "composer.couldNotAttachValue": "تعذر إرفاق {name}: {reason}",

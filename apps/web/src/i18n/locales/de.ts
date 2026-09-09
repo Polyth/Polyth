@@ -162,6 +162,7 @@ export const de: AppMessages = {
   "composer.contextWindow": "Kontextfenster",
   "composer.contextWindowDetails": "Details zum Kontextfenster",
   "composer.contextWindowUnavailable": "Kontextfenster nicht verfügbar",
+  "composer.contextWindowUnsupported": "Dieses Harness unterstützt keine Kontextfenster-Telemetrie",
   "composer.couldnTAttachTheGoal": "Konnte das Ziel nicht anhängen",
   "composer.couldNotAttach": "Konnte nicht angehängt werden: {reason}",
   "composer.couldNotAttachValue": "{name} konnte nicht angehängt werden: {reason}",

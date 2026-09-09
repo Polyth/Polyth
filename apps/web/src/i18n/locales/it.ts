@@ -162,6 +162,7 @@ export const it: AppMessages = {
   "composer.contextWindow": "Finestra di contesto",
   "composer.contextWindowDetails": "Dettagli della finestra di contesto",
   "composer.contextWindowUnavailable": "Finestra di contesto non disponibile",
+  "composer.contextWindowUnsupported": "Questo harness non supporta la telemetria della finestra di contesto",
   "composer.couldnTAttachTheGoal": "Non poteva collegare l'obiettivo",
   "composer.couldNotAttach": "Impossibile allegare: {reason}",
   "composer.couldNotAttachValue": "Impossibile allegare {name}: {reason}",

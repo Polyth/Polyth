@@ -172,6 +172,52 @@ test("lost prompt response records one durable unknown and never redispatches", 
   await store.close();
 });
 
+test("a runtime timeout keeps its timeout code in the durable unknown outcome", async () => {
+  const runtime = {
+    capabilities: async () => ({
+      streaming: true,
+      permissions: true,
+      questions: false,
+      compaction: false,
+      subagents: false,
+    }),
+    models: async () => [],
+    agents: async () => [],
+    ensureSession: async (input: { sessionId: string; backendSessionId?: string }) =>
+      input.backendSessionId ?? `backend-${input.sessionId}`,
+    sessions: async () => [],
+    history: async () => [],
+    startTurn: async () => undefined,
+    startTurnOperation: async () => {
+      throw Object.assign(new Error("runtime operation exceeded its deadline"), {
+        code: "runtime-timeout",
+      });
+    },
+    abort: async () => undefined,
+    replyPermission: async () => undefined,
+    replyQuestion: async () => undefined,
+    onEvent: () => ({ dispose: () => {} }),
+    dispose: async () => undefined,
+  } as unknown as AgentRuntime;
+  const { sessions, store } = harness(runtime);
+  const created = await sessions.create({ projectId: "project-1", title: "Timeout" });
+
+  await assert.rejects(
+    () => sessions.send(created.id, { text: "timed out" }),
+    (error: Error & { code?: string }) => error.code === "outcome-unknown",
+  );
+  const operation = (await store.operations(created.id))
+    .find((candidate) => candidate.mutationKind === "turn-submit");
+  assert.equal(operation?.state, "unknown");
+  assert.equal(operation?.code, "runtime-timeout");
+  const uncertainty = (await store.events(created.id))
+    .find((event) => event.type === "mutation/uncertainty-recorded"
+      && (event.data as { operationId?: string }).operationId === operation?.operationId);
+  assert.equal((uncertainty?.data as { code?: string } | undefined)?.code, "runtime-timeout");
+  await waitFor(async () => (await store.reconciliation(created.id))?.state === "blocked");
+  await store.close();
+});
+
 test("a post-admission runtime timeout is durably closed by a terminal error event", async () => {
   const listeners = new Set<Listener>();
   const emit = (sessionId: string, event: RuntimeEvent): void => {

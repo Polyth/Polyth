@@ -165,6 +165,7 @@ export const en = {
   "composer.contextWindow": "Context Window",
   "composer.contextWindowDetails": "Context window details",
   "composer.contextWindowUnavailable": "Context window unavailable",
+  "composer.contextWindowUnsupported": "Context window unsupported by this harness",
   "composer.couldnTAttachTheGoal": "Couldn’t attach the goal",
   "composer.couldNotAttach": "Couldn’t attach: {reason}",
   "composer.couldNotAttachValue": "Couldn’t attach {name}: {reason}",

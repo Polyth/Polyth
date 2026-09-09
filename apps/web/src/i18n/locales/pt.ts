@@ -162,6 +162,7 @@ export const pt: AppMessages = {
   "composer.contextWindow": "Janela de contexto",
   "composer.contextWindowDetails": "Detalhes da janela de contexto",
   "composer.contextWindowUnavailable": "Janela de contexto indisponível",
+  "composer.contextWindowUnsupported": "Este harness não suporta telemetria da janela de contexto",
   "composer.couldnTAttachTheGoal": "Não foi possível anexar o objetivo",
   "composer.couldNotAttach": "Não foi possível anexar: {reason}",
   "composer.couldNotAttachValue": "Não foi possível anexar {name}: {reason}",

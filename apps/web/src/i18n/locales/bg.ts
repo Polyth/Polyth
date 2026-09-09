@@ -162,6 +162,7 @@ export const bg: AppMessages = {
   "composer.contextWindow": "Контекстен прозорец",
   "composer.contextWindowDetails": "Подробности за контекстния прозорец",
   "composer.contextWindowUnavailable": "Контекстният прозорец не е наличен",
+  "composer.contextWindowUnsupported": "Този harness не поддържа телеметрия на контекстния прозорец",
   "composer.couldnTAttachTheGoal": "Не може да прикачите целта",
   "composer.couldNotAttach": "Неуспешно прикачване: {reason}",
   "composer.couldNotAttachValue": "Неуспешно прикачване на {name}: {reason}",

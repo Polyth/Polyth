@@ -45,8 +45,7 @@ import type {
   ProjectPatch,
   QueueItemDto,
   RuntimeDiagnosticsDto,
-  RuntimeCapabilities,
-  RuntimeCommandDescriptor,
+  RuntimeFeaturesDto,
   RuntimeSession,
   SecureSafeCreateInput,
   SecureSafeEntryDto,
@@ -663,12 +662,7 @@ export const api = {
   sendMessage: (id: string, body: { text: string; command?: { id: string; args?: string }; autoTitle?: boolean; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; delivery?: string; dismissPending?: boolean; agentProfileId?: string | null }) =>
     jfetch<SendResult>(`/api/sessions/${id}/message`, json("POST", body)),
   runtimeFeatures: (id: string) =>
-    jfetch<{
-      capabilities: RuntimeCapabilities;
-      commands: RuntimeCommandDescriptor[];
-      contextWindow?: import("@polyth/contracts").ContextWindowState;
-      attachmentSupport: Partial<Record<import("@polyth/contracts").AttachmentModality, import("@polyth/contracts").FeatureSupport>>;
-    }>(`/api/harnesses/sessions/${encodeURIComponent(id)}/features`),
+    jfetch<RuntimeFeaturesDto>(`/api/harnesses/sessions/${encodeURIComponent(id)}/features`),
   abort: (id: string) => jfetch<void>(`/api/sessions/${id}/abort`, { method: "POST" }),
   /** Drop a pending rate-limit auto-resume; the session stays failed. */
   cancelResume: (id: string) =>

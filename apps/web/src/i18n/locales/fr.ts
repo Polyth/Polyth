@@ -162,6 +162,7 @@ export const fr: AppMessages = {
   "composer.contextWindow": "Fenêtre contextuelle",
   "composer.contextWindowDetails": "Détails de la fenêtre contextuelle",
   "composer.contextWindowUnavailable": "Fenêtre contextuelle indisponible",
+  "composer.contextWindowUnsupported": "Ce harness ne prend pas en charge la télémétrie de la fenêtre de contexte",
   "composer.couldnTAttachTheGoal": "Impossible de fixer le but",
   "composer.couldNotAttach": "Impossible de joindre : {reason}",
   "composer.couldNotAttachValue": "Impossible de joindre {name} : {reason}",
