@@ -40,6 +40,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Polyth uses the camera to scan secure pairing QR codes.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Polyth connects to the server you choose on your local network.</string>
 	<key>UIApplicationSceneManifest</key>
