@@ -384,11 +384,22 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
         return connections
     }
 
-    private func hasConnectionMetadata(_ hostID: String) throws -> Bool {
+    private func connectionMetadata(_ hostID: String) throws -> [String: Any]? {
         guard let connections = try invoke("connections.list", [:]) as? [[String: Any]] else {
             throw PolythLinkFailure(code: "transport-protocol-error")
         }
-        return connections.contains { ($0["hostEndpointId"] as? String) == hostID }
+        return connections.first { ($0["hostEndpointId"] as? String) == hostID }
+    }
+
+    private func hasConnectionMetadata(_ hostID: String) throws -> Bool {
+        try connectionMetadata(hostID) != nil
+    }
+
+    private func discardPrepared(_ connectionID: String) throws {
+        _ = try invoke("disconnect", ["connectionId": connectionID])
+        try keychain.delete(connectionID)
+        _ = try invoke("forget", ["connectionId": connectionID])
+        forgetTransport(connectionID)
     }
 
     private func rememberTransport(_ connectionID: String) {
@@ -502,10 +513,9 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
         controlQueue.async {
             do {
                 _ = try self.invoke("pairing.cancel", ["attemptId": attemptID])
-                if let record = self.removeAttempt(attemptID),
-                   record.createdForAttempt,
-                   try !self.hasConnectionMetadata(record.hostID) {
-                    try self.keychain.delete(record.hostID)
+                if let record = self.removeAttempt(attemptID), record.createdForAttempt {
+                    let hasMetadata = try self.hasConnectionMetadata(record.hostID)
+                    if !hasMetadata { try self.keychain.delete(record.hostID) }
                 }
                 call.resolve(["ok": true])
             } catch { self.reject(call, error) }
@@ -534,13 +544,21 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func connect(_ call: CAPPluginCall) {
         guard trusted(call), let connectionID = require(call, "connectionId", code: "device-unknown") else { return }
         queue.async {
+            var prepared = false
             do {
+                prepared = try self.connectionMetadata(connectionID)?["pairingState"] as? String == "prepared"
                 guard var secret = try self.keychain.load(connectionID) else { throw PolythLinkFailure(code: "host-identity-unavailable") }
                 defer { secret.resetBytes(in: 0..<secret.count) }
                 let result = try self.object(self.invoke("connect", ["connectionId": connectionID], secret: secret))
                 self.rememberTransport(connectionID)
                 call.resolve(result)
-            } catch { self.reject(call, error) }
+            } catch {
+                let code = (error as? PolythLinkFailure)?.code
+                if prepared && (code == "pairing-invalid" || code == "device-unknown") {
+                    try? self.discardPrepared(connectionID)
+                }
+                self.reject(call, error)
+            }
         }
     }
 
