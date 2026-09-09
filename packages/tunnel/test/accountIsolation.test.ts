@@ -8,17 +8,16 @@ import { createTunnelStore } from "../src/index.ts";
 
 const store = () => createTunnelStore(join(mkdtempSync(join(tmpdir(), "polyth-tunnel-account-")), "tunnel.db"));
 
-test("pending pairings are account-owned and can be invalidated as a group", () => {
+test("pending pairings cannot be claimed by another account", () => {
   const db = store();
   try {
-    db.claimPairing("pair-alice-1", "usr_alice");
-    db.claimPairing("pair-alice-2", "usr_alice");
-    db.claimPairing("pair-bob", "usr_bob");
-
-    assert.deepEqual(db.releasePairingsForUser("usr_alice").sort(), ["pair-alice-1", "pair-alice-2"]);
-    assert.equal(db.pairingOwner("pair-alice-1"), undefined);
-    assert.equal(db.pairingOwner("pair-alice-2"), undefined);
-    assert.equal(db.pairingOwner("pair-bob"), "usr_bob");
+    db.claimPairing("pair-alice", "usr_alice");
+    assert.equal(db.pairingOwner("pair-alice"), "usr_alice");
+    assert.throws(
+      () => db.claimPairing("pair-alice", "usr_bob"),
+      (error: Error & { code?: string }) => error.code === "not-found",
+    );
+    assert.equal(db.pairingOwner("pair-alice"), "usr_alice");
   } finally {
     db.close();
   }
