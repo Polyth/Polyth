@@ -12,6 +12,14 @@ export interface PairingAttempt {
   state: string;
 }
 
+export interface NumericPairingInput {
+  hostEndpointId: string;
+  addresses: string[];
+  port?: number | null;
+  code: string;
+  label: string;
+}
+
 export interface ConnectionMetadata {
   id: string;
   hostEndpointId: string;
@@ -32,6 +40,7 @@ export interface ProxyLaunch {
 export interface PolythLinkNative {
   parsePairingTicket(raw: string): Promise<PairingPreview>;
   beginPairing(raw: string, label: string): Promise<PairingAttempt>;
+  beginNumericPairing(input: NumericPairingInput): Promise<PairingAttempt>;
   confirmPairing(attemptId: string): Promise<ProxyLaunch>;
   cancelPairing(attemptId: string): Promise<void>;
   listConnections(): Promise<ConnectionMetadata[]>;
@@ -47,6 +56,7 @@ class MissingNativeCore implements PolythLinkNative {
   }
   parsePairingTicket() { return Promise.reject(this.fail()); }
   beginPairing() { return Promise.reject(this.fail()); }
+  beginNumericPairing() { return Promise.reject(this.fail()); }
   confirmPairing() { return Promise.reject(this.fail()); }
   cancelPairing() { return Promise.reject(this.fail()); }
   async listConnections() { return []; }
