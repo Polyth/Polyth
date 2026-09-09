@@ -3,10 +3,12 @@
 // package's existing i18n keys.
 import { useEffect, useMemo, useState } from "react";
 import {
+  DEFAULT_LOCAL_MODEL_ID,
   providerCapabilities,
   providerCatalog,
   speechSupport,
   type DictationLatencyPreference,
+  type DictationProcessingPolicy,
   type DictationProviderId,
   type DictationTransport,
 } from "@polyth/dictation";
@@ -25,6 +27,10 @@ interface DictationSettingsDto {
   localModel: string;
   language: string;
   contextInjection: boolean;
+  processingPolicy: DictationProcessingPolicy;
+  fallbackProvider?: DictationProviderId;
+  fallbackApiKeyEnv: string;
+  /** Compatibility mirror for older servers/clients. */
   cloudFallback: boolean;
   latencyPreference: DictationLatencyPreference;
   apiKeyEnv: string;
@@ -33,6 +39,7 @@ interface DictationSettingsDto {
 type ServerVoiceSettings = VoiceSettingsDto & {
   dictation: DictationSettingsDto;
   dictationKeyConfigured?: boolean;
+  fallbackKeyConfigured?: boolean;
 };
 
 interface ProviderView {
@@ -44,11 +51,13 @@ interface ProviderView {
   reason?: string;
   local: boolean;
   publicApi: boolean;
+  extension?: boolean;
 }
 
 interface LocalModelView {
   id: string;
   label: string;
+  preset?: "ultra" | "fast" | "balanced" | "accurate";
   state: "missing" | "downloading" | "installed" | "failed";
   downloadedBytes: number;
   totalBytes: number;
@@ -86,6 +95,48 @@ const fetchJson = async <T,>(path: string, init?: RequestInit): Promise<T> => {
     throw new Error(body.message ?? body.error ?? `HTTP ${response.status}`);
   }
   return response.json() as Promise<T>;
+};
+
+const policyOptions = (provider: DictationProviderId): DictationProcessingPolicy[] => {
+  if (provider === "web-speech") return ["browser-fallback"];
+  const capability = providerCapabilities(provider);
+  return capability?.local
+    ? ["local-only", "prefer-local", "auto-fallback"]
+    : ["prefer-cloud", "auto-fallback", "browser-fallback"];
+};
+
+const processingDescription = (
+  settings: DictationSettingsDto,
+  providers: ProviderView[],
+): string => {
+  const selected = providers.find((item) => item.id === settings.provider)?.label
+    ?? providerCapabilities(settings.provider)?.label
+    ?? settings.provider;
+  const fallback = settings.fallbackProvider
+    ? providers.find((item) => item.id === settings.fallbackProvider)?.label
+      ?? providerCapabilities(settings.fallbackProvider)?.label
+      ?? settings.fallbackProvider
+    : "";
+  switch (settings.processingPolicy) {
+    case "local-only":
+      return "Audio stays on this Polyth host. Cloud fallback is disabled.";
+    case "prefer-local":
+      return fallback
+        ? `Audio is processed locally first; ${fallback} is used only after a recoverable local failure.`
+        : "Audio is processed locally. No cloud fallback provider is configured.";
+    case "prefer-cloud":
+      return `Audio is processed by ${selected}. No secondary provider is selected implicitly.`;
+    case "auto-fallback":
+      return providerCapabilities(settings.provider)?.local
+        ? fallback
+          ? `Audio starts locally; one recoverable failure may switch to ${fallback} using bounded in-memory replay.`
+          : "Audio starts locally. No secondary cloud provider is configured."
+        : `Audio starts with ${selected}; local Nemotron is the only automatic secondary path when it is installed.`;
+    case "browser-fallback":
+      return settings.provider === "web-speech"
+        ? "Audio is processed by the browser Web Speech engine."
+        : `Audio starts with ${selected}; Web Speech may be used only if that route is unavailable and this browser supports it.`;
+  }
 };
 
 function ServerEndpointForm({ server, onSaved }: { server: ServerVoiceSettings; onSaved: (s: ServerVoiceSettings) => void }) {
@@ -184,19 +235,60 @@ function DictationProviderForm({
 
   const capability = providerCapabilities(value.provider);
   const providerView = providers.find((item) => item.id === value.provider);
-  const localModel = models.find((item) => item.id === value.localModel) ?? models[0];
+  const localModel = models.find((item) => item.id === (value.localModel || DEFAULT_LOCAL_MODEL_ID))
+    ?? models.find((item) => item.id === DEFAULT_LOCAL_MODEL_ID)
+    ?? models[0];
   const transportOptions = capability?.transports ?? ["auto"];
+  const policies = policyOptions(value.provider);
+  const needsFallbackProvider = Boolean(capability?.local)
+    && (value.processingPolicy === "prefer-local" || value.processingPolicy === "auto-fallback");
+  const fallbackCandidates = providerCatalog().filter((provider) =>
+    !provider.local && provider.id !== value.provider,
+  );
+  const fallbackView = value.fallbackProvider
+    ? providers.find((item) => item.id === value.fallbackProvider)
+    : undefined;
 
   const changeProvider = (provider: DictationProviderId) => {
     const nextCapability = providerCapabilities(provider);
     const preferredTransport: DictationTransport = provider === "web-speech" ? "direct-browser"
-      : provider.startsWith("local-") ? "local-worker" : "auto";
+      : provider === "local-nemotron" ? "local-worker" : "auto";
+    const processingPolicy: DictationProcessingPolicy = provider === "web-speech"
+      ? "browser-fallback"
+      : nextCapability?.local ? "local-only" : "prefer-cloud";
     setValue((current) => ({
       ...current,
       provider,
       transport: nextCapability?.transports.includes(preferredTransport) ? preferredTransport : nextCapability?.transports[0] ?? "auto",
       model: nextCapability?.defaultModel ?? "",
+      localModel: provider === "local-nemotron" ? current.localModel || DEFAULT_LOCAL_MODEL_ID : current.localModel,
       apiKeyEnv: providerEnv(provider),
+      processingPolicy,
+      fallbackProvider: undefined,
+      fallbackApiKeyEnv: "",
+      cloudFallback: false,
+    }));
+  };
+
+  const changePolicy = (processingPolicy: DictationProcessingPolicy) => {
+    const keepFallback = Boolean(capability?.local)
+      && (processingPolicy === "prefer-local" || processingPolicy === "auto-fallback");
+    setValue((current) => ({
+      ...current,
+      processingPolicy,
+      ...(keepFallback ? {} : { fallbackProvider: undefined, fallbackApiKeyEnv: "" }),
+      cloudFallback: keepFallback && Boolean(current.fallbackProvider),
+    }));
+  };
+
+  const changeFallback = (fallbackProvider: string) => {
+    const provider = fallbackProvider ? fallbackProvider as DictationProviderId : undefined;
+    setValue((current) => ({
+      ...current,
+      ...(provider ? { fallbackProvider: provider } : { fallbackProvider: undefined }),
+      fallbackApiKeyEnv: provider ? providerEnv(provider) : "",
+      cloudFallback: Boolean(provider)
+        && (current.processingPolicy === "prefer-local" || current.processingPolicy === "auto-fallback"),
     }));
   };
 
@@ -205,7 +297,10 @@ function DictationProviderForm({
     setMsg("");
     setFailed(false);
     try {
-      const next = { stt: server.stt, tts: server.tts, dictation: value };
+      const cloudFallback = Boolean(value.fallbackProvider)
+        && (value.processingPolicy === "prefer-local" || value.processingPolicy === "auto-fallback");
+      const dictation = { ...value, cloudFallback };
+      const next = { stt: server.stt, tts: server.tts, dictation };
       const saved = await api.voiceSettingsSave(next) as ServerVoiceSettings;
       onSaved(saved);
       setValue(saved.dictation);
@@ -217,6 +312,8 @@ function DictationProviderForm({
         localModel: saved.dictation.localModel || undefined,
         lang: saved.dictation.language || "auto",
         contextInjection: saved.dictation.contextInjection,
+        processingPolicy: saved.dictation.processingPolicy,
+        fallbackProvider: saved.dictation.fallbackProvider,
         cloudFallback: saved.dictation.cloudFallback,
         latencyPreference: saved.dictation.latencyPreference,
       });
@@ -310,9 +407,16 @@ function DictationProviderForm({
           aria-label={tr("settings.voicepage.sttApiKeyEnvVar")}
         />
       )}
+
+      <div className="stat-label">Audio processing</div>
       <div className="mcp-form-row">
+        <Select
+          value={value.processingPolicy}
+          label={value.processingPolicy}
+          options={policies.map((policy) => ({ value: policy, label: policy }))}
+          onChange={(policy) => changePolicy(policy as DictationProcessingPolicy)}
+        />
         <Toggle on={value.contextInjection} onChange={(contextInjection) => setValue({ ...value, contextInjection })} label="Context injection" />
-        <Toggle on={value.cloudFallback} onChange={(cloudFallback) => setValue({ ...value, cloudFallback })} label="Cloud fallback" />
         <Select
           value={value.latencyPreference}
           label={value.latencyPreference}
@@ -320,8 +424,34 @@ function DictationProviderForm({
           onChange={(latencyPreference) => setValue({ ...value, latencyPreference: latencyPreference as DictationLatencyPreference })}
         />
       </div>
+      <div className="muted voice-form-note">{processingDescription(value, providers)}</div>
+
+      {needsFallbackProvider && (
+        <div className="mcp-form-row">
+          <Select
+            value={value.fallbackProvider ?? ""}
+            label={value.fallbackProvider
+              ? providerCapabilities(value.fallbackProvider)?.label ?? value.fallbackProvider
+              : "No cloud fallback"}
+            options={[
+              { value: "", label: "No cloud fallback" },
+              ...fallbackCandidates.map((provider) => ({ value: provider.id, label: provider.label })),
+            ]}
+            onChange={changeFallback}
+          />
+          {value.fallbackProvider && (
+            <TextInput
+              value={value.fallbackApiKeyEnv}
+              placeholder={providerEnv(value.fallbackProvider)}
+              onChange={(event) => setValue({ ...value, fallbackApiKeyEnv: event.target.value })}
+              aria-label="Fallback provider API key env var"
+            />
+          )}
+        </div>
+      )}
+      {fallbackView?.reason && <div className={fallbackView.available ? "form-success" : "muted"}>Fallback: {fallbackView.reason}</div>}
       {providerView?.reason && <div className={providerView.available ? "form-success" : "muted"}>{providerView.reason}</div>}
-      {capability?.publicApi === false && <div className="muted">No verified public Voice Interface API contract is available for this provider.</div>}
+      {capability?.publicApi === false && <div className="muted">No verified public Voice Interface API contract is built in. A private provider adapter may register through the dictation provider registry.</div>}
 
       {value.provider === "local-nemotron" && (
         <>
@@ -354,10 +484,10 @@ function DictationProviderForm({
 
           {localModel && (
             <div className="mcp-form" data-settings-item="voice.local-model">
-              <div className="stat-label">{localModel.label}</div>
+              <div className="stat-label">Local model preset</div>
               <div className="mcp-form-row">
                 <Select
-                  value={value.localModel || localModel.id}
+                  value={value.localModel || DEFAULT_LOCAL_MODEL_ID}
                   label={localModel.label}
                   options={models.map((model) => ({ value: model.id, label: model.label }))}
                   onChange={(localModelId) => setValue({ ...value, localModel: localModelId })}
@@ -373,7 +503,10 @@ function DictationProviderForm({
               </div>
               {localModel.state === "downloading" && <progress value={localModel.downloadedBytes} max={localModel.totalBytes} />}
               {localModel.error && <div className="form-error">{localModel.error}</div>}
-              <div className="muted">Explicit download only · {Math.round(localModel.totalBytes / (1024 * 1024))} MiB · Ukrainian supported</div>
+              <div className="muted">
+                Explicit download only · {Math.round(localModel.totalBytes / (1024 * 1024))} MiB · Ukrainian supported
+                {localModel.preset === "balanced" ? " · default until Polyth has comparative end-to-end benchmarks" : ""}
+              </div>
             </div>
           )}
         </>
