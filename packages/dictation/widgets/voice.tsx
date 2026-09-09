@@ -6,6 +6,7 @@ import {
   VOICE_PREFS_KEY,
   mergeTranscript,
   parseVoicePrefs,
+  providerCapabilities,
   recognitionCtor,
   serializeVoicePrefs,
   speakableText,
@@ -23,8 +24,7 @@ import { requestComposerInsert } from "../../../apps/web/src/composerInsert.ts";
 import { getState, openSettingsPage, subscribeStore } from "../../../apps/web/src/store.ts";
 import { api } from "@polyth/session/web-api";
 import { startStreamingDictation, type StreamingDictation } from "./dictationClient.ts";
-import { startDirectElevenLabsDictation } from "./directElevenLabs.ts";
-import { startDirectWisprDictation } from "./directWispr.ts";
+import { canStartDirectProvider, startDirectProvider } from "./directProviders.ts";
 import { announce } from "../../../apps/web/src/components/a11y/live.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { Button, IconButton, MicIcon } from "@polyth/web/ui";
@@ -196,6 +196,7 @@ type RuntimeDictationSettings = {
   provider: DictationProviderId;
   transport: DictationTransport;
   model: string;
+  language: string;
   contextInjection: boolean;
   processingPolicy: DictationProcessingPolicy;
 };
@@ -226,21 +227,25 @@ function MicButton() {
   const browserCommitRef = useRef(false);
   const startGeneration = useRef(0);
   const support = speechSupport(typeof window !== "undefined" ? window : undefined);
-  const serverStt = prefs.sttEngine === "server";
-  const selectionReady = !serverStt || serverSelection !== undefined;
+  // Provider + transport now own dictation routing. sttEngine remains persisted
+  // only for older clients and the unrelated legacy OpenAI-compatible settings.
+  const serverStt = true;
+  const selectionReady = serverSelection !== undefined;
   const provider = serverSelection?.provider ?? prefs.dictationProvider;
   const transport = serverSelection?.transport ?? prefs.dictationTransport;
   const providerModel = serverSelection?.model || prefs.dictationModel;
+  const language = serverSelection?.language || prefs.lang || "auto";
   const contextInjection = serverSelection?.contextInjection ?? prefs.contextInjection;
   const processingPolicy = serverSelection?.processingPolicy ?? prefs.processingPolicy;
   const browserFallback = processingPolicy === "browser-fallback";
   const cloudPrimaryPolicy = processingPolicy === "prefer-cloud" || browserFallback;
+  const directCapability = providerCapabilities(provider);
   // Auto-fallback remains on the server so recoverable cloud failures can replay
-  // PCM into local Nemotron. Direct transport is used only when cloud is the
-  // explicit primary route and the provider has a Polyth ephemeral-auth client.
-  const directCloud = serverStt
-    && cloudPrimaryPolicy
-    && (provider === "elevenlabs" || provider === "wispr")
+  // PCM into local Nemotron. Direct is selected only from verified capability data.
+  const directCloud = cloudPrimaryPolicy
+    && directCapability?.ephemeralClientAuth === true
+    && directCapability.transports.includes("direct-browser")
+    && canStartDirectProvider(provider)
     && (transport === "auto" || transport === "direct-browser");
 
   useEffect(() => () => {
@@ -251,7 +256,7 @@ function MicButton() {
   }, []);
 
   useEffect(() => {
-    if (!prefs.dictation || !serverStt) {
+    if (!prefs.dictation) {
       setServerSelection(null);
       return;
     }
@@ -269,16 +274,16 @@ function MicButton() {
     return () => { cancelled = true; };
   }, [
     prefs.dictation,
-    serverStt,
     prefs.dictationProvider,
     prefs.dictationTransport,
     prefs.dictationModel,
     prefs.processingPolicy,
     prefs.contextInjection,
+    prefs.lang,
   ]);
 
   useEffect(() => {
-    if (!prefs.dictation || !serverStt) {
+    if (!prefs.dictation) {
       setCapability(null);
       return;
     }
@@ -306,21 +311,19 @@ function MicButton() {
       void api.dictationCapability().then((c) => { if (!cancelled) setCapability(c); });
     }
     return () => { cancelled = true; };
-  }, [prefs.dictation, serverStt, selectionReady, directCloud, provider, transport, processingPolicy]);
+  }, [prefs.dictation, selectionReady, directCloud, provider, transport, processingPolicy]);
 
   const providerOrBrowserAvailable = Boolean(capability?.available) || (browserFallback && support.stt);
   const availability: { available: boolean; reason?: string; settings?: boolean } =
     !prefs.dictation ? { available: false, reason: tr("voice.dictationOff"), settings: true }
-    : serverStt && (!selectionReady || capability === null) ? { available: false, reason: tr("voice.checkingMicrophone") }
-    : serverStt && !providerOrBrowserAvailable
+    : !selectionReady || capability === null ? { available: false, reason: tr("voice.checkingMicrophone") }
+    : !providerOrBrowserAvailable
       ? {
           available: false,
           reason: capability?.reason ?? tr("voice.serverTranscriptionUnavailable"),
           settings: true,
         }
-    : !serverStt && !support.stt
-      ? { available: false, reason: tr("voice.dictationUnsupported"), settings: true }
-    : { available: true };
+      : { available: true };
 
   const lifecycleStatus = error !== null ? tr("voice.dictationFailedValue", { error })
     : phase === "starting" ? tr("voice.startingMicrophone")
@@ -400,7 +403,7 @@ function MicButton() {
       return;
     }
     const rec = new Ctor();
-    rec.lang = prefs.lang === "auto" ? navigator.language : prefs.lang;
+    rec.lang = language === "auto" ? navigator.language : language;
     rec.continuous = true;
     rec.interimResults = true;
     browserTranscriptRef.current = "";
@@ -437,7 +440,6 @@ function MicButton() {
   const startProvider = async (generation: number) => {
     setPhase("starting");
     try {
-      const language = prefs.lang || "auto";
       const context = contextInjection ? currentDictationContext(language) : { language };
       const onPartial = (text: string) => {
         if (startGeneration.current === generation) setPartial(text);
@@ -452,15 +454,14 @@ function MicButton() {
       let stream: StreamingDictation;
       if (directCloud) {
         try {
-          stream = provider === "wispr"
-            ? await startDirectWisprDictation({ language, context, onPartial, onError: fail })
-            : await startDirectElevenLabsDictation({
-                model: providerModel || "scribe_v2_realtime",
-                language,
-                context,
-                onPartial,
-                onError: fail,
-              });
+          stream = await startDirectProvider({
+            provider,
+            model: providerModel,
+            language,
+            context,
+            onPartial,
+            onError: fail,
+          });
         } catch (directError) {
           if (transport !== "auto") throw directError;
           stream = await startStreamingDictation(serverOptions);
@@ -489,15 +490,11 @@ function MicButton() {
     setError(null);
     setPartial("");
     const generation = ++startGeneration.current;
-    if (serverStt) {
-      if (capability?.available) {
-        void startProvider(generation);
-      } else if (browserFallback && support.stt) {
-        startBrowser();
-      }
-      return;
+    if (capability?.available) {
+      void startProvider(generation);
+    } else if (browserFallback && support.stt) {
+      startBrowser();
     }
-    startBrowser();
   };
 
   const busy = phase === "starting" || phase === "transcribing";
