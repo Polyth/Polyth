@@ -15,6 +15,12 @@ export type DictationProviderId =
 
 export type DictationTransport = "auto" | "direct-browser" | "server-proxy" | "local-worker";
 export type DictationLatencyPreference = "lowest" | "balanced" | "quality";
+export type DictationProcessingPolicy =
+  | "local-only"
+  | "prefer-local"
+  | "prefer-cloud"
+  | "auto-fallback"
+  | "browser-fallback";
 
 export type DictationErrorCode =
   | "mic_denied"
@@ -54,9 +60,15 @@ export interface DictationContext {
 }
 
 export type NormalizedSttEvent =
+  | { type: "connecting" }
+  | { type: "ready" }
+  | { type: "speech_start" }
+  | { type: "speech_end" }
   | { type: "partial"; text: string; revision: number; stable?: string; unstable?: string }
   | { type: "commit"; text: string; revision: number }
+  | { type: "finalizing" }
   | { type: "final"; text: string; revision: number }
+  | { type: "cancelled" }
   | { type: "error"; error: DictationError };
 
 export interface ProviderCapabilities {
@@ -149,10 +161,13 @@ const CATALOG: readonly ProviderCapabilities[] = [
     ephemeralClientAuth: false, publicApi: true,
   },
   {
-    id: "local-parakeet", label: "Parakeet (English)", streaming: true,
-    partials: true, commits: true, transports: ["auto", "local-worker"],
+    id: "local-parakeet", label: "Parakeet (English, optional)", streaming: true,
+    partials: true, commits: true, transports: ["auto"],
     languages: ["en", "en-US"], context: false, local: true,
-    ephemeralClientAuth: false, publicApi: true,
+    ephemeralClientAuth: false,
+    // Not shipped: Nemotron already covers English and Ukrainian with the same
+    // runtime class, so another ~0.5 GB English-only model is not justified yet.
+    publicApi: false,
   },
   {
     id: "web-speech", label: "Browser Web Speech", streaming: true,
@@ -166,12 +181,22 @@ export const providerCatalog = (): readonly ProviderCapabilities[] => CATALOG;
 export const providerCapabilities = (id: DictationProviderId): ProviderCapabilities | undefined =>
   CATALOG.find((provider) => provider.id === id);
 
+export const isLocalDictationProvider = (id: DictationProviderId): boolean =>
+  id === "local-nemotron" || id === "local-parakeet" || id === "web-speech";
+
+export const isCloudDictationProvider = (id: DictationProviderId): boolean =>
+  !isLocalDictationProvider(id);
+
 export class ProviderRegistry {
   private readonly providers = new Map<DictationProviderId, DictationProvider>();
 
   register(provider: DictationProvider): this {
     this.providers.set(provider.id, provider);
     return this;
+  }
+
+  unregister(id: DictationProviderId): boolean {
+    return this.providers.delete(id);
   }
 
   get(id: DictationProviderId): DictationProvider | undefined {
@@ -190,6 +215,10 @@ export interface DictationPreferences {
   localModel?: string;
   language: "auto" | string;
   contextInjection: boolean;
+  processingPolicy: DictationProcessingPolicy;
+  /** Explicit secondary cloud provider. Never inferred for new settings. */
+  fallbackProvider?: DictationProviderId;
+  /** @deprecated persisted for older clients; processingPolicy owns routing. */
   cloudFallback: boolean;
   latencyPreference: DictationLatencyPreference;
 }
@@ -199,8 +228,7 @@ export const DEFAULT_DICTATION_PREFERENCES: DictationPreferences = {
   transport: "auto",
   language: "auto",
   contextInjection: true,
-  // Privacy boundary: local audio must never move to a cloud provider unless
-  // the user explicitly opts in to fallback.
+  processingPolicy: "prefer-cloud",
   cloudFallback: false,
   latencyPreference: "lowest",
 };
@@ -208,6 +236,17 @@ export const DEFAULT_DICTATION_PREFERENCES: DictationPreferences = {
 const providerIds = new Set<DictationProviderId>(CATALOG.map((item) => item.id));
 const transports = new Set<DictationTransport>(["auto", "direct-browser", "server-proxy", "local-worker"]);
 const latencyPreferences = new Set<DictationLatencyPreference>(["lowest", "balanced", "quality"]);
+const processingPolicies = new Set<DictationProcessingPolicy>([
+  "local-only", "prefer-local", "prefer-cloud", "auto-fallback", "browser-fallback",
+]);
+
+const derivedPolicy = (provider: DictationProviderId, legacyCloudFallback: boolean): DictationProcessingPolicy => {
+  if (provider === "web-speech") return "browser-fallback";
+  if (provider === "local-nemotron" || provider === "local-parakeet") {
+    return legacyCloudFallback ? "prefer-local" : "local-only";
+  }
+  return "prefer-cloud";
+};
 
 export function migrateDictationPreferences(input: unknown): DictationPreferences {
   const raw = input && typeof input === "object" ? input as Record<string, unknown> : {};
@@ -249,6 +288,23 @@ export function migrateDictationPreferences(input: unknown): DictationPreference
       ? raw.lang.trim()
       : DEFAULT_DICTATION_PREFERENCES.language;
   const latency = raw.latencyPreference;
+  const legacyCloudFallback = raw.cloudFallback === true;
+  const requestedPolicy = raw.processingPolicy;
+  const processingPolicy = typeof requestedPolicy === "string" && processingPolicies.has(requestedPolicy as DictationProcessingPolicy)
+    ? requestedPolicy as DictationProcessingPolicy
+    : derivedPolicy(provider, legacyCloudFallback);
+
+  const requestedFallback = raw.fallbackProvider;
+  let fallbackProvider = typeof requestedFallback === "string" && providerIds.has(requestedFallback as DictationProviderId)
+    && isCloudDictationProvider(requestedFallback as DictationProviderId)
+    && requestedFallback !== provider
+      ? requestedFallback as DictationProviderId
+      : undefined;
+  // The old boolean specifically meant local Nemotron -> ElevenLabs. Preserve
+  // that explicit historical opt-in, but never infer a provider for new prefs.
+  if (!fallbackProvider && legacyCloudFallback && (provider === "local-nemotron" || provider === "local-parakeet")) {
+    fallbackProvider = "elevenlabs";
+  }
 
   return {
     provider,
@@ -257,7 +313,9 @@ export function migrateDictationPreferences(input: unknown): DictationPreference
     ...(typeof raw.localModel === "string" && raw.localModel.trim() ? { localModel: raw.localModel.trim() } : {}),
     language,
     contextInjection: typeof raw.contextInjection === "boolean" ? raw.contextInjection : DEFAULT_DICTATION_PREFERENCES.contextInjection,
-    cloudFallback: typeof raw.cloudFallback === "boolean" ? raw.cloudFallback : DEFAULT_DICTATION_PREFERENCES.cloudFallback,
+    processingPolicy,
+    ...(fallbackProvider ? { fallbackProvider } : {}),
+    cloudFallback: Boolean(fallbackProvider) && (processingPolicy === "prefer-local" || processingPolicy === "auto-fallback"),
     latencyPreference: typeof latency === "string" && latencyPreferences.has(latency as DictationLatencyPreference)
       ? latency as DictationLatencyPreference
       : DEFAULT_DICTATION_PREFERENCES.latencyPreference,
