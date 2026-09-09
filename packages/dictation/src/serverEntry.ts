@@ -20,6 +20,7 @@ import {
 } from "./index.ts";
 import { createDeepgramSttAdapter } from "./deepgram.ts";
 import { createElevenLabsSttAdapter } from "./elevenlabs.ts";
+import { createOpenAIRealtimeSttAdapter } from "./openaiRealtime.ts";
 import { createLocalModelManager } from "./localModels.ts";
 import { localModelRoutes } from "./localModelRoutes.ts";
 import { createLocalNemotronSttAdapter } from "./localNemotron.ts";
@@ -139,18 +140,17 @@ const providerAvailability = (
   return providerCatalog().map((provider) => {
     let available = false;
     let reason: string | undefined;
-    if (provider.id === "elevenlabs" || provider.id === "deepgram") {
+    if (["elevenlabs", "deepgram", "openai-live", "openai-transcribe"].includes(provider.id)) {
       available = selected === provider.id && !!key;
       if (!available && selected === provider.id) {
-        const fallback = provider.id === "elevenlabs" ? "ELEVENLABS_API_KEY" : "DEEPGRAM_API_KEY";
+        const fallback = provider.id === "elevenlabs" ? "ELEVENLABS_API_KEY"
+          : provider.id === "deepgram" ? "DEEPGRAM_API_KEY"
+            : "OPENAI_API_KEY";
         reason = `missing ${settings.dictation.apiKeyEnv || fallback}`;
       } else if (!available) reason = "not selected";
     } else if (provider.id === "openai-compatible") {
       available = selected === provider.id && !!settings.stt.baseUrl;
       if (!available) reason = selected === provider.id ? "OpenAI-compatible STT base URL is missing" : "not selected";
-    } else if (provider.id === "openai-transcribe") {
-      available = selected === provider.id && !!key;
-      if (!available) reason = selected === provider.id ? `missing ${settings.dictation.apiKeyEnv || "OPENAI_API_KEY"}` : "not selected";
     } else if (provider.id === "local-nemotron") {
       const model = settings.dictation.localModel || "nemotron-3.5-streaming-0.6b-80ms";
       available = selected === provider.id && !!localModelInstalled?.(model);
@@ -377,14 +377,13 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           model: selected.model || "nova-3",
         });
       }
-      if (selected.provider === "openai-transcribe") {
+      if (selected.provider === "openai-live" || selected.provider === "openai-transcribe") {
         const apiKey = voice.resolveKey("dictation");
         if (!apiKey) return null;
-        return createWhisperSttAdapter({
-          baseUrl: settings.stt.baseUrl || "https://api.openai.com/v1",
-          model: selected.model || "gpt-4o-transcribe",
-          ...(selected.language && selected.language !== "auto" ? { language: selected.language } : {}),
+        return createOpenAIRealtimeSttAdapter({
           apiKey,
+          model: selected.model || (selected.provider === "openai-live" ? "gpt-live-transcribe" : "gpt-transcribe"),
+          latencyPreference: selected.latencyPreference,
         });
       }
       if (selected.provider === "openai-compatible") {
