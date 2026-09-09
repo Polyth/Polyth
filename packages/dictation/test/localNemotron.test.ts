@@ -10,9 +10,9 @@ class FakeWorker extends EventEmitter {
   failPush = false;
   holdPush = false;
 
-  constructor() {
+  constructor(ready = true) {
     super();
-    queueMicrotask(() => this.emit("message", { type: "ready" }));
+    if (ready) queueMicrotask(() => this.emit("message", { type: "ready" }));
   }
 
   postMessage(message: Record<string, unknown>): void {
@@ -80,6 +80,80 @@ test("worker failure is surfaced as worker_crashed", async () => {
     workerFactory: () => {
       worker = new FakeWorker();
       worker.failPush = true;
+      return worker as unknown as Worker;
+    },
+  });
+  const stream = adapter.createStream({ format });
+  await assert.rejects(
+    () => stream.push(pcm),
+    (error: unknown) => (error as { code?: string }).code === "worker_crashed",
+  );
+});
+
+test("worker startup has a hard deadline instead of hanging forever", async () => {
+  let worker!: FakeWorker;
+  const adapter = createLocalNemotronSttAdapter({
+    modelDir: "/models/nemotron",
+    startupTimeoutMs: 10,
+    workerFactory: () => {
+      worker = new FakeWorker(false);
+      return worker as unknown as Worker;
+    },
+  });
+  const stream = adapter.createStream({ format });
+  await assert.rejects(
+    () => stream.push(pcm),
+    (error: unknown) => {
+      const e = error as { code?: string; message?: string };
+      return e.code === "worker_crashed" && /did not become ready/.test(e.message ?? "");
+    },
+  );
+  assert.equal(worker.terminated, true);
+});
+
+test("repeated native crashes trip the restart limiter", async () => {
+  let created = 0;
+  let clock = 1_000;
+  const adapter = createLocalNemotronSttAdapter({
+    modelDir: "/models/nemotron",
+    maxCrashes: 2,
+    crashWindowMs: 60_000,
+    now: () => clock,
+    workerFactory: () => {
+      created++;
+      const worker = new FakeWorker();
+      worker.failPush = true;
+      return worker as unknown as Worker;
+    },
+  });
+
+  for (let i = 0; i < 2; i++) {
+    const stream = adapter.createStream({ format });
+    await assert.rejects(
+      () => stream.push(pcm),
+      (error: unknown) => (error as { code?: string }).code === "worker_crashed",
+    );
+    clock += 10;
+  }
+
+  const blocked = adapter.createStream({ format });
+  await assert.rejects(
+    () => blocked.push(pcm),
+    (error: unknown) => {
+      const e = error as { code?: string; message?: string };
+      return e.code === "worker_crashed" && /crash loop/.test(e.message ?? "");
+    },
+  );
+  assert.equal(created, 2);
+});
+
+test("an unexpected clean exit still rejects startup as worker_crashed", async () => {
+  let worker!: FakeWorker;
+  const adapter = createLocalNemotronSttAdapter({
+    modelDir: "/models/nemotron",
+    workerFactory: () => {
+      worker = new FakeWorker(false);
+      queueMicrotask(() => worker.emit("exit", 0));
       return worker as unknown as Worker;
     },
   });
