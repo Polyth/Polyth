@@ -69,6 +69,13 @@ function scopeSessions(
     guard.assertSession(ctx, sessionId);
     return sessionId;
   };
+  // Account identity is server-owned metadata carried only across the scoped
+  // facade. It never comes from a request body and does not expand the public
+  // session contract.
+  const withAccount = <T extends object>(input: T): T & { accountUserId: string } => ({
+    ...input,
+    accountUserId: ctx.userId,
+  });
   // Every SessionService method returns a promise, so a denial must REJECT
   // rather than throw synchronously — otherwise a caller's `.catch()` misses
   // it and an ordinary `await` still works only by accident.
@@ -108,11 +115,11 @@ function scopeSessions(
       // service ever runs, so no half-created row can leak across.
       const project = await projects.get(input.projectId);
       if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
-      return base.create(input);
+      return base.create(withAccount(input));
     },
     switchHarness: base.switchHarness ? (sessionId, selection, timing) => guarded(() => base.switchHarness!(g(sessionId), selection, timing)) : undefined,
     cancelHarnessSwitch: base.cancelHarnessSwitch ? (sessionId) => guarded(() => base.cancelHarnessSwitch!(g(sessionId))) : undefined,
-    send: (sessionId, input) => guarded(() => base.send(g(sessionId), input)),
+    send: (sessionId, input) => guarded(() => base.send(g(sessionId), withAccount(input))),
     abort: (sessionId) => guarded(() => base.abort(g(sessionId))),
     fork: (sessionId, atSeq) => guarded(() => base.fork(g(sessionId), atSeq)),
     archive: (sessionId) => guarded(() => base.archive(g(sessionId))),
