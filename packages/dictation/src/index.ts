@@ -39,9 +39,11 @@ export {
 } from "./speechmatics.ts";
 export {
   createLocalModelManager,
+  DEFAULT_LOCAL_MODEL_ID,
   localModelCatalog,
   type LocalModelDescriptor,
   type LocalModelManager,
+  type LocalModelPreset,
   type LocalModelState,
   type LocalModelStatus,
 } from "./localModels.ts";
