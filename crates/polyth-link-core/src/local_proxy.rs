@@ -146,6 +146,7 @@ pub fn bootstrap_redirect_target(query: Option<&str>) -> Result<String, LinkErro
 
 /// Loopback listener with an owned shutdown handle. Disconnect/forget/revoke
 /// must close this so the port is released.
+#[derive(Clone)]
 pub struct OwnedLoopback {
     pub port: u16,
     shutdown: watch::Sender<bool>,
