@@ -305,7 +305,6 @@ export function voiceRoutes(deps: {
           error: "upstream",
           message: error instanceof Error ? error.message : String(error),
         });
-        return true;
       } finally {
         clearTimeout(timer);
       }
@@ -428,7 +427,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
       const dictationRoute = dictationRoutes(dictation);
-      const modelRoute = localModelRoutes(localModels);
+      const modelRoute = localModelRoutes(localModels, localRuntime);
       const runtimeRoute = localRuntimeRoutes(localRuntime);
       const voiceRoute = voiceRoutes({
         voice,
