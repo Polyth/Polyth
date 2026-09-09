@@ -2,12 +2,14 @@ node_modules
 /target
 apps/web/dist
 packages/*/dist
+packages/harness-runtime/native/bin
 apps/desktop/dist
 apps/desktop/release
 apps/desktop/build/icon.png
 apps/desktop/resources/opencode/*/opencode
 apps/desktop/resources/opencode/*/opencode.exe
 apps/desktop/resources/opencode/*/provenance.json
+apps/desktop/resources/runtime-supervisor/*/polyth-supervisor
 apps/mobile/ios/App/CapApp-SPM/PolythLinkCore.xcframework
 apps/mobile/android/app/src/main/jniLibs
 *.db
