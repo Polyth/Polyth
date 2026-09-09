@@ -24,6 +24,10 @@ export {
   type ElevenLabsSttOptions,
 } from "./elevenlabs.ts";
 export {
+  createDeepgramSttAdapter,
+  type DeepgramSttOptions,
+} from "./deepgram.ts";
+export {
   createLocalModelManager,
   localModelCatalog,
   type LocalModelDescriptor,
