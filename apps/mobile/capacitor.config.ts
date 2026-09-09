@@ -7,15 +7,14 @@ const config: CapacitorConfig = {
   appName: "Polyth",
   webDir: "../web/dist",
   backgroundColor: "#1b1713",
-  // The bundled first-launch shell validates one user-entered Polyth host and
-  // then loads that host as the canonical same-origin app. Runtime navigation
-  // policy in src/nativeBridge.ts keeps all other HTTP(S) links in the platform
-  // browser.
   server: {
     hostname: "localhost",
     androidScheme: "https",
     iosScheme: "capacitor",
-    allowNavigation: ["*"],
+    // The authenticated Rust proxy is the only non-bundled WebView destination.
+    // PolythLink native methods additionally reject calls after leaving the
+    // bundled capacitor://localhost / https://localhost origin.
+    allowNavigation: ["127.0.0.1"],
   },
   plugins: {
     App: {
