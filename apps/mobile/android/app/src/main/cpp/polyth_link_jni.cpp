@@ -77,14 +77,14 @@ extern "C" JNIEXPORT jbyteArray JNICALL
 Java_com_polyth_mobile_PolythLinkRust_generateIdentitySecret(JNIEnv* env, jclass) {
   uint8_t secret[32] = {};
   if (polyth_link_generate_identity_secret(secret, sizeof(secret)) != sizeof(secret)) {
-    std::fill(std::begin(secret), std::end(secret), 0);
+    std::fill(secret, secret + sizeof(secret), 0);
     return nullptr;
   }
   jbyteArray result = env->NewByteArray(sizeof(secret));
   if (result != nullptr) {
     env->SetByteArrayRegion(result, 0, sizeof(secret), reinterpret_cast<const jbyte*>(secret));
   }
-  std::fill(std::begin(secret), std::end(secret), 0);
+  std::fill(secret, secret + sizeof(secret), 0);
   return result;
 }
 
