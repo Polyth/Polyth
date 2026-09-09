@@ -92,7 +92,9 @@ public final class PolythDiscoveryPlugin extends Plugin {
             nsd.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener);
             emit(current, "discovering", null);
             main.postDelayed(() -> emitEmptyIfNeeded(current), EMPTY_DELAY_MS);
-            call.resolve(new JSObject().put("ok", true));
+            JSObject response = new JSObject();
+            response.put("ok", true);
+            call.resolve(response);
         } catch (SecurityException error) {
             stopInternal();
             call.reject("discovery-permission-denied", "discovery-permission-denied", error);
@@ -106,7 +108,9 @@ public final class PolythDiscoveryPlugin extends Plugin {
     public void stopDiscovery(PluginCall call) {
         if (!trusted(call)) return;
         stopInternal();
-        call.resolve(new JSObject().put("ok", true));
+        JSObject response = new JSObject();
+        response.put("ok", true);
+        call.resolve(response);
     }
 
     private NsdManager.DiscoveryListener listener(int current) {
