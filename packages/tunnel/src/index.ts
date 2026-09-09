@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { TunnelDeviceDto } from "@polyth/contracts";
-import { GRANT_PROFILE_PRESETS, normalizeDeviceGrants, type GrantProfileId } from "@polyth/contracts";
+import { GRANT_PROFILE_PRESETS, REMOTE_CAPABILITY, normalizeDeviceGrants, type GrantProfileId } from "@polyth/contracts";
 
 const LEGACY_OWNER_USER_ID = "usr_owner";
 
@@ -31,7 +31,13 @@ export interface TunnelDeviceRecord {
 }
 
 export function grantsForProfile(profile: GrantProfileId): string[] {
-  return normalizeDeviceGrants(GRANT_PROFILE_PRESETS[profile]);
+  const grants = [...GRANT_PROFILE_PRESETS[profile]];
+  // Voice input is an interactive capability: it belongs with session
+  // messaging/control, not the read-only observe profile. Keep the canonical
+  // profile contract stable while allowing the tunnel layer to opt into a
+  // package-owned capability that older servers did not know about.
+  if (profile !== "observe") grants.push(REMOTE_CAPABILITY.dictationUse);
+  return normalizeDeviceGrants(grants);
 }
 
 export function fingerprintEndpoint(endpointId: string): string {

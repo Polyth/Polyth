@@ -10,6 +10,7 @@ import { readWebStylesSync } from "./webStyles.ts";
 interface ProviderLogoProps {
   providerID?: string;
   providerName?: string;
+  harnessId?: string;
   size?: "compact" | "regular";
   className?: string;
 }
@@ -138,6 +139,54 @@ test("registered harness identities reuse the shared provider marks", async () =
   assert.doesNotMatch(cursorMark, /M4 5\.5 12 12 4 18\.5/);
 });
 
+test("brand harness models keep the harness mark beside provider identity", async () => {
+  const spark = /M4\.709 15\.955/;
+  const letterA = /M3\.7 19 10 4\.8/;
+
+  const anthropicOnly = await render({
+    providerID: "anthropic",
+    providerName: "Anthropic",
+  });
+  assert.match(anthropicOnly, /data-provider="anthropic"/);
+  assert.match(anthropicOnly, spark);
+  assert.doesNotMatch(anthropicOnly, letterA);
+
+  const claudeModel = await render({
+    providerID: "anthropic",
+    providerName: "Anthropic",
+    harnessId: "claude",
+  });
+  assert.match(claudeModel, /data-provider="claude"/);
+  assert.match(claudeModel, spark);
+  assert.doesNotMatch(claudeModel, /data-provider="anthropic"/);
+
+  const acpModel = await render({
+    providerID: "anthropic",
+    providerName: "Anthropic",
+    harnessId: "cursor",
+  });
+  assert.match(acpModel, /data-provider="cursor"/);
+  assert.match(acpModel, /M11\.503\.131/);
+
+  const routedAnthropic = await render({
+    providerID: "anthropic",
+    providerName: "Anthropic",
+    harnessId: "opencode",
+  });
+  assert.match(routedAnthropic, /data-provider="anthropic"/);
+  assert.match(routedAnthropic, spark);
+  assert.doesNotMatch(routedAnthropic, /data-provider="opencode"/);
+  assert.doesNotMatch(routedAnthropic, letterA);
+
+  const routedNamedClaude = await render({
+    providerID: "anthropic",
+    providerName: "Claude 4 Sonnet",
+    harnessId: "opencode",
+  });
+  assert.match(routedNamedClaude, /data-provider="claude"/);
+  assert.match(routedNamedClaude, spark);
+});
+
 test("OpenCode variants use the OpenCode brand mark", async () => {
   const variants: Array<{ props: ProviderLogoProps; provider: string }> = [
     { props: { providerID: "opencode-zen" }, provider: "opencode-zen" },
@@ -243,4 +292,7 @@ test("provider surfaces use ProviderLogo without brand palette rules", () => {
   assert.match(harnesses, /providerID=\{row\.identity\.id\}/);
   assert.match(harnesses, /providerID=\{detail\.identity\.id\}/);
   assert.match(harnesses, /providerName=\{row\.identity\.name\}/);
+  assert.match(picker, /harnessId=\{model\.harnessId\}/);
+  assert.match(picker, /harnessId=\{selectedModel\.harnessId\}/);
+  assert.match(picker, /harnessId=\{unanimousHarnessId\(provider\.models\)\}/);
 });

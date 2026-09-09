@@ -9,12 +9,14 @@ export default function ContextIndicator({
   mode,
   providerID,
   providerName,
+  harnessId,
   active,
 }: {
   gauge: ContextGauge;
   mode: ContextIndicatorMode;
   providerID?: string;
   providerName?: string;
+  harnessId?: string;
   active: boolean;
 }) {
   const percentLabel = formatContextPercent(gauge);
@@ -27,7 +29,7 @@ export default function ContextIndicator({
       aria-label={label}
       title={label}
     >
-      {mode === "logo" && <ProviderLogo providerID={providerID} providerName={providerName} size="compact" />}
+      {mode === "logo" && <ProviderLogo providerID={providerID} providerName={providerName} harnessId={harnessId} size="compact" />}
     </span>
   );
 }

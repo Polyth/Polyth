@@ -43,10 +43,7 @@ export interface InstructionProvisionState {
  * lookup (`HarnessRegistry.get` / `harnessProviderById`), never
  * `registry.resolve()` — resolve() probes every candidate harness, and a
  * probe that reads through the same physical-acquire key it is being called
- * from deadlocks. This is the one seam both production (the OpenCode pool's
- * acquire factory) and the deadlock-regression test go through, so a
- * regression back to `resolve()` in either place fails loudly instead of
- * silently reintroducing the hang. */
+ * from deadlocks. */
 export async function reconcilePinnedHarness(
   controller: CapabilityProvisioningController,
   harnesses: HarnessRegistry,
@@ -65,7 +62,6 @@ export interface CapabilityProvisioningController {
   status(context: HarnessContext, harnessId?: string): HarnessCapabilityStatusDto[];
   desired(context: HarnessContext): Promise<AgentCapabilityDescriptor[]>;
   acknowledge(receipt: HarnessCapabilityApplicationReceipt): void;
-  /** Mark a staged overlay revision as captured by a native spawn/create. */
   captureLaunch(input: {
     spaceId: string;
     projectId: string;
@@ -74,7 +70,6 @@ export interface CapabilityProvisioningController {
     sessionId?: string;
     desiredRevision: string;
   }): void;
-  /** Release an in-flight spawn capture after a definitive native create failure. */
   releaseLaunch(input: {
     spaceId: string;
     projectId: string;
@@ -100,14 +95,13 @@ interface CapabilityGenerationLease {
   authorityId?: string;
   generation?: number;
   revision: string;
-  /** True once a native spawn/create has read this overlay revision. */
   captured?: boolean;
   toolToken?: string;
   resourceRoot?: string;
 }
 
-const PENDING_RESTART_REASON = "OpenCode runtime restart required to apply this capability revision";
-const PENDING_RESTART_REMOVAL_REASON = "OpenCode runtime restart required to drop this capability";
+const PENDING_RESTART_REASON = "Harness runtime restart required to apply this capability revision";
+const PENDING_RESTART_REMOVAL_REASON = "Harness runtime restart required to drop this capability";
 
 const logicalTargetKey = (
   context: HarnessContext,
@@ -119,9 +113,10 @@ const logicalTargetKey = (
 };
 
 const RETIRED_TRANSPORT = { kind: "stdio" as const, command: "_", args: [] as string[], envKeys: [] as string[] };
-
 const instructionId = "polyth.behavior";
 const mcpId = (id: string) => `polyth.mcp.${id}`;
+const restartSensitive = (record: Pick<HarnessCapabilityRecord, "mutability">): boolean =>
+  record.mutability === "requires-restart";
 
 const sanitize = (record: HarnessCapabilityRecord): HarnessCapabilityRecord => {
   const reason = record.reason
@@ -136,11 +131,6 @@ const rankId = (id: string): string => {
   return `2:${id}`;
 };
 
-// Application state (what was actually applied, by whom, at what revision) is
-// intentionally volatile: it describes a live process incarnation, not a
-// durable fact about the Space. Never widen this to `true` — `persist()`
-// already only writes rows with `durable: true`, so this stub is what keeps
-// per-generation status out of the on-disk capability-status.json entirely.
 const isDurableApplicationState = (
   _lifetime: HarnessCapabilityTargetLifetime,
   _context: HarnessContext,
@@ -168,8 +158,6 @@ const sameLogicalTarget = (
   && left.harnessId === right.harnessId
   && (left.sessionId ?? "") === (right.sessionId ?? "");
 
-const RESTART_KINDS = new Set(["mcp-server", "tool", "skill"]);
-
 const promoteRestartIfLive = (
   previous: HarnessCapabilityRecord[] | undefined,
   next: HarnessCapabilityRecord[],
@@ -179,7 +167,7 @@ const promoteRestartIfLive = (
     const prior = previous?.find((row) => row.capabilityId === record.capabilityId);
     if (
       record.status === "pending"
-      && record.mutability === "requires-restart"
+      && restartSensitive(record)
       && liveGeneration
       && prior
       && (prior.status === "applied" || prior.status === "unverifiable")
@@ -193,10 +181,6 @@ const promoteRestartIfLive = (
       };
     }
     if (record.capabilityId.startsWith("polyth.mcp.retired.") && liveGeneration) {
-      // Tombstones stay pending-restart until a matching receipt settles them.
-      // Once applied/unverifiable, do not re-arm — overlay omission is already
-      // the live projection and another restart cannot make the tombstone
-      // "more applied".
       if (prior?.status === "applied" || prior?.status === "unverifiable") {
         return {
           ...record,
@@ -207,28 +191,16 @@ const promoteRestartIfLive = (
       }
       return { ...record, status: "pending-restart" as const, reason: PENDING_RESTART_REASON };
     }
-    if (record.status !== "pending") return record;
-    if (record.mutability !== "requires-restart") return record;
-    if (!liveGeneration) return record;
-    if (prior?.appliedRevision === record.desiredRevision && prior.status !== "pending-restart") {
-      return record;
-    }
-    return {
-      ...record,
-      status: "pending-restart" as const,
-      reason: PENDING_RESTART_REASON,
-    };
+    if (record.status !== "pending" || !restartSensitive(record) || !liveGeneration) return record;
+    if (prior?.appliedRevision === record.desiredRevision && prior.status !== "pending-restart") return record;
+    return { ...record, status: "pending-restart" as const, reason: PENDING_RESTART_REASON };
   });
   if (!liveGeneration || !previous) return mapped;
   const nextIds = new Set(mapped.map((row) => row.capabilityId));
   const removals = previous.flatMap((prior) => {
-    if (!RESTART_KINDS.has(prior.kind) || nextIds.has(prior.capabilityId)) return [];
+    if (!restartSensitive(prior) || nextIds.has(prior.capabilityId)) return [];
     if (prior.status === "unsupported" || prior.status === "failed") return [];
-    return [{
-      ...prior,
-      status: "pending-restart" as const,
-      reason: PENDING_RESTART_REMOVAL_REASON,
-    }];
+    return [{ ...prior, status: "pending-restart" as const, reason: PENDING_RESTART_REMOVAL_REASON }];
   });
   return [...mapped, ...removals];
 };
@@ -254,12 +226,24 @@ export function createCapabilityProvisioningController(opts: {
   file: string;
   tools?: AgentToolBridge;
   toolsEndpoint?: () => string;
-  /** Trusted-package enablement. Unknown owners remain visible so tests and
-   *  core contributions can register without a package-registry round-trip. */
   contributionAllowed?: (owner: string, context: HarnessContext) => boolean;
-  /** Stage a coalesced OpenCode restart when physical-runtime capabilities need it. */
+  /** Generic physical-runtime restart hook. Shared code never chooses a harness. */
+  onCapabilityRestartRequired?: (input: {
+    context: HarnessContext;
+    harnessId: string;
+    desiredRevision: string;
+  }) => void;
+  /** Generic settlement hook for an admitted physical-runtime revision. */
+  onCapabilityRevisionSettled?: (input: {
+    spaceId: string;
+    projectId: string;
+    cwd: string;
+    harnessId: string;
+    desiredRevision: string;
+  }) => void;
+  /** @deprecated Composition compatibility; use onCapabilityRestartRequired. */
   onOpenCodeCapabilityRestart?: (context: HarnessContext, desiredRevision: string) => void;
-  /** Settle only the restart task for the successfully admitted revision. */
+  /** @deprecated Composition compatibility; use onCapabilityRevisionSettled. */
   onOpenCodeCapabilitySettled?: (input: {
     spaceId: string;
     projectId: string;
@@ -287,12 +271,7 @@ export function createCapabilityProvisioningController(opts: {
           }
           if (row.spaceId && row.harnessId) {
             return [{
-              target: {
-                spaceId: row.spaceId,
-                projectId: row.projectId ?? "",
-                cwd: "",
-                harnessId: row.harnessId,
-              },
+              target: { spaceId: row.spaceId, projectId: row.projectId ?? "", cwd: "", harnessId: row.harnessId },
               desiredRevision: row.desiredRevision,
               records: row.records,
               durable: true,
@@ -324,22 +303,15 @@ export function createCapabilityProvisioningController(opts: {
   const leasesByTarget = new Map<string, CapabilityGenerationLease[]>();
   const activeTokens = new Map<string, { revision: string; targetKey: string }>();
   const reconcileSlots = new Map<string, { dirty: boolean; promise: Promise<HarnessCapabilityStatusDto> }>();
-
   const leasesFor = (targetKey: string): CapabilityGenerationLease[] => leasesByTarget.get(targetKey) ?? [];
 
   const referencedTokens = (): Set<string> => {
     const out = new Set<string>();
-    for (const leases of leasesByTarget.values()) {
-      for (const lease of leases) {
-        if (lease.toolToken) out.add(lease.toolToken);
-      }
-    }
+    for (const leases of leasesByTarget.values()) for (const lease of leases) if (lease.toolToken) out.add(lease.toolToken);
     return out;
   };
-
   const keepRevisionsFor = (targetKey: string): string[] =>
     [...new Set(leasesFor(targetKey).map((lease) => lease.revision).filter(Boolean))];
-
   const revokeUnreferencedTokens = (): void => {
     const keep = referencedTokens();
     for (const [token] of [...activeTokens.entries()]) {
@@ -350,25 +322,19 @@ export function createCapabilityProvisioningController(opts: {
   };
 
   const retiredAuthorities = new Map<string, Set<string>>();
-
   const retireAuthority = (targetKey: string, authorityId: string): void => {
     const retired = retiredAuthorities.get(targetKey) ?? new Set<string>();
     retired.add(authorityId);
     retiredAuthorities.set(targetKey, retired);
   };
 
-  // STAGED: latest desired overlay not yet captured by any spawn.
-  // IN_FLIGHT: overlay was captured by spawn/create; receipt has not arrived.
-  // BOUND: receipt tied the revision to authority/generation.
   const upsertStagedLease = (targetKey: string, revision: string): CapabilityGenerationLease => {
     const leases = leasesFor(targetKey);
     const exact = leases.find((lease) => lease.generation === undefined && lease.revision === revision);
     if (exact) return exact;
     for (let i = leases.length - 1; i >= 0; i--) {
       const row = leases[i]!;
-      if (row.generation === undefined && !row.captured && row.revision !== revision) {
-        leases.splice(i, 1);
-      }
+      if (row.generation === undefined && !row.captured && row.revision !== revision) leases.splice(i, 1);
     }
     const lease: CapabilityGenerationLease = { targetKey, revision };
     leases.push(lease);
@@ -378,33 +344,19 @@ export function createCapabilityProvisioningController(opts: {
   };
 
   const launchContext = (input: {
-    spaceId: string;
-    projectId: string;
-    cwd: string;
-    harnessId: string;
-    sessionId?: string;
-    desiredRevision: string;
+    spaceId: string; projectId: string; cwd: string; harnessId: string; sessionId?: string; desiredRevision: string;
   }): { targetKey: string; revision: string } => ({
-    targetKey: logicalTargetKey(
-      {
-        spaceId: input.spaceId,
-        projectId: input.projectId,
-        cwd: input.cwd,
-        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-      },
-      input.harnessId,
-      input.sessionId ? "session" : "physical-runtime",
-    ),
+    targetKey: logicalTargetKey({
+      spaceId: input.spaceId,
+      projectId: input.projectId,
+      cwd: input.cwd,
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+    }, input.harnessId, input.sessionId ? "session" : "physical-runtime"),
     revision: input.desiredRevision,
   });
 
   const captureLaunch = (input: {
-    spaceId: string;
-    projectId: string;
-    cwd: string;
-    harnessId: string;
-    sessionId?: string;
-    desiredRevision: string;
+    spaceId: string; projectId: string; cwd: string; harnessId: string; sessionId?: string; desiredRevision: string;
   }): void => {
     if (!input.desiredRevision) return;
     const { targetKey, revision } = launchContext(input);
@@ -420,12 +372,7 @@ export function createCapabilityProvisioningController(opts: {
   };
 
   const releaseLaunch = (input: {
-    spaceId: string;
-    projectId: string;
-    cwd: string;
-    harnessId: string;
-    sessionId?: string;
-    desiredRevision: string;
+    spaceId: string; projectId: string; cwd: string; harnessId: string; sessionId?: string; desiredRevision: string;
   }): void => {
     if (!input.desiredRevision) return;
     const { targetKey, revision } = launchContext(input);
@@ -454,9 +401,7 @@ export function createCapabilityProvisioningController(opts: {
     let lease = generation !== undefined
       ? leases.find((row) => row.generation === generation && (!authorityId || row.authorityId === authorityId))
       : undefined;
-    if (!lease) {
-      lease = leases.find((row) => row.generation === undefined && row.revision === revision);
-    }
+    if (!lease) lease = leases.find((row) => row.generation === undefined && row.revision === revision);
     if (!lease) {
       lease = { targetKey, revision };
       leases.push(lease);
@@ -468,25 +413,14 @@ export function createCapabilityProvisioningController(opts: {
     if (generation !== undefined) {
       lease.generation = generation;
       lease.captured = true;
-      // One live native generation per physical target. Drop every other
-      // bound lease. Retire the previous authority identity only when it
-      // differs — same-authority generation advances must not fence the
-      // live identity from later receipts.
       for (let i = leases.length - 1; i >= 0; i--) {
         const row = leases[i]!;
         if (row !== lease && row.generation !== undefined) {
-          if (row.authorityId && row.authorityId !== (authorityId ?? lease.authorityId)) {
-            retireAuthority(targetKey, row.authorityId);
-          }
+          if (row.authorityId && row.authorityId !== (authorityId ?? lease.authorityId)) retireAuthority(targetKey, row.authorityId);
           leases.splice(i, 1);
         }
       }
-      if (previousAuthority && authorityId && previousAuthority !== authorityId) {
-        retireAuthority(targetKey, previousAuthority);
-      }
-      // Binding the current desired bundle drops uncaptured staged
-      // predecessors. Captured in-flight revisions stay until their own
-      // receipt or a definitive spawn failure.
+      if (previousAuthority && authorityId && previousAuthority !== authorityId) retireAuthority(targetKey, previousAuthority);
       if (!currentDesired || revision === currentDesired) {
         for (let i = leases.length - 1; i >= 0; i--) {
           const row = leases[i]!;
@@ -519,10 +453,7 @@ export function createCapabilityProvisioningController(opts: {
     if (lifetime === "physical-runtime") {
       const durable = { ...context };
       delete durable.sessionId;
-      remembered.set(`runtime:${context.spaceId}:${context.projectId}:${context.cwd}:${harnessId}`, {
-        ...entry,
-        context: durable,
-      });
+      remembered.set(`runtime:${context.spaceId}:${context.projectId}:${context.cwd}:${harnessId}`, { ...entry, context: durable });
       return;
     }
     if (context.sessionId) {
@@ -540,26 +471,16 @@ export function createCapabilityProvisioningController(opts: {
   ): HarnessCapabilityRecord[] => {
     const previousRow = statuses.find((row) => provisioningTargetKey(row.target) === provisioningTargetKey(target))
       ?? statuses.find((row) => sameLogicalTarget(row.target, target));
-    const storedTarget = target.authorityId || target.generation !== undefined
-      ? target
-      : previousRow?.target ?? target;
-    const liveGeneration = storedTarget.generation !== undefined;
+    const storedTarget = target.authorityId || target.generation !== undefined ? target : previousRow?.target ?? target;
     const records = promoteRestartIfLive(
       previousRow?.records,
       mergePendingRevision(previousRow?.records, next),
-      liveGeneration,
+      storedTarget.generation !== undefined,
     ).map(sanitize);
     statuses = [
-      ...statuses.filter((row) =>
-        row !== previousRow
-        && !sameLogicalTarget(row.target, storedTarget)
+      ...statuses.filter((row) => row !== previousRow && !sameLogicalTarget(row.target, storedTarget)
         && provisioningTargetKey(row.target) !== provisioningTargetKey(storedTarget)),
-      {
-        target: storedTarget,
-        desiredRevision,
-        records,
-        durable,
-      },
+      { target: storedTarget, desiredRevision, records, durable },
     ];
     persist();
     return records;
@@ -609,17 +530,12 @@ export function createCapabilityProvisioningController(opts: {
         descriptors.push({ ...descriptor, revision: semanticCapabilityRevision(descriptor) });
       }
     }
-    descriptors.push(...opts.contributions.resolve(context).filter((descriptor) => {
-      if (descriptor.owner === "polyth") return true;
-      return opts.contributionAllowed?.(descriptor.owner, context) !== false;
-    }));
+    descriptors.push(...opts.contributions.resolve(context).filter((descriptor) =>
+      descriptor.owner === "polyth" || opts.contributionAllowed?.(descriptor.owner, context) !== false));
     return descriptors.sort((a, b) => rankId(a.id).localeCompare(rankId(b.id)) || a.id.localeCompare(b.id));
   };
 
-  const unsupportedResult = (
-    items: AgentCapabilityDescriptor[],
-    reason: string,
-  ): HarnessCapabilityRecord[] =>
+  const unsupportedResult = (items: AgentCapabilityDescriptor[], reason: string): HarnessCapabilityRecord[] =>
     items.map((capability) => ({
       capabilityId: capability.id,
       kind: capability.kind,
@@ -634,24 +550,20 @@ export function createCapabilityProvisioningController(opts: {
   const failedResult = (
     items: Array<{ capability: AgentCapabilityDescriptor; mode: HarnessCapabilityRecord["mode"]; mutability: HarnessCapabilityRecord["mutability"] }>,
     reason: string,
-  ): HarnessCapabilityRecord[] =>
-    items.map((item) => ({
-      capabilityId: item.capability.id,
-      kind: item.capability.kind,
-      owner: item.capability.owner,
-      desiredRevision: item.capability.revision,
-      mode: item.mode,
-      status: item.mode === "unsupported" ? "unsupported" as const : "failed" as const,
-      mutability: item.mutability,
-      reason: item.mode === "unsupported" ? "Harness does not support this capability" : reason,
-    }));
+  ): HarnessCapabilityRecord[] => items.map((item) => ({
+    capabilityId: item.capability.id,
+    kind: item.capability.kind,
+    owner: item.capability.owner,
+    desiredRevision: item.capability.revision,
+    mode: item.mode,
+    status: item.mode === "unsupported" ? "unsupported" as const : "failed" as const,
+    mutability: item.mutability,
+    reason: item.mode === "unsupported" ? "Harness does not support this capability" : reason,
+  }));
 
   const revokeTools = (targetKey: string) => {
     for (const lease of leasesFor(targetKey)) {
-      if (!lease.toolToken) continue;
-      // Live and in-flight generations still present the previous overlay
-      // until successor admission or spawn failure.
-      if (lease.generation !== undefined || lease.captured) continue;
+      if (!lease.toolToken || lease.generation !== undefined || lease.captured) continue;
       opts.tools?.revoke(lease.toolToken);
       activeTokens.delete(lease.toolToken);
       delete lease.toolToken;
@@ -665,18 +577,13 @@ export function createCapabilityProvisioningController(opts: {
     let items: AgentCapabilityDescriptor[] = [];
     let planned: ReturnType<typeof planHarnessCapabilities>["items"] = [];
     try {
-      const support = provider.provisioner
-        ? await provider.provisioner.support(context)
-        : undefined;
+      const support = provider.provisioner ? await provider.provisioner.support(context) : undefined;
       lifetime = support?.targetLifetime ?? "session";
       remember(context, provider.descriptor.id, lifetime, provider.provisioner?.release
-        ? (ctx, keepRevisions) => provider.provisioner!.release!(ctx, { keepRevisions })
-        : undefined);
+        ? (ctx, keepRevisions) => provider.provisioner!.release!(ctx, { keepRevisions }) : undefined);
       target = targetOf(context, provider.descriptor.id, lifetime);
       const durable = isDurableApplicationState(lifetime, context);
-      const applyContext = lifetime === "physical-runtime"
-        ? { ...context, sessionId: undefined }
-        : context;
+      const applyContext = lifetime === "physical-runtime" ? { ...context, sessionId: undefined } : context;
       items = await desired(applyContext);
       const desiredRevision = desiredBundleRevision(items);
       if (!provider.provisioner || !support) {
@@ -691,19 +598,9 @@ export function createCapabilityProvisioningController(opts: {
       let toolEnv: Record<string, string> = {};
       const mcpSupport = support.kinds["mcp-server"];
       const toolItems = plan.items.filter((item) => item.capability.kind === "tool" && item.mode === "mcp");
-      const toolContext = lifetime === "physical-runtime"
-        ? { ...context, sessionId: undefined }
-        : context;
       if (!toolItems.length) revokeTools(targetKey);
-      if (
-        toolItems.length
-        && mcpSupport
-        && !context.remote
-        && opts.tools
-        && opts.toolsEndpoint
-      ) {
-        const tools = toolItems
-          .map((item) => item.capability)
+      if (toolItems.length && mcpSupport && !context.remote && opts.tools && opts.toolsEndpoint) {
+        const tools = toolItems.map((item) => item.capability)
           .filter((item): item is Extract<AgentCapabilityDescriptor, { kind: "tool" }> => item.kind === "tool");
         const revision = desiredBundleRevision(tools);
         const stagedLease = upsertStagedLease(targetKey, desiredRevision);
@@ -711,8 +608,7 @@ export function createCapabilityProvisioningController(opts: {
         const existing = token ? activeTokens.get(token) : undefined;
         if (!token || existing?.revision !== revision) {
           const toolScope = mcpSupport.configScope === "session"
-            ? "session"
-            : mcpSupport.configScope === "deployment" ? "deployment" : "project";
+            ? "session" : mcpSupport.configScope === "deployment" ? "deployment" : "project";
           token = opts.tools.mint({
             spaceId: context.spaceId,
             projectId: context.projectId,
@@ -746,11 +642,8 @@ export function createCapabilityProvisioningController(opts: {
         planned = plan.items;
       }
       plan.keepRevisions = keepRevisionsFor(targetKey);
-      const canonicalIds = new Set(
-        context.space
-          ? opts.mcp.projection(context.space).servers.map((server) => mcpId(server.id))
-          : [],
-      );
+      const canonicalIds = new Set(context.space
+        ? opts.mcp.projection(context.space).servers.map((server) => mcpId(server.id)) : []);
       const secrets: CapabilitySecretResolver = {
         mcpSecrets(serverId) {
           if (serverId === "polyth.agent-tools") return { ...toolEnv };
@@ -761,33 +654,25 @@ export function createCapabilityProvisioningController(opts: {
       const result = await provider.provisioner.apply(applyContext, plan, secrets);
       const records = replaceRecords(target, desiredRevision, result.records, durable);
       const storedTarget = statuses.find((row) =>
-        provisioningTargetKey(row.target) === provisioningTargetKey(target)
-        || sameLogicalTarget(row.target, target))?.target ?? target;
+        provisioningTargetKey(row.target) === provisioningTargetKey(target) || sameLogicalTarget(row.target, target))?.target ?? target;
       if (
         lifetime === "physical-runtime"
-        && provider.descriptor.id === "opencode"
         && records.some((row) => row.status === "pending-restart")
         && storedTarget.generation !== undefined
       ) {
-        opts.onOpenCodeCapabilityRestart?.(applyContext, desiredRevision);
+        if (opts.onCapabilityRestartRequired) {
+          opts.onCapabilityRestartRequired({ context: applyContext, harnessId: provider.descriptor.id, desiredRevision });
+        } else {
+          opts.onOpenCodeCapabilityRestart?.(applyContext, desiredRevision);
+        }
       }
-      return {
-        harnessId: provider.descriptor.id,
-        desiredRevision,
-        records,
-        target: storedTarget,
-      };
+      return { harnessId: provider.descriptor.id, desiredRevision, records, target: storedTarget };
     } catch (error) {
       remember(context, provider.descriptor.id, lifetime, provider.provisioner?.release
-        ? (ctx, keepRevisions) => provider.provisioner!.release!(ctx, { keepRevisions })
-        : undefined);
+        ? (ctx, keepRevisions) => provider.provisioner!.release!(ctx, { keepRevisions }) : undefined);
       target = targetOf(context, provider.descriptor.id, lifetime);
       if (!items.length) {
-        try {
-          items = await desired(context);
-        } catch {
-          items = [];
-        }
+        try { items = await desired(context); } catch { items = []; }
       }
       const desiredRevision = desiredBundleRevision(items);
       const reason = sanitize({
@@ -800,8 +685,7 @@ export function createCapabilityProvisioningController(opts: {
         mutability: "immutable",
         reason: (error as Error).message,
       }).reason ?? "Harness capability probe failed";
-      const next = planned.length
-        ? failedResult(planned, reason)
+      const next = planned.length ? failedResult(planned, reason)
         : unsupportedResult(items, reason.length ? reason : "Harness capability probe failed");
       if (!planned.length && next.length === 0) {
         next.push({
@@ -823,9 +707,7 @@ export function createCapabilityProvisioningController(opts: {
   const reconcile = async (provider: HarnessProvider, context: HarnessContext): Promise<HarnessCapabilityStatusDto> => {
     let lifetime: HarnessCapabilityTargetLifetime = "session";
     try {
-      const support = provider.provisioner
-        ? await provider.provisioner.support(context)
-        : undefined;
+      const support = provider.provisioner ? await provider.provisioner.support(context) : undefined;
       lifetime = support?.targetLifetime ?? "session";
     } catch {
       lifetime = "session";
@@ -865,20 +747,15 @@ export function createCapabilityProvisioningController(opts: {
     const logical = statuses.find((item) => sameLogicalTarget(item.target, receipt.target));
     const row = exact ?? logical;
     if (!row) return;
-    if (row.target.spaceId !== receipt.target.spaceId) return;
-    if (row.target.harnessId !== receipt.target.harnessId) return;
+    if (row.target.spaceId !== receipt.target.spaceId || row.target.harnessId !== receipt.target.harnessId) return;
     if (row.target.projectId !== receipt.target.projectId || row.target.cwd !== receipt.target.cwd) return;
     const lifetime = row.target.sessionId ? "session" : "physical-runtime";
-    const targetKey = logicalTargetKey(
-      {
-        spaceId: row.target.spaceId,
-        projectId: row.target.projectId,
-        cwd: row.target.cwd,
-        ...(row.target.sessionId ? { sessionId: row.target.sessionId } : {}),
-      },
-      row.target.harnessId,
-      lifetime,
-    );
+    const targetKey = logicalTargetKey({
+      spaceId: row.target.spaceId,
+      projectId: row.target.projectId,
+      cwd: row.target.cwd,
+      ...(row.target.sessionId ? { sessionId: row.target.sessionId } : {}),
+    }, row.target.harnessId, lifetime);
     const storedGen = row.target.generation;
     const receiptGen = receipt.target.generation;
     const storedAuth = row.target.authorityId;
@@ -888,17 +765,13 @@ export function createCapabilityProvisioningController(opts: {
       if (storedGen !== undefined && (receiptGen === undefined || receiptGen < storedGen)) return;
     } else if (storedAuth && receiptAuth && storedAuth !== receiptAuth) {
       if (receiptGen === undefined) return;
-    } else if (storedGen !== undefined && (receiptGen === undefined || receiptGen < storedGen)) {
-      return;
-    }
+    } else if (storedGen !== undefined && (receiptGen === undefined || receiptGen < storedGen)) return;
     const matchesCurrentBundle = !receipt.desiredRevision || receipt.desiredRevision === row.desiredRevision;
     const ids = new Set(receipt.capabilityIds);
     const settleNegativeAdmission = (records: HarnessCapabilityRecord[]): HarnessCapabilityRecord[] => {
-      const retiredIds = new Set(
-        records
-          .filter((record) => record.capabilityId.startsWith("polyth.mcp.retired."))
-          .map((record) => record.capabilityId.slice("polyth.mcp.retired.".length)),
-      );
+      const retiredIds = new Set(records
+        .filter((record) => record.capabilityId.startsWith("polyth.mcp.retired."))
+        .map((record) => record.capabilityId.slice("polyth.mcp.retired.".length)));
       return records.flatMap((record) => {
         if (record.capabilityId.startsWith("polyth.mcp.retired.")) {
           return [sanitize({
@@ -912,30 +785,18 @@ export function createCapabilityProvisioningController(opts: {
           record.status === "pending-restart"
           && record.capabilityId.startsWith("polyth.mcp.")
           && retiredIds.has(record.capabilityId.slice("polyth.mcp.".length))
-        ) {
-          return [];
-        }
+        ) return [];
         if (
           record.status === "pending-restart"
-          && RESTART_KINDS.has(record.kind)
+          && restartSensitive(record)
           && record.reason === PENDING_RESTART_REMOVAL_REASON
-        ) {
-          return [];
-        }
+        ) return [];
         return [record];
       });
     };
     if (receipt.outcome !== "failed") {
-      bindLeaseGeneration(
-        targetKey,
-        receipt.desiredRevision || row.desiredRevision,
-        receiptAuth,
-        receiptGen,
-        row.desiredRevision,
-      );
-      if (storedAuth && receiptAuth && storedAuth !== receiptAuth) {
-        retireAuthority(targetKey, storedAuth);
-      }
+      bindLeaseGeneration(targetKey, receipt.desiredRevision || row.desiredRevision, receiptAuth, receiptGen, row.desiredRevision);
+      if (storedAuth && receiptAuth && storedAuth !== receiptAuth) retireAuthority(targetKey, storedAuth);
       row.target = {
         ...row.target,
         ...receipt.target,
@@ -945,13 +806,20 @@ export function createCapabilityProvisioningController(opts: {
         harnessId: row.target.harnessId,
         ...(row.target.sessionId && !receipt.target.sessionId ? { sessionId: row.target.sessionId } : {}),
       };
-      if (receipt.target.harnessId === "opencode" && receipt.desiredRevision) {
-        opts.onOpenCodeCapabilitySettled?.({
+      if (receipt.desiredRevision) {
+        const settled = {
           spaceId: row.target.spaceId,
           projectId: row.target.projectId,
           cwd: row.target.cwd,
+          harnessId: row.target.harnessId,
           desiredRevision: receipt.desiredRevision,
-        });
+        };
+        if (opts.onCapabilityRevisionSettled) {
+          opts.onCapabilityRevisionSettled(settled);
+        } else if (lifetime === "physical-runtime") {
+          const { harnessId: _harnessId, ...legacy } = settled;
+          opts.onOpenCodeCapabilitySettled?.(legacy);
+        }
       }
     }
     if (receipt.outcome !== "failed" && !matchesCurrentBundle) {
@@ -959,25 +827,22 @@ export function createCapabilityProvisioningController(opts: {
       return;
     }
     if (receipt.outcome !== "failed" && ids.size === 0) {
-      if (matchesCurrentBundle) {
-        // Matching successor admission is negative evidence for removals
-        // even when the overlay projected no positive capability IDs.
-        row.records = settleNegativeAdmission(row.records);
-      }
+      if (matchesCurrentBundle) row.records = settleNegativeAdmission(row.records);
       persist();
       return;
     }
     const materializedKey = provisioningTargetKey(row.target);
     statuses = statuses.filter((item) => item === row || provisioningTargetKey(item.target) !== materializedKey);
-    if (receipt.outcome !== "failed" && matchesCurrentBundle) {
-      row.records = settleNegativeAdmission(row.records);
-    }
+    if (receipt.outcome !== "failed" && matchesCurrentBundle) row.records = settleNegativeAdmission(row.records);
     row.records = row.records.flatMap((record) => {
-      if (receipt.outcome !== "failed" && matchesCurrentBundle) {
-        if (record.status === "pending-restart" && RESTART_KINDS.has(record.kind) && ids.size && !ids.has(record.capabilityId)) {
-          return [];
-        }
-      }
+      if (
+        receipt.outcome !== "failed"
+        && matchesCurrentBundle
+        && record.status === "pending-restart"
+        && restartSensitive(record)
+        && ids.size
+        && !ids.has(record.capabilityId)
+      ) return [];
       if (ids.size && !ids.has(record.capabilityId)) return [record];
       if (record.status === "unsupported" || record.status === "failed") return [record];
       if (receipt.outcome === "failed") {
@@ -1006,10 +871,7 @@ export function createCapabilityProvisioningController(opts: {
     harnessId?: string,
   ): boolean => {
     if (harnessId && row.harnessId && row.harnessId !== harnessId) return false;
-    if (context.sessionId) {
-      return row.spaceId === context.spaceId && row.sessionId === context.sessionId;
-    }
-    return false;
+    return Boolean(context.sessionId && row.spaceId === context.spaceId && row.sessionId === context.sessionId);
   };
 
   const matchesPhysicalRelease = (
@@ -1018,10 +880,7 @@ export function createCapabilityProvisioningController(opts: {
     harnessId?: string,
   ): boolean => {
     if (harnessId && row.harnessId && row.harnessId !== harnessId) return false;
-    return row.spaceId === context.spaceId
-      && row.projectId === context.projectId
-      && row.cwd === context.cwd
-      && !row.sessionId;
+    return row.spaceId === context.spaceId && row.projectId === context.projectId && row.cwd === context.cwd && !row.sessionId;
   };
 
   const release = (context: HarnessContext, harnessId?: string): void => {
@@ -1036,27 +895,19 @@ export function createCapabilityProvisioningController(opts: {
       if (sessionRelease) {
         if (entry.lifetime === "physical-runtime") continue;
         if (!matchesSessionRelease({ ...entry.context, harnessId: entry.harnessId }, context, harnessId)) continue;
-      } else if (!matchesPhysicalRelease({ ...entry.context, harnessId: entry.harnessId }, context, harnessId)) {
-        continue;
-      }
+      } else if (!matchesPhysicalRelease({ ...entry.context, harnessId: entry.harnessId }, context, harnessId)) continue;
       dropped.push({ harnessId: entry.harnessId, lifetime: entry.lifetime, cleanup: entry.cleanup });
       remembered.delete(key);
     }
     const providersById = new Map(opts.harnesses.providers().map((provider) => [provider.descriptor.id, provider]));
     for (const droppedEntry of dropped) {
-      const lifetime = droppedEntry.lifetime;
-      const releaseContext = lifetime === "physical-runtime"
-        ? { ...context, sessionId: undefined }
-        : context;
-      const targetKey = logicalTargetKey(releaseContext, droppedEntry.harnessId, lifetime);
+      const releaseContext = droppedEntry.lifetime === "physical-runtime" ? { ...context, sessionId: undefined } : context;
+      const targetKey = logicalTargetKey(releaseContext, droppedEntry.harnessId, droppedEntry.lifetime);
       releaseLeases(targetKey);
       const keepRevisions = keepRevisionsFor(targetKey);
       try {
-        if (droppedEntry.cleanup) {
-          droppedEntry.cleanup(releaseContext, keepRevisions);
-        } else {
-          providersById.get(droppedEntry.harnessId)?.provisioner?.release?.(releaseContext, { keepRevisions });
-        }
+        if (droppedEntry.cleanup) droppedEntry.cleanup(releaseContext, keepRevisions);
+        else providersById.get(droppedEntry.harnessId)?.provisioner?.release?.(releaseContext, { keepRevisions });
       } catch {
         // Overlay cleanup must not fail session delete.
       }
@@ -1074,10 +925,7 @@ export function createCapabilityProvisioningController(opts: {
     persist();
   };
 
-  const instructionState = async (
-    context: HarnessContext,
-    harnessId?: string,
-  ): Promise<InstructionProvisionState> => {
+  const instructionState = async (context: HarnessContext, harnessId?: string): Promise<InstructionProvisionState> => {
     const desiredRevision = capabilityRevision(await opts.behavior.effectiveText());
     const rows = statuses.filter((row) => {
       if (row.target.spaceId !== context.spaceId || row.target.projectId !== context.projectId) return false;
@@ -1096,15 +944,11 @@ export function createCapabilityProvisioningController(opts: {
       && record.desiredRevision === desiredRevision;
     return {
       provisioned: Boolean(live),
-      contributions: records
-        .filter((row) =>
-          row.kind === "instruction"
-          && (row.status === "applied" || row.status === "unverifiable")
-          && row.appliedRevision === desiredRevision)
-        .map((row) => row.capabilityId),
-      ...(live && (record.status === "applied" || record.status === "unverifiable")
-        ? { verification: record.status }
-        : {}),
+      contributions: records.filter((row) =>
+        row.kind === "instruction"
+        && (row.status === "applied" || row.status === "unverifiable")
+        && row.appliedRevision === desiredRevision).map((row) => row.capabilityId),
+      ...(live && (record.status === "applied" || record.status === "unverifiable") ? { verification: record.status } : {}),
     };
   };
 
@@ -1117,14 +961,10 @@ export function createCapabilityProvisioningController(opts: {
       if (!filter(entry)) continue;
       const provider = live.get(entry.harnessId);
       if (!provider) {
-        const releaseContext = entry.lifetime === "physical-runtime"
-          ? { ...entry.context, sessionId: undefined }
-          : entry.context;
+        const releaseContext = entry.lifetime === "physical-runtime" ? { ...entry.context, sessionId: undefined } : entry.context;
         const targetKey = logicalTargetKey(releaseContext, entry.harnessId, entry.lifetime);
         releaseLeases(targetKey);
-        try {
-          entry.cleanup?.(releaseContext, keepRevisionsFor(targetKey));
-        } catch { /* provider is already gone */ }
+        try { entry.cleanup?.(releaseContext, keepRevisionsFor(targetKey)); } catch { /* provider is already gone */ }
         remembered.delete(key);
         statuses = statuses.filter((row) => row.target.harnessId !== entry.harnessId
           || row.target.spaceId !== entry.context.spaceId
@@ -1142,11 +982,8 @@ export function createCapabilityProvisioningController(opts: {
   return {
     reconcile,
     async reconcileAll(context) {
-      const liveIds = opts.harnesses.providers();
       const out: HarnessCapabilityStatusDto[] = [];
-      for (const provider of liveIds) {
-        out.push(await reconcile(provider, context));
-      }
+      for (const provider of opts.harnesses.providers()) out.push(await reconcile(provider, context));
       const seen = new Set(out.map((row) => `${row.harnessId}:${row.target?.spaceId}:${row.target?.projectId}:${row.target?.cwd}:${row.target?.sessionId ?? ""}`));
       const extra = await reconcileRemembered((entry) => {
         if (entry.context.spaceId !== context.spaceId) return false;
@@ -1166,10 +1003,8 @@ export function createCapabilityProvisioningController(opts: {
         .filter((provider) => !harnessId || provider.descriptor.id === harnessId)
         .map((provider) => {
           const row = statuses.find((item) => {
-            if (item.target.spaceId !== context.spaceId) return false;
-            if (item.target.harnessId !== provider.descriptor.id) return false;
-            if (item.target.projectId !== context.projectId) return false;
-            if (item.target.cwd !== context.cwd) return false;
+            if (item.target.spaceId !== context.spaceId || item.target.harnessId !== provider.descriptor.id
+              || item.target.projectId !== context.projectId || item.target.cwd !== context.cwd) return false;
             const lifetime = [...remembered.values()].find((entry) => entry.harnessId === provider.descriptor.id)?.lifetime
               ?? (item.target.sessionId ? "session" : "physical-runtime");
             if (lifetime === "physical-runtime") return !item.target.sessionId;
