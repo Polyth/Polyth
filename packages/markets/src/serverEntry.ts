@@ -7,6 +7,7 @@ import {
 import { registerDefaultMarketProviders } from "./defaultProviders.ts";
 import { createMarketsService, type MarketsService } from "./service.ts";
 import type { MarketRange } from "./types.ts";
+import { loadWatchlists, saveWatchlists } from "./watchlists.ts";
 
 export const marketsServiceKey = serverServiceKey<MarketsService>("markets");
 
@@ -17,9 +18,32 @@ const badRequest = (json: (status: number, value: unknown) => void, message: str
   return true;
 };
 
-export function marketsRoutes(markets: MarketsService): NonNullable<ServerPackage["routes"]> {
-  return async ({ path, method, url, json }) => {
-    if (method !== "GET" || !path.startsWith("/api/markets")) return false;
+export function marketsRoutes(
+  host: Pick<ServerPackageHost, "spaceStorage">,
+  markets: MarketsService,
+): NonNullable<ServerPackage["routes"]> {
+  return async ({ path, method, url, body, json, space }) => {
+    if (!path.startsWith("/api/markets")) return false;
+
+    if (path === "/api/markets/watchlists") {
+      const storage = host.spaceStorage(space);
+      if (method === "GET") {
+        json(200, await loadWatchlists(storage));
+        return true;
+      }
+      if (method === "PUT") {
+        try {
+          json(200, await saveWatchlists(storage, await body()));
+        } catch (cause) {
+          if ((cause as { code?: string }).code === "invalid-input") return badRequest(json, errorMessage(cause));
+          throw cause;
+        }
+        return true;
+      }
+      return false;
+    }
+
+    if (method !== "GET") return false;
 
     if (path === "/api/markets/providers") {
       json(200, { providers: markets.providers.healthSnapshot() });
@@ -76,7 +100,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   registerDefaultMarketProviders(markets);
   host.services.provide(marketsServiceKey, markets);
   return {
-    routes: marketsRoutes(markets),
+    routes: marketsRoutes(host, markets),
     remoteAccess: localOnlyRemoteAccess(["markets"]),
   };
 }

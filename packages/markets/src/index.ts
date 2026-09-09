@@ -34,3 +34,11 @@ export type {
   MarketRange,
   MarketSearchResult,
 } from "./types.ts";
+export {
+  DEFAULT_WATCHLISTS,
+  loadWatchlists,
+  parseWatchlists,
+  saveWatchlists,
+  type MarketWatchlist,
+  type MarketWatchlists,
+} from "./watchlists.ts";
