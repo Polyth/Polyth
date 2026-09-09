@@ -8,6 +8,7 @@ import { exposeSurfaces } from "./surfaces.ts";
 import { exposeCapabilities } from "./capabilities.ts";
 import { installShell } from "./shell.ts";
 import { installCommandSlotBridge } from "./commandBridge.ts";
+import { installNativeConnectionCommands } from "./nativeConnections.ts";
 import { applySettingsToDom } from "./settings.ts";
 import { applyUiSettings } from "./uiPrefs.ts";
 import { setNativeKeyboardInset, startMobileViewport } from "./mobileViewport.ts";
@@ -88,16 +89,13 @@ installNativeMobileIntegration({
     );
   },
   openDeepLink: openNativeAppPath,
-  openPairingLink: () => {
-    // Pairing links are retained in the mobile pending-pair store for the
-    // connection screen. The connected app does not start pairing itself.
-  },
   reconnect: reconnectSync,
   setKeyboardInset: setNativeKeyboardInset,
 });
 // Palette commands + keyboard shortcuts: one install, synced with the
 // capability registry from then on (UX-PERSONAS: search sees every tool).
 installShell();
+installNativeConnectionCommands();
 installCommandSlotBridge();
 
 // F16: init() loads REST data and opens /ws — it must not run until the
