@@ -14,7 +14,11 @@ import type {
 import { REMOTE_CAPABILITY, isLocalUiPrincipal } from "@polyth/contracts";
 import type { BrowserFrame, BrowserService } from "@polyth/browser";
 import type { ChatWorkspaceFrameBus, ChatWorkspaceFrame, ChatWorkspaceTabEvent } from "@polyth/contracts";
-import type { DictationService } from "@polyth/dictation";
+import {
+  decodeDictationAudioFrame,
+  isDictationAudioFrame,
+  type DictationService,
+} from "@polyth/dictation";
 import type { Broadcaster } from "./sessions.ts";
 import type { SpaceGateway } from "./spaces.ts";
 import { parseSpaceCookie } from "./spaces.ts";
@@ -319,17 +323,31 @@ export function createWsGateway(
     });
     ws.on("message", async (raw) => {
       if (closed) return;
+      const data = Array.isArray(raw) ? Buffer.concat(raw) : raw;
+      let audioFrame: ReturnType<typeof decodeDictationAudioFrame> | null = null;
       let msg: {
         type?: string; sessionId?: string; afterSeq?: number; projectId?: string;
         browserSessionId?: string; afterRevision?: number;
         tabId?: string; visible?: boolean; quality?: number;
         dictationId?: string; seq?: number; pcm?: string;
-      };
-      try { msg = JSON.parse(String(raw)); } catch { return; }
+      } = {};
+
+      if (isDictationAudioFrame(data)) {
+        try {
+          audioFrame = decodeDictationAudioFrame(data);
+        } catch (error) {
+          const failure = error as Error & { code?: string };
+          send(ws, { type: "dictation/error", code: failure.code ?? "protocol_error", message: failure.message });
+          return;
+        }
+      } else {
+        try { msg = JSON.parse(String(data)); } catch { return; }
+      }
+
       // Audio chunks are cheap in-memory pushes and stream continuously, so
       // they get their own (higher) rate budget; everything else keeps the
       // strict cap that protects gap-fill DB reads.
-      const isAudio = msg.type === "dictation/audio";
+      const isAudio = audioFrame !== null || msg.type === "dictation/audio";
       const now = Date.now();
       if (now - sub.windowStart >= 1000) {
         sub.windowStart = now;
@@ -349,6 +367,55 @@ export function createWsGateway(
           return;
         }
       }
+
+      const pushDictation = async (id: string, seq: number, pcm: Uint8Array) => {
+        if (!dictation || !requireCap(ws, sub, REMOTE_CAPABILITY.dictationUse)) return;
+        try {
+          const r = await dictation.push(id, seq, pcm);
+          if (closed) return;
+          if (!requireCap(ws, sub, REMOTE_CAPABILITY.dictationUse)) return;
+          send(ws, {
+            type: "dictation/ack", dictationId: id, seq: r.ack,
+            duplicate: r.duplicate, ...(r.buffered ? { buffered: true } : {}),
+          });
+          if (r.transcript) {
+            send(ws, {
+              type: "dictation/transcript", dictationId: id,
+              revision: r.transcript.revision, text: r.transcript.text, final: r.transcript.final,
+            });
+          }
+        } catch (error) {
+          if (!requireCap(ws, sub, REMOTE_CAPABILITY.dictationUse)) return;
+          const failure = error as Error & { code?: string };
+          send(ws, {
+            type: "dictation/error", dictationId: id,
+            code: failure.code ?? "internal", message: failure.message,
+          });
+        }
+      };
+
+      if (audioFrame) {
+        if (!dictation || !requireCap(ws, sub, REMOTE_CAPABILITY.dictationUse)) return;
+        const current = dictation.get(audioFrame.dictationId);
+        if (!current) {
+          send(ws, { type: "dictation/error", dictationId: audioFrame.dictationId, code: "not-found" });
+          return;
+        }
+        if (
+          audioFrame.format !== current.format.encoding
+          || audioFrame.sampleRate !== current.format.sampleRate
+          || audioFrame.channels !== current.format.channels
+        ) {
+          send(ws, {
+            type: "dictation/error", dictationId: audioFrame.dictationId, code: "audio_format_error",
+            message: `expected ${current.format.encoding}/${current.format.sampleRate}/${current.format.channels}`,
+          });
+          return;
+        }
+        await pushDictation(audioFrame.dictationId, audioFrame.seq, audioFrame.payload);
+        return;
+      }
+
       if (msg.type === "dictation/start" && dictation) {
         if (!requireCap(ws, sub, REMOTE_CAPABILITY.dictationUse)) return;
         const dto = msg.dictationId ? dictation.get(msg.dictationId) : null;
@@ -356,26 +423,11 @@ export function createWsGateway(
         else send(ws, { type: "dictation/state", dictationId: dto.id, session: dto });
         return;
       }
-      if (isAudio && dictation) {
-        if (!requireCap(ws, sub, REMOTE_CAPABILITY.dictationUse)) return;
+      // Backward compatibility for clients predating binary protocol v1.
+      if (msg.type === "dictation/audio" && dictation) {
         const id = msg.dictationId ?? "";
-        try {
-          const pcm = new Uint8Array(Buffer.from(String(msg.pcm ?? ""), "base64"));
-          const r = await dictation.push(id, Number(msg.seq), pcm);
-          if (closed) return;
-          if (!requireCap(ws, sub, REMOTE_CAPABILITY.dictationUse)) return;
-          send(ws, { type: "dictation/ack", dictationId: id, seq: r.ack, duplicate: r.duplicate });
-          if (r.transcript) {
-            send(ws, {
-              type: "dictation/transcript", dictationId: id,
-              revision: r.transcript.revision, text: r.transcript.text, final: r.transcript.final,
-            });
-          }
-        } catch (err) {
-          if (!requireCap(ws, sub, REMOTE_CAPABILITY.dictationUse)) return;
-          const e = err as Error & { code?: string };
-          send(ws, { type: "dictation/error", dictationId: id, code: e.code ?? "internal", message: e.message });
-        }
+        const pcm = new Uint8Array(Buffer.from(String(msg.pcm ?? ""), "base64"));
+        await pushDictation(id, Number(msg.seq), pcm);
         return;
       }
       if (msg.type === "chat-workspace/subscribe" && chatWorkspace) {
