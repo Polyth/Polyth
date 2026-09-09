@@ -122,8 +122,27 @@ interface SpaceMcpState {
 }
 const err = (code: string, message: string) => Object.assign(new Error(message), { code });
 const sameScope = (row: { projectId?: string }, projectId?: string): boolean => row.projectId === projectId;
-const inScope = (row: { projectId?: string }, projectId?: string): boolean =>
-  row.projectId === undefined || (projectId !== undefined && row.projectId === projectId);
+
+const secretKeys = (transport: McpTransport): string[] =>
+  transport.kind === "stdio" ? transport.envKeys : transport.headersSecretRefs;
+
+const validateSecrets = (transport: McpTransport, secrets?: Record<string, string>): void => {
+  if (!secrets) return;
+  const allowed = new Set(secretKeys(transport));
+  for (const key of Object.keys(secrets)) {
+    if (!allowed.has(key)) {
+      throw err("invalid-input", `secret "${key}" is not referenced by the MCP transport`);
+    }
+  }
+};
+
+const retainReferencedSecrets = (
+  transport: McpTransport,
+  secrets: Record<string, string>,
+): Record<string, string> => Object.fromEntries(
+  secretKeys(transport).flatMap((key) =>
+    Object.prototype.hasOwnProperty.call(secrets, key) ? [[key, secrets[key]!]] : []),
+);
 
 const validateTransport = (t: McpTransport): void => {
   if (t?.kind === "stdio") {
@@ -243,6 +262,26 @@ export function createMcpConfigService(opts: {
     }
     return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
   };
+  const effectiveTombstones = (
+    state: SpaceMcpState,
+    projectId: string | undefined,
+    activeNames: ReadonlySet<string>,
+  ): ScopedTombstone[] => {
+    const byName = new Map<string, ScopedTombstone>();
+    for (const tombstone of state.tombstones) {
+      if (tombstone.projectId === undefined && !activeNames.has(tombstone.name)) {
+        byName.set(tombstone.name, tombstone);
+      }
+    }
+    if (projectId !== undefined) {
+      for (const tombstone of state.tombstones) {
+        if (tombstone.projectId === projectId && !activeNames.has(tombstone.name)) {
+          byName.set(tombstone.name, tombstone);
+        }
+      }
+    }
+    return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+  };
   const commit = async <T>(space: SpaceContext, projectId: string | undefined, mutate: (state: SpaceMcpState) => T): Promise<T> => {
     assertScope(space, projectId, true);
     const next = structuredClone(load(space));
@@ -276,12 +315,15 @@ export function createMcpConfigService(opts: {
       const state = load(space);
       const rows = effective(state, projectId);
       const names = new Set(rows.map((row) => row.name));
-      const tombstones = state.tombstones.filter((t) => inScope(t, projectId) && !names.has(t.name));
-      const secrets = new Map(rows.map((row) => [row.id, { ...(state.secrets[row.id] ?? {}) }]));
+      const tombstones = effectiveTombstones(state, projectId, names);
+      const secrets = new Map(rows.map((row) => [
+        row.id,
+        retainReferencedSecrets(row.transport, state.secrets[row.id] ?? {}),
+      ]));
       return {
         servers: rows.map(({ status: _status, lastError: _lastError, ...row }) => structuredClone(row)),
-        retiredNames: [...new Set(tombstones.map((t) => t.name))].sort(),
-        tombstones: [...new Map(tombstones.map((t) => [t.name, { ...t }])).values()],
+        retiredNames: tombstones.map((t) => t.name),
+        tombstones: tombstones.map((t) => ({ ...t })),
         secretsFor: (id) => ({ ...secrets.get(id) }),
       };
     },
@@ -289,6 +331,7 @@ export function createMcpConfigService(opts: {
       assertScope(space, projectId, true);
       const name = validateName(input.name);
       validateTransport(input.transport);
+      validateSecrets(input.transport, input.secrets);
       const state = load(space);
       if (input.origin === "backend-import" && state.tombstones.some((t) => t.name === name && sameScope(t, projectId))) {
         throw err("conflict", `MCP server "${name}" was deleted and must not be re-imported from backend config`);
@@ -303,7 +346,8 @@ export function createMcpConfigService(opts: {
       const add = (next: SpaceMcpState): McpInstallationDto => {
         next.tombstones = next.tombstones.filter((t) => t.name !== name || !sameScope(t, projectId));
         next.servers.push(row);
-        if (input.secrets) next.secrets[row.id] = { ...input.secrets };
+        const secrets = retainReferencedSecrets(row.transport, input.secrets ?? {});
+        if (Object.keys(secrets).length) next.secrets[row.id] = secrets;
         return toDto(row);
       };
       if (input.origin === "backend-import") {
@@ -321,7 +365,9 @@ export function createMcpConfigService(opts: {
       if (row.revision !== expectedRevision) throw err("conflict", "entry changed since you loaded it");
       const name = patch.name === undefined ? row.name : validateName(patch.name);
       if (state.servers.some((s) => s.id !== id && s.name === name && sameScope(s, projectId))) throw err("conflict", `an MCP server named "${name}" already exists in this scope`);
+      const transport = patch.transport === undefined ? row.transport : patch.transport;
       if (patch.transport !== undefined) validateTransport(patch.transport);
+      validateSecrets(transport, patch.secrets);
       return commit(space, projectId, (next) => {
         const current = requireRow(next, id, projectId);
         if (name !== current.name) {
@@ -331,7 +377,12 @@ export function createMcpConfigService(opts: {
         }
         if (patch.transport !== undefined) current.transport = structuredClone(patch.transport);
         if (patch.enabled !== undefined) { current.enabled = patch.enabled; current.status = patch.enabled ? "starting" : "disabled"; }
-        if (patch.secrets) next.secrets[id] = { ...(next.secrets[id] ?? {}), ...patch.secrets };
+        const secrets = retainReferencedSecrets(current.transport, {
+          ...(next.secrets[id] ?? {}),
+          ...(patch.secrets ?? {}),
+        });
+        if (Object.keys(secrets).length) next.secrets[id] = secrets;
+        else delete next.secrets[id];
         current.revision += 1;
         return toDto(current);
       });
