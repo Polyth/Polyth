@@ -174,13 +174,22 @@ const boundedReason = (raw: unknown): string => {
   return s.length > 120 ? `${s.slice(0, 117)}…` : s;
 };
 
+const boundedPartial = (text: string): string => {
+  const value = text.trim().replace(/\s+/g, " ");
+  if (value.length <= 180) return value;
+  return `…${value.slice(-179)}`;
+};
+
 function MicButton() {
   const prefs = useVoicePrefs();
   const [phase, setPhase] = useState<MicPhase>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [partial, setPartial] = useState("");
   const [capability, setCapability] = useState<{ available: boolean; engine?: string; reason?: string } | null>(null);
   const recRef = useRef<SpeechRecognitionLike | null>(null);
   const streamRef = useRef<StreamingDictation | null>(null);
+  const browserTranscriptRef = useRef("");
+  const browserCommitRef = useRef(false);
   const support = speechSupport(typeof window !== "undefined" ? window : undefined);
   const serverStt = prefs.sttEngine === "server";
   const directElevenLabs = serverStt
@@ -188,6 +197,7 @@ function MicButton() {
     && prefs.dictationTransport === "direct-browser";
 
   useEffect(() => () => {
+    browserCommitRef.current = false;
     recRef.current?.abort();
     streamRef.current?.cancel();
   }, []);
@@ -232,39 +242,74 @@ function MicButton() {
       ? { available: false, reason: tr("voice.dictationUnsupported"), settings: true }
     : { available: true };
 
-  const status = error !== null ? tr("voice.dictationFailedValue", { error })
+  const lifecycleStatus = error !== null ? tr("voice.dictationFailedValue", { error })
     : phase === "starting" ? tr("voice.startingMicrophone")
     : phase === "listening" ? tr("voice.listening")
     : phase === "transcribing" ? tr("voice.transcribing")
     : availability.available ? null
     : availability.reason ?? null;
+  const status = phase === "listening" && partial.trim()
+    ? boundedPartial(partial)
+    : lifecycleStatus;
 
+  // Do not announce every changing recognition revision. Accessibility gets
+  // lifecycle transitions while the visual status can update at provider rate.
   const lastAnnounced = useRef<string | null>(null);
   useEffect(() => {
-    if (status && status !== lastAnnounced.current) announce(status);
-    lastAnnounced.current = status;
-  }, [status]);
+    if (lifecycleStatus && lifecycleStatus !== lastAnnounced.current) announce(lifecycleStatus);
+    lastAnnounced.current = lifecycleStatus;
+  }, [lifecycleStatus]);
 
   const fail = (raw: unknown) => {
+    browserCommitRef.current = false;
+    browserTranscriptRef.current = "";
+    const rec = recRef.current;
+    recRef.current = null;
+    try { rec?.abort(); } catch { /* already ended */ }
+    const stream = streamRef.current;
+    streamRef.current = null;
+    stream?.cancel();
+    setPartial("");
     setPhase("idle");
     setError(boundedReason(raw));
   };
 
-  const stop = () => {
-    recRef.current?.stop();
+  const cancel = () => {
+    browserCommitRef.current = false;
+    browserTranscriptRef.current = "";
+    const rec = recRef.current;
     recRef.current = null;
+    try { rec?.abort(); } catch { /* already ended */ }
+    const stream = streamRef.current;
+    streamRef.current = null;
+    stream?.cancel();
+    setPartial("");
+    setError(null);
+    setPhase("idle");
+  };
+
+  const stop = () => {
+    const rec = recRef.current;
+    if (rec) {
+      setPhase("transcribing");
+      try { rec.stop(); } catch (error) { fail(error); }
+      return;
+    }
+
     const stream = streamRef.current;
     streamRef.current = null;
     if (stream) {
       setPhase("transcribing");
       void stream.stop()
         .then((text) => {
+          setPartial("");
           setPhase("idle");
           if (text.trim()) requestComposerInsert(text.trim());
         })
         .catch(fail);
       return;
     }
+    setPartial("");
     setPhase("idle");
   };
 
@@ -277,21 +322,35 @@ function MicButton() {
     const rec = new Ctor();
     rec.lang = prefs.lang === "auto" ? navigator.language : prefs.lang;
     rec.continuous = true;
-    rec.interimResults = false;
-    let transcript = "";
+    rec.interimResults = true;
+    browserTranscriptRef.current = "";
+    // Natural browser end is treated as a completed recording. Explicit
+    // Cancel flips this false first, so the pre-existing composer draft stays
+    // byte-for-byte untouched.
+    browserCommitRef.current = true;
     rec.onresult = (e) => {
+      let interim = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i]!;
-        if (r.isFinal) {
-          const merged = mergeTranscript(transcript, r[0].transcript);
-          const chunk = merged.slice(transcript.length).trim();
-          transcript = merged;
-          if (chunk) requestComposerInsert(chunk);
-        }
+        if (r.isFinal) browserTranscriptRef.current = mergeTranscript(browserTranscriptRef.current, r[0].transcript);
+        else interim = mergeTranscript(interim, r[0].transcript);
       }
+      setPartial(mergeTranscript(browserTranscriptRef.current, interim));
     };
-    rec.onerror = (e) => fail(e.error ?? tr("voice.microphoneError"));
-    rec.onend = () => setPhase((p) => (p === "listening" ? "idle" : p));
+    rec.onerror = (e) => {
+      browserCommitRef.current = false;
+      fail(e.error ?? tr("voice.microphoneError"));
+    };
+    rec.onend = () => {
+      const commit = browserCommitRef.current;
+      const text = browserTranscriptRef.current.trim();
+      browserCommitRef.current = false;
+      browserTranscriptRef.current = "";
+      recRef.current = null;
+      setPartial("");
+      setPhase("idle");
+      if (commit && text) requestComposerInsert(text);
+    };
     recRef.current = rec;
     rec.start();
     setPhase("listening");
@@ -302,17 +361,20 @@ function MicButton() {
     try {
       const language = prefs.lang || "auto";
       const context = prefs.contextInjection ? currentDictationContext(language) : { language };
+      const onPartial = (text: string) => setPartial(text);
       streamRef.current = directElevenLabs
         ? await startDirectElevenLabsDictation({
             model: prefs.dictationModel || "scribe_v2_realtime",
             language,
             context,
+            onPartial,
             onError: fail,
           })
         : await startStreamingDictation({
             ...(getState().activeSessionId ? { sessionId: getState().activeSessionId! } : {}),
             language,
             ...(prefs.contextInjection ? { context } : {}),
+            onPartial,
             onError: fail,
           });
       setPhase("listening");
@@ -324,6 +386,7 @@ function MicButton() {
 
   const start = () => {
     setError(null);
+    setPartial("");
     if (serverStt) {
       if (capability?.available) void startProvider();
       return;
@@ -348,6 +411,9 @@ function MicButton() {
         onClick={() => (phase === "listening" ? stop() : start())}
       />
       {status && <span className="mic-status">{status}</span>}
+      {phase === "listening" && (
+        <Button size="sm" className="mic-cancel" onClick={cancel}>{tr("common.cancel")}</Button>
+      )}
       {error !== null && (
         <Button size="sm" className="mic-retry" onClick={start}>
           {tr("voice.tryAgain")}</Button>
