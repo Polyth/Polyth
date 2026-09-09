@@ -442,6 +442,17 @@ async fn dispatch(
                     Instant::now(),
                 )
                 .map_err(|e| e.code())?;
+            let numeric = match conn::create_code(
+                &host_endpoint,
+                &invitation.pairing_id,
+                Instant::now(),
+            ) {
+                Ok(code) => code,
+                Err(error) => {
+                    let _ = state.pairing.cancel(&invitation.pairing_id);
+                    return Err(error.code());
+                }
+            };
             let qr = ticket_qr_modules(&invitation.ticket).unwrap_or_default();
             let _ = state
                 .events
@@ -456,6 +467,8 @@ async fn dispatch(
                 "ticket": invitation.ticket,
                 "qrPayload": invitation.ticket,
                 "qrModules": qr,
+                "numericCode": format!("{} {}", &numeric.code[..3], &numeric.code[3..]),
+                "numericExpiresAt": numeric.expires_at,
             }))
         }
         "pairing.get" => {
@@ -504,6 +517,7 @@ async fn dispatch(
                 .and_then(Value::as_str)
                 .ok_or("pairing-invalid")?;
             state.pairing.reject(id).map_err(|e| e.code())?;
+            conn::cancel_code(id);
             let _ = state.events.send(
                 json!({"type":"tunnel/pairing-finished","pairingId": id, "state":"rejected"}),
             );
@@ -516,6 +530,7 @@ async fn dispatch(
                 .and_then(Value::as_str)
                 .ok_or("pairing-invalid")?;
             state.pairing.cancel(id).map_err(|e| e.code())?;
+            conn::cancel_code(id);
             Ok(json!({ "ok": true }))
         }
         "pairing.finish" => {
@@ -525,6 +540,7 @@ async fn dispatch(
                 .and_then(Value::as_str)
                 .ok_or("pairing-invalid")?;
             state.pairing.mark_committed(id).map_err(|e| e.code())?;
+            conn::cancel_code(id);
             let _ = state.events.send(
                 json!({"type":"tunnel/pairing-finished","pairingId": id, "state":"committed"}),
             );
@@ -537,6 +553,7 @@ async fn dispatch(
                 .and_then(Value::as_str)
                 .ok_or("pairing-invalid")?;
             let _ = state.pairing.mark_storage_failed(id);
+            conn::cancel_code(id);
             Ok(json!({ "ok": true }))
         }
         "connection.close_device" => {
@@ -702,6 +719,7 @@ where
         .collect();
     guard.identity = staged;
     guard.pairing.invalidate_all();
+    conn::invalidate_codes();
     for trusted in guard.trust.values_mut() {
         trusted.revoked = true;
     }
