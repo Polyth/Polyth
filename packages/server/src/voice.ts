@@ -4,14 +4,37 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { atomicWriteSync } from "@polyth/plugins";
-import {
-  DEFAULT_LOCAL_MODEL_ID,
-  isCloudDictationProvider,
-  type DictationLatencyPreference,
-  type DictationProcessingPolicy,
-  type DictationProviderId,
-  type DictationTransport,
-} from "@polyth/dictation";
+
+// Persistence DTOs intentionally stay package-neutral. Feature packages may
+// structurally narrow these values, but the core server must not depend on a
+// non-core package such as @polyth/dictation.
+type DictationProviderId =
+  | "elevenlabs"
+  | "wispr"
+  | "openai-live"
+  | "openai-transcribe"
+  | "deepgram"
+  | "speechmatics"
+  | "openai-compatible"
+  | "local-nemotron"
+  | "local-parakeet"
+  | "web-speech";
+type DictationTransport = "auto" | "direct-browser" | "server-proxy" | "local-worker";
+type DictationLatencyPreference = "lowest" | "balanced" | "quality";
+type DictationProcessingPolicy =
+  | "local-only"
+  | "prefer-local"
+  | "prefer-cloud"
+  | "auto-fallback"
+  | "browser-fallback";
+
+const DEFAULT_LOCAL_MODEL_ID = "nemotron-3.5-streaming-0.6b-80ms";
+const CLOUD_DICTATION_PROVIDERS = new Set<DictationProviderId>([
+  "elevenlabs", "wispr", "openai-live", "openai-transcribe", "deepgram",
+  "speechmatics", "openai-compatible",
+]);
+const isCloudDictationProvider = (provider: DictationProviderId): boolean =>
+  CLOUD_DICTATION_PROVIDERS.has(provider);
 
 export interface VoiceSttSettings {
   /** Legacy/OpenAI-compatible batch STT endpoint. */
