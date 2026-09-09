@@ -436,6 +436,46 @@ public final class PolythLinkPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void beginNumericPairing(PluginCall call) {
+        if (!trusted(call)) return;
+        String hostKey = require(call, "hostEndpointId", "pairing-invalid");
+        String code = require(call, "code", "pairing-invalid");
+        if (hostKey == null || code == null) return;
+        String label = call.getString("label", "This phone");
+        JSArray addresses = call.getArray("addresses", new JSArray());
+        Integer port = call.getInt("port");
+        executor.execute(() -> {
+            byte[] secret = null;
+            boolean created = false;
+            try {
+                secret = secureStore.load(hostKey);
+                created = secret == null;
+                if (secret == null) {
+                    secret = PolythLinkRust.generateIdentitySecret();
+                    if (secret == null || secret.length != SECRET_LENGTH) throw new LinkFailure("pairing-storage-failed");
+                    secureStore.store(hostKey, secret);
+                }
+                JSObject params = new JSObject()
+                    .put("hostEndpointId", hostKey)
+                    .put("addresses", addresses)
+                    .put("code", code)
+                    .put("label", label);
+                if (port != null) params.put("port", port);
+                JSONObject result = invokeObject("pairing.begin_numeric", params, secret);
+                String attemptId = result.optString("attemptId", "");
+                if (attemptId.isEmpty()) throw new LinkFailure("transport-protocol-error");
+                attempts.put(attemptId, new PairingSecretRecord(hostKey, created));
+                call.resolve(JSObject.fromJSONObject(result));
+            } catch (Exception error) {
+                if (created) try { secureStore.delete(hostKey); } catch (Exception ignored) {}
+                reject(call, error);
+            } finally {
+                if (secret != null) Arrays.fill(secret, (byte) 0);
+            }
+        });
+    }
+
+    @PluginMethod
     public void confirmPairing(PluginCall call) {
         if (!trusted(call)) return;
         String attemptId = require(call, "attemptId", "pairing-invalid");
