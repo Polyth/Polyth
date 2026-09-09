@@ -2,11 +2,13 @@
 .pkg-harnesses.pkg-harnesses-picker-tabs { display: grid; gap: var(--space-2); min-width: 0; }
 .pkg-harnesses-picker-tabs-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
 .pkg-harnesses-picker-tabs-head .pkg-harnesses-tablist { flex: 1 1 auto; min-width: 0; }
+.pkg-harnesses-tablist .ui-tab { display: inline-flex; align-items: center; gap: var(--space-1); }
 .pkg-harnesses-timing { display: grid; gap: var(--space-2); padding-block: var(--space-2); }
 .pkg-harnesses-timing-choice-copy { display: grid; min-width: 0; gap: var(--space-1); }
 .pkg-harnesses small { color: var(--muted); font-size: var(--font-meta); font-weight: 400; }
 .pkg-harnesses-timing-choice { height: auto; min-height: var(--tap); justify-content: flex-start; text-align: start; }
 .pkg-harnesses-transition { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); color: var(--muted); font-size: var(--font-meta); }
+.pkg-harnesses-transition > span { display: inline-flex; align-items: center; gap: var(--space-2); }
 .pkg-harnesses-transition-status:empty { display: none; }
 .pkg-harnesses-picker-state { margin: 0; color: var(--muted); font-size: var(--font-meta); }
 .pkg-harnesses-mobile-config { display: grid; gap: var(--space-1); padding-block: var(--space-2); border-block: 1px solid var(--border-soft); }
@@ -16,6 +18,7 @@
 
 .pkg-harnesses.pkg-harnesses-settings { container: harnesses / inline-size; display: grid; gap: var(--space-4); }
 .pkg-harnesses-settings header h2, .pkg-harnesses-settings header p { margin: 0; }
+.pkg-harnesses-settings header h2 { display: flex; align-items: center; gap: var(--space-2); }
 .pkg-harnesses-settings header { display: grid; gap: var(--space-2); }
 .pkg-harnesses-default { display: grid; gap: var(--space-2); padding: var(--space-4); border: 1px solid var(--border-soft); border-radius: var(--radius-card); background: var(--panel); }
 .pkg-harnesses-default > div, .pkg-harnesses-settings-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
@@ -24,7 +27,8 @@
 .pkg-harnesses-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--border-soft); border-radius: var(--radius-card); background: var(--panel); }
 .pkg-harnesses-row.dragging { opacity: .6; }
 .pkg-harnesses-row-main { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; text-align: start; }
-.pkg-harnesses-row-main > span:nth-child(2), .pkg-harnesses-availability > span { display: grid; gap: var(--space-1); min-width: 0; }
+.pkg-harnesses-row-main > span:nth-child(2) { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--space-3); min-width: 0; }
+.pkg-harnesses-row-main > span:nth-child(2) > span, .pkg-harnesses-availability > span { display: grid; gap: var(--space-1); min-width: 0; }
 .pkg-harnesses-drag { color: var(--faint); font-size: var(--font-label); }
 .pkg-harnesses-status { color: var(--muted); font-size: var(--font-meta); }
 .pkg-harnesses-availability { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding-block-start: var(--space-3); border-block-start: 1px solid var(--border-soft); }
@@ -47,7 +51,7 @@
 .pkg-harnesses-switch-marker::before { content: ""; position: absolute; inset: 50% 0 auto; border-block-start: 1px solid var(--border-soft); }
 .pkg-harnesses-switch-marker summary { position: relative; display: flex; justify-content: center; cursor: pointer; list-style: none; }
 .pkg-harnesses-switch-marker summary::-webkit-details-marker { display: none; }
-.pkg-harnesses-switch-marker summary span { padding-inline: var(--space-3); background: var(--bg); }
+.pkg-harnesses-switch-marker summary span { display: inline-flex; align-items: center; gap: var(--space-2); padding-inline: var(--space-3); background: var(--bg); }
 .pkg-harnesses-switch-marker[open] dl { margin: var(--space-3) auto 0; max-width: 520px; padding: var(--space-3); border-radius: var(--radius-card); background: var(--sunken); }
 
 @container harnesses (max-width: 520px) {

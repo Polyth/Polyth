@@ -272,10 +272,29 @@ export function reduceSessionModel(
   return sessionId ? activeModelCache.get(sessionId, events) : EMPTY_MODEL;
 }
 
+export function modelForAutoAccept(model: RenderModel, autoAccept: boolean): RenderModel {
+  if (!autoAccept || !model.permissions.some((permission) => permission.status === "pending")) {
+    return model;
+  }
+  return {
+    ...model,
+    permissions: model.permissions.filter((permission) => permission.status !== "pending"),
+  };
+}
+
 export function useActiveModel(): RenderModel {
   const sessionId = useStore((s) => s.activeSessionId);
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? EMPTY_EVENTS);
-  return useMemo(() => reduceSessionModel(sessionId, events), [sessionId, events]);
+  const autoAccept = useStore((s) =>
+    s.activeSessionId !== null
+    && s.sessions.find((session) => session.id === s.activeSessionId)?.autoAccept === true);
+  return useMemo(() => {
+    const model = reduceSessionModel(sessionId, events);
+    // The server resolver remains authoritative. This projection guard only
+    // prevents an already-hydrated/stale request from flashing while the
+    // durable automatic response is being reconciled after toggle/reconnect.
+    return modelForAutoAccept(model, autoAccept);
+  }, [sessionId, events, autoAccept]);
 }
 
 // ---- project registry actions (UX-ONBOARDING) -----------------------------

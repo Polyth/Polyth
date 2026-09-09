@@ -2102,8 +2102,8 @@ export async function boot(opts: BootOptions = {}) {
     },
     ...(gitService ? { worktrees: gitService.worktrees } : {}),
     ...(terminalService ? { shell: terminalService } : {}),
-    // F18: server-owned per-session auto-accept policy (nearest-parent
-    // resolution for subagents; session-scoped only, never a global default).
+    // Legacy F18 JSON is supplied only for one-way migration. New explicit
+    // choices live with the canonical session projection.
     ...(autoAcceptStore ? { autoAccept: autoAcceptStore } : {}),
     notify: pushNotifier,
     ...(attachmentGuard ? { attachments: attachmentGuard } : {}),

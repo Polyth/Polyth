@@ -60,6 +60,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   );
   host.services.provide(
     serverServiceKey<AutoAcceptStore>("permissions.auto-accept"),
+    // Compatibility reader for pre-projection settings. SessionService moves
+    // each entry into canonical session storage before clearing it here.
     createAutoAcceptStore(join(host.storageDir, "auto-accept.json")),
   );
   return {

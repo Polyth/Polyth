@@ -386,7 +386,7 @@ export function createSessionService(deps: {
     /** Promote draft captures to durable storage when a message is sent. */
     commit?(ids: ReadonlyArray<string>): Promise<void>;
   };
-  /** F18: per-session auto-accept policy store (nearest-parent resolution). */
+  /** Legacy F18 JSON source, retained only to migrate pre-projection settings. */
   autoAccept?: AutoAcceptStore;
   /** F18: human-needed / turn-ended signals for out-of-page delivery (web
    *  push). Fired only when a card actually reaches the UI — auto-accepted
@@ -1886,9 +1886,13 @@ export function createSessionService(deps: {
           sessionId,
           observations,
         });
+        const deferredPermissionEvents: SessionEvent[] = [];
         for (const result of snapshotIngestion.observations) {
           if (result.kind !== "applied") continue;
-          for (const event of result.events) broadcast.event(event);
+          for (const event of result.events) {
+            if (event.type === "permission/requested") deferredPermissionEvents.push(event);
+            else broadcast.event(event);
+          }
         }
         if (
           authoritativeState.value === "idle"
@@ -1935,6 +1939,17 @@ export function createSessionService(deps: {
         facts = await logFacts(sessionId);
         await settleProvenOperationNonapplications(sessionId, snapshot, facts);
         facts = await logFacts(sessionId);
+        // Pull/reconnect observations use the exact same resolver as live
+        // events. First consume native evidence for any uncertain prior
+        // response above; only then may a still-open request be answered.
+        await reconcilePendingPermissionsUnderPolicy(sessionId);
+        facts = await logFacts(sessionId);
+        for (const event of deferredPermissionEvents) {
+          const requestId = (event.data as { requestId?: unknown }).requestId;
+          if (typeof requestId !== "string" || !facts.openPermissions.has(requestId)) continue;
+          broadcast.event(event);
+          deps.notify?.attention(sessionId, "permission", requestId);
+        }
         // Warm-restart recovery: the rebind above only succeeds against the
         // SAME verified owned backend session. When it is demonstrably alive
         // (definite running/idle evidence), lift any turn stranded `unknown` by
@@ -2068,15 +2083,48 @@ export function createSessionService(deps: {
   // ancestor's (subagents/forks carry parentId). The chain is prefetched from
   // projections; resolveAutoAccept is the pure, cycle-guarded core.
   const effectiveAutoAccept = async (sessionId: string): Promise<boolean> => {
-    if (!deps.autoAccept) return false;
     const parents = new Map<string, string | undefined>();
+    const settings = new Map<string, AutoAcceptSetting>();
     let id: string | undefined = sessionId;
     while (id && !parents.has(id) && parents.size < 64) {
       const proj = await store.projection(id);
       parents.set(id, proj?.parentId);
+      settings.set(
+        id,
+        proj?.autoAcceptSetting === "on" || proj?.autoAcceptSetting === "off"
+          ? proj.autoAcceptSetting
+          : deps.autoAccept?.get(id) ?? "inherit",
+      );
       id = proj?.parentId;
     }
-    return resolveAutoAccept(sessionId, (x) => deps.autoAccept!.get(x), (x) => parents.get(x));
+    return resolveAutoAccept(sessionId, (x) => settings.get(x) ?? "inherit", (x) => parents.get(x));
+  };
+
+  type AutomaticPermissionResolution = {
+    reply: "once" | "reject";
+    auto: boolean;
+  };
+
+  /** One provider-neutral decision point for live events, pull reconciliation,
+   *  and reconnect recovery. Harnesses always request through Polyth; they do
+   *  not cache Auto-Approve or select a second native permission policy. */
+  const automaticPermissionResolution = async (
+    sessionId: string,
+    permission: string,
+    patterns: string[],
+  ): Promise<AutomaticPermissionResolution | null> => {
+    const projection = await store.projection(sessionId);
+    const verdict = permissions.evaluate(
+      permission,
+      patterns,
+      projection?.projectId,
+      sessionId,
+    );
+    if (verdict === "deny") return { reply: "reject", auto: false };
+    if (verdict === "allow") return { reply: "once", auto: false };
+    return await effectiveAutoAccept(sessionId)
+      ? { reply: "once", auto: true }
+      : null;
   };
 
   const clearTitleFallbackTimer = (sessionId: string): void => {
@@ -2544,6 +2592,20 @@ export function createSessionService(deps: {
     if (next === "idle") void dispatchQueue(sessionId);
   };
 
+  const mirrorRuntimeRequestToParent = async (
+    sessionId: string,
+    event: Extract<RuntimeEvent, { type: "permission/requested" | "question/asked" }>,
+  ): Promise<void> => {
+    const child = await store.projection(sessionId);
+    if (!child?.parentId) return;
+    const { type: _type, ...data } = event;
+    await appendAndBroadcast(child.parentId, event.type, {
+      ...data as unknown as JsonObject,
+      sourceSessionId: sessionId,
+    }, { ignorable: true });
+    await updateProjection(child.parentId, { status: "waiting" });
+  };
+
   const onRuntimeEvent = async (
     sessionId: string,
     ev: RuntimeEvent,
@@ -2645,18 +2707,10 @@ export function createSessionService(deps: {
     // replyable mirror marked with the canonical child ID.
     if (
       sideEffects
-      && (ev.type === "permission/requested"
-        || (ev.type === "question/asked" && !ev.questions.some((question) => secureRequest(ev.requestId, question))))
+      && ev.type === "question/asked"
+      && !ev.questions.some((question) => secureRequest(ev.requestId, question))
     ) {
-      const child = await store.projection(sessionId);
-      if (child?.parentId) {
-        const { type: _type, ...data } = ev;
-        await appendAndBroadcast(child.parentId, ev.type, {
-          ...data as unknown as JsonObject,
-          sourceSessionId: sessionId,
-        }, { ignorable: true });
-        await updateProjection(child.parentId, { status: "waiting" });
-      }
+      await mirrorRuntimeRequestToParent(sessionId, ev);
     }
     switch (ev.type) {
       case "turn/started":
@@ -2823,28 +2877,53 @@ export function createSessionService(deps: {
           }) as unknown as JsonObject,
           allowedScopes: [...PERMISSION_ALLOWED_SCOPES],
         };
-        await persist(sessionId, "permission/requested", enriched, { ignorable: true });
+        // Do not publish a permission request until the authoritative policy
+        // has decided that human input is actually required. The canonical
+        // request is still persisted first; successful automatic resolution
+        // therefore remains truthful without ever opening a permission card.
+        const requested = options.persist
+          ? await persist(sessionId, "permission/requested", enriched, { ignorable: true })
+          : await store.append(sessionId, "permission/requested", enriched, { ignorable: true });
         if (sideEffects) {
-          const applied = await applyRuntimeProjection(
+          const resolution = await automaticPermissionResolution(
             sessionId,
-            runtimeEventSeq,
-            (current) => ({ ...current, status: "waiting", updatedAt: Date.now() }),
+            ev.permission,
+            ev.patterns,
           );
-          if (!applied) break;
-          const proj = await store.projection(sessionId);
-          const verdict = permissions.evaluate(ev.permission, ev.patterns, proj?.projectId, sessionId);
-          if (verdict === "allow" || verdict === "deny") {
-            const reply = verdict === "allow" ? "once" : "reject";
-            await replyPermissionCore(sessionId, ev.requestId, reply).catch((error) => {
-              console.warn(`[polyth] policy permission response remains unresolved for ${sessionId}`, error);
-            });
-          } else if (await effectiveAutoAccept(sessionId)) {
-            await replyPermissionCore(sessionId, ev.requestId, "once", undefined, true).catch((error) => {
-              console.warn(`[polyth] auto-accept permission remains unresolved for ${sessionId}`, error);
-            });
-          } else {
-            deps.notify?.attention(sessionId, "permission", ev.requestId);
+          if (resolution) {
+            try {
+              await replyPermissionCore(
+                sessionId,
+                ev.requestId,
+                resolution.reply,
+                undefined,
+                resolution.auto,
+              );
+              break;
+            } catch (error) {
+              console.warn(
+                `[polyth] ${resolution.auto ? "auto-accept" : "policy"} permission response remains unresolved for ${sessionId}`,
+                error,
+              );
+              // A post-confirmation projection/mirror failure can throw after
+              // permission/resolved is already durable. Never publish the
+              // older request behind that confirmed resolution.
+              if (!(await logFacts(sessionId)).openPermissions.has(ev.requestId)) break;
+            }
           }
+          // Automatic delivery failed, or policy requires a person. Only this
+          // path publishes/mirrors the request and marks the session waiting.
+          broadcast.event(requested);
+          const current = await store.projection(sessionId);
+          if (current?.status !== "unknown") {
+            await applyRuntimeProjection(
+              sessionId,
+              runtimeEventSeq,
+              (projection) => ({ ...projection, status: "waiting", updatedAt: Date.now() }),
+            );
+          }
+          await mirrorRuntimeRequestToParent(sessionId, ev);
+          deps.notify?.attention(sessionId, "permission", ev.requestId);
         }
         break;
       }
@@ -3135,6 +3214,7 @@ export function createSessionService(deps: {
           .map((event) => event.seq),
       );
       let used = 0;
+      const deferPermissionBroadcast = observation.events[index]!.type === "permission/requested";
       await onRuntimeEvent(sessionId, observation.events[index]!, {
         persist: async (_sessionId, type) => {
           const persisted = ingested.events[persistedIndex++];
@@ -3142,7 +3222,7 @@ export function createSessionService(deps: {
             throw new Error("runtime observation canonical batch did not match its persisted events");
           }
           used += 1;
-          if (ingested.kind === "applied") broadcast.event(persisted);
+          if (ingested.kind === "applied" && !deferPermissionBroadcast) broadcast.event(persisted);
           return persisted;
         },
         runtimeEventSeq,
@@ -3831,13 +3911,14 @@ export function createSessionService(deps: {
       ? original
       : undefined;
     const rt = shellRequest ? undefined : await ensureWired(sessionId, proj);
-    const expected: JsonObject = { reply, ...(scope ? { scope } : {}) };
+    const expected: JsonObject = { reply, ...(scope ? { scope } : {}), ...(auto ? { auto: true } : {}) };
     const choice = await broadcastTail(sessionId, () => durable.chooseResponseIntent({
       kind: "permission",
       sessionId,
       requestId,
       reply,
       ...(scope ? { scope } : {}),
+      ...(auto ? { auto: true } : {}),
     }));
     const operation = assertChosenIntent(choice, expected);
     const completion = {
@@ -7185,9 +7266,17 @@ export function createSessionService(deps: {
       if (!advanced) return;
       const projection = await store.projection(sessionId);
       if (!projection) return;
+      const autoAccept = await effectiveAutoAccept(sessionId);
       const counts = await deps.org?.attentionFor([sessionId]).catch(() => undefined);
       const attention = counts?.[sessionId];
-      publishProjection(attention ? { ...projection, attention } : projection);
+      publishProjection(attention ? {
+        ...projection,
+        autoAccept,
+        attention: {
+          ...attention,
+          permissions: autoAccept ? 0 : attention.permissions,
+        },
+      } : { ...projection, autoAccept });
     },
 
     async list(projectId) {
@@ -7202,13 +7291,21 @@ export function createSessionService(deps: {
         await settleDelegatedChild(projection.id);
         return (await store.projection(projection.id)) ?? projection;
       }));
-      if (!deps.org || settled.length === 0) return settled.map(overlayProjection);
+      const hydrated = await Promise.all(settled.map(async (projection) => ({
+        ...projection,
+        autoAccept: await effectiveAutoAccept(projection.id),
+      })));
+      if (!deps.org || hydrated.length === 0) return hydrated.map(overlayProjection);
       // Attention badges derive from durable events on every read (WP5).
-      const counts = await deps.org.attentionFor(settled.map((p) => p.id)).catch(() => ({} as Record<string, { questions: number; permissions: number; unread: number }>));
-      return settled.map((p) => {
+      const counts = await deps.org.attentionFor(hydrated.map((p) => p.id)).catch(() => ({} as Record<string, { questions: number; permissions: number; unread: number }>));
+      return hydrated.map((p) => {
         const c = counts[p.id];
         const withAttention = c
-          ? { ...p, attention: { questions: c.questions, permissions: c.permissions, unread: c.unread } }
+          ? { ...p, attention: {
+              questions: c.questions,
+              permissions: p.autoAccept ? 0 : c.permissions,
+              unread: c.unread,
+            } }
           : p;
         return overlayProjection(withAttention);
       });
@@ -7505,27 +7602,42 @@ export function createSessionService(deps: {
     },
 
     async autoAcceptGet(sessionId) {
-      if (!deps.autoAccept) throw Object.assign(new Error("auto-accept unavailable"), { code: "unsupported" });
       const proj = await store.projection(sessionId);
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
-      return { setting: deps.autoAccept.get(sessionId), effective: await effectiveAutoAccept(sessionId) };
+      const setting = proj.autoAcceptSetting === "on" || proj.autoAcceptSetting === "off"
+        ? proj.autoAcceptSetting
+        : deps.autoAccept?.get(sessionId) ?? "inherit";
+      return { setting, effective: await effectiveAutoAccept(sessionId) };
     },
 
     async autoAcceptSet(sessionId, setting: AutoAcceptSetting) {
-      if (!deps.autoAccept) throw Object.assign(new Error("auto-accept unavailable"), { code: "unsupported" });
       const proj = await store.projection(sessionId);
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
       if (setting !== "on" && setting !== "off" && setting !== "inherit") {
         throw Object.assign(new Error("setting must be on, off, or inherit"), { code: "invalid-input" });
       }
-      deps.autoAccept.set(sessionId, setting);
+      await withSessionLock(sessionId, async () => {
+        await applyProjection(sessionId, (current) => {
+          const next = { ...current, updatedAt: Date.now() };
+          if (setting === "inherit") delete next.autoAcceptSetting;
+          else {
+            next.autoAcceptSetting = setting;
+            next.autoAccept = setting === "on";
+          }
+          return next;
+        });
+        // New writes are canonical-session owned. Clear an older JSON entry
+        // only after the projection commit; if interrupted, it cannot win.
+        deps.autoAccept?.set(sessionId, "inherit");
+      });
       // Refresh the effective flag everywhere the change can be seen through a
-      // parent chain, and reconcile pending requests where the policy now
-      // approves them (OC#2158: enabling resolves requests already waiting).
+      // parent chain, and reconcile every pending request where the policy now
+      // approves it. Status is deliberately not used as the queue: reconnects
+      // can leave a truthful open request under reconciling/unknown/idle.
       for (const p of await store.projections()) {
         const effective = await effectiveAutoAccept(p.id);
         if ((p.autoAccept ?? false) !== effective) await updateProjection(p.id, { autoAccept: effective });
-        if (effective && p.status === "waiting") await reconcilePendingPermissions(p.id);
+        if (effective) await reconcilePendingPermissions(p.id);
       }
       return { setting, effective: await effectiveAutoAccept(sessionId) };
     },
@@ -7554,17 +7666,78 @@ export function createSessionService(deps: {
     }
   };
 
-  /** F18 reconcile-on-enable: resolve every pending runtime permission request
-   *  of the session with an auto "once". Composer-shell confirmations are
-   *  skipped — those confirm a command the USER typed and must stay manual. */
-  const reconcilePendingPermissions = async (sessionId: string): Promise<void> => {
-    await withSessionLock(sessionId, async () => {
-      const facts = await logFacts(sessionId);
-      for (const [rid, requested] of [...facts.openPermissions]) {
-        if (requested.producerPlugin === "composer-shell") continue;
-        await replyPermissionCore(sessionId, rid, "once", undefined, true);
+  /** Resolve every pending native permission request whose current server
+   *  policy is automatic. This is shared by toggle, live reconnect, and pull
+   *  reconciliation; composer-shell confirmations remain manual. */
+  const reconcilePendingPermissionsUnderPolicy = async (sessionId: string): Promise<void> => {
+    const facts = await logFacts(sessionId);
+    for (const [requestId, requested] of [...facts.openPermissions]) {
+      if (requested.producerPlugin === "composer-shell") continue;
+      const data = requested.data as { permission?: unknown; patterns?: unknown };
+      const permission = typeof data.permission === "string" ? data.permission : "unknown";
+      const patterns = Array.isArray(data.patterns)
+        ? data.patterns.filter((value): value is string => typeof value === "string")
+        : [];
+      const resolution = await automaticPermissionResolution(sessionId, permission, patterns);
+      if (!resolution) continue;
+      try {
+        await replyPermissionCore(
+          sessionId,
+          requestId,
+          resolution.reply,
+          undefined,
+          resolution.auto,
+        );
+      } catch (error) {
+        console.warn(
+          `[polyth] ${resolution.auto ? "auto-accept" : "policy"} pending permission remains unresolved for ${sessionId}`,
+          error,
+        );
       }
+    }
+  };
+
+  const reconcilePendingPermissions = (sessionId: string): Promise<void> =>
+    withSessionLock(sessionId, async () => {
+      const facts = await logFacts(sessionId);
+      if (facts.openPermissions.size === 0) return;
+      if (!sessionRuntime.has(sessionId)) {
+        const projection = await store.projection(sessionId);
+        if (!projection || projection.status === "archived") return;
+        // Reattachment reconciliation gets first chance to settle the exact
+        // native requests. Re-read facts afterward so no request is answered
+        // twice when that snapshot path already resolved it.
+        await ensureWired(sessionId, projection);
+      }
+      await reconcilePendingPermissionsUnderPolicy(sessionId);
     });
+
+  const rehydrateAutoAcceptPermissions = async (): Promise<void> => {
+    const projections = await store.projections();
+    for (const projection of projections) {
+      await withSessionLock(projection.id, async () => {
+        const current = await store.projection(projection.id);
+        const legacy = current?.autoAcceptSetting === undefined
+          ? deps.autoAccept?.get(projection.id) ?? "inherit"
+          : "inherit";
+        if (legacy !== "on" && legacy !== "off") return;
+        await applyProjection(projection.id, (latest) => ({
+          ...latest,
+          autoAcceptSetting: legacy,
+          updatedAt: Date.now(),
+        }));
+        deps.autoAccept?.set(projection.id, "inherit");
+      });
+    }
+    for (const projection of await store.projections()) {
+      const effective = await effectiveAutoAccept(projection.id);
+      if ((projection.autoAccept ?? false) !== effective) {
+        await updateProjection(projection.id, { autoAccept: effective });
+      }
+      if (projection.status === "archived" || !effective) continue;
+      const facts = await logFacts(projection.id);
+      if (facts.openPermissions.size > 0) await reconcilePendingPermissions(projection.id);
+    }
   };
 
   // Re-arm rate-limit resume timers for sessions that were waiting when the
@@ -7575,6 +7748,9 @@ export function createSessionService(deps: {
   );
   void rehydrateToolWatchdogs().catch(
     (err: unknown) => console.error("[polyth] tool watchdog rehydrate failed", err),
+  );
+  void rehydrateAutoAcceptPermissions().catch(
+    (err: unknown) => console.error("[polyth] auto-accept permission rehydrate failed", err),
   );
 
   return service;

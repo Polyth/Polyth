@@ -2379,6 +2379,7 @@ export function createStore(dbPath: string): Store {
         ? {
             reply: input.reply,
             ...(input.scope ? { scope: input.scope } : {}),
+            ...(input.auto ? { auto: true } : {}),
           }
         : input.kind === "question"
           ? {
