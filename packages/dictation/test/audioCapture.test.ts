@@ -58,10 +58,12 @@ test("ended microphone track is replaced before reporting the capture as ended",
     connect() {}
     disconnect() { this.disconnected = true; }
   }
+  let currentContext: FakeContext | null = null;
   class FakeContext {
     state: AudioContextState = "running";
     audioWorklet = { addModule: async () => {} };
     sources: FakeSource[] = [];
+    constructor() { currentContext = this; }
     createMediaStreamSource() {
       const source = new FakeSource();
       this.sources.push(source);
@@ -81,7 +83,6 @@ test("ended microphone track is replaced before reporting the capture as ended",
   const second = new FakeTrack();
   let calls = 0;
   let ended = 0;
-  const context = new FakeContext();
   const navigatorValue = {
     mediaDevices: {
       async getUserMedia() {
@@ -94,7 +95,7 @@ test("ended microphone track is replaced before reporting the capture as ended",
   };
 
   await withNavigator(navigatorValue, async () => {
-    await withGlobal("AudioContext", class { constructor() { return context; } }, async () => {
+    await withGlobal("AudioContext", FakeContext, async () => {
       await withGlobal("AudioWorkletNode", FakeWorkletNode, async () => {
         const capture = await startPcm16Capture({ onChunk() {}, onEnded: () => { ended++; } });
         assert.equal(calls, 1);
@@ -102,6 +103,8 @@ test("ended microphone track is replaced before reporting the capture as ended",
         await new Promise((resolve) => setImmediate(resolve));
         assert.equal(calls, 2);
         assert.equal(ended, 0);
+        const context = currentContext as FakeContext | null;
+        assert.ok(context);
         assert.equal(context.sources.length, 2);
         assert.equal(context.sources[0]?.disconnected, true);
 
