@@ -193,10 +193,13 @@ function MicButton() {
   const startGeneration = useRef(0);
   const support = speechSupport(typeof window !== "undefined" ? window : undefined);
   const serverStt = prefs.sttEngine === "server";
-  // ElevenLabs supplies server-minted single-use client tokens, so its direct
-  // browser path is safe and lower-latency. "auto" prefers it while retaining
-  // a same-provider server-proxy fallback during startup.
+  const browserFallback = prefs.processingPolicy === "browser-fallback";
+  const cloudPrimaryPolicy = prefs.processingPolicy === "prefer-cloud" || browserFallback;
+  // Keep auto-fallback on the server so recoverable cloud failures can replay
+  // PCM into local Nemotron. Direct browser cannot provide that mid-stream
+  // transition without shipping the local runtime into the WebView.
   const directElevenLabs = serverStt
+    && cloudPrimaryPolicy
     && prefs.dictationProvider === "elevenlabs"
     && (prefs.dictationTransport === "auto" || prefs.dictationTransport === "direct-browser");
 
@@ -232,15 +235,23 @@ function MicButton() {
       void api.dictationCapability().then((c) => { if (!cancelled) setCapability(c); });
     }
     return () => { cancelled = true; };
-  }, [prefs.dictation, serverStt, directElevenLabs, prefs.dictationProvider, prefs.dictationTransport]);
+  }, [
+    prefs.dictation,
+    serverStt,
+    directElevenLabs,
+    prefs.dictationProvider,
+    prefs.dictationTransport,
+    prefs.processingPolicy,
+  ]);
 
+  const providerOrBrowserAvailable = Boolean(capability?.available) || (browserFallback && support.stt);
   const availability: { available: boolean; reason?: string; settings?: boolean } =
     !prefs.dictation ? { available: false, reason: tr("voice.dictationOff"), settings: true }
     : serverStt && capability === null ? { available: false, reason: tr("voice.checkingMicrophone") }
-    : serverStt && capability && !capability.available
+    : serverStt && !providerOrBrowserAvailable
       ? {
           available: false,
-          reason: capability.reason ?? tr("voice.serverTranscriptionUnavailable"),
+          reason: capability?.reason ?? tr("voice.serverTranscriptionUnavailable"),
           settings: true,
         }
     : !serverStt && !support.stt
@@ -340,8 +351,6 @@ function MicButton() {
       setPartial(mergeTranscript(browserTranscriptRef.current, interim));
     };
     rec.onerror = (e) => {
-      // Avoid fail() aborting the recognizer from inside its own error callback,
-      // which can emit a second "aborted" error and hide the root cause.
       recRef.current = null;
       browserCommitRef.current = false;
       fail(e.error ?? tr("voice.microphoneError"));
@@ -400,10 +409,13 @@ function MicButton() {
       streamRef.current = stream;
       setPhase("listening");
     } catch (startError) {
-      if (startGeneration.current === generation) {
-        streamRef.current = null;
-        fail(startError);
+      if (startGeneration.current !== generation) return;
+      streamRef.current = null;
+      if (browserFallback && support.stt) {
+        startBrowser();
+        return;
       }
+      fail(startError);
     }
   };
 
@@ -412,7 +424,11 @@ function MicButton() {
     setPartial("");
     const generation = ++startGeneration.current;
     if (serverStt) {
-      if (capability?.available) void startProvider(generation);
+      if (capability?.available) {
+        void startProvider(generation);
+      } else if (browserFallback && support.stt) {
+        startBrowser();
+      }
       return;
     }
     startBrowser();
