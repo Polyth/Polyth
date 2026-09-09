@@ -10,6 +10,7 @@ import {
   rename,
   rm,
   stat,
+  statfs,
 } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -18,6 +19,7 @@ import { finished } from "node:stream/promises";
 import { DictationError } from "./providers.ts";
 
 export type LocalModelState = "missing" | "downloading" | "installed" | "failed";
+export type LocalModelPreset = "ultra" | "fast" | "balanced" | "accurate";
 
 export interface LocalModelDescriptor {
   id: string;
@@ -25,7 +27,9 @@ export interface LocalModelDescriptor {
   provider: "local-nemotron" | "local-parakeet";
   languages: readonly string[];
   streaming: boolean;
+  /** Upstream streaming chunk/latency preset, not an end-to-end benchmark. */
   latencyMs: number;
+  preset?: LocalModelPreset;
   archiveUrl: string;
   archiveBytes: number;
   sha256: string;
@@ -39,22 +43,65 @@ export interface LocalModelStatus extends Omit<LocalModelDescriptor, "archiveUrl
   error?: string;
 }
 
-const NEMOTRON_80MS: LocalModelDescriptor = {
-  id: "nemotron-3.5-streaming-0.6b-80ms",
-  label: "Nemotron 3.5 Streaming 0.6B · 80 ms · int8",
-  provider: "local-nemotron",
-  languages: [
-    "ar", "de", "en", "es", "fr", "hi", "it", "ja", "ko", "nl",
-    "pl", "pt", "ru", "sv", "tr", "uk-UA", "vi", "zh",
-  ],
-  streaming: true,
-  latencyMs: 80,
-  archiveUrl: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-80ms-int8-2026-06-11.tar.bz2",
-  archiveBytes: 475_274_007,
-  sha256: "fb170128c496db33a1fb9f5f9f823257f42f911224ee218bb429f3c2eaf90a8d",
-};
+const NEMOTRON_LANGUAGES = [
+  "ar", "de", "en", "es", "fr", "hi", "it", "ja", "ko", "nl",
+  "pl", "pt", "ru", "sv", "tr", "uk-UA", "vi", "zh",
+] as const;
 
-export const localModelCatalog = (): readonly LocalModelDescriptor[] => [NEMOTRON_80MS];
+const nemotron = (
+  latencyMs: 80 | 160 | 560 | 1120,
+  preset: LocalModelPreset,
+  label: string,
+  archiveBytes: number,
+  sha256: string,
+): LocalModelDescriptor => ({
+  id: `nemotron-3.5-streaming-0.6b-${latencyMs}ms`,
+  label: `${label} · Nemotron 3.5 Streaming 0.6B · ${latencyMs} ms · int8`,
+  provider: "local-nemotron",
+  languages: NEMOTRON_LANGUAGES,
+  streaming: true,
+  latencyMs,
+  preset,
+  archiveUrl: `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-${latencyMs}ms-int8-2026-06-11.tar.bz2`,
+  archiveBytes,
+  sha256,
+});
+
+const NEMOTRON_MODELS: readonly LocalModelDescriptor[] = [
+  nemotron(
+    80,
+    "ultra",
+    "Ultra",
+    475_274_007,
+    "fb170128c496db33a1fb9f5f9f823257f42f911224ee218bb429f3c2eaf90a8d",
+  ),
+  nemotron(
+    160,
+    "fast",
+    "Fast",
+    475_273_363,
+    "a81909a1780d84cff16d73c15e13e67d9d81d8839faf14870d507d8499f7a61a",
+  ),
+  nemotron(
+    560,
+    "balanced",
+    "Balanced",
+    475_271_763,
+    "c6bf5e0df765f9d5b43bc9e0536d4b4b3e7d40bdf5ecf13e45f134c51c05ae3a",
+  ),
+  nemotron(
+    1120,
+    "accurate",
+    "Accurate",
+    475_276_334,
+    "adbdd5e9fef87300c37cebfcfc4f1ebe56845c860c8a760af0a1dd65ce9beed3",
+  ),
+] as const;
+
+/** Safe default until Polyth has comparable end-to-end benchmarks on target hardware. */
+export const DEFAULT_LOCAL_MODEL_ID = "nemotron-3.5-streaming-0.6b-560ms";
+
+export const localModelCatalog = (): readonly LocalModelDescriptor[] => NEMOTRON_MODELS;
 
 export interface LocalModelManager {
   list(): Promise<LocalModelStatus[]>;
@@ -111,9 +158,13 @@ const extractTarBz2 = async (archive: string, destination: string): Promise<void
   });
 };
 
+const formatBytes = (bytes: number): string => `${Math.ceil(bytes / (1024 * 1024))} MiB`;
+
 export function createLocalModelManager(options: {
   root: string;
   fetchFn?: typeof fetch;
+  /** Test/platform seam; defaults to the filesystem containing root. */
+  availableBytes?: () => Promise<number>;
 }): LocalModelManager {
   const root = options.root;
   const fetchFn = options.fetchFn ?? fetch;
@@ -123,6 +174,10 @@ export function createLocalModelManager(options: {
   mkdirSync(stagingDir, { recursive: true });
   const active = new Map<string, ActiveDownload>();
   const failures = new Map<string, string>();
+  const availableBytes = options.availableBytes ?? (async () => {
+    const fs = await statfs(root);
+    return Number(fs.bavail) * Number(fs.bsize);
+  });
 
   const finalDir = (id: string) => join(root, id);
   const partialFile = (id: string) => join(downloadsDir, `${id}.tar.bz2.part`);
@@ -139,6 +194,7 @@ export function createLocalModelManager(options: {
         languages: model.languages,
         streaming: model.streaming,
         latencyMs: model.latencyMs,
+        ...(model.preset ? { preset: model.preset } : {}),
         archiveBytes: model.archiveBytes,
         state: "downloading",
         downloadedBytes: running.downloadedBytes,
@@ -153,6 +209,7 @@ export function createLocalModelManager(options: {
         languages: model.languages,
         streaming: model.streaming,
         latencyMs: model.latencyMs,
+        ...(model.preset ? { preset: model.preset } : {}),
         archiveBytes: model.archiveBytes,
         state: "installed",
         downloadedBytes: model.archiveBytes,
@@ -170,6 +227,7 @@ export function createLocalModelManager(options: {
       languages: model.languages,
       streaming: model.streaming,
       latencyMs: model.latencyMs,
+      ...(model.preset ? { preset: model.preset } : {}),
       archiveBytes: model.archiveBytes,
       state: failure ? "failed" : "missing",
       downloadedBytes,
@@ -191,6 +249,18 @@ export function createLocalModelManager(options: {
         offset = 0;
       }
       running.downloadedBytes = offset;
+
+      // Keep room for the remaining archive plus extraction/staging. The exact
+      // unpacked footprint varies by ONNX metadata; 2× archive is deliberately
+      // conservative and avoids a half-installed model on a nearly-full disk.
+      const requiredFree = Math.max(0, model.archiveBytes - offset) + model.archiveBytes * 2;
+      const free = await availableBytes();
+      if (Number.isFinite(free) && free < requiredFree) {
+        throw new DictationError(
+          "local_model_failed",
+          `Not enough free disk space for ${model.label}: need about ${formatBytes(requiredFree)}, have ${formatBytes(free)}`,
+        );
+      }
 
       const headers = offset > 0 ? { Range: `bytes=${offset}-` } : undefined;
       const response = await fetchFn(model.archiveUrl, { headers, signal: controller.signal });
