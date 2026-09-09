@@ -205,6 +205,9 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
             do {
                 let hostID = try self.hostID(raw)
                 var secret = try self.keychain.load(hostID)
+                defer {
+                    if secret != nil { secret!.resetBytes(in: 0..<secret!.count) }
+                }
                 let created = secret == nil
                 if secret == nil {
                     secret = try self.freshSecret()
@@ -252,7 +255,9 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
                 guard var connections = try self.invoke("connections.list", [:]) as? [[String: Any]] else { throw PolythLinkFailure(code: "transport-protocol-error") }
                 for index in connections.indices {
                     let hostID = connections[index]["hostEndpointId"] as? String ?? ""
-                    connections[index]["hasSecureIdentity"] = !hostID.isEmpty && (try self.keychain.load(hostID) != nil)
+                    var secret = hostID.isEmpty ? nil : try self.keychain.load(hostID)
+                    connections[index]["hasSecureIdentity"] = secret != nil
+                    if secret != nil { secret!.resetBytes(in: 0..<secret!.count) }
                 }
                 call.resolve(["connections": connections])
             } catch { self.reject(call, error) }
@@ -263,7 +268,8 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
         guard trusted(call), let connectionID = require(call, "connectionId", code: "device-unknown") else { return }
         queue.async {
             do {
-                guard let secret = try self.keychain.load(connectionID) else { throw PolythLinkFailure(code: "host-identity-unavailable") }
+                guard var secret = try self.keychain.load(connectionID) else { throw PolythLinkFailure(code: "host-identity-unavailable") }
+                defer { secret.resetBytes(in: 0..<secret.count) }
                 call.resolve(try self.object(self.invoke("connect", ["connectionId": connectionID], secret: secret)))
             } catch { self.reject(call, error) }
         }
