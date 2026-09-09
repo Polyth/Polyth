@@ -133,6 +133,70 @@ test("project MCP resolution is isolated, deterministic, persistent, and cleanup
   assert.deepEqual(reloaded.list(a).map((row) => row.name), ["shared"]);
 });
 
+test("MCP credentials are limited to transport references", async () => {
+  const dataDir = root();
+  const a = space(dataDir, "space-a", "user-a");
+  const mcp = createMcpConfigService({
+    dataDir,
+    deployment: "server-trusted",
+    assertProject(ctx, projectId) {
+      if (ctx.spaceId !== "space-a" || projectId !== "project-a") {
+        throw Object.assign(new Error("project not found"), { code: "not-found" });
+      }
+    },
+  });
+
+  await assert.rejects(
+    () => mcp.create(a, {
+      name: "extra-secret",
+      transport: http("https://extra.example"),
+      secrets: { TOKEN: "valid", STALE: "must-not-persist" },
+    }, "project-a"),
+    (error) => code(error) === "invalid-input",
+  );
+
+  const created = await mcp.create(a, {
+    name: "prune",
+    transport: {
+      kind: "http",
+      url: "https://prune.example",
+      headersSecretRefs: ["TOKEN", "OLD"],
+    },
+    secrets: { TOKEN: "keep", OLD: "drop" },
+  }, "project-a");
+  await mcp.update(a, created.id, {
+    transport: http("https://prune.example"),
+  }, created.revision, "project-a");
+
+  const snapshot = mcp.projection(a, "project-a");
+  const row = snapshot.servers.find((server) => server.name === "prune")!;
+  assert.deepEqual(snapshot.secretsFor(row.id), { TOKEN: "keep" });
+});
+
+test("project tombstones deterministically override broader tombstones", async () => {
+  const dataDir = root();
+  const a = space(dataDir, "space-a", "user-a");
+  const mcp = createMcpConfigService({
+    dataDir,
+    deployment: "server-trusted",
+    assertProject(ctx, projectId) {
+      if (ctx.spaceId !== "space-a" || projectId !== "project-a") {
+        throw Object.assign(new Error("project not found"), { code: "not-found" });
+      }
+    },
+  });
+
+  const projectRow = await mcp.create(a, { name: "retired", transport: http("https://project.example") }, "project-a");
+  await mcp.remove(a, projectRow.id, "project-a");
+  const spaceRow = await mcp.create(a, { name: "retired", transport: http("https://space.example") });
+  await mcp.remove(a, spaceRow.id);
+
+  const projectTombstone = mcp.projection(a, "project-a").tombstones.find((row) => row.name === "retired")!;
+  const spaceTombstone = mcp.projection(a).tombstones.find((row) => row.name === "retired")!;
+  assert.equal(projectTombstone.projectId, "project-a");
+  assert.equal(spaceTombstone.projectId, undefined);
+});
+
 test("MCP scope writes enforce Space roles", async () => {
   const dataDir = root();
   const owners = new Map([["project-a", "space-a"]]);
