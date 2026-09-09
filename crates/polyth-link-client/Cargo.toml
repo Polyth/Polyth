@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Polyth Link client process: pairing, native identity, local proxy"
+description = "Shared Polyth Link client core and CLI"
 
 [[bin]]
 name = "polyth-link-client"
@@ -19,6 +19,7 @@ tokio.workspace = true
 hex.workspace = true
 base64.workspace = true
 rand.workspace = true
+zeroize.workspace = true
 httparse = "1.10.1"
 url = "2.5.4"
 
