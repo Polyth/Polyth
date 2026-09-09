@@ -4,6 +4,7 @@ import {
   ConnectionController,
   type ConnectionControllerState,
 } from "../src/connectionController.ts";
+import type { DiscoveredPolyth, DiscoveryUpdate } from "../src/discovery.ts";
 import type {
   ConnectionMetadata,
   PairingAttempt,
@@ -38,6 +39,19 @@ function launch(connectionId: string): ProxyLaunch {
     origin: "http://127.0.0.1:49152",
     bootstrapUrl: "http://127.0.0.1:49152/bootstrap",
     connectionId,
+  };
+}
+
+function discovered(id = "a".repeat(64), hostLabel = "Desk"): DiscoveredPolyth {
+  return {
+    id,
+    serviceName: hostLabel,
+    hostLabel,
+    hostEndpointId: id,
+    protocolVersion: 1,
+    port: 4433,
+    addresses: ["192.168.1.10"],
+    numericPairing: true,
   };
 }
 
@@ -178,4 +192,62 @@ test("rapid A to B to A switch serializes native mutations and honors newest int
   assert.deepEqual(connectCalls, ["a"]);
   assert.equal(controller.state.phase, "connected");
   assert.equal(controller.state.activeConnectionId, "a");
+});
+
+test("discovery results are progressive and stop when QR becomes the newest intent", async () => {
+  let publish: ((update: DiscoveryUpdate) => void) | undefined;
+  let stops = 0;
+  const controller = await loadedController(native());
+
+  await controller.startDiscovery(async (onUpdate) => {
+    publish = onUpdate;
+    return {
+      async stop() {
+        stops += 1;
+      },
+    };
+  });
+  publish?.({ state: "results", results: [discovered()] });
+  assert.equal(controller.state.phase, "discovery-results");
+  assert.equal(controller.state.discovered[0]?.hostLabel, "Desk");
+
+  controller.startQrScan();
+  await Promise.resolve();
+  publish?.({ state: "results", results: [discovered("b".repeat(64), "Stale")] });
+
+  assert.equal(stops, 1);
+  assert.equal(controller.state.phase, "scanning-qr");
+  assert.equal(controller.state.discovered[0]?.hostLabel, "Desk");
+});
+
+test("a discovery session that starts late is immediately stopped after intent changes", async () => {
+  const pendingSession = deferred<{ stop(): Promise<void> }>();
+  let stops = 0;
+  const controller = await loadedController(native());
+
+  const starting = controller.startDiscovery(async () => pendingSession.promise);
+  controller.startQrScan();
+  pendingSession.resolve({
+    async stop() {
+      stops += 1;
+    },
+  });
+
+  await starting;
+  assert.equal(stops, 1);
+  assert.equal(controller.state.phase, "scanning-qr");
+});
+
+test("discovery permission denial is recoverable and does not affect trusted reconnect state", async () => {
+  const controller = await loadedController(native());
+
+  await controller.startDiscovery(async () => {
+    const error = new Error("discovery-permission-denied") as Error & { code: string };
+    error.code = "discovery-permission-denied";
+    throw error;
+  });
+
+  assert.equal(controller.state.phase, "discovery-permission-required");
+  assert.equal(controller.state.trusted.length, 1);
+  assert.equal(controller.state.discovered.length, 0);
 });
