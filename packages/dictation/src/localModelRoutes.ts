@@ -41,17 +41,15 @@ export function localModelRoutes(models: LocalModelManager, runtime?: LocalRunti
       if (match && method === "POST") {
         const id = decodeURIComponent(match[1]!);
         const current = await models.status(id);
-        const runtimeStatus = runtime ? await runtime.status() : null;
-        const runtimeReady = runtimeStatus === null || runtimeStatus.state === "installed";
-        if (current.state === "installed" && runtimeReady) {
+        if (current.state === "installed") {
           json(200, await withRuntime(current));
           return true;
         }
-        if (current.state !== "installed" && current.state !== "downloading") {
+        if (current.state !== "downloading") {
+          // Explicit model action downloads the model only. The native runtime
+          // has its own visible /api/dictation/runtime action and is never
+          // started as a hidden side effect of choosing a model preset.
           void models.download(id).catch(() => {});
-        }
-        if (runtime && runtimeStatus?.state !== "installed" && runtimeStatus?.state !== "downloading" && runtimeStatus?.state !== "unsupported") {
-          void runtime.download().catch(() => {});
         }
         json(202, await withRuntime(await models.status(id)));
         return true;
