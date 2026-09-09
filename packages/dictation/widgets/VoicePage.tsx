@@ -56,6 +56,16 @@ interface LocalModelView {
   error?: string;
 }
 
+interface LocalRuntimeView {
+  state: "missing" | "downloading" | "installed" | "failed" | "unsupported";
+  version: string;
+  platform: string;
+  arch: string;
+  downloadedBytes: number;
+  totalBytes?: number;
+  error?: string;
+}
+
 const providerEnv = (provider: DictationProviderId): string => {
   switch (provider) {
     case "elevenlabs": return "ELEVENLABS_API_KEY";
@@ -92,9 +102,6 @@ function ServerEndpointForm({ server, onSaved }: { server: ServerVoiceSettings; 
     setMsg("");
     setSaveFailed(false);
     try {
-      // Include the current provider block so old server-endpoint edits can
-      // never reset dictation routing, even against a server without the
-      // compatibility merge added in this change.
       const next = { stt, tts, dictation: server.dictation };
       const saved = await api.voiceSettingsSave(next) as ServerVoiceSettings;
       onSaved(saved);
@@ -153,6 +160,7 @@ function DictationProviderForm({
   server,
   providers,
   models,
+  runtime,
   onSaved,
   onRefreshProviders,
   onRefreshModels,
@@ -160,6 +168,7 @@ function DictationProviderForm({
   server: ServerVoiceSettings;
   providers: ProviderView[];
   models: LocalModelView[];
+  runtime: LocalRuntimeView | null;
   onSaved: (settings: ServerVoiceSettings) => void;
   onRefreshProviders: () => Promise<void>;
   onRefreshModels: () => Promise<void>;
@@ -167,6 +176,7 @@ function DictationProviderForm({
   const [value, setValue] = useState<DictationSettingsDto>(server.dictation);
   const [busy, setBusy] = useState(false);
   const [modelBusy, setModelBusy] = useState(false);
+  const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [failed, setFailed] = useState(false);
 
@@ -230,7 +240,7 @@ function DictationProviderForm({
         `/api/dictation/models/${encodeURIComponent(localModel.id)}${action === "download" ? "/download" : ""}`,
         { method: action === "download" ? "POST" : "DELETE" },
       );
-      await onRefreshModels();
+      await Promise.all([onRefreshModels(), onRefreshProviders()]);
     } catch (error) {
       setFailed(true);
       setMsg(error instanceof Error ? error.message : String(error));
@@ -239,8 +249,26 @@ function DictationProviderForm({
     }
   };
 
+  const runtimeAction = async (action: "download" | "delete") => {
+    setRuntimeBusy(true);
+    setFailed(false);
+    setMsg("");
+    try {
+      await fetchJson("/api/dictation/runtime", { method: action === "download" ? "POST" : "DELETE" });
+      await Promise.all([onRefreshModels(), onRefreshProviders()]);
+    } catch (error) {
+      setFailed(true);
+      setMsg(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRuntimeBusy(false);
+    }
+  };
+
   const progress = localModel && localModel.totalBytes > 0
     ? Math.min(100, Math.round((localModel.downloadedBytes / localModel.totalBytes) * 100))
+    : 0;
+  const runtimeProgress = runtime?.totalBytes
+    ? Math.min(100, Math.round((runtime.downloadedBytes / runtime.totalBytes) * 100))
     : 0;
 
   return (
@@ -295,29 +323,60 @@ function DictationProviderForm({
       {providerView?.reason && <div className={providerView.available ? "form-success" : "muted"}>{providerView.reason}</div>}
       {capability?.publicApi === false && <div className="muted">No verified public Voice Interface API contract is available for this provider.</div>}
 
-      {value.provider === "local-nemotron" && localModel && (
-        <div className="mcp-form" data-settings-item="voice.local-model">
-          <div className="stat-label">{localModel.label}</div>
-          <div className="mcp-form-row">
-            <Select
-              value={value.localModel || localModel.id}
-              label={localModel.label}
-              options={models.map((model) => ({ value: model.id, label: model.label }))}
-              onChange={(localModelId) => setValue({ ...value, localModel: localModelId })}
-            />
-            <span className="muted">{localModel.state}{localModel.state === "downloading" ? ` · ${progress}%` : ""}</span>
-            {localModel.state === "installed" ? (
-              <Button size="sm" variant="danger" busy={modelBusy} onClick={() => void modelAction("delete")}>Delete</Button>
-            ) : (
-              <Button size="sm" busy={modelBusy} disabled={localModel.state === "downloading"} onClick={() => void modelAction("download")}>
-                {localModel.state === "failed" ? "Retry" : "Download"}
-              </Button>
-            )}
+      {value.provider === "local-nemotron" && (
+        <>
+          <div className="mcp-form" data-settings-item="voice.local-runtime">
+            <div className="stat-label">Local ASR runtime{runtime ? ` · sherpa-onnx ${runtime.version}` : ""}</div>
+            {runtime ? (
+              <>
+                <div className="mcp-form-row">
+                  <span className="muted">
+                    {runtime.state} · {runtime.platform}/{runtime.arch}
+                    {runtime.state === "downloading" && runtime.totalBytes ? ` · ${runtimeProgress}%` : ""}
+                  </span>
+                  <span className="header-spacer" />
+                  {runtime.state === "installed" ? (
+                    <Button size="sm" variant="danger" busy={runtimeBusy} onClick={() => void runtimeAction("delete")}>Delete</Button>
+                  ) : runtime.state !== "unsupported" ? (
+                    <Button size="sm" busy={runtimeBusy} disabled={runtime.state === "downloading"} onClick={() => void runtimeAction("download")}>
+                      {runtime.state === "failed" ? "Retry" : "Download"}
+                    </Button>
+                  ) : null}
+                </div>
+                {runtime.state === "downloading" && runtime.totalBytes && (
+                  <progress value={runtime.downloadedBytes} max={runtime.totalBytes} />
+                )}
+                {runtime.error && <div className={runtime.state === "unsupported" ? "muted" : "form-error"}>{runtime.error}</div>}
+                <div className="muted">Explicit download only · native runtime stays isolated from the main server process</div>
+              </>
+            ) : <div className="muted">Checking local runtime…</div>}
           </div>
-          {localModel.state === "downloading" && <progress value={localModel.downloadedBytes} max={localModel.totalBytes} />}
-          {localModel.error && <div className="form-error">{localModel.error}</div>}
-          <div className="muted">Explicit download only · {Math.round(localModel.totalBytes / (1024 * 1024))} MiB · Ukrainian supported</div>
-        </div>
+
+          {localModel && (
+            <div className="mcp-form" data-settings-item="voice.local-model">
+              <div className="stat-label">{localModel.label}</div>
+              <div className="mcp-form-row">
+                <Select
+                  value={value.localModel || localModel.id}
+                  label={localModel.label}
+                  options={models.map((model) => ({ value: model.id, label: model.label }))}
+                  onChange={(localModelId) => setValue({ ...value, localModel: localModelId })}
+                />
+                <span className="muted">{localModel.state}{localModel.state === "downloading" ? ` · ${progress}%` : ""}</span>
+                {localModel.state === "installed" ? (
+                  <Button size="sm" variant="danger" busy={modelBusy} onClick={() => void modelAction("delete")}>Delete</Button>
+                ) : (
+                  <Button size="sm" busy={modelBusy} disabled={localModel.state === "downloading"} onClick={() => void modelAction("download")}>
+                    {localModel.state === "failed" ? "Retry" : "Download"}
+                  </Button>
+                )}
+              </div>
+              {localModel.state === "downloading" && <progress value={localModel.downloadedBytes} max={localModel.totalBytes} />}
+              {localModel.error && <div className="form-error">{localModel.error}</div>}
+              <div className="muted">Explicit download only · {Math.round(localModel.totalBytes / (1024 * 1024))} MiB · Ukrainian supported</div>
+            </div>
+          )}
+        </>
       )}
 
       {msg && <div className={failed ? "form-error" : "form-success"}>{msg}</div>}
@@ -338,6 +397,7 @@ export default function VoicePage() {
   const [server, setServer] = useState<ServerVoiceSettings | null>(null);
   const [providers, setProviders] = useState<ProviderView[]>([]);
   const [models, setModels] = useState<LocalModelView[]>([]);
+  const [runtime, setRuntime] = useState<LocalRuntimeView | null>(null);
   const [ttsTestMsg, setTtsTestMsg] = useState("");
   const [ttsTestFailed, setTtsTestFailed] = useState(false);
 
@@ -347,18 +407,22 @@ export default function VoicePage() {
     setProviders(result.providers);
   };
   const refreshModels = async () => {
-    const result = await fetchJson<{ models: LocalModelView[] }>("/api/dictation/models");
+    const result = await fetchJson<{ models: LocalModelView[]; runtime?: LocalRuntimeView }>("/api/dictation/models");
     setModels(result.models);
+    setRuntime(result.runtime ?? null);
   };
 
   useEffect(() => {
     refreshCapability();
     void api.voiceSettings().then((value) => setServer(value as ServerVoiceSettings)).catch(() => setServer(null));
     void refreshProviders().catch(() => setProviders([]));
-    void refreshModels().catch(() => setModels([]));
+    void refreshModels().catch(() => { setModels([]); setRuntime(null); });
   }, []);
 
-  const downloading = useMemo(() => models.some((model) => model.state === "downloading"), [models]);
+  const downloading = useMemo(
+    () => models.some((model) => model.state === "downloading") || runtime?.state === "downloading",
+    [models, runtime?.state],
+  );
   useEffect(() => {
     if (!downloading) return;
     const timer = window.setInterval(() => void refreshModels().catch(() => {}), 1_000);
@@ -416,6 +480,7 @@ export default function VoicePage() {
           server={server}
           providers={providers}
           models={models}
+          runtime={runtime}
           onSaved={(saved) => { setServer(saved); refreshCapability(); }}
           onRefreshProviders={refreshProviders}
           onRefreshModels={refreshModels}
