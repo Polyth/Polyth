@@ -69,7 +69,7 @@ const defaults = (): VoiceSettings => ({
     localModel: "nemotron-3.5-streaming-0.6b-80ms",
     language: "auto",
     contextInjection: true,
-    cloudFallback: true,
+    cloudFallback: false,
     latencyPreference: "lowest",
     apiKeyEnv: "ELEVENLABS_API_KEY",
   },
