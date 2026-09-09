@@ -19,6 +19,10 @@ export {
   createWhisperSttAdapter, downsampleToPcm16, pcmToWav,
   type WhisperSttOptions,
 } from "./whisper.ts";
+export {
+  createElevenLabsSttAdapter,
+  type ElevenLabsSttOptions,
+} from "./elevenlabs.ts";
 export * from "./providers.ts";
 export * from "./wire.ts";
 
