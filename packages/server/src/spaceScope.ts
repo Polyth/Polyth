@@ -69,13 +69,14 @@ function scopeSessions(
     guard.assertSession(ctx, sessionId);
     return sessionId;
   };
-  // Account identity is server-owned metadata carried only across the scoped
-  // facade. It never comes from a request body and does not expand the public
-  // session contract.
-  const withAccount = <T extends object>(input: T): T & { accountUserId: string } => ({
-    ...input,
-    accountUserId: ctx.userId,
-  });
+  // Agent presets are account-owned composer configuration, not a shared
+  // session fact. The composer already resolves a preset into model/agent/
+  // thinking state before send, so the private preset id must stop here.
+  const withoutPrivatePreset = <T extends { agentProfileId?: string | null }>(input: T): T => {
+    if (input.agentProfileId === undefined) return input;
+    const { agentProfileId: _privatePresetId, ...rest } = input;
+    return rest as T;
+  };
   // Every SessionService method returns a promise, so a denial must REJECT
   // rather than throw synchronously — otherwise a caller's `.catch()` misses
   // it and an ordinary `await` still works only by accident.
@@ -115,11 +116,11 @@ function scopeSessions(
       // service ever runs, so no half-created row can leak across.
       const project = await projects.get(input.projectId);
       if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
-      return base.create(withAccount(input));
+      return base.create(input);
     },
     switchHarness: base.switchHarness ? (sessionId, selection, timing) => guarded(() => base.switchHarness!(g(sessionId), selection, timing)) : undefined,
     cancelHarnessSwitch: base.cancelHarnessSwitch ? (sessionId) => guarded(() => base.cancelHarnessSwitch!(g(sessionId))) : undefined,
-    send: (sessionId, input) => guarded(() => base.send(g(sessionId), withAccount(input))),
+    send: (sessionId, input) => guarded(() => base.send(g(sessionId), withoutPrivatePreset(input))),
     abort: (sessionId) => guarded(() => base.abort(g(sessionId))),
     fork: (sessionId, atSeq) => guarded(() => base.fork(g(sessionId), atSeq)),
     archive: (sessionId) => guarded(() => base.archive(g(sessionId))),
