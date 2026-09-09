@@ -49,6 +49,26 @@ test("legacy voice engines migrate without opting into cloud fallback", () => {
   assert.equal(modern.cloudFallback, true);
 });
 
+test("stale or hand-edited unsupported transports normalize to a provider-supported choice", () => {
+  assert.equal(
+    migrateDictationPreferences({ provider: "deepgram", transport: "direct-browser" }).transport,
+    "auto",
+  );
+  assert.equal(
+    migrateDictationPreferences({ provider: "local-nemotron", transport: "server-proxy" }).transport,
+    "auto",
+  );
+  assert.equal(
+    migrateDictationPreferences({ provider: "web-speech", transport: "local-worker" }).transport,
+    "auto",
+  );
+  // A supported explicit choice survives migration unchanged.
+  assert.equal(
+    migrateDictationPreferences({ provider: "elevenlabs", transport: "direct-browser" }).transport,
+    "direct-browser",
+  );
+});
+
 test("dictation context is deduped and bounded before provider use", () => {
   const context = normalizeDictationContext({
     language: "uk-UA",
