@@ -20,6 +20,18 @@ impl NativeClient {
         params: Value,
         identity_secret: Option<&[u8]>,
     ) -> Result<Value, String> {
+        if method == "connections.list" {
+            if identity_secret.is_some() {
+                return Err(LinkError::PairingInvalid.code().to_string());
+            }
+            let (data_dir, metadata_lock) = {
+                let guard = self.state.lock().await;
+                (guard.data_dir.clone(), guard.metadata_lock.clone())
+            };
+            let _metadata = metadata_lock.lock().await;
+            return list_native_metadata(&data_dir).map_err(|error| error.code().to_string());
+        }
+
         let _identity = match identity_secret {
             Some(secret) => {
                 let host = identity_host(method, &params)?;
@@ -36,6 +48,26 @@ impl NativeClient {
             .await
             .map_err(str::to_string)
     }
+}
+
+fn list_native_metadata(data_dir: &Path) -> Result<Value, LinkError> {
+    let list = read_metadata(&metadata_path(data_dir))?;
+    Ok(json!(
+        list.into_iter()
+            .map(|item| {
+                json!({
+                    "id": item.get("id").cloned().unwrap_or(Value::Null),
+                    "hostEndpointId": item.get("hostEndpointId").cloned().unwrap_or(Value::Null),
+                    "hostLabel": item.get("hostLabel").cloned().unwrap_or(Value::String(String::new())),
+                    "pairingState": item.get("pairingState").cloned().unwrap_or(Value::String("active".into())),
+                    "lastUsedAt": item.get("lastUsedAt").cloned().unwrap_or(Value::from(0)),
+                    "lastTransport": item.get("lastTransport").cloned().unwrap_or(Value::Null),
+                    "revoked": item.get("revoked").cloned().unwrap_or(Value::Bool(false)),
+                    "hasSecureIdentity": item.get("hasSecureIdentity").cloned().unwrap_or(Value::Bool(false)),
+                })
+            })
+            .collect::<Vec<_>>()
+    ))
 }
 
 fn identity_host(method: &str, params: &Value) -> Result<String, String> {
@@ -83,6 +115,7 @@ pub fn run_cli() {
 #[cfg(test)]
 mod native_tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn generated_identity_round_trips_without_serialization() {
@@ -99,5 +132,28 @@ mod native_tests {
             identity_host("connections.list", &params),
             Err(LinkError::PairingInvalid.code().to_string())
         );
+    }
+
+    #[test]
+    fn native_connection_list_exposes_recoverable_state_without_pairing_material() {
+        let dir = tempdir().unwrap();
+        persist_metadata(
+            dir.path(),
+            "host-endpoint",
+            "Polyth",
+            None,
+            "pairing-secret-reference",
+            "prepared",
+            None,
+        )
+        .unwrap();
+        let public = list_native_metadata(dir.path()).unwrap();
+        assert_eq!(public[0]["pairingState"], "prepared");
+        let text = public.to_string();
+        assert!(!text.contains("pairing-secret-reference"));
+        assert!(!text.contains("pairingId"));
+        assert!(!text.contains("deviceId"));
+        assert!(!text.contains("directAddresses"));
+        assert!(!text.contains("relayUrls"));
     }
 }
