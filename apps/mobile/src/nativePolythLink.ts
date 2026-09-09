@@ -29,7 +29,7 @@ const NativePolythLink = registerPlugin<PolythLinkCapacitorPlugin>("PolythLink")
 let installed = false;
 
 export function installNativePolythLink(): void {
-  if (installed || !Capacitor.isNativePlatform()) return;
+  if (installed || !Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable("PolythLink")) return;
   installed = true;
 
   const adapter: PolythLinkNative = {
