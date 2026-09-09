@@ -169,6 +169,14 @@ export function createLocalRuntimeManager(options: {
 
   const partialFile = (pkg: RuntimePackage): string => join(downloadsDir, `${pkg.name}-${SHERPA_RUNTIME_VERSION}.tgz.part`);
   const stageDir = (): string => join(stagingDir, `sherpa-${process.pid}`);
+  const installedStatus = (): LocalRuntimeStatus => ({
+    state: "installed",
+    version: SHERPA_RUNTIME_VERSION,
+    platform,
+    arch,
+    downloadedBytes: 0,
+    path: finalDir,
+  });
 
   const status = async (): Promise<LocalRuntimeStatus> => {
     if (!native) {
@@ -181,6 +189,7 @@ export function createLocalRuntimeManager(options: {
         error: `sherpa-onnx-node ${SHERPA_RUNTIME_VERSION} has no published binary for ${platform}/${arch}`,
       };
     }
+    if (existsSync(finalDir)) return installedStatus();
     if (active) {
       return {
         state: "downloading",
@@ -189,16 +198,6 @@ export function createLocalRuntimeManager(options: {
         arch,
         downloadedBytes: active.downloadedBytes,
         ...(active.totalBytes ? { totalBytes: active.totalBytes } : {}),
-      };
-    }
-    if (existsSync(finalDir)) {
-      return {
-        state: "installed",
-        version: SHERPA_RUNTIME_VERSION,
-        platform,
-        arch,
-        downloadedBytes: 0,
-        path: finalDir,
       };
     }
     let downloadedBytes = 0;
@@ -221,7 +220,7 @@ export function createLocalRuntimeManager(options: {
     let offset = existsSync(partial) ? (await stat(partial)).size : 0;
     running.downloadedBytes += offset;
     const headers = offset > 0 ? { Range: `bytes=${offset}-` } : undefined;
-    let response = await fetchFn(pkg.url, { headers, signal: controller.signal });
+    const response = await fetchFn(pkg.url, { headers, signal: controller.signal });
     if (offset > 0 && response.status === 200) {
       running.downloadedBytes -= offset;
       await rm(partial, { force: true });
@@ -274,7 +273,8 @@ export function createLocalRuntimeManager(options: {
       await rename(staging, finalDir);
       await rm(coreArchive, { force: true });
       await rm(platformArchive, { force: true });
-      return status();
+      failure = undefined;
+      return installedStatus();
     } catch (error) {
       await rm(staging, { recursive: true, force: true }).catch(() => {});
       if (controller.signal.aborted) {
@@ -292,7 +292,7 @@ export function createLocalRuntimeManager(options: {
     status,
     async download() {
       if (!native) return status();
-      if (existsSync(finalDir)) return status();
+      if (existsSync(finalDir)) return installedStatus();
       if (active) return active.promise;
       const controller = new AbortController();
       const running: ActiveDownload = {
