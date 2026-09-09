@@ -1,13 +1,15 @@
-// F16 lock screen: shown before the app boots when the server requires a UI
-// password (and again if the device session is revoked mid-use). Static
-// assets are public, so this shell always renders; every /api call behind it
-// stays 401 until login mints the polyth_auth cookie.
+// Shown before the app boots when the server requires authentication (and
+// again if the current device session is revoked mid-use). Static assets are
+// public; every protected /api call stays 401 until login mints the httpOnly
+// account-bound polyth_auth cookie.
 import { useEffect, useRef, useState } from "react";
-import { api } from "@polyth/session/web-api";
+import { loginAccount, loginAccounts, type AccountChoice } from "../accounts.ts";
 import { tr } from "../i18n/index.ts";
-import { Button, TextInput } from "./ui/index.ts";
+import { Button, Select, TextInput } from "./ui/index.ts";
 
 export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
+  const [accounts, setAccounts] = useState<AccountChoice[]>([]);
+  const [accountId, setAccountId] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [retryAt, setRetryAt] = useState<number | null>(null);
@@ -15,7 +17,16 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
   const [tick, setTick] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  useEffect(() => {
+    let active = true;
+    void loginAccounts().then((next) => {
+      if (!active) return;
+      setAccounts(next);
+      setAccountId((current) => current || next[0]?.id || "usr_owner");
+      requestAnimationFrame(() => inputRef.current?.focus());
+    });
+    return () => { active = false; };
+  }, []);
 
   // Countdown re-render while rate-limited; the disabled state lifts itself.
   useEffect(() => {
@@ -34,7 +45,7 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      const r = await api.authLogin(password);
+      const r = await loginAccount(accountId || "usr_owner", password);
       if (r.ok) {
         onUnlocked();
         return;
@@ -45,7 +56,7 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
       } else if (r.error === "invalid-password") {
         setError(tr("lockscreen.wrongPassword"));
       } else {
-        setError(r.message);
+        setError(r.message ?? tr("lockscreen.wrongPassword"));
       }
       setPassword("");
     } catch {
@@ -60,7 +71,21 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
       <form className="lock-card" onSubmit={submit}>
         <span className="welcome-mark">{tr("lockscreen.p")}</span>
         <h1>{tr("lockscreen.polythIsLocked")}</h1>
-        <p className="lock-hint">{tr("lockscreen.enterTheUiPasswordToContinue")}</p>
+        <p className="lock-hint">Sign in to this Polyth server.</p>
+        {accounts.length > 1 && (
+          <Select
+            label="Account"
+            value={accountId}
+            ariaLabel="Account"
+            options={accounts.map((account) => ({ value: account.id, label: account.name }))}
+            onChange={(value) => {
+              setAccountId(value);
+              setPassword("");
+              setError(null);
+              requestAnimationFrame(() => inputRef.current?.focus());
+            }}
+          />
+        )}
         <TextInput
           ref={inputRef}
           type="password"
