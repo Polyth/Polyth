@@ -17,10 +17,11 @@ use crate::errors::LinkError;
 use crate::timefmt::{now_unix_ms, unix_ms_to_rfc3339};
 
 const NUMERIC_TTL: Duration = Duration::from_secs(120);
-const ATTEMPT_WINDOW: Duration = Duration::from_secs(60);
-const MAX_CODE_ATTEMPTS: u32 = 5;
-const MAX_ENDPOINT_ATTEMPTS: usize = 10;
-const MAX_GLOBAL_ATTEMPTS: usize = 100;
+const ATTEMPT_WINDOW: Duration = Duration::from_secs(10 * 60);
+const COOLDOWN: Duration = Duration::from_secs(10 * 60);
+const MAX_CLIENT_ATTEMPTS: usize = 3;
+const MAX_ENDPOINT_ATTEMPTS: usize = 6;
+const MAX_GLOBAL_ATTEMPTS: usize = 30;
 const MAX_PENDING_LOGINS: usize = 16;
 
 struct NumericCipherSuite;
@@ -35,17 +36,20 @@ pub struct NumericPairing {
     setup: ServerSetup<NumericCipherSuite>,
     active: Option<NumericInvitation>,
     pending: HashMap<String, PendingLogin>,
+    attempts_by_client: HashMap<(String, String), usize>,
     attempts_by_endpoint: HashMap<String, Vec<Instant>>,
+    endpoint_cooldowns: HashMap<String, Instant>,
     global_attempts: Vec<Instant>,
+    host_cooldown_until: Option<Instant>,
 }
 
 struct NumericInvitation {
     pairing_id: String,
     host_endpoint_id: String,
+    expires_at: String,
     credential_id: Vec<u8>,
     password_file: Vec<u8>,
     created: Instant,
-    attempts: u32,
     redeemed: bool,
 }
 
@@ -64,10 +68,18 @@ pub struct NumericPairingCode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NumericBootstrap {
+    pub pairing_id: String,
+    pub host_endpoint_id: String,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NumericServerChallenge {
     pub attempt_id: String,
     pub pairing_id: String,
     pub host_endpoint_id: String,
+    pub expires_at: String,
     pub response: Vec<u8>,
 }
 
@@ -80,6 +92,8 @@ pub struct NumericClientLogin {
     state: ClientLogin<NumericCipherSuite>,
     code: Zeroizing<Vec<u8>>,
     expected_host_endpoint_id: String,
+    expected_pairing_id: String,
+    expected_expires_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,8 +114,11 @@ impl NumericPairing {
             setup: ServerSetup::<NumericCipherSuite>::new(&mut rng),
             active: None,
             pending: HashMap::new(),
+            attempts_by_client: HashMap::new(),
             attempts_by_endpoint: HashMap::new(),
+            endpoint_cooldowns: HashMap::new(),
             global_attempts: Vec::new(),
+            host_cooldown_until: None,
         }
     }
 
@@ -112,10 +129,9 @@ impl NumericPairing {
         now: Instant,
     ) -> Result<NumericPairingCode, LinkError> {
         validate_endpoint(host_endpoint_id)?;
-        if pairing_id.is_empty() || pairing_id.len() > 128 {
-            return Err(LinkError::PairingInvalid);
-        }
+        validate_pairing_id(pairing_id)?;
         self.invalidate_active();
+        self.prune_rate_limits(now);
 
         let mut rng = OsRng;
         let code = format!("{:06}", rng.gen_range(0..1_000_000u32));
@@ -129,18 +145,30 @@ impl NumericPairing {
         self.active = Some(NumericInvitation {
             pairing_id: pairing_id.to_string(),
             host_endpoint_id: host_endpoint_id.to_string(),
+            expires_at: expires_at.clone(),
             credential_id,
             password_file,
             created: now,
-            attempts: 0,
             redeemed: false,
         });
-        self.pending.clear();
 
         Ok(NumericPairingCode {
             code,
             pairing_id: pairing_id.to_string(),
             expires_at,
+        })
+    }
+
+    pub fn bootstrap(&mut self, now: Instant) -> Result<NumericBootstrap, LinkError> {
+        self.expire(now);
+        let active = self.active.as_ref().ok_or(LinkError::PairingExpired)?;
+        if active.redeemed {
+            return Err(LinkError::PairingClaimed);
+        }
+        Ok(NumericBootstrap {
+            pairing_id: active.pairing_id.clone(),
+            host_endpoint_id: active.host_endpoint_id.clone(),
+            expires_at: active.expires_at.clone(),
         })
     }
 
@@ -161,45 +189,39 @@ impl NumericPairing {
     pub fn start_login(
         &mut self,
         device_endpoint_id: &str,
+        pairing_id: &str,
         request: &[u8],
         now: Instant,
     ) -> Result<NumericServerChallenge, LinkError> {
         validate_endpoint(device_endpoint_id)?;
+        validate_pairing_id(pairing_id)?;
         self.expire(now);
         self.prune_rate_limits(now);
 
-        if self.global_attempts.len() >= MAX_GLOBAL_ATTEMPTS {
-            return Err(LinkError::RequestRateLimited);
+        let active = self.active.as_ref().ok_or(LinkError::PairingExpired)?;
+        if active.pairing_id != pairing_id {
+            return Err(LinkError::PairingInvalid);
         }
-        let endpoint_attempts = self
-            .attempts_by_endpoint
-            .entry(device_endpoint_id.to_string())
-            .or_default();
-        if endpoint_attempts.len() >= MAX_ENDPOINT_ATTEMPTS {
-            return Err(LinkError::RequestRateLimited);
+        if active.redeemed {
+            return Err(LinkError::PairingClaimed);
         }
+        self.reserve_attempt(device_endpoint_id, pairing_id, now)?;
         if self.pending.len() >= MAX_PENDING_LOGINS {
             return Err(LinkError::RequestRateLimited);
         }
 
-        let active = self.active.as_mut().ok_or(LinkError::PairingExpired)?;
-        if active.redeemed {
-            return Err(LinkError::PairingClaimed);
-        }
-        if active.attempts >= MAX_CODE_ATTEMPTS {
-            return Err(LinkError::RequestRateLimited);
-        }
-        active.attempts += 1;
-        endpoint_attempts.push(now);
-        self.global_attempts.push(now);
-
+        let active = self.active.as_ref().ok_or(LinkError::PairingExpired)?;
         let credential_request = CredentialRequest::<NumericCipherSuite>::deserialize(request)
             .map_err(|_| LinkError::PairingInvalid)?;
         let password_file = ServerRegistration::<NumericCipherSuite>::deserialize(
             &active.password_file,
         )
         .map_err(|_| LinkError::PairingInvalid)?;
-        let context = context(&active.host_endpoint_id, &active.pairing_id);
+        let transcript = context(
+            &active.host_endpoint_id,
+            &active.pairing_id,
+            &active.expires_at,
+        );
         let mut rng = OsRng;
         let started = ServerLogin::start(
             &mut rng,
@@ -208,7 +230,7 @@ impl NumericPairing {
             credential_request,
             &active.credential_id,
             ServerLoginParameters {
-                context: Some(&context),
+                context: Some(&transcript),
                 ..ServerLoginParameters::default()
             },
         )
@@ -231,6 +253,7 @@ impl NumericPairing {
             attempt_id,
             pairing_id: active.pairing_id.clone(),
             host_endpoint_id: active.host_endpoint_id.clone(),
+            expires_at: active.expires_at.clone(),
             response: started.message.serialize().to_vec(),
         })
     }
@@ -249,44 +272,122 @@ impl NumericPairing {
             .remove(attempt_id)
             .ok_or(LinkError::PairingInvalid)?;
         if pending.device_endpoint_id != device_endpoint_id {
-            return Err(LinkError::PairingClaimed);
+            return Err(LinkError::PairingInvalid);
         }
         if now.duration_since(pending.created) >= NUMERIC_TTL {
             return Err(LinkError::PairingExpired);
         }
 
-        let active = self.active.as_mut().ok_or(LinkError::PairingExpired)?;
-        if active.pairing_id != pending.pairing_id {
-            return Err(LinkError::PairingExpired);
-        }
-        if active.redeemed {
-            return Err(LinkError::PairingClaimed);
-        }
-        let message = CredentialFinalization::<NumericCipherSuite>::deserialize(finalization)
-            .map_err(|_| LinkError::PairingInvalid)?;
-        let context = context(&active.host_endpoint_id, &active.pairing_id);
-        pending
-            .state
-            .finish(
-                message,
-                ServerLoginParameters {
-                    context: Some(&context),
-                    ..ServerLoginParameters::default()
-                },
-            )
-            .map_err(|_| LinkError::PairingInvalid)?;
+        let pairing_id = {
+            let active = self.active.as_mut().ok_or(LinkError::PairingExpired)?;
+            if active.pairing_id != pending.pairing_id {
+                return Err(LinkError::PairingExpired);
+            }
+            if active.redeemed {
+                return Err(LinkError::PairingClaimed);
+            }
+            let message = CredentialFinalization::<NumericCipherSuite>::deserialize(finalization)
+                .map_err(|_| LinkError::PairingInvalid)?;
+            let transcript = context(
+                &active.host_endpoint_id,
+                &active.pairing_id,
+                &active.expires_at,
+            );
+            pending
+                .state
+                .finish(
+                    message,
+                    ServerLoginParameters {
+                        context: Some(&transcript),
+                        ..ServerLoginParameters::default()
+                    },
+                )
+                .map_err(|_| LinkError::PairingInvalid)?;
 
-        active.redeemed = true;
-        active.password_file.zeroize();
+            active.redeemed = true;
+            active.password_file.zeroize();
+            active.pairing_id.clone()
+        };
+
+        self.refund_success(device_endpoint_id, &pairing_id);
         self.pending.clear();
-        Ok(NumericPairingRedeemed {
-            pairing_id: active.pairing_id.clone(),
-        })
+        Ok(NumericPairingRedeemed { pairing_id })
     }
 
     pub fn active_pairing_id(&mut self, now: Instant) -> Option<&str> {
         self.expire(now);
         self.active.as_ref().map(|active| active.pairing_id.as_str())
+    }
+
+    fn reserve_attempt(
+        &mut self,
+        device_endpoint_id: &str,
+        pairing_id: &str,
+        now: Instant,
+    ) -> Result<(), LinkError> {
+        if self.host_cooldown_until.is_some_and(|until| now < until) {
+            return Err(LinkError::RequestRateLimited);
+        }
+        if self
+            .endpoint_cooldowns
+            .get(device_endpoint_id)
+            .is_some_and(|until| now < *until)
+        {
+            return Err(LinkError::RequestRateLimited);
+        }
+
+        let client_key = (pairing_id.to_string(), device_endpoint_id.to_string());
+        let client_attempts = self.attempts_by_client.entry(client_key).or_default();
+        if *client_attempts >= MAX_CLIENT_ATTEMPTS {
+            return Err(LinkError::RequestRateLimited);
+        }
+
+        let endpoint_attempts = self
+            .attempts_by_endpoint
+            .entry(device_endpoint_id.to_string())
+            .or_default();
+        if endpoint_attempts.len() >= MAX_ENDPOINT_ATTEMPTS {
+            self.endpoint_cooldowns
+                .insert(device_endpoint_id.to_string(), now + COOLDOWN);
+            return Err(LinkError::RequestRateLimited);
+        }
+        if self.global_attempts.len() >= MAX_GLOBAL_ATTEMPTS {
+            self.host_cooldown_until = Some(now + COOLDOWN);
+            return Err(LinkError::RequestRateLimited);
+        }
+
+        *client_attempts += 1;
+        endpoint_attempts.push(now);
+        self.global_attempts.push(now);
+        if *client_attempts >= MAX_CLIENT_ATTEMPTS {
+            // This bootstrap/source pair may finish its current attempt, but no
+            // additional online guesses are allowed for this pairing session.
+        }
+        if endpoint_attempts.len() >= MAX_ENDPOINT_ATTEMPTS {
+            self.endpoint_cooldowns
+                .insert(device_endpoint_id.to_string(), now + COOLDOWN);
+        }
+        if self.global_attempts.len() >= MAX_GLOBAL_ATTEMPTS {
+            self.host_cooldown_until = Some(now + COOLDOWN);
+        }
+        Ok(())
+    }
+
+    fn refund_success(&mut self, device_endpoint_id: &str, pairing_id: &str) {
+        let key = (pairing_id.to_string(), device_endpoint_id.to_string());
+        if let Some(attempts) = self.attempts_by_client.get_mut(&key) {
+            *attempts = attempts.saturating_sub(1);
+            if *attempts == 0 {
+                self.attempts_by_client.remove(&key);
+            }
+        }
+        if let Some(attempts) = self.attempts_by_endpoint.get_mut(device_endpoint_id) {
+            attempts.pop();
+            if attempts.is_empty() {
+                self.attempts_by_endpoint.remove(device_endpoint_id);
+            }
+        }
+        self.global_attempts.pop();
     }
 
     fn expire(&mut self, now: Instant) {
@@ -308,11 +409,18 @@ impl NumericPairing {
             attempts.retain(|at| now.duration_since(*at) < ATTEMPT_WINDOW);
             !attempts.is_empty()
         });
+        self.endpoint_cooldowns.retain(|_, until| now < *until);
+        if self.host_cooldown_until.is_some_and(|until| now >= until) {
+            self.host_cooldown_until = None;
+        }
     }
 
     fn invalidate_active(&mut self) {
         if let Some(mut active) = self.active.take() {
+            let pairing_id = active.pairing_id.clone();
             active.password_file.zeroize();
+            self.attempts_by_client
+                .retain(|(candidate, _), _| candidate != &pairing_id);
         }
         self.pending.clear();
     }
@@ -328,8 +436,14 @@ impl NumericClientLogin {
     pub fn start(
         code: &str,
         expected_host_endpoint_id: &str,
+        expected_pairing_id: &str,
+        expected_expires_at: &str,
     ) -> Result<(Self, NumericClientRequest), LinkError> {
         validate_endpoint(expected_host_endpoint_id)?;
+        validate_pairing_id(expected_pairing_id)?;
+        if expected_expires_at.is_empty() || expected_expires_at.len() > 64 {
+            return Err(LinkError::PairingInvalid);
+        }
         let normalized = normalize_code(code)?;
         let mut rng = OsRng;
         let started = ClientLogin::<NumericCipherSuite>::start(&mut rng, normalized.as_bytes())
@@ -339,6 +453,8 @@ impl NumericClientLogin {
                 state: started.state,
                 code: Zeroizing::new(normalized.into_bytes()),
                 expected_host_endpoint_id: expected_host_endpoint_id.to_string(),
+                expected_pairing_id: expected_pairing_id.to_string(),
+                expected_expires_at: expected_expires_at.to_string(),
             },
             NumericClientRequest {
                 request: started.message.serialize().to_vec(),
@@ -353,9 +469,18 @@ impl NumericClientLogin {
         if challenge.host_endpoint_id != self.expected_host_endpoint_id {
             return Err(LinkError::HostIdentityMismatch);
         }
+        if challenge.pairing_id != self.expected_pairing_id
+            || challenge.expires_at != self.expected_expires_at
+        {
+            return Err(LinkError::PairingInvalid);
+        }
         let response = CredentialResponse::<NumericCipherSuite>::deserialize(&challenge.response)
             .map_err(|_| LinkError::PairingInvalid)?;
-        let context = context(&challenge.host_endpoint_id, &challenge.pairing_id);
+        let transcript = context(
+            &challenge.host_endpoint_id,
+            &challenge.pairing_id,
+            &challenge.expires_at,
+        );
         let mut rng = OsRng;
         let finished = self
             .state
@@ -364,7 +489,7 @@ impl NumericClientLogin {
                 &self.code,
                 response,
                 ClientLoginFinishParameters {
-                    context: Some(&context),
+                    context: Some(&transcript),
                     ..ClientLoginFinishParameters::default()
                 },
             )
@@ -416,14 +541,29 @@ fn credential_id(host_endpoint_id: &str, pairing_id: &str) -> Vec<u8> {
     format!("polyth-numeric-v1:{host_endpoint_id}:{pairing_id}").into_bytes()
 }
 
-fn context(host_endpoint_id: &str, pairing_id: &str) -> Vec<u8> {
-    format!("polyth-link/numeric-pair/v1/{host_endpoint_id}/{pairing_id}").into_bytes()
+fn context(host_endpoint_id: &str, pairing_id: &str, expires_at: &str) -> Vec<u8> {
+    format!(
+        "polyth-link/numeric-pair/v1/{host_endpoint_id}/{pairing_id}/{expires_at}"
+    )
+    .into_bytes()
 }
 
 fn validate_endpoint(value: &str) -> Result<(), LinkError> {
     if value.len() < 32
         || value.len() > 64
         || !value.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    {
+        return Err(LinkError::PairingInvalid);
+    }
+    Ok(())
+}
+
+fn validate_pairing_id(value: &str) -> Result<(), LinkError> {
+    if value.is_empty()
+        || value.len() > 128
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
     {
         return Err(LinkError::PairingInvalid);
     }
@@ -443,44 +583,184 @@ mod tests {
     const HOST: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const DEVICE: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
+    fn device(index: usize) -> String {
+        format!("{:052}", index)
+    }
+
     #[test]
-    fn numeric_code_authenticates_only_the_existing_pairing_id() {
+    fn bootstrap_is_opaque_pairing_id_and_binds_expiry_into_opaque_context() {
         let now = Instant::now();
         let mut server = NumericPairing::new();
-        let code = server.create(HOST, "pairing-a", now).unwrap();
-        let (client, request) = NumericClientLogin::start(&code.code, HOST).unwrap();
-        let challenge = server.start_login(DEVICE, &request.request, now).unwrap();
+        let code = server.create(HOST, "bootstrap_A-1", now).unwrap();
+        let bootstrap = server.bootstrap(now).unwrap();
+        assert_eq!(bootstrap.pairing_id, code.pairing_id);
+
+        let (client, request) = NumericClientLogin::start(
+            &code.code,
+            HOST,
+            &bootstrap.pairing_id,
+            &bootstrap.expires_at,
+        )
+        .unwrap();
+        let challenge = server
+            .start_login(DEVICE, &bootstrap.pairing_id, &request.request, now)
+            .unwrap();
         let finish = client.finish(&challenge).unwrap();
         let redeemed = server
             .finish_login(DEVICE, &finish.attempt_id, &finish.finalization, now)
             .unwrap();
+        assert_eq!(redeemed.pairing_id, bootstrap.pairing_id);
+    }
 
-        assert_eq!(redeemed.pairing_id, "pairing-a");
+    #[test]
+    fn wrong_bootstrap_id_is_rejected_before_opaque_login() {
+        let now = Instant::now();
+        let mut server = NumericPairing::new();
+        let code = server.create(HOST, "bootstrap-a", now).unwrap();
+        let bootstrap = server.bootstrap(now).unwrap();
+        let (_client, request) = NumericClientLogin::start(
+            &code.code,
+            HOST,
+            &bootstrap.pairing_id,
+            &bootstrap.expires_at,
+        )
+        .unwrap();
         assert_eq!(
-            server.finish_login(DEVICE, &finish.attempt_id, &finish.finalization, now),
+            server.start_login(DEVICE, "bootstrap-b", &request.request, now),
             Err(LinkError::PairingInvalid)
         );
     }
 
     #[test]
-    fn wrong_code_never_authenticates_the_pairing_id() {
+    fn three_attempts_bound_one_client_bootstrap_pair() {
         let now = Instant::now();
         let mut server = NumericPairing::new();
-        let code = server.create(HOST, "pairing-a", now).unwrap();
-        let wrong = if code.code == "000000" { "000001" } else { "000000" };
-        let (client, request) = NumericClientLogin::start(wrong, HOST).unwrap();
-        let challenge = server.start_login(DEVICE, &request.request, now).unwrap();
-        assert_eq!(client.finish(&challenge), Err(LinkError::PairingInvalid));
+        let code = server.create(HOST, "bootstrap-a", now).unwrap();
+        let bootstrap = server.bootstrap(now).unwrap();
+        for _ in 0..MAX_CLIENT_ATTEMPTS {
+            let (_client, request) = NumericClientLogin::start(
+                &code.code,
+                HOST,
+                &bootstrap.pairing_id,
+                &bootstrap.expires_at,
+            )
+            .unwrap();
+            server
+                .start_login(DEVICE, &bootstrap.pairing_id, &request.request, now)
+                .unwrap();
+        }
+        let (_client, request) = NumericClientLogin::start(
+            &code.code,
+            HOST,
+            &bootstrap.pairing_id,
+            &bootstrap.expires_at,
+        )
+        .unwrap();
+        assert_eq!(
+            server.start_login(DEVICE, &bootstrap.pairing_id, &request.request, now),
+            Err(LinkError::RequestRateLimited)
+        );
+    }
+
+    #[test]
+    fn source_limit_survives_code_regeneration_and_cools_down_for_ten_minutes() {
+        let now = Instant::now();
+        let mut server = NumericPairing::new();
+        for pairing in ["bootstrap-a", "bootstrap-b"] {
+            let code = server.create(HOST, pairing, now).unwrap();
+            let bootstrap = server.bootstrap(now).unwrap();
+            for _ in 0..MAX_CLIENT_ATTEMPTS {
+                let (_client, request) = NumericClientLogin::start(
+                    &code.code,
+                    HOST,
+                    &bootstrap.pairing_id,
+                    &bootstrap.expires_at,
+                )
+                .unwrap();
+                server
+                    .start_login(DEVICE, &bootstrap.pairing_id, &request.request, now)
+                    .unwrap();
+            }
+        }
+        let code = server.create(HOST, "bootstrap-c", now).unwrap();
+        let bootstrap = server.bootstrap(now).unwrap();
+        let (_client, request) = NumericClientLogin::start(
+            &code.code,
+            HOST,
+            &bootstrap.pairing_id,
+            &bootstrap.expires_at,
+        )
+        .unwrap();
+        assert_eq!(
+            server.start_login(DEVICE, &bootstrap.pairing_id, &request.request, now),
+            Err(LinkError::RequestRateLimited)
+        );
+
+        let later = now + COOLDOWN + Duration::from_secs(1);
+        let code = server.create(HOST, "bootstrap-d", later).unwrap();
+        let bootstrap = server.bootstrap(later).unwrap();
+        let (_client, request) = NumericClientLogin::start(
+            &code.code,
+            HOST,
+            &bootstrap.pairing_id,
+            &bootstrap.expires_at,
+        )
+        .unwrap();
+        assert!(server
+            .start_login(DEVICE, &bootstrap.pairing_id, &request.request, later)
+            .is_ok());
+    }
+
+    #[test]
+    fn host_limit_is_thirty_attempts_across_sources() {
+        let now = Instant::now();
+        let mut server = NumericPairing::new();
+        let code = server.create(HOST, "bootstrap-a", now).unwrap();
+        let bootstrap = server.bootstrap(now).unwrap();
+        for index in 1..=MAX_GLOBAL_ATTEMPTS {
+            let endpoint = device(index);
+            let (_client, request) = NumericClientLogin::start(
+                &code.code,
+                HOST,
+                &bootstrap.pairing_id,
+                &bootstrap.expires_at,
+            )
+            .unwrap();
+            server
+                .start_login(&endpoint, &bootstrap.pairing_id, &request.request, now)
+                .unwrap();
+        }
+        let endpoint = device(MAX_GLOBAL_ATTEMPTS + 1);
+        let (_client, request) = NumericClientLogin::start(
+            &code.code,
+            HOST,
+            &bootstrap.pairing_id,
+            &bootstrap.expires_at,
+        )
+        .unwrap();
+        assert_eq!(
+            server.start_login(&endpoint, &bootstrap.pairing_id, &request.request, now),
+            Err(LinkError::RequestRateLimited)
+        );
     }
 
     #[test]
     fn regeneration_invalidates_old_login_and_old_code() {
         let now = Instant::now();
         let mut server = NumericPairing::new();
-        let first = server.create(HOST, "pairing-a", now).unwrap();
-        let (client, request) = NumericClientLogin::start(&first.code, HOST).unwrap();
-        let challenge = server.start_login(DEVICE, &request.request, now).unwrap();
-        server.create(HOST, "pairing-b", now).unwrap();
+        let first = server.create(HOST, "bootstrap-a", now).unwrap();
+        let bootstrap = server.bootstrap(now).unwrap();
+        let (client, request) = NumericClientLogin::start(
+            &first.code,
+            HOST,
+            &bootstrap.pairing_id,
+            &bootstrap.expires_at,
+        )
+        .unwrap();
+        let challenge = server
+            .start_login(DEVICE, &bootstrap.pairing_id, &request.request, now)
+            .unwrap();
+        server.create(HOST, "bootstrap-b", now).unwrap();
         let finish = client.finish(&challenge).unwrap();
         assert_eq!(
             server.finish_login(DEVICE, &finish.attempt_id, &finish.finalization, now),
@@ -489,19 +769,10 @@ mod tests {
     }
 
     #[test]
-    fn code_expires_and_attempts_are_bounded() {
+    fn code_expires() {
         let now = Instant::now();
         let mut server = NumericPairing::new();
-        let code = server.create(HOST, "pairing-a", now).unwrap();
-        for _ in 0..MAX_CODE_ATTEMPTS {
-            let (_client, request) = NumericClientLogin::start(&code.code, HOST).unwrap();
-            server.start_login(DEVICE, &request.request, now).unwrap();
-        }
-        let (_client, request) = NumericClientLogin::start(&code.code, HOST).unwrap();
-        assert_eq!(
-            server.start_login(DEVICE, &request.request, now),
-            Err(LinkError::RequestRateLimited)
-        );
+        server.create(HOST, "bootstrap-a", now).unwrap();
         assert_eq!(server.active_pairing_id(now + NUMERIC_TTL), None);
     }
 
