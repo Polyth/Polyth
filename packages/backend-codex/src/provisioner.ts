@@ -7,6 +7,7 @@ import type {
   HarnessProvisioningPlan,
 } from "@polyth/contracts";
 import { createLaunchOverlayStore, mcpNativeNameCollision, type LaunchOverlayStore } from "@polyth/harness-runtime";
+import { renderCapabilityText } from "@polyth/harness-runtime/capability-text";
 
 export interface CodexLaunchOverlay {
   developerInstructions?: string;
@@ -22,8 +23,8 @@ const support = (_context: HarnessContext): HarnessCapabilitySupport => ({
     instruction: { modes: ["config"], mutability: "session-create", configScope: "session" },
     "mcp-server": { modes: ["config"], mutability: "session-create", remote: false, configScope: "session" },
     tool: { modes: ["mcp"], mutability: "session-create", remote: false, configScope: "session" },
-    skill: { modes: ["unsupported"], mutability: "immutable" },
-    context: { modes: ["unsupported"], mutability: "immutable" },
+    skill: { modes: ["prompt"], mutability: "session-create", remote: false, configScope: "session" },
+    context: { modes: ["prompt"], mutability: "session-create", remote: false, configScope: "session" },
     extension: { modes: ["unsupported"], mutability: "immutable" },
   },
 });
@@ -55,12 +56,8 @@ export function createCodexProvisioner(): HarnessProvisioner {
         };
       }
       const overlay: CodexLaunchOverlay = {};
-      const instructions = plan.items.filter((item) => item.capability.kind === "instruction" && item.mode !== "unsupported");
-      if (instructions.length) {
-        overlay.developerInstructions = instructions
-          .map((item) => item.capability.kind === "instruction" ? item.capability.text : "")
-          .join("\n\n");
-      }
+      const instructions = renderCapabilityText(plan);
+      if (instructions) overlay.developerInstructions = instructions;
       overlay.mcpServers = {};
       for (const item of plan.items) {
         if (item.capability.kind !== "mcp-server" || item.mode === "unsupported" || !item.capability.enabled) continue;
@@ -95,9 +92,7 @@ export function createCodexProvisioner(): HarnessProvisioner {
           if (item.mode === "unsupported") {
             return record(item, "unsupported", "Codex has no verified projection for this capability");
           }
-          return record(item, "pending", item.capability.kind === "instruction"
-            ? "Staged for the next Codex thread/start"
-            : "Staged for the next Codex thread/start");
+          return record(item, "pending", "Staged for the next Codex thread/start");
         }),
       };
     },
