@@ -8,8 +8,13 @@ import {
 import {
   createDictationService,
   createWhisperSttAdapter,
+  providerCatalog,
+  type DictationProviderId,
   type DictationService,
+  type DictationTransport,
+  type DictationLatencyPreference,
 } from "./index.ts";
+import { createElevenLabsSttAdapter } from "./elevenlabs.ts";
 
 interface VoiceEngineSettings {
   baseUrl: string;
@@ -17,22 +22,42 @@ interface VoiceEngineSettings {
   apiKeyEnv: string;
 }
 
+interface VoiceDictationSettings {
+  provider: DictationProviderId;
+  transport: DictationTransport;
+  model: string;
+  localModel: string;
+  language: string;
+  contextInjection: boolean;
+  cloudFallback: boolean;
+  latencyPreference: DictationLatencyPreference;
+  apiKeyEnv: string;
+}
+
 interface VoiceSettings {
   stt: VoiceEngineSettings & { language: string };
   tts: VoiceEngineSettings & { voice: string };
+  dictation: VoiceDictationSettings;
 }
 
 interface VoiceSettingsService {
   get(): VoiceSettings;
   put(next: unknown): VoiceSettings;
-  resolveKey(section: "stt" | "tts"): string | undefined;
+  resolveKey(section: "stt" | "tts" | "dictation"): string | undefined;
 }
 
 const DICTATION_STATUS: Record<string, number> = {
   "not-found": 404,
   "invalid-input": 400,
+  audio_format_error: 400,
+  protocol_error: 400,
   unavailable: 503,
+  provider_unavailable: 503,
+  invalid_credentials: 401,
+  rate_limited: 429,
+  network_error: 502,
   limit: 429,
+  backpressure_overflow: 429,
   conflict: 409,
   gap: 409,
   "out-of-order": 409,
@@ -72,10 +97,11 @@ export function dictationRoutes(dictation: DictationService): RouteHandler {
       }
       return false;
     } catch (error) {
-      const failure = error as Error & { code?: string };
+      const failure = error as Error & { code?: string; retryAfterMs?: number };
       json(DICTATION_STATUS[failure.code ?? ""] ?? 500, {
         error: failure.code ?? "internal",
         message: failure.message,
+        ...(typeof failure.retryAfterMs === "number" ? { retryAfterMs: failure.retryAfterMs } : {}),
       });
       return true;
     }
@@ -83,6 +109,32 @@ export function dictationRoutes(dictation: DictationService): RouteHandler {
 }
 
 const MAX_SPEAK_CHARS = 8_000;
+
+const providerAvailability = (voice: VoiceSettingsService) => {
+  const settings = voice.get();
+  const selected = settings.dictation.provider;
+  const key = voice.resolveKey("dictation");
+  return providerCatalog().map((provider) => {
+    let available = false;
+    let reason: string | undefined;
+    if (provider.id === "elevenlabs") {
+      available = selected === provider.id && !!key;
+      if (!available) reason = selected === provider.id ? `missing ${settings.dictation.apiKeyEnv || "ELEVENLABS_API_KEY"}` : "not selected";
+    } else if (provider.id === "openai-compatible") {
+      available = selected === provider.id && !!settings.stt.baseUrl;
+      if (!available) reason = selected === provider.id ? "OpenAI-compatible STT base URL is missing" : "not selected";
+    } else if (provider.id === "openai-transcribe") {
+      available = selected === provider.id && !!key;
+      if (!available) reason = selected === provider.id ? `missing ${settings.dictation.apiKeyEnv || "OPENAI_API_KEY"}` : "not selected";
+    } else if (provider.id === "web-speech") {
+      // The server cannot probe browser Web Speech support; the web client does.
+      available = selected === provider.id;
+    } else {
+      reason = provider.publicApi ? "provider adapter not enabled yet" : "public Voice Interface API contract unavailable";
+    }
+    return { ...provider, available, ...(reason ? { reason } : {}) };
+  });
+};
 
 export function voiceRoutes(deps: {
   voice: VoiceSettingsService;
@@ -98,6 +150,7 @@ export function voiceRoutes(deps: {
         ...settings,
         sttConfigured: !!settings.stt.baseUrl,
         ttsConfigured: !!settings.tts.baseUrl,
+        dictationKeyConfigured: !!deps.voice.resolveKey("dictation"),
       });
       return true;
     }
@@ -107,7 +160,54 @@ export function voiceRoutes(deps: {
         ...settings,
         sttConfigured: !!settings.stt.baseUrl,
         ttsConfigured: !!settings.tts.baseUrl,
+        dictationKeyConfigured: !!deps.voice.resolveKey("dictation"),
       });
+      return true;
+    }
+    if (path === "/api/voice/providers" && method === "GET") {
+      json(200, { providers: providerAvailability(deps.voice) });
+      return true;
+    }
+    if (path === "/api/dictation/token" && method === "POST") {
+      const settings = deps.voice.get().dictation;
+      const input = await request.body();
+      const provider = String(input.provider ?? settings.provider);
+      if (provider !== "elevenlabs" || settings.provider !== "elevenlabs") {
+        json(400, { error: "provider_unavailable", message: "single-use tokens are only enabled for the selected ElevenLabs provider" });
+        return true;
+      }
+      const key = deps.voice.resolveKey("dictation");
+      if (!key) {
+        json(401, { error: "invalid_credentials", message: `missing ${settings.apiKeyEnv || "ELEVENLABS_API_KEY"}` });
+        return true;
+      }
+      try {
+        const response = await fetchFn("https://api.elevenlabs.io/v1/single-use-token/realtime_scribe", {
+          method: "POST",
+          headers: { "xi-api-key": key },
+        });
+        if (!response.ok) {
+          const code = response.status === 401 || response.status === 403 ? "invalid_credentials"
+            : response.status === 429 ? "rate_limited" : "provider_unavailable";
+          json(response.status === 429 ? 429 : response.status === 401 || response.status === 403 ? 401 : 502, {
+            error: code,
+            message: `ElevenLabs token request failed: HTTP ${response.status}`,
+          });
+          return true;
+        }
+        const payload = await response.json() as { token?: unknown };
+        if (typeof payload.token !== "string" || !payload.token) {
+          json(502, { error: "protocol_error", message: "ElevenLabs token response did not include a token" });
+          return true;
+        }
+        // ElevenLabs documents these tokens as one-use and expiring after 15m.
+        json(200, { provider: "elevenlabs", token: payload.token, expiresInSeconds: 900 });
+      } catch (error) {
+        json(502, {
+          error: "network_error",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
       return true;
     }
     if (path === "/api/tts/speak" && method === "POST") {
@@ -200,26 +300,48 @@ export function voiceRoutes(deps: {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
-  // Streaming dictation (WP15/F8): the adapter provider re-reads the voice
-  // settings on every call, so saving an STT server URL flips the capability
-  // honestly without a restart; no URL = browser Web Speech. Voice settings
-  // are composition-root-owned and published before package discovery runs.
   const voice = host.services.require(
     serverServiceKey<VoiceSettingsService>("voice.settings"),
   );
   const dictation = createDictationService({
     adapter: () => {
-      const stt = voice.get().stt;
-      if (!stt.baseUrl) return null;
-      const apiKey = voice.resolveKey("stt");
-      return createWhisperSttAdapter({
-        baseUrl: stt.baseUrl,
-        ...(stt.model ? { model: stt.model } : {}),
-        ...(stt.language ? { language: stt.language } : {}),
-        ...(apiKey ? { apiKey } : {}),
-      });
+      const settings = voice.get();
+      const selected = settings.dictation;
+      if (selected.transport === "direct-browser" || selected.transport === "local-worker" || selected.provider === "web-speech") {
+        return null;
+      }
+      if (selected.provider === "elevenlabs") {
+        const apiKey = voice.resolveKey("dictation");
+        if (!apiKey) return null;
+        return createElevenLabsSttAdapter({
+          apiKey,
+          model: selected.model || "scribe_v2_realtime",
+        });
+      }
+      if (selected.provider === "openai-transcribe") {
+        const apiKey = voice.resolveKey("dictation");
+        if (!apiKey) return null;
+        return createWhisperSttAdapter({
+          baseUrl: settings.stt.baseUrl || "https://api.openai.com/v1",
+          model: selected.model || "gpt-4o-transcribe",
+          ...(selected.language && selected.language !== "auto" ? { language: selected.language } : {}),
+          apiKey,
+        });
+      }
+      if (selected.provider === "openai-compatible") {
+        const stt = settings.stt;
+        if (!stt.baseUrl) return null;
+        const apiKey = voice.resolveKey("dictation") ?? voice.resolveKey("stt");
+        return createWhisperSttAdapter({
+          baseUrl: stt.baseUrl,
+          model: selected.model || stt.model || "whisper-1",
+          ...(selected.language && selected.language !== "auto" ? { language: selected.language } : stt.language ? { language: stt.language } : {}),
+          ...(apiKey ? { apiKey } : {}),
+        });
+      }
+      return null;
     },
-    unavailableReason: "no speech-to-text engine configured; browser Web Speech is used instead",
+    unavailableReason: "selected dictation provider is unavailable or missing credentials",
   });
   host.services.provide(serverServiceKey<DictationService>("dictation"), dictation);
   let routes: RouteHandler | null = null;
