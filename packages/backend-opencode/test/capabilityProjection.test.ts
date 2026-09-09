@@ -12,9 +12,15 @@ import {
 } from "../src/provisioner.ts";
 import type { BackendConfigApplier } from "../src/config.ts";
 
-const descriptor = (
-  value: Omit<AgentCapabilityDescriptor, "owner" | "revision">,
-): AgentCapabilityDescriptor => ({ ...value, owner: "fixture", revision: `rev-${value.id}` } as AgentCapabilityDescriptor);
+type DescriptorInput = {
+  [K in AgentCapabilityDescriptor["kind"]]: Omit<Extract<AgentCapabilityDescriptor, { kind: K }>, "owner" | "revision">;
+}[AgentCapabilityDescriptor["kind"]];
+
+const descriptor = (value: DescriptorInput): AgentCapabilityDescriptor => ({
+  ...value,
+  owner: "fixture",
+  revision: `rev-${value.id}`,
+} as AgentCapabilityDescriptor);
 
 const contextAt = (storageDir: string): HarnessContext => ({
   spaceId: "space-a",
@@ -31,7 +37,7 @@ const contextAt = (storageDir: string): HarnessContext => ({
 });
 
 const applier = (behavior: string[]): BackendConfigApplier => ({
-  async applyBehavior(text) { behavior.push(text); return text.length; },
+  async applyBehavior(text: string) { behavior.push(text); return text.length; },
   configAuthority: () => ({ kind: "writable", targetId: "fixture" }),
 } as unknown as BackendConfigApplier);
 
