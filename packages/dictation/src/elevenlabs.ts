@@ -1,5 +1,5 @@
 import WebSocket from "ws";
-import { DictationError } from "./providers.ts";
+import { DictationError, type DictationContext } from "./providers.ts";
 import type { DictationFormat, SttAdapter, SttStream } from "./streaming.ts";
 
 const DEFAULT_BASE_URL = "wss://api.elevenlabs.io/v1/speech-to-text/realtime";
@@ -48,29 +48,50 @@ const providerError = (message: ElevenLabsMessage): DictationError => {
   }
 };
 
+const elevenLabsKeyterms = (context?: DictationContext): string[] => {
+  if (!context) return [];
+  const values = [
+    ...(context.keywords ?? []),
+    ...Object.entries(context.glossary ?? {}).flatMap(([from, to]) => [from, to]),
+  ];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of values) {
+    // Realtime Scribe documents <=50 keyterms, each <=20 chars. Unsupported
+    // delimiter characters are removed rather than leaking malformed query data.
+    const term = raw.replace(/[<>{}\[\]\\]/g, "").trim().replace(/\s+/g, " ").slice(0, 20);
+    const key = term.toLocaleLowerCase();
+    if (!term || seen.has(key)) continue;
+    seen.add(key);
+    out.push(term);
+    if (out.length >= 50) break;
+  }
+  return out;
+};
+
 export function createElevenLabsSttAdapter(options: ElevenLabsSttOptions): SttAdapter {
   if (!options.apiKey.trim()) throw new DictationError("invalid_credentials", "ElevenLabs API key is missing");
 
   return {
     engine: "elevenlabs",
-    createStream({ format, language }): SttStream {
+    createStream({ format, language, context }): SttStream {
       if (format.encoding !== "pcm_s16le" || format.channels !== 1) {
         throw new DictationError("audio_format_error", "ElevenLabs realtime adapter expects mono pcm_s16le");
       }
-      return createStream(options, format, language);
+      return createStream(options, format, language, context);
     },
   };
 }
 
-function createStream(options: ElevenLabsSttOptions, format: DictationFormat, language?: string): SttStream {
+function createStream(options: ElevenLabsSttOptions, format: DictationFormat, language?: string, context?: DictationContext): SttStream {
   const url = new URL(options.baseUrl ?? DEFAULT_BASE_URL);
   url.searchParams.set("model_id", options.model?.trim() || DEFAULT_MODEL);
   url.searchParams.set("audio_format", `pcm_${format.sampleRate}`);
   url.searchParams.set("commit_strategy", "manual");
   if (language && language !== "auto") {
-    // ElevenLabs expects language codes rather than BCP-47 regions.
     url.searchParams.set("language_code", language.split("-")[0]!.toLowerCase());
   }
+  for (const keyterm of elevenLabsKeyterms(context)) url.searchParams.append("keyterms", keyterm);
 
   const connect = options.connect ?? ((socketUrl, headers) => new WebSocket(socketUrl, { headers }) as unknown as SocketLike);
   const socket = connect(url.toString(), { "xi-api-key": options.apiKey });
