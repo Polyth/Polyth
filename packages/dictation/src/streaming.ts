@@ -1,10 +1,6 @@
-// Server-authoritative streaming dictation (WP15). The service owns audio
-// session state, chunk dedupe/acks, caps, and a provider-neutral STT adapter
-// seam. Raw audio is consumed by the adapter and never stored or logged;
-// nothing here touches the session event log — interim transcripts are
-// transient composer state by design.
-// Platform-neutral on purpose: the chunk buffer runs in the browser bundle,
-// so Web Crypto (available in Node 22 and browsers) supplies ids.
+// Server-authoritative streaming dictation. The service owns audio session
+// state, bounded reordering, duplicate suppression, acks, limits and
+// idempotent finalization. Raw audio is never stored outside the live session.
 const randomUUID = (): string => globalThis.crypto.randomUUID();
 
 export interface DictationFormat {
@@ -15,6 +11,12 @@ export interface DictationFormat {
 
 export const DICTATION_FORMAT: DictationFormat = { encoding: "pcm_s16le", sampleRate: 16000, channels: 1 };
 
+export interface DictationTimingDto {
+  startedAt: number;
+  firstPartialMs?: number;
+  finalMs?: number;
+}
+
 export interface DictationSessionDto {
   id: string;
   sessionId?: string;
@@ -22,15 +24,17 @@ export interface DictationSessionDto {
   format: DictationFormat;
   acknowledgedSeq: number;
   transcript: string;
+  timing: DictationTimingDto;
 }
 
-/** One live STT stream; created per dictation session by the adapter. */
+/** Compatibility seam used by batch and realtime providers. New providers can
+ * normalize their vendor events internally while the service remains neutral. */
 export interface SttStream {
   push(pcm: Uint8Array): void | Promise<void>;
   /** Latest interim transcript, when the engine produces one. */
   partial?(): string;
   finalize(): Promise<string>;
-  cancel?(): void;
+  cancel?(): void | Promise<void>;
 }
 
 export interface SttAdapter {
@@ -39,31 +43,36 @@ export interface SttAdapter {
 }
 
 export interface DictationChunkResult {
+  /** Highest contiguous sequence consumed by the provider. */
   ack: number;
   duplicate: boolean;
+  /** True when the chunk is accepted but waiting for an earlier sequence. */
+  buffered?: boolean;
   transcript?: { revision: number; text: string; final: boolean };
 }
 
 export interface DictationServiceOptions {
-  /** No adapter = capability {available:false}; the web app keeps Web Speech.
-   *  A function is re-evaluated per call so settings changes flip the
-   *  capability honestly without recreating the service (F8). */
+  /** No adapter = capability {available:false}; evaluated per call so a
+   * settings change can flip availability without recreating the service. */
   adapter?: SttAdapter | null | (() => SttAdapter | null);
   unavailableReason?: string;
   maxSessions?: number;
-  /** Total audio cap per dictation (default 10 MB). */
+  /** Total unique audio cap per dictation (default 10 MB). */
   maxBytes?: number;
   /** Duration cap derived from bytes at the PCM rate (default 120 s). */
   maxDurationMs?: number;
-  /** A seq jump larger than this fails the session (client lost audio). */
+  /** Maximum distance from the contiguous ACK before the stream is invalid. */
   maxSeqGap?: number;
+  /** Bounded server-side out-of-order queue. */
+  maxBufferedChunks?: number;
+  maxBufferedBytes?: number;
 }
 
 export interface DictationService {
   capability(): { available: boolean; engine?: string; reason?: string };
   create(input: { sessionId?: string; language?: string }): DictationSessionDto;
   get(id: string): DictationSessionDto | null;
-  /** Idempotent per (id, seq): replayed chunks re-ack without re-transcribing. */
+  /** Idempotent per (id, seq). Replayed chunks re-ack without re-transcribing. */
   push(id: string, seq: number, pcm: Uint8Array): Promise<DictationChunkResult>;
   finalize(id: string): Promise<DictationSessionDto>;
   cancel(id: string): void;
@@ -72,19 +81,29 @@ export interface DictationService {
 interface SessionState {
   dto: DictationSessionDto;
   stream: SttStream;
+  /** Unique bytes accepted (contiguous + buffered). */
   bytes: number;
   revision: number;
   finalizeP: Promise<DictationSessionDto> | null;
+  pending: Map<number, Uint8Array>;
+  pendingBytes: number;
 }
 
 const err = (code: string, message: string): Error => Object.assign(new Error(message), { code });
+const copyDto = (dto: DictationSessionDto): DictationSessionDto => ({
+  ...dto,
+  format: { ...dto.format },
+  timing: { ...dto.timing },
+});
 
 export function createDictationService(opts: DictationServiceOptions = {}): DictationService {
   const adapterOf = typeof opts.adapter === "function" ? opts.adapter : () => (opts.adapter as SttAdapter | null | undefined) ?? null;
   const maxSessions = opts.maxSessions ?? 8;
   const maxBytes = opts.maxBytes ?? 10 * 1024 * 1024;
   const maxDurationMs = opts.maxDurationMs ?? 120_000;
-  const maxSeqGap = opts.maxSeqGap ?? 50;
+  const maxSeqGap = opts.maxSeqGap ?? 256;
+  const maxBufferedChunks = opts.maxBufferedChunks ?? 256;
+  const maxBufferedBytes = opts.maxBufferedBytes ?? 2 * 1024 * 1024;
   const sessions = new Map<string, SessionState>();
 
   const durationMs = (bytes: number): number =>
@@ -94,6 +113,24 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
     const s = sessions.get(id);
     if (!s) throw err("not-found", `dictation session ${id} not found`);
     return s;
+  };
+
+  const fail = (s: SessionState, code: string, message: string): never => {
+    s.dto.status = "failed";
+    void s.stream.cancel?.();
+    s.pending.clear();
+    s.pendingBytes = 0;
+    throw err(code, message);
+  };
+
+  const refreshPartial = (s: SessionState): void => {
+    const partial = s.stream.partial?.() ?? "";
+    if (!partial || partial === s.dto.transcript) return;
+    s.dto.transcript = partial;
+    s.revision++;
+    if (s.dto.timing.firstPartialMs === undefined) {
+      s.dto.timing.firstPartialMs = Math.max(0, Date.now() - s.dto.timing.startedAt);
+    }
   };
 
   return {
@@ -115,6 +152,7 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
         format: { ...DICTATION_FORMAT },
         acknowledgedSeq: 0,
         transcript: "",
+        timing: { startedAt: Date.now() },
       };
       sessions.set(id, {
         dto,
@@ -122,52 +160,73 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
         bytes: 0,
         revision: 0,
         finalizeP: null,
+        pending: new Map(),
+        pendingBytes: 0,
       });
-      return { ...dto };
+      return copyDto(dto);
     },
 
     get(id) {
       const s = sessions.get(id);
-      return s ? { ...s.dto } : null;
+      return s ? copyDto(s.dto) : null;
     },
 
     async push(id, seq, pcm) {
       const s = stateOf(id);
       if (s.dto.status !== "recording") throw err("conflict", `dictation is ${s.dto.status}`);
-      if (!Number.isInteger(seq) || seq < 1) throw err("invalid-input", "seq must be a positive integer");
-      // Replay after reconnect: anything at or below the ack is already
-      // transcribed — re-ack so the client can drop it, transcribe nothing.
-      if (seq <= s.dto.acknowledgedSeq) {
+      if (!Number.isInteger(seq) || seq < 1 || seq > 0xffff_ffff) throw err("invalid-input", "seq must be a positive uint32");
+      if ((pcm.byteLength & 1) !== 0) throw err("audio_format_error", "pcm_s16le chunks must contain whole 16-bit samples");
+
+      // Reconnect replay or repeated buffered frame: accept idempotently.
+      if (seq <= s.dto.acknowledgedSeq || s.pending.has(seq)) {
         return { ack: s.dto.acknowledgedSeq, duplicate: true, ...currentTranscript(s) };
       }
-      if (seq !== s.dto.acknowledgedSeq + 1) {
-        if (seq - s.dto.acknowledgedSeq > maxSeqGap) {
-          s.dto.status = "failed";
-          s.stream.cancel?.();
-          throw err("gap", `audio gap: expected seq ${s.dto.acknowledgedSeq + 1}, got ${seq}`);
-        }
-        throw err("out-of-order", `expected seq ${s.dto.acknowledgedSeq + 1}, got ${seq}`);
+
+      const distance = seq - s.dto.acknowledgedSeq;
+      if (distance > maxSeqGap) {
+        return fail(s, "gap", `audio gap: expected near seq ${s.dto.acknowledgedSeq + 1}, got ${seq}`);
       }
-      s.bytes += pcm.byteLength;
-      if (s.bytes > maxBytes || durationMs(s.bytes) > maxDurationMs) {
-        s.dto.status = "failed";
-        s.stream.cancel?.();
-        throw err("too-long", "dictation exceeded the audio cap");
+      if (s.bytes + pcm.byteLength > maxBytes || durationMs(s.bytes + pcm.byteLength) > maxDurationMs) {
+        return fail(s, "too-long", "dictation exceeded the audio cap");
       }
-      await s.stream.push(pcm);
-      s.dto.acknowledgedSeq = seq;
-      const partial = s.stream.partial?.() ?? "";
-      if (partial && partial !== s.dto.transcript) {
-        s.dto.transcript = partial;
-        s.revision++;
+      if (s.pending.size >= maxBufferedChunks || s.pendingBytes + pcm.byteLength > maxBufferedBytes) {
+        return fail(s, "backpressure_overflow", "dictation reorder buffer overflowed");
       }
-      return { ack: seq, duplicate: false, ...currentTranscript(s) };
+
+      // Retain our own bytes because a WebSocket implementation may recycle
+      // its receive buffer after this handler returns.
+      const retained = pcm.slice();
+      s.pending.set(seq, retained);
+      s.pendingBytes += retained.byteLength;
+      s.bytes += retained.byteLength;
+
+      // Drain only contiguous audio. Out-of-order arrivals wait boundedly and
+      // the ACK remains at the high-water mark so clients know what to replay.
+      for (;;) {
+        const nextSeq = s.dto.acknowledgedSeq + 1;
+        const next = s.pending.get(nextSeq);
+        if (!next) break;
+        s.pending.delete(nextSeq);
+        s.pendingBytes -= next.byteLength;
+        await s.stream.push(next);
+        s.dto.acknowledgedSeq = nextSeq;
+      }
+      refreshPartial(s);
+      return {
+        ack: s.dto.acknowledgedSeq,
+        duplicate: false,
+        ...(s.dto.acknowledgedSeq < seq ? { buffered: true } : {}),
+        ...currentTranscript(s),
+      };
     },
 
     async finalize(id) {
       const s = stateOf(id);
-      if (s.dto.status === "done") return { ...s.dto };
+      if (s.dto.status === "done") return copyDto(s.dto);
       if (s.dto.status === "failed") throw err("conflict", "dictation failed");
+      if (s.pending.size > 0) {
+        throw err("gap", `cannot finalize with missing audio before seq ${Math.min(...s.pending.keys())}`);
+      }
       // Finalizes exactly once: concurrent callers share the same promise.
       if (!s.finalizeP) {
         s.dto.status = "finalizing";
@@ -177,11 +236,12 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
             s.dto.transcript = text;
             s.revision++;
             s.dto.status = "done";
+            s.dto.timing.finalMs = Math.max(0, Date.now() - s.dto.timing.startedAt);
           } catch (e) {
             s.dto.status = "failed";
             throw e;
           }
-          return { ...s.dto };
+          return copyDto(s.dto);
         })();
       }
       return s.finalizeP;
@@ -190,7 +250,8 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
     cancel(id) {
       const s = sessions.get(id);
       if (!s) return;
-      s.stream.cancel?.();
+      void s.stream.cancel?.();
+      s.pending.clear();
       sessions.delete(id);
     },
   };
@@ -201,20 +262,18 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
   }
 }
 
-// ---------------------------------------------------------------- client-side chunk buffer
+// ---------------------------------------------------------------- client-side replay buffer
 
 export interface BufferedChunk { seq: number; pcm: Uint8Array }
 
-/** Bounded PCM retention until the server acks (WP15). After a reconnect the
- *  caller replays `unacked()` in order; the server re-acks duplicates. */
+/** Bounded PCM retention until the server acks. After a reconnect the caller
+ * replays `unacked()` in order; the server re-acks duplicates. Eviction is
+ * observable through dropped(), so capture can fail rather than silently
+ * produce a transcript with missing audio. */
 export interface ChunkBuffer {
-  /** Assign the next seq, retain the chunk, return the seq. */
   push(pcm: Uint8Array): number;
-  /** Server acknowledged everything at or below `seq`; drop it. */
   ack(seq: number): void;
-  /** In-order replay list for reconnect. */
   unacked(): BufferedChunk[];
-  /** Chunks evicted because the bound was hit; audio was lost. */
   dropped(): number;
   bytes(): number;
 }
