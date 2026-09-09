@@ -1,0 +1,425 @@
+name: Voice finish patch
+
+on:
+  push:
+    branches:
+      - feat/realtime-voice-dictation
+
+permissions:
+  contents: write
+
+jobs:
+  finish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/realtime-voice-dictation
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Apply final dictation integration patch
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f"expected pattern missing in {path}: {old[:120]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              "packages/dictation/src/localModels.ts",
+              '/** Lowest-latency multilingual preset requested for Polyth\'s default realtime path. */\nexport const DEFAULT_LOCAL_MODEL_ID = "nemotron-3.5-streaming-0.6b-80ms";',
+              '/** Balanced multilingual preset until comparative end-to-end benchmarks justify another default. */\nexport const DEFAULT_LOCAL_MODEL_ID = "nemotron-3.5-streaming-0.6b-560ms";',
+          )
+
+          replace_once(
+              "packages/server/src/voice.ts",
+              'const DEFAULT_LOCAL_MODEL_ID = "nemotron-3.5-streaming-0.6b-80ms";',
+              'const DEFAULT_LOCAL_MODEL_ID = "nemotron-3.5-streaming-0.6b-560ms";',
+          )
+          replace_once(
+              "packages/server/src/voice.ts",
+              '    case "elevenlabs":\n    case "wispr":\n      return ["auto", "direct-browser", "server-proxy"];',
+              '    case "elevenlabs":\n    case "wispr":\n    case "deepgram":\n      return ["auto", "direct-browser", "server-proxy"];',
+          )
+
+          replace_once(
+              "packages/dictation/src/providers.ts",
+              '    timestamps: true, transports: ["auto", "server-proxy"],\n    languages: ["*", "uk", "multi"], audioFormats: RAW_16K, defaultModel: "nova-3", context: true, local: false,',
+              '    timestamps: true, transports: ["auto", "direct-browser", "server-proxy"],\n    languages: ["*", "uk", "multi"], audioFormats: RAW_16K, defaultModel: "nova-3", context: true, local: false,',
+          )
+
+          replace_once(
+              "packages/dictation/src/serverEntry.ts",
+              '      const directCloudAllowed = settings.processingPolicy === "prefer-cloud"\n        || settings.processingPolicy === "auto-fallback"\n        || settings.processingPolicy === "browser-fallback";',
+              '      const directCloudAllowed = settings.processingPolicy === "prefer-cloud"\n        || settings.processingPolicy === "browser-fallback";',
+          )
+          replace_once(
+              "packages/dictation/src/serverEntry.ts",
+              '      const directProvider = provider === "elevenlabs" || provider === "wispr";',
+              '      const directProvider = provider === "elevenlabs" || provider === "wispr" || provider === "deepgram";',
+          )
+          marker = '        const clientId = String(input.clientId ?? "").trim().slice(0, 128);'
+          deepgram = '''        if (provider === "deepgram") {
+          const response = await fetchFn("https://api.deepgram.com/v1/auth/grant", {
+            method: "POST",
+            headers: {
+              authorization: `Token ${key}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ ttl_seconds: 60 }),
+          });
+          if (!response.ok) {
+            const code = response.status === 401 || response.status === 403 ? "invalid_credentials"
+              : response.status === 429 ? "rate_limited" : "provider_unavailable";
+            json(response.status === 429 ? 429 : response.status === 401 || response.status === 403 ? 401 : 502, {
+              error: code,
+              message: `Deepgram token request failed: HTTP ${response.status}`,
+            });
+            return true;
+          }
+          const payload = await response.json() as { access_token?: unknown; expires_in?: unknown };
+          if (typeof payload.access_token !== "string" || !payload.access_token) {
+            json(502, { error: "protocol_error", message: "Deepgram token response did not include an access token" });
+            return true;
+          }
+          json(200, {
+            provider: "deepgram",
+            token: payload.access_token,
+            expiresInSeconds: typeof payload.expires_in === "number" ? payload.expires_in : 60,
+          });
+          return true;
+        }
+
+'''
+          replace_once("packages/dictation/src/serverEntry.ts", marker, deepgram + marker)
+
+          replace_once(
+              "packages/dictation/widgets/voice.tsx",
+              '  VOICE_PREFS_KEY,\n  mergeTranscript,',
+              '  VOICE_PREFS_KEY,\n  providerCapabilities,\n  mergeTranscript,',
+          )
+          replace_once(
+              "packages/dictation/widgets/voice.tsx",
+              'import { startDirectElevenLabsDictation } from "./directElevenLabs.ts";\nimport { startDirectWisprDictation } from "./directWispr.ts";',
+              'import { canStartDirectProvider, startDirectProvider } from "./directProviders.ts";',
+          )
+          replace_once(
+              "packages/dictation/widgets/voice.tsx",
+              '  const serverStt = prefs.sttEngine === "server";',
+              '  // Dictation routing is provider-owned; sttEngine remains persisted only for legacy compatibility.\n  const serverStt = true;',
+          )
+          replace_once(
+              "packages/dictation/widgets/voice.tsx",
+              '  const directCloud = serverStt\n    && cloudPrimaryPolicy\n    && (provider === "elevenlabs" || provider === "wispr")\n    && (transport === "auto" || transport === "direct-browser");',
+              '  const directCapability = providerCapabilities(provider);\n  const directCloud = serverStt\n    && cloudPrimaryPolicy\n    && directCapability?.ephemeralClientAuth === true\n    && directCapability.transports.includes("direct-browser")\n    && canStartDirectProvider(provider)\n    && (transport === "auto" || transport === "direct-browser");',
+          )
+          old_start = '''          stream = provider === "wispr"
+            ? await startDirectWisprDictation({ language, context, onPartial, onError: fail })
+            : await startDirectElevenLabsDictation({
+                model: providerModel || "scribe_v2_realtime",
+                language,
+                context,
+                onPartial,
+                onError: fail,
+              });'''
+          new_start = '''          stream = await startDirectProvider({
+            provider,
+            model: providerModel,
+            language,
+            context,
+            onPartial,
+            onError: fail,
+          });'''
+          replace_once("packages/dictation/widgets/voice.tsx", old_start, new_start)
+
+          p = Path("packages/dictation/widgets/VoicePage.tsx")
+          text = p.read_text()
+          pattern = re.compile(
+              r'\n      <Row\n        label=\{tr\("settings\.voicepage\.dictationEngine"\)\}.*?\n      </Row>\n\n      \{server && \(',
+              re.S,
+          )
+          text, count = pattern.subn('\n\n      {server && (', text, count=1)
+          if count != 1:
+              raise SystemExit("could not remove legacy Browser/Server dictation switch")
+          p.write_text(text)
+          PY
+
+          cat > packages/dictation/widgets/directProviders.ts <<'TS'
+          import type { DictationContext, DictationProviderId } from "@polyth/dictation";
+          import { DictationError } from "@polyth/dictation";
+          import type { StreamingDictation } from "./dictationClient.ts";
+          import { startDirectDeepgramDictation } from "./directDeepgram.ts";
+          import { startDirectElevenLabsDictation } from "./directElevenLabs.ts";
+          import { startDirectWisprDictation } from "./directWispr.ts";
+
+          export interface DirectProviderOptions {
+            provider: DictationProviderId;
+            model?: string;
+            language?: string;
+            context?: DictationContext;
+            onPartial?: (text: string) => void;
+            onError?: (message: string) => void;
+          }
+
+          type DirectStarter = (options: DirectProviderOptions) => Promise<StreamingDictation>;
+
+          const starters: Partial<Record<DictationProviderId, DirectStarter>> = {
+            elevenlabs: (options) => startDirectElevenLabsDictation({
+              model: options.model || "scribe_v2_realtime",
+              language: options.language,
+              context: options.context,
+              onPartial: options.onPartial,
+              onError: options.onError,
+            }),
+            wispr: (options) => startDirectWisprDictation({
+              language: options.language,
+              context: options.context,
+              onPartial: options.onPartial,
+              onError: options.onError,
+            }),
+            deepgram: (options) => startDirectDeepgramDictation({
+              model: options.model || "nova-3",
+              language: options.language,
+              context: options.context,
+              onPartial: options.onPartial,
+              onError: options.onError,
+            }),
+          };
+
+          export const canStartDirectProvider = (provider: DictationProviderId): boolean =>
+            typeof starters[provider] === "function";
+
+          export const startDirectProvider = async (options: DirectProviderOptions): Promise<StreamingDictation> => {
+            const start = starters[options.provider];
+            if (!start) {
+              throw new DictationError("provider_unavailable", `${options.provider} has no direct client transport`);
+            }
+            return start(options);
+          };
+          TS
+
+          cat > packages/dictation/test/directDeepgram.test.ts <<'TS'
+          import { test } from "node:test";
+          import assert from "node:assert/strict";
+          import { startDirectDeepgramDictation } from "../widgets/directDeepgram.ts";
+          import type { Pcm16Capture, Pcm16CaptureOptions } from "../widgets/audioCapture.ts";
+
+          class FakeSocket {
+            readyState = 1;
+            bufferedAmount = 0;
+            sent: Array<string | Uint8Array> = [];
+            onopen: (() => void) | null = null;
+            onmessage: ((event: { data: unknown }) => void) | null = null;
+            onerror: (() => void) | null = null;
+            onclose: ((event: { code: number; reason: string }) => void) | null = null;
+
+            constructor() {
+              queueMicrotask(() => this.onopen?.());
+            }
+
+            send(data: string | Uint8Array): void {
+              this.sent.push(data);
+              if (typeof data !== "string") return;
+              const message = JSON.parse(data) as { type?: string };
+              if (message.type === "Finalize") {
+                queueMicrotask(() => this.onmessage?.({
+                  data: JSON.stringify({
+                    type: "Results",
+                    is_final: true,
+                    channel: { alternatives: [{ transcript: "Привіт з Deepgram" }] },
+                  }),
+                }));
+              }
+            }
+
+            close(code = 1000, reason = ""): void {
+              if (this.readyState === 3) return;
+              this.readyState = 3;
+              queueMicrotask(() => this.onclose?.({ code, reason }));
+            }
+          }
+
+          test("Deepgram direct transport uses an ephemeral Bearer subprotocol and raw PCM", async () => {
+            const tokenRequests: Array<{ path: string; body: string }> = [];
+            const sockets: FakeSocket[] = [];
+            const protocolsSeen: string[][] = [];
+            const urls: string[] = [];
+            let captureOptions: Pcm16CaptureOptions | null = null;
+            let stopped = false;
+
+            const fetchFn: typeof fetch = async (input, init) => {
+              tokenRequests.push({ path: String(input), body: String(init?.body ?? "") });
+              return new Response(JSON.stringify({ token: "header.payload.signature", expiresInSeconds: 60 }), {
+                status: 200,
+                headers: { "content-type": "application/json" },
+              });
+            };
+
+            const captureFactory = async (options: Pcm16CaptureOptions): Promise<Pcm16Capture> => {
+              captureOptions = options;
+              return {
+                sampleRate: 16_000,
+                channels: 1,
+                pause: async () => {},
+                resume: async () => {},
+                stop: () => { stopped = true; },
+              };
+            };
+
+            const stream = await startDirectDeepgramDictation({
+              model: "nova-3",
+              language: "uk-UA",
+              context: { language: "uk-UA", keywords: ["Polyth"] },
+              fetchFn,
+              socketFactory(url, protocols) {
+                urls.push(url);
+                protocolsSeen.push(protocols);
+                const socket = new FakeSocket();
+                sockets.push(socket);
+                return socket;
+              },
+              captureFactory,
+            });
+
+            assert.deepEqual(tokenRequests, [{ path: "/api/dictation/token", body: JSON.stringify({ provider: "deepgram" }) }]);
+            assert.deepEqual(protocolsSeen[0], ["bearer", "header.payload.signature"]);
+            const url = new URL(urls[0]!);
+            assert.equal(url.origin, "wss://api.deepgram.com");
+            assert.equal(url.pathname, "/v1/listen");
+            assert.equal(url.searchParams.get("model"), "nova-3");
+            assert.equal(url.searchParams.get("encoding"), "linear16");
+            assert.equal(url.searchParams.get("sample_rate"), "16000");
+            assert.equal(url.searchParams.get("language"), "uk");
+            assert.ok(url.searchParams.getAll("keyterm").includes("Polyth"));
+            assert.equal(urls[0]!.includes("header.payload.signature"), false);
+
+            captureOptions!.onChunk(new Uint8Array([1, 0, 2, 0]));
+            await new Promise((resolve) => setImmediate(resolve));
+            assert.ok(sockets[0]!.sent.some((message) => message instanceof Uint8Array));
+
+            assert.equal(await stream.stop(), "Привіт з Deepgram");
+            assert.equal(stopped, true);
+            assert.ok(sockets[0]!.sent.some((message) =>
+              typeof message === "string" && JSON.parse(message).type === "Finalize"));
+          });
+          TS
+
+          cat > packages/dictation/test/deepgramToken.test.ts <<'TS'
+          import { test } from "node:test";
+          import assert from "node:assert/strict";
+          import { mkdtempSync } from "node:fs";
+          import { tmpdir } from "node:os";
+          import { join } from "node:path";
+          import { createVoiceSettings } from "../../server/src/voice.ts";
+          import { ProviderRegistry } from "../src/providers.ts";
+          import { voiceRoutes } from "../src/serverEntry.ts";
+          import type { RouteRequest } from "../../server/src/http.ts";
+
+          test("Deepgram direct token is minted server-side with a short TTL and never exposes the API key", async () => {
+            const calls: Array<{ url: string; auth: string; body: string }> = [];
+            const voice = createVoiceSettings({
+              file: join(mkdtempSync(join(tmpdir(), "polyth-deepgram-token-")), "voice.json"),
+              env: { DEEPGRAM_API_KEY: "deepgram-long-lived-secret" },
+            });
+            voice.put({
+              dictation: {
+                provider: "deepgram",
+                transport: "auto",
+                processingPolicy: "prefer-cloud",
+                apiKeyEnv: "DEEPGRAM_API_KEY",
+              },
+            });
+            const routes = voiceRoutes({
+              voice,
+              providers: new ProviderRegistry(),
+              fetchFn: (async (url, init) => {
+                const headers = init?.headers as Record<string, string> | undefined;
+                calls.push({
+                  url: String(url),
+                  auth: headers?.authorization ?? "",
+                  body: String(init?.body ?? ""),
+                });
+                return new Response(JSON.stringify({ access_token: "deepgram-jwt", expires_in: 60 }), {
+                  status: 200,
+                  headers: { "content-type": "application/json" },
+                });
+              }) as typeof fetch,
+            });
+
+            let status = 0;
+            let payload: unknown;
+            const request = {
+              req: {},
+              res: {},
+              url: new URL("http://x/api/dictation/token"),
+              path: "/api/dictation/token",
+              method: "POST",
+              body: async () => ({ provider: "deepgram" }),
+              json: (code: number, body: unknown) => { status = code; payload = body; },
+            } as unknown as RouteRequest;
+
+            assert.equal(await routes(request), true);
+            assert.equal(status, 200);
+            assert.deepEqual(calls, [{
+              url: "https://api.deepgram.com/v1/auth/grant",
+              auth: "Token deepgram-long-lived-secret",
+              body: JSON.stringify({ ttl_seconds: 60 }),
+            }]);
+            assert.deepEqual(payload, { provider: "deepgram", token: "deepgram-jwt", expiresInSeconds: 60 });
+            assert.doesNotMatch(JSON.stringify(payload), /deepgram-long-lived-secret/);
+          });
+          TS
+
+          rm .github/workflows/voice-finish.yml
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web packages and shell
+        run: npm run build:web
+
+      - name: Typecheck server and desktop/mobile hosts
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx tsc --noEmit -p packages/server
+          npx tsc --noEmit -p apps/desktop
+          npx tsc --noEmit -p apps/mobile
+
+      - name: Run focused dictation tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --experimental-strip-types --test \
+            packages/dictation/test/directDeepgram.test.ts \
+            packages/dictation/test/deepgramToken.test.ts \
+            packages/dictation/test/deepgram.test.ts \
+            packages/dictation/test/directElevenLabs.test.ts \
+            packages/dictation/test/directWispr.test.ts \
+            packages/dictation/test/voice.test.ts \
+            packages/dictation/test/localModels.test.ts \
+            packages/dictation/test/localNemotron.test.ts \
+            packages/dictation/test/wsDictation.test.ts
+
+      - name: Commit completed implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name "Polyth Voice Completion"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "feat(dictation): complete realtime direct provider routing"
+          git push origin HEAD:feat/realtime-voice-dictation
