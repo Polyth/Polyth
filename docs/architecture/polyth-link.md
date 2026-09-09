@@ -23,18 +23,24 @@ or unauthenticated share link.
    channels attach to this ingress as well as the public listener.
 5. **Remote policy.** Paired devices are default-deny. Packages declare
    `remoteAccess` manifests. Unknown routes are rejected before handlers.
-6. **Mobile proxy.** When a native adapter exists, the WebView loads a
-   one-time `bootstrapUrl` on loopback. `origin` is the bare loopback origin.
-   Private keys never enter JavaScript. Production Android/iOS native pairing
-   is not included yet.
+6. **Mobile proxy.** The Android/iOS native adapter runs the shared Rust Link
+   client and loads the bundled web app through a one-time `bootstrapUrl` on
+   a Rust-owned `127.0.0.1` listener. The browser receives only non-secret
+   connection metadata and the loopback bootstrap URL. Device identity stays
+   native: iOS stores it in Keychain; Android stores an encrypted identity blob
+   protected by an Android Keystore key. The privileged Capacitor plugin is
+   callable only from the bundled app origin, not from the loopback page.
 
 ## Packages
 
 - `@polyth/tunnel` — product package (Polyth Link UI, device store, host process).
 - `@polyth/pairing-qr` — encode/decode/preview only.
-- `crates/polyth-link-core` — protocol owner.
+- `crates/polyth-link-core` — protocol owner and shared transport/proxy primitives.
 - `crates/polyth-link-host` — Node/desktop host process.
-- `crates/polyth-link-uniffi` — ticket-parse FFI only, not a native pairing core.
+- `crates/polyth-link-client` — shared client state machine for pairing,
+  reconnect, revocation handling and the authenticated loopback proxy.
+- `crates/polyth-link-uniffi` — stable native C ABI over the shared client.
+  It contains no second pairing or transport implementation.
 
 ## Canonical API
 
@@ -52,4 +58,3 @@ Privileged capabilities (pairing, grants, identity rotate, password,
 package install, secure-safe export, shutdown) never ride in Full remote.
 
 See `packages/server/src/remotePolicy.ts` and each package `serverEntry`.
-
