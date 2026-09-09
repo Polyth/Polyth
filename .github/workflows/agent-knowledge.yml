@@ -1,0 +1,66 @@
+name: Agent Knowledge
+
+on:
+  pull_request:
+    paths:
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - 'GEMINI.md'
+      - 'CONTRIBUTING_AGENT_OVERVIEW.md'
+      - '.agents/**'
+      - '.claude/**'
+      - '.cursor/rules/**'
+      - '.cursor/agents/**'
+      - '.opencode/skill/polyth-control/**'
+      - '.github/copilot-instructions.md'
+      - '.github/workflows/agent-knowledge.yml'
+      - 'docs/agents/**'
+      - 'docs/dev/README.md'
+      - 'scripts/agent-kit*'
+      - 'scripts/test/agent-kit.test.ts'
+      - 'scripts/test/agent_kit_install_test.py'
+  push:
+    branches: [master]
+    paths:
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - 'GEMINI.md'
+      - 'CONTRIBUTING_AGENT_OVERVIEW.md'
+      - '.agents/**'
+      - '.claude/**'
+      - '.cursor/rules/**'
+      - '.cursor/agents/**'
+      - '.opencode/skill/polyth-control/**'
+      - '.github/copilot-instructions.md'
+      - '.github/workflows/agent-knowledge.yml'
+      - 'docs/agents/**'
+      - 'docs/dev/README.md'
+      - 'scripts/agent-kit*'
+      - 'scripts/test/agent-kit.test.ts'
+      - 'scripts/test/agent_kit_install_test.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-knowledge-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Check knowledge structure and repository paths
+        run: node scripts/agent-kit.mjs check
+      - name: Test read-only navigation and evidence tooling
+        run: node --experimental-strip-types --test scripts/test/agent-kit.test.ts
+      - name: Test safe installer on isolated fixtures
+        run: python3 scripts/test/agent_kit_install_test.py

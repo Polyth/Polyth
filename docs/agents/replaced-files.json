@@ -1,0 +1,13 @@
+{
+  "baseline": "d70f875ecb919a0a7d59488fc7ddafc47915b558",
+  "replacements": {
+    "AGENTS.md": "7bfaf65496697c86f329e34b5e799e03b781f395",
+    "docs/dev/README.md": "19dba6151be8bf2a0fac10fcbd0aef3671c6cf03",
+    ".cursor/rules/polyth.mdc": "b2284ea99b28b45449e55c3156deee6cc5bb51e3",
+    ".cursor/agents/delivery-orchestrator.md": "10f5e2cc34808999887171298fde96e3c224c96b",
+    ".cursor/agents/explorer.md": "2f52cd7b98bc911159f27498db9e21ef5dee1ceb",
+    ".cursor/agents/implementer.md": "c67b0bb61a22142590ecb7e2b9bed91116ee735a",
+    ".cursor/agents/verifier.md": "dd8ea9d3eb4e3440fa9c6b6115ede3caa3466461",
+    ".opencode/skill/polyth-control/SKILL.md": "902895ced07a507782c846acf90dbb44a577232b"
+  }
+}
