@@ -193,9 +193,12 @@ function MicButton() {
   const startGeneration = useRef(0);
   const support = speechSupport(typeof window !== "undefined" ? window : undefined);
   const serverStt = prefs.sttEngine === "server";
+  // ElevenLabs supplies server-minted single-use client tokens, so its direct
+  // browser path is safe and lower-latency. "auto" prefers it while retaining
+  // a same-provider server-proxy fallback during startup.
   const directElevenLabs = serverStt
     && prefs.dictationProvider === "elevenlabs"
-    && prefs.dictationTransport === "direct-browser";
+    && (prefs.dictationTransport === "auto" || prefs.dictationTransport === "direct-browser");
 
   useEffect(() => () => {
     startGeneration.current++;
@@ -366,21 +369,30 @@ function MicButton() {
       const onPartial = (text: string) => {
         if (startGeneration.current === generation) setPartial(text);
       };
-      const stream = directElevenLabs
-        ? await startDirectElevenLabsDictation({
+      const serverOptions = {
+        ...(getState().activeSessionId ? { sessionId: getState().activeSessionId! } : {}),
+        language,
+        ...(prefs.contextInjection ? { context } : {}),
+        onPartial,
+        onError: fail,
+      };
+      let stream: StreamingDictation;
+      if (directElevenLabs) {
+        try {
+          stream = await startDirectElevenLabsDictation({
             model: prefs.dictationModel || "scribe_v2_realtime",
             language,
             context,
             onPartial,
             onError: fail,
-          })
-        : await startStreamingDictation({
-            ...(getState().activeSessionId ? { sessionId: getState().activeSessionId! } : {}),
-            language,
-            ...(prefs.contextInjection ? { context } : {}),
-            onPartial,
-            onError: fail,
           });
+        } catch (directError) {
+          if (prefs.dictationTransport !== "auto") throw directError;
+          stream = await startStreamingDictation(serverOptions);
+        }
+      } else {
+        stream = await startStreamingDictation(serverOptions);
+      }
       if (startGeneration.current !== generation) {
         stream.cancel();
         return;
