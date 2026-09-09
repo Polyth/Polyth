@@ -92,11 +92,39 @@ pub(super) async fn begin_numeric_pairing(
             .await
             .map_err(|_| LinkError::TransportProtocolError.code())?;
         let _ = send.set_priority(PRI_CONTROL);
-        let (login, request) = NumericClientLogin::start(&code, &host_endpoint_id)
+
+        write_numeric(&mut send, &NumericWireMessage::BootstrapRequest)
+            .await
             .map_err(|error| error.code())?;
+        let (pairing_id, expires_at) = match read_numeric(&mut recv)
+            .await
+            .map_err(|error| error.code())?
+        {
+            NumericWireMessage::Bootstrap {
+                pairing_id,
+                host_endpoint_id: bootstrap_host,
+                expires_at,
+            } => {
+                if bootstrap_host != host_endpoint_id {
+                    return Err(LinkError::HostIdentityMismatch.code());
+                }
+                (pairing_id, expires_at)
+            }
+            NumericWireMessage::Rejected { code } => return Err(leak_code(code)),
+            _ => return Err(LinkError::TransportProtocolError.code()),
+        };
+
+        let (login, request) = NumericClientLogin::start(
+            &code,
+            &host_endpoint_id,
+            &pairing_id,
+            &expires_at,
+        )
+        .map_err(|error| error.code())?;
         write_numeric(
             &mut send,
             &NumericWireMessage::Start {
+                pairing_id: pairing_id.clone(),
                 request: request.request,
             },
         )
@@ -107,11 +135,13 @@ pub(super) async fn begin_numeric_pairing(
                 attempt_id,
                 pairing_id,
                 host_endpoint_id,
+                expires_at,
                 response,
             } => NumericServerChallenge {
                 attempt_id,
                 pairing_id,
                 host_endpoint_id,
+                expires_at,
                 response,
             },
             NumericWireMessage::Rejected { code } => return Err(leak_code(code)),
