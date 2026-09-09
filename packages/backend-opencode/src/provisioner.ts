@@ -429,16 +429,12 @@ export function createOpenCodeProvisioner(applier: BackendConfigApplier): Harnes
             records.push(recordFor(item, "failed", collision));
             continue;
           }
-          if (item.capability.owner !== "polyth" && item.capability.id !== "polyth.agent-tools") {
-            records.push(recordFor(item, "unsupported", "OpenCode only projects canonical Polyth MCP entries"));
-            continue;
-          }
           if (item.mode === "unsupported") {
             records.push(recordFor(item, "unsupported", "OpenCode does not support this capability"));
             continue;
           }
-          // Retired Polyth MCP tombstones are omitted from the private overlay so
-          // they never shadow user-owned OpenCode MCP entries of the same name.
+          // Disabled/tombstoned canonical MCPs are omitted from the private
+          // overlay so they never shadow user-owned OpenCode MCP entries.
           if (!item.capability.enabled) {
             records.push(recordFor(item, "applied", "Retired from Polyth desired state"));
             continue;
