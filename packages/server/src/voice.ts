@@ -28,7 +28,7 @@ type DictationProcessingPolicy =
   | "auto-fallback"
   | "browser-fallback";
 
-const DEFAULT_LOCAL_MODEL_ID = "nemotron-3.5-streaming-0.6b-80ms";
+const DEFAULT_LOCAL_MODEL_ID = "nemotron-3.5-streaming-0.6b-560ms";
 const CLOUD_DICTATION_PROVIDERS = new Set<DictationProviderId>([
   "elevenlabs", "wispr", "openai-live", "openai-transcribe", "deepgram",
   "speechmatics", "openai-compatible",
