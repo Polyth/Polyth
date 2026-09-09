@@ -210,6 +210,7 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
     let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "parsePairingTicket", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "beginPairing", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "beginNumericPairing", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "confirmPairing", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "cancelPairing", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "listConnections", returnType: CAPPluginReturnPromise),
@@ -483,6 +484,44 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
                 }
                 do {
                     let result = try self.object(self.invoke("pairing.begin", ["ticket": raw, "label": label], secret: secret))
+                    guard let attemptID = result["attemptId"] as? String else { throw PolythLinkFailure(code: "transport-protocol-error") }
+                    self.setAttempt(attemptID, PairingSecretRecord(hostID: hostID, createdForAttempt: created))
+                    call.resolve(result)
+                } catch {
+                    if created { try? self.keychain.delete(hostID) }
+                    throw error
+                }
+            } catch { self.reject(call, error) }
+        }
+    }
+
+    @objc func beginNumericPairing(_ call: CAPPluginCall) {
+        guard trusted(call),
+              let hostID = require(call, "hostEndpointId", code: "pairing-invalid"),
+              let code = require(call, "code", code: "pairing-invalid") else { return }
+        let label = call.getString("label") ?? "This phone"
+        let addresses = call.getArray("addresses", String.self) ?? []
+        let port = call.getInt("port")
+        queue.async {
+            do {
+                var secret = try self.keychain.load(hostID)
+                defer {
+                    if secret != nil { secret!.resetBytes(in: 0..<secret!.count) }
+                }
+                let created = secret == nil
+                if secret == nil {
+                    secret = try self.freshSecret()
+                    try self.keychain.store(secret!, for: hostID)
+                }
+                do {
+                    var params: [String: Any] = [
+                        "hostEndpointId": hostID,
+                        "addresses": addresses,
+                        "code": code,
+                        "label": label,
+                    ]
+                    if let port { params["port"] = port }
+                    let result = try self.object(self.invoke("pairing.begin_numeric", params, secret: secret))
                     guard let attemptID = result["attemptId"] as? String else { throw PolythLinkFailure(code: "transport-protocol-error") }
                     self.setAttempt(attemptID, PairingSecretRecord(hostID: hostID, createdForAttempt: created))
                     call.resolve(result)
