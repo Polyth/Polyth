@@ -113,6 +113,12 @@ export function authRoutes(auth: AuthService): RouteHandler {
         rc.json(403, { error: "forbidden", message: "server account management requires the owner account" });
         return true;
       }
+      // Adding the first secondary credential turns the server-wide auth gate
+      // on. The owner must already be able to log back in before that happens.
+      if (!auth.hasCredential(OWNER_USER_ID)) {
+        rc.json(409, { error: "conflict", message: "set the owner password before adding another account" });
+        return true;
+      }
       const body = await rc.body();
       const name = typeof body.name === "string" ? body.name.trim() : "";
       const password = typeof body.password === "string" ? body.password : "";
