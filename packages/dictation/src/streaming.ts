@@ -20,8 +20,11 @@ export const DICTATION_FORMAT: DictationFormat = { encoding: "pcm_s16le", sample
 
 export interface DictationTimingDto {
   startedAt: number;
+  /** Provider stream became usable, observed by the first successful PCM write. */
+  connectMs?: number;
   /** First contiguous PCM chunk accepted by the provider. */
   firstAudioMs?: number;
+  /** First non-empty transcript revision observed by Polyth. */
   firstPartialMs?: number;
   finalMs?: number;
 }
@@ -92,8 +95,14 @@ interface SessionState {
   revision: number;
   finalizeP: Promise<DictationSessionDto> | null;
   pending: Map<number, Uint8Array>;
+  /** Accepted but not yet acknowledged seqs, including the one currently in provider.push(). */
+  acceptedSeqs: Set<number>;
   pendingBytes: number;
   lastActivityAt: number;
+  /** Serializes provider writes. Vendor streams are not assumed re-entrant. */
+  providerTail: Promise<void>;
+  /** Finalization closes admission synchronously before waiting for the provider tail. */
+  acceptingAudio: boolean;
 }
 
 const err = (code: string, message: string): Error => Object.assign(new Error(message), { code });
@@ -127,12 +136,18 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
     return count;
   };
 
+  const clearAudioState = (s: SessionState): void => {
+    s.pending.clear();
+    s.acceptedSeqs.clear();
+    s.pendingBytes = 0;
+  };
+
   const sweep = (): void => {
     const at = now();
     for (const [id, s] of sessions) {
       if (s.dto.status === "recording" && at - s.lastActivityAt > idleTimeoutMs) {
         void s.stream.cancel?.();
-        s.pending.clear();
+        clearAudioState(s);
         sessions.delete(id);
         continue;
       }
@@ -147,7 +162,7 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
     if (!s) throw err("not-found", `dictation session ${id} not found`);
     if (s.dto.status === "recording" && now() - s.lastActivityAt > idleTimeoutMs) {
       void s.stream.cancel?.();
-      s.pending.clear();
+      clearAudioState(s);
       sessions.delete(id);
       throw err("session_expired", `dictation session ${id} expired after inactivity`);
     }
@@ -156,11 +171,20 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
 
   const fail = (s: SessionState, code: string, message: string): never => {
     s.dto.status = "failed";
+    s.acceptingAudio = false;
     s.lastActivityAt = now();
     void s.stream.cancel?.();
-    s.pending.clear();
-    s.pendingBytes = 0;
+    clearAudioState(s);
     throw err(code, message);
+  };
+
+  const failWith = (s: SessionState, error: unknown): never => {
+    s.dto.status = "failed";
+    s.acceptingAudio = false;
+    s.lastActivityAt = now();
+    void s.stream.cancel?.();
+    clearAudioState(s);
+    throw error;
   };
 
   const refreshPartial = (s: SessionState): void => {
@@ -171,6 +195,31 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
     if (s.dto.timing.firstPartialMs === undefined) {
       s.dto.timing.firstPartialMs = Math.max(0, now() - s.dto.timing.startedAt);
     }
+  };
+
+  const queueProviderDrain = (s: SessionState): Promise<void> => {
+    const task = s.providerTail.then(async () => {
+      for (;;) {
+        const nextSeq = s.dto.acknowledgedSeq + 1;
+        const next = s.pending.get(nextSeq);
+        if (!next) break;
+        s.pending.delete(nextSeq);
+        s.pendingBytes -= next.byteLength;
+        try {
+          await s.stream.push(next);
+        } catch (error) {
+          failWith(s, error);
+        }
+        s.dto.acknowledgedSeq = nextSeq;
+        s.acceptedSeqs.delete(nextSeq);
+        const elapsed = Math.max(0, now() - s.dto.timing.startedAt);
+        if (s.dto.timing.connectMs === undefined) s.dto.timing.connectMs = elapsed;
+        if (s.dto.timing.firstAudioMs === undefined) s.dto.timing.firstAudioMs = elapsed;
+        refreshPartial(s);
+      }
+    });
+    s.providerTail = task;
+    return task;
   };
 
   return {
@@ -215,8 +264,11 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
         revision: 0,
         finalizeP: null,
         pending: new Map(),
+        acceptedSeqs: new Set(),
         pendingBytes: 0,
         lastActivityAt: startedAt,
+        providerTail: Promise.resolve(),
+        acceptingAudio: true,
       });
       return copyDto(dto);
     },
@@ -229,12 +281,16 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
 
     async push(id, seq, pcm) {
       const s = stateOf(id);
-      if (s.dto.status !== "recording") throw err("conflict", `dictation is ${s.dto.status}`);
+      if (s.dto.status !== "recording" || !s.acceptingAudio) {
+        throw err("conflict", `dictation is ${s.dto.status === "recording" ? "finalizing" : s.dto.status}`);
+      }
       if (!Number.isInteger(seq) || seq < 1 || seq > 0xffff_ffff) throw err("invalid-input", "seq must be a positive uint32");
       if ((pcm.byteLength & 1) !== 0) throw err("audio_format_error", "pcm_s16le chunks must contain whole 16-bit samples");
       s.lastActivityAt = now();
 
-      if (seq <= s.dto.acknowledgedSeq || s.pending.has(seq)) {
+      // acceptedSeqs covers the short window after a frame leaves `pending`
+      // but before the provider write resolves and advances the ACK.
+      if (seq <= s.dto.acknowledgedSeq || s.acceptedSeqs.has(seq)) {
         return { ack: s.dto.acknowledgedSeq, duplicate: true, ...currentTranscript(s) };
       }
 
@@ -251,21 +307,11 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
 
       const retained = pcm.slice();
       s.pending.set(seq, retained);
+      s.acceptedSeqs.add(seq);
       s.pendingBytes += retained.byteLength;
       s.bytes += retained.byteLength;
 
-      for (;;) {
-        const nextSeq = s.dto.acknowledgedSeq + 1;
-        const next = s.pending.get(nextSeq);
-        if (!next) break;
-        s.pending.delete(nextSeq);
-        s.pendingBytes -= next.byteLength;
-        await s.stream.push(next);
-        s.dto.acknowledgedSeq = nextSeq;
-        if (s.dto.timing.firstAudioMs === undefined) {
-          s.dto.timing.firstAudioMs = Math.max(0, now() - s.dto.timing.startedAt);
-        }
-      }
+      await queueProviderDrain(s);
       s.lastActivityAt = now();
       refreshPartial(s);
       return {
@@ -280,36 +326,57 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
       const s = stateOf(id);
       if (s.dto.status === "done") return copyDto(s.dto);
       if (s.dto.status === "failed") throw err("conflict", "dictation failed");
-      if (s.pending.size > 0) {
-        throw err("gap", `cannot finalize with missing audio before seq ${Math.min(...s.pending.keys())}`);
-      }
-      if (!s.finalizeP) {
+      if (s.finalizeP) return s.finalizeP;
+
+      // Close admission before the first await. Audio already accepted by push()
+      // is serialized ahead of finalize through providerTail; later audio is
+      // rejected and the client can replay it if a real seq gap reopens input.
+      s.acceptingAudio = false;
+      const operation = (async (): Promise<DictationSessionDto> => {
+        await s.providerTail;
+        if (s.pending.size > 0) {
+          s.acceptingAudio = true;
+          throw err("gap", `cannot finalize with missing audio before seq ${Math.min(...s.pending.keys())}`);
+        }
         s.dto.status = "finalizing";
         s.lastActivityAt = now();
-        s.finalizeP = (async () => {
-          try {
-            const text = await s.stream.finalize();
-            s.dto.transcript = text;
-            s.revision++;
-            s.dto.status = "done";
-            s.dto.timing.finalMs = Math.max(0, now() - s.dto.timing.startedAt);
-            s.lastActivityAt = now();
-          } catch (e) {
-            s.dto.status = "failed";
-            s.lastActivityAt = now();
-            throw e;
-          }
-          return copyDto(s.dto);
-        })();
+        try {
+          const text = await s.stream.finalize();
+          s.dto.transcript = text;
+          s.revision++;
+          s.dto.status = "done";
+          s.dto.timing.finalMs = Math.max(0, now() - s.dto.timing.startedAt);
+          s.lastActivityAt = now();
+          clearAudioState(s);
+        } catch (error) {
+          s.dto.status = "failed";
+          s.acceptingAudio = false;
+          s.lastActivityAt = now();
+          clearAudioState(s);
+          throw error;
+        }
+        return copyDto(s.dto);
+      })();
+      s.finalizeP = operation;
+      try {
+        return await operation;
+      } catch (error) {
+        // A seq gap is recoverable: reopen audio admission and allow a later
+        // finalize call. Provider/final errors are terminal and remain cached.
+        if (s.dto.status === "recording") {
+          s.finalizeP = null;
+          s.acceptingAudio = true;
+        }
+        throw error;
       }
-      return s.finalizeP;
     },
 
     cancel(id) {
       const s = sessions.get(id);
       if (!s) return;
+      s.acceptingAudio = false;
       void s.stream.cancel?.();
-      s.pending.clear();
+      clearAudioState(s);
       sessions.delete(id);
     },
   };
