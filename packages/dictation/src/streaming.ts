@@ -2,6 +2,11 @@
 // state, bounded reordering, duplicate suppression, acks, limits and
 // idempotent finalization. Raw audio is never stored outside the live session.
 import { normalizeDictationContext, type DictationContext } from "./providers.ts";
+import {
+  decodeDictationAudioFrame,
+  isDictationAudioFrame,
+  type DictationAudioFrame,
+} from "./wire.ts";
 
 const randomUUID = (): string => globalThis.crypto.randomUUID();
 
@@ -29,11 +34,8 @@ export interface DictationSessionDto {
   timing: DictationTimingDto;
 }
 
-/** Compatibility seam used by batch and realtime providers. New providers can
- * normalize their vendor events internally while the service remains neutral. */
 export interface SttStream {
   push(pcm: Uint8Array): void | Promise<void>;
-  /** Latest interim transcript, when the engine produces one. */
   partial?(): string;
   finalize(): Promise<string>;
   cancel?(): void | Promise<void>;
@@ -45,36 +47,30 @@ export interface SttAdapter {
 }
 
 export interface DictationChunkResult {
-  /** Highest contiguous sequence consumed by the provider. */
   ack: number;
   duplicate: boolean;
-  /** True when the chunk is accepted but waiting for an earlier sequence. */
   buffered?: boolean;
   transcript?: { revision: number; text: string; final: boolean };
 }
 
 export interface DictationServiceOptions {
-  /** No adapter = capability {available:false}; evaluated per call so a
-   * settings change can flip availability without recreating the service. */
   adapter?: SttAdapter | null | (() => SttAdapter | null);
   unavailableReason?: string;
   maxSessions?: number;
-  /** Total unique audio cap per dictation (default 10 MB). */
   maxBytes?: number;
-  /** Duration cap derived from bytes at the PCM rate (default 120 s). */
   maxDurationMs?: number;
-  /** Maximum distance from the contiguous ACK before the stream is invalid. */
   maxSeqGap?: number;
-  /** Bounded server-side out-of-order queue. */
   maxBufferedChunks?: number;
   maxBufferedBytes?: number;
 }
 
 export interface DictationService {
+  /** Binary hot-path decoding stays package-owned; the core WS gateway only
+   * consumes this structural method and never imports @polyth/dictation. */
+  decodeAudioFrame(value: ArrayBuffer | ArrayBufferView): DictationAudioFrame | null;
   capability(): { available: boolean; engine?: string; reason?: string };
   create(input: { sessionId?: string; language?: string; context?: Partial<DictationContext> }): DictationSessionDto;
   get(id: string): DictationSessionDto | null;
-  /** Idempotent per (id, seq). Replayed chunks re-ack without re-transcribing. */
   push(id: string, seq: number, pcm: Uint8Array): Promise<DictationChunkResult>;
   finalize(id: string): Promise<DictationSessionDto>;
   cancel(id: string): void;
@@ -83,7 +79,6 @@ export interface DictationService {
 interface SessionState {
   dto: DictationSessionDto;
   stream: SttStream;
-  /** Unique bytes accepted (contiguous + buffered). */
   bytes: number;
   revision: number;
   finalizeP: Promise<DictationSessionDto> | null;
@@ -136,6 +131,10 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
   };
 
   return {
+    decodeAudioFrame(value) {
+      return isDictationAudioFrame(value) ? decodeDictationAudioFrame(value) : null;
+    },
+
     capability() {
       const adapter = adapterOf();
       if (!adapter) return { available: false, reason: opts.unavailableReason ?? "no speech-to-text engine configured" };
