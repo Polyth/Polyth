@@ -23,6 +23,7 @@ test("new voice settings use balanced local model and no implicit secondary prov
     const current = settings.get();
     assert.equal(current.dictation.localModel, DEFAULT_LOCAL_MODEL_ID);
     assert.equal(current.dictation.localModel, "nemotron-3.5-streaming-0.6b-560ms");
+    assert.equal(current.dictation.contextInjection, false);
     assert.equal(current.dictation.processingPolicy, "prefer-cloud");
     assert.equal(current.dictation.fallbackProvider, undefined);
     assert.equal(current.dictation.fallbackApiKeyEnv, "");
@@ -83,4 +84,40 @@ test("new local-only settings never infer a cloud provider even when cloud secre
     assert.equal(saved.dictation.cloudFallback, false);
     assert.equal(settings.resolveDictationProviderKey("elevenlabs"), undefined);
   }, { ELEVENLABS_API_KEY: "must-not-be-consulted" });
+});
+
+test("auto-fallback canonicalizes direct browser to server-owned auto transport", async () => {
+  await withSettings((settings) => {
+    const eleven = settings.put({
+      dictation: {
+        provider: "elevenlabs",
+        transport: "direct-browser",
+        processingPolicy: "auto-fallback",
+      },
+    });
+    assert.equal(eleven.dictation.transport, "auto");
+
+    const wispr = settings.put({
+      dictation: {
+        provider: "wispr",
+        transport: "direct-browser",
+        processingPolicy: "auto-fallback",
+      },
+    });
+    assert.equal(wispr.dictation.transport, "auto");
+  });
+});
+
+test("unsupported provider transports normalize to auto while supported direct routes survive", async () => {
+  await withSettings((settings) => {
+    assert.equal(settings.put({
+      dictation: { provider: "deepgram", transport: "direct-browser", processingPolicy: "prefer-cloud" },
+    }).dictation.transport, "auto");
+    assert.equal(settings.put({
+      dictation: { provider: "local-nemotron", transport: "server-proxy", processingPolicy: "local-only" },
+    }).dictation.transport, "auto");
+    assert.equal(settings.put({
+      dictation: { provider: "wispr", transport: "direct-browser", processingPolicy: "prefer-cloud" },
+    }).dictation.transport, "direct-browser");
+  });
 });
