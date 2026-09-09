@@ -20,11 +20,10 @@ import { requestComposerInsert } from "../../../apps/web/src/composerInsert.ts";
 import { getState, openSettingsPage, subscribeStore } from "../../../apps/web/src/store.ts";
 import { api } from "@polyth/session/web-api";
 import { startStreamingDictation, type StreamingDictation } from "./dictationClient.ts";
+import { startDirectElevenLabsDictation } from "./directElevenLabs.ts";
 import { announce } from "../../../apps/web/src/components/a11y/live.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { Button, IconButton, MicIcon } from "@polyth/web/ui";
-
-// ---- voice prefs store ------------------------------------------------------
 
 const read = (): string | null => {
   try { return localStorage.getItem(VOICE_PREFS_KEY); } catch { return null; }
@@ -51,8 +50,6 @@ export function useVoicePrefs(): VoicePrefs {
     getVoicePrefs,
   );
 }
-
-// ---- text-to-speech ----------------------------------------------------------
 
 let audioCtx: AudioContext | null = null;
 let serverSource: AudioBufferSourceNode | null = null;
@@ -97,11 +94,8 @@ function speakBrowser(text: string): void {
 
 export function speak(text: string): void {
   if (!text.trim()) return;
-  if (voicePrefs.ttsEngine === "server") {
-    void speakServer(text).catch(() => speakBrowser(text));
-  } else {
-    speakBrowser(text);
-  }
+  if (voicePrefs.ttsEngine === "server") void speakServer(text).catch(() => speakBrowser(text));
+  else speakBrowser(text);
 }
 
 export function speakReply(text: string): void {
@@ -131,12 +125,10 @@ export function readLastReply(): void {
   }
 }
 
-// ---- bounded provider context ------------------------------------------------
-
 const basename = (path: string | null | undefined): string =>
   path?.split(/[\\/]/).filter(Boolean).pop() ?? "";
 
-function currentDictationContext(language: string): Partial<DictationContext> {
+function currentDictationContext(language: string): DictationContext {
   const state = getState();
   const session = state.activeSessionId
     ? state.sessions.find((item) => item.id === state.activeSessionId)
@@ -175,8 +167,6 @@ function currentDictationContext(language: string): Partial<DictationContext> {
   };
 }
 
-// ---- mic button (composer.leading) -------------------------------------------
-
 type MicPhase = "idle" | "starting" | "listening" | "transcribing";
 
 const boundedReason = (raw: unknown): string => {
@@ -193,6 +183,9 @@ function MicButton() {
   const streamRef = useRef<StreamingDictation | null>(null);
   const support = speechSupport(typeof window !== "undefined" ? window : undefined);
   const serverStt = prefs.sttEngine === "server";
+  const directElevenLabs = serverStt
+    && prefs.dictationProvider === "elevenlabs"
+    && prefs.dictationTransport === "direct-browser";
 
   useEffect(() => () => {
     recRef.current?.abort();
@@ -205,14 +198,31 @@ function MicButton() {
       return;
     }
     let cancelled = false;
-    void api.dictationCapability().then((c) => { if (!cancelled) setCapability(c); });
+    if (directElevenLabs) {
+      void fetch("/api/voice/providers")
+        .then(async (response) => response.ok
+          ? response.json() as Promise<{ providers?: Array<{ id?: string; available?: boolean; reason?: string }> }>
+          : Promise.reject(new Error(`HTTP ${response.status}`)))
+        .then((body) => {
+          if (cancelled) return;
+          const provider = body.providers?.find((item) => item.id === "elevenlabs");
+          setCapability(provider?.available
+            ? { available: true, engine: "elevenlabs-direct" }
+            : { available: false, reason: provider?.reason ?? "ElevenLabs direct transcription is unavailable" });
+        })
+        .catch((e) => {
+          if (!cancelled) setCapability({ available: false, reason: boundedReason(e) });
+        });
+    } else {
+      void api.dictationCapability().then((c) => { if (!cancelled) setCapability(c); });
+    }
     return () => { cancelled = true; };
-  }, [prefs.dictation, serverStt]);
+  }, [prefs.dictation, serverStt, directElevenLabs, prefs.dictationProvider, prefs.dictationTransport]);
 
   const availability: { available: boolean; reason?: string; settings?: boolean } =
     !prefs.dictation ? { available: false, reason: tr("voice.dictationOff"), settings: true }
     : serverStt && capability === null ? { available: false, reason: tr("voice.checkingMicrophone") }
-    : serverStt && capability && !capability.available && !support.stt
+    : serverStt && capability && !capability.available
       ? {
           available: false,
           reason: capability.reason ?? tr("voice.serverTranscriptionUnavailable"),
@@ -261,7 +271,7 @@ function MicButton() {
   const startBrowser = () => {
     const Ctor = recognitionCtor(window);
     if (!Ctor) {
-      fail("Dictation is not supported in this browser");
+      fail(tr("voice.dictationUnsupported"));
       return;
     }
     const rec = new Ctor();
@@ -287,28 +297,38 @@ function MicButton() {
     setPhase("listening");
   };
 
-  const startServer = async () => {
+  const startProvider = async () => {
     setPhase("starting");
     try {
       const language = prefs.lang || "auto";
-      streamRef.current = await startStreamingDictation({
-        ...(getState().activeSessionId ? { sessionId: getState().activeSessionId! } : {}),
-        language,
-        ...(prefs.contextInjection ? { context: currentDictationContext(language) } : {}),
-        onError: fail,
-      });
+      const context = prefs.contextInjection ? currentDictationContext(language) : { language };
+      streamRef.current = directElevenLabs
+        ? await startDirectElevenLabsDictation({
+            model: prefs.dictationModel || "scribe_v2_realtime",
+            language,
+            context,
+            onError: fail,
+          })
+        : await startStreamingDictation({
+            ...(getState().activeSessionId ? { sessionId: getState().activeSessionId! } : {}),
+            language,
+            ...(prefs.contextInjection ? { context } : {}),
+            onError: fail,
+          });
       setPhase("listening");
     } catch (err) {
       streamRef.current = null;
-      if (prefs.cloudFallback && support.stt) startBrowser();
-      else fail(err);
+      fail(err);
     }
   };
 
   const start = () => {
     setError(null);
-    if (serverStt && capability?.available) void startServer();
-    else startBrowser();
+    if (serverStt) {
+      if (capability?.available) void startProvider();
+      return;
+    }
+    startBrowser();
   };
 
   const busy = phase === "starting" || phase === "transcribing";
@@ -339,8 +359,6 @@ function MicButton() {
     </span>
   );
 }
-
-// ---- install -----------------------------------------------------------------
 
 let uninstallVoice: (() => void) | null = null;
 
