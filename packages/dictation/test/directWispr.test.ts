@@ -12,8 +12,14 @@ class FakeSocket {
   onerror: (() => void) | null = null;
   onclose: ((event: { code: number; reason: string }) => void) | null = null;
 
-  constructor(readonly url: string) {
-    queueMicrotask(() => this.onopen?.());
+  constructor(readonly url: string, autoOpen = true) {
+    if (autoOpen) queueMicrotask(() => this.open());
+    else this.readyState = 0;
+  }
+
+  open(): void {
+    this.readyState = 1;
+    this.onopen?.();
   }
 
   send(data: string): void {
@@ -35,6 +41,19 @@ class FakeSocket {
   }
 }
 
+const tokenFetch: typeof fetch = async () => new Response(
+  JSON.stringify({ token: "wispr-client-jwt", expiresInSeconds: 900 }),
+  { status: 200, headers: { "content-type": "application/json" } },
+);
+
+const emptyCapture = (): Pcm16Capture => ({
+  sampleRate: 16_000,
+  channels: 1,
+  pause: async () => {},
+  resume: async () => {},
+  stop: () => {},
+});
+
 test("Wispr direct transport mints a client JWT and keeps the org API key off the browser wire", async () => {
   const urls: string[] = [];
   const tokenRequests: Array<{ path: string; body: string }> = [];
@@ -44,10 +63,7 @@ test("Wispr direct transport mints a client JWT and keeps the org API key off th
 
   const fetchFn: typeof fetch = async (input, init) => {
     tokenRequests.push({ path: String(input), body: String(init?.body ?? "") });
-    return new Response(JSON.stringify({ token: "wispr-client-jwt", expiresInSeconds: 900 }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
+    return tokenFetch(input, init);
   };
 
   const captureFactory = async (options: Pcm16CaptureOptions): Promise<Pcm16Capture> => {
@@ -101,7 +117,6 @@ test("Wispr direct transport mints a client JWT and keeps the org API key off th
   assert.ok(auth.context?.dictionary_context?.includes("Polyth"));
   assert.ok(auth.context?.dictionary_context?.includes("AudioWorklet"));
 
-  // A complete one-second canonical PCM packet becomes one documented WAV append.
   captureOptions!.onChunk(new Uint8Array(32_000));
   await new Promise((resolve) => setImmediate(resolve));
   const append = sockets[0]!.sent
@@ -122,4 +137,38 @@ test("Wispr direct transport mints a client JWT and keeps the org API key off th
     .map((item) => JSON.parse(item) as { type?: string; total_packets?: number })
     .find((item) => item.type === "commit");
   assert.equal(commit?.total_packets, 1);
+});
+
+test("Wispr preserves a one-second packet captured before direct auth completes", async () => {
+  let socket!: FakeSocket;
+  const pcm = new Uint8Array(32_000);
+  pcm[0] = 7;
+
+  const stream = await startDirectWisprDictation({
+    clientId: "test-client",
+    fetchFn: tokenFetch,
+    socketFactory(url) {
+      socket = new FakeSocket(url, false);
+      setTimeout(() => socket.open(), 10);
+      return socket;
+    },
+    captureFactory: async (options) => {
+      // Simulate AudioWorklet producing a complete provider packet while token
+      // minting/socket auth is still in flight.
+      options.onChunk(pcm);
+      return emptyCapture();
+    },
+  });
+
+  const appendsBeforeStop = socket.sent
+    .map((item) => JSON.parse(item) as { type?: string; position?: number })
+    .filter((item) => item.type === "append");
+  assert.equal(appendsBeforeStop.length, 1);
+  assert.equal(appendsBeforeStop[0]?.position, 0);
+
+  assert.equal(await stream.stop(), "Привіт з Wispr");
+  const allAppends = socket.sent
+    .map((item) => JSON.parse(item) as { type?: string })
+    .filter((item) => item.type === "append");
+  assert.equal(allAppends.length, 1);
 });
