@@ -9,17 +9,8 @@ pub struct NativeClient {
 
 impl NativeClient {
     pub fn new(data_dir: PathBuf, web_dist: Option<PathBuf>) -> Self {
-        let (events, _) = broadcast::channel(128);
         Self {
-            state: Arc::new(Mutex::new(ClientState {
-                data_dir,
-                metadata_lock: Arc::new(Mutex::new(())),
-                web_dist,
-                endpoint: None,
-                pairing: HashMap::new(),
-                sessions: HashMap::new(),
-                events,
-            })),
+            state: Arc::new(Mutex::new(new_state(data_dir, web_dist))),
         }
     }
 
@@ -77,10 +68,12 @@ pub fn generate_identity_secret() -> Vec<u8> {
 /// Native-only helper used to verify that a secure-store record belongs to the
 /// expected device endpoint before reconnecting.
 pub fn identity_endpoint_id(secret: &[u8]) -> Result<String, String> {
-    let bytes: [u8; 32] = secret
+    let mut bytes: [u8; 32] = secret
         .try_into()
         .map_err(|_| LinkError::PairingStorageFailed.code().to_string())?;
-    Ok(iroh::SecretKey::from_bytes(&bytes).public().to_string())
+    let endpoint = iroh::SecretKey::from_bytes(&bytes).public().to_string();
+    bytes.zeroize();
+    Ok(endpoint)
 }
 
 pub fn run_cli() {
@@ -93,9 +86,10 @@ mod native_tests {
 
     #[test]
     fn generated_identity_round_trips_without_serialization() {
-        let secret = generate_identity_secret();
+        let mut secret = generate_identity_secret();
         assert_eq!(secret.len(), 32);
         assert!(!identity_endpoint_id(&secret).unwrap().is_empty());
+        secret.zeroize();
     }
 
     #[test]
