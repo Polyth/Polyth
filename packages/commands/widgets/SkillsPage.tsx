@@ -70,6 +70,7 @@ export default function SkillsPage() {
   useEffect(() => {
     clearForm();
     setError("");
+    setBusy(false);
   }, [selectionKey, clearForm]);
 
   useEffect(() => {
@@ -94,10 +95,11 @@ export default function SkillsPage() {
     return () => controller.abort();
   }, [scope, projectId, selectedProjectId]);
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (expectedSelection: string) => {
     if (scope === "project" && !selectedProjectId) return;
     const query = selectedProjectId ? `?projectId=${encodeURIComponent(selectedProjectId)}` : "";
-    setSkills(await request<SkillInstallationDto[]>(`/api/skills${query}`));
+    const next = await request<SkillInstallationDto[]>(`/api/skills${query}`);
+    if (selectionRef.current === expectedSelection) setSkills(next);
   }, [scope, selectedProjectId]);
 
   const ownsSelectedScope = useCallback((skill: SkillInstallationDto): boolean =>
@@ -136,24 +138,26 @@ export default function SkillsPage() {
       }));
       if (selectionRef.current !== operationKey) return;
       clearForm();
-      await reload();
+      await reload(operationKey);
     } catch (reason) {
       if (selectionRef.current === operationKey) {
         setError(reason instanceof Error ? reason.message : String(reason));
       }
     } finally {
-      setBusy(false);
+      if (selectionRef.current === operationKey) setBusy(false);
     }
   };
 
   const remove = async (skill: SkillInstallationDto) => {
     if (!ownsSelectedScope(skill)) return;
+    const operationKey = selectionKey;
     const where = scope === "project" ? `project ${project?.name ?? selectedProjectId}` : "this Space";
     if (!await confirmAlert(`Remove skill "${skill.name}" from ${where}?`, {
       title: "Remove skill",
       confirmLabel: "Remove",
     })) return;
-    const operationKey = selectionKey;
+    // Project/scope may have changed while the confirmation dialog was open.
+    if (selectionRef.current !== operationKey) return;
     setBusy(true);
     setError("");
     try {
@@ -165,13 +169,13 @@ export default function SkillsPage() {
       }));
       if (selectionRef.current !== operationKey) return;
       if (revision !== undefined && name === skill.name) clearForm();
-      await reload();
+      await reload(operationKey);
     } catch (reason) {
       if (selectionRef.current === operationKey) {
         setError(reason instanceof Error ? reason.message : String(reason));
       }
     } finally {
-      setBusy(false);
+      if (selectionRef.current === operationKey) setBusy(false);
     }
   };
 
