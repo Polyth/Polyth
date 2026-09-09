@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -8,11 +8,11 @@ use polyth_link_core::http_io::{
     copy_exact, pump_remote_http_to_client, read_http_head, request_headers_from_parsed,
     resolve_static_path, validate_http_response_head, PrefixedIo,
 };
-use polyth_link_core::identity::{self, HostIdentity};
+use polyth_link_core::identity;
 use polyth_link_core::limits::Limits;
 use polyth_link_core::local_proxy::{
-    bootstrap_redirect_target, origin_allowed, OwnedLoopback, ProxyBootstrap, BOOTSTRAP_COOKIE,
-    BOOTSTRAP_PATH_PREFIX,
+    bootstrap_redirect_target, host_allowed, origin_allowed, OwnedLoopback, ProxyBootstrap,
+    BOOTSTRAP_COOKIE, BOOTSTRAP_PATH_PREFIX,
 };
 use polyth_link_core::net::{bind_link_endpoint, endpoint_addr_from_ticket, path_transport};
 use polyth_link_core::pairing::client_proof;
@@ -38,26 +38,25 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpStream, UnixListener};
 use tokio::sync::{broadcast, Mutex};
 use tokio::time::Duration;
+use zeroize::Zeroize;
 
-#[allow(dead_code)]
 struct PairingAttempt {
-    id: String,
     ticket: PairingTicket,
-    secret: [u8; 32],
-    phrase: [String; 4],
     send: SendStream,
     recv: RecvStream,
     connection: Connection,
-    identity: HostIdentity,
+    endpoint: iroh::Endpoint,
     started: Instant,
 }
 
 struct LiveSession {
+    generation: u64,
     connection_id: String,
     host_endpoint_id: String,
     host_label: String,
+    _endpoint: iroh::Endpoint,
     connection: Connection,
-    proxy: Option<ProxyHandle>,
+    proxy: ProxyHandle,
 }
 
 struct ProxyHandle {
@@ -88,9 +87,10 @@ struct ClientState {
     data_dir: PathBuf,
     metadata_lock: Arc<Mutex<()>>,
     web_dist: Option<PathBuf>,
-    endpoint: Option<iroh::Endpoint>,
     pairing: HashMap<String, PairingAttempt>,
     sessions: HashMap<String, LiveSession>,
+    revoked_hosts: HashSet<String>,
+    next_generation: u64,
     events: broadcast::Sender<Value>,
 }
 
@@ -119,6 +119,20 @@ async fn main() {
     }
 }
 
+fn new_state(data_dir: PathBuf, web_dist: Option<PathBuf>) -> ClientState {
+    let (events, _) = broadcast::channel(128);
+    ClientState {
+        data_dir,
+        metadata_lock: Arc::new(Mutex::new(())),
+        web_dist,
+        pairing: HashMap::new(),
+        sessions: HashMap::new(),
+        revoked_hosts: HashSet::new(),
+        next_generation: 0,
+        events,
+    }
+}
+
 async fn serve(
     data_dir: PathBuf,
     socket: PathBuf,
@@ -134,16 +148,7 @@ async fn serve(
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600));
     }
-    let (events, _) = broadcast::channel(128);
-    let state = Arc::new(Mutex::new(ClientState {
-        data_dir,
-        metadata_lock: Arc::new(Mutex::new(())),
-        web_dist,
-        endpoint: None,
-        pairing: HashMap::new(),
-        sessions: HashMap::new(),
-        events,
-    }));
+    let state = Arc::new(Mutex::new(new_state(data_dir, web_dist)));
     loop {
         let (stream, _) = listener.accept().await.map_err(|e| e.to_string())?;
         let state = state.clone();
@@ -184,7 +189,7 @@ async fn handle_line(state: Arc<Mutex<ClientState>>, line: &str) -> String {
             return serde_json::to_string(&RpcResponse {
                 id: 0,
                 result: None,
-                error: Some(json!({"code": "pairing-invalid"})),
+                error: Some(json!({"code": LinkError::PairingInvalid.code()})),
             })
             .unwrap();
         }
@@ -215,8 +220,8 @@ async fn dispatch(
             let raw = params
                 .get("ticket")
                 .and_then(Value::as_str)
-                .ok_or("pairing-invalid")?;
-            let ticket = parse_pairing_ticket(raw).map_err(|e| e.code())?;
+                .ok_or(LinkError::PairingInvalid.code())?;
+            let ticket = parse_pairing_ticket(raw).map_err(|error| error.code())?;
             Ok(json!({
                 "hostLabel": ticket.host.label,
                 "hostFingerprint": fingerprint(&ticket.host.endpoint_id),
@@ -229,9 +234,9 @@ async fn dispatch(
             let id = params
                 .get("attemptId")
                 .and_then(Value::as_str)
-                .ok_or("pairing-invalid")?;
-            let mut guard = state.lock().await;
-            if let Some(mut attempt) = guard.pairing.remove(id) {
+                .ok_or(LinkError::PairingInvalid.code())?;
+            let attempt = state.lock().await.pairing.remove(id);
+            if let Some(mut attempt) = attempt {
                 let _ = write_control(
                     &mut attempt.send,
                     &ControlMessage::Shutdown {
@@ -240,15 +245,16 @@ async fn dispatch(
                 )
                 .await;
                 attempt.connection.close(0u32.into(), b"cancel");
+                attempt.endpoint.close().await;
             }
             Ok(json!({ "ok": true }))
         }
         "connections.list" => {
-            let (data_dir, lock) = {
+            let (data_dir, metadata_lock) = {
                 let guard = state.lock().await;
                 (guard.data_dir.clone(), guard.metadata_lock.clone())
             };
-            let _metadata = lock.lock().await;
+            let _metadata = metadata_lock.lock().await;
             list_metadata(&data_dir).map_err(|error| error.code())
         }
         "connect" => connect_existing(state, params).await,
@@ -256,13 +262,10 @@ async fn dispatch(
             let id = params
                 .get("connectionId")
                 .and_then(Value::as_str)
-                .ok_or("device-unknown")?;
-            let mut guard = state.lock().await;
-            if let Some(session) = guard.sessions.remove(id) {
-                session.connection.close(0u32.into(), b"disconnect");
-                if let Some(proxy) = session.proxy {
-                    proxy.listener.close();
-                }
+                .ok_or(LinkError::DeviceUnknown.code())?;
+            let session = state.lock().await.sessions.remove(id);
+            if let Some(session) = session {
+                close_session(session, b"disconnect").await;
             }
             Ok(json!({ "ok": true }))
         }
@@ -270,19 +273,21 @@ async fn dispatch(
             let id = params
                 .get("connectionId")
                 .and_then(Value::as_str)
-                .ok_or("device-unknown")?;
-            let lock = state.lock().await.metadata_lock.clone();
-            let _metadata = lock.lock().await;
-            let mut guard = state.lock().await;
-            if let Some(session) = guard.sessions.remove(id) {
-                session.connection.close(0u32.into(), b"forget");
-                if let Some(proxy) = session.proxy {
-                    proxy.listener.close();
-                }
+                .ok_or(LinkError::DeviceUnknown.code())?;
+            let (session, data_dir, metadata_lock) = {
+                let mut guard = state.lock().await;
+                let session = guard.sessions.remove(id);
+                guard.revoked_hosts.remove(id);
+                (session, guard.data_dir.clone(), guard.metadata_lock.clone())
+            };
+            if let Some(session) = session {
+                close_session(session, b"forget").await;
             }
-            forget_metadata(&guard.data_dir, id).map_err(|error| error.code())?;
-            let dir = guard.data_dir.join("hosts").join(id);
-            let _ = std::fs::remove_dir_all(dir);
+            {
+                let _metadata = metadata_lock.lock().await;
+                forget_metadata(&data_dir, id).map_err(|error| error.code())?;
+            }
+            let _ = std::fs::remove_dir_all(data_dir.join("hosts").join(id));
             Ok(json!({ "ok": true }))
         }
         "status" => {
@@ -291,11 +296,14 @@ async fn dispatch(
                 .and_then(Value::as_str)
                 .unwrap_or("");
             let guard = state.lock().await;
+            if guard.revoked_hosts.contains(id) {
+                return Ok(json!({ "state": "revoked", "error": LinkError::DeviceRevoked.code() }));
+            }
             if let Some(session) = guard.sessions.get(id) {
                 Ok(json!({
                     "state": "connected",
                     "transport": path_transport(&session.connection),
-                    "origin": session.proxy.as_ref().map(|p| p.origin.clone()),
+                    "origin": session.proxy.origin,
                     "connectionId": session.connection_id,
                     "hostEndpointId": session.host_endpoint_id,
                     "hostLabel": session.host_label,
@@ -304,7 +312,7 @@ async fn dispatch(
                 Ok(json!({ "state": "disconnected" }))
             }
         }
-        _ => Err("pairing-invalid"),
+        _ => Err(LinkError::PairingInvalid.code()),
     }
 }
 
@@ -315,19 +323,20 @@ async fn begin_pairing(
     let raw = params
         .get("ticket")
         .and_then(Value::as_str)
-        .ok_or("pairing-invalid")?;
+        .ok_or(LinkError::PairingInvalid.code())?;
     let label = params
         .get("label")
         .and_then(Value::as_str)
         .unwrap_or("Mobile device");
-    let ticket = parse_pairing_ticket(raw).map_err(|e| e.code())?;
-    let secret = decode_invite_secret(&ticket).map_err(|e| e.code())?;
-    let host_addr = endpoint_addr_from_ticket(&ticket).map_err(|e| e.code())?;
-    let policy = match ticket.candidates.first().map(|c| c.policy.as_str()) {
-        Some("relay-only") => TransportPolicy::RelayOnly,
-        Some("air-gapped") => TransportPolicy::AirGapped,
-        _ => TransportPolicy::DirectPreferred,
-    };
+    let ticket = parse_pairing_ticket(raw).map_err(|error| error.code())?;
+    let mut invite_secret = decode_invite_secret(&ticket).map_err(|error| error.code())?;
+    let host_addr = endpoint_addr_from_ticket(&ticket).map_err(|error| error.code())?;
+    let policy = ticket
+        .candidates
+        .first()
+        .map(|candidate| transport_policy(&candidate.policy))
+        .transpose()?
+        .unwrap_or(TransportPolicy::DirectPreferred);
     let identity_path = {
         let guard = state.lock().await;
         guard
@@ -336,29 +345,29 @@ async fn begin_pairing(
             .join(&ticket.host.endpoint_id)
             .join("identity")
     };
-    let identity =
-        identity::load_or_create(&identity_path).map_err(|_| "pairing-storage-failed")?;
+    let identity = identity::load_or_create(&identity_path).map_err(identity_error_code)?;
     let device_endpoint = identity.endpoint_id();
     let endpoint = bind_link_endpoint(identity.secret_key(), policy)
         .await
-        .map_err(|_| "transport-unavailable")?;
+        .map_err(|_| LinkError::TransportUnavailable.code())?;
     let connection = tokio::time::timeout(
-        std::time::Duration::from_secs(20),
+        Duration::from_secs(20),
         endpoint.connect(host_addr, POLYTH_LINK_ALPN.as_bytes()),
     )
     .await
-    .map_err(|_| "transport-unavailable")?
-    .map_err(|_| "host-identity-mismatch")?;
+    .map_err(|_| LinkError::TransportUnavailable.code())?
+    .map_err(|_| LinkError::TransportUnavailable.code())?;
     if connection.remote_id().to_string() != ticket.host.endpoint_id {
-        connection.close(0u32.into(), b"mismatch");
-        return Err("host-identity-mismatch");
+        connection.close(0u32.into(), b"identity-mismatch");
+        endpoint.close().await;
+        return Err(LinkError::HostIdentityMismatch.code());
     }
     let (mut send, mut recv) = connection
         .open_bi()
         .await
-        .map_err(|_| "transport-protocol-error")?;
+        .map_err(|_| LinkError::TransportProtocolError.code())?;
     let _ = send.set_priority(PRI_CONTROL);
-    open_control(&mut send).await.map_err(|e| e.code())?;
+    open_control(&mut send).await.map_err(|error| error.code())?;
     let mut client_nonce = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut client_nonce);
     write_control(
@@ -369,18 +378,18 @@ async fn begin_pairing(
             profile: ticket.profile.clone(),
             device_label: label.chars().take(80).collect(),
             platform: std::env::consts::OS.into(),
-            app_version: "0.1.0".into(),
+            app_version: env!("CARGO_PKG_VERSION").into(),
         },
     )
     .await
-    .map_err(|e| e.code())?;
-    let server_nonce = match read_control(&mut recv).await.map_err(|e| e.code())? {
+    .map_err(|error| error.code())?;
+    let server_nonce = match read_control(&mut recv).await.map_err(|error| error.code())? {
         ControlMessage::PairingChallenge { server_nonce } => server_nonce,
         ControlMessage::ConnectionRejected { code } => return Err(leak_code(code)),
-        _ => return Err("pairing-invalid"),
+        _ => return Err(LinkError::PairingInvalid.code()),
     };
     let proof = client_proof(
-        &secret,
+        &invite_secret,
         &ticket.pairing_id,
         &ticket.host.endpoint_id,
         &device_endpoint,
@@ -388,35 +397,29 @@ async fn begin_pairing(
         &server_nonce,
         &ticket.profile,
     );
+    invite_secret.zeroize();
     write_control(&mut send, &ControlMessage::PairingProof { proof })
         .await
-        .map_err(|e| e.code())?;
-    let phrase = match read_control(&mut recv).await.map_err(|e| e.code())? {
+        .map_err(|error| error.code())?;
+    let phrase = match read_control(&mut recv).await.map_err(|error| error.code())? {
         ControlMessage::PairingSafety { phrase } => phrase,
         ControlMessage::ConnectionRejected { code } => return Err(leak_code(code)),
-        _ => return Err("pairing-invalid"),
+        _ => return Err(LinkError::PairingInvalid.code()),
     };
     let mut id = [0u8; 8];
     rand::thread_rng().fill_bytes(&mut id);
     let attempt_id = hex::encode(id);
-    {
-        let mut guard = state.lock().await;
-        guard.endpoint = Some(endpoint);
-        guard.pairing.insert(
-            attempt_id.clone(),
-            PairingAttempt {
-                id: attempt_id.clone(),
-                ticket,
-                secret,
-                phrase: phrase.clone(),
-                send,
-                recv,
-                connection,
-                identity,
-                started: Instant::now(),
-            },
-        );
-    }
+    state.lock().await.pairing.insert(
+        attempt_id.clone(),
+        PairingAttempt {
+            ticket,
+            send,
+            recv,
+            connection,
+            endpoint,
+            started: Instant::now(),
+        },
+    );
     Ok(json!({
         "attemptId": attempt_id,
         "safetyPhrase": phrase,
@@ -431,18 +434,24 @@ async fn confirm_pairing(
     let id = params
         .get("attemptId")
         .and_then(Value::as_str)
-        .ok_or("pairing-invalid")?;
-    let mut attempt = {
-        let mut guard = state.lock().await;
-        guard.pairing.remove(id).ok_or("pairing-invalid")?
-    };
-    let (data_dir, metadata_lock) = {
+        .ok_or(LinkError::PairingInvalid.code())?;
+    let mut attempt = state
+        .lock()
+        .await
+        .pairing
+        .remove(id)
+        .ok_or(LinkError::PairingInvalid.code())?;
+    let (data_dir, metadata_lock, web_dist) = {
         let guard = state.lock().await;
-        (guard.data_dir.clone(), guard.metadata_lock.clone())
+        (
+            guard.data_dir.clone(),
+            guard.metadata_lock.clone(),
+            guard.web_dist.clone(),
+        )
     };
-    let prepared = {
+    {
         let _metadata = metadata_lock.lock().await;
-        persist_metadata(
+        if persist_metadata(
             &data_dir,
             &attempt.ticket.host.endpoint_id,
             attempt.ticket.host.label.as_deref().unwrap_or("Polyth"),
@@ -451,61 +460,85 @@ async fn confirm_pairing(
             "prepared",
             None,
         )
-    };
-    if prepared.is_err() {
-        let _ = write_control(&mut attempt.send, &ControlMessage::ClientStorageFailed).await;
-        return Err("pairing-storage-failed");
+        .is_err()
+        {
+            let _ = write_control(&mut attempt.send, &ControlMessage::ClientStorageFailed).await;
+            attempt.connection.close(0u32.into(), b"storage-failed");
+            attempt.endpoint.close().await;
+            return Err(LinkError::PairingStorageFailed.code());
+        }
     }
     write_control(&mut attempt.send, &ControlMessage::PairingDeviceConfirmed)
         .await
-        .map_err(|e| e.code())?;
+        .map_err(|error| error.code())?;
     loop {
         if attempt.started.elapsed().as_secs() > 120 {
-            return Err("pairing-expired");
+            attempt.connection.close(0u32.into(), b"pairing-expired");
+            attempt.endpoint.close().await;
+            return Err(LinkError::PairingExpired.code());
         }
         match read_control(&mut attempt.recv)
             .await
-            .map_err(|e| e.code())?
+            .map_err(|error| error.code())?
         {
             ControlMessage::PairingCommitted {
                 device_id,
                 grant_revision: _,
                 grants: _,
             } => {
+                let connection_id = attempt.ticket.host.endpoint_id.clone();
+                let transport = path_transport(&attempt.connection);
                 {
                     let _metadata = metadata_lock.lock().await;
-                    let _ = persist_metadata(
+                    persist_metadata(
                         &data_dir,
-                        &attempt.ticket.host.endpoint_id,
+                        &connection_id,
                         attempt.ticket.host.label.as_deref().unwrap_or("Polyth"),
                         attempt.ticket.candidates.first(),
                         &attempt.ticket.pairing_id,
                         "active",
                         Some(&device_id),
-                    );
+                    )
+                    .and_then(|_| mark_metadata_connected(&data_dir, &connection_id, transport))
+                    .map_err(|_| LinkError::PairingStorageFailed.code())?;
                 }
-                spawn_control_loop(attempt.send, attempt.recv, attempt.connection.clone());
-                let connection_id = attempt.ticket.host.endpoint_id.clone();
-                let web_dist = state.lock().await.web_dist.clone();
-                let proxy =
-                    start_proxy(attempt.connection.clone(), web_dist, connection_id.clone())
-                        .await
-                        .map_err(|_| "proxy-bootstrap-invalid")?;
+                let proxy = start_proxy(attempt.connection.clone(), web_dist)
+                    .await
+                    .map_err(|_| LinkError::ProxyBootstrapInvalid.code())?;
                 let origin = proxy.origin.clone();
                 let bootstrap = proxy.bootstrap.clone();
+                let proxy_listener = proxy.listener.clone();
+                let generation;
+                let previous;
                 {
                     let mut guard = state.lock().await;
-                    guard.sessions.insert(
+                    guard.revoked_hosts.remove(&connection_id);
+                    generation = next_generation(&mut guard);
+                    previous = guard.sessions.insert(
                         connection_id.clone(),
                         LiveSession {
+                            generation,
                             connection_id: connection_id.clone(),
-                            host_endpoint_id: attempt.ticket.host.endpoint_id.clone(),
+                            host_endpoint_id: connection_id.clone(),
                             host_label: attempt.ticket.host.label.clone().unwrap_or_default(),
-                            connection: attempt.connection,
-                            proxy: Some(proxy),
+                            _endpoint: attempt.endpoint,
+                            connection: attempt.connection.clone(),
+                            proxy,
                         },
                     );
                 }
+                if let Some(previous) = previous {
+                    close_session(previous, b"replaced").await;
+                }
+                spawn_control_loop(
+                    state.clone(),
+                    connection_id.clone(),
+                    generation,
+                    attempt.send,
+                    attempt.recv,
+                    attempt.connection,
+                    proxy_listener,
+                );
                 return Ok(json!({
                     "connectionId": connection_id,
                     "origin": origin,
@@ -515,7 +548,7 @@ async fn confirm_pairing(
                 }));
             }
             ControlMessage::ConnectionRejected { code } => return Err(leak_code(code)),
-            ControlMessage::DeviceRevoked => return Err("device-revoked"),
+            ControlMessage::DeviceRevoked => return Err(LinkError::DeviceRevoked.code()),
             ControlMessage::Ping { nonce } => {
                 let _ = write_control(&mut attempt.send, &ControlMessage::Pong { nonce }).await;
             }
@@ -531,17 +564,22 @@ async fn connect_existing(
     let id = params
         .get("connectionId")
         .and_then(Value::as_str)
-        .ok_or("device-unknown")?;
+        .filter(|value| !value.is_empty())
+        .ok_or(LinkError::DeviceUnknown.code())?;
     let live = {
         let guard = state.lock().await;
-        guard.sessions.get(id).and_then(|session| {
-            session
-                .proxy
-                .as_ref()
-                .map(|proxy| (proxy.origin.clone(), proxy.boot.clone()))
+        if guard.revoked_hosts.contains(id) {
+            return Err(LinkError::DeviceRevoked.code());
+        }
+        guard.sessions.get(id).map(|session| {
+            (
+                session.proxy.origin.clone(),
+                session.proxy.boot.clone(),
+                session.generation,
+            )
         })
     };
-    if let Some((origin, boot)) = live {
+    if let Some((origin, boot, _generation)) = live {
         let bootstrap = {
             let mut boot = boot.lock().await;
             boot.mint_fresh_nonce();
@@ -551,7 +589,7 @@ async fn connect_existing(
             "origin": origin,
             "bootstrap": bootstrap,
             "bootstrapUrl": bootstrap,
-            "connectionId": id
+            "connectionId": id,
         }));
     }
     let (data_dir, web_dist, metadata_lock) = {
@@ -563,59 +601,90 @@ async fn connect_existing(
         )
     };
     let identity_path = data_dir.join("hosts").join(id).join("identity");
-    let identity = identity::load_existing(&identity_path).map_err(|_| "pairing-storage-failed")?;
-    let (saved_policy, saved_direct, saved_relays) = {
+    let identity = identity::load_existing(&identity_path).map_err(identity_error_code)?;
+    let (policy, saved_direct, saved_relays, host_label) = {
         let _metadata = metadata_lock.lock().await;
         let saved = read_metadata(&metadata_path(&data_dir)).map_err(|error| error.code())?;
         let item = saved
             .iter()
-            .find(|item| item.get("id").and_then(Value::as_str) == Some(id));
-        let strings = |field: &str| -> Vec<String> {
-            item.and_then(|item| item.get(field).and_then(Value::as_array))
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect()
+            .find(|item| item.get("id").and_then(Value::as_str) == Some(id))
+            .ok_or(LinkError::DeviceUnknown.code())?;
+        if item.get("hostEndpointId").and_then(Value::as_str) != Some(id) {
+            return Err(LinkError::HostIdentityMismatch.code());
+        }
+        if item.get("revoked").and_then(Value::as_bool) == Some(true)
+            || item.get("pairingState").and_then(Value::as_str) == Some("revoked")
+        {
+            return Err(LinkError::DeviceRevoked.code());
+        }
+        match item.get("pairingState").and_then(Value::as_str) {
+            Some("active" | "prepared") => {}
+            _ => return Err(LinkError::DeviceUnknown.code()),
+        }
+        let strings = |field: &str| -> Result<Vec<String>, &'static str> {
+            match item.get(field) {
+                None => Ok(Vec::new()),
+                Some(Value::Array(values)) => values
+                    .iter()
+                    .map(|value| {
+                        value
+                            .as_str()
+                            .map(str::to_string)
+                            .ok_or(LinkError::PairingStorageFailed.code())
+                    })
+                    .collect(),
+                Some(_) => Err(LinkError::PairingStorageFailed.code()),
+            }
         };
-        let policy = item
-            .and_then(|item| item.get("activePolicy").and_then(Value::as_str))
-            .unwrap_or("direct-preferred")
-            .to_string();
-        (policy, strings("directAddresses"), strings("relayUrls"))
+        let policy = transport_policy(
+            item.get("activePolicy")
+                .and_then(Value::as_str)
+                .unwrap_or("direct-preferred"),
+        )?;
+        (
+            policy,
+            strings("directAddresses")?,
+            strings("relayUrls")?,
+            item.get("hostLabel")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+        )
     };
-    if saved_policy != "direct-preferred" && !saved_policy.is_empty() {
-        return Err("pairing-invalid");
-    }
-    let endpoint = bind_link_endpoint(identity.secret_key(), TransportPolicy::DirectPreferred)
+    let endpoint = bind_link_endpoint(identity.secret_key(), policy)
         .await
-        .map_err(|_| "transport-unavailable")?;
-    let host_id: iroh::EndpointId = id.parse().map_err(|_| "host-identity-mismatch")?;
+        .map_err(|_| LinkError::TransportUnavailable.code())?;
+    let host_id: iroh::EndpointId = id
+        .parse()
+        .map_err(|_| LinkError::HostIdentityMismatch.code())?;
     let mut addr = iroh::EndpointAddr::new(host_id);
     for item in saved_direct {
-        if let Ok(socket) = item.parse() {
-            addr = addr.with_ip_addr(socket);
-        }
+        let socket = item
+            .parse()
+            .map_err(|_| LinkError::PairingStorageFailed.code())?;
+        addr = addr.with_ip_addr(socket);
     }
     for relay in saved_relays {
-        if let Ok(url) = relay.parse::<iroh::RelayUrl>() {
-            addr = addr.with_relay_url(url);
-        }
+        let url = relay
+            .parse::<iroh::RelayUrl>()
+            .map_err(|_| LinkError::PairingStorageFailed.code())?;
+        addr = addr.with_relay_url(url);
     }
     let connection = endpoint
         .connect(addr, POLYTH_LINK_ALPN.as_bytes())
         .await
-        .map_err(|_| "host-identity-mismatch")?;
+        .map_err(|_| LinkError::TransportUnavailable.code())?;
     if connection.remote_id().to_string() != id {
-        connection.close(0u32.into(), b"mismatch");
-        return Err("host-identity-mismatch");
+        connection.close(0u32.into(), b"identity-mismatch");
+        endpoint.close().await;
+        return Err(LinkError::HostIdentityMismatch.code());
     }
     let (mut send, mut recv) = connection
         .open_bi()
         .await
-        .map_err(|_| "transport-protocol-error")?;
+        .map_err(|_| LinkError::TransportProtocolError.code())?;
     let _ = send.set_priority(PRI_CONTROL);
-    open_control(&mut send).await.map_err(|e| e.code())?;
+    open_control(&mut send).await.map_err(|error| error.code())?;
     write_control(
         &mut send,
         &ControlMessage::ConnectionHello {
@@ -624,66 +693,118 @@ async fn connect_existing(
         },
     )
     .await
-    .map_err(|e| e.code())?;
-    validate_connection_response(read_control(&mut recv).await.map_err(|e| e.code())?)?;
-    spawn_control_loop(send, recv, connection.clone());
-    let proxy = start_proxy(connection.clone(), web_dist, id.to_string())
+    .map_err(|error| error.code())?;
+    validate_connection_response(read_control(&mut recv).await.map_err(|error| error.code())?)?;
+    let transport = path_transport(&connection);
+    {
+        let _metadata = metadata_lock.lock().await;
+        mark_metadata_connected(&data_dir, id, transport)
+            .map_err(|_| LinkError::PairingStorageFailed.code())?;
+    }
+    let proxy = start_proxy(connection.clone(), web_dist)
         .await
-        .map_err(|_| "proxy-bootstrap-invalid")?;
+        .map_err(|_| LinkError::ProxyBootstrapInvalid.code())?;
     let origin = proxy.origin.clone();
     let bootstrap = proxy.bootstrap.clone();
+    let proxy_listener = proxy.listener.clone();
+    let generation;
+    let previous;
     {
         let mut guard = state.lock().await;
-        guard.endpoint = Some(endpoint);
-        guard.sessions.insert(
+        if guard.revoked_hosts.contains(id) {
+            proxy.listener.close();
+            connection.close(0u32.into(), b"revoked");
+            endpoint.close().await;
+            return Err(LinkError::DeviceRevoked.code());
+        }
+        generation = next_generation(&mut guard);
+        previous = guard.sessions.insert(
             id.to_string(),
             LiveSession {
+                generation,
                 connection_id: id.to_string(),
                 host_endpoint_id: id.to_string(),
-                host_label: String::new(),
-                connection,
-                proxy: Some(proxy),
+                host_label,
+                _endpoint: endpoint,
+                connection: connection.clone(),
+                proxy,
             },
         );
     }
+    if let Some(previous) = previous {
+        close_session(previous, b"replaced").await;
+    }
+    spawn_control_loop(
+        state.clone(),
+        id.to_string(),
+        generation,
+        send,
+        recv,
+        connection,
+        proxy_listener,
+    );
     Ok(json!({
         "origin": origin,
         "bootstrap": bootstrap,
         "bootstrapUrl": bootstrap,
-        "connectionId": id
+        "connectionId": id,
     }))
 }
 
 fn validate_connection_response(message: ControlMessage) -> Result<(), &'static str> {
     match message {
-        ControlMessage::ConnectionAccepted {
-            version,
-            connection_id: _,
-            ..
-        } if version == PROTOCOL_VERSION => {}
+        ControlMessage::ConnectionAccepted { version, .. } if version == PROTOCOL_VERSION => Ok(()),
         ControlMessage::ConnectionAccepted { .. } => {
-            return Err(LinkError::TransportVersionUnsupported.code())
+            Err(LinkError::TransportVersionUnsupported.code())
         }
-        ControlMessage::DeviceRevoked | ControlMessage::ConnectionRejected { .. } => {
-            return Err("device-revoked")
-        }
-        _ => return Err("transport-protocol-error"),
+        ControlMessage::DeviceRevoked => Err(LinkError::DeviceRevoked.code()),
+        ControlMessage::ConnectionRejected { code } => Err(leak_code(code)),
+        _ => Err(LinkError::TransportProtocolError.code()),
     }
-    Ok(())
+}
+
+fn transport_policy(value: &str) -> Result<TransportPolicy, &'static str> {
+    match value {
+        "direct-preferred" | "" => Ok(TransportPolicy::DirectPreferred),
+        "relay-only" => Ok(TransportPolicy::RelayOnly),
+        "air-gapped" => Ok(TransportPolicy::AirGapped),
+        _ => Err(LinkError::PairingInvalid.code()),
+    }
+}
+
+fn identity_error_code(error: identity::IdentityError) -> &'static str {
+    match error {
+        identity::IdentityError::Corrupt | identity::IdentityError::UnsupportedVersion => {
+            LinkError::HostIdentityCorrupt.code()
+        }
+        identity::IdentityError::NotFound
+        | identity::IdentityError::Permission
+        | identity::IdentityError::Io => LinkError::PairingStorageFailed.code(),
+    }
+}
+
+fn next_generation(state: &mut ClientState) -> u64 {
+    state.next_generation = state.next_generation.wrapping_add(1);
+    if state.next_generation == 0 {
+        state.next_generation = 1;
+    }
+    state.next_generation
+}
+
+async fn close_session(session: LiveSession, reason: &'static [u8]) {
+    session.proxy.listener.close();
+    session.connection.close(0u32.into(), reason);
+    session._endpoint.close().await;
 }
 
 async fn start_proxy(
     connection: Connection,
     web_dist: Option<PathBuf>,
-    connection_id: String,
 ) -> Result<ProxyHandle, LinkError> {
     let (listener, owned) = polyth_link_core::local_proxy::bind_owned_loopback().await?;
     let port = owned.port;
     let boot = Arc::new(Mutex::new(ProxyBootstrap::new(port)));
-    let bootstrap = {
-        let guard = boot.lock().await;
-        guard.bootstrap_url()
-    };
+    let bootstrap = boot.lock().await.bootstrap_url();
     let origin = format!("http://127.0.0.1:{port}");
     let mut shutdown_rx = owned.subscribe();
     let boot_handle = boot.clone();
@@ -696,9 +817,8 @@ async fn start_proxy(
                     let connection = connection.clone();
                     let web_dist = web_dist.clone();
                     let boot = boot.clone();
-                    let connection_id = connection_id.clone();
                     tokio::spawn(async move {
-                        let _ = handle_proxy_conn(stream, connection, web_dist, boot, connection_id).await;
+                        let _ = handle_proxy_conn(stream, connection, web_dist, boot).await;
                     });
                 }
             }
@@ -717,27 +837,40 @@ async fn handle_proxy_conn(
     connection: Connection,
     web_dist: Option<PathBuf>,
     boot: Arc<Mutex<ProxyBootstrap>>,
-    _connection_id: String,
 ) -> Result<(), LinkError> {
     let parsed = read_http_head(&mut stream, Limits::v1().http_head_bytes).await?;
     let method = parsed.method.clone().unwrap_or_else(|| "GET".into());
     let raw_path = parsed.path.clone().unwrap_or_else(|| "/".into());
     let (path, query) = split_path_query(&raw_path);
-    let origin = parsed.header("origin").map(str::to_string);
-    let cookie = parsed.header("cookie").map(str::to_string);
-    let port = stream.local_addr().map(|addr| addr.port()).unwrap_or(0);
-    if let Some(origin) = &origin {
-        if !origin_allowed(origin, port) {
-            write_http(&mut stream, 403, "not allowed").await?;
-            return Err(LinkError::ProxyOriginDenied);
-        }
+    let port = stream
+        .local_addr()
+        .map_err(|_| LinkError::ProxyOriginDenied)?
+        .port();
+    let hosts: Vec<&str> = parsed
+        .headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("host"))
+        .map(|(_, value)| value.as_str())
+        .collect();
+    if hosts.len() != 1 || !host_allowed(hosts[0], port) {
+        write_http(&mut stream, 403, "invalid host").await?;
+        return Err(LinkError::ProxyOriginDenied);
+    }
+    let origins: Vec<&str> = parsed
+        .headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("origin"))
+        .map(|(_, value)| value.as_str())
+        .collect();
+    if origins.len() > 1 || origins.first().is_some_and(|origin| !origin_allowed(origin, port)) {
+        write_http(&mut stream, 403, "not allowed").await?;
+        return Err(LinkError::ProxyOriginDenied);
     }
     if let Some(rest) = path.strip_prefix(BOOTSTRAP_PATH_PREFIX) {
         if rest.ends_with('/') || rest.is_empty() {
             write_http(&mut stream, 400, "invalid bootstrap").await?;
             return Err(LinkError::ProxyBootstrapInvalid);
         }
-        let nonce = rest.split('?').next().unwrap_or(rest);
         let location = match bootstrap_redirect_target(query.as_deref()) {
             Ok(value) => value,
             Err(error) => {
@@ -745,7 +878,7 @@ async fn handle_proxy_conn(
                 return Err(error);
             }
         };
-        let session = match boot.lock().await.consume_nonce(nonce) {
+        let session = match boot.lock().await.consume_nonce(rest) {
             Ok(session) => session,
             Err(error) => {
                 write_http(&mut stream, 400, "invalid bootstrap").await?;
@@ -753,7 +886,7 @@ async fn handle_proxy_conn(
             }
         };
         let headers = format!(
-            "HTTP/1.1 302 Found\r\nLocation: {location}\r\nSet-Cookie: {BOOTSTRAP_COOKIE}={session}; Path=/; HttpOnly; SameSite=Strict\r\nContent-Length: 0\r\n\r\n"
+            "HTTP/1.1 302 Found\r\nLocation: {location}\r\nSet-Cookie: {BOOTSTRAP_COOKIE}={session}; Path=/; HttpOnly; SameSite=Strict\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
         );
         stream
             .write_all(headers.as_bytes())
@@ -761,14 +894,14 @@ async fn handle_proxy_conn(
             .map_err(|_| LinkError::TransportProtocolError)?;
         return Ok(());
     }
+    let cookie = parsed.header("cookie");
     let session_ok = {
         let guard = boot.lock().await;
         cookie
-            .as_deref()
             .and_then(|cookie| {
                 cookie.split(';').find_map(|part| {
-                    let part = part.trim();
-                    part.strip_prefix(&format!("{BOOTSTRAP_COOKIE}="))
+                    part.trim()
+                        .strip_prefix(&format!("{BOOTSTRAP_COOKIE}="))
                 })
             })
             .map(|value| guard.session_valid(value))
@@ -778,8 +911,9 @@ async fn handle_proxy_conn(
         write_http(&mut stream, 401, "authentication required").await?;
         return Err(LinkError::ProxySessionInvalid);
     }
-    if path.starts_with("/api/") || path.starts_with("/ws") {
-        if parsed.is_websocket_upgrade() || path.starts_with("/ws") {
+    let websocket_path = path == "/ws" || path.starts_with("/ws/");
+    if path.starts_with("/api/") || websocket_path {
+        if parsed.is_websocket_upgrade() || websocket_path {
             return proxy_ws(stream, parsed, &connection, &raw_path).await;
         }
         return proxy_http(stream, parsed, &connection, &method, &raw_path).await;
@@ -794,17 +928,36 @@ fn split_path_query(raw: &str) -> (String, Option<String>) {
     }
 }
 
-fn spawn_control_loop(mut send: SendStream, mut recv: RecvStream, connection: Connection) {
+fn spawn_control_loop(
+    state: Arc<Mutex<ClientState>>,
+    connection_id: String,
+    generation: u64,
+    mut send: SendStream,
+    mut recv: RecvStream,
+    connection: Connection,
+    proxy_listener: OwnedLoopback,
+) {
     tokio::spawn(async move {
+        let mut revoked = false;
         loop {
             match read_control(&mut recv).await {
                 Ok(ControlMessage::Ping { nonce }) => {
-                    let _ = write_control(&mut send, &ControlMessage::Pong { nonce }).await;
+                    if write_control(&mut send, &ControlMessage::Pong { nonce })
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
                 }
-                Ok(ControlMessage::DeviceRevoked) | Ok(ControlMessage::Shutdown { .. }) => {
-                    connection.close(0u32.into(), b"revoked");
+                Ok(ControlMessage::DeviceRevoked) => {
+                    revoked = true;
                     break;
                 }
+                Ok(ControlMessage::ConnectionRejected { code }) if code == "device-revoked" => {
+                    revoked = true;
+                    break;
+                }
+                Ok(ControlMessage::Shutdown { .. }) => break,
                 Ok(ControlMessage::ConnectionAccepted { .. })
                 | Ok(ControlMessage::GrantRevisionChanged { .. })
                 | Ok(ControlMessage::TransportStatus { .. })
@@ -813,7 +966,44 @@ fn spawn_control_loop(mut send: SendStream, mut recv: RecvStream, connection: Co
                 Ok(_) | Err(_) => break,
             }
         }
+        proxy_listener.close();
+        connection.close(0u32.into(), if revoked { b"revoked" } else { b"closed" });
+        finish_session(state, &connection_id, generation, revoked).await;
     });
+}
+
+async fn finish_session(
+    state: Arc<Mutex<ClientState>>,
+    connection_id: &str,
+    generation: u64,
+    revoked: bool,
+) {
+    let (removed, data_dir, metadata_lock) = {
+        let mut guard = state.lock().await;
+        let current = guard
+            .sessions
+            .get(connection_id)
+            .is_some_and(|session| session.generation == generation);
+        if !current {
+            return;
+        }
+        if revoked {
+            guard.revoked_hosts.insert(connection_id.to_string());
+        }
+        (
+            guard.sessions.remove(connection_id),
+            guard.data_dir.clone(),
+            guard.metadata_lock.clone(),
+        )
+    };
+    if let Some(session) = removed {
+        session.proxy.listener.close();
+        session.connection.close(0u32.into(), b"closed");
+    }
+    if revoked {
+        let _metadata = metadata_lock.lock().await;
+        let _ = mark_metadata_revoked(&data_dir, connection_id);
+    }
 }
 
 async fn proxy_http(
@@ -962,17 +1152,20 @@ async fn serve_static(
     let bytes = tokio::fs::read(&file)
         .await
         .map_err(|_| LinkError::RequestPathDenied)?;
-    let content_type = match file.extension().and_then(|e| e.to_str()) {
+    let content_type = match file.extension().and_then(|extension| extension.to_str()) {
         Some("js") => "text/javascript",
         Some("css") => "text/css",
         Some("html") => "text/html; charset=utf-8",
         Some("json") => "application/json",
         Some("svg") => "image/svg+xml",
         Some("woff2") => "font/woff2",
+        Some("png") => "image/png",
+        Some("webp") => "image/webp",
+        Some("ico") => "image/x-icon",
         _ => "application/octet-stream",
     };
     let headers = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n\r\n",
         bytes.len()
     );
     stream
@@ -988,8 +1181,17 @@ async fn serve_static(
 
 async fn write_http(stream: &mut TcpStream, status: u16, body: &str) -> Result<(), LinkError> {
     let payload = format!("{{\"error\":\"{body}\"}}");
+    let reason = match status {
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        411 => "Length Required",
+        413 => "Payload Too Large",
+        _ => "Error",
+    };
     let headers = format!(
-        "HTTP/1.1 {status} \r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
         payload.len()
     );
     stream
@@ -1016,7 +1218,23 @@ fn metadata_path(data_dir: &Path) -> PathBuf {
 }
 
 fn list_metadata(data_dir: &Path) -> Result<Value, LinkError> {
-    Ok(json!(read_metadata(&metadata_path(data_dir))?))
+    let list = read_metadata(&metadata_path(data_dir))?;
+    Ok(json!(
+        list.into_iter()
+            .filter(|item| item.get("pairingState").and_then(Value::as_str) != Some("prepared"))
+            .map(|item| {
+                json!({
+                    "id": item.get("id").cloned().unwrap_or(Value::Null),
+                    "hostEndpointId": item.get("hostEndpointId").cloned().unwrap_or(Value::Null),
+                    "hostLabel": item.get("hostLabel").cloned().unwrap_or(Value::String(String::new())),
+                    "lastUsedAt": item.get("lastUsedAt").cloned().unwrap_or(Value::from(0)),
+                    "lastTransport": item.get("lastTransport").cloned().unwrap_or(Value::Null),
+                    "revoked": item.get("revoked").cloned().unwrap_or(Value::Bool(false)),
+                    "hasSecureIdentity": item.get("hasSecureIdentity").cloned().unwrap_or(Value::Bool(false)),
+                })
+            })
+            .collect::<Vec<_>>()
+    ))
 }
 
 fn read_metadata(path: &Path) -> Result<Vec<Value>, LinkError> {
@@ -1033,21 +1251,30 @@ fn write_metadata(path: &Path, list: &[Value]) -> Result<(), LinkError> {
     }
     let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
     let bytes = serde_json::to_vec(list).map_err(|_| LinkError::PairingStorageFailed)?;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).truncate(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
         .open(&tmp)
         .map_err(|_| LinkError::PairingStorageFailed)?;
     std::io::Write::write_all(&mut file, &bytes).map_err(|_| LinkError::PairingStorageFailed)?;
     file.sync_all()
         .map_err(|_| LinkError::PairingStorageFailed)?;
-    std::fs::rename(tmp, path).map_err(|_| LinkError::PairingStorageFailed)?;
+    std::fs::rename(&tmp, path).map_err(|_| LinkError::PairingStorageFailed)?;
     #[cfg(unix)]
-    if let Some(parent) = path.parent() {
-        std::fs::File::open(parent)
-            .and_then(|dir| dir.sync_all())
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
             .map_err(|_| LinkError::PairingStorageFailed)?;
+        if let Some(parent) = path.parent() {
+            std::fs::File::open(parent)
+                .and_then(|dir| dir.sync_all())
+                .map_err(|_| LinkError::PairingStorageFailed)?;
+        }
     }
     Ok(())
 }
@@ -1076,12 +1303,54 @@ fn persist_metadata(
             "pairingState": pairing_state,
             "deviceId": device_id,
             "lastUsedAt": now_ms(),
+            "lastTransport": Value::Null,
+            "revoked": false,
             "hasSecureIdentity": true,
             "activePolicy": candidate.map(|item| item.policy.clone()).unwrap_or_else(|| "direct-preferred".into()),
             "directAddresses": candidate.and_then(|item| item.direct_addresses.clone()).unwrap_or_default(),
             "relayUrls": candidate.map(|item| item.relay_urls.clone()).unwrap_or_default(),
         }),
     );
+    write_metadata(&path, &list)
+}
+
+fn mark_metadata_connected(
+    data_dir: &Path,
+    host_endpoint_id: &str,
+    transport: &str,
+) -> Result<(), LinkError> {
+    let path = metadata_path(data_dir);
+    let mut list = read_metadata(&path)?;
+    let item = list
+        .iter_mut()
+        .find(|item| item.get("id").and_then(Value::as_str) == Some(host_endpoint_id))
+        .ok_or(LinkError::DeviceUnknown)?;
+    let object = item
+        .as_object_mut()
+        .ok_or(LinkError::PairingStorageFailed)?;
+    object.insert("pairingState".into(), Value::String("active".into()));
+    object.insert("lastUsedAt".into(), Value::from(now_ms()));
+    object.insert("lastTransport".into(), Value::String(transport.into()));
+    object.insert("revoked".into(), Value::Bool(false));
+    write_metadata(&path, &list)
+}
+
+fn mark_metadata_revoked(
+    data_dir: &Path,
+    host_endpoint_id: &str,
+) -> Result<(), LinkError> {
+    let path = metadata_path(data_dir);
+    let mut list = read_metadata(&path)?;
+    let item = list
+        .iter_mut()
+        .find(|item| item.get("id").and_then(Value::as_str) == Some(host_endpoint_id))
+        .ok_or(LinkError::DeviceUnknown)?;
+    let object = item
+        .as_object_mut()
+        .ok_or(LinkError::PairingStorageFailed)?;
+    object.insert("pairingState".into(), Value::String("revoked".into()));
+    object.insert("lastUsedAt".into(), Value::from(now_ms()));
+    object.insert("revoked".into(), Value::Bool(true));
     write_metadata(&path, &list)
 }
 
@@ -1101,14 +1370,16 @@ fn now_ms() -> u64 {
 
 fn leak_code(code: String) -> &'static str {
     match code.as_str() {
-        "pairing-invalid" => "pairing-invalid",
-        "pairing-expired" => "pairing-expired",
-        "pairing-claimed" => "pairing-claimed",
-        "pairing-rejected" => "pairing-rejected",
-        "pairing-cancelled" => "pairing-cancelled",
-        "device-revoked" => "device-revoked",
-        "host-identity-mismatch" => "host-identity-mismatch",
-        _ => "pairing-invalid",
+        "pairing-invalid" => LinkError::PairingInvalid.code(),
+        "pairing-expired" => LinkError::PairingExpired.code(),
+        "pairing-claimed" => LinkError::PairingClaimed.code(),
+        "pairing-rejected" => LinkError::PairingRejected.code(),
+        "pairing-cancelled" => LinkError::PairingCancelled.code(),
+        "device-unknown" => LinkError::DeviceUnknown.code(),
+        "device-revoked" => LinkError::DeviceRevoked.code(),
+        "host-identity-mismatch" => LinkError::HostIdentityMismatch.code(),
+        "transport-version-unsupported" => LinkError::TransportVersionUnsupported.code(),
+        _ => LinkError::PairingInvalid.code(),
     }
 }
 
@@ -1130,11 +1401,31 @@ mod tests {
             None,
         )
         .unwrap();
-        let saved = list_metadata(dir.path()).unwrap();
-        let item = &saved.as_array().unwrap()[0];
+        let saved = read_metadata(&metadata_path(dir.path())).unwrap();
+        let item = &saved[0];
         assert_eq!(item["pairingId"], "pairing-id");
         assert_eq!(item["pairingState"], "prepared");
         assert_eq!(item["hostEndpointId"], "host-endpoint");
+    }
+
+    #[test]
+    fn public_connection_list_does_not_leak_pairing_material() {
+        let dir = tempdir().unwrap();
+        persist_metadata(
+            dir.path(),
+            "host-endpoint",
+            "Polyth",
+            None,
+            "pairing-secret-reference",
+            "active",
+            Some("device-id"),
+        )
+        .unwrap();
+        let public = list_metadata(dir.path()).unwrap().to_string();
+        assert!(!public.contains("pairing-secret-reference"));
+        assert!(!public.contains("device-id"));
+        assert!(!public.contains("directAddresses"));
+        assert!(!public.contains("relayUrls"));
     }
 
     #[test]
@@ -1155,6 +1446,44 @@ mod tests {
             Err(LinkError::PairingStorageFailed)
         );
         assert_eq!(std::fs::read(path).unwrap(), b"not json");
+    }
+
+    #[test]
+    fn revocation_is_durable_and_public() {
+        let dir = tempdir().unwrap();
+        persist_metadata(
+            dir.path(),
+            "host-endpoint",
+            "Polyth",
+            None,
+            "pairing-id",
+            "active",
+            Some("device-id"),
+        )
+        .unwrap();
+        mark_metadata_revoked(dir.path(), "host-endpoint").unwrap();
+        let raw = read_metadata(&metadata_path(dir.path())).unwrap();
+        assert_eq!(raw[0]["pairingState"], "revoked");
+        assert_eq!(raw[0]["revoked"], true);
+        let public = list_metadata(dir.path()).unwrap();
+        assert_eq!(public[0]["revoked"], true);
+    }
+
+    #[test]
+    fn all_supported_transport_policies_restore_exactly() {
+        assert_eq!(
+            transport_policy("direct-preferred").unwrap(),
+            TransportPolicy::DirectPreferred
+        );
+        assert_eq!(
+            transport_policy("relay-only").unwrap(),
+            TransportPolicy::RelayOnly
+        );
+        assert_eq!(
+            transport_policy("air-gapped").unwrap(),
+            TransportPolicy::AirGapped
+        );
+        assert!(transport_policy("anything-else").is_err());
     }
 
     #[test]
