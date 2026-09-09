@@ -1,0 +1,93 @@
+name: Polyth Link Native
+
+on:
+  pull_request:
+    paths:
+      - "crates/polyth-link-*/**"
+      - "apps/mobile/android/**"
+      - "apps/mobile/ios/**"
+      - "apps/mobile/scripts/build-polyth-link-*.sh"
+      - "apps/mobile/scripts/configure-ios-polyth-link.mjs"
+      - "apps/mobile/src/polythLink.ts"
+      - "apps/mobile/src/nativePolythLink.ts"
+      - "apps/mobile/src/nativeBridge.ts"
+      - "apps/mobile/src/ConnectionScreen.tsx"
+      - "apps/mobile/capacitor.config.ts"
+      - "apps/mobile/package.json"
+      - ".github/workflows/polyth-link-native.yml"
+  push:
+    branches:
+      - master
+    paths:
+      - "crates/polyth-link-*/**"
+      - "apps/mobile/android/**"
+      - "apps/mobile/ios/**"
+      - "apps/mobile/scripts/build-polyth-link-*.sh"
+      - "apps/mobile/scripts/configure-ios-polyth-link.mjs"
+      - "apps/mobile/src/polythLink.ts"
+      - "apps/mobile/src/nativePolythLink.ts"
+      - "apps/mobile/src/nativeBridge.ts"
+      - "apps/mobile/src/ConnectionScreen.tsx"
+      - "apps/mobile/capacitor.config.ts"
+      - "apps/mobile/package.json"
+      - ".github/workflows/polyth-link-native.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: polyth-link-native-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build:web
+      - run: cd apps/mobile && npx cap sync android
+      - run: cd apps/mobile/android && ./gradlew :app:assembleDebug --stacktrace
+
+  ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build:web
+      - run: cd apps/mobile && npx cap sync ios
+      - run: npm --workspace @polyth/mobile run native:ios
+      - run: >-
+          xcodebuild
+          -project apps/mobile/ios/App/App.xcodeproj
+          -scheme App
+          -configuration Debug
+          -sdk iphonesimulator
+          -destination 'generic/platform=iOS Simulator'
+          CODE_SIGNING_ALLOWED=NO
+          build
