@@ -114,6 +114,12 @@ export interface SpaceResolver {
   deployment: DeploymentProfile;
 }
 
+const accountName = (userId: string): string => {
+  const raw = userId.startsWith("usr_") ? userId.slice(4) : userId;
+  const name = raw.replace(/[-_]+/g, " ").trim();
+  return name ? name.replace(/\b\w/g, (letter) => letter.toUpperCase()) : "User";
+};
+
 export function createSpaceResolver(opts: {
   store: TenancyStore;
   identities: IdentityResolver;
@@ -136,6 +142,15 @@ export function createSpaceResolver(opts: {
     return contextFor(userId, space, role);
   };
 
+  const ensureUser = (identity: Identity): void => {
+    if (store.user(identity.userId)) return;
+    // Only an authenticated, server-minted principal can reach this point.
+    // Provisioning here avoids a second account registry and guarantees every
+    // newly authenticated user starts inside an isolated Personal Space.
+    store.createUser(accountName(identity.userId), identity.userId);
+    store.createSpace({ name: "Personal", ownerId: identity.userId, isDefault: true });
+  };
+
   return {
     deployment,
     identity: (principal) => identities.resolve(principal),
@@ -143,6 +158,7 @@ export function createSpaceResolver(opts: {
     forPrincipal(principal, hints = {}) {
       const identity = identities.resolve(principal);
       if (!identity) throw error("unauthorized", "authentication required");
+      ensureUser(identity);
 
       // 1. explicit selection — must be valid, never silently downgraded
       if (hints.explicit) {
@@ -166,6 +182,7 @@ export function createSpaceResolver(opts: {
     remember(principal, spaceId) {
       const identity = identities.resolve(principal);
       if (!identity) throw error("unauthorized", "authentication required");
+      ensureUser(identity);
       store.select(identity.deviceKey, identity.userId, spaceId);
     },
   };
