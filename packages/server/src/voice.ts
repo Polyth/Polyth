@@ -182,7 +182,14 @@ export function createVoiceSettings(opts: { file: string; env?: Record<string, s
   return {
     get: () => structuredClone(settings),
     put(next) {
-      settings = sanitize(next);
+      const incoming = next && typeof next === "object" ? next as Record<string, unknown> : {};
+      // Older web clients only PUT {stt, tts}. Preserve the already-migrated
+      // provider block instead of interpreting every legacy save as a fresh
+      // migration and silently resetting the selected realtime provider.
+      settings = sanitize({
+        ...incoming,
+        dictation: incoming.dictation ?? settings.dictation,
+      });
       atomicWriteSync(opts.file, JSON.stringify(settings, null, 2));
       return structuredClone(settings);
     },
