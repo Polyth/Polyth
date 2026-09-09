@@ -38,6 +38,13 @@ async function sessionJson<T>(path: string, init?: RequestInit): Promise<T> {
 const sessionPath = (id = ""): string =>
   `/api/dictation/sessions${id ? `/${encodeURIComponent(id)}` : ""}`;
 
+interface AckWaiter {
+  seq: number;
+  resolve(): void;
+  reject(error: Error): void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 export async function startStreamingDictation(opts: {
   sessionId?: string;
   language?: string;
@@ -62,6 +69,43 @@ export async function startStreamingDictation(opts: {
   let active = true;
   let failed: Error | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let acknowledgedSeq = dto.acknowledgedSeq;
+  let lastSeq = dto.acknowledgedSeq;
+  const ackWaiters = new Set<AckWaiter>();
+
+  const settleAckWaiters = (): void => {
+    for (const waiter of ackWaiters) {
+      if (acknowledgedSeq < waiter.seq) continue;
+      clearTimeout(waiter.timer);
+      ackWaiters.delete(waiter);
+      waiter.resolve();
+    }
+  };
+
+  const rejectAckWaiters = (error: Error): void => {
+    for (const waiter of ackWaiters) {
+      clearTimeout(waiter.timer);
+      waiter.reject(error);
+    }
+    ackWaiters.clear();
+  };
+
+  const waitForAck = (seq: number, timeoutMs = 4_000): Promise<void> => {
+    if (acknowledgedSeq >= seq) return Promise.resolve();
+    if (failed) return Promise.reject(failed);
+    return new Promise<void>((resolve, reject) => {
+      const waiter: AckWaiter = {
+        seq,
+        resolve,
+        reject,
+        timer: setTimeout(() => {
+          ackWaiters.delete(waiter);
+          reject(new DictationError("network_error", `Timed out waiting for microphone audio ACK ${seq}`));
+        }, timeoutMs),
+      };
+      ackWaiters.add(waiter);
+    });
+  };
 
   const cancelSession = (): void => {
     void sessionJson<{ ok: true }>(sessionPath(dto.id), { method: "DELETE" }).catch(() => {});
@@ -70,6 +114,7 @@ export async function startStreamingDictation(opts: {
   const fail = (error: unknown) => {
     if (!active || failed) return;
     failed = error instanceof Error ? error : new Error(String(error));
+    rejectAckWaiters(failed);
     opts.onError?.(failed.message);
     void capture?.pause().catch(() => {});
   };
@@ -110,7 +155,9 @@ export async function startStreamingDictation(opts: {
       try { msg = JSON.parse(String(e.data)); } catch { return; }
       if (msg.dictationId && msg.dictationId !== dto.id) return;
       if (msg.type === "dictation/ack" && typeof msg.seq === "number") {
-        buffer.ack(msg.seq);
+        acknowledgedSeq = Math.max(acknowledgedSeq, msg.seq);
+        buffer.ack(acknowledgedSeq);
+        settleAckWaiters();
       } else if (msg.type === "dictation/transcript" && typeof msg.text === "string") {
         opts.onPartial?.(msg.text);
       } else if (msg.type === "dictation/error") {
@@ -140,6 +187,7 @@ export async function startStreamingDictation(opts: {
         if (!active || failed) return;
         const beforeDropped = buffer.dropped();
         const seq = buffer.push(pcm);
+        lastSeq = seq;
         if (buffer.dropped() !== beforeDropped) {
           fail(new DictationError(
             "backpressure_overflow",
@@ -155,6 +203,7 @@ export async function startStreamingDictation(opts: {
     });
   } catch (error) {
     active = false;
+    rejectAckWaiters(error instanceof Error ? error : new Error(String(error)));
     ws?.close();
     cancelSession();
     throw error;
@@ -190,12 +239,15 @@ export async function startStreamingDictation(opts: {
         throw error;
       }
 
-      const deadline = Date.now() + 4_000;
-      while (buffer.unacked().length > 0 && Date.now() < deadline && !failed) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
+      try {
+        await waitForAck(lastSeq);
+      } catch (error) {
+        teardown();
+        cancelSession();
+        throw error;
       }
-      if (failed || buffer.unacked().length > 0) {
-        const error = failed ?? new DictationError("network_error", "Timed out while delivering microphone audio");
+      if (failed) {
+        const error = failed;
         teardown();
         cancelSession();
         throw error;
@@ -206,6 +258,7 @@ export async function startStreamingDictation(opts: {
       return final.transcript;
     },
     cancel() {
+      rejectAckWaiters(new DictationError("session_expired", "Dictation was cancelled"));
       teardown();
       cancelSession();
     },
