@@ -1,6 +1,7 @@
 import {
   DictationError,
   normalizeDictationError,
+  type DictationContext,
   type DictationErrorCode,
 } from "./providers.ts";
 import type { DictationFormat, SttAdapter, SttStream } from "./streaming.ts";
@@ -40,7 +41,7 @@ export function createFailoverSttAdapter(
 
   return {
     engine: `${primary.engine}->${fallback.engine}`,
-    createStream(opts: { format: DictationFormat; language?: string; context?: Parameters<SttAdapter["createStream"]>[0]["context"] }): SttStream {
+    createStream(opts: { format: DictationFormat; language?: string; context?: DictationContext }): SttStream {
       const primaryStream = primary.createStream(opts);
       let active = primaryStream;
       let fallbackStream: SttStream | null = null;
