@@ -396,7 +396,10 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
                 guard var connections = try self.invoke("connections.list", [:]) as? [[String: Any]] else { throw PolythLinkFailure(code: "transport-protocol-error") }
                 for index in connections.indices {
                     let hostID = connections[index]["hostEndpointId"] as? String ?? ""
-                    var secret = hostID.isEmpty ? nil : try self.keychain.load(hostID)
+                    var secret: Data?
+                    if !hostID.isEmpty {
+                        do { secret = try self.keychain.load(hostID) } catch { secret = nil }
+                    }
                     connections[index]["hasSecureIdentity"] = secret != nil
                     if secret != nil { secret!.resetBytes(in: 0..<secret!.count) }
                 }
