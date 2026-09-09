@@ -21,6 +21,8 @@ pub enum LinkError {
     RelayUnreachable,
     DirectUnreachable,
     TransportUnavailable,
+    TransportCancelled,
+    TransportTimeout,
     TransportOutcomeUnknown,
     TransportProtocolError,
     TransportVersionUnsupported,
@@ -57,6 +59,8 @@ impl LinkError {
             Self::RelayUnreachable => "relay-unreachable",
             Self::DirectUnreachable => "direct-unreachable",
             Self::TransportUnavailable => "transport-unavailable",
+            Self::TransportCancelled => "transport-cancelled",
+            Self::TransportTimeout => "transport-timeout",
             Self::TransportOutcomeUnknown => "transport-outcome-unknown",
             Self::TransportProtocolError => "transport-protocol-error",
             Self::TransportVersionUnsupported => "transport-version-unsupported",
@@ -79,6 +83,7 @@ impl LinkError {
             Self::RelayUnreachable
                 | Self::DirectUnreachable
                 | Self::TransportUnavailable
+                | Self::TransportTimeout
                 | Self::RequestRateLimited
         )
     }
@@ -111,6 +116,8 @@ impl LinkError {
             Self::RelayUnreachable => "The encrypted relay is unreachable.",
             Self::DirectUnreachable => "A direct path is unavailable.",
             Self::TransportUnavailable => "The secure connection is unavailable.",
+            Self::TransportCancelled => "The secure connection was cancelled.",
+            Self::TransportTimeout => "The secure connection timed out.",
             Self::TransportOutcomeUnknown => "The request may or may not have reached the host.",
             Self::TransportProtocolError | Self::TransportVersionUnsupported => {
                 "This Polyth Link version is not compatible."
@@ -170,6 +177,8 @@ mod tests {
             assert!(!error.user_message().contains("hmac"));
         }
         assert!(LinkError::RelayUnreachable.retryable());
+        assert!(LinkError::TransportTimeout.retryable());
+        assert!(!LinkError::TransportCancelled.retryable());
         assert!(!LinkError::DeviceRevoked.retryable());
         assert!(!LinkError::HostIdentityUnavailable.retryable());
     }
