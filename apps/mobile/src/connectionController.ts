@@ -4,6 +4,7 @@ import type {
   PolythLinkNative,
   ProxyLaunch,
 } from "./polythLink.ts";
+import type { DiscoveredPolyth, DiscoveryUpdate } from "./discovery.ts";
 
 export type ConnectionPhase =
   | "idle"
@@ -39,11 +40,20 @@ export interface ConnectionControllerState {
   phase: ConnectionPhase;
   epoch: number;
   trusted: ConnectionMetadata[];
+  discovered: DiscoveredPolyth[];
   activeConnectionId: string | null;
   targetConnectionId: string | null;
   pairingAttempt: PairingAttempt | null;
   error: string | null;
 }
+
+export interface DiscoverySession {
+  stop(): Promise<void>;
+}
+
+export type DiscoveryStarter = (
+  onUpdate: (update: DiscoveryUpdate) => void,
+) => Promise<DiscoverySession>;
 
 type Listener = (state: ConnectionControllerState) => void;
 
@@ -88,6 +98,25 @@ function failurePhase(cause: unknown, fallback: ConnectionPhase): ConnectionPhas
   }
 }
 
+function discoveryPhase(state: DiscoveryUpdate["state"]): ConnectionPhase {
+  switch (state) {
+    case "empty":
+      return "discovery-empty";
+    case "results":
+      return "discovery-results";
+    case "permission-required":
+      return "discovery-permission-required";
+    case "error":
+      return "fatal-error";
+    default:
+      return "discovering";
+  }
+}
+
+function discoveryActive(phase: ConnectionPhase): boolean {
+  return phase === "discovering" || phase === "discovery-empty" || phase === "discovery-results";
+}
+
 export function connectionPhaseBusy(phase: ConnectionPhase): boolean {
   return phase === "loading-trusted-connections"
     || phase === "preparing-pairing"
@@ -107,6 +136,7 @@ export class ConnectionController {
   #epoch = 0;
   #physicalActiveConnectionId: string | null = null;
   #connectionQueue: Promise<void> = Promise.resolve();
+  #discoverySession: DiscoverySession | null = null;
   #disposed = false;
 
   constructor(native: PolythLinkNative, initialError?: string) {
@@ -115,6 +145,7 @@ export class ConnectionController {
       phase: "idle",
       epoch: 0,
       trusted: [],
+      discovered: [],
       activeConnectionId: null,
       targetConnectionId: null,
       pairingAttempt: null,
@@ -135,6 +166,7 @@ export class ConnectionController {
   dispose(): void {
     this.#disposed = true;
     this.#epoch += 1;
+    this.#stopDiscoverySession();
     this.#listeners.clear();
   }
 
@@ -148,6 +180,7 @@ export class ConnectionController {
     phase: ConnectionPhase,
     patch: Partial<ConnectionControllerState> = {},
   ): number {
+    if (!discoveryActive(phase)) this.#stopDiscoverySession();
     const epoch = ++this.#epoch;
     this.#set({
       phase,
@@ -161,6 +194,12 @@ export class ConnectionController {
 
   #current(epoch: number): boolean {
     return !this.#disposed && epoch === this.#epoch;
+  }
+
+  #stopDiscoverySession(): void {
+    const session = this.#discoverySession;
+    this.#discoverySession = null;
+    if (session) void session.stop().catch(() => undefined);
   }
 
   #enqueueConnection<T>(operation: () => Promise<T>): Promise<T> {
@@ -195,6 +234,38 @@ export class ConnectionController {
         error: errorText(cause),
       });
     }
+  }
+
+  async startDiscovery(starter: DiscoveryStarter): Promise<void> {
+    this.#stopDiscoverySession();
+    const epoch = this.#intent("discovering", { discovered: [] });
+    try {
+      const session = await starter((update) => {
+        if (!this.#current(epoch)) return;
+        const phase = discoveryPhase(update.state);
+        this.#set({ phase, discovered: update.results, error: update.error ?? null });
+        if (!discoveryActive(phase)) this.#stopDiscoverySession();
+      });
+      if (!this.#current(epoch) || !discoveryActive(this.#state.phase)) {
+        await session.stop().catch(() => undefined);
+        return;
+      }
+      this.#discoverySession = session;
+    } catch (cause) {
+      if (!this.#current(epoch)) return;
+      const code = errorCode(cause);
+      this.#set({
+        phase: code === "discovery-permission-denied"
+          ? "discovery-permission-required"
+          : "fatal-error",
+        discovered: [],
+        error: code,
+      });
+    }
+  }
+
+  stopDiscovery(): void {
+    this.#intent("idle", { discovered: [] });
   }
 
   startQrScan(): number {
