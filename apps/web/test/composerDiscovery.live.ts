@@ -597,20 +597,33 @@ test("selectors: truthful model and agent names with per-session model persisten
   assert.ok((await modelChip.getAttribute("aria-label"))?.startsWith("Select model, current "));
   await modelChip.click();
   await page.waitForSelector(".model-pop", { state: "visible" });
+  await page.waitForSelector(".model-picker-row", { state: "visible" });
+  const visibleModels = await page.locator(".model-picker-row").allInnerTexts();
+  assert.ok(visibleModels.some((name) => name.includes("Fable Mini")), `visible models: ${visibleModels.join(", ")}`);
+  const harnessTabs = await page.locator(".pkg-harnesses-tablist").evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  assert.ok(harnessTabs.scrollWidth <= harnessTabs.clientWidth, "logo-only harness tabs never create horizontal scroll");
+  const shellBeforeDetails = await page.locator(".model-picker-shell").boundingBox();
+  assert.ok(shellBeforeDetails);
   const row = page.locator(".model-picker-row", { hasText: "Fable Mini" });
-  assert.equal(await row.locator(".model-picker-copy small").innerText(), "Text · 128K");
+  assert.equal(await row.locator(".model-capability-icons").getAttribute("aria-label"), "Text");
   await row.hover();
   await page.waitForSelector(".model-details-panel .model-hover-details", { state: "visible" });
-  assert.ok((await page.locator(".model-details-panel").innerText()).includes("Context window"));
+  const shellWithDetails = await page.locator(".model-picker-shell").boundingBox();
+  assert.deepEqual(shellWithDetails, shellBeforeDetails, "opening adjacent details does not move or resize the picker shell");
+  const detailsText = await page.locator(".model-details-panel").innerText();
+  assert.match(detailsText, /context window/i);
   await shot(page, "model_picker_truth.png");
 
   // Selecting the model persists the per-session pending configuration.
   await row.click();
   await page.waitForSelector(".model-pop", { state: "detached" });
   const stored = await page.evaluate((key) => localStorage.getItem(key),
-    `polyth.composer.config.v1.${SESSIONS.main}`);
+    `polyth.composer.config.v1.${SESSIONS.main}.account.usr_owner`);
   assert.ok(stored, "explicit selection stored per session");
-  assert.deepEqual(JSON.parse(stored!).model, { providerID: "synthetic", modelID: "fable-mini" });
+  assert.deepEqual(JSON.parse(stored!).model, { harnessId: "opencode", providerID: "synthetic", modelID: "fable-mini" });
 
   // Reload restores the exact same pending selection.
   await page.reload({ waitUntil: "load" });

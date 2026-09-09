@@ -81,7 +81,11 @@ export async function buildComposerDiscFixture() {
   // --- fake model runtime binary on PATH -------------------------------------
   const fake = join(here, "msgActionsFakeBackend.mjs");
   const ocWrapper = join(FIXTURE_BIN, "opencode");
-  writeFileSync(ocWrapper, `#!/bin/sh\nexec "${process.execPath}" "${fake}" "$@"\n`);
+  writeFileSync(ocWrapper, `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "1.18.18"; exit 0; fi
+if [ "$1" = "db" ] && [ "$2" = "path" ]; then printf '%s\n' "$OPENCODE_DB"; exit 0; fi
+exec "${process.execPath}" "${fake}" "$@"
+`);
   chmodSync(ocWrapper, 0o755);
 
   // --- deterministic `gh` shim ------------------------------------------------
@@ -126,6 +130,8 @@ esac
   const now = Date.now();
   const projection = (id, title, status, extra = {}) => ({
     id, projectId: PROJECT_ID, title, status,
+    harness: { mode: "pinned", harnessId: "opencode" },
+    resolvedHarnessId: "opencode",
     createdAt: now - 3_600_000, updatedAt: now, ...extra,
   });
 

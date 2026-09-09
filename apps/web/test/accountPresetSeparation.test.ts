@@ -11,7 +11,7 @@ test("model picker has no account or preset ownership", () => {
   const picker = source("packages/models/widgets/ModelPicker.tsx");
   assert.equal(/AgentProfile|accountId|executionProfileControl|useProfiles/.test(picker), false);
 
-  const harness = source("packages/harness-runtime/widgets/index.tsx");
+  const harness = source("packages/harness-runtime/widgets/runtime.tsx");
   const modelHeaderRegistration = harness.split("\n").find((line) => line.includes('slot: "modelPicker.header"')) ?? "";
   assert.ok(modelHeaderRegistration, "harness model-picker header contribution exists");
   assert.equal(modelHeaderRegistration.includes("executionProfileControl"), false, "preset is not injected into model picker");

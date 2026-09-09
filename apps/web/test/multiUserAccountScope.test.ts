@@ -85,7 +85,7 @@ test("remembered authentication aligns browser account scope before bootstrap", 
 
 test("agent presets stay separate from the harness/model picker", () => {
   const harness = readFileSync(
-    new URL("../../../packages/harness-runtime/widgets/index.tsx", import.meta.url),
+    new URL("../../../packages/harness-runtime/widgets/runtime.tsx", import.meta.url),
     "utf8",
   );
   const sessionPackage = readFileSync(new URL("../../../packages/session/package.json", import.meta.url), "utf8");

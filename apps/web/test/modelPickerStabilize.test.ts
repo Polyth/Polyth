@@ -126,7 +126,7 @@ test("stable anchoring ignores composer layout movement and still clamps after v
 });
 
 test("harness picker header omits Manage and Auto tabs", async () => {
-  const source = await read("../../../packages/harness-runtime/widgets/index.tsx");
+  const source = await read("../../../packages/harness-runtime/widgets/runtime.tsx");
   assert.doesNotMatch(source, /pkg-harnesses-manage/);
   assert.doesNotMatch(source, /id:\s*"auto"/);
   assert.match(source, /mode:\s*"pinned"/);
