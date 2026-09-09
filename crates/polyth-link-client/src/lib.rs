@@ -15,12 +15,15 @@ struct NativeOperationLease {
     generation: u64,
     cancel: tokio::sync::watch::Receiver<bool>,
     done: tokio::sync::watch::Sender<bool>,
+    target_connection_id: Option<String>,
+    previous_session_generation: Option<u64>,
 }
 
 struct NativeOperationSpec {
     key: String,
     timeout: Duration,
     cancelled: &'static str,
+    target_connection_id: Option<String>,
 }
 
 /// In-process adapter over the same client state machine used by the CLI.
@@ -78,7 +81,7 @@ impl NativeClient {
                 .map_err(str::to_string);
         }
 
-        let spec = native_operation_spec(method, &params)?;
+        let spec = self.native_operation_spec(method, &params).await?;
         let lease = match spec.as_ref() {
             Some(spec) => Some(self.begin_operation(spec).await?),
             None => None,
@@ -128,6 +131,55 @@ impl NativeClient {
         result
     }
 
+    async fn native_operation_spec(
+        &self,
+        method: &str,
+        params: &Value,
+    ) -> Result<Option<NativeOperationSpec>, String> {
+        match method {
+            "pairing.begin" => {
+                let host = identity_host(method, params)?;
+                Ok(Some(NativeOperationSpec {
+                    key: format!("pairing-begin:{host}"),
+                    timeout: NATIVE_CONNECT_TIMEOUT,
+                    cancelled: LinkError::PairingCancelled.code(),
+                    target_connection_id: None,
+                }))
+            }
+            "pairing.confirm" => {
+                let attempt_id = params
+                    .get("attemptId")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| LinkError::PairingInvalid.code().to_string())?;
+                let connection_id = self
+                    .state
+                    .lock()
+                    .await
+                    .pairing
+                    .get(attempt_id)
+                    .map(|attempt| attempt.ticket.host.endpoint_id.clone())
+                    .ok_or_else(|| LinkError::PairingInvalid.code().to_string())?;
+                Ok(Some(NativeOperationSpec {
+                    key: pairing_confirm_operation_key(attempt_id),
+                    timeout: NATIVE_PAIRING_TIMEOUT,
+                    cancelled: LinkError::PairingCancelled.code(),
+                    target_connection_id: Some(connection_id),
+                }))
+            }
+            "connect" => {
+                let id = connection_id(params)?;
+                Ok(Some(NativeOperationSpec {
+                    key: connect_operation_key(&id),
+                    timeout: NATIVE_CONNECT_TIMEOUT,
+                    cancelled: LinkError::TransportCancelled.code(),
+                    target_connection_id: Some(id),
+                }))
+            }
+            _ => Ok(None),
+        }
+    }
+
     async fn begin_operation(
         &self,
         spec: &NativeOperationSpec,
@@ -154,6 +206,8 @@ impl NativeClient {
                     generation,
                     cancel: cancel_rx,
                     done: done_tx,
+                    target_connection_id: spec.target_connection_id.clone(),
+                    previous_session_generation: None,
                 })
                 .await;
                 return Err(error);
@@ -172,6 +226,31 @@ impl NativeClient {
                 generation,
                 cancel: cancel_rx,
                 done: done_tx,
+                target_connection_id: spec.target_connection_id.clone(),
+                previous_session_generation: None,
+            };
+            self.finish_operation(lease).await;
+            return Err(spec.cancelled.to_string());
+        }
+
+        let previous_session_generation = match spec.target_connection_id.as_deref() {
+            Some(connection_id) => self
+                .state
+                .lock()
+                .await
+                .sessions
+                .get(connection_id)
+                .map(|session| session.generation),
+            None => None,
+        };
+        if *cancel_rx.borrow() {
+            let lease = NativeOperationLease {
+                key: spec.key.clone(),
+                generation,
+                cancel: cancel_rx,
+                done: done_tx,
+                target_connection_id: spec.target_connection_id.clone(),
+                previous_session_generation,
             };
             self.finish_operation(lease).await;
             return Err(spec.cancelled.to_string());
@@ -182,6 +261,8 @@ impl NativeClient {
             generation,
             cancel: cancel_rx,
             done: done_tx,
+            target_connection_id: spec.target_connection_id.clone(),
+            previous_session_generation,
         })
     }
 
@@ -207,8 +288,40 @@ impl NativeClient {
                 Err(_) => Err(LinkError::TransportTimeout.code().to_string()),
             }
         };
+        let rollback = matches!(
+            &result,
+            Err(error)
+                if error == cancelled || error == LinkError::TransportTimeout.code()
+        );
+        if rollback {
+            self.rollback_session(&lease).await;
+        }
         self.finish_operation(lease).await;
         result
+    }
+
+    async fn rollback_session(&self, lease: &NativeOperationLease) {
+        let Some(connection_id) = lease.target_connection_id.as_deref() else {
+            return;
+        };
+        let session = {
+            let mut state = self.state.lock().await;
+            let current_generation = state.sessions.get(connection_id).map(|session| session.generation);
+            if current_generation.is_some()
+                && current_generation != lease.previous_session_generation
+            {
+                state.sessions.remove(connection_id)
+            } else {
+                None
+            }
+        };
+        if let Some(session) = session {
+            let _ = tokio::time::timeout(
+                NATIVE_CANCEL_TIMEOUT,
+                close_session(session, b"operation-cancelled"),
+            )
+            .await;
+        }
     }
 
     async fn finish_operation(&self, lease: NativeOperationLease) {
@@ -307,43 +420,6 @@ async fn wait_done(mut done: tokio::sync::watch::Receiver<bool>) -> Result<(), S
     Ok(())
 }
 
-fn native_operation_spec(
-    method: &str,
-    params: &Value,
-) -> Result<Option<NativeOperationSpec>, String> {
-    match method {
-        "pairing.begin" => {
-            let host = identity_host(method, params)?;
-            Ok(Some(NativeOperationSpec {
-                key: format!("pairing-begin:{host}"),
-                timeout: NATIVE_CONNECT_TIMEOUT,
-                cancelled: LinkError::PairingCancelled.code(),
-            }))
-        }
-        "pairing.confirm" => {
-            let attempt_id = params
-                .get("attemptId")
-                .and_then(Value::as_str)
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| LinkError::PairingInvalid.code().to_string())?;
-            Ok(Some(NativeOperationSpec {
-                key: pairing_confirm_operation_key(attempt_id),
-                timeout: NATIVE_PAIRING_TIMEOUT,
-                cancelled: LinkError::PairingCancelled.code(),
-            }))
-        }
-        "connect" => {
-            let id = connection_id(params)?;
-            Ok(Some(NativeOperationSpec {
-                key: connect_operation_key(&id),
-                timeout: NATIVE_CONNECT_TIMEOUT,
-                cancelled: LinkError::TransportCancelled.code(),
-            }))
-        }
-        _ => Ok(None),
-    }
-}
-
 fn pairing_confirm_operation_key(attempt_id: &str) -> String {
     format!("pairing-confirm:{attempt_id}")
 }
@@ -423,6 +499,15 @@ mod native_tests {
     use super::*;
     use tempfile::tempdir;
 
+    fn spec(key: &str, cancelled: &'static str) -> NativeOperationSpec {
+        NativeOperationSpec {
+            key: key.into(),
+            timeout: Duration::from_secs(1),
+            cancelled,
+            target_connection_id: None,
+        }
+    }
+
     #[test]
     fn generated_identity_round_trips_without_serialization() {
         let mut secret = generate_identity_secret();
@@ -467,11 +552,8 @@ mod native_tests {
     async fn native_operation_deadline_terminates_a_silent_future() {
         let dir = tempdir().unwrap();
         let client = NativeClient::new(dir.path().to_path_buf(), None);
-        let spec = NativeOperationSpec {
-            key: "test:timeout".into(),
-            timeout: Duration::from_millis(5),
-            cancelled: LinkError::TransportCancelled.code(),
-        };
+        let mut spec = spec("test:timeout", LinkError::TransportCancelled.code());
+        spec.timeout = Duration::from_millis(5);
         let lease = client.begin_operation(&spec).await.unwrap();
         let result = client
             .run_operation(
@@ -490,11 +572,7 @@ mod native_tests {
         let dir = tempdir().unwrap();
         let client = Arc::new(NativeClient::new(dir.path().to_path_buf(), None));
         let key = pairing_confirm_operation_key("attempt-a");
-        let spec = NativeOperationSpec {
-            key: key.clone(),
-            timeout: Duration::from_secs(1),
-            cancelled: LinkError::PairingCancelled.code(),
-        };
+        let spec = spec(&key, LinkError::PairingCancelled.code());
         let lease = client.begin_operation(&spec).await.unwrap();
         let worker = client.clone();
         let task = tokio::spawn(async move {
@@ -521,11 +599,7 @@ mod native_tests {
         let dir = tempdir().unwrap();
         let client = Arc::new(NativeClient::new(dir.path().to_path_buf(), None));
         let key = connect_operation_key("host-a");
-        let spec = NativeOperationSpec {
-            key: key.clone(),
-            timeout: Duration::from_secs(1),
-            cancelled: LinkError::TransportCancelled.code(),
-        };
+        let spec = spec(&key, LinkError::TransportCancelled.code());
         let lease = client.begin_operation(&spec).await.unwrap();
         let worker = client.clone();
         let task = tokio::spawn(async move {
@@ -551,11 +625,10 @@ mod native_tests {
     async fn shutdown_interrupts_a_pending_operation() {
         let dir = tempdir().unwrap();
         let client = Arc::new(NativeClient::new(dir.path().to_path_buf(), None));
-        let spec = NativeOperationSpec {
-            key: connect_operation_key("host-a"),
-            timeout: Duration::from_secs(1),
-            cancelled: LinkError::TransportCancelled.code(),
-        };
+        let spec = spec(
+            &connect_operation_key("host-a"),
+            LinkError::TransportCancelled.code(),
+        );
         let lease = client.begin_operation(&spec).await.unwrap();
         let worker = client.clone();
         let task = tokio::spawn(async move {
@@ -596,11 +669,7 @@ mod native_tests {
     async fn replacement_generation_cancels_old_completion_without_removing_new() {
         let dir = tempdir().unwrap();
         let client = Arc::new(NativeClient::new(dir.path().to_path_buf(), None));
-        let spec = NativeOperationSpec {
-            key: "connect:host-a".into(),
-            timeout: Duration::from_secs(1),
-            cancelled: LinkError::TransportCancelled.code(),
-        };
+        let spec = spec("connect:host-a", LinkError::TransportCancelled.code());
         let first = client.begin_operation(&spec).await.unwrap();
         let first_generation = first.generation;
         let client_for_first = client.clone();
@@ -637,16 +706,8 @@ mod native_tests {
     async fn cancellation_is_idempotent_and_host_scoped() {
         let dir = tempdir().unwrap();
         let client = NativeClient::new(dir.path().to_path_buf(), None);
-        let host_a = NativeOperationSpec {
-            key: "connect:host-a".into(),
-            timeout: Duration::from_secs(1),
-            cancelled: LinkError::TransportCancelled.code(),
-        };
-        let host_b = NativeOperationSpec {
-            key: "connect:host-b".into(),
-            timeout: Duration::from_secs(1),
-            cancelled: LinkError::TransportCancelled.code(),
-        };
+        let host_a = spec("connect:host-a", LinkError::TransportCancelled.code());
+        let host_b = spec("connect:host-b", LinkError::TransportCancelled.code());
         let mut a = client.begin_operation(&host_a).await.unwrap();
         let b = client.begin_operation(&host_b).await.unwrap();
         {
@@ -661,6 +722,14 @@ mod native_tests {
         client.finish_operation(b).await;
     }
 
+    #[test]
+    fn rollback_only_targets_a_changed_session_generation() {
+        assert!(!session_generation_changed(None, None));
+        assert!(!session_generation_changed(Some(7), Some(7)));
+        assert!(session_generation_changed(None, Some(8)));
+        assert!(session_generation_changed(Some(7), Some(8)));
+    }
+
     #[tokio::test]
     async fn native_shutdown_is_idempotent_without_live_state() {
         let dir = tempdir().unwrap();
@@ -668,4 +737,8 @@ mod native_tests {
         client.shutdown().await;
         client.shutdown().await;
     }
+}
+
+fn session_generation_changed(previous: Option<u64>, current: Option<u64>) -> bool {
+    current.is_some() && current != previous
 }
