@@ -102,7 +102,9 @@ const defaults = (): VoiceSettings => ({
     model: "scribe_v2_realtime",
     localModel: DEFAULT_LOCAL_MODEL_ID,
     language: "auto",
-    contextInjection: true,
+    // Repository/chat/composer context can leave the machine when a cloud
+    // provider is selected. New installations must opt in explicitly.
+    contextInjection: false,
     processingPolicy: "prefer-cloud",
     fallbackApiKeyEnv: "",
     cloudFallback: false,
