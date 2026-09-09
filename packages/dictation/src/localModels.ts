@@ -98,8 +98,8 @@ const NEMOTRON_MODELS: readonly LocalModelDescriptor[] = [
   ),
 ] as const;
 
-/** Safe default until Polyth has comparable end-to-end benchmarks on target hardware. */
-export const DEFAULT_LOCAL_MODEL_ID = "nemotron-3.5-streaming-0.6b-560ms";
+/** Lowest-latency multilingual preset requested for the default local path. */
+export const DEFAULT_LOCAL_MODEL_ID = "nemotron-3.5-streaming-0.6b-80ms";
 
 export const localModelCatalog = (): readonly LocalModelDescriptor[] => NEMOTRON_MODELS;
 
