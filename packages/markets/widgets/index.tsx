@@ -1,9 +1,39 @@
 import "./styles.css";
-import { createElement } from "react";
-import { defineWebPackage } from "@polyth/web-sdk";
-import MarketsSurface from "./MarketsSurface.tsx";
+import "./integration.css";
+import "./widgetStyles.css";
+import { createElement, useSyncExternalStore } from "react";
+import { defineWebPackage, type WebPackageHost } from "@polyth/web-sdk";
+import MarketsSurface, { type MarketHandoffOption } from "./MarketsSurface.tsx";
+import { MarketAssetWidget, MarketWatchlistWidget } from "./MarketWidgets.tsx";
+import { selectMarketSymbol } from "./selection.ts";
+
+function HostedMarketsSurface({ host, active }: { host: WebPackageHost; active?: boolean }) {
+  const snapshot = useSyncExternalStore(
+    (listener) => host.store.subscribe(listener),
+    () => host.store.getSnapshot(),
+  );
+  const handoffOptions: MarketHandoffOption[] = snapshot.activeProjectId
+    ? host.handoffTargets.list()
+        .filter((target) => target.available())
+        .map((target) => ({
+          id: target.id,
+          label: target.label,
+          send: (text) => target.send({
+            projectId: snapshot.activeProjectId!,
+            sessionId: snapshot.activeSessionId,
+            text,
+          }),
+        }))
+    : [];
+  return <MarketsSurface active={active} handoffOptions={handoffOptions} />;
+}
 
 export default defineWebPackage((host) => () => {
+  const openSymbol = (symbol: string) => {
+    selectMarketSymbol(symbol);
+    host.navigation.openWorkspacePane("markets");
+  };
+
   const off = [
     host.surfaces.register({
       id: "markets",
@@ -11,7 +41,7 @@ export default defineWebPackage((host) => () => {
       description: "Research prices, charts, fundamentals, and market context.",
       capabilityId: "markets",
       order: 52,
-      component: (props) => createElement(MarketsSurface, props),
+      component: (props) => createElement(HostedMarketsSurface, { host, active: props?.active }),
       presentation: {
         kind: "workspace",
         defaultRatio: 0.62,
@@ -28,6 +58,69 @@ export default defineWebPackage((host) => () => {
         minBlockSize: 280,
         keepAlive: true,
       },
+    }),
+    host.widgets.registerPlugin({
+      id: "markets",
+      name: "Markets",
+      widgets: [
+        {
+          id: "markets.asset",
+          title: "Market asset",
+          description: "Live-ish price and daily move for one market symbol.",
+          kind: "widget",
+          defaultSlot: "workspace.right",
+          supportedSlots: ["workspace.main", "workspace.right", "workspace.bottom", "workspace.floating"],
+          recommendedSize: { w: 4, h: 3 },
+          minSize: { w: 3, h: 2 },
+          maxSize: { w: 8, h: 6 },
+          audience: "standard",
+          scope: "workspace",
+          resizable: true,
+          duplicatable: true,
+          floating: true,
+          recommended: true,
+          defaultVisible: false,
+          settingsSchema: {
+            type: "object",
+            properties: {
+              symbol: { type: "string", title: "Symbol", default: "SPY" },
+            },
+          },
+          render: (context) => <MarketAssetWidget context={context} onOpen={openSymbol} />,
+        },
+        {
+          id: "markets.watchlist",
+          title: "Market watchlist",
+          description: "Your active watchlist with current prices and daily moves.",
+          kind: "widget",
+          defaultSlot: "workspace.right",
+          supportedSlots: ["workspace.main", "workspace.right", "workspace.bottom", "workspace.floating"],
+          recommendedSize: { w: 5, h: 6 },
+          minSize: { w: 3, h: 3 },
+          maxSize: { w: 8, h: 12 },
+          audience: "simple",
+          scope: "workspace",
+          resizable: true,
+          duplicatable: false,
+          floating: true,
+          recommended: true,
+          defaultVisible: false,
+          render: (context) => <MarketWatchlistWidget context={context} onOpen={openSymbol} />,
+        },
+      ],
+    }),
+    host.workbench.profiles.register({
+      id: "markets",
+      label: "Markets",
+      description: "Research markets beside a Polyth session.",
+      order: 30,
+      defaultLayout: {
+        surfaces: [
+          { surface: "markets", region: "primary", active: true },
+          { surface: "session", region: "end" },
+        ],
+      },
+      presentation: { text: "data" },
     }),
     host.capabilities.register({
       id: "markets",

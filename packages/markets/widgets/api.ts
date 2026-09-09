@@ -7,6 +7,7 @@ import type {
   MarketRange,
   MarketSearchResult,
 } from "../src/types.ts";
+import type { MarketWatchlists } from "../src/watchlists.ts";
 
 const transport = createApiTransport();
 
@@ -28,5 +29,11 @@ export const marketsApi = {
   },
   fundamentals(symbol: string, signal?: AbortSignal): Promise<MarketDataResult<MarketFundamentals>> {
     return transport.get(`/api/markets/fundamentals?symbol=${encodeURIComponent(symbol)}`, { signal });
+  },
+  watchlists(signal?: AbortSignal): Promise<MarketWatchlists> {
+    return transport.get("/api/markets/watchlists", { signal });
+  },
+  saveWatchlists(document: MarketWatchlists, signal?: AbortSignal): Promise<MarketWatchlists> {
+    return transport.put("/api/markets/watchlists", document, { signal });
   },
 };

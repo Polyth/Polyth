@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type {
   MarketCandleSeries,
   MarketDataResult,
@@ -9,6 +9,9 @@ import type {
 } from "../src/types.ts";
 import { marketsApi } from "./api.ts";
 import { buildCloseLine } from "./chart.ts";
+import { buildMarketHandoffText } from "./context.ts";
+import { getMarketSymbol, selectMarketSymbol, subscribeMarketSymbol } from "./selection.ts";
+import { useMarketWatchlists } from "./watchlistHooks.ts";
 
 const RANGES: readonly MarketRange[] = ["1D", "5D", "1M", "6M", "YTD", "1Y", "5Y", "MAX"];
 
@@ -18,7 +21,7 @@ const price = (value: number, currency?: string): string => {
     return new Intl.NumberFormat(undefined, {
       style: "currency",
       currency,
-      minimumFractionDigits: value < 10 ? 2 : 2,
+      minimumFractionDigits: 2,
       maximumFractionDigits: value < 1 ? 4 : 2,
     }).format(value);
   } catch {
@@ -40,13 +43,20 @@ const percent = (value?: number): string => value === undefined
 
 const abortError = (cause: unknown): boolean => cause instanceof DOMException && cause.name === "AbortError";
 
-interface MarketsSurfaceProps {
-  active?: boolean;
+export interface MarketHandoffOption {
+  id: string;
+  label: string;
+  send(text: string): Promise<void>;
 }
 
-export default function MarketsSurface({ active = true }: MarketsSurfaceProps) {
-  const [symbol, setSymbol] = useState("SPY");
-  const [query, setQuery] = useState("SPY");
+interface MarketsSurfaceProps {
+  active?: boolean;
+  handoffOptions?: readonly MarketHandoffOption[];
+}
+
+export default function MarketsSurface({ active = true, handoffOptions = [] }: MarketsSurfaceProps) {
+  const symbol = useSyncExternalStore(subscribeMarketSymbol, getMarketSymbol);
+  const [query, setQuery] = useState(symbol);
   const [range, setRange] = useState<MarketRange>("1M");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<MarketSearchResult[]>([]);
@@ -59,6 +69,11 @@ export default function MarketsSurface({ active = true }: MarketsSurfaceProps) {
   const [assetLoading, setAssetLoading] = useState(false);
   const [chartLoading, setChartLoading] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const [handoffOpen, setHandoffOpen] = useState(false);
+  const [handoffBusy, setHandoffBusy] = useState(false);
+  const watchlists = useMarketWatchlists(active);
+
+  useEffect(() => setQuery(symbol), [symbol]);
 
   useEffect(() => {
     if (!active || !searchOpen || query.trim().length < 2) {
@@ -132,14 +147,45 @@ export default function MarketsSurface({ active = true }: MarketsSurfaceProps) {
 
   const line = useMemo(() => buildCloseLine(candles?.data.candles ?? []), [candles]);
   const direction = (quote?.data.changePercent ?? (line ? line.last - line.first : 0)) >= 0 ? "positive" : "negative";
+  const activeWatchlist = watchlists.data?.items.find((item) => item.id === watchlists.data?.activeId) ?? watchlists.data?.items[0];
+  const watching = activeWatchlist?.symbols.includes(symbol) ?? false;
 
   const selectSymbol = (next: string) => {
     const normalized = next.trim().toUpperCase();
     if (!normalized) return;
-    setSymbol(normalized);
-    setQuery(normalized);
+    selectMarketSymbol(normalized);
     setSearchOpen(false);
     setSearchResults([]);
+  };
+
+  const toggleWatch = async () => {
+    if (!watchlists.data || !activeWatchlist) return;
+    const items = watchlists.data.items.map((item) => item.id !== activeWatchlist.id
+      ? item
+      : {
+          ...item,
+          symbols: watching
+            ? item.symbols.filter((candidate) => candidate !== symbol)
+            : [...item.symbols, symbol],
+        });
+    await watchlists.save({ ...watchlists.data, items }).catch(() => undefined);
+  };
+
+  const sendHandoff = async (option: MarketHandoffOption) => {
+    if (handoffBusy) return;
+    setHandoffBusy(true);
+    try {
+      await option.send(buildMarketHandoffText({
+        symbol,
+        range,
+        ...(quote?.data ? { quote: quote.data } : {}),
+        ...(fundamentals?.data ? { fundamentals: fundamentals.data } : {}),
+        ...(candles?.data ? { candles: candles.data } : {}),
+      }));
+      setHandoffOpen(false);
+    } finally {
+      setHandoffBusy(false);
+    }
   };
 
   return (
@@ -190,9 +236,42 @@ export default function MarketsSurface({ active = true }: MarketsSurfaceProps) {
             )}
           </div>
         </form>
-        <button className="markets-refresh" type="button" onClick={() => setRefresh((value) => value + 1)}>
-          Refresh
-        </button>
+        <div className="markets-toolbar-actions">
+          <button
+            className="markets-watch-toggle"
+            type="button"
+            aria-pressed={watching}
+            aria-label={watching ? `Remove ${symbol} from watchlist` : `Add ${symbol} to watchlist`}
+            disabled={!activeWatchlist}
+            onClick={() => void toggleWatch()}
+          >
+            {watching ? "★" : "☆"}
+          </button>
+          <div className="markets-handoff">
+            <button
+              className="markets-ask"
+              type="button"
+              disabled={handoffOptions.length === 0 || handoffBusy}
+              title={handoffOptions.length === 0 ? "Open a project to send market context to Polyth" : undefined}
+              aria-expanded={handoffOpen}
+              onClick={() => setHandoffOpen((value) => !value)}
+            >
+              <span aria-hidden="true">↗</span> <span className="markets-ask-label">Ask Polyth</span>
+            </button>
+            {handoffOpen && handoffOptions.length > 0 && (
+              <div className="markets-handoff-menu" role="menu" aria-label="Send market context">
+                {handoffOptions.map((option) => (
+                  <button key={option.id} type="button" role="menuitem" onClick={() => void sendHandoff(option)}>
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button className="markets-refresh" type="button" onClick={() => setRefresh((value) => value + 1)}>
+            Refresh
+          </button>
+        </div>
       </div>
 
       <section className="markets-asset" aria-live="polite">
