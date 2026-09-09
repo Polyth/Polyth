@@ -307,9 +307,7 @@ impl NativeClient {
         let session = {
             let mut state = self.state.lock().await;
             let current_generation = state.sessions.get(connection_id).map(|session| session.generation);
-            if current_generation.is_some()
-                && current_generation != lease.previous_session_generation
-            {
+            if session_generation_changed(lease.previous_session_generation, current_generation) {
                 state.sessions.remove(connection_id)
             } else {
                 None
@@ -492,6 +490,10 @@ pub fn identity_endpoint_id(secret: &[u8]) -> Result<String, String> {
 
 pub fn run_cli() {
     main();
+}
+
+fn session_generation_changed(previous: Option<u64>, current: Option<u64>) -> bool {
+    current.is_some() && current != previous
 }
 
 #[cfg(test)]
@@ -737,8 +739,4 @@ mod native_tests {
         client.shutdown().await;
         client.shutdown().await;
     }
-}
-
-fn session_generation_changed(previous: Option<u64>, current: Option<u64>) -> bool {
-    current.is_some() && current != previous
 }
