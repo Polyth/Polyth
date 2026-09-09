@@ -52,6 +52,14 @@ final class PolythNavigationPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 }
 
+final class PolythRootBridgeViewController: CAPBridgeViewController {
+    override func capacitorDidLoad() {
+        super.capacitorDidLoad()
+        bridge?.registerPluginInstance(PolythLinkPlugin())
+        bridge?.registerPluginInstance(PolythNavigationPlugin())
+    }
+}
+
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
 
@@ -64,12 +72,9 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             PolythPendingNavigation.shared.remember(url)
         }
 
-        let controller = PolythBridgeViewController()
         window = UIWindow(windowScene: windowScene)
-        window?.rootViewController = controller
+        window?.rootViewController = PolythRootBridgeViewController()
         window?.makeKeyAndVisible()
-        controller.loadViewIfNeeded()
-        controller.bridge?.registerPluginInstance(PolythNavigationPlugin())
 
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)
     }
