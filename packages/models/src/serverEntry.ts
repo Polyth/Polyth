@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type {
   AgentDescriptor,
   AgentProfile,
@@ -5,24 +7,120 @@ import type {
   ModelDiscoveryState,
   RouteHandler,
 } from "@polyth/contracts";
-import { localOnlyRemoteAccess, type ServerPackage, type ServerPackageHost } from "@polyth/plugins";
+import {
+  atomicWriteSync,
+  localOnlyRemoteAccess,
+  type ServerPackage,
+  type ServerPackageHost,
+} from "@polyth/plugins";
 import { customProviderRoutes } from "./customProviderRoutes.ts";
 import { validateProfile } from "./index.ts";
 
-interface ProfileStore {
-  profileList(userId?: string): Promise<AgentProfile[]>;
-  profileGet(id: string, userId?: string): Promise<AgentProfile | undefined>;
+const OWNER_USER_ID = "usr_owner";
+
+interface LegacyProfileStore {
+  profileList(): Promise<AgentProfile[]>;
+  profileGet(id: string): Promise<AgentProfile | undefined>;
   profileCreate(
     input: Omit<AgentProfile, "id" | "revision" | "createdAt" | "updatedAt">,
-    userId?: string,
   ): Promise<AgentProfile>;
   profileUpdate(
     id: string,
     patch: Partial<Omit<AgentProfile, "id" | "revision" | "createdAt" | "updatedAt">>,
     expectedRevision: number,
-    userId?: string,
   ): Promise<AgentProfile>;
-  profileRemove(id: string, userId?: string): Promise<boolean>;
+  profileRemove(id: string): Promise<boolean>;
+}
+
+interface ProfileStore {
+  profileList(userId: string): Promise<AgentProfile[]>;
+  profileGet(id: string, userId: string): Promise<AgentProfile | undefined>;
+  profileCreate(
+    input: Omit<AgentProfile, "id" | "revision" | "createdAt" | "updatedAt">,
+    userId: string,
+  ): Promise<AgentProfile>;
+  profileUpdate(
+    id: string,
+    patch: Partial<Omit<AgentProfile, "id" | "revision" | "createdAt" | "updatedAt">>,
+    expectedRevision: number,
+    userId: string,
+  ): Promise<AgentProfile>;
+  profileRemove(id: string, userId: string): Promise<boolean>;
+}
+
+interface ProfileOwnersFile {
+  version: 1;
+  owners: Record<string, string>;
+}
+
+/**
+ * Agent profiles predate user accounts and live in the session store. Moving
+ * that table would add a broad migration for a small ownership problem, so the
+ * models package owns the missing relation explicitly: profile id -> user id.
+ * Unmapped legacy rows belong to the only historical account, `usr_owner`.
+ */
+function createOwnedProfileStore(base: LegacyProfileStore, file: string): ProfileStore {
+  let owners: Record<string, string> = {};
+  try {
+    const raw = JSON.parse(readFileSync(file, "utf8")) as Partial<ProfileOwnersFile>;
+    if (raw.version === 1 && raw.owners && typeof raw.owners === "object" && !Array.isArray(raw.owners)) {
+      owners = Object.fromEntries(
+        Object.entries(raw.owners).filter((entry): entry is [string, string] =>
+          Boolean(entry[0]) && typeof entry[1] === "string" && Boolean(entry[1])),
+      );
+    }
+  } catch {
+    // First boot: all pre-existing profiles are bootstrap-owner profiles.
+  }
+
+  const ownerOf = (id: string): string => owners[id] ?? OWNER_USER_ID;
+  const persist = (): void => {
+    atomicWriteSync(file, `${JSON.stringify({ version: 1, owners }, null, 2)}\n`, 0o600);
+  };
+
+  return {
+    async profileList(userId) {
+      return (await base.profileList()).filter((profile) => ownerOf(profile.id) === userId);
+    },
+
+    async profileGet(id, userId) {
+      if (ownerOf(id) !== userId) return undefined;
+      return base.profileGet(id);
+    },
+
+    async profileCreate(input, userId) {
+      const created = await base.profileCreate(input);
+      owners = { ...owners, [created.id]: userId };
+      try {
+        persist();
+      } catch (error) {
+        delete owners[created.id];
+        await base.profileRemove(created.id).catch(() => false);
+        throw error;
+      }
+      return created;
+    },
+
+    async profileUpdate(id, patch, expectedRevision, userId) {
+      if (ownerOf(id) !== userId) {
+        throw Object.assign(new Error("agent preset not found"), { code: "not-found" });
+      }
+      return base.profileUpdate(id, patch, expectedRevision);
+    },
+
+    async profileRemove(id, userId) {
+      if (ownerOf(id) !== userId) return false;
+      const removed = await base.profileRemove(id);
+      if (!removed) return false;
+      if (Object.prototype.hasOwnProperty.call(owners, id)) {
+        const next = { ...owners };
+        delete next[id];
+        owners = next;
+        persist();
+      }
+      return true;
+    },
+  };
 }
 
 export function profileRoutes(deps: {
@@ -65,7 +163,7 @@ export function profileRoutes(deps: {
       json(200, await deps.store.profileCreate({
         name: String(input.name ?? ""),
         // This endpoint historically described OpenCode models. Keeping that
-        // default preserves old clients while every updated profile editor
+        // default preserves old clients while every updated preset editor
         // sends an explicit harness identity.
         harnessId: typeof input.harnessId === "string" ? input.harnessId : "opencode",
         providerID: String(input.providerID ?? ""),
@@ -214,7 +312,10 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     (agent) => `${agent.harnessId ?? "legacy"}/${agent.name}`,
   );
   const profiles = profileRoutes({
-    store: host.store as unknown as ProfileStore,
+    store: createOwnedProfileStore(
+      host.store as unknown as LegacyProfileStore,
+      join(host.storageDir, "agent-profile-owners.json"),
+    ),
     listModels,
     listAgents,
   });
