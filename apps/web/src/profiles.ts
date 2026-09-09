@@ -2,7 +2,7 @@
 // is authoritative and account-scoped; this module only mirrors the current
 // account for composer and Settings surfaces.
 import { useSyncExternalStore } from "react";
-import type { AgentProfile } from "@polyth/contracts";
+import type { AgentProfile, ModelDescriptor } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 
 let profiles: AgentProfile[] = [];
@@ -35,4 +35,12 @@ export function useProfiles(): AgentProfile[] {
     },
     getProfiles,
   );
+}
+
+/** Compatibility-only cleanup for an old Composer call site. Favorites are
+ * model-picker preferences, never agent presets, so this function deliberately
+ * cannot create or update server records. # ponytail: remove with the stale
+ * Composer import when that large owner is next edited. */
+export async function migrateFavoritesOnce(_models: readonly ModelDescriptor[]): Promise<void> {
+  try { localStorage.removeItem("polyth.profiles.favoritesMigrated"); } catch { /* private mode */ }
 }
