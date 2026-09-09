@@ -114,13 +114,9 @@ pub(super) async fn begin_numeric_pairing(
             _ => return Err(LinkError::TransportProtocolError.code()),
         };
 
-        let (login, request) = NumericClientLogin::start(
-            &code,
-            &host_endpoint_id,
-            &pairing_id,
-            &expires_at,
-        )
-        .map_err(|error| error.code())?;
+        let (login, request) =
+            NumericClientLogin::start(&code, &host_endpoint_id, &pairing_id, &expires_at)
+                .map_err(|error| error.code())?;
         write_numeric(
             &mut send,
             &NumericWireMessage::Start {
@@ -130,7 +126,10 @@ pub(super) async fn begin_numeric_pairing(
         )
         .await
         .map_err(|error| error.code())?;
-        let challenge = match read_numeric(&mut recv).await.map_err(|error| error.code())? {
+        let challenge = match read_numeric(&mut recv)
+            .await
+            .map_err(|error| error.code())?
+        {
             NumericWireMessage::Challenge {
                 attempt_id,
                 pairing_id,
@@ -157,14 +156,18 @@ pub(super) async fn begin_numeric_pairing(
         )
         .await
         .map_err(|error| error.code())?;
-        let ticket = match read_numeric(&mut recv).await.map_err(|error| error.code())? {
+        let ticket = match read_numeric(&mut recv)
+            .await
+            .map_err(|error| error.code())?
+        {
             NumericWireMessage::Ticket { ticket } => ticket,
             NumericWireMessage::Rejected { code } => return Err(leak_code(code)),
             _ => return Err(LinkError::TransportProtocolError.code()),
         };
-        let parsed = polyth_link_core::parse_pairing_ticket(&ticket)
-            .map_err(|error| error.code())?;
-        if parsed.host.endpoint_id != host_endpoint_id || parsed.pairing_id != challenge.pairing_id {
+        let parsed =
+            polyth_link_core::parse_pairing_ticket(&ticket).map_err(|error| error.code())?;
+        if parsed.host.endpoint_id != host_endpoint_id || parsed.pairing_id != challenge.pairing_id
+        {
             return Err(LinkError::HostIdentityMismatch.code());
         }
         let _ = send.finish();

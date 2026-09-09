@@ -2,6 +2,7 @@ import { Capacitor, registerPlugin } from "@capacitor/core";
 import {
   setPolythLinkNative,
   type ConnectionMetadata,
+  type ConnectionRecovery,
   type NumericPairingInput,
   type PairingAttempt,
   type PairingPreview,
@@ -17,6 +18,7 @@ interface PolythLinkCapacitorPlugin {
   cancelPairing(options: { attemptId: string }): Promise<{ ok: boolean }>;
   listConnections(): Promise<{ connections: ConnectionMetadata[] }>;
   connect(options: { connectionId: string }): Promise<ProxyLaunch>;
+  recoverConnection(options: { connectionId: string }): Promise<ConnectionRecovery>;
   disconnect(options: { connectionId: string }): Promise<{ ok: boolean }>;
   forgetConnection(options: { connectionId: string }): Promise<{ ok: boolean }>;
   getStatus(options: { connectionId: string }): Promise<{
@@ -57,6 +59,7 @@ export function installNativePolythLink(): void {
     },
     listConnections: async () => (await NativePolythLink.listConnections()).connections,
     connect: (connectionId) => NativePolythLink.connect({ connectionId }),
+    recoverConnection: (connectionId) => NativePolythLink.recoverConnection({ connectionId }),
     disconnect: async (connectionId) => {
       await NativePolythLink.disconnect({ connectionId });
     },

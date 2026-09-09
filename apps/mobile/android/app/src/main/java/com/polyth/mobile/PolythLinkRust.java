@@ -11,5 +11,6 @@ final class PolythLinkRust {
     static native void clientFree(long handle);
     static native String invoke(long handle, String method, String paramsJson, byte[] identitySecret);
     static native byte[] generateIdentitySecret();
+    static native String identityEndpointId(byte[] identitySecret);
     static native String ticketHostId(String ticket);
 }

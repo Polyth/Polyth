@@ -10,6 +10,8 @@ struct NativeInflightOperation {
     generation: u64,
     cancel: tokio::sync::watch::Sender<bool>,
     done: tokio::sync::watch::Receiver<bool>,
+    target_connection_id: Option<String>,
+    kind: NativeOperationKind,
 }
 
 struct NativeOperationLease {
@@ -26,6 +28,14 @@ struct NativeOperationSpec {
     timeout: Duration,
     cancelled: &'static str,
     target_connection_id: Option<String>,
+    kind: NativeOperationKind,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NativeOperationKind {
+    Other,
+    Pairing,
+    Recovery,
 }
 
 /// In-process adapter over the same client state machine used by the CLI.
@@ -69,7 +79,8 @@ impl NativeClient {
                 key: format!("pairing-begin:{host}"),
                 timeout: NATIVE_CONNECT_TIMEOUT,
                 cancelled: LinkError::PairingCancelled.code(),
-                target_connection_id: None,
+                target_connection_id: Some(host),
+                kind: NativeOperationKind::Pairing,
             };
             let lease = self.begin_operation(&spec).await?;
             let result = self
@@ -110,6 +121,8 @@ impl NativeClient {
             let connection_id = connection_id(&params)?;
             self.interrupt_operation(&connect_operation_key(&connection_id))
                 .await?;
+            self.interrupt_operation(&format!("recover:{connection_id}"))
+                .await?;
             return dispatch(self.state.clone(), method, params)
                 .await
                 .map_err(str::to_string);
@@ -147,19 +160,24 @@ impl NativeClient {
             None => None,
         };
 
-        let result = match (spec, lease) {
-            (Some(spec), Some(lease)) => {
-                self.run_operation(
-                    lease,
-                    spec.timeout,
-                    spec.cancelled,
-                    dispatch(self.state.clone(), method, params),
+        let operation = async {
+            if method == "connection.recover" {
+                connect_existing(
+                    self.state.clone(),
+                    params,
+                    ExistingConnectionMode::RecoverPrepared,
                 )
                 .await
+            } else {
+                dispatch(self.state.clone(), method, params).await
             }
-            _ => dispatch(self.state.clone(), method, params)
-                .await
-                .map_err(str::to_string),
+        };
+        let result = match (spec, lease) {
+            (Some(spec), Some(lease)) => {
+                self.run_operation(lease, spec.timeout, spec.cancelled, operation)
+                    .await
+            }
+            _ => operation.await.map_err(str::to_string),
         };
         drop(identity);
         result
@@ -177,7 +195,8 @@ impl NativeClient {
                     key: format!("pairing-begin:{host}"),
                     timeout: NATIVE_CONNECT_TIMEOUT,
                     cancelled: LinkError::PairingCancelled.code(),
-                    target_connection_id: None,
+                    target_connection_id: Some(host),
+                    kind: NativeOperationKind::Pairing,
                 }))
             }
             "pairing.confirm" => {
@@ -199,6 +218,7 @@ impl NativeClient {
                     timeout: NATIVE_PAIRING_TIMEOUT,
                     cancelled: LinkError::PairingCancelled.code(),
                     target_connection_id: Some(connection_id),
+                    kind: NativeOperationKind::Pairing,
                 }))
             }
             "connect" => {
@@ -208,6 +228,27 @@ impl NativeClient {
                     timeout: NATIVE_CONNECT_TIMEOUT,
                     cancelled: LinkError::TransportCancelled.code(),
                     target_connection_id: Some(id),
+                    kind: NativeOperationKind::Other,
+                }))
+            }
+            "connection.recover" => {
+                let id = connection_id(params)?;
+                let pairing_pending = self
+                    .state
+                    .lock()
+                    .await
+                    .pairing
+                    .values()
+                    .any(|attempt| attempt.ticket.host.endpoint_id == id);
+                if pairing_pending {
+                    return Err(LinkError::PairingConfirmationRequired.code().to_string());
+                }
+                Ok(Some(NativeOperationSpec {
+                    key: format!("recover:{id}"),
+                    timeout: NATIVE_CONNECT_TIMEOUT,
+                    cancelled: LinkError::TransportCancelled.code(),
+                    target_connection_id: Some(id),
+                    kind: NativeOperationKind::Recovery,
                 }))
             }
             _ => Ok(None),
@@ -224,14 +265,30 @@ impl NativeClient {
             .wrapping_add(1);
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         let (done_tx, done_rx) = tokio::sync::watch::channel(false);
-        let previous = self.inflight.lock().await.insert(
+        let mut inflight = self.inflight.lock().await;
+        if spec.target_connection_id.as_ref().is_some_and(|target| {
+            inflight.values().any(|operation| {
+                operation.target_connection_id.as_ref() == Some(target)
+                    && matches!(
+                        (spec.kind, operation.kind),
+                        (NativeOperationKind::Recovery, NativeOperationKind::Pairing)
+                            | (NativeOperationKind::Pairing, NativeOperationKind::Recovery)
+                    )
+            })
+        }) {
+            return Err(LinkError::PairingConfirmationRequired.code().to_string());
+        }
+        let previous = inflight.insert(
             spec.key.clone(),
             NativeInflightOperation {
                 generation,
                 cancel: cancel_tx,
                 done: done_rx,
+                target_connection_id: spec.target_connection_id.clone(),
+                kind: spec.kind,
             },
         );
+        drop(inflight);
         if let Some(previous) = previous {
             let _ = previous.cancel.send(true);
             if let Err(error) = wait_done(previous.done).await {
@@ -340,7 +397,10 @@ impl NativeClient {
         };
         let session = {
             let mut state = self.state.lock().await;
-            let current_generation = state.sessions.get(connection_id).map(|session| session.generation);
+            let current_generation = state
+                .sessions
+                .get(connection_id)
+                .map(|session| session.generation);
             if session_generation_changed(lease.previous_session_generation, current_generation) {
                 state.sessions.remove(connection_id)
             } else {
@@ -500,7 +560,7 @@ fn identity_host(method: &str, params: &Value) -> Result<String, String> {
                 .map(|ticket| ticket.host.endpoint_id)
                 .map_err(|error| error.code().to_string())
         }
-        "connect" => connection_id(params),
+        "connect" | "connection.recover" => connection_id(params),
         _ => Err(LinkError::PairingInvalid.code().to_string()),
     }
 }
@@ -541,6 +601,7 @@ mod native_tests {
             timeout: Duration::from_secs(1),
             cancelled,
             target_connection_id: None,
+            kind: NativeOperationKind::Other,
         }
     }
 
@@ -756,6 +817,32 @@ mod native_tests {
         assert!(!*b.cancel.borrow());
         client.finish_operation(a).await;
         client.finish_operation(b).await;
+    }
+
+    #[tokio::test]
+    async fn recovery_and_pairing_are_mutually_exclusive_per_host() {
+        let dir = tempdir().unwrap();
+        let client = NativeClient::new(dir.path().to_path_buf(), None);
+        let pairing = NativeOperationSpec {
+            key: "pairing-confirm:attempt".into(),
+            timeout: Duration::from_secs(1),
+            cancelled: LinkError::PairingCancelled.code(),
+            target_connection_id: Some("host-a".into()),
+            kind: NativeOperationKind::Pairing,
+        };
+        let recovery = NativeOperationSpec {
+            key: "recover:host-a".into(),
+            timeout: Duration::from_secs(1),
+            cancelled: LinkError::TransportCancelled.code(),
+            target_connection_id: Some("host-a".into()),
+            kind: NativeOperationKind::Recovery,
+        };
+        let pairing_lease = client.begin_operation(&pairing).await.unwrap();
+        assert_eq!(
+            client.begin_operation(&recovery).await.err(),
+            Some(LinkError::PairingConfirmationRequired.code().to_string())
+        );
+        client.finish_operation(pairing_lease).await;
     }
 
     #[test]

@@ -68,11 +68,8 @@ pub async fn write_numeric<W: AsyncWrite + Unpin>(
 pub async fn read_numeric<R: AsyncRead + Unpin>(
     reader: &mut R,
 ) -> Result<NumericWireMessage, LinkError> {
-    let payload = Zeroizing::new(read_len_prefixed(
-        reader,
-        Limits::v1().control_message_bytes,
-    )
-    .await?);
+    let payload =
+        Zeroizing::new(read_len_prefixed(reader, Limits::v1().control_message_bytes).await?);
     decode_numeric_message(&payload)
 }
 
@@ -103,6 +100,9 @@ mod tests {
     #[test]
     fn numeric_wire_rejects_oversized_payloads() {
         let payload = vec![0u8; Limits::v1().control_message_bytes + 1];
-        assert_eq!(decode_numeric_message(&payload), Err(LinkError::RequestTooLarge));
+        assert_eq!(
+            decode_numeric_message(&payload),
+            Err(LinkError::RequestTooLarge)
+        );
     }
 }

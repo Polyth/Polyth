@@ -37,6 +37,10 @@ export interface ProxyLaunch {
   connectionId: string;
 }
 
+export type ConnectionRecovery =
+  | { state: "connected"; launch: ProxyLaunch }
+  | { state: "needs-pairing"; connectionId: string };
+
 export interface PolythLinkNative {
   parsePairingTicket(raw: string): Promise<PairingPreview>;
   beginPairing(raw: string, label: string): Promise<PairingAttempt>;
@@ -45,6 +49,7 @@ export interface PolythLinkNative {
   cancelPairing(attemptId: string): Promise<void>;
   listConnections(): Promise<ConnectionMetadata[]>;
   connect(connectionId: string): Promise<ProxyLaunch>;
+  recoverConnection(connectionId: string): Promise<ConnectionRecovery>;
   disconnect(connectionId: string): Promise<void>;
   forgetConnection(connectionId: string): Promise<void>;
   getStatus(connectionId: string): Promise<{ state: string; transport?: "direct" | "relay"; error?: string }>;
@@ -61,6 +66,7 @@ class MissingNativeCore implements PolythLinkNative {
   cancelPairing() { return Promise.reject(this.fail()); }
   async listConnections() { return []; }
   connect() { return Promise.reject(this.fail()); }
+  recoverConnection() { return Promise.reject(this.fail()); }
   disconnect() { return Promise.resolve(); }
   forgetConnection() { return Promise.resolve(); }
   getStatus() { return Promise.resolve({ state: "unavailable", error: "host-identity-unavailable" }); }

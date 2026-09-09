@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use polyth_link_client::NativeClient;
+use polyth_link_core::LinkError;
 use serde_json::{json, Value};
 use tempfile::tempdir;
 
@@ -89,4 +90,28 @@ async fn forgetting_one_host_cannot_mutate_another() {
     assert_eq!(connections.as_array().unwrap().len(), 1);
     assert_eq!(connections[0]["hostEndpointId"], "host-b");
     assert_eq!(connections[0]["pairingState"], "active");
+}
+
+#[tokio::test]
+async fn ordinary_connect_refuses_prepared_state_without_deleting_it() {
+    let dir = tempdir().unwrap();
+    write_connections(dir.path(), json!([connection("host-a", "prepared")]));
+    let client = NativeClient::new(dir.path().to_path_buf(), None);
+    let secret = polyth_link_client::generate_identity_secret();
+
+    assert_eq!(
+        client
+            .invoke(
+                "connect",
+                json!({ "connectionId": "host-a" }),
+                Some(&secret),
+            )
+            .await,
+        Err(LinkError::DeviceUnknown.code().to_string())
+    );
+    let connections = client
+        .invoke("connections.list", json!({}), None)
+        .await
+        .unwrap();
+    assert_eq!(connections[0]["pairingState"], "prepared");
 }

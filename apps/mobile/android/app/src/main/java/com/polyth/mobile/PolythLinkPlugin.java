@@ -350,13 +350,6 @@ public final class PolythLinkPlugin extends Plugin {
         return null;
     }
 
-    private void discardPrepared(String connectionId) throws Exception {
-        invoke("disconnect", new JSObject().put("connectionId", connectionId), null);
-        secureStore.delete(connectionId);
-        invoke("forget", new JSObject().put("connectionId", connectionId), null);
-        forgetTransport(connectionId);
-    }
-
     private void rememberTransport(String connectionId) {
         statePrefs.edit().putString(LAST_CONNECTION, connectionId).apply();
     }
@@ -540,22 +533,66 @@ public final class PolythLinkPlugin extends Plugin {
         String connectionId = require(call, "connectionId", "device-unknown");
         if (connectionId == null) return;
         executor.execute(() -> {
-            boolean prepared = false;
             try {
-                JSONObject metadata = connectionMetadata(connectionId);
-                prepared = metadata != null && "prepared".equals(metadata.optString("pairingState", ""));
                 byte[] secret = secureStore.load(connectionId);
                 if (secret == null) throw new LinkFailure("host-identity-unavailable");
                 JSONObject result = invokeObject("connect", new JSObject().put("connectionId", connectionId), secret);
                 rememberTransport(connectionId);
                 call.resolve(JSObject.fromJSONObject(result));
-            } catch (Exception error) {
-                String code = error instanceof LinkFailure ? ((LinkFailure) error).code : "";
-                if (prepared && ("pairing-invalid".equals(code) || "device-unknown".equals(code))) {
-                    try { discardPrepared(connectionId); } catch (Exception ignored) {}
+            } catch (Exception error) { reject(call, error); }
+        });
+    }
+
+    @PluginMethod
+    public void recoverConnection(PluginCall call) {
+        if (!trusted(call)) return;
+        String connectionId = require(call, "connectionId", "device-unknown");
+        if (connectionId == null) return;
+        executor.execute(() -> {
+            try {
+                byte[] secret = secureStore.load(connectionId);
+                if (secret == null) throw new LinkFailure("host-identity-unavailable");
+                String identityId = PolythLinkRust.identityEndpointId(secret);
+                if (identityId == null || identityId.isEmpty()) throw new LinkFailure("pairing-storage-failed");
+                JSONObject result = invokeObject(
+                    "connection.recover",
+                    new JSObject().put("connectionId", connectionId),
+                    secret
+                );
+                switch (result.optString("state", "")) {
+                    case "connected":
+                        result.remove("state");
+                        rememberTransport(connectionId);
+                        call.resolve(new JSObject()
+                            .put("state", "connected")
+                            .put("launch", JSObject.fromJSONObject(result)));
+                        break;
+                    case "orphaned":
+                        JSONObject metadata = connectionMetadata(connectionId);
+                        boolean attemptPending = false;
+                        for (PairingSecretRecord attempt : attempts.values()) {
+                            if (connectionId.equals(attempt.hostId())) {
+                                attemptPending = true;
+                                break;
+                            }
+                        }
+                        if (!identityId.equals(result.optString("identityEndpointId", ""))
+                            || metadata == null
+                            || !"prepared".equals(metadata.optString("pairingState", ""))
+                            || attemptPending) {
+                            throw new LinkFailure("pairing-confirmation-required");
+                        }
+                        secureStore.delete(connectionId);
+                        invoke("forget", new JSObject().put("connectionId", connectionId), null);
+                        forgetTransport(connectionId);
+                        call.resolve(new JSObject()
+                            .put("state", "needs-pairing")
+                            .put("connectionId", connectionId));
+                        break;
+                    default:
+                        throw new LinkFailure("transport-protocol-error");
                 }
-                reject(call, error);
-            }
+            } catch (Exception error) { reject(call, error); }
         });
     }
 

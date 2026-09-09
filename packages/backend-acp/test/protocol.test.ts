@@ -30,7 +30,7 @@ test("ACP admission requires prompt evidence; cancellation has no fictional ackn
     assert.equal(snap.acceptedOperations?.[0]?.operationId, "submit");
     assert.doesNotMatch(JSON.stringify(events), /private reasoning/);
 });
-test("ACP permissions map native option ids; a lost prompt result never invents success", async () => {
+test("ACP permissions map native option ids; a lost admitted prompt records a terminal error", async () => {
     const f = fakeRpc();
     let rejectPrompt!: (reason: unknown) => void;
     f.handle(async (method) => method === "session/new" ? { sessionId: "native" } : new Promise((_resolve, reject) => { rejectPrompt = reject; }));
@@ -46,9 +46,56 @@ test("ACP permissions map native option ids; a lost prompt result never invents 
     rejectPrompt(Object.assign(new Error("lost"), { code: "outcome-unknown" }));
     f.disconnect();
     await new Promise(resolve => setImmediate(resolve));
-    assert.ok(!events.some(e => e.type === "turn/stopped"));
+    assert.ok(events.some(e => e.type === "turn/stopped"
+        && e.reason === "error"
+        && e.code === "unknown"));
     assert.equal((await rt.reconcile!(binding)).state?.value, "unknown");
     assert.equal((await rt.releaseExecution!(binding, "switch")).kind, "confirmed");
+});
+
+test("ACP follow-up silence times out with one terminal error and fences late completion", async () => {
+    const f = fakeRpc();
+    let promptCount = 0;
+    let finishFollowUp!: (value: unknown) => void;
+    f.handle(async (method) => {
+        if (method === "session/new") return { sessionId: "native" };
+        if (method === "session/prompt") {
+            promptCount++;
+            if (promptCount === 1) return { stopReason: "end_turn" };
+            return new Promise((resolve) => { finishFollowUp = resolve; });
+        }
+        return {};
+    });
+    const rt = createAcpRuntime(context, f.rpc, "cursor", undefined, "Cursor", {
+        promptIdleTimeoutMs: 20,
+    });
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    assert.equal((await rt.startTurnOperation!({ sessionId: "canonical", text: "first" }, "first")).kind, "confirmed");
+
+    const admission = rt.startTurnOperation!({ sessionId: "canonical", text: "follow up" }, "follow-up");
+    f.emit("session/update", {
+        sessionId: "native",
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "partial" } },
+    });
+    assert.equal((await admission).kind, "confirmed");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const followUpStops = events.filter((event) => event.type === "turn/stopped" && event.turnId === "follow-up");
+    assert.deepEqual(followUpStops, [{
+        type: "turn/stopped",
+        turnId: "follow-up",
+        reason: "error",
+        error: "ACP prompt timed out before a terminal result",
+        code: "unknown",
+    }]);
+    assert.ok(f.calls.some((call) => call.method === "session/cancel"));
+
+    finishFollowUp({ stopReason: "end_turn" });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(events.filter((event) => event.type === "turn/stopped" && event.turnId === "follow-up").length, 1);
+    await rt.dispose();
 });
 test("ACP session/new forwards overlay mcpServers", async () => {
     const { acpOverlays } = await import("../src/provisioner.ts");

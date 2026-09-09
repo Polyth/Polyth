@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { build } from "esbuild";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { extname, join, relative, resolve } from "node:path";
 
@@ -58,6 +59,26 @@ test("all browser feature packages own a canonical web entry", () => {
       `${id} is missing widgets/index.tsx`,
     );
   }
+});
+
+test("dictation web entry resolves only its browser-safe public surface", async () => {
+  const result = await build({
+    entryPoints: [join(packagesDir, "dictation/widgets/index.tsx")],
+    bundle: true,
+    platform: "browser",
+    format: "esm",
+    outdir: join(root, ".polyth-build-test"),
+    write: false,
+    metafile: true,
+    logLevel: "silent",
+  });
+  const inputs = Object.keys(result.metafile.inputs);
+  assert.ok(inputs.some((input) => input.endsWith("packages/dictation/src/browser.ts")));
+  assert.equal(
+    inputs.some((input) => input.endsWith("packages/dictation/src/localModels.ts")),
+    false,
+    "the browser graph must not include the Node-only local model manager",
+  );
 });
 
 // Feature widgets may consume these generic shell services and primitives while

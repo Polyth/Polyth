@@ -715,6 +715,13 @@ export interface RuntimeFeaturesDto {
   capabilities: RuntimeCapabilities;
   commands: RuntimeCommandDescriptor[];
   contextWindow?: ContextWindowState;
+  /** Whether the current runtime has produced telemetry, can produce it but
+   * has no sample yet, or does not implement it. A reported zero is therefore
+   * distinct from missing telemetry. */
+  telemetry?: {
+    usage: { status: "reported" | "unavailable" | "unsupported" };
+    context: { status: "reported" | "unavailable" | "unsupported" };
+  };
   attachmentSupport: Partial<Record<AttachmentModality, FeatureSupport>>;
   /** The session's execution root lives on another host. */
   remote: boolean;

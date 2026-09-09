@@ -252,6 +252,52 @@ test("owned epoch transition atomically records the break and fences prior unkno
     assert.equal(result.projection.runtimeBinding?.backendSessionId, "backend-new");
     assert.equal(result.projection.status, "epoch-pending");
     assert.equal(result.fencedOperations.length, 2);
+
+    const recoveredReconciliation = await store.startReconciliation(sessionId);
+    await assert.rejects(
+      () => store.ingestObservation({
+        sessionId,
+        identity: {
+          authorityId: "owned:destroyed-authority",
+          generation: 4,
+          location: endpoint.location,
+          backendSessionId: "backend-old",
+          artifactKind: "message",
+          entityId: "late-old-runtime-message",
+          revision: "1",
+        },
+        reconciliationOrdinal: recoveredReconciliation.ordinal,
+        events: [{
+          type: "assistant/message",
+          data: { partId: "old", text: "must be fenced" },
+        }],
+      }),
+      (error: Error & { code?: string }) => error.code === "stale-evidence",
+    );
+    const recoveredObservation = await store.ingestObservation({
+      sessionId,
+      identity: {
+        authorityId: endpoint.authorityId,
+        generation: endpoint.generation,
+        location: endpoint.location,
+        backendSessionId: "backend-new",
+        artifactKind: "message",
+        entityId: "new-runtime-message",
+        revision: "1",
+      },
+      reconciliationOrdinal: recoveredReconciliation.ordinal,
+      events: [{
+        type: "assistant/message",
+        data: { partId: "new", text: "accepted once" },
+      }],
+    });
+    assert.equal(recoveredObservation.kind, "applied");
+    assert.equal((await store.events(sessionId)).filter((event) =>
+      event.type === "assistant/message"
+      && (event.data as { text?: string }).text === "accepted once").length, 1);
+    assert.equal((await store.events(sessionId)).some((event) =>
+      (event.data as { text?: string }).text === "must be fenced"), false);
+
     for (const operation of result.fencedOperations) {
       assert.equal(operation.state, "fenced");
       assert.equal(isRuntimeOperationBlocking(operation), false);

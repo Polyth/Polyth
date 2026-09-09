@@ -29,7 +29,7 @@ const tenancy = await testTenancy();
 
 type Emit = (sessionId: string, event: RuntimeEvent) => void;
 
-function fakeRuntime(agentCatalog: AgentDescriptor[] = []) {
+function fakeRuntime(agentCatalog: AgentDescriptor[] = [], harnessId?: string) {
   const listeners = new Set<Emit>();
   const ensured: string[] = [];
   const permissionReplies: Array<{ sessionId: string; requestId: string; reply: string }> = [];
@@ -39,6 +39,7 @@ function fakeRuntime(agentCatalog: AgentDescriptor[] = []) {
     for (const listener of listeners) listener(sessionId, event);
   };
   const runtime: AgentRuntime = {
+    ...(harnessId ? { harnessId } : {}),
     capabilities: async () => ({
       streaming: true,
       permissions: true,
@@ -115,7 +116,10 @@ function fakeGoals(): AgentGoalService {
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 25));
 
-async function makeApp(agentCatalog: AgentDescriptor[] = []) {
+async function makeApp(
+  agentCatalog: AgentDescriptor[] = [],
+  harnessIds: string[] = [],
+) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-agent-sessions-"));
   const projectRows: Project[] = [
     { id: "p1", path: join(dir, "one"), name: "One", createdAt: 1 },
@@ -130,13 +134,24 @@ async function makeApp(agentCatalog: AgentDescriptor[] = []) {
   };
   const store = createStore(join(dir, "sessions.db"));
   const runtime = fakeRuntime(agentCatalog);
+  const runtimesByHarness = new Map(
+    harnessIds.map((harnessId) => [harnessId, fakeRuntime(agentCatalog, harnessId)]),
+  );
   const permissions = {
     evaluate: () => "ask",
     addRule: () => {},
     rules: () => [],
   } as unknown as PermissionService;
   const broadcast: Broadcaster = { event: () => {}, projection: () => {} };
-  const pool = { forProject: async () => runtime.runtime };
+  const pool = {
+    forProject: async () => runtime.runtime,
+    forSession: async (projection: { harness?: { mode: string; harnessId?: string } }) => {
+      const harnessId = projection.harness?.mode === "pinned"
+        ? projection.harness.harnessId
+        : undefined;
+      return harnessId ? runtimesByHarness.get(harnessId)?.runtime ?? runtime.runtime : runtime.runtime;
+    },
+  };
   const sessions = createSessionService({
     store,
     projects,
@@ -168,12 +183,34 @@ async function makeApp(agentCatalog: AgentDescriptor[] = []) {
     base: `http://127.0.0.1:${port}`,
     sessions,
     runtime,
+    runtimesByHarness,
     close: async () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await store.close();
     },
   };
 }
+
+test("agent session.create preserves explicit Claude, Cursor, and Codex harness pins", async () => {
+  const harnessIds = ["claude", "cursor", "codex"];
+  const app = await makeApp([], harnessIds);
+  try {
+    for (const harnessId of harnessIds) {
+      const created = await jsonFetch<{
+        session: { harness?: { mode: string; harnessId?: string }; resolvedHarnessId?: string };
+      }>(app.base, "/api/agent/sessions", jsonRequest("POST", {
+        projectId: "p1",
+        harness: { mode: "pinned", harnessId },
+      }));
+      assert.equal(created.status, 201);
+      assert.deepEqual(created.body.session.harness, { mode: "pinned", harnessId });
+      assert.equal(created.body.session.resolvedHarnessId, harnessId);
+      assert.equal(app.runtimesByHarness.get(harnessId)?.ensured.length, 1);
+    }
+  } finally {
+    await app.close();
+  }
+});
 
 async function jsonFetch<T>(
   base: string,

@@ -30,7 +30,7 @@ import {
   setCapabilityReceiptSink,
 } from "@polyth/harness-runtime";
 import type { BehaviorService } from "./behavior.ts";
-import type { McpConfigService } from "./mcp.ts";
+import type { McpConfigService, McpProjectionState } from "./mcp.ts";
 import { AGENT_TOOLS_MCP_NAME, type AgentToolBridge } from "./agentTools.ts";
 
 export interface InstructionProvisionState {
@@ -115,6 +115,8 @@ const logicalTargetKey = (
 const RETIRED_TRANSPORT = { kind: "stdio" as const, command: "_", args: [] as string[], envKeys: [] as string[] };
 const instructionId = "polyth.behavior";
 const mcpId = (id: string) => `polyth.mcp.${id}`;
+const projectScopeId = (context: HarnessContext): string | undefined =>
+  context.projectId && context.projectId !== "__default__" ? context.projectId : undefined;
 const restartSensitive = (record: Pick<HarnessCapabilityRecord, "mutability">): boolean =>
   record.mutability === "requires-restart";
 
@@ -486,7 +488,10 @@ export function createCapabilityProvisioningController(opts: {
     return records;
   };
 
-  const desired = async (context: HarnessContext): Promise<AgentCapabilityDescriptor[]> => {
+  const desired = async (
+    context: HarnessContext,
+    mcpSnapshot?: McpProjectionState,
+  ): Promise<AgentCapabilityDescriptor[]> => {
     const descriptors: AgentCapabilityDescriptor[] = [];
     const text = await opts.behavior.effectiveText();
     descriptors.push({
@@ -499,14 +504,15 @@ export function createCapabilityProvisioningController(opts: {
       text,
     });
     if (context.space) {
-      const projection = opts.mcp.projection(context.space);
+      const projection = mcpSnapshot ?? opts.mcp.projection(context.space, projectScopeId(context));
       for (const server of projection.servers) {
         const descriptor: Extract<AgentCapabilityDescriptor, { kind: "mcp-server" }> = {
           id: mcpId(server.id),
           kind: "mcp-server",
           owner: "polyth",
-          scope: "space",
+          scope: server.projectId ? "project" : "space",
           spaceId: context.spaceId,
+          ...(server.projectId ? { projectId: server.projectId } : {}),
           revision: String(server.revision),
           name: server.name,
           enabled: server.enabled,
@@ -520,8 +526,9 @@ export function createCapabilityProvisioningController(opts: {
           id: `polyth.mcp.retired.${tomb.name}`,
           kind: "mcp-server",
           owner: "polyth",
-          scope: "space",
+          scope: tomb.projectId ? "project" : "space",
           spaceId: context.spaceId,
+          ...(tomb.projectId ? { projectId: tomb.projectId } : {}),
           revision: `retired:${tomb.revision}`,
           name: tomb.name,
           enabled: false,
@@ -584,7 +591,10 @@ export function createCapabilityProvisioningController(opts: {
       target = targetOf(context, provider.descriptor.id, lifetime);
       const durable = isDurableApplicationState(lifetime, context);
       const applyContext = lifetime === "physical-runtime" ? { ...context, sessionId: undefined } : context;
-      items = await desired(applyContext);
+      const mcpSnapshot = applyContext.space
+        ? opts.mcp.projection(applyContext.space, projectScopeId(applyContext))
+        : undefined;
+      items = await desired(applyContext, mcpSnapshot);
       const desiredRevision = desiredBundleRevision(items);
       if (!provider.provisioner || !support) {
         const next = unsupportedResult(items, "Harness has no capability provisioner");
@@ -642,13 +652,12 @@ export function createCapabilityProvisioningController(opts: {
         planned = plan.items;
       }
       plan.keepRevisions = keepRevisionsFor(targetKey);
-      const canonicalIds = new Set(context.space
-        ? opts.mcp.projection(context.space).servers.map((server) => mcpId(server.id)) : []);
+      const canonicalIds = new Set(mcpSnapshot?.servers.map((server) => mcpId(server.id)) ?? []);
       const secrets: CapabilitySecretResolver = {
         mcpSecrets(serverId) {
           if (serverId === "polyth.agent-tools") return { ...toolEnv };
-          if (!context.space || !canonicalIds.has(serverId)) return {};
-          return opts.mcp.projection(context.space).secretsFor(serverId.slice("polyth.mcp.".length));
+          if (!mcpSnapshot || !canonicalIds.has(serverId)) return {};
+          return mcpSnapshot.secretsFor(serverId.slice("polyth.mcp.".length));
         },
       };
       const result = await provider.provisioner.apply(applyContext, plan, secrets);

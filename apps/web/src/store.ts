@@ -6,11 +6,7 @@ import type {
   EditorLocation,
   ModelDescriptor,
   Project,
-  RuntimeCapabilities,
-  RuntimeCommandDescriptor,
-  ContextWindowState,
-  AttachmentModality,
-  FeatureSupport,
+  RuntimeFeaturesDto,
   RuntimeUnavailableReport,
   SessionEvent,
   SessionProjection,
@@ -126,6 +122,12 @@ export function clearNewSessionDraft(projectId: string): void {
   try { localStorage.removeItem(NEW_SESSION_DRAFT + projectId); } catch { /* best-effort */ }
 }
 
+type RuntimeFeaturesState = Omit<RuntimeFeaturesDto, "remote" | "materializeAvailable"> & {
+  /** Older servers omit these; treated as false at the attachment intersection. */
+  remote?: boolean;
+  materializeAvailable?: boolean;
+};
+
 export interface AppState {
   /** Canonical project-registry truth (UX-ONBOARDING): loading, failed, and
    *  ready are distinct; `projects` has this one owner. */
@@ -167,15 +169,7 @@ export interface AppState {
   /** File requested by a changed-file jump into the Changes rail. */
   gitDiffPath: string | null;
   /** Server-resolved runtime feature surface keyed by session id. */
-  runtimeFeatures: Record<string, {
-    capabilities: RuntimeCapabilities;
-    commands: RuntimeCommandDescriptor[];
-    contextWindow?: ContextWindowState;
-    attachmentSupport: Partial<Record<AttachmentModality, FeatureSupport>>;
-    /** Older servers omit these; treated as false at the intersection. */
-    remote?: boolean;
-    materializeAvailable?: boolean;
-  } | undefined>;
+  runtimeFeatures: Record<string, RuntimeFeaturesState | undefined>;
 }
 
 let state: AppState = {

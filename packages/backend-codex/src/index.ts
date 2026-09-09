@@ -6,7 +6,9 @@ import {
     attachmentModality,
     captureCapabilityLaunch,
     composeTurnPrompt,
+    contextWindowTelemetry,
     deltaTokenUsage,
+    normalizeTokenUsage,
     provisioningTarget,
     releaseCapabilityLaunch,
     resolveModelSelection,
@@ -79,14 +81,13 @@ const timestampMs = (value: unknown): number | undefined =>
 const usageBreakdown = (value: unknown): TokenUsage | undefined => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
     const row = value as Record<string, unknown>;
-    const number = (key: string): number => typeof row[key] === "number" ? Math.max(0, row[key] as number) : 0;
-    return {
-        input: number("inputTokens"),
-        output: number("outputTokens"),
-        cacheRead: number("cachedInputTokens"),
-        cacheWrite: number("cacheWriteInputTokens"),
-        reasoning: number("reasoningOutputTokens"),
-    };
+    return normalizeTokenUsage({
+        input: row.inputTokens,
+        output: row.outputTokens,
+        cacheRead: row.cachedInputTokens,
+        cacheWrite: row.cacheWriteInputTokens,
+        reasoning: row.reasoningOutputTokens,
+    });
 };
 const classifyFailure = (
     turn: Turn,
@@ -251,19 +252,11 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
             const totalTokens = params.tokenUsage?.total?.totalTokens;
             const limitTokens = params.tokenUsage?.modelContextWindow;
             if (typeof totalTokens === "number" || typeof limitTokens === "number") {
-                emit({
-                    type: "context/updated",
+                emit({ type: "context/updated", ...contextWindowTelemetry({
                     source: "native",
-                    updatedAt: Date.now(),
-                    ...(typeof totalTokens === "number" ? { usedTokens: totalTokens } : {}),
-                    ...(typeof limitTokens === "number" ? { limitTokens } : {}),
-                    ...(typeof totalTokens === "number" && typeof limitTokens === "number"
-                        ? {
-                            remainingTokens: Math.max(0, limitTokens - totalTokens),
-                            fraction: limitTokens > 0 ? totalTokens / limitTokens : undefined,
-                        }
-                        : {}),
-                }, `${turnId || params.threadId}:context`);
+                    usedTokens: totalTokens,
+                    limitTokens,
+                }) }, `${turnId || params.threadId}:context`);
             }
         }
         if (method === "turn/started") {
@@ -323,11 +316,31 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
         }
     };
     const create: NonNullable<AgentRuntime["createSessionOperation"]> = async (input, operationId) => {
-        const outcome = await mutate(operationId, async () => {
-            if (rpc.receipts[operationId]) {
-                nativeId = rpc.receipts[operationId]!;
-                return { backendSessionId: nativeId };
+        if (rpc.receipts[operationId]) {
+            nativeId = rpc.receipts[operationId]!;
+            return {
+                kind: "confirmed",
+                value: { backendSessionId: nativeId },
+                receipt: nativeId,
+            };
+        }
+        if (input.model) {
+            let available: ModelDescriptor[];
+            try {
+                available = await catalog();
+            } catch {
+                return {
+                    kind: "rejected",
+                    code: "discovery-unavailable",
+                    message: "Codex could not verify the requested model before creating the session.",
+                };
             }
+            const selection = resolveModelSelection(available, input.model, "codex");
+            if (!selection.ok) {
+                return { kind: "rejected", code: selection.code, message: selection.message };
+            }
+        }
+        const outcome = await mutate(operationId, async () => {
             const staged = codexOverlays.peek(context, "codex");
             const overlay = staged?.value;
             const config = overlay?.mcpServers ? { mcp_servers: overlay.mcpServers } : undefined;
@@ -362,6 +375,7 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
             }
             const { thread } = result;
             if (result.model && result.modelProvider) nativeModel = { modelID: result.model, providerID: result.modelProvider };
+            else if (input.model) nativeModel = input.model;
             nativeId = thread.id;
             if (staged) {
                 codexOverlays.consumeIfRevision(context, "codex", staged.desiredRevision);
@@ -395,27 +409,54 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
         if (modelCatalog) return Promise.resolve(modelCatalog);
         if (modelCatalogPending) return modelCatalogPending;
         const pending = (async () => {
-            const { data } = await rpc.request<{
-                data: Array<{
+            type NativeModel = {
                     model: string;
                     displayName?: string;
                     hidden?: boolean;
                     inputModalities?: string[];
                     supportedReasoningEfforts?: unknown;
                     defaultReasoningEffort?: string;
-                }>;
-            }>("model/list", {});
-            const models = (data ?? []).filter((m) => !m.hidden).map((m) => {
+            };
+            const rows: NativeModel[] = [];
+            const seenCursors = new Set<string>();
+            let cursor: string | undefined;
+            let pageCount = 0;
+            while (true) {
+                pageCount++;
+                const response = await rpc.request<{
+                    data?: NativeModel[];
+                    nextCursor?: string | null;
+                }>("model/list", cursor ? { cursor } : {});
+                rows.push(...(response.data ?? []));
+                const nextCursor = typeof response.nextCursor === "string" && response.nextCursor
+                    ? response.nextCursor
+                    : undefined;
+                if (!nextCursor) break;
+                if (pageCount >= 100) {
+                    throw new Error("Codex model catalog exceeded the pagination limit");
+                }
+                if (seenCursors.has(nextCursor)) {
+                    throw new Error("Codex model catalog returned a repeated pagination cursor");
+                }
+                seenCursors.add(nextCursor);
+                cursor = nextCursor;
+            }
+            const seenModels = new Set<string>();
+            const models = rows.filter((m) => !m.hidden).flatMap((m) => {
                 const variants = reasoningEfforts(m.supportedReasoningEfforts);
                 const defaultVariant = typeof m.defaultReasoningEffort === "string"
                     && variants.includes(m.defaultReasoningEffort)
                     ? m.defaultReasoningEffort
                     : undefined;
-                return {
+                const providerID = nativeModel?.providerID ?? "openai";
+                const key = `${providerID}\0${m.model}`;
+                if (seenModels.has(key)) return [];
+                seenModels.add(key);
+                return [{
                     // App Server v2 `model/list` carries no provider field; the
                     // provider is a property of the thread, so use the live one
                     // when the thread has reported it.
-                    providerID: nativeModel?.providerID ?? "openai",
+                    providerID,
                     modelID: m.model,
                     name: m.displayName || m.model,
                     connected: true,
@@ -430,7 +471,7 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer):
                     ],
                     ...(variants.length ? { variants } : {}),
                     ...(defaultVariant ? { defaultVariant } : {}),
-                } satisfies ModelDescriptor;
+                } satisfies ModelDescriptor];
             });
             modelCatalog = models;
             return models;

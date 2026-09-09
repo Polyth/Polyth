@@ -303,9 +303,10 @@ test("Claude maps cumulative usage to deltas, deduplicates results, discovers co
     });
     await new Promise((resolve) => setImmediate(resolve));
     await submit("turn-2", 200, "result-2");
+    await submit("turn-3", 0, "result-3");
     const usage = events.filter((event) => event.type === "usage/recorded");
-    assert.deepEqual(usage.map((event) => event.tokens.input), [100, 100]);
-    assert.deepEqual(usage.map((event) => event.cost), [1, 1]);
+    assert.deepEqual(usage.map((event) => event.tokens.input), [100, 100, 0]);
+    assert.deepEqual(usage.map((event) => event.cost), [1, 1, 0]);
 
     push({
         type: "system",

@@ -9,6 +9,7 @@ void polyth_link_client_free(uint64_t handle);
 char* polyth_link_invoke(uint64_t handle, const char* method, const char* params_json,
                          const uint8_t* identity_secret, size_t identity_secret_len);
 size_t polyth_link_generate_identity_secret(uint8_t* out, size_t out_len);
+char* polyth_link_identity_endpoint_id(const uint8_t* secret, size_t secret_len);
 char* polyth_link_ticket_host_id(const char* ticket);
 void polyth_link_string_free(char* value);
 }
@@ -92,6 +93,20 @@ Java_com_polyth_mobile_PolythLinkRust_generateIdentitySecret(JNIEnv* env, jclass
   }
   std::fill(secret, secret + sizeof(secret), 0);
   return result;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_polyth_mobile_PolythLinkRust_identityEndpointId(JNIEnv* env, jclass, jbyteArray identity_secret) {
+  if (identity_secret == nullptr || env->GetArrayLength(identity_secret) != 32) return nullptr;
+  uint8_t secret[32] = {};
+  env->GetByteArrayRegion(identity_secret, 0, 32, reinterpret_cast<jbyte*>(secret));
+  if (env->ExceptionCheck()) {
+    std::fill(secret, secret + sizeof(secret), 0);
+    return nullptr;
+  }
+  char* endpoint = polyth_link_identity_endpoint_id(secret, sizeof(secret));
+  std::fill(secret, secret + sizeof(secret), 0);
+  return owned_string(env, endpoint);
 }
 
 extern "C" JNIEXPORT jstring JNICALL

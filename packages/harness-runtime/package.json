@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
+    ".": "./src/public.ts",
     "./features": "./src/features.ts",
     "./capability-text": "./src/capabilityText.ts"
   },

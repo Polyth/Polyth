@@ -3,6 +3,7 @@ import type {
   AgentSessionDetailDto,
   AgentSessionListDto,
   AutoAcceptSetting,
+  HarnessSelection,
   JsonObject,
   ModelRef,
   Project,
@@ -122,7 +123,29 @@ const modelInput = (value: unknown): ModelRef | undefined => {
     || typeof raw.modelID !== "string" || !raw.modelID.trim()) {
     return invalid("model must contain providerID and modelID");
   }
-  return { providerID: raw.providerID, modelID: raw.modelID };
+  if (raw.variant !== undefined && (typeof raw.variant !== "string" || !raw.variant.trim())) {
+    return invalid("model variant must be a non-empty string");
+  }
+  return {
+    providerID: raw.providerID,
+    modelID: raw.modelID,
+    ...(typeof raw.variant === "string" ? { variant: raw.variant } : {}),
+  };
+};
+
+const harnessInput = (value: unknown): HarnessSelection | undefined => {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return invalid("harness must be auto or a pinned harness selection");
+  }
+  const raw = value as Record<string, unknown>;
+  if (raw.mode === "auto" && raw.harnessId === undefined) return { mode: "auto" };
+  if (raw.mode === "pinned"
+    && typeof raw.harnessId === "string"
+    && /^[a-z][a-z0-9-]*$/.test(raw.harnessId)) {
+    return { mode: "pinned", harnessId: raw.harnessId };
+  }
+  return invalid("harness must be auto or a pinned harness selection");
 };
 
 const commandInput = (value: unknown): UserTurnInput["command"] | undefined => {
@@ -439,12 +462,14 @@ export function agentSessionRoutes(deps: AgentSessionRouteDeps): RouteHandler {
         return invalid("projectId is required");
       }
       const model = modelInput(input.model);
+      const harness = harnessInput(input.harness);
       const title = optionalString(input, "title");
       const agent = optionalString(input, "agent");
       const parentId = optionalString(input, "parentId");
       const worktreePath = optionalString(input, "worktreePath");
       const createInput = {
         projectId: input.projectId,
+        ...(harness ? { harness } : {}),
         ...(title !== undefined ? { title } : {}),
         ...(model ? { model } : {}),
         ...(agent !== undefined ? { agent } : {}),

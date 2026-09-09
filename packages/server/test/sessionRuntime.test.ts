@@ -48,3 +48,30 @@ test("session runtime binding uses the parent session worktree cwd", async () =>
   assert.deepEqual(binding.model, projection.model);
   assert.equal(binding.agent, projection.agent);
 });
+
+test("session runtime binding fails closed when its stable project id was removed", async () => {
+  const projection: SessionProjection = {
+    id: "session-deleted-project",
+    projectId: "deleted-project",
+    title: "Old task",
+    status: "idle",
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  let runtimeCalls = 0;
+
+  await assert.rejects(
+    () => resolveSessionRuntimeBinding(projection.id, {
+      store: { projection: async () => projection },
+      projects: { get: async () => undefined },
+      runtimes: {
+        forProject: async () => {
+          runtimeCalls += 1;
+          return {} as AgentRuntime;
+        },
+      },
+    }),
+    (error) => (error as { code?: string }).code === "not-found",
+  );
+  assert.equal(runtimeCalls, 0, "a removed project must never fall back to a default runtime");
+});

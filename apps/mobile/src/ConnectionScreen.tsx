@@ -58,7 +58,7 @@ function trustedConnectionDetail(connection: ConnectionMetadata, activeConnectio
   if (connection.id === activeConnectionId) return "Connected";
   if (connection.revoked || connection.pairingState === "revoked") return "Revoked";
   if (!connection.hasSecureIdentity) return "Secure identity unavailable — pair again";
-  if (connection.pairingState === "prepared") return "Pairing interrupted — verify host approval to recover";
+  if (connection.pairingState === "prepared") return "Pairing interrupted — resume pairing";
   if (connection.lastTransport) return `Last connected via ${connection.lastTransport}`;
   return "Paired securely";
 }
@@ -101,6 +101,8 @@ function connectionHeading(state: ConnectionControllerState | null, nativeAvaila
       return `Switching to ${targetLabel}…`;
     case "reconnecting":
       return `Connecting to ${targetLabel}…`;
+    case "recovering":
+      return `Resuming pairing with ${targetLabel}…`;
     case "connected":
       return "Connected";
     case "offline":
@@ -378,7 +380,9 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
   const reconnectTrusted = async (connection: ConnectionMetadata) => {
     if (!controller || connection.revoked || !connection.hasSecureIdentity) return;
     stopCamera();
-    const launched = await controller.connect(connection.id);
+    const launched = connection.pairingState === "prepared"
+      ? await controller.recoverPrepared(connection.id)
+      : await controller.connect(connection.id);
     if (launched) openLaunch(launched);
   };
 
@@ -533,7 +537,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
 
                 {discoveryPermissionDenied && (
                   <p className="mobile-connect-message">
-                    Local network access is disabled. You can still scan a QR code; enable local network access in system Settings to find nearby servers or use a code.
+                    Local network access is disabled. You can still scan a QR code; enable local network access in system Settings to find nearby servers and use a code.
                   </p>
                 )}
               </>

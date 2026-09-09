@@ -62,6 +62,56 @@ test("model/list becomes a catalog with reasoning efforts as variants and a defa
   assert.ok(models[0]!.capabilities?.includes("input:image"));
 });
 
+test("model/list follows pagination so Codex Spark can be selected at session creation", async () => {
+  const f = fakeRpc();
+  let threadStart: Record<string, unknown> | undefined;
+  f.handle(async (method, params) => {
+    if (method === "model/list") {
+      return params.cursor === "page-2"
+        ? { data: [{ model: "gpt-5.3-codex-spark", displayName: "GPT-5.3 Codex Spark", inputModalities: ["text"] }] }
+        : { data: MODEL_LIST.data, nextCursor: "page-2" };
+    }
+    if (method === "thread/start") {
+      threadStart = params;
+      return { thread: { id: "native-spark" }, model: "gpt-5.3-codex-spark", modelProvider: "openai" };
+    }
+    return {};
+  });
+  const rt = await createCodexRuntime(context, f.rpc);
+  const models = await rt.models();
+  assert.ok(models.some((model) => model.modelID === "gpt-5.3-codex-spark"));
+
+  const outcome = await rt.createSessionOperation!({
+    projectId: "p",
+    sessionId: "canonical",
+    title: "Spark",
+    cwd: "/tmp",
+    model: { providerID: "openai", modelID: "gpt-5.3-codex-spark" },
+  }, "create-spark");
+  assert.equal(outcome.kind, "confirmed");
+  assert.equal(threadStart?.model, "gpt-5.3-codex-spark");
+  assert.deepEqual(
+    f.calls.filter((call) => call.method === "model/list").map((call) => call.params),
+    [{}, { cursor: "page-2" }],
+  );
+});
+
+test("session creation rejects an unavailable Codex model before thread/start", async () => {
+  const f = fakeRpc();
+  f.handle(async (method) => method === "model/list" ? MODEL_LIST : {});
+  const rt = await createCodexRuntime(context, f.rpc);
+  const outcome = await rt.createSessionOperation!({
+    projectId: "p",
+    sessionId: "canonical",
+    title: "Unavailable",
+    cwd: "/tmp",
+    model: { providerID: "openai", modelID: "removed-codex-model" },
+  }, "create-invalid");
+  assert.equal(outcome.kind === "rejected" && outcome.code, "invalid-model");
+  assert.match(outcome.kind === "rejected" ? outcome.message : "", /not available/i);
+  assert.equal(f.calls.some((call) => call.method === "thread/start"), false);
+});
+
 test("a selected variant reaches turn/start as the native effort field", async () => {
   const { rt, turns } = await started();
   const outcome = await rt.startTurnOperation!({

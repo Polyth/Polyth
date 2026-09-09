@@ -12,6 +12,8 @@ private func polythLinkClientFree(_ handle: UInt64)
 private func polythLinkInvoke(_ handle: UInt64, _ method: UnsafePointer<CChar>, _ paramsJSON: UnsafePointer<CChar>, _ identitySecret: UnsafePointer<UInt8>?, _ identitySecretLength: Int) -> UnsafeMutablePointer<CChar>?
 @_silgen_name("polyth_link_generate_identity_secret")
 private func polythLinkGenerateIdentitySecret(_ output: UnsafeMutablePointer<UInt8>, _ outputLength: Int) -> Int
+@_silgen_name("polyth_link_identity_endpoint_id")
+private func polythLinkIdentityEndpointID(_ secret: UnsafePointer<UInt8>, _ secretLength: Int) -> UnsafeMutablePointer<CChar>?
 @_silgen_name("polyth_link_ticket_host_id")
 private func polythLinkTicketHostID(_ ticket: UnsafePointer<CChar>) -> UnsafeMutablePointer<CChar>?
 @_silgen_name("polyth_link_string_free")
@@ -215,6 +217,7 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "cancelPairing", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "listConnections", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "connect", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "recoverConnection", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "disconnect", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "forgetConnection", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getStatus", returnType: CAPPluginReturnPromise),
@@ -318,6 +321,19 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
         return Data(bytes)
     }
 
+    private func identityEndpointID(_ secret: Data) throws -> String {
+        guard secret.count == 32,
+              let pointer = secret.withUnsafeBytes({ raw -> UnsafeMutablePointer<CChar>? in
+                  let bytes = raw.bindMemory(to: UInt8.self)
+                  guard let base = bytes.baseAddress else { return nil }
+                  return polythLinkIdentityEndpointID(base, bytes.count)
+              }) else {
+            throw PolythLinkFailure(code: "pairing-storage-failed")
+        }
+        defer { polythLinkStringFree(pointer) }
+        return String(cString: pointer)
+    }
+
     private func invoke(_ method: String, _ params: [String: Any], secret originalSecret: Data? = nil) throws -> Any {
         let handle = try ensureClient()
         let encoded = try JSONSerialization.data(withJSONObject: params)
@@ -394,13 +410,6 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private func hasConnectionMetadata(_ hostID: String) throws -> Bool {
         try connectionMetadata(hostID) != nil
-    }
-
-    private func discardPrepared(_ connectionID: String) throws {
-        _ = try invoke("disconnect", ["connectionId": connectionID])
-        try keychain.delete(connectionID)
-        _ = try invoke("forget", ["connectionId": connectionID])
-        forgetTransport(connectionID)
     }
 
     private func rememberTransport(_ connectionID: String) {
@@ -583,21 +592,44 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func connect(_ call: CAPPluginCall) {
         guard trusted(call), let connectionID = require(call, "connectionId", code: "device-unknown") else { return }
         queue.async {
-            var prepared = false
             do {
-                prepared = try self.connectionMetadata(connectionID)?["pairingState"] as? String == "prepared"
                 guard var secret = try self.keychain.load(connectionID) else { throw PolythLinkFailure(code: "host-identity-unavailable") }
                 defer { secret.resetBytes(in: 0..<secret.count) }
                 let result = try self.object(self.invoke("connect", ["connectionId": connectionID], secret: secret))
                 self.rememberTransport(connectionID)
                 call.resolve(result)
-            } catch {
-                let code = (error as? PolythLinkFailure)?.code
-                if prepared && (code == "pairing-invalid" || code == "device-unknown") {
-                    try? self.discardPrepared(connectionID)
+            } catch { self.reject(call, error) }
+        }
+    }
+
+    @objc func recoverConnection(_ call: CAPPluginCall) {
+        guard trusted(call), let connectionID = require(call, "connectionId", code: "device-unknown") else { return }
+        queue.async {
+            do {
+                guard var secret = try self.keychain.load(connectionID) else { throw PolythLinkFailure(code: "host-identity-unavailable") }
+                defer { secret.resetBytes(in: 0..<secret.count) }
+                let identityID = try self.identityEndpointID(secret)
+                let result = try self.object(self.invoke("connection.recover", ["connectionId": connectionID], secret: secret))
+                switch result["state"] as? String {
+                case "connected":
+                    var launch = result
+                    launch.removeValue(forKey: "state")
+                    self.rememberTransport(connectionID)
+                    call.resolve(["state": "connected", "launch": launch])
+                case "orphaned":
+                    guard result["identityEndpointId"] as? String == identityID,
+                          try self.connectionMetadata(connectionID)?["pairingState"] as? String == "prepared",
+                          !self.attemptHostIDs().contains(connectionID) else {
+                        throw PolythLinkFailure(code: "pairing-confirmation-required")
+                    }
+                    try self.keychain.delete(connectionID)
+                    _ = try self.invoke("forget", ["connectionId": connectionID])
+                    self.forgetTransport(connectionID)
+                    call.resolve(["state": "needs-pairing", "connectionId": connectionID])
+                default:
+                    throw PolythLinkFailure(code: "transport-protocol-error")
                 }
-                self.reject(call, error)
-            }
+            } catch { self.reject(call, error) }
         }
     }
 

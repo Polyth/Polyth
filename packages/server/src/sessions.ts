@@ -2265,10 +2265,26 @@ export function createSessionService(deps: {
       materialize,
     );
     const contextWindow = projectionContextWindow(sessionId, proj);
+    const usageStatus = proj.tokenTotals !== undefined
+      ? "reported" as const
+      : capabilities.usage === true
+        ? "unavailable" as const
+        : "unsupported" as const;
+    const contextSupported = capabilities.contextOccupancy !== undefined
+      && capabilities.contextOccupancy !== "unknown";
+    const contextStatus = !contextSupported
+      ? "unsupported" as const
+      : contextWindow && contextWindow.source !== "unknown"
+        ? "reported" as const
+        : "unavailable" as const;
     return {
       capabilities,
       commands,
       ...(contextWindow ? { contextWindow } : {}),
+      telemetry: {
+        usage: { status: usageStatus },
+        context: { status: contextStatus },
+      },
       attachmentSupport,
       remote,
       materializeAvailable: materialize,

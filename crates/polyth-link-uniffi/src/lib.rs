@@ -255,7 +255,8 @@ mod tests {
     #[test]
     fn abi_identity_generation_stays_binary() {
         let mut bytes = [0u8; 32];
-        let written = unsafe { polyth_link_generate_identity_secret(bytes.as_mut_ptr(), bytes.len()) };
+        let written =
+            unsafe { polyth_link_generate_identity_secret(bytes.as_mut_ptr(), bytes.len()) };
         assert_eq!(written, 32);
         let endpoint = unsafe { polyth_link_identity_endpoint_id(bytes.as_ptr(), bytes.len()) };
         assert!(!endpoint.is_null());

@@ -66,6 +66,12 @@ struct ProxyHandle {
     listener: OwnedLoopback,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ExistingConnectionMode {
+    Active,
+    RecoverPrepared,
+}
+
 #[derive(Deserialize)]
 struct RpcRequest {
     id: u64,
@@ -257,7 +263,7 @@ async fn dispatch(
             let _metadata = metadata_lock.lock().await;
             list_metadata(&data_dir).map_err(|error| error.code())
         }
-        "connect" => connect_existing(state, params).await,
+        "connect" => connect_existing(state, params, ExistingConnectionMode::Active).await,
         "disconnect" => {
             let id = params
                 .get("connectionId")
@@ -560,6 +566,7 @@ async fn confirm_pairing(
 async fn connect_existing(
     state: Arc<Mutex<ClientState>>,
     params: Value,
+    mode: ExistingConnectionMode,
 ) -> Result<Value, &'static str> {
     let id = params
         .get("connectionId")
@@ -585,12 +592,16 @@ async fn connect_existing(
             boot.mint_fresh_nonce();
             boot.bootstrap_url()
         };
-        return Ok(json!({
+        let mut result = json!({
             "origin": origin,
             "bootstrap": bootstrap,
             "bootstrapUrl": bootstrap,
             "connectionId": id,
-        }));
+        });
+        if mode == ExistingConnectionMode::RecoverPrepared {
+            result["state"] = Value::String("connected".into());
+        }
+        return Ok(result);
     }
     let (data_dir, web_dist, metadata_lock) = {
         let guard = state.lock().await;
@@ -617,8 +628,9 @@ async fn connect_existing(
         {
             return Err(LinkError::DeviceRevoked.code());
         }
-        match item.get("pairingState").and_then(Value::as_str) {
-            Some("active" | "prepared") => {}
+        match (mode, item.get("pairingState").and_then(Value::as_str)) {
+            (ExistingConnectionMode::Active, Some("active"))
+            | (ExistingConnectionMode::RecoverPrepared, Some("prepared")) => {}
             _ => return Err(LinkError::DeviceUnknown.code()),
         }
         let strings = |field: &str| -> Result<Vec<String>, &'static str> {
@@ -651,6 +663,7 @@ async fn connect_existing(
                 .to_string(),
         )
     };
+    let identity_endpoint_id = identity.endpoint_id();
     let endpoint = bind_link_endpoint(identity.secret_key(), policy)
         .await
         .map_err(|_| LinkError::TransportUnavailable.code())?;
@@ -689,12 +702,22 @@ async fn connect_existing(
         &mut send,
         &ControlMessage::ConnectionHello {
             version: PROTOCOL_VERSION,
-            device_endpoint: identity.endpoint_id(),
+            device_endpoint: identity_endpoint_id.clone(),
         },
     )
     .await
     .map_err(|error| error.code())?;
-    validate_connection_response(read_control(&mut recv).await.map_err(|error| error.code())?)?;
+    let response = read_control(&mut recv).await.map_err(|error| error.code())?;
+    if mode == ExistingConnectionMode::RecoverPrepared && authoritative_orphan(&response) {
+        connection.close(0u32.into(), b"orphaned-pairing");
+        endpoint.close().await;
+        return Ok(json!({
+            "state": "orphaned",
+            "connectionId": id,
+            "identityEndpointId": identity_endpoint_id,
+        }));
+    }
+    validate_connection_response(response)?;
     let transport = path_transport(&connection);
     {
         let _metadata = metadata_lock.lock().await;
@@ -743,12 +766,16 @@ async fn connect_existing(
         connection,
         proxy_listener,
     );
-    Ok(json!({
+    let mut result = json!({
         "origin": origin,
         "bootstrap": bootstrap,
         "bootstrapUrl": bootstrap,
         "connectionId": id,
-    }))
+    });
+    if mode == ExistingConnectionMode::RecoverPrepared {
+        result["state"] = Value::String("connected".into());
+    }
+    Ok(result)
 }
 
 fn validate_connection_response(message: ControlMessage) -> Result<(), &'static str> {
@@ -761,6 +788,14 @@ fn validate_connection_response(message: ControlMessage) -> Result<(), &'static 
         ControlMessage::ConnectionRejected { code } => Err(leak_code(code)),
         _ => Err(LinkError::TransportProtocolError.code()),
     }
+}
+
+fn authoritative_orphan(message: &ControlMessage) -> bool {
+    matches!(
+        message,
+        ControlMessage::ConnectionRejected { code }
+            if code == "pairing-invalid" || code == "device-unknown"
+    )
 }
 
 fn transport_policy(value: &str) -> Result<TransportPolicy, &'static str> {
@@ -1387,6 +1422,19 @@ fn leak_code(code: String) -> &'static str {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn only_exact_host_rejections_are_authoritative_orphan_evidence() {
+        for code in ["pairing-invalid", "device-unknown"] {
+            assert!(authoritative_orphan(&ControlMessage::ConnectionRejected {
+                code: code.into(),
+            }));
+        }
+        assert!(!authoritative_orphan(&ControlMessage::ConnectionRejected {
+            code: "unknown".into(),
+        }));
+        assert!(!authoritative_orphan(&ControlMessage::DeviceRevoked));
+    }
 
     #[test]
     fn reconnect_metadata_can_be_durably_prepared_before_confirmation() {

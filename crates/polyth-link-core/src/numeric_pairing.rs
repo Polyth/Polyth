@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use opaque_ke::ksf::Identity;
+use opaque_ke::argon2::{Algorithm, Argon2, Params, Version};
 use opaque_ke::{
     CipherSuite, ClientLogin, ClientLoginFinishParameters, ClientRegistration,
     ClientRegistrationFinishParameters, CredentialFinalization, CredentialRequest,
@@ -23,13 +23,14 @@ const MAX_CLIENT_ATTEMPTS: usize = 3;
 const MAX_ENDPOINT_ATTEMPTS: usize = 6;
 const MAX_GLOBAL_ATTEMPTS: usize = 30;
 const MAX_PENDING_LOGINS: usize = 16;
+const KSF_PROFILE: &str = "argon2id-v1-m65536-t3-p1";
 
 struct NumericCipherSuite;
 
 impl CipherSuite for NumericCipherSuite {
     type OprfCs = Ristretto255;
     type KeyExchange = TripleDh<Ristretto255, Sha512>;
-    type Ksf = Identity;
+    type Ksf = Argon2<'static>;
 }
 
 #[derive(Clone, Copy)]
@@ -146,10 +147,9 @@ impl NumericPairing {
         let code = format!("{:06}", rng.gen_range(0..1_000_000u32));
         let credential_id = credential_id(host_endpoint_id, pairing_id);
         let password_file = register_password(&self.setup, code.as_bytes(), &credential_id)?;
-        let expires_at = unix_ms_to_rfc3339(
-            now_unix_ms().saturating_add(NUMERIC_TTL.as_millis() as u64),
-        )
-        .map_err(|_| LinkError::PairingInvalid)?;
+        let expires_at =
+            unix_ms_to_rfc3339(now_unix_ms().saturating_add(NUMERIC_TTL.as_millis() as u64))
+                .map_err(|_| LinkError::PairingInvalid)?;
 
         self.active = Some(NumericInvitation {
             pairing_id: pairing_id.to_string(),
@@ -222,10 +222,9 @@ impl NumericPairing {
         let active = self.active.as_ref().ok_or(LinkError::PairingExpired)?;
         let credential_request = CredentialRequest::<NumericCipherSuite>::deserialize(request)
             .map_err(|_| LinkError::PairingInvalid)?;
-        let password_file = ServerRegistration::<NumericCipherSuite>::deserialize(
-            &active.password_file,
-        )
-        .map_err(|_| LinkError::PairingInvalid)?;
+        let password_file =
+            ServerRegistration::<NumericCipherSuite>::deserialize(&active.password_file)
+                .map_err(|_| LinkError::PairingInvalid)?;
         let transcript = context(
             &active.host_endpoint_id,
             &active.pairing_id,
@@ -327,7 +326,9 @@ impl NumericPairing {
 
     pub fn active_pairing_id(&mut self, now: Instant) -> Option<&str> {
         self.expire(now);
-        self.active.as_ref().map(|active| active.pairing_id.as_str())
+        self.active
+            .as_ref()
+            .map(|active| active.pairing_id.as_str())
     }
 
     fn reserve_attempt(
@@ -381,12 +382,7 @@ impl NumericPairing {
         Ok(rate_attempt.id)
     }
 
-    fn refund_success(
-        &mut self,
-        device_endpoint_id: &str,
-        pairing_id: &str,
-        rate_attempt_id: u64,
-    ) {
+    fn refund_success(&mut self, device_endpoint_id: &str, pairing_id: &str, rate_attempt_id: u64) {
         let key = (pairing_id.to_string(), device_endpoint_id.to_string());
         let remove_client = if let Some(attempts) = self.attempts_by_client.get_mut(&key) {
             *attempts = attempts.saturating_sub(1);
@@ -398,12 +394,13 @@ impl NumericPairing {
             self.attempts_by_client.remove(&key);
         }
 
-        let remove_endpoint = if let Some(attempts) = self.attempts_by_endpoint.get_mut(device_endpoint_id) {
-            attempts.retain(|attempt| attempt.id != rate_attempt_id);
-            attempts.is_empty()
-        } else {
-            false
-        };
+        let remove_endpoint =
+            if let Some(attempts) = self.attempts_by_endpoint.get_mut(device_endpoint_id) {
+                attempts.retain(|attempt| attempt.id != rate_attempt_id);
+                attempts.is_empty()
+            } else {
+                false
+            };
         if remove_endpoint {
             self.attempts_by_endpoint.remove(device_endpoint_id);
         }
@@ -503,6 +500,7 @@ impl NumericClientLogin {
             &challenge.expires_at,
         );
         let mut rng = OsRng;
+        let ksf = numeric_ksf();
         let finished = self
             .state
             .finish(
@@ -511,6 +509,7 @@ impl NumericClientLogin {
                 response,
                 ClientLoginFinishParameters {
                     context: Some(&transcript),
+                    ksf: Some(&ksf),
                     ..ClientLoginFinishParameters::default()
                 },
             )
@@ -538,35 +537,46 @@ fn register_password(
     let mut rng = OsRng;
     let client = ClientRegistration::<NumericCipherSuite>::start(&mut rng, password)
         .map_err(|_| LinkError::PairingInvalid)?;
-    let server = ServerRegistration::<NumericCipherSuite>::start(
-        setup,
-        client.message,
-        credential_id,
-    )
-    .map_err(|_| LinkError::PairingInvalid)?;
+    let server =
+        ServerRegistration::<NumericCipherSuite>::start(setup, client.message, credential_id)
+            .map_err(|_| LinkError::PairingInvalid)?;
+    let ksf = numeric_ksf();
     let upload = client
         .state
         .finish(
             &mut rng,
             password,
             server.message,
-            ClientRegistrationFinishParameters::default(),
+            ClientRegistrationFinishParameters {
+                ksf: Some(&ksf),
+                ..ClientRegistrationFinishParameters::default()
+            },
         )
         .map_err(|_| LinkError::PairingInvalid)?;
-    Ok(ServerRegistration::<NumericCipherSuite>::finish(upload.message)
-        .serialize()
-        .to_vec())
+    Ok(
+        ServerRegistration::<NumericCipherSuite>::finish(upload.message)
+            .serialize()
+            .to_vec(),
+    )
 }
 
 fn credential_id(host_endpoint_id: &str, pairing_id: &str) -> Vec<u8> {
-    format!("polyth-numeric-v1:{host_endpoint_id}:{pairing_id}").into_bytes()
+    format!("polyth-numeric-v1:{KSF_PROFILE}:{host_endpoint_id}:{pairing_id}").into_bytes()
 }
 
 fn context(host_endpoint_id: &str, pairing_id: &str, expires_at: &str) -> Vec<u8> {
     format!(
-        "polyth-link/numeric-pair/v1/{host_endpoint_id}/{pairing_id}/{expires_at}"
+        "polyth-link/numeric-pair/v1/{KSF_PROFILE}/{host_endpoint_id}/{pairing_id}/{expires_at}"
     )
     .into_bytes()
+}
+
+fn numeric_ksf() -> Argon2<'static> {
+    Argon2::new(
+        Algorithm::Argon2id,
+        Version::V0x13,
+        Params::new(65_536, 3, 1, None).expect("fixed Argon2id profile"),
+    )
 }
 
 fn validate_endpoint(value: &str) -> Result<(), LinkError> {
@@ -634,6 +644,20 @@ mod tests {
     }
 
     #[test]
+    fn numeric_pairing_binds_the_fixed_argon2id_profile() {
+        let configured = format!("{:?}", numeric_ksf());
+        assert!(configured.contains("Argon2id"));
+        assert!(configured.contains("V0x13"));
+        assert_eq!(numeric_ksf().params().m_cost(), 65_536);
+        assert_eq!(numeric_ksf().params().t_cost(), 3);
+        assert_eq!(numeric_ksf().params().p_cost(), 1);
+        assert!(credential_id(HOST, "pairing")
+            .starts_with(format!("polyth-numeric-v1:{KSF_PROFILE}:").as_bytes()));
+        assert!(context(HOST, "pairing", "expiry")
+            .starts_with(format!("polyth-link/numeric-pair/v1/{KSF_PROFILE}/").as_bytes()));
+    }
+
+    #[test]
     fn successful_login_refunds_only_its_own_rate_limit_slot() {
         let now = Instant::now();
         let mut server = NumericPairing::new();
@@ -659,7 +683,12 @@ mod tests {
         )
         .unwrap();
         server
-            .start_login(&other_device, &bootstrap.pairing_id, &other_request.request, now)
+            .start_login(
+                &other_device,
+                &bootstrap.pairing_id,
+                &other_request.request,
+                now,
+            )
             .unwrap();
 
         let own_rate_id = server.pending[&challenge.attempt_id].rate_attempt_id;
@@ -674,8 +703,14 @@ mod tests {
             .finish_login(DEVICE, &finish.attempt_id, &finish.finalization, now)
             .unwrap();
 
-        assert!(!server.global_attempts.iter().any(|attempt| attempt.id == own_rate_id));
-        assert!(server.global_attempts.iter().any(|attempt| attempt.id == other_rate_id));
+        assert!(!server
+            .global_attempts
+            .iter()
+            .any(|attempt| attempt.id == own_rate_id));
+        assert!(server
+            .global_attempts
+            .iter()
+            .any(|attempt| attempt.id == other_rate_id));
     }
 
     #[test]
@@ -857,6 +892,7 @@ mod tests {
             server
                 .start_login(&endpoint, &bootstrap.pairing_id, &request.request, now)
                 .unwrap();
+            server.pending.clear();
         }
         let endpoint = device(MAX_GLOBAL_ATTEMPTS + 1);
         let (_client, request) = NumericClientLogin::start(

@@ -69,6 +69,7 @@ function native(overrides: Partial<PolythLinkNative> = {}): PolythLinkNative {
     cancelPairing: async () => undefined,
     listConnections: async () => [connection("a")],
     connect: async (connectionId) => launch(connectionId),
+    recoverConnection: async (connectionId) => ({ state: "connected", launch: launch(connectionId) }),
     disconnect: async () => undefined,
     forgetConnection: async () => undefined,
     getStatus: async () => ({ state: "disconnected" }),
@@ -162,21 +163,23 @@ test("cancelled approval tears down a late successful connection", async () => {
   assert.deepEqual(disconnected, ["a"]);
 });
 
-test("rapid A to B to A switch serializes native mutations and honors newest intent", async () => {
-  const disconnectA = deferred<void>();
+test("rapid A to B to A switch connects before disconnecting and honors newest intent", async () => {
+  const connectB = deferred<ProxyLaunch>();
   const connectCalls: string[] = [];
-  let disconnectStarted = false;
+  const disconnected: string[] = [];
+  let connectStarted = false;
   const adapter = native({
     listConnections: async () => [connection("a"), connection("b")],
     getStatus: async (connectionId) => ({ state: connectionId === "a" ? "connected" : "disconnected" }),
     disconnect: async (connectionId) => {
-      if (connectionId === "a") {
-        disconnectStarted = true;
-        await disconnectA.promise;
-      }
+      disconnected.push(connectionId);
     },
     connect: async (connectionId) => {
       connectCalls.push(connectionId);
+      if (connectionId === "b") {
+        connectStarted = true;
+        return connectB.promise;
+      }
       return launch(connectionId);
     },
   });
@@ -184,15 +187,88 @@ test("rapid A to B to A switch serializes native mutations and honors newest int
   assert.equal(controller.state.activeConnectionId, "a");
 
   const toB = controller.connect("b");
-  while (!disconnectStarted) await Promise.resolve();
+  while (!connectStarted) await Promise.resolve();
+  assert.deepEqual(disconnected, []);
   const backToA = controller.connect("a");
-  disconnectA.resolve();
+  connectB.resolve(launch("b"));
 
   assert.equal(await toB, undefined);
   assert.equal((await backToA)?.connectionId, "a");
-  assert.deepEqual(connectCalls, ["a"]);
+  assert.deepEqual(connectCalls, ["b", "a"]);
+  assert.deepEqual(disconnected, ["b"]);
   assert.equal(controller.state.phase, "connected");
   assert.equal(controller.state.activeConnectionId, "a");
+});
+
+test("failed switch leaves the active connection usable", async () => {
+  const disconnected: string[] = [];
+  const controller = await loadedController(native({
+    listConnections: async () => [connection("a"), connection("b")],
+    getStatus: async (connectionId) => ({ state: connectionId === "a" ? "connected" : "disconnected" }),
+    connect: async (connectionId) => {
+      if (connectionId === "b") throw Object.assign(new Error("transport-unavailable"), { code: "transport-unavailable" });
+      return launch(connectionId);
+    },
+    disconnect: async (connectionId) => { disconnected.push(connectionId); },
+  }));
+
+  assert.equal(await controller.connect("b"), undefined);
+  assert.deepEqual(disconnected, []);
+  assert.equal(controller.state.activeConnectionId, "a");
+  assert.equal(controller.state.phase, "unreachable");
+});
+
+test("prepared state uses explicit recovery and removes authoritative orphans", async () => {
+  const prepared = { ...connection("a"), pairingState: "prepared" as const };
+  let connects = 0;
+  let recoveries = 0;
+  const controller = await loadedController(native({
+    listConnections: async () => [prepared],
+    connect: async (connectionId) => { connects += 1; return launch(connectionId); },
+    recoverConnection: async (connectionId) => {
+      recoveries += 1;
+      return { state: "needs-pairing", connectionId };
+    },
+  }));
+
+  assert.equal(await controller.connect("a"), undefined);
+  assert.equal(connects, 0);
+  assert.equal(await controller.recoverPrepared("a"), undefined);
+  assert.equal(recoveries, 1);
+  assert.deepEqual(controller.state.trusted, []);
+  assert.match(controller.state.error ?? "", /Pair again/);
+});
+
+test("prepared recovery preserves state on non-authoritative failure", async () => {
+  const prepared = { ...connection("a"), pairingState: "prepared" as const };
+  const controller = await loadedController(native({
+    listConnections: async () => [prepared],
+    recoverConnection: async () => {
+      throw Object.assign(new Error("transport-unavailable"), { code: "transport-unavailable" });
+    },
+  }));
+
+  assert.equal(await controller.recoverPrepared("a"), undefined);
+  assert.equal(controller.state.trusted[0]?.pairingState, "prepared");
+  assert.equal(controller.state.phase, "unreachable");
+});
+
+test("successful recovery connects the new host before disconnecting the old host", async () => {
+  const prepared = { ...connection("b"), pairingState: "prepared" as const };
+  const calls: string[] = [];
+  const controller = await loadedController(native({
+    listConnections: async () => [connection("a"), prepared],
+    getStatus: async (connectionId) => ({ state: connectionId === "a" ? "connected" : "disconnected" }),
+    recoverConnection: async (connectionId) => {
+      calls.push(`recover:${connectionId}`);
+      return { state: "connected", launch: launch(connectionId) };
+    },
+    disconnect: async (connectionId) => { calls.push(`disconnect:${connectionId}`); },
+  }));
+
+  assert.equal((await controller.recoverPrepared("b"))?.connectionId, "b");
+  assert.deepEqual(calls, ["recover:b", "disconnect:a"]);
+  assert.equal(controller.state.activeConnectionId, "b");
 });
 
 test("discovery results are progressive and stop when QR becomes the newest intent", async () => {

@@ -25,6 +25,7 @@ export {
   isPlaceholderTitle,
   titleFromPrompt,
 } from "./features.ts";
+export { contextWindowTelemetry, normalizeTokenUsage } from "./telemetry.ts";
 // The canonical model/attachment control rules live on the contract surface so
 // the browser can apply the same ones without importing this node-side
 // package. Adapters keep one import site by re-exporting them here.

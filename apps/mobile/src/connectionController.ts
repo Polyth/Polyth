@@ -23,6 +23,7 @@ export type ConnectionPhase =
   | "connected"
   | "switching"
   | "reconnecting"
+  | "recovering"
   | "offline"
   | "unreachable"
   | "revoked"
@@ -128,6 +129,7 @@ export function connectionPhaseBusy(phase: ConnectionPhase): boolean {
     || phase === "committing"
     || phase === "switching"
     || phase === "reconnecting"
+    || phase === "recovering"
     || phase === "numeric-code-validating";
 }
 
@@ -210,6 +212,35 @@ export class ConnectionController {
     const run = this.#connectionQueue.then(operation, operation);
     this.#connectionQueue = run.then(() => undefined, () => undefined);
     return run;
+  }
+
+  async #activateLaunch(epoch: number, launch: ProxyLaunch): Promise<ProxyLaunch | undefined> {
+    const previous = this.#physicalActiveConnectionId;
+    if (!this.#current(epoch)) {
+      await this.#native.disconnect(launch.connectionId).catch(() => undefined);
+      if (this.#physicalActiveConnectionId === launch.connectionId) {
+        this.#physicalActiveConnectionId = null;
+      }
+      return undefined;
+    }
+
+    this.#physicalActiveConnectionId = launch.connectionId;
+    if (previous && previous !== launch.connectionId) {
+      try {
+        await this.#native.disconnect(previous);
+      } catch (cause) {
+        await this.#native.disconnect(launch.connectionId).catch(() => undefined);
+        this.#physicalActiveConnectionId = previous;
+        throw cause;
+      }
+    }
+    if (!this.#current(epoch)) return undefined;
+    this.#set({
+      phase: "connected",
+      activeConnectionId: launch.connectionId,
+      targetConnectionId: null,
+    });
+    return launch;
   }
 
   async loadTrustedConnections(): Promise<void> {
@@ -419,6 +450,13 @@ export class ConnectionController {
       this.#intent("identity-mismatch", { targetConnectionId: connectionId });
       return undefined;
     }
+    if (connection.pairingState === "prepared") {
+      this.#intent("pairing-rejected", {
+        targetConnectionId: connectionId,
+        error: "Resume the interrupted pairing before connecting.",
+      });
+      return undefined;
+    }
 
     const switching = this.#physicalActiveConnectionId !== null
       && this.#physicalActiveConnectionId !== connectionId;
@@ -429,31 +467,44 @@ export class ConnectionController {
     return this.#enqueueConnection(async () => {
       if (!this.#current(epoch)) return undefined;
       try {
-        const active = this.#physicalActiveConnectionId;
-        if (active && active !== connectionId) {
-          await this.#native.disconnect(active);
-          this.#physicalActiveConnectionId = null;
-          if (!this.#current(epoch)) return undefined;
-        }
-
         const launch = await this.#native.connect(connectionId);
-        this.#physicalActiveConnectionId = launch.connectionId;
-        if (!this.#current(epoch)) {
-          if (this.#state.targetConnectionId !== launch.connectionId
-            && this.#state.activeConnectionId !== launch.connectionId) {
-            await this.#native.disconnect(launch.connectionId).catch(() => undefined);
-            if (this.#physicalActiveConnectionId === launch.connectionId) {
-              this.#physicalActiveConnectionId = null;
-            }
+        return await this.#activateLaunch(epoch, launch);
+      } catch (cause) {
+        if (!this.#current(epoch)) return undefined;
+        this.#set({
+          phase: failurePhase(cause, "unreachable"),
+          targetConnectionId: null,
+          error: errorText(cause),
+        });
+        return undefined;
+      }
+    });
+  }
+
+  async recoverPrepared(connectionId: string): Promise<ProxyLaunch | undefined> {
+    const connection = this.#state.trusted.find((item) => item.id === connectionId);
+    if (!connection || connection.pairingState !== "prepared") return undefined;
+    if (!connection.hasSecureIdentity) {
+      this.#intent("identity-mismatch", { targetConnectionId: connectionId });
+      return undefined;
+    }
+    const epoch = this.#intent("recovering", { targetConnectionId: connectionId });
+    return this.#enqueueConnection(async () => {
+      if (!this.#current(epoch)) return undefined;
+      try {
+        const result = await this.#native.recoverConnection(connectionId);
+        if (result.state === "needs-pairing") {
+          if (this.#current(epoch)) {
+            this.#set({
+              phase: "idle",
+              trusted: this.#state.trusted.filter((item) => item.id !== connectionId),
+              targetConnectionId: null,
+              error: "Pairing was not completed on the host. Pair again using a new QR code or nearby code.",
+            });
           }
           return undefined;
         }
-        this.#set({
-          phase: "connected",
-          activeConnectionId: launch.connectionId,
-          targetConnectionId: null,
-        });
-        return launch;
+        return await this.#activateLaunch(epoch, result.launch);
       } catch (cause) {
         if (!this.#current(epoch)) return undefined;
         this.#set({

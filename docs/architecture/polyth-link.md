@@ -29,7 +29,15 @@ or unauthenticated share link.
    connection metadata and the loopback bootstrap URL. Device identity stays
    native: iOS stores it in Keychain; Android stores an encrypted identity blob
    protected by an Android Keystore key. The privileged Capacitor plugin is
-   callable only from the bundled app origin, not from the loopback page.
+    callable only from the bundled app origin, not from the loopback page.
+7. **Local numeric pairing.** Nearby discovery supplies only a pinned bootstrap
+   hint. The six-digit code is authenticated with OPAQUE using the fixed
+   `argon2id-v1-m65536-t3-p1` profile, a 120-second lifetime, and bounded
+   per-device, endpoint, and host attempts; it never becomes persistent trust.
+8. **Interrupted pairing recovery.** A durable `prepared` record is never an
+   active connection. Only the explicit native recovery operation may probe the
+   pinned host. It promotes an accepted device, or removes the matching native
+   identity and metadata only after an exact authoritative orphan rejection.
 
 ## Packages
 

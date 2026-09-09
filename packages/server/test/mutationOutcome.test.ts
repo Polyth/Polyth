@@ -172,6 +172,73 @@ test("lost prompt response records one durable unknown and never redispatches", 
   await store.close();
 });
 
+test("a post-admission runtime timeout is durably closed by a terminal error event", async () => {
+  const listeners = new Set<Listener>();
+  const emit = (sessionId: string, event: RuntimeEvent): void => {
+    for (const listener of listeners) listener(sessionId, event);
+  };
+  const runtime = {
+    harnessId: "cursor",
+    capabilities: async () => ({
+      streaming: true,
+      permissions: true,
+      questions: false,
+      compaction: false,
+      subagents: false,
+      usage: false,
+      contextOccupancy: "unknown" as const,
+    }),
+    models: async () => [],
+    agents: async () => [],
+    ensureSession: async (input: { sessionId: string; backendSessionId?: string }) =>
+      input.backendSessionId ?? `backend-${input.sessionId}`,
+    sessions: async () => [],
+    history: async () => [],
+    startTurn: async () => undefined,
+    startTurnOperation: async (request: { sessionId: string }, operationId: string) => {
+      emit(request.sessionId, { type: "turn/started", turnId: operationId });
+      setTimeout(() => emit(request.sessionId, {
+        type: "turn/stopped",
+        turnId: operationId,
+        reason: "error",
+        error: "ACP prompt timed out before a terminal result",
+        code: "unknown",
+      }), 10);
+      return { kind: "confirmed", value: { admissionId: operationId }, receipt: operationId };
+    },
+    abort: async () => undefined,
+    replyPermission: async () => undefined,
+    replyQuestion: async () => undefined,
+    onEvent(callback: Listener) {
+      listeners.add(callback);
+      return { dispose: () => listeners.delete(callback) };
+    },
+    dispose: async () => undefined,
+  } as AgentRuntime;
+  const { sessions, store } = harness(runtime);
+  const created = await sessions.create({ projectId: "project-1", title: "Cursor timeout" });
+
+  await sessions.send(created.id, { text: "follow up" });
+  await waitFor(async () => (await store.events(created.id)).some((event) =>
+    event.type === "turn/stopped"
+    && (event.data as { reason?: string; code?: string }).reason === "error"
+    && (event.data as { code?: string }).code === "unknown"));
+
+  const events = await store.events(created.id);
+  assert.equal(events.filter((event) => event.type === "turn/started").length, 1);
+  assert.deepEqual(
+    events.filter((event) => event.type === "turn/stopped").map((event) => event.data),
+    [{
+      turnId: events.find((event) => event.type === "turn/started")?.data.turnId,
+      reason: "error",
+      error: "ACP prompt timed out before a terminal result",
+      code: "unknown",
+    }],
+  );
+  assert.equal((await store.projection(created.id))?.status, "failed");
+  await store.close();
+});
+
 test("unknown queue admission retains and blocks the FIFO reservation", async () => {
   const listeners = new Set<Listener>();
   let submissions = 0;

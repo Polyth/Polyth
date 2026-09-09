@@ -151,7 +151,19 @@ test("declared attachment modalities fail closed before runtime admission", asyn
 test("context occupancy and compaction never overwrite additive lifetime totals", async () => {
   const f = fixture({ usage: true, contextOccupancy: "native", compaction: true });
   const { id } = await f.sessions.create({ projectId: "p", title: "T" });
+  assert.deepEqual((await f.sessions.runtimeFeatures!(id)).telemetry, {
+    usage: { status: "unavailable" },
+    context: { status: "unavailable" },
+  });
   await f.sessions.send(id, { text: "measure" });
+  f.emit(id, {
+    type: "usage/recorded",
+    model: { providerID: "fake", modelID: "m" },
+    tokens: { input: 0, output: 0 },
+  });
+  await flush();
+  assert.deepEqual((await f.store.projection(id))?.tokenTotals, { input: 0, output: 0 });
+  assert.equal((await f.sessions.runtimeFeatures!(id)).telemetry?.usage.status, "reported");
   f.emit(id, {
     type: "usage/recorded",
     model: { providerID: "fake", modelID: "m" },
@@ -175,6 +187,10 @@ test("context occupancy and compaction never overwrite additive lifetime totals"
   assert.equal(projection?.contextWindow, undefined);
   const features = await f.sessions.runtimeFeatures!(id);
   assert.equal(features.contextWindow?.fraction, 0.4);
+  assert.deepEqual(features.telemetry, {
+    usage: { status: "reported" },
+    context: { status: "reported" },
+  });
 
   f.emit(id, { type: "session/compacted" });
   await flush();
@@ -183,12 +199,17 @@ test("context occupancy and compaction never overwrite additive lifetime totals"
   assert.equal(projection?.contextWindow, undefined);
   const afterCompact = await f.sessions.runtimeFeatures!(id);
   assert.equal(afterCompact.contextWindow?.source, "unknown");
+  assert.equal(afterCompact.telemetry?.context.status, "unavailable");
   await f.store.close();
 });
 
 test("occupancy-unknown compaction keeps unknown window instead of deleting it", async () => {
   const f = fixture({ usage: true, contextOccupancy: "unknown", compaction: true });
   const { id } = await f.sessions.create({ projectId: "p", title: "T" });
+  assert.deepEqual((await f.sessions.runtimeFeatures!(id)).telemetry, {
+    usage: { status: "unavailable" },
+    context: { status: "unsupported" },
+  });
   await f.sessions.send(id, { text: "measure" });
   f.emit(id, {
     type: "context/updated",
@@ -205,6 +226,7 @@ test("occupancy-unknown compaction keeps unknown window instead of deleting it",
   assert.equal(projection?.contextWindow, undefined);
   const features = await f.sessions.runtimeFeatures!(id);
   assert.equal(features.contextWindow?.source, "unknown");
+  assert.equal(features.telemetry?.context.status, "unsupported");
   f.emit(id, {
     type: "usage/recorded",
     model: { providerID: "fake", modelID: "m" },
@@ -214,6 +236,10 @@ test("occupancy-unknown compaction keeps unknown window instead of deleting it",
   projection = await f.store.projection(id);
   assert.equal(projection?.contextWindow, undefined);
   assert.equal((await f.sessions.runtimeFeatures!(id)).contextWindow?.source, "unknown");
+  assert.deepEqual((await f.sessions.runtimeFeatures!(id)).telemetry, {
+    usage: { status: "reported" },
+    context: { status: "unsupported" },
+  });
   assert.equal(projection?.tokenTotals?.input, 10);
   await f.store.close();
 });

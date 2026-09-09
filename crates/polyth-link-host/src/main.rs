@@ -442,17 +442,14 @@ async fn dispatch(
                     Instant::now(),
                 )
                 .map_err(|e| e.code())?;
-            let numeric = match conn::create_code(
-                &host_endpoint,
-                &invitation.pairing_id,
-                Instant::now(),
-            ) {
-                Ok(code) => code,
-                Err(error) => {
-                    let _ = state.pairing.cancel(&invitation.pairing_id);
-                    return Err(error.code());
-                }
-            };
+            let numeric =
+                match conn::create_code(&host_endpoint, &invitation.pairing_id, Instant::now()) {
+                    Ok(code) => code,
+                    Err(error) => {
+                        let _ = state.pairing.cancel(&invitation.pairing_id);
+                        return Err(error.code());
+                    }
+                };
             let qr = ticket_qr_modules(&invitation.ticket).unwrap_or_default();
             let _ = state
                 .events

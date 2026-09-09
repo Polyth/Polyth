@@ -46,6 +46,7 @@ test("setPolythLinkNative flips nativeLinkAvailable", async () => {
     cancelPairing: async () => {},
     listConnections: async () => [],
     connect: async () => ({ origin: "http://127.0.0.1:9", bootstrapUrl: "http://127.0.0.1:9/__polyth_boot/abc", connectionId: "c1" }),
+    recoverConnection: async () => ({ state: "needs-pairing", connectionId: "c1" }),
     disconnect: async () => {},
     forgetConnection: async () => {},
     getStatus: async () => ({ state: "connected" }),
