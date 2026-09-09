@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type { RouteHandler } from "@polyth/contracts";
 import {
   localOnlyRemoteAccess,
@@ -13,8 +15,12 @@ import {
   type DictationService,
   type DictationTransport,
   type DictationLatencyPreference,
+  type SttAdapter,
 } from "./index.ts";
 import { createElevenLabsSttAdapter } from "./elevenlabs.ts";
+import { createLocalModelManager } from "./localModels.ts";
+import { localModelRoutes } from "./localModelRoutes.ts";
+import { createLocalNemotronSttAdapter } from "./localNemotron.ts";
 
 interface VoiceEngineSettings {
   baseUrl: string;
@@ -56,6 +62,12 @@ const DICTATION_STATUS: Record<string, number> = {
   invalid_credentials: 401,
   rate_limited: 429,
   network_error: 502,
+  local_model_missing: 404,
+  local_model_downloading: 409,
+  local_model_failed: 500,
+  worker_crashed: 503,
+  session_expired: 409,
+  unsupported_language: 400,
   limit: 429,
   backpressure_overflow: 429,
   conflict: 409,
@@ -110,7 +122,10 @@ export function dictationRoutes(dictation: DictationService): RouteHandler {
 
 const MAX_SPEAK_CHARS = 8_000;
 
-const providerAvailability = (voice: VoiceSettingsService) => {
+const providerAvailability = (
+  voice: VoiceSettingsService,
+  localModelInstalled?: (id: string) => boolean,
+) => {
   const settings = voice.get();
   const selected = settings.dictation.provider;
   const key = voice.resolveKey("dictation");
@@ -126,6 +141,10 @@ const providerAvailability = (voice: VoiceSettingsService) => {
     } else if (provider.id === "openai-transcribe") {
       available = selected === provider.id && !!key;
       if (!available) reason = selected === provider.id ? `missing ${settings.dictation.apiKeyEnv || "OPENAI_API_KEY"}` : "not selected";
+    } else if (provider.id === "local-nemotron") {
+      const model = settings.dictation.localModel || "nemotron-3.5-streaming-0.6b-80ms";
+      available = selected === provider.id && !!localModelInstalled?.(model);
+      if (!available) reason = selected === provider.id ? "local model is not downloaded" : "not selected";
     } else if (provider.id === "web-speech") {
       // The server cannot probe browser Web Speech support; the web client does.
       available = selected === provider.id;
@@ -140,6 +159,7 @@ export function voiceRoutes(deps: {
   voice: VoiceSettingsService;
   fetchFn?: typeof fetch;
   summarize?: (text: string) => Promise<string>;
+  localModelInstalled?: (id: string) => boolean;
 }): RouteHandler {
   const fetchFn = deps.fetchFn ?? fetch;
   return async (request) => {
@@ -165,7 +185,7 @@ export function voiceRoutes(deps: {
       return true;
     }
     if (path === "/api/voice/providers" && method === "GET") {
-      json(200, { providers: providerAvailability(deps.voice) });
+      json(200, { providers: providerAvailability(deps.voice, deps.localModelInstalled) });
       return true;
     }
     if (path === "/api/dictation/token" && method === "POST") {
@@ -200,7 +220,6 @@ export function voiceRoutes(deps: {
           json(502, { error: "protocol_error", message: "ElevenLabs token response did not include a token" });
           return true;
         }
-        // ElevenLabs documents these tokens as one-use and expiring after 15m.
         json(200, { provider: "elevenlabs", token: payload.token, expiresInSeconds: 900 });
       } catch (error) {
         json(502, {
@@ -303,13 +322,36 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   const voice = host.services.require(
     serverServiceKey<VoiceSettingsService>("voice.settings"),
   );
+  const modelsRoot = join(host.storageDir, "models");
+  const localModels = createLocalModelManager({ root: modelsRoot });
+  let localAdapter: SttAdapter | null = null;
+  let localAdapterPath = "";
+
+  const installedLocalModel = (id: string): string | null => {
+    const path = join(modelsRoot, id);
+    return existsSync(path) ? path : null;
+  };
+
+  const localNemotronAdapter = (id: string): SttAdapter | null => {
+    const path = installedLocalModel(id);
+    if (!path) return null;
+    if (!localAdapter || localAdapterPath !== path) {
+      localAdapter = createLocalNemotronSttAdapter({ modelDir: path });
+      localAdapterPath = path;
+    }
+    return localAdapter;
+  };
+
   const dictation = createDictationService({
     adapter: () => {
       const settings = voice.get();
       const selected = settings.dictation;
-      if (selected.transport === "direct-browser" || selected.transport === "local-worker" || selected.provider === "web-speech") {
-        return null;
+      if (selected.provider === "web-speech" || selected.transport === "direct-browser") return null;
+      if (selected.provider === "local-nemotron") {
+        if (selected.transport !== "auto" && selected.transport !== "local-worker") return null;
+        return localNemotronAdapter(selected.localModel || "nemotron-3.5-streaming-0.6b-80ms");
       }
+      if (selected.transport === "local-worker") return null;
       if (selected.provider === "elevenlabs") {
         const apiKey = voice.resolveKey("dictation");
         if (!apiKey) return null;
@@ -341,7 +383,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       }
       return null;
     },
-    unavailableReason: "selected dictation provider is unavailable or missing credentials",
+    unavailableReason: "selected dictation provider is unavailable, missing credentials, or its local model is not installed",
   });
   host.services.provide(serverServiceKey<DictationService>("dictation"), dictation);
   let routes: RouteHandler | null = null;
@@ -350,8 +392,10 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
       const dictationRoute = dictationRoutes(dictation);
+      const modelRoute = localModelRoutes(localModels);
       const voiceRoute = voiceRoutes({
         voice,
+        localModelInstalled: (id) => !!installedLocalModel(id),
         summarize: async (text) => {
           const runtime = await host.runtimes.forProject("__default__");
           return host.oneShot(runtime, {
@@ -366,6 +410,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         },
       });
       routes ??= async (request) => {
+        if (await modelRoute(request)) return true;
         if (await dictationRoute(request)) return true;
         return voiceRoute(request);
       };
