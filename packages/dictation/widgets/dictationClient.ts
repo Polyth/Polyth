@@ -7,8 +7,8 @@ import {
   createChunkBuffer,
   encodeDictationAudioFrame,
   type DictationContext,
+  type DictationSessionDto,
 } from "@polyth/dictation";
-import { api } from "@polyth/session/web-api";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { startPcm16Capture, type Pcm16Capture } from "./audioCapture.ts";
 
@@ -16,6 +16,27 @@ export interface StreamingDictation {
   stop(): Promise<string>;
   cancel(): void;
 }
+
+async function sessionJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(path, init);
+  if (!response.ok) {
+    if (response.status === 401 && typeof window !== "undefined") {
+      window.dispatchEvent(new Event("polyth:auth-required"));
+    }
+    const body = await response.json().catch(() => ({})) as { error?: unknown; message?: unknown };
+    throw Object.assign(
+      new Error(typeof body.message === "string" ? body.message : `Dictation request failed: HTTP ${response.status}`),
+      {
+        status: response.status,
+        ...(typeof body.error === "string" ? { code: body.error } : {}),
+      },
+    );
+  }
+  return response.json() as Promise<T>;
+}
+
+const sessionPath = (id = ""): string =>
+  `/api/dictation/sessions${id ? `/${encodeURIComponent(id)}` : ""}`;
 
 export async function startStreamingDictation(opts: {
   sessionId?: string;
@@ -29,7 +50,11 @@ export async function startStreamingDictation(opts: {
     ...(opts.language ? { language: opts.language } : {}),
     ...(opts.context ? { context: opts.context } : {}),
   };
-  const dto = await api.dictationCreate(createInput);
+  const dto = await sessionJson<DictationSessionDto>(sessionPath(), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(createInput),
+  });
 
   const buffer = createChunkBuffer();
   let ws: WebSocket | null = null;
@@ -37,6 +62,10 @@ export async function startStreamingDictation(opts: {
   let active = true;
   let failed: Error | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const cancelSession = (): void => {
+    void sessionJson<{ ok: true }>(sessionPath(dto.id), { method: "DELETE" }).catch(() => {});
+  };
 
   const fail = (error: unknown) => {
     if (!active || failed) return;
@@ -127,7 +156,7 @@ export async function startStreamingDictation(opts: {
   } catch (error) {
     active = false;
     ws?.close();
-    void api.dictationCancel(dto.id).catch(() => {});
+    cancelSession();
     throw error;
   }
 
@@ -157,7 +186,7 @@ export async function startStreamingDictation(opts: {
       if (failed) {
         const error = failed;
         teardown();
-        void api.dictationCancel(dto.id).catch(() => {});
+        cancelSession();
         throw error;
       }
 
@@ -168,17 +197,17 @@ export async function startStreamingDictation(opts: {
       if (failed || buffer.unacked().length > 0) {
         const error = failed ?? new DictationError("network_error", "Timed out while delivering microphone audio");
         teardown();
-        void api.dictationCancel(dto.id).catch(() => {});
+        cancelSession();
         throw error;
       }
 
       teardown();
-      const final = await api.dictationFinalize(dto.id);
+      const final = await sessionJson<DictationSessionDto>(`${sessionPath(dto.id)}/finalize`, { method: "POST" });
       return final.transcript;
     },
     cancel() {
       teardown();
-      void api.dictationCancel(dto.id).catch(() => {});
+      cancelSession();
     },
   };
 }
