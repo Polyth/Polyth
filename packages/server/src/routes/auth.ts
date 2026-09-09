@@ -1,7 +1,8 @@
-// Auth routes. /api/auth/status and /api/auth/login are the only public
-// /api endpoints (the http gate skips them); everything else here runs behind
-// the gate like any other route. Cookies are httpOnly + SameSite=Strict so
-// the token is invisible to page script and never rides cross-site requests.
+// Auth routes. /api/auth/status, /api/auth/accounts and /api/auth/login are the
+// only public /api endpoints (the http gate skips them); everything else here
+// runs behind the gate like any other route. Cookies are httpOnly +
+// SameSite=Strict so the token is invisible to page script and never rides
+// cross-site requests.
 import { REMOTE_CAPABILITY } from "@polyth/contracts";
 import type { RouteHandler } from "../http.ts";
 import {
@@ -12,7 +13,10 @@ import {
 
 const COOKIE_MAX_AGE = 30 * 24 * 60 * 60; // seconds — matches the session TTL
 
-export function authRoutes(auth: AuthService): RouteHandler {
+export function authRoutes(
+  auth: AuthService,
+  accounts: () => Array<{ id: string; name: string }> = () => [],
+): RouteHandler {
   return async (rc) => {
     const { path, method, ingress, principal } = rc;
     if (!path.startsWith("/api/auth/")) return false;
@@ -26,6 +30,12 @@ export function authRoutes(auth: AuthService): RouteHandler {
     if (path === "/api/auth/status" && method === "GET") {
       const resolution = auth.resolve(reqLike, ingress);
       rc.json(200, auth.statusDto(resolution));
+      return true;
+    }
+
+    if (path === "/api/auth/accounts" && method === "GET") {
+      const available = new Set(auth.accountIds());
+      rc.json(200, accounts().filter((account) => available.has(account.id)));
       return true;
     }
 
