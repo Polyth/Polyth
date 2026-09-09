@@ -67,7 +67,7 @@ export class TunnelEventBus {
 
   visibleTo(event: PackageEvent, userId: string | undefined): boolean {
     const owner = this.owners.get(event);
-    return owner === undefined || owner === userId;
+    return owner === undefined || (userId !== undefined && owner === userId);
   }
 
   subscribe(listener: (event: PackageEvent) => void): () => void {
@@ -82,7 +82,8 @@ export class TunnelEventBus {
   snapshot(afterRevision = 0, userId?: string): { revision: number; events: PackageEvent[] } {
     return {
       revision: this.revision,
-      events: this.recent.filter((event) => event.revision > afterRevision && this.visibleTo(event, userId)),
+      events: this.recent.filter((event) =>
+        event.revision > afterRevision && (userId === undefined || this.visibleTo(event, userId))),
     };
   }
 }
