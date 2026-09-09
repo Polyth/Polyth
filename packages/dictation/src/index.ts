@@ -23,6 +23,14 @@ export {
   createElevenLabsSttAdapter,
   type ElevenLabsSttOptions,
 } from "./elevenlabs.ts";
+export {
+  createLocalModelManager,
+  localModelCatalog,
+  type LocalModelDescriptor,
+  type LocalModelManager,
+  type LocalModelState,
+  type LocalModelStatus,
+} from "./localModels.ts";
 export * from "./providers.ts";
 export * from "./wire.ts";
 
