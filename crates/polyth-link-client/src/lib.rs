@@ -53,8 +53,7 @@ impl NativeClient {
     }
 
     /// Stop every in-flight pairing and live tunnel owned by this native
-    /// client. The operation gate makes handle destruction wait for a current
-    /// native call instead of leaving its loopback listener alive.
+    /// client. The operation gate prevents teardown from racing a native call.
     pub async fn shutdown(&self) {
         let _operation = self.operation.lock().await;
         let (pairing, sessions) = {
@@ -64,11 +63,11 @@ impl NativeClient {
                 std::mem::take(&mut state.sessions),
             )
         };
-        for (_, attempt) in pairing {
+        for attempt in pairing.into_values() {
             attempt.connection.close(0u32.into(), b"client-free");
             attempt.endpoint.close().await;
         }
-        for (_, session) in sessions {
+        for session in sessions.into_values() {
             close_session(session, b"client-free").await;
         }
     }
