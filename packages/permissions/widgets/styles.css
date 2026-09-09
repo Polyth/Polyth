@@ -9,41 +9,25 @@
   padding: var(--space-3);
   overflow: auto;
   overscroll-behavior: contain;
-  border: 1px solid var(--amber);
-  border-radius: var(--radius-card);
-  background: var(--amber-wash);
-  box-shadow: var(--shadow-sm);
+}
+
+.perm-banner.permission-toast {
+  min-width: 0;
 }
 
 .perm-banner .perm-title {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  color: var(--amber-on-wash);
+  color: var(--muted);
   font-size: var(--font-meta);
-  font-weight: 600;
-}
-
-.perm-banner .permission-alert-mark {
-  display: grid;
-  width: var(--icon-md);
-  height: var(--icon-md);
-  flex: none;
-  place-items: center;
-  border: 1px solid currentColor;
-  border-radius: 50%;
-  font: 700 var(--font-meta)/1 var(--ui-font-family);
+  line-height: var(--font-meta-lh);
 }
 
 .perm-banner .permission-request {
   display: grid;
+  min-width: 0;
   gap: var(--space-2);
-  padding: var(--space-3);
-  border: 1px solid var(--border-soft);
-  border-inline-start: 3px solid var(--amber);
-  border-radius: var(--radius-control);
-  background: var(--elevated);
-  box-shadow: var(--inset-hi);
 }
 
 .perm-banner .permission-request-head {
@@ -57,13 +41,15 @@
 .perm-banner .permission-request-title {
   overflow-wrap: anywhere;
   color: var(--text);
-  font-size: var(--font-label);
+  font-size: var(--font-activity-title);
   font-weight: 600;
+  line-height: var(--font-activity-title-lh);
 }
 
 .perm-banner .permission-request-tool {
   color: var(--muted);
   font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
   white-space: nowrap;
 }
 
@@ -83,26 +69,6 @@
 
 .perm-banner .permission-risk {
   margin-inline-start: auto;
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-round);
-  font-size: var(--font-meta);
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
-
-.perm-banner .permission-risk.risk-low {
-  background: var(--green-wash);
-  color: var(--green-on-wash);
-}
-
-.perm-banner .permission-risk.risk-medium {
-  background: var(--amber-wash);
-  color: var(--amber-on-wash);
-}
-
-.perm-banner .permission-risk.risk-high {
-  background: var(--red-wash);
-  color: var(--red);
 }
 
 .perm-banner .permission-preview {
@@ -117,7 +83,8 @@
   border-radius: var(--radius-control);
   background: var(--sunken);
   font-family: var(--mono);
-  font-size: var(--font-code);
+  font-size: var(--font-technical);
+  line-height: var(--font-technical-lh);
 }
 
 .perm-banner .permission-preview code {
