@@ -151,7 +151,7 @@ for (const adapter of textAdapters) {
 
 for (const harnessId of ["acp", "cursor", "fx", "third-party"]) {
   for (const http of [false, true]) {
-    test(`${harnessId}: HTTP MCP=${http} receipts contain only staged capabilities`, async (t) => {
+    test(`${harnessId}: HTTP MCP=${http} receipts separate native configuration from prompt delivery`, async (t) => {
       const provisioner = createAcpProvisioner(harnessId, http);
       t.after(() => provisioner.release?.(context));
       const desired = registryFor().resolve(context);
@@ -161,12 +161,16 @@ for (const harnessId of ["acp", "cursor", "fx", "third-party"]) {
       assert.ok(overlay);
       assert.deepEqual(result.records.map((row) => row.capabilityId), desired.map((row) => row.id));
       assert.deepEqual(overlay.capabilityIds,
-        result.records.filter((row) => row.status === "pending").map((row) => row.capabilityId));
+        result.records.filter((row) => row.status === "pending" && row.mode !== "prompt").map((row) => row.capabilityId));
+      assert.deepEqual(overlay.value.prompt?.capabilityIds,
+        result.records.filter((row) => row.status === "pending" && row.mode === "prompt").map((row) => row.capabilityId));
+      assert.equal(overlay.value.prompt?.text, renderCapabilityText(plan));
+      assert.doesNotMatch(overlay.value.prompt?.text ?? "", /stdio-secret|http-secret|not-exported/);
       assert.equal(overlay.value.mcpServers.some((server) => server.name === "http-helper"), http);
       assert.equal(overlay.capabilityIds.includes("fixture.http"), http);
       assert.equal(result.records.find((row) => row.capabilityId === "fixture.http")?.status, http ? "pending" : "unsupported");
       assert.ok(result.records.filter((row) => ["instruction", "skill", "context"].includes(row.kind))
-        .every((row) => row.status === "unsupported"));
+        .every((row) => row.status === "pending" && row.mode === "prompt"));
     });
   }
 }
