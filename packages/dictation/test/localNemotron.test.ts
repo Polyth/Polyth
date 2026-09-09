@@ -8,6 +8,7 @@ class FakeWorker extends EventEmitter {
   readonly messages: Array<Record<string, unknown>> = [];
   terminated = false;
   failPush = false;
+  holdPush = false;
 
   constructor() {
     super();
@@ -21,6 +22,7 @@ class FakeWorker extends EventEmitter {
       queueMicrotask(() => this.emit("error", new Error("native crash")));
       return;
     }
+    if (message.op === "push" && this.holdPush) return;
     const value = message.op === "push" ? "привіт" : message.op === "final" ? "привіт світ" : "";
     queueMicrotask(() => this.emit("message", { id, ok: true, value }));
   }
@@ -102,4 +104,31 @@ test("local Nemotron rejects the wrong audio format before worker startup", () =
     (error: unknown) => (error as { code?: string }).code === "audio_format_error",
   );
   assert.equal(created, 0);
+});
+
+test("dispose terminates the worker, rejects pending RPC and prevents restart", async () => {
+  let worker!: FakeWorker;
+  const adapter = createLocalNemotronSttAdapter({
+    modelDir: "/models/nemotron",
+    workerFactory: () => {
+      worker = new FakeWorker();
+      worker.holdPush = true;
+      return worker as unknown as Worker;
+    },
+  });
+  const stream = adapter.createStream({ format });
+  // Let the open RPC complete before starting a deliberately stuck decode.
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const pushing = stream.push(pcm);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  adapter.dispose();
+  await assert.rejects(
+    () => pushing,
+    (error: unknown) => (error as { code?: string }).code === "session_expired",
+  );
+  assert.equal(worker.terminated, true);
+  assert.throws(
+    () => adapter.createStream({ format }),
+    (error: unknown) => (error as { code?: string }).code === "session_expired",
+  );
 });
