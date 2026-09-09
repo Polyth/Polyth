@@ -15,8 +15,11 @@ export function registerDefaultMarketProviders(
   options: DefaultMarketProviderOptions = {},
 ): void {
   const common = { fetch: options.fetch, now: options.now };
+  // Registration order is capability priority. TradingView does not expose
+  // quote/candle adapters here, so Nasdaq remains first for price data while
+  // TradingView wins search/fundamentals without a second priority system.
+  service.registerProvider(createTradingViewProvider(common satisfies TradingViewProviderOptions));
   service.registerProvider(createNasdaqProvider(common satisfies NasdaqProviderOptions));
   service.registerProvider(createYahooProvider(common satisfies YahooProviderOptions));
   service.registerProvider(createStooqProvider(common satisfies StooqProviderOptions));
-  service.registerProvider(createTradingViewProvider(common satisfies TradingViewProviderOptions));
 }
