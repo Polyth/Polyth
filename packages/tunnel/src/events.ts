@@ -1,6 +1,6 @@
 import type { IncomingMessage, Server } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
-import type { PackageEvent } from "@polyth/contracts";
+import type { AuthPrincipal, PackageEvent } from "@polyth/contracts";
 import { REMOTE_CAPABILITY } from "@polyth/contracts";
 import {
   allowWsCapability,
@@ -27,6 +27,11 @@ const ADMIN_EVENT_KEYS = new Set([
   "phrase",
 ]);
 
+const principalUserId = (principal: AuthPrincipal): string | undefined => {
+  const userId = (principal as AuthPrincipal & { userId?: unknown }).userId;
+  return typeof userId === "string" && userId ? userId : undefined;
+};
+
 export function redactTunnelStatusEvent(event: PackageEvent): PackageEvent {
   const data: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(event.data ?? {})) {
@@ -43,8 +48,9 @@ export class TunnelEventBus {
   private revision = 0;
   private readonly listeners = new Set<(event: PackageEvent) => void>();
   private readonly recent: PackageEvent[] = [];
+  private readonly owners = new WeakMap<PackageEvent, string>();
 
-  emit(type: string, data: Record<string, unknown>): PackageEvent {
+  emit(type: string, data: Record<string, unknown>, userId?: string): PackageEvent {
     this.revision += 1;
     const event: PackageEvent = {
       packageId: "tunnel",
@@ -52,10 +58,16 @@ export class TunnelEventBus {
       revision: this.revision,
       data: data as PackageEvent["data"],
     };
+    if (userId) this.owners.set(event, userId);
     this.recent.push(event);
     if (this.recent.length > RECENT_LIMIT) this.recent.shift();
     for (const listener of this.listeners) listener(event);
     return event;
+  }
+
+  visibleTo(event: PackageEvent, userId: string | undefined): boolean {
+    const owner = this.owners.get(event);
+    return owner === undefined || owner === userId;
   }
 
   subscribe(listener: (event: PackageEvent) => void): () => void {
@@ -67,10 +79,10 @@ export class TunnelEventBus {
     return this.revision;
   }
 
-  snapshot(afterRevision = 0): { revision: number; events: PackageEvent[] } {
+  snapshot(afterRevision = 0, userId?: string): { revision: number; events: PackageEvent[] } {
     return {
       revision: this.revision,
-      events: this.recent.filter((event) => event.revision > afterRevision),
+      events: this.recent.filter((event) => event.revision > afterRevision && this.visibleTo(event, userId)),
     };
   }
 }
@@ -79,7 +91,7 @@ export function attachTunnelEventsWs(server: Server, deps: WsAttachAuth & {
   events: TunnelEventBus;
 }): () => void {
   const wss = new WebSocketServer({ noServer: true });
-  const sockets = new Map<WebSocket, { principal: import("@polyth/contracts").AuthPrincipal }>();
+  const sockets = new Map<WebSocket, { principal: AuthPrincipal }>();
   const send = (socket: WebSocket, message: unknown) => {
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
   };
@@ -112,6 +124,7 @@ export function attachTunnelEventsWs(server: Server, deps: WsAttachAuth & {
       }
       bound.principal = live;
       if (!allowWsCapability(live, REMOTE_CAPABILITY.tunnelStatusRead)) continue;
+      if (!deps.events.visibleTo(event, principalUserId(live))) continue;
       send(socket, redacted);
     }
   });
