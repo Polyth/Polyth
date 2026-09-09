@@ -26,6 +26,7 @@ import {
     attachmentModality,
     captureCapabilityLaunch,
     composeTurnPrompt,
+    contextWindowTelemetry,
     createStdioRpc,
     materializeAttachmentText,
     provisioningTarget,
@@ -151,6 +152,12 @@ export interface AcpConnection {
     authMethods?: AcpAuthMethod[];
 }
 
+export interface AcpRuntimeOptions {
+    /** Maximum silence while a native prompt is active. Activity resets the
+     * watchdog; zero disables it for protocol fixtures that own their clock. */
+    promptIdleTimeoutMs?: number;
+}
+
 const parseAuthMethods = (value: unknown): AcpAuthMethod[] =>
     (Array.isArray(value) ? value : []).flatMap((entry) => {
         const row = entry && typeof entry === "object" ? entry as Record<string, unknown> : undefined;
@@ -194,6 +201,7 @@ export function createAcpRuntime(
     agentCapabilities?: AcpAgentCapabilities,
     /** Display name used in user-facing refusals. */
     descriptorName = harnessId,
+    options: AcpRuntimeOptions = {},
 ): AgentRuntime {
     let nativeId = "";
     let active = false;
@@ -202,7 +210,8 @@ export function createAcpRuntime(
     let createId = "";
     let turnId = "";
     let text = "";
-    let admit: (() => void) | undefined;
+    let resolveAdmission: ((outcome: MutationOutcome<{ admissionId: string }>) => void) | undefined;
+    let promptWatchdog: ReturnType<typeof setTimeout> | undefined;
     let lastTitle = "";
     // The agent's own session controls, as advertised. Selection is
     // session-scoped, so it is re-applied after a load/resume.
@@ -234,18 +243,60 @@ export function createAcpRuntime(
     const endpoint = { authorityId: rpc.authorityId, generation: rpc.generation, continuity: "generation-only" as const, url: "stdio:", location: { directory: context.cwd }, control: { kind: "owned" as const, instanceToken: rpc.authorityId }, config: { kind: "read-only" as const }, authentication: { kind: "none" as const } };
     const emit = (event: RuntimeEvent) => { for (const cb of listeners)
         cb(context.sessionId!, event); };
-    const markAccepted = () => { if (admit) {
-        const done = admit;
-        admit = undefined;
+    const clearPromptWatchdog = () => {
+        if (promptWatchdog) clearTimeout(promptWatchdog);
+        promptWatchdog = undefined;
+    };
+    const promptIdleTimeoutMs = options.promptIdleTimeoutMs ?? 2 * 60_000;
+    const failTimedOutPrompt = (expectedTurnId: string) => {
+        if (!active || turnId !== expectedTurnId) return;
+        clearPromptWatchdog();
+        const pendingAdmission = resolveAdmission;
+        resolveAdmission = undefined;
+        active = false;
+        connected = false;
+        order++;
+        if (pendingAdmission) {
+            pendingAdmission({
+                kind: "unknown",
+                operationId: expectedTurnId,
+                message: "ACP prompt timed out before admission was confirmed",
+            });
+        } else {
+            emit({
+                type: "turn/stopped",
+                turnId: expectedTurnId,
+                reason: "error",
+                error: "ACP prompt timed out before a terminal result",
+                code: "unknown",
+            });
+        }
+        // The request outcome is uncertain, so this authority must not accept
+        // another prompt. Closing it also prevents late output from crossing
+        // into a recovered runtime generation.
+        try { rpc.notify("session/cancel", { sessionId: nativeId }); } catch { /* best effort */ }
+        void rpc.close().catch(() => {});
+    };
+    const touchPromptWatchdog = () => {
+        if (!active || promptIdleTimeoutMs <= 0) return;
+        clearPromptWatchdog();
+        const expectedTurnId = turnId;
+        promptWatchdog = setTimeout(() => failTimedOutPrompt(expectedTurnId), promptIdleTimeoutMs);
+        promptWatchdog.unref?.();
+    };
+    const markAccepted = () => { if (resolveAdmission) {
+        const done = resolveAdmission;
+        resolveAdmission = undefined;
         accepted.push({ operationId: turnId, mutationKind: "turn-submit", receipt: turnId });
         emit({ type: "turn/started", turnId });
-        done();
+        done({ kind: "confirmed", value: { admissionId: turnId }, receipt: turnId });
     } };
     rpc.onClose(() => { connected = false; for (const cb of lifecycle)
         cb({ type: "stream-disconnected", authorityId: rpc.authorityId, generation: rpc.generation }); });
     rpc.onNotification((method, params) => {
         if (method !== "session/update" || params.sessionId !== nativeId)
             return;
+        touchPromptWatchdog();
         const update = params.update;
         if (update.sessionUpdate === "config_option_update") {
             sessionConfig = applyConfigOptionUpdate(sessionConfig, update);
@@ -302,19 +353,11 @@ export function createAcpRuntime(
                 ? update.sizeTokens
                 : typeof update.size === "number" ? update.size : undefined;
             if (usedTokens !== undefined || limitTokens !== undefined) {
-                emit({
-                    type: "context/updated",
+                emit({ type: "context/updated", ...contextWindowTelemetry({
                     source: "native",
-                    updatedAt: Date.now(),
-                    ...(usedTokens !== undefined ? { usedTokens } : {}),
-                    ...(limitTokens !== undefined ? { limitTokens } : {}),
-                    ...(usedTokens !== undefined && limitTokens !== undefined
-                        ? {
-                            remainingTokens: Math.max(0, limitTokens - usedTokens),
-                            fraction: limitTokens > 0 ? usedTokens / limitTokens : undefined,
-                        }
-                        : {}),
-                });
+                    usedTokens,
+                    limitTokens,
+                }) });
             }
             return;
         }
@@ -513,6 +556,8 @@ export function createAcpRuntime(
         createSessionOperation: create, resetSessionOperation: create,
         sessions: async () => Object.entries(rpc.receipts).map(([operationId, id]) => ({ id, operationId, title: lastTitle || "New session", createdAt: 0, updatedAt: 0 })), history: async () => [],
         async startTurnOperation(request, operationId) {
+            if (!connected)
+                return { kind: "unknown", operationId, message: "ACP runtime is disconnected and requires recovery" };
             if (active)
                 return { kind: "rejected", code: "unsupported", message: "ACP adapter supports idle text turns" };
             const catalog: ModelDescriptor[] = modelSelectionUnavailable
@@ -613,10 +658,13 @@ export function createAcpRuntime(
             text = "";
             order++;
             return new Promise((resolve) => {
-                admit = () => resolve({ kind: "confirmed", value: { admissionId: operationId }, receipt: operationId });
+                resolveAdmission = resolve;
+                touchPromptWatchdog();
                 void rpc.request<{
                     stopReason: string;
                 }>("session/prompt", { sessionId: nativeId, prompt }, 0).then((result) => {
+                    if (!active || turnId !== operationId) return;
+                    clearPromptWatchdog();
                     markAccepted();
                     if (text)
                         emit({ type: "assistant/message", partId: turnId, text });
@@ -626,18 +674,30 @@ export function createAcpRuntime(
                     for (const cb of lifecycle)
                         cb({ type: "stream-connected", authorityId: rpc.authorityId, generation: rpc.generation });
                 }, (error) => {
+                    if (!active || turnId !== operationId) return;
+                    clearPromptWatchdog();
                     const rejected = (error as {
                         code?: string;
                     }).code === "runtime-rejected";
-                    if (admit) {
-                        admit = undefined;
-                        resolve(rejected ? { kind: "rejected", code: "runtime-rejected", message: "ACP rejected the prompt" } : { kind: "unknown", operationId, message: "ACP response was lost" });
+                    const pendingAdmission = resolveAdmission;
+                    resolveAdmission = undefined;
+                    if (pendingAdmission) {
+                        pendingAdmission(rejected ? { kind: "rejected", code: "runtime-rejected", message: "ACP rejected the prompt" } : { kind: "unknown", operationId, message: "ACP response was lost" });
                     }
-                    // Loss of the channel never invents a stopped turn.
-                    if (rejected) {
-                        active = false;
-                        order++;
-                        emit({ type: "turn/stopped", turnId, reason: "error", error: "ACP rejected the prompt" });
+                    active = false;
+                    order++;
+                    // Once admission was observed, every failed prompt must
+                    // close the canonical turn even when the native outcome is
+                    // unknown. Before admission, the durable operation records
+                    // rejection/uncertainty instead.
+                    if (!pendingAdmission) {
+                        emit({
+                            type: "turn/stopped",
+                            turnId,
+                            reason: "error",
+                            error: rejected ? "ACP rejected the prompt" : "ACP response was lost before a terminal result",
+                            ...(!rejected ? { code: "unknown" as const } : {}),
+                        });
                     }
                 });
             });
@@ -670,7 +730,7 @@ export function createAcpRuntime(
             throw Object.assign(new Error("release requires the native backend session"), { code: "unknown-session" }); await rpc.close(); return { authorityId: binding.authorityId, generation: binding.generation, backendSessionId: binding.backendSessionId }; }),
         onEvent: (cb) => { listeners.add(cb); return { dispose: () => { listeners.delete(cb); } }; },
         onLifecycle: (cb) => { lifecycle.add(cb); return { dispose: () => { lifecycle.delete(cb); } }; },
-        dispose: () => rpc.close(),
+        dispose: () => { clearPromptWatchdog(); return rpc.close(); },
     };
     return runtime;
 }

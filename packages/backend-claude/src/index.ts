@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import type { AgentRuntime, HarnessContext, JsonObject, ModelDescriptor, ModelRef, MutationOutcome, RateLimitRetryHint, RuntimeCommandDescriptor, RuntimeEvent, RuntimeObservation, RuntimeSnapshot, TokenUsage } from "@polyth/contracts";
-import { attachmentModality, composeTurnPrompt, createProcessAuthority, deltaCost, deltaTokenUsage, isPlaceholderTitle, resolveModelSelection, unsupportedAttachmentMessage } from "@polyth/harness-runtime";
+import { attachmentModality, composeTurnPrompt, contextWindowTelemetry, createProcessAuthority, deltaCost, deltaTokenUsage, isPlaceholderTitle, normalizeTokenUsage, resolveModelSelection, unsupportedAttachmentMessage } from "@polyth/harness-runtime";
 import type { EffortLevel, SDKUserMessage, Query, PermissionResult, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import {
     acknowledgeCapabilityApplication,
@@ -40,7 +40,7 @@ const usageFromModelUsage = (usage: Record<string, { inputTokens?: number; outpu
         cacheRead += row.cacheReadInputTokens ?? 0;
         cacheWrite += row.cacheCreationInputTokens ?? 0;
     }
-    return { input, output, ...(cacheRead ? { cacheRead } : {}), ...(cacheWrite ? { cacheWrite } : {}) };
+    return normalizeTokenUsage({ input, output, cacheRead, cacheWrite });
 };
 const toNativeCommands = (commands: Array<{ name: string; description?: string; argumentHint?: string }>): RuntimeCommandDescriptor[] =>
     commands.map((cmd) => ({
@@ -224,32 +224,28 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                             const rebased = lastUsage !== undefined && cumulative.input < lastUsage.input;
                             const tokens = rebased ? cumulative : deltaTokenUsage(lastUsage, cumulative);
                             const cost = rebased ? message.total_cost_usd : deltaCost(lastCost, message.total_cost_usd);
-                            const hasUsage = tokens.input > 0 || tokens.output > 0 || (tokens.cacheRead ?? 0) > 0;
-                            if (hasUsage || cost !== undefined) {
-                                lastUsage = cumulative;
-                                lastCost = message.total_cost_usd;
-                                lastResultId = resultId;
-                                emit({
-                                    type: "usage/recorded",
-                                    model: nativeModel ?? { providerID: "anthropic", modelID: "unknown" },
-                                    tokens,
-                                    ...(cost !== undefined ? { cost, costSource: "derived" } : {}),
-                                }, resultId + ":usage");
-                            }
+                            // modelUsage is an authoritative sample even when
+                            // every counter is zero. Persisting that sample is
+                            // what distinguishes zero usage from no telemetry.
+                            lastUsage = cumulative;
+                            lastCost = message.total_cost_usd;
+                            lastResultId = resultId;
+                            emit({
+                                type: "usage/recorded",
+                                model: nativeModel ?? { providerID: "anthropic", modelID: "unknown" },
+                                tokens,
+                                ...(cost !== undefined ? { cost, costSource: "derived" } : {}),
+                            }, resultId + ":usage");
                         }
                         lastContextResultId = resultId;
                         const contextResultId = resultId;
                         void query?.getContextUsage?.({ detail: "summary" }).then((usage) => {
                             if (contextResultId !== lastContextResultId) return;
-                            emit({
-                                type: "context/updated",
+                            emit({ type: "context/updated", ...contextWindowTelemetry({
                                 source: "native",
-                                updatedAt: Date.now(),
                                 usedTokens: usage.totalTokens,
                                 limitTokens: usage.maxTokens,
-                                remainingTokens: usage.maxTokens - usage.totalTokens,
-                                fraction: usage.maxTokens > 0 ? usage.totalTokens / usage.maxTokens : undefined,
-                            }, resultId + ":context");
+                            }) }, resultId + ":context");
                         }).catch(() => {});
                         void sdk.getSessionInfo(nativeId, { dir: context.cwd }).then((info) => {
                             if (!info) return;
