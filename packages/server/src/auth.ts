@@ -408,6 +408,13 @@ export function createAuthService(opts: AuthServiceOptions): AuthService {
       if (ingress.kind === "polyth-link") {
         const paired = pairedResolver?.(ingress) ?? null;
         if (paired && paired.kind === "paired-device" && paired.connectionId === ingress.connectionId) {
+          const userId = (paired as IdentifiedPrincipal).userId;
+          // Secondary account credentials are the durable existence check for
+          // that account. Removing the account invalidates all of its paired
+          // channels immediately; legacy/owner pairings retain compatibility.
+          if (userId && userId !== ownerUserId && !credentialHash(userId)) {
+            return { principal: ANONYMOUS, authenticated: false };
+          }
           return { principal: paired, authenticated: true };
         }
         return { principal: ANONYMOUS, authenticated: false };
