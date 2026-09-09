@@ -77,6 +77,12 @@ function connectionHeading(state: ConnectionControllerState | null, nativeAvaila
       return "Polyth servers nearby";
     case "discovery-permission-required":
       return "Local network access is disabled";
+    case "numeric-code-entry":
+      return `Enter the code from ${state.numericTarget?.hostLabel || "your Polyth"}`;
+    case "numeric-code-validating":
+      return "Checking pairing code securely…";
+    case "numeric-code-rate-limited":
+      return "Too many pairing attempts";
     case "scanning-qr":
       return "Scan pairing QR";
     case "validating-pairing":
@@ -128,6 +134,8 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
     () => controller?.state ?? null,
   );
   const [ticket, setTicket] = useState(initialPending ?? "");
+  const [numericCode, setNumericCode] = useState("");
+  const [preferNumericDiscovery, setPreferNumericDiscovery] = useState(false);
   const [url, setUrl] = useState(launch.preferred ?? launch.recent[0]?.url ?? "");
   const [recent, setRecent] = useState(launch.recent);
   const [cameraPermission, setCameraPermission] = useState<"unknown" | "prompt" | "granted" | "denied">("unknown");
@@ -139,6 +147,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
 
   const trusted = connectionState?.trusted ?? [];
   const discovered = connectionState?.discovered ?? [];
+  const numericTarget = connectionState?.numericTarget ?? null;
   const attempt = connectionState?.pairingAttempt ?? null;
   const phrase = attempt?.safetyPhrase ?? null;
   const controllerBusy = connectionState
@@ -149,8 +158,16 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
   const discovering = connectionState?.phase === "discovering"
     || connectionState?.phase === "discovery-empty"
     || connectionState?.phase === "discovery-results";
+  const numericCodeEntry = connectionState?.phase === "numeric-code-entry"
+    || connectionState?.phase === "numeric-code-validating"
+    || connectionState?.phase === "numeric-code-rate-limited";
   const discoveryPermissionDenied = connectionState?.phase === "discovery-permission-required";
-  const error = connectionState?.error || legacyError || (!nativeAvailable ? launch.error ?? "" : "");
+  const normalizedNumericCode = numericCode.replace(/\s/gu, "");
+  const numericCodeValid = /^\d{6}$/u.test(normalizedNumericCode);
+  const rawError = connectionState?.error || legacyError || (!nativeAvailable ? launch.error ?? "" : "");
+  const error = connectionState?.phase === "numeric-code-rate-limited"
+    ? "Too many attempts. Regenerate the code on your computer, or try again shortly."
+    : rawError;
   const stage = connectionHeading(connectionState, nativeAvailable);
 
   const stopCamera = () => {
@@ -170,6 +187,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
 
   const startPair = async (raw: string) => {
     stopCamera();
+    setPreferNumericDiscovery(false);
     rememberPendingPairingLink(raw);
     if (!controller) return;
     const pairing = await controller.beginPairing(raw, "This phone");
@@ -215,6 +233,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
 
   const scanQr = async () => {
     if (!controller) return;
+    setPreferNumericDiscovery(false);
     stopCamera();
     const scanEpoch = controller.startQrScan();
     scanIntent.current = scanEpoch;
@@ -242,8 +261,8 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
         controller.failQrScan(
           scanEpoch,
           new Error(denied
-            ? "Camera permission is required to scan. Use another pairing method or allow camera access in Settings."
-            : "Camera scanning failed. Use another pairing method."),
+            ? "Camera permission is required to scan. Find nearby or enter the code instead."
+            : "Camera scanning failed. Find nearby or enter the code instead."),
         );
       }
       return;
@@ -255,7 +274,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
       };
     }).BarcodeDetector;
     if (!Detector) {
-      controller.failQrScan(scanEpoch, new Error("Camera scanning is unavailable here. Use another pairing method."));
+      controller.failQrScan(scanEpoch, new Error("Camera scanning is unavailable here. Find nearby or enter the code instead."));
       return;
     }
 
@@ -309,8 +328,8 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
       controller.failQrScan(
         scanEpoch,
         new Error(denied
-          ? "Camera permission is required to scan. Use another pairing method or allow camera access in Settings."
-          : "Camera scanning failed. Use another pairing method."),
+          ? "Camera permission is required to scan. Find nearby or enter the code instead."
+          : "Camera scanning failed. Find nearby or enter the code instead."),
       );
     } finally {
       stopCamera();
@@ -323,10 +342,28 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
     if (controller && epoch !== null) controller.cancelQrScan(epoch);
   };
 
-  const findNearby = async () => {
+  const findNearby = async (forCode = false) => {
     if (!controller || !discoveryAvailable) return;
+    setPreferNumericDiscovery(forCode);
     stopCamera();
     await controller.startDiscovery(startNativeDiscovery);
+  };
+
+  const chooseNumericTarget = (target: NonNullable<ConnectionControllerState["numericTarget"]>) => {
+    if (!controller) return;
+    setNumericCode("");
+    controller.startNumericCodeEntry(target);
+  };
+
+  const submitNumericCode = async () => {
+    if (!controller || !numericCodeValid) return;
+    const pairing = await controller.submitNumericCode(normalizedNumericCode, "This phone");
+    if (pairing && !pairing.safetyPhrase?.length) await finishPairing();
+  };
+
+  const cancelNumericCode = () => {
+    setNumericCode("");
+    controller?.cancelNumericCodeEntry();
   };
 
   const reconnectTrusted = async (connection: ConnectionMetadata) => {
@@ -399,7 +436,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
           <section className="mobile-connect-recents" aria-labelledby="mobile-pair-title">
             <h2 id="mobile-pair-title">Add another Polyth</h2>
 
-            {!attempt && (
+            {!attempt && !numericCodeEntry && (
               <>
                 <div className="mobile-connect-actions">
                   <button
@@ -414,9 +451,17 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
                     type="button"
                     className="mobile-connect-test"
                     disabled={busy || !discoveryAvailable}
-                    onClick={() => void findNearby()}
+                    onClick={() => void findNearby(false)}
                   >
                     Find nearby
+                  </button>
+                  <button
+                    type="button"
+                    className="mobile-connect-test"
+                    disabled={busy || !discoveryAvailable}
+                    onClick={() => void findNearby(true)}
+                  >
+                    Enter code
                   </button>
                 </div>
 
@@ -424,7 +469,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
                   <div id="mobile-connect-scan-preview" className="mobile-connect-scan-preview" />
                   <div className="mobile-connect-scan-frame" aria-hidden="true" />
                   {cameraPermission === "denied" && (
-                    <p className="mobile-connect-message">Camera permission is denied. Find nearby remains available.</p>
+                    <p className="mobile-connect-message">Camera permission is denied. Find nearby or enter the code instead.</p>
                   )}
                   <button type="button" className="mobile-connect-test" onClick={cancelScan}>
                     Cancel scan
@@ -434,6 +479,9 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
                 {discovering && (
                   <section aria-labelledby="mobile-nearby-title">
                     <h2 id="mobile-nearby-title">Nearby</h2>
+                    {preferNumericDiscovery && (
+                      <p className="mobile-connect-message">Choose the Polyth that is showing your six-digit code.</p>
+                    )}
                     {discovered.length === 0 ? (
                       <p className="mobile-connect-message">
                         {connectionState?.phase === "discovery-empty"
@@ -455,10 +503,15 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
                               <span>Nearby · already paired</span>
                             </button>
                           ) : (
-                            <div className="mobile-connect-recent" aria-label={`${nearby.hostLabel}, nearby and not yet trusted`}>
+                            <button
+                              type="button"
+                              className="mobile-connect-recent"
+                              disabled={busy}
+                              onClick={() => chooseNumericTarget(nearby)}
+                            >
                               <strong>{nearby.hostLabel}</strong>
-                              <span>Nearby · pair securely before connecting</span>
-                            </div>
+                              <span>Nearby · enter code to pair securely</span>
+                            </button>
                           )}
                         </article>
                       );
@@ -471,10 +524,49 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
 
                 {discoveryPermissionDenied && (
                   <p className="mobile-connect-message">
-                    Local network access is disabled. You can still scan a QR code; enable local network access in system Settings to find nearby servers.
+                    Local network access is disabled. You can still scan a QR code; enable local network access in system Settings to find nearby servers or use a code.
                   </p>
                 )}
               </>
+            )}
+
+            {!attempt && numericCodeEntry && numericTarget && (
+              <section aria-labelledby="mobile-code-title">
+                <h2 id="mobile-code-title">{numericTarget.hostLabel}</h2>
+                <p className="mobile-connect-message">
+                  Enter the six-digit code shown on this Polyth computer. The code only authenticates the bootstrap; it does not become this phone’s trust secret.
+                </p>
+                <label className="mobile-connect-field">
+                  <span>Pairing code</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    maxLength={7}
+                    placeholder="482 731"
+                    value={numericCode}
+                    onChange={(event) => {
+                      const digits = event.target.value.replace(/\D/gu, "").slice(0, 6);
+                      setNumericCode(digits.length > 3 ? `${digits.slice(0, 3)} ${digits.slice(3)}` : digits);
+                    }}
+                  />
+                </label>
+                <div className="mobile-connect-actions">
+                  <button
+                    type="button"
+                    className="mobile-connect-primary"
+                    disabled={busy || !numericCodeValid || connectionState?.phase === "numeric-code-rate-limited"}
+                    onClick={() => void submitNumericCode()}
+                  >
+                    Pair securely
+                  </button>
+                  <button type="button" className="mobile-connect-test" disabled={busy} onClick={cancelNumericCode}>
+                    Cancel
+                  </button>
+                </div>
+              </section>
             )}
 
             {phrase && (
