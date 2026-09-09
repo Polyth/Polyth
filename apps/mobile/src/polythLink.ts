@@ -16,6 +16,7 @@ export interface ConnectionMetadata {
   id: string;
   hostEndpointId: string;
   hostLabel: string;
+  pairingState?: "prepared" | "active" | "revoked";
   lastUsedAt: number;
   lastTransport?: "direct" | "relay";
   revoked?: boolean;
@@ -31,7 +32,7 @@ export interface ProxyLaunch {
 export interface PolythLinkNative {
   parsePairingTicket(raw: string): Promise<PairingPreview>;
   beginPairing(raw: string, label: string): Promise<PairingAttempt>;
-    confirmPairing(attemptId: string): Promise<ProxyLaunch>;
+  confirmPairing(attemptId: string): Promise<ProxyLaunch>;
   cancelPairing(attemptId: string): Promise<void>;
   listConnections(): Promise<ConnectionMetadata[]>;
   connect(connectionId: string): Promise<ProxyLaunch>;
