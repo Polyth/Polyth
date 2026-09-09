@@ -17,6 +17,8 @@ import { noSuchSpace, type TenancyStore } from "./store.ts";
 const error = (code: string, message: string): Error =>
   Object.assign(new Error(message), { code });
 
+type IdentifiedPrincipal = AuthPrincipal & { userId?: string };
+
 export function deploymentProfileFromEnv(
   env: Record<string, string | undefined> = process.env,
 ): DeploymentProfile {
@@ -28,11 +30,7 @@ export function deploymentProfileFromEnv(
   return "local-trusted";
 }
 
-/** Durable identity behind one authenticated request channel.
- *
- * Polyth today has a single shared UI password, so every human principal maps
- * to the one bootstrap user. The mapping lives here (not in the auth service)
- * so per-user credentials can change ONLY this function later. */
+/** Durable identity behind one authenticated request channel. */
 export interface Identity {
   userId: string;
   /** Stable per-device key used to remember the last selected Space. */
@@ -52,19 +50,30 @@ export function createIdentityResolver(opts: {
   deployment: DeploymentProfile;
 }): IdentityResolver {
   const { ownerUserId } = opts;
+  const identifiedUser = (principal: AuthPrincipal): string | undefined => {
+    const userId = (principal as IdentifiedPrincipal).userId;
+    return typeof userId === "string" && userId ? userId : undefined;
+  };
   return {
     resolve(principal) {
       switch (principal.kind) {
         case "anonymous":
           return null;
         case "local-user":
-          return { userId: ownerUserId, deviceKey: `local:${principal.sessionId ?? "loopback"}` };
+          return {
+            userId: identifiedUser(principal) ?? ownerUserId,
+            deviceKey: `local:${principal.sessionId ?? "loopback"}`,
+          };
         case "ui-session":
-          return { userId: ownerUserId, deviceKey: `ui:${principal.rememberedDeviceId}` };
+          return {
+            userId: identifiedUser(principal) ?? ownerUserId,
+            deviceKey: `ui:${principal.rememberedDeviceId}`,
+          };
         case "paired-device":
-          // A paired device acts for the user who paired it. Today that is the
-          // owner; when devices are paired per user this reads the pairing row.
-          return { userId: ownerUserId, deviceKey: `device:${principal.deviceId}` };
+          return {
+            userId: identifiedUser(principal) ?? ownerUserId,
+            deviceKey: `device:${principal.deviceId}`,
+          };
         case "internal-service":
           // The local control socket (Polyth's own MCP) is filesystem-protected
           // and speaks for the operator, so in a trusted deployment it resolves
