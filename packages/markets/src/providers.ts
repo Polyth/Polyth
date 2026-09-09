@@ -1,15 +1,18 @@
 import type {
-  MarketCandle,
+  MarketCandleSeries,
+  MarketFundamentals,
   MarketProviderCapability,
   MarketQuote,
+  MarketRange,
   MarketSearchResult,
 } from "./types.ts";
 
 export interface MarketProvider {
   id: string;
   quote?(symbol: string, signal: AbortSignal): Promise<MarketQuote>;
-  candles?(symbol: string, range: string, signal: AbortSignal): Promise<MarketCandle[]>;
+  candles?(symbol: string, range: MarketRange, signal: AbortSignal): Promise<MarketCandleSeries>;
   search?(query: string, signal: AbortSignal): Promise<MarketSearchResult[]>;
+  fundamentals?(symbol: string, signal: AbortSignal): Promise<MarketFundamentals>;
 }
 
 export interface ProviderHealth {

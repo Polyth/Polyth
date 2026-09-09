@@ -7,15 +7,17 @@ export type MarketAssetType =
   | "commodity"
   | "unknown";
 
+export type MarketRange = "1D" | "5D" | "1M" | "6M" | "YTD" | "1Y" | "5Y" | "MAX";
 export type MarketDataFreshness = "live" | "delayed" | "indicative";
 export type MarketCacheState = "fresh" | "stale" | "refreshed";
-export type MarketProviderCapability = "quote" | "candles" | "search";
+export type MarketProviderCapability = "quote" | "candles" | "search" | "fundamentals";
 
 export interface MarketQuote {
   symbol: string;
   name?: string;
   assetType?: MarketAssetType;
-  currency: string;
+  currency?: string;
+  exchange?: string;
   price: number;
   change?: number;
   changePercent?: number;
@@ -39,6 +41,15 @@ export interface MarketCandle {
   volume?: number;
 }
 
+export interface MarketCandleSeries {
+  symbol: string;
+  range: MarketRange;
+  candles: MarketCandle[];
+  asOf: string;
+  source: string;
+  freshness: MarketDataFreshness;
+}
+
 export interface MarketSearchResult {
   symbol: string;
   name: string;
@@ -46,6 +57,22 @@ export interface MarketSearchResult {
   assetType: MarketAssetType;
   currency?: string;
   source: string;
+}
+
+export interface MarketFundamentals {
+  symbol: string;
+  exchange?: string;
+  marketCap?: number;
+  pe?: number;
+  eps?: number;
+  dividendYield?: number;
+  beta?: number;
+  sharesOutstanding?: number;
+  sector?: string;
+  industry?: string;
+  asOf: string;
+  source: string;
+  freshness: MarketDataFreshness;
 }
 
 export interface MarketDataResult<T> {
