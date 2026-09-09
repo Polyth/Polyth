@@ -103,6 +103,8 @@ export interface LocalRuntimeStatus {
 export interface LocalRuntimeManager {
   status(): Promise<LocalRuntimeStatus>;
   download(): Promise<LocalRuntimeStatus>;
+  /** Stop an in-flight explicit download but keep partials for a later resume. */
+  cancel(): Promise<void>;
   remove(): Promise<void>;
   path(): Promise<string | null>;
 }
@@ -288,6 +290,16 @@ export function createLocalRuntimeManager(options: {
     }
   };
 
+  const cancel = async (): Promise<void> => {
+    const running = active;
+    if (!running) return;
+    running.controller.abort();
+    await running.promise.catch(() => {});
+    // Cancellation is lifecycle, not a failed installation. Keep partials so a
+    // later explicit download can resume from the verified HTTP Range boundary.
+    if (failure === "Local ASR runtime download was cancelled") failure = undefined;
+  };
+
   return {
     status,
     async download() {
@@ -306,11 +318,9 @@ export function createLocalRuntimeManager(options: {
       });
       return running.promise;
     },
+    cancel,
     async remove() {
-      if (active) {
-        active.controller.abort();
-        await active.promise.catch(() => {});
-      }
+      await cancel();
       await rm(finalDir, { recursive: true, force: true });
       if (native) {
         await rm(partialFile(CORE), { force: true });
