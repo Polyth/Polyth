@@ -1,8 +1,10 @@
 import { App } from "@capacitor/app";
 import { Capacitor, CapacitorHttp } from "@capacitor/core";
 import { Preferences } from "@capacitor/preferences";
+import { consumeNativePendingUrl, nativeNavigationAvailable } from "./nativeNavigation.ts";
 
 const HOSTS_KEY = "polyth.mobile.hosts.v1";
+const PENDING_DEEP_LINK_KEY = "polyth.mobile.pending-deep-link.v1";
 const MAX_RECENT_HOSTS = 5;
 
 export interface MobileHost {
@@ -173,6 +175,24 @@ function canonicalProjectPath(pathname: string): string | undefined {
   return `/p/${encodeURIComponent(projectId)}${sessionId ? `/s/${encodeURIComponent(sessionId)}` : ""}`;
 }
 
+function canonicalMobilePath(raw: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(raw, "https://localhost");
+  } catch {
+    return undefined;
+  }
+  if (url.origin !== "https://localhost" || url.hash) return undefined;
+  const projectPath = canonicalProjectPath(url.pathname);
+  if (projectPath && !url.search) return projectPath;
+  const keys = [...url.searchParams.keys()];
+  if (url.pathname === "/" && keys.length === 1 && keys[0] === "session") {
+    const session = url.searchParams.get("session");
+    return session ? `/?session=${encodeURIComponent(session)}` : undefined;
+  }
+  return undefined;
+}
+
 export function isPairingDeepLink(raw: string): boolean {
   const value = raw.trim();
   return value.startsWith("polyth://pair?") || value.startsWith("polyth://pair/?");
@@ -189,9 +209,6 @@ export function mobileDeepLinkPath(raw: string): string | undefined {
   if (url.protocol === "http:" || url.protocol === "https:") {
     const projectPath = canonicalProjectPath(url.pathname);
     return projectPath
-      // A universal/app link may carry tracking or credential-like query
-      // parameters from another application. Canonical project/session paths
-      // need none of them, so never copy that data to the selected Polyth host.
       ? projectPath
       : url.searchParams.has("session")
         ? `/?session=${encodeURIComponent(url.searchParams.get("session") ?? "")}`
@@ -221,6 +238,27 @@ function isBundledOrigin(): boolean {
     && (location.protocol === "capacitor:" || location.protocol === "https:");
 }
 
+function bundledMobileOrigin(): string {
+  return Capacitor.getPlatform() === "ios" ? "capacitor://localhost" : "https://localhost";
+}
+
+async function consumePendingMobilePath(): Promise<string | undefined> {
+  const { value } = await Preferences.get({ key: PENDING_DEEP_LINK_KEY });
+  await Preferences.remove({ key: PENDING_DEEP_LINK_KEY });
+  return value ? canonicalMobilePath(value) : undefined;
+}
+
+export async function returnToMobileConnectionHub(deepLinkPath?: string): Promise<void> {
+  try {
+    const canonical = deepLinkPath ? canonicalMobilePath(deepLinkPath) : undefined;
+    if (canonical) {
+      await Preferences.set({ key: PENDING_DEEP_LINK_KEY, value: canonical });
+    }
+  } finally {
+    location.replace(bundledMobileOrigin());
+  }
+}
+
 export function navigateToMobileHost(host: string, deepLinkPath = "/"): void {
   location.replace(`${normalizePolythHost(host)}${deepLinkPath.startsWith("/") ? deepLinkPath : `/${deepLinkPath}`}`);
 }
@@ -228,20 +266,24 @@ export function navigateToMobileHost(host: string, deepLinkPath = "/"): void {
 export async function prepareMobileLaunch(): Promise<MobileLaunch> {
   if (!isNativeMobile()) return { kind: "web" };
   const hosts = await loadMobileHosts();
-  const launchUrl = await App.getLaunchUrl().catch(() => undefined);
-  const deepLinkPath = launchUrl?.url ? mobileDeepLinkPath(launchUrl.url) : undefined;
 
+  // Never apply an OS/custom deep link directly to an already connected
+  // origin. The link may belong to another paired server and loopback Polyth
+  // Link origins deliberately do not expose privileged connection metadata.
   if (!isBundledOrigin()) {
     if (!isPolythLinkLoopbackOrigin(location.origin)) {
       await rememberMobileHost(location.origin);
     }
-    if (deepLinkPath && `${location.pathname}${location.search}` !== deepLinkPath) {
-      history.replaceState(null, "", deepLinkPath);
-    }
-    return { kind: "app", ...(deepLinkPath ? { deepLinkPath } : {}) };
+    return { kind: "app" };
   }
 
-  const launchPair = launchUrl?.url && isPairingDeepLink(launchUrl.url) ? launchUrl.url : undefined;
+  const pendingPath = await consumePendingMobilePath().catch(() => undefined);
+  const opened = nativeNavigationAvailable()
+    ? await consumeNativePendingUrl().catch(() => undefined)
+    : (await App.getLaunchUrl().catch(() => undefined))?.url;
+  const deepLinkPath = (opened ? mobileDeepLinkPath(opened) : undefined) ?? pendingPath;
+  const launchPair = opened && isPairingDeepLink(opened) ? opened : undefined;
+
   if (launchPair) {
     return {
       kind: "connect",
@@ -251,8 +293,6 @@ export async function prepareMobileLaunch(): Promise<MobileLaunch> {
     };
   }
 
-  // Production launches stay on the bundled origin. Raw URL auto-connect is
-  // developer-only and never happens here.
   return {
     kind: "connect",
     recent: hosts.recent,
