@@ -4,8 +4,10 @@
 //
 //  - current: `session/new` / `session/load` return `configOptions`, a list of
 //    `{ id, name, category?, type: "select" | "boolean", ... }`. The optional
-//    category or the exact well-known ids `model` / `thought_level` identify
-//    the two controls. Changes go through
+//    semantic category identifies model/thought controls when present. For
+//    compatibility with agents that historically used semantic ids, exact
+//    `model` / `thought_level` ids are also recognized when category is absent;
+//    ACP does not standardize those ids. Changes go through
 //    `session/set_config_option`.
 //  - legacy (still shipped by some agents): `session/new` returns
 //    `models: { availableModels, currentModelId }` and changes go through
@@ -26,9 +28,9 @@ export interface AcpConfigSelect {
 }
 
 export interface AcpSessionConfig {
-  /** The model select identified by category or exact well-known id. */
+  /** Model select identified by semantic category, with an exact-id compatibility fallback. */
   model?: AcpConfigSelect;
-  /** The thinking select identified by category or exact well-known id. */
+  /** Thinking select identified by semantic category, with an exact-id compatibility fallback. */
   thoughtLevel?: AcpConfigSelect;
   /** Legacy `models` block from `session/new`. */
   legacyModels?: { available: AcpSelectOption[]; current?: string };
