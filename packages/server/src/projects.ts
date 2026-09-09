@@ -31,6 +31,7 @@ export interface ProjectRegistry extends ProjectService {
 const MAX_PROJECT_ICON_BYTES = 512 * 1024;
 const IMAGE_ICON = /^data:(image\/(?:png|svg\+xml|x-icon|vnd\.microsoft\.icon));base64,([A-Za-z0-9+/]+={0,2})$/;
 const PROJECT_ICON_PATH = /^\/assets\/project-icons\/[a-z0-9]+(?:-[a-z0-9]+)*\.svg$/;
+const HARNESS_ID = /^[a-z][a-z0-9-]*$/;
 
 function validProjectIcon(icon: string): boolean {
   if (PROJECT_ICON_PATH.test(icon)) return true;
@@ -199,15 +200,30 @@ export function createProjectService(
           const harness = patch.defaults.harness;
           if (harness !== undefined && harness !== null && (
             !harness || typeof harness !== "object"
-            || (harness.mode !== "auto" && (harness.mode !== "pinned" || typeof harness.harnessId !== "string" || !/^[a-z][a-z0-9-]*$/.test(harness.harnessId)))
+            || (harness.mode !== "auto" && (harness.mode !== "pinned" || typeof harness.harnessId !== "string" || !HARNESS_ID.test(harness.harnessId)))
           )) {
             throw Object.assign(new Error("defaults.harness must be inherit, Auto, or a registered harness selection"), { code: "invalid-input" });
           }
           if (patch.defaults.agentProfileId !== undefined && patch.defaults.agentProfileId !== null && typeof patch.defaults.agentProfileId !== "string") {
             throw Object.assign(new Error("defaults.agentProfileId must be a profile id or null"), { code: "invalid-input" });
           }
+          // Harness-qualified model refs are a client-side catalog identity.
+          // ProjectDefaults stores that identity canonically as ModelRef + the
+          // separate harness selection, so never persist harnessId inside model.
+          const defaults = { ...patch.defaults };
+          const model = defaults.model as ({ providerID: string; modelID: string; harnessId?: unknown } | null | undefined);
+          if (model?.harnessId !== undefined) {
+            const harnessId = model.harnessId;
+            if (typeof harnessId !== "string" || !HARNESS_ID.test(harnessId)) {
+              throw Object.assign(new Error("defaults.model.harnessId must be a valid harness id"), { code: "invalid-input" });
+            }
+            defaults.model = { providerID: model.providerID, modelID: model.modelID };
+            // An explicit harness in the same patch wins. Otherwise preserve
+            // the exact harness-qualified model the client selected.
+            if (defaults.harness === undefined) defaults.harness = { mode: "pinned", harnessId };
+          }
           // shallow-merge defaults so a partial patch never wipes other defaults
-          project.defaults = { ...project.defaults, ...patch.defaults };
+          project.defaults = { ...project.defaults, ...defaults };
         }
         persist();
         return project;
