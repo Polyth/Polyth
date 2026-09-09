@@ -167,14 +167,14 @@ test("model picker renders a contributed catalog header inside its overlay", asy
       root.render(createElement(ModelPicker, {
         models: [{ providerID: "openai", modelID: "gpt-test", name: "GPT Test" }],
         onPick: () => {},
-        header: createElement("div", { "data-test-harness-tabs": true }, "Auto · OpenCode  Codex"),
+        header: createElement("div", { "data-test-harness-tabs": true }, "OpenCode  Codex"),
       }));
     });
     assert.equal(document.body.querySelector("[data-test-harness-tabs]"), null, "the contribution stays lazy while the picker is closed");
     await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
     assert.equal(
       document.body.querySelector("[data-test-harness-tabs]")?.textContent,
-      "Auto · OpenCode  Codex",
+      "OpenCode  Codex",
     );
     assert.ok(document.body.querySelector(".model-picker-header"), "the contribution precedes the model catalog");
   } finally {

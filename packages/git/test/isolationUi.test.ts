@@ -15,7 +15,7 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { activateSession, seedSessionCache } = await import("../../../apps/web/src/store.ts");
-const { IsolationCard } = await import("../widgets/IsolationCard.tsx");
+const { IsolationCard, IsolationListBadge } = await import("../widgets/IsolationCard.tsx");
 const { tr } = await import("../../../apps/web/src/i18n/index.ts");
 const { api } = await import("@polyth/session/web-api");
 const wait = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -35,6 +35,37 @@ async function mount(session: SessionProjection) {
   await act(async () => { root.render(createElement(IsolationCard)); await wait(); });
   return { container, async close() { await act(async () => root.unmount()); container.remove(); } };
 }
+
+test("IsolationListBadge names Isolated when isolation is present and is absent otherwise", async () => {
+  const isolated = projection("list-badge", { ...base, state: "active" });
+  seedSessionCache(isolated);
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(createElement(IsolationListBadge, { sessionId: isolated.id }));
+      await wait();
+    });
+    const badge = container.querySelector(".isolation-list-badge");
+    assert.ok(badge);
+    assert.equal(badge?.getAttribute("aria-label"), tr("isolation.isolated"));
+    assert.equal(badge?.getAttribute("title"), tr("isolation.isolated"));
+    assert.equal(badge?.textContent, tr("isolation.isolated"));
+
+    await act(async () => {
+      seedSessionCache({
+        id: "list-badge-plain", projectId: "ui-test", title: "plain", status: "idle", createdAt: 1, updatedAt: 1,
+      });
+      root.render(createElement(IsolationListBadge, { sessionId: "list-badge-plain" }));
+      await wait();
+    });
+    assert.equal(container.querySelector(".isolation-list-badge"), null);
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
 
 test("missing source offers no Keep action; published recovery stays visible and retries explicitly", async () => {
   const originalStatus = api.isolationStatus;

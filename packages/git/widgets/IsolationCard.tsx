@@ -363,7 +363,8 @@ export function IsolationListBadge({ sessionId }: { sessionId: string }) {
     isolationOf(state.sessions.find((candidate) => candidate.id === sessionId) ?? null),
   );
   if (!isolation) return null;
+  const label = tr("isolation.isolated");
   return (
-    <span className="isolation-list-badge">{tr("isolation.isolated")}</span>
+    <span className="isolation-list-badge" title={label} aria-label={label}>{label}</span>
   );
 }
