@@ -5,7 +5,20 @@ import {
   type SttAdapter, type SttStream,
 } from "@polyth/dictation";
 
-/** Fake STT: decodes each PCM chunk as UTF-8 words; finalize joins them. */
+/** Test-only PCM fixture: each ASCII byte becomes the low byte of one s16le
+ * sample so the service still receives structurally valid PCM16. */
+const chunk = (s: string): Uint8Array => {
+  const text = Buffer.from(s, "utf8");
+  const pcm = new Uint8Array(text.byteLength * 2);
+  for (let i = 0; i < text.byteLength; i++) pcm[i * 2] = text[i]!;
+  return pcm;
+};
+const decodeChunk = (pcm: Uint8Array): string => {
+  const bytes = Buffer.allocUnsafe(pcm.byteLength / 2);
+  for (let i = 0; i < bytes.byteLength; i++) bytes[i] = pcm[i * 2]!;
+  return bytes.toString("utf8");
+};
+
 function fakeAdapter(): SttAdapter & { pushed: Uint8Array[] } {
   const pushed: Uint8Array[] = [];
   return {
@@ -16,7 +29,7 @@ function fakeAdapter(): SttAdapter & { pushed: Uint8Array[] } {
       return {
         push(pcm) {
           pushed.push(pcm);
-          words.push(Buffer.from(pcm).toString("utf8"));
+          words.push(decodeChunk(pcm));
         },
         partial: () => words.join(" "),
         finalize: async () => words.join(" ").trim(),
@@ -24,8 +37,6 @@ function fakeAdapter(): SttAdapter & { pushed: Uint8Array[] } {
     },
   };
 }
-
-const chunk = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, "utf8"));
 
 test("no adapter: capability is honest, create refuses", () => {
   const svc = createDictationService({ adapter: null, unavailableReason: "no engine" });
@@ -111,6 +122,12 @@ test("byte cap fails the dictation", async () => {
   assert.equal(svc.get(d.id)!.status, "failed");
 });
 
+test("odd byte chunks fail explicit pcm16 validation", async () => {
+  const svc = createDictationService({ adapter: fakeAdapter() });
+  const d = svc.create({});
+  await assert.rejects(() => svc.push(d.id, 1, new Uint8Array(3)), /whole 16-bit samples/);
+});
+
 test("finalize refuses missing buffered audio", async () => {
   const svc = createDictationService({ adapter: fakeAdapter() });
   const d = svc.create({});
@@ -158,7 +175,7 @@ test("chunk buffer assigns sequential seqs and replays unacked in order", () => 
   buf.ack(1);
   const replay = buf.unacked();
   assert.deepEqual(replay.map((c) => c.seq), [2, 3]);
-  assert.equal(Buffer.from(replay[0]!.pcm).toString(), "bb");
+  assert.equal(decodeChunk(replay[0]!.pcm), "bb");
 });
 
 test("chunk buffer ack is idempotent and tolerates high acks", () => {
