@@ -48,6 +48,8 @@
 	<string>Polyth uses the camera to scan secure pairing QR codes.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Polyth finds and connects to the Polyth server you choose on your local network.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Polyth uses the microphone only while you are actively dictating a message.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
