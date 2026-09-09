@@ -5,11 +5,13 @@ import type {
   AgentProfile,
   ModelDescriptor,
   ModelDiscoveryState,
+  Project,
   RouteHandler,
 } from "@polyth/contracts";
 import {
   atomicWriteSync,
   localOnlyRemoteAccess,
+  serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
@@ -54,14 +56,12 @@ interface ProfileOwnersFile {
 }
 
 /**
- * Agent profiles predate user accounts and live in the session store. Moving
+ * Agent presets predate user accounts and live in the session store. Moving
  * that table would add a broad migration for a small ownership problem, so the
- * models package owns the missing relation explicitly: profile id -> user id.
+ * models package owns the missing relation explicitly: preset id -> user id.
  * Unmapped legacy rows belong to the only historical account, `usr_owner`.
  */
 function createOwnedProfileStore(base: LegacyProfileStore, file: string): ProfileStore {
-  // Capture the legacy methods before registration disables raw unscoped
-  // profile lookup for the session service later in server composition.
   const legacy = {
     list: base.profileList.bind(base),
     get: base.profileGet.bind(base),
@@ -79,7 +79,7 @@ function createOwnedProfileStore(base: LegacyProfileStore, file: string): Profil
       );
     }
   } catch {
-    // First boot: all pre-existing profiles are bootstrap-owner profiles.
+    // First boot: all pre-existing presets are bootstrap-owner presets.
   }
 
   const ownerOf = (id: string): string => owners[id] ?? OWNER_USER_ID;
@@ -173,9 +173,6 @@ export function profileRoutes(deps: {
       const input = await body();
       json(200, await deps.store.profileCreate({
         name: String(input.name ?? ""),
-        // This endpoint historically described OpenCode models. Keeping that
-        // default preserves old clients while every updated preset editor
-        // sends an explicit harness identity.
         harnessId: typeof input.harnessId === "string" ? input.harnessId : "opencode",
         providerID: String(input.providerID ?? ""),
         modelID: String(input.modelID ?? ""),
@@ -234,14 +231,32 @@ export function profileRoutes(deps: {
   };
 }
 
+const selectionKey = (project: Project): string => {
+  const selection = project.defaults?.harness;
+  return selection?.mode === "pinned" ? `pinned:${selection.harnessId}` : "auto";
+};
+
+/**
+ * Package-local agent metadata fallback is bounded by harness diversity, not
+ * project count. Canonical model metadata uses the shared runtime.catalog
+ * service so custom-provider/preset validation never duplicates discovery.
+ */
 const aggregate = async <T>(
   host: ServerPackageHost,
   fetch: (projectId: string) => Promise<T[]>,
   key: (item: T) => string,
 ): Promise<T[]> => {
   const projects = await host.projects.list();
-  const ids = projects.length ? projects.map((project) => project.id) : ["__default__"];
-  const settled = await Promise.allSettled(ids.map(fetch));
+  const bySelection = new Map<string, Project>();
+  for (const project of projects) {
+    const selection = selectionKey(project);
+    const current = bySelection.get(selection);
+    if (!current || (current.remote && !project.remote)) bySelection.set(selection, project);
+  }
+  const representatives = [...bySelection.values()].map((project) => project.id);
+  if (representatives.length === 0) representatives.push("__default__");
+
+  const settled = await Promise.allSettled(representatives.map(fetch));
   const seen = new Set<string>();
   const result: T[] = [];
   for (const response of settled) {
@@ -295,7 +310,10 @@ export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
-  const listModels = () => aggregate(
+  const sharedCatalog = host.services.get(serverServiceKey<{
+    models(): Promise<ModelDescriptor[]>;
+  }>("runtime.catalog"));
+  const fallbackModels = () => aggregate(
     host,
     async (projectId) => {
       const runtime = await host.runtimes.forProject(projectId);
@@ -306,6 +324,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     },
     (model) => `${model.harnessId ?? "legacy"}/${model.providerID}/${model.modelID}`,
   );
+  const listModels = () => sharedCatalog?.models() ?? fallbackModels();
   const listAgents = () => aggregate(
     host,
     async (projectId) => {
@@ -323,9 +342,9 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     join(host.storageDir, "agent-profile-owners.json"),
   );
   // The core session service is composed after packages load. Its historical
-  // direct profile lookup has no authenticated user parameter, so disable that
-  // unscoped path. Composer selection already resolves presets into explicit
-  // model/agent/thinking state; the scoped routes above remain authoritative.
+  // direct preset lookup has no authenticated user parameter, so disable that
+  // unscoped path. Composer selection resolves presets into explicit execution
+  // configuration before the scoped session facade strips the private id.
   legacyStore.profileGet = async () => undefined;
   const profiles = profileRoutes({ store: ownedProfiles, listModels, listAgents });
   const custom = customProviderRoutes(host, listModels);
