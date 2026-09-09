@@ -10,9 +10,10 @@ import {
   type DictationProvider,
 } from "@polyth/dictation";
 
-test("cloud default is ElevenLabs with automatic transport", () => {
+test("cloud default is ElevenLabs with automatic transport and fallback off", () => {
   assert.equal(DEFAULT_DICTATION_PREFERENCES.provider, "elevenlabs");
   assert.equal(DEFAULT_DICTATION_PREFERENCES.transport, "auto");
+  assert.equal(DEFAULT_DICTATION_PREFERENCES.cloudFallback, false);
   assert.equal(providerCapabilities("elevenlabs")?.ephemeralClientAuth, true);
 });
 
@@ -29,23 +30,23 @@ test("Wispr is represented without inventing a public API contract", () => {
   assert.equal(wispr?.streaming, true);
 });
 
-test("legacy voice engines migrate without losing explicit new preferences", () => {
+test("legacy voice engines migrate without opting into cloud fallback", () => {
   assert.deepEqual(
     migrateDictationPreferences({ sttEngine: "browser", lang: "uk-UA" }),
     {
       provider: "web-speech", transport: "direct-browser", language: "uk-UA",
-      contextInjection: true, cloudFallback: true, latencyPreference: "lowest",
+      contextInjection: true, cloudFallback: false, latencyPreference: "lowest",
     },
   );
   const modern = migrateDictationPreferences({
     provider: "deepgram", transport: "server-proxy", model: "nova-3", language: "uk",
-    contextInjection: false, cloudFallback: false, latencyPreference: "balanced",
+    contextInjection: false, cloudFallback: true, latencyPreference: "balanced",
   });
   assert.equal(modern.provider, "deepgram");
   assert.equal(modern.transport, "server-proxy");
   assert.equal(modern.model, "nova-3");
   assert.equal(modern.contextInjection, false);
-  assert.equal(modern.cloudFallback, false);
+  assert.equal(modern.cloudFallback, true);
 });
 
 test("dictation context is deduped and bounded before provider use", () => {
