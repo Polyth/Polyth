@@ -44,9 +44,7 @@ struct NumericInvitation {
     host_endpoint_id: String,
     credential_id: Vec<u8>,
     password_file: Vec<u8>,
-    ticket: Zeroizing<String>,
     created: Instant,
-    expires_at: String,
     attempts: u32,
     redeemed: bool,
 }
@@ -93,7 +91,6 @@ pub struct NumericClientFinish {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NumericPairingRedeemed {
     pub pairing_id: String,
-    pub ticket: String,
 }
 
 impl NumericPairing {
@@ -112,11 +109,10 @@ impl NumericPairing {
         &mut self,
         host_endpoint_id: &str,
         pairing_id: &str,
-        ticket: &str,
         now: Instant,
     ) -> Result<NumericPairingCode, LinkError> {
         validate_endpoint(host_endpoint_id)?;
-        if pairing_id.is_empty() || pairing_id.len() > 128 || ticket.is_empty() {
+        if pairing_id.is_empty() || pairing_id.len() > 128 {
             return Err(LinkError::PairingInvalid);
         }
         self.invalidate_active();
@@ -135,9 +131,7 @@ impl NumericPairing {
             host_endpoint_id: host_endpoint_id.to_string(),
             credential_id,
             password_file,
-            ticket: Zeroizing::new(ticket.to_string()),
             created: now,
-            expires_at: expires_at.clone(),
             attempts: 0,
             redeemed: false,
         });
@@ -158,6 +152,10 @@ impl NumericPairing {
         {
             self.invalidate_active();
         }
+    }
+
+    pub fn invalidate_all(&mut self) {
+        self.invalidate_active();
     }
 
     pub fn start_login(
@@ -280,12 +278,9 @@ impl NumericPairing {
 
         active.redeemed = true;
         active.password_file.zeroize();
-        let ticket = active.ticket.to_string();
-        active.ticket.zeroize();
         self.pending.clear();
         Ok(NumericPairingRedeemed {
             pairing_id: active.pairing_id.clone(),
-            ticket,
         })
     }
 
@@ -318,7 +313,6 @@ impl NumericPairing {
     fn invalidate_active(&mut self) {
         if let Some(mut active) = self.active.take() {
             active.password_file.zeroize();
-            active.ticket.zeroize();
         }
         self.pending.clear();
     }
@@ -429,9 +423,7 @@ fn context(host_endpoint_id: &str, pairing_id: &str) -> Vec<u8> {
 fn validate_endpoint(value: &str) -> Result<(), LinkError> {
     if value.len() < 32
         || value.len() > 64
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric())
+        || !value.bytes().all(|byte| byte.is_ascii_alphanumeric())
     {
         return Err(LinkError::PairingInvalid);
     }
@@ -452,12 +444,10 @@ mod tests {
     const DEVICE: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
     #[test]
-    fn numeric_code_is_only_a_pake_bootstrap_for_the_regular_ticket() {
+    fn numeric_code_authenticates_only_the_existing_pairing_id() {
         let now = Instant::now();
         let mut server = NumericPairing::new();
-        let code = server
-            .create(HOST, "pairing-a", "regular-stage-one-ticket", now)
-            .unwrap();
+        let code = server.create(HOST, "pairing-a", now).unwrap();
         let (client, request) = NumericClientLogin::start(&code.code, HOST).unwrap();
         let challenge = server.start_login(DEVICE, &request.request, now).unwrap();
         let finish = client.finish(&challenge).unwrap();
@@ -466,7 +456,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(redeemed.pairing_id, "pairing-a");
-        assert_eq!(redeemed.ticket, "regular-stage-one-ticket");
         assert_eq!(
             server.finish_login(DEVICE, &finish.attempt_id, &finish.finalization, now),
             Err(LinkError::PairingInvalid)
@@ -474,10 +463,10 @@ mod tests {
     }
 
     #[test]
-    fn wrong_code_never_reveals_the_ticket() {
+    fn wrong_code_never_authenticates_the_pairing_id() {
         let now = Instant::now();
         let mut server = NumericPairing::new();
-        let code = server.create(HOST, "pairing-a", "secret-ticket", now).unwrap();
+        let code = server.create(HOST, "pairing-a", now).unwrap();
         let wrong = if code.code == "000000" { "000001" } else { "000000" };
         let (client, request) = NumericClientLogin::start(wrong, HOST).unwrap();
         let challenge = server.start_login(DEVICE, &request.request, now).unwrap();
@@ -488,10 +477,10 @@ mod tests {
     fn regeneration_invalidates_old_login_and_old_code() {
         let now = Instant::now();
         let mut server = NumericPairing::new();
-        let first = server.create(HOST, "pairing-a", "ticket-a", now).unwrap();
+        let first = server.create(HOST, "pairing-a", now).unwrap();
         let (client, request) = NumericClientLogin::start(&first.code, HOST).unwrap();
         let challenge = server.start_login(DEVICE, &request.request, now).unwrap();
-        server.create(HOST, "pairing-b", "ticket-b", now).unwrap();
+        server.create(HOST, "pairing-b", now).unwrap();
         let finish = client.finish(&challenge).unwrap();
         assert_eq!(
             server.finish_login(DEVICE, &finish.attempt_id, &finish.finalization, now),
@@ -503,7 +492,7 @@ mod tests {
     fn code_expires_and_attempts_are_bounded() {
         let now = Instant::now();
         let mut server = NumericPairing::new();
-        let code = server.create(HOST, "pairing-a", "ticket-a", now).unwrap();
+        let code = server.create(HOST, "pairing-a", now).unwrap();
         for _ in 0..MAX_CODE_ATTEMPTS {
             let (_client, request) = NumericClientLogin::start(&code.code, HOST).unwrap();
             server.start_login(DEVICE, &request.request, now).unwrap();
@@ -513,10 +502,7 @@ mod tests {
             server.start_login(DEVICE, &request.request, now),
             Err(LinkError::RequestRateLimited)
         );
-        assert_eq!(
-            server.active_pairing_id(now + NUMERIC_TTL),
-            None
-        );
+        assert_eq!(server.active_pairing_id(now + NUMERIC_TTL), None);
     }
 
     #[test]
