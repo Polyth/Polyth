@@ -3,9 +3,10 @@ import type {
   AgentProfile,
   ModelDescriptor,
   ModelDiscoveryState,
+  Project,
   RouteHandler,
 } from "@polyth/contracts";
-import { localOnlyRemoteAccess, type ServerPackage, type ServerPackageHost } from "@polyth/plugins";
+import { localOnlyRemoteAccess, serverServiceKey, type ServerPackage, type ServerPackageHost } from "@polyth/plugins";
 import { customProviderRoutes } from "./customProviderRoutes.ts";
 import { validateProfile } from "./index.ts";
 
@@ -120,14 +121,32 @@ export function profileRoutes(deps: {
   };
 }
 
+const selectionKey = (project: Project): string => {
+  const selection = project.defaults?.harness;
+  return selection?.mode === "pinned" ? `pinned:${selection.harnessId}` : "auto";
+};
+
+/**
+ * Package-local agent metadata fallback is bounded by harness diversity, not
+ * project count. Canonical model metadata uses the shared runtime.catalog
+ * service so custom-provider/profile validation never duplicates discovery.
+ */
 const aggregate = async <T>(
   host: ServerPackageHost,
   fetch: (projectId: string) => Promise<T[]>,
   key: (item: T) => string,
 ): Promise<T[]> => {
   const projects = await host.projects.list();
-  const ids = projects.length ? projects.map((project) => project.id) : ["__default__"];
-  const settled = await Promise.allSettled(ids.map(fetch));
+  const bySelection = new Map<string, Project>();
+  for (const project of projects) {
+    const selection = selectionKey(project);
+    const current = bySelection.get(selection);
+    if (!current || (current.remote && !project.remote)) bySelection.set(selection, project);
+  }
+  const representatives = [...bySelection.values()].map((project) => project.id);
+  if (representatives.length === 0) representatives.push("__default__");
+
+  const settled = await Promise.allSettled(representatives.map(fetch));
   const seen = new Set<string>();
   const result: T[] = [];
   for (const response of settled) {
@@ -186,7 +205,10 @@ export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
-  const listModels = () => aggregate(
+  const sharedCatalog = host.services.get(serverServiceKey<{
+    models(): Promise<ModelDescriptor[]>;
+  }>("runtime.catalog"));
+  const fallbackModels = () => aggregate(
     host,
     async (projectId) => {
       const runtime = await host.runtimes.forProject(projectId);
@@ -197,6 +219,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     },
     (model) => `${model.harnessId ?? "legacy"}/${model.providerID}/${model.modelID}`,
   );
+  const listModels = () => sharedCatalog?.models() ?? fallbackModels();
   const listAgents = () => aggregate(
     host,
     async (projectId) => {

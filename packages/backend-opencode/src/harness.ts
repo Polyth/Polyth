@@ -33,11 +33,27 @@ export function createOpenCodeHarness(
                 engine.agents(),
                 engine.capabilities(),
             ]);
-            const providers = [...new Map(models.map((model) => [model.providerID, {
-                id: model.providerID,
-                name: model.providerName ?? model.providerID,
-                connected: models.some((candidate) => candidate.providerID === model.providerID && candidate.connected === true),
-            }])).values()];
+            // Provider projection is on the interactive catalog path. Build it
+            // in one pass instead of scanning the full model list for every
+            // model (the previous map(... models.some(...)) was O(n²)).
+            const providerMap = new Map<string, { id: string; name: string; connected: boolean }>();
+            for (const model of models) {
+                const current = providerMap.get(model.providerID);
+                if (current) {
+                    if (model.connected === true) current.connected = true;
+                    // Preserve the old projection's ability to surface a
+                    // provider display name even when only a later model row
+                    // carries it.
+                    if (current.name === current.id && model.providerName) current.name = model.providerName;
+                    continue;
+                }
+                providerMap.set(model.providerID, {
+                    id: model.providerID,
+                    name: model.providerName ?? model.providerID,
+                    connected: model.connected === true,
+                });
+            }
+            const providers = [...providerMap.values()];
             const hasUsableModel = models.some((model) => model.connected !== false);
             return {
                 state: hasUsableModel ? "ready" : "setup-required",

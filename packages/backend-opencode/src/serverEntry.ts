@@ -47,6 +47,12 @@ export default function registerPackage(host: ServerPackageHost) {
     runtime: openCodeRuntime,
     invalidateModels: () => catalog?.invalidateModels(),
   });
+  const authRoutes = providerAuthRoutes({
+    auth,
+    runtime: openCodeRuntime,
+    ...(catalog ? { catalog } : {}),
+    ...(visibility ? { visibility } : {}),
+  });
   const restart = events?.onRestart?.(async (runtime) => {
     const endpoint = await runtime.endpoint?.();
     auth.notifyRuntimeChange(endpoint);
@@ -54,12 +60,21 @@ export default function registerPackage(host: ServerPackageHost) {
 
   return {
     remoteAccess: localOnlyRemoteAccess(["backend-opencode"]),
-    routes: providerAuthRoutes({
-      auth,
-      runtime: openCodeRuntime,
-      ...(catalog ? { catalog } : {}),
-      ...(visibility ? { visibility } : {}),
-    }),
+    routes: async (request) => {
+      // OpenCode provider administration must not wait for generic multi-harness
+      // catalog aggregation. Query the host-global OpenCode authority directly.
+      if (request.path === "/api/opencode/providers" && request.method === "GET") {
+        if (request.url.searchParams.get("refresh") === "1") catalog?.invalidateModels();
+        const runtime = await openCodeRuntime(request.space);
+        const models = (await runtime.models()).map((model) => ({
+          ...model,
+          harnessId: "opencode",
+        }));
+        request.json(200, visibility?.catalog(models) ?? []);
+        return true;
+      }
+      return authRoutes(request);
+    },
     onDisable: () => {
       restart?.dispose();
       registration.dispose();

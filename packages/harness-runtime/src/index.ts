@@ -98,6 +98,8 @@ export function createHarnessRegistry() {
         current?: HarnessSnapshot;
         lastGood?: HarnessSnapshot;
         pending?: Promise<HarnessSnapshot>;
+        /** Last successful detail/discovery verification for current metadata. */
+        detailedAt?: number;
     }>();
     let revision = 0;
     const SNAPSHOT_TTL_MS = 15_000;
@@ -147,7 +149,9 @@ export function createHarnessRegistry() {
                 snapshots.set(key, entry);
                 const fresh = entry.current
                     && Date.now() - entry.current.context.fetchedAt < SNAPSHOT_TTL_MS
-                    && (!options.detail || entry.current.catalog !== undefined || provider.discover === undefined);
+                    && (!options.detail
+                        || provider.discover === undefined
+                        || (entry.detailedAt !== undefined && entry.detailedAt >= entry.current.context.fetchedAt));
                 if (!options.force && fresh)
                     return entry.current!;
                 if (!options.force && entry.pending)
@@ -241,6 +245,8 @@ export function createHarnessRegistry() {
                             : retained?.native !== undefined ? { native: retained.native } : {}),
                     };
                     entry.current = snapshot;
+                    if (options.detail && provider.discover && discoveryError === undefined)
+                        entry.detailedAt = checkedAt;
                     if (!degraded && (state === "ready" || state === "unknown" || state === "partially-configured"))
                         entry.lastGood = snapshot;
                     return snapshot;
@@ -264,6 +270,7 @@ export function createHarnessRegistry() {
                 if (match.harnessId !== undefined && match.harnessId !== harnessId)
                     continue;
                 entry.current = undefined;
+                entry.detailedAt = undefined;
             }
         },
         async resolve(context: HarnessContext, selection: HarnessSelection, stickyId?: string) {
@@ -274,6 +281,21 @@ export function createHarnessRegistry() {
                 ? ordered.filter((p) => p.descriptor.id === id)
                 : [...ordered.filter((p) => p.descriptor.id === id), ...ordered.filter((p) => p.descriptor.id !== id)].filter((p) => p.descriptor.autoSelect !== false);
             for (const provider of candidates) {
+                const cache = snapshots.get(snapshotKey(context, provider.descriptor.id));
+                const current = cache?.current;
+                if (current && Date.now() - current.context.fetchedAt < SNAPSHOT_TTL_MS) {
+                    const cachedProbe = current.availability as HarnessProbe;
+                    if (!runnable(cachedProbe))
+                        continue;
+                    // Detail discovery already proved readiness for this exact
+                    // context. Re-running probe/discover here was the main warm
+                    // harness-switch tax and could start OpenCode just to select
+                    // a runtime that was already known-good.
+                    const detailed = provider.discover === undefined
+                        || (cache?.detailedAt !== undefined && cache.detailedAt >= current.context.fetchedAt);
+                    if (detailed || (cachedProbe.state !== "unknown" && cachedProbe.authenticated !== "unknown"))
+                        return provider;
+                }
                 let probe = await probeOne(provider, context);
                 if (!runnable(probe))
                     continue;
@@ -290,6 +312,21 @@ export function createHarnessRegistry() {
                             ...(discovery.state !== undefined ? { state: discovery.state } : {}),
                             ...(discovery.message ? { message: discovery.message } : {}),
                         };
+                        if (cache?.current) {
+                            const checkedAt = Date.now();
+                            cache.current = {
+                                ...cache.current,
+                                availability: { ...cache.current.availability, ...probe, checkedAt },
+                                context: {
+                                    ...cache.current.context,
+                                    revision: `${checkedAt}-${++revision}`,
+                                    fetchedAt: checkedAt,
+                                },
+                            };
+                            // This path verified execution readiness only. It did
+                            // not materialize catalog/capabilities/configuration,
+                            // so a later detail=1 request must still discover them.
+                        }
                     }
                     catch {
                         continue;
@@ -398,6 +435,15 @@ export function createHarnessPool(options: {
         return available(entry);
     };
     return {
+        /** Read cached/discovered metadata for all harnesses in one project context. */
+        async harnessSnapshots(
+            projectId: string,
+            cwd?: string,
+            snapshotOptions: { harnessId?: string; force?: boolean; detail?: boolean } = {},
+        ) {
+            const context = await options.context(projectId, cwd);
+            return options.registry.snapshots(context, snapshotOptions);
+        },
         async forProject(projectId: string, cwd?: string) {
             const context = await options.context(projectId, cwd);
             return get(context, await options.registry.resolve(context, { mode: "auto" }));
