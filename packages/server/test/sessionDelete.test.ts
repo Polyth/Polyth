@@ -45,7 +45,10 @@ function fakeRuntime() {
 
 const flush = () => new Promise((r) => setTimeout(r, 20));
 
-function makeService(fake: ReturnType<typeof fakeRuntime>) {
+function makeService(
+  fake: ReturnType<typeof fakeRuntime>,
+  runtimeFor: (projectId: string, cwd?: string) => Promise<AgentRuntime> = async () => fake.rt,
+) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-delete-"));
   const store = createStore(join(dir, "s.db"));
   const project: Project = { id: "p1", path: dir, name: "p", createdAt: 1 };
@@ -64,7 +67,7 @@ function makeService(fake: ReturnType<typeof fakeRuntime>) {
   const broadcast: Broadcaster = { event: () => {}, projection: () => {} };
   const sessions = createSessionService({
     store, projects, permissions, broadcast, queue: store,
-    runtimes: { forProject: async () => fake.rt },
+    runtimes: { forProject: runtimeFor },
   });
   return { sessions, store };
 }
@@ -145,4 +148,33 @@ test("delete removes a session whose persisted runtime identity changed without 
 
   assert.equal(await store.projection("identity-changed"), undefined);
   assert.equal(discarded, 0);
+});
+
+test("delete removes a session whose worktree disappeared without constructing a runtime", async () => {
+  const fake = fakeRuntime();
+  const { sessions, store } = makeService(fake, async () => {
+    throw Object.assign(new Error("Runtime workspace/cwd no longer exists"), { code: "unavailable" });
+  });
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  const missingWorktree = join(tmpdir(), "polyth-delete-missing-worktree");
+  const projection = await store.projection(id);
+  assert.ok(projection);
+  await store.upsertProjection({
+    ...projection,
+    backendSessionId: "be_missing-worktree",
+    worktreePath: missingWorktree,
+    worktreeState: "missing",
+    runtimeBinding: {
+      backendSessionId: "be_missing-worktree",
+      authorityId: "owned:missing-worktree",
+      generation: 1,
+      continuity: "verified",
+      protocol: "legacy",
+      location: { directory: missingWorktree },
+    },
+  });
+
+  await sessions.delete!(id);
+
+  assert.equal(await store.projection(id), undefined);
 });

@@ -6884,6 +6884,10 @@ export function createSessionService(deps: {
         const project = await projects.get(proj.projectId);
         const cwd = proj.worktreePath ?? project?.path ?? process.cwd();
         const rt = sessionRuntime.get(sessionId) ?? (proj.backendSessionId
+          // A removed worktree cannot construct a runtime. The canonical
+          // session can still be tombstoned; upstream deletion remains
+          // unconfirmed until a later reconciliation can prove it.
+          && proj.worktreeState !== "missing"
           ? await runtimeFor(proj, cwd)
           : undefined);
         // Drop callbacks before abort/delete I/O. A synchronous turn/stopped
