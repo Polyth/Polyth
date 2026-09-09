@@ -1,3 +1,5 @@
+mod numeric;
+
 include!("runtime.rs");
 
 const NATIVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -50,6 +52,38 @@ impl NativeClient {
         params: Value,
         identity_secret: Option<&[u8]>,
     ) -> Result<Value, String> {
+        if method == "pairing.begin_numeric" {
+            let secret = identity_secret
+                .ok_or_else(|| LinkError::PairingStorageFailed.code().to_string())?;
+            let host = params
+                .get("hostEndpointId")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| LinkError::PairingInvalid.code().to_string())?
+                .to_string();
+            let data_dir = self.state.lock().await.data_dir.clone();
+            let path = data_dir.join("hosts").join(&host).join("identity");
+            let identity = identity::use_memory_identity(path, secret)
+                .map_err(|_| LinkError::PairingStorageFailed.code().to_string())?;
+            let spec = NativeOperationSpec {
+                key: format!("pairing-begin:{host}"),
+                timeout: NATIVE_CONNECT_TIMEOUT,
+                cancelled: LinkError::PairingCancelled.code(),
+                target_connection_id: None,
+            };
+            let lease = self.begin_operation(&spec).await?;
+            let result = self
+                .run_operation(
+                    lease,
+                    spec.timeout,
+                    spec.cancelled,
+                    numeric::begin_numeric_pairing(self.state.clone(), params),
+                )
+                .await;
+            drop(identity);
+            return result;
+        }
+
         if method == "connections.list" {
             if identity_secret.is_some() {
                 return Err(LinkError::PairingInvalid.code().to_string());
