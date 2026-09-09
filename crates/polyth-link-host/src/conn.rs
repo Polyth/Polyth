@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
+use polyth_link_core::{POLYTH_LINK_ALPN, POLYTH_NUMERIC_ALPN};
 use tokio::sync::Mutex;
 
 use crate::HostState;
 
+#[allow(dead_code)]
 mod transport {
     include!("conn_transport.rs");
 }
@@ -22,7 +24,36 @@ pub async fn accept_loop(state: Arc<Mutex<HostState>>, endpoint: iroh::Endpoint)
     } else {
         None
     };
-    transport::accept_loop(state, endpoint).await;
+
+    loop {
+        let incoming = match endpoint.accept().await {
+            Some(incoming) => incoming,
+            None => break,
+        };
+        let connecting = match incoming.accept() {
+            Ok(connecting) => connecting,
+            Err(_) => continue,
+        };
+        let connection = match connecting.await {
+            Ok(connection) => connection,
+            Err(_) => continue,
+        };
+        let peer = connection.remote_id().to_string();
+        let state = state.clone();
+        match connection.alpn() {
+            alpn if alpn == POLYTH_LINK_ALPN.as_bytes() => {
+                tokio::spawn(async move {
+                    let _ = transport::handle_connection(state, connection, peer).await;
+                });
+            }
+            alpn if alpn == POLYTH_NUMERIC_ALPN.as_bytes() => {
+                tokio::spawn(async move {
+                    let _ = crate::numeric::handle_connection(state, connection, peer).await;
+                });
+            }
+            _ => connection.close(0u32.into(), b"alpn"),
+        }
+    }
 }
 
 fn lan_advertising_enabled() -> bool {
