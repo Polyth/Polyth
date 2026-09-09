@@ -14,6 +14,7 @@ on:
       - "apps/mobile/src/ConnectionScreen.tsx"
       - "apps/mobile/capacitor.config.ts"
       - "apps/mobile/package.json"
+      - "codemagic.yaml"
       - ".github/workflows/polyth-link-native.yml"
   push:
     branches:
@@ -30,6 +31,7 @@ on:
       - "apps/mobile/src/ConnectionScreen.tsx"
       - "apps/mobile/capacitor.config.ts"
       - "apps/mobile/package.json"
+      - "codemagic.yaml"
       - ".github/workflows/polyth-link-native.yml"
   workflow_dispatch:
 
