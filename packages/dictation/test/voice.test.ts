@@ -7,6 +7,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createVoiceSettings } from "../../server/src/voice.ts";
+import { ProviderRegistry } from "../src/providers.ts";
 import { voiceRoutes } from "../src/serverEntry.ts";
 import type { RouteRequest } from "../../server/src/http.ts";
 
@@ -17,6 +18,7 @@ test("voice settings: round-trip persists refs, validates URLs and env names", (
   const svc = createVoiceSettings({ file, env: { WHISPER_KEY: "secret-value" } });
 
   assert.deepEqual(svc.get().stt, { baseUrl: "", model: "", language: "", apiKeyEnv: "" });
+  assert.equal(svc.get().dictation.localModel, "nemotron-3.5-streaming-0.6b-560ms");
 
   const saved = svc.put({
     stt: { baseUrl: "http://127.0.0.1:8000/v1", model: "whisper-1", language: "en", apiKeyEnv: "WHISPER_KEY" },
@@ -49,6 +51,7 @@ function harness(opts: {
   const voice = createVoiceSettings({ file: join(tmp(), "voice.json"), env: opts.env ?? {} });
   const routes = voiceRoutes({
     voice,
+    providers: new ProviderRegistry(),
     ...(opts.fetchFn ? { fetchFn: opts.fetchFn } : {}),
     ...(opts.summarize ? { summarize: opts.summarize } : {}),
   });
