@@ -48,6 +48,15 @@ export {
   type LocalModelState,
   type LocalModelStatus,
 } from "./localModels.ts";
+export {
+  createFailoverSttAdapter,
+  type FailoverSttOptions,
+} from "./failover.ts";
+export { providerToSttAdapter } from "./providerBridge.ts";
+export {
+  selectDictationAdapter,
+  type DictationRoutingInput,
+} from "./routing.ts";
 export * from "./providers.ts";
 export * from "./wire.ts";
 
@@ -92,8 +101,6 @@ export function defaultVoicePrefs(): VoicePrefs {
     tts: false,
     lang: "en-US",
     rate: 1,
-    // Prefer the server/provider path for new profiles. The mic control already
-    // falls back to Web Speech when the server truthfully reports unavailable.
     sttEngine: "server",
     ttsEngine: "browser",
     pitch: 1,
