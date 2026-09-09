@@ -86,6 +86,8 @@ export interface DictationService {
   push(id: string, seq: number, pcm: Uint8Array): Promise<DictationChunkResult>;
   finalize(id: string): Promise<DictationSessionDto>;
   cancel(id: string): void;
+  /** Package/server teardown: cancel live provider work and forget retained results. */
+  closeAll(): void;
 }
 
 interface SessionState {
@@ -288,8 +290,6 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
       if ((pcm.byteLength & 1) !== 0) throw err("audio_format_error", "pcm_s16le chunks must contain whole 16-bit samples");
       s.lastActivityAt = now();
 
-      // acceptedSeqs covers the short window after a frame leaves `pending`
-      // but before the provider write resolves and advances the ACK.
       if (seq <= s.dto.acknowledgedSeq || s.acceptedSeqs.has(seq)) {
         return { ack: s.dto.acknowledgedSeq, duplicate: true, ...currentTranscript(s) };
       }
@@ -328,9 +328,6 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
       if (s.dto.status === "failed") throw err("conflict", "dictation failed");
       if (s.finalizeP) return s.finalizeP;
 
-      // Close admission before the first await. Audio already accepted by push()
-      // is serialized ahead of finalize through providerTail; later audio is
-      // rejected and the client can replay it if a real seq gap reopens input.
       s.acceptingAudio = false;
       const operation = (async (): Promise<DictationSessionDto> => {
         await s.providerTail;
@@ -361,8 +358,6 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
       try {
         return await operation;
       } catch (error) {
-        // A seq gap is recoverable: reopen audio admission and allow a later
-        // finalize call. Provider/final errors are terminal and remain cached.
         if (s.dto.status === "recording") {
           s.finalizeP = null;
           s.acceptingAudio = true;
@@ -378,6 +373,15 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
       void s.stream.cancel?.();
       clearAudioState(s);
       sessions.delete(id);
+    },
+
+    closeAll() {
+      for (const s of sessions.values()) {
+        s.acceptingAudio = false;
+        void s.stream.cancel?.();
+        clearAudioState(s);
+      }
+      sessions.clear();
     },
   };
 
