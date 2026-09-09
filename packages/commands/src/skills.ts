@@ -3,6 +3,7 @@
 // touch a repository, server HOME, or vendor-specific configuration file.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { atomicWriteSync } from "@polyth/plugins";
 import type {
   AgentCapabilityDescriptor,
@@ -67,7 +68,8 @@ export function createSkillService(opts: {
   legacy: Pick<CommandService, "listSkills">;
   onChanged?(space: SpaceContext, projectId?: string): Promise<void>;
 }): SkillService {
-  const file = (space: SpaceContext): string => opts.storage(space).path("packages/commands/skills.json");
+  const file = (space: SpaceContext): string =>
+    join(opts.storage(space).packageDir("commands"), "skills.json");
 
   const read = (space: SpaceContext): SkillDocument => {
     let raw: unknown;
@@ -154,10 +156,10 @@ export function createSkillService(opts: {
       project = await opts.projects(space).get(projectId);
     }
 
-    // Native discovery is compatibility-only. A shared server never reads its
-    // process HOME as a user's capability source; local-trusted keeps legacy
-    // user discovery. Remote projects cannot be read from the control-plane FS.
-    const native = project && !project.remote
+    // Native filesystem discovery is compatibility-only and belongs to the
+    // single-operator local profile. Shared-server Spaces must never inherit
+    // capabilities from a host path or process HOME that another user can see.
+    const native = project && !project.remote && space.deployment === "local-trusted"
       ? await opts.legacy.listSkills(project.path, { includeUser: opts.allowUserSkills(space) })
       : [];
 
