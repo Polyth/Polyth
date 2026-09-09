@@ -64,6 +64,7 @@ function native(overrides: Partial<PolythLinkNative> = {}): PolythLinkNative {
   return {
     parsePairingTicket: async () => preview,
     beginPairing: async () => ({ attemptId: "attempt", safetyPhrase: ["amber", "river"], state: "prepared" }),
+    beginNumericPairing: async () => ({ attemptId: "numeric-attempt", safetyPhrase: ["amber", "river"], state: "prepared" }),
     confirmPairing: async () => launch("a"),
     cancelPairing: async () => undefined,
     listConnections: async () => [connection("a")],
@@ -250,4 +251,67 @@ test("discovery permission denial is recoverable and does not affect trusted rec
   assert.equal(controller.state.phase, "discovery-permission-required");
   assert.equal(controller.state.trusted.length, 1);
   assert.equal(controller.state.discovered.length, 0);
+});
+
+test("numeric pairing uses the selected hostile discovery result only as a pinned bootstrap hint", async () => {
+  const calls: unknown[] = [];
+  const controller = await loadedController(native({
+    beginNumericPairing: async (input) => {
+      calls.push(input);
+      return { attemptId: "numeric-attempt", safetyPhrase: ["amber", "river"], state: "prepared" };
+    },
+  }));
+  const target = discovered();
+  controller.startNumericCodeEntry(target);
+
+  const attempt = await controller.submitNumericCode("482 731");
+
+  assert.equal(attempt?.attemptId, "numeric-attempt");
+  assert.equal(controller.state.phase, "safety-confirmation");
+  assert.deepEqual(calls, [{
+    hostEndpointId: target.hostEndpointId,
+    addresses: target.addresses,
+    port: target.port,
+    code: "482 731",
+    label: "This phone",
+  }]);
+});
+
+test("late numeric pairing attempt is cancelled when QR becomes the newest intent", async () => {
+  const pendingAttempt = deferred<PairingAttempt>();
+  const cancelled: string[] = [];
+  let started = false;
+  const controller = await loadedController(native({
+    beginNumericPairing: async () => {
+      started = true;
+      return pendingAttempt.promise;
+    },
+    cancelPairing: async (attemptId) => {
+      cancelled.push(attemptId);
+    },
+  }));
+  controller.startNumericCodeEntry(discovered());
+
+  const numeric = controller.submitNumericCode("482731");
+  while (!started) await Promise.resolve();
+  controller.startQrScan();
+  pendingAttempt.resolve({ attemptId: "stale-numeric", safetyPhrase: ["amber", "river"], state: "prepared" });
+
+  assert.equal(await numeric, undefined);
+  assert.equal(controller.state.phase, "scanning-qr");
+  assert.deepEqual(cancelled, ["stale-numeric"]);
+});
+
+test("numeric request rate limiting maps to a dedicated recoverable state", async () => {
+  const controller = await loadedController(native({
+    beginNumericPairing: async () => {
+      throw Object.assign(new Error("request-rate-limited"), { code: "request-rate-limited" });
+    },
+  }));
+  const target = discovered();
+  controller.startNumericCodeEntry(target);
+
+  assert.equal(await controller.submitNumericCode("482731"), undefined);
+  assert.equal(controller.state.phase, "numeric-code-rate-limited");
+  assert.equal(controller.state.numericTarget?.hostEndpointId, target.hostEndpointId);
 });
