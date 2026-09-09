@@ -23,6 +23,10 @@ import {
   nativePairingScannerAvailable,
   scanNativePairingQr,
 } from "./nativePolythLink.ts";
+import {
+  nativeDiscoveryAvailable,
+  startNativeDiscovery,
+} from "./nativeDiscovery.ts";
 import { isPairingLink } from "@polyth/pairing-qr";
 import { bootstrapUrlWithNext, connectionUiState } from "./connectionUi.ts";
 import {
@@ -65,6 +69,14 @@ function connectionHeading(state: ConnectionControllerState | null, nativeAvaila
   switch (state?.phase) {
     case "loading-trusted-connections":
       return "Loading your Polyth servers…";
+    case "discovering":
+      return "Looking for nearby Polyth servers…";
+    case "discovery-empty":
+      return "No nearby Polyth found";
+    case "discovery-results":
+      return "Polyth servers nearby";
+    case "discovery-permission-required":
+      return "Local network access is disabled";
     case "scanning-qr":
       return "Scan pairing QR";
     case "validating-pairing":
@@ -105,6 +117,7 @@ function connectionHeading(state: ConnectionControllerState | null, nativeAvaila
 
 function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
   const nativeAvailable = nativeLinkAvailable();
+  const discoveryAvailable = nativeDiscoveryAvailable();
   const initialPending = launch.pendingPair ?? peekPendingPairingLink();
   const ui = connectionUiState({ nativeAvailable, pendingPair: initialPending });
   const controller = useMemo(
@@ -125,6 +138,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
   const scanIntent = useRef<number | null>(null);
 
   const trusted = connectionState?.trusted ?? [];
+  const discovered = connectionState?.discovered ?? [];
   const attempt = connectionState?.pairingAttempt ?? null;
   const phrase = attempt?.safetyPhrase ?? null;
   const controllerBusy = connectionState
@@ -132,6 +146,10 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
     : false;
   const busy = legacyBusy || controllerBusy;
   const scanning = connectionState?.phase === "scanning-qr";
+  const discovering = connectionState?.phase === "discovering"
+    || connectionState?.phase === "discovery-empty"
+    || connectionState?.phase === "discovery-results";
+  const discoveryPermissionDenied = connectionState?.phase === "discovery-permission-required";
   const error = connectionState?.error || legacyError || (!nativeAvailable ? launch.error ?? "" : "");
   const stage = connectionHeading(connectionState, nativeAvailable);
 
@@ -237,7 +255,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
       };
     }).BarcodeDetector;
     if (!Detector) {
-      controller.failQrScan(scanEpoch, new Error("Camera scanning is unavailable here. Paste the pairing link instead."));
+      controller.failQrScan(scanEpoch, new Error("Camera scanning is unavailable here. Use another pairing method."));
       return;
     }
 
@@ -303,6 +321,12 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
     const epoch = scanIntent.current;
     stopCamera();
     if (controller && epoch !== null) controller.cancelQrScan(epoch);
+  };
+
+  const findNearby = async () => {
+    if (!controller || !discoveryAvailable) return;
+    stopCamera();
+    await controller.startDiscovery(startNativeDiscovery);
   };
 
   const reconnectTrusted = async (connection: ConnectionMetadata) => {
@@ -377,18 +401,119 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
 
             {!attempt && (
               <>
+                <div className="mobile-connect-actions">
+                  <button
+                    type="button"
+                    className="mobile-connect-primary"
+                    disabled={busy}
+                    onClick={() => void scanQr()}
+                  >
+                    Scan QR
+                  </button>
+                  <button
+                    type="button"
+                    className="mobile-connect-test"
+                    disabled={busy || !discoveryAvailable}
+                    onClick={() => void findNearby()}
+                  >
+                    Find nearby
+                  </button>
+                </div>
+
                 <div className="mobile-connect-scan" hidden={!scanning}>
                   <div id="mobile-connect-scan-preview" className="mobile-connect-scan-preview" />
                   <div className="mobile-connect-scan-frame" aria-hidden="true" />
                   {cameraPermission === "denied" && (
-                    <p className="mobile-connect-message">Camera permission is denied.</p>
+                    <p className="mobile-connect-message">Camera permission is denied. Find nearby remains available.</p>
                   )}
                   <button type="button" className="mobile-connect-test" onClick={cancelScan}>
                     Cancel scan
                   </button>
                 </div>
+
+                {discovering && (
+                  <section aria-labelledby="mobile-nearby-title">
+                    <h2 id="mobile-nearby-title">Nearby</h2>
+                    {discovered.length === 0 ? (
+                      <p className="mobile-connect-message">
+                        {connectionState?.phase === "discovery-empty"
+                          ? "No Polyth server is advertising on this network yet."
+                          : "Servers will appear here as they are found."}
+                      </p>
+                    ) : discovered.map((nearby) => {
+                      const paired = trusted.find((connection) => connection.hostEndpointId === nearby.hostEndpointId);
+                      return (
+                        <article key={nearby.id}>
+                          {paired ? (
+                            <button
+                              type="button"
+                              className="mobile-connect-recent"
+                              disabled={busy || paired.revoked || !paired.hasSecureIdentity}
+                              onClick={() => void reconnectTrusted(paired)}
+                            >
+                              <strong>{paired.hostLabel || nearby.hostLabel}</strong>
+                              <span>Nearby · already paired</span>
+                            </button>
+                          ) : (
+                            <div className="mobile-connect-recent" aria-label={`${nearby.hostLabel}, nearby and not yet trusted`}>
+                              <strong>{nearby.hostLabel}</strong>
+                              <span>Nearby · pair securely before connecting</span>
+                            </div>
+                          )}
+                        </article>
+                      );
+                    })}
+                    <button type="button" className="mobile-connect-test" onClick={() => controller?.stopDiscovery()}>
+                      Stop finding nearby
+                    </button>
+                  </section>
+                )}
+
+                {discoveryPermissionDenied && (
+                  <p className="mobile-connect-message">
+                    Local network access is disabled. You can still scan a QR code; enable local network access in system Settings to find nearby servers.
+                  </p>
+                )}
+              </>
+            )}
+
+            {phrase && (
+              <ol className="mobile-connect-phrase">
+                {phrase.map((word) => <li key={word}>{word}</li>)}
+              </ol>
+            )}
+
+            {attempt && (
+              <div className="mobile-connect-actions">
+                <button type="button" className="mobile-connect-primary" disabled={busy} onClick={() => void finishPairing()}>
+                  {phrase?.length ? "The words match" : "Continue pairing"}
+                </button>
+                <button type="button" className="mobile-connect-test" disabled={busy} onClick={() => controller?.cancelPairing()}>
+                  Cancel
+                </button>
+              </div>
+            )}
+          </section>
+        )}
+
+        {!ui.showSecurePairing && ui.preservePendingPair && (
+          <p className="mobile-connect-message">Saved pairing request is ready when native Polyth Link is available.</p>
+        )}
+
+        {error && <div className="mobile-connect-message is-error" role="alert">{error}</div>}
+
+        <button type="button" className="mobile-connect-forget" onClick={() => setDeveloper((value) => !value)}>
+          {developer ? "Hide advanced options" : "Advanced"}
+        </button>
+
+        {developer && (
+          <section className="mobile-connect-recents" aria-labelledby="mobile-legacy-title">
+            <h2 id="mobile-legacy-title">Development connections</h2>
+            <p>These paths are not production trust state.</p>
+            {ui.showSecurePairing && (
+              <>
                 <label className="mobile-connect-field">
-                  <span>Pairing link</span>
+                  <span>Full pairing link</span>
                   <textarea
                     rows={3}
                     autoCapitalize="none"
@@ -401,65 +526,18 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
                     }}
                   />
                 </label>
+                <button
+                  type="button"
+                  className="mobile-connect-test"
+                  disabled={busy || !isPairingLink(ticket)}
+                  onClick={() => void startPair(ticket)}
+                >
+                  Use full pairing link
+                </button>
               </>
             )}
-
-            {phrase && (
-              <ol className="mobile-connect-phrase">
-                {phrase.map((word) => <li key={word}>{word}</li>)}
-              </ol>
-            )}
-
-            <div className="mobile-connect-actions">
-              {!attempt ? (
-                <>
-                  <button
-                    type="button"
-                    className="mobile-connect-primary"
-                    disabled={busy}
-                    onClick={() => void scanQr()}
-                  >
-                    Scan QR
-                  </button>
-                  <button
-                    type="button"
-                    className="mobile-connect-test"
-                    disabled={busy || !isPairingLink(ticket)}
-                    onClick={() => void startPair(ticket)}
-                  >
-                    Use pairing link
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button type="button" className="mobile-connect-primary" disabled={busy} onClick={() => void finishPairing()}>
-                    {phrase?.length ? "The words match" : "Continue pairing"}
-                  </button>
-                  <button type="button" className="mobile-connect-test" disabled={busy} onClick={() => controller?.cancelPairing()}>
-                    Cancel
-                  </button>
-                </>
-              )}
-            </div>
-          </section>
-        )}
-
-        {!ui.showSecurePairing && ui.preservePendingPair && (
-          <p className="mobile-connect-message">Saved pairing code: {ticket || initialPending}</p>
-        )}
-
-        {error && <div className="mobile-connect-message is-error" role="alert">{error}</div>}
-
-        <button type="button" className="mobile-connect-forget" onClick={() => setDeveloper((value) => !value)}>
-          {developer ? "Hide insecure development connections" : "Advanced → Insecure development connection"}
-        </button>
-
-        {developer && (
-          <section className="mobile-connect-recents" aria-labelledby="mobile-legacy-title">
-            <h2 id="mobile-legacy-title">Insecure development connection</h2>
-            <p>Raw URL mode is not Polyth Link. It is not paired or trusted.</p>
             <label className="mobile-connect-field">
-              <span>Server address</span>
+              <span>Insecure server address</span>
               <input
                 type="url"
                 value={url}
