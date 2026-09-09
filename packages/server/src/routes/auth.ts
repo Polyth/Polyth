@@ -93,10 +93,14 @@ export function authRoutes(auth: AuthService): RouteHandler {
         rc.json(401, { error: "unauthorized", message: "authentication required" });
         return true;
       }
+      const accounts = accountList(auth);
+      if (!accounts.some((account) => account.id === currentUserId)) {
+        accounts.unshift({ id: currentUserId, name: accountName(currentUserId) });
+      }
       rc.json(200, {
         currentAccountId: currentUserId,
         canManage: currentUserId === OWNER_USER_ID,
-        accounts: accountList(auth).map((account) => ({ ...account, current: account.id === currentUserId })),
+        accounts: accounts.map((account) => ({ ...account, current: account.id === currentUserId })),
       });
       return true;
     }
@@ -114,7 +118,7 @@ export function authRoutes(auth: AuthService): RouteHandler {
         rc.json(400, { error: "invalid-input", message: "password must be 8-1024 characters" });
         return true;
       }
-      if (auth.hasCredential(accountId)) {
+      if (auth.hasCredential(accountId) || accountId === OWNER_USER_ID) {
         rc.json(409, { error: "conflict", message: "account already exists" });
         return true;
       }
@@ -130,7 +134,7 @@ export function authRoutes(auth: AuthService): RouteHandler {
         rc.json(403, { error: "forbidden", message: "not allowed" });
         return true;
       }
-      if (!auth.hasCredential(target)) {
+      if (target !== OWNER_USER_ID && !auth.hasCredential(target)) {
         rc.json(404, { error: "not-found", message: "account not found" });
         return true;
       }
