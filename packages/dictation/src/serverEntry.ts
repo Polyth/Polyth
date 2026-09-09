@@ -583,6 +583,14 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         explicitFallback,
       });
     },
+    contextFilter: (context) => {
+      const settings = voice.get().dictation;
+      if (settings.contextInjection) return context;
+      return {
+        language: context.language,
+        ...(context.localeHints?.length ? { localeHints: context.localeHints } : {}),
+      };
+    },
     unavailableReason: "selected dictation processing route is unavailable or missing its configured model/runtime/credentials",
   });
   host.services.provide(serverServiceKey<DictationService>("dictation"), dictation);
