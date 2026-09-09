@@ -22,7 +22,7 @@ test("Nemotron catalog pins every verified multilingual latency preset", () => {
     ],
   );
   for (const model of models) assert.ok(model.languages.includes("uk-UA"));
-  assert.equal(DEFAULT_LOCAL_MODEL_ID, "nemotron-3.5-streaming-0.6b-560ms");
+  assert.equal(DEFAULT_LOCAL_MODEL_ID, "nemotron-3.5-streaming-0.6b-80ms");
 });
 
 test("constructing or inspecting the model manager never downloads implicitly", async () => {
