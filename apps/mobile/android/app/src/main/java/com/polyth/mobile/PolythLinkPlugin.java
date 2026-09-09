@@ -338,11 +338,23 @@ public final class PolythLinkPlugin extends Plugin {
     }
 
     private boolean hasConnectionMetadata(String hostId) throws Exception {
+        return connectionMetadata(hostId) != null;
+    }
+
+    private JSONObject connectionMetadata(String hostId) throws Exception {
         JSONArray raw = invokeArray("connections.list", new JSObject());
         for (int i = 0; i < raw.length(); i++) {
-            if (hostId.equals(raw.getJSONObject(i).optString("hostEndpointId", ""))) return true;
+            JSONObject item = raw.getJSONObject(i);
+            if (hostId.equals(item.optString("hostEndpointId", ""))) return item;
         }
-        return false;
+        return null;
+    }
+
+    private void discardPrepared(String connectionId) throws Exception {
+        invoke("disconnect", new JSObject().put("connectionId", connectionId), null);
+        secureStore.delete(connectionId);
+        invoke("forget", new JSObject().put("connectionId", connectionId), null);
+        forgetTransport(connectionId);
     }
 
     private void rememberTransport(String connectionId) {
@@ -488,13 +500,22 @@ public final class PolythLinkPlugin extends Plugin {
         String connectionId = require(call, "connectionId", "device-unknown");
         if (connectionId == null) return;
         executor.execute(() -> {
+            boolean prepared = false;
             try {
+                JSONObject metadata = connectionMetadata(connectionId);
+                prepared = metadata != null && "prepared".equals(metadata.optString("pairingState", ""));
                 byte[] secret = secureStore.load(connectionId);
                 if (secret == null) throw new LinkFailure("host-identity-unavailable");
                 JSONObject result = invokeObject("connect", new JSObject().put("connectionId", connectionId), secret);
                 rememberTransport(connectionId);
                 call.resolve(JSObject.fromJSONObject(result));
-            } catch (Exception error) { reject(call, error); }
+            } catch (Exception error) {
+                String code = error instanceof LinkFailure ? ((LinkFailure) error).code : "";
+                if (prepared && ("pairing-invalid".equals(code) || "device-unknown".equals(code))) {
+                    try { discardPrepared(connectionId); } catch (Exception ignored) {}
+                }
+                reject(call, error);
+            }
         });
     }
 
