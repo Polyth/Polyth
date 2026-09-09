@@ -84,26 +84,25 @@ export function createAcpProvisioner(harnessId: string, mcpHttp = false): Harnes
           });
         }
       }
+      const records = plan.items.map((item) => {
+        const collision = mcpNativeNameCollision(plan.items, item.capability.id);
+        if (collision) return record(item, "failed", collision);
+        if (item.capability.kind === "mcp-server" && item.capability.transport.kind === "http" && !mcpHttp) {
+          return record(item, "unsupported", "ACP agent did not advertise HTTP MCP");
+        }
+        if (item.mode === "unsupported") {
+          return record(item, "unsupported", "ACP v1 has no standard projection for this capability");
+        }
+        return record(item, "pending", "Staged for the next ACP session/new");
+      });
       acpOverlays.set(context, { mcpServers, mcpHttp }, harnessId, {
         desiredRevision: plan.desiredRevision,
-        capabilityIds: plan.items
-          .filter((item) => item.mode !== "unsupported" && !mcpNativeNameCollision(plan.items, item.capability.id))
-          .map((item) => item.capability.id),
+        capabilityIds: records.filter((item) => item.status === "pending").map((item) => item.capabilityId),
       });
       return {
         harnessId,
         desiredRevision: plan.desiredRevision,
-        records: plan.items.map((item) => {
-          const collision = mcpNativeNameCollision(plan.items, item.capability.id);
-          if (collision) return record(item, "failed", collision);
-          if (item.capability.kind === "mcp-server" && item.capability.transport.kind === "http" && !mcpHttp) {
-            return record(item, "unsupported", "ACP agent did not advertise HTTP MCP");
-          }
-          if (item.mode === "unsupported") {
-            return record(item, "unsupported", "ACP v1 has no standard projection for this capability");
-          }
-          return record(item, "pending", "Staged for the next ACP session/new");
-        }),
+        records,
       };
     },
     release(context) {
