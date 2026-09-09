@@ -12,9 +12,21 @@ import {
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { startPcm16Capture, type Pcm16Capture } from "./audioCapture.ts";
 
+export interface DictationTransportMetrics {
+  startedAt: number;
+  capturedFrames: number;
+  reconnects: number;
+  replayedFrames: number;
+  droppedFrames: number;
+  firstPartialMs?: number;
+  finalMs?: number;
+}
+
 export interface StreamingDictation {
   stop(): Promise<string>;
   cancel(): void;
+  /** Local transport observations only; no provider billing/CPU values are inferred. */
+  metrics?(): Readonly<DictationTransportMetrics>;
 }
 
 async function sessionJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -52,6 +64,14 @@ export async function startStreamingDictation(opts: {
   onPartial?: (text: string) => void;
   onError?: (message: string) => void;
 }): Promise<StreamingDictation> {
+  const startedAt = performance.now();
+  const metrics: DictationTransportMetrics = {
+    startedAt: Date.now(),
+    capturedFrames: 0,
+    reconnects: 0,
+    replayedFrames: 0,
+    droppedFrames: 0,
+  };
   const createInput = {
     ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
     ...(opts.language ? { language: opts.language } : {}),
@@ -71,6 +91,7 @@ export async function startStreamingDictation(opts: {
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let acknowledgedSeq = dto.acknowledgedSeq;
   let lastSeq = dto.acknowledgedSeq;
+  let opened = false;
   const ackWaiters = new Set<AckWaiter>();
 
   const settleAckWaiters = (): void => {
@@ -141,7 +162,11 @@ export async function startStreamingDictation(opts: {
     ws = sock;
     sock.onopen = () => {
       if (!active || ws !== sock) return;
-      for (const chunk of buffer.unacked()) send(chunk);
+      if (opened) metrics.reconnects++;
+      opened = true;
+      const replay = buffer.unacked();
+      if (replay.length) metrics.replayedFrames += replay.length;
+      for (const chunk of replay) send(chunk);
     };
     sock.onmessage = (e: MessageEvent) => {
       let msg: {
@@ -159,6 +184,9 @@ export async function startStreamingDictation(opts: {
         buffer.ack(acknowledgedSeq);
         settleAckWaiters();
       } else if (msg.type === "dictation/transcript" && typeof msg.text === "string") {
+        if (metrics.firstPartialMs === undefined && msg.text.trim()) {
+          metrics.firstPartialMs = Math.max(0, performance.now() - startedAt);
+        }
         opts.onPartial?.(msg.text);
       } else if (msg.type === "dictation/error") {
         fail(Object.assign(
@@ -187,8 +215,11 @@ export async function startStreamingDictation(opts: {
         if (!active || failed) return;
         const beforeDropped = buffer.dropped();
         const seq = buffer.push(pcm);
+        metrics.capturedFrames++;
         lastSeq = seq;
-        if (buffer.dropped() !== beforeDropped) {
+        const dropped = buffer.dropped() - beforeDropped;
+        if (dropped > 0) {
+          metrics.droppedFrames += dropped;
           fail(new DictationError(
             "backpressure_overflow",
             "Dictation audio could not be replayed safely because the network buffer overflowed",
@@ -255,6 +286,7 @@ export async function startStreamingDictation(opts: {
 
       teardown();
       const final = await sessionJson<DictationSessionDto>(`${sessionPath(dto.id)}/finalize`, { method: "POST" });
+      metrics.finalMs = Math.max(0, performance.now() - startedAt);
       return final.transcript;
     },
     cancel() {
@@ -262,5 +294,6 @@ export async function startStreamingDictation(opts: {
       teardown();
       cancelSession();
     },
+    metrics: () => ({ ...metrics }),
   };
 }
