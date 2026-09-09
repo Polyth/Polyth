@@ -28,6 +28,12 @@ export {
   type DeepgramSttOptions,
 } from "./deepgram.ts";
 export {
+  createOpenAIRealtimeSttAdapter,
+  createPcm16Resampler,
+  type OpenAIRealtimeSttOptions,
+  type Pcm16Resampler,
+} from "./openaiRealtime.ts";
+export {
   createLocalModelManager,
   localModelCatalog,
   type LocalModelDescriptor,
