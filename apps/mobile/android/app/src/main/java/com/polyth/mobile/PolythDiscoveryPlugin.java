@@ -15,6 +15,9 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.net.URI;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -199,16 +202,16 @@ public final class PolythDiscoveryPlugin extends Plugin {
     private void acceptResolved(int current, NsdServiceInfo serviceInfo) {
         String serviceName = safeServiceName(serviceInfo);
         if (serviceName == null) return;
-        String endpoint = attribute(serviceInfo, "endpoint");
+        String endpoint = firstNonBlank(attribute(serviceInfo, "endpoint"), attribute(serviceInfo, "pk"));
         String version = attribute(serviceInfo, "v");
-        if (!validEndpoint(endpoint) || !"1".equals(version)) return;
+        if (!validEndpoint(endpoint) || (version != null && !"1".equals(version))) return;
         int port = serviceInfo.getPort();
         if (port < 1 || port > 65535) return;
 
         JSObject item = new JSObject();
         item.put("id", endpoint);
         item.put("serviceName", serviceName);
-        item.put("hostLabel", safeLabel(attribute(serviceInfo, "label"), serviceName));
+        item.put("hostLabel", safeLabel(attribute(serviceInfo, "label")));
         item.put("hostEndpointId", endpoint);
         item.put("protocolVersion", 1);
         item.put("port", port);
@@ -216,8 +219,9 @@ public final class PolythDiscoveryPlugin extends Plugin {
         JSArray addresses = new JSArray();
         if (serviceInfo.getHost() != null) {
             String address = serviceInfo.getHost().getHostAddress();
-            if (address != null && address.length() <= 64) addresses.put(address);
+            if (safeAddress(address)) addresses.put(address);
         }
+        appendTxtAddresses(addresses, attribute(serviceInfo, "address"));
         item.put("addresses", addresses);
 
         synchronized (lock) {
@@ -231,20 +235,29 @@ public final class PolythDiscoveryPlugin extends Plugin {
     private String attribute(NsdServiceInfo serviceInfo, String key) {
         try {
             byte[] raw = serviceInfo.getAttributes().get(key);
-            if (raw == null || raw.length == 0 || raw.length > 128) return null;
-            String value = new String(raw, StandardCharsets.UTF_8);
-            if (!StandardCharsets.UTF_8.newEncoder().canEncode(value)) return null;
-            return value;
+            if (raw == null || raw.length == 0 || raw.length > 512) return null;
+            return StandardCharsets.UTF_8
+                .newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(raw))
+                .toString();
+        } catch (CharacterCodingException ignored) {
+            return null;
         } catch (Exception ignored) {
             return null;
         }
+    }
+
+    private static String firstNonBlank(String first, String second) {
+        return first != null && !first.isBlank() ? first : second;
     }
 
     private static boolean validEndpoint(String value) {
         if (value == null || value.length() < 32 || value.length() > 64) return false;
         for (int i = 0; i < value.length(); i++) {
             char ch = value.charAt(i);
-            if (!Character.isLetterOrDigit(ch)) return false;
+            if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9'))) return false;
         }
         return true;
     }
@@ -259,8 +272,8 @@ public final class PolythDiscoveryPlugin extends Plugin {
         return name;
     }
 
-    private static String safeLabel(String candidate, String fallback) {
-        String value = candidate == null || candidate.isBlank() ? fallback : candidate.trim();
+    private static String safeLabel(String candidate) {
+        String value = candidate == null || candidate.isBlank() ? "Polyth" : candidate.trim();
         if (value.length() > 80) value = value.substring(0, 80);
         StringBuilder clean = new StringBuilder(value.length());
         for (int i = 0; i < value.length(); i++) {
@@ -268,6 +281,22 @@ public final class PolythDiscoveryPlugin extends Plugin {
             if (!Character.isISOControl(ch)) clean.append(ch);
         }
         return clean.length() == 0 ? "Polyth" : clean.toString();
+    }
+
+    private static boolean safeAddress(String value) {
+        if (value == null || value.isBlank() || value.length() > 96) return false;
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (Character.isWhitespace(ch) || ch == '/' || ch == '@' || ch == '?' || ch == '#' || ch == '\\') return false;
+        }
+        return true;
+    }
+
+    private static void appendTxtAddresses(JSArray target, String raw) {
+        if (raw == null || raw.isBlank() || raw.length() > 1024) return;
+        for (String candidate : raw.trim().split("\\s+")) {
+            if (safeAddress(candidate) && target.length() < 16) target.put(candidate);
+        }
     }
 
     private void emitEmptyIfNeeded(int current) {
