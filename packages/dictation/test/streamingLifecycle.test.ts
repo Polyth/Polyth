@@ -162,3 +162,17 @@ test("provider write failure makes the session terminal instead of risking ambig
   assert.equal(svc.get(d.id)?.status, "failed");
   await assert.rejects(() => svc.push(d.id, 1, pcm), /dictation is failed/);
 });
+
+test("closeAll cancels every live provider stream and forgets session state", () => {
+  let cancelled = 0;
+  const svc = createDictationService({ adapter: adapter(() => { cancelled++; }) });
+  const first = svc.create({});
+  const second = svc.create({});
+  svc.closeAll();
+  assert.equal(cancelled, 2);
+  assert.equal(svc.get(first.id), null);
+  assert.equal(svc.get(second.id), null);
+  // Idempotent package teardown must be safe during repeated disable/shutdown.
+  svc.closeAll();
+  assert.equal(cancelled, 2);
+});
