@@ -60,6 +60,15 @@ interface ProfileOwnersFile {
  * Unmapped legacy rows belong to the only historical account, `usr_owner`.
  */
 function createOwnedProfileStore(base: LegacyProfileStore, file: string): ProfileStore {
+  // Capture the legacy methods before registration disables raw unscoped
+  // profile lookup for the session service later in server composition.
+  const legacy = {
+    list: base.profileList.bind(base),
+    get: base.profileGet.bind(base),
+    create: base.profileCreate.bind(base),
+    update: base.profileUpdate.bind(base),
+    remove: base.profileRemove.bind(base),
+  };
   let owners: Record<string, string> = {};
   try {
     const raw = JSON.parse(readFileSync(file, "utf8")) as Partial<ProfileOwnersFile>;
@@ -80,22 +89,24 @@ function createOwnedProfileStore(base: LegacyProfileStore, file: string): Profil
 
   return {
     async profileList(userId) {
-      return (await base.profileList()).filter((profile) => ownerOf(profile.id) === userId);
+      return (await legacy.list()).filter((profile) => ownerOf(profile.id) === userId);
     },
 
     async profileGet(id, userId) {
       if (ownerOf(id) !== userId) return undefined;
-      return base.profileGet(id);
+      return legacy.get(id);
     },
 
     async profileCreate(input, userId) {
-      const created = await base.profileCreate(input);
+      const created = await legacy.create(input);
       owners = { ...owners, [created.id]: userId };
       try {
         persist();
       } catch (error) {
-        delete owners[created.id];
-        await base.profileRemove(created.id).catch(() => false);
+        const next = { ...owners };
+        delete next[created.id];
+        owners = next;
+        await legacy.remove(created.id).catch(() => false);
         throw error;
       }
       return created;
@@ -105,12 +116,12 @@ function createOwnedProfileStore(base: LegacyProfileStore, file: string): Profil
       if (ownerOf(id) !== userId) {
         throw Object.assign(new Error("agent preset not found"), { code: "not-found" });
       }
-      return base.profileUpdate(id, patch, expectedRevision);
+      return legacy.update(id, patch, expectedRevision);
     },
 
     async profileRemove(id, userId) {
       if (ownerOf(id) !== userId) return false;
-      const removed = await base.profileRemove(id);
+      const removed = await legacy.remove(id);
       if (!removed) return false;
       if (Object.prototype.hasOwnProperty.call(owners, id)) {
         const next = { ...owners };
@@ -259,9 +270,6 @@ export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
     const runtime = host.runtimes.forSession
       ? await host.runtimes.forSession(session, session.worktreePath ?? project.path)
       : await host.runtimes.forProject(project.id, session.worktreePath ?? project.path);
-    // A harness whose discovery failed is reported as unavailable with the
-    // reason. Reporting it as an empty catalog would tell the user this engine
-    // has no models, which is a different and false claim.
     const [modelResult, rawAgents, capabilities] = await Promise.all([
       runtime.models().then(
         (value) => ({ ok: true as const, value }),
@@ -280,8 +288,6 @@ export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
       agents,
       capabilities,
       discovery,
-      // An empty successful catalog can mean "this engine has a hidden native
-      // model". A failed lookup is not that: it is unavailable.
       nativeDefault: modelResult.ok && models.length === 0,
       harnessId: runtime.harnessId,
     }); return true;
@@ -311,14 +317,17 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     },
     (agent) => `${agent.harnessId ?? "legacy"}/${agent.name}`,
   );
-  const profiles = profileRoutes({
-    store: createOwnedProfileStore(
-      host.store as unknown as LegacyProfileStore,
-      join(host.storageDir, "agent-profile-owners.json"),
-    ),
-    listModels,
-    listAgents,
-  });
+  const legacyStore = host.store as unknown as LegacyProfileStore;
+  const ownedProfiles = createOwnedProfileStore(
+    legacyStore,
+    join(host.storageDir, "agent-profile-owners.json"),
+  );
+  // The core session service is composed after packages load. Its historical
+  // direct profile lookup has no authenticated user parameter, so disable that
+  // unscoped path. Composer selection already resolves presets into explicit
+  // model/agent/thinking state; the scoped routes above remain authoritative.
+  legacyStore.profileGet = async () => undefined;
+  const profiles = profileRoutes({ store: ownedProfiles, listModels, listAgents });
   const custom = customProviderRoutes(host, listModels);
   return {
     remoteAccess: localOnlyRemoteAccess(["agent-profiles", "runtime-catalog"]),
