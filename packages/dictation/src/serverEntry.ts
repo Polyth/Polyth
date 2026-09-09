@@ -21,6 +21,7 @@ import {
 import { createDeepgramSttAdapter } from "./deepgram.ts";
 import { createElevenLabsSttAdapter } from "./elevenlabs.ts";
 import { createOpenAIRealtimeSttAdapter } from "./openaiRealtime.ts";
+import { createSpeechmaticsSttAdapter } from "./speechmatics.ts";
 import { createLocalModelManager } from "./localModels.ts";
 import { localModelRoutes } from "./localModelRoutes.ts";
 import { createLocalNemotronSttAdapter } from "./localNemotron.ts";
@@ -143,12 +144,13 @@ const providerAvailability = (
   return providerCatalog().map((provider) => {
     let available = false;
     let reason: string | undefined;
-    if (["elevenlabs", "deepgram", "openai-live", "openai-transcribe"].includes(provider.id)) {
+    if (["elevenlabs", "deepgram", "openai-live", "openai-transcribe", "speechmatics"].includes(provider.id)) {
       available = selected === provider.id && !!key;
       if (!available && selected === provider.id) {
         const fallback = provider.id === "elevenlabs" ? "ELEVENLABS_API_KEY"
           : provider.id === "deepgram" ? "DEEPGRAM_API_KEY"
-            : "OPENAI_API_KEY";
+            : provider.id === "speechmatics" ? "SPEECHMATICS_API_KEY"
+              : "OPENAI_API_KEY";
         reason = `missing ${settings.dictation.apiKeyEnv || fallback}`;
       } else if (!available) reason = "not selected";
     } else if (provider.id === "openai-compatible") {
@@ -402,6 +404,15 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         return createOpenAIRealtimeSttAdapter({
           apiKey,
           model: selected.model || (selected.provider === "openai-live" ? "gpt-live-transcribe" : "gpt-transcribe"),
+          latencyPreference: selected.latencyPreference,
+        });
+      }
+      if (selected.provider === "speechmatics") {
+        const apiKey = voice.resolveKey("dictation");
+        if (!apiKey) return null;
+        return createSpeechmaticsSttAdapter({
+          apiKey,
+          model: selected.model || "enhanced",
           latencyPreference: selected.latencyPreference,
         });
       }
