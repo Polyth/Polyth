@@ -50,7 +50,7 @@ pub async fn accept_loop(state: Arc<Mutex<HostState>>, endpoint: iroh::Endpoint)
                     let _ = transport::handle_connection(state, connection, peer).await;
                 });
             }
-            alpn if alpn == POLYTH_NUMERIC_ALPN.as_bytes() => {
+            alpn if alpn == POLYTH_NUMERIC_ALPN.as_bytes() && numeric_pairing_enabled() => {
                 tokio::spawn(async move {
                     let _ = numeric::handle_connection(state, connection, peer).await;
                 });
@@ -60,6 +60,10 @@ pub async fn accept_loop(state: Arc<Mutex<HostState>>, endpoint: iroh::Endpoint)
     }
 }
 
-fn lan_advertising_enabled() -> bool {
+pub(crate) fn lan_advertising_enabled() -> bool {
     std::env::var("POLYTH_LINK_DISABLE_LAN_DISCOVERY").as_deref() != Ok("1")
+}
+
+pub(crate) fn numeric_pairing_enabled() -> bool {
+    std::env::var("POLYTH_LINK_DISABLE_NUMERIC_PAIRING").as_deref() != Ok("1")
 }
