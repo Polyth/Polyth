@@ -52,12 +52,13 @@ const keyterms = (context?: DictationContext): string[] => {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const raw of values) {
-    const value = raw.trim().replace(/\s+/g, " ").slice(0, 50);
+    // Scribe Realtime accepts at most 50 keyterms, each at most 20 chars.
+    const value = raw.replace(/[<>{}\[\]\\]/g, "").trim().replace(/\s+/g, " ").slice(0, 20);
     const key = value.toLocaleLowerCase();
     if (!value || seen.has(key)) continue;
     seen.add(key);
     out.push(value);
-    if (out.length >= 64) break;
+    if (out.length >= 50) break;
   }
   return out;
 };
