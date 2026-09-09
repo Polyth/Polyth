@@ -277,10 +277,6 @@ export async function startDirectWisprDictation(options: DirectWisprOptions): Pr
           if (message.status === "text" && typeof message.body?.text === "string") {
             latest = message.body.text;
             options.onPartial?.(latest);
-            // Flow closes after its final response. Some published response
-            // examples have historically shown final=false even for the final
-            // block, so after an explicit commit the next text result is the
-            // authoritative result regardless of that flag.
             if ((message.final || stopping) && finalResolve) {
               const done = finalResolve;
               finalResolve = null;
@@ -328,6 +324,13 @@ export async function startDirectWisprDictation(options: DirectWisprOptions): Pr
     return connectFlight;
   }
 
+  // Start token minting/socket setup before microphone capture, but make every
+  // initial audio send depend on this exact connection. AudioWorklet can emit a
+  // full second before auth completes on a slow network; without this barrier
+  // that first packet lived only in the replay buffer and was not sent until a
+  // later reconnect.
+  const initialConnect = connect(false);
+
   const enqueuePacket = (pcm: Uint8Array): void => {
     const wav = pcmToWav(pcm, { encoding: "pcm_s16le", sampleRate: SAMPLE_RATE, channels: 1 });
     const packet: WisprPacket = { audio: base64(wav), bytes: wav.byteLength, volume: volumeOf(pcm) };
@@ -339,12 +342,11 @@ export async function startDirectWisprDictation(options: DirectWisprOptions): Pr
       return;
     }
     sendTail = sendTail.then(async () => {
+      await initialConnect;
       const ws = socket;
       if (!ws || ws.readyState !== OPEN) return;
       await sendPacket(ws, packet, position);
     }).catch((error) => {
-      // A disconnected socket is replayed after reconnect; actual provider or
-      // backpressure failures remain fatal.
       if (!(error instanceof DictationError) || error.code !== "network_error") fail(error);
     });
   };
@@ -371,7 +373,6 @@ export async function startDirectWisprDictation(options: DirectWisprOptions): Pr
     enqueuePacket(padded);
   };
 
-  const initialConnect = connect(false);
   try {
     capture = await captureFactory({
       targetSampleRate: SAMPLE_RATE,
@@ -442,8 +443,9 @@ export async function startDirectWisprDictation(options: DirectWisprOptions): Pr
         finalReject = reject;
       });
       await sendJson(ws, { type: "commit", total_packets: packets.length });
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
       const timeout = new Promise<never>((_, reject) => {
-        setTimeout(
+        timeoutId = setTimeout(
           () => reject(new DictationError("network_error", "Timed out waiting for Wispr Flow final transcript")),
           FINAL_TIMEOUT_MS,
         );
@@ -451,6 +453,7 @@ export async function startDirectWisprDictation(options: DirectWisprOptions): Pr
       try {
         return await Promise.race([final, timeout]);
       } finally {
+        if (timeoutId) clearTimeout(timeoutId);
         teardown();
       }
     },
