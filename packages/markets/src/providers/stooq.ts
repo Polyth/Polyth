@@ -43,8 +43,9 @@ export function createStooqProvider(options: StooqProviderOptions = {}): MarketP
         signal,
       );
       const lines = csv.trim().split(/\r?\n/);
-      if (lines.length < 2) throw new Error(`stooq: no quote for ${symbol}`);
-      const [remoteSymbol, , , openRaw, highRaw, lowRaw, closeRaw, volumeRaw] = lines[1].split(",");
+      const row = lines[1];
+      if (!row) throw new Error(`stooq: no quote for ${symbol}`);
+      const [remoteSymbol, , , openRaw, highRaw, lowRaw, closeRaw, volumeRaw] = row.split(",");
       const price = Number(closeRaw);
       if (!Number.isFinite(price)) throw new Error(`stooq: no price for ${symbol}`);
       const open = Number(openRaw);
@@ -72,10 +73,11 @@ export function createStooqProvider(options: StooqProviderOptions = {}): MarketP
         signal,
       );
       const lines = csv.trim().split(/\r?\n/);
-      if (lines.length < 2 || !lines[0].startsWith("Date")) throw new Error(`stooq: no chart for ${symbol}`);
+      if (!lines[0]?.startsWith("Date") || !lines[1]) throw new Error(`stooq: no chart for ${symbol}`);
       const candles: MarketCandle[] = [];
       for (const line of lines.slice(1)) {
         const [date, openRaw, highRaw, lowRaw, closeRaw, volumeRaw] = line.split(",");
+        if (!date || !openRaw || !highRaw || !lowRaw || !closeRaw) continue;
         const time = Date.parse(`${date}T00:00:00Z`) / 1_000;
         const open = Number(openRaw);
         const high = Number(highRaw);
