@@ -309,7 +309,7 @@ export function createWsGateway(
         type?: string; sessionId?: string; afterSeq?: number; projectId?: string;
         browserSessionId?: string; afterRevision?: number;
         tabId?: string; visible?: boolean; quality?: number;
-        dictationId?: string; seq?: number; pcm?: string;
+        dictationId?: string;
       } = {};
 
       try {
@@ -323,7 +323,7 @@ export function createWsGateway(
         try { msg = JSON.parse(String(data)); } catch { return; }
       }
 
-      const isAudio = audioFrame !== null || msg.type === "dictation/audio";
+      const isAudio = audioFrame !== null;
       const now = Date.now();
       if (now - sub.windowStart >= 1000) {
         sub.windowStart = now;
@@ -397,12 +397,6 @@ export function createWsGateway(
         const dto = msg.dictationId ? dictation.get(msg.dictationId) : null;
         if (!dto) send(ws, { type: "dictation/error", dictationId: msg.dictationId, code: "not-found" });
         else send(ws, { type: "dictation/state", dictationId: dto.id, session: dto });
-        return;
-      }
-      if (msg.type === "dictation/audio" && dictation) {
-        const id = msg.dictationId ?? "";
-        const pcm = new Uint8Array(Buffer.from(String(msg.pcm ?? ""), "base64"));
-        await pushDictation(id, Number(msg.seq), pcm);
         return;
       }
       if (msg.type === "chat-workspace/subscribe" && chatWorkspace) {
