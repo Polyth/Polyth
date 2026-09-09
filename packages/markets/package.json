@@ -1,0 +1,23 @@
+{
+  "name": "@polyth/markets",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "Markets",
+      "description": "Fast market research, watchlists, and agent-ready financial context.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Workspace",
+      "icon": "↗",
+      "hasSettings": false
+    }
+  },
+  "dependencies": {
+    "@polyth/plugins": "0.1.0"
+  }
+}
