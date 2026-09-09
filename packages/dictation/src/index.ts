@@ -1,18 +1,26 @@
-// Voice: dictation (speech→text) and read-aloud (text→speech) built on the
-// browser Web Speech API — no npm deps, no audio leaves the machine beyond
-// what the browser engine does. Pure helpers here; the web app owns DOM glue.
-// Server-authoritative streaming dictation (WP15) lives in ./streaming.ts.
+// Voice: dictation (speech→text) and read-aloud (text→speech). Browser DOM
+// glue lives in widgets; server-authoritative streaming lives in streaming.ts.
+import {
+  DEFAULT_DICTATION_PREFERENCES,
+  migrateDictationPreferences,
+  type DictationLatencyPreference,
+  type DictationProviderId,
+  type DictationTransport,
+} from "./providers.ts";
 
 export {
   createDictationService, createChunkBuffer, DICTATION_FORMAT,
   type DictationFormat, type DictationSessionDto, type DictationChunkResult,
   type DictationService, type DictationServiceOptions,
   type SttAdapter, type SttStream, type ChunkBuffer, type BufferedChunk,
+  type DictationTimingDto,
 } from "./streaming.ts";
 export {
   createWhisperSttAdapter, downsampleToPcm16, pcmToWav,
   type WhisperSttOptions,
 } from "./whisper.ts";
+export * from "./providers.ts";
+export * from "./wire.ts";
 
 export type VoiceEngine = "browser" | "server";
 
@@ -27,24 +35,43 @@ export interface VoicePrefs {
   rate: number;
   /** Preferred speechSynthesis voice name. */
   voice?: string;
-  /** F8: dictation engine — server needs a configured STT endpoint. */
+  /** Compatibility placement switch; provider/transport own new STT routing. */
   sttEngine: VoiceEngine;
-  /** F8: read-aloud engine — server needs a configured TTS endpoint. */
+  /** Read-aloud engine. */
   ttsEngine: VoiceEngine;
-  /** Playback pitch 0.5–2 (browser: utterance pitch; server: playbackRate). */
   pitch: number;
-  /** Playback volume 0–1. */
   volume: number;
-  /** F8: summarize long replies with the Small Model before speaking. */
   summarize: boolean;
+  /** Provider-neutral realtime dictation preferences. */
+  dictationProvider: DictationProviderId;
+  dictationTransport: DictationTransport;
+  dictationModel?: string;
+  localModel?: string;
+  contextInjection: boolean;
+  cloudFallback: boolean;
+  latencyPreference: DictationLatencyPreference;
 }
 
 export const VOICE_PREFS_KEY = "polyth.voice";
 
 export function defaultVoicePrefs(): VoicePrefs {
   return {
-    dictation: true, tts: false, lang: "en-US", rate: 1,
-    sttEngine: "browser", ttsEngine: "browser", pitch: 1, volume: 1, summarize: false,
+    dictation: true,
+    tts: false,
+    lang: "en-US",
+    rate: 1,
+    // Prefer the server/provider path for new profiles. The mic control already
+    // falls back to Web Speech when the server truthfully reports unavailable.
+    sttEngine: "server",
+    ttsEngine: "browser",
+    pitch: 1,
+    volume: 1,
+    summarize: false,
+    dictationProvider: DEFAULT_DICTATION_PREFERENCES.provider,
+    dictationTransport: DEFAULT_DICTATION_PREFERENCES.transport,
+    contextInjection: DEFAULT_DICTATION_PREFERENCES.contextInjection,
+    cloudFallback: DEFAULT_DICTATION_PREFERENCES.cloudFallback,
+    latencyPreference: DEFAULT_DICTATION_PREFERENCES.latencyPreference,
   };
 }
 
@@ -54,7 +81,14 @@ const engineOf = (v: unknown, fallback: VoiceEngine): VoiceEngine =>
 export function parseVoicePrefs(raw: string | null): VoicePrefs {
   const d = defaultVoicePrefs();
   try {
-    const data = JSON.parse(raw ?? "") as Partial<VoicePrefs>;
+    const data = JSON.parse(raw ?? "") as Partial<VoicePrefs> & Record<string, unknown>;
+    const dictation = migrateDictationPreferences({
+      ...data,
+      provider: data.dictationProvider,
+      transport: data.dictationTransport,
+      model: data.dictationModel,
+      language: data.lang,
+    });
     return {
       dictation: typeof data.dictation === "boolean" ? data.dictation : d.dictation,
       tts: typeof data.tts === "boolean" ? data.tts : d.tts,
@@ -66,6 +100,13 @@ export function parseVoicePrefs(raw: string | null): VoicePrefs {
       pitch: typeof data.pitch === "number" && data.pitch >= 0.5 && data.pitch <= 2 ? data.pitch : d.pitch,
       volume: typeof data.volume === "number" && data.volume >= 0 && data.volume <= 1 ? data.volume : d.volume,
       summarize: typeof data.summarize === "boolean" ? data.summarize : d.summarize,
+      dictationProvider: dictation.provider,
+      dictationTransport: dictation.transport,
+      ...(dictation.model ? { dictationModel: dictation.model } : {}),
+      ...(dictation.localModel ? { localModel: dictation.localModel } : {}),
+      contextInjection: dictation.contextInjection,
+      cloudFallback: dictation.cloudFallback,
+      latencyPreference: dictation.latencyPreference,
     };
   } catch {
     return d;
@@ -98,8 +139,6 @@ export function speakableText(markdown: string, maxChars = 2000): string {
   return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
 }
 
-// ---- browser feature detection (safe to call in Node: returns false) -------
-
 interface SpeechWindowLike {
   SpeechRecognition?: unknown;
   webkitSpeechRecognition?: unknown;
@@ -114,15 +153,12 @@ export function speechSupport(w: unknown): { stt: boolean; tts: boolean } {
   };
 }
 
-/** SpeechRecognition constructor from a window-like object, if available. */
 export function recognitionCtor(w: unknown): (new () => SpeechRecognitionLike) | null {
   const win = (w ?? {}) as SpeechWindowLike;
   const ctor = win.SpeechRecognition ?? win.webkitSpeechRecognition;
   return typeof ctor === "function" ? (ctor as new () => SpeechRecognitionLike) : null;
 }
 
-// Minimal structural type for the Web Speech recognition object; DOM lib does
-// not ship it and we only rely on these members.
 export interface SpeechRecognitionLike {
   lang: string;
   continuous: boolean;
