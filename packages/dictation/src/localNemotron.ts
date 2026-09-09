@@ -5,6 +5,7 @@ import type { DictationFormat, SttAdapter, SttStream } from "./streaming.ts";
 
 const WORKER_SOURCE = String.raw`
 const { parentPort, workerData } = require("node:worker_threads");
+const { createRequire } = require("node:module");
 const path = require("node:path");
 
 const reply = (id, ok, value) => parentPort.postMessage(ok ? { id, ok, value } : { id, ok, error: value });
@@ -19,7 +20,29 @@ const joinText = (a, b) => {
 let recognizer;
 const streams = new Map();
 try {
-  const sherpa = require("sherpa-onnx-node");
+  let sherpa;
+  if (workerData.runtimeDir) {
+    const modules = path.join(workerData.runtimeDir, "node_modules");
+    const coreLib = path.join(modules, "sherpa-onnx-node", "lib");
+    const platformPackage = process.platform === "darwin"
+      ? "sherpa-onnx-darwin-" + process.arch
+      : process.platform === "linux"
+        ? "sherpa-onnx-linux-" + process.arch
+        : process.platform === "win32"
+          ? "sherpa-onnx-win-" + process.arch
+          : "";
+    const platformLib = platformPackage ? path.join(modules, platformPackage, "lib") : "";
+    const nativePaths = [coreLib, platformLib].filter(Boolean).join(path.delimiter);
+    if (process.platform === "linux") process.env.LD_LIBRARY_PATH = nativePaths + (process.env.LD_LIBRARY_PATH ? path.delimiter + process.env.LD_LIBRARY_PATH : "");
+    if (process.platform === "darwin") process.env.DYLD_LIBRARY_PATH = nativePaths + (process.env.DYLD_LIBRARY_PATH ? path.delimiter + process.env.DYLD_LIBRARY_PATH : "");
+    if (process.platform === "win32") process.env.PATH = nativePaths + (process.env.PATH ? path.delimiter + process.env.PATH : "");
+    const runtimeRequire = createRequire(path.join(workerData.runtimeDir, "bootstrap.cjs"));
+    sherpa = runtimeRequire("sherpa-onnx-node");
+  } else {
+    // Test/developer compatibility only. Production package wiring supplies an
+    // explicit verified runtimeDir, so the main server never imports the addon.
+    sherpa = require("sherpa-onnx-node");
+  }
   const modelDir = workerData.modelDir;
   recognizer = new sherpa.OnlineRecognizer({
     featConfig: { sampleRate: 16000, featureDim: 128 },
@@ -102,6 +125,8 @@ interface PendingRpc {
 
 export interface LocalNemotronOptions {
   modelDir: string;
+  /** Verified package-owned sherpa runtime root. Production always supplies it. */
+  runtimeDir?: string;
   threads?: number;
   idleMs?: number;
   workerFactory?: (source: string, options: ConstructorParameters<typeof Worker>[1]) => Worker;
@@ -165,7 +190,11 @@ export function createLocalNemotronSttAdapter(options: LocalNemotronOptions): St
     });
     const next = workerFactory(WORKER_SOURCE, {
       eval: true,
-      workerData: { modelDir: options.modelDir, threads },
+      workerData: {
+        modelDir: options.modelDir,
+        ...(options.runtimeDir ? { runtimeDir: options.runtimeDir } : {}),
+        threads,
+      },
     });
     worker = next;
     next.on("message", (message: unknown) => {
