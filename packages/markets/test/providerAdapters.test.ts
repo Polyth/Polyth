@@ -21,7 +21,7 @@ test("default providers preserve fallback priority by capability", () => {
   registerDefaultMarketProviders(service, { fetch: fetchFrom(() => json({})) });
   assert.deepEqual(service.providers.providerIds("quote"), ["nasdaq", "yahoo", "stooq"]);
   assert.deepEqual(service.providers.providerIds("candles"), ["nasdaq", "yahoo", "stooq"]);
-  assert.deepEqual(service.providers.providerIds("search"), ["yahoo", "tradingview"]);
+  assert.deepEqual(service.providers.providerIds("search"), ["tradingview", "yahoo"]);
   assert.deepEqual(service.providers.providerIds("fundamentals"), ["tradingview"]);
 });
 
