@@ -129,6 +129,13 @@ export interface LocalNemotronOptions {
   runtimeDir?: string;
   threads?: number;
   idleMs?: number;
+  /** Native addon/model initialization deadline. */
+  startupTimeoutMs?: number;
+  /** Fail fast after this many unexpected worker failures inside crashWindowMs. */
+  maxCrashes?: number;
+  crashWindowMs?: number;
+  /** Test seam for crash-window accounting. */
+  now?: () => number;
   workerFactory?: (source: string, options: ConstructorParameters<typeof Worker>[1]) => Worker;
 }
 
@@ -146,6 +153,10 @@ const languageOption = (language?: string): string | undefined => {
 export function createLocalNemotronSttAdapter(options: LocalNemotronOptions): LocalNemotronAdapter {
   const threads = Math.max(1, Math.min(8, options.threads ?? 2));
   const idleMs = Math.max(5_000, options.idleMs ?? 60_000);
+  const startupTimeoutMs = Math.max(10, options.startupTimeoutMs ?? 10_000);
+  const maxCrashes = Math.max(1, options.maxCrashes ?? 3);
+  const crashWindowMs = Math.max(1_000, options.crashWindowMs ?? 60_000);
+  const now = options.now ?? Date.now;
   const workerFactory = options.workerFactory ?? ((source, workerOptions) => new Worker(source, workerOptions));
   let worker: Worker | null = null;
   let ready: Promise<void> | null = null;
@@ -154,8 +165,40 @@ export function createLocalNemotronSttAdapter(options: LocalNemotronOptions): Lo
   let requestId = 0;
   let activeStreams = 0;
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  let startupTimer: ReturnType<typeof setTimeout> | null = null;
   let disposed = false;
   const pending = new Map<number, PendingRpc>();
+  const crashTimes: number[] = [];
+  const countedFailures = new WeakSet<object>();
+
+  const pruneCrashes = (): void => {
+    const floor = now() - crashWindowMs;
+    while (crashTimes.length && crashTimes[0]! <= floor) crashTimes.shift();
+  };
+
+  const recordCrash = (target: Worker): void => {
+    if (countedFailures.has(target as unknown as object)) return;
+    countedFailures.add(target as unknown as object);
+    pruneCrashes();
+    crashTimes.push(now());
+  };
+
+  const crashBudgetError = (): DictationError | null => {
+    pruneCrashes();
+    return crashTimes.length >= maxCrashes
+      ? new DictationError(
+          "worker_crashed",
+          `Local ASR worker entered a crash loop (${crashTimes.length} failures within ${Math.round(crashWindowMs / 1000)}s); retry after the crash window or reinstall the runtime/model`,
+        )
+      : null;
+  };
+
+  const clearTimers = (): void => {
+    if (idleTimer) clearTimeout(idleTimer);
+    if (startupTimer) clearTimeout(startupTimer);
+    idleTimer = null;
+    startupTimer = null;
+  };
 
   const rejectAll = (error: Error): void => {
     for (const rpc of pending.values()) rpc.reject(error);
@@ -166,8 +209,7 @@ export function createLocalNemotronSttAdapter(options: LocalNemotronOptions): Lo
   };
 
   const resetWorker = (error?: Error): void => {
-    if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = null;
+    clearTimers();
     if (error) rejectAll(error);
     worker = null;
     ready = null;
@@ -175,9 +217,15 @@ export function createLocalNemotronSttAdapter(options: LocalNemotronOptions): Lo
     readyReject = null;
   };
 
+  const failWorker = (target: Worker, error: Error): void => {
+    if (worker !== target) return;
+    recordCrash(target);
+    activeStreams = 0;
+    resetWorker(error);
+  };
+
   const terminateWorker = (reason: Error): void => {
-    if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = null;
+    clearTimers();
     const current = worker;
     rejectAll(reason);
     resetWorker();
@@ -190,6 +238,8 @@ export function createLocalNemotronSttAdapter(options: LocalNemotronOptions): Lo
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
       const current = worker;
+      // Reset first so the resulting clean exit is recognized as intentional
+      // and never consumes crash-loop budget.
       resetWorker();
       void current?.terminate();
     }, idleMs);
@@ -199,6 +249,8 @@ export function createLocalNemotronSttAdapter(options: LocalNemotronOptions): Lo
   const ensureWorker = (): Promise<void> => {
     if (disposed) return Promise.reject(new DictationError("session_expired", "Local ASR adapter was disposed"));
     if (ready) return ready;
+    const budgetFailure = crashBudgetError();
+    if (budgetFailure) return Promise.reject(budgetFailure);
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = null;
     ready = new Promise<void>((resolve, reject) => {
@@ -214,9 +266,22 @@ export function createLocalNemotronSttAdapter(options: LocalNemotronOptions): Lo
       },
     });
     worker = next;
+    startupTimer = setTimeout(() => {
+      if (worker !== next || !readyReject) return;
+      const failure = new DictationError(
+        "worker_crashed",
+        `Local Nemotron worker did not become ready within ${startupTimeoutMs} ms`,
+      );
+      failWorker(next, failure);
+      void next.terminate();
+    }, startupTimeoutMs);
+
     next.on("message", (message: unknown) => {
       const data = message as { type?: string; id?: number; ok?: boolean; value?: string; error?: string; message?: string };
       if (data.type === "ready") {
+        if (worker !== next) return;
+        if (startupTimer) clearTimeout(startupTimer);
+        startupTimer = null;
         readyResolve?.();
         readyResolve = null;
         readyReject = null;
@@ -227,9 +292,8 @@ export function createLocalNemotronSttAdapter(options: LocalNemotronOptions): Lo
           "provider_unavailable",
           `Local Nemotron runtime failed to initialize: ${data.message ?? "unknown worker error"}`,
         );
-        rejectAll(failure);
+        failWorker(next, failure);
         void next.terminate();
-        resetWorker();
         return;
       }
       if (typeof data.id !== "number") return;
@@ -240,15 +304,13 @@ export function createLocalNemotronSttAdapter(options: LocalNemotronOptions): Lo
       else rpc.reject(new DictationError("worker_crashed", data.error ?? "Local ASR worker request failed"));
     });
     next.once("error", (error) => {
-      const failure = new DictationError("worker_crashed", `Local ASR worker crashed: ${error.message}`, { cause: error });
-      rejectAll(failure);
-      resetWorker();
+      failWorker(next, new DictationError("worker_crashed", `Local ASR worker crashed: ${error.message}`, { cause: error }));
     });
     next.once("exit", (code) => {
       if (worker !== next) return;
-      const failure = code === 0 ? undefined : new DictationError("worker_crashed", `Local ASR worker exited with code ${code}`);
-      if (failure) rejectAll(failure);
-      resetWorker();
+      // Intentional idle/dispose termination resets worker before terminate().
+      // Therefore every exit still owning the slot is unexpected, including 0.
+      failWorker(next, new DictationError("worker_crashed", `Local ASR worker exited unexpectedly with code ${code}`));
     });
     return ready;
   };
