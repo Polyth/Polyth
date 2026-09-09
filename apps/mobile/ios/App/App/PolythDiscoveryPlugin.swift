@@ -114,22 +114,24 @@ final class PolythDiscoveryPlugin: CAPPlugin, CAPBridgedPlugin {
                   safe(name, max: 128) != nil,
                   case let .bonjour(txt) = result.metadata else { continue }
             let properties = txt.dictionary
-            guard let endpoint = endpoint(properties["endpoint"]),
-                  properties["v"] == "1",
-                  let label = safe(properties["label"] ?? name, max: 80),
-                  let portRaw = properties["port"],
-                  let port = Int(portRaw),
-                  (1...65535).contains(port) else { continue }
-            byEndpoint[endpoint] = [
+            guard let endpoint = endpoint(properties["endpoint"] ?? properties["pk"]),
+                  properties["v"] == nil || properties["v"] == "1",
+                  let label = safe(properties["label"] ?? "Polyth", max: 80) else { continue }
+            var item: [String: Any] = [
                 "id": endpoint,
                 "serviceName": name,
                 "hostLabel": label,
                 "hostEndpointId": endpoint,
                 "protocolVersion": 1,
-                "port": port,
-                "addresses": [],
+                "addresses": txtAddresses(properties["address"]),
                 "numericPairing": properties["code"] == "1",
             ]
+            if let portRaw = properties["port"],
+               let port = Int(portRaw),
+               (1...65535).contains(port) {
+                item["port"] = port
+            }
+            byEndpoint[endpoint] = item
         }
         let results = byEndpoint.values.sorted {
             (($0["hostLabel"] as? String) ?? "Polyth").localizedCaseInsensitiveCompare(
@@ -176,8 +178,9 @@ final class PolythDiscoveryPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private func endpoint(_ value: String?) -> String? {
         guard let value, value.count >= 32, value.count <= 64 else { return nil }
-        let allowed = CharacterSet.alphanumerics
-        guard value.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return nil }
+        guard value.utf8.allSatisfy({ byte in
+            (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+        }) else { return nil }
         return value
     }
 
@@ -187,6 +190,24 @@ final class PolythDiscoveryPlugin: CAPPlugin, CAPBridgedPlugin {
         guard !trimmed.isEmpty, trimmed.count <= max else { return nil }
         guard !trimmed.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { return nil }
         return trimmed
+    }
+
+    private func txtAddresses(_ value: String?) -> [String] {
+        guard let value, value.count <= 1536 else { return [] }
+        var seen = Set<String>()
+        return value
+            .split(whereSeparator: { $0.isWhitespace })
+            .compactMap { safeAddress(String($0)) }
+            .filter { seen.insert($0).inserted }
+            .prefix(16)
+            .map { $0 }
+    }
+
+    private func safeAddress(_ value: String) -> String? {
+        guard !value.isEmpty, value.count <= 96 else { return nil }
+        let forbidden = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "/@?#\\"))
+        guard !value.unicodeScalars.contains(where: { forbidden.contains($0) }) else { return nil }
+        return value
     }
 
     private func isCurrent(_ current: Int) -> Bool {
