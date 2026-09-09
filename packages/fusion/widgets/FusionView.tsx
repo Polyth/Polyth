@@ -142,6 +142,7 @@ export default function FusionView() {
                   <ProviderLogo
                     providerID={m.providerID}
                     providerName={m.providerName}
+                    harnessId={m.harnessId}
                     className="fusion-provider-logo"
                   />
                   {modelDisplayName(m, textModels)}
@@ -214,7 +215,11 @@ export default function FusionView() {
                     <article key={source.model} className="fusion-source">
                       <header>
                         <span>
-                          <ProviderLogo providerID={providerIdFromModel(source.model)} className="fusion-provider-logo" />
+                          <ProviderLogo
+                            providerID={providerIdFromModel(source.model)}
+                            harnessId={textModels.find((item) => `${item.providerID}/${item.modelID}` === source.model)?.harnessId}
+                            className="fusion-provider-logo"
+                          />
                           <strong>{source.model}</strong>
                         </span>
                         <Badge tone="neutral">{weightFor(source.model)}% attributed</Badge>

@@ -65,6 +65,11 @@ const DETAILS_PANEL_WIDTH = 272;
 type ModelPickerDragKind = "favorite" | "provider";
 type ModelPickerDrag = { kind: ModelPickerDragKind; id: string };
 
+function unanimousHarnessId(models: readonly ModelDescriptor[]): string | undefined {
+  const harnessId = models[0]?.harnessId;
+  return harnessId && models.every((model) => model.harnessId === harnessId) ? harnessId : undefined;
+}
+
 function visibleBand() {
   const vv = typeof window !== "undefined" ? window.visualViewport : null;
   if (vv) {
@@ -224,6 +229,7 @@ function ModelDetails({
         <ProviderLogo
           providerID={model.providerID}
           providerName={model.providerName}
+          harnessId={model.harnessId}
           className="model-row-provider-logo"
         />
         <div className="model-details-title">
@@ -264,7 +270,7 @@ function ModelHoverDetails({ model, favorite }: { model: ModelDescriptor; favori
   return (
     <div className="model-hover-details">
       <header>
-        <ProviderLogo providerID={model.providerID} providerName={model.providerName} className="model-row-provider-logo" />
+        <ProviderLogo providerID={model.providerID} providerName={model.providerName} harnessId={model.harnessId} className="model-row-provider-logo" />
         <div><strong>{model.name}</strong><small>{model.providerName ?? model.providerID}</small></div>
         <FavoriteIcon className={`model-hover-star${favorite ? " on" : ""}`} aria-label={favorite ? tr("modelpicker.removeFavorite") : tr("modelpicker.addFavorite")} />
       </header>
@@ -625,7 +631,7 @@ export default function ModelPicker({
         } : {})}
       >
         <span className={`model-picker-grip${favoriteDrag ? "" : " spacer"}`} aria-hidden="true">{favoriteDrag ? "⠿" : ""}</span>
-        <ProviderLogo providerID={model.providerID} providerName={model.providerName} className="model-row-provider-logo" />
+        <ProviderLogo providerID={model.providerID} providerName={model.providerName} harnessId={model.harnessId} className="model-row-provider-logo" />
         <span className="model-picker-copy">
           <strong>
             {model.name}
@@ -653,7 +659,7 @@ export default function ModelPicker({
       key={`${group}:${modelKey(model)}`}
       title={model.name}
       icon={(
-        <>{editing && group === "favorites" && <span className="model-sheet-grip" aria-hidden="true">⠿</span>}<ProviderLogo providerID={model.providerID} providerName={model.providerName} className="model-row-provider-logo" /></>
+        <>{editing && group === "favorites" && <span className="model-sheet-grip" aria-hidden="true">⠿</span>}<ProviderLogo providerID={model.providerID} providerName={model.providerName} harnessId={model.harnessId} className="model-row-provider-logo" /></>
       )}
       selected={isSelected(model)}
       onClick={() => choose(model)}
@@ -706,6 +712,7 @@ export default function ModelPicker({
         <ProviderLogo
           providerID={selectedModel.providerID}
           providerName={selectedModel.providerName}
+          harnessId={selectedModel.harnessId}
           size="compact"
           className="model-trigger-logo"
         />
@@ -799,6 +806,7 @@ export default function ModelPicker({
                         <ProviderLogo
                           providerID={provider.id}
                           providerName={provider.name}
+                          harnessId={unanimousHarnessId(provider.models)}
                           className="model-provider-logo"
                         />
                         <span>{provider.name}</span>
@@ -889,6 +897,7 @@ export default function ModelPicker({
                         <ProviderLogo
                           providerID={provider.id}
                           providerName={provider.name}
+                          harnessId={unanimousHarnessId(provider.models)}
                           className="model-provider-logo"
                         />
                         <strong>{provider.name}</strong>

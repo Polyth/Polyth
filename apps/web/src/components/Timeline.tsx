@@ -748,6 +748,7 @@ function AssistantAgentHeader({
         <ProviderLogo
           providerID={descriptor?.providerID ?? modelRef?.providerID}
           providerName={descriptor?.providerName}
+          harnessId={descriptor?.harnessId ?? m.harnessId ?? turn?.harnessId}
           className="response-footer-mark"
         />
         <span className="response-footer-model">{modelName}</span>
