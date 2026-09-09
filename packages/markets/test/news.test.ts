@@ -13,7 +13,7 @@ test("RSS parser normalizes bounded market news without a parser dependency", ()
   assert.equal(items.length, 2);
   assert.deepEqual(items[0], {
     title: "Nvidia & AI demand rises",
-    url: "https://example.com/a",
+    url: "https://example.com/a/",
     publisher: "Example Wire",
     publishedAt: "2026-09-09T18:00:00.000Z",
     symbol: "NVDA",
@@ -22,12 +22,12 @@ test("RSS parser normalizes bounded market news without a parser dependency", ()
   assert.equal(items[1]?.publisher, "Fallback");
 });
 
-test("news dedupe prefers newest unique title/url", () => {
+test("news dedupe removes duplicate titles and URLs while preserving distinct stories", () => {
   const items = dedupeMarketNews([
     { title: "Same Story!", url: "https://a.example/1", publisher: "A", publishedAt: "2026-09-09T17:00:00.000Z", symbol: "NVDA", source: "a" },
     { title: "Same story", url: "https://b.example/2", publisher: "B", publishedAt: "2026-09-09T18:00:00.000Z", symbol: "NVDA", source: "b" },
     { title: "Other", url: "https://a.example/1", publisher: "C", publishedAt: "2026-09-09T19:00:00.000Z", symbol: "NVDA", source: "c" },
   ]);
-  assert.equal(items.length, 1);
-  assert.equal(items[0]?.source, "c");
+  assert.equal(items.length, 2);
+  assert.deepEqual(items.map((item) => item.source), ["c", "b"]);
 });

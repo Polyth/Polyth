@@ -2,17 +2,16 @@ import "./styles.css";
 import "./integration.css";
 import "./widgetStyles.css";
 import "./news.css";
-import { createElement, useSyncExternalStore } from "react";
+import { createElement, useEffect, useState } from "react";
 import { defineWebPackage, type WebPackageHost } from "@polyth/web-sdk";
 import MarketsSurface, { type MarketHandoffOption } from "./MarketsSurface.tsx";
 import { MarketAssetWidget, MarketNewsWidget, MarketWatchlistWidget } from "./MarketWidgets.tsx";
 import { selectMarketSymbol } from "./selection.ts";
 
 function HostedMarketsSurface({ host, active }: { host: WebPackageHost; active?: boolean }) {
-  const snapshot = useSyncExternalStore(
-    (listener) => host.store.subscribe(listener),
-    () => host.store.getSnapshot(),
-  );
+  const [snapshot, setSnapshot] = useState(() => host.store.getSnapshot());
+  useEffect(() => host.store.subscribe(() => setSnapshot(host.store.getSnapshot())), [host]);
+
   const handoffOptions: MarketHandoffOption[] = snapshot.activeProjectId
     ? host.handoffTargets.list()
         .filter((target) => target.available())
