@@ -46,12 +46,13 @@ fn response(result: Result<Value, String>) -> *mut c_char {
     c_string(value.to_string())
 }
 
-unsafe fn required_string<'a>(ptr: *const c_char) -> Result<&'a str, String> {
+unsafe fn required_string(ptr: *const c_char) -> Result<String, String> {
     if ptr.is_null() {
         return Err(LinkError::PairingInvalid.code().to_string());
     }
     unsafe { CStr::from_ptr(ptr) }
         .to_str()
+        .map(str::to_owned)
         .map_err(|_| LinkError::PairingInvalid.code().to_string())
 }
 
@@ -83,6 +84,12 @@ pub extern "C" fn polyth_link_abi_version() -> u32 {
     ABI_VERSION
 }
 
+/// Create an isolated native client handle.
+///
+/// # Safety
+/// `data_dir` must point to a valid NUL-terminated UTF-8 string. `web_dist`
+/// must be null or point to a valid NUL-terminated UTF-8 string for the
+/// duration of this call.
 #[no_mangle]
 pub unsafe extern "C" fn polyth_link_client_new(
     data_dir: *const c_char,
@@ -115,11 +122,17 @@ pub extern "C" fn polyth_link_client_free(handle: u64) {
         .and_then(|mut clients| clients.remove(&handle));
     if let Some(client) = removed {
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            runtime().block_on(client.shutdown());
+            drop(runtime().spawn(async move { client.shutdown().await }));
         }));
     }
 }
 
+/// Invoke one shared Polyth Link client operation.
+///
+/// # Safety
+/// `method` and `params_json` must point to valid NUL-terminated UTF-8 strings.
+/// When `identity_secret_len` is non-zero, `identity_secret` must point to at
+/// least that many readable bytes for the duration of this call.
 #[no_mangle]
 pub unsafe extern "C" fn polyth_link_invoke(
     handle: u64,
@@ -131,7 +144,7 @@ pub unsafe extern "C" fn polyth_link_invoke(
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let method = unsafe { required_string(method) }?;
         let params_raw = unsafe { required_string(params_json) }?;
-        let params: Value = serde_json::from_str(params_raw)
+        let params: Value = serde_json::from_str(&params_raw)
             .map_err(|_| LinkError::PairingInvalid.code().to_string())?;
         if !params.is_object() {
             return Err(LinkError::PairingInvalid.code().to_string());
@@ -145,7 +158,7 @@ pub unsafe extern "C" fn polyth_link_invoke(
             Some(unsafe { slice::from_raw_parts(identity_secret, identity_secret_len) })
         };
         let client = client(handle)?;
-        runtime().block_on(client.invoke(method, params, secret))
+        runtime().block_on(client.invoke(&method, params, secret))
     }));
     match result {
         Ok(result) => response(result),
@@ -153,6 +166,11 @@ pub unsafe extern "C" fn polyth_link_invoke(
     }
 }
 
+/// Fill `out` with a newly generated 32-byte native identity secret.
+///
+/// # Safety
+/// `out` must point to at least `out_len` writable bytes. The caller owns and
+/// must securely erase the returned secret after storing or using it.
 #[no_mangle]
 pub unsafe extern "C" fn polyth_link_generate_identity_secret(
     out: *mut u8,
@@ -174,6 +192,10 @@ pub unsafe extern "C" fn polyth_link_generate_identity_secret(
     result.unwrap_or(0)
 }
 
+/// Derive the public device endpoint ID for a native identity secret.
+///
+/// # Safety
+/// `secret` must point to at least `secret_len` readable bytes for this call.
 #[no_mangle]
 pub unsafe extern "C" fn polyth_link_identity_endpoint_id(
     secret: *const u8,
@@ -191,11 +213,14 @@ pub unsafe extern "C" fn polyth_link_identity_endpoint_id(
 
 /// Native-only ticket helper used to select the per-host Keychain/Keystore
 /// record. It is deliberately not part of the JavaScript plugin surface.
+///
+/// # Safety
+/// `ticket` must point to a valid NUL-terminated UTF-8 string for this call.
 #[no_mangle]
 pub unsafe extern "C" fn polyth_link_ticket_host_id(ticket: *const c_char) -> *mut c_char {
     let result = std::panic::catch_unwind(|| {
         let ticket = unsafe { required_string(ticket) }?;
-        parse_pairing_ticket(ticket)
+        parse_pairing_ticket(&ticket)
             .map(|parsed| parsed.host.endpoint_id)
             .map_err(|error| error.code().to_string())
     });
@@ -205,6 +230,11 @@ pub unsafe extern "C" fn polyth_link_ticket_host_id(ticket: *const c_char) -> *m
     }
 }
 
+/// Release a string returned by this ABI.
+///
+/// # Safety
+/// `value` must be null or a pointer previously returned by a Polyth Link ABI
+/// function and not already freed.
 #[no_mangle]
 pub unsafe extern "C" fn polyth_link_string_free(value: *mut c_char) {
     if !value.is_null() {
