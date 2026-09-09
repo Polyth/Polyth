@@ -160,13 +160,13 @@ const providerAvailability = (
       const model = settings.dictation.localModel || "nemotron-3.5-streaming-0.6b-80ms";
       const modelReady = !!localModelInstalled?.(model);
       const runtimeReady = !!localRuntimeInstalled?.();
-      available = selected === provider.id && modelReady && runtimeReady;
-      if (!available) {
-        reason = selected !== provider.id ? "not selected"
-          : !runtimeReady ? "local sherpa runtime is not downloaded"
-            : !modelReady ? "local model is not downloaded"
-              : undefined;
-      }
+      const localReady = modelReady && runtimeReady;
+      const fallbackReady = settings.dictation.cloudFallback && !!process.env.ELEVENLABS_API_KEY;
+      available = selected === provider.id && (localReady || fallbackReady);
+      if (selected !== provider.id) reason = "not selected";
+      else if (!localReady && fallbackReady) reason = "using explicit cloud fallback (ElevenLabs)";
+      else if (!runtimeReady) reason = "local sherpa runtime is not downloaded";
+      else if (!modelReady) reason = "local model is not downloaded";
     } else if (provider.id === "web-speech") {
       available = selected === provider.id;
     } else {
@@ -372,6 +372,11 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     return localAdapter;
   };
 
+  const elevenLabsFallback = (): SttAdapter | null => {
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+    return apiKey ? createElevenLabsSttAdapter({ apiKey, model: "scribe_v2_realtime" }) : null;
+  };
+
   const dictation = createDictationService({
     adapter: () => {
       const settings = voice.get();
@@ -379,7 +384,9 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       if (selected.provider === "web-speech" || selected.transport === "direct-browser") return null;
       if (selected.provider === "local-nemotron") {
         if (selected.transport !== "auto" && selected.transport !== "local-worker") return null;
-        return localNemotronAdapter(selected.localModel || "nemotron-3.5-streaming-0.6b-80ms");
+        const local = localNemotronAdapter(selected.localModel || "nemotron-3.5-streaming-0.6b-80ms");
+        if (local) return local;
+        return selected.cloudFallback ? elevenLabsFallback() : null;
       }
       if (selected.transport === "local-worker") return null;
       if (selected.provider === "elevenlabs") {
