@@ -1,5 +1,5 @@
-use std::sync::{Mutex as StdMutex, OnceLock};
 use std::sync::Arc;
+use std::sync::{Mutex as StdMutex, OnceLock};
 use std::time::Instant;
 
 use iroh::endpoint::{Connection, SendStream};
@@ -59,7 +59,7 @@ pub(crate) async fn handle_connection(
         let _ = write_numeric(
             &mut send,
             &NumericWireMessage::Rejected {
-                code: error.code().to_string(),
+                code: public_error_code(error).to_string(),
             },
         )
         .await;
@@ -69,27 +69,68 @@ pub(crate) async fn handle_connection(
     result
 }
 
+fn public_error_code(error: &LinkError) -> &'static str {
+    match error {
+        LinkError::RequestRateLimited => LinkError::RequestRateLimited.code(),
+        LinkError::HostIdentityMismatch => LinkError::HostIdentityMismatch.code(),
+        LinkError::TransportProtocolError => LinkError::TransportProtocolError.code(),
+        _ => LinkError::PairingInvalid.code(),
+    }
+}
+
 async fn handle_exchange(
     state: &Arc<Mutex<HostState>>,
     peer: &str,
     send: &mut SendStream,
     recv: &mut iroh::endpoint::RecvStream,
 ) -> Result<(), LinkError> {
-    let request = match read_numeric(recv).await? {
-        NumericWireMessage::Start { request } => request,
+    match read_numeric(recv).await? {
+        NumericWireMessage::BootstrapRequest => {}
+        _ => return Err(LinkError::TransportProtocolError),
+    }
+
+    let bootstrap = manager()
+        .lock()
+        .map_err(|_| LinkError::TransportProtocolError)?
+        .bootstrap(Instant::now())?;
+    {
+        let guard = state.lock().await;
+        if guard.identity.endpoint_id() != bootstrap.host_endpoint_id {
+            return Err(LinkError::HostIdentityMismatch);
+        }
+    }
+    write_numeric(
+        send,
+        &NumericWireMessage::Bootstrap {
+            pairing_id: bootstrap.pairing_id.clone(),
+            host_endpoint_id: bootstrap.host_endpoint_id.clone(),
+            expires_at: bootstrap.expires_at.clone(),
+        },
+    )
+    .await?;
+
+    let (pairing_id, request) = match read_numeric(recv).await? {
+        NumericWireMessage::Start {
+            pairing_id,
+            request,
+        } => (pairing_id, request),
         _ => return Err(LinkError::TransportProtocolError),
     };
+    if pairing_id != bootstrap.pairing_id {
+        return Err(LinkError::PairingInvalid);
+    }
 
     let challenge = manager()
         .lock()
         .map_err(|_| LinkError::TransportProtocolError)?
-        .start_login(peer, &request, Instant::now())?;
+        .start_login(peer, &pairing_id, &request, Instant::now())?;
     write_numeric(
         send,
         &NumericWireMessage::Challenge {
             attempt_id: challenge.attempt_id.clone(),
             pairing_id: challenge.pairing_id.clone(),
             host_endpoint_id: challenge.host_endpoint_id.clone(),
+            expires_at: challenge.expires_at.clone(),
             response: challenge.response.clone(),
         },
     )
