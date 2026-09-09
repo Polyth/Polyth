@@ -49,12 +49,40 @@ export class DictationError extends Error {
   }
 }
 
+export interface DictationContextMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface DictationContext {
   /** "auto" asks the provider to detect language; otherwise BCP-47/locale-ish. */
   language: "auto" | string;
   localeHints?: string[];
   keywords?: string[];
   glossary?: Record<string, string>;
+  technicalVocabulary?: string[];
+  app?: {
+    type: "ai" | "email" | "other";
+    name?: string;
+  };
+  composer?: {
+    beforeCursor?: string;
+    selection?: string;
+    afterCursor?: string;
+  };
+  conversation?: {
+    id?: string;
+    messages?: DictationContextMessage[];
+  };
+  project?: {
+    name?: string;
+    repository?: string;
+    branch?: string;
+    packages?: string[];
+    files?: string[];
+    harnesses?: string[];
+    models?: string[];
+  };
   /** Bounded lexical context assembled by the caller, never raw repository dumps. */
   lexicalContext?: string;
 }
@@ -65,11 +93,24 @@ export type NormalizedSttEvent =
   | { type: "speech_start" }
   | { type: "speech_end" }
   | { type: "partial"; text: string; revision: number; stable?: string; unstable?: string }
-  | { type: "commit"; text: string; revision: number }
+  | { type: "committed"; text: string; revision: number }
   | { type: "finalizing" }
   | { type: "final"; text: string; revision: number }
+  | { type: "recoverable_error"; error: DictationError }
+  | { type: "fatal_error"; error: DictationError }
   | { type: "cancelled" }
+  /** @deprecated provider-extension compatibility; emit `committed`. */
+  | { type: "commit"; text: string; revision: number }
+  /** @deprecated provider-extension compatibility; emit a typed error event. */
   | { type: "error"; error: DictationError };
+
+export interface ProviderAudioFormat {
+  encoding: "pcm_s16le";
+  sampleRates: readonly number[];
+  channels: readonly number[];
+  /** Provider wire container. Polyth may still keep canonical internal PCM raw. */
+  container: "raw" | "wav";
+}
 
 export interface ProviderCapabilities {
   id: DictationProviderId;
@@ -77,15 +118,26 @@ export interface ProviderCapabilities {
   streaming: boolean;
   partials: boolean;
   commits: boolean;
+  finalOnly: boolean;
+  manualCommit: boolean;
+  vadCommit: boolean;
+  languageAutoDetection: boolean;
+  languageHints: boolean;
+  contextualPrompting: boolean;
+  vocabulary: boolean;
+  timestamps: boolean;
   transports: readonly DictationTransport[];
   /** "*" means provider-managed language detection/catalog. */
   languages: readonly string[];
+  audioFormats: readonly ProviderAudioFormat[];
   defaultModel?: string;
+  /** Compatibility mirror for older capability consumers. */
   context: boolean;
   local: boolean;
+  localModelDownloadRequired: boolean;
   /** The upstream supports ephemeral client auth even if Polyth currently keeps the provider server-proxied. */
   ephemeralClientAuth: boolean;
-  /** False means Polyth deliberately has no public endpoint contract to call. */
+  /** False means Polyth deliberately has no supported public endpoint contract to call. */
   publicApi: boolean;
 }
 
@@ -108,72 +160,93 @@ export interface DictationProvider {
   }): SttSession;
 }
 
+const RAW_16K = [{ encoding: "pcm_s16le", sampleRates: [16_000], channels: [1], container: "raw" }] as const;
+const WAV_16K = [{ encoding: "pcm_s16le", sampleRates: [16_000], channels: [1], container: "wav" }] as const;
+const RAW_24K = [{ encoding: "pcm_s16le", sampleRates: [24_000], channels: [1], container: "raw" }] as const;
+
 const CATALOG: readonly ProviderCapabilities[] = [
   {
     id: "elevenlabs", label: "ElevenLabs Scribe Realtime v2", streaming: true,
-    partials: true, commits: true, transports: ["auto", "direct-browser", "server-proxy"],
-    languages: ["*"], defaultModel: "scribe_v2_realtime", context: true, local: false,
-    ephemeralClientAuth: true, publicApi: true,
+    partials: true, commits: true, finalOnly: false, manualCommit: true, vadCommit: true,
+    languageAutoDetection: true, languageHints: true, contextualPrompting: true, vocabulary: true,
+    timestamps: true, transports: ["auto", "direct-browser", "server-proxy"],
+    languages: ["*"], audioFormats: RAW_16K, defaultModel: "scribe_v2_realtime", context: true, local: false,
+    localModelDownloadRequired: false, ephemeralClientAuth: true, publicApi: true,
   },
   {
     id: "wispr", label: "Wispr Flow", streaming: true,
-    partials: true, commits: true, transports: ["auto"],
-    languages: ["*"], context: true, local: false,
-    ephemeralClientAuth: true,
-    // Keep disabled until an actual Voice Interface API contract is configured;
-    // do not invent a public endpoint from the consumer Flow product.
-    publicApi: false,
+    partials: true, commits: true, finalOnly: false, manualCommit: true, vadCommit: false,
+    languageAutoDetection: true, languageHints: true, contextualPrompting: true, vocabulary: true,
+    timestamps: false, transports: ["auto", "direct-browser"],
+    languages: ["*"], audioFormats: WAV_16K, context: true, local: false,
+    localModelDownloadRequired: false, ephemeralClientAuth: true, publicApi: true,
   },
   {
     id: "openai-live", label: "OpenAI GPT Live Transcribe", streaming: true,
-    partials: true, commits: true, transports: ["auto", "server-proxy"],
-    languages: ["*"], defaultModel: "gpt-live-transcribe", context: true, local: false,
-    ephemeralClientAuth: true, publicApi: true,
+    partials: true, commits: true, finalOnly: false, manualCommit: true, vadCommit: true,
+    languageAutoDetection: true, languageHints: true, contextualPrompting: true, vocabulary: true,
+    timestamps: false, transports: ["auto", "server-proxy"],
+    languages: ["*"], audioFormats: RAW_24K, defaultModel: "gpt-live-transcribe", context: true, local: false,
+    localModelDownloadRequired: false, ephemeralClientAuth: true, publicApi: true,
   },
   {
     id: "openai-transcribe", label: "OpenAI GPT Transcribe", streaming: true,
-    partials: true, commits: true, transports: ["auto", "server-proxy"],
-    languages: ["*"], defaultModel: "gpt-transcribe", context: true, local: false,
-    ephemeralClientAuth: false, publicApi: true,
+    partials: true, commits: true, finalOnly: false, manualCommit: true, vadCommit: true,
+    languageAutoDetection: true, languageHints: true, contextualPrompting: true, vocabulary: true,
+    timestamps: false, transports: ["auto", "server-proxy"],
+    languages: ["*"], audioFormats: RAW_24K, defaultModel: "gpt-transcribe", context: true, local: false,
+    localModelDownloadRequired: false, ephemeralClientAuth: false, publicApi: true,
   },
   {
     id: "deepgram", label: "Deepgram Nova-3", streaming: true,
-    partials: true, commits: true, transports: ["auto", "server-proxy"],
-    languages: ["*", "uk"], defaultModel: "nova-3", context: true, local: false,
-    ephemeralClientAuth: true, publicApi: true,
+    partials: true, commits: true, finalOnly: false, manualCommit: true, vadCommit: true,
+    languageAutoDetection: true, languageHints: true, contextualPrompting: true, vocabulary: true,
+    timestamps: true, transports: ["auto", "server-proxy"],
+    languages: ["*", "uk"], audioFormats: RAW_16K, defaultModel: "nova-3", context: true, local: false,
+    localModelDownloadRequired: false, ephemeralClientAuth: true, publicApi: true,
   },
   {
     id: "speechmatics", label: "Speechmatics Realtime", streaming: true,
-    partials: true, commits: true, transports: ["auto", "server-proxy"],
-    languages: ["*"], context: true, local: false,
-    ephemeralClientAuth: false, publicApi: true,
+    partials: true, commits: true, finalOnly: false, manualCommit: true, vadCommit: false,
+    languageAutoDetection: true, languageHints: true, contextualPrompting: true, vocabulary: true,
+    timestamps: true, transports: ["auto", "server-proxy"],
+    languages: ["*"], audioFormats: RAW_16K, context: true, local: false,
+    localModelDownloadRequired: false, ephemeralClientAuth: false, publicApi: true,
   },
   {
     id: "openai-compatible", label: "OpenAI-compatible STT", streaming: false,
-    partials: false, commits: false, transports: ["auto", "server-proxy"],
-    languages: ["*"], defaultModel: "whisper-1", context: true, local: false,
-    ephemeralClientAuth: false, publicApi: true,
+    partials: false, commits: false, finalOnly: true, manualCommit: false, vadCommit: false,
+    languageAutoDetection: true, languageHints: true, contextualPrompting: true, vocabulary: false,
+    timestamps: false, transports: ["auto", "server-proxy"],
+    languages: ["*"], audioFormats: WAV_16K, defaultModel: "whisper-1", context: true, local: false,
+    localModelDownloadRequired: false, ephemeralClientAuth: false, publicApi: true,
   },
   {
     id: "local-nemotron", label: "Nemotron 3.5 Streaming 0.6B", streaming: true,
-    partials: true, commits: true, transports: ["auto", "local-worker"],
-    languages: ["uk-UA", "en-US", "*"], context: true, local: true,
-    ephemeralClientAuth: false, publicApi: true,
+    partials: true, commits: true, finalOnly: false, manualCommit: true, vadCommit: true,
+    languageAutoDetection: true, languageHints: true, contextualPrompting: false, vocabulary: false,
+    timestamps: false, transports: ["auto", "local-worker"],
+    languages: ["uk-UA", "en-US", "es-ES", "*"], audioFormats: RAW_16K, context: false, local: true,
+    localModelDownloadRequired: true, ephemeralClientAuth: false, publicApi: true,
   },
   {
     id: "local-parakeet", label: "Parakeet (English, optional)", streaming: true,
-    partials: true, commits: true, transports: ["auto"],
-    languages: ["en", "en-US"], context: false, local: true,
-    ephemeralClientAuth: false,
+    partials: true, commits: true, finalOnly: false, manualCommit: true, vadCommit: true,
+    languageAutoDetection: false, languageHints: false, contextualPrompting: false, vocabulary: false,
+    timestamps: false, transports: ["auto"],
+    languages: ["en", "en-US"], audioFormats: RAW_16K, context: false, local: true,
+    localModelDownloadRequired: true, ephemeralClientAuth: false,
     // Not shipped: Nemotron already covers English and Ukrainian with the same
     // runtime class, so another ~0.5 GB English-only model is not justified yet.
     publicApi: false,
   },
   {
     id: "web-speech", label: "Browser Web Speech", streaming: true,
-    partials: true, commits: true, transports: ["auto", "direct-browser"],
-    languages: ["*"], context: false, local: true,
-    ephemeralClientAuth: false, publicApi: true,
+    partials: true, commits: true, finalOnly: false, manualCommit: true, vadCommit: true,
+    languageAutoDetection: false, languageHints: true, contextualPrompting: false, vocabulary: false,
+    timestamps: false, transports: ["auto", "direct-browser"],
+    languages: ["*"], audioFormats: [], context: false, local: true,
+    localModelDownloadRequired: false, ephemeralClientAuth: false, publicApi: true,
   },
 ] as const;
 
@@ -227,7 +300,9 @@ export const DEFAULT_DICTATION_PREFERENCES: DictationPreferences = {
   provider: "elevenlabs",
   transport: "auto",
   language: "auto",
-  contextInjection: true,
+  // Extended composer/chat/repository context is privacy-sensitive. A user must
+  // explicitly opt in before a cloud provider receives it.
+  contextInjection: false,
   processingPolicy: "prefer-cloud",
   cloudFallback: false,
   latencyPreference: "lowest",
@@ -337,19 +412,79 @@ const cleanList = (values: readonly string[] | undefined, max: number, itemMax: 
   return out.length ? out : undefined;
 };
 
+const cleanText = (value: unknown, max: number): string | undefined => {
+  if (typeof value !== "string") return undefined;
+  const text = value.trim().replace(/\s+/g, " ").slice(0, max);
+  return text || undefined;
+};
+
+const cleanMessages = (messages: readonly DictationContextMessage[] | undefined): DictationContextMessage[] | undefined => {
+  if (!messages?.length) return undefined;
+  const out: DictationContextMessage[] = [];
+  for (const raw of messages.slice(-12)) {
+    if (raw?.role !== "user" && raw?.role !== "assistant") continue;
+    const content = cleanText(raw.content, 600);
+    if (content) out.push({ role: raw.role, content });
+  }
+  return out.length ? out : undefined;
+};
+
 /** Bound user/project lexical context before it reaches any cloud provider. */
 export function normalizeDictationContext(input: Partial<DictationContext> = {}): DictationContext {
-  const lexical = typeof input.lexicalContext === "string"
-    ? input.lexicalContext.trim().replace(/\s+/g, " ").slice(0, 8_000)
-    : "";
+  const lexical = cleanText(input.lexicalContext, 4_000);
   const glossaryEntries = Object.entries(input.glossary ?? {}).slice(0, 64)
     .map(([from, to]) => [from.trim().slice(0, 96), to.trim().slice(0, 96)] as const)
     .filter(([from, to]) => from && to);
+  const localeHints = cleanList(input.localeHints, 8, 32);
+  const keywords = cleanList(input.keywords, 64, 96);
+  const technicalVocabulary = cleanList(input.technicalVocabulary, 96, 96);
+  const messages = cleanMessages(input.conversation?.messages);
+  const appName = cleanText(input.app?.name, 96);
+  const beforeCursor = cleanText(input.composer?.beforeCursor, 2_000);
+  const selection = cleanText(input.composer?.selection, 1_000);
+  const afterCursor = cleanText(input.composer?.afterCursor, 2_000);
+  const conversationId = cleanText(input.conversation?.id, 128);
+  const projectName = cleanText(input.project?.name, 128);
+  const repository = cleanText(input.project?.repository, 160);
+  const branch = cleanText(input.project?.branch, 160);
+  const packages = cleanList(input.project?.packages, 32, 128);
+  const files = cleanList(input.project?.files, 32, 192);
+  const harnesses = cleanList(input.project?.harnesses, 16, 96);
+  const models = cleanList(input.project?.models, 16, 96);
+
   return {
-    language: typeof input.language === "string" && input.language.trim() ? input.language.trim() : "auto",
-    ...(cleanList(input.localeHints, 8, 32) ? { localeHints: cleanList(input.localeHints, 8, 32) } : {}),
-    ...(cleanList(input.keywords, 64, 96) ? { keywords: cleanList(input.keywords, 64, 96) } : {}),
+    language: typeof input.language === "string" && input.language.trim() ? input.language.trim().slice(0, 32) : "auto",
+    ...(localeHints ? { localeHints } : {}),
+    ...(keywords ? { keywords } : {}),
     ...(glossaryEntries.length ? { glossary: Object.fromEntries(glossaryEntries) } : {}),
+    ...(technicalVocabulary ? { technicalVocabulary } : {}),
+    ...(input.app?.type === "ai" || input.app?.type === "email" || input.app?.type === "other"
+      ? { app: { type: input.app.type, ...(appName ? { name: appName } : {}) } }
+      : {}),
+    ...(beforeCursor || selection || afterCursor
+      ? { composer: {
+          ...(beforeCursor ? { beforeCursor } : {}),
+          ...(selection ? { selection } : {}),
+          ...(afterCursor ? { afterCursor } : {}),
+        } }
+      : {}),
+    ...(conversationId || messages
+      ? { conversation: {
+          ...(conversationId ? { id: conversationId } : {}),
+          ...(messages ? { messages } : {}),
+        } }
+      : {}),
+    ...(projectName || repository || branch || packages || files || harnesses || models
+      ? { project: {
+          ...(projectName ? { name: projectName } : {}),
+          ...(repository ? { repository } : {}),
+          ...(branch ? { branch } : {}),
+          ...(packages ? { packages } : {}),
+          ...(files ? { files } : {}),
+          ...(harnesses ? { harnesses } : {}),
+          ...(models ? { models } : {}),
+        } }
+      : {}),
     ...(lexical ? { lexicalContext: lexical } : {}),
   };
 }
