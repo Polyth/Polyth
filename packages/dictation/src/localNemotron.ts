@@ -132,13 +132,18 @@ export interface LocalNemotronOptions {
   workerFactory?: (source: string, options: ConstructorParameters<typeof Worker>[1]) => Worker;
 }
 
+export interface LocalNemotronAdapter extends SttAdapter {
+  /** Immediately terminate native worker state; used on package disable/reload. */
+  dispose(): void;
+}
+
 const languageOption = (language?: string): string | undefined => {
   const value = language?.trim();
   if (!value || value.toLowerCase() === "auto") return undefined;
   return value.toLowerCase().split(/[-_]/, 1)[0];
 };
 
-export function createLocalNemotronSttAdapter(options: LocalNemotronOptions): SttAdapter {
+export function createLocalNemotronSttAdapter(options: LocalNemotronOptions): LocalNemotronAdapter {
   const threads = Math.max(1, Math.min(8, options.threads ?? 2));
   const idleMs = Math.max(5_000, options.idleMs ?? 60_000);
   const workerFactory = options.workerFactory ?? ((source, workerOptions) => new Worker(source, workerOptions));
@@ -149,6 +154,7 @@ export function createLocalNemotronSttAdapter(options: LocalNemotronOptions): St
   let requestId = 0;
   let activeStreams = 0;
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  let disposed = false;
   const pending = new Map<number, PendingRpc>();
 
   const rejectAll = (error: Error): void => {
@@ -169,8 +175,18 @@ export function createLocalNemotronSttAdapter(options: LocalNemotronOptions): St
     readyReject = null;
   };
 
+  const terminateWorker = (reason: Error): void => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = null;
+    const current = worker;
+    rejectAll(reason);
+    resetWorker();
+    activeStreams = 0;
+    void current?.terminate();
+  };
+
   const scheduleIdleShutdown = (): void => {
-    if (activeStreams !== 0 || !worker) return;
+    if (disposed || activeStreams !== 0 || !worker) return;
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
       const current = worker;
@@ -181,6 +197,7 @@ export function createLocalNemotronSttAdapter(options: LocalNemotronOptions): St
   };
 
   const ensureWorker = (): Promise<void> => {
+    if (disposed) return Promise.reject(new DictationError("session_expired", "Local ASR adapter was disposed"));
     if (ready) return ready;
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = null;
@@ -253,6 +270,7 @@ export function createLocalNemotronSttAdapter(options: LocalNemotronOptions): St
   return {
     engine: "local-nemotron",
     createStream({ format, language }: { format: DictationFormat; language?: string }): SttStream {
+      if (disposed) throw new DictationError("session_expired", "Local ASR adapter was disposed");
       if (format.encoding !== "pcm_s16le" || format.sampleRate !== 16_000 || format.channels !== 1) {
         throw new DictationError("audio_format_error", "Local Nemotron requires mono PCM16 at 16 kHz");
       }
@@ -299,12 +317,17 @@ export function createLocalNemotronSttAdapter(options: LocalNemotronOptions): St
             await open;
             if (!closed) await rpc("cancel", streamId);
           } catch {
-            // Cancellation is best effort; worker crash is already surfaced to the active request.
+            // Cancellation is best effort; worker crash/disposal is already surfaced to the active request.
           } finally {
             close();
           }
         },
       };
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      terminateWorker(new DictationError("session_expired", "Local ASR adapter was disposed"));
     },
   };
 }
