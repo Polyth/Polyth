@@ -16,6 +16,7 @@ import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
 import { finished } from "node:stream/promises";
 import { DictationError } from "./providers.ts";
+import { ensureSherpaRuntime, sherpaRuntimePath } from "./sherpaRuntime.ts";
 
 export type LocalModelState = "missing" | "downloading" | "installed" | "failed";
 
@@ -35,6 +36,7 @@ export interface LocalModelStatus extends Omit<LocalModelDescriptor, "archiveUrl
   state: LocalModelState;
   downloadedBytes: number;
   totalBytes: number;
+  runtimeReady: boolean;
   path?: string;
   error?: string;
 }
@@ -62,13 +64,13 @@ export interface LocalModelManager {
   download(id: string): Promise<LocalModelStatus>;
   remove(id: string): Promise<void>;
   path(id: string): Promise<string | null>;
+  runtimePath(): string | null;
 }
 
 interface ActiveDownload {
   controller: AbortController;
   promise: Promise<LocalModelStatus>;
   downloadedBytes: number;
-  error?: string;
 }
 
 const modelOf = (id: string): LocalModelDescriptor => {
@@ -123,14 +125,25 @@ export function createLocalModelManager(options: {
   mkdirSync(stagingDir, { recursive: true });
   const active = new Map<string, ActiveDownload>();
   const failures = new Map<string, string>();
+  let runtimeInstall: Promise<string> | null = null;
 
   const finalDir = (id: string) => join(root, id);
   const partialFile = (id: string) => join(downloadsDir, `${id}.tar.bz2.part`);
   const stageDir = (id: string) => join(stagingDir, `${id}-${process.pid}`);
+  const runtimeReady = () => existsSync(join(sherpaRuntimePath(root), "node_modules", "sherpa-onnx-node", "package.json"));
+
+  const ensureRuntime = (signal: AbortSignal): Promise<string> => {
+    if (runtimeReady()) return Promise.resolve(sherpaRuntimePath(root));
+    runtimeInstall ??= ensureSherpaRuntime({ modelsRoot: root, fetchFn, signal }).finally(() => {
+      runtimeInstall = null;
+    });
+    return runtimeInstall;
+  };
 
   const status = async (id: string): Promise<LocalModelStatus> => {
     const model = modelOf(id);
     const running = active.get(id);
+    const ready = runtimeReady();
     if (running) {
       return {
         id: model.id,
@@ -143,9 +156,12 @@ export function createLocalModelManager(options: {
         state: "downloading",
         downloadedBytes: running.downloadedBytes,
         totalBytes: model.archiveBytes,
+        runtimeReady: ready,
       };
     }
-    if (existsSync(finalDir(id))) {
+    const modelReady = existsSync(finalDir(id));
+    const failure = failures.get(id);
+    if (modelReady && ready && !failure) {
       return {
         id: model.id,
         label: model.label,
@@ -157,12 +173,14 @@ export function createLocalModelManager(options: {
         state: "installed",
         downloadedBytes: model.archiveBytes,
         totalBytes: model.archiveBytes,
+        runtimeReady: true,
         path: finalDir(id),
       };
     }
     const partial = partialFile(id);
-    const downloadedBytes = existsSync(partial) ? (await stat(partial)).size : 0;
-    const failure = failures.get(id);
+    const downloadedBytes = modelReady
+      ? model.archiveBytes
+      : existsSync(partial) ? (await stat(partial)).size : 0;
     return {
       id: model.id,
       label: model.label,
@@ -174,80 +192,94 @@ export function createLocalModelManager(options: {
       state: failure ? "failed" : "missing",
       downloadedBytes,
       totalBytes: model.archiveBytes,
+      runtimeReady: ready,
+      ...(modelReady ? { path: finalDir(id) } : {}),
       ...(failure ? { error: failure } : {}),
     };
   };
 
-  const install = async (model: LocalModelDescriptor, controller: AbortController): Promise<LocalModelStatus> => {
+  const installModelArchive = async (
+    model: LocalModelDescriptor,
+    controller: AbortController,
+    running: ActiveDownload,
+  ): Promise<void> => {
+    if (existsSync(finalDir(model.id))) {
+      running.downloadedBytes = model.archiveBytes;
+      return;
+    }
+
     const partial = partialFile(model.id);
+    const staging = stageDir(model.id);
+    let offset = existsSync(partial) ? (await stat(partial)).size : 0;
+    if (offset > model.archiveBytes) {
+      await rm(partial, { force: true });
+      offset = 0;
+    }
+    running.downloadedBytes = offset;
+
+    const headers = offset > 0 ? { Range: `bytes=${offset}-` } : undefined;
+    const response = await fetchFn(model.archiveUrl, { headers, signal: controller.signal });
+    if (offset > 0 && response.status === 200) {
+      await rm(partial, { force: true });
+      offset = 0;
+      running.downloadedBytes = 0;
+    } else if (offset > 0 && response.status !== 206) {
+      throw new DictationError("network_error", `Local model resume failed: HTTP ${response.status}`);
+    }
+    if (offset === 0 && !response.ok) {
+      throw new DictationError("network_error", `Local model download failed: HTTP ${response.status}`);
+    }
+    if (!response.body) throw new DictationError("network_error", "Local model download returned no body");
+
+    const output = createWriteStream(partial, { flags: offset > 0 ? "a" : "w" });
+    const body = Readable.fromWeb(response.body as never);
+    for await (const chunk of body) {
+      if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
+      const bytes = chunk as Buffer;
+      if (!output.write(bytes)) await new Promise<void>((resolve) => output.once("drain", resolve));
+      running.downloadedBytes += bytes.byteLength;
+      if (running.downloadedBytes > model.archiveBytes) {
+        throw new DictationError("local_model_failed", "Local model download exceeded the expected size");
+      }
+    }
+    output.end();
+    await finished(output);
+
+    const fileSize = (await stat(partial)).size;
+    if (fileSize !== model.archiveBytes) {
+      throw new DictationError(
+        "local_model_failed",
+        `Local model size mismatch: expected ${model.archiveBytes}, got ${fileSize}`,
+      );
+    }
+    const digest = await sha256File(partial);
+    if (digest !== model.sha256) {
+      await rm(partial, { force: true });
+      throw new DictationError("local_model_failed", "Local model SHA-256 verification failed; the partial download was discarded");
+    }
+
+    await rm(staging, { recursive: true, force: true });
+    await mkdirSync(staging, { recursive: true });
+    await extractTarBz2(partial, staging);
+    const entries = await readdir(staging, { withFileTypes: true });
+    const dirs = entries.filter((entry) => entry.isDirectory());
+    if (dirs.length !== 1) {
+      throw new DictationError("local_model_failed", "Local model archive has an unexpected directory layout");
+    }
+    const extracted = join(staging, dirs[0]!.name);
+    if (existsSync(finalDir(model.id))) await rm(finalDir(model.id), { recursive: true, force: true });
+    await rename(extracted, finalDir(model.id));
+    await rm(staging, { recursive: true, force: true });
+    await rm(partial, { force: true });
+  };
+
+  const install = async (model: LocalModelDescriptor, controller: AbortController): Promise<LocalModelStatus> => {
     const staging = stageDir(model.id);
     const running = active.get(model.id)!;
     failures.delete(model.id);
-
     try {
-      let offset = existsSync(partial) ? (await stat(partial)).size : 0;
-      if (offset > model.archiveBytes) {
-        await rm(partial, { force: true });
-        offset = 0;
-      }
-      running.downloadedBytes = offset;
-
-      const headers = offset > 0 ? { Range: `bytes=${offset}-` } : undefined;
-      let response = await fetchFn(model.archiveUrl, { headers, signal: controller.signal });
-      // A server may ignore Range. Restart the partial instead of appending a
-      // full response to it, which would only fail after a 475 MB download.
-      if (offset > 0 && response.status === 200) {
-        await rm(partial, { force: true });
-        offset = 0;
-        running.downloadedBytes = 0;
-      } else if (offset > 0 && response.status !== 206) {
-        throw new DictationError("network_error", `Local model resume failed: HTTP ${response.status}`);
-      }
-      if (offset === 0 && !response.ok) {
-        throw new DictationError("network_error", `Local model download failed: HTTP ${response.status}`);
-      }
-      if (!response.body) throw new DictationError("network_error", "Local model download returned no body");
-
-      const output = createWriteStream(partial, { flags: offset > 0 ? "a" : "w" });
-      const body = Readable.fromWeb(response.body as never);
-      for await (const chunk of body) {
-        if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
-        const bytes = chunk as Buffer;
-        if (!output.write(bytes)) await new Promise<void>((resolve) => output.once("drain", resolve));
-        running.downloadedBytes += bytes.byteLength;
-        if (running.downloadedBytes > model.archiveBytes) {
-          throw new DictationError("local_model_failed", "Local model download exceeded the expected size");
-        }
-      }
-      output.end();
-      await finished(output);
-
-      const fileSize = (await stat(partial)).size;
-      if (fileSize !== model.archiveBytes) {
-        throw new DictationError(
-          "local_model_failed",
-          `Local model size mismatch: expected ${model.archiveBytes}, got ${fileSize}`,
-        );
-      }
-      const digest = await sha256File(partial);
-      if (digest !== model.sha256) {
-        await rm(partial, { force: true });
-        throw new DictationError("local_model_failed", "Local model SHA-256 verification failed; the partial download was discarded");
-      }
-
-      await rm(staging, { recursive: true, force: true });
-      await mkdirSync(staging, { recursive: true });
-      await extractTarBz2(partial, staging);
-      const entries = await readdir(staging, { withFileTypes: true });
-      const dirs = entries.filter((entry) => entry.isDirectory());
-      if (dirs.length !== 1) {
-        throw new DictationError("local_model_failed", "Local model archive has an unexpected directory layout");
-      }
-      const extracted = join(staging, dirs[0]!.name);
-      if (existsSync(finalDir(model.id))) await rm(finalDir(model.id), { recursive: true, force: true });
-      await rename(extracted, finalDir(model.id));
-      await rm(staging, { recursive: true, force: true });
-      await rm(partial, { force: true });
+      await installModelArchive(model, controller, running);
+      await ensureRuntime(controller.signal);
       failures.delete(model.id);
       return status(model.id);
     } catch (error) {
@@ -270,13 +302,14 @@ export function createLocalModelManager(options: {
     status,
     async download(id) {
       const model = modelOf(id);
-      if (existsSync(finalDir(id))) return status(id);
+      const current = await status(id);
+      if (current.state === "installed") return current;
       const existing = active.get(id);
       if (existing) return existing.promise;
       const controller = new AbortController();
       const entry: ActiveDownload = {
         controller,
-        downloadedBytes: existsSync(partialFile(id)) ? (await stat(partialFile(id))).size : 0,
+        downloadedBytes: current.downloadedBytes,
         promise: Promise.resolve(null as never),
       };
       active.set(id, entry);
@@ -300,6 +333,9 @@ export function createLocalModelManager(options: {
     async path(id) {
       modelOf(id);
       return existsSync(finalDir(id)) ? finalDir(id) : null;
+    },
+    runtimePath() {
+      return runtimeReady() ? sherpaRuntimePath(root) : null;
     },
   };
 }
