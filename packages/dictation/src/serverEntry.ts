@@ -105,8 +105,6 @@ export function dictationRoutes(dictation: DictationService): RouteHandler {
         json(200, dictation.capability());
         return true;
       }
-      // `/sessions` is the unambiguous remote-safe namespace. Keep the old
-      // POST `/api/dictation` route for existing local clients.
       if ((path === "/api/dictation/sessions" || path === "/api/dictation") && method === "POST") {
         json(200, await createSession(dictation, body));
         return true;
@@ -130,7 +128,6 @@ export function dictationRoutes(dictation: DictationService): RouteHandler {
         return true;
       }
 
-      // Compatibility routes stay local-only through the package remote policy.
       match = path.match(/^\/api\/dictation\/([^/]+)$/);
       if (match && match[1] !== "capability" && method === "GET") {
         const session = dictation.get(match[1]!);
@@ -368,9 +365,6 @@ export function voiceRoutes(deps: {
   };
 }
 
-/** Paired devices may dictate, but may not administer server voice settings or
- * package-owned local model/runtime state. Session routes use a dedicated
- * namespace so `:id` can never overlap `runtime`, `models`, or future admin paths. */
 export const DICTATION_REMOTE_ACCESS = {
   ...localOnlyRemoteAccess(["dictation"]),
   http: [
@@ -437,18 +431,12 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       if (selected.provider === "elevenlabs") {
         const apiKey = voice.resolveKey("dictation");
         if (!apiKey) return null;
-        return createElevenLabsSttAdapter({
-          apiKey,
-          model: selected.model || "scribe_v2_realtime",
-        });
+        return createElevenLabsSttAdapter({ apiKey, model: selected.model || "scribe_v2_realtime" });
       }
       if (selected.provider === "deepgram") {
         const apiKey = voice.resolveKey("dictation");
         if (!apiKey) return null;
-        return createDeepgramSttAdapter({
-          apiKey,
-          model: selected.model || "nova-3",
-        });
+        return createDeepgramSttAdapter({ apiKey, model: selected.model || "nova-3" });
       }
       if (selected.provider === "openai-live" || selected.provider === "openai-transcribe") {
         const apiKey = voice.resolveKey("dictation");
@@ -462,11 +450,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       if (selected.provider === "speechmatics") {
         const apiKey = voice.resolveKey("dictation");
         if (!apiKey) return null;
-        return createSpeechmaticsSttAdapter({
-          apiKey,
-          model: selected.model || "enhanced",
-          latencyPreference: selected.latencyPreference,
-        });
+        return createSpeechmaticsSttAdapter({ apiKey, model: selected.model || "enhanced", latencyPreference: selected.latencyPreference });
       }
       if (selected.provider === "openai-compatible") {
         const stt = settings.stt;
@@ -515,6 +499,12 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         if (await dictationRoute(request)) return true;
         return voiceRoute(request);
       };
+    },
+    onDisable() {
+      dictation.closeAll();
+      (localAdapter as (SttAdapter & { dispose?(): void }) | null)?.dispose?.();
+      localAdapter = null;
+      localAdapterKey = "";
     },
   };
 }
