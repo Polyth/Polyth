@@ -1,6 +1,7 @@
 import UIKit
 import Foundation
 import Security
+import AVFoundation
 import Capacitor
 
 @_silgen_name("polyth_link_client_new")
@@ -68,6 +69,125 @@ private struct PairingSecretRecord {
     let createdForAttempt: Bool
 }
 
+private final class PolythQRScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
+    private let session = AVCaptureSession()
+    private let sessionQueue = DispatchQueue(label: "com.polyth.mobile.polyth-link.camera")
+    private let completion: (Result<String?, PolythLinkFailure>) -> Void
+    private var previewLayer: AVCaptureVideoPreviewLayer?
+    private var finished = false
+
+    init(completion: @escaping (Result<String?, PolythLinkFailure>) -> Void) {
+        self.completion = completion
+        super.init(nibName: nil, bundle: nil)
+        modalPresentationStyle = .fullScreen
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+        do {
+            try configureCamera()
+        } catch let error as PolythLinkFailure {
+            DispatchQueue.main.async { self.finish(.failure(error)) }
+            return
+        } catch {
+            DispatchQueue.main.async { self.finish(.failure(PolythLinkFailure(code: "camera-unavailable"))) }
+            return
+        }
+
+        let cancel = UIButton(type: .system)
+        cancel.setTitle("Cancel", for: .normal)
+        cancel.setTitleColor(.white, for: .normal)
+        cancel.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        cancel.layer.cornerRadius = 18
+        cancel.contentEdgeInsets = UIEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
+        cancel.translatesAutoresizingMaskIntoConstraints = false
+        cancel.addTarget(self, action: #selector(cancelScan), for: .touchUpInside)
+        view.addSubview(cancel)
+        NSLayoutConstraint.activate([
+            cancel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+            cancel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+        ])
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        sessionQueue.async { [weak self] in
+            guard let self, !self.session.isRunning else { return }
+            self.session.startRunning()
+        }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        previewLayer?.frame = view.bounds
+    }
+
+    private func configureCamera() throws {
+        guard let camera = AVCaptureDevice.default(for: .video) else {
+            throw PolythLinkFailure(code: "camera-unavailable")
+        }
+        let input: AVCaptureDeviceInput
+        do {
+            input = try AVCaptureDeviceInput(device: camera)
+        } catch {
+            throw PolythLinkFailure(code: "camera-unavailable")
+        }
+        guard session.canAddInput(input) else {
+            throw PolythLinkFailure(code: "camera-unavailable")
+        }
+        session.addInput(input)
+
+        let output = AVCaptureMetadataOutput()
+        guard session.canAddOutput(output) else {
+            throw PolythLinkFailure(code: "camera-unavailable")
+        }
+        session.addOutput(output)
+        output.setMetadataObjectsDelegate(self, queue: .main)
+        guard output.availableMetadataObjectTypes.contains(.qr) else {
+            throw PolythLinkFailure(code: "camera-unavailable")
+        }
+        output.metadataObjectTypes = [.qr]
+
+        let preview = AVCaptureVideoPreviewLayer(session: session)
+        preview.videoGravity = .resizeAspectFill
+        preview.frame = view.bounds
+        view.layer.insertSublayer(preview, at: 0)
+        previewLayer = preview
+    }
+
+    @objc private func cancelScan() {
+        finish(.success(nil))
+    }
+
+    private func finish(_ result: Result<String?, PolythLinkFailure>) {
+        guard !finished else { return }
+        finished = true
+        sessionQueue.async { [session] in
+            if session.isRunning { session.stopRunning() }
+        }
+        dismiss(animated: true) { [completion] in completion(result) }
+    }
+
+    func metadataOutput(
+        _ output: AVCaptureMetadataOutput,
+        didOutput metadataObjects: [AVMetadataObject],
+        from connection: AVCaptureConnection
+    ) {
+        for case let object as AVMetadataMachineReadableCodeObject in metadataObjects {
+            guard object.type == .qr,
+                  let raw = object.stringValue,
+                  raw.starts(with: "polyth://pair") else { continue }
+            finish(.success(raw))
+            return
+        }
+    }
+}
+
 @objc(PolythLinkPlugin)
 final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
     let identifier = "PolythLinkPlugin"
@@ -82,6 +202,7 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "disconnect", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "forgetConnection", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getStatus", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "scanPairingQr", returnType: CAPPluginReturnPromise),
     ]
 
     private let queue = DispatchQueue(label: "com.polyth.mobile.polyth-link", qos: .userInitiated)
@@ -193,6 +314,25 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
         return result
     }
 
+    private func presentPairingScanner(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            guard var presenter = self.bridge?.viewController else {
+                call.reject("camera-unavailable", "camera-unavailable")
+                return
+            }
+            while let next = presenter.presentedViewController { presenter = next }
+            let scanner = PolythQRScannerViewController { result in
+                switch result {
+                case .success(let raw):
+                    if let raw { call.resolve(["raw": raw]) } else { call.resolve([:]) }
+                case .failure(let error):
+                    self.reject(call, error)
+                }
+            }
+            presenter.present(scanner, animated: true)
+        }
+    }
+
     @objc func parsePairingTicket(_ call: CAPPluginCall) {
         guard trusted(call), let raw = require(call, "raw", code: "pairing-invalid") else { return }
         queue.async { do { call.resolve(try self.object(self.invoke("pairing.parse", ["ticket": raw]))) } catch { self.reject(call, error) } }
@@ -294,6 +434,26 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func getStatus(_ call: CAPPluginCall) {
         guard trusted(call), let connectionID = require(call, "connectionId", code: "device-unknown") else { return }
         queue.async { do { call.resolve(try self.object(self.invoke("status", ["connectionId": connectionID]))) } catch { self.reject(call, error) } }
+    }
+
+    @objc func scanPairingQr(_ call: CAPPluginCall) {
+        guard trusted(call) else { return }
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            presentPairingScanner(call)
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                if granted {
+                    self.presentPairingScanner(call)
+                } else {
+                    call.reject("camera-permission-denied", "camera-permission-denied")
+                }
+            }
+        case .denied, .restricted:
+            call.reject("camera-permission-denied", "camera-permission-denied")
+        @unknown default:
+            call.reject("camera-unavailable", "camera-unavailable")
+        }
     }
 }
 
