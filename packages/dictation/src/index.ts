@@ -34,6 +34,10 @@ export {
   type Pcm16Resampler,
 } from "./openaiRealtime.ts";
 export {
+  createSpeechmaticsSttAdapter,
+  type SpeechmaticsSttOptions,
+} from "./speechmatics.ts";
+export {
   createLocalModelManager,
   localModelCatalog,
   type LocalModelDescriptor,
