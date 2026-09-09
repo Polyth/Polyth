@@ -22,11 +22,24 @@ interface PolythLinkCapacitorPlugin {
     transport?: "direct" | "relay";
     error?: string;
   }>;
+  scanPairingQr(): Promise<{ raw?: string }>;
 }
 
 const NativePolythLink = registerPlugin<PolythLinkCapacitorPlugin>("PolythLink");
 
 let installed = false;
+
+export function nativePairingScannerAvailable(): boolean {
+  return Capacitor.isNativePlatform()
+    && Capacitor.getPlatform() === "ios"
+    && Capacitor.isPluginAvailable("PolythLink");
+}
+
+export async function scanNativePairingQr(): Promise<string | undefined> {
+  if (!nativePairingScannerAvailable()) return undefined;
+  const { raw } = await NativePolythLink.scanPairingQr();
+  return typeof raw === "string" && raw ? raw : undefined;
+}
 
 export function installNativePolythLink(): void {
   if (installed || !Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable("PolythLink")) return;
