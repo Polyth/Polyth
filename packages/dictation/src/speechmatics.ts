@@ -46,8 +46,8 @@ const providerError = (message: SpeechmaticsMessage): DictationError => {
   if (type.includes("not_authorised") || type.includes("not_authorized") || type.includes("auth")) {
     return new DictationError("invalid_credentials", reason);
   }
-  if (type.includes("insufficient_funds") || type.includes("rate") || type.includes("limit")) {
-    return new DictationError("rate_limited", reason);
+  if (type.includes("insufficient_funds") || type.includes("quota") || type.includes("rate") || type.includes("limit")) {
+    return new DictationError("rate_limited", reason, { retryAfterMs: 5_000 });
   }
   if (type.includes("language") || type.includes("model")) {
     return new DictationError("unsupported_language", reason);
@@ -108,6 +108,7 @@ function createStream(
   let interim = "";
   let started = false;
   let closed = false;
+  let audioSeq = 0;
   let failure: DictationError | null = null;
   let finalRequested = false;
   let finalResolve: ((text: string) => void) | null = null;
@@ -208,6 +209,7 @@ function createStream(
       await ready;
       if (!started) throw new DictationError("protocol_error", "Speechmatics recognition did not start");
       await send(pcm);
+      audioSeq += 1;
     },
     partial() {
       return merge(committed, interim);
@@ -221,7 +223,7 @@ function createStream(
         finalResolve = resolve;
         finalReject = rejectFinal;
       });
-      await send(JSON.stringify({ message: "EndOfStream", last_seq_no: 0 }));
+      await send(JSON.stringify({ message: "EndOfStream", last_seq_no: audioSeq }));
       const timeout = new Promise<never>((_, rejectTimeout) => {
         const timer = setTimeout(
           () => rejectTimeout(new DictationError("network_error", "Timed out waiting for Speechmatics final transcript")),
