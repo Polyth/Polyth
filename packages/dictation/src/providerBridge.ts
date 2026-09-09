@@ -27,11 +27,18 @@ export function providerToSttAdapter(provider: DictationProvider): SttAdapter {
         const events = session.events?.() ?? [];
         for (let i = events.length - 1; i >= 0; i--) {
           const event: NormalizedSttEvent = events[i]!;
-          if (event.type === "partial" || event.type === "commit" || event.type === "final") {
+          if (
+            event.type === "partial"
+            || event.type === "committed"
+            || event.type === "commit"
+            || event.type === "final"
+          ) {
             latest = event.text;
             return;
           }
-          if (event.type === "error") throw event.error;
+          if (event.type === "recoverable_error" || event.type === "fatal_error" || event.type === "error") {
+            throw event.error;
+          }
         }
       };
 
