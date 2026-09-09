@@ -218,7 +218,6 @@ const providerAvailability = (
       if (!runtimeReady) reason = "local sherpa runtime is not downloaded";
       else if (!modelReady) reason = "local model is not downloaded";
     } else if (provider.id === "web-speech") {
-      // Browser support is probed in the client; the server only describes it.
       available = provider.id === selected || settings.dictation.processingPolicy === "browser-fallback";
     } else if (extension && extensionAvailability && !extensionAvailability.available) {
       reason = extensionAvailability.reason ?? "registered provider is unavailable";
@@ -319,8 +318,6 @@ export function voiceRoutes(deps: {
           json(400, { error: "invalid-input", message: "Wispr clientId is required and must be an opaque identifier" });
           return true;
         }
-        // Warm-up is opportunistic and contains no user/audio/context data. It
-        // must never block token issuance or make Wispr a startup dependency.
         void fetchFn("https://platform-api.wisprflow.ai/api/v1/dash/warmup_dash", {
           headers: { authorization: `Bearer ${key}` },
         }).catch(() => {});
@@ -565,8 +562,6 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       const settings = voice.get();
       const selected = settings.dictation;
 
-      // Direct browser is a different transport owner. The REST capability is
-      // intentionally unavailable for it; the browser probes provider auth.
       if (selected.transport === "direct-browser") return null;
       if (selected.transport === "local-worker" && selected.provider !== "local-nemotron") return null;
 
@@ -628,11 +623,15 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         return voiceRoute(request);
       };
     },
-    onDisable() {
+    async onDisable() {
       dictation.closeAll();
       (localAdapter as (SttAdapter & { dispose?(): void }) | null)?.dispose?.();
       localAdapter = null;
       localAdapterKey = "";
+      await Promise.allSettled([
+        localModels.cancelAll(),
+        localRuntime.cancel(),
+      ]);
     },
   };
 }
