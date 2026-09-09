@@ -98,8 +98,8 @@ const NEMOTRON_MODELS: readonly LocalModelDescriptor[] = [
   ),
 ] as const;
 
-/** Lowest-latency multilingual preset requested for the default local path. */
-export const DEFAULT_LOCAL_MODEL_ID = "nemotron-3.5-streaming-0.6b-80ms";
+/** Safe default until Polyth has comparable end-to-end benchmarks on target hardware. */
+export const DEFAULT_LOCAL_MODEL_ID = "nemotron-3.5-streaming-0.6b-560ms";
 
 export const localModelCatalog = (): readonly LocalModelDescriptor[] => NEMOTRON_MODELS;
 
@@ -107,6 +107,8 @@ export interface LocalModelManager {
   list(): Promise<LocalModelStatus[]>;
   status(id: string): Promise<LocalModelStatus>;
   download(id: string): Promise<LocalModelStatus>;
+  /** Stop in-flight explicit downloads but keep partials for later resume. */
+  cancelAll(): Promise<void>;
   remove(id: string): Promise<void>;
   path(id: string): Promise<string | null>;
 }
@@ -250,9 +252,6 @@ export function createLocalModelManager(options: {
       }
       running.downloadedBytes = offset;
 
-      // Keep room for the remaining archive plus extraction/staging. The exact
-      // unpacked footprint varies by ONNX metadata; 2× archive is deliberately
-      // conservative and avoids a half-installed model on a nearly-full disk.
       const requiredFree = Math.max(0, model.archiveBytes - offset) + model.archiveBytes * 2;
       const free = await availableBytes();
       if (Number.isFinite(free) && free < requiredFree) {
@@ -331,6 +330,13 @@ export function createLocalModelManager(options: {
     }
   };
 
+  const cancelAll = async (): Promise<void> => {
+    const running = [...active.values()];
+    if (!running.length) return;
+    for (const download of running) download.controller.abort();
+    await Promise.allSettled(running.map((download) => download.promise));
+  };
+
   return {
     async list() {
       return Promise.all(localModelCatalog().map((model) => status(model.id)));
@@ -353,6 +359,7 @@ export function createLocalModelManager(options: {
       });
       return entry.promise;
     },
+    cancelAll,
     async remove(id) {
       modelOf(id);
       const running = active.get(id);
