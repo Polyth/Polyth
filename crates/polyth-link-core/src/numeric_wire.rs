@@ -11,13 +11,21 @@ pub const POLYTH_NUMERIC_ALPN: &str = "polyth-link-code/1";
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum NumericWireMessage {
+    BootstrapRequest,
+    Bootstrap {
+        pairing_id: String,
+        host_endpoint_id: String,
+        expires_at: String,
+    },
     Start {
+        pairing_id: String,
         request: Vec<u8>,
     },
     Challenge {
         attempt_id: String,
         pairing_id: String,
         host_endpoint_id: String,
+        expires_at: String,
         response: Vec<u8>,
     },
     Finish {
@@ -76,13 +84,20 @@ mod tests {
     fn numeric_wire_round_trips_without_a_plaintext_code_field() {
         let message = NumericWireMessage::Challenge {
             attempt_id: "attempt".into(),
-            pairing_id: "pairing".into(),
+            pairing_id: "bootstrap-id".into(),
             host_endpoint_id: "a".repeat(52),
+            expires_at: "2026-09-09T12:00:00Z".into(),
             response: vec![1, 2, 3],
         };
         let encoded = encode_numeric_message(&message).unwrap();
         assert_eq!(decode_numeric_message(&encoded).unwrap(), message);
         assert!(!String::from_utf8_lossy(&encoded).contains("482731"));
+    }
+
+    #[test]
+    fn bootstrap_request_carries_no_short_code() {
+        let encoded = encode_numeric_message(&NumericWireMessage::BootstrapRequest).unwrap();
+        assert!(!String::from_utf8_lossy(&encoded).contains("code"));
     }
 
     #[test]
