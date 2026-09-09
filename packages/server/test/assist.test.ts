@@ -389,5 +389,13 @@ test("POST project assist/prompt improves a pre-session draft", async () => {
     (await wired.call("POST", "/api/projects/p1/assist/prompt", { draft: "fix teh bug" })).payload,
     { suggestion: "p1: fix the bug", atSeq: 0 },
   );
+  const missing = routeHarness({
+    improve: async () => { throw Object.assign(new Error("no small model configured"), { code: "unavailable" }); },
+  });
+  assert.equal((await missing.call("POST", "/api/projects/p1/assist/prompt", { draft: "fix it" })).status, 503);
+  const stale = routeHarness({
+    improve: async () => { throw Object.assign(new Error("model not available"), { code: "invalid-model" }); },
+  });
+  assert.equal((await stale.call("POST", "/api/projects/p1/assist/prompt", { draft: "fix it" })).status, 422);
   assert.equal((await wired.call("POST", "/api/projects/p1/assist/prompt", { draft: " " })).status, 400);
 });

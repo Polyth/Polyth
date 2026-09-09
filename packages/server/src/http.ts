@@ -851,6 +851,7 @@ async function dispatchHttp(
       const status =
         e.code === "not-found" ? 404
         : e.code === "invalid-json" || e.code === "invalid-path" || e.code === "invalid-input" ? 400
+        : e.code === "invalid-model" ? 422
         // history-mismatch keeps its own code in the body so the client can
         // explain a failed exact-history branch, but shares 409 semantics.
         : e.code === "conflict" || e.code === "history-mismatch" || e.code === "worktree-dirty" || RECOVERY_CONFLICT_CODES.has(e.code ?? "") ? 409

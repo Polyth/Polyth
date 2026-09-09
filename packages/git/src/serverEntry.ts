@@ -60,8 +60,8 @@ export function buildCommitMessagePrompt(diff: string, inputBudget: number): str
 
 export interface CommitMessageGeneratorDeps {
   diff(root: string, opts?: { staged?: boolean }): Promise<{ diff: string }>;
-  runtime(root: string): Promise<AgentRuntime>;
-  model?: ModelRef;
+  runtime(root: string, model: (ModelRef & { harnessId?: string }) | undefined): Promise<AgentRuntime>;
+  model?: () => (ModelRef & { harnessId?: string }) | undefined;
   inputBudget(runtime: AgentRuntime, model: ModelRef | undefined, maxOutputTokens: number): Promise<number>;
   complete(runtime: AgentRuntime, options: {
     cwd: string; prompt: string; model?: ModelRef; maxOutputTokens: number; timeoutMs?: number;
@@ -80,18 +80,19 @@ export function createCommitMessageGenerator(deps: CommitMessageGeneratorDeps): 
     const stagedSelected = !!staged.diff.trim();
     const diff = stagedSelected ? staged.diff : (await deps.diff(root)).diff;
     if (!diff.trim()) throw Object.assign(new Error("nothing to describe"), { code: "invalid-input" });
-    const modelKey = deps.model ? `${deps.model.providerID}/${deps.model.modelID}` : "default";
+    const model = deps.model?.();
+    const modelKey = model ? `${model.harnessId ?? "auto"}/${model.providerID}/${model.modelID}` : "default";
     const key = `${digest(diff)}:${stagedSelected ? "staged" : "unstaged"}:${modelKey}:v${COMMIT_PROMPT_VERSION}`;
     const hit = cache.get(key);
     if (hit && hit.expiresAt > now()) return hit.text;
     const pending = inFlight.get(key);
     if (pending) return pending;
     const task = (async () => {
-      const runtime = await deps.runtime(root);
-      const budget = await deps.inputBudget(runtime, deps.model, COMMIT_OUTPUT_TOKENS);
+      const runtime = await deps.runtime(root, model);
+      const budget = await deps.inputBudget(runtime, model, COMMIT_OUTPUT_TOKENS);
       const result = await deps.complete(runtime, {
         cwd: root,
-        model: deps.model,
+        model,
         maxOutputTokens: COMMIT_OUTPUT_TOKENS,
         timeoutMs: COMMIT_TIMEOUT_MS,
         prompt: buildCommitMessagePrompt(diff, budget),
@@ -580,21 +581,16 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     async onEnable() {
       const commitMessage = createCommitMessageGenerator({
         diff: (root, opts) => git.diff(root, opts),
-        runtime: async (root) => {
+        runtime: async (root, model) => {
           const project = (await host.projects.list()).find((candidate) => candidate.path === root);
-          return host.runtimes.forProject(project?.id ?? "__default__");
+          return host.runtimes.forProject(project?.id ?? "__default__", root, model?.harnessId);
         },
-        model: host.smallModel(),
+        model: host.smallModel,
         inputBudget: (runtime, model, maxOutputTokens) => host.smallModelInputBudget(runtime, model, maxOutputTokens),
-        // Keep commit-message generation on the proven session transport. The
-        // direct provider transport is optional and can turn provider hiccups
-        // into a hard 500 before the fallback runtime is able to recover.
-        complete: (runtime, options) => host.oneShot(runtime, {
-          cwd: options.cwd,
-          prompt: options.prompt,
-          ...(options.model ? { model: options.model } : {}),
-          ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
-        }).then((text) => ({ text })),
+        complete: (runtime, options) => host.smallModelComplete(runtime, {
+          ...options,
+          purpose: "commit-message-generation",
+        }),
       });
       const append = (sessionId: string, type: string, data: JsonObject) => host.events.append(
         sessionId,

@@ -754,9 +754,12 @@ export async function boot(opts: BootOptions = {}) {
     let idleController: RuntimeIdleController | undefined;
     const liveStreamSessionIds = new Set<string>();
     const setTurnActive = (sessionId: string, active: boolean): void => {
+      const transient = sessionId.startsWith("oneshot-");
       if (active) {
         if (liveStreamSessionIds.has(sessionId)) return;
-        if (!occupancy.beginExecution(sessionId)) {
+        if (!(transient
+          ? occupancy.beginTransientExecution(sessionId)
+          : occupancy.beginExecution(sessionId))) {
           throw Object.assign(
             new Error(`runtime ${occupancy.key} is not accepting executions`),
             { code: "unavailable" },
@@ -766,14 +769,16 @@ export async function boot(opts: BootOptions = {}) {
       } else if (!liveStreamSessionIds.delete(sessionId)) {
         return;
       } else {
-        occupancy.endExecution(sessionId);
+        if (transient) occupancy.endTransientExecution(sessionId);
+        else occupancy.endExecution(sessionId);
       }
       admissionBarrier.trackTurn(sessionId, active);
     };
     const clearActiveTurns = (): void => {
       for (const sessionId of liveStreamSessionIds) {
         admissionBarrier.trackTurn(sessionId, false);
-        occupancy.endExecution(sessionId);
+        if (sessionId.startsWith("oneshot-")) occupancy.endTransientExecution(sessionId);
+        else occupancy.endExecution(sessionId);
       }
       liveStreamSessionIds.clear();
     };
@@ -1904,15 +1909,19 @@ export async function boot(opts: BootOptions = {}) {
   // the settings route) so small-model generation can honour the model the user
   // picked in Settings → Sessions → Small Model, not just POLYTH_SMALL_MODEL.
   const clientSettings = createClientSettings({ file: `${dataDir}/client-settings.json` });
-  const resolveSmallModel = (): { providerID: string; modelID: string } | undefined => {
+  const resolveSmallModel = (): ({ providerID: string; modelID: string } & { harnessId?: string }) | undefined => {
     const raw = (clientSettings.get().settings as {
-      sessionDefaults?: { smallModel?: { providerID?: unknown; modelID?: unknown } };
+      sessionDefaults?: { smallModel?: { harnessId?: unknown; providerID?: unknown; modelID?: unknown } };
     }).sessionDefaults?.smallModel;
     if (
       raw && typeof raw.providerID === "string" && raw.providerID
       && typeof raw.modelID === "string" && raw.modelID
     ) {
-      return { providerID: raw.providerID, modelID: raw.modelID };
+      return {
+        providerID: raw.providerID,
+        modelID: raw.modelID,
+        ...(typeof raw.harnessId === "string" && raw.harnessId ? { harnessId: raw.harnessId } : {}),
+      };
     }
     return smallModel();
   };
@@ -2216,11 +2225,11 @@ export async function boot(opts: BootOptions = {}) {
   ): Promise<string> => {
     const proj = await store.projection(sessionId);
     const project = proj ? await projects.get(proj.projectId) : null;
-    const rt = await runtimes.forProject(proj?.projectId ?? "__default__");
-    // Prefer the configured small model, then the session's own (known-good,
-    // plugin-provided) model, then the runtime default. Direct provider
-    // transport is tried first with a session-transport fallback.
-    const model = resolveSmallModel() ?? proj?.model ?? undefined;
+    // Prefer the configured small model, then the session's own known-good
+    // model. Direct provider transport is tried first with a session fallback.
+    const configuredSmallModel = resolveSmallModel();
+    const model = configuredSmallModel ?? proj?.model ?? undefined;
+    const rt = await runtimes.forProject(proj?.projectId ?? "__default__", project?.path, configuredSmallModel?.harnessId);
     const { text } = await smallModels.complete(rt, {
       cwd: project?.path ?? process.cwd(),
       prompt,
@@ -2373,14 +2382,15 @@ export async function boot(opts: BootOptions = {}) {
       improve: async (space, projectId, draft) => {
         const project = await spaceServices(space).projects.get(projectId);
         if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
-        const runtime = await runtimes.forProject(projectId);
         const model = resolveSmallModel();
+        const runtime = await runtimes.forProject(projectId, project.path, model?.harnessId);
         const { text } = await smallModels.complete(runtime, {
           cwd: project.path,
           prompt: buildPromptImprovementPrompt(draft),
           ...(model ? { model } : {}),
           maxOutputTokens: 1_024,
           timeoutMs: 90_000,
+          purpose: "prompt-generation",
         });
         return sanitizeNextActionReply(text, PROMPT_IMPROVEMENT_OUTPUT_MAX_CHARS);
       },
@@ -2400,8 +2410,9 @@ export async function boot(opts: BootOptions = {}) {
         if (!prompt) throw Object.assign(new Error("nothing to summarize — the session has no user prompt"), { code: "invalid-input" });
         const proj = await store.projection(sessionId);
         const project = proj ? await projects.get(proj.projectId) : null;
-        const runtime = await runtimes.forProject(proj?.projectId ?? "__default__");
-        const model = resolveSmallModel() ?? proj?.model ?? undefined;
+        const configuredSmallModel = resolveSmallModel();
+        const model = configuredSmallModel ?? proj?.model ?? undefined;
+        const runtime = await runtimes.forProject(proj?.projectId ?? "__default__", project?.path, configuredSmallModel?.harnessId);
         const { text: brief } = await smallModels.complete(runtime, {
           cwd: project?.path ?? process.cwd(),
           ...(model ? { model } : {}),

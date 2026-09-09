@@ -9,10 +9,12 @@ const runtime = {} as AgentRuntime;
 test("commit generator caches unchanged selected diff and coalesces concurrent requests", async () => {
   let calls = 0;
   let seenTimeoutMs: number | undefined;
+  let selected = { harnessId: "opencode", providerID: "openai", modelID: "small" };
+  let seenHarness: string | undefined;
   const generate = createCommitMessageGenerator({
     diff: async (_root, opts) => ({ diff: opts?.staged ? DIFF : "unstaged ignored" }),
-    runtime: async () => runtime,
-    model: { providerID: "openai", modelID: "small" },
+    runtime: async (_root, model) => { seenHarness = model?.harnessId; return runtime; },
+    model: () => selected,
     inputBudget: async () => 2_000,
     complete: async (_rt, options) => {
       calls += 1;
@@ -26,6 +28,10 @@ test("commit generator caches unchanged selected diff and coalesces concurrent r
   assert.equal(calls, 1);
   await generate("/repo");
   assert.equal(calls, 1);
+  selected = { ...selected, harnessId: "codex" };
+  await generate("/repo");
+  assert.equal(calls, 2);
+  assert.equal(seenHarness, "codex");
   assert.equal(
     seenTimeoutMs,
     90_000,

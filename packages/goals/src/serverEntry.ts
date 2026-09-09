@@ -57,12 +57,13 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     complete: async (sessionId, prompt) => {
       const proj = await host.store.projection(sessionId);
       const project = proj ? await host.projects.get(proj.projectId) : null;
-      const rt = await host.runtimes.forProject(proj?.projectId ?? "__default__");
+      const model = host.smallModel();
+      const rt = await host.runtimes.forProject(proj?.projectId ?? "__default__", project?.path, model?.harnessId);
       return host.oneShot(rt, {
         cwd: project?.path ?? process.cwd(),
         prompt,
-        ...(host.smallModel()
-          ? { model: host.smallModel()! }
+        ...(model
+          ? { model }
           : proj?.model ? { model: proj.model } : {}),
       });
     },

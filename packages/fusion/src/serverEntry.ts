@@ -68,11 +68,16 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       });
     },
     synthesize: async ({ sessionId, prompt, answers }) => {
-      const { rt, cwd, model } = await host.resolveSessionRuntime(sessionId);
+      const binding = await host.resolveSessionRuntime(sessionId);
+      const smallModel = host.smallModel();
+      const projection = smallModel?.harnessId ? await host.store.projection(sessionId) : undefined;
+      const rt = smallModel?.harnessId
+        ? await host.runtimes.forProject(projection?.projectId ?? "__default__", binding.cwd, smallModel.harnessId)
+        : binding.rt;
       return host.oneShot(rt, {
-        cwd,
+        cwd: binding.cwd,
         prompt: synthesisPrompt(prompt, answers),
-        ...(host.smallModel() ? { model: host.smallModel()! } : model ? { model } : {}),
+        ...(smallModel ? { model: smallModel } : binding.model ? { model: binding.model } : {}),
       });
     },
   });

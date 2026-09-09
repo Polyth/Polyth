@@ -104,7 +104,7 @@ export interface QueueStore {
 
 export interface RuntimePool {
   /** `cwd` overrides the project root — that is how worktree sessions are isolated. */
-  forProject(projectId: string, cwd?: string): Promise<AgentRuntime>;
+  forProject(projectId: string, cwd?: string, targetHarnessId?: string): Promise<AgentRuntime>;
   forSession?(projection: SessionProjection, cwd: string, targetHarnessId?: string): Promise<AgentRuntime>;
   resolve?(projection: SessionProjection, cwd: string, selection: HarnessSelection): Promise<string>;
   forgetSession?(sessionId: string): void;
