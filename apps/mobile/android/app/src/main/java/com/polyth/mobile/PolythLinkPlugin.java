@@ -315,26 +315,29 @@ public final class PolythLinkPlugin extends Plugin {
         if (raw == null) return;
         String label = call.getString("label", "This phone");
         executor.execute(() -> {
+            String hostKey = null;
+            byte[] secret = null;
+            boolean created = false;
             try {
-                String hostId = hostId(raw);
-                byte[] secret = secureStore.load(hostId);
-                boolean created = secret == null;
+                hostKey = hostId(raw);
+                secret = secureStore.load(hostKey);
+                created = secret == null;
                 if (secret == null) {
                     secret = PolythLinkRust.generateIdentitySecret();
                     if (secret == null || secret.length != SECRET_LENGTH) throw new LinkFailure("pairing-storage-failed");
-                    secureStore.store(hostId, secret);
+                    secureStore.store(hostKey, secret);
                 }
-                try {
-                    JSONObject result = invokeObject("pairing.begin", new JSObject().put("ticket", raw).put("label", label), secret);
-                    String attemptId = result.optString("attemptId", "");
-                    if (attemptId.isEmpty()) throw new LinkFailure("transport-protocol-error");
-                    attempts.put(attemptId, new PairingSecretRecord(hostId, created));
-                    call.resolve(JSObject.fromJSONObject(result));
-                } catch (Exception error) {
-                    if (created) try { secureStore.delete(hostId); } catch (Exception ignored) {}
-                    throw error;
-                }
-            } catch (Exception error) { reject(call, error); }
+                JSONObject result = invokeObject("pairing.begin", new JSObject().put("ticket", raw).put("label", label), secret);
+                String attemptId = result.optString("attemptId", "");
+                if (attemptId.isEmpty()) throw new LinkFailure("transport-protocol-error");
+                attempts.put(attemptId, new PairingSecretRecord(hostKey, created));
+                call.resolve(JSObject.fromJSONObject(result));
+            } catch (Exception error) {
+                if (created && hostKey != null) try { secureStore.delete(hostKey); } catch (Exception ignored) {}
+                reject(call, error);
+            } finally {
+                if (secret != null) Arrays.fill(secret, (byte) 0);
+            }
         });
     }
 
