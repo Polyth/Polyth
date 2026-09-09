@@ -24,6 +24,7 @@ import { getState, openSettingsPage, subscribeStore } from "../../../apps/web/sr
 import { api } from "@polyth/session/web-api";
 import { startStreamingDictation, type StreamingDictation } from "./dictationClient.ts";
 import { startDirectElevenLabsDictation } from "./directElevenLabs.ts";
+import { startDirectWisprDictation } from "./directWispr.ts";
 import { announce } from "../../../apps/web/src/components/a11y/live.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { Button, IconButton, MicIcon } from "@polyth/web/ui";
@@ -141,31 +142,50 @@ function currentDictationContext(language: string): DictationContext {
     ? state.runtimeFeatures[state.activeSessionId]?.commands ?? []
     : [];
 
+  const technicalVocabulary = commands.slice(0, 24).map((command) => command.name).filter(Boolean);
   const keywords = [
     session?.title ?? "",
     state.gitBranch,
     basename(session?.worktreePath),
     basename(state.editorFile),
-    ...commands.slice(0, 24).map((command) => command.name),
+    ...technicalVocabulary,
   ].filter(Boolean);
-
-  const recentChat = events.slice(-8).flatMap((event) => {
+  const recentMessages = events.slice(-12).flatMap((event) => {
     if (event.type !== "user/message" && event.type !== "assistant/message") return [];
-    const text = String((event.data as { text?: unknown }).text ?? "").trim();
-    return text ? [text.slice(0, 600)] : [];
-  }).join("\n").slice(-3_000);
-
+    const content = String((event.data as { text?: unknown }).text ?? "").trim();
+    if (!content) return [];
+    return [{
+      role: event.type === "user/message" ? "user" as const : "assistant" as const,
+      content: content.slice(0, 600),
+    }];
+  });
+  const repository = basename(session?.worktreePath);
+  const openFile = basename(state.editorFile);
   const lexicalContext = [
     session?.title ? `Session: ${session.title}` : "",
-    session?.worktreePath ? `Worktree: ${session.worktreePath}` : "",
+    repository ? `Repository/worktree: ${repository}` : "",
     state.gitBranch ? `Branch: ${state.gitBranch}` : "",
-    state.editorFile ? `Open file: ${state.editorFile}` : "",
-    recentChat ? `Recent conversation:\n${recentChat}` : "",
+    openFile ? `Open file: ${openFile}` : "",
   ].filter(Boolean).join("\n");
 
   return {
     language: language || "auto",
+    app: { name: "Polyth", type: "ai" },
     ...(keywords.length ? { keywords } : {}),
+    ...(technicalVocabulary.length ? { technicalVocabulary } : {}),
+    ...(state.activeSessionId || recentMessages.length
+      ? { conversation: {
+          ...(state.activeSessionId ? { id: state.activeSessionId } : {}),
+          ...(recentMessages.length ? { messages: recentMessages } : {}),
+        } }
+      : {}),
+    ...(repository || state.gitBranch || openFile
+      ? { project: {
+          ...(repository ? { repository } : {}),
+          ...(state.gitBranch ? { branch: state.gitBranch } : {}),
+          ...(openFile ? { files: [openFile] } : {}),
+        } }
+      : {}),
     ...(lexicalContext ? { lexicalContext } : {}),
   };
 }
@@ -215,12 +235,12 @@ function MicButton() {
   const processingPolicy = serverSelection?.processingPolicy ?? prefs.processingPolicy;
   const browserFallback = processingPolicy === "browser-fallback";
   const cloudPrimaryPolicy = processingPolicy === "prefer-cloud" || browserFallback;
-  // Keep auto-fallback on the server so recoverable cloud failures can replay
-  // PCM into local Nemotron. Direct browser cannot provide that mid-stream
-  // transition without shipping the local runtime into the WebView.
-  const directElevenLabs = serverStt
+  // Auto-fallback remains on the server so recoverable cloud failures can replay
+  // PCM into local Nemotron. Direct transport is used only when cloud is the
+  // explicit primary route and the provider has a Polyth ephemeral-auth client.
+  const directCloud = serverStt
     && cloudPrimaryPolicy
-    && provider === "elevenlabs"
+    && (provider === "elevenlabs" || provider === "wispr")
     && (transport === "auto" || transport === "direct-browser");
 
   useEffect(() => () => {
@@ -267,17 +287,17 @@ function MicButton() {
       return;
     }
     let cancelled = false;
-    if (directElevenLabs) {
+    if (directCloud) {
       void fetch("/api/voice/providers")
         .then(async (response) => response.ok
           ? response.json() as Promise<{ providers?: Array<{ id?: string; available?: boolean; reason?: string }> }>
           : Promise.reject(new Error(`HTTP ${response.status}`)))
         .then((body) => {
           if (cancelled) return;
-          const selected = body.providers?.find((item) => item.id === "elevenlabs");
+          const selected = body.providers?.find((item) => item.id === provider);
           setCapability(selected?.available
-            ? { available: true, engine: "elevenlabs-direct" }
-            : { available: false, reason: selected?.reason ?? "ElevenLabs direct transcription is unavailable" });
+            ? { available: true, engine: `${provider}-direct` }
+            : { available: false, reason: selected?.reason ?? `${provider} direct transcription is unavailable` });
         })
         .catch((e) => {
           if (!cancelled) setCapability({ available: false, reason: boundedReason(e) });
@@ -286,7 +306,7 @@ function MicButton() {
       void api.dictationCapability().then((c) => { if (!cancelled) setCapability(c); });
     }
     return () => { cancelled = true; };
-  }, [prefs.dictation, serverStt, selectionReady, directElevenLabs, provider, transport, processingPolicy]);
+  }, [prefs.dictation, serverStt, selectionReady, directCloud, provider, transport, processingPolicy]);
 
   const providerOrBrowserAvailable = Boolean(capability?.available) || (browserFallback && support.stt);
   const availability: { available: boolean; reason?: string; settings?: boolean } =
@@ -430,15 +450,17 @@ function MicButton() {
         onError: fail,
       };
       let stream: StreamingDictation;
-      if (directElevenLabs) {
+      if (directCloud) {
         try {
-          stream = await startDirectElevenLabsDictation({
-            model: providerModel || "scribe_v2_realtime",
-            language,
-            context,
-            onPartial,
-            onError: fail,
-          });
+          stream = provider === "wispr"
+            ? await startDirectWisprDictation({ language, context, onPartial, onError: fail })
+            : await startDirectElevenLabsDictation({
+                model: providerModel || "scribe_v2_realtime",
+                language,
+                context,
+                onPartial,
+                onError: fail,
+              });
         } catch (directError) {
           if (transport !== "auto") throw directError;
           stream = await startStreamingDictation(serverOptions);
