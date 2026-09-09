@@ -70,6 +70,10 @@ const microphoneError = (error: unknown): DictationError => {
   return new DictationError("audio_format_error", error instanceof Error ? error.message : "Microphone capture failed", { cause: error });
 };
 
+const microphoneConstraints: MediaStreamConstraints = {
+  audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+};
+
 export async function startPcm16Capture(options: Pcm16CaptureOptions): Promise<Pcm16Capture> {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new DictationError("mic_denied", "Microphone capture is not available in this environment");
@@ -80,9 +84,7 @@ export async function startPcm16Capture(options: Pcm16CaptureOptions): Promise<P
 
   let media: MediaStream;
   try {
-    media = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
+    media = await navigator.mediaDevices.getUserMedia(microphoneConstraints);
   } catch (error) {
     throw microphoneError(error);
   }
@@ -91,8 +93,16 @@ export async function startPcm16Capture(options: Pcm16CaptureOptions): Promise<P
   let source: MediaStreamAudioSourceNode | null = null;
   let node: AudioWorkletNode | null = null;
   let objectUrl: string | null = null;
+  let tracks = media.getAudioTracks();
   let stopped = false;
-  const tracks = media.getAudioTracks();
+  let replaceFlight: Promise<void> | null = null;
+  let endedReported = false;
+
+  const reportEnded = () => {
+    if (stopped || endedReported) return;
+    endedReported = true;
+    options.onEnded?.();
+  };
 
   const cleanup = () => {
     if (stopped) return;
@@ -104,6 +114,50 @@ export async function startPcm16Capture(options: Pcm16CaptureOptions): Promise<P
     if (objectUrl) URL.revokeObjectURL(objectUrl);
     objectUrl = null;
     if (context) void context.close().catch(() => {});
+  };
+
+  const armTracks = () => {
+    for (const track of tracks) {
+      track.onended = () => {
+        if (stopped) return;
+        void replaceMicrophone().catch(reportEnded);
+      };
+    }
+  };
+
+  const replaceMicrophone = async (): Promise<void> => {
+    if (stopped) return;
+    if (replaceFlight) return replaceFlight;
+    replaceFlight = (async () => {
+      let replacement: MediaStream;
+      try {
+        replacement = await navigator.mediaDevices.getUserMedia(microphoneConstraints);
+      } catch (error) {
+        throw microphoneError(error);
+      }
+      if (stopped || !context || !node) {
+        for (const track of replacement.getTracks()) track.stop();
+        return;
+      }
+      const nextSource = context.createMediaStreamSource(replacement);
+      nextSource.connect(node);
+
+      const previousMedia = media;
+      const previousSource = source;
+      const previousTracks = tracks;
+      media = replacement;
+      source = nextSource;
+      tracks = replacement.getAudioTracks();
+      endedReported = false;
+      armTracks();
+
+      try { previousSource?.disconnect(); } catch { /* already detached */ }
+      for (const track of previousTracks) track.onended = null;
+      for (const track of previousMedia.getTracks()) track.stop();
+    })().finally(() => {
+      replaceFlight = null;
+    });
+    return replaceFlight;
   };
 
   try {
@@ -127,11 +181,7 @@ export async function startPcm16Capture(options: Pcm16CaptureOptions): Promise<P
       }
     };
     source.connect(node);
-    for (const track of tracks) {
-      track.onended = () => {
-        if (!stopped) options.onEnded?.();
-      };
-    }
+    armTracks();
     if (context.state === "suspended") await context.resume();
   } catch (error) {
     cleanup();
