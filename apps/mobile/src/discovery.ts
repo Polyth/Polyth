@@ -39,7 +39,7 @@ function addressField(value: unknown): string | undefined {
 function addressFields(value: unknown): string[] {
   if (typeof value !== "string") return [];
   return value
-    .split(/[\s,]+/u)
+    .split(",")
     .map(addressField)
     .filter((item): item is string => Boolean(item));
 }
