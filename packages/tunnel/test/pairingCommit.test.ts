@@ -40,12 +40,16 @@ test("pairing prepare, host acknowledgement, finish, and activation are idempote
   const store = createTunnelStore(join(mkdtempSync(join(tmpdir(), "polyth-pair-")), "tunnel.db"));
   const events = new TunnelEventBus();
   const { host, calls } = fakeHost();
+  store.claimPairing("pair-a", "usr_alice");
   await commitPairingDevice(input("a"), { store, host, events });
   await commitPairingDevice(input("a"), { store, host, events });
   assert.deepEqual(calls, ["trust.upsert", "pairing.finish", "trust.upsert", "pairing.finish"]);
   assert.equal(store.deviceByPairing("pair-a")?.pairingState, "active");
-  assert.equal(store.trustList().length, 1);
-  assert.equal(events.snapshot().events.filter((event) => event.type === "tunnel/device-added").length, 1);
+  assert.equal(store.deviceByPairing("pair-a")?.ownerUserId, "usr_alice");
+  assert.equal(store.pairingOwner("pair-a"), undefined);
+  assert.equal(store.trustList("usr_alice").length, 1);
+  assert.equal(events.snapshot(0, "usr_alice").events.filter((event) => event.type === "tunnel/device-added").length, 1);
+  assert.equal(events.snapshot(0, "usr_bob").events.filter((event) => event.type === "tunnel/device-added").length, 0);
   store.close();
 });
 

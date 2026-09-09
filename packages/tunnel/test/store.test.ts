@@ -16,6 +16,7 @@ test("commitDevice is atomic, unique on endpoint, and revoke does not resurrect 
     grants: grantsForProfile("interact"),
     pairedVia: "polyth-link",
   });
+  assert.equal(first.ownerUserId, "usr_owner");
   assert.equal(first.grants.length, GRANT_PROFILE_PRESETS.interact.length);
   assert.equal(fingerprintEndpoint(first.endpointId).includes("…"), true);
   const again = store.commitDevice({
@@ -30,6 +31,51 @@ test("commitDevice is atomic, unique on endpoint, and revoke does not resurrect 
   assert.ok(revoked.revokedAt);
   assert.equal(store.forget(first.id), true);
   assert.equal(store.device(first.id), undefined);
+  store.close();
+});
+
+test("pairing ownership survives restart and cannot be claimed by another account", () => {
+  const path = db();
+  let store = createTunnelStore(path);
+  store.claimPairing("pair-alice", "usr_alice");
+  assert.equal(store.pairingOwner("pair-alice"), "usr_alice");
+  const pending = store.prepareDevice({
+    pairingId: "pair-alice",
+    endpointId: "fa".repeat(32),
+    label: "Alice phone",
+    grants: grantsForProfile("interact"),
+    pairedVia: "polyth-link",
+  });
+  assert.equal(pending.ownerUserId, "usr_alice");
+  assert.throws(
+    () => store.claimPairing("pair-alice", "usr_bob"),
+    (error: { code?: string }) => error.code === "not-found",
+  );
+  store.close();
+
+  store = createTunnelStore(path);
+  assert.equal(store.pairingOwner("pair-alice"), "usr_alice");
+  store.markHostAcknowledged("pair-alice");
+  const active = store.activatePairing("pair-alice");
+  assert.equal(active.ownerUserId, "usr_alice");
+  assert.equal(store.pairingOwner("pair-alice"), undefined);
+  assert.equal(store.deviceForUser(active.id, "usr_alice")?.id, active.id);
+  assert.equal(store.deviceForUser(active.id, "usr_bob"), undefined);
+  assert.deepEqual(store.list("usr_bob"), []);
+  assert.deepEqual(store.list("usr_alice").map((device) => device.id), [active.id]);
+
+  store.claimPairing("pair-bob", "usr_bob");
+  assert.throws(
+    () => store.prepareDevice({
+      pairingId: "pair-bob",
+      endpointId: active.endpointId,
+      label: "Takeover",
+      grants: grantsForProfile("interact"),
+      pairedVia: "polyth-link",
+    }),
+    (error: { code?: string }) => error.code === "not-found",
+  );
+  store.releasePairingOwner("pair-bob");
   store.close();
 });
 

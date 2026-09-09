@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type {
   AgentDescriptor,
   AgentProfile,
@@ -6,11 +8,19 @@ import type {
   Project,
   RouteHandler,
 } from "@polyth/contracts";
-import { localOnlyRemoteAccess, serverServiceKey, type ServerPackage, type ServerPackageHost } from "@polyth/plugins";
+import {
+  atomicWriteSync,
+  localOnlyRemoteAccess,
+  serverServiceKey,
+  type ServerPackage,
+  type ServerPackageHost,
+} from "@polyth/plugins";
 import { customProviderRoutes } from "./customProviderRoutes.ts";
 import { validateProfile } from "./index.ts";
 
-interface ProfileStore {
+const OWNER_USER_ID = "usr_owner";
+
+interface LegacyProfileStore {
   profileList(): Promise<AgentProfile[]>;
   profileGet(id: string): Promise<AgentProfile | undefined>;
   profileCreate(
@@ -22,6 +32,106 @@ interface ProfileStore {
     expectedRevision: number,
   ): Promise<AgentProfile>;
   profileRemove(id: string): Promise<boolean>;
+}
+
+interface ProfileStore {
+  profileList(userId: string): Promise<AgentProfile[]>;
+  profileGet(id: string, userId: string): Promise<AgentProfile | undefined>;
+  profileCreate(
+    input: Omit<AgentProfile, "id" | "revision" | "createdAt" | "updatedAt">,
+    userId: string,
+  ): Promise<AgentProfile>;
+  profileUpdate(
+    id: string,
+    patch: Partial<Omit<AgentProfile, "id" | "revision" | "createdAt" | "updatedAt">>,
+    expectedRevision: number,
+    userId: string,
+  ): Promise<AgentProfile>;
+  profileRemove(id: string, userId: string): Promise<boolean>;
+}
+
+interface ProfileOwnersFile {
+  version: 1;
+  owners: Record<string, string>;
+}
+
+/**
+ * Agent presets predate user accounts and live in the session store. Moving
+ * that table would add a broad migration for a small ownership problem, so the
+ * models package owns the missing relation explicitly: preset id -> user id.
+ * Unmapped legacy rows belong to the only historical account, `usr_owner`.
+ */
+function createOwnedProfileStore(base: LegacyProfileStore, file: string): ProfileStore {
+  const legacy = {
+    list: base.profileList.bind(base),
+    get: base.profileGet.bind(base),
+    create: base.profileCreate.bind(base),
+    update: base.profileUpdate.bind(base),
+    remove: base.profileRemove.bind(base),
+  };
+  let owners: Record<string, string> = {};
+  try {
+    const raw = JSON.parse(readFileSync(file, "utf8")) as Partial<ProfileOwnersFile>;
+    if (raw.version === 1 && raw.owners && typeof raw.owners === "object" && !Array.isArray(raw.owners)) {
+      owners = Object.fromEntries(
+        Object.entries(raw.owners).filter((entry): entry is [string, string] =>
+          Boolean(entry[0]) && typeof entry[1] === "string" && Boolean(entry[1])),
+      );
+    }
+  } catch {
+    // First boot: all pre-existing presets are bootstrap-owner presets.
+  }
+
+  const ownerOf = (id: string): string => owners[id] ?? OWNER_USER_ID;
+  const persist = (): void => {
+    atomicWriteSync(file, `${JSON.stringify({ version: 1, owners }, null, 2)}\n`, 0o600);
+  };
+
+  return {
+    async profileList(userId) {
+      return (await legacy.list()).filter((profile) => ownerOf(profile.id) === userId);
+    },
+
+    async profileGet(id, userId) {
+      if (ownerOf(id) !== userId) return undefined;
+      return legacy.get(id);
+    },
+
+    async profileCreate(input, userId) {
+      const created = await legacy.create(input);
+      owners = { ...owners, [created.id]: userId };
+      try {
+        persist();
+      } catch (error) {
+        const next = { ...owners };
+        delete next[created.id];
+        owners = next;
+        await legacy.remove(created.id).catch(() => false);
+        throw error;
+      }
+      return created;
+    },
+
+    async profileUpdate(id, patch, expectedRevision, userId) {
+      if (ownerOf(id) !== userId) {
+        throw Object.assign(new Error("agent preset not found"), { code: "not-found" });
+      }
+      return legacy.update(id, patch, expectedRevision);
+    },
+
+    async profileRemove(id, userId) {
+      if (ownerOf(id) !== userId) return false;
+      const removed = await legacy.remove(id);
+      if (!removed) return false;
+      if (Object.prototype.hasOwnProperty.call(owners, id)) {
+        const next = { ...owners };
+        delete next[id];
+        owners = next;
+        persist();
+      }
+      return true;
+    },
+  };
 }
 
 export function profileRoutes(deps: {
@@ -51,19 +161,18 @@ export function profileRoutes(deps: {
     ...(optional(input.color) !== undefined ? { color: optional(input.color)! } : {}),
   });
 
-  return async ({ path, method, body, json }) => {
+  return async (request) => {
+    const { path, method, body, json } = request;
     if (!path.startsWith("/api/agent-profiles")) return false;
+    const userId = request.space.userId;
     if (path === "/api/agent-profiles" && method === "GET") {
-      json(200, await deps.store.profileList());
+      json(200, await deps.store.profileList(userId));
       return true;
     }
     if (path === "/api/agent-profiles" && method === "POST") {
       const input = await body();
       json(200, await deps.store.profileCreate({
         name: String(input.name ?? ""),
-        // This endpoint historically described OpenCode models. Keeping that
-        // default preserves old clients while every updated profile editor
-        // sends an explicit harness identity.
         harnessId: typeof input.harnessId === "string" ? input.harnessId : "opencode",
         providerID: String(input.providerID ?? ""),
         modelID: String(input.modelID ?? ""),
@@ -76,12 +185,12 @@ export function profileRoutes(deps: {
         ...(input.notes ? { notes: String(input.notes) } : {}),
         ...(input.icon ? { icon: String(input.icon) } : {}),
         ...(input.color ? { color: String(input.color) } : {}),
-      }));
+      }, userId));
       return true;
     }
     let match = path.match(/^\/api\/agent-profiles\/([^/]+)\/validate$/);
     if (match && method === "POST") {
-      const profile = await deps.store.profileGet(match[1]!);
+      const profile = await deps.store.profileGet(match[1]!, userId);
       if (!profile) {
         json(404, { error: "not-found" });
         return true;
@@ -95,7 +204,7 @@ export function profileRoutes(deps: {
     }
     match = path.match(/^\/api\/agent-profiles\/([^/]+)$/);
     if (match && method === "GET") {
-      const profile = await deps.store.profileGet(match[1]!);
+      const profile = await deps.store.profileGet(match[1]!, userId);
       if (!profile) {
         json(404, { error: "not-found" });
         return true;
@@ -109,11 +218,12 @@ export function profileRoutes(deps: {
         match[1]!,
         patchOf(input),
         Number(input.expectedRevision ?? 0),
+        userId,
       ));
       return true;
     }
     if (match && method === "DELETE") {
-      const removed = await deps.store.profileRemove(match[1]!);
+      const removed = await deps.store.profileRemove(match[1]!, userId);
       json(removed ? 200 : 404, removed ? { ok: true } : { error: "not-found" });
       return true;
     }
@@ -129,7 +239,7 @@ const selectionKey = (project: Project): string => {
 /**
  * Package-local agent metadata fallback is bounded by harness diversity, not
  * project count. Canonical model metadata uses the shared runtime.catalog
- * service so custom-provider/profile validation never duplicates discovery.
+ * service so custom-provider/preset validation never duplicates discovery.
  */
 const aggregate = async <T>(
   host: ServerPackageHost,
@@ -175,9 +285,6 @@ export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
     const runtime = host.runtimes.forSession
       ? await host.runtimes.forSession(session, session.worktreePath ?? project.path)
       : await host.runtimes.forProject(project.id, session.worktreePath ?? project.path);
-    // A harness whose discovery failed is reported as unavailable with the
-    // reason. Reporting it as an empty catalog would tell the user this engine
-    // has no models, which is a different and false claim.
     const [modelResult, rawAgents, capabilities] = await Promise.all([
       runtime.models().then(
         (value) => ({ ok: true as const, value }),
@@ -196,8 +303,6 @@ export function runtimeCatalogRoutes(host: ServerPackageHost): RouteHandler {
       agents,
       capabilities,
       discovery,
-      // An empty successful catalog can mean "this engine has a hidden native
-      // model". A failed lookup is not that: it is unavailable.
       nativeDefault: modelResult.ok && models.length === 0,
       harnessId: runtime.harnessId,
     }); return true;
@@ -231,11 +336,17 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     },
     (agent) => `${agent.harnessId ?? "legacy"}/${agent.name}`,
   );
-  const profiles = profileRoutes({
-    store: host.store as unknown as ProfileStore,
-    listModels,
-    listAgents,
-  });
+  const legacyStore = host.store as unknown as LegacyProfileStore;
+  const ownedProfiles = createOwnedProfileStore(
+    legacyStore,
+    join(host.storageDir, "agent-profile-owners.json"),
+  );
+  // The core session service is composed after packages load. Its historical
+  // direct preset lookup has no authenticated user parameter, so disable that
+  // unscoped path. Composer selection resolves presets into explicit execution
+  // configuration before the scoped session facade strips the private id.
+  legacyStore.profileGet = async () => undefined;
+  const profiles = profileRoutes({ store: ownedProfiles, listModels, listAgents });
   const custom = customProviderRoutes(host, listModels);
   return {
     remoteAccess: localOnlyRemoteAccess(["agent-profiles", "runtime-catalog"]),

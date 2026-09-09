@@ -1,4 +1,4 @@
-// Reactive browser wrapper around model prefs. Persists polyth.modelPrefs.
+// Reactive browser wrapper around account-owned model preferences.
 import { useSyncExternalStore } from "react";
 import {
   MODEL_PREFS_KEY,
@@ -12,23 +12,20 @@ import {
   type ModelPrefs,
   type ModelSort,
 } from "@polyth/models";
+import {
+  accountStorageGet,
+  accountStorageKey,
+  accountStorageSet,
+} from "@polyth/web/account-storage";
 
-const read = (): string | null => {
-  try { return localStorage.getItem(MODEL_PREFS_KEY); } catch { return null; }
-};
-const write = (v: string): void => {
-  try { localStorage.setItem(MODEL_PREFS_KEY, v); } catch { /* private mode */ }
-};
-
-let prefs: ModelPrefs = parseModelPrefs(read());
+let prefs: ModelPrefs = parseModelPrefs(accountStorageGet(MODEL_PREFS_KEY));
 const listeners = new Set<() => void>();
 
-// localStorage is the existing preference store. The storage event keeps open
-// pickers in other tabs/windows in sync without adding a second persistence
-// layer or polling.
+// localStorage remains browser-local, but its key is account-scoped. The
+// storage event keeps open tabs for the same authenticated account in sync.
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (event) => {
-    if (event.key !== MODEL_PREFS_KEY) return;
+    if (event.key !== accountStorageKey(MODEL_PREFS_KEY)) return;
     prefs = parseModelPrefs(event.newValue);
     for (const listener of [...listeners]) listener();
   });
@@ -36,7 +33,7 @@ if (typeof window !== "undefined") {
 
 const commit = (next: ModelPrefs): void => {
   prefs = next;
-  write(serializeModelPrefs(prefs));
+  accountStorageSet(MODEL_PREFS_KEY, serializeModelPrefs(prefs));
   for (const l of [...listeners]) l();
 };
 

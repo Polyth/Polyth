@@ -69,6 +69,14 @@ function scopeSessions(
     guard.assertSession(ctx, sessionId);
     return sessionId;
   };
+  // Agent presets are account-owned composer configuration, not a shared
+  // session fact. The composer already resolves a preset into model/agent/
+  // thinking state before send, so the private preset id must stop here.
+  const withoutPrivatePreset = <T extends { agentProfileId?: string | null }>(input: T): T => {
+    if (input.agentProfileId === undefined) return input;
+    const { agentProfileId: _privatePresetId, ...rest } = input;
+    return rest as T;
+  };
   // Every SessionService method returns a promise, so a denial must REJECT
   // rather than throw synchronously — otherwise a caller's `.catch()` misses
   // it and an ordinary `await` still works only by accident.
@@ -112,7 +120,7 @@ function scopeSessions(
     },
     switchHarness: base.switchHarness ? (sessionId, selection, timing) => guarded(() => base.switchHarness!(g(sessionId), selection, timing)) : undefined,
     cancelHarnessSwitch: base.cancelHarnessSwitch ? (sessionId) => guarded(() => base.cancelHarnessSwitch!(g(sessionId))) : undefined,
-    send: (sessionId, input) => guarded(() => base.send(g(sessionId), input)),
+    send: (sessionId, input) => guarded(() => base.send(g(sessionId), withoutPrivatePreset(input))),
     abort: (sessionId) => guarded(() => base.abort(g(sessionId))),
     fork: (sessionId, atSeq) => guarded(() => base.fork(g(sessionId), atSeq)),
     archive: (sessionId) => guarded(() => base.archive(g(sessionId))),

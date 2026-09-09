@@ -5,9 +5,15 @@ import { randomBytes } from "node:crypto";
 import type { TunnelDeviceDto } from "@polyth/contracts";
 import { GRANT_PROFILE_PRESETS, REMOTE_CAPABILITY, normalizeDeviceGrants, type GrantProfileId } from "@polyth/contracts";
 
+const LEGACY_OWNER_USER_ID = "usr_owner";
+
+const unknownPairing = (): Error =>
+  Object.assign(new Error("unknown pairing"), { code: "not-found" });
+
 export interface TunnelDeviceRecord {
   id: string;
   endpointId: string;
+  ownerUserId: string;
   label: string;
   platform: string | null;
   model: string | null;
@@ -55,6 +61,7 @@ export class TunnelStore {
       CREATE TABLE IF NOT EXISTS tunnel_device (
         id TEXT PRIMARY KEY,
         endpoint_id TEXT NOT NULL UNIQUE,
+        owner_user_id TEXT NOT NULL DEFAULT '${LEGACY_OWNER_USER_ID}',
         label TEXT NOT NULL,
         platform TEXT,
         model TEXT,
@@ -75,6 +82,11 @@ export class TunnelStore {
         PRIMARY KEY (device_id, capability),
         FOREIGN KEY (device_id) REFERENCES tunnel_device(id) ON DELETE CASCADE
       );
+      CREATE TABLE IF NOT EXISTS tunnel_pairing_owner (
+        pairing_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS tunnel_audit (
         id TEXT PRIMARY KEY,
         event_type TEXT NOT NULL,
@@ -86,10 +98,15 @@ export class TunnelStore {
     `);
     this.db.exec("INSERT OR IGNORE INTO tunnel_meta(key, value) VALUES ('schema', 1)");
     const columns = new Set((this.db.prepare("PRAGMA table_info(tunnel_device)").all() as Array<{ name: string }>).map((row) => row.name));
+    if (!columns.has("owner_user_id")) {
+      this.db.exec(`ALTER TABLE tunnel_device ADD COLUMN owner_user_id TEXT NOT NULL DEFAULT '${LEGACY_OWNER_USER_ID}'`);
+    }
     if (!columns.has("pairing_id")) this.db.exec("ALTER TABLE tunnel_device ADD COLUMN pairing_id TEXT");
     if (!columns.has("pairing_state")) this.db.exec("ALTER TABLE tunnel_device ADD COLUMN pairing_state TEXT NOT NULL DEFAULT 'active'");
+    this.db.prepare("UPDATE tunnel_device SET owner_user_id = ? WHERE owner_user_id IS NULL OR owner_user_id = ''").run(LEGACY_OWNER_USER_ID);
     this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS tunnel_device_pairing_id ON tunnel_device(pairing_id) WHERE pairing_id IS NOT NULL");
-    this.db.exec("UPDATE tunnel_meta SET value = 2 WHERE key = 'schema'");
+    this.db.exec("CREATE INDEX IF NOT EXISTS tunnel_device_owner ON tunnel_device(owner_user_id)");
+    this.db.exec("UPDATE tunnel_meta SET value = 3 WHERE key = 'schema'");
   }
 
   close(): void {
@@ -109,8 +126,32 @@ export class TunnelStore {
     );
   }
 
+  claimPairing(pairingId: string, userId: string): void {
+    if (!pairingId || !userId) {
+      throw Object.assign(new Error("pairing id and user id are required"), { code: "invalid-input" });
+    }
+    const existing = this.pairingOwner(pairingId);
+    if (existing && existing !== userId) throw unknownPairing();
+    this.db.prepare(
+      "INSERT OR IGNORE INTO tunnel_pairing_owner(pairing_id, user_id, created_at) VALUES (?, ?, ?)",
+    ).run(pairingId, userId, Date.now());
+    if (this.pairingOwner(pairingId) !== userId) throw unknownPairing();
+  }
+
+  pairingOwner(pairingId: string): string | undefined {
+    const row = this.db.prepare("SELECT user_id FROM tunnel_pairing_owner WHERE pairing_id = ?").get(pairingId) as
+      | { user_id: string }
+      | undefined;
+    return row?.user_id;
+  }
+
+  releasePairingOwner(pairingId: string): void {
+    this.db.prepare("DELETE FROM tunnel_pairing_owner WHERE pairing_id = ?").run(pairingId);
+  }
+
   commitDevice(input: {
     endpointId: string;
+    ownerUserId?: string;
     label: string;
     platform?: string;
     model?: string;
@@ -118,7 +159,11 @@ export class TunnelStore {
     grants: readonly string[];
     pairedVia: string;
   }): TunnelDeviceRecord {
-    const device = this.prepareDevice({ ...input, pairingId: `legacy-${randomBytes(16).toString("hex")}` });
+    const device = this.prepareDevice({
+      ...input,
+      ownerUserId: input.ownerUserId ?? LEGACY_OWNER_USER_ID,
+      pairingId: `legacy-${randomBytes(16).toString("hex")}`,
+    });
     if (device.pairingState === "active") return device;
     this.markHostAcknowledged(device.pairingId!);
     return this.activatePairing(device.pairingId!);
@@ -127,6 +172,7 @@ export class TunnelStore {
   prepareDevice(input: {
     pairingId: string;
     endpointId: string;
+    ownerUserId?: string;
     label: string;
     platform?: string;
     model?: string;
@@ -134,16 +180,22 @@ export class TunnelStore {
     grants: readonly string[];
     pairedVia: string;
   }): TunnelDeviceRecord {
+    const claimedOwner = input.ownerUserId ?? this.pairingOwner(input.pairingId);
     const byPairing = this.deviceByPairing(input.pairingId);
     if (byPairing) {
       if (byPairing.endpointId !== input.endpointId) throw new Error("pairing endpoint mismatch");
+      if (claimedOwner && byPairing.ownerUserId !== claimedOwner) throw unknownPairing();
       return byPairing;
     }
+    const ownerUserId = claimedOwner ?? LEGACY_OWNER_USER_ID;
     const now = Date.now();
     const existing = this.db.prepare("SELECT * FROM tunnel_device WHERE endpoint_id = ?").get(input.endpointId) as
-      | { id: string; revoked_at: number | null; grant_revision: number; created_at: number; pairing_state: string; pairing_id: string | null } | undefined;
+      | { id: string; owner_user_id: string; revoked_at: number | null; grant_revision: number; created_at: number; pairing_state: string; pairing_id: string | null }
+      | undefined;
     if (existing?.pairing_state === "active" && existing.revoked_at == null) {
-      return this.device(existing.id)!;
+      const active = this.device(existing.id)!;
+      if (active.ownerUserId !== ownerUserId) throw unknownPairing();
+      return active;
     }
     if (existing && (existing.pairing_state === "pending" || existing.pairing_state === "host-acknowledged")) {
       throw new Error("device already has an unfinished pairing");
@@ -153,9 +205,10 @@ export class TunnelStore {
     this.db.exec("BEGIN");
     try {
       this.db.prepare(`
-        INSERT INTO tunnel_device(id, endpoint_id, label, platform, model, app_version, created_at, updated_at, last_seen_at, revoked_at, grant_revision, paired_via, last_transport, pairing_id, pairing_state)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, 'pending')
+        INSERT INTO tunnel_device(id, endpoint_id, owner_user_id, label, platform, model, app_version, created_at, updated_at, last_seen_at, revoked_at, grant_revision, paired_via, last_transport, pairing_id, pairing_state)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, 'pending')
         ON CONFLICT(id) DO UPDATE SET
+          owner_user_id=excluded.owner_user_id,
           label=excluded.label,
           platform=excluded.platform,
           model=excluded.model,
@@ -169,6 +222,7 @@ export class TunnelStore {
       `).run(
         id,
         input.endpointId,
+        ownerUserId,
         input.label,
         input.platform ?? null,
         input.model ?? null,
@@ -219,8 +273,9 @@ export class TunnelStore {
       this.db.prepare("UPDATE tunnel_device SET pairing_state = 'active', updated_at = ? WHERE pairing_id = ? AND pairing_state = 'host-acknowledged'")
         .run(now, pairingId);
       this.db.prepare(
-        "INSERT INTO tunnel_audit(id, event_type, device_id, connection_id, created_at, metadata_json) VALUES (?, ?, ?, NULL, ?, ?)",
-      ).run(randomBytes(16).toString("hex"), "pairing-committed", current.id, now, JSON.stringify({ pairingId }));
+        "INSERT INTO tunnel_audit(id, event_type, device_id, connection_id, created_at, metadata_json) VALUES (?, 'pairing-committed', ?, NULL, ?, ?)",
+      ).run(randomBytes(16).toString("hex"), current.id, now, JSON.stringify({ pairingId }));
+      this.db.prepare("DELETE FROM tunnel_pairing_owner WHERE pairing_id = ?").run(pairingId);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -235,6 +290,7 @@ export class TunnelStore {
     const now = Date.now();
     this.db.prepare("UPDATE tunnel_device SET pairing_state = 'failed', revoked_at = ?, grant_revision = grant_revision + 1, updated_at = ? WHERE pairing_id = ?")
       .run(now, now, pairingId);
+    this.releasePairingOwner(pairingId);
     this.audit("pairing-failed", { deviceId: current.id, metadata: { pairingId } });
     return this.deviceByPairing(pairingId);
   }
@@ -251,8 +307,10 @@ export class TunnelStore {
         const audit = this.db.prepare(
           "INSERT INTO tunnel_audit(id, event_type, device_id, connection_id, created_at, metadata_json) VALUES (?, 'pairing-recovered', ?, NULL, ?, ?)",
         );
+        const releaseOwner = this.db.prepare("DELETE FROM tunnel_pairing_owner WHERE pairing_id = ?");
         for (const row of acknowledged) {
           audit.run(randomBytes(16).toString("hex"), row.id, now, JSON.stringify({ pairingId: row.pairing_id }));
+          releaseOwner.run(row.pairing_id);
         }
         this.db.exec("COMMIT");
       } catch (error) {
@@ -269,6 +327,11 @@ export class TunnelStore {
     return this.hydrate(row);
   }
 
+  deviceForUser(id: string, userId: string): TunnelDeviceRecord | undefined {
+    const device = this.device(id);
+    return device?.ownerUserId === userId ? device : undefined;
+  }
+
   deviceByEndpoint(endpointId: string): TunnelDeviceRecord | undefined {
     const row = this.db.prepare("SELECT * FROM tunnel_device WHERE endpoint_id = ?").get(endpointId) as Record<string, unknown> | undefined;
     if (!row) return undefined;
@@ -280,14 +343,18 @@ export class TunnelStore {
     return row ? this.hydrate(row) : undefined;
   }
 
-  list(): TunnelDeviceRecord[] {
-    const rows = this.db.prepare("SELECT * FROM tunnel_device WHERE pairing_state IN ('active', 'failed') ORDER BY updated_at DESC").all() as Record<string, unknown>[];
-    return rows.map((row) => this.hydrate(row));
+  list(userId?: string): TunnelDeviceRecord[] {
+    const rows = userId
+      ? this.db.prepare("SELECT * FROM tunnel_device WHERE pairing_state IN ('active', 'failed') AND owner_user_id = ? ORDER BY updated_at DESC").all(userId)
+      : this.db.prepare("SELECT * FROM tunnel_device WHERE pairing_state IN ('active', 'failed') ORDER BY updated_at DESC").all();
+    return (rows as Record<string, unknown>[]).map((row) => this.hydrate(row));
   }
 
-  trustList(): TunnelDeviceRecord[] {
-    const rows = this.db.prepare("SELECT * FROM tunnel_device WHERE pairing_state = 'active' ORDER BY updated_at DESC").all() as Record<string, unknown>[];
-    return rows.map((row) => this.hydrate(row));
+  trustList(userId?: string): TunnelDeviceRecord[] {
+    const rows = userId
+      ? this.db.prepare("SELECT * FROM tunnel_device WHERE pairing_state = 'active' AND owner_user_id = ? ORDER BY updated_at DESC").all(userId)
+      : this.db.prepare("SELECT * FROM tunnel_device WHERE pairing_state = 'active' ORDER BY updated_at DESC").all();
+    return (rows as Record<string, unknown>[]).map((row) => this.hydrate(row));
   }
 
   rename(id: string, label: string): TunnelDeviceRecord | undefined {
@@ -334,6 +401,7 @@ export class TunnelStore {
   forget(id: string): boolean {
     const current = this.device(id);
     if (!current?.revokedAt) return false;
+    if (current.pairingId) this.releasePairingOwner(current.pairingId);
     this.db.prepare("DELETE FROM tunnel_device WHERE id = ?").run(id);
     return true;
   }
@@ -377,6 +445,7 @@ export class TunnelStore {
     return {
       id,
       endpointId: String(row.endpoint_id),
+      ownerUserId: typeof row.owner_user_id === "string" && row.owner_user_id ? row.owner_user_id : LEGACY_OWNER_USER_ID,
       label: String(row.label),
       platform: row.platform == null ? null : String(row.platform),
       model: row.model == null ? null : String(row.model),

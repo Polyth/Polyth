@@ -12,9 +12,10 @@ export interface SettingsRouteDeps {
   mcp: McpConfigService;
   systemInfo(local: boolean): SystemInfoDto;
   saveRole?(name: string, role: { prompt?: string; model?: ModelRef; mode: AgentDescriptor["mode"] }): Promise<AgentDescriptor>;
-  /** Server-persisted client preferences shared across every device. */
+  /** Server-persisted client preferences, isolated by authenticated account. */
   clientSettings?: ClientSettingsService;
-  /** Fan a just-accepted client-settings write out to the other devices. */
+  /** Legacy single-user live fan-out seam. Multi-user writes deliberately do
+   *  not use it because the current WS payload carries no user identity. */
   broadcastClientSettings?(state: ClientSettingsDto): void;
 }
 
@@ -71,16 +72,19 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
       return true;
     }
 
-    // ---- shared client preferences -----------------------------------------
+    // ---- account-owned client preferences -----------------------------------
     if (path === "/api/settings/client" && deps.clientSettings) {
+      const userId = rc.space.userId;
       if (method === "GET") {
-        rc.json(200, deps.clientSettings.get());
+        rc.json(200, deps.clientSettings.get(userId));
         return true;
       }
       if (method === "PUT") {
         const b = await rc.body();
-        const next = deps.clientSettings.put((b as { settings?: unknown }).settings);
-        deps.broadcastClientSettings?.(next);
+        const next = deps.clientSettings.put(userId, (b as { settings?: unknown }).settings);
+        // Do not use the legacy deployment-wide WS fan-out here: it would
+        // disclose one account's preference object to every connected user.
+        // Reconnect/normal settings fetch observes the durable update.
         rc.json(200, next);
         return true;
       }
