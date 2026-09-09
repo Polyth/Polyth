@@ -72,6 +72,13 @@ impl ProxyBootstrap {
     }
 }
 
+pub fn host_allowed(host: &str, port: u16) -> bool {
+    let host = host.trim();
+    host == format!("127.0.0.1:{port}")
+        || host.eq_ignore_ascii_case(&format!("localhost:{port}"))
+        || host == format!("[::1]:{port}")
+}
+
 pub fn origin_allowed(origin: &str, port: u16) -> bool {
     let allowed = [
         format!("http://127.0.0.1:{port}"),
@@ -176,6 +183,11 @@ mod tests {
         let nonce = boot.nonce_hex();
         assert!(boot.consume_nonce(&nonce).is_ok());
         assert!(boot.consume_nonce(&nonce).is_err());
+        assert!(host_allowed("127.0.0.1:9", 9));
+        assert!(host_allowed("LOCALHOST:9", 9));
+        assert!(host_allowed("[::1]:9", 9));
+        assert!(!host_allowed("127.0.0.1:10", 9));
+        assert!(!host_allowed("evil.test:9", 9));
         assert!(origin_allowed("http://127.0.0.1:9", 9));
         assert!(!origin_allowed("http://evil.test", 9));
         boot.mint_fresh_nonce();
