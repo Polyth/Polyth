@@ -8,14 +8,20 @@ import {
   type ServerPackageHost,
 } from "@polyth/plugins";
 import {
+  DEFAULT_LOCAL_MODEL_ID,
+  ProviderRegistry,
   createDictationService,
   createWhisperSttAdapter,
+  providerCapabilities,
   providerCatalog,
+  providerToSttAdapter,
+  selectDictationAdapter,
   type DictationContext,
+  type DictationLatencyPreference,
+  type DictationProcessingPolicy,
   type DictationProviderId,
   type DictationService,
   type DictationTransport,
-  type DictationLatencyPreference,
   type SttAdapter,
 } from "./index.ts";
 import { createDeepgramSttAdapter } from "./deepgram.ts";
@@ -41,6 +47,9 @@ interface VoiceDictationSettings {
   localModel: string;
   language: string;
   contextInjection: boolean;
+  processingPolicy: DictationProcessingPolicy;
+  fallbackProvider?: DictationProviderId;
+  fallbackApiKeyEnv: string;
   cloudFallback: boolean;
   latencyPreference: DictationLatencyPreference;
   apiKeyEnv: string;
@@ -56,6 +65,7 @@ interface VoiceSettingsService {
   get(): VoiceSettings;
   put(next: unknown): VoiceSettings;
   resolveKey(section: "stt" | "tts" | "dictation"): string | undefined;
+  resolveDictationProviderKey(provider: DictationProviderId): string | undefined;
 }
 
 const DICTATION_STATUS: Record<string, number> = {
@@ -159,44 +169,60 @@ export function dictationRoutes(dictation: DictationService): RouteHandler {
 
 const MAX_SPEAK_CHARS = 8_000;
 
+const providerDefaultEnv = (provider: DictationProviderId): string => {
+  switch (provider) {
+    case "elevenlabs": return "ELEVENLABS_API_KEY";
+    case "deepgram": return "DEEPGRAM_API_KEY";
+    case "speechmatics": return "SPEECHMATICS_API_KEY";
+    case "wispr": return "WISPR_API_KEY";
+    case "openai-live":
+    case "openai-transcribe":
+    case "openai-compatible": return "OPENAI_API_KEY";
+    default: return "";
+  }
+};
+
 const providerAvailability = (
   voice: VoiceSettingsService,
+  providers: ProviderRegistry,
   localModelInstalled?: (id: string) => boolean,
   localRuntimeInstalled?: () => boolean,
 ) => {
   const settings = voice.get();
   const selected = settings.dictation.provider;
-  const key = voice.resolveKey("dictation");
+  const fallback = settings.dictation.fallbackProvider;
   return providerCatalog().map((provider) => {
+    const extension = providers.get(provider.id);
+    const extensionAvailability = extension?.available();
+    if (extension && extensionAvailability?.available) {
+      return { ...provider, available: true, extension: true };
+    }
+
     let available = false;
     let reason: string | undefined;
+    const participating = provider.id === selected || provider.id === fallback;
     if (["elevenlabs", "deepgram", "openai-live", "openai-transcribe", "speechmatics"].includes(provider.id)) {
-      available = selected === provider.id && !!key;
-      if (!available && selected === provider.id) {
-        const fallback = provider.id === "elevenlabs" ? "ELEVENLABS_API_KEY"
-          : provider.id === "deepgram" ? "DEEPGRAM_API_KEY"
-            : provider.id === "speechmatics" ? "SPEECHMATICS_API_KEY"
-              : "OPENAI_API_KEY";
-        reason = `missing ${settings.dictation.apiKeyEnv || fallback}`;
-      } else if (!available) reason = "not selected";
+      available = !!voice.resolveDictationProviderKey(provider.id);
+      if (!available) reason = participating
+        ? `missing ${provider.id === fallback ? settings.dictation.fallbackApiKeyEnv : settings.dictation.apiKeyEnv || providerDefaultEnv(provider.id)}`
+        : "not configured for this route";
     } else if (provider.id === "openai-compatible") {
-      available = selected === provider.id && !!settings.stt.baseUrl;
-      if (!available) reason = selected === provider.id ? "OpenAI-compatible STT base URL is missing" : "not selected";
+      available = !!settings.stt.baseUrl;
+      if (!available) reason = participating ? "OpenAI-compatible STT base URL is missing" : "not configured for this route";
     } else if (provider.id === "local-nemotron") {
-      const model = settings.dictation.localModel || "nemotron-3.5-streaming-0.6b-80ms";
+      const model = settings.dictation.localModel || DEFAULT_LOCAL_MODEL_ID;
       const modelReady = !!localModelInstalled?.(model);
       const runtimeReady = !!localRuntimeInstalled?.();
-      const localReady = modelReady && runtimeReady;
-      const fallbackReady = settings.dictation.cloudFallback && !!process.env.ELEVENLABS_API_KEY;
-      available = selected === provider.id && (localReady || fallbackReady);
-      if (selected !== provider.id) reason = "not selected";
-      else if (!localReady && fallbackReady) reason = "using explicit cloud fallback (ElevenLabs)";
-      else if (!runtimeReady) reason = "local sherpa runtime is not downloaded";
+      available = modelReady && runtimeReady;
+      if (!runtimeReady) reason = "local sherpa runtime is not downloaded";
       else if (!modelReady) reason = "local model is not downloaded";
     } else if (provider.id === "web-speech") {
-      available = selected === provider.id;
+      // Browser support is probed in the client; the server only describes it.
+      available = provider.id === selected || settings.dictation.processingPolicy === "browser-fallback";
+    } else if (extension && extensionAvailability && !extensionAvailability.available) {
+      reason = extensionAvailability.reason ?? "registered provider is unavailable";
     } else {
-      reason = provider.publicApi ? "provider adapter not enabled yet" : "public Voice Interface API contract unavailable";
+      reason = provider.publicApi ? "provider adapter not enabled yet" : "private provider adapter is not registered";
     }
     return { ...provider, available, ...(reason ? { reason } : {}) };
   });
@@ -204,6 +230,7 @@ const providerAvailability = (
 
 export function voiceRoutes(deps: {
   voice: VoiceSettingsService;
+  providers: ProviderRegistry;
   fetchFn?: typeof fetch;
   summarize?: (text: string) => Promise<string>;
   localModelInstalled?: (id: string) => boolean;
@@ -218,7 +245,10 @@ export function voiceRoutes(deps: {
         ...settings,
         sttConfigured: !!settings.stt.baseUrl,
         ttsConfigured: !!settings.tts.baseUrl,
-        dictationKeyConfigured: !!deps.voice.resolveKey("dictation"),
+        dictationKeyConfigured: !!deps.voice.resolveDictationProviderKey(settings.dictation.provider),
+        fallbackKeyConfigured: settings.dictation.fallbackProvider
+          ? !!deps.voice.resolveDictationProviderKey(settings.dictation.fallbackProvider)
+          : false,
       });
       return true;
     }
@@ -228,23 +258,32 @@ export function voiceRoutes(deps: {
         ...settings,
         sttConfigured: !!settings.stt.baseUrl,
         ttsConfigured: !!settings.tts.baseUrl,
-        dictationKeyConfigured: !!deps.voice.resolveKey("dictation"),
+        dictationKeyConfigured: !!deps.voice.resolveDictationProviderKey(settings.dictation.provider),
+        fallbackKeyConfigured: settings.dictation.fallbackProvider
+          ? !!deps.voice.resolveDictationProviderKey(settings.dictation.fallbackProvider)
+          : false,
       });
       return true;
     }
     if (path === "/api/voice/providers" && method === "GET") {
-      json(200, { providers: providerAvailability(deps.voice, deps.localModelInstalled, deps.localRuntimeInstalled) });
+      json(200, { providers: providerAvailability(deps.voice, deps.providers, deps.localModelInstalled, deps.localRuntimeInstalled) });
       return true;
     }
     if (path === "/api/dictation/token" && method === "POST") {
       const settings = deps.voice.get().dictation;
       const input = await request.body();
       const provider = String(input.provider ?? settings.provider);
-      if (provider !== "elevenlabs" || settings.provider !== "elevenlabs") {
-        json(400, { error: "provider_unavailable", message: "single-use tokens are only enabled for the selected ElevenLabs provider" });
+      const directCloudAllowed = settings.processingPolicy === "prefer-cloud"
+        || settings.processingPolicy === "auto-fallback"
+        || settings.processingPolicy === "browser-fallback";
+      if (provider !== "elevenlabs" || settings.provider !== "elevenlabs" || !directCloudAllowed) {
+        json(400, {
+          error: "provider_unavailable",
+          message: "ElevenLabs direct tokens require ElevenLabs as the selected cloud provider and a cloud-processing policy",
+        });
         return true;
       }
-      const key = deps.voice.resolveKey("dictation");
+      const key = deps.voice.resolveDictationProviderKey("elevenlabs");
       if (!key) {
         json(401, { error: "invalid_credentials", message: `missing ${settings.apiKeyEnv || "ELEVENLABS_API_KEY"}` });
         return true;
@@ -382,6 +421,9 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   const voice = host.services.require(
     serverServiceKey<VoiceSettingsService>("voice.settings"),
   );
+  const providers = new ProviderRegistry();
+  host.services.provide(serverServiceKey<ProviderRegistry>("dictation.providers"), providers);
+
   const modelsRoot = join(host.storageDir, "models");
   const runtimeRoot = join(host.storageDir, "runtime");
   const localModels = createLocalModelManager({ root: modelsRoot });
@@ -405,69 +447,100 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     if (!modelDir || !runtimeDir) return null;
     const key = `${runtimeDir}\0${modelDir}`;
     if (!localAdapter || localAdapterKey !== key) {
+      (localAdapter as (SttAdapter & { dispose?(): void }) | null)?.dispose?.();
       localAdapter = createLocalNemotronSttAdapter({ modelDir, runtimeDir });
       localAdapterKey = key;
     }
     return localAdapter;
   };
 
-  const elevenLabsFallback = (): SttAdapter | null => {
-    const apiKey = process.env.ELEVENLABS_API_KEY;
-    return apiKey ? createElevenLabsSttAdapter({ apiKey, model: "scribe_v2_realtime" }) : null;
+  const registeredAdapter = (id: DictationProviderId): SttAdapter | null => {
+    const provider = providers.get(id);
+    if (!provider) return null;
+    const availability = provider.available();
+    return availability.available ? providerToSttAdapter(provider) : null;
+  };
+
+  const adapterFor = (
+    id: DictationProviderId,
+    settings: VoiceSettings,
+    primary: boolean,
+  ): SttAdapter | null => {
+    const extension = registeredAdapter(id);
+    if (extension) return extension;
+
+    if (id === "local-nemotron") {
+      return localNemotronAdapter(settings.dictation.localModel || DEFAULT_LOCAL_MODEL_ID);
+    }
+    if (id === "local-parakeet" || id === "web-speech" || id === "wispr") return null;
+
+    const apiKey = voice.resolveDictationProviderKey(id);
+    const model = primary && settings.dictation.provider === id && settings.dictation.model
+      ? settings.dictation.model
+      : providerCapabilities(id)?.defaultModel ?? "";
+
+    if (id === "elevenlabs") {
+      return apiKey ? createElevenLabsSttAdapter({ apiKey, model: model || "scribe_v2_realtime" }) : null;
+    }
+    if (id === "deepgram") {
+      return apiKey ? createDeepgramSttAdapter({ apiKey, model: model || "nova-3" }) : null;
+    }
+    if (id === "openai-live" || id === "openai-transcribe") {
+      return apiKey ? createOpenAIRealtimeSttAdapter({
+        apiKey,
+        model: model || (id === "openai-live" ? "gpt-live-transcribe" : "gpt-transcribe"),
+        latencyPreference: settings.dictation.latencyPreference,
+      }) : null;
+    }
+    if (id === "speechmatics") {
+      return apiKey ? createSpeechmaticsSttAdapter({
+        apiKey,
+        model: model || "enhanced",
+        latencyPreference: settings.dictation.latencyPreference,
+      }) : null;
+    }
+    if (id === "openai-compatible") {
+      const stt = settings.stt;
+      if (!stt.baseUrl) return null;
+      return createWhisperSttAdapter({
+        baseUrl: stt.baseUrl,
+        model: model || stt.model || "whisper-1",
+        ...(settings.dictation.language && settings.dictation.language !== "auto"
+          ? { language: settings.dictation.language }
+          : stt.language ? { language: stt.language } : {}),
+        ...(apiKey ?? voice.resolveKey("stt") ? { apiKey: apiKey ?? voice.resolveKey("stt") } : {}),
+      });
+    }
+    return null;
   };
 
   const dictation = createDictationService({
     adapter: () => {
       const settings = voice.get();
       const selected = settings.dictation;
-      if (selected.provider === "web-speech" || selected.transport === "direct-browser") return null;
-      if (selected.provider === "local-nemotron") {
-        if (selected.transport !== "auto" && selected.transport !== "local-worker") return null;
-        const local = localNemotronAdapter(selected.localModel || "nemotron-3.5-streaming-0.6b-80ms");
-        if (local) return local;
-        return selected.cloudFallback ? elevenLabsFallback() : null;
-      }
-      if (selected.transport === "local-worker") return null;
-      if (selected.provider === "elevenlabs") {
-        const apiKey = voice.resolveKey("dictation");
-        if (!apiKey) return null;
-        return createElevenLabsSttAdapter({ apiKey, model: selected.model || "scribe_v2_realtime" });
-      }
-      if (selected.provider === "deepgram") {
-        const apiKey = voice.resolveKey("dictation");
-        if (!apiKey) return null;
-        return createDeepgramSttAdapter({ apiKey, model: selected.model || "nova-3" });
-      }
-      if (selected.provider === "openai-live" || selected.provider === "openai-transcribe") {
-        const apiKey = voice.resolveKey("dictation");
-        if (!apiKey) return null;
-        return createOpenAIRealtimeSttAdapter({
-          apiKey,
-          model: selected.model || (selected.provider === "openai-live" ? "gpt-live-transcribe" : "gpt-transcribe"),
-          latencyPreference: selected.latencyPreference,
-        });
-      }
-      if (selected.provider === "speechmatics") {
-        const apiKey = voice.resolveKey("dictation");
-        if (!apiKey) return null;
-        return createSpeechmaticsSttAdapter({ apiKey, model: selected.model || "enhanced", latencyPreference: selected.latencyPreference });
-      }
-      if (selected.provider === "openai-compatible") {
-        const stt = settings.stt;
-        if (!stt.baseUrl) return null;
-        const apiKey = voice.resolveKey("dictation") ?? voice.resolveKey("stt");
-        return createWhisperSttAdapter({
-          baseUrl: stt.baseUrl,
-          model: selected.model || stt.model || "whisper-1",
-          ...(selected.language && selected.language !== "auto" ? { language: selected.language } : stt.language ? { language: stt.language } : {}),
-          ...(apiKey ? { apiKey } : {}),
-        });
-      }
-      return null;
+
+      // Direct browser is a different transport owner. The REST capability is
+      // intentionally unavailable for it; the browser probes provider auth.
+      if (selected.transport === "direct-browser") return null;
+      if (selected.transport === "local-worker" && selected.provider !== "local-nemotron") return null;
+
+      const local = localNemotronAdapter(selected.localModel || DEFAULT_LOCAL_MODEL_ID);
+      const primary = adapterFor(selected.provider, settings, true);
+      const explicitFallback = selected.fallbackProvider
+        ? adapterFor(selected.fallbackProvider, settings, false)
+        : null;
+      return selectDictationAdapter({
+        policy: selected.processingPolicy,
+        selectedProvider: selected.provider,
+        selected: primary,
+        local,
+        explicitFallback,
+      });
     },
-    unavailableReason: "selected dictation provider is unavailable, missing credentials, or its local model/runtime is not installed",
+    unavailableReason: "selected dictation processing route is unavailable or missing its configured model/runtime/credentials",
   });
   host.services.provide(serverServiceKey<DictationService>("dictation"), dictation);
+
   let routes: RouteHandler | null = null;
   return {
     remoteAccess: DICTATION_REMOTE_ACCESS,
@@ -478,6 +551,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       const runtimeRoute = localRuntimeRoutes(localRuntime);
       const voiceRoute = voiceRoutes({
         voice,
+        providers,
         localModelInstalled: (id) => !!installedLocalModel(id),
         localRuntimeInstalled: () => !!installedLocalRuntime(),
         summarize: async (text) => {
