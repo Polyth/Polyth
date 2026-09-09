@@ -378,13 +378,6 @@ impl NumericPairing {
         *client_attempts += 1;
         endpoint_attempts.push(rate_attempt);
         self.global_attempts.push(rate_attempt);
-        if endpoint_attempts.len() >= MAX_ENDPOINT_ATTEMPTS {
-            self.endpoint_cooldowns
-                .insert(device_endpoint_id.to_string(), now + COOLDOWN);
-        }
-        if self.global_attempts.len() >= MAX_GLOBAL_ATTEMPTS {
-            self.host_cooldown_until = Some(now + COOLDOWN);
-        }
         Ok(rate_attempt.id)
     }
 
@@ -683,6 +676,68 @@ mod tests {
 
         assert!(!server.global_attempts.iter().any(|attempt| attempt.id == own_rate_id));
         assert!(server.global_attempts.iter().any(|attempt| attempt.id == other_rate_id));
+    }
+
+    #[test]
+    fn successful_edge_attempt_does_not_create_source_cooldown() {
+        let now = Instant::now();
+        let mut server = NumericPairing::new();
+        let first = server.create(HOST, "bootstrap-a", now).unwrap();
+        let first_bootstrap = server.bootstrap(now).unwrap();
+        for _ in 0..MAX_CLIENT_ATTEMPTS {
+            let (_client, request) = NumericClientLogin::start(
+                &first.code,
+                HOST,
+                &first_bootstrap.pairing_id,
+                &first_bootstrap.expires_at,
+            )
+            .unwrap();
+            server
+                .start_login(DEVICE, &first_bootstrap.pairing_id, &request.request, now)
+                .unwrap();
+        }
+
+        let second = server.create(HOST, "bootstrap-b", now).unwrap();
+        let second_bootstrap = server.bootstrap(now).unwrap();
+        for _ in 0..2 {
+            let (_client, request) = NumericClientLogin::start(
+                &second.code,
+                HOST,
+                &second_bootstrap.pairing_id,
+                &second_bootstrap.expires_at,
+            )
+            .unwrap();
+            server
+                .start_login(DEVICE, &second_bootstrap.pairing_id, &request.request, now)
+                .unwrap();
+        }
+        let (client, request) = NumericClientLogin::start(
+            &second.code,
+            HOST,
+            &second_bootstrap.pairing_id,
+            &second_bootstrap.expires_at,
+        )
+        .unwrap();
+        let challenge = server
+            .start_login(DEVICE, &second_bootstrap.pairing_id, &request.request, now)
+            .unwrap();
+        let finish = client.finish(&challenge).unwrap();
+        server
+            .finish_login(DEVICE, &finish.attempt_id, &finish.finalization, now)
+            .unwrap();
+
+        let third = server.create(HOST, "bootstrap-c", now).unwrap();
+        let third_bootstrap = server.bootstrap(now).unwrap();
+        let (_client, request) = NumericClientLogin::start(
+            &third.code,
+            HOST,
+            &third_bootstrap.pairing_id,
+            &third_bootstrap.expires_at,
+        )
+        .unwrap();
+        assert!(server
+            .start_login(DEVICE, &third_bootstrap.pairing_id, &request.request, now)
+            .is_ok());
     }
 
     #[test]
