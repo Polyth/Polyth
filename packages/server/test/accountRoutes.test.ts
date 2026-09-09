@@ -60,10 +60,13 @@ test("owner cannot create a second account until the owner account is secured", 
   assert.equal(auth.hasCredential("usr_alice"), false);
 
   auth.setPassword("usr_owner", "owner-password");
+  const owner = auth.login("owner-password", "127.0.0.1", "Owner", "usr_owner");
+  assert.ok(owner.ok);
+  if (!owner.ok) return;
   const created = await call(auth, "POST", "/api/auth/accounts", {
     name: "Alice",
     password: "alice-password",
-  });
+  }, owner.token);
   assert.equal(created.status, 201);
   assert.equal(auth.hasCredential("usr_alice"), true);
 });
