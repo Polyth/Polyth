@@ -26,8 +26,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.security.MessageDigest;
 import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -39,12 +40,15 @@ import javax.crypto.spec.GCMParameterSpec;
 @CapacitorPlugin(name = "PolythLink")
 public final class PolythLinkPlugin extends Plugin {
     private static final String PREFS = "polyth_link_secure";
+    private static final String STATE_PREFS = "polyth_link_state";
+    private static final String LAST_CONNECTION = "last_connection_id";
     private static final String KEY_PREFIX = "polyth-link-";
     private static final int SECRET_LENGTH = 32;
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private final Map<String, PairingSecretRecord> attempts = new HashMap<>();
-    private long clientHandle;
+    private final ExecutorService controlExecutor = Executors.newSingleThreadExecutor();
+    private final ConcurrentHashMap<String, PairingSecretRecord> attempts = new ConcurrentHashMap<>();
+    private volatile long clientHandle;
 
     private static final class LinkFailure extends Exception {
         final String code;
@@ -163,22 +167,34 @@ public final class PolythLinkPlugin extends Plugin {
                 throw new LinkFailure("pairing-storage-failed");
             }
         }
+
+        Set<String> hostIds() {
+            return new HashSet<>(prefs.getAll().keySet());
+        }
     }
 
     private SecureStore secureStore;
+    private SharedPreferences statePrefs;
 
     @Override
     public void load() {
         secureStore = new SecureStore();
+        statePrefs = getContext().getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE);
+    }
+
+    @Override
+    protected void handleOnResume() {
+        super.handleOnResume();
+        restoreLoopbackTransport();
     }
 
     @Override
     protected void handleOnDestroy() {
-        if (clientHandle != 0) {
-            PolythLinkRust.clientFree(clientHandle);
-            clientHandle = 0;
-        }
+        long handle = clientHandle;
+        clientHandle = 0;
+        if (handle != 0) PolythLinkRust.clientFree(handle);
         executor.shutdownNow();
+        controlExecutor.shutdownNow();
         super.handleOnDestroy();
     }
 
@@ -192,6 +208,16 @@ public final class PolythLinkPlugin extends Plugin {
         } catch (Exception ignored) {}
         call.reject("forbidden", "forbidden");
         return false;
+    }
+
+    private boolean loopbackContent() {
+        try {
+            String raw = getBridge().getWebView().getUrl();
+            URI url = URI.create(raw == null ? "" : raw);
+            return "http".equalsIgnoreCase(url.getScheme()) && "127.0.0.1".equals(url.getHost());
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     private String require(PluginCall call, String key, String code) {
@@ -297,6 +323,62 @@ public final class PolythLinkPlugin extends Plugin {
         return (JSONArray) value;
     }
 
+    private JSONArray listAndCleanOrphans() throws Exception {
+        JSONArray raw = invokeArray("connections.list", new JSObject());
+        Set<String> keep = new HashSet<>();
+        for (int i = 0; i < raw.length(); i++) {
+            String hostId = raw.getJSONObject(i).optString("hostEndpointId", "");
+            if (!hostId.isEmpty()) keep.add(hostId);
+        }
+        for (PairingSecretRecord attempt : attempts.values()) keep.add(attempt.hostId());
+        for (String hostId : secureStore.hostIds()) {
+            if (!keep.contains(hostId)) secureStore.delete(hostId);
+        }
+        return raw;
+    }
+
+    private boolean hasConnectionMetadata(String hostId) throws Exception {
+        JSONArray raw = invokeArray("connections.list", new JSObject());
+        for (int i = 0; i < raw.length(); i++) {
+            if (hostId.equals(raw.getJSONObject(i).optString("hostEndpointId", ""))) return true;
+        }
+        return false;
+    }
+
+    private void rememberTransport(String connectionId) {
+        statePrefs.edit().putString(LAST_CONNECTION, connectionId).apply();
+    }
+
+    private void forgetTransport(String connectionId) {
+        if (connectionId.equals(statePrefs.getString(LAST_CONNECTION, null))) {
+            statePrefs.edit().remove(LAST_CONNECTION).apply();
+        }
+    }
+
+    private void restoreLoopbackTransport() {
+        if (!loopbackContent()) return;
+        String connectionId = statePrefs.getString(LAST_CONNECTION, null);
+        if (connectionId == null || connectionId.isEmpty()) return;
+        controlExecutor.execute(() -> {
+            try {
+                JSONObject status = invokeObject("status", new JSObject().put("connectionId", connectionId), null);
+                if ("connected".equals(status.optString("state", ""))) return;
+                byte[] secret = secureStore.load(connectionId);
+                if (secret == null) throw new LinkFailure("host-identity-unavailable");
+                JSONObject result = invokeObject("connect", new JSObject().put("connectionId", connectionId), secret);
+                String bootstrap = result.optString("bootstrapUrl", result.optString("bootstrap", ""));
+                if (bootstrap.isEmpty()) throw new LinkFailure("proxy-bootstrap-invalid");
+                getActivity().runOnUiThread(() -> {
+                    if (loopbackContent()) getBridge().getWebView().loadUrl(bootstrap);
+                });
+            } catch (Exception error) {
+                getActivity().runOnUiThread(() -> {
+                    if (loopbackContent()) getBridge().getWebView().loadUrl("https://localhost");
+                });
+            }
+        });
+    }
+
     @PluginMethod
     public void parsePairingTicket(PluginCall call) {
         if (!trusted(call)) return;
@@ -350,6 +432,8 @@ public final class PolythLinkPlugin extends Plugin {
             try {
                 JSONObject result = invokeObject("pairing.confirm", new JSObject().put("attemptId", attemptId), null);
                 attempts.remove(attemptId);
+                String connectionId = result.optString("connectionId", "");
+                if (!connectionId.isEmpty()) rememberTransport(connectionId);
                 call.resolve(JSObject.fromJSONObject(result));
             } catch (Exception error) { reject(call, error); }
         });
@@ -360,11 +444,13 @@ public final class PolythLinkPlugin extends Plugin {
         if (!trusted(call)) return;
         String attemptId = require(call, "attemptId", "pairing-invalid");
         if (attemptId == null) return;
-        executor.execute(() -> {
+        controlExecutor.execute(() -> {
             try {
                 invoke("pairing.cancel", new JSObject().put("attemptId", attemptId), null);
                 PairingSecretRecord record = attempts.remove(attemptId);
-                if (record != null && record.createdForAttempt()) secureStore.delete(record.hostId());
+                if (record != null && record.createdForAttempt() && !hasConnectionMetadata(record.hostId())) {
+                    secureStore.delete(record.hostId());
+                }
                 call.resolve(new JSObject().put("ok", true));
             } catch (Exception error) { reject(call, error); }
         });
@@ -375,7 +461,7 @@ public final class PolythLinkPlugin extends Plugin {
         if (!trusted(call)) return;
         executor.execute(() -> {
             try {
-                JSONArray raw = invokeArray("connections.list", new JSObject());
+                JSONArray raw = listAndCleanOrphans();
                 JSArray connections = new JSArray();
                 for (int i = 0; i < raw.length(); i++) {
                     JSONObject item = raw.getJSONObject(i);
@@ -406,6 +492,7 @@ public final class PolythLinkPlugin extends Plugin {
                 byte[] secret = secureStore.load(connectionId);
                 if (secret == null) throw new LinkFailure("host-identity-unavailable");
                 JSONObject result = invokeObject("connect", new JSObject().put("connectionId", connectionId), secret);
+                rememberTransport(connectionId);
                 call.resolve(JSObject.fromJSONObject(result));
             } catch (Exception error) { reject(call, error); }
         });
@@ -416,9 +503,10 @@ public final class PolythLinkPlugin extends Plugin {
         if (!trusted(call)) return;
         String connectionId = require(call, "connectionId", "device-unknown");
         if (connectionId == null) return;
-        executor.execute(() -> {
+        controlExecutor.execute(() -> {
             try {
                 invoke("disconnect", new JSObject().put("connectionId", connectionId), null);
+                forgetTransport(connectionId);
                 call.resolve(new JSObject().put("ok", true));
             } catch (Exception error) { reject(call, error); }
         });
@@ -429,11 +517,12 @@ public final class PolythLinkPlugin extends Plugin {
         if (!trusted(call)) return;
         String connectionId = require(call, "connectionId", "device-unknown");
         if (connectionId == null) return;
-        executor.execute(() -> {
+        controlExecutor.execute(() -> {
             try {
                 invoke("disconnect", new JSObject().put("connectionId", connectionId), null);
                 secureStore.delete(connectionId);
                 invoke("forget", new JSObject().put("connectionId", connectionId), null);
+                forgetTransport(connectionId);
                 call.resolve(new JSObject().put("ok", true));
             } catch (Exception error) { reject(call, error); }
         });
