@@ -84,15 +84,17 @@ test("remembered authentication aligns browser account scope before bootstrap", 
 });
 
 test("agent presets stay separate from the harness/model picker", () => {
-  const harnessPicker = readFileSync(
+  const harness = readFileSync(
     new URL("../../../packages/harness-runtime/widgets/index.tsx", import.meta.url),
     "utf8",
   );
-  const miniWidgets = readFileSync(new URL("../src/widgets/builtinMiniWidgets.tsx", import.meta.url), "utf8");
   const sessionPackage = readFileSync(new URL("../../../packages/session/package.json", import.meta.url), "utf8");
 
-  assert.doesNotMatch(harnessPicker, /executionProfileControl/);
-  assert.match(miniWidgets, /id: "composer\.preset"/);
-  assert.match(miniWidgets, /context\.executionProfileControl/);
+  const modelHeader = harness.split("\n").find((line) => line.includes('slot: "modelPicker.header"')) ?? "";
+  const preset = harness.split("\n").find((line) => line.includes('id: "harnesses.agent-preset"')) ?? "";
+  assert.ok(modelHeader);
+  assert.equal(modelHeader.includes("executionProfileControl"), false);
+  assert.ok(preset.includes('slot: "composer.execution"'));
+  assert.ok(preset.includes("executionProfileControl"));
   assert.match(sessionPackage, /webApiAccountScoped\.ts/);
 });
