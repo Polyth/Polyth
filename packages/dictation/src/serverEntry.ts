@@ -18,6 +18,7 @@ import {
   type DictationLatencyPreference,
   type SttAdapter,
 } from "./index.ts";
+import { createDeepgramSttAdapter } from "./deepgram.ts";
 import { createElevenLabsSttAdapter } from "./elevenlabs.ts";
 import { createLocalModelManager } from "./localModels.ts";
 import { localModelRoutes } from "./localModelRoutes.ts";
@@ -138,9 +139,12 @@ const providerAvailability = (
   return providerCatalog().map((provider) => {
     let available = false;
     let reason: string | undefined;
-    if (provider.id === "elevenlabs") {
+    if (provider.id === "elevenlabs" || provider.id === "deepgram") {
       available = selected === provider.id && !!key;
-      if (!available) reason = selected === provider.id ? `missing ${settings.dictation.apiKeyEnv || "ELEVENLABS_API_KEY"}` : "not selected";
+      if (!available && selected === provider.id) {
+        const fallback = provider.id === "elevenlabs" ? "ELEVENLABS_API_KEY" : "DEEPGRAM_API_KEY";
+        reason = `missing ${settings.dictation.apiKeyEnv || fallback}`;
+      } else if (!available) reason = "not selected";
     } else if (provider.id === "openai-compatible") {
       available = selected === provider.id && !!settings.stt.baseUrl;
       if (!available) reason = selected === provider.id ? "OpenAI-compatible STT base URL is missing" : "not selected";
@@ -363,6 +367,14 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         return createElevenLabsSttAdapter({
           apiKey,
           model: selected.model || "scribe_v2_realtime",
+        });
+      }
+      if (selected.provider === "deepgram") {
+        const apiKey = voice.resolveKey("dictation");
+        if (!apiKey) return null;
+        return createDeepgramSttAdapter({
+          apiKey,
+          model: selected.model || "nova-3",
         });
       }
       if (selected.provider === "openai-transcribe") {
