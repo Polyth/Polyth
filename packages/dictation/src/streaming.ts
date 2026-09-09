@@ -29,6 +29,17 @@ export interface DictationTimingDto {
   finalMs?: number;
 }
 
+export interface DictationMetricsDto {
+  /** Selected route, e.g. "elevenlabs", "local-nemotron" or "local-nemotron->deepgram". */
+  provider: string;
+  audioBytes: number;
+  audioDurationMs: number;
+  acceptedFrames: number;
+  duplicateFrames: number;
+  reorderedFrames: number;
+  providerErrors: number;
+}
+
 export interface DictationSessionDto {
   id: string;
   sessionId?: string;
@@ -37,6 +48,7 @@ export interface DictationSessionDto {
   acknowledgedSeq: number;
   transcript: string;
   timing: DictationTimingDto;
+  metrics: DictationMetricsDto;
 }
 
 export interface SttStream {
@@ -112,6 +124,7 @@ const copyDto = (dto: DictationSessionDto): DictationSessionDto => ({
   ...dto,
   format: { ...dto.format },
   timing: { ...dto.timing },
+  metrics: { ...dto.metrics },
 });
 
 export function createDictationService(opts: DictationServiceOptions = {}): DictationService {
@@ -181,6 +194,7 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
   };
 
   const failWith = (s: SessionState, error: unknown): never => {
+    s.dto.metrics.providerErrors++;
     s.dto.status = "failed";
     s.acceptingAudio = false;
     s.lastActivityAt = now();
@@ -254,6 +268,15 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
         acknowledgedSeq: 0,
         transcript: "",
         timing: { startedAt },
+        metrics: {
+          provider: adapter.engine,
+          audioBytes: 0,
+          audioDurationMs: 0,
+          acceptedFrames: 0,
+          duplicateFrames: 0,
+          reorderedFrames: 0,
+          providerErrors: 0,
+        },
       };
       sessions.set(id, {
         dto,
@@ -291,6 +314,7 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
       s.lastActivityAt = now();
 
       if (seq <= s.dto.acknowledgedSeq || s.acceptedSeqs.has(seq)) {
+        s.dto.metrics.duplicateFrames++;
         return { ack: s.dto.acknowledgedSeq, duplicate: true, ...currentTranscript(s) };
       }
 
@@ -306,10 +330,14 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
       }
 
       const retained = pcm.slice();
+      if (seq > s.dto.acknowledgedSeq + 1) s.dto.metrics.reorderedFrames++;
       s.pending.set(seq, retained);
       s.acceptedSeqs.add(seq);
       s.pendingBytes += retained.byteLength;
       s.bytes += retained.byteLength;
+      s.dto.metrics.acceptedFrames++;
+      s.dto.metrics.audioBytes = s.bytes;
+      s.dto.metrics.audioDurationMs = durationMs(s.bytes);
 
       await queueProviderDrain(s);
       s.lastActivityAt = now();
@@ -346,6 +374,7 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
           s.lastActivityAt = now();
           clearAudioState(s);
         } catch (error) {
+          s.dto.metrics.providerErrors++;
           s.dto.status = "failed";
           s.acceptingAudio = false;
           s.lastActivityAt = now();
