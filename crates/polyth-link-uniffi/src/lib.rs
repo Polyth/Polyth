@@ -122,7 +122,7 @@ pub extern "C" fn polyth_link_client_free(handle: u64) {
         .and_then(|mut clients| clients.remove(&handle));
     if let Some(client) = removed {
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            drop(runtime().spawn(async move { client.shutdown().await }));
+            runtime().block_on(client.shutdown());
         }));
     }
 }
