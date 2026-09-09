@@ -591,22 +591,6 @@ export default function VoicePage() {
       <Row label={tr("settings.voicepage.dictation")} hint={support.stt || streaming?.available ? tr("settings.voicepage.showsTheMicButtonInTheComposer") : streaming?.reason ?? tr("settings.voicepage.notSupportedInThisBrowser")} itemId="voice.dictation">
         <Toggle on={prefs.dictation} onChange={(dictation) => setVoicePrefs({ dictation })} label={tr("settings.voicepage.dictation")} />
       </Row>
-      <Row
-        label={tr("settings.voicepage.dictationEngine")}
-        hint={streaming?.available
-          ? tr("settings.voicepage.serverTranscriptionViaValueWithReconnectSafe", { engine: streaming.engine })
-          : streaming?.reason ?? tr("settings.voicepage.browserEngineFallback")}
-        itemId="voice.streaming"
-      >
-        <Seg
-          value={prefs.sttEngine}
-          options={[
-            ["browser", tr("packages.onboarding.tours.builtin.browser")],
-            ["server", tr("ssh.sshprojectsource.server")],
-          ]}
-          onChange={(sttEngine) => setVoicePrefs({ sttEngine })}
-        />
-      </Row>
 
       {server && (
         <DictationProviderForm
