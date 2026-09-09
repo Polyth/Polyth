@@ -2,6 +2,7 @@ import { Capacitor, registerPlugin } from "@capacitor/core";
 import {
   setPolythLinkNative,
   type ConnectionMetadata,
+  type NumericPairingInput,
   type PairingAttempt,
   type PairingPreview,
   type PolythLinkNative,
@@ -11,6 +12,7 @@ import {
 interface PolythLinkCapacitorPlugin {
   parsePairingTicket(options: { raw: string }): Promise<PairingPreview>;
   beginPairing(options: { raw: string; label: string }): Promise<PairingAttempt>;
+  beginNumericPairing(options: NumericPairingInput): Promise<PairingAttempt>;
   confirmPairing(options: { attemptId: string }): Promise<ProxyLaunch>;
   cancelPairing(options: { attemptId: string }): Promise<{ ok: boolean }>;
   listConnections(): Promise<{ connections: ConnectionMetadata[] }>;
@@ -48,6 +50,7 @@ export function installNativePolythLink(): void {
   const adapter: PolythLinkNative = {
     parsePairingTicket: (raw) => NativePolythLink.parsePairingTicket({ raw }),
     beginPairing: (raw, label) => NativePolythLink.beginPairing({ raw, label }),
+    beginNumericPairing: (input) => NativePolythLink.beginNumericPairing(input),
     confirmPairing: (attemptId) => NativePolythLink.confirmPairing({ attemptId }),
     cancelPairing: async (attemptId) => {
       await NativePolythLink.cancelPairing({ attemptId });
