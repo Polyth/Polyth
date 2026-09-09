@@ -73,22 +73,22 @@ test("contextual capabilities resolve through the shared registry and never leak
 
 test("contextual resolution rejects duplicate effective ids", () => {
   const registry = createCapabilityContributionRegistry();
-  const contextual = (owner: string, suffix: string): Contextual => ({
+  const contextual = (resolverId: string, suffix: string): Contextual => ({
     descriptor: {
-      id: `${owner}.resolver`,
+      id: `commands.${resolverId}`,
       kind: "context",
-      owner,
+      owner: "commands",
       scope: "space",
       spaceId: "space-a",
       revision: "1",
-      title: owner,
+      title: resolverId,
       text: "",
     },
     resolveCapabilities(ctx) {
       return [{
-        id: "duplicate.skill",
+        id: "commands.skill.duplicate",
         kind: "skill",
-        owner,
+        owner: "commands",
         scope: "project",
         spaceId: ctx.spaceId,
         projectId: ctx.projectId,
@@ -100,7 +100,7 @@ test("contextual resolution rejects duplicate effective ids", () => {
       }];
     },
   });
-  registry.register("a", contextual("a", "a"));
-  registry.register("b", contextual("b", "b"));
+  registry.register("commands", contextual("resolver-a", "a"));
+  registry.register("commands", contextual("resolver-b", "b"));
   assert.throws(() => registry.resolve(context("project-a")), /capability already resolved/);
 });
