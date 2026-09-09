@@ -6,8 +6,12 @@ interface PolythNavigationPlugin {
 
 const NativeNavigation = registerPlugin<PolythNavigationPlugin>("PolythNavigation");
 
+export function nativeNavigationAvailable(): boolean {
+  return Capacitor.isNativePlatform() && Capacitor.isPluginAvailable("PolythNavigation");
+}
+
 export async function consumeNativePendingUrl(): Promise<string | undefined> {
-  if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable("PolythNavigation")) return undefined;
+  if (!nativeNavigationAvailable()) return undefined;
   const { url } = await NativeNavigation.consumePendingUrl();
   return typeof url === "string" && url ? url : undefined;
 }
