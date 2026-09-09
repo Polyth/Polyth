@@ -4,10 +4,11 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { atomicWriteSync } from "@polyth/plugins";
-import type {
-  DictationLatencyPreference,
-  DictationProviderId,
-  DictationTransport,
+import {
+  DEFAULT_LOCAL_MODEL_ID,
+  type DictationLatencyPreference,
+  type DictationProviderId,
+  type DictationTransport,
 } from "@polyth/dictation";
 
 export interface VoiceSttSettings {
@@ -66,7 +67,7 @@ const defaults = (): VoiceSettings => ({
     provider: "elevenlabs",
     transport: "auto",
     model: "scribe_v2_realtime",
-    localModel: "nemotron-3.5-streaming-0.6b-80ms",
+    localModel: DEFAULT_LOCAL_MODEL_ID,
     language: "auto",
     contextInjection: true,
     cloudFallback: false,
