@@ -101,6 +101,7 @@ export function connectionPhaseBusy(phase: ConnectionPhase): boolean {
 }
 
 export class ConnectionController {
+  #native: PolythLinkNative;
   #state: ConnectionControllerState;
   #listeners = new Set<Listener>();
   #epoch = 0;
@@ -108,7 +109,8 @@ export class ConnectionController {
   #connectionQueue: Promise<void> = Promise.resolve();
   #disposed = false;
 
-  constructor(private readonly native: PolythLinkNative, initialError?: string) {
+  constructor(native: PolythLinkNative, initialError?: string) {
+    this.#native = native;
     this.#state = {
       phase: "idle",
       epoch: 0,
@@ -170,10 +172,10 @@ export class ConnectionController {
   async loadTrustedConnections(): Promise<void> {
     const epoch = this.#intent("loading-trusted-connections");
     try {
-      const trusted = await this.native.listConnections();
+      const trusted = await this.#native.listConnections();
       const statuses = await Promise.all(trusted.map(async (connection) => {
         try {
-          return await this.native.getStatus(connection.id);
+          return await this.#native.getStatus(connection.id);
         } catch {
           return undefined;
         }
@@ -217,12 +219,12 @@ export class ConnectionController {
   async beginPairing(raw: string, label = "This phone"): Promise<PairingAttempt | undefined> {
     const epoch = this.#intent("validating-pairing", { pairingAttempt: null });
     try {
-      await this.native.parsePairingTicket(raw);
+      await this.#native.parsePairingTicket(raw);
       if (!this.#current(epoch)) return undefined;
       this.#set({ phase: "preparing-pairing" });
-      const attempt = await this.native.beginPairing(raw, label);
+      const attempt = await this.#native.beginPairing(raw, label);
       if (!this.#current(epoch)) {
-        await this.native.cancelPairing(attempt.attemptId).catch(() => undefined);
+        await this.#native.cancelPairing(attempt.attemptId).catch(() => undefined);
         return undefined;
       }
       this.#set({
@@ -245,11 +247,11 @@ export class ConnectionController {
     if (!attempt) return undefined;
     const epoch = this.#intent("awaiting-host-approval", { pairingAttempt: attempt });
     try {
-      const launch = await this.native.confirmPairing(attempt.attemptId);
+      const launch = await this.#native.confirmPairing(attempt.attemptId);
       if (!this.#current(epoch)) {
         if (this.#state.targetConnectionId !== launch.connectionId
           && this.#state.activeConnectionId !== launch.connectionId) {
-          await this.native.disconnect(launch.connectionId).catch(() => undefined);
+          await this.#native.disconnect(launch.connectionId).catch(() => undefined);
         }
         return undefined;
       }
@@ -272,10 +274,10 @@ export class ConnectionController {
 
   cancelPairing(): void {
     const attempt = this.#state.pairingAttempt;
-    this.#intent("idle", { pairingAttempt: null });
+    const epoch = this.#intent("idle", { pairingAttempt: null });
     if (!attempt) return;
-    void this.native.cancelPairing(attempt.attemptId).catch((cause) => {
-      if (this.#state.phase === "idle") this.#set({ error: errorText(cause) });
+    void this.#native.cancelPairing(attempt.attemptId).catch((cause) => {
+      if (this.#current(epoch)) this.#set({ error: errorText(cause) });
     });
   }
 
@@ -305,17 +307,17 @@ export class ConnectionController {
       try {
         const active = this.#physicalActiveConnectionId;
         if (active && active !== connectionId) {
-          await this.native.disconnect(active);
+          await this.#native.disconnect(active);
           this.#physicalActiveConnectionId = null;
           if (!this.#current(epoch)) return undefined;
         }
 
-        const launch = await this.native.connect(connectionId);
+        const launch = await this.#native.connect(connectionId);
         this.#physicalActiveConnectionId = launch.connectionId;
         if (!this.#current(epoch)) {
           if (this.#state.targetConnectionId !== launch.connectionId
             && this.#state.activeConnectionId !== launch.connectionId) {
-            await this.native.disconnect(launch.connectionId).catch(() => undefined);
+            await this.#native.disconnect(launch.connectionId).catch(() => undefined);
             if (this.#physicalActiveConnectionId === launch.connectionId) {
               this.#physicalActiveConnectionId = null;
             }
@@ -347,7 +349,7 @@ export class ConnectionController {
     await this.#enqueueConnection(async () => {
       if (!this.#current(epoch)) return;
       try {
-        await this.native.disconnect(connectionId);
+        await this.#native.disconnect(connectionId);
         this.#physicalActiveConnectionId = null;
         if (this.#current(epoch)) this.#set({ activeConnectionId: null });
       } catch (cause) {
@@ -363,7 +365,7 @@ export class ConnectionController {
     await this.#enqueueConnection(async () => {
       if (!this.#current(epoch)) return;
       try {
-        await this.native.forgetConnection(connectionId);
+        await this.#native.forgetConnection(connectionId);
         if (this.#physicalActiveConnectionId === connectionId) this.#physicalActiveConnectionId = null;
         if (!this.#current(epoch)) return;
         this.#set({
