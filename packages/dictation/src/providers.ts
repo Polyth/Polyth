@@ -71,7 +71,7 @@ export interface ProviderCapabilities {
   defaultModel?: string;
   context: boolean;
   local: boolean;
-  /** Direct browser use is allowed only with a server-minted ephemeral token. */
+  /** The upstream supports ephemeral client auth even if Polyth currently keeps the provider server-proxied. */
   ephemeralClientAuth: boolean;
   /** False means Polyth deliberately has no public endpoint contract to call. */
   publicApi: boolean;
@@ -99,13 +99,13 @@ export interface DictationProvider {
 const CATALOG: readonly ProviderCapabilities[] = [
   {
     id: "elevenlabs", label: "ElevenLabs Scribe Realtime v2", streaming: true,
-    partials: true, commits: true, transports: ["auto", "direct-browser", "server-proxy"],
+    partials: true, commits: true, transports: ["auto", "server-proxy"],
     languages: ["*"], defaultModel: "scribe_v2_realtime", context: true, local: false,
     ephemeralClientAuth: true, publicApi: true,
   },
   {
     id: "wispr", label: "Wispr Flow", streaming: true,
-    partials: true, commits: true, transports: ["auto", "direct-browser", "server-proxy"],
+    partials: true, commits: true, transports: ["auto"],
     languages: ["*"], context: true, local: false,
     ephemeralClientAuth: true,
     // Keep disabled until an actual Voice Interface API contract is configured;
@@ -114,19 +114,19 @@ const CATALOG: readonly ProviderCapabilities[] = [
   },
   {
     id: "openai-live", label: "OpenAI GPT Live Transcribe", streaming: true,
-    partials: true, commits: true, transports: ["auto", "direct-browser", "server-proxy"],
-    languages: ["*"], defaultModel: "gpt-realtime-transcribe", context: true, local: false,
+    partials: true, commits: true, transports: ["auto", "server-proxy"],
+    languages: ["*"], defaultModel: "gpt-live-transcribe", context: true, local: false,
     ephemeralClientAuth: true, publicApi: true,
   },
   {
-    id: "openai-transcribe", label: "OpenAI GPT Transcribe", streaming: false,
-    partials: false, commits: false, transports: ["auto", "server-proxy"],
-    languages: ["*"], defaultModel: "gpt-4o-transcribe", context: true, local: false,
+    id: "openai-transcribe", label: "OpenAI GPT Transcribe", streaming: true,
+    partials: true, commits: true, transports: ["auto", "server-proxy"],
+    languages: ["*"], defaultModel: "gpt-transcribe", context: true, local: false,
     ephemeralClientAuth: false, publicApi: true,
   },
   {
     id: "deepgram", label: "Deepgram Nova-3", streaming: true,
-    partials: true, commits: true, transports: ["auto", "direct-browser", "server-proxy"],
+    partials: true, commits: true, transports: ["auto", "server-proxy"],
     languages: ["*", "uk"], defaultModel: "nova-3", context: true, local: false,
     ephemeralClientAuth: true, publicApi: true,
   },
@@ -139,7 +139,7 @@ const CATALOG: readonly ProviderCapabilities[] = [
   {
     id: "openai-compatible", label: "OpenAI-compatible STT", streaming: false,
     partials: false, commits: false, transports: ["auto", "server-proxy"],
-    languages: ["*"], defaultModel: "whisper-1", context: false, local: false,
+    languages: ["*"], defaultModel: "whisper-1", context: true, local: false,
     ephemeralClientAuth: false, publicApi: true,
   },
   {
