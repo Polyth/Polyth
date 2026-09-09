@@ -109,8 +109,14 @@ pub unsafe extern "C" fn polyth_link_client_new(
 
 #[no_mangle]
 pub extern "C" fn polyth_link_client_free(handle: u64) {
-    if let Ok(mut clients) = clients().lock() {
-        clients.remove(&handle);
+    let removed = clients()
+        .lock()
+        .ok()
+        .and_then(|mut clients| clients.remove(&handle));
+    if let Some(client) = removed {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            runtime().block_on(client.shutdown());
+        }));
     }
 }
 
