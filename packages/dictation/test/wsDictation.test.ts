@@ -175,8 +175,9 @@ test("binary dictation validates format and keeps socket usable", async () => {
   }
 });
 
-test("legacy JSON/base64 audio remains backward compatible", async () => {
-  const dictation = createDictationService({ adapter: fakeAdapter() });
+test("legacy JSON/base64 audio is not accepted as an internal dictation transport", async () => {
+  const adapter = fakeAdapter();
+  const dictation = createDictationService({ adapter });
   const server = createServer((_req, res) => { res.statusCode = 404; res.end(); });
   attachWs(server, sessionsDouble, undefined, dictation);
   server.listen(0);
@@ -187,9 +188,15 @@ test("legacy JSON/base64 audio remains backward compatible", async () => {
     const c = await connect(port);
     ws = c.ws;
     const d = dictation.create({});
-    c.ws.send(JSON.stringify({ type: "dictation/audio", dictationId: d.id, seq: 1, pcm: b64("ok") }));
+    c.ws.send(JSON.stringify({ type: "dictation/audio", dictationId: d.id, seq: 1, pcm: b64("legacy") }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(adapter.pushes, 0);
+    assert.equal(dictation.get(d.id)?.acknowledgedSeq, 0);
+
+    c.ws.send(frame(d.id, 1, "ok"));
     assert.equal((await c.next()).seq, 1);
     assert.equal((await c.next()).text, "ok");
+    assert.equal(adapter.pushes, 1);
   } finally {
     ws?.terminate();
     server.close();
