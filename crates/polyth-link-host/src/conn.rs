@@ -5,11 +5,15 @@ use tokio::sync::Mutex;
 
 use crate::HostState;
 
+#[path = "numeric.rs"]
+mod numeric;
+
 #[allow(dead_code)]
 mod transport {
     include!("conn_transport.rs");
 }
 
+pub(crate) use numeric::{cancel_code, create_code, invalidate_codes};
 pub(crate) use transport::close_device_connections;
 
 pub async fn accept_loop(state: Arc<Mutex<HostState>>, endpoint: iroh::Endpoint) {
@@ -48,7 +52,7 @@ pub async fn accept_loop(state: Arc<Mutex<HostState>>, endpoint: iroh::Endpoint)
             }
             alpn if alpn == POLYTH_NUMERIC_ALPN.as_bytes() => {
                 tokio::spawn(async move {
-                    let _ = crate::numeric::handle_connection(state, connection, peer).await;
+                    let _ = numeric::handle_connection(state, connection, peer).await;
                 });
             }
             _ => connection.close(0u32.into(), b"alpn"),
