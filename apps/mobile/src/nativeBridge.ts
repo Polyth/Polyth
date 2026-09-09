@@ -12,6 +12,7 @@ import { SafeArea, SystemBarsStyle } from "@capacitor-community/safe-area";
 import { FilePicker } from "@capawesome/capacitor-file-picker";
 import { mobileDeepLinkPath, isNativeMobile } from "./runtime.ts";
 import { rememberPendingPairingLink } from "./pendingPair.ts";
+import { installNativePolythLink } from "./nativePolythLink.ts";
 
 export interface NativeMobileCallbacks {
   handleBack(): boolean;
@@ -67,8 +68,6 @@ async function shareDownload(anchor: HTMLAnchorElement): Promise<void> {
 export async function pickNativeFiles(): Promise<NativeFilePickResult> {
   if (!isNativeMobile()) return { status: "failed", message: "Native file picking is unavailable." };
   try {
-    // The system document picker grants scoped access to the chosen files; no
-    // broad photo-library or storage permission is requested.
     const result = await FilePicker.pickFiles();
     if (result.files.length === 0) return { status: "cancelled" };
     const files = await Promise.all(result.files.map(async (picked) => {
@@ -138,6 +137,7 @@ export async function showNativeLocalNotification(options: {
 export function installNativeMobileIntegration(callbacks: NativeMobileCallbacks): void {
   if (!isNativeMobile() || installed) return;
   installed = true;
+  installNativePolythLink();
   document.body.dataset.nativePlatform = Capacitor.getPlatform();
 
   void SafeArea.setSystemBarsStyle({ style: SystemBarsStyle.Default });
