@@ -12,7 +12,12 @@ import {
   type MobileHost,
   type MobileLaunch,
 } from "./runtime.ts";
-import { nativeLinkAvailable, polythLink } from "./polythLink.ts";
+import {
+  nativeLinkAvailable,
+  polythLink,
+  type ConnectionMetadata,
+} from "./polythLink.ts";
+import { installNativePolythLink } from "./nativePolythLink.ts";
 import { isPairingLink, previewPairingLink } from "@polyth/pairing-qr";
 import { bootstrapUrlWithNext, connectionUiState } from "./connectionUi.ts";
 import {
@@ -24,12 +29,21 @@ import "./styles.css";
 
 type ConnectLaunch = Extract<MobileLaunch, { kind: "connect" }>;
 
+installNativePolythLink();
+
 function connectionLabel(host: MobileHost): string {
   try {
     return new URL(host.url).host;
   } catch {
     return host.url;
   }
+}
+
+function trustedConnectionDetail(connection: ConnectionMetadata): string {
+  if (connection.revoked) return "Revoked";
+  if (!connection.hasSecureIdentity) return "Secure identity unavailable — pair again";
+  if (connection.lastTransport) return `Last connected via ${connection.lastTransport}`;
+  return "Paired securely";
 }
 
 function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
@@ -39,6 +53,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
   const [ticket, setTicket] = useState(initialPending ?? "");
   const [phrase, setPhrase] = useState<string[] | null>(null);
   const [attemptId, setAttemptId] = useState<string | null>(null);
+  const [trusted, setTrusted] = useState<ConnectionMetadata[]>([]);
   const [stage, setStage] = useState(ui.showUnavailableBanner
     ? "Polyth Link is unavailable in this build"
     : "Connect to your Polyth");
@@ -56,6 +71,19 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
       (scanQr as { cleanup?: () => void }).cleanup?.();
     };
   }, []);
+
+  useEffect(() => {
+    if (!nativeAvailable) return;
+    let cancelled = false;
+    void polythLink().listConnections()
+      .then((connections) => {
+        if (!cancelled) setTrusted(connections);
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
+      });
+    return () => { cancelled = true; };
+  }, [nativeAvailable]);
 
   useEffect(() => {
     if (launch.pendingPair) rememberPendingPairingLink(launch.pendingPair);
@@ -194,6 +222,35 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
     }
   };
 
+  const reconnectTrusted = async (connection: ConnectionMetadata) => {
+    if (connection.revoked || !connection.hasSecureIdentity) return;
+    setBusy(true);
+    setError("");
+    setStage(`Connecting to ${connection.hostLabel || "your Polyth"}…`);
+    try {
+      const launched = await polythLink().connect(connection.id);
+      location.replace(bootstrapUrlWithNext(launched.bootstrapUrl, launch.deepLinkPath));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      setStage("Connect to your Polyth");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const forgetTrusted = async (connectionId: string) => {
+    setBusy(true);
+    setError("");
+    try {
+      await polythLink().forgetConnection(connectionId);
+      setTrusted((connections) => connections.filter((connection) => connection.id !== connectionId));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const legacyConnect = async () => {
     setBusy(true);
     const checked = await checkPolythHost(url);
@@ -217,18 +274,42 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
           {ui.showUnavailableBanner ? (
             <p>
               This build does not include a native Polyth Link adapter, so QR pairing cannot run.
-              You can still use an insecure development URL below. A pairing code kept in memory
-              can be retried during this app session; after expiration or restart you will need a
-              new QR.
+              You can still use an insecure development URL below.
             </p>
           ) : (
             <p>
-              Scan a QR from Settings → Polyth Link. Compare the four words, then allow the device
-              on your computer. The current pairing code stays in memory for this app session only.
-              After it expires or the app restarts, scan a new QR.
+              Pair once with a QR from Settings → Polyth Link. After approval, this device keeps its
+              identity in the system secure store and can reconnect here without another QR.
             </p>
           )}
         </div>
+
+        {nativeAvailable && trusted.length > 0 && (
+          <section className="mobile-connect-recents" aria-labelledby="mobile-trusted-title">
+            <h2 id="mobile-trusted-title">Trusted Polyth hosts</h2>
+            {trusted.map((connection) => (
+              <article key={connection.id}>
+                <button
+                  type="button"
+                  className="mobile-connect-recent"
+                  disabled={busy || connection.revoked || !connection.hasSecureIdentity}
+                  onClick={() => void reconnectTrusted(connection)}
+                >
+                  <strong>{connection.hostLabel || "Polyth"}</strong>
+                  <span>{trustedConnectionDetail(connection)}</span>
+                </button>
+                <button
+                  type="button"
+                  className="mobile-connect-forget"
+                  disabled={busy}
+                  onClick={() => void forgetTrusted(connection.id)}
+                >
+                  Forget
+                </button>
+              </article>
+            ))}
+          </section>
+        )}
 
         {ui.showSecurePairing && !phrase && (
           <>
@@ -244,20 +325,20 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
                 Cancel scan
               </button>
             </div>
-          <label className="mobile-connect-field">
-            <span>Pairing code</span>
-            <textarea
-              rows={3}
-              autoCapitalize="none"
-              autoCorrect="off"
-              placeholder="polyth://pair?v=1&t=…"
-              value={ticket}
-              onChange={(event) => {
-                setTicket(event.target.value);
-                if (isPairingDeepLink(event.target.value)) rememberPendingPairingLink(event.target.value);
-              }}
-            />
-          </label>
+            <label className="mobile-connect-field">
+              <span>Pairing code</span>
+              <textarea
+                rows={3}
+                autoCapitalize="none"
+                autoCorrect="off"
+                placeholder="polyth://pair?v=1&t=…"
+                value={ticket}
+                onChange={(event) => {
+                  setTicket(event.target.value);
+                  if (isPairingDeepLink(event.target.value)) rememberPendingPairingLink(event.target.value);
+                }}
+              />
+            </label>
           </>
         )}
 
