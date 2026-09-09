@@ -190,6 +190,7 @@ function MicButton() {
   const streamRef = useRef<StreamingDictation | null>(null);
   const browserTranscriptRef = useRef("");
   const browserCommitRef = useRef(false);
+  const startGeneration = useRef(0);
   const support = speechSupport(typeof window !== "undefined" ? window : undefined);
   const serverStt = prefs.sttEngine === "server";
   const directElevenLabs = serverStt
@@ -197,6 +198,7 @@ function MicButton() {
     && prefs.dictationTransport === "direct-browser";
 
   useEffect(() => () => {
+    startGeneration.current++;
     browserCommitRef.current = false;
     recRef.current?.abort();
     streamRef.current?.cancel();
@@ -252,8 +254,6 @@ function MicButton() {
     ? boundedPartial(partial)
     : lifecycleStatus;
 
-  // Do not announce every changing recognition revision. Accessibility gets
-  // lifecycle transitions while the visual status can update at provider rate.
   const lastAnnounced = useRef<string | null>(null);
   useEffect(() => {
     if (lifecycleStatus && lifecycleStatus !== lastAnnounced.current) announce(lifecycleStatus);
@@ -261,6 +261,7 @@ function MicButton() {
   }, [lifecycleStatus]);
 
   const fail = (raw: unknown) => {
+    startGeneration.current++;
     browserCommitRef.current = false;
     browserTranscriptRef.current = "";
     const rec = recRef.current;
@@ -275,6 +276,7 @@ function MicButton() {
   };
 
   const cancel = () => {
+    startGeneration.current++;
     browserCommitRef.current = false;
     browserTranscriptRef.current = "";
     const rec = recRef.current;
@@ -292,7 +294,7 @@ function MicButton() {
     const rec = recRef.current;
     if (rec) {
       setPhase("transcribing");
-      try { rec.stop(); } catch (error) { fail(error); }
+      try { rec.stop(); } catch (stopError) { fail(stopError); }
       return;
     }
 
@@ -324,9 +326,6 @@ function MicButton() {
     rec.continuous = true;
     rec.interimResults = true;
     browserTranscriptRef.current = "";
-    // Natural browser end is treated as a completed recording. Explicit
-    // Cancel flips this false first, so the pre-existing composer draft stays
-    // byte-for-byte untouched.
     browserCommitRef.current = true;
     rec.onresult = (e) => {
       let interim = "";
@@ -338,6 +337,9 @@ function MicButton() {
       setPartial(mergeTranscript(browserTranscriptRef.current, interim));
     };
     rec.onerror = (e) => {
+      // Avoid fail() aborting the recognizer from inside its own error callback,
+      // which can emit a second "aborted" error and hide the root cause.
+      recRef.current = null;
       browserCommitRef.current = false;
       fail(e.error ?? tr("voice.microphoneError"));
     };
@@ -356,13 +358,15 @@ function MicButton() {
     setPhase("listening");
   };
 
-  const startProvider = async () => {
+  const startProvider = async (generation: number) => {
     setPhase("starting");
     try {
       const language = prefs.lang || "auto";
       const context = prefs.contextInjection ? currentDictationContext(language) : { language };
-      const onPartial = (text: string) => setPartial(text);
-      streamRef.current = directElevenLabs
+      const onPartial = (text: string) => {
+        if (startGeneration.current === generation) setPartial(text);
+      };
+      const stream = directElevenLabs
         ? await startDirectElevenLabsDictation({
             model: prefs.dictationModel || "scribe_v2_realtime",
             language,
@@ -377,18 +381,26 @@ function MicButton() {
             onPartial,
             onError: fail,
           });
+      if (startGeneration.current !== generation) {
+        stream.cancel();
+        return;
+      }
+      streamRef.current = stream;
       setPhase("listening");
-    } catch (err) {
-      streamRef.current = null;
-      fail(err);
+    } catch (startError) {
+      if (startGeneration.current === generation) {
+        streamRef.current = null;
+        fail(startError);
+      }
     }
   };
 
   const start = () => {
     setError(null);
     setPartial("");
+    const generation = ++startGeneration.current;
     if (serverStt) {
-      if (capability?.available) void startProvider();
+      if (capability?.available) void startProvider(generation);
       return;
     }
     startBrowser();
