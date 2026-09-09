@@ -11,6 +11,7 @@ import {
   createDictationService,
   createWhisperSttAdapter,
   providerCatalog,
+  type DictationContext,
   type DictationProviderId,
   type DictationService,
   type DictationTransport,
@@ -85,9 +86,14 @@ export function dictationRoutes(dictation: DictationService): RouteHandler {
       }
       if (path === "/api/dictation" && method === "POST") {
         const input = await body();
+        const rawContext = input.context;
+        const context = rawContext && typeof rawContext === "object" && !Array.isArray(rawContext)
+          ? rawContext as Partial<DictationContext>
+          : undefined;
         json(200, dictation.create({
           ...(input.sessionId ? { sessionId: String(input.sessionId) } : {}),
           ...(input.language ? { language: String(input.language) } : {}),
+          ...(context ? { context } : {}),
         }));
         return true;
       }
@@ -146,7 +152,6 @@ const providerAvailability = (
       available = selected === provider.id && !!localModelInstalled?.(model);
       if (!available) reason = selected === provider.id ? "local model is not downloaded" : "not selected";
     } else if (provider.id === "web-speech") {
-      // The server cannot probe browser Web Speech support; the web client does.
       available = selected === provider.id;
     } else {
       reason = provider.publicApi ? "provider adapter not enabled yet" : "public Voice Interface API contract unavailable";
