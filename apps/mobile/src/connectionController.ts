@@ -41,6 +41,7 @@ export interface ConnectionControllerState {
   epoch: number;
   trusted: ConnectionMetadata[];
   discovered: DiscoveredPolyth[];
+  numericTarget: DiscoveredPolyth | null;
   activeConnectionId: string | null;
   targetConnectionId: string | null;
   pairingAttempt: PairingAttempt | null;
@@ -87,6 +88,7 @@ function failurePhase(cause: unknown, fallback: ConnectionPhase): ConnectionPhas
     case "incompatible":
       return "incompatible";
     case "rate-limited":
+    case "request-rate-limited":
     case "pairing-rate-limited":
       return "numeric-code-rate-limited";
     case "transport-unavailable":
@@ -146,6 +148,7 @@ export class ConnectionController {
       epoch: 0,
       trusted: [],
       discovered: [],
+      numericTarget: null,
       activeConnectionId: null,
       targetConnectionId: null,
       pairingAttempt: null,
@@ -187,6 +190,7 @@ export class ConnectionController {
       epoch,
       error: null,
       targetConnectionId: null,
+      numericTarget: null,
       ...patch,
     });
     return epoch;
@@ -266,6 +270,55 @@ export class ConnectionController {
 
   stopDiscovery(): void {
     this.#intent("idle", { discovered: [] });
+  }
+
+  startNumericCodeEntry(target: DiscoveredPolyth): void {
+    this.#intent("numeric-code-entry", {
+      numericTarget: target,
+      pairingAttempt: null,
+    });
+  }
+
+  cancelNumericCodeEntry(): void {
+    this.#intent("idle", { pairingAttempt: null });
+  }
+
+  async submitNumericCode(code: string, label = "This phone"): Promise<PairingAttempt | undefined> {
+    const target = this.#state.numericTarget;
+    if (!target) {
+      this.#intent("fatal-error", { error: "Choose a nearby Polyth first." });
+      return undefined;
+    }
+    const epoch = this.#intent("numeric-code-validating", {
+      numericTarget: target,
+      pairingAttempt: null,
+    });
+    try {
+      const attempt = await this.#native.beginNumericPairing({
+        hostEndpointId: target.hostEndpointId,
+        addresses: target.addresses,
+        port: target.port,
+        code,
+        label,
+      });
+      if (!this.#current(epoch)) {
+        await this.#native.cancelPairing(attempt.attemptId).catch(() => undefined);
+        return undefined;
+      }
+      this.#set({
+        phase: attempt.safetyPhrase?.length ? "safety-confirmation" : "pairing",
+        pairingAttempt: attempt,
+      });
+      return attempt;
+    } catch (cause) {
+      if (!this.#current(epoch)) return undefined;
+      this.#set({
+        phase: failurePhase(cause, "numeric-code-entry"),
+        numericTarget: target,
+        error: errorText(cause),
+      });
+      return undefined;
+    }
   }
 
   startQrScan(): number {
