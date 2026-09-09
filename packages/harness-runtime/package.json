@@ -22,7 +22,7 @@
       "hasSettings": true,
       "settingsGroup": "Engineering"
     },
-    "webEntry": "./widgets/public.tsx"
+    "webEntry": "./widgets/index.tsx"
   },
   "peerDependencies": {
     "react": "^19.0.0"
