@@ -156,6 +156,8 @@ export interface AcpRuntimeOptions {
     /** Maximum silence while a native prompt is active. Activity resets the
      * watchdog; zero disables it for protocol fixtures that own their clock. */
     promptIdleTimeoutMs?: number;
+    /** Model-specific controls learned from capability-probed discovery. */
+    models?: ModelDescriptor[];
 }
 
 const parseAuthMethods = (value: unknown): AcpAuthMethod[] =>
@@ -226,6 +228,16 @@ export function createAcpRuntime(
         const reset = explicitThoughtLevelReset(sessionConfig)
             ?? (allowCurrent ? sessionConfig.thoughtLevel?.currentValue : undefined);
         if (model && reset) thoughtDefaults.set(model, reset);
+    };
+    const advertisedModels = (): ModelDescriptor[] => {
+        const current = currentModelId(sessionConfig);
+        return acpModelDescriptors(sessionConfig, harnessId).map((model) => {
+            const { variants: liveVariants, defaultVariant: _defaultVariant, ...base } = model;
+            const variants = model.modelID === current
+                ? liveVariants
+                : options.models?.find((known) => known.modelID === model.modelID)?.variants;
+            return variants?.length ? { ...base, variants } : base;
+        });
     };
     const nativeCommands: RuntimeCommandDescriptor[] = [];
     const listeners = new Set<(sid: string, event: RuntimeEvent) => void>();
@@ -509,6 +521,9 @@ export function createAcpRuntime(
             }
             operation = "thought";
             const thought = sessionConfig.thoughtLevel;
+            if (variant && !thought) {
+                return { ok: false, code: "unsupported", message: "This model does not expose thinking-level selection." };
+            }
             const target = variant ?? (modelId ? thoughtDefaults.get(modelId) : undefined)
                 ?? explicitThoughtLevelReset(sessionConfig);
             if (thought && target && target !== thought.currentValue) {
@@ -543,7 +558,7 @@ export function createAcpRuntime(
         commands: async () => [...nativeCommands],
         // Only what the agent advertised for this session. An agent that
         // exposes no model control reports an empty catalog, truthfully.
-        models: async () => modelSelectionUnavailable ? [] : acpModelDescriptors(sessionConfig, harnessId),
+        models: async () => modelSelectionUnavailable ? [] : advertisedModels(),
         agents: async () => [],
         ensureSession: async (input) => {
             if (input.backendSessionId === nativeId && nativeId) return nativeId;
@@ -562,7 +577,7 @@ export function createAcpRuntime(
                 return { kind: "rejected", code: "unsupported", message: "ACP adapter supports idle text turns" };
             const catalog: ModelDescriptor[] = modelSelectionUnavailable
                 ? []
-                : acpModelDescriptors(sessionConfig, harnessId);
+                : advertisedModels();
             if (request.model && (modelSelectionUnavailable || modelControl(sessionConfig).kind === "none")) {
                 return { kind: "rejected", code: "unsupported", message: "This agent does not expose model selection." };
             }

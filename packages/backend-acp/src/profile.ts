@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { HarnessContext, HarnessRegistry } from "@polyth/contracts";
+import type { HarnessContext, HarnessRegistry, ModelDescriptor } from "@polyth/contracts";
 import { acknowledgeCapabilityApplication, releaseProcessExecution } from "@polyth/harness-runtime";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { ACP_STATIC_FEATURES, connectAcp, createAcpRuntime, type AcpProfile } from "./index.ts";
@@ -9,6 +9,8 @@ import { configureAcpCapabilityDelivery } from "./capabilityDelivery.ts";
 export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile) {
     const registry = host.services.require(serverServiceKey<HarnessRegistry>("harnesses"));
     let registration: ReturnType<HarnessRegistry["register"]> | undefined;
+    const catalogs = new Map<string, ModelDescriptor[]>();
+    const contextKey = (context: HarnessContext) => JSON.stringify([context.spaceId, context.projectId, context.cwd]);
     /** ACP exposes its model catalog only while opening a native session. */
     const discoveryProbe = (context: HarnessContext) => ({
         async open(signal?: AbortSignal) {
@@ -19,6 +21,11 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
                 const result = await connection.rpc.request("session/new", { cwd: context.cwd, mcpServers: [] });
                 return {
                     result,
+                    setConfigOption: (configId: string, value: string) => connection.rpc.request("session/set_config_option", {
+                        sessionId: (result as { sessionId: string }).sessionId,
+                        configId,
+                        value,
+                    }),
                     close: async () => {
                         signal?.removeEventListener("abort", abort);
                         await connection.rpc.close();
@@ -61,6 +68,7 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
                         harnessId: profile.descriptor.id,
                         version: availability.version ?? "unknown",
                         authFingerprint: String(availability.authenticated ?? "unknown"),
+                        cacheIdentity: contextKey(context),
                         probe: discoveryProbe(context),
                     });
                     if (discovery.state !== "ready") {
@@ -72,6 +80,7 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
                                 : discovery.reason,
                         };
                     }
+                    catalogs.set(contextKey(context), discovery.models);
                     return {
                         state: "ready" as const,
                         catalog: { models: discovery.models, agents: [] },
@@ -92,6 +101,7 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
                             profile.descriptor.id,
                             connection.agentCapabilities,
                             profile.descriptor.name,
+                            { models: catalogs.get(contextKey(context)) },
                         );
                     } catch (error) {
                         await connection.rpc.close().catch(() => {});
@@ -105,6 +115,6 @@ export function registerAcpProfile(host: ServerPackageHost, profile: AcpProfile)
                 },
             });
         },
-        onDisable() { registration?.dispose(); },
+        onDisable() { registration?.dispose(); catalogs.clear(); },
     };
 }

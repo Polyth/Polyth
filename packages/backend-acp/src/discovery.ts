@@ -11,7 +11,11 @@ import { acpModelDescriptors, parseSessionConfig } from "./sessionConfig.ts";
 
 export interface AcpDiscoveryProbe {
   /** Opens a connection, runs `session/new`, returns its raw result. */
-  open(signal?: AbortSignal): Promise<{ result: unknown; close(): Promise<void> }>;
+  open(signal?: AbortSignal): Promise<{
+    result: unknown;
+    setConfigOption?(configId: string, value: string): Promise<unknown>;
+    close(): Promise<void>;
+  }>;
 }
 
 export interface AcpDiscoveryOptions {
@@ -20,6 +24,8 @@ export interface AcpDiscoveryOptions {
   version: string;
   /** Auth-relevant identity, so a sign-in does not serve a stale answer. */
   authFingerprint: string;
+  /** Project/runtime identity because ACP options may depend on cwd or account scope. */
+  cacheIdentity?: string;
   probe: AcpDiscoveryProbe;
   ttlMs?: number;
   timeoutMs?: number;
@@ -43,7 +49,38 @@ const AUTH_TTL_MS = 60_000;
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 const cacheKey = (options: AcpDiscoveryOptions): string =>
-  JSON.stringify([options.harnessId, options.version, options.authFingerprint]);
+  JSON.stringify([options.harnessId, options.version, options.authFingerprint, options.cacheIdentity ?? ""]);
+
+const withoutVariants = (model: ModelDescriptor): ModelDescriptor => {
+  const { variants: _variants, defaultVariant: _defaultVariant, ...rest } = model;
+  return rest;
+};
+
+/** Config options are dependent state: changing the model may add, remove, or
+ * alter thought levels. Probe each model on the throwaway session instead of
+ * claiming the current model's levels for every row. */
+const discoverDescriptors = async (
+  opened: Awaited<ReturnType<AcpDiscoveryProbe["open"]>>,
+  harnessId: string,
+): Promise<ModelDescriptor[]> => {
+  const initial = parseSessionConfig(opened.result);
+  const models = acpModelDescriptors(initial, harnessId).map(withoutVariants);
+  if (!initial.model || !opened.setConfigOption) return models;
+  for (const model of models) {
+    try {
+      const result = initial.model.currentValue === model.modelID
+        ? opened.result
+        : await opened.setConfigOption(initial.model.id, model.modelID);
+      const selected = acpModelDescriptors(parseSessionConfig(result), harnessId)
+        .find((candidate) => candidate.modelID === model.modelID);
+      if (selected?.variants?.length) model.variants = selected.variants;
+    } catch {
+      // Keep the model usable, but do not invent capabilities the agent did
+      // not confirm for it.
+    }
+  }
+  return models;
+};
 
 export function invalidateAcpDiscovery(options?: Pick<AcpDiscoveryOptions, "harnessId">): void {
   if (!options) { cache.clear(); return; }
@@ -83,9 +120,11 @@ export function discoverAcpModels(options: AcpDiscoveryOptions): Promise<AcpDisc
       void opened.then((late) => {
         if (controller.signal.aborted) void late.close().catch(() => {});
       }, () => {});
-      session = await Promise.race([opened, timedOut]);
-      const config = parseSessionConfig(session.result);
-      return { state: "ready", models: acpModelDescriptors(config, options.harnessId) };
+       session = await Promise.race([opened, timedOut]);
+       return {
+         state: "ready",
+         models: await Promise.race([discoverDescriptors(session, options.harnessId), timedOut]),
+       };
     } catch (error) {
       const auth = authRefusal(error);
       if (auth) return { state: "auth-required", reason: auth };
