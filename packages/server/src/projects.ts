@@ -55,7 +55,10 @@ function validProjectIcon(icon: string): boolean {
     && !/(?:javascript:|https?:|\bdata:)/i.test(svgWithoutNamespaces);
 }
 
-export function createProjectService(dataDir: string): ProjectRegistry {
+export function createProjectService(
+  dataDir: string,
+  opts: { onRemoved?: (project: Project) => void | Promise<void> } = {},
+): ProjectRegistry {
   const file = `${dataDir}/projects.json`;
   let items: Project[] = [];
   try {
@@ -123,9 +126,17 @@ export function createProjectService(dataDir: string): ProjectRegistry {
       async remove(id) {
         // A delete that names another tenant's project must not silently
         // succeed either — it removes nothing and says not-found.
-        require_(id);
+        const project = { ...require_(id) };
         items = items.filter((p) => p.id !== id);
         persist();
+        // Project deletion is canonical even if best-effort auxiliary cleanup
+        // fails. Stores also resolve only existing project IDs, so a failed hook
+        // can leave at most unreachable garbage, never a cross-tenant reference.
+        try {
+          await opts.onRemoved?.(project);
+        } catch (cause) {
+          console.warn(`[polyth] project cleanup skipped for ${project.id}`, cause);
+        }
       },
 
       // Remote-bound project: `path` lives on the machine behind `remote`, so
