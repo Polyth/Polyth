@@ -1,9 +1,10 @@
-// F8: server STT through any OpenAI-compatible Whisper endpoint
+// F8: server STT through any OpenAI-compatible transcription endpoint
 // (POST {baseUrl}/audio/transcriptions, multipart file upload). The adapter
 // buffers PCM in memory (the dictation service caps total bytes upstream) and
 // uploads once on finalize — no partials, no retention: audio is dropped as
 // soon as the request settles. Works in Node 22 and browsers (fetch/FormData/
 // Blob are globals in both).
+import type { DictationContext } from "./providers.ts";
 import type { DictationFormat, SttAdapter, SttStream } from "./streaming.ts";
 
 export interface WhisperSttOptions {
@@ -32,13 +33,13 @@ export function pcmToWav(pcm: Uint8Array, format: DictationFormat): Uint8Array {
   dv.setUint32(4, 36 + pcm.byteLength, true);
   ascii(8, "WAVE");
   ascii(12, "fmt ");
-  dv.setUint32(16, 16, true);          // fmt chunk size
-  dv.setUint16(20, 1, true);           // PCM
+  dv.setUint32(16, 16, true);
+  dv.setUint16(20, 1, true);
   dv.setUint16(22, format.channels, true);
   dv.setUint32(24, format.sampleRate, true);
   dv.setUint32(28, byteRate, true);
   dv.setUint16(32, blockAlign, true);
-  dv.setUint16(34, 16, true);          // bits per sample
+  dv.setUint16(34, 16, true);
   ascii(36, "data");
   dv.setUint32(40, pcm.byteLength, true);
   out.set(pcm, 44);
@@ -47,11 +48,21 @@ export function pcmToWav(pcm: Uint8Array, format: DictationFormat): Uint8Array {
 
 const joinUrl = (base: string, path: string): string => `${base.replace(/\/+$/, "")}${path}`;
 
+const promptFromContext = (context?: DictationContext): string => {
+  if (!context) return "";
+  const glossary = Object.entries(context.glossary ?? {}).map(([from, to]) => `${from}: ${to}`);
+  return [
+    context.lexicalContext ?? "",
+    ...(context.keywords?.length ? [`Terms: ${context.keywords.join(", ")}`] : []),
+    ...(glossary.length ? [`Glossary: ${glossary.join(", ")}`] : []),
+  ].filter(Boolean).join("\n").slice(0, 1_500);
+};
+
 export function createWhisperSttAdapter(opts: WhisperSttOptions): SttAdapter {
   const fetchFn = opts.fetchFn ?? fetch;
   return {
     engine: "whisper",
-    createStream({ format, language }): SttStream {
+    createStream({ format, language, context }): SttStream {
       const chunks: Uint8Array[] = [];
       let bytes = 0;
       let cancelled = false;
@@ -69,13 +80,13 @@ export function createWhisperSttAdapter(opts: WhisperSttOptions): SttAdapter {
           chunks.length = 0;
           const wav = pcmToWav(pcm, format);
 
-          // Standard OpenAI fields only — nothing non-standard is sent, so
-          // self-hosted Whisper servers accept the same request.
           const form = new FormData();
           form.append("file", new Blob([wav.buffer as ArrayBuffer], { type: "audio/wav" }), "audio.wav");
           if (opts.model) form.append("model", opts.model);
           const lang = language ?? opts.language;
-          if (lang) form.append("language", lang);
+          if (lang && lang !== "auto") form.append("language", lang.split("-")[0] ?? lang);
+          const prompt = promptFromContext(context);
+          if (prompt) form.append("prompt", prompt);
           form.append("response_format", "json");
 
           const res = await fetchFn(joinUrl(opts.baseUrl, "/audio/transcriptions"), {
@@ -91,7 +102,7 @@ export function createWhisperSttAdapter(opts: WhisperSttOptions): SttAdapter {
             const parsed = JSON.parse(raw) as { text?: unknown };
             return typeof parsed.text === "string" ? parsed.text.trim() : raw.trim();
           } catch {
-            return raw.trim(); // response_format ignored by the server; plain text
+            return raw.trim();
           }
         },
         cancel() {
@@ -112,7 +123,6 @@ export function downsampleToPcm16(input: Float32Array, fromRate: number, toRate 
   const length = Math.floor(input.length / ratio);
   const out = new Int16Array(length);
   for (let i = 0; i < length; i++) {
-    // average the source window for cheap anti-aliasing
     const start = Math.floor(i * ratio);
     const end = Math.min(Math.floor((i + 1) * ratio), input.length);
     let sum = 0;
