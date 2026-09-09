@@ -57,19 +57,25 @@ Java_com_polyth_mobile_PolythLinkRust_invoke(JNIEnv* env, jclass, jlong handle, 
   UtfChars params_chars(env, params_json);
   if (method_chars.get() == nullptr || params_chars.get() == nullptr) return nullptr;
 
-  jbyte* secret = nullptr;
-  jsize secret_len = 0;
+  uint8_t secret[32] = {};
+  const uint8_t* secret_ptr = nullptr;
+  size_t secret_len = 0;
   if (identity_secret != nullptr) {
-    secret_len = env->GetArrayLength(identity_secret);
-    secret = env->GetByteArrayElements(identity_secret, nullptr);
-    if (secret == nullptr) return nullptr;
+    const jsize length = env->GetArrayLength(identity_secret);
+    secret_len = static_cast<size_t>(length);
+    if (length == static_cast<jsize>(sizeof(secret))) {
+      env->GetByteArrayRegion(identity_secret, 0, length, reinterpret_cast<jbyte*>(secret));
+      if (env->ExceptionCheck()) {
+        std::fill(secret, secret + sizeof(secret), 0);
+        return nullptr;
+      }
+      secret_ptr = secret;
+    }
   }
 
   char* result = polyth_link_invoke(
-      static_cast<uint64_t>(handle), method_chars.get(), params_chars.get(),
-      reinterpret_cast<const uint8_t*>(secret), static_cast<size_t>(secret_len));
-
-  if (secret != nullptr) env->ReleaseByteArrayElements(identity_secret, secret, JNI_ABORT);
+      static_cast<uint64_t>(handle), method_chars.get(), params_chars.get(), secret_ptr, secret_len);
+  std::fill(secret, secret + sizeof(secret), 0);
   return owned_string(env, result);
 }
 
