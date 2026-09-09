@@ -572,8 +572,8 @@ test("selectors: truthful model and agent names with per-session model persisten
   const row = page.locator(".model-picker-row", { hasText: "Fable Mini" });
   assert.equal(await row.locator(".model-picker-copy small").innerText(), "Text · 128K");
   await row.hover();
-  await page.waitForSelector(".model-hover-card .model-details", { state: "visible" });
-  assert.ok((await page.locator(".model-hover-card").innerText()).includes("Context window"));
+  await page.waitForSelector(".model-details-panel .model-hover-details", { state: "visible" });
+  assert.ok((await page.locator(".model-details-panel").innerText()).includes("Context window"));
   await shot(page, "model_picker_truth.png");
 
   // Selecting the model persists the per-session pending configuration.
