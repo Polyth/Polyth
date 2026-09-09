@@ -68,6 +68,22 @@ test("Deepgram Nova-3 uses raw PCM, safe auth headers, and bounded keyterms", as
   await stream.cancel?.();
 });
 
+test("Deepgram maps Polyth uk-UA to Nova-3 streaming language uk", async () => {
+  const socket = new FakeSocket();
+  let connectedUrl = "";
+  const adapter = createDeepgramSttAdapter({
+    apiKey: "test",
+    connect(url) {
+      connectedUrl = url;
+      return socket as never;
+    },
+  });
+  const stream = adapter.createStream({ format: DICTATION_FORMAT, language: "uk-UA" });
+  assert.equal(new URL(connectedUrl).searchParams.get("language"), "uk");
+  socket.open();
+  await stream.cancel?.();
+});
+
 test("Deepgram finalization commits the final result and sends Finalize", async () => {
   const socket = new FakeSocket();
   const adapter = createDeepgramSttAdapter({
