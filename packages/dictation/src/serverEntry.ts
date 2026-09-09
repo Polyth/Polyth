@@ -26,6 +26,7 @@ import {
 } from "./index.ts";
 import { createDeepgramSttAdapter } from "./deepgram.ts";
 import { createElevenLabsSttAdapter } from "./elevenlabs.ts";
+import { createWisprSttAdapter } from "./wispr.ts";
 import { createOpenAIRealtimeSttAdapter } from "./openaiRealtime.ts";
 import { createSpeechmaticsSttAdapter } from "./speechmatics.ts";
 import { createLocalModelManager } from "./localModels.ts";
@@ -201,7 +202,7 @@ const providerAvailability = (
     let available = false;
     let reason: string | undefined;
     const participating = provider.id === selected || provider.id === fallback;
-    if (["elevenlabs", "deepgram", "openai-live", "openai-transcribe", "speechmatics"].includes(provider.id)) {
+    if (["elevenlabs", "wispr", "deepgram", "openai-live", "openai-transcribe", "speechmatics"].includes(provider.id)) {
       available = !!voice.resolveDictationProviderKey(provider.id);
       if (!available) reason = participating
         ? `missing ${provider.id === fallback ? settings.dictation.fallbackApiKeyEnv : settings.dictation.apiKeyEnv || providerDefaultEnv(provider.id)}`
@@ -272,42 +273,84 @@ export function voiceRoutes(deps: {
     if (path === "/api/dictation/token" && method === "POST") {
       const settings = deps.voice.get().dictation;
       const input = await request.body();
-      const provider = String(input.provider ?? settings.provider);
+      const provider = String(input.provider ?? settings.provider) as DictationProviderId;
       const directCloudAllowed = settings.processingPolicy === "prefer-cloud"
         || settings.processingPolicy === "auto-fallback"
         || settings.processingPolicy === "browser-fallback";
-      if (provider !== "elevenlabs" || settings.provider !== "elevenlabs" || !directCloudAllowed) {
+      const directProvider = provider === "elevenlabs" || provider === "wispr";
+      if (!directProvider || settings.provider !== provider || !directCloudAllowed) {
         json(400, {
           error: "provider_unavailable",
-          message: "ElevenLabs direct tokens require ElevenLabs as the selected cloud provider and a cloud-processing policy",
+          message: "Direct dictation tokens require the requested provider to be the selected cloud provider and a cloud-processing policy",
         });
         return true;
       }
-      const key = deps.voice.resolveDictationProviderKey("elevenlabs");
+      const key = deps.voice.resolveDictationProviderKey(provider);
       if (!key) {
-        json(401, { error: "invalid_credentials", message: `missing ${settings.apiKeyEnv || "ELEVENLABS_API_KEY"}` });
+        json(401, { error: "invalid_credentials", message: `missing ${settings.apiKeyEnv || providerDefaultEnv(provider)}` });
         return true;
       }
       try {
-        const response = await fetchFn("https://api.elevenlabs.io/v1/single-use-token/realtime_scribe", {
+        if (provider === "elevenlabs") {
+          const response = await fetchFn("https://api.elevenlabs.io/v1/single-use-token/realtime_scribe", {
+            method: "POST",
+            headers: { "xi-api-key": key },
+          });
+          if (!response.ok) {
+            const code = response.status === 401 || response.status === 403 ? "invalid_credentials"
+              : response.status === 429 ? "rate_limited" : "provider_unavailable";
+            json(response.status === 429 ? 429 : response.status === 401 || response.status === 403 ? 401 : 502, {
+              error: code,
+              message: `ElevenLabs token request failed: HTTP ${response.status}`,
+            });
+            return true;
+          }
+          const payload = await response.json() as { token?: unknown };
+          if (typeof payload.token !== "string" || !payload.token) {
+            json(502, { error: "protocol_error", message: "ElevenLabs token response did not include a token" });
+            return true;
+          }
+          json(200, { provider: "elevenlabs", token: payload.token, expiresInSeconds: 900 });
+          return true;
+        }
+
+        const clientId = String(input.clientId ?? "").trim().slice(0, 128);
+        if (!clientId || !/^[A-Za-z0-9._:-]+$/.test(clientId)) {
+          json(400, { error: "invalid-input", message: "Wispr clientId is required and must be an opaque identifier" });
+          return true;
+        }
+        // Warm-up is opportunistic and contains no user/audio/context data. It
+        // must never block token issuance or make Wispr a startup dependency.
+        void fetchFn("https://platform-api.wisprflow.ai/api/v1/dash/warmup_dash", {
+          headers: { authorization: `Bearer ${key}` },
+        }).catch(() => {});
+        const response = await fetchFn("https://platform-api.wisprflow.ai/api/v1/dash/generate_access_token", {
           method: "POST",
-          headers: { "xi-api-key": key },
+          headers: {
+            authorization: `Bearer ${key}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ client_id: clientId, duration_secs: 900 }),
         });
         if (!response.ok) {
           const code = response.status === 401 || response.status === 403 ? "invalid_credentials"
             : response.status === 429 ? "rate_limited" : "provider_unavailable";
           json(response.status === 429 ? 429 : response.status === 401 || response.status === 403 ? 401 : 502, {
             error: code,
-            message: `ElevenLabs token request failed: HTTP ${response.status}`,
+            message: `Wispr Flow token request failed: HTTP ${response.status}`,
           });
           return true;
         }
-        const payload = await response.json() as { token?: unknown };
-        if (typeof payload.token !== "string" || !payload.token) {
-          json(502, { error: "protocol_error", message: "ElevenLabs token response did not include a token" });
+        const payload = await response.json() as { access_token?: unknown; expires_in?: unknown };
+        if (typeof payload.access_token !== "string" || !payload.access_token) {
+          json(502, { error: "protocol_error", message: "Wispr Flow token response did not include an access token" });
           return true;
         }
-        json(200, { provider: "elevenlabs", token: payload.token, expiresInSeconds: 900 });
+        json(200, {
+          provider: "wispr",
+          token: payload.access_token,
+          expiresInSeconds: typeof payload.expires_in === "number" ? payload.expires_in : 900,
+        });
       } catch (error) {
         json(502, {
           error: "network_error",
@@ -472,7 +515,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     if (id === "local-nemotron") {
       return localNemotronAdapter(settings.dictation.localModel || DEFAULT_LOCAL_MODEL_ID);
     }
-    if (id === "local-parakeet" || id === "web-speech" || id === "wispr") return null;
+    if (id === "local-parakeet" || id === "web-speech") return null;
 
     const apiKey = voice.resolveDictationProviderKey(id);
     const model = primary && settings.dictation.provider === id && settings.dictation.model
@@ -481,6 +524,9 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
 
     if (id === "elevenlabs") {
       return apiKey ? createElevenLabsSttAdapter({ apiKey, model: model || "scribe_v2_realtime" }) : null;
+    }
+    if (id === "wispr") {
+      return apiKey ? createWisprSttAdapter({ apiKey }) : null;
     }
     if (id === "deepgram") {
       return apiKey ? createDeepgramSttAdapter({ apiKey, model: model || "nova-3" }) : null;
