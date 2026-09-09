@@ -425,8 +425,9 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
         guard trusted(call), let connectionID = require(call, "connectionId", code: "device-unknown") else { return }
         queue.async {
             do {
-                _ = try self.invoke("forget", ["connectionId": connectionID])
+                _ = try self.invoke("disconnect", ["connectionId": connectionID])
                 try self.keychain.delete(connectionID)
+                _ = try self.invoke("forget", ["connectionId": connectionID])
                 call.resolve(["ok": true])
             } catch { self.reject(call, error) }
         }
