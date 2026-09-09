@@ -246,18 +246,25 @@ function SvgMark({ provider }: { provider: ProviderKey }) {
   return null;
 }
 
+const ROUTER_HARNESS_ID = "opencode";
+
 export default function ProviderLogo({
   providerID,
   providerName,
+  harnessId,
   size = "regular",
   className = "",
 }: {
   providerID?: string;
   providerName?: string;
+  /** Brand harness identity for dedicated runtimes. Ignored for the OpenCode router. */
+  harnessId?: string;
   size?: "compact" | "regular";
   className?: string;
 }) {
-  const id = `${providerID ?? ""} ${providerName ?? ""}`.trim().toLowerCase() || "polyth";
+  const harness = harnessId?.trim().toLowerCase() ?? "";
+  const brandHarness = harness && harness !== ROUTER_HARNESS_ID ? harness : "";
+  const id = `${brandHarness} ${providerID ?? ""} ${providerName ?? ""}`.trim().toLowerCase() || "polyth";
   const key = findProviderKey(id);
   const fallback = (providerName || providerID || "P").trim().slice(0, 2).toUpperCase();
   const label = providerName || providerID || "Polyth";

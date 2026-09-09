@@ -241,7 +241,7 @@ export default function MobileSessionHeader() {
           aria-expanded={surface === "island"}
           onClick={() => setSurface("island")}
         >
-          {session && <ContextIndicator gauge={gauge} mode={ui.contextIndicatorMode} providerID={activeModel?.providerID} providerName={descriptor?.providerName} active={sessionStatus?.kind === "working"} />}
+          {session && <ContextIndicator gauge={gauge} mode={ui.contextIndicatorMode} providerID={activeModel?.providerID} providerName={descriptor?.providerName} harnessId={descriptor?.harnessId ?? session.resolvedHarnessId} active={sessionStatus?.kind === "working"} />}
           <span className="mobile-island-text">{title}</span>
           <Icon.chevronDown />
         </button>
