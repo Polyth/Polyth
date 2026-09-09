@@ -123,8 +123,6 @@ const checkUrl = (url: string, label: string): void => {
   if (u.protocol !== "http:" && u.protocol !== "https:") throw err("invalid-input", `${label} URL must be http(s)`);
 };
 
-// Env refs are names, not values — refuse anything that looks like a secret
-// pasted by mistake (long, or containing non-identifier characters).
 const checkEnvRef = (ref: string, label: string): void => {
   if (!ref) return;
   if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(ref)) {
@@ -153,6 +151,36 @@ const derivedPolicy = (provider: DictationProviderId, legacyCloudFallback: boole
   return "prefer-cloud";
 };
 
+const providerTransports = (provider: DictationProviderId): readonly DictationTransport[] => {
+  switch (provider) {
+    case "elevenlabs":
+    case "wispr":
+      return ["auto", "direct-browser", "server-proxy"];
+    case "web-speech":
+      return ["auto", "direct-browser"];
+    case "local-nemotron":
+      return ["auto", "local-worker"];
+    case "local-parakeet":
+      return ["auto"];
+    default:
+      return ["auto", "server-proxy"];
+  }
+};
+
+const canonicalTransport = (
+  provider: DictationProviderId,
+  requested: DictationTransport,
+  policy: DictationProcessingPolicy,
+): DictationTransport => {
+  const supported = providerTransports(provider);
+  let value = supported.includes(requested) ? requested : "auto";
+  // Mid-stream cloud -> local failover requires Polyth to retain/replay PCM on
+  // the server. A direct browser socket cannot satisfy that invariant.
+  if (policy === "auto-fallback" && value === "direct-browser") value = "auto";
+  if (policy === "local-only" && provider === "web-speech") return "direct-browser";
+  return value;
+};
+
 export function createVoiceSettings(opts: { file: string; env?: Record<string, string | undefined> }): VoiceSettingsService {
   mkdirSync(dirname(opts.file), { recursive: true });
   const env = opts.env ?? process.env;
@@ -178,7 +206,7 @@ export function createVoiceSettings(opts: { file: string; env?: Record<string, s
         ? "openai-compatible"
         : d.dictation.provider;
     const requestedTransport = str(r.dictation?.transport, 32) as DictationTransport;
-    const transport: DictationTransport = DICTATION_TRANSPORTS.has(requestedTransport)
+    const rawTransport: DictationTransport = DICTATION_TRANSPORTS.has(requestedTransport)
       ? requestedTransport
       : provider === "openai-compatible" ? "server-proxy"
         : provider === "web-speech" ? "direct-browser"
@@ -195,6 +223,7 @@ export function createVoiceSettings(opts: { file: string; env?: Record<string, s
     const processingPolicy = PROCESSING_POLICIES.has(requestedPolicy)
       ? requestedPolicy
       : derivedPolicy(provider, legacyCloudFallback);
+    const transport = canonicalTransport(provider, rawTransport, processingPolicy);
     const requestedFallback = str(r.dictation?.fallbackProvider, 64) as DictationProviderId;
     let fallbackProvider = DICTATION_PROVIDERS.has(requestedFallback)
       && isCloudDictationProvider(requestedFallback)
@@ -253,9 +282,6 @@ export function createVoiceSettings(opts: { file: string; env?: Record<string, s
     get: () => structuredClone(settings),
     put(next) {
       const incoming = next && typeof next === "object" ? next as Record<string, unknown> : {};
-      // Older web clients only PUT {stt, tts}. Preserve the already-migrated
-      // provider block instead of interpreting every legacy save as a fresh
-      // migration and silently resetting the selected realtime provider.
       settings = sanitize({
         ...incoming,
         dictation: incoming.dictation ?? settings.dictation,
