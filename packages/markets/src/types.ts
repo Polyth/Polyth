@@ -10,7 +10,7 @@ export type MarketAssetType =
 export type MarketRange = "1D" | "5D" | "1M" | "6M" | "YTD" | "1Y" | "5Y" | "MAX";
 export type MarketDataFreshness = "live" | "delayed" | "indicative";
 export type MarketCacheState = "fresh" | "stale" | "refreshed";
-export type MarketProviderCapability = "quote" | "candles" | "search" | "fundamentals";
+export type MarketProviderCapability = "quote" | "candles" | "search" | "fundamentals" | "news";
 
 export interface MarketQuote {
   symbol: string;
@@ -73,6 +73,34 @@ export interface MarketFundamentals {
   asOf: string;
   source: string;
   freshness: MarketDataFreshness;
+}
+
+export interface MarketNewsItem {
+  title: string;
+  url: string;
+  publisher: string;
+  publishedAt?: string;
+  symbol: string;
+  source: string;
+}
+
+export interface MarketPerformance {
+  range: MarketRange;
+  firstClose: number;
+  lastClose: number;
+  changePercent: number;
+  source: string;
+  freshness: MarketDataFreshness;
+}
+
+export interface MarketResearchContext {
+  symbol: string;
+  generatedAt: string;
+  quote?: MarketQuote;
+  fundamentals?: MarketFundamentals;
+  performance?: MarketPerformance;
+  news: MarketNewsItem[];
+  errors: string[];
 }
 
 export interface MarketDataResult<T> {

@@ -23,6 +23,7 @@ test("default providers preserve fallback priority by capability", () => {
   assert.deepEqual(service.providers.providerIds("candles"), ["nasdaq", "yahoo", "stooq"]);
   assert.deepEqual(service.providers.providerIds("search"), ["tradingview", "yahoo"]);
   assert.deepEqual(service.providers.providerIds("fundamentals"), ["tradingview"]);
+  assert.deepEqual(service.providers.providerIds("news"), ["yahoo-news", "google-news"]);
 });
 
 test("nasdaq adapter normalizes quote data", async () => {

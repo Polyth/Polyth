@@ -1,5 +1,6 @@
 import type { MarketsService } from "./service.ts";
 import { createNasdaqProvider, type NasdaqProviderOptions } from "./providers/nasdaq.ts";
+import { createGoogleNewsProvider, createYahooNewsProvider, type NewsProviderOptions } from "./providers/news.ts";
 import { createStooqProvider, type StooqProviderOptions } from "./providers/stooq.ts";
 import { createTradingViewProvider, type TradingViewProviderOptions } from "./providers/tradingview.ts";
 import { createYahooProvider, type YahooProviderOptions } from "./providers/yahoo.ts";
@@ -22,4 +23,6 @@ export function registerDefaultMarketProviders(
   service.registerProvider(createNasdaqProvider(common satisfies NasdaqProviderOptions));
   service.registerProvider(createYahooProvider(common satisfies YahooProviderOptions));
   service.registerProvider(createStooqProvider(common satisfies StooqProviderOptions));
+  service.registerProvider(createYahooNewsProvider({ fetch: options.fetch } satisfies NewsProviderOptions));
+  service.registerProvider(createGoogleNewsProvider({ fetch: options.fetch } satisfies NewsProviderOptions));
 }

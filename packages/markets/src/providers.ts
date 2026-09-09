@@ -1,6 +1,7 @@
 import type {
   MarketCandleSeries,
   MarketFundamentals,
+  MarketNewsItem,
   MarketProviderCapability,
   MarketQuote,
   MarketRange,
@@ -13,6 +14,7 @@ export interface MarketProvider {
   candles?(symbol: string, range: MarketRange, signal: AbortSignal): Promise<MarketCandleSeries>;
   search?(query: string, signal: AbortSignal): Promise<MarketSearchResult[]>;
   fundamentals?(symbol: string, signal: AbortSignal): Promise<MarketFundamentals>;
+  news?(symbol: string, signal: AbortSignal): Promise<MarketNewsItem[]>;
 }
 
 export interface ProviderHealth {
@@ -116,6 +118,41 @@ export class ProviderRegistry {
     throw Object.assign(new Error(`all ${capability} providers failed: ${errors.join("; ")}`), {
       code: "unavailable",
     });
+  }
+
+  async runAll<T>(
+    capability: MarketProviderCapability,
+    invoke: (provider: MarketProvider) => Promise<T>,
+  ): Promise<Array<{ value: T; providerId: string }>> {
+    const now = this.now();
+    const candidates = this.providers.filter((provider) => {
+      if (!supports(provider, capability)) return false;
+      return (this.requireHealth(provider.id).circuitOpenUntil ?? 0) <= now;
+    });
+    if (candidates.length === 0) {
+      const hasCapability = this.providers.some((provider) => supports(provider, capability));
+      throw Object.assign(new Error(hasCapability
+        ? `all ${capability} providers are temporarily unavailable`
+        : `no market provider supports ${capability}`), { code: hasCapability ? "unavailable" : "not-found" });
+    }
+
+    const settled = await Promise.all(candidates.map(async (provider) => {
+      const health = this.requireHealth(provider.id);
+      const started = this.now();
+      try {
+        const value = await invoke(provider);
+        this.recordSuccess(health, Math.max(0, this.now() - started));
+        return { ok: true as const, value, providerId: provider.id };
+      } catch (cause) {
+        const message = errorMessage(cause);
+        this.recordFailure(health, Math.max(0, this.now() - started), message);
+        return { ok: false as const, providerId: provider.id, message };
+      }
+    }));
+    const successes = settled.filter((item) => item.ok).map((item) => ({ value: item.value, providerId: item.providerId }));
+    if (successes.length > 0) return successes;
+    const errors = settled.filter((item) => !item.ok).map((item) => `${item.providerId}: ${item.message}`);
+    throw Object.assign(new Error(`all ${capability} providers failed: ${errors.join("; ")}`), { code: "unavailable" });
   }
 
   private requireHealth(providerId: string): ProviderHealth {

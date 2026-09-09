@@ -25,6 +25,15 @@ test("provider registry falls back and records health", async () => {
   assert.equal(health[1]?.successes, 1);
 });
 
+test("provider registry runs aggregate capabilities concurrently and keeps partial success", async () => {
+  const registry = new ProviderRegistry();
+  registry.register({ id: "a", news: async () => [{ title: "A", url: "https://a.example", publisher: "A", symbol: "NVDA", source: "a" }] });
+  registry.register({ id: "b", news: async () => { throw new Error("down"); } });
+  const result = await registry.runAll("news", (provider) => provider.news!("NVDA", new AbortController().signal));
+  assert.deepEqual(result.map((item) => item.providerId), ["a"]);
+  assert.equal(registry.healthSnapshot()[1]?.failures, 1);
+});
+
 test("provider registry opens a circuit after repeated failures", async () => {
   let now = 1_000;
   let primaryCalls = 0;

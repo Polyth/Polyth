@@ -91,6 +91,21 @@ export function marketsRoutes(
       return true;
     }
 
+    if (path === "/api/markets/news") {
+      const symbol = url.searchParams.get("symbol") ?? "";
+      if (!symbol.trim()) return badRequest(json, "symbol is required");
+      json(200, await markets.news(symbol));
+      return true;
+    }
+
+    if (path === "/api/markets/context") {
+      const symbol = url.searchParams.get("symbol") ?? "";
+      const range = url.searchParams.get("range") ?? "1M";
+      if (!symbol.trim()) return badRequest(json, "symbol is required");
+      json(200, await markets.context(symbol, range as MarketRange));
+      return true;
+    }
+
     return false;
   };
 }

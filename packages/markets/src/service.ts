@@ -1,11 +1,14 @@
 import { SwrCache, type SwrCachePolicy } from "./cache.ts";
 import { ProviderRegistry, type MarketProvider } from "./providers.ts";
+import { dedupeMarketNews } from "./providers/news.ts";
 import type {
   MarketCandleSeries,
   MarketDataResult,
   MarketFundamentals,
+  MarketNewsItem,
   MarketQuote,
   MarketRange,
+  MarketResearchContext,
   MarketSearchResult,
 } from "./types.ts";
 
@@ -13,6 +16,7 @@ const QUOTE_POLICY: SwrCachePolicy = { softTtlMs: 10_000, hardTtlMs: 5 * 60_000,
 const CANDLE_POLICY: SwrCachePolicy = { softTtlMs: 30_000, hardTtlMs: 60 * 60_000, maxEntries: 100 };
 const SEARCH_POLICY: SwrCachePolicy = { softTtlMs: 12 * 60 * 60_000, hardTtlMs: 24 * 60 * 60_000, maxEntries: 500 };
 const FUNDAMENTALS_POLICY: SwrCachePolicy = { softTtlMs: 30 * 60_000, hardTtlMs: 24 * 60 * 60_000, maxEntries: 1_000 };
+const NEWS_POLICY: SwrCachePolicy = { softTtlMs: 2 * 60_000, hardTtlMs: 30 * 60_000, maxEntries: 1_000 };
 const RANGES = new Set<MarketRange>(["1D", "5D", "1M", "6M", "YTD", "1Y", "5Y", "MAX"]);
 
 export interface MarketsServiceOptions {
@@ -27,14 +31,18 @@ export class MarketsService {
   private readonly candleSeries: SwrCache<MarketCandleSeries>;
   private readonly searches: SwrCache<MarketSearchResult[]>;
   private readonly fundamentalsCache: SwrCache<MarketFundamentals>;
+  private readonly newsCache: SwrCache<MarketNewsItem[]>;
   private readonly quotePolicy: SwrCachePolicy;
+  private readonly now: () => number;
 
   constructor(options: MarketsServiceOptions = {}) {
-    this.providers = options.providers ?? new ProviderRegistry({ now: options.now });
-    this.quotes = new SwrCache(options.now);
-    this.candleSeries = new SwrCache(options.now);
-    this.searches = new SwrCache(options.now);
-    this.fundamentalsCache = new SwrCache(options.now);
+    this.now = options.now ?? Date.now;
+    this.providers = options.providers ?? new ProviderRegistry({ now: this.now });
+    this.quotes = new SwrCache(this.now);
+    this.candleSeries = new SwrCache(this.now);
+    this.searches = new SwrCache(this.now);
+    this.fundamentalsCache = new SwrCache(this.now);
+    this.newsCache = new SwrCache(this.now);
     this.quotePolicy = options.quotePolicy ?? QUOTE_POLICY;
   }
 
@@ -67,6 +75,56 @@ export class MarketsService {
       provider.fundamentals!(normalized, signal));
   }
 
+  news(symbol: string): Promise<MarketDataResult<MarketNewsItem[]>> {
+    const normalized = normalizeSymbol(symbol);
+    return this.cachedAll(this.newsCache, normalized, NEWS_POLICY, "news", 4_000, (provider, signal) =>
+      provider.news!(normalized, signal), (values) => dedupeMarketNews(values.flat()));
+  }
+
+  async context(symbol: string, range: MarketRange = "1M"): Promise<MarketResearchContext> {
+    const normalized = normalizeSymbol(symbol);
+    const normalizedRange = normalizeRange(range);
+    const settled = await Promise.allSettled([
+      this.quote(normalized),
+      this.fundamentals(normalized),
+      this.candles(normalized, normalizedRange),
+      this.news(normalized),
+    ]);
+    const [quoteResult, fundamentalsResult, candlesResult, newsResult] = settled;
+    const errors: string[] = [];
+    const collectError = (label: string, result: PromiseSettledResult<unknown>) => {
+      if (result.status === "rejected") errors.push(`${label}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+    };
+    collectError("quote", quoteResult);
+    collectError("fundamentals", fundamentalsResult);
+    collectError("candles", candlesResult);
+    collectError("news", newsResult);
+
+    const candles = candlesResult.status === "fulfilled" ? candlesResult.value.data : undefined;
+    const firstClose = candles?.candles[0]?.close;
+    const lastClose = candles?.candles.at(-1)?.close;
+    const performance = candles && firstClose !== undefined && lastClose !== undefined && firstClose !== 0
+      ? {
+          range: normalizedRange,
+          firstClose,
+          lastClose,
+          changePercent: ((lastClose - firstClose) / firstClose) * 100,
+          source: candles.source,
+          freshness: candles.freshness,
+        }
+      : undefined;
+
+    return {
+      symbol: normalized,
+      generatedAt: new Date(this.now()).toISOString(),
+      ...(quoteResult.status === "fulfilled" ? { quote: quoteResult.value.data } : {}),
+      ...(fundamentalsResult.status === "fulfilled" ? { fundamentals: fundamentalsResult.value.data } : {}),
+      ...(performance ? { performance } : {}),
+      news: newsResult.status === "fulfilled" ? newsResult.value.data.slice(0, 12) : [],
+      errors,
+    };
+  }
+
   private async cached<T>(
     cache: SwrCache<T>,
     key: string,
@@ -80,6 +138,27 @@ export class MarketsService {
         invoke(provider, AbortSignal.timeout(timeoutMs)));
       return loaded.value;
     });
+    return this.result(result);
+  }
+
+  private async cachedAll<T>(
+    cache: SwrCache<T>,
+    key: string,
+    policy: SwrCachePolicy,
+    capability: "news",
+    timeoutMs: number,
+    invoke: (provider: MarketProvider, signal: AbortSignal) => Promise<T>,
+    merge: (values: T[]) => T,
+  ): Promise<MarketDataResult<T>> {
+    const result = await cache.get(key, policy, async () => {
+      const loaded = await this.providers.runAll(capability, (provider) =>
+        invoke(provider, AbortSignal.timeout(timeoutMs)));
+      return merge(loaded.map((item) => item.value));
+    });
+    return this.result(result);
+  }
+
+  private result<T>(result: { value: T; state: "fresh" | "stale" | "refreshed"; updatedAt: number; revalidating: boolean }): MarketDataResult<T> {
     return {
       data: result.value,
       cache: result.state,

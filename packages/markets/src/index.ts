@@ -10,6 +10,13 @@ export {
   type ProviderRegistryOptions,
 } from "./providers.ts";
 export { createNasdaqProvider, type NasdaqProviderOptions } from "./providers/nasdaq.ts";
+export {
+  createGoogleNewsProvider,
+  createYahooNewsProvider,
+  dedupeMarketNews,
+  parseMarketRss,
+  type NewsProviderOptions,
+} from "./providers/news.ts";
 export { createStooqProvider, stooqSymbol, type StooqProviderOptions } from "./providers/stooq.ts";
 export { createTradingViewProvider, type TradingViewProviderOptions } from "./providers/tradingview.ts";
 export { createYahooProvider, type YahooProviderOptions } from "./providers/yahoo.ts";
@@ -29,9 +36,12 @@ export type {
   MarketDataFreshness,
   MarketDataResult,
   MarketFundamentals,
+  MarketNewsItem,
+  MarketPerformance,
   MarketProviderCapability,
   MarketQuote,
   MarketRange,
+  MarketResearchContext,
   MarketSearchResult,
 } from "./types.ts";
 export {

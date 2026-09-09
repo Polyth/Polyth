@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import type { SpaceContext, SpaceStorage } from "@polyth/contracts";
 import type { ServerPackage } from "@polyth/plugins";
 import { marketsRoutes } from "../src/serverEntry.ts";
 import { MarketsService } from "../src/service.ts";
@@ -26,7 +30,10 @@ const service = (): MarketsService => {
       return {
         symbol,
         range,
-        candles: [{ time: 1, open: 1, high: 2, low: 1, close: 2 }],
+        candles: [
+          { time: 1, open: 1, high: 2, low: 1, close: 1 },
+          { time: 2, open: 2, high: 3, low: 2, close: 2 },
+        ],
         asOf: "2026-09-09T00:00:00.000Z",
         source: "fixture",
         freshness: "delayed",
@@ -41,6 +48,9 @@ const service = (): MarketsService => {
         freshness: "delayed",
       };
     },
+    async news(symbol) {
+      return [{ title: "Fixture news", url: "https://example.com/news", publisher: "Fixture", symbol, source: "fixture" }];
+    },
   });
   return markets;
 };
@@ -49,19 +59,27 @@ type RouteRequest = Parameters<NonNullable<ServerPackage["routes"]>>[0];
 
 async function invoke(pathAndQuery: string): Promise<{ handled: boolean; status: number; body: unknown }> {
   let status = 0;
-  let body: unknown;
+  let responseBody: unknown;
   const url = new URL(pathAndQuery, "http://localhost");
-  const route = marketsRoutes(service());
+  const root = await mkdtemp(join(tmpdir(), "polyth-markets-routes-"));
+  const storage: SpaceStorage = {
+    root,
+    packageDir: (packageId) => join(root, "packages", packageId),
+    path: (relative) => join(root, relative),
+  };
+  const route = marketsRoutes({ spaceStorage: () => storage }, service());
+  const space = { storageDir: root } as SpaceContext;
   const request = {
     path: url.pathname,
     method: "GET",
     url,
+    space,
     json(nextStatus: number, nextBody: unknown) {
       status = nextStatus;
-      body = nextBody;
+      responseBody = nextBody;
     },
   } as RouteRequest;
-  return { handled: await route(request), status, body };
+  return { handled: await route(request), status, body: responseBody };
 }
 
 test("quote route batches symbols and preserves partial failures", async () => {
@@ -79,10 +97,14 @@ test("quote route rejects empty and oversized batches", async () => {
   assert.equal((await invoke(`/api/markets/quote?symbols=${symbols}`)).status, 400);
 });
 
-test("market read routes expose search, candles, fundamentals, and health", async () => {
+test("market read routes expose search, candles, fundamentals, news, context, and health", async () => {
   assert.equal((await invoke("/api/markets/search?q=nvidia")).status, 200);
   assert.equal((await invoke("/api/markets/candles?symbol=NVDA&range=1Y")).status, 200);
   assert.equal((await invoke("/api/markets/fundamentals?symbol=NVDA")).status, 200);
+  assert.equal((await invoke("/api/markets/news?symbol=NVDA")).status, 200);
+  const context = await invoke("/api/markets/context?symbol=NVDA&range=1M");
+  assert.equal(context.status, 200);
+  assert.equal((context.body as { performance: { changePercent: number } }).performance.changePercent, 100);
   const health = await invoke("/api/markets/providers");
   assert.equal(health.status, 200);
   assert.deepEqual((health.body as { providers: Array<{ providerId: string }> }).providers.map((item) => item.providerId), ["fixture"]);
