@@ -133,6 +133,9 @@ test("registered harness identities reuse the shared provider marks", async () =
     assert.doesNotMatch(html, /#[\da-f]{3,8}\b/i);
     assert.match(html, /aria-hidden="true"/);
   }
+  const cursorMark = await render({ providerID: "cursor", providerName: "Cursor" });
+  assert.match(cursorMark, /M11\.503\.131/);
+  assert.doesNotMatch(cursorMark, /M4 5\.5 12 12 4 18\.5/);
 });
 
 test("OpenCode variants use the OpenCode brand mark", async () => {
