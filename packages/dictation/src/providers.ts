@@ -204,7 +204,7 @@ const CATALOG: readonly ProviderCapabilities[] = [
     // language=multi is multilingual transcription, not generic language detection
     // and does not currently include every monolingual Nova-3 language (notably uk).
     languageAutoDetection: false, languageHints: true, contextualPrompting: true, vocabulary: true,
-    timestamps: true, transports: ["auto", "server-proxy"],
+    timestamps: true, transports: ["auto", "direct-browser", "server-proxy"],
     languages: ["*", "uk", "multi"], audioFormats: RAW_16K, defaultModel: "nova-3", context: true, local: false,
     localModelDownloadRequired: false, ephemeralClientAuth: true, publicApi: true,
   },
