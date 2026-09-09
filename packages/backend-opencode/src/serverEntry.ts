@@ -4,6 +4,7 @@ import {
   serverServiceKey,
   type ServerPackageHost,
 } from "@polyth/plugins";
+import { configureOpenCodeCapabilityDelivery } from "./capabilityDelivery.ts";
 import { createOpenCodeHarness } from "./harness.ts";
 import { createOpenCodeProvisioner } from "./provisioner.ts";
 import type { BackendConfigApplier } from "./config.ts";
@@ -35,7 +36,12 @@ export default function registerPackage(host: ServerPackageHost) {
     ): import("@polyth/contracts").AvailableProviderDescriptor[];
   }>("models.visibility"));
 
-  const harness = createOpenCodeHarness(pool, releaseExecution);
+  const runtime = async (context: HarnessContext): Promise<AgentRuntime> => {
+    const engine = await pool(context);
+    if (!context.remote) configureOpenCodeCapabilityDelivery(engine, context);
+    return engine;
+  };
+  const harness = createOpenCodeHarness(runtime, releaseExecution);
   const applier = host.services.get(serverServiceKey<BackendConfigApplier>("plugins.config"));
   if (applier && typeof applier.applyBehavior === "function" && typeof applier.applyMcp === "function") {
     harness.provisioner = createOpenCodeProvisioner(applier);

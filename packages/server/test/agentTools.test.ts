@@ -60,6 +60,90 @@ test("agent tool bridge lists granted tools and refuses a disposed executor", as
   assert.equal(captured?.code, 403);
 });
 
+test("agent tool bridge authorizes the exact scoped grant before invoking", async () => {
+  const registry = createCapabilityContributionRegistry();
+  let executed = false;
+  let executionContext: Record<string, string | undefined> | undefined;
+  registry.register("example-feature", {
+    descriptor: {
+      id: "example-feature.mutate",
+      kind: "tool",
+      owner: "example-feature",
+      scope: "session",
+      revision: "1",
+      name: "mutate",
+      description: "mutate",
+      inputSchema: { type: "object", properties: {} },
+      trust: "trusted",
+      mutating: true,
+    },
+    execute: async (_input, ctx) => {
+      executed = true;
+      executionContext = {
+        spaceId: ctx.spaceId,
+        projectId: ctx.projectId,
+        sessionId: ctx.sessionId,
+        cwd: ctx.cwd,
+      };
+      return { output: "mutated" };
+    },
+  });
+  let decision: "allow" | "deny" = "deny";
+  let authorizedGrant: { spaceId: string; projectId: string; sessionId?: string; cwd: string } | undefined;
+  const bridge = createAgentToolBridge({
+    executor: (id) => registry.executor(id),
+    contribution: (id) => registry.contribution(id),
+    authorize: (_tool, grant) => {
+      authorizedGrant = {
+        spaceId: grant.spaceId,
+        projectId: grant.projectId,
+        sessionId: grant.sessionId,
+        cwd: grant.cwd,
+      };
+      return decision;
+    },
+  });
+  const descriptor = registry.list()[0]!.descriptor as Extract<import("@polyth/contracts").AgentCapabilityDescriptor, { kind: "tool" }>;
+  const grant = bridge.mint({
+    spaceId: "space-a",
+    projectId: "project-a",
+    sessionId: "session-a",
+    cwd: "/workspace/a",
+    tools: [descriptor],
+  });
+  let captured: { code: number; body: unknown } | undefined;
+  const rc = {
+    path: AGENT_TOOLS_PATH,
+    method: "POST",
+    ingress: { kind: "public-http" as const, listenerId: "public", loopback: true, secure: false },
+    req: { headers: { authorization: `Bearer ${grant.token}` } },
+    body: async () => ({ id: "example-feature.mutate", arguments: {} }),
+    json: (code: number, body: unknown) => { captured = { code, body }; },
+  };
+
+  assert.equal(await bridge.route(rc as never), true);
+  assert.equal(captured?.code, 403);
+  assert.equal(executed, false);
+  assert.deepEqual(authorizedGrant, {
+    spaceId: "space-a",
+    projectId: "project-a",
+    sessionId: "session-a",
+    cwd: "/workspace/a",
+  });
+
+  decision = "allow";
+  captured = undefined;
+  assert.equal(await bridge.route(rc as never), true);
+  assert.equal(captured?.code, 200);
+  assert.equal(executed, true);
+  assert.deepEqual(executionContext, {
+    spaceId: "space-a",
+    projectId: "project-a",
+    sessionId: "session-a",
+    cwd: "/workspace/a",
+  });
+});
+
 test("agent-tools MCP stdio uses newline-delimited JSON-RPC", async () => {
   const script = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "agentToolsMcp.mjs");
   const child = spawn(process.execPath, [script], { stdio: ["pipe", "pipe", "pipe"] });
@@ -89,4 +173,3 @@ test("agent-tools MCP stdio uses newline-delimited JSON-RPC", async () => {
   const message = JSON.parse(reply) as { result?: { serverInfo?: { name?: string } } };
   assert.equal(message.result?.serverInfo?.name, "polyth-agent-tools");
 });
-
