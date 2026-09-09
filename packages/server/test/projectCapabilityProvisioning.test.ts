@@ -22,13 +22,13 @@ type Contextual = AgentCapabilityContribution & {
 };
 
 const temp = () => mkdtempSync(join(tmpdir(), "polyth-project-capabilities-"));
-const spaceOf = (dir: string): SpaceContext => {
-  const storageDir = join(dir, "space-a");
+const spaceOf = (dir: string, id = "space-a", userId = "user-a"): SpaceContext => {
+  const storageDir = join(dir, id);
   mkdirSync(storageDir, { recursive: true });
   return {
-    spaceId: "space-a",
-    spaceSlug: "space-a",
-    userId: "user-a",
+    spaceId: id,
+    spaceSlug: id,
+    userId,
     role: "owner",
     deployment: "server-trusted",
     storageDir,
@@ -193,4 +193,26 @@ test("every compatible harness receives only the active project's effective MCPs
   assert.deepEqual(mcpNames(desiredB), ["b-only", "db", "shared"]);
   assert.deepEqual(skillNames(desiredA), ["skill-project-a"]);
   assert.deepEqual(skillNames(desiredB), ["skill-project-b"]);
+
+  // Project ownership is checked again by canonical MCP resolution. If a
+  // stale session/runtime context survives metadata deletion and is even
+  // mis-bound to another/default Space, provisioning must stop before any
+  // contextual Skill or MCP reaches a harness.
+  owners.delete("project-a");
+  seen.delete("claude:project-a");
+  seen.delete("codex:project-a");
+  const wrongDefault = spaceOf(dir, "space-b", "user-b");
+  const staleContext: HarnessContext = {
+    space: wrongDefault,
+    spaceId: wrongDefault.spaceId,
+    projectId: "project-a",
+    cwd: "/tmp/project-a",
+  };
+  await assert.rejects(
+    () => controller.desired(staleContext),
+    (error) => (error as { code?: string }).code === "not-found",
+  );
+  await controller.reconcileAll(staleContext);
+  assert.equal(seen.has("claude:project-a"), false);
+  assert.equal(seen.has("codex:project-a"), false);
 });
