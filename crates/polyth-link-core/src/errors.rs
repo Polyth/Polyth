@@ -12,6 +12,7 @@ pub enum LinkError {
     PairingStorageFailed,
     HostIdentityMismatch,
     HostIdentityCorrupt,
+    HostIdentityUnavailable,
     HostIdentityRotated,
     DeviceUnknown,
     DeviceRevoked,
@@ -47,6 +48,7 @@ impl LinkError {
             Self::PairingStorageFailed => "pairing-storage-failed",
             Self::HostIdentityMismatch => "host-identity-mismatch",
             Self::HostIdentityCorrupt => "host-identity-corrupt",
+            Self::HostIdentityUnavailable => "host-identity-unavailable",
             Self::HostIdentityRotated => "host-identity-rotated",
             Self::DeviceUnknown => "device-unknown",
             Self::DeviceRevoked => "device-revoked",
@@ -96,7 +98,10 @@ impl LinkError {
                 "This Polyth host identity changed. Pair again with a new QR code."
             }
             Self::HostIdentityCorrupt => {
-                "This Polyth host identity file is unreadable. Follow identity recovery."
+                "This Polyth host identity is unreadable. Pair again after recovery."
+            }
+            Self::HostIdentityUnavailable => {
+                "This device no longer has the secure identity for this Polyth host. Pair again."
             }
             Self::DeviceUnknown => "This device is not paired.",
             Self::DeviceRevoked => "This device was revoked.",
@@ -156,11 +161,16 @@ mod tests {
 
     #[test]
     fn codes_are_stable_and_secret_free() {
-        for error in [LinkError::PairingInvalid, LinkError::HostIdentityCorrupt] {
+        for error in [
+            LinkError::PairingInvalid,
+            LinkError::HostIdentityCorrupt,
+            LinkError::HostIdentityUnavailable,
+        ] {
             assert!(!error.code().contains("key"));
             assert!(!error.user_message().contains("hmac"));
         }
         assert!(LinkError::RelayUnreachable.retryable());
         assert!(!LinkError::DeviceRevoked.retryable());
+        assert!(!LinkError::HostIdentityUnavailable.retryable());
     }
 }
