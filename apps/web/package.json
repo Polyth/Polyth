@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
+    "./account-storage": "./src/accountStorage.ts",
     "./haptics": "./src/haptics.ts",
     "./i18n": "./src/i18n/index.ts",
     "./icons": "./src/icons.tsx",
