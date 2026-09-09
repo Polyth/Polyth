@@ -245,7 +245,10 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
     setStage("Waiting for approval on your computer…");
     try {
       const launched = await polythLink().confirmPairing(currentAttempt);
-      cancelledAttempts.current.delete(currentAttempt);
+      if (cancelledAttempts.current.delete(currentAttempt)) {
+        await polythLink().disconnect(launched.connectionId).catch(() => undefined);
+        return;
+      }
       setStage("Connected");
       location.replace(bootstrapUrlWithNext(launched.bootstrapUrl, launch.deepLinkPath));
     } catch (cause) {
@@ -266,6 +269,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
       setError(cause instanceof Error ? cause.message : String(cause));
     });
     setBusy(false);
+    setError("");
     setPhrase(null);
     setAttemptId(null);
     setStage("Connect to your Polyth");
@@ -283,6 +287,9 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
       location.replace(bootstrapUrlWithNext(launched.bootstrapUrl, launch.deepLinkPath));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+      if (connection.pairingState === "prepared") {
+        void polythLink().listConnections().then(setTrusted).catch(() => undefined);
+      }
       setStage("Connect to your Polyth");
     } finally {
       setBusy(false);
