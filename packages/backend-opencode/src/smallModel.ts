@@ -86,9 +86,16 @@ const contentText = (value: unknown): string => {
 };
 
 const nonEmptyText = (value: unknown): string => {
-  if (typeof value !== "string" || !value.trim()) throw new Error("provider returned an empty completion");
+  if (typeof value !== "string" || !value.trim()) {
+    throw Object.assign(new Error("provider returned an empty completion"), { code: "invalid-response" });
+  }
   return value.trim();
 };
+
+const providerFailure = (status: number): Error => Object.assign(
+  new Error(`provider completion failed (${status})`),
+  { code: status === 401 || status === 403 ? "auth-rejected" : status === 404 ? "invalid-model" : "unavailable" },
+);
 
 /** Attempt a direct request.  Missing credentials/capabilities are reported as
  * `unsupported` so the server utility service can use its reliable oneShot
@@ -124,7 +131,7 @@ export async function completeSmallModelDirect(
         stream: true, store: false,
       }),
     });
-    if (!response.ok) throw new Error(`provider completion failed (${response.status})`);
+    if (!response.ok) throw providerFailure(response.status);
     const raw = await response.text();
     let delta = "";
     let complete = "";
@@ -164,7 +171,7 @@ export async function completeSmallModelDirect(
         ...(request.maxOutputTokens ? { max_completion_tokens: request.maxOutputTokens } : {}),
       }),
     });
-    if (!response.ok) throw new Error(`provider completion failed (${response.status})`);
+    if (!response.ok) throw providerFailure(response.status);
     const body = await response.json() as { choices?: Array<{ message?: { content?: unknown } }> };
     return {
       text: nonEmptyText(contentText(body.choices?.[0]?.message?.content)),
@@ -187,7 +194,7 @@ export async function completeSmallModelDirect(
         messages: [{ role: "user", content: request.prompt }],
       }),
     });
-    if (!response.ok) throw new Error(`provider completion failed (${response.status})`);
+    if (!response.ok) throw providerFailure(response.status);
     const body = await response.json() as { content?: unknown };
     return {
       text: nonEmptyText(contentText(body.content)),

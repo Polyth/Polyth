@@ -972,6 +972,7 @@ export default function GitView() {
                   setGenerating(true);
                   void api.gitCommitMessage(projectId, sessionId ?? undefined)
                     .then((result) => { if (result.message) setCommitMsg(result.message); })
+                    .catch((error) => setUiError(friendlyError(tr("gitview.generate"), error)))
                     .finally(() => setGenerating(false));
                 }}>{tr("gitview.generate")}</Button>
                 <Button size="sm" variant="primary" busy={busy && !!commitMsg.trim()} disabled={!commitMsg.trim() || busy} onClick={() => void run(commitStaged)}>{tr("gitview.commit")}</Button>

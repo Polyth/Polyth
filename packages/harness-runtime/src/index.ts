@@ -501,9 +501,11 @@ export function createHarnessPool(options: {
             const context = await options.context(projectId, cwd);
             return options.registry.snapshots(context, snapshotOptions);
         },
-        async forProject(projectId: string, cwd?: string) {
+        async forProject(projectId: string, cwd?: string, targetHarnessId?: string) {
             const context = await options.context(projectId, cwd);
-            return get(context, await options.registry.resolve(context, { mode: "auto" }));
+            return get(context, await options.registry.resolve(context, targetHarnessId
+                ? { mode: "pinned", harnessId: targetHarnessId }
+                : { mode: "auto" }));
         },
         async forSession(projection: SessionProjection, cwd: string, targetHarnessId?: string) {
             const context = { ...await options.context(projection.projectId, cwd, projection.id), model: projection.model };

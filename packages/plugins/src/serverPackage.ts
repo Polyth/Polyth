@@ -80,7 +80,7 @@ export interface ServerBroadcast {
 /** Per-project agent-runtime pool (structural mirror of the server's pool). */
 export interface ServerRuntimePool {
   /** `cwd` overrides the project root — that is how worktree sessions are isolated. */
-  forProject(projectId: string, cwd?: string): Promise<AgentRuntime>;
+  forProject(projectId: string, cwd?: string, targetHarnessId?: string): Promise<AgentRuntime>;
   forSession?(projection: SessionProjection, cwd: string, targetHarnessId?: string): Promise<AgentRuntime>;
   restartAll?(): Promise<number>;
 }
@@ -112,6 +112,7 @@ export interface ServerSmallModelOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   responseSchema?: JsonObject;
+  purpose?: string;
 }
 
 export interface ServerSmallModelResult {
@@ -285,8 +286,8 @@ export interface ServerPackageHost extends TrustedServerPluginHost {
    * supported; oneShot is only a compatibility fallback. */
   smallModelComplete(runtime: AgentRuntime, opts: ServerSmallModelOptions): Promise<ServerSmallModelResult>;
   smallModelInputBudget(runtime: AgentRuntime, model: ModelRef | undefined, maxOutputTokens: number): Promise<number>;
-  /** POLYTH_SMALL_MODEL when configured — cheap model for auditors/summaries. */
-  smallModel(): ModelRef | undefined;
+  /** Configured cheap model for auditors/summaries, including its owning harness. */
+  smallModel(): (ModelRef & { harnessId?: string }) | undefined;
   /** Resolve a session's project runtime + cwd/model/agent context. */
   resolveSessionRuntime(sessionId: string): Promise<SessionRuntimeBinding>;
   /** Mount a kernel plugin on the composition root; dispose to unmount. */

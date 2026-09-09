@@ -230,11 +230,12 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   };
   const generate = async (source: WalkthroughSource, prompt: string, signal?: AbortSignal): Promise<string> => {
     const project = await host.projects.get(source.projectId);
-    const rt = await host.runtimes.forProject(source.projectId);
+    const model = host.smallModel();
+    const rt = await host.runtimes.forProject(source.projectId, project?.path, model?.harnessId);
     const result = await host.smallModelComplete(rt, {
       cwd: project?.path ?? process.cwd(),
       prompt,
-      ...(host.smallModel() ? { model: host.smallModel()! } : {}),
+      ...(model ? { model } : {}),
       maxOutputTokens: 2_048,
       timeoutMs: 180_000,
       ...(signal ? { signal } : {}),
@@ -242,8 +243,9 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     return result.text;
   };
   const inputBudget = async (source: WalkthroughSource): Promise<number> => {
-    const rt = await host.runtimes.forProject(source.projectId);
-    return host.smallModelInputBudget(rt, host.smallModel(), 2_048);
+    const model = host.smallModel();
+    const rt = await host.runtimes.forProject(source.projectId, undefined, model?.harnessId);
+    return host.smallModelInputBudget(rt, model, 2_048);
   };
   const append = (sessionId: string, type: string, data: JsonObject) =>
     host.events.append(sessionId, type, data, { ignorable: true, producerPlugin: "review" });

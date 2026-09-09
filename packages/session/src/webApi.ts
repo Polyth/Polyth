@@ -982,9 +982,7 @@ export const api = {
   gitCommit: (projectId: string, message: string, sessionId?: string) =>
     jfetch<{ sha: string }>(`/api/git/commit`, json("POST", { projectId, message, ...(sessionId ? { sessionId } : {}) })),
   gitCommitMessage: (projectId: string, sessionId?: string) =>
-    jfetch<{ message: string }>(`/api/git/commit-message`, json("POST", { projectId, ...(sessionId ? { sessionId } : {}) })).catch(
-      (): { message: "" } => ({ message: "" }),
-    ),
+    jfetch<{ message: string }>(`/api/git/commit-message`, json("POST", { projectId, ...(sessionId ? { sessionId } : {}) })),
   gitBranches: (projectId: string, sessionId?: string) =>
     jfetch<GitBranches>(`/api/git/branches?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`),
   gitBranch: (projectId: string, name: string, from?: string, sessionId?: string) =>

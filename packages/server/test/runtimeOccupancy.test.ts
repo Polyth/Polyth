@@ -74,6 +74,16 @@ test("normal dispose refuses active bindings and executions", async () => {
   assert.equal(owner.peek("R"), undefined);
 });
 
+test("transient executions hold a temporary binding until completion", async () => {
+  const owner = createKeyedRuntimeOwner<{ id: string }>();
+  const entry = await owner.acquire("R", async () => created({ id: "R" }));
+  assert.equal(entry.occupancy.beginTransientExecution("oneshot-task"), true);
+  assert.deepEqual(entry.occupancy.snapshot(), { accepting: true, bindings: 1, executions: 1 });
+  entry.occupancy.endTransientExecution("oneshot-task");
+  assert.deepEqual(entry.occupancy.snapshot(), { accepting: true, bindings: 0, executions: 0 });
+  await owner.dispose("R");
+});
+
 test("force bypasses occupancy only before the first teardown", async () => {
   let physical = 0;
   const owner = createKeyedRuntimeOwner<{ id: string }>();

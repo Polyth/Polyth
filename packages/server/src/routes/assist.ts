@@ -41,7 +41,10 @@ export function assistRoutes(deps: {
         json(200, { suggestion: await deps.improve(rc.space, projectId, draft), atSeq: 0 });
       } catch (error) {
         const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "upstream";
-        json(code === "not-found" ? 404 : 502, { error: code, message: error instanceof Error ? error.message : String(error) });
+        json(code === "not-found" ? 404 : code === "unavailable" ? 503 : code === "invalid-model" ? 422 : 502, {
+          error: code,
+          message: error instanceof Error ? error.message : String(error),
+        });
       }
       return true;
     }

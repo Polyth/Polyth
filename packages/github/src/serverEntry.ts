@@ -390,10 +390,11 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           const project = (await host.projects.list()).find(
             (candidate) => candidate.path === root,
           );
-          const runtime = await host.runtimes.forProject(project?.id ?? "__default__");
+          const model = host.smallModel();
+          const runtime = await host.runtimes.forProject(project?.id ?? "__default__", root, model?.harnessId);
           const text = await host.oneShot(runtime, {
             cwd: root,
-            ...(host.smallModel() ? { model: host.smallModel()! } : {}),
+            ...(model ? { model } : {}),
             prompt: [
               "Write a pull request title and description for the diff below.",
               "Line 1: a <=72 character imperative title. Then a blank line, then a concise",
