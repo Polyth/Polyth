@@ -1,8 +1,8 @@
 // OpenCode capability projector. Persistent user/global config still goes
-// through BackendConfigApplier. Space/project/session runtime capabilities
-// (MCP, package tools, generated skills) are delivered as a private launch
-// overlay via OPENCODE_CONFIG_CONTENT — never written into project
-// `.opencode/` files.
+// through BackendConfigApplier. Space/project runtime capabilities (MCP,
+// package tools, generated skills, instructions and context) are delivered as
+// a private launch overlay via OPENCODE_CONFIG_CONTENT — never written into
+// project `.opencode/` files.
 import {
   existsSync,
   mkdirSync,
@@ -40,6 +40,7 @@ export type OpenCodeLaunchOverlay = {
 type OverlayRecord = {
   mcp: Record<string, Record<string, unknown>>;
   skills: { paths: string[] } | null;
+  instructions: string[];
   env: Record<string, string>;
   desiredRevision: string;
   capabilityIds: string[];
@@ -54,6 +55,7 @@ const serializeOverlay = (record: OverlayRecord): OpenCodeLaunchOverlay => {
   const config: Record<string, unknown> = {};
   if (Object.keys(record.mcp).length > 0) config.mcp = record.mcp;
   if (record.skills) config.skills = record.skills;
+  if (record.instructions.length) config.instructions = record.instructions;
   return {
     configContent: Object.keys(config).length > 0 ? JSON.stringify(config) : "",
     env: { ...record.env },
@@ -130,6 +132,10 @@ export function applyOpenCodeLaunchOverlay(
   const baseMcp = isPlainObject(base.mcp) ? base.mcp : {};
   const extraMcp = isPlainObject(extra.mcp) ? extra.mcp : {};
   const skills = mergeSkillConfig(base.skills, extra.skills);
+  const instructions = uniqueStrings([
+    ...(Array.isArray(base.instructions) ? base.instructions : []),
+    ...(Array.isArray(extra.instructions) ? extra.instructions : []),
+  ]);
   next.OPENCODE_CONFIG_CONTENT = JSON.stringify({
     ...base,
     ...extra,
@@ -137,6 +143,7 @@ export function applyOpenCodeLaunchOverlay(
       ? { mcp: { ...baseMcp, ...extraMcp } }
       : {}),
     ...(skills ? { skills } : {}),
+    ...(instructions.length ? { instructions } : {}),
   });
   return next;
 }
@@ -145,11 +152,14 @@ const supportFor = (_context: HarnessContext): HarnessCapabilitySupport => ({
   harnessId: "opencode",
   targetLifetime: "physical-runtime",
   kinds: {
-    instruction: { modes: ["config"], mutability: "immediate", configScope: "deployment", remote: false },
+    // A project runtime can isolate deployment/Space/project instructions. A
+    // session-scoped instruction is narrower than the physical config target
+    // and is therefore rejected by the shared planner rather than leaked.
+    instruction: { modes: ["config"], mutability: "requires-restart", configScope: "project", remote: false },
     "mcp-server": { modes: ["config"], mutability: "requires-restart", configScope: "project", remote: false },
     tool: { modes: ["mcp"], mutability: "requires-restart", remote: false, configScope: "project" },
     skill: { modes: ["filesystem"], mutability: "requires-restart", configScope: "project", remote: false },
-    context: { modes: ["unsupported"], mutability: "immutable" },
+    context: { modes: ["config"], mutability: "requires-restart", configScope: "project", remote: false },
     extension: { modes: ["unsupported"], mutability: "immutable" },
   },
 });
@@ -274,6 +284,23 @@ ${capability.instructions}
   return { status: "pending", skillId };
 };
 
+const writeOwnedInstruction = (
+  context: HarnessContext,
+  revision: string,
+  capability: Extract<HarnessProvisioningPlan["items"][number]["capability"], { kind: "instruction" | "context" }>,
+): string | undefined => {
+  const root = runtimeRoot(context, "revisions", revisionToken(revision), "instructions");
+  if (!root) return undefined;
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  const suffix = createHash("sha1").update(capability.id).digest("hex").slice(0, 12);
+  const path = join(root, `${capability.kind}-${suffix}.md`);
+  const text = capability.kind === "context"
+    ? `# ${capability.title}\n\n${capability.text}`
+    : capability.text;
+  atomicWriteSync(path, text.endsWith("\n") ? text : `${text}\n`, 0o600);
+  return path;
+};
+
 const removeOwnedSkills = (root: string, keep: Set<string>): void => {
   if (!existsSync(root)) return;
   for (const entry of readdirSync(root, { withFileTypes: true })) {
@@ -337,15 +364,18 @@ export function createOpenCodeProvisioner(applier: BackendConfigApplier): Harnes
       const authority = applier.configAuthority?.();
       const readOnly = authority?.kind === "read-only";
       const records: HarnessCapabilityRecord[] = [];
+      const overlayInstructions: string[] = [];
+      const capabilityIds: string[] = [];
 
-      const instructions = plan.items.filter((item) => item.capability.kind === "instruction");
-      const text = instructions
+      const instructionItems = plan.items.filter((item) => item.capability.kind === "instruction");
+      const deploymentInstructions = instructionItems.filter((item) => item.capability.scope === "deployment");
+      const deploymentText = deploymentInstructions
         .filter((item) => item.mode !== "unsupported")
         .map((item) => item.capability.kind === "instruction" ? item.capability.text : "")
         .join("\n\n");
-      if (instructions.length) {
+      if (deploymentInstructions.length) {
         if (readOnly) {
-          for (const item of instructions) {
+          for (const item of deploymentInstructions) {
             records.push(recordFor(
               item,
               item.mode === "unsupported" ? "unsupported" : "pending",
@@ -356,8 +386,8 @@ export function createOpenCodeProvisioner(applier: BackendConfigApplier): Harnes
           }
         } else {
           try {
-            await applier.applyBehavior(text);
-            for (const item of instructions) {
+            await applier.applyBehavior(deploymentText);
+            for (const item of deploymentInstructions) {
               records.push(recordFor(
                 item,
                 item.mode === "unsupported" ? "unsupported" : "applied",
@@ -365,18 +395,32 @@ export function createOpenCodeProvisioner(applier: BackendConfigApplier): Harnes
               ));
             }
           } catch (error) {
-            for (const item of instructions) {
+            for (const item of deploymentInstructions) {
               records.push(recordFor(item, "failed", (error as Error).message.slice(0, 280)));
             }
           }
         }
+      }
+      for (const item of instructionItems.filter((row) => row.capability.scope !== "deployment")) {
+        if (item.capability.kind !== "instruction") continue;
+        if (item.mode === "unsupported") {
+          records.push(recordFor(item, "unsupported", "Instruction scope is narrower than the OpenCode project runtime"));
+          continue;
+        }
+        const path = writeOwnedInstruction(context, plan.desiredRevision, item.capability);
+        if (!path) {
+          records.push(recordFor(item, "unsupported", "OpenCode private instructions require Space-owned runtime storage"));
+          continue;
+        }
+        overlayInstructions.push(path);
+        capabilityIds.push(item.capability.id);
+        records.push(recordFor(item, "pending", "Staged as a private OpenCode instruction source"));
       }
 
       const mcpItems = plan.items.filter((item) => item.capability.kind === "mcp-server");
       const toolItems = plan.items.filter((item) => item.capability.kind === "tool");
       const overlayEnv: Record<string, string> = {};
       const overlayMcp: Record<string, Record<string, unknown>> = {};
-      const capabilityIds: string[] = [];
       try {
         for (const item of mcpItems) {
           if (item.capability.kind !== "mcp-server") continue;
@@ -459,13 +503,29 @@ export function createOpenCodeProvisioner(applier: BackendConfigApplier): Harnes
         if (keep.size) skills = { paths: [skillRoot] };
       }
 
-      for (const item of plan.items.filter((item) => item.capability.kind === "context" || item.capability.kind === "extension")) {
+      for (const item of plan.items.filter((item) => item.capability.kind === "context")) {
+        if (item.capability.kind !== "context") continue;
+        if (item.mode === "unsupported") {
+          records.push(recordFor(item, "unsupported", "Context scope is narrower than the OpenCode project runtime"));
+          continue;
+        }
+        const path = writeOwnedInstruction(context, plan.desiredRevision, item.capability);
+        if (!path) {
+          records.push(recordFor(item, "unsupported", "OpenCode context requires Space-owned private runtime storage"));
+          continue;
+        }
+        overlayInstructions.push(path);
+        capabilityIds.push(item.capability.id);
+        records.push(recordFor(item, "pending", "Staged as a private OpenCode instruction source"));
+      }
+      for (const item of plan.items.filter((item) => item.capability.kind === "extension")) {
         records.push(recordFor(item, "unsupported", "OpenCode has no portable projection for this capability"));
       }
 
       const overlay: OverlayRecord = {
         mcp: overlayMcp,
         skills,
+        instructions: overlayInstructions,
         env: overlayEnv,
         desiredRevision: plan.desiredRevision,
         capabilityIds,
