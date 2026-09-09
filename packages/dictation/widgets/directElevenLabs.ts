@@ -1,11 +1,34 @@
 import { DictationError, type DictationContext } from "@polyth/dictation";
-import { startPcm16Capture, type Pcm16Capture } from "./audioCapture.ts";
+import { startPcm16Capture, type Pcm16Capture, type Pcm16CaptureOptions } from "./audioCapture.ts";
 import type { StreamingDictation } from "./dictationClient.ts";
 
 const PROVIDER_URL = "wss://api.elevenlabs.io/v1/speech-to-text/realtime";
 const MAX_REPLAY_BYTES = 5 * 1024 * 1024;
 const MAX_SOCKET_BUFFER = 2 * 1024 * 1024;
 const FINAL_TIMEOUT_MS = 12_000;
+const OPEN = 1;
+
+interface BrowserSocketLike {
+  readyState: number;
+  bufferedAmount: number;
+  onmessage: ((event: { data: unknown }) => void) | null;
+  onerror: (() => void) | null;
+  onclose: ((event: { code: number; reason: string }) => void) | null;
+  send(data: string): void;
+  close(code?: number, reason?: string): void;
+}
+
+export interface DirectElevenLabsOptions {
+  model?: string;
+  language?: string;
+  context?: DictationContext;
+  onPartial?: (text: string) => void;
+  onError?: (message: string) => void;
+  /** Deterministic test seams; production callers never set these. */
+  fetchFn?: typeof fetch;
+  socketFactory?: (url: string) => BrowserSocketLike;
+  captureFactory?: (options: Pcm16CaptureOptions) => Promise<Pcm16Capture>;
+}
 
 const base64 = (bytes: Uint8Array): string => {
   let binary = "";
@@ -39,14 +62,16 @@ const keyterms = (context?: DictationContext): string[] => {
   return out;
 };
 
-async function mintToken(): Promise<string> {
-  const response = await fetch("/api/dictation/token", {
+async function mintToken(fetchFn: typeof fetch): Promise<string> {
+  const response = await fetchFn("/api/dictation/token", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ provider: "elevenlabs" }),
   });
   if (!response.ok) {
-    if (response.status === 401) window.dispatchEvent(new Event("polyth:auth-required"));
+    if (response.status === 401 && typeof window !== "undefined") {
+      window.dispatchEvent(new Event("polyth:auth-required"));
+    }
     const body = await response.json().catch(() => ({})) as { error?: unknown; message?: unknown };
     const code = typeof body.error === "string"
       ? body.error
@@ -70,14 +95,11 @@ async function mintToken(): Promise<string> {
   return data.token;
 }
 
-export async function startDirectElevenLabsDictation(options: {
-  model?: string;
-  language?: string;
-  context?: DictationContext;
-  onPartial?: (text: string) => void;
-  onError?: (message: string) => void;
-}): Promise<StreamingDictation> {
-  let socket: WebSocket | null = null;
+export async function startDirectElevenLabsDictation(options: DirectElevenLabsOptions): Promise<StreamingDictation> {
+  const fetchFn = options.fetchFn ?? fetch;
+  const socketFactory = options.socketFactory ?? ((url) => new WebSocket(url));
+  const captureFactory = options.captureFactory ?? startPcm16Capture;
+  let socket: BrowserSocketLike | null = null;
   let capture: Pcm16Capture | null = null;
   let active = true;
   let stopping = false;
@@ -103,20 +125,20 @@ export async function startDirectElevenLabsDictation(options: {
     finalResolve = null;
   };
 
-  const sendJson = async (ws: WebSocket, value: unknown): Promise<void> => {
-    while (active && ws.readyState === WebSocket.OPEN && ws.bufferedAmount > 512 * 1024) {
+  const sendJson = async (ws: BrowserSocketLike, value: unknown): Promise<void> => {
+    while (active && ws.readyState === OPEN && ws.bufferedAmount > 512 * 1024) {
       if (ws.bufferedAmount > MAX_SOCKET_BUFFER) {
         throw new DictationError("backpressure_overflow", "ElevenLabs browser socket buffer overflowed");
       }
       await new Promise((resolve) => setTimeout(resolve, 15));
     }
-    if (!active || ws.readyState !== WebSocket.OPEN) {
+    if (!active || ws.readyState !== OPEN) {
       throw new DictationError("network_error", "ElevenLabs browser connection is not open");
     }
     ws.send(JSON.stringify(value));
   };
 
-  const replay = async (ws: WebSocket): Promise<void> => {
+  const replay = async (ws: BrowserSocketLike): Promise<void> => {
     for (const chunk of chunks) {
       await sendJson(ws, {
         message_type: "input_audio_chunk",
@@ -125,23 +147,11 @@ export async function startDirectElevenLabsDictation(options: {
     }
   };
 
-  const scheduleReconnect = (): void => {
-    if (!active || stopping || failed || reconnectTimer || connectFlight) return;
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null;
-      if (!active || stopping || failed) return;
-      void capture?.pause().catch(() => {});
-      void connect(true)
-        .then(() => capture?.resume())
-        .catch(fail);
-    }, 400);
-  };
-
-  const connect = (withReplay: boolean): Promise<void> => {
+  async function connect(withReplay: boolean): Promise<void> {
     if (connectFlight) return connectFlight;
     const currentGeneration = ++generation;
     connectFlight = (async () => {
-      const token = await mintToken();
+      const token = await mintToken(fetchFn);
       if (!active) return;
       const url = new URL(PROVIDER_URL);
       url.searchParams.set("model_id", options.model?.trim() || "scribe_v2_realtime");
@@ -152,7 +162,7 @@ export async function startDirectElevenLabsDictation(options: {
       if (language && language !== "auto") url.searchParams.set("language_code", language.split("-")[0]!.toLowerCase());
       for (const term of keyterms(options.context)) url.searchParams.append("keyterms", term);
 
-      const ws = new WebSocket(url.toString());
+      const ws = socketFactory(url.toString());
       socket = ws;
       committed = "";
       interim = "";
@@ -207,11 +217,18 @@ export async function startDirectElevenLabsDictation(options: {
               event.reason || `ElevenLabs direct connection closed (${event.code})`,
             ));
           }
-          if (currentGeneration === generation) scheduleReconnect();
+          if (currentGeneration === generation && active && !stopping && !failed && !reconnectTimer) {
+            reconnectTimer = setTimeout(() => {
+              reconnectTimer = null;
+              if (!active || stopping || failed) return;
+              void capture?.pause().catch(() => {});
+              void connect(true).then(() => capture?.resume()).catch(fail);
+            }, 400);
+          }
         };
       });
 
-      if (socket !== ws || ws.readyState !== WebSocket.OPEN) {
+      if (socket !== ws || ws.readyState !== OPEN) {
         throw new DictationError("network_error", "ElevenLabs direct session did not stay open");
       }
       if (withReplay) await replay(ws);
@@ -219,11 +236,11 @@ export async function startDirectElevenLabsDictation(options: {
       connectFlight = null;
     });
     return connectFlight;
-  };
+  }
 
   const initialConnect = connect(false);
   try {
-    capture = await startPcm16Capture({
+    capture = await captureFactory({
       targetSampleRate: 16_000,
       chunkMs: 40,
       onChunk(pcm) {
@@ -241,7 +258,7 @@ export async function startDirectElevenLabsDictation(options: {
         sendTail = sendTail.then(async () => {
           await initialConnect;
           const ws = socket;
-          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          if (!ws || ws.readyState !== OPEN) return;
           await sendJson(ws, {
             message_type: "input_audio_chunk",
             audio_base_64: base64(retained),
@@ -266,12 +283,12 @@ export async function startDirectElevenLabsDictation(options: {
     if (document.visibilityState === "hidden") void capture.pause().catch(() => {});
     else void capture.resume().catch(fail);
   };
-  document.addEventListener("visibilitychange", onVisibility);
+  if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibility);
 
   const teardown = (): void => {
     if (!active) return;
     active = false;
-    document.removeEventListener("visibilitychange", onVisibility);
+    if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibility);
     if (reconnectTimer) clearTimeout(reconnectTimer);
     reconnectTimer = null;
     capture?.stop();
@@ -300,7 +317,7 @@ export async function startDirectElevenLabsDictation(options: {
         teardown();
         return "";
       }
-      if (!socket || socket.readyState !== WebSocket.OPEN) await connect(true);
+      if (!socket || socket.readyState !== OPEN) await connect(true);
       const ws = socket;
       if (!ws) throw new DictationError("network_error", "ElevenLabs direct connection is unavailable");
       const final = new Promise<string>((resolve, reject) => {
