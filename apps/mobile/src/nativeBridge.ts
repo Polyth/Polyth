@@ -10,8 +10,12 @@ import { Share } from "@capacitor/share";
 import { SplashScreen } from "@capacitor/splash-screen";
 import { SafeArea, SystemBarsStyle } from "@capacitor-community/safe-area";
 import { FilePicker } from "@capawesome/capacitor-file-picker";
-import { mobileDeepLinkPath, isNativeMobile } from "./runtime.ts";
-import { rememberPendingPairingLink } from "./pendingPair.ts";
+import {
+  isNativeMobile,
+  isPairingDeepLink,
+  mobileDeepLinkPath,
+  returnToMobileConnectionHub,
+} from "./runtime.ts";
 import { installNativePolythLink } from "./nativePolythLink.ts";
 
 export interface NativeMobileCallbacks {
@@ -148,13 +152,12 @@ export function installNativeMobileIntegration(callbacks: NativeMobileCallbacks)
   }).then((handle) => disposers.push(() => void handle.remove()));
 
   void App.addListener("appUrlOpen", ({ url }) => {
-    if (url.trim().startsWith("polyth://pair")) {
-      rememberPendingPairingLink(url);
-      callbacks.openPairingLink?.(url);
-      return;
+    if (isPairingDeepLink(url) || mobileDeepLinkPath(url)) {
+      // The native layer has already captured the raw OS URL in process memory.
+      // Never apply an ambiguous external link to whichever server happens to
+      // be active; reload the bundled Connection Hub and resolve the server there.
+      void returnToMobileConnectionHub();
     }
-    const path = mobileDeepLinkPath(url);
-    if (path) callbacks.openDeepLink(path);
   }).then((handle) => disposers.push(() => void handle.remove()));
 
   void App.addListener("backButton", () => {
@@ -171,7 +174,7 @@ export function installNativeMobileIntegration(callbacks: NativeMobileCallbacks)
   void LocalNotifications.addListener("localNotificationActionPerformed", ({ notification }) => {
     const sessionId = (notification.extra as { sessionId?: unknown } | undefined)?.sessionId;
     if (typeof sessionId === "string" && sessionId) {
-      callbacks.openDeepLink(`/?session=${encodeURIComponent(sessionId)}`);
+      void returnToMobileConnectionHub(`/?session=${encodeURIComponent(sessionId)}`);
     }
   }).then((handle) => disposers.push(() => void handle.remove()));
 
@@ -195,7 +198,7 @@ export function installNativeMobileIntegration(callbacks: NativeMobileCallbacks)
     const deepLink = mobileDeepLinkPath(url.href);
     if (url.protocol === "polyth:" && deepLink) {
       event.preventDefault();
-      callbacks.openDeepLink(deepLink);
+      void returnToMobileConnectionHub(deepLink);
       return;
     }
     if (url.protocol === "http:" || url.protocol === "https:") {
