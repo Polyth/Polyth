@@ -47,7 +47,7 @@ export function authRoutes(auth: AuthService): RouteHandler {
 
     if (path === "/api/auth/status" && method === "GET") {
       const resolution = auth.resolve(reqLike, ingress);
-      rc.json(200, { ...auth.statusDto(resolution), accounts: accountList(auth) });
+      rc.json(200, auth.statusDto(resolution));
       return true;
     }
 
@@ -57,7 +57,10 @@ export function authRoutes(auth: AuthService): RouteHandler {
         return true;
       }
       const b = await rc.body();
-      const accountId = typeof b.accountId === "string" && b.accountId ? b.accountId : undefined;
+      const rawAccount = typeof b.accountId === "string" ? b.accountId.trim() : "";
+      const accountId = rawAccount
+        ? rawAccount.startsWith("usr_") ? rawAccount : accountIdFor(rawAccount)
+        : undefined;
       const r = auth.login(
         String(b.password ?? ""),
         rc.req.socket?.remoteAddress,
