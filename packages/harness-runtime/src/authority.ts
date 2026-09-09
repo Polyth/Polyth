@@ -1,11 +1,10 @@
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Duplex } from "node:stream";
 import type { ExecutionReleaseProof, MutationOutcome, RuntimeSessionBinding } from "@polyth/contracts";
-import { supervisorSource } from "./supervisor.ts";
 type Proof = {
     authorityId: string;
     generation: number;
@@ -19,6 +18,44 @@ type State = Proof & {
     receipts: Record<string, string>;
 };
 const unknown = (message: string) => Object.assign(new Error(message), { code: "outcome-unknown" });
+const unavailable = (message: string) => Object.assign(new Error(message), { code: "unavailable" });
+const supervisorExecutable = () => {
+    const target = `linux-${process.arch}`;
+    const resources = process.env.POLYTH_RESOURCES_DIR;
+    if (resources)
+        return join(resources, "runtime-supervisor", target, "polyth-supervisor");
+    const source = join(import.meta.dirname, "..", "native", "bin", target, "polyth-supervisor");
+    return existsSync(source)
+        ? source
+        : join(import.meta.dirname, "..", "resources", "runtime-supervisor", target, "polyth-supervisor");
+};
+const validateLaunch = (binary: string, options: SpawnOptions) => {
+    if (options.cwd !== undefined) {
+        try {
+            if (!statSync(options.cwd).isDirectory())
+                throw unavailable("Runtime workspace/cwd is not a directory");
+        }
+        catch (error) {
+            if ((error as { code?: string }).code === "unavailable") throw error;
+            const code = (error as { code?: string }).code;
+            if (code === "ENOENT" || code === "ENOTDIR")
+                throw unavailable("Runtime workspace/cwd no longer exists");
+            throw unavailable("Runtime workspace/cwd is unavailable");
+        }
+    }
+    try {
+        if (!statSync(binary).isFile())
+            throw unavailable("Polyth runtime supervisor binary is unavailable");
+        accessSync(binary, constants.X_OK);
+    }
+    catch (error) {
+        if ((error as { code?: string }).code === "unavailable") throw error;
+        const code = (error as { code?: string }).code;
+        throw unavailable(code === "ENOENT"
+            ? "Polyth runtime supervisor binary is missing"
+            : "Polyth runtime supervisor binary is unavailable");
+    }
+};
 const identity = (pid: number) => {
     try {
         const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
@@ -50,15 +87,18 @@ const confirmed = (state: State) => {
 async function release(state: State) {
     if (!state.pid || state.released || confirmed(state))
         return;
-    if (!state.receiptFile || identity(state.pid) !== state.startTime)
+    if (!state.receiptFile || !state.startTime || identity(state.pid) !== state.startTime)
         throw unknown("Previous executor has no verified release receipt");
     let signalled = false;
     for (let i = 0; i < 250; i++) {
         if (confirmed(state))
             return;
-        if (!signalled && confirmed({ ...state, receiptFile: state.receiptFile + ".ready" })) {
-            if (identity(state.pid) !== state.startTime)
-                throw unknown("Executor exited without a release receipt");
+        const ready = confirmed({ ...state, receiptFile: state.receiptFile + ".ready" });
+        if (identity(state.pid) !== state.startTime)
+            throw unknown(ready
+                ? "Executor exited without a release receipt"
+                : "Polyth runtime supervisor exited before ready");
+        if (!signalled && ready) {
             try {
                 process.kill(state.pid, "SIGTERM");
             }
@@ -170,11 +210,13 @@ export async function createProcessAuthority(file?: string, stable = false, proo
         spawn(command: string, args: string[], options: SpawnOptions = {}) {
             if (child)
                 throw Object.assign(new Error("Authority already owns a process"), { code: "conflict" });
-            const config = JSON.stringify({ argv: [command, ...args], receipt: state.receiptFile, proof: { authorityId: state.authorityId, generation: state.generation } });
+            const binary = supervisorExecutable();
+            validateLaunch(binary, options);
+            const proof = JSON.stringify({ authorityId: state.authorityId, generation: state.generation });
             // SDK cancellation may kill the native process, but must not SIGKILL the
             // supervisor before it has proved descendants stopped. close() owns it.
-            const { signal: _signal, ...spawnOptions } = options;
-            child = spawn(process.env.POLYTH_PYTHON_BIN ?? "python3", ["-c", supervisorSource, config], { ...spawnOptions, detached: true, stdio: ["pipe", "pipe", "pipe", "pipe"] });
+            const { signal: _signal, shell: _shell, ...spawnOptions } = options;
+            child = spawn(binary, [state.receiptFile!, proof, command, ...args], { ...spawnOptions, shell: false, detached: true, stdio: ["pipe", "pipe", "pipe", "pipe"] });
             const gate = child.stdio[3] as Duplex;
             const failGate = (): void => {
                 // The proof gate is part of ownership publication. If it

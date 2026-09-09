@@ -46,6 +46,7 @@ test("desktop packaging covers each supported updater target", async () => {
   assert.equal(pkg.build.extraResources.some(({ to }) => to === "opencode"), true);
   assert.equal(pkg.build.extraResources.some(({ to }) => to === "packages"), true);
   assert.equal(pkg.build.extraResources.some(({ to }) => to === "polyth-link"), true);
+  assert.equal(pkg.build.extraResources.some(({ to }) => to === "runtime-supervisor"), true);
   assert.equal(pkg.build.extraResources.some(({ to }) => to === "server/agentToolsMcp.mjs"), true);
 });
 
@@ -98,4 +99,5 @@ test("pinned OpenCode lock covers packaged CPU and operating-system targets", as
   assert.match(mainSource, /POLYTH_LINK_HOST/);
   const buildSource = await readFile(join(desktopDir, "build.ts"), "utf8");
   assert.match(buildSource, /resources", "polyth-link"/);
+  assert.match(buildSource, /resources", "runtime-supervisor"/);
 });
