@@ -433,6 +433,7 @@ test("response intent compare-and-set records one winner and reopens only after 
       sessionId: "session-a",
       requestId: "permission-a",
       reply: "once",
+      auto: true,
     });
     const loser = await store.chooseResponseIntent({
       kind: "permission",
@@ -443,7 +444,7 @@ test("response intent compare-and-set records one winner and reopens only after 
     assert.equal(winner.kind, "chosen");
     assert.equal(loser.kind, "existing");
     assert.equal(loser.operation.operationId, winner.operation.operationId);
-    assert.deepEqual(loser.intent.payload, { reply: "once" });
+    assert.deepEqual(loser.intent.payload, { reply: "once", auto: true });
 
     await store.claimOperation(winner.operation.operationId);
     await store.settleResponseIntent(winner.operation.operationId, {

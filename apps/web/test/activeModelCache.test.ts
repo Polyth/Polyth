@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { JsonObject, SessionEvent } from "@polyth/contracts";
-import { reduceSessionModel } from "../src/store.ts";
+import { modelForAutoAccept, reduceSessionModel } from "../src/store.ts";
 
 function event(sessionId: string, seq: number, text: string): SessionEvent {
   return {
@@ -32,4 +32,20 @@ test("active model reduction does not cross session switches", () => {
   const second = reduceSessionModel("s2", [event("s2", 1, "session two")]);
   assert.notStrictEqual(second, first);
   assert.equal(second.messages[0]?.kind === "user" && second.messages[0].text, "session two");
+});
+
+test("Auto-Approve hydration never exposes an already-cached pending permission", () => {
+  const permission: SessionEvent = {
+    id: "permission-1",
+    sessionId: "s1",
+    seq: 1,
+    time: 1,
+    type: "permission/requested",
+    data: { requestId: "p1", permission: "bash", patterns: ["npm test"] },
+    v: 1,
+  };
+  const pending = reduceSessionModel("s1", [permission]);
+  assert.equal(pending.permissions[0]?.status, "pending");
+  assert.equal(modelForAutoAccept(pending, true).permissions.length, 0);
+  assert.strictEqual(modelForAutoAccept(pending, false), pending);
 });
