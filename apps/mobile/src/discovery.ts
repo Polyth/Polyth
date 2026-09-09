@@ -4,7 +4,7 @@ export interface DiscoveredPolyth {
   hostLabel: string;
   hostEndpointId: string;
   protocolVersion: 1;
-  port: number;
+  port: number | null;
   addresses: string[];
   numericPairing: boolean;
 }
@@ -31,9 +31,15 @@ function endpointField(value: unknown): string | undefined {
 }
 
 function addressField(value: unknown): string | undefined {
-  const address = stringField(value, 64);
+  const address = stringField(value, 96);
   if (!address || /[\s/@?#\\]/u.test(address)) return undefined;
   return address;
+}
+
+function portField(value: unknown): number | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > 65535) return undefined;
+  return value as number;
 }
 
 export function normalizeDiscoveredPolyth(value: unknown): DiscoveredPolyth | undefined {
@@ -42,9 +48,8 @@ export function normalizeDiscoveredPolyth(value: unknown): DiscoveredPolyth | un
   const endpoint = endpointField(raw.hostEndpointId);
   const serviceName = stringField(raw.serviceName, 128);
   const hostLabel = stringField(raw.hostLabel, 80);
-  const port = raw.port;
-  if (!endpoint || !serviceName || !hostLabel || raw.protocolVersion !== 1) return undefined;
-  if (!Number.isInteger(port) || (port as number) < 1 || (port as number) > 65535) return undefined;
+  const port = portField(raw.port);
+  if (!endpoint || !serviceName || !hostLabel || raw.protocolVersion !== 1 || port === undefined) return undefined;
 
   const addresses = Array.isArray(raw.addresses)
     ? Array.from(new Set(raw.addresses.map(addressField).filter((item): item is string => Boolean(item)))).slice(0, 16)
@@ -56,7 +61,7 @@ export function normalizeDiscoveredPolyth(value: unknown): DiscoveredPolyth | un
     hostLabel,
     hostEndpointId: endpoint,
     protocolVersion: 1,
-    port: port as number,
+    port,
     addresses,
     numericPairing: raw.numericPairing === true,
   };
