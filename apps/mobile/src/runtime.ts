@@ -61,6 +61,15 @@ export function normalizePolythHost(input: string): string {
   return url.origin;
 }
 
+export function isPolythLinkLoopbackOrigin(raw: string): boolean {
+  try {
+    const url = new URL(raw);
+    return url.protocol === "http:" && url.hostname === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+
 function parseHostState(value: string | null): HostState {
   try {
     const parsed = JSON.parse(value ?? "null") as Partial<HostState> | null;
@@ -223,7 +232,9 @@ export async function prepareMobileLaunch(): Promise<MobileLaunch> {
   const deepLinkPath = launchUrl?.url ? mobileDeepLinkPath(launchUrl.url) : undefined;
 
   if (!isBundledOrigin()) {
-    await rememberMobileHost(location.origin);
+    if (!isPolythLinkLoopbackOrigin(location.origin)) {
+      await rememberMobileHost(location.origin);
+    }
     if (deepLinkPath && `${location.pathname}${location.search}` !== deepLinkPath) {
       history.replaceState(null, "", deepLinkPath);
     }
