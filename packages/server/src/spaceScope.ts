@@ -146,6 +146,7 @@ function scopeSessions(
   assign("runShell", bySession(base.runShell));
   assign("delete", bySession(base.delete));
   assign("debug", bySession(base.debug));
+  assign("runtimeFeatures", bySession(base.runtimeFeatures));
   assign("replySecret", bySession(base.replySecret));
   assign("rename", bySession(base.rename));
   assign("organize", bySession(base.organize));
