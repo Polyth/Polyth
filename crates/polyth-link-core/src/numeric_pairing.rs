@@ -32,15 +32,22 @@ impl CipherSuite for NumericCipherSuite {
     type Ksf = Identity;
 }
 
+#[derive(Clone, Copy)]
+struct RateAttempt {
+    id: u64,
+    at: Instant,
+}
+
 pub struct NumericPairing {
     setup: ServerSetup<NumericCipherSuite>,
     active: Option<NumericInvitation>,
     pending: HashMap<String, PendingLogin>,
     attempts_by_client: HashMap<(String, String), usize>,
-    attempts_by_endpoint: HashMap<String, Vec<Instant>>,
+    attempts_by_endpoint: HashMap<String, Vec<RateAttempt>>,
     endpoint_cooldowns: HashMap<String, Instant>,
-    global_attempts: Vec<Instant>,
+    global_attempts: Vec<RateAttempt>,
     host_cooldown_until: Option<Instant>,
+    next_rate_attempt_id: u64,
 }
 
 struct NumericInvitation {
@@ -58,6 +65,7 @@ struct PendingLogin {
     device_endpoint_id: String,
     state: ServerLogin<NumericCipherSuite>,
     created: Instant,
+    rate_attempt_id: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,6 +127,7 @@ impl NumericPairing {
             endpoint_cooldowns: HashMap::new(),
             global_attempts: Vec::new(),
             host_cooldown_until: None,
+            next_rate_attempt_id: 0,
         }
     }
 
@@ -205,10 +214,10 @@ impl NumericPairing {
         if active.redeemed {
             return Err(LinkError::PairingClaimed);
         }
-        self.reserve_attempt(device_endpoint_id, pairing_id, now)?;
         if self.pending.len() >= MAX_PENDING_LOGINS {
             return Err(LinkError::RequestRateLimited);
         }
+        let rate_attempt_id = self.reserve_attempt(device_endpoint_id, pairing_id, now)?;
 
         let active = self.active.as_ref().ok_or(LinkError::PairingExpired)?;
         let credential_request = CredentialRequest::<NumericCipherSuite>::deserialize(request)
@@ -246,6 +255,7 @@ impl NumericPairing {
                 device_endpoint_id: device_endpoint_id.to_string(),
                 state: started.state,
                 created: now,
+                rate_attempt_id,
             },
         );
 
@@ -277,6 +287,7 @@ impl NumericPairing {
         if now.duration_since(pending.created) >= NUMERIC_TTL {
             return Err(LinkError::PairingExpired);
         }
+        let rate_attempt_id = pending.rate_attempt_id;
 
         let pairing_id = {
             let active = self.active.as_mut().ok_or(LinkError::PairingExpired)?;
@@ -309,7 +320,7 @@ impl NumericPairing {
             active.pairing_id.clone()
         };
 
-        self.refund_success(device_endpoint_id, &pairing_id);
+        self.refund_success(device_endpoint_id, &pairing_id, rate_attempt_id);
         self.pending.clear();
         Ok(NumericPairingRedeemed { pairing_id })
     }
@@ -324,7 +335,7 @@ impl NumericPairing {
         device_endpoint_id: &str,
         pairing_id: &str,
         now: Instant,
-    ) -> Result<(), LinkError> {
+    ) -> Result<u64, LinkError> {
         if self.host_cooldown_until.is_some_and(|until| now < until) {
             return Err(LinkError::RequestRateLimited);
         }
@@ -356,13 +367,17 @@ impl NumericPairing {
             return Err(LinkError::RequestRateLimited);
         }
 
-        *client_attempts += 1;
-        endpoint_attempts.push(now);
-        self.global_attempts.push(now);
-        if *client_attempts >= MAX_CLIENT_ATTEMPTS {
-            // This bootstrap/source pair may finish its current attempt, but no
-            // additional online guesses are allowed for this pairing session.
+        self.next_rate_attempt_id = self.next_rate_attempt_id.wrapping_add(1);
+        if self.next_rate_attempt_id == 0 {
+            self.next_rate_attempt_id = 1;
         }
+        let rate_attempt = RateAttempt {
+            id: self.next_rate_attempt_id,
+            at: now,
+        };
+        *client_attempts += 1;
+        endpoint_attempts.push(rate_attempt);
+        self.global_attempts.push(rate_attempt);
         if endpoint_attempts.len() >= MAX_ENDPOINT_ATTEMPTS {
             self.endpoint_cooldowns
                 .insert(device_endpoint_id.to_string(), now + COOLDOWN);
@@ -370,24 +385,37 @@ impl NumericPairing {
         if self.global_attempts.len() >= MAX_GLOBAL_ATTEMPTS {
             self.host_cooldown_until = Some(now + COOLDOWN);
         }
-        Ok(())
+        Ok(rate_attempt.id)
     }
 
-    fn refund_success(&mut self, device_endpoint_id: &str, pairing_id: &str) {
+    fn refund_success(
+        &mut self,
+        device_endpoint_id: &str,
+        pairing_id: &str,
+        rate_attempt_id: u64,
+    ) {
         let key = (pairing_id.to_string(), device_endpoint_id.to_string());
-        if let Some(attempts) = self.attempts_by_client.get_mut(&key) {
+        let remove_client = if let Some(attempts) = self.attempts_by_client.get_mut(&key) {
             *attempts = attempts.saturating_sub(1);
-            if *attempts == 0 {
-                self.attempts_by_client.remove(&key);
-            }
+            *attempts == 0
+        } else {
+            false
+        };
+        if remove_client {
+            self.attempts_by_client.remove(&key);
         }
-        if let Some(attempts) = self.attempts_by_endpoint.get_mut(device_endpoint_id) {
-            attempts.pop();
-            if attempts.is_empty() {
-                self.attempts_by_endpoint.remove(device_endpoint_id);
-            }
+
+        let remove_endpoint = if let Some(attempts) = self.attempts_by_endpoint.get_mut(device_endpoint_id) {
+            attempts.retain(|attempt| attempt.id != rate_attempt_id);
+            attempts.is_empty()
+        } else {
+            false
+        };
+        if remove_endpoint {
+            self.attempts_by_endpoint.remove(device_endpoint_id);
         }
-        self.global_attempts.pop();
+        self.global_attempts
+            .retain(|attempt| attempt.id != rate_attempt_id);
     }
 
     fn expire(&mut self, now: Instant) {
@@ -404,9 +432,9 @@ impl NumericPairing {
 
     fn prune_rate_limits(&mut self, now: Instant) {
         self.global_attempts
-            .retain(|at| now.duration_since(*at) < ATTEMPT_WINDOW);
+            .retain(|attempt| now.duration_since(attempt.at) < ATTEMPT_WINDOW);
         self.attempts_by_endpoint.retain(|_, attempts| {
-            attempts.retain(|at| now.duration_since(*at) < ATTEMPT_WINDOW);
+            attempts.retain(|attempt| now.duration_since(attempt.at) < ATTEMPT_WINDOW);
             !attempts.is_empty()
         });
         self.endpoint_cooldowns.retain(|_, until| now < *until);
@@ -610,6 +638,51 @@ mod tests {
             .finish_login(DEVICE, &finish.attempt_id, &finish.finalization, now)
             .unwrap();
         assert_eq!(redeemed.pairing_id, bootstrap.pairing_id);
+    }
+
+    #[test]
+    fn successful_login_refunds_only_its_own_rate_limit_slot() {
+        let now = Instant::now();
+        let mut server = NumericPairing::new();
+        let code = server.create(HOST, "bootstrap-a", now).unwrap();
+        let bootstrap = server.bootstrap(now).unwrap();
+        let other_device = device(2);
+
+        let (client, request) = NumericClientLogin::start(
+            &code.code,
+            HOST,
+            &bootstrap.pairing_id,
+            &bootstrap.expires_at,
+        )
+        .unwrap();
+        let challenge = server
+            .start_login(DEVICE, &bootstrap.pairing_id, &request.request, now)
+            .unwrap();
+        let (_other_client, other_request) = NumericClientLogin::start(
+            &code.code,
+            HOST,
+            &bootstrap.pairing_id,
+            &bootstrap.expires_at,
+        )
+        .unwrap();
+        server
+            .start_login(&other_device, &bootstrap.pairing_id, &other_request.request, now)
+            .unwrap();
+
+        let own_rate_id = server.pending[&challenge.attempt_id].rate_attempt_id;
+        let other_rate_id = server
+            .pending
+            .values()
+            .find(|pending| pending.device_endpoint_id == other_device)
+            .unwrap()
+            .rate_attempt_id;
+        let finish = client.finish(&challenge).unwrap();
+        server
+            .finish_login(DEVICE, &finish.attempt_id, &finish.finalization, now)
+            .unwrap();
+
+        assert!(!server.global_attempts.iter().any(|attempt| attempt.id == own_rate_id));
+        assert!(server.global_attempts.iter().any(|attempt| attempt.id == other_rate_id));
     }
 
     #[test]
