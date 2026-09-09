@@ -25,7 +25,13 @@ test("normalizes bounded discovery metadata without creating trust material", ()
   assert.deepEqual(normalizeDiscoveredPolyth(result()), result());
 });
 
-test("rejects malformed endpoint, protocol and port", () => {
+test("accepts a standards-compliant browse result when platform resolution does not expose SRV port", () => {
+  const normalized = normalizeDiscoveredPolyth(result({ port: undefined }));
+  assert.equal(normalized?.port, null);
+  assert.equal(normalized?.hostEndpointId, endpoint);
+});
+
+test("rejects malformed endpoint, protocol and explicit port", () => {
   assert.equal(normalizeDiscoveredPolyth(result({ hostEndpointId: "<script>" })), undefined);
   assert.equal(normalizeDiscoveredPolyth(result({ protocolVersion: 2 })), undefined);
   assert.equal(normalizeDiscoveredPolyth(result({ port: 0 })), undefined);
