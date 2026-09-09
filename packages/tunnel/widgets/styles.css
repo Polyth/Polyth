@@ -28,7 +28,8 @@
 .pkg-tunnel-devices li > div:first-child,
 .pkg-tunnel-form,
 .pkg-tunnel-pair,
-.pkg-tunnel-field {
+.pkg-tunnel-field,
+.pkg-tunnel-numeric {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -36,7 +37,8 @@
 
 .pkg-tunnel-status span,
 .pkg-tunnel-devices span,
-.pkg-tunnel-grants {
+.pkg-tunnel-grants,
+.pkg-tunnel-numeric > span {
   color: var(--muted);
   font-size: var(--font-meta);
 }
@@ -46,9 +48,28 @@
 }
 
 .pkg-tunnel-actions,
-.pkg-tunnel-devices li > div:last-child {
+.pkg-tunnel-devices li > div:last-child,
+.pkg-tunnel-numeric > div {
   display: flex;
   gap: var(--space-2);
+}
+
+.pkg-tunnel-numeric {
+  align-items: center;
+  padding: var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  text-align: center;
+}
+
+.pkg-tunnel-numeric > div {
+  align-items: center;
+}
+
+.pkg-tunnel-numeric strong {
+  font-size: clamp(1.8rem, 8cqi, 2.6rem);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.12em;
 }
 
 .pkg-tunnel-devices {
