@@ -26,3 +26,13 @@ test("legacy favorites migration cannot manufacture agent presets", () => {
   assert.equal(profiles.includes("createProfile("), false);
   assert.equal(profiles.includes("@polyth/models/web-prefs"), false);
 });
+
+test("project profile defaults stay account-local", () => {
+  const settings = source("apps/web/src/components/settings/pages.tsx");
+  assert.ok(settings.includes("updateDraftExecutionConfig"));
+  assert.equal(settings.includes("saveExecution(p.id, { agentProfileId"), false);
+
+  const composer = source("apps/web/src/components/Composer.tsx");
+  assert.ok(composer.includes("draftExecution.profileId"));
+  assert.equal(composer.includes("activeProject?.defaults?.agentProfileId"), false);
+});

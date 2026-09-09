@@ -3,13 +3,14 @@
 // the same thing as the enable toggle. Model search is local to a card.
 import { useEffect, useMemo, useState } from "react";
 import { deriveProviderStatus, filterProviderModels, isFavorite, modelKey, orderProviders } from "@polyth/models";
+import { createApiTransport } from "@polyth/web-sdk";
 import {
   reorderModelProviders,
   setModelProviderExpanded,
   toggleModelFavorite,
   useModelPrefs,
 } from "./modelPrefs.ts";
-import { setModels } from "../../../apps/web/src/store.ts";
+import { setModels, useStore } from "../../../apps/web/src/store.ts";
 import {
   api,
   type AvailableProviderDto,
@@ -38,6 +39,10 @@ import {
   TextInput,
 } from "../../../apps/web/src/components/ui/index.ts";
 
+const providerCatalogApi = createApiTransport();
+const loadOpenCodeProviders = (refresh = false) =>
+  providerCatalogApi.get<ProviderCatalogDto[]>(`/api/opencode/providers${refresh ? "?refresh=1" : ""}`);
+
 function fmtContext(context?: number): string {
   if (!context) return "";
   return context >= 1000 ? `${Math.round(context / 1000)}k ctx` : `${context} ctx`;
@@ -62,6 +67,7 @@ function overlayStatus(provider: ProviderCatalogDto, enabled: boolean): NonNulla
 
 export default function ModelsPage() {
   const prefs = useModelPrefs();
+  const globalModels = useStore((state) => state.models);
   const [providers, setProviders] = useState<ProviderCatalogDto[] | null>(null);
   const [error, setError] = useState("");
   const [draggedProvider, setDraggedProvider] = useState<string | null>(null);
@@ -83,7 +89,7 @@ export default function ModelsPage() {
   );
 
   const refreshCatalog = () =>
-    api.listProviders().then(setProviders).catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    loadOpenCodeProviders().then(setProviders).catch((e) => setError(e instanceof Error ? e.message : String(e)));
 
   const loadProviderOptions = async (opts: { force?: boolean; quiet?: boolean } = {}) => {
     if (options.loading) return;
@@ -111,8 +117,10 @@ export default function ModelsPage() {
   };
 
   useEffect(() => {
+    // The visible provider catalog is the only metadata needed on page open.
+    // Available-provider and auth discovery may initialize OpenCode plugins or
+    // network flows, so load those only when the user opens an admin surface.
     void refreshCatalog();
-    void loadProviderOptions({ quiet: true });
   }, []);
 
   const closeReconfigure = (id: string) =>
@@ -170,6 +178,7 @@ export default function ModelsPage() {
     setProviders(catalog);
     const enabled = catalog.flatMap((provider) => provider.enabled
       ? provider.models.filter((model) => model.enabled && model.connected).map((model) => ({
+          harnessId: "opencode",
           providerID: model.providerID,
           modelID: model.modelID,
           name: model.name,
@@ -181,7 +190,8 @@ export default function ModelsPage() {
           connected: model.connected,
         }))
       : []);
-    setModels(enabled);
+    const otherHarnesses = globalModels.filter((model) => model.harnessId && model.harnessId !== "opencode");
+    setModels([...otherHarnesses, ...enabled]);
   };
 
   const reconcile = (catalog: ProviderCatalogDto[], state: VisibilityStateDto) =>
@@ -223,7 +233,7 @@ export default function ModelsPage() {
     setRefreshing(true);
     setError("");
     try {
-      publish(await api.refreshProviders());
+      publish(await loadOpenCodeProviders(true));
       await loadProviderOptions({ force: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -292,7 +302,10 @@ export default function ModelsPage() {
           }}
         />
       </div>
-      <details className="provider-org-login-wrap">
+      <details
+        className="provider-org-login-wrap"
+        onToggle={(event) => { if (event.currentTarget.open) void loadProviderOptions(); }}
+      >
         <summary>{tr("settings.modelspage.organizationLogin")}</summary>
         {options.authCapabilities?.discovery?.status === "unavailable" ? (
           <p className="muted">{tr("settings.modelspage.authManagedByDeployment")}</p>

@@ -1,6 +1,6 @@
 import type {
   AgentDescriptor,
-  AgentRuntime,
+  HarnessSnapshot,
   ModelDescriptor,
   ProjectService,
 } from "@polyth/contracts";
@@ -11,16 +11,75 @@ export interface RuntimeCatalog {
   models(): Promise<ModelDescriptor[]>;
   agents(): Promise<AgentDescriptor[]>;
   patchAgent(agent: AgentDescriptor): void;
-  /** Drop the cached model snapshot so the next models() call re-fans-out.
-   *  Used right after a provider connects/disconnects so Settings reflects
-   *  it immediately instead of waiting for a restart. */
+  /** Drop model metadata after provider/auth/config changes. */
   invalidateModels(): void;
 }
 
+type CatalogSnapshot = {
+  models: ModelDescriptor[];
+  agents: AgentDescriptor[];
+  modelsOk: boolean;
+  agentsOk: boolean;
+};
+
+type SnapshotRuntimePool = RuntimePool & {
+  /** Harness-registry metadata seam exposed by createHarnessPool. */
+  harnessSnapshots?(
+    projectId: string,
+    cwd?: string,
+    options?: { harnessId?: string; force?: boolean; detail?: boolean },
+  ): Promise<HarnessSnapshot[]>;
+};
+
+const dedupeModels = (items: ModelDescriptor[]): ModelDescriptor[] => {
+  const seen = new Set<string>();
+  return items.filter((model) => {
+    const key = `${model.harnessId ?? "legacy"}/${model.providerID}/${model.modelID}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const dedupeAgents = (items: AgentDescriptor[]): AgentDescriptor[] => {
+  const seen = new Set<string>();
+  return items.filter((agent) => {
+    const key = `${agent.harnessId ?? "legacy"}/${agent.name}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const snapshotCatalog = (snapshots: HarnessSnapshot[]): Omit<CatalogSnapshot, "modelsOk" | "agentsOk"> => {
+  const models: ModelDescriptor[] = [];
+  const agents: AgentDescriptor[] = [];
+  for (const snapshot of snapshots) {
+    if (!snapshot.policy.enabled) continue;
+    const harnessId = snapshot.identity.id;
+    for (const model of snapshot.catalog?.models ?? []) {
+      models.push({ ...model, harnessId: model.harnessId ?? harnessId });
+    }
+    for (const agent of snapshot.catalog?.agents ?? snapshot.catalog?.roles ?? []) {
+      agents.push({ ...agent, harnessId: agent.harnessId ?? harnessId });
+    }
+  }
+  return { models: dedupeModels(models), agents: dedupeAgents(agents) };
+};
+
+const authoritativeDetail = (snapshot: HarnessSnapshot): boolean =>
+  snapshot.stale !== true
+  && snapshot.availability.state !== "degraded"
+  && snapshot.availability.state !== "offline";
+
 /**
- * OpenCode's provider endpoint may initialize provider plugins and perform
- * network discovery. Keep one raw catalog snapshot for the server lifetime so
- * opening Settings never fans out to every project runtime again.
+ * Global model/agent metadata is read from the harness registry in one project
+ * context. First load cheap summaries, then detail only enabled harnesses in
+ * parallel. Registry TTL/singleflight makes cost bounded by harness count and
+ * never by unrelated project count; models and agents share this same load.
+ *
+ * Older/tests-only RuntimePool implementations without the snapshot seam fall
+ * back to the bounded runtime aggregator for compatibility.
  */
 export function createRuntimeCatalog(deps: {
   projects: ProjectService;
@@ -29,110 +88,108 @@ export function createRuntimeCatalog(deps: {
 }): RuntimeCatalog {
   let models: ModelDescriptor[] | undefined;
   let agents: AgentDescriptor[] | undefined;
-  let modelsPending: Promise<ModelDescriptor[]> | undefined;
-  let agentsPending: Promise<AgentDescriptor[]> | undefined;
-  let modelAttempts = 0;
-  let agentAttempts = 0;
+  let pending: Promise<CatalogSnapshot> | undefined;
+  let modelEpoch = 0;
 
-  // A cold-boot fan-out settles before every project's runtime has finished
-  // spawning, so it can be empty OR partial — e.g. only the always-free
-  // `opencode` provider answered while the credentialed ones warm up. Freezing
-  // that for the server lifetime is what makes "only OpenCode Zen models show"
-  // survive until a restart. Cache only a complete fan-out; keep retrying
-  // otherwise, but stop after a few tries so one permanently unreachable
-  // project can't force a full fan-out on every Settings open.
-  const MAX_PARTIAL_ATTEMPTS = 8;
-
-  const incremental = <T,>(
-    fetch: (runtime: AgentRuntime) => Promise<T[]>,
-    key: (item: T) => string,
-  ): { first: Promise<T[]>; full: Promise<{ items: T[]; complete: boolean }> } => {
-    let settled = false;
-    let scheduled = false;
-    let resolveFirst!: (items: T[]) => void;
-    let rejectFirst!: (error: unknown) => void;
-    const first = new Promise<T[]>((resolve, reject) => {
-      resolveFirst = resolve;
-      rejectFirst = reject;
-    });
-    const finish = (items: T[]): void => {
-      if (settled) return;
-      settled = true;
-      resolveFirst(items);
-    };
-    const full = aggregateRuntimes(deps, fetch, key, (items) => {
-      if (items.length === 0 || settled || scheduled) return;
-      scheduled = true;
-      // Give an already-finishing fan-out one turn to preserve its complete,
-      // stable ordering. A genuinely slow sibling no longer blocks the first
-      // usable catalog response.
-      setImmediate(() => finish(items));
-    });
-    void full.then(
-      (result) => finish(result.items),
-      (error) => {
-        if (!settled) {
-          settled = true;
-          rejectFirst(error);
-        }
-      },
-    );
-    return { first, full };
-  };
-
-  const loadModels = () => {
-    if (models) return Promise.resolve(models);
-    if (modelsPending) return modelsPending;
-    const loading = incremental<ModelDescriptor>(
-      async (runtime) => (await runtime.models()).map((model) => ({
-        ...model,
-        ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}),
-      })),
-      (model) => `${model.harnessId ?? "legacy"}/${model.providerID}/${model.modelID}`,
-    );
-    const pending = loading.first;
-    modelsPending = pending;
-    void loading.full.then(({ items, complete }) => {
-      modelAttempts += 1;
-      if (items.length > 0 && (complete || modelAttempts >= MAX_PARTIAL_ATTEMPTS)) {
-        models = items;
+  const loadFallback = (): Promise<CatalogSnapshot> => aggregateRuntimes(
+    deps,
+    async (runtime) => {
+      const [modelResult, agentResult] = await Promise.allSettled([
+        runtime.models(),
+        runtime.agents(),
+      ]);
+      if (modelResult.status === "rejected" && agentResult.status === "rejected") {
+        throw modelResult.reason;
       }
-    }).catch(() => {}).finally(() => {
-      if (modelsPending === pending) modelsPending = undefined;
-    });
-    return pending;
-  };
+      return [{
+        models: modelResult.status === "fulfilled"
+          ? modelResult.value.map((model) => ({
+              ...model,
+              ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}),
+            }))
+          : [],
+        agents: agentResult.status === "fulfilled"
+          ? agentResult.value.map((agent) => ({
+              ...agent,
+              ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}),
+            }))
+          : [],
+        modelsOk: modelResult.status === "fulfilled",
+        agentsOk: agentResult.status === "fulfilled",
+      }];
+    },
+    (snapshot) => JSON.stringify([
+      snapshot.models.map((model) => [model.harnessId, model.providerID, model.modelID]),
+      snapshot.agents.map((agent) => [agent.harnessId, agent.name]),
+    ]),
+  ).then(({ items }) => ({
+    models: dedupeModels(items.flatMap((item) => item.models)),
+    agents: dedupeAgents(items.flatMap((item) => item.agents)),
+    modelsOk: items.some((item) => item.modelsOk),
+    agentsOk: items.some((item) => item.agentsOk),
+  }));
 
-  const loadAgents = () => {
-    if (agents) return Promise.resolve(agents);
-    if (agentsPending) return agentsPending;
-    const loading = incremental<AgentDescriptor>(
-      async (runtime) => (await runtime.agents()).map((agent) => ({
-        ...agent,
-        ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}),
-      })),
-      (agent) => `${agent.harnessId ?? "legacy"}/${agent.name}`,
-    );
-    const pending = loading.first;
-    agentsPending = pending;
-    void loading.full.then(({ items, complete }) => {
-      agentAttempts += 1;
-      if (items.length > 0 && (complete || agentAttempts >= MAX_PARTIAL_ATTEMPTS)) {
-        agents = items;
-      }
-    }).catch(() => {}).finally(() => {
-      if (agentsPending === pending) agentsPending = undefined;
+  const load = (): Promise<CatalogSnapshot> => {
+    if (models !== undefined && agents !== undefined) {
+      return Promise.resolve({ models, agents, modelsOk: true, agentsOk: true });
+    }
+    if (pending) return pending;
+    const requestedModelEpoch = modelEpoch;
+    const pool = deps.runtimes as SnapshotRuntimePool;
+    let run!: Promise<CatalogSnapshot>;
+    run = (async () => {
+      if (!pool.harnessSnapshots) return loadFallback();
+      const projects = await deps.projects.list();
+      const authority = projects.find((project) => !project.remote) ?? projects[0];
+      const projectId = authority?.id ?? "__default__";
+      const cwd = authority?.path;
+      const summaries = await pool.harnessSnapshots(projectId, cwd);
+      const enabled = summaries.filter((snapshot) => snapshot.policy.enabled);
+      const detailed = await Promise.allSettled(enabled.map(async (summary) => {
+        const rows = await pool.harnessSnapshots(projectId, cwd, {
+          harnessId: summary.identity.id,
+          detail: true,
+        });
+        return rows[0] ?? summary;
+      }));
+      const fulfilled = detailed.flatMap((result) =>
+        result.status === "fulfilled" ? [result.value] : []);
+      const data = snapshotCatalog(fulfilled);
+      const complete = enabled.length === 0
+        || (fulfilled.length === enabled.length && fulfilled.every(authoritativeDetail));
+      // A non-empty partial snapshot is useful and safe to keep as a fallback.
+      // An empty degraded cold snapshot is not: retry later instead of freezing
+      // "no models" until restart.
+      return {
+        ...data,
+        modelsOk: data.models.length > 0 || complete,
+        agentsOk: data.agents.length > 0 || complete,
+      };
+    })().then((snapshot) => {
+      // An invalidation that races this request owns the newer truth. Keep the
+      // response usable by its caller, but never republish it into the cache.
+      if (snapshot.modelsOk && requestedModelEpoch === modelEpoch) models = snapshot.models;
+      if (snapshot.agentsOk) agents = snapshot.agents;
+      return snapshot;
+    }).finally(() => {
+      if (pending === run) pending = undefined;
     });
-    return pending;
+    pending = run;
+    return run;
   };
 
   return {
-    models: loadModels,
-    agents: loadAgents,
+    async models() {
+      if (models !== undefined) return models;
+      return (await load()).models;
+    },
+    async agents() {
+      if (agents !== undefined) return agents;
+      return (await load()).agents;
+    },
     invalidateModels() {
+      modelEpoch += 1;
       models = undefined;
-      modelsPending = undefined;
-      modelAttempts = 0;
       deps.onModelsInvalidated?.();
     },
     patchAgent(agent) {

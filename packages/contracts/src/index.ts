@@ -1488,6 +1488,9 @@ export interface SessionProjection {
   /** F18: effective auto-accept policy (own setting or nearest parent's) —
    *  drives the loud header indicator. Never a global default. */
   autoAccept?: boolean;
+  /** Explicit durable choice owned by this canonical session. Absent means
+   *  inherit, preserving projections written before this field existed. */
+  autoAcceptSetting?: "on" | "off";
   /** Per-session composer draft text, persisted server-side so it syncs
    *  across clients. Cleared on send. */
   draft?: string;
@@ -2670,6 +2673,8 @@ export type ResponseIntentInput =
       requestId: string;
       reply: "once" | "always" | "reject";
       scope?: "session" | "project";
+      /** Durable provenance for a server-side Auto-Approve decision. */
+      auto?: boolean;
     }
   | {
       kind: "question";

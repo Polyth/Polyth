@@ -11,6 +11,7 @@ import type {
 import { createApiTransport, defineWebPackage, type WebPackageHost } from "@polyth/web-sdk";
 import { Button, Dialog, Notice, Select, Switch, Tabs, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 import MoveControls from "../../../apps/web/src/components/MoveControls.tsx";
+import ProviderLogo from "../../models/widgets/ProviderLogo.tsx";
 
 const api = createApiTransport();
 
@@ -239,7 +240,10 @@ function HarnessTabs({
     : resolvedTab ?? "";
   const tabs = ordered.map((row) => ({
     id: row.identity.id,
-    label: row.identity.name,
+    label: <>
+      <ProviderLogo providerID={row.identity.id} providerName={row.identity.name} size="compact" />
+      {row.identity.name}
+    </>,
     disabled: activeTab !== row.identity.id && (busy || Boolean(transition) || !canExecute(row)),
   }));
   const activeRow = ordered.find((row) => row.identity.id === activeTab);
@@ -262,11 +266,11 @@ function HarnessTabs({
         <Button size="sm" variant="ghost" onClick={() => setChoice(undefined)}>Back</Button>
       </div> : <>
         {transition?.phase === "requested" && <div className="pkg-harnesses-transition" role="status">
-          <span>Waiting for current response · Will run with {target?.identity.name ?? transition.targetHarnessId}</span>
+          <span>Waiting for current response · Will run with <ProviderLogo providerID={target?.identity.id ?? transition.targetHarnessId} providerName={target?.identity.name} size="compact" />{target?.identity.name ?? transition.targetHarnessId}</span>
           <Button size="sm" busy={busy} onClick={() => void perform(transition.selection, "stop-now")}>Switch now</Button>
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => void cancel()}>Cancel</Button>
         </div>}
-        {transition?.phase === "released" && <div className="pkg-harnesses-transition" role="status">Starting {target?.identity.name ?? transition.targetHarnessId}…</div>}
+        {transition?.phase === "released" && <div className="pkg-harnesses-transition" role="status"><ProviderLogo providerID={target?.identity.id ?? transition.targetHarnessId} providerName={target?.identity.name} size="compact" />Starting {target?.identity.name ?? transition.targetHarnessId}…</div>}
         {transition?.phase === "failed" && <Notice tone="error" role="alert" heading={`${target?.identity.name ?? transition.targetHarnessId} couldn't start`} actions={<Button size="sm" busy={busy} onClick={() => void perform(transition.selection, "after-turn")}>Retry</Button>}>
           The previous harness stopped safely. {transition.error?.message ?? "Choose another harness tab to continue."}
         </Notice>}
@@ -324,11 +328,11 @@ function HarnessTransitionStatus({
 
   return <div className="pkg-harnesses pkg-harnesses-transition-status">
     {transition.phase === "requested" && <div className="pkg-harnesses-transition" role="status">
-      <span>{resolvedHarnessId ?? "Current"} → {transition.targetHarnessId} after this response</span>
+      <span><ProviderLogo providerID={resolvedHarnessId} size="compact" />{resolvedHarnessId ?? "Current"} → <ProviderLogo providerID={transition.targetHarnessId} size="compact" />{transition.targetHarnessId} after this response</span>
       <Button size="sm" busy={busy} onClick={() => void update("stop-now")}>Switch now</Button>
       <Button size="sm" variant="ghost" disabled={busy} onClick={() => void cancel()}>Cancel</Button>
     </div>}
-    {transition.phase === "released" && <div className="pkg-harnesses-transition" role="status">Starting {transition.targetHarnessId}…</div>}
+    {transition.phase === "released" && <div className="pkg-harnesses-transition" role="status"><ProviderLogo providerID={transition.targetHarnessId} size="compact" />Starting {transition.targetHarnessId}…</div>}
     {transition.phase === "failed" && <Notice tone="error" role="alert" heading={`${transition.targetHarnessId} couldn't start`} actions={<Button size="sm" busy={busy} onClick={() => void update("after-turn")}>Retry</Button>}>
       {transition.error?.message ?? "Open the model picker to choose another harness."}
     </Notice>}
@@ -407,7 +411,7 @@ function HarnessSettings({ host }: { host: WebPackageHost }) {
 
   if (detail) return <div className="pkg-harnesses pkg-harnesses-settings pkg-harnesses-detail">
     <Button size="sm" variant="ghost" onClick={() => setDetailId(undefined)}>‹ Harnesses</Button>
-    <header><h2>{detail.identity.name}</h2><p>{availabilityLabel(detail)}{detail.identity.version ? ` · ${detail.identity.version}` : ""}</p></header>
+    <header><h2><ProviderLogo providerID={detail.identity.id} providerName={detail.identity.name} size="regular" />{detail.identity.name}</h2><p>{availabilityLabel(detail)}{detail.identity.version ? ` · ${detail.identity.version}` : ""}</p></header>
     <nav className="pkg-harnesses-tabs" aria-label={`${detail.identity.name} settings`}>
       {[{ id: "overview", label: "Overview", order: -1 }, ...contributed].map((section) => <Button key={section.id} size="sm" variant={sectionId === section.id ? "quiet" : "ghost"} aria-pressed={sectionId === section.id} onClick={() => setSectionId(section.id)}>{section.label}</Button>)}
     </nav>
@@ -427,7 +431,7 @@ function HarnessSettings({ host }: { host: WebPackageHost }) {
     {!loading && !rows.some(canExecute) && <Notice>Set up a harness below to start a conversation.</Notice>}
     <div className="pkg-harnesses-list">
       {ordered.map((row, index) => <article className={`pkg-harnesses-row${dragged === row.identity.id ? " dragging" : ""}`} key={row.identity.id} draggable={!busy} onDragStart={(event: DragEvent<HTMLElement>) => { setDragged(row.identity.id); event.dataTransfer.setData("text/plain", row.identity.id); }} onDragEnd={() => setDragged(undefined)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const id = event.dataTransfer.getData("text/plain") || dragged; if (id) move(id, index); setDragged(undefined); }}>
-        <button type="button" className="pkg-harnesses-row-main" onClick={() => openDetail(row.identity.id)}><span className="pkg-harnesses-drag" aria-hidden="true">⠿</span><span><strong>{row.identity.name}</strong><small>{row.identity.integration}{row.identity.version ? ` · ${row.identity.version}` : ""}</small></span><span className="pkg-harnesses-status">{availabilityLabel(row)}</span></button>
+        <button type="button" className="pkg-harnesses-row-main" onClick={() => openDetail(row.identity.id)}><span className="pkg-harnesses-drag" aria-hidden="true">⠿</span><span><ProviderLogo providerID={row.identity.id} providerName={row.identity.name} size="regular" /><span><strong>{row.identity.name}</strong><small>{row.identity.integration}{row.identity.version ? ` · ${row.identity.version}` : ""}</small></span></span><span className="pkg-harnesses-status">{availabilityLabel(row)}</span></button>
         <MoveControls label={row.identity.name} index={index} count={ordered.length} onMove={(next) => move(row.identity.id, next)} />
         <div className="pkg-harnesses-availability"><span><strong>Available for new sessions</strong><small>Existing conversations are unaffected.</small></span><Switch label={`Allow ${row.identity.name} for new sessions`} checked={row.policy.enabled} disabled={busy} onChange={(enabled) => toggle(row.identity.id, enabled)} /></div>
         {setupLabel(row) && <div className="pkg-harnesses-setup-actions">
@@ -447,7 +451,7 @@ function SwitchMarker({ event }: { event: SessionEvent }) {
   const closed = event.data.closedLeg as Record<string, unknown> | undefined;
   const leg = event.data.leg as Record<string, unknown> | undefined;
   return <details className="pkg-harnesses-switch-marker">
-    <summary><span>{from} → {to} · continued here</span></summary>
+    <summary><span><ProviderLogo providerID={from} size="compact" />{from} → <ProviderLogo providerID={to} size="compact" />{to} · continued here</span></summary>
     <dl><dt>Started</dt><dd><time dateTime={new Date(event.time).toISOString()}>{new Date(event.time).toLocaleTimeString()}</time></dd><dt>Continuity</dt><dd>Canonical Polyth history</dd>{Boolean(closed?.nativeSessionId) && <><dt>Previous native session</dt><dd>{String(closed!.nativeSessionId)}</dd></>}{Boolean(leg?.nativeSessionId) && <><dt>New native session</dt><dd>{String(leg!.nativeSessionId)}</dd></>}{Boolean(leg?.bootstrap) && <><dt>Bootstrap</dt><dd>{String(leg!.bootstrap)}</dd></>}</dl>
   </details>;
 }
