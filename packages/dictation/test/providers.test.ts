@@ -10,9 +10,10 @@ import {
   type DictationProvider,
 } from "@polyth/dictation";
 
-test("cloud default is ElevenLabs with automatic transport and no secondary provider", () => {
+test("cloud default is ElevenLabs with automatic transport, no context injection and no secondary provider", () => {
   assert.equal(DEFAULT_DICTATION_PREFERENCES.provider, "elevenlabs");
   assert.equal(DEFAULT_DICTATION_PREFERENCES.transport, "auto");
+  assert.equal(DEFAULT_DICTATION_PREFERENCES.contextInjection, false);
   assert.equal(DEFAULT_DICTATION_PREFERENCES.processingPolicy, "prefer-cloud");
   assert.equal(DEFAULT_DICTATION_PREFERENCES.fallbackProvider, undefined);
   assert.equal(DEFAULT_DICTATION_PREFERENCES.cloudFallback, false);
@@ -27,29 +28,32 @@ test("catalog keeps Ukrainian on the primary local Nemotron path", () => {
   assert.equal(providerCapabilities("local-parakeet")?.publicApi, false);
 });
 
-test("Wispr is represented without inventing a public API contract", () => {
+test("Wispr is first-class now that the public Voice Interface contract is documented", () => {
   const wispr = providerCapabilities("wispr");
-  assert.equal(wispr?.publicApi, false);
+  assert.equal(wispr?.publicApi, true);
   assert.equal(wispr?.streaming, true);
+  assert.equal(wispr?.ephemeralClientAuth, true);
+  assert.ok(wispr?.transports.includes("direct-browser"));
+  assert.ok(wispr?.transports.includes("server-proxy"));
 });
 
-test("legacy voice engines migrate without opting into cloud fallback", () => {
+test("legacy voice engines migrate without opting into cloud fallback or context injection", () => {
   assert.deepEqual(
     migrateDictationPreferences({ sttEngine: "browser", lang: "uk-UA" }),
     {
       provider: "web-speech", transport: "direct-browser", language: "uk-UA",
-      contextInjection: true, processingPolicy: "browser-fallback", cloudFallback: false,
+      contextInjection: false, processingPolicy: "browser-fallback", cloudFallback: false,
       latencyPreference: "lowest",
     },
   );
   const modern = migrateDictationPreferences({
     provider: "deepgram", transport: "server-proxy", model: "nova-3", language: "uk",
-    contextInjection: false, cloudFallback: true, latencyPreference: "balanced",
+    contextInjection: true, cloudFallback: true, latencyPreference: "balanced",
   });
   assert.equal(modern.provider, "deepgram");
   assert.equal(modern.transport, "server-proxy");
   assert.equal(modern.model, "nova-3");
-  assert.equal(modern.contextInjection, false);
+  assert.equal(modern.contextInjection, true);
   // The old boolean never meant "pick a mystery provider" for cloud primary.
   assert.equal(modern.processingPolicy, "prefer-cloud");
   assert.equal(modern.fallbackProvider, undefined);
@@ -106,9 +110,12 @@ test("stale or hand-edited unsupported transports normalize to a provider-suppor
     migrateDictationPreferences({ provider: "web-speech", transport: "local-worker" }).transport,
     "auto",
   );
-  // A supported explicit choice survives migration unchanged.
   assert.equal(
     migrateDictationPreferences({ provider: "elevenlabs", transport: "direct-browser" }).transport,
+    "direct-browser",
+  );
+  assert.equal(
+    migrateDictationPreferences({ provider: "wispr", transport: "direct-browser" }).transport,
     "direct-browser",
   );
 });
