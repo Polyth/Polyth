@@ -199,7 +199,9 @@ export const DEFAULT_DICTATION_PREFERENCES: DictationPreferences = {
   transport: "auto",
   language: "auto",
   contextInjection: true,
-  cloudFallback: true,
+  // Privacy boundary: local audio must never move to a cloud provider unless
+  // the user explicitly opts in to fallback.
+  cloudFallback: false,
   latencyPreference: "lowest",
 };
 
@@ -246,8 +248,8 @@ export function migrateDictationPreferences(input: unknown): DictationPreference
     ...(typeof raw.model === "string" && raw.model.trim() ? { model: raw.model.trim() } : {}),
     ...(typeof raw.localModel === "string" && raw.localModel.trim() ? { localModel: raw.localModel.trim() } : {}),
     language,
-    contextInjection: typeof raw.contextInjection === "boolean" ? raw.contextInjection : true,
-    cloudFallback: typeof raw.cloudFallback === "boolean" ? raw.cloudFallback : true,
+    contextInjection: typeof raw.contextInjection === "boolean" ? raw.contextInjection : DEFAULT_DICTATION_PREFERENCES.contextInjection,
+    cloudFallback: typeof raw.cloudFallback === "boolean" ? raw.cloudFallback : DEFAULT_DICTATION_PREFERENCES.cloudFallback,
     latencyPreference: typeof latency === "string" && latencyPreferences.has(latency as DictationLatencyPreference)
       ? latency as DictationLatencyPreference
       : DEFAULT_DICTATION_PREFERENCES.latencyPreference,
