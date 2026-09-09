@@ -3123,7 +3123,7 @@ export interface HarnessRegistry {
   probe(context: HarnessContext): Promise<HarnessProbe[]>;
   resolve(context: HarnessContext, selection: HarnessSelection, stickyId?: string): Promise<HarnessProvider>;
   snapshots(context: HarnessContext, options?: { harnessId?: string; force?: boolean; detail?: boolean }): Promise<HarnessSnapshot[]>;
-  invalidate(context?: Partial<Pick<HarnessContext, "spaceId" | "projectId" | "cwd">> & { harnessId?: string }): void;
+  invalidate(context?: Partial<Pick<HarnessContext, "spaceId" | "projectId" | "cwd" | "remote">> & { harnessId?: string }): void;
 }
 export interface RuntimeLeg {
   id: string;

@@ -234,7 +234,7 @@ test("provider surfaces use ProviderLogo without brand palette rules", () => {
   const projectUsage = source("../../../packages/usage/widgets/usage/projectUi.tsx");
   const usageWidget = source("../../../packages/usage/widgets/usagePlugin.tsx");
   const fusion = source("../../../packages/fusion/widgets/FusionView.tsx");
-  const harnesses = source("../../../packages/harness-runtime/widgets/index.tsx");
+  const harnesses = source("../../../packages/harness-runtime/widgets/runtime.tsx");
 
   assert.doesNotMatch(logo, /#[\da-f]{3,8}\b/i);
   assert.doesNotMatch(

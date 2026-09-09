@@ -78,7 +78,7 @@ test("shared menus focus, navigate, dismiss, and restore their trigger", async (
 
     await act(async () => { trigger.click(); });
     await act(async () => {
-      document.body.dispatchEvent(new MouseEventCtor("mousedown", { bubbles: true, cancelable: true }));
+      document.body.dispatchEvent(new MouseEventCtor("pointerdown", { bubbles: true, cancelable: true }));
     });
     assert.equal(container.querySelector('[role="menu"]'), null);
     assert.equal(document.activeElement, trigger);

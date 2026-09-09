@@ -16,6 +16,7 @@ export interface PopoverProps {
   className?: string;
   align?: AnchoredAlign;
   side?: AnchoredSide;
+  stableAnchor?: boolean;
   /** Accessible name for the surface (role dialog by default). */
   ariaLabel?: string;
   role?: "dialog" | "menu" | "listbox" | "presentation";
@@ -35,6 +36,7 @@ export default function Popover({
   className,
   align = "start",
   side = "down",
+  stableAnchor = false,
   ariaLabel,
   role = "dialog",
   initialFocus,
@@ -43,7 +45,7 @@ export default function Popover({
 }: PopoverProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const packageWindowOwner = usePackageWindowOwner();
-  const position = useAnchoredPosition(open, anchorRef, surfaceRef, { align, side });
+  const position = useAnchoredPosition(open, anchorRef, surfaceRef, { align, side, stableAnchor });
   useEscape(open, onClose);
 
   // Focus management: optional initial focus, anchor restore on close.

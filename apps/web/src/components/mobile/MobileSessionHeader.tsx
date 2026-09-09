@@ -21,7 +21,13 @@ import { ComposeIcon, GlassIsland, IconButton, LayersIcon, MenuIcon } from "../u
 import Sheet, { SheetRow, SheetSection } from "./Sheet.tsx";
 import WorkspacePanel from "./WorkspacePanel.tsx";
 import { PROMPT_VISIBILITY_EVENT, promptIsVisible } from "../../promptVisibility.ts";
-import { contextGauge, formatContextPercent, type ContextGauge } from "../../reduce.ts";
+import {
+  contextGaugeForTelemetry,
+  contextTelemetryNotice,
+  contextTelemetryStatus,
+  formatContextPercent,
+  type ContextGauge,
+} from "../../reduce.ts";
 import { useUiSettings } from "../../uiPrefs.ts";
 import ContextIndicator from "../ContextIndicator.tsx";
 
@@ -84,6 +90,7 @@ function IslandOverview({
   recent,
   events,
   gauge,
+  contextNotice,
   onClose,
 }: {
   title: string;
@@ -93,6 +100,7 @@ function IslandOverview({
   recent: SessionProjection[];
   events: Record<string, readonly SessionEvent[] | undefined>;
   gauge: ContextGauge;
+  contextNotice?: string;
   onClose: () => void;
 }) {
   const contextPercent = formatContextPercent(gauge);
@@ -107,7 +115,9 @@ function IslandOverview({
         <strong className="mobile-island-session">{title}</strong>
         <div className="mobile-island-context">
           <strong>Context{contextPercent ? ` · ${contextPercent}` : ""}</strong>
-          <span>{gauge.known ? `${fmtTokens(gauge.inputTokens)} / ${fmtTokens(gauge.contextTokens)} tokens` : "Model context metadata is unavailable."}</span>
+          <span>{contextNotice ?? (gauge.known
+            ? `${fmtTokens(gauge.inputTokens)} / ${fmtTokens(gauge.contextTokens)} tokens`
+            : "Model context metadata is unavailable.")}</span>
         </div>
         {prompt
           ? <PromptExcerpt text={prompt} />
@@ -221,9 +231,12 @@ export default function MobileSessionHeader() {
   }), [title, session, model.tasks, model.permissions, model.questions, model.secrets, peers, labels]);
   const requests = useMemo(() => items.filter((item) => item.kind === "request"), [items]);
   const sessionStatus = session ? resolveSessionStatus(session) : null;
+  const runtimeFeatures = useStore((s) => session?.id ? s.runtimeFeatures[session.id] : undefined);
   const activeModel = model.contextUsage?.model ?? model.turn?.model ?? session?.model;
   const descriptor = activeModel ? models.find((item) => item.providerID === activeModel.providerID && item.modelID === activeModel.modelID) : undefined;
-  const gauge = contextGauge(model, descriptor?.context, session?.contextWindow ?? null);
+  const telemetryStatus = contextTelemetryStatus(runtimeFeatures?.telemetry);
+  const gauge = contextGaugeForTelemetry(model, descriptor?.context, session?.contextWindow ?? null, telemetryStatus);
+  const contextNotice = contextTelemetryNotice(telemetryStatus, gauge);
 
   return <>
     <div className="mobile-session-floats" aria-label="Workspace navigation">
@@ -241,7 +254,7 @@ export default function MobileSessionHeader() {
           aria-expanded={surface === "island"}
           onClick={() => setSurface("island")}
         >
-          {session && <ContextIndicator gauge={gauge} mode={ui.contextIndicatorMode} providerID={activeModel?.providerID} providerName={descriptor?.providerName} harnessId={descriptor?.harnessId ?? session.resolvedHarnessId} active={sessionStatus?.kind === "working"} />}
+          {session && <ContextIndicator gauge={gauge} mode={ui.contextIndicatorMode} providerID={activeModel?.providerID} providerName={descriptor?.providerName} harnessId={descriptor?.harnessId ?? session.resolvedHarnessId} active={sessionStatus?.kind === "working"} telemetryStatus={telemetryStatus} />}
           <span className="mobile-island-text">{title}</span>
           <Icon.chevronDown />
         </button>
@@ -260,6 +273,7 @@ export default function MobileSessionHeader() {
         recent={recent}
         events={events}
         gauge={gauge}
+        contextNotice={contextNotice}
         onClose={() => setSurface(null)}
       />
     )}

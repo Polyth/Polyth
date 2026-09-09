@@ -99,7 +99,7 @@ test("chat composer keeps the Run workflow launcher mounted after project activa
   }
 });
 
-test("new-session creation immediately replaces the empty composer with loading feedback", async () => {
+test("new-session creation immediately reports that the agent is spawning", async () => {
   const originalComposerCatalog = api.composerCatalog;
   const originalCreateSession = api.createSession;
   const originalGetSession = api.getSession;
@@ -160,7 +160,7 @@ test("new-session creation immediately replaces the empty composer with loading 
       await createStarted;
     });
 
-    assert.equal(container.querySelector(".session-loading")?.textContent?.trim(), "Loading session…");
+    assert.equal(container.querySelector(".session-loading")?.textContent?.trim(), "Spawning agent…");
     assert.equal(container.querySelector('[aria-label="Message"]'), null, "a second draft cannot be lost while creation is pending");
 
     await act(async () => {

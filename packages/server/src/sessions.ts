@@ -450,10 +450,12 @@ export function createSessionService(deps: {
   const rememberEndpoint = (runtime: AgentRuntime, endpoint: RuntimeEndpoint): void => {
     attachedEndpoint.set(runtime, snapshotDebugEndpoint(endpoint));
   };
-  // One onEvent subscription per runtime (not per session): events dispatch
-  // through sessionRuntime, so wiring N sessions to a runtime costs a single
-  // listener that unwire() disposes once the last session leaves it.
+  // Observation/lifecycle subscriptions are shared per runtime. Legacy
+  // semantic events have a session-scoped subscription so its closure can
+  // capture the exact wire generation and fence late callbacks after an
+  // epoch replacement, even when the runtime facade object is reused.
   const runtimeSubs = new Map<AgentRuntime, Disposable[]>();
+  const sessionEventSubs = new Map<string, Disposable>();
   const wireTokens = new Map<string, symbol>();
   type MaterializationFailure = {
     runtime: AgentRuntime;
@@ -724,6 +726,7 @@ export function createSessionService(deps: {
   const settleOperation = async <T,>(
     operation: DurableOperation,
     outcome: MutationOutcome<T>,
+    unknownCode = "runtime-outcome-unknown",
   ): Promise<void> => {
     if (outcome.kind === "confirmed") {
       await broadcastTail(operation.sessionId, () => durable.settleOperation(operation.operationId, {
@@ -742,7 +745,7 @@ export function createSessionService(deps: {
     }
     await broadcastTail(operation.sessionId, () => durable.settleOperation(operation.operationId, {
       kind: "unknown",
-      code: "runtime-outcome-unknown",
+      code: unknownCode,
       message: outcome.message,
     }));
   };
@@ -754,12 +757,13 @@ export function createSessionService(deps: {
     operation: DurableOperation,
     call: (operationId: string) => Promise<R | MutationOutcome<T>>,
     confirmed: (value: R) => T,
-    settle: (outcome: MutationOutcome<T>) => Promise<void> = (outcome) =>
-      settleOperation(operation, outcome),
+    settle: (outcome: MutationOutcome<T>, unknownCode?: string) => Promise<void> = (outcome, unknownCode) =>
+      settleOperation(operation, outcome, unknownCode),
     timeoutMs = RUNTIME_AWAIT_MS,
   ): Promise<MutationOutcome<T>> => {
     await claimOperation(operation);
     let outcome: MutationOutcome<T>;
+    let unknownCode = "runtime-outcome-unknown";
     try {
       const value = await boundedRuntimeAwait(
         call(operation.operationId),
@@ -771,15 +775,21 @@ export function createSessionService(deps: {
         : { kind: "confirmed", value: confirmed(value as R) };
     } catch (error) {
       const rejected = knownRejection(error);
+      const timedOut = error !== null
+        && typeof error === "object"
+        && (error as { code?: unknown }).code === "runtime-timeout";
+      if (timedOut) unknownCode = "runtime-timeout";
       outcome = rejected
         ? { kind: "rejected", ...rejected }
         : {
             kind: "unknown",
             operationId: operation.operationId,
-            message: "the runtime did not provide a definitive mutation outcome",
+            message: timedOut && error instanceof Error
+              ? error.message
+              : "the runtime did not provide a definitive mutation outcome",
           };
     }
-    await settle(outcome);
+    await settle(outcome, unknownCode);
     return outcome;
   };
 
@@ -2272,10 +2282,10 @@ export function createSessionService(deps: {
         : "unsupported" as const;
     const contextSupported = capabilities.contextOccupancy !== undefined
       && capabilities.contextOccupancy !== "unknown";
-    const contextStatus = !contextSupported
-      ? "unsupported" as const
-      : contextWindow && contextWindow.source !== "unknown"
-        ? "reported" as const
+    const contextStatus = contextWindow && contextWindow.source !== "unknown"
+      ? "reported" as const
+      : !contextSupported
+        ? "unsupported" as const
         : "unavailable" as const;
     return {
       capabilities,
@@ -3264,20 +3274,15 @@ export function createSessionService(deps: {
 
   const wire = (sessionId: string, rt: AgentRuntime) => {
     if (sessionRuntime.has(sessionId)) return;
-    sessionWireGeneration.set(sessionId, (sessionWireGeneration.get(sessionId) ?? 0) + 1);
+    const wireGeneration = (sessionWireGeneration.get(sessionId) ?? 0) + 1;
+    sessionWireGeneration.set(sessionId, wireGeneration);
     sessionRuntime.set(sessionId, rt);
     runtimes.bindSession?.(sessionId, rt);
-    sessionRuntime.set(sessionId, rt);
     wireTokens.set(sessionId, Symbol());
-    if (runtimeSubs.has(rt)) return;
-    const subscriptions: Disposable[] = [];
-    subscriptions.push(rt.onEvent((sid, ev) => {
-      const wireGeneration = sessionWireGeneration.get(sid);
-      // deliver only to sessions currently wired to this runtime — the same
-      // filter the old per-session closures applied, minus the listener pile-up.
-      if (sessionRuntime.get(sid) !== rt) return;
-      // Serialize each canonical session: a terminal turn/stopped can never be
-      // overwritten by an older usage or chunk projection update.
+    sessionEventSubs.set(sessionId, rt.onEvent((sid, ev) => {
+      if (sid !== sessionId
+        || sessionRuntime.get(sid) !== rt
+        || sessionWireGeneration.get(sid) !== wireGeneration) return;
       void withSessionLock(sid, async () => {
         if (sessionRuntime.get(sid) === rt && sessionWireGeneration.get(sid) === wireGeneration) {
           await onRuntimeEvent(sid, ev);
@@ -3286,6 +3291,8 @@ export function createSessionService(deps: {
         console.error(`[polyth] runtime event handling failed for ${sid}`, err);
       });
     }));
+    if (runtimeSubs.has(rt)) return;
+    const subscriptions: Disposable[] = [];
     if (rt.onObservation) {
       subscriptions.push(rt.onObservation((sid, observation) => {
         const wireGeneration = sessionWireGeneration.get(sid);
@@ -3328,6 +3335,8 @@ export function createSessionService(deps: {
     sessionWireGeneration.set(sessionId, (sessionWireGeneration.get(sessionId) ?? 0) + 1);
     clearRuntimeFeatureState(sessionId);
     materializationFailures.delete(sessionId);
+    sessionEventSubs.get(sessionId)?.dispose();
+    sessionEventSubs.delete(sessionId);
     const rt = sessionRuntime.get(sessionId);
     if (!rt) return;
     runtimes.unbindSession?.(sessionId, rt);
@@ -3434,7 +3443,7 @@ export function createSessionService(deps: {
           const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(operation,
             (id) => rt!.createSessionOperation ? rt!.createSessionOperation(request, id) : rt!.ensureSession(request),
             (backendSessionId) => ({ backendSessionId }),
-            (result) => settleOperation(operation!, result.kind === "confirmed" ? { ...result, receipt: result.value.backendSessionId } : result));
+            (result, unknownCode) => settleOperation(operation!, result.kind === "confirmed" ? { ...result, receipt: result.value.backendSessionId } : result, unknownCode));
           if (outcome.kind !== "confirmed") throw outcomeError(outcome);
         }
         attachedProjection = (await store.projection(sessionId))!;
@@ -3755,7 +3764,7 @@ export function createSessionService(deps: {
     confirmed: (value: R) => T,
     completionEvent: { type: string; data: JsonObject; ignorable?: boolean },
   ): Promise<MutationOutcome<T>> =>
-    runPreparedOperation(operation, call, confirmed, async (outcome) => {
+    runPreparedOperation(operation, call, confirmed, async (outcome, unknownCode) => {
       if (outcome.kind === "confirmed") {
         await broadcastTail(operation.sessionId, () => durable.settleResponseIntent(
           operation.operationId,
@@ -3775,7 +3784,7 @@ export function createSessionService(deps: {
           operation.operationId,
           {
             kind: "unknown",
-            code: "runtime-outcome-unknown",
+            code: unknownCode ?? "runtime-outcome-unknown",
             message: outcome.message,
           },
         ));
@@ -4507,7 +4516,7 @@ export function createSessionService(deps: {
       },
       () => ({}),
       reserved
-        ? async (settled) => {
+        ? async (settled, unknownCode) => {
             if (settled.kind === "confirmed") {
               await broadcastTail(sessionId, () => deps.queue!.confirmQueueReservation(
                 operation!.operationId,
@@ -4519,7 +4528,7 @@ export function createSessionService(deps: {
                 { kind: "rejected", code: settled.code, message: settled.message },
               ));
             } else {
-              await settleOperation(operation!, settled);
+              await settleOperation(operation!, settled, unknownCode);
             }
           }
         : undefined,
@@ -4972,7 +4981,7 @@ export function createSessionService(deps: {
       const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(operation,
         id => runtime.createSessionOperation ? runtime.createSessionOperation(request, id) : runtime.ensureSession(request),
         backendSessionId => ({ backendSessionId }),
-        result => settleOperation(operation!, result.kind === "confirmed" ? { ...result, receipt: result.value.backendSessionId } : result));
+        (result, unknownCode) => settleOperation(operation!, result.kind === "confirmed" ? { ...result, receipt: result.value.backendSessionId } : result, unknownCode));
       if (outcome.kind !== "confirmed") {
         await updateProjection(sessionId, { status: outcome.kind === "unknown" ? "unknown" : "failed" });
         throw outcomeError(outcome);
@@ -5515,8 +5524,8 @@ export function createSessionService(deps: {
             : target.createSessionOperation ? target.createSessionOperation(request, id)
             : target.ensureSession(request),
           (backendSessionId) => ({ backendSessionId }),
-          async (result) => {
-            await settleOperation(operation!, result.kind === "confirmed" ? { ...result, receipt: result.value.backendSessionId } : result);
+          async (result, unknownCode) => {
+            await settleOperation(operation!, result.kind === "confirmed" ? { ...result, receipt: result.value.backendSessionId } : result, unknownCode);
           });
         if (outcome.kind !== "confirmed") throw outcomeError(outcome);
         operation = (await durable.operation(operation.operationId))!;
@@ -5790,11 +5799,12 @@ export function createSessionService(deps: {
       // compatibility without rewriting the row until the user edits it.
       const projectProfileHarnessId = projectProfile ? projectProfile.harnessId ?? "opencode" : undefined;
       const requestedHarness = input.harness;
-      const harness = requestedHarness?.mode === "pinned"
-        ? requestedHarness
-        : projectProfileHarnessId
+      // A supplied selection is user intent, including an explicit Auto. The
+      // project profile is only a default when the caller omitted harness.
+      const harness = requestedHarness
+        ?? (projectProfileHarnessId
           ? { mode: "pinned" as const, harnessId: projectProfileHarnessId }
-          : requestedHarness ?? project.defaults?.harness ?? { mode: "auto" as const };
+          : project.defaults?.harness ?? { mode: "auto" as const });
       const compatibleProjectProfile = projectProfile && (harness.mode === "auto"
         || projectProfileHarnessId === harness.harnessId)
         ? projectProfile
@@ -5880,6 +5890,7 @@ export function createSessionService(deps: {
           type: "session/created",
           data: {
             title: projection.title, projectId: project.id,
+            harness: harness as unknown as JsonObject,
             ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
             ...(input.isolation ? { isolation: input.isolation as unknown as JsonObject } : {}),
             ...(input.model ? { model: input.model as unknown as JsonObject } : {}),
@@ -6884,6 +6895,10 @@ export function createSessionService(deps: {
         const project = await projects.get(proj.projectId);
         const cwd = proj.worktreePath ?? project?.path ?? process.cwd();
         const rt = sessionRuntime.get(sessionId) ?? (proj.backendSessionId
+          // A removed worktree cannot construct a runtime. The canonical
+          // session can still be tombstoned; upstream deletion remains
+          // unconfirmed until a later reconciliation can prove it.
+          && proj.worktreeState !== "missing"
           ? await runtimeFor(proj, cwd)
           : undefined);
         // Drop callbacks before abort/delete I/O. A synchronous turn/stopped

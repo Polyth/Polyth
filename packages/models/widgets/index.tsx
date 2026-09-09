@@ -1,6 +1,7 @@
 import "./styles.css";
 import { defineWebPackage } from "@polyth/web-sdk";
 import ModelsPage from "./ModelsPage.tsx";
+import { invalidateRuntimeCatalogs } from "./runtimeCatalog.ts";
 
 export default defineWebPackage((host) => () => {
   const off = [
@@ -22,5 +23,8 @@ export default defineWebPackage((host) => () => {
       available: () => true,
     }),
   ];
-  return () => off.toReversed().forEach((dispose) => dispose());
+  return () => {
+    off.toReversed().forEach((dispose) => dispose());
+    invalidateRuntimeCatalogs();
+  };
 });

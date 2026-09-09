@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import Timeline from "../Timeline.tsx";
 import Composer from "../Composer.tsx";
 import QuestionCards from "../QuestionCards.tsx";
-import { focusComposer, setOverlay, setUiError, useActiveModel, useStore } from "../../store.ts";
+import { focusComposer, isActiveSessionSpawning, setOverlay, setUiError, useActiveModel, useStore } from "../../store.ts";
 import { openSession, prefetchSessionTail, restoreSession } from "../../init.ts";
 import { friendlyError } from "../../settings.ts";
 import { composerBlockedByArchive, sessionSurfaceKind } from "../../sessionSurface.ts";
@@ -248,6 +248,7 @@ function SessionSurface() {
   const projectId = useStore((s) => s.activeProjectId);
   const sessionId = useStore((s) => s.activeSessionId);
   const openingSessionId = useStore((s) => s.openingSessionId);
+  const spawning = useStore(isActiveSessionSpawning);
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const starterPickerOpen = useStore((s) => s.overlay === "starter-picker");
   const model = useActiveModel();
@@ -303,7 +304,7 @@ function SessionSurface() {
   // canonical replay yields to the loading row (never a false fresh hero).
   // Archived sessions remain visible but replace the composer with the
   // atomic restore action.
-  const kind = sessionSurfaceKind(sessionId, openingSessionId, model, session);
+  const kind = sessionSurfaceKind(sessionId, openingSessionId, model, session, spawning);
   const picker = starterPickerOpen ? (
     <StarterPicker
       context={starterContext}

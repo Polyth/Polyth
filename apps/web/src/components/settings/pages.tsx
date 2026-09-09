@@ -44,11 +44,6 @@ import {
   resolveSessionDefaultModel,
   useSessionDefaults,
 } from "../../sessionDefaults.ts";
-import {
-  readDraftExecutionConfig,
-  subscribeDraftExecutionConfig,
-  updateDraftExecutionConfig,
-} from "../../executionDraft.ts";
 import { Button, Checkbox, Dialog, IconButton, Select, Textarea, TextInput } from "../ui/index.ts";
 import { DeleteIcon } from "../ui/icons.ts";
 import { BackgroundPicker } from "../BackgroundPicker.tsx";
@@ -847,9 +842,7 @@ export function ProjectsPage() {
   const activeProjectId = useStore((s) => s.activeProjectId);
   const models = useStore((s) => s.models).filter(modelSupportsTextWorkflow);
   const sessionDefaults = useSessionDefaults();
-  const profiles = useProfiles();
   const [harnesses, setHarnesses] = useState<Record<string, HarnessSnapshot[]>>({});
-  const [profileDefaults, setProfileDefaults] = useState<Record<string, string>>({});
   const [picking, setPicking] = useState(false);
   const globalModel = resolveSessionDefaultModel(null, sessionDefaults.defaultModel, models[0]);
   const globalModelName = globalModel
@@ -865,13 +858,6 @@ export function ProjectsPage() {
       .catch(() => {});
     return () => { cancelled = true; };
   }, [projects.map((project) => project.id).join("|")]);
-  useEffect(() => {
-    const refresh = () => setProfileDefaults(Object.fromEntries(
-      projects.map((project) => [project.id, readDraftExecutionConfig(project.id).profileId ?? ""]),
-    ));
-    refresh();
-    return subscribeDraftExecutionConfig(refresh);
-  }, [projects]);
   const saveExecution = async (projectId: string, patch: { harness?: HarnessSelection | null }) => {
     try {
       applyProjectUpsert(await api.patchProject(projectId, { defaults: patch }));
@@ -973,17 +959,6 @@ export function ProjectsPage() {
                 ...(harnesses[p.id] ?? []).map((snapshot) => ({ value: snapshot.identity.id, label: snapshot.identity.name, detail: snapshot.availability.state === "ready" ? "Ready" : "Setup may be required" })),
               ]}
               onChange={(value) => void saveExecution(p.id, { harness: value === "inherit" ? null : value === "auto" ? { mode: "auto" } : { mode: "pinned", harnessId: value } })}
-            />
-          </div>
-          <div className="project-settings-options" data-settings-item="projects.executionProfile">
-            <div><strong>Default profile</strong><span>Applied for this account when a new conversation does not choose another profile.</span></div>
-            <Select
-              label="Default profile"
-              value={profileDefaults[p.id] ?? ""}
-              options={[{ value: "", label: "None" }, ...profiles.map((profile) => ({ value: profile.id, label: profile.name, detail: profile.harnessId ?? "Legacy harness" }))]}
-              onChange={(value) => {
-                updateDraftExecutionConfig(p.id, { profileId: value || undefined });
-              }}
             />
           </div>
           {projectRemembersModelSelection(p.defaults) && (

@@ -4057,10 +4057,6 @@ color: var(--text-dim);
 
 /* ================== UX-COMPOSER-DISC: honest discovery ==================== */
 
-/* Invisible click-catcher for legacy in-flow menus. Portaled popovers use the
-   shared .ui-popover-backdrop instead. */
-.menu-backdrop { position: fixed; inset: 0; z-index: 40; background: transparent; }
-
 /* --- Add trigger + menu ---------------------------------------------------- */
 .composer-add { position: relative; display: inline-flex; }
 .composer-add-trigger { height: 32px; padding: 0 11px; gap: 6px; color: var(--text-dim); }
@@ -12504,4 +12500,3 @@ body[data-glass="off"] :is(.scrim, .dialog-backdrop, .sheet-backdrop) {
 @container polyth-remote-ui (max-width: 36rem) {
   .polyth-remote-ui-inline { flex-direction: column; align-items: stretch; }
 }
-

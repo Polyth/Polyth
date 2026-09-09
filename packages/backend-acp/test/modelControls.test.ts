@@ -91,6 +91,33 @@ test("a thought_level select exposes variants without treating mutable current s
     assert.equal(model!.defaultVariant, undefined);
 });
 
+test("cold discovery probes dependent thinking controls per model", async () => {
+    invalidateAcpDiscovery();
+    const result = await discoverAcpModels({
+        harnessId: "acp",
+        version: "dependent",
+        authFingerprint: "true",
+        cacheIdentity: "project-a",
+        probe: {
+            async open() {
+                return {
+                    result: configOptionsSession,
+                    async setConfigOption(_id: string, value: string) {
+                        return value === "deep-2"
+                            ? { ...sessionConfigAt(value, "high"), configOptions: sessionConfigAt(value, "high").configOptions.filter((option) => option.category !== "thought_level") }
+                            : sessionConfigAt(value, "medium");
+                    },
+                    close: async () => {},
+                };
+            },
+        },
+    });
+    assert.deepEqual(result.state === "ready" ? result.models.map((model) => model.variants) : [], [
+        ["low", "medium", "high"],
+        undefined,
+    ]);
+});
+
 test("the legacy models block becomes the same canonical catalog", async () => {
     const { rt } = await startedRuntime(legacySession);
     assert.deepEqual((await rt.models!()).map((model) => model.modelID), ["legacy-a", "legacy-b"]);
@@ -230,6 +257,37 @@ test("model switch followed by Auto uses the new model's native state", async ()
     assert.deepEqual(paramsOf(f, "session/set_config_option").at(-1), {
         sessionId: "native", configId: "model", value: "deep-2",
     });
+});
+
+test("switching across model-specific thinking support never sends stale effort", async () => {
+    const f = fakeRpc();
+    let model = "fast-1";
+    const state = () => ({
+        ...sessionConfigAt(model, "medium"),
+        configOptions: sessionConfigAt(model, "medium").configOptions.filter((option) =>
+            model === "fast-1" || option.category !== "thought_level"),
+    });
+    f.handle(async (method, params) => {
+        if (method === "session/new") return state();
+        if (method === "session/set_config_option") {
+            if (params.configId === "model") model = params.value;
+            return state();
+        }
+        return { stopReason: "end_turn" };
+    });
+    const models = [
+        { providerID: "acp", modelID: "fast-1", name: "Fast 1", connected: true, variants: ["low", "medium", "high"] },
+        { providerID: "acp", modelID: "deep-2", name: "Deep 2", connected: true },
+    ];
+    const rt = createAcpRuntime(context, f.rpc, "acp", undefined, "Test Agent", { models });
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    await rt.startTurnOperation!({ sessionId: "canonical", text: "deep", model: { providerID: "acp", modelID: "deep-2" } }, "deep");
+    await rt.startTurnOperation!({ sessionId: "canonical", text: "fast", model: { providerID: "acp", modelID: "fast-1", variant: "high" } }, "fast");
+    assert.deepEqual(paramsOf(f, "session/set_config_option").map((call) => [call.configId, call.value]), [
+        ["model", "deep-2"],
+        ["model", "fast-1"],
+        ["thinking", "high"],
+    ]);
 });
 
 test("selecting what the session already runs issues no config call at all", async () => {
@@ -632,6 +690,16 @@ test("a version bump invalidates the cached catalog", async () => {
     assert.equal(opens, 2);
 });
 
+test("cold catalogs are isolated by project/runtime identity", async () => {
+    invalidateAcpDiscovery();
+    let opens = 0;
+    const probe = { async open() { opens++; return { result: legacySession, close: async () => {} }; } };
+    const shared = { harnessId: "acp", version: "same", authFingerprint: "true", probe };
+    await discoverAcpModels({ ...shared, cacheIdentity: "project-a" });
+    await discoverAcpModels({ ...shared, cacheIdentity: "project-b" });
+    assert.equal(opens, 2);
+});
+
 test("a failed start is degraded with its cause, and never cached as empty", async () => {
     invalidateAcpDiscovery();
     const probe = { async open(): Promise<never> { throw new Error("spawn agent ENOENT"); } };
@@ -652,6 +720,31 @@ test("cold discovery is bounded and late probes are closed", async () => {
     });
     assert.equal(result.state, "degraded");
     await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(closes, 1);
+});
+
+test("model capability probing is bounded and closes a late session", async () => {
+    invalidateAcpDiscovery();
+    let closes = 0;
+    const result = await discoverAcpModels({
+        harnessId: "acp",
+        version: "slow-options",
+        authFingerprint: "true",
+        timeoutMs: 5,
+        probe: {
+            async open() {
+                return {
+                    result: configOptionsSession,
+                    async setConfigOption() {
+                        await new Promise((resolve) => setTimeout(resolve, 20));
+                        return configOptionsSession;
+                    },
+                    close: async () => { closes++; },
+                };
+            },
+        },
+    });
+    assert.equal(result.state, "degraded");
     assert.equal(closes, 1);
 });
 

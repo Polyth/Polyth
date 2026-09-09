@@ -7,13 +7,13 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { addMenuRows, type AddMenuAction, type CatalogState, type ComposerCommand } from "../composer/discovery.ts";
 import type { SnippetDef } from "@polyth/session/web-api";
 import { parseGithubUrl, type GithubAttachResult } from "@polyth/github/attachments";
-import { useEscape } from "../useEscape.ts";
 import { Icon } from "../icons.tsx";
 import { tr } from "../i18n/index.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { dismissKeyboard } from "../mobileViewport.ts";
 import Sheet from "./mobile/Sheet.tsx";
 import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
+import { useDismissibleMenu } from "./a11y/Menu.ts";
 import { Button, Dialog, TextInput } from "./ui/index.ts";
 
 export interface ComposerAddMenuProps {
@@ -47,7 +47,12 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
     setOpen(false);
     triggerRef.current?.focus();
   };
-  useEscape(open && !githubOpen && !asSheet, closeToTrigger);
+  const onMenuKeyDown = useDismissibleMenu({
+    open: open && !asSheet,
+    menuRef,
+    triggerRef,
+    onClose: () => setOpen(false),
+  });
 
   const toggleOpen = () => {
     if (open) {
@@ -93,7 +98,9 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
     }
   };
 
-  const onMenuKey = (e: KeyboardEvent<HTMLDivElement>) => {
+  // Sheets retain the existing in-list arrow handling; desktop delegates to
+  // the shared menu primitive for the complete dismissal/navigation contract.
+  const onSheetMenuKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     const items = Array.from(
       menuRef.current?.querySelectorAll<HTMLButtonElement>("button[role='menuitem']") ?? [],
@@ -114,7 +121,7 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
       role="menu"
       aria-label={tr("composeraddmenu.addContextOrUseAComposerTool")}
       className={`add-menu ${asSheet ? "add-menu-sheet-list" : props.direction}`}
-      onKeyDown={onMenuKey}
+      onKeyDown={asSheet ? onSheetMenuKey : onMenuKeyDown}
     >
       {rows.map((row) => row.kind === "group" ? (
         <div key={row.id} className="add-menu-group" role="presentation">{row.label}</div>
@@ -164,12 +171,7 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
           {menuRows}
         </Sheet>
       )}
-      {open && !asSheet && (
-        <>
-          <div className="menu-backdrop" onClick={closeToTrigger} />
-          {menuRows}
-        </>
-      )}
+      {open && !asSheet && menuRows}
       {githubOpen && (
         <GithubLinkDialog
           attachGithub={props.attachGithub}

@@ -57,6 +57,9 @@ import {
   initialModelPickerState,
   modelPickerReducer,
   providerIsExpanded,
+  pickerModelMatches,
+  pickerCatalogModels,
+  flatModelCatalog,
 } from "./modelPickerState.ts";
 
 const MAX_RENDERED_MODELS = 200;
@@ -258,7 +261,7 @@ function ModelDetails({
   );
 }
 
-function ModelHoverDetails({ model, favorite }: { model: ModelDescriptor; favorite: boolean }) {
+function ModelHoverDetails({ model, favorite, showFavorite = true }: { model: ModelDescriptor; favorite: boolean; showFavorite?: boolean }) {
   const capabilities = new Set((model.capabilities ?? []).map((capability) => capability.toLowerCase()));
   const icon = (label: string, node: ReactNode) => <span title={label} aria-label={label}>{node}</span>;
   const prices = model.cost && (
@@ -272,7 +275,7 @@ function ModelHoverDetails({ model, favorite }: { model: ModelDescriptor; favori
       <header>
         <ProviderLogo providerID={model.providerID} providerName={model.providerName} harnessId={model.harnessId} className="model-row-provider-logo" />
         <div><strong>{model.name}</strong><small>{model.providerName ?? model.providerID}</small></div>
-        <FavoriteIcon className={`model-hover-star${favorite ? " on" : ""}`} aria-label={favorite ? tr("modelpicker.removeFavorite") : tr("modelpicker.addFavorite")} />
+        {showFavorite && <FavoriteIcon className={`model-hover-star${favorite ? " on" : ""}`} aria-label={favorite ? tr("modelpicker.removeFavorite") : tr("modelpicker.addFavorite")} />}
       </header>
       <div className="model-hover-capabilities" aria-label={tr("modelpicker.modalities")}>
         {icon(tr("modelpicker.text"), <Icon.text />)}
@@ -294,6 +297,7 @@ function ModelHoverDetails({ model, favorite }: { model: ModelDescriptor; favori
 
 interface ModelPickerProps {
   models: ModelDescriptor[];
+  harnessId?: string;
   value?: ModelRef & { harnessId?: string };
   recommended?: ModelRef & { harnessId?: string };
   onPick: (model?: ModelRef & { harnessId?: string }) => void;
@@ -307,7 +311,8 @@ interface ModelPickerProps {
 }
 
 export default function ModelPicker({
-  models,
+  models: catalogModels,
+  harnessId,
   value,
   recommended,
   onPick,
@@ -316,6 +321,8 @@ export default function ModelPicker({
   usage,
   className,
 }: ModelPickerProps) {
+  const models = useMemo(() => pickerCatalogModels(catalogModels, harnessId), [catalogModels, harnessId]);
+  const flatCatalog = flatModelCatalog(models, harnessId);
   const prefs = useModelPrefs();
   const phone = useShellMode() === "phone";
   const [open, setOpen] = useState(false);
@@ -336,13 +343,15 @@ export default function ModelPicker({
   const pickerShellRef = useRef<HTMLDivElement>(null);
 
   const current = value
-    ? models.find((model) => modelKey(model) === modelKey(value))
+    ? models.find((model) => pickerModelMatches(model, value))
     : undefined;
   const fallback = recommended
-    ? models.find((model) => modelKey(model) === modelKey(recommended))
+    ? models.find((model) => pickerModelMatches(model, recommended))
     : undefined;
-  const selectedModel = current ?? fallback ?? models[0];
-  const label = selectedModel?.name ?? tr("modelpicker.noModel");
+  // A pending or partial catalog is not authority to replace the selection.
+  const selectedRef = value ?? recommended;
+  const selectedModel = selectedRef ? (value ? current : fallback) : models[0];
+  const label = selectedModel?.name ?? selectedRef?.modelID ?? tr("modelpicker.noModel");
   const q = pickerState.query.trim().toLowerCase();
   // Build normalized search text only when the catalog changes. Rapid typing
   // scans one precomputed string per model instead of lowercasing four fields.
@@ -360,6 +369,7 @@ export default function ModelPicker({
   );
 
   const providers = useMemo(() => {
+    if (flatCatalog) return [];
     const byId = new Map<string, { id: string; name: string; models: ModelDescriptor[] }>();
     for (const model of filtered) {
       const provider = byId.get(model.providerID) ?? {
@@ -371,21 +381,23 @@ export default function ModelPicker({
       byId.set(model.providerID, provider);
     }
     return orderProviders([...byId.values()], prefs);
-  }, [filtered, prefs]);
+  }, [filtered, prefs, flatCatalog]);
   const providerIds = providers.map((provider) => provider.id);
   const favorites = useMemo(() => {
+    if (flatCatalog) return [];
     const favoriteRank = new Map(prefs.favorites.map((key, index) => [key, index]));
     return filtered
       .filter((model) => favoriteRank.has(modelKey(model)))
       .sort((left, right) =>
         (favoriteRank.get(modelKey(left)) ?? 0) - (favoriteRank.get(modelKey(right)) ?? 0));
-  }, [filtered, prefs.favorites]);
+  }, [filtered, prefs.favorites, flatCatalog]);
   const recents = useMemo(() => {
+    if (flatCatalog) return [];
     const rank = new Map(prefs.recents.map((key, index) => [key, index]));
     return filtered
       .filter((model) => rank.has(modelKey(model)) && !isFavorite(prefs, modelKey(model)))
       .sort((left, right) => (rank.get(modelKey(left)) ?? 0) - (rank.get(modelKey(right)) ?? 0));
-  }, [filtered, prefs.favorites, prefs.recents]);
+  }, [filtered, prefs.favorites, prefs.recents, flatCatalog]);
   const expandedProviders = useMemo(
     () => new Set(prefs.expandedProviders),
     [prefs.expandedProviders],
@@ -406,6 +418,7 @@ export default function ModelPicker({
   // same bounded policy as the generic Picker prevents a 400+ model catalog
   // from mounting hundreds of rows in one overlay; search reaches the rest.
   const flatRows = useMemo(() => {
+    if (flatCatalog) return filtered.slice(0, MAX_RENDERED_MODELS);
     const rows: ModelDescriptor[] = [...favorites, ...recents].slice(0, MAX_RENDERED_MODELS);
     for (const provider of providers) {
       if (!isExpanded(provider.id) || rows.length >= MAX_RENDERED_MODELS) continue;
@@ -416,14 +429,14 @@ export default function ModelPicker({
     }
     return rows;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [favorites, recents, providers, prefs.favorites, prefs.recents, pickerState, expandedProviders, selectedModel]);
+  }, [flatCatalog, filtered, favorites, recents, providers, prefs.favorites, prefs.recents, pickerState, expandedProviders, selectedModel]);
   const activeIndex = flatRows.length > 0 ? Math.min(active, flatRows.length - 1) : -1;
   const activeKey = activeIndex >= 0 ? modelKey(flatRows[activeIndex]!) : null;
   const flatRowIndex = useMemo(
     () => new Map(flatRows.map((model, index) => [modelKey(model), index])),
     [flatRows],
   );
-  const visibleCandidateCount = favorites.length + recents.length + providers.reduce((total, provider) => (
+  const visibleCandidateCount = flatCatalog ? filtered.length : favorites.length + recents.length + providers.reduce((total, provider) => (
     isExpanded(provider.id)
       ? total + provider.models.filter((model) => !isFavorite(prefs, modelKey(model)) && !prefs.recents.includes(modelKey(model))).length
       : total
@@ -444,6 +457,11 @@ export default function ModelPicker({
     setDetailAnchor(null);
     setShowDetails(false);
   };
+  useEffect(() => {
+    closeDetails();
+    setActive(0);
+    dispatchPicker({ type: "reset" });
+  }, [harnessId]);
   const hoverDetailsModel = showDetails && activeIndex >= 0 ? flatRows[activeIndex] : null;
   const hoverDetailsAnchor = hoverDetailsModel && !detail
     ? document.getElementById(`model-option-${modelKey(hoverDetailsModel)}`)
@@ -642,7 +660,7 @@ export default function ModelPicker({
         </span>
         {capabilityIcons(model)}
         {infoButton(model)}
-        {star(model)}
+        {!flatCatalog && star(model)}
       </div>
     );
   };
@@ -691,7 +709,7 @@ export default function ModelPicker({
         <span className="sheet-row-tools">
           {capabilityIcons(model)}
           {infoButton(model, "sheet")}
-          {star(model, "sheet")}
+          {!flatCatalog && star(model, "sheet")}
         </span>
       )}
     />
@@ -738,6 +756,7 @@ export default function ModelPicker({
         <ModelHoverDetails
           model={detailsPanelModel}
           favorite={isFavorite(prefs, modelKey(detailsPanelModel))}
+          showFavorite={!flatCatalog}
         />
       )
   );
@@ -753,6 +772,7 @@ export default function ModelPicker({
           restoreFocusRef={triggerRef}
           side={direction === "up" ? "up" : "down"}
           align="start"
+          stableAnchor
           className={phone ? "model-sheet" : "model-pop"}
           popoverOverflow="visible"
           initialFocus={!phone ? ".model-pop-search input" : undefined}
@@ -779,6 +799,7 @@ export default function ModelPicker({
           {header && <div className="model-picker-header">{header}</div>}
           {phone ? (
             <div role="listbox" aria-label={tr("modelpicker.models")}>
+              {flatCatalog && flatRows.map((model) => sheetRow(model, "provider"))}
               {shownFavorites.length > 0 && (
                 <SheetSection title={tr("modelpicker.favorites")} count={favorites.length}>
                   {shownFavorites.map((model) => sheetRow(model, "favorites"))}
@@ -852,6 +873,7 @@ export default function ModelPicker({
                 role="listbox"
                 aria-label={tr("modelpicker.models")}
               >
+                {flatCatalog && flatRows.map((model) => row(model, "provider"))}
                 {shownFavorites.length > 0 && (
                   <section className="model-provider-section favorites">
                     <div className="model-provider-head static">

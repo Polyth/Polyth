@@ -7,7 +7,12 @@ import { useActiveModel, useStore } from "../store.ts";
 import { firstUserTextCached, lastUserTextCached } from "../utils.ts";
 import { Icon } from "../icons.tsx";
 import { Popover } from "./ui/index.ts";
-import { contextGauge, formatContextPercent } from "../reduce.ts";
+import {
+  contextGaugeForTelemetry,
+  contextTelemetryNotice,
+  contextTelemetryStatus,
+  formatContextPercent,
+} from "../reduce.ts";
 import { useUiSettings } from "../uiPrefs.ts";
 import ContextIndicator from "./ContextIndicator.tsx";
 
@@ -20,6 +25,7 @@ export default function DesktopSessionStatus() {
   const events = useStore((state) => state.events);
   const models = useStore((state) => state.models);
   const activeSessionId = useStore((state) => state.activeSessionId);
+  const runtimeFeatures = useStore((state) => activeSessionId ? state.runtimeFeatures[activeSessionId] : undefined);
   const session = sessions.find((item) => item.id === activeSessionId) ?? null;
   const model = useActiveModel();
   const recent = useMemo(() => recentSessionsForIsland(sessions, activeSessionId ?? undefined, 5), [sessions, activeSessionId]);
@@ -29,8 +35,10 @@ export default function DesktopSessionStatus() {
   const prompt = lastUserTextCached(session ? events[session.id] : undefined);
   const activeModel = model.contextUsage?.model ?? model.turn?.model ?? session?.model;
   const descriptor = activeModel ? models.find((item) => item.providerID === activeModel.providerID && item.modelID === activeModel.modelID) : undefined;
-  const gauge = contextGauge(model, descriptor?.context, session?.contextWindow ?? null);
+  const telemetryStatus = contextTelemetryStatus(runtimeFeatures?.telemetry);
+  const gauge = contextGaugeForTelemetry(model, descriptor?.context, session?.contextWindow ?? null, telemetryStatus);
   const contextPercent = formatContextPercent(gauge);
+  const contextNotice = contextTelemetryNotice(telemetryStatus, gauge);
 
   if (!session || !status) return null;
 
@@ -45,7 +53,7 @@ export default function DesktopSessionStatus() {
       title={status.label}
       onClick={() => setOpen((value) => !value)}
     >
-      <ContextIndicator gauge={gauge} mode={ui.contextIndicatorMode} providerID={activeModel?.providerID} providerName={descriptor?.providerName} harnessId={descriptor?.harnessId ?? session.resolvedHarnessId} active={status.kind === "working"} />
+      <ContextIndicator gauge={gauge} mode={ui.contextIndicatorMode} providerID={activeModel?.providerID} providerName={descriptor?.providerName} harnessId={descriptor?.harnessId ?? session.resolvedHarnessId} active={status.kind === "working"} telemetryStatus={telemetryStatus} />
       <span className="desktop-session-status-mask">
         <span className="desktop-session-status-copy"><span>{title}</span></span>
       </span>
@@ -59,7 +67,9 @@ export default function DesktopSessionStatus() {
         </header>
         <section className="session-context-details">
           <h3>Context{contextPercent ? ` · ${contextPercent}` : ""}</h3>
-          <p>{gauge.known ? `${fmtTokens(gauge.inputTokens)} / ${fmtTokens(gauge.contextTokens)} tokens` : "Model context metadata is unavailable."}</p>
+          <p>{contextNotice ?? (gauge.known
+            ? `${fmtTokens(gauge.inputTokens)} / ${fmtTokens(gauge.contextTokens)} tokens`
+            : "Model context metadata is unavailable.")}</p>
         </section>
         <section>
           <h3>Active task</h3>

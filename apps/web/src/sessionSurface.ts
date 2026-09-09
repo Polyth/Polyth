@@ -55,7 +55,9 @@ export function sessionSurfaceKind(
   openingSessionId: string | null,
   model: SurfaceModel,
   session: Pick<SessionProjection, "status"> | null,
+  spawning = false,
 ): SessionSurfaceKind {
+  if (spawning) return "session";
   if (!showSessionHero(sessionId, model, session)) return "session";
   return openingSessionId !== null ? "loading" : "hero";
 }

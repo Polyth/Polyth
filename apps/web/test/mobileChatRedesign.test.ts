@@ -411,7 +411,7 @@ test("the composer is adaptive, with one primary action at a time", async () => 
 
 test("phone execution choices live behind the model picker with harness tabs", async () => {
   const composer = await read("../src/components/Composer.tsx");
-  const harnessPicker = await read("../../../packages/harness-runtime/widgets/index.tsx");
+  const harnessPicker = await read("../../../packages/harness-runtime/widgets/runtime.tsx");
   const modelPicker = await read("../../../packages/models/widgets/ModelPicker.tsx");
   const modelStyles = await read("../../../packages/models/widgets/styles.css");
   const effortMenu = await read("../src/components/EffortMenu.tsx");

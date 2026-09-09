@@ -11,7 +11,7 @@ export interface DismissibleMenuOptions {
   restoreRef?: RefObject<HTMLElement | null>;
 }
 
-/** Shared menu interaction contract: outside click and Escape dismiss, focus
+/** Shared menu interaction contract: outside press and Escape dismiss, focus
  * returns to the opener, and arrow/Home/End navigation cycles menu items. */
 export function useDismissibleMenu({
   open,
@@ -33,7 +33,7 @@ export function useDismissibleMenu({
       onCloseRef.current();
       requestAnimationFrame(() => (restoreRef?.current ?? triggerRef.current)?.focus());
     };
-    const onPointer = (event: MouseEvent) => {
+    const onPointer = (event: PointerEvent) => {
       const target = event.target as Node;
       if (!menuRef.current?.contains(target) && !triggerRef.current?.contains(target)) close();
     };
@@ -43,10 +43,10 @@ export function useDismissibleMenu({
       event.stopPropagation();
       close();
     };
-    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("pointerdown", onPointer);
     document.addEventListener("keydown", onKey, true);
     return () => {
-      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("pointerdown", onPointer);
       document.removeEventListener("keydown", onKey, true);
     };
   }, [focusFirst, menuRef, open, restoreRef, triggerRef]);
