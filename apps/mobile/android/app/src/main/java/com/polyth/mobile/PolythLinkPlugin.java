@@ -428,8 +428,9 @@ public final class PolythLinkPlugin extends Plugin {
         if (connectionId == null) return;
         executor.execute(() -> {
             try {
-                invoke("forget", new JSObject().put("connectionId", connectionId), null);
+                invoke("disconnect", new JSObject().put("connectionId", connectionId), null);
                 secureStore.delete(connectionId);
+                invoke("forget", new JSObject().put("connectionId", connectionId), null);
                 call.resolve(new JSObject().put("ok", true));
             } catch (Exception error) { reject(call, error); }
         });
