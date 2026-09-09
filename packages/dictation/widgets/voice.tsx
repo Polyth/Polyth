@@ -11,6 +11,9 @@ import {
   speakableText,
   speechSupport,
   type DictationContext,
+  type DictationProcessingPolicy,
+  type DictationProviderId,
+  type DictationTransport,
   type SpeechRecognitionLike,
   type VoicePrefs,
 } from "@polyth/dictation";
@@ -169,6 +172,14 @@ function currentDictationContext(language: string): DictationContext {
 
 type MicPhase = "idle" | "starting" | "listening" | "transcribing";
 
+type RuntimeDictationSettings = {
+  provider: DictationProviderId;
+  transport: DictationTransport;
+  model: string;
+  contextInjection: boolean;
+  processingPolicy: DictationProcessingPolicy;
+};
+
 const boundedReason = (raw: unknown): string => {
   const s = raw instanceof Error ? raw.message : String(raw ?? tr("voice.microphoneError"));
   return s.length > 120 ? `${s.slice(0, 117)}…` : s;
@@ -186,6 +197,9 @@ function MicButton() {
   const [error, setError] = useState<string | null>(null);
   const [partial, setPartial] = useState("");
   const [capability, setCapability] = useState<{ available: boolean; engine?: string; reason?: string } | null>(null);
+  // undefined means server routing is still loading; null means an older or
+  // unreachable settings endpoint, where local prefs remain a compatibility fallback.
+  const [serverSelection, setServerSelection] = useState<RuntimeDictationSettings | null | undefined>(undefined);
   const recRef = useRef<SpeechRecognitionLike | null>(null);
   const streamRef = useRef<StreamingDictation | null>(null);
   const browserTranscriptRef = useRef("");
@@ -193,15 +207,21 @@ function MicButton() {
   const startGeneration = useRef(0);
   const support = speechSupport(typeof window !== "undefined" ? window : undefined);
   const serverStt = prefs.sttEngine === "server";
-  const browserFallback = prefs.processingPolicy === "browser-fallback";
-  const cloudPrimaryPolicy = prefs.processingPolicy === "prefer-cloud" || browserFallback;
+  const selectionReady = !serverStt || serverSelection !== undefined;
+  const provider = serverSelection?.provider ?? prefs.dictationProvider;
+  const transport = serverSelection?.transport ?? prefs.dictationTransport;
+  const providerModel = serverSelection?.model || prefs.dictationModel;
+  const contextInjection = serverSelection?.contextInjection ?? prefs.contextInjection;
+  const processingPolicy = serverSelection?.processingPolicy ?? prefs.processingPolicy;
+  const browserFallback = processingPolicy === "browser-fallback";
+  const cloudPrimaryPolicy = processingPolicy === "prefer-cloud" || browserFallback;
   // Keep auto-fallback on the server so recoverable cloud failures can replay
   // PCM into local Nemotron. Direct browser cannot provide that mid-stream
   // transition without shipping the local runtime into the WebView.
   const directElevenLabs = serverStt
     && cloudPrimaryPolicy
-    && prefs.dictationProvider === "elevenlabs"
-    && (prefs.dictationTransport === "auto" || prefs.dictationTransport === "direct-browser");
+    && provider === "elevenlabs"
+    && (transport === "auto" || transport === "direct-browser");
 
   useEffect(() => () => {
     startGeneration.current++;
@@ -212,6 +232,37 @@ function MicButton() {
 
   useEffect(() => {
     if (!prefs.dictation || !serverStt) {
+      setServerSelection(null);
+      return;
+    }
+    let cancelled = false;
+    setServerSelection(undefined);
+    void api.voiceSettings()
+      .then((settings) => {
+        if (cancelled) return;
+        const dictation = (settings as typeof settings & { dictation?: RuntimeDictationSettings }).dictation;
+        setServerSelection(dictation ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setServerSelection(null);
+      });
+    return () => { cancelled = true; };
+  }, [
+    prefs.dictation,
+    serverStt,
+    prefs.dictationProvider,
+    prefs.dictationTransport,
+    prefs.dictationModel,
+    prefs.processingPolicy,
+    prefs.contextInjection,
+  ]);
+
+  useEffect(() => {
+    if (!prefs.dictation || !serverStt) {
+      setCapability(null);
+      return;
+    }
+    if (!selectionReady) {
       setCapability(null);
       return;
     }
@@ -223,10 +274,10 @@ function MicButton() {
           : Promise.reject(new Error(`HTTP ${response.status}`)))
         .then((body) => {
           if (cancelled) return;
-          const provider = body.providers?.find((item) => item.id === "elevenlabs");
-          setCapability(provider?.available
+          const selected = body.providers?.find((item) => item.id === "elevenlabs");
+          setCapability(selected?.available
             ? { available: true, engine: "elevenlabs-direct" }
-            : { available: false, reason: provider?.reason ?? "ElevenLabs direct transcription is unavailable" });
+            : { available: false, reason: selected?.reason ?? "ElevenLabs direct transcription is unavailable" });
         })
         .catch((e) => {
           if (!cancelled) setCapability({ available: false, reason: boundedReason(e) });
@@ -235,19 +286,12 @@ function MicButton() {
       void api.dictationCapability().then((c) => { if (!cancelled) setCapability(c); });
     }
     return () => { cancelled = true; };
-  }, [
-    prefs.dictation,
-    serverStt,
-    directElevenLabs,
-    prefs.dictationProvider,
-    prefs.dictationTransport,
-    prefs.processingPolicy,
-  ]);
+  }, [prefs.dictation, serverStt, selectionReady, directElevenLabs, provider, transport, processingPolicy]);
 
   const providerOrBrowserAvailable = Boolean(capability?.available) || (browserFallback && support.stt);
   const availability: { available: boolean; reason?: string; settings?: boolean } =
     !prefs.dictation ? { available: false, reason: tr("voice.dictationOff"), settings: true }
-    : serverStt && capability === null ? { available: false, reason: tr("voice.checkingMicrophone") }
+    : serverStt && (!selectionReady || capability === null) ? { available: false, reason: tr("voice.checkingMicrophone") }
     : serverStt && !providerOrBrowserAvailable
       ? {
           available: false,
@@ -374,14 +418,14 @@ function MicButton() {
     setPhase("starting");
     try {
       const language = prefs.lang || "auto";
-      const context = prefs.contextInjection ? currentDictationContext(language) : { language };
+      const context = contextInjection ? currentDictationContext(language) : { language };
       const onPartial = (text: string) => {
         if (startGeneration.current === generation) setPartial(text);
       };
       const serverOptions = {
         ...(getState().activeSessionId ? { sessionId: getState().activeSessionId! } : {}),
         language,
-        ...(prefs.contextInjection ? { context } : {}),
+        ...(contextInjection ? { context } : {}),
         onPartial,
         onError: fail,
       };
@@ -389,14 +433,14 @@ function MicButton() {
       if (directElevenLabs) {
         try {
           stream = await startDirectElevenLabsDictation({
-            model: prefs.dictationModel || "scribe_v2_realtime",
+            model: providerModel || "scribe_v2_realtime",
             language,
             context,
             onPartial,
             onError: fail,
           });
         } catch (directError) {
-          if (prefs.dictationTransport !== "auto") throw directError;
+          if (transport !== "auto") throw directError;
           stream = await startStreamingDictation(serverOptions);
         }
       } else {
