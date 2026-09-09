@@ -26,6 +26,12 @@ export async function resolveSessionRuntimeBinding(
   const projection = await deps.store.projection(sessionId);
   const projectId = projection?.projectId ?? "__default__";
   const project = projection ? await deps.projects.get(projectId) : undefined;
+  // A canonical session may outlive project metadata. Never reinterpret that
+  // stale stable project id as the default project/Space: doing so could bind
+  // background work to another tenant's runtime capabilities after deletion.
+  if (projection && !project) {
+    throw Object.assign(new Error("project not found"), { code: "not-found" });
+  }
   const cwd = projection?.worktreePath ?? project?.path ?? process.cwd();
   const rt = projection && deps.runtimes.forSession
     ? await deps.runtimes.forSession(projection, cwd)
