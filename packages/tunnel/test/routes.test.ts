@@ -26,8 +26,10 @@ const request = (opts: {
   body?: Record<string, unknown>;
   loopback?: boolean;
   ingressKind?: "public-http" | "polyth-link" | "internal";
-}): { rc: RouteRequest; codes: number[] } => {
+  space?: SpaceContext;
+}): { rc: RouteRequest; codes: number[]; bodies: unknown[] } => {
   const codes: number[] = [];
+  const bodies: unknown[] = [];
   const loopback = opts.loopback ?? true;
   const ingress = opts.ingressKind === "polyth-link"
     ? { kind: "polyth-link" as const, connectionId: "c1", transport: "direct" as const }
@@ -42,12 +44,12 @@ const request = (opts: {
     method: opts.method ?? "GET",
     ingress,
     principal: opts.principal,
-    space: SPACE,
+    space: opts.space ?? SPACE,
     requireCapability() {},
     body: async () => opts.body ?? {},
-    json(code) { codes.push(code); },
+    json(code, body) { codes.push(code); bodies.push(body); },
   };
-  return { rc, codes };
+  return { rc, codes, bodies };
 };
 
 test("pairing and identity rotation stay local-admin; paired devices only reach status/diagnostics", async () => {
@@ -107,6 +109,72 @@ test("pairing and identity rotation stay local-admin; paired devices only reach 
   });
   assert.equal(await routes(local.rc), true);
   assert.deepEqual(local.codes, [503]);
+  store.close();
+});
+
+test("pairing and paired-device administration are scoped to the active account", async () => {
+  const store = createTunnelStore(join(tmp(), "tunnel.db"));
+  const events = new TunnelEventBus();
+  const host = {
+    available: true,
+    request: async (method: string) => method === "pairing.create"
+      ? { pairing: { id: "pair-user" } }
+      : { ok: true },
+  } as never;
+  const routes = tunnelRoutes({
+    store,
+    events,
+    host: () => host,
+    connections: new Map(),
+    status: async () => ({}),
+    diagnostics: async () => ({}),
+    closeDeviceSockets() {},
+  });
+  const local: AuthPrincipal = { kind: "local-user", trustedLoopback: true };
+  const created = request({
+    path: "/api/tunnel/pairing",
+    method: "POST",
+    principal: local,
+    body: { profile: "interact" },
+  });
+  assert.equal(await routes(created.rc), true);
+  assert.deepEqual(created.codes, [200]);
+  assert.equal(store.pairingOwner("pair-user"), "usr_test");
+
+  const pending = store.prepareDevice({
+    pairingId: "pair-user",
+    endpointId: "ab".repeat(32),
+    label: "Test phone",
+    grants: [],
+    pairedVia: "polyth-link",
+  });
+  store.markHostAcknowledged("pair-user");
+  const device = store.activatePairing("pair-user");
+  assert.equal(device.ownerUserId, "usr_test");
+  assert.equal(pending.id, device.id);
+
+  const otherSpace: SpaceContext = {
+    ...SPACE,
+    spaceId: "spc_other",
+    spaceSlug: "other",
+    userId: "usr_other",
+    storageDir: "/tmp/polyth-tunnel-other-space",
+  };
+  await assert.rejects(
+    () => routes(request({
+      path: `/api/tunnel/devices/${device.id}`,
+      principal: local,
+      space: otherSpace,
+    }).rc),
+    (error: Error & { code?: string }) => error.code === "not-found",
+  );
+  const otherList = request({ path: "/api/tunnel/devices", principal: local, space: otherSpace });
+  assert.equal(await routes(otherList.rc), true);
+  assert.deepEqual(otherList.bodies, [[]]);
+
+  events.emit("tunnel/device-updated", { id: device.id }, "usr_test");
+  assert.equal(events.snapshot(0, "usr_test").events.length > 0, true);
+  assert.deepEqual(events.snapshot(0, "usr_other").events, []);
   store.close();
 });
 
