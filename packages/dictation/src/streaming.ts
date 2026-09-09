@@ -1,6 +1,8 @@
 // Server-authoritative streaming dictation. The service owns audio session
 // state, bounded reordering, duplicate suppression, acks, limits and
 // idempotent finalization. Raw audio is never stored outside the live session.
+import { normalizeDictationContext, type DictationContext } from "./providers.ts";
+
 const randomUUID = (): string => globalThis.crypto.randomUUID();
 
 export interface DictationFormat {
@@ -39,7 +41,7 @@ export interface SttStream {
 
 export interface SttAdapter {
   engine: string;
-  createStream(opts: { format: DictationFormat; language?: string }): SttStream;
+  createStream(opts: { format: DictationFormat; language?: string; context?: DictationContext }): SttStream;
 }
 
 export interface DictationChunkResult {
@@ -70,7 +72,7 @@ export interface DictationServiceOptions {
 
 export interface DictationService {
   capability(): { available: boolean; engine?: string; reason?: string };
-  create(input: { sessionId?: string; language?: string }): DictationSessionDto;
+  create(input: { sessionId?: string; language?: string; context?: Partial<DictationContext> }): DictationSessionDto;
   get(id: string): DictationSessionDto | null;
   /** Idempotent per (id, seq). Replayed chunks re-ack without re-transcribing. */
   push(id: string, seq: number, pcm: Uint8Array): Promise<DictationChunkResult>;
@@ -145,6 +147,10 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
       if (!adapter) throw err("unavailable", opts.unavailableReason ?? "no speech-to-text engine configured");
       if (sessions.size >= maxSessions) throw err("limit", `too many dictation sessions (max ${maxSessions})`);
       const id = randomUUID();
+      const context = normalizeDictationContext({
+        ...(input.context ?? {}),
+        language: input.language ?? input.context?.language ?? "auto",
+      });
       const dto: DictationSessionDto = {
         id,
         ...(input.sessionId ? { sessionId: input.sessionId } : {}),
@@ -156,7 +162,11 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
       };
       sessions.set(id, {
         dto,
-        stream: adapter.createStream({ format: dto.format, ...(input.language ? { language: input.language } : {}) }),
+        stream: adapter.createStream({
+          format: dto.format,
+          ...(context.language !== "auto" ? { language: context.language } : {}),
+          context,
+        }),
         bytes: 0,
         revision: 0,
         finalizeP: null,
@@ -177,7 +187,6 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
       if (!Number.isInteger(seq) || seq < 1 || seq > 0xffff_ffff) throw err("invalid-input", "seq must be a positive uint32");
       if ((pcm.byteLength & 1) !== 0) throw err("audio_format_error", "pcm_s16le chunks must contain whole 16-bit samples");
 
-      // Reconnect replay or repeated buffered frame: accept idempotently.
       if (seq <= s.dto.acknowledgedSeq || s.pending.has(seq)) {
         return { ack: s.dto.acknowledgedSeq, duplicate: true, ...currentTranscript(s) };
       }
@@ -193,15 +202,11 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
         return fail(s, "backpressure_overflow", "dictation reorder buffer overflowed");
       }
 
-      // Retain our own bytes because a WebSocket implementation may recycle
-      // its receive buffer after this handler returns.
       const retained = pcm.slice();
       s.pending.set(seq, retained);
       s.pendingBytes += retained.byteLength;
       s.bytes += retained.byteLength;
 
-      // Drain only contiguous audio. Out-of-order arrivals wait boundedly and
-      // the ACK remains at the high-water mark so clients know what to replay.
       for (;;) {
         const nextSeq = s.dto.acknowledgedSeq + 1;
         const next = s.pending.get(nextSeq);
@@ -227,7 +232,6 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
       if (s.pending.size > 0) {
         throw err("gap", `cannot finalize with missing audio before seq ${Math.min(...s.pending.keys())}`);
       }
-      // Finalizes exactly once: concurrent callers share the same promise.
       if (!s.finalizeP) {
         s.dto.status = "finalizing";
         s.finalizeP = (async () => {
@@ -266,10 +270,6 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
 
 export interface BufferedChunk { seq: number; pcm: Uint8Array }
 
-/** Bounded PCM retention until the server acks. After a reconnect the caller
- * replays `unacked()` in order; the server re-acks duplicates. Eviction is
- * observable through dropped(), so capture can fail rather than silently
- * produce a transcript with missing audio. */
 export interface ChunkBuffer {
   push(pcm: Uint8Array): number;
   ack(seq: number): void;
