@@ -82,6 +82,22 @@ const DICTATION_STATUS: Record<string, number> = {
   "too-long": 413,
 };
 
+const createSession = async (
+  dictation: DictationService,
+  body: () => Promise<Record<string, unknown>>,
+) => {
+  const input = await body();
+  const rawContext = input.context;
+  const context = rawContext && typeof rawContext === "object" && !Array.isArray(rawContext)
+    ? rawContext as Partial<DictationContext>
+    : undefined;
+  return dictation.create({
+    ...(input.sessionId ? { sessionId: String(input.sessionId) } : {}),
+    ...(input.language ? { language: String(input.language) } : {}),
+    ...(context ? { context } : {}),
+  });
+};
+
 export function dictationRoutes(dictation: DictationService): RouteHandler {
   return async ({ path, method, body, json }) => {
     try {
@@ -89,20 +105,33 @@ export function dictationRoutes(dictation: DictationService): RouteHandler {
         json(200, dictation.capability());
         return true;
       }
-      if (path === "/api/dictation" && method === "POST") {
-        const input = await body();
-        const rawContext = input.context;
-        const context = rawContext && typeof rawContext === "object" && !Array.isArray(rawContext)
-          ? rawContext as Partial<DictationContext>
-          : undefined;
-        json(200, dictation.create({
-          ...(input.sessionId ? { sessionId: String(input.sessionId) } : {}),
-          ...(input.language ? { language: String(input.language) } : {}),
-          ...(context ? { context } : {}),
-        }));
+      // `/sessions` is the unambiguous remote-safe namespace. Keep the old
+      // POST `/api/dictation` route for existing local clients.
+      if ((path === "/api/dictation/sessions" || path === "/api/dictation") && method === "POST") {
+        json(200, await createSession(dictation, body));
         return true;
       }
-      let match = path.match(/^\/api\/dictation\/([^/]+)$/);
+
+      let match = path.match(/^\/api\/dictation\/sessions\/([^/]+)$/);
+      if (match && method === "GET") {
+        const session = dictation.get(match[1]!);
+        json(session ? 200 : 404, session ?? { error: "not-found" });
+        return true;
+      }
+      if (match && method === "DELETE") {
+        dictation.cancel(match[1]!);
+        json(200, { ok: true });
+        return true;
+      }
+
+      match = path.match(/^\/api\/dictation\/sessions\/([^/]+)\/finalize$/);
+      if (match && method === "POST") {
+        json(200, await dictation.finalize(match[1]!));
+        return true;
+      }
+
+      // Compatibility routes stay local-only through the package remote policy.
+      match = path.match(/^\/api\/dictation\/([^/]+)$/);
       if (match && match[1] !== "capability" && method === "GET") {
         const session = dictation.get(match[1]!);
         json(session ? 200 : 404, session ?? { error: "not-found" });
@@ -339,6 +368,22 @@ export function voiceRoutes(deps: {
   };
 }
 
+/** Paired devices may dictate, but may not administer server voice settings or
+ * package-owned local model/runtime state. Session routes use a dedicated
+ * namespace so `:id` can never overlap `runtime`, `models`, or future admin paths. */
+export const DICTATION_REMOTE_ACCESS = {
+  ...localOnlyRemoteAccess(["dictation"]),
+  http: [
+    { methods: ["GET"] as const, path: "/api/dictation/capability", capability: "dictation.use", mutation: false },
+    { methods: ["POST"] as const, path: "/api/dictation/sessions", capability: "dictation.use", mutation: true, maxBodyBytes: 16 * 1024 },
+    { methods: ["GET"] as const, path: "/api/dictation/sessions/:id", capability: "dictation.use", mutation: false },
+    { methods: ["DELETE"] as const, path: "/api/dictation/sessions/:id", capability: "dictation.use", mutation: true },
+    { methods: ["POST"] as const, path: "/api/dictation/sessions/:id/finalize", capability: "dictation.use", mutation: true, maxBodyBytes: 256 },
+    { methods: ["GET"] as const, path: "/api/voice/providers", capability: "dictation.use", mutation: false },
+    { methods: ["POST"] as const, path: "/api/dictation/token", capability: "dictation.use", mutation: true, maxBodyBytes: 512 },
+  ],
+};
+
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   const voice = host.services.require(
     serverServiceKey<VoiceSettingsService>("voice.settings"),
@@ -441,7 +486,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   host.services.provide(serverServiceKey<DictationService>("dictation"), dictation);
   let routes: RouteHandler | null = null;
   return {
-    remoteAccess: localOnlyRemoteAccess(["dictation"]),
+    remoteAccess: DICTATION_REMOTE_ACCESS,
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
       const dictationRoute = dictationRoutes(dictation);
