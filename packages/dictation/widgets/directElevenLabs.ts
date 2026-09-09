@@ -330,8 +330,9 @@ export async function startDirectElevenLabsDictation(options: DirectElevenLabsOp
         audio_base_64: "",
         commit: true,
       });
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
       const timeout = new Promise<never>((_, reject) => {
-        setTimeout(
+        timeoutId = setTimeout(
           () => reject(new DictationError("network_error", "Timed out waiting for ElevenLabs final transcript")),
           FINAL_TIMEOUT_MS,
         );
@@ -339,6 +340,7 @@ export async function startDirectElevenLabsDictation(options: DirectElevenLabsOp
       try {
         return await Promise.race([final, timeout]);
       } finally {
+        if (timeoutId) clearTimeout(timeoutId);
         teardown();
       }
     },
