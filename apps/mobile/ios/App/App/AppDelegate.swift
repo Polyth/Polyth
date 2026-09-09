@@ -170,7 +170,8 @@ private final class PolythQRScannerViewController: UIViewController, AVCaptureMe
         sessionQueue.async { [session] in
             if session.isRunning { session.stopRunning() }
         }
-        dismiss(animated: true) { [completion] in completion(result) }
+        let completion = self.completion
+        dismiss(animated: true) { completion(result) }
     }
 
     func metadataOutput(
@@ -443,10 +444,12 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
             presentPairingScanner(call)
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { granted in
-                if granted {
-                    self.presentPairingScanner(call)
-                } else {
-                    call.reject("camera-permission-denied", "camera-permission-denied")
+                DispatchQueue.main.async {
+                    if granted {
+                        self.presentPairingScanner(call)
+                    } else {
+                        call.reject("camera-permission-denied", "camera-permission-denied")
+                    }
                 }
             }
         case .denied, .restricted:
