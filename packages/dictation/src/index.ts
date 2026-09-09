@@ -14,7 +14,7 @@ export {
   type DictationFormat, type DictationSessionDto, type DictationChunkResult,
   type DictationService, type DictationServiceOptions,
   type SttAdapter, type SttStream, type ChunkBuffer, type BufferedChunk,
-  type DictationTimingDto,
+  type DictationTimingDto, type DictationMetricsDto,
 } from "./streaming.ts";
 export {
   createWhisperSttAdapter, downsampleToPcm16, pcmToWav,
