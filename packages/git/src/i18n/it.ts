@@ -444,6 +444,8 @@ export const it: GitMessages = {
   "isolation.discardConfirm": "Le modifiche non unite di questo spazio isolato andranno perse.",
   "isolation.discardTitle": "Scarta lo spazio isolato",
   "isolation.discard": "Scarta",
+  "isolation.finishWithoutCleanup": "Completa e conserva lo spazio",
+  "isolation.finishWithoutCleanupConfirm": "Lo spazio e il branch non verificati saranno conservati e non più gestiti da questa sessione.",
   "isolation.dirtyTarget": "{branch} ha modifiche locali. Esegui il commit o scartale prima di integrare questa sessione.",
   "isolation.missingWorkspace": "Lo spazio isolato non è più disponibile.",
   "isolation.workInIsolation": "Lavora in isolamento",

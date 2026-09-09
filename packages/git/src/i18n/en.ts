@@ -446,6 +446,8 @@ export const en = {
   "isolation.discardConfirm": "Unmerged changes in this isolated workspace will be lost.",
   "isolation.discardTitle": "Discard isolated workspace",
   "isolation.discard": "Discard",
+  "isolation.finishWithoutCleanup": "Finish and preserve workspace",
+  "isolation.finishWithoutCleanupConfirm": "The unverified workspace and branch will be preserved and no longer managed by this session.",
   "isolation.dirtyTarget": "{branch} has local changes. Commit or discard them before integrating this session.",
   "isolation.missingWorkspace": "The isolated workspace is no longer available.",
   "isolation.workInIsolation": "Work in isolation",

@@ -5,7 +5,13 @@ import { normalizeIsolation, transitionIsolation, isolationActions, isManagedIso
 
 const active: SessionIsolation = { kind: "git-worktree", state: "active", createdAt: "2026-09-08", worktreePath: "/repo-isolate/abc",
   worktreeBranch: "polyth/isolate/abc", targetPath: "/repo", targetBranch: "main", originPath: "/repo", baseCommit: "base" };
-const intent: IsolationPublishIntent = { expectedTargetSha: "before", resultCommit: "result", snapshotSha: "snapshot", targetRef: "refs/heads/main" };
+const resultCommit = "b".repeat(40);
+const intent: IsolationPublishIntent = {
+  expectedTargetSha: "a".repeat(40),
+  resultCommit,
+  snapshotSha: "c".repeat(40),
+  targetRef: "refs/heads/main",
+};
 const raw = (fields: object) => ({ ...active, ...fields }) as SessionIsolation;
 
 test("legacy publication and cleanup phases normalize without losing recovery identity", () => {
@@ -13,23 +19,33 @@ test("legacy publication and cleanup phases normalize without losing recovery id
   assert.equal(publishing.state, "publishing");
   assert.deepEqual(publishing.publish, intent);
   assert.equal(publishing.conflict, undefined);
-  const pending = normalizeIsolation(raw({ state: "cleanup-pending", resultCommit: "result", rebound: false }));
+  const pending = normalizeIsolation(raw({ state: "cleanup-pending", resultCommit, rebound: false }));
   assert.equal(pending.state, "rebind-pending");
-  assert.equal(pending.resultCommit, "result");
-  const cleanup = normalizeIsolation(raw({ state: "cleanup-pending", resultCommit: "result", rebound: true }));
+  assert.equal(pending.resultCommit, resultCommit);
+  const cleanup = normalizeIsolation(raw({ state: "cleanup-pending", resultCommit, rebound: true }));
   assert.equal(cleanup.state, "cleanup-pending");
   assert.equal(cleanup.rebound, true);
   assert.deepEqual(normalizeIsolation(publishing), publishing);
   assert.deepEqual(normalizeIsolation(pending), pending);
 });
 
+test("legacy pre-publication merging normalizes to active", () => {
+  assert.equal(normalizeIsolation(raw({ state: "merging" })).state, "active");
+});
+
 test("unknown or impossible durable states fail closed without modifying the input", () => {
   for (const fields of [
     { state: "future" }, { state: "active", publish: intent }, { state: "active", rebound: true },
+    { state: "active", resultCommit }, { state: "active", dismissedRevision: 42 },
     { state: "publishing" }, { state: "conflict", conflict: { message: "oops", files: [1] } },
+    { state: "conflict", conflict: { message: "oops", files: [] }, resultCommit },
     { state: "publishing", publish: { ...intent, receiptRef: 123 } },
     { state: "publishing", publish: { ...intent, receiptRef: "refs/polyth/x" } },
-    { state: "rebind-pending", sourceRevision: 42 },
+    { state: "publishing", publish: {
+      ...intent, receiptRef: "refs/heads/main", checkoutPath: "/repo", sourceRevision: "revision",
+    } },
+    { state: "rebind-pending", sourceRevision: 42 }, { state: "rebind-pending", rebound: true },
+    { state: "merging", resultCommit }, { state: "active", sourceSessionId: 42 },
   ]) {
     const value = raw(fields);
     const before = JSON.stringify(value);
@@ -40,8 +56,8 @@ test("unknown or impossible durable states fail closed without modifying the inp
 
 test("transitions clear phase-specific payloads and preserve immutable origin", () => {
   const publishing = transitionIsolation(active, { state: "publishing", publish: intent });
-  const rebound = transitionIsolation(publishing, { state: "rebind-pending", resultCommit: "result", sourceRevision: "revision" });
-  const cleanup = transitionIsolation(rebound, { state: "cleanup-pending", resultCommit: "result", rebound: true, sourceRevision: "revision" });
+  const rebound = transitionIsolation(publishing, { state: "rebind-pending", resultCommit, sourceRevision: "revision" });
+  const cleanup = transitionIsolation(rebound, { state: "cleanup-pending", resultCommit, rebound: true, sourceRevision: "revision" });
   assert.equal(rebound.publish, undefined);
   assert.equal(cleanup.originPath, active.originPath);
   assert.equal(cleanup.worktreePath, active.worktreePath);

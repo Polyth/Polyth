@@ -12,6 +12,7 @@ test("worktree session dialog offers checked-out branches as isolation origins",
   assert.match(source, /sourceSession && sourceSession.projectId === request.projectId/);
   assert.match(source, /targetBranch: origin/);
   assert.match(source, /tr\("isolation\.workInIsolation"\)/);
+  assert.match(source, /!item\.branch\.startsWith\("polyth\/isolate\/"\)/);
   assert.doesNotMatch(source, /remoteBranches/);
   assert.doesNotMatch(source, /origin\/foo/);
 });
@@ -25,6 +26,8 @@ test("new-session branch picker fetches the remote on open and lists remote bran
   assert.match(composer, /const refreshBranchesFromRemote = useCallback/);
   assert.match(composer, /await api\.gitFetch\(projectId\)\.catch\(\(\) => undefined\)/);
   assert.match(composer, /onBranchPickerOpen: refreshBranchesFromRemote/);
+  assert.match(composer, /!worktree\.branch\?\.startsWith\("polyth\/isolate\/"\)/);
+  assert.match(composer, /!candidate\.name\.startsWith\("polyth\/isolate\/"\)/);
   // Isolation ("new worktree") only forks from a live checkout.
   assert.match(composer, /target: \{ kind: "new-worktree", base: currentBranchName \}/);
   assert.match(composer, /target: \{ kind: "new-worktree", base: name \}/);
@@ -50,4 +53,13 @@ test("git catalog defines the remote-branch refresh strings", async () => {
     assert.match(catalog, /"gitview\.remoteUnreachableShowingCached":/);
     assert.match(catalog, /"worktreesessiondialog\.aNewCheckoutWillTrack": ".*\{branch\}.*\{remote\}/);
   }
+});
+
+test("git view hides isolation implementation worktrees and branches", async () => {
+  const source = await read("../../../packages/git/widgets/GitView.tsx");
+
+  assert.match(source, /const visibleTrees = trees\.filter\(\(tree\) => !tree\.branch\?\.startsWith\("polyth\/isolate\/"\)\)/);
+  assert.match(source, /!branch\.name\.startsWith\("polyth\/isolate\/"\)/);
+  assert.match(source, /visibleTrees\.length/);
+  assert.match(source, /visibleTrees\.map\(\(tree\) =>/);
 });

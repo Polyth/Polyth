@@ -2,9 +2,9 @@
 // in the worktree git dir plus a namespaced branch (`polyth/isolate/…`) are
 // both required before anything is deleted.
 import { existsSync } from "node:fs";
-import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { mkdir, open, readFile, readdir, realpath, rename, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { basename, dirname, join, resolve } from "node:path";
 import type { JsonObject } from "@polyth/contracts";
 import type { GitService } from "./index.ts";
 
@@ -12,6 +12,23 @@ export const MANAGED_BRANCH_PREFIX = "polyth/isolate/";
 export const INTEGRATE_DIR_SUFFIX = "-polyth-integrate";
 export const ISOLATE_DIR_SUFFIX = "-polyth-isolate";
 const MARKER = "polyth-managed.json";
+const RECEIPTS = "polyth/creation-receipts";
+const CREATION_TOKEN = "polyth-creation-token";
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const COMMIT_ID = /^[0-9a-f]{40,64}$/i;
+
+type CreationReceipt = {
+  version: 1;
+  phase: "planned" | "created";
+  kind: "isolate" | "integration";
+  root: string;
+  path: string;
+  sessionId: string;
+  expectedHead: string;
+  nonce: string;
+  branch?: string;
+  gitDir?: string;
+};
 
 export interface ManagedWorktreeMeta {
   kind?: "isolate";
@@ -38,16 +55,26 @@ export interface ManagedWorktree {
   meta: ManagedWorktreeMeta;
 }
 
-export type OwnershipFailure = "not-listed" | "marker-missing" | "marker-corrupt" | "wrong-kind" | "mismatch";
-export type OwnedWorktreeInspection =
-  | { status: "owned"; worktree: ManagedWorktree }
-  | { status: "missing" }
-  | { status: "unowned"; reason: OwnershipFailure };
-
 export type RemoveOwnedResult =
   | { status: "removed" }
   | { status: "already-gone" }
-  | { status: "unowned"; reason: OwnershipFailure };
+  | { status: "unowned"; reason: OwnershipFailureReason };
+
+export type OwnershipFailureReason =
+  | "not-listed"
+  | "marker-missing"
+  | "marker-corrupt"
+  | "wrong-kind"
+  | "branch-unmanaged"
+  | "session-mismatch"
+  | "branch-mismatch"
+  | "target-mismatch"
+  | "base-mismatch";
+
+export type OwnedWorktreeInspection =
+  | { status: "owned"; worktree: ManagedWorktree }
+  | { status: "missing" }
+  | { status: "unowned"; reason: OwnershipFailureReason };
 
 export interface OwnedWorktreeRef {
   sessionId: string;
@@ -70,6 +97,11 @@ export function isolateBranchName(sessionId: string): string {
   return `${MANAGED_BRANCH_PREFIX}${short}`;
 }
 
+const preservedBranchName = (sessionId: string): string => {
+  const short = sessionId.replaceAll("-", "").slice(0, 12);
+  return `polyth-preserved/${short}-${randomUUID().slice(0, 8)}`;
+};
+
 export function isolateWorktreePath(repoRoot: string, sessionId: string): string {
   const root = resolve(repoRoot);
   const short = sessionId.replaceAll("-", "").slice(0, 12);
@@ -84,8 +116,95 @@ export function integrationWorktreePath(repoRoot: string, sessionId: string): st
 
 async function writeMarker(git: GitService, worktreePath: string, meta: ManagedMarker): Promise<void> {
   const dir = await git.gitDir(worktreePath);
-  await writeFile(join(dir, MARKER), JSON.stringify(meta), "utf8");
+  const target = join(dir, MARKER);
+  const temp = join(dir, `${MARKER}.${process.pid}.${randomUUID()}.tmp`);
+  const handle = await open(temp, "wx", 0o600);
+  try {
+    await handle.writeFile(JSON.stringify(meta), "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  try {
+    await rename(temp, target);
+    const directory = await open(dir, "r");
+    try { await directory.sync(); } finally { await directory.close(); }
+  } catch (error) {
+    await rm(temp, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
+
+async function writeCreationToken(git: GitService, worktreePath: string, nonce: string): Promise<string> {
+  const dir = resolve(await git.gitDir(worktreePath));
+  const target = join(dir, CREATION_TOKEN);
+  const temp = `${target}.${process.pid}.${randomUUID()}.tmp`;
+  const handle = await open(temp, "wx", 0o600);
+  try {
+    await handle.writeFile(nonce, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  try {
+    await rename(temp, target);
+    const directory = await open(dir, "r");
+    try { await directory.sync(); } finally { await directory.close(); }
+  } catch (error) {
+    await rm(temp, { force: true }).catch(() => undefined);
+    throw error;
+  }
+  return dir;
+}
+
+async function writeCreationReceipt(git: GitService, receipt: CreationReceipt): Promise<string> {
+  const directory = join(await git.commonDir(receipt.root), RECEIPTS);
+  await mkdir(directory, { recursive: true });
+  const name = creationReceiptName(receipt);
+  const target = join(directory, name);
+  const temp = `${target}.${process.pid}.${randomUUID()}.tmp`;
+  const handle = await open(temp, "wx", 0o600);
+  try {
+    await handle.writeFile(JSON.stringify(receipt), "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  await rename(temp, target);
+  const dir = await open(directory, "r");
+  try { await dir.sync(); } finally { await dir.close(); }
+  return target;
+}
+
+const creationReceiptName = (receipt: Pick<CreationReceipt, "kind" | "sessionId" | "path">): string =>
+  `${receipt.kind}-${receipt.sessionId.replaceAll("-", "")}-${basename(receipt.path)}.json`;
+
+const validReceipt = (value: unknown, root: string): value is CreationReceipt => {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<CreationReceipt>;
+  if (!(item.version === 1
+    && (item.phase === "planned" || item.phase === "created")
+    && (item.kind === "isolate" || item.kind === "integration")
+    && typeof item.root === "string"
+    && resolve(item.root) === resolve(root)
+    && typeof item.path === "string"
+    && typeof item.sessionId === "string" && SESSION_ID.test(item.sessionId)
+    && typeof item.expectedHead === "string" && COMMIT_ID.test(item.expectedHead)
+    && typeof item.nonce === "string" && SESSION_ID.test(item.nonce)
+    && (item.branch === undefined || typeof item.branch === "string")
+    && (item.gitDir === undefined || typeof item.gitDir === "string"))) return false;
+  if (item.phase === "created" && typeof item.gitDir !== "string") return false;
+  if (item.phase === "planned" && item.gitDir !== undefined) return false;
+  if (item.kind === "isolate") {
+    return resolve(item.path) === resolve(isolateWorktreePath(root, item.sessionId))
+      && item.branch === isolateBranchName(item.sessionId);
+  }
+  const integrationDir = resolve(dirname(integrationWorktreePath(root, item.sessionId)));
+  const short = item.sessionId.replaceAll("-", "").slice(0, 12);
+  return item.branch === undefined
+    && resolve(dirname(item.path)) === integrationDir
+    && new RegExp(`^${short}-[0-9a-z]+$`).test(basename(item.path));
+};
 
 export async function readManagedMarker(git: GitService, worktreePath: string): Promise<ManagedMarker | null | "corrupt"> {
   let raw: string;
@@ -145,49 +264,125 @@ export function createManagedWorktrees(git: GitService) {
       throw invalid("managed workspace parent must use its canonical filesystem path; reopen the project through its real path");
     }
   };
-
-
-  // The creator retains its exact receipt until marker establishment succeeds.
-  // Rollback never scans for lookalike paths or falls back to recursive rm.
-  const rollback = async (root: string, path: string, branch: string | null, head: string, sessionId: string) => {
-    try {
-      const listed = (await git.worktrees.list(root)).find((wt) => samePath(wt.path, path));
-      if (!listed && !existsSync(path) && (!branch || await git.readRef(root, `refs/heads/${branch}`) === null)) return;
-      if (!listed || listed.isMain || listed.branch !== branch || listed.head !== head
-        || !samePath(await realpath(path), path)) {
-        throw invalid("created worktree identity changed before rollback");
+  const rollbackCreated = async (input: {
+    root: string;
+    path: string;
+    branch?: string;
+    expectedHead: string;
+    sessionId: string;
+    stage: string;
+  }): Promise<void> => {
+    const failures: string[] = [];
+    let resourceIdentityProven = false;
+    const listed = (await git.worktrees.list(input.root))
+      .find((item) => resolve(item.path) === resolve(input.path));
+    if (listed) {
+      const unchanged = listed.head === input.expectedHead
+        && (input.branch === undefined || listed.branch === input.branch)
+        && !(await git.hasUniqueChanges(listed.path, input.expectedHead));
+      if (!unchanged) {
+        failures.push("worktree: identity or contents changed after creation");
+      } else {
+        resourceIdentityProven = true;
+        try {
+          await git.worktrees.remove(input.root, { path: input.path, deleteBranch: false, force: true });
+        } catch (error) {
+          resourceIdentityProven = false;
+          failures.push(`worktree: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
-      await git.worktrees.remove(root, { path, deleteBranch: false, force: true });
-      if (branch && !await git.deleteRef(root, `refs/heads/${branch}`, head)) throw invalid("created branch rollback failed");
-    } catch (error) {
-      log("creation-rollback-failed", { sessionId, root, path, branch, head, message: String(error) });
+    } else if (existsSync(input.path)) {
+      failures.push("worktree: unlisted path cannot be proven owned");
+    } else {
+      resourceIdentityProven = true;
+    }
+
+    if (input.branch && resourceIdentityProven) {
+      const branchHead = await git.revParse(input.root, input.branch).catch(() => undefined);
+      if (branchHead === input.expectedHead) {
+        try { await git.deleteBranch(input.root, input.branch); } catch (error) {
+          failures.push(`branch: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      } else if (branchHead !== undefined) {
+        failures.push("branch: tip changed after creation");
+      }
+    }
+    try { await git.worktrees.prune(input.root); } catch (error) {
+      failures.push(`prune: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (failures.length) {
+      log("creation-rollback-failed", {
+        sessionId: input.sessionId,
+        worktreePath: input.path,
+        branch: input.branch ?? "",
+        stage: input.stage,
+        failures: failures.join("; "),
+      });
+      throw new AggregateError(failures.map((message) => new Error(message)), "managed worktree rollback failed");
     }
   };
 
-  const inspectOwned = async (root: string, ref: OwnedWorktreeRef): Promise<OwnedWorktreeInspection> => {
-    if (ref.worktreeBranch !== isolateBranchName(ref.sessionId)
-      || !isManagedBranch(ref.worktreeBranch)
-      || !samePath(ref.worktreePath, isolateWorktreePath(root, ref.sessionId))) {
-      return { status: "unowned", reason: "mismatch" };
+  const reconcileThrowingCreate = async (
+    planned: CreationReceipt,
+  ): Promise<boolean> => {
+    let inventory: Awaited<ReturnType<GitService["worktrees"]["list"]>>;
+    try { inventory = await git.worktrees.list(planned.root); } catch { return false; }
+    const listed = inventory.find((item) => resolve(item.path) === resolve(planned.path));
+    if (listed) {
+      const unchanged = listed.head === planned.expectedHead
+        && (planned.branch === undefined || listed.branch === planned.branch)
+        && !(await git.hasUniqueChanges(listed.path, planned.expectedHead));
+      if (!unchanged) return false;
+      const gitDir = await writeCreationToken(git, listed.path, planned.nonce);
+      await writeCreationReceipt(git, { ...planned, phase: "created", gitDir });
+      await rollbackCreated({
+        root: planned.root,
+        path: planned.path,
+        ...(planned.branch ? { branch: planned.branch } : {}),
+        expectedHead: planned.expectedHead,
+        sessionId: planned.sessionId,
+        stage: `${planned.kind}-create-threw`,
+      });
+      return true;
     }
-    const listed = (await git.worktrees.list(root)).find((wt) => samePath(wt.path, ref.worktreePath));
+    if (existsSync(planned.path)) return false;
+    // A branch without its worktree/token is ambiguous: another actor may have
+    // created or replaced it after the throwing Git call. Preserve it.
+    if (planned.branch && await git.revParse(planned.root, planned.branch).then(() => true).catch(() => false)) return false;
+    await git.worktrees.prune(planned.root);
+    return true;
+  };
+
+  const inspectOwned = async (root: string, ref: OwnedWorktreeRef): Promise<OwnedWorktreeInspection> => {
+    const expectedBranch = isolateBranchName(ref.sessionId);
+    if (ref.worktreeBranch !== expectedBranch || !isManagedBranch(ref.worktreeBranch)
+      || !samePath(ref.worktreePath, isolateWorktreePath(root, ref.sessionId))) {
+      return { status: "unowned", reason: "branch-unmanaged" };
+    }
+    const listed = (await git.worktrees.list(root)).find((item) => samePath(item.path, ref.worktreePath));
+    if (!listed) return existsSync(ref.worktreePath)
+      ? { status: "unowned", reason: "not-listed" }
+      : { status: "missing" };
     if (!existsSync(ref.worktreePath)) return { status: "missing" };
-    if (!listed) return { status: "unowned", reason: "not-listed" };
-    if (listed.isMain || listed.branch !== ref.worktreeBranch) return { status: "unowned", reason: "mismatch" };
-    // Symlink substitution must not redirect marker reads or destructive Git calls.
-    if (!samePath(await realpath(ref.worktreePath), ref.worktreePath)) return { status: "unowned", reason: "mismatch" };
+    if (listed.isMain || listed.branch !== ref.worktreeBranch
+      || !samePath(await realpath(ref.worktreePath), ref.worktreePath)) {
+      return { status: "unowned", reason: "branch-mismatch" };
+    }
     const marker = await readManagedMarker(git, listed.path);
     if (marker === "corrupt") return { status: "unowned", reason: "marker-corrupt" };
     if (!marker) return { status: "unowned", reason: "marker-missing" };
     if (marker.kind === "integration") return { status: "unowned", reason: "wrong-kind" };
-    if (marker.sessionId !== ref.sessionId || marker.worktreeBranch !== ref.worktreeBranch
-      || (ref.targetPath !== undefined && !samePath(marker.targetPath, ref.targetPath))
-      || (ref.targetBranch !== undefined && marker.targetBranch !== ref.targetBranch)
-      || (ref.baseCommit !== undefined && marker.baseCommit !== ref.baseCommit)) {
-      return { status: "unowned", reason: "mismatch" };
+    if (marker.sessionId !== ref.sessionId) return { status: "unowned", reason: "session-mismatch" };
+    if (marker.worktreeBranch !== ref.worktreeBranch) return { status: "unowned", reason: "branch-mismatch" };
+    if ((ref.targetPath !== undefined && !samePath(marker.targetPath, ref.targetPath))
+      || (ref.targetBranch !== undefined && marker.targetBranch !== ref.targetBranch)) {
+      return { status: "unowned", reason: "target-mismatch" };
     }
-    if (!(await git.isAncestor(root, marker.baseCommit, listed.head))) return { status: "unowned", reason: "mismatch" };
-    return { status: "owned", worktree: { path: listed.path, branch: ref.worktreeBranch, head: listed.head, meta: marker } };
+    if ((ref.baseCommit !== undefined && marker.baseCommit !== ref.baseCommit)
+      || !(await git.isAncestor(root, marker.baseCommit, listed.head))) {
+      return { status: "unowned", reason: "base-mismatch" };
+    }
+    return { status: "owned", worktree: { path: listed.path, branch: listed.branch, head: listed.head, meta: marker } };
   };
 
   return {
@@ -213,14 +408,35 @@ export function createManagedWorktrees(git: GitService) {
       if (isManagedBranch(input.targetBranch.replace(/^refs\/heads\//, ""))) throw invalid("nested isolation is unsupported");
       const branch = isolateBranchName(input.sessionId);
       const path = isolateWorktreePath(input.root, input.sessionId);
-      if (existsSync(path) || (await git.worktrees.list(input.root)).some((wt) => samePath(wt.path, path))) throw invalid("managed workspace path already exists");
-      if (await git.readRef(input.root, `refs/heads/${branch}`) !== null) throw invalid("managed branch already exists");
-      const head = await git.revParse(input.root, input.base ?? input.targetBranch);
       await prepareParent(path);
+      const start = input.base ?? input.targetBranch;
+      const expectedHead = await git.revParse(input.root, start);
+      const collision = (await git.worktrees.list(input.root))
+        .some((item) => resolve(item.path) === resolve(path));
+      const branchExists = await git.revParse(input.root, branch).then(() => true).catch(() => false);
+      if (collision || branchExists || existsSync(path)) {
+        throw Object.assign(new Error("managed workspace path already exists or its branch already exists"), { code: "conflict" });
+      }
+      const planned: CreationReceipt = {
+        version: 1,
+        phase: "planned",
+        kind: "isolate",
+        root: resolve(input.root),
+        path: resolve(path),
+        sessionId: input.sessionId,
+        expectedHead,
+        nonce: randomUUID(),
+        branch,
+      };
+      const receipt = await writeCreationReceipt(git, planned);
+      let createdResource = false;
       try {
-        const created = await git.worktrees.create(input.root, { branch, path, base: head, newBranchOnly: true });
-        const actualHead = await git.revParse(created.path, "HEAD");
-        if (!samePath(created.path, path) || created.branch !== branch || actualHead !== head
+        const created = await git.worktrees.create(input.root, { branch, path, base: expectedHead, newBranchOnly: true });
+        createdResource = true;
+        const createdGitDir = await writeCreationToken(git, created.path, planned.nonce);
+        await writeCreationReceipt(git, { ...planned, phase: "created", gitDir: createdGitDir });
+        const head = await git.revParse(created.path, "HEAD");
+        if (!samePath(created.path, path) || created.branch !== branch || head !== expectedHead
           || !samePath(await realpath(created.path), created.path)) {
           throw invalid("created worktree identity mismatch");
         }
@@ -231,13 +447,50 @@ export function createManagedWorktrees(git: GitService) {
           targetPath: resolve(input.targetPath),
           targetBranch: input.targetBranch,
           baseCommit: head,
-          worktreeBranch: branch,
+          worktreeBranch: created.branch,
         };
-        await writeMarker(git, path, meta);
-        log("created", { sessionId: input.sessionId, repository: input.root, targetBranch: input.targetBranch, baseCommit: head });
-        return { path, branch, head, meta };
+        await writeMarker(git, created.path, meta);
+        await rm(receipt, { force: true });
+        log("created", {
+          sessionId: input.sessionId,
+          repository: input.root,
+          targetBranch: input.targetBranch,
+          baseCommit: head,
+        });
+        return { path: created.path, branch: created.branch, head, meta };
       } catch (error) {
-        await rollback(input.root, path, branch, head, input.sessionId);
+        if (!createdResource) {
+          try {
+            if (await reconcileThrowingCreate(planned)) await rm(receipt, { force: true });
+            else {
+              log("creation-rollback-failed", {
+                sessionId: planned.sessionId,
+                worktreePath: planned.path,
+                branch: planned.branch ?? "",
+                stage: "isolation-create-threw",
+                failures: "resource identity could not be proven",
+              });
+              throw error;
+            }
+          } catch (cleanupError) {
+            if (cleanupError === error) throw error;
+            throw new AggregateError([error, cleanupError], `managed worktree creation and rollback failed: ${error instanceof Error ? error.message : String(error)}`);
+          }
+          throw error;
+        }
+        try {
+          await rollbackCreated({
+            root: input.root,
+            path,
+            branch,
+            expectedHead,
+            sessionId: input.sessionId,
+            stage: "isolation-ownership",
+          });
+          await rm(receipt, { force: true });
+        } catch (rollbackError) {
+          throw new AggregateError([error, rollbackError], `managed worktree creation and rollback failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
         throw error;
       }
     },
@@ -254,34 +507,133 @@ export function createManagedWorktrees(git: GitService) {
       startPoint: string;
     }): Promise<string> {
       const path = integrationWorktreePath(input.root, input.sessionId);
-      if (existsSync(path) || (await git.worktrees.list(input.root)).some((wt) => samePath(wt.path, path))) throw invalid("integration workspace path already exists");
-      const head = await git.revParse(input.root, input.startPoint);
       await prepareParent(path);
+      const expectedHead = await git.revParse(input.root, input.startPoint);
+      if ((await git.worktrees.list(input.root)).some((item) => resolve(item.path) === resolve(path)) || existsSync(path)) {
+        throw Object.assign(new Error("managed integration destination already exists"), { code: "conflict" });
+      }
+      const planned: CreationReceipt = {
+        version: 1,
+        phase: "planned",
+        kind: "integration",
+        root: resolve(input.root),
+        path: resolve(path),
+        sessionId: input.sessionId,
+        expectedHead,
+        nonce: randomUUID(),
+      };
+      const receipt = await writeCreationReceipt(git, planned);
+      let createdResource = false;
       try {
-        await git.worktrees.addDetached(input.root, path, head);
-        if (!samePath(await realpath(path), path) || await git.revParse(path, "HEAD") !== head
-          || (await git.branches(path)).current !== null) throw invalid("created integration identity mismatch");
-        await writeMarker(git, path, { kind: "integration", sessionId: input.sessionId, createdAt: new Date().toISOString() });
-        log("integration-started", { sessionId: input.sessionId, repository: input.root, startPoint: head });
+        await git.worktrees.addDetached(input.root, path, input.startPoint);
+        createdResource = true;
+        const createdGitDir = await writeCreationToken(git, path, planned.nonce);
+        await writeCreationReceipt(git, { ...planned, phase: "created", gitDir: createdGitDir });
+        await writeMarker(git, path, {
+          kind: "integration",
+          sessionId: input.sessionId,
+          createdAt: new Date().toISOString(),
+        });
+        await rm(receipt, { force: true });
+        log("integration-started", {
+          sessionId: input.sessionId,
+          repository: input.root,
+          startPoint: input.startPoint,
+        });
         return path;
       } catch (error) {
-        await rollback(input.root, path, null, head, input.sessionId);
+        if (!createdResource) {
+          try {
+            if (await reconcileThrowingCreate(planned)) await rm(receipt, { force: true });
+            else throw error;
+          } catch (cleanupError) {
+            if (cleanupError === error) throw error;
+            throw new AggregateError([error, cleanupError], "integration worktree creation and rollback failed");
+          }
+          throw error;
+        }
+        try {
+          await rollbackCreated({
+            root: input.root,
+            path,
+            expectedHead,
+            sessionId: input.sessionId,
+            stage: "integration-ownership",
+          });
+          await rm(receipt, { force: true });
+        } catch (rollbackError) {
+          throw new AggregateError([error, rollbackError], "integration worktree creation and rollback failed");
+        }
         throw error;
       }
     },
 
     async removeOwned(root: string, ref: OwnedWorktreeRef): Promise<RemoveOwnedResult> {
-      const result = await inspectOwned(root, ref);
-      if (result.status === "unowned") return result;
-      if (result.status === "missing") {
-        // A missing path is not a receipt for deleting a same-named branch.
-        // Leave externally removed resources and branch identities untouched.
-        return { status: "already-gone" };
+      const inspection = await inspectOwned(root, ref);
+      if (inspection.status === "missing") return { status: "already-gone" };
+      if (inspection.status === "unowned") {
+        log("cleanup-unowned", {
+          worktreePath: ref.worktreePath,
+          reason: inspection.reason,
+          sessionId: ref.sessionId,
+        });
+        return inspection;
       }
-      await git.worktrees.remove(root, { path: result.worktree.path, deleteBranch: false, force: true });
-      if (!await git.deleteRef(root, `refs/heads/${ref.worktreeBranch}`, result.worktree.head)) throw invalid("owned branch cleanup failed");
+      await git.worktrees.remove(root, { path: inspection.worktree.path, deleteBranch: false, force: true });
+      if (!await git.deleteRef(root, `refs/heads/${ref.worktreeBranch}`, inspection.worktree.head)) {
+        throw invalid("owned branch cleanup failed");
+      }
+      await git.worktrees.prune(root);
       log("cleanup", { sessionId: ref.sessionId, worktreePath: ref.worktreePath, branch: ref.worktreeBranch });
       return { status: "removed" };
+    },
+
+    async relinquishOwned(root: string, ref: OwnedWorktreeRef): Promise<{ branch: string }> {
+      const inspection = await inspectOwned(root, ref);
+      if (inspection.status !== "owned") {
+        throw Object.assign(
+          new Error(`refusing to relinquish an isolation workspace whose ownership is not proven (${inspection.status === "missing" ? "missing" : inspection.reason})`),
+          { code: "conflict" },
+        );
+      }
+      const branch = preservedBranchName(ref.sessionId);
+      // Rename first. If any later metadata cleanup is interrupted, the branch
+      // mismatch makes every managed deletion path fail closed and also makes
+      // the preserved worktree visible in ordinary Git inventory.
+      await git.renameBranch(root, ref.worktreeBranch, branch);
+      const gitDir = resolve(await git.gitDir(ref.worktreePath));
+      const marker = await readManagedMarker(git, ref.worktreePath);
+      if (!marker || marker === "corrupt" || marker.kind === "integration"
+        || marker.sessionId !== ref.sessionId || marker.worktreeBranch !== ref.worktreeBranch) {
+        throw Object.assign(new Error("managed marker changed while relinquishing ownership"), { code: "conflict" });
+      }
+      await rm(join(gitDir, MARKER), { force: true });
+      const tokenPath = join(gitDir, CREATION_TOKEN);
+      const nonce = await readFile(tokenPath, "utf8").catch(() => "");
+      if (SESSION_ID.test(nonce)) await rm(tokenPath, { force: true });
+      const receiptPath = join(
+        await git.commonDir(root),
+        RECEIPTS,
+        creationReceiptName({ kind: "isolate", sessionId: ref.sessionId, path: ref.worktreePath }),
+      );
+      const receipt = await readFile(receiptPath, "utf8")
+        .then((raw) => JSON.parse(raw) as unknown)
+        .catch(() => undefined);
+      if (validReceipt(receipt, root)
+        && receipt.kind === "isolate"
+        && receipt.sessionId === ref.sessionId
+        && resolve(receipt.path) === resolve(ref.worktreePath)
+        && (!nonce || receipt.nonce === nonce)) {
+        await rm(receiptPath, { force: true });
+      }
+      const directory = await open(gitDir, "r");
+      try { await directory.sync(); } finally { await directory.close(); }
+      log("ownership-relinquished", {
+        sessionId: ref.sessionId,
+        worktreePath: ref.worktreePath,
+        branch,
+      });
+      return { branch };
     },
 
     async removeIfOwned(root: string, worktreePath: string): Promise<boolean> {
@@ -291,21 +643,32 @@ export function createManagedWorktrees(git: GitService) {
       return result.status === "removed" || result.status === "already-gone";
     },
 
-    async discardIntegration(root: string, integrationPath: string, sessionId: string): Promise<void> {
-      const listed = (await git.worktrees.list(root)).find((wt) => samePath(wt.path, integrationPath));
-      if (!listed && !existsSync(integrationPath)) return;
-      const expectedParent = dirname(integrationWorktreePath(root, sessionId));
-      const prefix = `${sessionId.replaceAll("-", "").slice(0, 12)}-`;
-      if (!listed || listed.isMain || listed.branch !== null
-        || !samePath(dirname(integrationPath), expectedParent) || !basename(integrationPath).startsWith(prefix)
-        || !samePath(await realpath(integrationPath), integrationPath)) {
-        throw invalid("refusing to delete an unowned integration workspace");
-      }
-      const marker = await readManagedMarker(git, integrationPath);
-      if (!marker || marker === "corrupt" || marker.kind !== "integration" || marker.sessionId !== sessionId) {
-        throw invalid("refusing to delete an unowned integration workspace");
+    async discardIntegration(root: string, integrationPath: string, sessionId?: string): Promise<void> {
+      const listed = (await git.worktrees.list(root))
+        .find((item) => resolve(item.path) === resolve(integrationPath));
+      if (!listed) return;
+      const marker = await readManagedMarker(git, listed.path);
+      const owner = marker && marker !== "corrupt" && marker.kind === "integration" ? marker.sessionId : sessionId;
+      const expectedParent = owner ? dirname(integrationWorktreePath(root, owner)) : "";
+      const prefix = owner ? `${owner.replaceAll("-", "").slice(0, 12)}-` : "";
+      if (
+        !marker
+        || marker === "corrupt"
+        || marker.kind !== "integration"
+        || (sessionId !== undefined && marker.sessionId !== sessionId)
+        || listed.isMain
+        || listed.branch !== null
+        || !owner
+        || !samePath(dirname(integrationPath), expectedParent)
+        || !basename(integrationPath).startsWith(prefix)
+        || !samePath(await realpath(integrationPath), integrationPath)
+      ) {
+        throw Object.assign(new Error("refusing to delete an unowned integration workspace whose ownership is not proven"), {
+          code: "conflict",
+        });
       }
       await git.worktrees.remove(root, { path: integrationPath, deleteBranch: false, force: true });
+      await git.worktrees.prune(root);
     },
 
     async pruneIntegrationsForSession(root: string, sessionId: string): Promise<number> {
@@ -315,7 +678,8 @@ export function createManagedWorktrees(git: GitService) {
       for (const wt of list) {
         if (wt.isMain) continue;
         const marker = await readManagedMarker(git, wt.path);
-        if (!marker || marker === "corrupt" || marker.kind !== "integration" || marker.sessionId !== sessionId) continue;
+        if (!marker || marker === "corrupt" || marker.kind !== "integration") continue;
+        if (marker.sessionId !== sessionId) continue;
         await this.discardIntegration(root, wt.path, sessionId);
         removed += 1;
         log("cleanup", { sessionId, worktreePath: wt.path, kind: "integration" });
@@ -323,6 +687,81 @@ export function createManagedWorktrees(git: GitService) {
       return removed;
     },
 
+    /** Reconcile interrupted create→marker transactions from a durable exact
+     * creation receipt. Dirty or identity-mismatched resources are preserved. */
+    async recoverCreations(root: string): Promise<number> {
+      const directory = join(await git.commonDir(root), RECEIPTS);
+      const names = await readdir(directory).catch(() => [] as string[]);
+      let recovered = 0;
+      for (const name of names.filter((item) => item.endsWith(".json"))) {
+        const file = join(directory, name);
+        let receipt: CreationReceipt;
+        try {
+          const parsed: unknown = JSON.parse(await readFile(file, "utf8"));
+          if (!validReceipt(parsed, root)) continue;
+          receipt = parsed;
+          if (name !== creationReceiptName(receipt)) continue;
+        } catch {
+          continue;
+        }
+        const listed = (await git.worktrees.list(root))
+          .find((item) => resolve(item.path) === resolve(receipt.path));
+        if (!listed) {
+          if (receipt.phase !== "created") continue;
+          const token = await readFile(join(receipt.gitDir!, CREATION_TOKEN), "utf8").catch(() => undefined);
+          if (token !== receipt.nonce) continue;
+          // A real path outside Git's worktree inventory has no provable
+          // relationship to this receipt. Preserve both it and the branch.
+          if (existsSync(receipt.path)) continue;
+          if (receipt.branch) {
+            const head = await git.revParse(root, receipt.branch).catch(() => undefined);
+            if (head === receipt.expectedHead) await git.deleteBranch(root, receipt.branch);
+            else if (head !== undefined) continue;
+          }
+          await rm(file, { force: true });
+          recovered += 1;
+          continue;
+        }
+        const marker = await readManagedMarker(git, listed.path);
+        const established = receipt.kind === "integration"
+          ? marker !== null && marker !== "corrupt" && marker.kind === "integration" && marker.sessionId === receipt.sessionId
+          : marker !== null && marker !== "corrupt" && marker.kind !== "integration"
+            && marker.sessionId === receipt.sessionId && marker.worktreeBranch === receipt.branch;
+        if (established) {
+          await rm(file, { force: true });
+          recovered += 1;
+          continue;
+        }
+        // Planned intent is not proof that Git completed resource creation.
+        // Preserve ambiguous paths/refs rather than deleting a substitute.
+        if (receipt.phase !== "created") continue;
+        const token = await readFile(join(receipt.gitDir!, CREATION_TOKEN), "utf8").catch(() => undefined);
+        if (token !== receipt.nonce) continue;
+        const actualGitDir = await git.gitDir(listed.path).then(resolve).catch(() => undefined);
+        if (
+          actualGitDir !== resolve(receipt.gitDir!)
+          ||
+          listed.head !== receipt.expectedHead
+          || (receipt.branch !== undefined && listed.branch !== receipt.branch)
+          || await git.hasUniqueChanges(listed.path, receipt.expectedHead)
+        ) continue;
+        await git.worktrees.remove(root, { path: listed.path, deleteBranch: false, force: true });
+        if (receipt.branch) {
+          const head = await git.revParse(root, receipt.branch).catch(() => undefined);
+          if (head !== receipt.expectedHead) continue;
+          await git.deleteBranch(root, receipt.branch);
+        }
+        await git.worktrees.prune(root);
+        await rm(file, { force: true });
+        recovered += 1;
+        log("creation-recovered", { sessionId: receipt.sessionId, worktreePath: receipt.path, kind: receipt.kind });
+      }
+      return recovered;
+    },
+
+    async prune(root: string): Promise<void> {
+      await git.worktrees.prune(root);
+    },
   };
 }
 

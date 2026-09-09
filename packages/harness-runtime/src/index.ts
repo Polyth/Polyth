@@ -1,4 +1,4 @@
-export { createProcessAuthority } from "./authority.ts";
+export { createProcessAuthority, releaseProcessExecution } from "./authority.ts";
 export { createStdioRpc, type RpcPeer } from "./rpc.ts";
 export {
   acknowledgeCapabilityApplication,
@@ -58,6 +58,7 @@ import type {
     HarnessRegistry,
     HarnessSelection,
     HarnessSnapshot,
+    RuntimeSessionBinding,
     SessionProjection,
 } from "@polyth/contracts";
 export const harnessError = (code: string, message: string): Error => Object.assign(new Error(message), { code });
@@ -306,6 +307,7 @@ export function createHarnessRegistry() {
  * may be alive. Only a new, not-yet-admitted session may try another factory. */
 type HarnessCacheEntry = {
     sessionId: string;
+    lifetime: "session" | "workspace";
     pending: Promise<AgentRuntime>;
     runtime?: AgentRuntime;
     releasing?: Promise<void>;
@@ -329,12 +331,14 @@ export function createHarnessPool(options: {
     releaseRuntime?: (runtime: AgentRuntime, dispose: () => Promise<void>) => Promise<void>;
 }) {
     const cached = new Map<string, HarnessCacheEntry>();
+    const failedRetirements = new Map<string, HarnessCacheEntry[]>();
+    const runtimeLocations = new WeakMap<AgentRuntime, string>();
     const disposals = new WeakMap<AgentRuntime, Promise<void>>();
     const disposeOnce = (runtime: AgentRuntime): Promise<void> => {
         let pending = disposals.get(runtime);
         if (!pending) {
-            // Start synchronously: a shared owner's occupancy check and fence
-            // must not be separated by a microtask that admits a new binding.
+            // Start synchronously so a shared owner's occupancy check and fence
+            // cannot admit a new binding between those two steps.
             pending = (async () => runtime.dispose())();
             disposals.set(runtime, pending);
         }
@@ -358,11 +362,31 @@ export function createHarnessPool(options: {
         const key = harnessCacheKey(context.spaceId, context.projectId, context.cwd, sessionId, provider.descriptor.id);
         let entry = cached.get(key);
         if (!entry) {
-            const created: HarnessCacheEntry = { sessionId, pending: Promise.resolve(undefined as unknown as AgentRuntime) };
+            const created: HarnessCacheEntry = {
+                sessionId,
+                lifetime: provider.runtimeLifetime ?? "session",
+                pending: Promise.resolve(undefined as unknown as AgentRuntime),
+            };
             created.pending = (async () => {
                 await options.beforeCreate?.(provider, context);
                 const runtime = await provider.createRuntime(context);
-                if (disposals.has(runtime)) throw harnessError("runtime-unavailable", "Provider returned a released runtime");
+                if (disposals.has(runtime)) {
+                    throw harnessError("runtime-unavailable", "Provider returned a released runtime");
+                }
+                const location = JSON.stringify([
+                    context.spaceId,
+                    context.projectId,
+                    context.cwd,
+                    provider.descriptor.id,
+                ]);
+                const priorLocation = runtimeLocations.get(runtime);
+                if (priorLocation !== undefined && priorLocation !== location) {
+                    throw harnessError(
+                        "runtime-unavailable",
+                        `Harness ${provider.descriptor.id} reused one runtime facade across workspace locations`,
+                    );
+                }
+                runtimeLocations.set(runtime, location);
                 Object.defineProperty(runtime, "harnessId", { value: provider.descriptor.id, configurable: true });
                 if (cached.get(key) === created) created.runtime = runtime;
                 return runtime;
@@ -414,6 +438,24 @@ export function createHarnessPool(options: {
                 throw error;
             }
         },
+        async releaseSessionExecution(
+            projection: SessionProjection,
+            binding: RuntimeSessionBinding,
+            operationId: string,
+        ) {
+            const harnessId = projection.resolvedHarnessId
+                ?? (projection.backendSessionId ? options.legacyHarnessId : undefined);
+            if (!harnessId)
+                return undefined;
+            const provider = options.registry.get(harnessId);
+            if (!provider?.releaseExecution)
+                return undefined;
+            const context = {
+                ...await options.context(projection.projectId, binding.location.directory, projection.id),
+                model: projection.model,
+            };
+            return provider.releaseExecution(context, binding, operationId);
+        },
         async resolve(projection: SessionProjection, cwd: string, selection: HarnessSelection) {
             const context = { ...await options.context(projection.projectId, cwd, projection.id), model: projection.model };
             return (await options.registry.resolve(context, selection, projection.resolvedHarnessId)).descriptor.id;
@@ -450,6 +492,39 @@ export function createHarnessPool(options: {
                 if (entry.sessionId === sessionId && !entry.releasing) cached.delete(key);
             }
         },
+        async retireSession(sessionId: string) {
+            const retiring = [...(failedRetirements.get(sessionId) ?? [])];
+            failedRetirements.delete(sessionId);
+            for (const [key, entry] of cached) {
+                if (entry.sessionId !== sessionId) continue;
+                cached.delete(key);
+                retiring.push(entry);
+            }
+            if (retiring.length === 0) return;
+            const settled = await Promise.allSettled(retiring.map((entry) => entry.pending));
+            // Never await unrelated factories: a hung provider for one session
+            // must not prevent another session from releasing its own lease.
+            const remaining = new Set([...cached.values()].flatMap((entry) =>
+                entry.runtime ? [entry.runtime] : []));
+            const disposed = new Set<AgentRuntime>();
+            const errors: unknown[] = [];
+            const retry: HarnessCacheEntry[] = [];
+            for (let index = 0; index < settled.length; index += 1) {
+                const result = settled[index]!;
+                // A rejected factory produced no runtime to leak.
+                if (result.status === "rejected") continue;
+                const runtime = result.value;
+                if (retiring[index]!.lifetime === "workspace" || remaining.has(runtime) || disposed.has(runtime)) continue;
+                disposed.add(runtime);
+                try { await runtime.dispose(); } catch (error) {
+                    retry.push(retiring[index]!);
+                    errors.push(error);
+                }
+            }
+            if (retry.length > 0) failedRetirements.set(sessionId, retry);
+            if (errors.length === 1) throw errors[0];
+            if (errors.length > 1) throw new AggregateError(errors, "harness session retirement failed");
+        },
         forgetRuntime(runtime: AgentRuntime) {
             for (const [key, entry] of cached) {
                 if (entry.runtime === runtime) cached.delete(key);
@@ -457,13 +532,18 @@ export function createHarnessPool(options: {
         },
         async dispose() {
             const seen = new Set<AgentRuntime>();
-            const jobs = [...cached.values()].map(async (entry) => {
+            const entries = [
+                ...cached.values(),
+                ...[...failedRetirements.values()].flat(),
+            ];
+            const jobs = entries.map(async (entry) => {
                 const runtime = entry.runtime ?? await entry.pending;
                 if (seen.has(runtime)) return;
                 seen.add(runtime);
                 await disposeOnce(runtime);
             });
             cached.clear();
+            failedRetirements.clear();
             const results = await Promise.allSettled(jobs);
             const errors = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
             if (errors.length === 1) throw errors[0];

@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Duplex } from "node:stream";
+import type { ExecutionReleaseProof, MutationOutcome, RuntimeSessionBinding } from "@polyth/contracts";
 import { supervisorSource } from "./supervisor.ts";
 type Proof = {
     authorityId: string;
@@ -72,6 +73,73 @@ async function release(state: State) {
         await new Promise(r => setTimeout(r, 20));
     }
     throw unknown("Executor descendants have not confirmed shutdown");
+}
+
+/** Fence an exact durable process authority without constructing a runtime or
+ * spawning in its (possibly vanished) workspace. */
+export async function releaseProcessExecution(
+    file: string,
+    binding: RuntimeSessionBinding,
+    operationId: string,
+): Promise<MutationOutcome<ExecutionReleaseProof>> {
+    const backendSessionId = binding.backendSessionId;
+    if (!backendSessionId) {
+        return { kind: "rejected", code: "binding-mismatch", message: "backend execution identity is missing" };
+    }
+    let state: State;
+    try {
+        state = JSON.parse(readFileSync(file, "utf8")) as State;
+    }
+    catch (error) {
+        return {
+            kind: "rejected",
+            code: (error as { code?: string }).code === "ENOENT" ? "not-found" : "invalid-state",
+            message: "durable process authority is unavailable",
+        };
+    }
+    if (!state || typeof state !== "object"
+        || typeof state.authorityId !== "string"
+        || !Number.isSafeInteger(state.generation)
+        || !Array.isArray(state.releasedAuthorities)
+        || !state.releasedAuthorities.every((proof) => proof
+            && typeof proof.authorityId === "string" && Number.isSafeInteger(proof.generation))) {
+        return { kind: "rejected", code: "invalid-state", message: "durable process authority is malformed" };
+    }
+    const exactCurrent = state.authorityId === binding.authorityId
+        && state.generation === binding.generation;
+    const alreadyReleased = state.releasedAuthorities.some((proof) =>
+        proof.authorityId === binding.authorityId && proof.generation === binding.generation);
+    if (!exactCurrent && !alreadyReleased) {
+        return { kind: "rejected", code: "stale-evidence", message: "durable process authority does not match" };
+    }
+    try {
+        // If a prior recovery already advanced this state file, fence that
+        // successor too: it may be the facade that reattached the same native
+        // session before crashing. Provider state keys are exact to the
+        // canonical session/workspace, so no unrelated authority is touched.
+        if (!state.released) {
+            await release(state);
+            state.released = true;
+            const temp = `${file}.${randomUUID()}.tmp`;
+            writeFileSync(temp, JSON.stringify(state), { mode: 0o600 });
+            renameSync(temp, file);
+        }
+        return {
+            kind: "confirmed",
+            value: {
+                authorityId: binding.authorityId,
+                generation: binding.generation,
+                backendSessionId,
+            },
+        };
+    }
+    catch (error) {
+        return {
+            kind: "unknown",
+            operationId,
+            message: error instanceof Error ? error.message : "process authority release was not confirmed",
+        };
+    }
 }
 /** Shared lifecycle only, not another execution API. Both SDK custom spawns
  * and stdio transports use the same durable, Linux-owned process authority. */

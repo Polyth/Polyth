@@ -108,8 +108,15 @@ export interface RuntimePool {
   forSession?(projection: SessionProjection, cwd: string, targetHarnessId?: string): Promise<AgentRuntime>;
   resolve?(projection: SessionProjection, cwd: string, selection: HarnessSelection): Promise<string>;
   forgetSession?(sessionId: string): void;
-  /** Release this canonical session cache; the physical owner protects shared occupancy. */
-  releaseSession?(sessionId: string): Promise<void>;
+  /** Retire every cached runtime lease for one canonical session. */
+  retireSession?(sessionId: string): Promise<void>;
+  /** Fence a persisted execution from durable provider authority state without
+   * constructing a runtime in a workspace that may no longer exist. */
+  releaseSessionExecution?(
+    projection: SessionProjection,
+    binding: RuntimeSessionBinding,
+    operationId: string,
+  ): Promise<MutationOutcome<ExecutionReleaseProof> | undefined>;
   forgetRuntime?(runtime: AgentRuntime): void;
   /** Session lease on a shared pool facade. Does not own process disposal. */
   bindSession?(sessionId: string, runtime: AgentRuntime): void;
@@ -432,6 +439,22 @@ export function createSessionService(deps: {
   }
   const hooks = deps.hooks ?? {};
   const sessionRuntime = new Map<string, AgentRuntime>(); // sessionId -> runtime
+  const sessionWireGeneration = new Map<string, number>();
+  // Owned runtime identity breaks are recoverable without user action. The
+  // implementation is assigned after the epoch helpers are declared; callers
+  // can safely request recovery during attach/reconciliation.
+  let recoverOwnedEpochIfPending: (sessionId: string) => Promise<void> = async () => {};
+  // Last redacted endpoint seen during normal attach/bind. debug() reads this
+  // instead of calling endpoint(), which can restart a dead owned instance.
+  const attachedEndpoint = new WeakMap<AgentRuntime, SessionDebugEndpointDto>();
+  const rememberEndpoint = (runtime: AgentRuntime, endpoint: RuntimeEndpoint): void => {
+    attachedEndpoint.set(runtime, snapshotDebugEndpoint(endpoint));
+  };
+  // One onEvent subscription per runtime (not per session): events dispatch
+  // through sessionRuntime, so wiring N sessions to a runtime costs a single
+  // listener that unwire() disposes once the last session leaves it.
+  const runtimeSubs = new Map<AgentRuntime, Disposable[]>();
+  const wireTokens = new Map<string, symbol>();
   type MaterializationFailure = {
     runtime: AgentRuntime;
     harnessId?: string;
@@ -452,26 +475,41 @@ export function createSessionService(deps: {
       .trim();
     return text.length > 500 ? `${text.slice(0, 500)}…` : text;
   };
-  // Owned runtime identity breaks are recoverable without user action. The
-  // implementation is assigned after the epoch helpers are declared; callers
-  // can safely request recovery during attach/reconciliation.
-  let recoverOwnedEpochIfPending: (sessionId: string) => Promise<void> = async () => {};
-  // Last redacted endpoint seen during normal attach/bind. debug() reads this
-  // instead of calling endpoint(), which can restart a dead owned instance.
-  const attachedEndpoint = new WeakMap<AgentRuntime, SessionDebugEndpointDto>();
-  const rememberEndpoint = (runtime: AgentRuntime, endpoint: RuntimeEndpoint): void => {
-    attachedEndpoint.set(runtime, snapshotDebugEndpoint(endpoint));
-  };
-  // One onEvent subscription per runtime (not per session): events dispatch
-  // through sessionRuntime, so wiring N sessions to a runtime costs a single
-  // listener that unwire() disposes once the last session leaves it.
-  const runtimeSubs = new Map<AgentRuntime, Disposable[]>();
-  const wireTokens = new Map<string, symbol>();
   const assertIsolationExecutable = (projection: SessionProjection): void => {
     const state = projection.isolation ? normalizeIsolation(projection.isolation).state : undefined;
     if (state && state !== "active" && state !== "merge-ready" && state !== "conflict") {
       throw Object.assign(new Error("Session isolation needs recovery before workspace execution"), { code: "conflict" });
     }
+  };
+  const workspaceFacts = async (projection: SessionProjection) => {
+    const project = projection.worktreePath ? undefined : await projects.get(projection.projectId);
+    return {
+      effectiveCwd: projection.worktreePath ?? project?.path,
+      runtimeCwd: projection.runtimeBinding?.location.directory,
+      isolationSource: projection.isolation?.kind === "git-worktree"
+        ? projection.isolation.worktreePath
+        : undefined,
+    };
+  };
+  const isolationOwnerAt = async (path: string, exceptSessionId?: string) => {
+    for (const projection of await store.projections()) {
+      if (projection.id === exceptSessionId) continue;
+      const facts = await workspaceFacts(projection);
+      if (facts.isolationSource && resolve(facts.isolationSource) === resolve(path)) return projection;
+    }
+    return undefined;
+  };
+  const workspaceDependents = async (path: string, exceptSessionId: string) => {
+    const dependents: SessionProjection[] = [];
+    for (const projection of await store.projections()) {
+      if (projection.id === exceptSessionId) continue;
+      const facts = await workspaceFacts(projection);
+      if ((facts.effectiveCwd && resolve(facts.effectiveCwd) === resolve(path))
+        || (facts.runtimeCwd && resolve(facts.runtimeCwd) === resolve(path))) {
+        dependents.push(projection);
+      }
+    }
+    return dependents;
   };
   const lastTurnId = new Map<string, string>();           // sessionId -> active turnId
   // sessions whose turn admission is in flight (startTurn sent, turn/started
@@ -2000,17 +2038,18 @@ export function createSessionService(deps: {
     const reconciliations: Promise<void>[] = [];
     for (const [sessionId, wired] of sessionRuntime) {
       if (wired !== runtime) continue;
-      const token = wireTokens.get(sessionId);
-      reconciliations.push((async () => {
-        await withSessionLock(sessionId, async () => {
-          if (sessionRuntime.get(sessionId) !== runtime || wireTokens.get(sessionId) !== token) return;
-          const projection = await store.projection(sessionId);
-          if (projection) await reconcileSession(sessionId, projection, runtime, "runtime-generation-replaced");
-        });
-        if (sessionRuntime.get(sessionId) === runtime && wireTokens.get(sessionId) === token) {
-          await recoverOwnedEpochIfPending(sessionId);
-        }
-      })());
+      const wireGeneration = sessionWireGeneration.get(sessionId);
+      const projection = await store.projection(sessionId);
+      if (projection) {
+        reconciliations.push((async () => {
+          await withSessionLock(sessionId, async () => {
+            if (sessionRuntime.get(sessionId) !== runtime
+              || sessionWireGeneration.get(sessionId) !== wireGeneration) return;
+            await reconcileSession(sessionId, projection, runtime, "runtime-generation-replaced");
+            await recoverOwnedEpochIfPending(sessionId);
+          });
+        })());
+      }
     }
     await settleAllOrThrow(reconciliations);
   });
@@ -3023,6 +3062,16 @@ export function createSessionService(deps: {
     sessionId: string,
     observation: RuntimeObservation,
   ): Promise<void> => {
+    const projection = await store.projection(sessionId);
+    const binding = projection?.runtimeBinding;
+    if (!binding
+      || binding.authorityId !== observation.identity.authorityId
+      || binding.generation !== observation.identity.generation
+      || binding.backendSessionId !== observation.identity.backendSessionId
+      || binding.location.directory !== observation.identity.location.directory
+      || binding.location.workspace !== observation.identity.location.workspace) {
+      return;
+    }
     const batches: CanonicalEventInput[][] = [];
     for (const event of observation.events) {
       batches.push(await captureRuntimeEvent(sessionId, event));
@@ -3119,28 +3168,37 @@ export function createSessionService(deps: {
 
   const wire = (sessionId: string, rt: AgentRuntime) => {
     if (sessionRuntime.has(sessionId)) return;
-    materializationFailures.delete(sessionId);
+    sessionWireGeneration.set(sessionId, (sessionWireGeneration.get(sessionId) ?? 0) + 1);
+    sessionRuntime.set(sessionId, rt);
     runtimes.bindSession?.(sessionId, rt);
     sessionRuntime.set(sessionId, rt);
     wireTokens.set(sessionId, Symbol());
     if (runtimeSubs.has(rt)) return;
     const subscriptions: Disposable[] = [];
     subscriptions.push(rt.onEvent((sid, ev) => {
+      const wireGeneration = sessionWireGeneration.get(sid);
       // deliver only to sessions currently wired to this runtime — the same
       // filter the old per-session closures applied, minus the listener pile-up.
       if (sessionRuntime.get(sid) !== rt) return;
       // Serialize each canonical session: a terminal turn/stopped can never be
       // overwritten by an older usage or chunk projection update.
-      const token = wireTokens.get(sid);
-      void withSessionLock(sid, async () => { if (sessionRuntime.get(sid) === rt && wireTokens.get(sid) === token) await onRuntimeEvent(sid, ev); }).catch((err) => {
+      void withSessionLock(sid, async () => {
+        if (sessionRuntime.get(sid) === rt && sessionWireGeneration.get(sid) === wireGeneration) {
+          await onRuntimeEvent(sid, ev);
+        }
+      }).catch((err) => {
         console.error(`[polyth] runtime event handling failed for ${sid}`, err);
       });
     }));
     if (rt.onObservation) {
       subscriptions.push(rt.onObservation((sid, observation) => {
+        const wireGeneration = sessionWireGeneration.get(sid);
         if (sessionRuntime.get(sid) !== rt) return;
-        const token = wireTokens.get(sid);
-        void withSessionLock(sid, async () => { if (sessionRuntime.get(sid) === rt && wireTokens.get(sid) === token) await ingestRuntimeObservation(sid, observation); }).catch((err) => {
+        void withSessionLock(sid, async () => {
+          if (sessionRuntime.get(sid) === rt && sessionWireGeneration.get(sid) === wireGeneration) {
+            await ingestRuntimeObservation(sid, observation);
+          }
+        }).catch((err) => {
           console.error(`[polyth] runtime observation handling failed for ${sid}`, err);
         });
       }));
@@ -3152,14 +3210,15 @@ export function createSessionService(deps: {
           && notification.type !== "endpoint-replaced") return;
         for (const [sid, wired] of sessionRuntime) {
           if (wired !== rt) continue;
-          const token = wireTokens.get(sid);
+          const wireGeneration = sessionWireGeneration.get(sid);
           void (async () => {
             await withSessionLock(sid, async () => {
-              if (sessionRuntime.get(sid) !== rt || wireTokens.get(sid) !== token) return;
+              if (sessionRuntime.get(sid) !== rt || sessionWireGeneration.get(sid) !== wireGeneration) return;
               const projection = await store.projection(sid);
-              if (projection) await reconcileSession(sid, projection, rt, notification.type);
+              if (!projection) return;
+              await reconcileSession(sid, projection, rt, notification.type);
+              await recoverOwnedEpochIfPending(sid);
             });
-            if (sessionRuntime.get(sid) === rt && wireTokens.get(sid) === token) await recoverOwnedEpochIfPending(sid);
           })().catch((err) => {
             console.error(`[polyth] runtime lifecycle reconciliation failed for ${sid}`, err);
           });
@@ -3170,6 +3229,7 @@ export function createSessionService(deps: {
   };
 
   const unwire = (sessionId: string) => {
+    sessionWireGeneration.set(sessionId, (sessionWireGeneration.get(sessionId) ?? 0) + 1);
     clearRuntimeFeatureState(sessionId);
     materializationFailures.delete(sessionId);
     const rt = sessionRuntime.get(sessionId);
@@ -3194,6 +3254,51 @@ export function createSessionService(deps: {
 
   const runtimeFor = (projection: SessionProjection, cwd: string, targetHarnessId?: string): Promise<AgentRuntime> =>
     runtimes.forSession ? runtimes.forSession(projection, cwd, targetHarnessId) : runtimes.forProject(projection.projectId, cwd);
+
+  const runtimeAttachedForRelease = async (
+    sessionId: string,
+    projection: SessionProjection,
+    cwd: string,
+  ): Promise<{ runtime: AgentRuntime; projection: SessionProjection }> => {
+    const wired = sessionRuntime.get(sessionId);
+    if (wired) return { runtime: wired, projection };
+    if (!projection.backendSessionId || !projection.runtimeBinding) {
+      throw Object.assign(new Error("the current execution identity is incomplete"), { code: "binding-mismatch" });
+    }
+    const runtime = await runtimeFor(projection, cwd);
+    // A newly constructed facade has no in-memory native session identity.
+    // Validate only the immutable location here, then reattach the exact
+    // persisted backend session before asking it to produce an authority
+    // release proof. A managed runtime restart can legitimately have a new
+    // generation-only authority; releaseExecution verifies its durable receipt
+    // for the prior authority, while ordinary session reuse must reject it.
+    const endpoint = await (runtime as ReliabilityRuntime).endpoint?.();
+    if (!endpoint
+      || resolve(endpoint.location.directory) !== resolve(projection.runtimeBinding.location.directory)
+      || (endpoint.location.workspace ?? "") !== (projection.runtimeBinding.location.workspace ?? "")) {
+      throw Object.assign(new Error("release runtime does not match the persisted execution location"), {
+        code: "binding-mismatch",
+      });
+    }
+    const attachedBackendId = await boundedRuntimeAwait(
+      runtime.ensureSession({
+        projectId: projection.projectId,
+        title: projection.title,
+        sessionId,
+        cwd,
+        backendSessionId: projection.backendSessionId,
+        ...(projection.model ? { model: projection.model } : {}),
+        ...(projection.agent ? { agent: projection.agent } : {}),
+      }),
+      `reattach-for-release:${sessionId}`,
+    );
+    if (attachedBackendId !== projection.backendSessionId) {
+      throw Object.assign(new Error("runtime reattached a different backend execution"), {
+        code: "binding-mismatch",
+      });
+    }
+    return { runtime, projection };
+  };
 
   const materializeSession = async (
     sessionId: string,
@@ -4468,7 +4573,7 @@ export function createSessionService(deps: {
     runtime: AgentRuntime,
     options: RuntimeEpochTransitionOptions,
   ): Promise<RuntimeEpochTransitionResult> => {
-        const projection = await store.projection(sessionId);
+        let projection = await store.projection(sessionId);
         if (!projection) {
           throw Object.assign(new Error("session not found"), { code: "not-found" });
         }
@@ -4494,18 +4599,29 @@ export function createSessionService(deps: {
               { code: "conflict" },
             );
           }
-        } else if (endpoint.control.kind === "owned") {
+        } else if (options.authorityDisposition.kind === "session-execution-released") {
           const disposition = options.authorityDisposition;
           if (
-            disposition.kind !== "session-execution-released"
-            && disposition.kind !== "owned-authority-destroyed"
+            disposition.authorityId !== oldBinding.authorityId
+            || disposition.generation !== oldBinding.generation
+            || disposition.backendSessionId !== oldBinding.backendSessionId
           ) {
             throw Object.assign(
-              new Error("owned runtime epoch requires proof of the released binding"),
+              new Error("runtime epoch requires proof of the released session binding"),
               { code: "epoch-proof-required" },
             );
           }
+          fence = {
+            mode: "session-released",
+            authorityId: disposition.authorityId,
+            generation: disposition.generation,
+            backendSessionId: disposition.backendSessionId,
+          };
+        } else if (endpoint.control.kind === "owned") {
+          const disposition = options.authorityDisposition;
           if (
+            disposition.kind !== "owned-authority-destroyed"
+            ||
             disposition.authorityId !== oldBinding.authorityId
             || disposition.generation !== oldBinding.generation
           ) {
@@ -4514,29 +4630,17 @@ export function createSessionService(deps: {
               { code: "epoch-proof-required" },
             );
           }
-          if (
-            disposition.kind === "owned-authority-destroyed"
-            && endpoint.authorityId === oldBinding.authorityId
-          ) {
+          if (endpoint.authorityId === oldBinding.authorityId) {
             throw Object.assign(
               new Error("owned runtime epoch requires proof of the destroyed binding"),
               { code: "epoch-proof-required" },
             );
           }
-          if (disposition.kind === "session-execution-released") {
-            fence = {
-              mode: "session-released",
-              authorityId: disposition.authorityId,
-              generation: disposition.generation,
-              backendSessionId: disposition.backendSessionId,
-            };
-          } else {
-            fence = {
-              mode: "destroyed",
-              authorityId: disposition.authorityId,
-              generation: disposition.generation,
-            };
-          }
+          fence = {
+            mode: "destroyed",
+            authorityId: disposition.authorityId,
+            generation: disposition.generation,
+          };
         } else if (options.authorityDisposition.kind !== "borrowed-runtime-confirmed") {
           throw Object.assign(
             new Error("borrowed runtime epoch requires explicit user confirmation"),
@@ -5277,7 +5381,8 @@ export function createSessionService(deps: {
       unwire(sessionId);
       lastTurnId.delete(sessionId);
       admitting.delete(sessionId);
-      runtimes.forgetSession?.(sessionId);
+      if (runtimes.retireSession) await runtimes.retireSession(sessionId);
+      else runtimes.forgetSession?.(sessionId);
       const releasedHarnessId = projection.resolvedHarnessId ?? old.harnessId;
       if (releasedHarnessId) {
         await deps.onHarnessTargetReleased?.({
@@ -5611,13 +5716,6 @@ export function createSessionService(deps: {
         }
         input = { ...input, worktreePath: worktree.path };
       }
-      if (input.worktreePath) {
-        const owner = (await store.projections(input.projectId)).find(projection => projection.isolation
-          && resolve(projection.isolation.worktreePath) === resolve(input.worktreePath!));
-        if (owner && owner.id !== input.id) {
-          throw Object.assign(new Error("Managed isolation workspaces belong to their canonical session"), { code: "conflict" });
-        }
-      }
       const sessionId = input.id?.trim() || randomUUID();
       if (input.id) {
         if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sessionId)) {
@@ -5625,6 +5723,25 @@ export function createSessionService(deps: {
         }
         if (await store.projection(sessionId)) {
           throw Object.assign(new Error("session already exists"), { code: "conflict" });
+        }
+      }
+      const requestedCwd = input.worktreePath ?? project.path;
+      if (await isolationOwnerAt(requestedCwd, sessionId)) {
+        throw Object.assign(new Error("an active isolation reserves this workspace"), {
+          code: "invalid-input",
+        });
+      }
+      if (worktree?.branch?.startsWith("polyth/isolate/")) {
+        const expectedBranch = `polyth/isolate/${sessionId.replaceAll("-", "").slice(0, 12)}`;
+        const isolation = input.isolation;
+        if (!isolation
+          || isolation.kind !== "git-worktree"
+          || resolve(isolation.worktreePath) !== resolve(worktree.path)
+          || isolation.worktreeBranch !== worktree.branch
+          || worktree.branch !== expectedBranch) {
+          throw Object.assign(new Error("managed isolation worktrees cannot host ordinary sessions"), {
+            code: "invalid-input",
+          });
         }
       }
       const cwd = input.worktreePath ?? project.path;
@@ -6373,6 +6490,10 @@ export function createSessionService(deps: {
     // stage leaves the source selected and creates no optimistic child.
     async fork(sessionId, atSeq): Promise<ForkResult> {
       return withSessionLock(sessionId, async () => {
+        const existing = await store.projection(sessionId);
+        if (existing?.isolation) {
+          throw Object.assign(new Error("isolated sessions cannot be forked"), { code: "conflict" });
+        }
         const { proj, events } = await assertMutable(sessionId);
         if (proj.isolation) throw Object.assign(new Error("Merge or discard isolation before forking its workspace"), { code: "conflict" });
         const eff = effectiveHistory(events);
@@ -6411,6 +6532,9 @@ export function createSessionService(deps: {
         const forkId = randomUUID();
         const project = await projects.get(proj.projectId);
         const forkCwd = proj.worktreePath ?? project?.path ?? process.cwd();
+        if (await isolationOwnerAt(forkCwd, sessionId)) {
+          throw Object.assign(new Error("an active isolation reserves this workspace"), { code: "conflict" });
+        }
         // ensureWired (not a bare runtime lookup): after a server restart the
         // adapter has no canonical→backend mapping yet, and branchSession must
         // resolve the SOURCE session's backend id to fork from it.
@@ -6654,7 +6778,11 @@ export function createSessionService(deps: {
       return withSessionLock(sessionId, async () => {
         const proj = await store.projection(sessionId);
         if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
-        if (proj.isolation) throw Object.assign(new Error("Merge or discard isolation before deleting the session"), { code: "conflict" });
+        if (proj.isolation) {
+          throw Object.assign(new Error("discard or merge the isolated workspace before deleting this session"), {
+            code: "conflict",
+          });
+        }
         const active = turnActive(sessionId);
         const project = await projects.get(proj.projectId);
         const cwd = proj.worktreePath ?? project?.path ?? process.cwd();
@@ -6766,6 +6894,8 @@ export function createSessionService(deps: {
           }
         }
         await settleOperation(deletion.operation, outcome);
+        if (runtimes.retireSession) await runtimes.retireSession(sessionId);
+        else runtimes.forgetSession?.(sessionId);
         if (outcome.kind === "confirmed") {
           await durable.retireDeletionTombstone(sessionId, { kind: "confirmed" });
         }
@@ -6844,22 +6974,14 @@ export function createSessionService(deps: {
       // session-lifetime; remove on worktree deletion (this is the hook).
       const missingPath = resolve(worktreePath);
       for (const projection of await store.projections(projectId)) {
-        await withSessionLock(projection.id, async () => {
-          await applyProjection(projection.id, current => {
-            if (!current.worktreePath || resolve(current.worktreePath) !== missingPath) return current;
-            const isolation = current.isolation && normalizeIsolation(current.isolation);
-            return {
-              ...current,
-              worktreeState: "missing",
-              updatedAt: Date.now(),
-              ...(current.isolation
-                ? { isolation: isolation?.state === "corrupt" || isolationNeedsRecovery(isolation!.state)
-                    ? current.isolation
-                    : transitionIsolation(current.isolation, { state: "missing" }) }
-                : {}),
-            };
-          });
-        });
+        if (!projection.worktreePath || resolve(projection.worktreePath) !== missingPath) continue;
+        const next: SessionProjection = {
+          ...projection,
+          worktreeState: "missing",
+          updatedAt: Date.now(),
+        };
+        await store.upsertProjection(next);
+        publishProjection(next);
       }
     },
 
@@ -6888,7 +7010,7 @@ export function createSessionService(deps: {
 
     async rebindWorkspace(sessionId, input) {
       return withSessionLock(sessionId, async () => {
-        const projection = await store.projection(sessionId);
+        let projection = await store.projection(sessionId);
         if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
         const normalized = projection.isolation && normalizeIsolation(projection.isolation);
         if (normalized?.state === "corrupt" && !isDeepStrictEqual(normalized, projection.isolation)) {
@@ -6901,27 +7023,93 @@ export function createSessionService(deps: {
           throw Object.assign(new Error("cannot rebind a running session"), { code: "conflict" });
         }
         const project = await projects.get(projection.projectId);
-        const previousCwd = projection.worktreePath ?? project?.path;
+        // Runtime binding location is authoritative while a prior rebind is
+        // incomplete. The projection cwd may already have moved before an
+        // epoch reset failed, and retry must still release the old execution.
+        const previousCwd = projection.runtimeBinding?.location.directory
+          ?? projection.worktreePath
+          ?? project?.path;
         const destCwd = input.worktreePath === null
           ? (project?.path ?? previousCwd)
           : typeof input.worktreePath === "string"
             ? input.worktreePath
             : previousCwd;
         const alreadyAtDest = !!previousCwd && !!destCwd && resolve(previousCwd) === resolve(destCwd);
-        const blocker = await blockingOperation(sessionId);
-        if (blocker && !(blocker.state === "prepared" && !projection.backendSessionId && destCwd
-          && await workspaceCreateIntent(sessionId, blocker, destCwd))) {
-          throw Object.assign(new Error("Reconcile the previous execution before releasing its workspace"), { code: "outcome-unknown" });
-        }
+        let released: ExecutionReleaseProof | undefined;
+        let releasedRuntimeHarnessId: string | undefined;
         if (!alreadyAtDest && previousCwd) {
-          const harnessId = projection.resolvedHarnessId ?? sessionRuntime.get(sessionId)?.harnessId;
+          if (projection.runtimeBinding) {
+            const binding: RuntimeSessionBinding = {
+              canonicalSessionId: sessionId,
+              backendSessionId: projection.runtimeBinding.backendSessionId,
+              authorityId: projection.runtimeBinding.authorityId,
+              generation: projection.runtimeBinding.generation,
+              continuity: projection.runtimeBinding.continuity,
+              location: projection.runtimeBinding.location,
+            };
+            const operationId = [
+              "workspace-rebind",
+              sessionId,
+              binding.authorityId,
+              String(binding.generation),
+              binding.backendSessionId,
+              resolve(destCwd ?? previousCwd),
+            ].join(":");
+            let oldRuntime = sessionRuntime.get(sessionId);
+            releasedRuntimeHarnessId = oldRuntime?.harnessId;
+            // Authority-wide durable release is safe only for the exact
+            // isolation worktree. That workspace is exclusive by construction:
+            // ordinary session creation and forks are rejected there. Generic
+            // rebinds on shared workspaces must use session-scoped release.
+            const siblingUsesSource = (await workspaceDependents(
+              binding.location.directory,
+              sessionId,
+            )).length > 0;
+            const exclusiveIsolationSource = projection.isolation?.kind === "git-worktree"
+              && resolve(projection.isolation.worktreePath) === resolve(binding.location.directory)
+              && !siblingUsesSource;
+            let outcome = !oldRuntime && exclusiveIsolationSource
+              ? await runtimes.releaseSessionExecution?.(projection, binding, operationId)
+              : undefined;
+            if (!outcome) {
+              const attached = await runtimeAttachedForRelease(sessionId, projection, previousCwd);
+              oldRuntime = attached.runtime;
+              releasedRuntimeHarnessId = oldRuntime.harnessId;
+              projection = attached.projection;
+              if (!oldRuntime.releaseExecution) {
+                throw Object.assign(new Error("the current harness cannot prove workspace release"), { code: "unsupported" });
+              }
+              outcome = await boundedRuntimeAwait(
+                oldRuntime.releaseExecution(binding, operationId),
+                operationId,
+              );
+            }
+            if (outcome.kind !== "confirmed") throw outcomeError(outcome);
+            if (
+              outcome.value.authorityId !== binding.authorityId
+              || outcome.value.generation !== binding.generation
+              || outcome.value.backendSessionId !== binding.backendSessionId
+            ) {
+              throw Object.assign(new Error("workspace release proof does not match the current execution"), {
+                code: "stale-evidence",
+              });
+            }
+            released = outcome.value;
+          }
           unwire(sessionId);
-          await runtimes.releaseSession?.(sessionId);
-          if (harnessId) await deps.onHarnessTargetReleased?.({
-            sessionId, projectId: projection.projectId, cwd: previousCwd, harnessId,
-          });
+          if (runtimes.retireSession) await runtimes.retireSession(sessionId);
+          else runtimes.forgetSession?.(sessionId);
+          const releasedHarnessId = projection.resolvedHarnessId ?? releasedRuntimeHarnessId;
+          if (releasedHarnessId) {
+            await deps.onHarnessTargetReleased?.({
+              sessionId,
+              projectId: projection.projectId,
+              cwd: previousCwd,
+              harnessId: releasedHarnessId,
+            });
+          }
         }
-        const next = await applyProjection(sessionId, (current) => {
+        const patchWorkspace = (current: SessionProjection): SessionProjection => {
           const patched: SessionProjection = {
             ...current,
             updatedAt: Date.now(),
@@ -6938,33 +7126,24 @@ export function createSessionService(deps: {
             patched.worktreeId = input.worktreePath;
             patched.worktreeState = "ready";
           }
-          if (input.isolation === null) delete patched.isolation;
-          else if (input.isolation) patched.isolation = input.isolation;
           if (input.branch === null) delete patched.branch;
           return patched;
-        });
+        };
+        const planned = patchWorkspace(projection);
+        const cwd = planned.worktreePath ?? project?.path ?? process.cwd();
+        const runtime = await runtimeFor(planned, cwd);
+        if (
+          !alreadyAtDest
+          && planned.runtimeBinding
+          && planned.backendSessionId
+          && !runtime.resetSessionOperation
+          && !runtime.resetSession
+        ) {
+          throw Object.assign(new Error("the target harness cannot establish a fresh workspace epoch"), { code: "unsupported" });
+        }
+        const next = await applyProjection(sessionId, patchWorkspace);
         if (!next) throw Object.assign(new Error("session not found"), { code: "not-found" });
-        const cwd = next.worktreePath ?? project?.path ?? process.cwd();
-        const runtime = await runtimeFor(next, cwd);
-        if (!next.backendSessionId || !next.runtimeBinding) {
-          return createWorkspaceBindingUnderLock(next, runtime, cwd);
-        }
-        if (next.runtimeBinding && !runtime.endpoint && !next.runtimeBinding.authorityId.startsWith("legacy:")) {
-          throw Object.assign(new Error("Runtime cannot verify the persisted workspace binding"), { code: "binding-mismatch" });
-        }
-        // A crash after epoch publication must not reset the native session twice.
-        if (alreadyAtDest && next.backendSessionId && next.runtimeBinding
-          && resolve(next.runtimeBinding.location.directory) === resolve(cwd)) {
-          await ensureWired(sessionId, next);
-          const ready = await store.projection(sessionId);
-          if (ready?.status !== "idle") throw Object.assign(new Error("Destination session is not reconciled idle"), { code: "outcome-unknown" });
-          return ready;
-        }
-        if (next.runtimeBinding && next.backendSessionId && runtime.endpoint
-          && !runtime.resetSessionOperation && !runtime.resetSession) {
-          throw Object.assign(new Error("Runtime cannot establish a fresh workspace session"), { code: "unsupported" });
-        }
-        if (next.runtimeBinding && next.backendSessionId && (runtime.resetSessionOperation || runtime.resetSession)) {
+        if (!alreadyAtDest && next.runtimeBinding && next.backendSessionId && (runtime.resetSessionOperation || runtime.resetSession)) {
           try {
             const endpoint = await (runtime as ReliabilityRuntime).endpoint?.();
             if (runtime.endpoint && (!endpoint || resolve(endpoint.location.directory) !== resolve(cwd))) {
@@ -6975,7 +7154,9 @@ export function createSessionService(deps: {
               await transitionRuntimeEpochUnderLock(sessionId, runtime, {
                 resetOperationId: reset.operationId,
                 reason: "session workspace rebound; restoring confirmed canonical history",
-                authorityDisposition: { kind: "unknown-session-replaced" },
+                authorityDisposition: released
+                  ? { kind: "session-execution-released", ...released }
+                  : { kind: "unknown-session-replaced" },
               });
               const rebound = (await store.projection(sessionId))!;
               await establishFreshRuntimeEpochUnderLock(sessionId, rebound, runtime, reset.operationId);
@@ -6985,14 +7166,16 @@ export function createSessionService(deps: {
             throw error;
           }
         }
-        if (!runtime.endpoint) {
-          if (next.backendSessionId) await updateProjection(sessionId, {
-            runtimeBinding: await newRuntimeBinding(runtime, next.backendSessionId, cwd,
-              next.runtimeBinding?.historyBaseline, (next.runtimeBinding?.epoch ?? 0) + 1),
-          });
-          wire(sessionId, runtime);
-        }
-        return (await store.projection(sessionId)) ?? next;
+        // Lifecycle advancement proves the complete runtime epoch transition,
+        // not merely the projection cwd update. A failure above therefore
+        // remains explicitly rebind-pending and preserves the source resource.
+        const finalized = await applyProjection(sessionId, (current) => {
+          const patched = { ...current, updatedAt: Date.now() };
+          if (input.isolation === null) delete patched.isolation;
+          else if (input.isolation) patched.isolation = input.isolation;
+          return patched;
+        });
+        return finalized ?? (await store.projection(sessionId)) ?? next;
       });
     },
 

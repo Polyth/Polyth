@@ -3,9 +3,13 @@ import { CAPABILITIES } from "./index.ts";
 import { inspectOpenCodeEngine, resolveOpenCodeBinary } from "./runtimeStorage.ts";
 /** The composition root supplies its managed pool (config/restart interlocks).
  * Vendor discovery and native history stay in this package. */
-export function createOpenCodeHarness(runtime: (context: HarnessContext) => Promise<AgentRuntime>): HarnessProvider {
+export function createOpenCodeHarness(
+    runtime: (context: HarnessContext) => Promise<AgentRuntime>,
+    releaseExecution?: NonNullable<HarnessProvider["releaseExecution"]>,
+): HarnessProvider {
     return {
         descriptor: { id: "opencode", name: "OpenCode", integration: "HTTP / SSE", priority: 0, setupUrl: "https://opencode.ai/docs/", installCommand: "npm install -g opencode-ai" },
+        runtimeLifetime: "workspace",
         staticFeatures: CAPABILITIES,
         async probe(context) {
             if (context.remote)
@@ -44,6 +48,7 @@ export function createOpenCodeHarness(runtime: (context: HarnessContext) => Prom
             };
         },
         createRuntime: runtime,
+        ...(releaseExecution ? { releaseExecution } : {}),
         source: {
             async list(context) {
                 const engine = await runtime(context);

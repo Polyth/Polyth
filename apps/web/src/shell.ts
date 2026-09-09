@@ -164,8 +164,8 @@ export function installShell(): void {
     id: "cmd.fork", label: tr("shell.forkSession"), group: tr("shell.session"),
     when: () => {
       const state = getState();
-      const session = state.sessions.find((candidate) => candidate.id === state.activeSessionId);
-      return !!session && !session.isolation;
+      return !!state.activeSessionId
+        && !state.sessions.find((session) => session.id === state.activeSessionId)?.isolation;
     },
     run: () => { const id = getState().activeSessionId; if (id) void forkSession(id); },
   });

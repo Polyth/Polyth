@@ -444,6 +444,8 @@ export const uk: GitMessages = {
   "isolation.discardConfirm": "Незлиті зміни в цьому ізольованому просторі буде втрачено.",
   "isolation.discardTitle": "Відкинути ізольований простір",
   "isolation.discard": "Відкинути",
+  "isolation.finishWithoutCleanup": "Завершити й зберегти простір",
+  "isolation.finishWithoutCleanupConfirm": "Неперевірені робочий простір і гілку буде збережено, і цей сеанс більше не керуватиме ними.",
   "isolation.dirtyTarget": "У {branch} є локальні зміни. Закомітьте або відкиньте їх перед інтеграцією цієї сесії.",
   "isolation.missingWorkspace": "Ізольований простір більше недоступний.",
   "isolation.workInIsolation": "Працювати ізольовано",

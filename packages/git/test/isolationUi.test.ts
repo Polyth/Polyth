@@ -102,6 +102,36 @@ test("a late status response cannot enable actions or show another session's bra
   }
 });
 
+test("a failed authoritative status request never enables stale conflict actions", async () => {
+  const originalStatus = api.isolationStatus;
+  api.isolationStatus = async () => { throw new Error("status unavailable"); };
+  const stale: SessionIsolation = {
+    ...base,
+    state: "conflict",
+    conflict: { message: "stale conflict", files: ["stale.ts"] },
+  };
+  const mounted = await mount(projection("failed-status", stale));
+  try {
+    const enabledLabels = new Set(
+      [...mounted.container.querySelectorAll("button")]
+        .filter((button) => !button.disabled)
+        .map((button) => button.textContent),
+    );
+    for (const label of [
+      "isolation.keepIsolated",
+      "isolation.merge",
+      "isolation.resolveWithAgent",
+      "isolation.discard",
+      "isolation.reviewConflicts",
+    ] as const) {
+      assert.equal(enabledLabels.has(tr(label)), false);
+    }
+  } finally {
+    await mounted.close();
+    api.isolationStatus = originalStatus;
+  }
+});
+
 
 test("unavailable return checkout is explained before publication; running sessions cannot recover", async () => {
   const originalStatus = api.isolationStatus;

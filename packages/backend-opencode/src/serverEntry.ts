@@ -1,4 +1,4 @@
-import type { AgentRuntime, HarnessContext, HarnessRegistry, ModelDescriptor, SpaceContext } from "@polyth/contracts";
+import type { AgentRuntime, HarnessContext, HarnessProvider, HarnessRegistry, ModelDescriptor, SpaceContext } from "@polyth/contracts";
 import {
   localOnlyRemoteAccess,
   serverServiceKey,
@@ -16,6 +16,9 @@ export default function registerPackage(host: ServerPackageHost) {
   const pool = host.services.require(
     serverServiceKey<(context: HarnessContext) => Promise<AgentRuntime>>("opencode.runtime"),
   );
+  const releaseExecution = host.services.get(
+    serverServiceKey<NonNullable<HarnessProvider["releaseExecution"]>>("opencode.runtime.release-execution"),
+  );
   const events = host.services.get(serverServiceKey<{
     onRestart(listener: (runtime: AgentRuntime) => void | Promise<void>): { dispose(): void };
   }>("opencode.runtime.events"));
@@ -32,7 +35,7 @@ export default function registerPackage(host: ServerPackageHost) {
     ): import("@polyth/contracts").AvailableProviderDescriptor[];
   }>("models.visibility"));
 
-  const harness = createOpenCodeHarness(pool);
+  const harness = createOpenCodeHarness(pool, releaseExecution);
   const applier = host.services.get(serverServiceKey<BackendConfigApplier>("plugins.config"));
   if (applier && typeof applier.applyBehavior === "function" && typeof applier.applyMcp === "function") {
     harness.provisioner = createOpenCodeProvisioner(applier);

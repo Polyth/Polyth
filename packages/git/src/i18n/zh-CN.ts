@@ -444,6 +444,8 @@ export const zhCN: GitMessages = {
   "isolation.discardConfirm": "此隔离工作区中未合并的更改将会丢失。",
   "isolation.discardTitle": "丢弃隔离工作区",
   "isolation.discard": "丢弃",
+  "isolation.finishWithoutCleanup": "完成并保留工作区",
+  "isolation.finishWithoutCleanupConfirm": "未验证的工作区和分支将被保留，并且不再由此会话管理。",
   "isolation.dirtyTarget": "{branch} 有本地更改。请先提交或丢弃它们，然后再集成此会话。",
   "isolation.missingWorkspace": "隔离工作区已不可用。",
   "isolation.workInIsolation": "隔离工作",
