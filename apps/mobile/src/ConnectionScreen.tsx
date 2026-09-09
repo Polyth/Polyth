@@ -17,7 +17,11 @@ import {
   polythLink,
   type ConnectionMetadata,
 } from "./polythLink.ts";
-import { installNativePolythLink } from "./nativePolythLink.ts";
+import {
+  installNativePolythLink,
+  nativePairingScannerAvailable,
+  scanNativePairingQr,
+} from "./nativePolythLink.ts";
 import { isPairingLink, previewPairingLink } from "@polyth/pairing-qr";
 import { bootstrapUrlWithNext, connectionUiState } from "./connectionUi.ts";
 import {
@@ -114,6 +118,30 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
       return;
     }
     setError("");
+
+    if (nativePairingScannerAvailable()) {
+      try {
+        const raw = await scanNativePairingQr();
+        if (!raw) return;
+        if (!isPairingLink(raw)) {
+          setError("This QR code is not a Polyth pairing code.");
+          return;
+        }
+        setCameraPermission("granted");
+        rememberPendingPairingLink(raw);
+        setTicket(raw);
+        await startPair(raw);
+      } catch (cause) {
+        const detail = cause instanceof Error ? cause.message : String(cause);
+        const denied = /denied|permission|not authorized/i.test(detail);
+        setCameraPermission(denied ? "denied" : "prompt");
+        setError(denied
+          ? "Camera permission is required to scan. You can also paste the pairing code."
+          : "Camera scanning failed. Paste the pairing code instead.");
+      }
+      return;
+    }
+
     const Detector = (globalThis as {
       BarcodeDetector?: new (opts: { formats: string[] }) => {
         detect(source: HTMLVideoElement): Promise<Array<{ rawValue?: string }>>;
