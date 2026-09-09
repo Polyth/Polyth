@@ -1,6 +1,6 @@
 include!("runtime.rs");
 
-const NATIVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+const NATIVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const NATIVE_PAIRING_TIMEOUT: Duration = Duration::from_secs(120);
 const NATIVE_CANCEL_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -128,7 +128,10 @@ impl NativeClient {
         result
     }
 
-    async fn begin_operation(&self, spec: &NativeOperationSpec) -> Result<NativeOperationLease, String> {
+    async fn begin_operation(
+        &self,
+        spec: &NativeOperationSpec,
+    ) -> Result<NativeOperationLease, String> {
         let generation = self
             .next_operation_generation
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
@@ -145,7 +148,16 @@ impl NativeClient {
         );
         if let Some(previous) = previous {
             let _ = previous.cancel.send(true);
-            wait_done(previous.done).await?;
+            if let Err(error) = wait_done(previous.done).await {
+                self.finish_operation(NativeOperationLease {
+                    key: spec.key.clone(),
+                    generation,
+                    cancel: cancel_rx,
+                    done: done_tx,
+                })
+                .await;
+                return Err(error);
+            }
         }
 
         let current = self
@@ -295,7 +307,10 @@ async fn wait_done(mut done: tokio::sync::watch::Receiver<bool>) -> Result<(), S
     Ok(())
 }
 
-fn native_operation_spec(method: &str, params: &Value) -> Result<Option<NativeOperationSpec>, String> {
+fn native_operation_spec(
+    method: &str,
+    params: &Value,
+) -> Result<Option<NativeOperationSpec>, String> {
     match method {
         "pairing.begin" => {
             let host = identity_host(method, params)?;
@@ -468,6 +483,113 @@ mod native_tests {
             .await;
         assert_eq!(result, Err(LinkError::TransportTimeout.code().to_string()));
         assert!(client.inflight.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn cancel_reaches_pairing_confirm_while_host_approval_is_pending() {
+        let dir = tempdir().unwrap();
+        let client = Arc::new(NativeClient::new(dir.path().to_path_buf(), None));
+        let key = pairing_confirm_operation_key("attempt-a");
+        let spec = NativeOperationSpec {
+            key: key.clone(),
+            timeout: Duration::from_secs(1),
+            cancelled: LinkError::PairingCancelled.code(),
+        };
+        let lease = client.begin_operation(&spec).await.unwrap();
+        let worker = client.clone();
+        let task = tokio::spawn(async move {
+            worker
+                .run_operation(
+                    lease,
+                    Duration::from_secs(1),
+                    LinkError::PairingCancelled.code(),
+                    std::future::pending::<Result<Value, &'static str>>(),
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        client.interrupt_operation(&key).await.unwrap();
+        assert_eq!(
+            task.await.unwrap(),
+            Err(LinkError::PairingCancelled.code().to_string())
+        );
+        assert!(client.inflight.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn disconnect_reaches_connect_while_transport_is_pending() {
+        let dir = tempdir().unwrap();
+        let client = Arc::new(NativeClient::new(dir.path().to_path_buf(), None));
+        let key = connect_operation_key("host-a");
+        let spec = NativeOperationSpec {
+            key: key.clone(),
+            timeout: Duration::from_secs(1),
+            cancelled: LinkError::TransportCancelled.code(),
+        };
+        let lease = client.begin_operation(&spec).await.unwrap();
+        let worker = client.clone();
+        let task = tokio::spawn(async move {
+            worker
+                .run_operation(
+                    lease,
+                    Duration::from_secs(1),
+                    LinkError::TransportCancelled.code(),
+                    std::future::pending::<Result<Value, &'static str>>(),
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        client.interrupt_operation(&key).await.unwrap();
+        assert_eq!(
+            task.await.unwrap(),
+            Err(LinkError::TransportCancelled.code().to_string())
+        );
+        assert!(client.inflight.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn shutdown_interrupts_a_pending_operation() {
+        let dir = tempdir().unwrap();
+        let client = Arc::new(NativeClient::new(dir.path().to_path_buf(), None));
+        let spec = NativeOperationSpec {
+            key: connect_operation_key("host-a"),
+            timeout: Duration::from_secs(1),
+            cancelled: LinkError::TransportCancelled.code(),
+        };
+        let lease = client.begin_operation(&spec).await.unwrap();
+        let worker = client.clone();
+        let task = tokio::spawn(async move {
+            worker
+                .run_operation(
+                    lease,
+                    Duration::from_secs(1),
+                    LinkError::TransportCancelled.code(),
+                    std::future::pending::<Result<Value, &'static str>>(),
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        client.shutdown().await;
+        assert_eq!(
+            task.await.unwrap(),
+            Err(LinkError::TransportCancelled.code().to_string())
+        );
+        assert!(client.inflight.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn repeated_pairing_cancel_is_idempotent() {
+        let dir = tempdir().unwrap();
+        let client = NativeClient::new(dir.path().to_path_buf(), None);
+        let params = json!({ "attemptId": "missing-attempt" });
+        assert_eq!(
+            client.invoke("pairing.cancel", params.clone(), None).await,
+            Ok(json!({ "ok": true }))
+        );
+        assert_eq!(
+            client.invoke("pairing.cancel", params, None).await,
+            Ok(json!({ "ok": true }))
+        );
     }
 
     #[tokio::test]
