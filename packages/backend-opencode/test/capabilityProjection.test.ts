@@ -74,6 +74,35 @@ test("OpenCode privately projects project instructions and context without touch
   assert.deepEqual(new Set(overlay.capabilityIds), new Set(["fixture.project-instruction", "fixture.project-context"]));
 });
 
+test("OpenCode projects package-owned MCP descriptors from the canonical plan", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "polyth-opencode-package-mcp-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const context = contextAt(root);
+  const provisioner = createOpenCodeProvisioner(applier([]));
+  const capability = descriptor({
+    id: "fixture.package-mcp",
+    kind: "mcp-server",
+    scope: "project",
+    projectId: context.projectId,
+    name: "package-helper",
+    enabled: true,
+    transport: { kind: "stdio", command: "package-helper", args: ["--stdio"], envKeys: [] },
+  });
+  const plan = planHarnessCapabilities("opencode", [capability], await provisioner.support(context), context);
+  const result = await provisioner.apply(context, plan, secrets);
+
+  assert.equal(result.records[0]?.status, "pending");
+  const overlay = peekOpenCodeLaunchOverlay(context);
+  assert.ok(overlay);
+  assert.ok(overlay.capabilityIds.includes("fixture.package-mcp"));
+  const config = JSON.parse(overlay.configContent) as { mcp?: Record<string, { type?: string; command?: string[] }> };
+  assert.deepEqual(config.mcp?.["package-helper"], {
+    type: "local",
+    command: ["package-helper", "--stdio"],
+    enabled: true,
+  });
+});
+
 test("OpenCode launch overlay preserves user instructions while adding private Polyth sources", () => {
   const overlay = {
     configContent: JSON.stringify({ instructions: ["/private/polyth-context.md"], mcp: { polyth: { type: "local" } } }),
