@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve, sep } from "node:path";
+import { join, resolve, sep } from "node:path";
 import test from "node:test";
 import type { Project, ProjectService, SpaceContext, SpaceStorage } from "@polyth/contracts";
 import { createCommandService } from "../src/index.ts";
@@ -11,15 +11,21 @@ const temp = (prefix: string) => mkdtempSync(join(tmpdir(), prefix));
 const code = (error: unknown): string | undefined =>
   error && typeof error === "object" ? (error as { code?: string }).code : undefined;
 
-const makeSpace = (base: string, id: string, userId: string, role: SpaceContext["role"] = "owner"): SpaceContext => {
+const makeSpace = (
+  base: string,
+  id: string,
+  userId: string,
+  role: SpaceContext["role"] = "owner",
+  deployment: SpaceContext["deployment"] = "server-trusted",
+): SpaceContext => {
   const storageDir = join(base, "spaces", id);
-  mkdirSync(join(storageDir, "packages", "commands"), { recursive: true });
+  mkdirSync(storageDir, { recursive: true });
   return {
     spaceId: id,
     spaceSlug: id,
     userId,
     role,
-    deployment: "server-trusted",
+    deployment,
     storageDir,
   };
 };
@@ -66,7 +72,7 @@ const input = (name: string, instructions = `${name} instructions`) => ({
   expectedRevision: 0,
 });
 
-test("managed skills isolate projects, resolve deterministically, persist, and clean up", async () => {
+test("managed skills isolate projects, persist, and never inherit host-native skills on shared servers", async () => {
   const base = temp("polyth-managed-skills-");
   const home = temp("polyth-managed-skills-home-");
   const rootA = join(base, "project-a");
@@ -92,6 +98,11 @@ test("managed skills isolate projects, resolve deterministically, persist, and c
   const skills = makeService();
 
   await skills.save(spaceA, "space", input("shared"));
+  assert.equal(
+    existsSync(join(spaceA.storageDir, "packages", "commands", "skills.json")),
+    true,
+    "the service must create its package directory on first write",
+  );
   await skills.save(spaceA, "project", input("a-only"), "project-a");
   await skills.save(spaceA, "project", input("b-only"), "project-b");
   await skills.save(spaceA, "project", input("same", "A instructions"), "project-a");
@@ -105,18 +116,20 @@ test("managed skills isolate projects, resolve deterministically, persist, and c
   assert.equal(rowsB.find((row) => row.name === "same")?.instructions, "B instructions");
   assert.equal(rowsA.find((row) => row.name === "shared")?.scope, "space");
 
+  // Two Spaces may legitimately register the same host path. Shared-server
+  // capability resolution therefore must not treat host-native skill folders
+  // as tenant-owned state.
   const nativeDir = join(rootA, ".opencode", "skills", "shared");
   mkdirSync(nativeDir, { recursive: true });
-  writeFileSync(join(nativeDir, "SKILL.md"), "---\nname: shared\ndescription: Project native override\n---\n\nNative instructions.\n");
-  const nativeShared = (await skills.list(spaceA, "project-a")).find((row) => row.name === "shared")!;
-  assert.equal(nativeShared.scope, "project-opencode");
-  assert.equal(nativeShared.readOnly, true);
+  writeFileSync(join(nativeDir, "SKILL.md"), "---\nname: shared\ndescription: Host native override\n---\n\nNative instructions.\n");
+  const sharedWithNativePresent = (await skills.list(spaceA, "project-a")).find((row) => row.name === "shared")!;
+  assert.equal(sharedWithNativePresent.scope, "space");
+  assert.equal(sharedWithNativePresent.readOnly, undefined);
 
   await skills.save(spaceA, "project", input("shared", "Managed A override"), "project-a");
   const managedShared = (await skills.list(spaceA, "project-a")).find((row) => row.name === "shared")!;
   assert.equal(managedShared.scope, "project");
   assert.equal(managedShared.instructions, "Managed A override");
-  assert.equal(managedShared.readOnly, undefined);
   assert.equal((await skills.list(spaceA, "project-b")).find((row) => row.name === "shared")?.scope, "space");
 
   const reloaded = makeService();
@@ -145,9 +158,44 @@ test("managed skills isolate projects, resolve deterministically, persist, and c
   reloaded.removeProject(spaceA, "project-a");
   const afterCleanupA = await reloaded.list(spaceA, "project-a");
   assert.equal(afterCleanupA.some((row) => row.scope === "project"), false);
-  assert.equal(afterCleanupA.find((row) => row.name === "shared")?.scope, "project-opencode", "cleanup reveals existing read-only native discovery");
+  assert.equal(afterCleanupA.find((row) => row.name === "shared")?.scope, "space");
   assert.deepEqual((await reloaded.list(spaceA, "project-b")).filter((row) => row.scope === "project").map((row) => row.name), ["b-only", "same"]);
   assert.deepEqual((await reloaded.list(spaceA)).map((row) => row.name), ["shared"]);
+});
+
+test("local-trusted projects retain read-only native discovery with managed project override precedence", async () => {
+  const base = temp("polyth-managed-skills-local-");
+  const home = temp("polyth-managed-skills-local-home-");
+  const projectRoot = join(base, "project-a");
+  mkdirSync(projectRoot, { recursive: true });
+  const localSpace = makeSpace(base, "space-local", "user-local", "owner", "local-trusted");
+  const projects = new Map<string, Project>([[
+    "project-a",
+    project("project-a", projectRoot, localSpace.spaceId),
+  ]]);
+  const skills = createSkillService({
+    storage,
+    projects: (ctx) => scopedProjects(projects, ctx),
+    allowUserSkills: () => true,
+    legacy: createCommandService({ home }),
+  });
+
+  await skills.save(localSpace, "space", input("shared", "Space managed"));
+  const nativeDir = join(projectRoot, ".opencode", "skills", "shared");
+  mkdirSync(nativeDir, { recursive: true });
+  writeFileSync(join(nativeDir, "SKILL.md"), "---\nname: shared\ndescription: Project native override\n---\n\nNative instructions.\n");
+
+  const discovered = (await skills.list(localSpace, "project-a")).find((row) => row.name === "shared")!;
+  assert.equal(discovered.scope, "project-opencode");
+  assert.equal(discovered.readOnly, true);
+  assert.equal(discovered.instructions, "Native instructions.");
+
+  const managed = await skills.save(localSpace, "project", input("shared", "Managed project override"), "project-a");
+  const effective = (await skills.list(localSpace, "project-a")).find((row) => row.name === "shared")!;
+  assert.equal(effective.scope, "project");
+  assert.equal(effective.instructions, "Managed project override");
+  assert.equal(await skills.remove(localSpace, "project", "shared", "project-a", managed.revision), true);
+  assert.equal((await skills.list(localSpace, "project-a")).find((row) => row.name === "shared")?.scope, "project-opencode");
 });
 
 test("managed skill writes enforce role and optimistic revision gates", async () => {
