@@ -99,7 +99,7 @@ export interface DictationProvider {
 const CATALOG: readonly ProviderCapabilities[] = [
   {
     id: "elevenlabs", label: "ElevenLabs Scribe Realtime v2", streaming: true,
-    partials: true, commits: true, transports: ["auto", "server-proxy"],
+    partials: true, commits: true, transports: ["auto", "direct-browser", "server-proxy"],
     languages: ["*"], defaultModel: "scribe_v2_realtime", context: true, local: false,
     ephemeralClientAuth: true, publicApi: true,
   },
