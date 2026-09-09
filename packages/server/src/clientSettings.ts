@@ -14,7 +14,12 @@ const MAX_BYTES = 256 * 1024;
 const OWNER_USER_ID = "usr_owner";
 
 export interface ClientSettingsService {
+  /** Account preferences require an explicit durable identity. An omitted id
+   * returns an empty record so server-global/background code cannot inherit
+   * whichever human happened to be the bootstrap owner. */
   get(userId?: string): ClientSettingsDto;
+  /** Compatibility write for the legacy single-user owner path. New request
+   * handlers must use the userId overload. */
   put(settings: unknown): ClientSettingsDto;
   put(userId: string, settings: unknown): ClientSettingsDto;
 }
@@ -75,7 +80,8 @@ export function createClientSettings(opts: { file: string }): ClientSettingsServ
   };
   if (migratedLegacy) persist();
 
-  const get = (userId = OWNER_USER_ID): ClientSettingsDto => {
+  const get = (userId?: string): ClientSettingsDto => {
+    if (!userId) return empty();
     const current = users[userId] ?? empty();
     return { ...current, settings: { ...current.settings } };
   };
