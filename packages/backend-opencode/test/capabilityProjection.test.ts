@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -43,7 +43,7 @@ const applier = (behavior: string[]): BackendConfigApplier => ({
 
 const secrets = { mcpSecrets: () => ({}) };
 
-test("OpenCode privately projects project instructions and context without touching user config", async (t) => {
+test("OpenCode prompt-projects canonical instructions and context without vendor instruction config", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "polyth-opencode-capability-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const context = contextAt(root);
@@ -58,20 +58,25 @@ test("OpenCode privately projects project instructions and context without touch
   const plan = planHarnessCapabilities("opencode", desired, await provisioner.support(context), context);
   const result = await provisioner.apply(context, plan, secrets);
 
-  assert.deepEqual(behavior, ["Global behavior"]);
-  assert.equal(result.records.find((row) => row.capabilityId === "fixture.global")?.status, "applied");
+  assert.deepEqual(behavior, [], "canonical behavior must not leak into global OpenCode config");
+  assert.equal(result.records.find((row) => row.capabilityId === "fixture.global")?.status, "pending");
   assert.equal(result.records.find((row) => row.capabilityId === "fixture.project-instruction")?.status, "pending");
   assert.equal(result.records.find((row) => row.capabilityId === "fixture.project-context")?.status, "pending");
   assert.equal(result.records.find((row) => row.capabilityId === "fixture.session-instruction")?.status, "unsupported");
 
   const overlay = peekOpenCodeLaunchOverlay(context);
   assert.ok(overlay);
-  const config = JSON.parse(overlay.configContent) as { instructions?: string[] };
-  assert.equal(config.instructions?.length, 2);
-  assert.ok(config.instructions?.every((path) => path.startsWith(root) && existsSync(path)));
-  assert.match(readFileSync(config.instructions![0]!, "utf8"), /Project instruction/);
-  assert.match(readFileSync(config.instructions![1]!, "utf8"), /Project facts[\s\S]*Project context/);
-  assert.deepEqual(new Set(overlay.capabilityIds), new Set(["fixture.project-instruction", "fixture.project-context"]));
+  assert.equal(overlay.configContent, "");
+  assert.deepEqual(overlay.capabilityIds, [], "text capabilities are not spawn receipts");
+  assert.ok(overlay.prompt);
+  assert.deepEqual(
+    new Set(overlay.prompt.capabilityIds),
+    new Set(["fixture.global", "fixture.project-instruction", "fixture.project-context"]),
+  );
+  assert.match(overlay.prompt.text, /Global behavior/);
+  assert.match(overlay.prompt.text, /Project instruction/);
+  assert.match(overlay.prompt.text, /## Context: Project facts[\s\S]*Project context/);
+  assert.doesNotMatch(overlay.prompt.text, /Session only/);
 });
 
 test("OpenCode projects package-owned MCP descriptors from the canonical plan", async (t) => {
@@ -95,6 +100,7 @@ test("OpenCode projects package-owned MCP descriptors from the canonical plan", 
   const overlay = peekOpenCodeLaunchOverlay(context);
   assert.ok(overlay);
   assert.ok(overlay.capabilityIds.includes("fixture.package-mcp"));
+  assert.equal(overlay.prompt, undefined);
   const config = JSON.parse(overlay.configContent) as { mcp?: Record<string, { type?: string; command?: string[] }> };
   assert.deepEqual(config.mcp?.["package-helper"], {
     type: "local",
@@ -103,16 +109,17 @@ test("OpenCode projects package-owned MCP descriptors from the canonical plan", 
   });
 });
 
-test("OpenCode launch overlay preserves user instructions while adding private Polyth sources", () => {
+test("OpenCode launch overlay leaves user instruction config untouched", () => {
   const overlay = {
-    configContent: JSON.stringify({ instructions: ["/private/polyth-context.md"], mcp: { polyth: { type: "local" } } }),
+    configContent: JSON.stringify({ mcp: { polyth: { type: "local" } } }),
     env: {},
     desiredRevision: "revision-a",
-    capabilityIds: ["fixture.context"],
+    capabilityIds: ["fixture.mcp"],
+    prompt: { text: "Private Polyth context", capabilityIds: ["fixture.context"] },
   };
   const env = applyOpenCodeLaunchOverlay({
     OPENCODE_CONFIG_CONTENT: JSON.stringify({
-      instructions: ["CONTRIBUTING.md", "CONTRIBUTING.md"],
+      instructions: ["CONTRIBUTING.md"],
       mcp: { user: { type: "local", command: ["user"] } },
       plugin: ["user-plugin"],
     }),
@@ -122,12 +129,12 @@ test("OpenCode launch overlay preserves user instructions while adding private P
     mcp: Record<string, unknown>;
     plugin: string[];
   };
-  assert.deepEqual(merged.instructions, ["CONTRIBUTING.md", "/private/polyth-context.md"]);
+  assert.deepEqual(merged.instructions, ["CONTRIBUTING.md"]);
   assert.deepEqual(Object.keys(merged.mcp).sort(), ["polyth", "user"]);
   assert.deepEqual(merged.plugin, ["user-plugin"]);
 });
 
-test("OpenCode context scope is explicit: project and wider are supported, session is not", async () => {
+test("OpenCode text scope is explicit: project and wider are prompt-projected, session is not", async () => {
   const root = mkdtempSync(join(tmpdir(), "polyth-opencode-support-"));
   try {
     const context = contextAt(root);
@@ -142,7 +149,9 @@ test("OpenCode context scope is explicit: project and wider are supported, sessi
         ...(scope === "project" ? { projectId: context.projectId } : {}),
         ...(scope === "space" ? { spaceId: context.spaceId } : {}),
       });
-      assert.equal(planHarnessCapabilities("opencode", [capability], support, context).items[0]?.mode, "config");
+      const item = planHarnessCapabilities("opencode", [capability], support, context).items[0];
+      assert.equal(item?.mode, "prompt");
+      assert.equal(item?.mutability, "immediate");
     }
     const session = descriptor({ id: "fixture.context-session", kind: "context", scope: "session", title: "session", text: "session" });
     assert.equal(planHarnessCapabilities("opencode", [session], support, context).items[0]?.mode, "unsupported");
