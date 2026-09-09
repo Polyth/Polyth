@@ -73,6 +73,8 @@ export interface DictationChunkResult {
 export interface DictationServiceOptions {
   adapter?: SttAdapter | null | (() => SttAdapter | null);
   unavailableReason?: string;
+  /** Server-side privacy/policy gate applied after normalization and before any provider sees context. */
+  contextFilter?: (context: DictationContext) => DictationContext;
   /** Maximum simultaneously recording/finalizing sessions. Completed results do not consume this budget. */
   maxSessions?: number;
   maxBytes?: number;
@@ -256,10 +258,13 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
       if (liveCount() >= maxSessions) throw err("limit", `too many live dictation sessions (max ${maxSessions})`);
       const id = randomUUID();
       const startedAt = now();
-      const context = normalizeDictationContext({
+      const normalizedContext = normalizeDictationContext({
         ...(input.context ?? {}),
         language: input.language ?? input.context?.language ?? "auto",
       });
+      const context = opts.contextFilter
+        ? normalizeDictationContext(opts.contextFilter(normalizedContext))
+        : normalizedContext;
       const dto: DictationSessionDto = {
         id,
         ...(input.sessionId ? { sessionId: input.sessionId } : {}),
