@@ -83,6 +83,14 @@ export default defineWebPackage((host) => () => {
           keywords: ["coach", "reminder", "daily", "weekly", "review", "schedule"],
           focusTarget: "personal-coach-reminders",
         },
+        {
+          id: "personal-coach-data",
+          pageId: "personal-coach",
+          label: "Reset Coach state",
+          description: "Clear durable goals, plans, check-ins, reflections, and insights.",
+          keywords: ["coach", "reset", "data", "forget", "clear", "privacy"],
+          focusTarget: "personal-coach-data",
+        },
       ],
     }),
     host.widgets.registerPlugin({
