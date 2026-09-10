@@ -19,6 +19,25 @@ export type CoachSettingsPatch = Partial<Pick<
   "tone" | "initiative" | "timeZone" | "challengeAssumptions"
 >>;
 
+export interface CoachReminderSettingsDto {
+  dailyCheckIn: { enabled: boolean; minuteOfDay: number };
+  weeklyReview: { enabled: boolean; day: number; minuteOfDay: number };
+  timeZone: string;
+}
+
+export interface CoachRemindersDto {
+  available: boolean;
+  settings?: CoachReminderSettingsDto;
+}
+
+export interface CoachReminderPatch {
+  dailyCheckIn: boolean;
+  dailyMinuteOfDay: number;
+  weeklyReview: boolean;
+  weeklyDay: number;
+  weeklyMinuteOfDay: number;
+}
+
 export interface CoachGoalDto {
   id: string;
   areaId?: string;
@@ -135,6 +154,8 @@ export interface CoachApi {
   home(): Promise<CoachHomeDto>;
   settings(): Promise<CoachSettingsDto>;
   updateSettings(patch: CoachSettingsPatch): Promise<CoachProfileDto>;
+  reminders(): Promise<CoachRemindersDto>;
+  updateReminders(patch: CoachReminderPatch): Promise<CoachRemindersDto>;
   completeCommitment(id: string): Promise<CoachCommitmentDto>;
   skipCommitment(id: string, reason?: string): Promise<CoachCommitmentDto>;
   recordCheckIn(input: { energy: number; focus: number; note?: string }): Promise<CoachCheckInDto>;
@@ -156,6 +177,8 @@ export function createCoachApi(): CoachApi {
     home: () => api.get<CoachHomeDto>("/api/personal-coach/home"),
     settings: () => api.get<CoachSettingsDto>("/api/personal-coach/settings"),
     updateSettings: (patch) => api.put<CoachProfileDto>("/api/personal-coach/settings", patch),
+    reminders: () => api.get<CoachRemindersDto>("/api/personal-coach/reminders"),
+    updateReminders: (patch) => api.put<CoachRemindersDto>("/api/personal-coach/reminders", patch),
     completeCommitment: (id) => api.post<CoachCommitmentDto>(
       `/api/personal-coach/commitments/${encodeURIComponent(id)}/complete`,
       {},
