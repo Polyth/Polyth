@@ -115,3 +115,18 @@ test("tradingview adapter normalizes search and fundamentals", async () => {
   assert.equal(fundamentals.dividendYield, 0.0003);
   assert.equal(fundamentals.exchange, "NASDAQ");
 });
+
+test("tradingview fundamentals skip non-US symbols before network", async () => {
+  let calls = 0;
+  const provider = createTradingViewProvider({
+    fetch: fetchFrom(() => {
+      calls += 1;
+      return json({});
+    }),
+  });
+  await assert.rejects(
+    provider.fundamentals!("BTC/USDT", new AbortController().signal),
+    (cause: unknown) => (cause as { code?: string }).code === "not-found",
+  );
+  assert.equal(calls, 0);
+});
