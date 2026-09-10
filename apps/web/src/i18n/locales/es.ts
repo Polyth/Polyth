@@ -314,6 +314,8 @@ export const es: AppMessages = {
   "contextrail.collapse": "Colapsar",
   "contextrail.collapseValue": "Colapsar {value}",
   "contextrail.dockBesideChat": "Muelle junto al chat",
+  "contextrail.dockBelowChat": "Acoplar debajo del chat",
+  "contextrail.unpinWindow": "Desacoplar ventana",
   "contextrail.expand": "Expandir",
   "contextrail.expandValue": "Expandir {value}",
   "contextrail.message": "×",
