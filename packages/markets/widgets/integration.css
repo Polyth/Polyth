@@ -1,0 +1,82 @@
+.markets-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.markets-watch-toggle,
+.markets-ask {
+  min-height: max(var(--hit-min), var(--control-h-sm));
+  padding: 0 var(--control-pad-x-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-label);
+  cursor: pointer;
+}
+
+.markets-watch-toggle:hover:not(:disabled),
+.markets-ask:hover:not(:disabled) {
+  background: var(--surface-overlay-hover);
+  color: var(--text);
+}
+
+.markets-watch-toggle[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.markets-watch-toggle:focus-visible,
+.markets-ask:focus-visible,
+.markets-handoff-menu button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.markets-handoff {
+  position: relative;
+}
+
+.markets-handoff-menu {
+  position: absolute;
+  z-index: var(--z-popover);
+  top: calc(100% + var(--space-1));
+  right: 0;
+  min-width: 180px;
+  padding: var(--space-1);
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-card);
+  background: var(--material-glass);
+  box-shadow: var(--shadow-md);
+}
+
+.markets-handoff-menu button {
+  display: block;
+  width: 100%;
+  min-height: max(var(--hit-min), var(--control-h-sm));
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-label);
+  text-align: left;
+  cursor: pointer;
+}
+
+.markets-handoff-menu button:hover {
+  background: var(--surface-overlay-hover);
+}
+
+@container (max-width: 560px) {
+  .markets-watch-toggle,
+  .markets-ask {
+    padding-inline: var(--space-2);
+  }
+
+  .markets-ask-label {
+    display: none;
+  }
+}

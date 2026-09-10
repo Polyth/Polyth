@@ -1,0 +1,113 @@
+.markets-portfolio-widget {
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.markets-portfolio-widget-summary,
+.markets-portfolio-widget-empty,
+.markets-portfolio-widget-positions button {
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.markets-portfolio-widget-summary:hover:not(:disabled),
+.markets-portfolio-widget-empty:hover:not(:disabled),
+.markets-portfolio-widget-positions button:hover:not(:disabled) {
+  background: var(--surface-overlay-hover);
+}
+
+.markets-portfolio-widget-summary:focus-visible,
+.markets-portfolio-widget-empty:focus-visible,
+.markets-portfolio-widget-positions button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.markets-portfolio-widget-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: max(var(--hit-min), var(--control-h));
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--hair);
+}
+
+.markets-portfolio-widget-summary > span {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.markets-portfolio-widget-summary small,
+.markets-portfolio-widget > small {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.markets-portfolio-widget-summary strong {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: var(--font-label);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.markets-portfolio-widget-positions {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.markets-portfolio-widget-positions button {
+  display: grid;
+  grid-template-columns: minmax(58px, .7fr) minmax(76px, 1fr) minmax(70px, .8fr);
+  align-items: center;
+  gap: var(--space-2);
+  min-height: max(var(--hit-min), var(--control-h-sm));
+  padding: var(--space-1) var(--space-2);
+}
+
+.markets-portfolio-widget-positions strong,
+.markets-portfolio-widget-positions button > span:last-child {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: var(--font-label);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.markets-portfolio-widget-positions .positive {
+  color: var(--green-on-wash);
+}
+
+.markets-portfolio-widget-positions .negative {
+  color: var(--red);
+}
+
+.markets-portfolio-widget-empty {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-height: 120px;
+  place-items: center;
+  padding: var(--space-3);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  text-align: center;
+}
+
+.markets-portfolio-widget > small {
+  padding: var(--space-1) var(--space-2);
+}
