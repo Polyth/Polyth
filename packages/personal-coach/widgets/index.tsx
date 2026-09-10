@@ -66,14 +66,24 @@ export default defineWebPackage((host) => () => {
       icon: "◎",
       order: 34,
       component: () => createElement(CoachSettingsPage, { api, client, friendlyError: errorText }),
-      settingsItems: [{
-        id: "personal-coach-behavior",
-        pageId: "personal-coach",
-        label: "Coach behavior",
-        description: "Style, initiative, assumption challenges, and time zone.",
-        keywords: ["coach", "tone", "initiative", "timezone", "style"],
-        focusTarget: "personal-coach-behavior",
-      }],
+      settingsItems: [
+        {
+          id: "personal-coach-behavior",
+          pageId: "personal-coach",
+          label: "Coach behavior",
+          description: "Style, initiative, assumption challenges, and time zone.",
+          keywords: ["coach", "tone", "initiative", "timezone", "style"],
+          focusTarget: "personal-coach-behavior",
+        },
+        {
+          id: "personal-coach-reminders",
+          pageId: "personal-coach",
+          label: "Scheduled check-ins",
+          description: "Daily check-in and weekly review schedule.",
+          keywords: ["coach", "reminder", "daily", "weekly", "review", "schedule"],
+          focusTarget: "personal-coach-reminders",
+        },
+      ],
     }),
     host.widgets.registerPlugin({
       id: "personal-coach",
