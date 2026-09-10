@@ -62,6 +62,8 @@ export function normalizeScreenerQuery(query: MarketScreenerQuery): Required<Pic
   ] as const) {
     if (value !== undefined && !Number.isFinite(value)) invalid(`${name} must be finite`);
   }
+  if (query.marketCapMin !== undefined && query.marketCapMin < 0) invalid("marketCapMin must be non-negative");
+  if (query.volumeMin !== undefined && query.volumeMin < 0) invalid("volumeMin must be non-negative");
   const sector = query.sector?.trim();
   if (sector && sector.length > 80) invalid("screener sector is too long");
   const { sector: _sector, ...rest } = query;
