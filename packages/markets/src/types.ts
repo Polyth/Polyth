@@ -10,7 +10,16 @@ export type MarketAssetType =
 export type MarketRange = "1D" | "5D" | "1M" | "6M" | "YTD" | "1Y" | "5Y" | "MAX";
 export type MarketDataFreshness = "live" | "delayed" | "indicative";
 export type MarketCacheState = "fresh" | "stale" | "refreshed";
-export type MarketProviderCapability = "quote" | "candles" | "search" | "fundamentals" | "news" | "filings" | "earnings";
+export type MarketProviderCapability =
+  | "quote"
+  | "candles"
+  | "search"
+  | "fundamentals"
+  | "news"
+  | "filings"
+  | "earnings"
+  | "crypto"
+  | "macro";
 
 export interface MarketQuote {
   symbol: string;
@@ -106,6 +115,24 @@ export interface MarketEarningsSurprise {
   consensusEps?: number;
   surprisePercent?: number;
   source: string;
+}
+
+export type MarketMacroUnit = "percent" | "percentage-point";
+
+export interface MarketMacroIndicator {
+  id: "fed-funds" | "treasury-2y" | "treasury-10y" | "yield-curve-10y2y" | "cpi-yoy" | "unemployment";
+  label: string;
+  value: number;
+  unit: MarketMacroUnit;
+  asOf: string;
+  source: string;
+}
+
+export interface MarketMacroSnapshot {
+  generatedAt: string;
+  indicators: MarketMacroIndicator[];
+  markets: MarketQuote[];
+  errors: string[];
 }
 
 export interface MarketPerformance {
