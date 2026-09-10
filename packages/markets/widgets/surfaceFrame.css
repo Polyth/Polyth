@@ -1,4 +1,5 @@
 .markets-surface-frame {
+  container-type: inline-size;
   display: flex;
   min-height: 0;
   height: 100%;
