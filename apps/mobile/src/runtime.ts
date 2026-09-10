@@ -2,6 +2,7 @@ import { App } from "@capacitor/app";
 import { Capacitor, CapacitorHttp } from "@capacitor/core";
 import { Preferences } from "@capacitor/preferences";
 import { consumeNativePendingUrl, nativeNavigationAvailable } from "./nativeNavigation.ts";
+import { consumeNativePushOpen, type NativePushOpen } from "./nativePush.ts";
 
 const HOSTS_KEY = "polyth.mobile.hosts.v1";
 const PENDING_DEEP_LINK_KEY = "polyth.mobile.pending-deep-link.v1";
@@ -33,6 +34,7 @@ export type MobileLaunch =
       error?: string;
       deepLinkPath?: string;
       pendingPair?: string;
+      pendingPushOpen?: NativePushOpen;
       developerUnlocked?: boolean;
     };
 
@@ -286,6 +288,9 @@ export async function prepareMobileLaunch(): Promise<MobileLaunch> {
   }
 
   const pendingPath = await consumePendingMobilePath().catch(() => undefined);
+  // A provider payload has already been strictly mapped to a trusted native
+  // connection/account before this point. It carries no URL or session data.
+  const pendingPushOpen = await consumeNativePushOpen().catch(() => undefined);
   const opened = nativeNavigationAvailable()
     ? await consumeNativePendingUrl().catch(() => undefined)
     : (await App.getLaunchUrl().catch(() => undefined))?.url;
@@ -298,6 +303,7 @@ export async function prepareMobileLaunch(): Promise<MobileLaunch> {
       recent: hosts.recent,
       pendingPair: launchPair,
       ...(deepLinkPath ? { deepLinkPath } : {}),
+      ...(pendingPushOpen ? { pendingPushOpen } : {}),
     };
   }
 
@@ -308,5 +314,6 @@ export async function prepareMobileLaunch(): Promise<MobileLaunch> {
     ...(hosts.active ? { preferred: hosts.active } : {}),
     ...(recoveryError ? { error: recoveryError } : {}),
     ...(deepLinkPath ? { deepLinkPath } : {}),
+    ...(pendingPushOpen ? { pendingPushOpen } : {}),
   };
 }

@@ -45,6 +45,7 @@ public final class PolythLinkPlugin extends Plugin {
     private static final String PREFS = "polyth_link_secure";
     private static final String STATE_PREFS = "polyth_link_state";
     private static final String LAST_CONNECTION = "last_connection_id";
+    private static final String ACTIVE_PROXY_ORIGIN = "active_proxy_origin";
     private static final String PROXY_RECOVERY_ATTEMPTS = "proxy_recovery_attempts";
     private static final int MAX_AUTOMATIC_PROXY_RECOVERIES = 2;
     private static final String KEY_PREFIX = "polyth-link-";
@@ -230,14 +231,31 @@ public final class PolythLinkPlugin extends Plugin {
         return false;
     }
 
-    private boolean loopbackContent() {
+    static boolean ownsCurrentProxy(Context context, String raw) {
         try {
-            String raw = getBridge().getWebView().getUrl();
             URI url = URI.create(raw == null ? "" : raw);
-            return "http".equalsIgnoreCase(url.getScheme()) && "127.0.0.1".equals(url.getHost());
+            String current = canonicalLoopbackOrigin(url);
+            SharedPreferences prefs = context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE);
+            return current != null && current.equals(prefs.getString(ACTIVE_PROXY_ORIGIN, null))
+                && prefs.getString(LAST_CONNECTION, null) != null;
         } catch (Exception ignored) {
             return false;
         }
+    }
+
+    private boolean loopbackContent() {
+        return ownsCurrentProxy(getContext(), getBridge().getWebView().getUrl());
+    }
+
+    private static String canonicalLoopbackOrigin(URI url) {
+        return "http".equalsIgnoreCase(url.getScheme()) && "127.0.0.1".equals(url.getHost()) && url.getPort() > 0
+            ? "http://127.0.0.1:" + url.getPort()
+            : null;
+    }
+
+    private static String launchOrigin(JSONObject launch) {
+        try { return canonicalLoopbackOrigin(URI.create(launch.optString("origin", ""))); }
+        catch (Exception ignored) { return null; }
     }
 
     private String require(PluginCall call, String key, String code) {
@@ -370,14 +388,16 @@ public final class PolythLinkPlugin extends Plugin {
         return null;
     }
 
-    private void rememberTransport(String connectionId) {
+    private void rememberTransport(String connectionId, JSONObject launch) throws LinkFailure {
+        String origin = launchOrigin(launch);
+        if (origin == null) throw new LinkFailure("proxy-bootstrap-invalid");
         statePrefs.edit().putString(LAST_CONNECTION, connectionId)
-            .putInt(PROXY_RECOVERY_ATTEMPTS, 0).apply();
+            .putString(ACTIVE_PROXY_ORIGIN, origin).putInt(PROXY_RECOVERY_ATTEMPTS, 0).apply();
     }
 
     private void forgetTransport(String connectionId) {
         if (connectionId.equals(statePrefs.getString(LAST_CONNECTION, null))) {
-            statePrefs.edit().remove(LAST_CONNECTION).apply();
+            statePrefs.edit().remove(LAST_CONNECTION).remove(ACTIVE_PROXY_ORIGIN).apply();
         }
     }
 
@@ -407,7 +427,13 @@ public final class PolythLinkPlugin extends Plugin {
                 if (bootstrap.isEmpty()) throw new LinkFailure("proxy-bootstrap-invalid");
                 String target = bootstrapWithCurrentPath(bootstrap);
                 getActivity().runOnUiThread(() -> {
-                    if (recoveryCurrent(generation)) getBridge().getWebView().loadUrl(target);
+                    if (!recoveryCurrent(generation)) return;
+                    try {
+                        rememberTransport(connectionId, result);
+                        getBridge().getWebView().loadUrl(target);
+                    } catch (LinkFailure error) {
+                        showRecoveryHub(generation);
+                    }
                 });
             } catch (Exception error) {
                 showRecoveryHub(generation);
@@ -540,7 +566,7 @@ public final class PolythLinkPlugin extends Plugin {
                 JSONObject result = invokeObject("pairing.confirm", new JSObject().put("attemptId", attemptId), null);
                 attempts.remove(attemptId);
                 String connectionId = result.optString("connectionId", "");
-                if (!connectionId.isEmpty()) rememberTransport(connectionId);
+                if (!connectionId.isEmpty()) rememberTransport(connectionId, result);
                 call.resolve(JSObject.fromJSONObject(result));
             } catch (Exception error) { reject(call, error); }
         });
@@ -599,7 +625,7 @@ public final class PolythLinkPlugin extends Plugin {
                 byte[] secret = secureStore.load(connectionId);
                 if (secret == null) throw new LinkFailure("host-identity-unavailable");
                 JSONObject result = invokeObject("connect", new JSObject().put("connectionId", connectionId), secret);
-                rememberTransport(connectionId);
+                rememberTransport(connectionId, result);
                 call.resolve(JSObject.fromJSONObject(result));
             } catch (Exception error) { reject(call, error); }
         });
@@ -624,7 +650,7 @@ public final class PolythLinkPlugin extends Plugin {
                 switch (result.optString("state", "")) {
                     case "connected":
                         result.remove("state");
-                        rememberTransport(connectionId);
+                        rememberTransport(connectionId, result);
                         call.resolve(new JSObject()
                             .put("state", "connected")
                             .put("launch", JSObject.fromJSONObject(result)));
@@ -680,6 +706,9 @@ public final class PolythLinkPlugin extends Plugin {
         controlExecutor.execute(() -> {
             try {
                 invoke("disconnect", new JSObject().put("connectionId", connectionId), null);
+                // Native push owns its own capability and must revoke only
+                // mappings for this trusted connection before Link erases it.
+                PolythPushPlugin.forgetConnection(getContext(), connectionId);
                 secureStore.delete(connectionId);
                 invoke("forget", new JSObject().put("connectionId", connectionId), null);
                 forgetTransport(connectionId);

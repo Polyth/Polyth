@@ -22,6 +22,23 @@ import {
   nativeTapFeedback,
   type NativeHapticKind,
 } from "./haptics.ts";
+import { refreshNativePushStatus } from "./nativePush.ts";
+
+export {
+  consumeNativePushOpen,
+  disableNativePush,
+  enableNativePush,
+  nativePushAvailable,
+  nativePushLocalProjectionEnabled,
+  refreshNativePushStatus,
+  setNativePushAuthoritativeProjection,
+  setNativePushForeground,
+  type NativePushClaim,
+  type NativePushEnableInput,
+  type NativePushOpen,
+  type NativePushStatus,
+} from "./nativePush.ts";
+export { NativePushController, type NativePushBridge, type NativePushServer } from "./nativePushController.ts";
 
 export interface NativeMobileCallbacks {
   handleBack(): boolean;
@@ -286,6 +303,10 @@ export function installNativeMobileIntegration(callbacks: NativeMobileCallbacks)
 
   void SafeArea.setSystemBarsStyle({ style: SystemBarsStyle.Default });
   void SplashScreen.hide();
+  // This only reads a semantic status. Native push keeps provider and relay
+  // credentials in platform secure storage; a failed status remains local
+  // notifications/browser fallback rather than disabling delivery.
+  void refreshNativePushStatus().catch(() => undefined);
 
   retainNativeListener(generation, App.addListener("appStateChange", ({ isActive }) => {
     callbacks.setForeground(isActive);

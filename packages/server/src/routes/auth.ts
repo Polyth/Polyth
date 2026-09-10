@@ -34,7 +34,10 @@ const accountIdFor = (name: string): string => {
 
 const accountList = (auth: AuthService) => auth.accountIds().map((id) => ({ id, name: accountName(id) }));
 
-export function authRoutes(auth: AuthService): RouteHandler {
+export function authRoutes(auth: AuthService, options: {
+  /** Purge account-scoped delivery authority before the credential disappears. */
+  onAccountRemoved?: (userId: string) => Promise<void>;
+} = {}): RouteHandler {
   return async (rc) => {
     const { path, method, ingress, principal } = rc;
     if (!path.startsWith("/api/auth/")) return false;
@@ -169,7 +172,12 @@ export function authRoutes(auth: AuthService): RouteHandler {
         rc.json(400, { error: "invalid-input", message: "the bootstrap owner account cannot be removed" });
         return true;
       }
-      if (!auth.hasCredential(target) || !auth.removeAccount(target)) {
+      if (!auth.hasCredential(target)) {
+        rc.json(404, { error: "not-found", message: "account not found" });
+        return true;
+      }
+      await options.onAccountRemoved?.(target);
+      if (!auth.removeAccount(target)) {
         rc.json(404, { error: "not-found", message: "account not found" });
         return true;
       }

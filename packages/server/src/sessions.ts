@@ -90,7 +90,7 @@ export interface Broadcaster {
   /** NTF-01: unfiltered notification-centre fan-out. Optional so existing
    *  fakes stay valid; inbox records never pass through appendAndBroadcast
    *  or any session reducer. */
-  notification?(record: NotificationRecord): void;
+  notification?(record: NotificationRecord, recipient?: { userId: string; spaceId: string }): void;
   pluginChanged?(packageId: string): void;
   packageChanged?(pkg: PackageDescriptorDto): void;
   /** Server-persisted client preferences changed on another device. */

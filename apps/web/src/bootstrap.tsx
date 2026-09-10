@@ -39,6 +39,7 @@ import { isWorkspaceSurface, listSurfaces } from "./surfaces.ts";
 import { installNativeMobileIntegration } from "@polyth/mobile/native";
 import { handleNativeBack } from "./nativeMobile.ts";
 import { applyBackgroundToDom } from "./backgrounds.ts";
+import { openPendingNativePushAfterHydration, reconcileNativePushForeground } from "./nativePush.ts";
 
 applySettingsToDom(getState().settings);
 applyUiSettings();
@@ -91,7 +92,10 @@ installNativeMobileIntegration({
     );
   },
   openDeepLink: openNativeAppPath,
-  setForeground: setSyncForeground,
+  setForeground: (active) => {
+    setSyncForeground(active);
+    void reconcileNativePushForeground(active).catch(() => undefined);
+  },
   setKeyboardInset: setNativeKeyboardInset,
 });
 // Palette commands + keyboard shortcuts: one install, synced with the
@@ -108,7 +112,7 @@ const bootOnce = (): void => {
   booted = true;
   void bootPackages().catch((error: unknown) =>
     console.error("[polyth] web package boot failed", error));
-  init();
+  void init().then(openPendingNativePushAfterHydration).catch(() => undefined);
 };
 
 function Root() {
@@ -123,7 +127,10 @@ function Root() {
       .then(async (s) => {
         // Account restoration above must finish before the trusted native
         // connection namespace selects its app-owned persistence backend.
-        if (!s.required || s.authorized) await initializeClientReliabilityContext();
+        if (!s.required || s.authorized) {
+          await initializeClientReliabilityContext();
+          await reconcileNativePushForeground(true).catch(() => undefined);
+        }
         if (!cancelled) setPhase(s.required && !s.authorized ? "locked" : "ready");
       })
       // Status unreachable → proceed; init()'s own error banner reports it.

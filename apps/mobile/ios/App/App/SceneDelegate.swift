@@ -57,6 +57,8 @@ final class PolythRootBridgeViewController: CAPBridgeViewController {
         super.capacitorDidLoad()
         bridge?.registerPluginInstance(PolythLinkPlugin())
         bridge?.registerPluginInstance(PolythNavigationPlugin())
+        bridge?.registerPluginInstance(PolythPushPlugin.shared)
+        PolythPushPlugin.shared.installNotificationDelegate()
     }
 }
 
@@ -65,6 +67,13 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
+
+        // Scene-based cold launches surface a notification action here rather
+        // than reliably through AppDelegate launch options. Receipt alone is
+        // still inert; only this user-selected response records an open.
+        if let response = connectionOptions.notificationResponse {
+            PolythPushPlugin.shared.recordTapped(response.notification.request.content.userInfo)
+        }
 
         if let url = connectionOptions.urlContexts.first?.url {
             PolythPendingNavigation.shared.remember(url)

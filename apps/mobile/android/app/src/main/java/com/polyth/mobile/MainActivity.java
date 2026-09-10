@@ -19,18 +19,29 @@ public class MainActivity extends BridgeActivity {
         return PENDING_URL.getAndSet(null);
     }
 
+    /** A locally-generated notification tap never carries a URL. Route it to
+     * the bundled hub, which alone consumes the validated native pending id
+     * and reconnects the saved mapping. */
+    private void routeNativePushOpen(Intent intent) {
+        if (intent == null || getBridge() == null || !PolythPushPlugin.recordTap(getApplicationContext(), intent)) return;
+        getBridge().getWebView().loadUrl("https://localhost");
+    }
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         rememberPendingUrl(getIntent());
         registerPlugin(PolythLinkPlugin.class);
         registerPlugin(PolythDiscoveryPlugin.class);
         registerPlugin(PolythNavigationPlugin.class);
+        registerPlugin(PolythPushPlugin.class);
         super.onCreate(savedInstanceState);
+        routeNativePushOpen(getIntent());
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         rememberPendingUrl(intent);
         super.onNewIntent(intent);
+        routeNativePushOpen(intent);
     }
 }

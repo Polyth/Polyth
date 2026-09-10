@@ -312,7 +312,7 @@ function startUrlSync(): void {
   });
 }
 
-export function init(): void {
+export function init(): Promise<void> {
   // PWA installability is independent from the opt-in push subscription.
   // Auth has already succeeded before init(), so register without prompting.
   void registerServiceWorker().catch((err) => console.warn("service worker registration failed", err));
@@ -320,7 +320,7 @@ export function init(): void {
   // independently and publish as soon as each settles. Awaiting a combined
   // Promise.all/allSettled before publishing any result is forbidden — a slow
   // or failed catalog request can never delay, erase, or roll back projects.
-  void refreshProjects("initial");
+  const initialHydration = refreshProjects("initial");
   const desktop = desktopBridge();
   if (desktop) {
     runtimeCatalogPolicy = "pending";
@@ -381,6 +381,7 @@ export function init(): void {
       fetchBranch(s.activeProjectId, s.activeSessionId);
     }
   });
+  return initialHydration;
 }
 
 // ---- project registry hydration (UX-ONBOARDING) ------------------------------

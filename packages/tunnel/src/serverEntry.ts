@@ -15,6 +15,7 @@ import {
   requireLocalTunnelAdmin,
 } from "@polyth/contracts";
 import {
+  serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
@@ -43,6 +44,13 @@ export const TUNNEL_REMOTE_ACCESS: RemoteAccessPolicy = {
     { path: "/ws/tunnel", capability: REMOTE_CAPABILITY.tunnelStatusRead },
   ],
 };
+
+/** Narrow, durable authority seam consumed by server-owned native push.
+ *  It exposes neither tunnel records nor connection IDs. */
+export interface NativePushAuthorityService {
+  hostEndpointId(): Promise<string | undefined>;
+  validate(input: { userId: string; spaceId: string; deviceId: string; deviceEndpointId: string }): Promise<boolean>;
+}
 
 export async function commitPairingDevice(input: {
   pairingId: string;
@@ -396,6 +404,25 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   mkdirSync(socketDir, { recursive: true });
   const controlSocket = join(socketDir, "host.sock");
   const ingressSocket = join(socketDir, "ingress.sock");
+  const nativePushAuthority: NativePushAuthorityService = {
+    async hostEndpointId() {
+      if (!linkHost?.available) return undefined;
+      try {
+        const status = await linkHost.request("identity.status");
+        return typeof status.endpointId === "string" && status.endpointId ? status.endpointId : undefined;
+      } catch { return undefined; }
+    },
+    async validate(input) {
+      const membership = host.services.get(serverServiceKey<{ hasAccess(userId: string, spaceId: string): boolean }>("tenancy.membership"));
+      if (!membership?.hasAccess(input.userId, input.spaceId)) return false;
+      const device = store.device(input.deviceId);
+      return Boolean(
+        device && device.endpointId === input.deviceEndpointId && device.ownerUserId === input.userId && device.pairingState === "active" && !device.revokedAt
+        && device.grants.includes(REMOTE_CAPABILITY.coreNotificationsRead),
+      );
+    },
+  };
+  host.services.provide(serverServiceKey<NativePushAuthorityService>("tunnel.native-push"), nativePushAuthority);
 
   const syncTrust = async (): Promise<void> => {
     if (!linkHost?.available) return;

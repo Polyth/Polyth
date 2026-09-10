@@ -47,6 +47,12 @@ import {
 import { Button, Checkbox, Dialog, IconButton, Select, Textarea, TextInput } from "../ui/index.ts";
 import { DeleteIcon } from "../ui/icons.ts";
 import { BackgroundPicker } from "../BackgroundPicker.tsx";
+import {
+  disableNativePushForCurrentAccount,
+  enableNativePushForCurrentAccount,
+  nativePushSettingsAvailable,
+  nativePushSettingsStatus,
+} from "../../nativePush.ts";
 
 function ThemeSwatches({ theme }: { theme: ThemeSpec }) {
   return (
@@ -670,6 +676,45 @@ export function NotificationsPage() {
         </Row>
       )}
       <PushRow />
+      <NativePushRow />
+    </>
+  );
+}
+
+/** Capacitor-native delivery is separate from browser Web Push. It is shown
+ * only inside the actual native client and asks the OS only after user intent. */
+function NativePushRow() {
+  const available = nativePushSettingsAvailable();
+  const [status, setStatus] = useState<"loading" | "unavailable" | "disabled" | "enabling" | "enabled" | "denied" | "failed">("loading");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (!available) return;
+    void nativePushSettingsStatus().then((next) => setStatus(next.state)).catch(() => setStatus("failed"));
+  }, [available]);
+  if (!available) return null;
+  const enabled = status === "enabled";
+  const hint = status === "denied"
+    ? "Notification permission is denied in system settings."
+    : status === "unavailable"
+      ? "Native push is unavailable in this app build."
+      : "Uses this phone’s trusted Polyth connection; enabled only after the server confirms the claim.";
+  const toggle = (next: boolean) => {
+    if (busy) return;
+    setBusy(true); setError("");
+    void (next ? enableNativePushForCurrentAccount() : disableNativePushForCurrentAccount())
+      .then((result) => setStatus(result.state))
+      .catch((cause) => { setStatus("disabled"); setError(cause instanceof Error ? cause.message : "Could not update native notifications."); })
+      .finally(() => setBusy(false));
+  };
+  return (
+    <>
+      <Row label="Mobile push notifications" hint={hint} itemId="notifications.mobilePush">
+        {status === "unavailable" || status === "denied"
+          ? <span className="tag">Unavailable</span>
+          : <Button size="sm" busy={busy} onClick={() => toggle(!enabled)}>{enabled ? "Disable" : "Enable"}</Button>}
+      </Row>
+      {error && <div className="muted" role="alert">{error}</div>}
     </>
   );
 }

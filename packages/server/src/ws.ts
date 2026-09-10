@@ -16,6 +16,7 @@ import type { BrowserFrame, BrowserService } from "@polyth/browser";
 import type { ChatWorkspaceFrameBus, ChatWorkspaceFrame, ChatWorkspaceTabEvent } from "@polyth/contracts";
 import type { Broadcaster } from "./sessions.ts";
 import type { SpaceGateway } from "./spaces.ts";
+import type { NotificationAccount } from "./notifications.ts";
 import { parseSpaceCookie } from "./spaces.ts";
 import {
   allowWsCapability,
@@ -78,6 +79,8 @@ interface Sub {
   principal: AuthPrincipal;
   refreshPrincipal?: (principal: AuthPrincipal) => AuthPrincipal | null;
   spaceId: string | null;
+  /** Immutable identity resolved at WS attach; never a client-provided id. */
+  notificationAccount: NotificationAccount | null;
   sessions: SessionService;
 }
 
@@ -217,6 +220,21 @@ export function createWsGateway(
     sub.principal = live;
     return live;
   };
+  const currentNotificationAccount = (ws: WebSocket, sub: Sub): NotificationAccount | null => {
+    const live = currentPrincipal(ws, sub);
+    if (!live || !spaces || !sub.notificationAccount) return null;
+    try {
+      // Re-check the subscription's original Space instead of whatever Space
+      // the user selected later. A removed member has no inbox fan-out.
+      const current = spaces.resolve(live, { explicit: sub.notificationAccount.spaceId });
+      return current.userId === sub.notificationAccount.userId
+        && current.spaceId === sub.notificationAccount.spaceId
+        ? sub.notificationAccount
+        : null;
+    } catch {
+      return null;
+    }
+  };
 
   const requireCap = (ws: WebSocket, sub: Sub, capability: string): boolean => {
     const live = currentPrincipal(ws, sub);
@@ -353,6 +371,7 @@ export function createWsGateway(
     const attachAuth = (ws as WebSocket & { _polythAuth?: WsAttachAuth })._polythAuth ?? {};
     const resolution = defaultWsIdentity(attachAuth, req);
     let socketSpaceId: string | null = null;
+    let notificationAccount: NotificationAccount | null = null;
     let socketSessions = sessions;
     if (spaces) {
       try {
@@ -360,6 +379,7 @@ export function createWsGateway(
           remembered: parseSpaceCookie(req.headers.cookie, spaces.cookieName),
         });
         socketSpaceId = ctx.spaceId;
+        notificationAccount = { userId: ctx.userId, spaceId: ctx.spaceId };
         socketSessions = spaces.services(ctx).sessions;
       } catch {
         socketSpaceId = null;
@@ -372,6 +392,7 @@ export function createWsGateway(
     }
     const sub: Sub = {
       spaceId: socketSpaceId,
+      notificationAccount,
       sessions: socketSessions,
       sessionId: null, afterSeq: 0, caughtUp: true,
       busy: false, pendingSubscribe: null, snapshotScope: null, liveBuffer: [], liveBufferBytes: 0, liveBufferSeq: new Set(),
@@ -669,13 +690,25 @@ export function createWsGateway(
         send(ws, { type: "projection", session: p });
       }
     },
-    notification(record: NotificationRecord) {
+    notification(record: NotificationRecord, recipient?: NotificationAccount) {
       if (closed) return;
-      const owner = spaceOf(record.sessionId);
+      // Production always composes a Space gateway. Older/unowned rows then
+      // fail closed; the no-gateway branch preserves the isolated legacy WS
+      // harness contract without becoming a tenant-serving path.
+      if (!recipient) {
+        if (spaces) return;
+        for (const [ws, sub] of clients) {
+          const live = currentPrincipal(ws, sub);
+          if (allowWsCapability(live, REMOTE_CAPABILITY.coreNotificationsRead)) {
+            send(ws, { type: "notification/added", notification: record });
+          }
+        }
+        return;
+      }
       for (const [ws, sub] of clients) {
-        const live = currentPrincipal(ws, sub);
-        if (!allowWsCapability(live, REMOTE_CAPABILITY.coreNotificationsRead)) continue;
-        if (!inSpace(sub, owner)) continue;
+        const account = currentNotificationAccount(ws, sub);
+        if (!account || account.userId !== recipient.userId || account.spaceId !== recipient.spaceId) continue;
+        if (!allowWsCapability(sub.principal, REMOTE_CAPABILITY.coreNotificationsRead)) continue;
         send(ws, { type: "notification/added", notification: record });
       }
     },

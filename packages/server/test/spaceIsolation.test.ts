@@ -429,7 +429,7 @@ test("a socket bound to one Space receives neither projections nor events from a
     gateway.notification({
       id: "n1", key: "k", kind: "completed", sessionId: inWork.sessionId,
       projectId: inWork.projectId, title: "done", body: "", ts: Date.now(), read: false,
-    });
+    }, { userId: h.work.userId, spaceId: h.work.spaceId });
     await until(
       () => workClient.messages.some((m) => m.type === "notification/added"),
       "Work's own notification",

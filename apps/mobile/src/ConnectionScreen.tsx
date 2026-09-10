@@ -178,8 +178,15 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
     scanCleanup.current = null;
   };
 
+  const pendingPushConnectStarted = useRef(false);
   const openLaunch = (next: ProxyLaunch) => {
-    location.replace(bootstrapUrlWithNext(next.bootstrapUrl, launch.deepLinkPath));
+    // The Link bootstrap accepts only a validated `next` target and discards
+    // every outer query key. A push tap wins over an unrelated old deep link.
+    const pending = launch.pendingPushOpen;
+    const nextPath = pending && next.connectionId === pending.connectionId
+      ? `/?nativePushOpen=${encodeURIComponent(pending.notificationId)}`
+      : launch.deepLinkPath;
+    location.replace(bootstrapUrlWithNext(next.bootstrapUrl, nextPath));
   };
 
   const finishPairing = async () => {
@@ -211,6 +218,16 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
       controller.dispose();
     };
   }, [controller]);
+
+  useEffect(() => {
+    const pending = launch.pendingPushOpen;
+    if (!controller || !pending || pendingPushConnectStarted.current || connectionState?.phase !== "idle") return;
+    if (!connectionState.trusted.some((connection) => connection.id === pending.connectionId)) return;
+    pendingPushConnectStarted.current = true;
+    void controller.connect(pending.connectionId).then((next) => {
+      if (next) openLaunch(next);
+    });
+  }, [controller, connectionState, launch.pendingPushOpen]);
 
   useEffect(() => {
     if (launch.pendingPair) rememberPendingPairingLink(launch.pendingPair);

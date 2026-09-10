@@ -87,6 +87,7 @@ import { createPushNotifier, createPushService } from "./push.ts";
 import { pushRoutes } from "./routes/push.ts";
 import { createNotificationStore } from "./notifications.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
+import { createNativePushService, nativePushRoutes } from "./nativePush.ts";
 import { registerDiscoveredPackages, registerServerPackage } from "./packageDiscovery.ts";
 import { queueRoutes } from "./routes/queue.ts";
 import { createBehaviorService } from "./behavior.ts";
@@ -511,7 +512,7 @@ export async function boot(opts: BootOptions = {}) {
   const broadcast: Broadcaster = {
     event: (e: SessionEvent) => live?.event(e),
     projection: (p: SessionProjection) => live?.projection(p),
-    notification: (n) => live?.notification?.(n),
+    notification: (n, recipient) => live?.notification?.(n, recipient),
     pluginChanged: (packageId) => live?.pluginChanged?.(packageId),
     packageChanged: (pkg) => live?.packageChanged?.(pkg),
     clientSettingsChanged: (settings) => live?.clientSettingsChanged?.(settings),
@@ -593,6 +594,15 @@ export async function boot(opts: BootOptions = {}) {
     services.provide(serverServiceKey<T>(name), service);
   const svc = <T,>(name: string): T | undefined => services.get(serverServiceKey<T>(name));
   const requireSvc = <T,>(name: string): T => services.require(serverServiceKey<T>(name));
+  // The bootstrap owner exists even when local password auth is disabled.
+  // Secondary account existence is wired to the auth store later in boot;
+  // until then notification delivery for them fails closed.
+  let notificationAccountExists = (userId: string): boolean => userId === "usr_owner";
+  const notificationAccess = ({ userId, spaceId }: { userId: string; spaceId: string }): boolean =>
+    notificationAccountExists(userId) && Boolean(spaceGateway.store.roleOf(userId, spaceId));
+  provideService("tenancy.membership", {
+    hasAccess: (userId: string, spaceId: string) => notificationAccess({ userId, spaceId }),
+  });
 
   // --- per-project opencode runtime pool (lazy spawn, one serve process per project)
   const runtimeDiagnostics = createRuntimeDiagnostics();
@@ -1792,14 +1802,25 @@ export async function boot(opts: BootOptions = {}) {
   // --- F18: web push (VAPID keys minted once into the data dir) + the
   // notifier bridging the session service's attention/turn-stopped seam.
   // Auto-accepted permissions never reach this seam, so they never push.
-  const push = createPushService({ file: `${dataDir}/push.json` });
+  const push = createPushService({
+    file: `${dataDir}/push.json`,
+    hasAccess: notificationAccess,
+  });
   // NTF-01: durable inbox recorded at the ONE transition-tight seam — the
   // notifier's send sink, after buildPushPayload. Order per record: JSON
-  // store commit → unfiltered WS broadcast → web-push attempt. A push
-  // failure keeps the durable row; a store failure emits neither (contained
-  // by the notifier's fire-and-forget boundary). /api/push/test calls
+  // store commit → recipient-filtered WS broadcast → independent Web/native
+  // push attempts. A transport failure keeps the durable row; a store failure
+  // emits nothing (contained by the notifier's fire-and-forget boundary). /api/push/test calls
   // push.send directly and therefore never creates a centre row.
-  const notifications = createNotificationStore({ file: `${dataDir}/notifications.json` });
+  const notifications = createNotificationStore({
+    file: `${dataDir}/notifications.json`,
+    hasAccess: notificationAccess,
+  });
+  const nativePush = createNativePushService({
+    file: `${dataDir}/native-push.json`,
+    relayOrigin: process.env.POLYTH_NATIVE_PUSH_RELAY_ORIGIN,
+    authority: () => svc<import("./nativePush.ts").NativePushAuthority>("tunnel.native-push"),
+  });
   const pushNotifier = createPushNotifier({
     send: async (payload) => {
       const { key, projectId } = payload;
@@ -1809,15 +1830,27 @@ export async function boot(opts: BootOptions = {}) {
       // Ownership: the target session (when it still exists) must belong to
       // the payload's project before the record is published.
       const target = await store.projection(payload.sessionId);
-      if (target && target.projectId !== projectId) {
+      if (!target || target.projectId !== projectId || !target.spaceId) {
         throw Object.assign(new Error("notification target belongs to another project"), { code: "invalid-input" });
       }
-      const record = await notifications.add({
+      const recipient = await notifications.recipientForSession(payload.sessionId, { spaceId: target.spaceId });
+      if (!recipient) return;
+      const record = await notifications.add(recipient, {
         key, kind: payload.kind, sessionId: payload.sessionId, projectId,
         title: payload.title, body: payload.body,
       });
-      broadcast.notification?.(record);
-      return push.send(payload);
+      if (!record) return;
+      broadcast.notification?.(record, recipient);
+      // Delivery transports are independent best-effort legs after the
+      // durable row + WS fan-out. A failed or stalled leg cannot suppress the
+      // other, and this whole sink remains behind the notifier's detached fire.
+      await Promise.allSettled([
+        push.send(recipient, payload),
+        nativePush.send({
+          userId: recipient.userId, spaceId: recipient.spaceId,
+          notificationId: record.id, kind: record.kind, transitionKey: record.key,
+        }),
+      ]);
     },
     projection: (sessionId) => store.projection(sessionId),
     attention: async (sessionId) => (await store.attentionFor([sessionId]))[sessionId],
@@ -2293,6 +2326,7 @@ export async function boot(opts: BootOptions = {}) {
     localhostOptional: process.env.POLYTH_UI_PASSWORD_LOCALHOST === "optional",
     cookieName: `polyth_auth_p${port}`,
   });
+  notificationAccountExists = (userId) => userId === "usr_owner" || auth.hasCredential(userId);
   attachLivePairedResolver = (resolver) => auth.attachPairedDeviceResolver(resolver);
   for (const resolver of queuedPairedResolvers) auth.attachPairedDeviceResolver(resolver);
 
@@ -2356,7 +2390,15 @@ export async function boot(opts: BootOptions = {}) {
 
   const staticCoreRoutes: RouteHandler[] = [
     async (request) => agentTools.route(request),
-    authRoutes(auth),
+    authRoutes(auth, {
+      onAccountRemoved: async (userId) => {
+        // Purge all durable delivery ownership before removing the credential;
+        // recreating the same stable account id must never adopt stale routes.
+        await notifications.removeAccount(userId);
+        push.removeAccount(userId);
+        await nativePush.removeAccount(userId);
+      },
+    }),
     spaceRoutes({
       store: spaceGateway.store,
       resolver: spaceGateway.resolver,
@@ -2434,11 +2476,22 @@ export async function boot(opts: BootOptions = {}) {
       capabilities: () => allCapabilities(),
       goals: () => svc<AgentGoalService>("goals"),
       version: "0.1.0",
+      onSessionCreated: async (sessionId, space, parentSessionId) => {
+        if (parentSessionId) await notifications.inheritSessionRecipient(parentSessionId, sessionId, space);
+        else await notifications.registerSessionRecipient(sessionId, space);
+      },
+      onSessionsImported: async (sessionIds, space) => {
+        for (const sessionId of sessionIds) await notifications.registerSessionRecipient(sessionId, space);
+      },
+      onSessionForked: async (parentSessionId, sessionId, space) => {
+        await notifications.inheritSessionRecipient(parentSessionId, sessionId, space);
+      },
     }),
     queueRoutes(spaceServices),
     runtimeEpochRoutes(spaceServices),
     runtimeDiagnosticsRoutes(runtimeDiagnostics),
     pushRoutes(push),
+    nativePushRoutes(nativePush),
     notificationRoutes(notifications),
     browseRoutes(),
     async (request) => {
@@ -2459,6 +2512,10 @@ export async function boot(opts: BootOptions = {}) {
     remotePolicies: () => routeRegistry.policies(),
     listenerId: "public",
     admission: httpAdmission,
+    notificationRecipients: {
+      created: async (sessionId, account) => { await notifications.registerSessionRecipient(sessionId, account); },
+      forked: async (parentSessionId, sessionId, account) => { await notifications.inheritSessionRecipient(parentSessionId, sessionId, account); },
+    },
   });
   httpHandlerRef = httpHandler;
   const server = createPublicHttpServer(httpHandler, "public");

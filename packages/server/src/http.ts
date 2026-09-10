@@ -278,6 +278,11 @@ export interface HttpDeps {
   /** Optional request drain/fence. When set, new requests stop at shutdown
    *  and late handlers cannot keep using live services after dispose. */
   admission?: HttpAdmission;
+  /** Private notification routing metadata, written after a durable session. */
+  notificationRecipients?: {
+    created(sessionId: string, account: { userId: string; spaceId: string }): Promise<void>;
+    forked(parentSessionId: string, sessionId: string, account: { userId: string; spaceId: string }): Promise<void>;
+  };
 }
 
 // Public even when a password is set: the SPA lock screen must be able to
@@ -558,6 +563,9 @@ async function dispatchHttp(
       }
 
       const requireCapability = (capability: string) => requirePrincipalCapability(principal, capability);
+      const recordNotificationRecipient = async (work: (() => Promise<void>) | undefined): Promise<void> => {
+        try { await work?.(); } catch { console.warn("[polyth] notification recipient registration failed"); }
+      };
 
       if (path === "/api/health" && method === "GET") {
         return json(res, 200, { ok: true, version: deps.version, capabilities: deps.capabilities() });
@@ -592,6 +600,9 @@ async function dispatchHttp(
           ...(b.agent ? { agent: String(b.agent) } : {}),
           ...(b.worktreePath ? { worktreePath: String(b.worktreePath) } : {}),
         });
+        await recordNotificationRecipient(deps.notificationRecipients
+          ? () => deps.notificationRecipients!.created(ref.id, space().ctx)
+          : undefined);
         return json(res, 200, ref);
       }
       m = path.match(/^\/api\/sessions\/([^/]+)$/);
@@ -705,7 +716,11 @@ async function dispatchHttp(
       m = path.match(/^\/api\/sessions\/([^/]+)\/fork$/);
       if (m && method === "POST") {
         const b = await loadBody();
-        return json(res, 200, await space().sessions.fork(m[1]!, b.atSeq === undefined ? undefined : Number(b.atSeq)));
+        const forked = await space().sessions.fork(m[1]!, b.atSeq === undefined ? undefined : Number(b.atSeq));
+        await recordNotificationRecipient(deps.notificationRecipients
+          ? () => deps.notificationRecipients!.forked(m[1]!, forked.id, space().ctx)
+          : undefined);
+        return json(res, 200, forked);
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/rewind$/);
       if (m && method === "POST") {
