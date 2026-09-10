@@ -763,7 +763,10 @@ export function createCoachStore(file: string, opts: { now?: () => number } = {}
       if (current.status === "done" || current.status === "cancelled") throw err("conflict", `${current.status} commitment cannot be rescheduled`);
       const target = optionalTime(plannedFor, "plannedFor")!;
       const why = optionalText(reason, "reason", REASON_MAX);
-      return mutate("commitment.rescheduled", "commitment", id, { plannedFor: target }, (at) => {
+      return mutate("commitment.rescheduled", "commitment", id, {
+        plannedFor: target,
+        ...(why ? { reason: why } : {}),
+      }, (at) => {
         db.prepare("UPDATE coach_commitments SET status = 'open', planned_for = ?, last_reason = ?, updated_at = ? WHERE id = ?").run(target, why ?? null, at, id);
         return commitmentOf(mustCommitment(id));
       });
@@ -773,7 +776,7 @@ export function createCoachStore(file: string, opts: { now?: () => number } = {}
       if (current.status === "skipped") return current;
       if (current.status === "done" || current.status === "cancelled") throw err("conflict", `${current.status} commitment cannot be skipped`);
       const why = optionalText(reason, "reason", REASON_MAX);
-      return mutate("commitment.skipped", "commitment", id, {}, (at) => {
+      return mutate("commitment.skipped", "commitment", id, why ? { reason: why } : {}, (at) => {
         db.prepare("UPDATE coach_commitments SET status = 'skipped', last_reason = ?, updated_at = ? WHERE id = ?").run(why ?? null, at, id);
         return commitmentOf(mustCommitment(id));
       });
@@ -783,7 +786,7 @@ export function createCoachStore(file: string, opts: { now?: () => number } = {}
       if (current.status === "cancelled") return current;
       if (current.status === "done") throw err("conflict", "completed commitment cannot be cancelled");
       const why = optionalText(reason, "reason", REASON_MAX);
-      return mutate("commitment.cancelled", "commitment", id, {}, (at) => {
+      return mutate("commitment.cancelled", "commitment", id, why ? { reason: why } : {}, (at) => {
         db.prepare("UPDATE coach_commitments SET status = 'cancelled', last_reason = ?, updated_at = ? WHERE id = ?").run(why ?? null, at, id);
         return commitmentOf(mustCommitment(id));
       });
