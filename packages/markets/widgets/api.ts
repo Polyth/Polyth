@@ -10,6 +10,7 @@ import type {
   MarketResearchContext,
   MarketSearchResult,
 } from "../src/types.ts";
+import type { MarketPortfolio, MarketPortfolioSnapshot } from "../src/portfolio.ts";
 import type { MarketWatchlists } from "../src/watchlists.ts";
 
 const transport = createApiTransport();
@@ -47,5 +48,14 @@ export const marketsApi = {
   },
   saveWatchlists(document: MarketWatchlists, signal?: AbortSignal): Promise<MarketWatchlists> {
     return transport.put("/api/markets/watchlists", document, { signal });
+  },
+  portfolio(signal?: AbortSignal): Promise<MarketPortfolio> {
+    return transport.get("/api/markets/portfolio", { signal });
+  },
+  savePortfolio(document: MarketPortfolio, signal?: AbortSignal): Promise<MarketPortfolio> {
+    return transport.put("/api/markets/portfolio", document, { signal });
+  },
+  portfolioSnapshot(signal?: AbortSignal): Promise<MarketPortfolioSnapshot> {
+    return transport.get("/api/markets/portfolio/snapshot", { signal });
   },
 };

@@ -4,6 +4,18 @@ export {
   type DefaultMarketProviderOptions,
 } from "./defaultProviders.ts";
 export {
+  DEFAULT_PORTFOLIO,
+  loadPortfolio,
+  parsePortfolio,
+  savePortfolio,
+  snapshotPortfolio,
+  type MarketPortfolio,
+  type MarketPortfolioCurrencySummary,
+  type MarketPortfolioHolding,
+  type MarketPortfolioPosition,
+  type MarketPortfolioSnapshot,
+} from "./portfolio.ts";
+export {
   ProviderRegistry,
   type MarketProvider,
   type ProviderHealth,

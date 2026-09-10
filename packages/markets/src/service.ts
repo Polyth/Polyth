@@ -118,8 +118,8 @@ export class MarketsService {
   async compare(symbols: readonly string[], range: MarketRange = "1M"): Promise<MarketComparison> {
     const normalizedRange = normalizeRange(range);
     const normalizedSymbols = [...new Set(symbols.map(normalizeSymbol))];
-    if (normalizedSymbols.length === 0 || normalizedSymbols.length > 8) {
-      throw Object.assign(new Error("market comparison requires 1 to 8 symbols"), { code: "invalid-input" });
+    if (normalizedSymbols.length < 2 || normalizedSymbols.length > 8) {
+      throw Object.assign(new Error("market comparison requires 2 to 8 symbols"), { code: "invalid-input" });
     }
 
     const items = await Promise.all(normalizedSymbols.map(async (symbol): Promise<MarketComparisonItem> => {

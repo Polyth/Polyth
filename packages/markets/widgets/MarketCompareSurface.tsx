@@ -83,7 +83,7 @@ export default function MarketCompareSurface({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [active, range, symbols.join("\u0000"), valid]);
+  }, [active, range, symbols, valid]);
 
   return (
     <div className="markets-compare" aria-busy={loading}>

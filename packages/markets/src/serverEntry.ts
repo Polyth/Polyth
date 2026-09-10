@@ -5,6 +5,7 @@ import {
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { registerDefaultMarketProviders } from "./defaultProviders.ts";
+import { loadPortfolio, savePortfolio, snapshotPortfolio } from "./portfolio.ts";
 import { createMarketsService, type MarketsService } from "./service.ts";
 import type { MarketRange } from "./types.ts";
 import { loadWatchlists, saveWatchlists } from "./watchlists.ts";
@@ -45,10 +46,34 @@ export function marketsRoutes(
       return false;
     }
 
+    if (path === "/api/markets/portfolio") {
+      const storage = host.spaceStorage(space);
+      if (method === "GET") {
+        json(200, await loadPortfolio(storage));
+        return true;
+      }
+      if (method === "PUT") {
+        try {
+          json(200, await savePortfolio(storage, await body()));
+        } catch (cause) {
+          if (isInvalidInput(cause)) return badRequest(json, errorMessage(cause));
+          throw cause;
+        }
+        return true;
+      }
+      return false;
+    }
+
     if (method !== "GET") return false;
 
     if (path === "/api/markets/providers") {
       json(200, { providers: markets.providers.healthSnapshot() });
+      return true;
+    }
+
+    if (path === "/api/markets/portfolio/snapshot") {
+      const portfolio = await loadPortfolio(host.spaceStorage(space));
+      json(200, await snapshotPortfolio(markets, portfolio));
       return true;
     }
 
