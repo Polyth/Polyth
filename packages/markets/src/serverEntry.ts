@@ -84,6 +84,16 @@ export function marketsRoutes(
       return true;
     }
 
+    if (path === "/api/markets/macro") {
+      json(200, await markets.macro());
+      return true;
+    }
+
+    if (path === "/api/markets/crypto") {
+      json(200, await markets.crypto());
+      return true;
+    }
+
     if (path === "/api/markets/portfolio/snapshot") {
       const portfolio = await loadPortfolio(host.spaceStorage(space));
       json(200, await snapshotPortfolio(markets, portfolio));
