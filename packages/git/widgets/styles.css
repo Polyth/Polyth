@@ -1142,8 +1142,7 @@ color: var(--purple);
   font-size: var(--font-label);
   font-weight: 650;
 }
-.isolation-card-meta,
-.isolation-card-stats {
+.isolation-card-meta {
   font-size: var(--font-meta);
 }
 .isolation-card-progress {
@@ -1155,6 +1154,16 @@ color: var(--purple);
   gap: var(--space-1);
   font-size: var(--font-meta);
   color: var(--text-dim);
+}
+.isolation-card-progress li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.isolation-card-progress-mark {
+  flex: none;
+  font-size: 0.75em;
+  line-height: 1.4;
 }
 .isolation-card-progress [aria-current="step"] {
   color: var(--text);

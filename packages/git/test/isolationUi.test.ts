@@ -4,7 +4,7 @@ import { register } from "node:module";
 import { Window } from "happy-dom";
 import type { IsolationStatusDto, SessionIsolation, SessionProjection } from "@polyth/contracts";
 
-const dom = new Window({ url: "http://127.0.0.1/4400/" });
+const dom = new Window({ url: "http://127.0.0.1:4400/" });
 Object.assign(globalThis, {
   window: dom, document: dom.document, localStorage: dom.localStorage,
   HTMLElement: dom.HTMLElement, Element: dom.Element, Node: dom.Node,
@@ -24,7 +24,6 @@ const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { activateSession, seedSessionCache } = await import("../../../apps/web/src/store.ts");
 const { IsolationBadge, IsolationCard, IsolationListBadge } = await import("../widgets/IsolationCard.tsx");
-const { cacheGitStatus } = await import("../widgets/gitStatusStore.ts");
 const { tr } = await import("../../../apps/web/src/i18n/index.ts");
 const { api } = await import("@polyth/session/web-api");
 const wait = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -103,7 +102,7 @@ test("header badge is passive status only with no mutation controls", async () =
     assert.equal(mounted.container.querySelector("button"), null);
     for (const label of [
       tr("isolation.integrateInto", { branch: base.targetBranch }),
-      tr("isolation.keepIsolated"),
+      tr("isolation.continueWorking"),
       tr("isolation.discard"),
       tr("isolation.resolveWithAgent"),
       tr("isolation.discardWorkspace"),
@@ -123,12 +122,6 @@ test("changes-ready shows integrate, review, continue and delete in overflow", a
     isolation, effectiveState: isolation.state, suggestion: readySuggestion,
     actions: { canReview: true, canMerge: true, canKeep: true, canResolve: false, canDiscard: true, canRecover: false, canAbandon: false },
   });
-  cacheGitStatus("ui-test", {
-    branch: "polyth/isolate/test", ahead: 0, behind: 0,
-    staged: [{ path: "a.ts", status: "M" }],
-    unstaged: [{ path: "b.ts", status: "M" }],
-    untracked: [], conflicted: [],
-  }, "ready-ui");
   let discarded = 0;
   api.isolationDiscard = async (id) => { discarded++; return projection(id, isolation); };
   const mounted = await mount(projection("ready-ui", isolation));
@@ -136,10 +129,9 @@ test("changes-ready shows integrate, review, continue and delete in overflow", a
     const text = mounted.container.textContent ?? "";
     assert.ok(text.includes(tr("isolation.changesAreReady")));
     assert.ok(text.includes(tr("isolation.basedOn", { branch: base.targetBranch })));
-    assert.ok(text.includes(tr("isolation.filesChanged", { count: 2 })));
     const integrate = buttons(mounted.container).find((b) => b.textContent === tr("isolation.integrateInto", { branch: base.targetBranch }));
     const review = buttons(mounted.container).find((b) => b.textContent === tr("isolation.reviewChanges"));
-    const keep = buttons(mounted.container).find((b) => b.textContent === tr("isolation.keepIsolated"));
+    const keep = buttons(mounted.container).find((b) => b.textContent === tr("isolation.continueWorking"));
     const more = buttons(mounted.container).find((b) => b.textContent === tr("common.more"));
     assert.ok(integrate && !integrate.disabled);
     assert.ok(review && !review.disabled);
@@ -189,7 +181,7 @@ test("continue working calls isolationKeep and hides dismissed card", async () =
   };
   const mounted = await mount(projection("keep-ui", isolation));
   try {
-    const keep = buttons(mounted.container).find((b) => b.textContent === tr("isolation.keepIsolated"));
+    const keep = buttons(mounted.container).find((b) => b.textContent === tr("isolation.continueWorking"));
     assert.ok(keep);
     await act(async () => { keep!.click(); await wait(); });
     assert.equal(kept, 1);
@@ -217,7 +209,7 @@ test("dirty target explains blocked integration without review changes", async (
     assert.equal(buttons(mounted.container).some((b) => b.textContent === tr("isolation.integrateInto", { branch: base.targetBranch }) && !b.disabled), false);
     assert.equal(buttons(mounted.container).some((b) => b.textContent === tr("isolation.reviewChanges")), false);
     assert.ok(buttons(mounted.container).some((b) => b.textContent === tr("gitview.checkAgain")));
-    assert.ok(buttons(mounted.container).some((b) => b.textContent === tr("isolation.keepIsolated") && !b.disabled));
+    assert.ok(buttons(mounted.container).some((b) => b.textContent === tr("isolation.continueWorking") && !b.disabled));
   } finally {
     await mounted.close();
     api.isolationStatus = originalStatus;
@@ -256,14 +248,14 @@ test("missing source offers no Keep action; published recovery stays visible and
     mounted = await mount(projection("missing", isolation));
     assert.match(mounted.container.textContent ?? "", new RegExp(tr("isolation.missingWorkspace"), "u"));
     assert.ok(mounted.container.textContent?.includes(base.worktreePath));
-    assert.equal(buttons(mounted.container).some((button) => button.textContent === tr("isolation.keepIsolated") && !button.disabled), false);
+    assert.equal(buttons(mounted.container).some((button) => button.textContent === tr("isolation.continueWorking") && !button.disabled), false);
     await mounted.close();
     for (const state of ["unowned", "corrupt"] as const) {
       isolation = { ...base, state };
       mounted = await mount(projection(state, isolation));
       assert.ok(mounted.container.textContent?.includes(tr("isolation.ownershipUnverified")));
       assert.ok(mounted.container.textContent?.includes(base.worktreePath));
-      for (const label of ["isolation.keepIsolated", "isolation.resolveWithAgent"] as const) {
+      for (const label of ["isolation.continueWorking", "isolation.resolveWithAgent"] as const) {
         assert.equal(buttons(mounted.container).some((button) => button.textContent === tr(label) && !button.disabled), false);
       }
       assert.equal(buttons(mounted.container).some((button) => button.textContent === tr("isolation.integrateInto", { branch: base.targetBranch }) && !button.disabled), false);
@@ -327,7 +319,7 @@ test("a failed authoritative status request never enables stale conflict actions
       buttons(mounted.container).filter((button) => !button.disabled).map((button) => button.textContent),
     );
     for (const label of [
-      "isolation.keepIsolated",
+      "isolation.continueWorking",
       "isolation.integrateInto",
       "isolation.resolveWithAgent",
       "isolation.discard",
@@ -392,21 +384,33 @@ test("publication repair shows integrating copy without restoreOrigin; cleanup k
 
 test("discard recovery never shows merging or integrating copy", async () => {
   const originalStatus = api.isolationStatus;
-  for (const state of ["rebind-pending", "cleanup-pending"] as const) {
-    const isolation: SessionIsolation = { ...base, state };
-    api.isolationStatus = async () => ({ isolation, effectiveState: isolation.state, suggestion: null });
-    const mounted = await mount(projection(`discard-${state}`, isolation));
-    try {
-      const text = mounted.container.textContent ?? "";
-      assert.equal(text.includes(tr("isolation.merging")), false);
-      assert.equal(text.includes("Merging"), false);
-      assert.equal(text.includes(tr("isolation.integratingInto", { branch: base.targetBranch })), false);
-      if (state === "rebind-pending") assert.ok(text.includes(tr("isolation.returningWorkspace")));
-      if (state === "cleanup-pending") assert.ok(text.includes(tr("isolation.cleaningWorkspace")));
-      assert.ok(text.includes(progressLabel("isolation.deletingWorkspace")));
-    } finally {
-      await mounted.close();
+  try {
+    for (const state of ["rebind-pending", "cleanup-pending"] as const) {
+      const isolation: SessionIsolation = { ...base, state };
+      api.isolationStatus = async () => ({ isolation, effectiveState: isolation.state, suggestion: null });
+      const mounted = await mount(projection(`discard-${state}`, isolation));
+      try {
+        const text = mounted.container.textContent ?? "";
+        assert.equal(text.includes(tr("isolation.merging")), false);
+        assert.equal(text.includes("Merging"), false);
+        assert.equal(text.includes(tr("isolation.integratingInto", { branch: base.targetBranch })), false);
+        assert.ok(text.includes("●"));
+        assert.ok(text.includes("○") || text.includes("✓"));
+        if (state === "rebind-pending") {
+          assert.ok(text.includes(tr("isolation.returningWorkspace")));
+          assert.ok(text.includes(tr("isolation.cleaningWorkspace")));
+          assert.equal(text.includes(tr("isolation.returnedWorkspace")), false);
+        }
+        if (state === "cleanup-pending") {
+          assert.ok(text.includes(tr("isolation.returnedWorkspace")));
+          assert.ok(text.includes(tr("isolation.cleaningWorkspace")));
+        }
+      } finally {
+        await mounted.close();
+      }
     }
+  } finally {
+    api.isolationStatus = originalStatus;
   }
 });
 
@@ -418,14 +422,64 @@ test("integration recovery uses integrating and returning copy with resultCommit
   try {
     const text = mounted.container.textContent ?? "";
     assert.ok(text.includes(tr("isolation.returningWorkspace")));
-    assert.equal(text.includes(progressLabel("isolation.deletingWorkspace")), false);
     assert.ok(text.includes(tr("isolation.integratingChanges")));
+    assert.ok(text.includes("✓"));
+    assert.ok(text.includes("●"));
+    assert.ok(text.includes(base.worktreePath), "stuck recovery still exposes the worktree path");
   } finally {
     await mounted.close();
     api.isolationStatus = originalStatus;
   }
 });
 
-function progressLabel(key: "isolation.deletingWorkspace" | "isolation.returningWorkspace" | "isolation.cleaningWorkspace") {
-  return tr(key).replace(/…+$/u, "");
-}
+test("in-flight recovery hides the worktree path", async () => {
+  const originalStatus = api.isolationStatus;
+  const originalRecover = api.isolationRecover;
+  const isolation: SessionIsolation = { ...base, state: "rebind-pending", resultCommit: "published" };
+  api.isolationStatus = async () => ({ isolation, effectiveState: isolation.state, suggestion: null });
+  let finish!: (session: SessionProjection) => void;
+  api.isolationRecover = () => new Promise((resolve) => { finish = resolve; });
+  const mounted = await mount(projection("path-progress", isolation));
+  try {
+    assert.ok(mounted.container.textContent?.includes(base.worktreePath));
+    const retry = buttons(mounted.container).find((button) => button.textContent === tr("isolation.retryRecovery"));
+    assert.ok(retry && !retry.disabled);
+    await act(async () => { retry.click(); await wait(); });
+    assert.equal(mounted.container.textContent?.includes(base.worktreePath), false);
+    await act(async () => { finish(projection("path-progress", isolation)); await wait(); });
+  } finally {
+    await mounted.close();
+    api.isolationStatus = originalStatus;
+    api.isolationRecover = originalRecover;
+  }
+});
+
+test("discard confirmation closes when the session changes", async () => {
+  const originalStatus = api.isolationStatus;
+  const isolation: SessionIsolation = { ...base, state: "merge-ready" };
+  api.isolationStatus = async () => ({
+    isolation, effectiveState: isolation.state, suggestion: readySuggestion,
+    actions: { canReview: true, canMerge: true, canKeep: true, canResolve: false, canDiscard: true, canRecover: false, canAbandon: false },
+  });
+  const mounted = await mount(projection("discard-session-a", isolation));
+  try {
+    const more = buttons(mounted.container).find((button) => button.textContent === tr("common.more"));
+    assert.ok(more);
+    await act(async () => { more!.click(); await wait(); });
+    const deleteEntry = [...document.querySelectorAll('[role="menuitem"]')]
+      .find((entry) => entry.textContent === tr("isolation.discardWorkspace"));
+    assert.ok(deleteEntry);
+    await act(async () => { deleteEntry!.dispatchEvent(new dom.MouseEvent("click", { bubbles: true })); await wait(); });
+    assert.ok(document.body.textContent?.includes(tr("isolation.discardTitle")));
+    await act(async () => {
+      seedSessionCache(projection("discard-session-b", isolation));
+      activateSession("discard-session-b");
+      await wait();
+    });
+    assert.equal(document.body.textContent?.includes(tr("isolation.discardTitle")), false);
+  } finally {
+    await act(async () => { document.querySelectorAll(".dialog-backdrop, [role=dialog]").forEach((node) => node.remove()); });
+    await mounted.close();
+    api.isolationStatus = originalStatus;
+  }
+});

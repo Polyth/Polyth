@@ -6,7 +6,6 @@ import { friendlyError } from "../../../apps/web/src/settings.ts";
 import { openChanges, setUiError, upsertSession, useStore } from "../../../apps/web/src/store.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { Button, Dialog, Menu, confirmAlert } from "../../../apps/web/src/components/ui/index.ts";
-import { peekGitStatus } from "./gitStatusStore.ts";
 
 const isolationOf = (session: SessionProjection | null | undefined): SessionIsolation | null =>
   session?.isolation?.kind === "git-worktree" ? session.isolation : null;
@@ -15,58 +14,31 @@ function applySession(next: SessionProjection): void {
   upsertSession(next);
 }
 
-function countChangedFiles(projectId: string, sessionId: string): number | null {
-  const status = peekGitStatus(projectId, sessionId);
-  if (!status) return null;
-  const paths = new Set<string>();
-  for (const list of [status.staged, status.unstaged, status.untracked, status.conflicted]) {
-    for (const entry of list) paths.add(entry.path);
-  }
-  return paths.size;
-}
+const PROGRESS_MARK = { done: "✓", current: "●", pending: "○" } as const;
 
-function progressLabel(key: "isolation.returningWorkspace" | "isolation.cleaningWorkspace" | "isolation.deletingWorkspace"): string {
-  return tr(key).replace(/…+$/u, "");
-}
+type StepState = keyof typeof PROGRESS_MARK;
 
-type StepState = "done" | "current" | "pending";
-
-function recoverySteps(integrating: boolean, liveState: string): Array<{ label: string; state: StepState }> {
-  const deletingOrIntegratingDone = liveState === "rebind-pending" || liveState === "cleanup-pending";
-  const integratingCurrent = liveState === "merging" || liveState === "publishing";
+function recoverySteps(integrating: boolean, liveState: string): Array<{ id: string; label: string; state: StepState }> {
   const returningDone = liveState === "cleanup-pending";
-  const returningCurrent = liveState === "rebind-pending";
-  const cleaningCurrent = liveState === "cleanup-pending";
-  if (integrating) {
-    return [
-      {
-        label: tr("isolation.integratingChanges"),
-        state: integratingCurrent ? "current" : deletingOrIntegratingDone ? "done" : "pending",
-      },
-      {
-        label: progressLabel("isolation.returningWorkspace"),
-        state: returningCurrent ? "current" : returningDone ? "done" : "pending",
-      },
-      {
-        label: progressLabel("isolation.cleaningWorkspace"),
-        state: cleaningCurrent ? "current" : "pending",
-      },
-    ];
-  }
-  const deletingCurrent = !deletingOrIntegratingDone && integratingCurrent;
+  const returning = {
+    id: "returning",
+    label: returningDone ? tr("isolation.returnedWorkspace") : tr("isolation.returningWorkspace"),
+    state: (liveState === "rebind-pending" ? "current" : returningDone ? "done" : "pending") as StepState,
+  };
+  const cleaning = {
+    id: "cleaning",
+    label: tr("isolation.cleaningWorkspace"),
+    state: (returningDone ? "current" : "pending") as StepState,
+  };
+  if (!integrating) return [returning, cleaning];
   return [
     {
-      label: progressLabel("isolation.deletingWorkspace"),
-      state: deletingCurrent ? "current" : deletingOrIntegratingDone ? "done" : "pending",
+      id: "integrating",
+      label: tr("isolation.integratingChanges"),
+      state: liveState === "merging" || liveState === "publishing" ? "current" : "done",
     },
-    {
-      label: progressLabel("isolation.returningWorkspace"),
-      state: returningCurrent ? "current" : returningDone ? "done" : "pending",
-    },
-    {
-      label: progressLabel("isolation.cleaningWorkspace"),
-      state: cleaningCurrent ? "current" : "pending",
-    },
+    returning,
+    cleaning,
   ];
 }
 
@@ -109,6 +81,10 @@ export function IsolationCard() {
     return () => { statusRequest.current += 1; };
   }, [refresh]);
 
+  useEffect(() => {
+    setConfirmingDiscard(false);
+  }, [sessionId]);
+
   if (!sessionId || !session || !isolation) {
     return null;
   }
@@ -139,7 +115,6 @@ export function IsolationCard() {
   const ready = actions?.canMerge === true;
   if (!conflict && !unavailable && !dirty && !destinationUnavailable && !ready && !recovering) return null;
 
-  const fileCount = countChangedFiles(session.projectId, sessionId);
   const warn = conflict || unavailable || dirty || destinationUnavailable;
 
   const run = async (kind: "merge" | "keep" | "resolve" | "recover" | "discard" | "abandon", action: () => Promise<void>) => {
@@ -208,7 +183,7 @@ export function IsolationCard() {
               ? tr("isolation.dirtyTargetDetail", { branch: targetBranch })
               : null;
 
-  const showPath = unavailable || recovering;
+  const showPath = unavailable || (recovering && busy === null);
   const steps = recovering ? recoverySteps(integrating, liveState) : null;
 
   return (
@@ -216,9 +191,6 @@ export function IsolationCard() {
       <div className={`isolation-card${warn ? " isolation-card--warn" : ""}`} role="status">
         <div className="isolation-card-copy">
           <strong>{title}</strong>
-          {ready && fileCount !== null && fileCount > 0 && (
-            <span className="isolation-card-stats muted">{tr("isolation.filesChanged", { count: fileCount })}</span>
-          )}
           {ready && (
             <span className="isolation-card-meta muted">{tr("isolation.basedOn", { branch: targetBranch })}</span>
           )}
@@ -227,10 +199,11 @@ export function IsolationCard() {
             <ol className="isolation-card-progress">
               {steps.map((step) => (
                 <li
-                  key={step.label}
+                  key={step.id}
                   className={step.state === "done" ? "isolation-card-progress-done" : undefined}
                   aria-current={step.state === "current" ? "step" : undefined}
                 >
+                  <span className="isolation-card-progress-mark" aria-hidden="true">{PROGRESS_MARK[step.state]}</span>
                   {step.label}
                 </li>
               ))}
@@ -284,7 +257,7 @@ export function IsolationCard() {
                 applySession(await api.isolationKeep(sessionId));
               })}
             >
-              {tr("isolation.keepIsolated")}
+              {tr("isolation.continueWorking")}
             </Button>
           )}
           {unavailable && actions?.canDiscard === true && (
@@ -368,11 +341,7 @@ export function IsolationCard() {
             </>
           )}
         >
-          <p>
-            {fileCount !== null && fileCount > 0
-              ? tr("isolation.discardConfirmFiles", { count: fileCount })
-              : tr("isolation.discardConfirmGeneric")}
-          </p>
+          <p>{tr("isolation.discardConfirmGeneric")}</p>
           <p>{tr("isolation.discardTargetUnchanged", { branch: targetBranch })}</p>
         </Dialog>
       )}
