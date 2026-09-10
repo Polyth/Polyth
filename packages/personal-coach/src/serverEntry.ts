@@ -161,6 +161,25 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     }
   };
 
+  const pauseOwnedSchedules = async (): Promise<void> => {
+    const schedule = host.services.get(serverServiceKey<CoachScheduleService>("schedule"));
+    if (!schedule) return;
+    const projectIds = new Set<string>(capabilities.keys());
+    for (const task of schedule.list()) {
+      if (task.projectId.startsWith("__polyth_pkg_")) projectIds.add(task.projectId);
+    }
+    for (const projectId of projectIds) {
+      try {
+        // Path validation prevents another package's internal workspace from
+        // being affected even if it happens to use the same schedule titles.
+        await service.forWorkspaceProject(projectId);
+        pauseCoachSchedules(schedule, projectId);
+      } catch (cause) {
+        if ((cause as { code?: string }).code !== "not-found") throw cause;
+      }
+    }
+  };
+
   return {
     remoteAccess: localOnlyRemoteAccess(["personal-coach"]),
     routes: async (request) => routes ? routes(request) : false,
@@ -190,10 +209,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     },
     async onDisable() {
       routes = null;
-      const schedule = host.services.get(serverServiceKey<CoachScheduleService>("schedule"));
-      if (schedule) {
-        for (const projectId of capabilities.keys()) pauseCoachSchedules(schedule, projectId);
-      }
+      await pauseOwnedSchedules();
       for (const capability of [...capabilities.values()].toReversed()) {
         await capability.dispose();
       }
