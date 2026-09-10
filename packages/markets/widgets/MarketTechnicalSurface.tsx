@@ -81,7 +81,7 @@ export default function MarketTechnicalSurface({
       label: "RSI 14",
       value: number(latest?.rsi14),
       detail: signalLabel(snapshot.signals.momentum),
-      tone: snapshot.signals.momentum === "oversold" ? "bearish" : snapshot.signals.momentum === "overbought" ? "bullish" : "neutral",
+      tone: "neutral",
     },
     {
       id: "macd",
