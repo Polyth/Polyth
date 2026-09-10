@@ -4,13 +4,56 @@ import "./widgetStyles.css";
 import "./news.css";
 import "./compare.css";
 import "./portfolio.css";
-import { createElement, useEffect, useState } from "react";
+import "./surfaceFrame.css";
+import "./portfolioWidget.css";
+import { createElement, useEffect, useState, type ReactNode } from "react";
 import { defineWebPackage, type WebPackageHost } from "@polyth/web-sdk";
 import MarketsSurface, { type MarketHandoffOption } from "./MarketsSurface.tsx";
 import MarketCompareSurface from "./MarketCompareSurface.tsx";
 import MarketPortfolioSurface from "./MarketPortfolioSurface.tsx";
+import { MarketPortfolioWidget } from "./MarketPortfolioWidget.tsx";
 import { MarketAssetWidget, MarketNewsWidget, MarketWatchlistWidget } from "./MarketWidgets.tsx";
 import { selectMarketSymbol } from "./selection.ts";
+
+type MarketSurfaceId = "markets" | "markets.compare" | "markets.portfolio";
+
+function MarketSurfaceFrame({
+  host,
+  activeId,
+  children,
+}: {
+  host: WebPackageHost;
+  activeId: MarketSurfaceId;
+  children: ReactNode;
+}) {
+  const links: Array<{ id: MarketSurfaceId; label: string }> = [
+    { id: "markets", label: "Research" },
+    { id: "markets.compare", label: "Compare" },
+    { id: "markets.portfolio", label: "Portfolio" },
+  ];
+  return (
+    <div className="markets-surface-frame">
+      <nav className="markets-surface-nav" aria-label="Markets sections">
+        {links.map((link) => (
+          <button
+            key={link.id}
+            type="button"
+            aria-current={activeId === link.id ? "page" : undefined}
+            onClick={() => host.navigation.openWorkspacePane(link.id)}
+          >
+            {link.label}
+          </button>
+        ))}
+      </nav>
+      <div className="markets-surface-frame-body">{children}</div>
+    </div>
+  );
+}
+
+function openMarketSymbol(host: WebPackageHost, symbol: string): void {
+  selectMarketSymbol(symbol);
+  host.navigation.openWorkspacePane("markets");
+}
 
 function HostedMarketsSurface({ host, active }: { host: WebPackageHost; active?: boolean }) {
   const [snapshot, setSnapshot] = useState(() => host.store.getSnapshot());
@@ -29,14 +72,32 @@ function HostedMarketsSurface({ host, active }: { host: WebPackageHost; active?:
           }),
         }))
     : [];
-  return <MarketsSurface active={active} handoffOptions={handoffOptions} />;
+  return (
+    <MarketSurfaceFrame host={host} activeId="markets">
+      <MarketsSurface active={active} handoffOptions={handoffOptions} />
+    </MarketSurfaceFrame>
+  );
+}
+
+function HostedCompareSurface({ host, active }: { host: WebPackageHost; active?: boolean }) {
+  return (
+    <MarketSurfaceFrame host={host} activeId="markets.compare">
+      <MarketCompareSurface active={active} onOpen={(symbol) => openMarketSymbol(host, symbol)} />
+    </MarketSurfaceFrame>
+  );
+}
+
+function HostedPortfolioSurface({ host, active }: { host: WebPackageHost; active?: boolean }) {
+  return (
+    <MarketSurfaceFrame host={host} activeId="markets.portfolio">
+      <MarketPortfolioSurface active={active} onOpen={(symbol) => openMarketSymbol(host, symbol)} />
+    </MarketSurfaceFrame>
+  );
 }
 
 export default defineWebPackage((host) => () => {
-  const openSymbol = (symbol: string) => {
-    selectMarketSymbol(symbol);
-    host.navigation.openWorkspacePane("markets");
-  };
+  const openSymbol = (symbol: string) => openMarketSymbol(host, symbol);
+  const openPortfolio = () => host.navigation.openWorkspacePane("markets.portfolio");
 
   const off = [
     host.surfaces.register({
@@ -69,7 +130,7 @@ export default defineWebPackage((host) => () => {
       description: "Compare price performance and fundamentals across market assets.",
       capabilityId: "markets.compare",
       order: 53,
-      component: (props) => createElement(MarketCompareSurface, { active: props?.active, onOpen: openSymbol }),
+      component: (props) => createElement(HostedCompareSurface, { host, active: props?.active }),
       presentation: {
         kind: "workspace",
         defaultRatio: 0.68,
@@ -93,7 +154,7 @@ export default defineWebPackage((host) => () => {
       description: "Track holdings and build per-space market context without mixing currencies.",
       capabilityId: "markets.portfolio",
       order: 54,
-      component: (props) => createElement(MarketPortfolioSurface, { active: props?.active, onOpen: openSymbol }),
+      component: (props) => createElement(HostedPortfolioSurface, { host, active: props?.active }),
       presentation: {
         kind: "workspace",
         defaultRatio: 0.68,
@@ -183,6 +244,27 @@ export default defineWebPackage((host) => () => {
             },
           },
           render: (context) => <MarketNewsWidget context={context} />,
+        },
+        {
+          id: "markets.portfolio-summary",
+          title: "Portfolio",
+          description: "Current portfolio value and daily move grouped by quote currency.",
+          kind: "widget",
+          defaultSlot: "workspace.right",
+          supportedSlots: ["workspace.main", "workspace.right", "workspace.bottom", "workspace.floating"],
+          recommendedSize: { w: 5, h: 6 },
+          minSize: { w: 3, h: 3 },
+          maxSize: { w: 8, h: 12 },
+          audience: "standard",
+          scope: "workspace",
+          resizable: true,
+          duplicatable: false,
+          floating: true,
+          recommended: true,
+          defaultVisible: false,
+          render: (context) => (
+            <MarketPortfolioWidget context={context} onOpen={openSymbol} onOpenPortfolio={openPortfolio} />
+          ),
         },
       ],
     }),
