@@ -68,6 +68,11 @@ const supports = (provider: MarketProvider, capability: MarketProviderCapability
 const errorMessage = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
 
+const errorCode = (cause: unknown): string | undefined =>
+  cause && typeof cause === "object" && "code" in cause && typeof (cause as { code?: unknown }).code === "string"
+    ? (cause as { code: string }).code
+    : undefined;
+
 export class ProviderRegistry {
   private readonly providers: MarketProvider[] = [];
   private readonly health = new Map<string, ProviderHealth>();
@@ -135,11 +140,17 @@ export class ProviderRegistry {
 
     const errors: string[] = [];
     let attempted = 0;
+    let misses = 0;
+    let failures = 0;
+    let circuitSkipped = 0;
     for (const provider of candidates) {
       const health = this.requireHealth(provider.id);
       const capabilityState = this.requireCapabilityHealth(provider.id, capability);
       const now = this.now();
-      if ((capabilityState.circuitOpenUntil ?? 0) > now) continue;
+      if ((capabilityState.circuitOpenUntil ?? 0) > now) {
+        circuitSkipped += 1;
+        continue;
+      }
 
       attempted += 1;
       const started = now;
@@ -150,10 +161,20 @@ export class ProviderRegistry {
       } catch (cause) {
         const message = errorMessage(cause);
         errors.push(`${provider.id}: ${message}`);
+        if (errorCode(cause) === "not-found") {
+          misses += 1;
+          continue;
+        }
+        failures += 1;
         this.recordFailure(health, capabilityState, Math.max(0, this.now() - started), message);
       }
     }
 
+    if (attempted > 0 && misses === attempted && failures === 0 && circuitSkipped === 0) {
+      throw Object.assign(new Error(`no ${capability} provider has data for this request: ${errors.join("; ")}`), {
+        code: "not-found",
+      });
+    }
     if (attempted === 0) {
       throw Object.assign(new Error(`all ${capability} providers are temporarily unavailable`), {
         code: "unavailable",
@@ -190,14 +211,20 @@ export class ProviderRegistry {
         return { ok: true as const, value, providerId: provider.id };
       } catch (cause) {
         const message = errorMessage(cause);
+        if (errorCode(cause) === "not-found") {
+          return { ok: false as const, providerId: provider.id, message, miss: true as const };
+        }
         this.recordFailure(health, capabilityState, Math.max(0, this.now() - started), message);
-        return { ok: false as const, providerId: provider.id, message };
+        return { ok: false as const, providerId: provider.id, message, miss: false as const };
       }
     }));
     const successes = settled.filter((item) => item.ok).map((item) => ({ value: item.value, providerId: item.providerId }));
     if (successes.length > 0) return successes;
     const errors = settled.filter((item) => !item.ok).map((item) => `${item.providerId}: ${item.message}`);
-    throw Object.assign(new Error(`all ${capability} providers failed: ${errors.join("; ")}`), { code: "unavailable" });
+    const missesOnly = settled.every((item) => !item.ok && item.miss);
+    throw Object.assign(new Error(`${missesOnly ? `no ${capability} provider has data` : `all ${capability} providers failed`}: ${errors.join("; ")}`), {
+      code: missesOnly ? "not-found" : "unavailable",
+    });
   }
 
   private requireHealth(providerId: string): ProviderHealth {
