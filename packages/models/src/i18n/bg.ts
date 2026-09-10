@@ -115,6 +115,8 @@ export const bg: ModelsMessages = {
   "settings.modelspage.noMatches": "Няма съвпадения",
   "settings.modelspage.noModelsAvailable": "Няма налични модели",
   "settings.modelspage.noModelsYet": "No models yet — discover them or add one manually.",
+  "settings.modelspage.noProvidersYet": "Все още няма доставчици",
+  "settings.modelspage.noProvidersHint": "Използвайте „Добавяне на доставчик“, за да свържете един. Моделите ще се появят тук.",
   "settings.modelspage.oauthMethod": "OAuth",
   "settings.modelspage.openLoginPage": "Отваряне на страницата за вход",
   "settings.modelspage.orApiKey": "Или използвайте API ключ",
