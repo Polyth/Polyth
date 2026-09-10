@@ -106,15 +106,23 @@ export function marketsRoutes(
         return true;
       }
       try {
+        const sector = url.searchParams.get("sector")?.trim();
+        const changeMin = numberParam(url, "changeMin");
+        const marketCapMin = numberParam(url, "marketCapMin");
+        const volumeMin = numberParam(url, "volumeMin");
+        const sort = url.searchParams.get("sort");
+        const direction = url.searchParams.get("dir");
+        const offset = numberParam(url, "offset");
+        const limit = numberParam(url, "limit");
         const query: MarketScreenerQuery = {
-          ...(url.searchParams.get("sector")?.trim() ? { sector: url.searchParams.get("sector")!.trim() } : {}),
-          ...(numberParam(url, "changeMin") !== undefined ? { changeMin: numberParam(url, "changeMin") } : {}),
-          ...(numberParam(url, "marketCapMin") !== undefined ? { marketCapMin: numberParam(url, "marketCapMin") } : {}),
-          ...(numberParam(url, "volumeMin") !== undefined ? { volumeMin: numberParam(url, "volumeMin") } : {}),
-          ...(url.searchParams.get("sort") ? { sort: url.searchParams.get("sort") as MarketScreenerSort } : {}),
-          ...(url.searchParams.get("dir") ? { direction: url.searchParams.get("dir") as MarketScreenerDirection } : {}),
-          ...(numberParam(url, "offset") !== undefined ? { offset: numberParam(url, "offset") } : {}),
-          ...(numberParam(url, "limit") !== undefined ? { limit: numberParam(url, "limit") } : {}),
+          ...(sector ? { sector } : {}),
+          ...(changeMin !== undefined ? { changeMin } : {}),
+          ...(marketCapMin !== undefined ? { marketCapMin } : {}),
+          ...(volumeMin !== undefined ? { volumeMin } : {}),
+          ...(sort ? { sort: sort as MarketScreenerSort } : {}),
+          ...(direction ? { direction: direction as MarketScreenerDirection } : {}),
+          ...(offset !== undefined ? { offset } : {}),
+          ...(limit !== undefined ? { limit } : {}),
         };
         json(200, await screener.screen(query));
       } catch (cause) {
