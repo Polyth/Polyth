@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import Button from "../../../apps/web/src/components/ui/Button.tsx";
+import { Button, Menu } from "../../../apps/web/src/components/ui/index.ts";
 import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
 import type { CoachCommitmentDto, CoachGoalDto, CoachHomeDto } from "./api.ts";
 import type { CoachClient } from "./store.ts";
@@ -50,6 +50,13 @@ function CommitmentRow({
   const pending = busy.has(`commitment:${item.id}`);
   const estimate = formatEstimate(item.estimateMinutes);
   const when = formatWhen(item.dueAt ?? item.plannedFor);
+  const skipEntries = [
+    ["no-time", "No time", "No time"],
+    ["too-large", "Too large", "Too large"],
+    ["blocked", "Blocked", "Blocked"],
+    ["priorities-changed", "Priorities changed", "Priorities changed"],
+    ["no-reason", "Skip without reason", undefined],
+  ] as const;
   return (
     <div className={`coach-commitment${compact ? " coach-commitment--compact" : ""}`}>
       <div className="coach-commitment-copy">
@@ -59,9 +66,22 @@ function CommitmentRow({
         )}
       </div>
       <div className="coach-row-actions">
-        <Button size="sm" variant="ghost" disabled={pending} onClick={() => void client.skip(item.id)}>
-          Skip
-        </Button>
+        <Menu
+          label={`Why skip ${item.title}?`}
+          title="Why skip this?"
+          entries={skipEntries.map(([id, label, reason]) => ({
+            id,
+            label,
+            disabled: pending,
+            onSelect: () => void client.skip(item.id, reason),
+          }))}
+        >
+          {(trigger) => (
+            <Button {...trigger} size="sm" variant="ghost" disabled={pending}>
+              Skip
+            </Button>
+          )}
+        </Menu>
         <Button size="sm" disabled={pending} onClick={() => void client.complete(item.id)}>
           Done
         </Button>
