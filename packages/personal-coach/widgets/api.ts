@@ -19,6 +19,12 @@ export type CoachSettingsPatch = Partial<Pick<
   "tone" | "initiative" | "timeZone" | "challengeAssumptions"
 >>;
 
+export interface CoachResetDto {
+  revision: number;
+  resetAt: number;
+  profile: CoachProfileDto;
+}
+
 export interface CoachReminderSettingsDto {
   dailyCheckIn: { enabled: boolean; minuteOfDay: number };
   weeklyReview: { enabled: boolean; day: number; minuteOfDay: number };
@@ -154,6 +160,7 @@ export interface CoachApi {
   home(): Promise<CoachHomeDto>;
   settings(): Promise<CoachSettingsDto>;
   updateSettings(patch: CoachSettingsPatch): Promise<CoachProfileDto>;
+  resetState(): Promise<CoachResetDto>;
   reminders(): Promise<CoachRemindersDto>;
   updateReminders(patch: CoachReminderPatch): Promise<CoachRemindersDto>;
   completeCommitment(id: string): Promise<CoachCommitmentDto>;
@@ -177,6 +184,7 @@ export function createCoachApi(): CoachApi {
     home: () => api.get<CoachHomeDto>("/api/personal-coach/home"),
     settings: () => api.get<CoachSettingsDto>("/api/personal-coach/settings"),
     updateSettings: (patch) => api.put<CoachProfileDto>("/api/personal-coach/settings", patch),
+    resetState: () => api.post<CoachResetDto>("/api/personal-coach/reset", {}),
     reminders: () => api.get<CoachRemindersDto>("/api/personal-coach/reminders"),
     updateReminders: (patch) => api.put<CoachRemindersDto>("/api/personal-coach/reminders", patch),
     completeCommitment: (id) => api.post<CoachCommitmentDto>(
