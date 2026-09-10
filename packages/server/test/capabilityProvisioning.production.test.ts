@@ -105,8 +105,7 @@ const seedMcp = async (
 });
 
 const revisionDirs = (space: SpaceContext, projectId: string, cwd: string): string[] => {
-  const projectIdSafe = projectId.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80) || "project";
-  const projectKey = `${projectIdSafe}-${createHash("sha1").update(resolve(cwd)).digest("hex").slice(0, 8)}`;
+  const projectKey = createHash("sha256").update(JSON.stringify([projectId, resolve(cwd)])).digest("hex");
   const root = join(space.storageDir, "runtime", "opencode", projectKey, "revisions");
   if (!existsSync(root)) return [];
   return readdirSync(root);
@@ -155,6 +154,7 @@ test("generation lease A→B→C keeps revision A resources until generation ret
     desiredRevision: revA,
     capabilityIds: first.records.filter((row) => row.kind === "mcp-server").map((row) => row.capabilityId),
     outcome: "applied",
+    evidence: { stage: "connected", source: "test:simulated-native-connection" },
   });
   const dirsA = revisionDirs(space, "p", cwd);
   assert.ok(dirsA.length > 0, "revision A storage should exist after admission");
@@ -175,6 +175,7 @@ test("generation lease A→B→C keeps revision A resources until generation ret
     desiredRevision: revC,
     capabilityIds: third.records.filter((row) => row.kind === "mcp-server").map((row) => row.capabilityId),
     outcome: "applied",
+    evidence: { stage: "connected", source: "test:simulated-native-connection" },
   });
   await controller.reconcile(harness, ctx);
   const dirsAfterG2 = revisionDirs(space, "p", cwd);
@@ -390,6 +391,7 @@ test("pre-ack generation retains every unacknowledged staged revision until a ge
     desiredRevision: revC,
     capabilityIds: third.records.filter((row) => row.kind === "mcp-server" || row.kind === "tool").map((row) => row.capabilityId),
     outcome: "applied",
+    evidence: { stage: "invocable", source: "test:simulated-tool-invocation" },
   });
   await controller.reconcile(harness, ctx);
   dirs = revisionDirs(space, "p", cwd);
@@ -419,6 +421,7 @@ test("pre-ack generation retains every unacknowledged staged revision until a ge
     desiredRevision: revC,
     capabilityIds: third.records.filter((row) => row.kind === "mcp-server" || row.kind === "tool").map((row) => row.capabilityId),
     outcome: "applied",
+    evidence: { stage: "invocable", source: "test:simulated-tool-invocation" },
   });
   dirs = revisionDirs(space, "p", cwd);
   assert.ok(dirs.length > 0, "revision C storage remains after G1 retires");
@@ -446,6 +449,7 @@ test("failed OpenCode start leaves the previous live generation's resources and 
     desiredRevision: first.desiredRevision,
     capabilityIds: first.records.filter((row) => row.kind === "mcp-server").map((row) => row.capabilityId),
     outcome: "applied",
+    evidence: { stage: "connected", source: "test:simulated-native-connection" },
   });
   const overlayBefore = peekOpenCodeLaunchOverlay({ cwd, spaceId: space.spaceId, projectId: "p" });
   assert.ok(overlayBefore);
@@ -493,6 +497,7 @@ test("failed restart leaves the old generation valid with its old token and reso
     desiredRevision: first.desiredRevision,
     capabilityIds: first.records.filter((row) => row.kind === "mcp-server").map((row) => row.capabilityId),
     outcome: "applied",
+    evidence: { stage: "connected", source: "test:simulated-native-connection" },
   });
   const dirsBefore = revisionDirs(space, "p", cwd);
   await bumpMcpUrl(mcp, space, created.id, "https://b.example");
@@ -563,6 +568,7 @@ test("token lease survives while old generation is live", async () => {
     desiredRevision: first.desiredRevision,
     capabilityIds: first.records.filter((row) => row.kind === "mcp-server" || row.kind === "tool").map((row) => row.capabilityId),
     outcome: "applied",
+    evidence: { stage: "invocable", source: "test:simulated-tool-invocation" },
   });
   await bumpMcpUrl(mcp, space, created.id, "https://b.example");
   await controller.reconcile(harness, ctx);
@@ -578,6 +584,7 @@ test("token lease survives while old generation is live", async () => {
       .filter((row) => row.kind === "mcp-server" || row.kind === "tool")
       .map((row) => row.capabilityId),
     outcome: "applied",
+    evidence: { stage: "invocable", source: "test:simulated-tool-invocation" },
   });
   await controller.reconcile(harness, ctx);
   const retired = fakeGet(tokenA);
@@ -691,6 +698,7 @@ test("pending-restart stages one coalesced runtime-capabilities restart task", a
     desiredRevision: first.desiredRevision,
     capabilityIds: first.records.filter((row) => row.kind === "mcp-server").map((row) => row.capabilityId),
     outcome: "applied",
+    evidence: { stage: "connected", source: "test:simulated-native-connection" },
   });
   await bumpMcpUrl(mcp, space, created.id, "https://b.example");
   await controller.reconcile(harness, ctx);
@@ -698,7 +706,7 @@ test("pending-restart stages one coalesced runtime-capabilities restart task", a
   const third = await controller.reconcile(harness, ctx);
   const row = third.records.find((item) => item.kind === "mcp-server")!;
   assert.equal(row.status, "pending-restart");
-  assert.match(row.reason ?? "", /OpenCode runtime restart required/);
+  assert.match(row.reason ?? "", /Harness runtime restart required/);
   assert.equal(pending.list().count, 1);
   assert.equal(pending.list().changes[0]?.kind, "runtime-capabilities");
   const applied = await pending.applyAndRestart();
@@ -1294,6 +1302,7 @@ test("overlay staged for a pending-restart revision is what a successor spawn wo
     desiredRevision: first.desiredRevision,
     capabilityIds: first.records.filter((row) => row.kind === "mcp-server").map((row) => row.capabilityId),
     outcome: "applied",
+    evidence: { stage: "connected", source: "test:simulated-native-connection" },
   });
   // B is requested but the live generation is not restarted — records show
   // pending-restart, yet the private launch overlay a NEW spawn would read

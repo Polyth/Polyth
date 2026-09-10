@@ -257,6 +257,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   const onEditorSave = useCallback(() => {
     if (dirtyRef.current && !readOnlyRef.current) void saveRef.current();
   }, []);
+  const onRevealConsumed = useCallback(() => setReveal(null), []);
 
   const reload = async () => {
     if (!td) return;
@@ -577,7 +578,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
             authoritativeGeneration={snap.authoritativeGeneration}
             onSave={onEditorSave}
             reveal={reveal}
-            onRevealConsumed={() => setReveal(null)}
+            onRevealConsumed={onRevealConsumed}
           />
         </div>
       ) : previewKind === "markdown" && !editing ? (

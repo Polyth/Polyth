@@ -43,6 +43,7 @@ jobs:
             packages/server
             packages/tunnel
             packages/terminal
+            packages/markets
             apps/mobile
             apps/desktop
           )

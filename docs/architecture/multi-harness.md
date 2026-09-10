@@ -120,7 +120,7 @@ Capabilities below describe the Polyth adapters, not everything each native prod
 | OpenCode | Existing HTTP/SSE adapter. [Official docs](https://opencode.ai/docs/) | Registered behind the registry; existing native capability negotiation retained. Local descendant supervision added. Native source reads the managed project runtime's inventory. It does not scan arbitrary external OpenCode databases. Live turns and switching passed. |
 | Codex | `codex app-server`; installed CLI 0.153.4 and its generated protocol schemas. [App Server](https://developers.openai.com/codex/app-server) | Native thread/turn receipts, streaming text, shell/edit outcomes, permissions, model catalog, verified native resume and native MCP. No attachment translation, steering, questions, subagent UI, compaction API, usage/cost reporting or fork. Source imports CLI-origin threads in the same cwd; partial/paginated history is rejected instead of truncated silently. Live turns and switching passed. |
 | Claude Code | Public Agent SDK, pinned optional dependency 0.3.263; native CLI 2.1.261 in verification. [TypeScript SDK](https://code.claude.com/docs/en/agent-sdk/typescript), [sessions](https://code.claude.com/docs/en/agent-sdk/sessions) | SDK query, documented custom spawn hook, native auth/model catalog, text and tool outcomes, permission bridge and native MCP. Final-message delivery, not token streaming. Generation-only continuity; no general native-resume claim, attachments, steering, questions, subagents, usage/cost, compaction or fork. No source inventory shipped. Live turns and switching passed. |
-| Generic ACP | Explicit protocol v1 negotiation. [ACP v1 prompt turn](https://agentclientprotocol.com/protocol/v1/prompt-turn) | Shared transport, lifecycle, text streaming and permission choices. Admission requires native evidence; cancellation has no acknowledgement and remains unknown until terminal evidence/release. No v2 guessing, native load/resume, model selection, attachments, source reader, usage/cost, fork, compaction or MCP configuration. Protocol tests passed. |
+| Generic ACP | Explicit protocol v1 negotiation. [ACP v1 prompt turn](https://agentclientprotocol.com/protocol/v1/prompt-turn) | Shared transport, lifecycle, text streaming and permission choices. Admission requires native evidence; cancellation has no acknowledgement and remains unknown until terminal evidence/release. No v2 guessing, native load/resume, model selection, attachments, source reader, usage/cost, fork or compaction. MCP configuration is passed for supported transports; connection/invocation remains unverifiable without a profile-specific readback. Protocol tests passed. |
 | Cursor | `agent acp`. [Official ACP interface](https://cursor.com/docs/cli/acp) | Thin shared-ACP profile. Installed version 2026.09.02-c22c1a3 detected. Authentication status is unknown; manual selection only, excluded from Auto. Native ACP v1 handshake and owned shutdown passed; no paid ACP turn was run. |
 | fx | `fx acp`. [Official ACP interface](https://fx.sh/docs/using-fx/acp) | Thin shared-ACP profile and native sign-in hint. Not installed in the verification environment; no live execution claim. Authentication unknown; excluded from Auto. |
 | Grok Build | Official announcement describes ACP and headless CLI integration. [xAI announcement](https://x.ai/news/grok-build-cli) | Researched, not implemented. Exact stable ACP invocation/auth contracts were not verified sufficiently to ship a profile. |
@@ -132,6 +132,48 @@ The composer has one model trigger. Its picker hosts the harness choices as tabs
 Settings provide enabled/priority preferences, detection refresh, official setup links, available verified install/sign-in commands and diagnostics. Commands are shown for explicit “Run command” confirmation and then run in the existing terminal UI. Detection refreshes after terminal exit/window focus. Missing or broken optional providers do not stop server boot. Cursor/fx remain deliberately outside Auto until native authentication can be verified.
 
 ## Verification
+
+### Portable capability evidence
+
+The provisioning controller retains canonical scope and generation leases. Skills
+are revisioned private artifacts for Codex, Claude and OpenCode; generic ACP uses
+explicit prompt fallback. MCP configuration acceptance alone is `unverifiable`.
+Receipts carry an optional `evidence` with `stage` and a provider-owned `source`:
+`staged`, `discovered`, `connected`, or `invocable`. Skill discovery must match the
+expected private artifact. MCP connection does not establish tool invocation;
+production provisioning never calls arbitrary user tools as a probe. Old native
+success records without sufficient evidence are downgraded when read.
+
+OpenCode uses a private file through `OPENCODE_CONFIG`, because 1.18.29 does not
+discover `skills.paths` from the inline overlay. It reads `/skill` and `/mcp` on
+the captured runtime generation. An existing custom `OPENCODE_CONFIG` is rejected
+when private skills are staged: relocating its relative plugins/file references
+would change user configuration semantics. User repository files are not edited.
+See the [native config source](https://opencode.ai/docs/config/#custom-path).
+
+Model-free process conformance is opt-in via `POLYTH_NATIVE_CAPABILITY_TESTS=1` in
+the backend native capability tests. It uses temporary storage and fixture MCP
+servers. Protocol fakes and successful native lists are not paid model-turn
+evidence; unavailable native invocation APIs remain explicitly unverified.
+
+```sh
+POLYTH_NATIVE_CAPABILITY_TESTS=1 node --experimental-strip-types --test packages/backend-{codex,claude,opencode}/test/nativeCapabilities.test.ts
+```
+
+The model-free checks on 2026-09-10 passed with Codex 0.153.4, Claude Code
+2.1.265 / SDK 0.3.263, and OpenCode 1.18.29. All three discovered isolated private
+skills, removed them on replacement, and connected the fixture MCP server.
+Codex additionally invoked the deterministic fixture through
+`mcpServer/tool/call`; Claude and OpenCode did not prove native invocation.
+
+On the changes rebased onto `ab1370f7`, the combined contracts/runtime/backend/
+capability/switch suites passed 709 tests with 4 opt-in skips; the separate native
+run passed 5/5. `npm run build:web` passed. Contracts, Codex, Claude and ACP
+typechecks passed. OpenCode/server typecheck diagnostics matched an untouched
+`ab1370f7` checkout: `backend-opencode/src/serverEntry.ts:69`,
+`server/src/runtimeCatalog.ts:149`, and `server/src/smallModel.ts:114–115`.
+
+### Historical native journey
 
 The isolated native journey used canonical session `5d599e70-665c-4919-8ef7-4de67493e813` and cwd `/tmp/polyth-harness-workspace`:
 

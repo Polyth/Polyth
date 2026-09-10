@@ -1,0 +1,273 @@
+.personal-coach-root {
+  container-type: inline-size;
+  color: var(--text);
+  font-family: var(--ui-font-family);
+  min-width: 0;
+}
+
+.personal-coach-root :is(h2, h3, p) { margin: 0; }
+
+.personal-coach-root.coach-home {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding-block-end: var(--space-5);
+}
+
+.personal-coach-root .coach-loading {
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.personal-coach-root .coach-inline-error {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--red);
+  border-radius: var(--radius-card);
+  color: var(--red);
+  font-size: var(--font-meta);
+}
+
+.personal-coach-root .coach-focus-section,
+.personal-coach-root .coach-section {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.personal-coach-root .coach-section-label,
+.personal-coach-root .coach-widget-label,
+.personal-coach-root .coach-kicker {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.personal-coach-root .coach-focus {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-surface);
+}
+
+.personal-coach-root .coach-focus h2 {
+  max-width: 28ch;
+  font-size: clamp(var(--subheader-font-size), 5cqi, var(--font-title));
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.personal-coach-root .coach-focus-meta,
+.personal-coach-root .coach-row-actions,
+.personal-coach-root .coach-checkin-summary,
+.personal-coach-root .coach-widget-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.personal-coach-root .coach-focus-meta,
+.personal-coach-root .coach-meta,
+.personal-coach-root .coach-quiet {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.personal-coach-root .coach-attention,
+.personal-coach-root .coach-insight {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  background: var(--surface-overlay);
+  border-left: 2px solid var(--amber);
+  border-radius: var(--radius-card);
+}
+
+.personal-coach-root .coach-attention span,
+.personal-coach-root .coach-insight p {
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.personal-coach-root .coach-review-due {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+}
+
+.personal-coach-root .coach-review-due > div {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.personal-coach-root .coach-review-due span {
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.personal-coach-root .coach-section-head,
+.personal-coach-root .coach-routine-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.personal-coach-root .coach-section-head h3 {
+  font-size: var(--subheader-font-size);
+}
+
+.personal-coach-root .coach-list,
+.personal-coach-root .coach-goal-list,
+.personal-coach-root .coach-routine-list {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.personal-coach-root .coach-commitment,
+.personal-coach-root .coach-goal-row,
+.personal-coach-root .coach-routine-row {
+  min-width: 0;
+  padding: var(--space-2) 0;
+}
+
+.personal-coach-root .coach-commitment {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.personal-coach-root .coach-commitment:last-child { border-bottom: 0; }
+
+.personal-coach-root .coach-commitment-copy,
+.personal-coach-root .coach-goal-row > div {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.personal-coach-root .coach-commitment-copy strong,
+.personal-coach-root .coach-goal-row strong,
+.personal-coach-root .coach-widget-focus {
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+.personal-coach-root .coach-goal-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.personal-coach-root .coach-goal-mark {
+  width: 6px;
+  height: 6px;
+  margin-top: 0.48em;
+  border-radius: var(--radius-round);
+  background: var(--accent);
+}
+
+.personal-coach-root .coach-checkin {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: end;
+}
+
+.personal-coach-root .coach-checkin label {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(56px, 1fr) 1.5em;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+}
+
+.personal-coach-root .coach-checkin input[type="range"] {
+  min-width: 56px;
+  accent-color: var(--accent);
+}
+
+.personal-coach-root .coach-footer {
+  display: flex;
+  justify-content: flex-start;
+  padding-top: var(--space-1);
+}
+
+.personal-coach-root.coach-widget {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.personal-coach-root .coach-widget-focus {
+  font-size: var(--subheader-font-size);
+}
+
+.personal-coach-root .coach-widget-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.personal-coach-root .coach-widget .coach-list {
+  overflow: auto;
+}
+
+.personal-coach-root .coach-widget .coach-commitment--compact {
+  padding-block: var(--space-1);
+}
+
+.personal-coach-root .coach-checkin--condensed {
+  grid-template-columns: 1fr;
+  align-items: stretch;
+}
+
+.personal-coach-root .coach-checkin-summary--condensed {
+  justify-content: space-between;
+}
+
+@container (max-width: 420px) {
+  .personal-coach-root .coach-commitment,
+  .personal-coach-root .coach-review-due {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .personal-coach-root .coach-row-actions {
+    align-self: stretch;
+    justify-content: flex-end;
+  }
+
+  .personal-coach-root .coach-checkin {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .personal-coach-root * { scroll-behavior: auto; }
+}

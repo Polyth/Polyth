@@ -689,9 +689,9 @@ test("OpenCode spawn receipt promotes pending overlay without rewriting appliedR
     desiredRevision: staged.desiredRevision,
     capabilityIds: [rec.capabilityId],
     outcome: "applied",
+    evidence: { stage: "connected", source: "test:simulated-native-connection" },
   });
   const after = controller.status(ctx, "opencode")[0]!.records.find((row) => row.capabilityId === rec.capabilityId)!;
   assert.equal(after.status, "applied");
   assert.equal(after.appliedRevision, rec.desiredRevision);
 });
-

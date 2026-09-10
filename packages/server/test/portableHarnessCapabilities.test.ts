@@ -70,19 +70,25 @@ for (const adapter of textAdapters) {
     const provisioner = adapter.create();
     t.after(() => provisioner.release?.(context));
     const desired = registryFor().resolve(context);
-    const plan = planHarnessCapabilities(adapter.id, desired, await provisioner.support(context), context);
+    const support = await provisioner.support(context);
+    const plan = planHarnessCapabilities(adapter.id, desired, support, context);
     const result = await provisioner.apply(context, plan, secrets);
-    for (const kind of ["skill", "context"]) {
-      const item = result.records.find((row) => row.kind === kind);
-      assert.equal(item?.mode, "prompt");
-      assert.equal(item?.status, "pending");
-    }
+    const skill = result.records.find((row) => row.kind === "skill");
+    const contextRecord = result.records.find((row) => row.kind === "context");
+    assert.equal(skill?.mode, support.kinds.skill?.modes[0]);
+    assert.notEqual(skill?.status, "applied");
+    assert.equal(contextRecord?.mode, "prompt");
+    assert.equal(contextRecord?.status, "pending");
     assert.equal(adapter.text(), renderCapabilityText(plan));
     assert.match(adapter.text() ?? "", /Canonical instructions\./);
-    assert.match(adapter.text() ?? "", /Check the invariants before changing code\./);
+    if (skill?.mode === "prompt") assert.match(adapter.text() ?? "", /Check the invariants before changing code\./);
+    else assert.doesNotMatch(adapter.text() ?? "", /Check the invariants before changing code\./);
     assert.match(adapter.text() ?? "", /Project A context\./);
     assert.doesNotMatch(adapter.text() ?? "", /stdio-secret|http-secret|not-exported/);
-    assert.deepEqual(result.records.map((row) => row.capabilityId), desired.map((row) => row.id));
+    assert.deepEqual(
+      result.records.map((row) => row.capabilityId).sort(),
+      desired.map((row) => row.id).sort(),
+    );
     assert.deepEqual(adapter.overlays.peek(context, adapter.id)?.capabilityIds,
       result.records.filter((row) => row.status === "pending").map((row) => row.capabilityId));
   });
@@ -130,7 +136,9 @@ for (const adapter of textAdapters) {
     const support = await provisioner.support(context);
     const first = planHarnessCapabilities(adapter.id, registryFor().resolve(context), support, context);
     await provisioner.apply(context, first, secrets);
-    assert.match(adapter.text() ?? "", /Check the invariants/);
+    const skill = first.items.find((item) => item.capability.kind === "skill");
+    if (skill?.mode === "prompt") assert.match(adapter.text() ?? "", /Check the invariants/);
+    else assert.doesNotMatch(adapter.text() ?? "", /Check the invariants/);
     const next = planHarnessCapabilities(adapter.id,
       registryFor(descriptors.filter((row) => row.kind !== "skill")).resolve(context), support, context);
     await provisioner.apply(context, next, secrets);

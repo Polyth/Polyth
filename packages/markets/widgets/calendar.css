@@ -1,0 +1,227 @@
+.markets-calendar {
+  container-type: inline-size;
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+  color: var(--text);
+}
+
+.markets-calendar-header,
+.markets-calendar-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--hair);
+}
+
+.markets-calendar-header {
+  justify-content: space-between;
+}
+
+.markets-calendar-header > div,
+.markets-calendar-actions,
+.markets-calendar-toolbar > div {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.markets-calendar button,
+.markets-calendar select {
+  min-height: var(--control-h-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-label);
+}
+
+.markets-calendar button {
+  padding: 0 var(--control-pad-x-sm);
+  cursor: pointer;
+}
+
+.markets-calendar button:hover:not(:disabled),
+.markets-calendar button[aria-pressed="true"],
+.markets-calendar button[aria-selected="true"] {
+  background: var(--surface-overlay-hover);
+  color: var(--text);
+}
+
+.markets-calendar button[aria-pressed="true"],
+.markets-calendar button[aria-selected="true"] {
+  border-color: var(--accent-line);
+  background: var(--accent-wash);
+}
+
+.markets-calendar button:focus-visible,
+.markets-calendar select:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.markets-calendar button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.markets-calendar-toolbar {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.markets-calendar-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.markets-calendar-toolbar select {
+  min-width: 92px;
+  padding: 0 var(--control-pad-x-sm);
+  border-color: var(--control-border);
+  background: var(--input-bg);
+  color: var(--text);
+}
+
+.markets-calendar-cache {
+  margin-left: auto;
+}
+
+.markets-calendar-table-wrap {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.markets-calendar-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: var(--font-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.markets-calendar-earnings {
+  min-width: 520px;
+}
+
+.markets-calendar-table th,
+.markets-calendar-table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--hair);
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.markets-calendar-table thead th {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  background: var(--surface-overlay);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.035em;
+}
+
+.markets-calendar-table tbody tr:hover {
+  background: var(--surface-overlay-hover);
+}
+
+.markets-calendar-table td:nth-child(4) {
+  width: 100%;
+  white-space: normal;
+}
+
+.markets-calendar-earnings td:nth-child(4) {
+  width: auto;
+}
+
+.markets-calendar-table th[scope="row"] button {
+  padding-inline: 0;
+  color: var(--text);
+  font-family: var(--mono);
+  font-weight: 700;
+}
+
+.markets-calendar-impact {
+  display: inline-flex;
+  min-width: 58px;
+  justify-content: center;
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.markets-calendar-impact.high {
+  background: var(--red-wash);
+  color: var(--red);
+}
+
+.markets-calendar-impact.medium {
+  background: var(--amber-wash);
+  color: var(--text-dim);
+}
+
+.markets-calendar-notice,
+.markets-calendar-status,
+.markets-calendar-empty {
+  padding: var(--space-3);
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.markets-calendar-notice {
+  border-bottom: 1px solid var(--hair);
+  background: var(--amber-wash);
+  color: var(--text-dim);
+}
+
+.markets-calendar-status {
+  border-top: 1px solid var(--hair);
+}
+
+.markets-calendar-empty {
+  text-align: center;
+}
+
+@container (max-width: 620px) {
+  .markets-calendar-header,
+  .markets-calendar-toolbar {
+    padding-inline: var(--space-2);
+  }
+
+  .markets-calendar-toolbar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .markets-calendar-cache {
+    width: 100%;
+    margin-left: 0;
+  }
+}
+
+@container (max-width: 420px) {
+  .markets-calendar-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .markets-calendar-header > div,
+  .markets-calendar-actions {
+    width: 100%;
+  }
+
+  .markets-calendar-header button {
+    flex: 1;
+  }
+}

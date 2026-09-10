@@ -429,6 +429,10 @@ export function createAcpRuntime(
                     capabilityIds: staged.capabilityIds,
                     outcome: "unverifiable",
                     reason,
+                    evidence: {
+                        stage: "staged",
+                        source: `${reason}; ACP does not expose authoritative connected or tool invocation evidence`,
+                    },
                 });
             }
             return result;

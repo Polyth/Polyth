@@ -8,6 +8,7 @@ import type {
   AgentCapabilityDescriptor,
   CapabilitySecretResolver,
   HarnessCapabilityApplicationReceipt,
+  HarnessCapabilityEvidenceStage,
   HarnessCapabilityRecord,
   HarnessCapabilityStatusDto,
   HarnessCapabilityTargetLifetime,
@@ -124,8 +125,62 @@ const sanitize = (record: HarnessCapabilityRecord): HarnessCapabilityRecord => {
   const reason = record.reason
     ? redactSecrets(record.reason.replace(/Bearer\s+\S+/gi, "Bearer [redacted]")).slice(0, 280)
     : undefined;
-  return { ...record, ...(reason ? { reason } : {}) };
+  const evidence = record.evidence && evidenceStage(record.evidence.stage)
+    && typeof record.evidence.source === "string" && record.evidence.source.trim().length > 0
+    ? {
+      stage: record.evidence.stage,
+      source: redactSecrets(record.evidence.source.trim().replace(/Bearer\s+\S+/gi, "Bearer [redacted]")).slice(0, 280),
+    }
+    : undefined;
+  const { evidence: _evidence, ...withoutEvidence } = record;
+  return {
+    ...withoutEvidence,
+    ...(reason ? { reason } : {}),
+    ...(evidence ? { evidence } : {}),
+  };
 };
+
+const evidenceStage = (value: unknown): value is HarnessCapabilityEvidenceStage =>
+  value === "staged" || value === "discovered" || value === "connected" || value === "invocable";
+
+const positiveEvidenceRequired = (record: Pick<HarnessCapabilityRecord, "capabilityId" | "kind" | "mode">): boolean =>
+  !record.capabilityId.startsWith("polyth.mcp.retired.")
+  && record.mode !== "prompt"
+  && record.mode !== "unsupported"
+  && (record.kind === "mcp-server" || record.kind === "skill" || record.kind === "tool");
+
+const promptEvidenceRequired = (record: Pick<HarnessCapabilityRecord, "mode">): boolean =>
+  record.mode === "prompt";
+
+const evidenceRank = (stage: HarnessCapabilityEvidenceStage): number =>
+  ({ staged: 0, discovered: 1, connected: 2, invocable: 3 }[stage]);
+
+const minimumEvidenceStage = (record: Pick<HarnessCapabilityRecord, "kind">): HarnessCapabilityEvidenceStage =>
+  record.kind === "tool" ? "invocable" : record.kind === "mcp-server" ? "connected" : "discovered";
+
+const sufficientEvidence = (
+  record: Pick<HarnessCapabilityRecord, "capabilityId" | "kind" | "mode">,
+  evidence: { stage: HarnessCapabilityEvidenceStage } | undefined,
+): boolean => Boolean(evidence && positiveEvidenceRequired(record)
+  && evidenceRank(evidence.stage) >= evidenceRank(minimumEvidenceStage(record)));
+
+const honestRecord = (record: HarnessCapabilityRecord): HarnessCapabilityRecord => {
+  const clean = sanitize(record);
+  if (clean.status !== "applied" || sufficientEvidence(clean, clean.evidence)) return clean;
+  if (promptEvidenceRequired(clean)) {
+    return { ...clean, status: "unverifiable", reason: clean.reason ?? "Prompt projection was staged; native model consumption is not observable" };
+  }
+  if (positiveEvidenceRequired(clean)) {
+    return { ...clean, status: "unverifiable", reason: clean.reason ?? "Capability application lacks sufficient authoritative evidence" };
+  }
+  return clean;
+};
+
+const stagePendingRecord = (record: HarnessCapabilityRecord): HarnessCapabilityRecord =>
+  (record.status === "pending" || record.status === "pending-restart")
+    && record.mode !== "unsupported" && !record.evidence
+    ? { ...record, evidence: { stage: "staged", source: "polyth:provisioning" } }
+    : record;
 
 const rankId = (id: string): string => {
   if (id === instructionId) return "0";
@@ -180,6 +235,7 @@ const promoteRestartIfLive = (
         status: prior.status,
         ...(prior.appliedRevision ? { appliedRevision: prior.appliedRevision } : {}),
         ...(prior.reason ? { reason: prior.reason } : {}),
+        ...(prior.evidence ? { evidence: prior.evidence } : {}),
       };
     }
     if (record.capabilityId.startsWith("polyth.mcp.retired.") && liveGeneration) {
@@ -217,6 +273,9 @@ const mergePendingRevision = (
     const appliedRevision = prior?.appliedRevision;
     const copy = { ...record };
     delete copy.appliedRevision;
+    // A newer capability revision must not inherit positive evidence from the
+    // prior revision. Evidence supplied for this fresh record remains valid.
+    if (prior && prior.desiredRevision !== record.desiredRevision) delete copy.evidence;
     return appliedRevision ? { ...copy, appliedRevision } : copy;
   });
 
@@ -474,11 +533,12 @@ export function createCapabilityProvisioningController(opts: {
     const previousRow = statuses.find((row) => provisioningTargetKey(row.target) === provisioningTargetKey(target))
       ?? statuses.find((row) => sameLogicalTarget(row.target, target));
     const storedTarget = target.authorityId || target.generation !== undefined ? target : previousRow?.target ?? target;
+    const previousRecords = previousRow?.records.map(honestRecord);
     const records = promoteRestartIfLive(
-      previousRow?.records,
-      mergePendingRevision(previousRow?.records, next),
+      previousRecords,
+      mergePendingRevision(previousRecords, next),
       storedTarget.generation !== undefined,
-    ).map(sanitize);
+    ).map(honestRecord).map(stagePendingRecord);
     statuses = [
       ...statuses.filter((row) => row !== previousRow && !sameLogicalTarget(row.target, storedTarget)
         && provisioningTargetKey(row.target) !== provisioningTargetKey(storedTarget)),
@@ -777,6 +837,45 @@ export function createCapabilityProvisioningController(opts: {
     } else if (storedGen !== undefined && (receiptGen === undefined || receiptGen < storedGen)) return;
     const matchesCurrentBundle = !receipt.desiredRevision || receipt.desiredRevision === row.desiredRevision;
     const ids = new Set(receipt.capabilityIds);
+    const generationChanged = receipt.outcome !== "failed"
+      && receiptGen !== undefined
+      && (storedGen === undefined || receiptGen !== storedGen || (receiptAuth !== undefined && receiptAuth !== storedAuth));
+    const resetForGeneration = (record: HarnessCapabilityRecord): HarnessCapabilityRecord => {
+      if (!generationChanged || record.capabilityId.startsWith("polyth.mcp.retired.")) return record;
+      if (record.status === "pending-restart") {
+        const { evidence: _evidence, ...withoutEvidence } = record;
+        return stagePendingRecord(withoutEvidence);
+      }
+      if (record.status !== "applied" && record.status !== "unverifiable") return record;
+      const { evidence: _evidence, ...withoutEvidence } = record;
+      return stagePendingRecord({
+        ...withoutEvidence,
+        status: "pending",
+        reason: "Awaiting evidence from the current runtime generation",
+      });
+    };
+    const receiptEvidence = receipt.evidence && evidenceStage(receipt.evidence.stage)
+      && typeof receipt.evidence.source === "string" && receipt.evidence.source.trim().length > 0
+      ? {
+        stage: receipt.evidence.stage,
+        source: redactSecrets(receipt.evidence.source.trim().replace(/Bearer\s+\S+/gi, "Bearer [redacted]")).slice(0, 280),
+      }
+      : undefined;
+    const outcomeFor = (record: HarnessCapabilityRecord): HarnessCapabilityApplicationReceipt["outcome"] => {
+      if (receipt.outcome !== "applied") return receipt.outcome;
+      // Prompt delivery only proves that text was staged. Native MCP/skill
+      // admission needs an explicit observation before it can be green.
+      if (promptEvidenceRequired(record)) return "unverifiable";
+      if (positiveEvidenceRequired(record) && !sufficientEvidence(record, receiptEvidence)) return "unverifiable";
+      return "applied";
+    };
+    const reasonFor = (record: HarnessCapabilityRecord, outcome: HarnessCapabilityApplicationReceipt["outcome"]): string | undefined => {
+      if (receipt.reason) return receipt.reason;
+      if (outcome !== "unverifiable" || receipt.outcome !== "applied") return record.reason;
+      if (promptEvidenceRequired(record)) return "Prompt projection was staged; native model consumption is not observable";
+      if (positiveEvidenceRequired(record)) return "Capability application lacks sufficient authoritative evidence";
+      return record.reason;
+    };
     const settleNegativeAdmission = (records: HarnessCapabilityRecord[]): HarnessCapabilityRecord[] => {
       const retiredIds = new Set(records
         .filter((record) => record.capabilityId.startsWith("polyth.mcp.retired."))
@@ -804,6 +903,7 @@ export function createCapabilityProvisioningController(opts: {
       });
     };
     if (receipt.outcome !== "failed") {
+      if (!matchesCurrentBundle && generationChanged) row.records = row.records.map(resetForGeneration);
       bindLeaseGeneration(targetKey, receipt.desiredRevision || row.desiredRevision, receiptAuth, receiptGen, row.desiredRevision);
       if (storedAuth && receiptAuth && storedAuth !== receiptAuth) retireAuthority(targetKey, storedAuth);
       row.target = {
@@ -837,6 +937,7 @@ export function createCapabilityProvisioningController(opts: {
     }
     if (receipt.outcome !== "failed" && ids.size === 0) {
       if (matchesCurrentBundle) row.records = settleNegativeAdmission(row.records);
+      if (generationChanged) row.records = row.records.map(resetForGeneration);
       persist();
       return;
     }
@@ -844,25 +945,23 @@ export function createCapabilityProvisioningController(opts: {
     statuses = statuses.filter((item) => item === row || provisioningTargetKey(item.target) !== materializedKey);
     if (receipt.outcome !== "failed" && matchesCurrentBundle) row.records = settleNegativeAdmission(row.records);
     row.records = row.records.flatMap((record) => {
-      if (
-        receipt.outcome !== "failed"
-        && matchesCurrentBundle
-        && record.status === "pending-restart"
-        && restartSensitive(record)
-        && ids.size
-        && !ids.has(record.capabilityId)
-      ) return [];
-      if (ids.size && !ids.has(record.capabilityId)) return [record];
+      if (ids.size && !ids.has(record.capabilityId)) {
+        return [resetForGeneration(record)];
+      }
       if (record.status === "unsupported" || record.status === "failed") return [record];
       if (receipt.outcome === "failed") {
         if (!matchesCurrentBundle) return [record];
-        return [sanitize({ ...record, status: "failed", reason: receipt.reason ?? record.reason })];
+        const { evidence: _evidence, ...withoutEvidence } = record;
+        return [sanitize({ ...withoutEvidence, status: "failed", reason: receipt.reason ?? record.reason })];
       }
+      const outcome = outcomeFor(record);
+      const { evidence: _previousEvidence, ...withoutEvidence } = record;
       return [sanitize({
-        ...record,
-        status: receipt.outcome,
+        ...withoutEvidence,
+        status: outcome,
         appliedRevision: record.desiredRevision,
-        reason: receipt.reason ?? record.reason,
+        reason: reasonFor(record, outcome),
+        ...(receiptEvidence ? { evidence: receiptEvidence } : {}),
       })];
     });
     persist();
@@ -1023,7 +1122,7 @@ export function createCapabilityProvisioningController(opts: {
           return {
             harnessId: provider.descriptor.id,
             desiredRevision: row?.desiredRevision ?? "",
-            records: (row?.records ?? []).map(sanitize),
+            records: (row?.records ?? []).map(honestRecord),
             ...(row?.target ? { target: row.target } : {}),
           };
         });

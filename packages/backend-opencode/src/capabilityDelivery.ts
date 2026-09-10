@@ -3,6 +3,7 @@ import type {
   AgentRuntime,
   HarnessCapabilityApplicationReceipt,
   HarnessContext,
+  HarnessProvisioningTarget,
   RuntimeEndpoint,
 } from "@polyth/contracts";
 import { acknowledgeCapabilityApplication } from "@polyth/harness-runtime";
@@ -16,6 +17,53 @@ interface OpenCodeCapabilityDelivery {
 }
 
 const configured = new WeakSet<AgentRuntime>();
+
+/** Read only from the captured physical generation. No probe invokes user tools. */
+export async function verifyOpenCodeCapabilities(
+  overlay: OpenCodeLaunchOverlay,
+  target: HarnessProvisioningTarget,
+  read: (path: string) => Promise<unknown>,
+  acknowledge: (receipt: HarnessCapabilityApplicationReceipt) => void = acknowledgeCapabilityApplication,
+): Promise<void> {
+  const receipt = (ids: string[], outcome: HarnessCapabilityApplicationReceipt["outcome"],
+    reason: string, evidence: HarnessCapabilityApplicationReceipt["evidence"]) => {
+    if (ids.length) acknowledge({ target, desiredRevision: overlay.desiredRevision, capabilityIds: ids, outcome, reason, evidence });
+  };
+  const skills = overlay.skills ?? [];
+  if (skills.length) {
+    try {
+      const result = await read("/skill");
+      if (!Array.isArray(result)) throw new Error("unsupported skill listing");
+      for (const skill of skills) {
+        const found = result.some((row) => row && typeof row === "object"
+          && row.name === skill.name && row.location === skill.path);
+        receipt([skill.capabilityId], found ? "applied" : "failed",
+          found ? "Native OpenCode skill discovered at the expected private path" : "Native OpenCode skill missing or shadowed",
+          { stage: found ? "discovered" : "staged", source: "opencode:/skill" });
+      }
+    } catch {
+      receipt(skills.map((skill) => skill.capabilityId), "unverifiable", "OpenCode native skill listing unavailable",
+        { stage: "staged", source: "opencode:launch" });
+    }
+  }
+  const servers = Object.entries(overlay.mcpNames ?? {});
+  if (servers.length) {
+    try {
+      const result = await read("/mcp");
+      if (!result || typeof result !== "object" || Array.isArray(result)) throw new Error("unsupported MCP status");
+      for (const [id, name] of servers) {
+        const state = (result as Record<string, { status?: string }>)[name]?.status;
+        const connected = state === "connected";
+        receipt([id], connected ? "applied" : "failed",
+          connected ? "OpenCode reports MCP connected; tool invocation has not been verified" : "OpenCode did not report MCP connected",
+          { stage: connected ? "connected" : "staged", source: "opencode:/mcp" });
+      }
+    } catch {
+      receipt(servers.map(([id]) => id), "unverifiable", "OpenCode MCP status unavailable",
+        { stage: "staged", source: "opencode:launch" });
+    }
+  }
+}
 
 const appendCapabilityText = (text: string, projection: string): string =>
   text.trim() ? `${text}\n\n${projection}` : projection;

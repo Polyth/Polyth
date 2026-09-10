@@ -21,6 +21,7 @@ import goals from "../../../packages/goals/src/serverEntry.ts";
 import homeAssistant from "../../../packages/home-assistant/src/serverEntry.ts";
 import hotkeys from "../../../packages/hotkeys/src/serverEntry.ts";
 import knowledge from "../../../packages/knowledge/src/serverEntry.ts";
+import markets from "../../../packages/markets/src/serverEntry.ts";
 import models from "../../../packages/models/src/serverEntry.ts";
 import multirun from "../../../packages/multirun/src/serverEntry.ts";
 import permissions from "../../../packages/permissions/src/serverEntry.ts";
@@ -85,6 +86,7 @@ export const desktopServerPackages = [
   entry("home-assistant", { name: "Home Assistant", description: "Home Assistant entities and controls.", core: false, enabled: false, settingsGroup: "Customize", icon: "🏠", hasSettings: true }, homeAssistant),
   entry("hotkeys", { name: "Shortcuts", description: "Keyboard shortcut configuration and runtime registration.", core: true, enabled: true, settingsGroup: "Workspace", icon: "⌨", hasSettings: true }, hotkeys),
   entry("knowledge", { name: "Knowledge", description: "Project notes, plans, and reusable context.", core: false, enabled: true, settingsGroup: "Workspace", icon: "📚", hasSettings: false }, knowledge),
+  entry("markets", { name: "Markets", description: "Fast market research, watchlists, and agent-ready financial context.", core: false, enabled: true, settingsGroup: "Workspace", icon: "↗", hasSettings: false }, markets),
   entry("models", { name: "Models", description: "Harness-qualified model selection, presentation, and favorites.", core: true, enabled: true, settingsGroup: "Engineering", hasSettings: false }, models),
   entry("multirun", { name: "Multirun", description: "Run prompts across multiple models.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⑂", hasSettings: false }, multirun),
   entry("opencode", {"name": "OpenCode", "description": "OpenCode-native roles and runtime configuration surfaces.", "core": true, "enabled": true, "hasSettings": false}, opencode),
