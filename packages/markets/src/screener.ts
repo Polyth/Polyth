@@ -64,7 +64,8 @@ export function normalizeScreenerQuery(query: MarketScreenerQuery): Required<Pic
   }
   const sector = query.sector?.trim();
   if (sector && sector.length > 80) invalid("screener sector is too long");
-  return { ...query, ...(sector ? { sector } : {}), sort, direction, offset, limit };
+  const { sector: _sector, ...rest } = query;
+  return { ...rest, ...(sector ? { sector } : {}), sort, direction, offset, limit };
 }
 
 export function screenMarketUniverse(rows: readonly MarketUniverseRow[], query: MarketScreenerQuery = {}): Omit<MarketScreenerPage, "generatedAt" | "cache" | "revalidating"> {
