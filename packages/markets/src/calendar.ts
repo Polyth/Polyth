@@ -57,12 +57,18 @@ export function normalizeCalendarSymbols(symbols: readonly string[]): string[] {
 export class MarketCalendarService {
   private readonly economicCache: SwrCache<MarketEconomicEvent[]>;
   private readonly earningsCache: SwrCache<MarketEarningsCalendarEntry[]>;
+  private readonly economicLoader: MarketEconomicCalendarLoader;
+  private readonly earningsLoader: MarketEarningsCalendarLoader;
+  private readonly now: () => number;
 
   constructor(
-    private readonly economicLoader: MarketEconomicCalendarLoader,
-    private readonly earningsLoader: MarketEarningsCalendarLoader,
-    private readonly now: () => number = Date.now,
+    economicLoader: MarketEconomicCalendarLoader,
+    earningsLoader: MarketEarningsCalendarLoader,
+    now: () => number = Date.now,
   ) {
+    this.economicLoader = economicLoader;
+    this.earningsLoader = earningsLoader;
+    this.now = now;
     this.economicCache = new SwrCache(this.now);
     this.earningsCache = new SwrCache(this.now);
   }

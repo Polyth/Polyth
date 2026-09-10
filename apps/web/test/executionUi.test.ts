@@ -59,6 +59,27 @@ test("shell previews remove setup noise without losing the useful command", () =
   );
 });
 
+test("shell-backed repository inspection is presented by semantic action", () => {
+  const searchTool = tool({
+    input: { command: "/bin/bash -lc 'rg -n -C 12 -S \"harnessTransition\" packages/server/test/harnessSwitch.test.ts'" },
+  });
+  const search = executionPresentation(searchTool);
+  assert.equal(search.kind, "search");
+  assert.equal(search.label, "Search");
+  assert.equal(search.preview, 'rg -n -C 12 -S "harnessTransition" packages/server/test/harnessSwitch.test.ts');
+
+  const readTool = tool({
+    input: { command: "/bin/bash -lc \"sed -n '1,185p' packages/server/test/harnessSwitch.test.ts\"" },
+  });
+  const read = executionPresentation(readTool);
+  assert.equal(read.kind, "read");
+  assert.equal(read.label, "Read");
+  assert.equal(read.preview, "sed -n '1,185p' packages/server/test/harnessSwitch.test.ts");
+
+  assert.equal(executionPresentation(tool({ input: { command: "sed -i 's/a/b/' file.ts" } })).kind, "shell");
+  assert.equal(executionGroupLabel([searchTool, readTool]), "Repository inspection");
+});
+
 test("file, URL, edit, search, MCP, and subagent previews are semantic", () => {
   assert.equal(
     middleTruncatePath("apps/web/src/components/workspace/very/deep/Composer.tsx", 38),
