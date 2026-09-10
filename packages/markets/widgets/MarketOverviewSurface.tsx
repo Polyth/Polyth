@@ -38,7 +38,10 @@ const change = (value?: number): string => value === undefined
 const macroValue = (value: number, unit: "percent" | "percentage-point"): string =>
   unit === "percentage-point" ? `${value >= 0 ? "+" : ""}${value.toFixed(2)} pp` : `${value.toFixed(2)}%`;
 
-function handoffText(macro: MarketMacroSnapshot | null, crypto: MarketDataResult<MarketQuote[]> | null): string {
+export function buildOverviewHandoffText(
+  macro: MarketMacroSnapshot | null,
+  crypto: MarketDataResult<MarketQuote[]> | null,
+): string {
   const evidence = {
     macroGeneratedAt: macro?.generatedAt,
     cryptoCachedAt: crypto?.cachedAt,
@@ -50,7 +53,7 @@ function handoffText(macro: MarketMacroSnapshot | null, crypto: MarketDataResult
   return [
     "Analyze the current macro and crypto market snapshot. Identify what is materially notable, cross-asset tensions, risk-on/risk-off signals, and what deserves follow-up research. Do not invent causal explanations from price moves alone.",
     "",
-    untrustedMarketDataBlock("macro and crypto snapshot", JSON.stringify(evidence, null, 2)),
+    ...untrustedMarketDataBlock("macro and crypto snapshot", [JSON.stringify(evidence, null, 2)]),
     "",
     "Treat all values as observational market data. Verify time-sensitive conclusions against current primary sources before relying on them.",
   ].join("\n");
@@ -134,7 +137,7 @@ export default function MarketOverviewSurface({
     if (!target || (!macro && !crypto)) return;
     setHandoffStatus("Sending…");
     try {
-      await target.send(handoffText(macro, crypto));
+      await target.send(buildOverviewHandoffText(macro, crypto));
       setHandoffStatus(`Sent to ${target.label}`);
     } catch (cause) {
       setHandoffStatus(errorMessage(cause));
