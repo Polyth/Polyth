@@ -85,6 +85,14 @@ test("shell-backed repository inspection is presented by semantic action", () =>
   assert.equal(compound.kind, "search");
   assert.equal(compound.label, "Search");
   assert.equal(compound.preview, "rg --files -g '!!!node_modules!!!' | sed -n '1,20p'");
+
+  const inventory = executionPresentation(tool({
+    input: { command: "/bin/bash -lc \"printf '%s\\\\n' '--- repo top ---'; find ../polyth -maxdepth 2 -type d -print | sort\"" },
+  }));
+  assert.equal(inventory.kind, "search");
+  assert.equal(inventory.label, "Search");
+  assert.equal(inventory.preview, "find ../polyth -maxdepth 2 -type d -print | sort");
+  assert.equal(executionPresentation(tool({ input: { command: "find . -exec rm {} \\;" } })).kind, "shell");
 });
 
 test("file, URL, edit, search, MCP, and subagent previews are semantic", () => {

@@ -232,6 +232,8 @@ export function classifyTool(tool: string, input: JsonObject): ExecutionKind {
       ?.replace(/^["']|["']$/g, "")
       .split(/[\\/]/).at(-1)?.toLowerCase();
     if (executable && /^(rg|ripgrep|grep|egrep|fgrep|fd)$/.test(executable)) return "search";
+    if (executable === "find"
+      && !/(?:^|\s)-(?:delete|exec(?:dir)?|ok(?:dir)?|fprint(?:0)?|fls|fprintf)(?:\s|$)/.test(operation)) return "search";
     if (executable === "sed" && /(?:^|\s)-(?:[A-Za-z]*n[A-Za-z]*)(?:\s|$)/.test(operation)
       && !/(?:^|\s)(?:-[A-Za-z]*i[A-Za-z]*|--in-place)(?:[=\s]|$)/.test(operation)) return "read";
     if (executable && /^(cat|head|tail|less|more|bat|nl)$/.test(executable)) return "read";
