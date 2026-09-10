@@ -1,4 +1,11 @@
-export { createProcessAuthority, releaseProcessExecution } from "./authority.ts";
+export {
+    createProcessAuthority,
+    releaseProcessExecution,
+    type ProcessAuthorityOptions,
+    type ProcessAuthorityProof,
+    type ProcessContainment,
+    type ProcessContainmentController,
+} from "./authority.ts";
 export { createStdioRpc, type RpcPeer } from "./rpc.ts";
 export {
   acknowledgeCapabilityApplication,

@@ -27,6 +27,20 @@ const unavailable = (message: string, cause?: unknown): Error =>
     code: "unavailable",
   });
 
+const runtimeIsUnresponsive = (error: unknown): boolean => {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  for (let depth = 0; depth < 6 && current && !seen.has(current); depth += 1) {
+    seen.add(current);
+    const message = current instanceof Error ? current.message : String(current);
+    if (/fetch failed|terminated|ECONNRESET|ECONNREFUSED|not ready|readiness probe|timed? ?out|exceeded .*ms/i.test(message)) {
+      return true;
+    }
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return false;
+};
+
 const normalizeDirectory = (directory: string): string => {
   const trimmed = directory.trim();
   if (!trimmed) throw bindingError("runtime directory is required");
@@ -672,8 +686,27 @@ export const createRuntimeLifecycle = async (
       return (await generation()).endpoint;
     },
     async refresh(reason) {
-      const next = await replaceSingleFlight(() => options.lease.refresh(reason));
-      return next.endpoint;
+      try {
+        const next = await replaceSingleFlight(() => options.lease.refresh(reason));
+        return next.endpoint;
+      } catch (error) {
+        // Refresh first gives a healthy owned runtime a chance to reconnect
+        // without losing native state. A failed readiness check means the
+        // process we own is no longer serving: terminate its complete owned
+        // boundary, advance generation, and let canonical Polyth sessions
+        // rehydrate through the endpoint-replaced lifecycle event. The failed
+        // request itself is never replayed here.
+        const lease = options.lease;
+        if (
+          reason !== "disconnect"
+          || !isOwnedEndpointLease(lease)
+          || !runtimeIsUnresponsive(error)
+        ) {
+          throw error;
+        }
+        const next = await replaceSingleFlight(() => lease.restart("crash"));
+        return next.endpoint;
+      }
     },
     async protocol() {
       return (await generation()).protocol.protocol;

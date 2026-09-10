@@ -811,9 +811,12 @@ export const createOwnedLocalEndpointLease = async (
               } catch {
                 // Missing record is already clean.
               }
-              if (shouldRemove) await rm(pidFile, { force: true });
               if (started.authority) await started.authority.close();
               else await terminateChild(started.child, options.gracefulStopMs ?? 3_000);
+              // Keep the exact process identity until the containment/release
+              // boundary has proved empty. An interrupted shutdown must leave
+              // enough evidence for the next Polyth owner to recover safely.
+              if (shouldRemove) await rm(pidFile, { force: true });
             },
           };
         } catch (error) {
