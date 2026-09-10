@@ -2,6 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "include": [
     "src/**/*.ts",
+    "widgets/**/*.ts",
+    "widgets/**/*.tsx",
     "test/**/*.ts"
   ]
 }
