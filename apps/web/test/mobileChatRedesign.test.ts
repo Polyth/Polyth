@@ -53,6 +53,36 @@ test("the keyboard inset is the strip of the layout viewport it covers", () => {
   assert.equal(keyboardInsetFrom(932, 596, 36), 300);
 });
 
+test("a native keyboard inset remains observable without visualViewport", () => {
+  // Capacitor can report the keyboard while an embedded WebView has no
+  // visualViewport API. The layout height is then its only browser geometry.
+  assert.deepEqual(
+    metricsFrom(932, 932, 0, 336),
+    { height: 932, keyboardInset: 336, offsetTop: 0, covering: true },
+  );
+});
+
+test("background composer updates do not steal the active editor focus", async () => {
+  const composer = await read("../src/components/Composer.tsx");
+  const insertHandler = composer.match(/const handler = \(e: Event\) => \{[\s\S]*?\n    \};/)?.[0] ?? "";
+  assert.ok(insertHandler.includes("insert(detail);"), "composer insert events still update the draft");
+  assert.doesNotMatch(insertHandler, /inputRef\.current\?\.focus\(\)/,
+    "dictation and other background inserts leave focus with the active editor");
+});
+
+test("late dictation finals remain owned by their originating composer", async () => {
+  const voice = await read("../../../packages/dictation/widgets/voice.tsx");
+  const stop = voice.slice(voice.indexOf("const stop = () =>"), voice.indexOf("const startBrowser ="));
+
+  assert.match(stop, /const generation = startGeneration\.current/);
+  assert.match(stop, /const originScope = originScopeRef\.current/);
+  assert.match(stop, /composerScopeKey\(\) !== originScope/);
+  assert.ok(stop.indexOf("streamRef.current = null") > stop.indexOf(".then((text)"),
+    "the stream remains cancellable until finalization settles");
+  assert.ok(stop.indexOf("requestComposerInsert") > stop.indexOf("composerScopeKey() !== originScope"),
+    "insertion happens only after generation and composer-scope checks");
+});
+
 test("browser chrome collapse is not reported as a keyboard", () => {
   assert.equal(keyboardInsetFrom(932, 932, 0), 0);
   assert.equal(keyboardInsetFrom(932, 932 - (KEYBOARD_MIN_INSET - 1), 0), 0);
@@ -518,8 +548,9 @@ test("phone CSS keeps the layout inside the visible viewport", async () => {
     /max-height: min\(var\(--composer-max-input-height\), 18dvh\)/,
     "§20: the expanded phone input stays compact and scrolls",
   );
-  assert.match(section, /margin-bottom: var\(--keyboard-inset, 0px\)/, "§21: sheets sit above the keyboard");
-  assert.match(section, /max-height: calc\(var\(--visual-vh, 100dvh\)/, "§29: sheets are sized by the visible band");
+  const sharedSheet = section.slice(section.indexOf(".sheet {"), section.indexOf("@keyframes sheet-rise"));
+  assert.match(sharedSheet, /max-height: calc\(var\(--visual-vh, 100dvh\)/, "§29: sheets are sized by the visible band");
+  assert.doesNotMatch(sharedSheet, /(?:height|margin-bottom):[^;]*--keyboard-inset/, "§21: the already-reduced visible band is not subtracted twice");
   assert.match(section, /html\[data-sheet="open"\], html\[data-sheet="open"\] body \{ overflow: hidden; \}/);
   assert.ok(!/100vh/.test(phone), "the phone layout never trusts the layout viewport height");
 });
@@ -589,10 +620,10 @@ test("phone views expose only floating power-on-demand controls", async () => {
   assert.doesNotMatch(navigation, /mobile-navigation-grid|header\.application/, "the grouped Application menu is gone");
 });
 
-test("haptics are opt-in, bounded, and respect reduced motion", async () => {
+test("haptics are bounded local feedback and stay independent from reduced motion", async () => {
   const haptics = await read("../src/haptics.ts");
-  assert.ok(haptics.includes('matchMedia("(prefers-reduced-motion: reduce)")'), "reduced motion silences it");
   assert.ok(haptics.includes("typeof navigator.vibrate !== \"function\""), "unsupported platforms are a no-op");
+  assert.doesNotMatch(haptics, /reduceAnimations|prefers-reduced-motion|desktopLowResource/);
   for (const rel of [
     "../../../packages/models/widgets/ModelPicker.tsx",
     "../src/components/Picker.tsx",

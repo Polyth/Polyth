@@ -1099,14 +1099,12 @@ export default function Composer({
       if (typeof detail !== "string") return;
       e.preventDefault();
       insert(detail);
-      inputRef.current?.focus();
     };
     const replace = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (typeof detail !== "string") return;
       e.preventDefault();
       replaceText(detail);
-      inputRef.current?.focus();
     };
     window.addEventListener(COMPOSER_INSERT, handler);
     window.addEventListener(COMPOSER_REPLACE, replace);

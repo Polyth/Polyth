@@ -80,6 +80,9 @@ test("file tree renders an ARIA tree with disclosure, indentation, and namespace
     assert.equal(file.hasAttribute("aria-expanded"), false, "leaf has no aria-expanded");
     assert.ok(dir.querySelector(".ft-chevron"), "disclosure chevron rendered");
     assert.ok(file.querySelector(".ft-name"), "name span rendered");
+    const actions = file.querySelector<HTMLButtonElement>(".file-row-actions .ui-icon-btn");
+    assert.ok(actions, "leaf rows reuse the shared actions menu instead of a hover-only @ affordance");
+    assert.equal(actions!.getAttribute("aria-label"), "Actions for README.md");
 
     // Finding 1 (UX-FILES-TIMELINE-03): rows carry decorative type glyphs —
     // a folder icon on directories, a family-tinted file icon on leaves, and

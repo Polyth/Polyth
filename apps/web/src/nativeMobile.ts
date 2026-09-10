@@ -7,6 +7,8 @@ export interface NativeBackState {
 
 export interface NativeBackActions {
   dismissEscapeLayer(): boolean;
+  /** Selection is ephemeral UI, so clear it before changing route history. */
+  dismissSelection?(): boolean;
   closeOverlay(): void;
   closeDrawer(): void;
   closeWorkspacePane(): void;
@@ -14,8 +16,18 @@ export interface NativeBackActions {
   navigateBack(): boolean;
 }
 
+function dismissDocumentSelection(): boolean {
+  if (typeof document === "undefined") return false;
+  const selection = document.getSelection();
+  if (!selection || selection.isCollapsed) return false;
+  selection.removeAllRanges();
+  return true;
+}
+
 /** D15 native-back contract. Transient escape-stack layers get first refusal,
- * then shell surfaces close from front to back, then in-app history navigates.
+ * then shell surfaces close from front to back, then selection and in-app
+ * history navigate. A workspace pane is foreground content, so it closes
+ * before the navigation drawer.
  * False means the native host may background the app. */
 export function handleNativeBack(
   state: NativeBackState,
@@ -26,10 +38,6 @@ export function handleNativeBack(
     actions.closeOverlay();
     return true;
   }
-  if (state.drawerOpen) {
-    actions.closeDrawer();
-    return true;
-  }
   if (state.workspacePaneOpen) {
     actions.closeWorkspacePane();
     return true;
@@ -38,5 +46,10 @@ export function handleNativeBack(
     actions.closeRail();
     return true;
   }
+  if (state.drawerOpen) {
+    actions.closeDrawer();
+    return true;
+  }
+  if (actions.dismissSelection?.() ?? dismissDocumentSelection()) return true;
   return actions.navigateBack();
 }

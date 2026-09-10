@@ -19,7 +19,11 @@ export default function FileRowActions({ projectId, path, onOpen }: {
   };
 
   return (
-    <span className="file-row-actions" onClick={(event) => event.stopPropagation()}>
+    <span
+      className="file-row-actions"
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
       <Menu
         label={tr("filerowactions.actionsForValue", { path })}
         title={tr("filerowactions.actionsForValue", { path })}

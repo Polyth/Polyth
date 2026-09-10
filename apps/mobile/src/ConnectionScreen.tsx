@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "@capacitor/app";
-import { Haptics, ImpactStyle } from "@capacitor/haptics";
 import { SplashScreen } from "@capacitor/splash-screen";
 import {
   checkPolythHost,
@@ -28,6 +27,7 @@ import {
   nativeDiscoveryAvailable,
   startNativeDiscovery,
 } from "./nativeDiscovery.ts";
+import { nativeTapFeedback } from "./haptics.ts";
 import { isPairingLink } from "@polyth/pairing-qr";
 import { bootstrapUrlWithNext, connectionUiState } from "./connectionUi.ts";
 import {
@@ -396,7 +396,7 @@ function ConnectionScreen({ launch }: { launch: ConnectLaunch }) {
       return;
     }
     const host = await rememberMobileHost(url);
-    await Haptics.impact({ style: ImpactStyle.Light }).catch(() => undefined);
+    await nativeTapFeedback();
     navigateToMobileHost(host, launch.deepLinkPath);
   };
 

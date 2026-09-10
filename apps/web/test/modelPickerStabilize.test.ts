@@ -8,6 +8,7 @@ import { Window } from "happy-dom";
 import type { ModelDescriptor } from "@polyth/contracts";
 
 const dom = new Window();
+let phoneMode = false;
 Object.assign(globalThis, {
   window: dom as unknown as typeof globalThis & Window,
   document: dom.document as unknown as Document,
@@ -16,6 +17,15 @@ Object.assign(globalThis, {
   cancelAnimationFrame: (id: number) => clearTimeout(id),
 });
 Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configurable: true });
+Object.defineProperty(dom, "matchMedia", {
+  configurable: true,
+  value: (query: string) => ({
+    get matches() { return phoneMode && query.includes("480px"); },
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }),
+});
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 register("./tsxHooks.mjs", import.meta.url);
@@ -186,6 +196,37 @@ test("model picker shell keeps fixed geometry while details open beside it", asy
     assert.equal(after.height, before.height, "popover height stays fixed after details open");
     assert.equal(after.top, before.top, "popover anchor top stays fixed after details open");
   } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("phone model details stay inside the shared sheet focus boundary", async () => {
+  phoneMode = true;
+  const { act, createElement } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { default: ModelPicker } = await import("../../../packages/models/widgets/ModelPicker.tsx");
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(createElement(ModelPicker, {
+        models: [{ providerID: "openai", modelID: "gpt-test", name: "GPT Test" }],
+        onPick: () => {},
+      }));
+    });
+    await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
+    const sheet = document.body.querySelector<HTMLElement>(".model-sheet");
+    assert.ok(sheet, "phone picker uses the shared modal sheet");
+    const info = sheet!.querySelector<HTMLButtonElement>(".sheet-row-info");
+    assert.ok(info, "the sheet row exposes details");
+    await act(async () => { info!.click(); });
+    assert.ok(sheet!.querySelector(".model-details"), "details replace the list inside the existing sheet");
+    assert.equal(document.body.querySelector(".model-details-panel"), null, "no sibling portal escapes the modal");
+    assert.ok(sheet!.contains(document.activeElement), "details move focus to a control inside the sheet");
+  } finally {
+    phoneMode = false;
     await act(async () => { root.unmount(); });
     container.remove();
   }

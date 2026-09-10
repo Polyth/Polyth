@@ -187,6 +187,7 @@ function ModelDetails({
   usage,
   onUse,
   onBack,
+  focusBack = false,
 }: {
   model: ModelDescriptor;
   selected: boolean;
@@ -194,7 +195,13 @@ function ModelDetails({
   usage?: number;
   onUse: () => void;
   onBack: () => void;
+  /** Phone details replace the list inside its modal sheet. */
+  focusBack?: boolean;
 }) {
+  const detailsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (focusBack) detailsRef.current?.querySelector<HTMLButtonElement>(".model-details-back")?.focus();
+  }, [focusBack]);
   const presentation = modelDetailsPresentation(model);
   const percent = selected && usage && model.context
     ? Math.min(100, Math.round((usage / model.context) * 100))
@@ -224,7 +231,7 @@ function ModelDetails({
       : []),
   ];
   return (
-    <div className="model-details">
+    <div ref={detailsRef} className="model-details">
       <Button type="button" className="model-details-back" size="sm" variant="ghost" iconStart={BackIcon} onClick={onBack}>
         {tr("common.back")}
       </Button>
@@ -452,10 +459,17 @@ export default function ModelPicker({
       ?.scrollIntoView({ block: "nearest" });
   }, [open, phone, activeKey]);
 
-  const closeDetails = () => {
+  const closeDetails = (restorePhoneFocus = false) => {
+    const returnKey = detail ? modelKey(detail) : null;
     setDetail(null);
     setDetailAnchor(null);
     setShowDetails(false);
+    if (phone && restorePhoneFocus && returnKey) {
+      requestAnimationFrame(() => {
+        const buttons = pickerShellRef.current?.querySelectorAll<HTMLButtonElement>(".sheet-row-info");
+        [...(buttons ?? [])].find((button) => button.dataset.modelKey === returnKey)?.focus();
+      });
+    }
   };
   useEffect(() => {
     closeDetails();
@@ -584,6 +598,7 @@ export default function ModelPicker({
     <IconButton
       type="button"
       className={variant === "sheet" ? "sheet-row-info" : "model-row-info"}
+      data-model-key={modelKey(model)}
       icon={InfoIcon}
       size="sm"
       variant="ghost"
@@ -749,7 +764,8 @@ export default function ModelPicker({
           selected={isSelected(detail)}
           {...(usage !== undefined ? { usage } : {})}
           onUse={() => choose(detail)}
-          onBack={closeDetails}
+          onBack={() => closeDetails(true)}
+          focusBack={phone}
         />
       )
       : (
@@ -797,7 +813,7 @@ export default function ModelPicker({
         >
         <div ref={pickerShellRef} className="model-picker-shell">
           {header && <div className="model-picker-header">{header}</div>}
-          {phone ? (
+          {phone ? (detail ? detailsPanelContent : (
             <div role="listbox" aria-label={tr("modelpicker.models")}>
               {flatCatalog && flatRows.map((model) => sheetRow(model, "provider"))}
               {shownFavorites.length > 0 && (
@@ -846,7 +862,7 @@ export default function ModelPicker({
                 <p className="picker-more">{hiddenMatchCount} {tr("picker.moreRefineTheFilter")}</p>
               )}
             </div>
-          ) : (
+          )) : (
             <div className="model-pop-content">
               <div className="model-pop-search">
                 <TextInput
@@ -945,7 +961,7 @@ export default function ModelPicker({
         </div>
       </ResponsiveOverlay>
       <AdjacentDetailsPanel
-        open={open && detailsOpen}
+        open={open && !phone && detailsOpen}
         anchor={detailsAnchor}
         pickerShellRef={pickerShellRef}
         onClose={closeDetails}

@@ -356,7 +356,7 @@ width: var(--tap); height: var(--tap);
 .term-mobile-controls {
 flex: none; display: grid; grid-template-columns: var(--tap) minmax(0, 1fr) var(--tap) var(--tap);
   gap: var(--space-1); align-items: center; padding: var(--space-1) var(--space-2)
-  max(var(--space-1), env(safe-area-inset-bottom, 0px));
+  max(var(--space-1), var(--safe-bottom));
   border-top: 1px solid var(--border-soft); background: var(--panel);
 }
 .term-mobile-controls > button {

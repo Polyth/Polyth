@@ -212,8 +212,17 @@ const boundedPartial = (text: string): string => {
   return `…${value.slice(-179)}`;
 };
 
+/** Dictation results belong to the composer that started them. A project is
+ * part of the identity because the no-session composer exists in every
+ * project and must not receive another project's late final transcript. */
+const composerScopeKey = (state = getState()): string => JSON.stringify([
+  state.activeProjectId,
+  state.activeSessionId,
+]);
+
 function MicButton() {
   const prefs = useVoicePrefs();
+  const composerScope = useSyncExternalStore(subscribeStore, composerScopeKey, composerScopeKey);
   const [phase, setPhase] = useState<MicPhase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [partial, setPartial] = useState("");
@@ -226,6 +235,8 @@ function MicButton() {
   const browserTranscriptRef = useRef("");
   const browserCommitRef = useRef(false);
   const startGeneration = useRef(0);
+  const originScopeRef = useRef<string | null>(null);
+  const previousComposerScope = useRef(composerScope);
   const support = speechSupport(typeof window !== "undefined" ? window : undefined);
   // Provider + transport now own dictation routing. sttEngine remains persisted
   // only for older clients and the unrelated legacy OpenAI-compatible settings.
@@ -250,10 +261,31 @@ function MicButton() {
 
   useEffect(() => () => {
     startGeneration.current++;
+    originScopeRef.current = null;
     browserCommitRef.current = false;
     recRef.current?.abort();
     streamRef.current?.cancel();
   }, []);
+
+  useEffect(() => {
+    if (previousComposerScope.current === composerScope) return;
+    previousComposerScope.current = composerScope;
+    // Session/project navigation invalidates the recording immediately. The
+    // completion path also checks this scope to close the pre-effect race.
+    startGeneration.current++;
+    originScopeRef.current = null;
+    browserCommitRef.current = false;
+    browserTranscriptRef.current = "";
+    const rec = recRef.current;
+    recRef.current = null;
+    try { rec?.abort(); } catch { /* already ended */ }
+    const stream = streamRef.current;
+    streamRef.current = null;
+    stream?.cancel();
+    setPartial("");
+    setError(null);
+    setPhase("idle");
+  }, [composerScope]);
 
   useEffect(() => {
     if (!prefs.dictation) {
@@ -343,6 +375,7 @@ function MicButton() {
 
   const fail = (raw: unknown) => {
     startGeneration.current++;
+    originScopeRef.current = null;
     browserCommitRef.current = false;
     browserTranscriptRef.current = "";
     const rec = recRef.current;
@@ -358,6 +391,7 @@ function MicButton() {
 
   const cancel = () => {
     startGeneration.current++;
+    originScopeRef.current = null;
     browserCommitRef.current = false;
     browserTranscriptRef.current = "";
     const rec = recRef.current;
@@ -380,23 +414,41 @@ function MicButton() {
     }
 
     const stream = streamRef.current;
-    streamRef.current = null;
     if (stream) {
+      const generation = startGeneration.current;
+      const originScope = originScopeRef.current;
       setPhase("transcribing");
       void stream.stop()
         .then((text) => {
+          if (streamRef.current === stream) streamRef.current = null;
+          if (
+            originScope === null
+            || startGeneration.current !== generation
+            || originScopeRef.current !== originScope
+            || composerScopeKey() !== originScope
+          ) return;
+          originScopeRef.current = null;
           setPartial("");
           setPhase("idle");
           if (text.trim()) requestComposerInsert(text.trim());
         })
-        .catch(fail);
+        .catch((stopError) => {
+          if (streamRef.current === stream) streamRef.current = null;
+          if (
+            originScope === null
+            || startGeneration.current !== generation
+            || originScopeRef.current !== originScope
+            || composerScopeKey() !== originScope
+          ) return;
+          fail(stopError);
+        });
       return;
     }
     setPartial("");
     setPhase("idle");
   };
 
-  const startBrowser = () => {
+  const startBrowser = (generation: number, originScope: string) => {
     const Ctor = recognitionCtor(window);
     if (!Ctor) {
       fail(tr("voice.dictationUnsupported"));
@@ -409,6 +461,7 @@ function MicButton() {
     browserTranscriptRef.current = "";
     browserCommitRef.current = true;
     rec.onresult = (e) => {
+      if (startGeneration.current !== generation || composerScopeKey() !== originScope) return;
       let interim = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i]!;
@@ -418,38 +471,49 @@ function MicButton() {
       setPartial(mergeTranscript(browserTranscriptRef.current, interim));
     };
     rec.onerror = (e) => {
+      if (startGeneration.current !== generation || composerScopeKey() !== originScope) return;
       recRef.current = null;
       browserCommitRef.current = false;
       fail(e.error ?? tr("voice.microphoneError"));
     };
     rec.onend = () => {
+      if (startGeneration.current !== generation || composerScopeKey() !== originScope) return;
       const commit = browserCommitRef.current;
       const text = browserTranscriptRef.current.trim();
       browserCommitRef.current = false;
       browserTranscriptRef.current = "";
       recRef.current = null;
+      originScopeRef.current = null;
       setPartial("");
       setPhase("idle");
       if (commit && text) requestComposerInsert(text);
     };
     recRef.current = rec;
     rec.start();
+    if (startGeneration.current !== generation || composerScopeKey() !== originScope) {
+      recRef.current = null;
+      try { rec.abort(); } catch { /* already ended */ }
+      return;
+    }
     setPhase("listening");
   };
 
-  const startProvider = async (generation: number) => {
+  const startProvider = async (generation: number, originScope: string, originSessionId: string | null) => {
     setPhase("starting");
     try {
       const context = contextInjection ? currentDictationContext(language) : { language };
       const onPartial = (text: string) => {
-        if (startGeneration.current === generation) setPartial(text);
+        if (startGeneration.current === generation && composerScopeKey() === originScope) setPartial(text);
+      };
+      const onError = (error: unknown) => {
+        if (startGeneration.current === generation && composerScopeKey() === originScope) fail(error);
       };
       const serverOptions = {
-        ...(getState().activeSessionId ? { sessionId: getState().activeSessionId! } : {}),
+        ...(originSessionId ? { sessionId: originSessionId } : {}),
         language,
         ...(contextInjection ? { context } : {}),
         onPartial,
-        onError: fail,
+        onError,
       };
       let stream: StreamingDictation;
       if (directCloud) {
@@ -460,7 +524,7 @@ function MicButton() {
             language,
             context,
             onPartial,
-            onError: fail,
+            onError,
           });
         } catch (directError) {
           if (transport !== "auto") throw directError;
@@ -469,17 +533,17 @@ function MicButton() {
       } else {
         stream = await startStreamingDictation(serverOptions);
       }
-      if (startGeneration.current !== generation) {
+      if (startGeneration.current !== generation || composerScopeKey() !== originScope) {
         stream.cancel();
         return;
       }
       streamRef.current = stream;
       setPhase("listening");
     } catch (startError) {
-      if (startGeneration.current !== generation) return;
+      if (startGeneration.current !== generation || composerScopeKey() !== originScope) return;
       streamRef.current = null;
       if (browserFallback && support.stt) {
-        startBrowser();
+        startBrowser(generation, originScope);
         return;
       }
       fail(startError);
@@ -489,11 +553,14 @@ function MicButton() {
   const start = () => {
     setError(null);
     setPartial("");
+    const origin = getState();
+    const originScope = composerScopeKey(origin);
+    originScopeRef.current = originScope;
     const generation = ++startGeneration.current;
     if (capability?.available) {
-      void startProvider(generation);
+      void startProvider(generation, originScope, origin.activeSessionId);
     } else if (browserFallback && support.stt) {
-      startBrowser();
+      startBrowser(generation, originScope);
     }
   };
 

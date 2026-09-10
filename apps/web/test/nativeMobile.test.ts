@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { handleNativeBack, type NativeBackState } from "../src/nativeMobile.ts";
 
-const closed = (state: Partial<NativeBackState>, escape = false, navigated = false) => {
+const closed = (state: Partial<NativeBackState>, escape = false, navigated = false, selection = false) => {
   const calls: string[] = [];
   const handled = handleNativeBack(
     {
@@ -16,6 +16,10 @@ const closed = (state: Partial<NativeBackState>, escape = false, navigated = fal
       dismissEscapeLayer: () => {
         calls.push("escape");
         return escape;
+      },
+      dismissSelection: () => {
+        if (selection) calls.push("selection");
+        return selection;
       },
       closeOverlay: () => calls.push("overlay"),
       closeDrawer: () => calls.push("drawer"),
@@ -37,7 +41,7 @@ test("native back closes only the frontmost available shell layer", () => {
   );
   assert.deepEqual(
     closed({ drawerOpen: true, workspacePaneOpen: true, railOpen: true }),
-    { handled: true, calls: ["escape", "drawer"] },
+    { handled: true, calls: ["escape", "pane"] },
   );
   assert.deepEqual(
     closed({ workspacePaneOpen: true, railOpen: true }),
@@ -61,5 +65,16 @@ test("native back gives escape layers priority and backgrounds only after naviga
   assert.deepEqual(
     closed({}, false, false),
     { handled: false, calls: ["escape", "navigate"] },
+  );
+});
+
+test("native back clears an active selection only after shell surfaces close", () => {
+  assert.deepEqual(
+    closed({ drawerOpen: true }, false, false, true),
+    { handled: true, calls: ["escape", "drawer"] },
+  );
+  assert.deepEqual(
+    closed({}, false, false, true),
+    { handled: true, calls: ["escape", "selection"] },
   );
 });

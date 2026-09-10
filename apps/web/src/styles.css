@@ -402,7 +402,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: max(6px, env(safe-area-inset-top, 0px)) 8px 5px;
+  padding: max(6px, var(--safe-top)) 8px 5px;
   border-bottom: 1px solid var(--border-soft);
   flex-shrink: 0;
 }
@@ -2861,7 +2861,10 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 }
 .dialog-backdrop {
   position: fixed; inset: auto 0; top: var(--visual-offset);
-  height: min(var(--visual-vh), calc(100dvh - var(--keyboard-inset)));
+  /* --visual-vh is already the visible band. Subtracting the separately
+     published keyboard inset here would apply the same resize twice in a
+     Capacitor WebView. */
+  height: var(--visual-vh, 100dvh);
   background: var(--scrim); display: flex; align-items: center; justify-content: center;
   z-index: var(--z-overlay);
   padding: max(var(--space-5), var(--safe-top)) max(var(--space-5), var(--safe-right))
@@ -5907,7 +5910,7 @@ grid-template-columns: 1fr !important;
 .widget-canvas-grid {
     display: flex;
     flex-direction: column;
-    padding: 18px 12px max(104px, calc(82px + env(safe-area-inset-bottom, 0px)));
+    padding: 18px 12px max(104px, calc(82px + var(--safe-bottom)));
   }
   .widget-canvas-grid .widget-card { min-height: 320px; }
   .widget-canvas-empty { min-height: 150px; }
@@ -6307,7 +6310,7 @@ width: 44px;
 }
 
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-.sidebar-service-bar { padding-top: max(8px, env(safe-area-inset-top, 0px)); }
+.sidebar-service-bar { padding-top: max(8px, var(--safe-top)); }
   .side-scroll { padding-inline: 8px; }
   .composer-simple .composer-card { border-radius: var(--radius-sheet); }
   .composer-simple .composer-actions { flex-wrap: nowrap; }
@@ -6525,7 +6528,7 @@ font-style: normal; opacity: .65;
   .msg.assistant .msg-time { margin-right: 4px; }
 
   .composer-chat {
-    padding: 8px 12px max(12px, env(safe-area-inset-bottom, 0px));
+    padding: 8px 12px max(12px, var(--safe-bottom));
     /* No divider or filled band above the phone composer — it rests directly
        on the conversation canvas. */
     border-top: 0;
@@ -6689,7 +6692,7 @@ color: var(--green);
 .package-tour-actions { display: flex; gap: 8px; }
 .package-tour-skips {
   display: flex; align-items: center; justify-content: center; gap: 9px;
-  padding: 8px 24px max(16px, env(safe-area-inset-bottom, 0px));
+  padding: 8px 24px max(16px, var(--safe-bottom));
   color: var(--faint); font-size: var(--font-meta);
 }
 .package-tour-skip {
@@ -6906,7 +6909,9 @@ width: 20px; height: 20px;
 /* ---- shared sheet system (§28/§46) -------------------------------------- */
 .sheet-backdrop {
   position: fixed;
-  inset: 0;
+  inset: auto 0;
+  top: var(--visual-offset, 0px);
+  height: var(--visual-vh, 100dvh);
   z-index: var(--z-overlay);
   display: flex;
   align-items: flex-end;
@@ -6918,12 +6923,10 @@ width: 20px; height: 20px;
   position: relative;
   width: min(560px, 100%);
   min-height: 0;
-  /* Never 100vh: the visible band is what the user can actually reach —
-     measured in CSS px against the visual viewport so the page's own
-     counter-shift (it follows the keyboard) can not move the band. */
-  max-height: calc(var(--visual-vh, 100dvh) - max(var(--space-5), var(--safe-top)) - var(--keyboard-inset, 0px));
-  /* Sit above the keyboard instead of behind it (§21/§47). */
-  margin-bottom: var(--keyboard-inset, 0px);
+  /* Never 100vh: --visual-vh is the already-reduced band the user can reach.
+     Do not subtract or offset by --keyboard-inset again: native resize and
+     visualViewport have already removed that covered strip. */
+  max-height: calc(var(--visual-vh, 100dvh) - max(var(--space-5), var(--safe-top)));
   display: flex;
   flex-direction: column;
   padding-bottom: max(var(--space-2), var(--safe-bottom));
@@ -6936,7 +6939,7 @@ width: 20px; height: 20px;
   animation: sheet-rise var(--motion-normal) cubic-bezier(.22, .61, .36, 1);
   transition: transform var(--motion-fast) var(--motion-ease);
 }
-.sheet-tall { height: calc(var(--visual-vh, 100dvh) - max(var(--space-5), var(--safe-top)) - var(--keyboard-inset, 0px)); }
+.sheet-tall { height: calc(var(--visual-vh, 100dvh) - max(var(--space-5), var(--safe-top))); }
 @keyframes sheet-rise { from { transform: translateY(18px); opacity: .55; } to { transform: none; opacity: 1; } }
 .sheet-backdrop-top {
   align-items: flex-start;
@@ -6953,7 +6956,7 @@ width: 20px; height: 20px;
   padding-top: max(var(--space-2), var(--safe-top));
   padding-bottom: var(--space-2);
   animation-name: sheet-drop;
-  max-height: min(78dvh, calc(var(--visual-vh, 100dvh) - var(--keyboard-inset, 0px)));
+  max-height: min(78dvh, var(--visual-vh, 100dvh));
 }
 .sheet-origin-top .sheet-grabber { order: 5; padding-top: 0; padding-bottom: 8px; }
 .sheet-origin-top .sheet-head { order: 1; }
@@ -8102,7 +8105,7 @@ html[data-modal-surface="open"] body {
     flex: none;
     flex-wrap: wrap;
     gap: 8px;
-    padding: 10px 14px max(10px, env(safe-area-inset-bottom, 0px));
+    padding: 10px 14px max(10px, var(--safe-bottom));
   }
   .dialog-foot > .muted:first-child { min-width: min(100%, 220px); flex: 1; }
 .dialog-foot button,
@@ -8128,12 +8131,12 @@ min-height: var(--tap);
     border-radius: 0;
   }
   .settings-mobile-nav-head {
-    min-height: calc(56px + env(safe-area-inset-top, 0px));
+    min-height: calc(56px + var(--safe-top));
     display: flex;
     align-items: flex-end;
     gap: 12px;
     flex: none;
-    padding: env(safe-area-inset-top, 0px) 12px 6px 16px;
+    padding: var(--safe-top) 12px 6px 16px;
     border-bottom: 1px solid var(--border-soft);
     background: var(--elevated);
   }
@@ -8154,7 +8157,7 @@ min-height: var(--tap);
     margin: 10px 12px 8px;
     font-size: 16px;
   }
-  .settings-nav-list { padding-bottom: max(16px, env(safe-area-inset-bottom, 0px)); }
+  .settings-nav-list { padding-bottom: max(16px, var(--safe-bottom)); }
   .settings-nav-item {
     min-height: 48px;
     gap: 3px;
@@ -8163,7 +8166,7 @@ min-height: var(--tap);
   .settings-nav-icon { width: 22px; margin-right: 8px; }
   .settings-nav-icon svg { width: 18px; height: 18px; }
   .settings-mobile-page .settings-pane-head {
-    padding: env(safe-area-inset-top, 0px) 10px 6px;
+    padding: var(--safe-top) 10px 6px;
     background: var(--elevated);
   }
   .settings-pane-head-bar { min-width: 0; min-height: 50px; gap: 8px; }
@@ -8184,7 +8187,7 @@ min-height: var(--tap);
   }
   .settings-mobile-page .settings-pane-body,
   .settings-mobile-page.settings-page-widgets .settings-pane-body {
-    padding: 10px 16px max(24px, env(safe-area-inset-bottom, 0px));
+    padding: 10px 16px max(24px, var(--safe-bottom));
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
   }
@@ -8263,7 +8266,7 @@ width: 100%; min-height: var(--tap);
   .theme-custom-row .danger-btn { margin-left: auto; }
   .theme-picker-pop {
     position: fixed;
-    inset: auto 8px max(8px, env(safe-area-inset-bottom, 0px));
+    inset: auto 8px max(8px, var(--safe-bottom));
     z-index: var(--z-toast);
     max-height: min(72dvh, 620px);
     display: flex;
@@ -8278,7 +8281,7 @@ width: 100%; min-height: var(--tap);
   .folder-dialog-body { overflow: hidden; }
   .folder-dialog-head {
     flex: none;
-    padding: max(12px, env(safe-area-inset-top, 0px)) 14px 8px;
+    padding: max(12px, var(--safe-top)) 14px 8px;
   }
   .folder-toolbar {
     flex: none;
@@ -8315,7 +8318,7 @@ width: 100%; min-height: var(--tap);
     flex: none;
     flex-wrap: wrap;
     gap: 8px;
-    padding: 10px 12px max(12px, env(safe-area-inset-bottom, 0px));
+    padding: 10px 12px max(12px, var(--safe-bottom));
   }
   .folder-selected {
     width: 100%;
@@ -8328,7 +8331,7 @@ width: 100%; min-height: var(--tap);
   .folder-open-btn { margin-left: auto; }
   .folder-sources {
     flex: none;
-    padding: 8px 12px max(10px, env(safe-area-inset-bottom, 0px));
+    padding: 8px 12px max(10px, var(--safe-bottom));
   }
   .folder-source-row :is(button, .ghost-link) { min-height: var(--tap); }
   .folder-source-panel { padding: var(--space-3) 0 0; overflow-y: auto; }
@@ -8392,7 +8395,7 @@ width: 100%; min-height: var(--tap);
     border-bottom: 0;
     border-left: 0;
     border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
-    padding-bottom: max(10px, env(safe-area-inset-bottom, 0px));
+    padding-bottom: max(10px, var(--safe-bottom));
   }
   .widget-add-panel section > button { min-height: var(--tap); }
 
@@ -8405,11 +8408,11 @@ width: 100%; min-height: var(--tap);
   .panel-sheet .rail-body {
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
-    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(10px + var(--safe-bottom));
   }
   .panel-sheet .rail-head {
-    min-height: calc(54px + env(safe-area-inset-top, 0px));
-    padding-top: env(safe-area-inset-top, 0px);
+    min-height: calc(54px + var(--safe-top));
+    padding-top: var(--safe-top);
   }
 
   .import-session-list { max-height: none; min-height: 0; flex: 1; }
@@ -8422,13 +8425,13 @@ grid-template-columns: 1fr;
 
   .package-tour-scrim {
     align-items: flex-end;
-    padding: max(48px, env(safe-area-inset-top, 0px)) 0 0;
+    padding: max(48px, var(--safe-top)) 0 0;
     overflow: hidden;
   }
   .package-tour {
     width: 100%;
     max-width: none;
-    max-height: calc(var(--visual-vh, 100dvh) - max(48px, env(safe-area-inset-top, 0px)));
+    max-height: calc(var(--visual-vh, 100dvh) - max(48px, var(--safe-top)));
     border-right: 0;
     border-bottom: 0;
     border-left: 0;
@@ -9058,11 +9061,10 @@ color: var(--muted);
   .mobile-tools-sheet.sheet {
     width: calc(100vw - max(var(--space-1), var(--safe-right)));
     max-width: none;
-    height: calc(var(--visual-vh, 100dvh) - var(--safe-top) - var(--keyboard-inset, 0px));
+    height: calc(var(--visual-vh, 100dvh) - var(--safe-top));
     max-height: none;
     margin-right: 0;
     margin-left: auto;
-    margin-bottom: var(--keyboard-inset, 0px);
     border-radius: var(--radius-sheet) 0 0 var(--radius-sheet);
     animation-name: mobile-tools-in;
   }
@@ -9991,9 +9993,9 @@ html[dir="rtl"] .panel-sheet { animation-name: module-slide-in-rtl; }
   }
   .module-view-content--page {
     gap: var(--space-4);
-    padding: 18px max(14px, env(safe-area-inset-right, 0px))
-      max(24px, env(safe-area-inset-bottom, 0px))
-      max(14px, env(safe-area-inset-left, 0px));
+    padding: 18px max(14px, var(--safe-right))
+      max(24px, var(--safe-bottom))
+      max(14px, var(--safe-left));
   }
   .view-title { font-size: var(--font-heading); line-height: 1.2; }
   .view-sub { max-width: 60ch; overflow-wrap: anywhere; }
@@ -10209,13 +10211,11 @@ color: var(--text);
   .composer-mobile .send-plane { color: var(--accent-ink); }
 }
 
-/* Mobile composition owns the visible band. Project/navigation, contextual,
-   and Settings surfaces must never compete with the focused editor or end up
-   behind the software keyboard. `data-keyboard` is the primary visual-
-   viewport signal; :has is the immediate fallback for WebViews that report
-   the viewport resize late (or not at all). Visibility changes immediately so
-   no part of a panel remains visible during keyboard animation. Its opacity
-   and transform are retained for the gentle return once writing ends. */
+/* Mobile COMPOSER focus owns the chat band. Hide competing navigation only
+   while that specific editor is active; a keyboard opened inside Settings,
+   Files, or another workspace surface must never hide its own container.
+   Visibility changes immediately, while opacity and transform are retained
+   for the gentle return once chat composition ends. */
 @media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
   :is(.sidebar.open, .rail-fullscreen, .panel-sheet, .settings-scrim) {
     transition:
@@ -10224,32 +10224,20 @@ color: var(--text);
       visibility 0s linear;
   }
 
-  body:not(:has(.term-mobile-input:focus)):is(
-    [data-keyboard="open"],
-    :has(.composer-mobile.composer-input-active)
-  )
+  body:has(.composer-mobile.composer-input-active)
     :is(.sidebar.open, .rail-fullscreen, .panel-sheet, .settings-scrim),
-  body:not(:has(.term-mobile-input:focus)):is(
-    [data-keyboard="open"],
-    :has(.composer-mobile.composer-input-active)
-  )
+  body:has(.composer-mobile.composer-input-active)
     :is(.sidebar-backdrop, .panel-sheet-backdrop) {
     visibility: hidden;
     pointer-events: none;
     opacity: 0;
   }
 
-  body:not(:has(.term-mobile-input:focus)):is(
-    [data-keyboard="open"],
-    :has(.composer-mobile.composer-input-active)
-  ) .sidebar.open {
+  body:has(.composer-mobile.composer-input-active) .sidebar.open {
     transform: translateX(-102%);
   }
 
-  body:not(:has(.term-mobile-input:focus)):is(
-    [data-keyboard="open"],
-    :has(.composer-mobile.composer-input-active)
-  )
+  body:has(.composer-mobile.composer-input-active)
     :is(.rail-fullscreen, .panel-sheet, .settings-scrim) {
     transform: translateY(var(--space-2));
   }
@@ -10756,21 +10744,21 @@ color: var(--text);
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: calc(7px + env(safe-area-inset-top, 0px)) calc(10px + env(safe-area-inset-right, 0px)) 7px calc(16px + env(safe-area-inset-left, 0px));
+  padding: calc(7px + var(--safe-top)) calc(10px + var(--safe-right)) 7px calc(16px + var(--safe-left));
   border-bottom: 1px solid var(--border-soft);
 }
 .execution-viewer > header strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .execution-viewer > header > span { color: var(--muted); font-size: 12px; }
 .execution-viewer > header .copy-btn,
 .execution-viewer-close { width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--muted); }
-.execution-viewer-tools { display: flex; align-items: center; gap: 8px; padding: 8px calc(12px + env(safe-area-inset-right, 0px)) 8px calc(12px + env(safe-area-inset-left, 0px)); border-bottom: 1px solid var(--border-soft); }
+.execution-viewer-tools { display: flex; align-items: center; gap: 8px; padding: 8px calc(12px + var(--safe-right)) 8px calc(12px + var(--safe-left)); border-bottom: 1px solid var(--border-soft); }
 .execution-viewer-tools label { min-width: 0; display: flex; align-items: center; flex: 1; gap: 8px; }
 .execution-viewer-tools label svg { width: 15px; height: 15px; color: var(--muted); }
 .execution-viewer-tools input { width: 100%; min-height: 44px; border: 0; background: transparent; }
 .execution-viewer-tools button { min-height: 44px; white-space: nowrap; }
 .execution-viewer > pre {
   margin: 0;
-  padding: 14px calc(16px + env(safe-area-inset-right, 0px)) calc(32px + env(safe-area-inset-bottom, 0px)) calc(16px + env(safe-area-inset-left, 0px));
+  padding: 14px calc(16px + var(--safe-right)) calc(32px + var(--safe-bottom)) calc(16px + var(--safe-left));
   overflow: auto;
   border: 0;
   border-radius: 0;

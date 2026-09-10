@@ -18,7 +18,9 @@ const config: CapacitorConfig = {
   },
   plugins: {
     App: {
-      disableBackButtonHandler: true,
+      // Keep AndroidX's dispatcher active. Polyth's single JS listener owns
+      // completed Back events and suppresses Capacitor's default navigation.
+      disableBackButtonHandler: false,
     },
     CapacitorHttp: {
       enabled: true,

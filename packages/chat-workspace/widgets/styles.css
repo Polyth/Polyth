@@ -5,7 +5,7 @@
   min-height: 0;
   position: relative;
   container-type: inline-size;
-  padding-bottom: env(safe-area-inset-bottom, 0);
+  padding-bottom: var(--safe-bottom);
   background: var(--raised);
 }
 
@@ -404,6 +404,10 @@ button.chat-workspace-dock-summary {
   margin-top: var(--space-2);
 }
 
+.chat-workspace-tab-active-dropdown {
+  display: none;
+}
+
 @container (max-width: 420px) {
   .chat-workspace-tabstrip-scroll .chat-workspace-tab {
     display: none;
@@ -423,8 +427,4 @@ button.chat-workspace-dock-summary {
     overflow: hidden;
     text-overflow: ellipsis;
   }
-}
-
-.chat-workspace-tab-active-dropdown {
-  display: none;
 }

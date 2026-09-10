@@ -3,7 +3,6 @@ import { Browser } from "@capacitor/browser";
 import { Clipboard } from "@capacitor/clipboard";
 import { Capacitor } from "@capacitor/core";
 import { Directory, Filesystem } from "@capacitor/filesystem";
-import { Haptics, ImpactStyle } from "@capacitor/haptics";
 import { Keyboard } from "@capacitor/keyboard";
 import { LocalNotifications } from "@capacitor/local-notifications";
 import { Share } from "@capacitor/share";
@@ -17,6 +16,12 @@ import {
   returnToMobileConnectionHub,
 } from "./runtime.ts";
 import { installNativePolythLink } from "./nativePolythLink.ts";
+import {
+  NATIVE_HAPTIC_EVENT,
+  nativeHapticFeedback,
+  nativeTapFeedback,
+  type NativeHapticKind,
+} from "./haptics.ts";
 
 export interface NativeMobileCallbacks {
   handleBack(): boolean;
@@ -34,6 +39,28 @@ export type NativeFilePickResult =
 
 const disposers: Array<() => void> = [];
 let installed = false;
+let installationGeneration = 0;
+let keyboardVisible = false;
+
+interface NativeListenerHandle {
+  remove(): Promise<void>;
+}
+
+/** A Capacitor listener can finish registering after its host has gone away.
+ * Keep only handles from the current installation; late handles remove
+ * themselves instead of escaping the disposer stack. */
+function retainNativeListener(
+  generation: number,
+  listener: Promise<NativeListenerHandle>,
+): void {
+  void listener.then((handle) => {
+    if (!installed || generation !== installationGeneration) {
+      void handle.remove();
+      return;
+    }
+    disposers.push(() => void handle.remove());
+  }).catch(() => undefined);
+}
 /** The existing canonical web attachment contract accepts File objects. Keep its
  * unavoidable compatibility path below this cap until it consumes staged URIs. */
 export const MAX_NATIVE_FILE_BYTES = 8 * 1024 * 1024;
@@ -201,7 +228,7 @@ export async function pickNativeFiles(): Promise<NativeFilePickResult> {
       await Promise.all(metadata.map((item) => removeNativeStagedFile(item)));
       throw error;
     }
-    await Haptics.impact({ style: ImpactStyle.Light }).catch(() => undefined);
+    await nativeTapFeedback();
     return { status: "picked", metadata };
   } catch (error) {
     if (isCancelled(error)) return { status: "cancelled" };
@@ -253,42 +280,61 @@ export async function showNativeLocalNotification(options: {
 export function installNativeMobileIntegration(callbacks: NativeMobileCallbacks): void {
   if (!isNativeMobile() || installed) return;
   installed = true;
+  const generation = ++installationGeneration;
   installNativePolythLink();
   document.body.dataset.nativePlatform = Capacitor.getPlatform();
 
   void SafeArea.setSystemBarsStyle({ style: SystemBarsStyle.Default });
   void SplashScreen.hide();
 
-  void App.addListener("appStateChange", ({ isActive }) => {
+  retainNativeListener(generation, App.addListener("appStateChange", ({ isActive }) => {
     callbacks.setForeground(isActive);
-  }).then((handle) => disposers.push(() => void handle.remove()));
+  }));
 
-  void App.addListener("appUrlOpen", ({ url }) => {
+  retainNativeListener(generation, App.addListener("appUrlOpen", ({ url }) => {
     if (isPairingDeepLink(url) || mobileDeepLinkPath(url)) {
       // The native layer has already captured the raw OS URL in process memory.
       // Never apply an ambiguous external link to whichever server happens to
       // be active; reload the bundled Connection Hub and resolve the server there.
       void returnToMobileConnectionHub();
     }
-  }).then((handle) => disposers.push(() => void handle.remove()));
+  }));
 
-  void App.addListener("backButton", () => {
+  retainNativeListener(generation, App.addListener("backButton", () => {
+    if (keyboardVisible) {
+      void Keyboard.hide().catch(() => {
+        keyboardVisible = false;
+        callbacks.setKeyboardInset(0);
+      });
+      return;
+    }
     if (!callbacks.handleBack()) void App.minimizeApp();
-  }).then((handle) => disposers.push(() => void handle.remove()));
+  }));
 
-  void Keyboard.addListener("keyboardWillShow", ({ keyboardHeight }) => {
+  retainNativeListener(generation, Keyboard.addListener("keyboardWillShow", ({ keyboardHeight }) => {
+    keyboardVisible = true;
     callbacks.setKeyboardInset(keyboardHeight);
-  }).then((handle) => disposers.push(() => void handle.remove()));
-  void Keyboard.addListener("keyboardWillHide", () => {
+  }));
+  retainNativeListener(generation, Keyboard.addListener("keyboardWillHide", () => {
+    keyboardVisible = false;
     callbacks.setKeyboardInset(0);
-  }).then((handle) => disposers.push(() => void handle.remove()));
+  }));
 
-  void LocalNotifications.addListener("localNotificationActionPerformed", ({ notification }) => {
+  retainNativeListener(generation, LocalNotifications.addListener("localNotificationActionPerformed", ({ notification }) => {
     const sessionId = (notification.extra as { sessionId?: unknown } | undefined)?.sessionId;
     if (typeof sessionId === "string" && sessionId) {
       void returnToMobileConnectionHub(`/?session=${encodeURIComponent(sessionId)}`);
     }
-  }).then((handle) => disposers.push(() => void handle.remove()));
+  }));
+
+  const onHaptic = (event: Event) => {
+    const kind = (event as CustomEvent<NativeHapticKind>).detail;
+    if (kind === "selection" || kind === "tap" || kind === "success" || kind === "warning" || kind === "error") {
+      void nativeHapticFeedback(kind);
+    }
+  };
+  window.addEventListener(NATIVE_HAPTIC_EVENT, onHaptic);
+  disposers.push(() => window.removeEventListener(NATIVE_HAPTIC_EVENT, onHaptic));
 
   const onClick = (event: MouseEvent) => {
     const target = event.target instanceof Element
@@ -323,6 +369,10 @@ export function installNativeMobileIntegration(callbacks: NativeMobileCallbacks)
 }
 
 export function disposeNativeMobileIntegration(): void {
-  while (disposers.length > 0) disposers.pop()?.();
+  // Invalidate first: asynchronous `addListener` completions can arrive while
+  // the existing handles are being removed or after a later re-installation.
+  installationGeneration += 1;
+  keyboardVisible = false;
   installed = false;
+  while (disposers.length > 0) disposers.pop()?.();
 }

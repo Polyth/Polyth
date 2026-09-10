@@ -79,12 +79,15 @@ export function metricsFrom(
   layoutHeight: number,
   visualHeight: number,
   offsetTop: number,
+  nativeInset = 0,
 ): ViewportMetrics {
+  const normalizedNativeInset = Number.isFinite(nativeInset) ? Math.max(0, Math.round(nativeInset)) : 0;
   return {
     height: Math.round(visualHeight),
-    keyboardInset: keyboardInsetFrom(layoutHeight, visualHeight, offsetTop),
+    keyboardInset: Math.max(keyboardInsetFrom(layoutHeight, visualHeight, offsetTop), normalizedNativeInset),
     offsetTop: Math.round(offsetTop),
-    covering: keyboardOpenFrom(layoutHeight, visualHeight, offsetTop, false),
+    covering: keyboardOpenFrom(layoutHeight, visualHeight, offsetTop, false)
+      || normalizedNativeInset >= KEYBOARD_MIN_INSET,
   };
 }
 
@@ -127,24 +130,28 @@ function publish(next: ViewportMetrics): void {
 function measure(): void {
   if (typeof window === "undefined") return;
   const visual = window.visualViewport;
-  if (!visual) return;
   const publishNow = () => {
-    const layoutHeight = window.innerHeight || visual.height || 0;
+    // Embedded WebViews may not expose visualViewport. Native keyboard events
+    // still use this seam, so retain layout geometry as the browser fallback
+    // instead of dropping the native inset on the floor.
+    const layoutHeight = window.innerHeight || visual?.height || 0;
+    const visualHeight = visual?.height ?? layoutHeight;
+    const offsetTop = visual?.offsetTop ?? 0;
     const next = metricsFrom(
       layoutHeight,
-      visual.height ?? layoutHeight,
-      visual.offsetTop ?? 0,
+      visualHeight,
+      offsetTop,
+      nativeKeyboardInset,
     );
     const measuredCovering = keyboardOpenFrom(
       layoutHeight,
-      visual.height ?? layoutHeight,
-      visual.offsetTop ?? 0,
+      visualHeight,
+      offsetTop,
       document.activeElement?.matches?.(TEXT_ENTRY) ?? false,
     );
     // Capacitor's native-resize mode can make innerHeight equal the already
     // reduced WebView height, hiding the covered amount from visualViewport.
     // Its keyboard plugin supplies that missing inset; web remains geometry-only.
-    next.keyboardInset = Math.max(next.keyboardInset, nativeKeyboardInset);
     next.covering = measuredCovering || nativeKeyboardInset >= KEYBOARD_MIN_INSET;
     publish(next);
   };
@@ -156,8 +163,8 @@ function measure(): void {
 
 /**
  * Install the measurement listeners. Idempotent; safe to call before the
- * first paint and in environments without visualViewport (it then falls back
- * to the layout viewport and reports a permanently closed keyboard).
+ * first paint and in environments without visualViewport (it falls back to
+ * layout geometry and accepts a native keyboard inset when one is available).
  */
 export function startMobileViewport(): void {
   if (started || typeof window === "undefined") return;
