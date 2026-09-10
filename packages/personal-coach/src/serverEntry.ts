@@ -33,6 +33,7 @@ import { personalCoachResetRoute } from "./resetRoute.ts";
 import { personalCoachRoutes } from "./routes.ts";
 import { createPersonalCoachService, type PersonalCoachService } from "./service.ts";
 import { personalCoachSessionRoute } from "./sessionRoute.ts";
+import { personalCoachSetupRoute } from "./setupRoute.ts";
 
 export type { PersonalCoachService } from "./service.ts";
 
@@ -186,6 +187,11 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     async onEnable() {
       const handlers = [
         personalCoachSessionRoute(host, { coach: service, ensureCapabilities }),
+        personalCoachSetupRoute(host, {
+          coach: service,
+          ensureCapabilities,
+          schedule: () => host.services.get(serverServiceKey<CoachScheduleService>("schedule")),
+        }),
         personalCoachReminderRoutes(host, {
           coach: service,
           ensureCapabilities,
